@@ -1,4 +1,4 @@
-# KeyTerm 빌드 및 배포 가이드
+# dolssh 빌드 및 배포 가이드
 
 ## 한눈에 보기
 
@@ -89,7 +89,7 @@ npm test
 추가 검증:
 
 ```bash
-npm run typecheck --workspace @keyterm/desktop
+npm run typecheck --workspace @dolssh/desktop
 (cd services/ssh-core && go test ./...)
 (cd services/ssh-core && go build ./...)
 (cd services/sync-api && go test ./...)
@@ -101,7 +101,7 @@ npm run typecheck --workspace @keyterm/desktop
 로컬 패키징:
 
 ```bash
-npm run build --workspace @keyterm/desktop
+npm run build --workspace @dolssh/desktop
 ```
 
 산출물:
@@ -121,7 +121,7 @@ npm run build --workspace @keyterm/desktop
 - notarization
 - `ssh-core` 바이너리 번들링
 
-즉, 현재 `npm run build --workspace @keyterm/desktop`은 “릴리스 아티팩트의 초안”에 가깝습니다.
+즉, 현재 `npm run build --workspace @dolssh/desktop`은 “릴리스 아티팩트의 초안”에 가깝습니다.
 
 ## ssh-core 단독 빌드
 
@@ -158,7 +158,7 @@ SQLite 개발 기본값:
 ```bash
 DB_DRIVER=sqlite
 PORT=8080
-DATABASE_URL=file:keyterm_sync.db?_pragma=busy_timeout(5000)
+DATABASE_URL=file:dolssh_sync.db?_pragma=busy_timeout(5000)
 JWT_SECRET=change-me-in-production
 ```
 
@@ -167,7 +167,7 @@ MySQL 전환 예시:
 ```bash
 DB_DRIVER=mysql
 PORT=8080
-DATABASE_URL=user:password@tcp(127.0.0.1:3306)/keyterm?charset=utf8mb4&parseTime=True&loc=UTC
+DATABASE_URL=user:password@tcp(127.0.0.1:3306)/dolssh?charset=utf8mb4&parseTime=True&loc=UTC
 JWT_SECRET=change-me-in-production
 ```
 
@@ -176,7 +176,7 @@ JWT_SECRET=change-me-in-production
 ```bash
 cd services/sync-api
 DB_DRIVER=sqlite \
-DATABASE_URL=file:keyterm_sync.db?_pragma=busy_timeout(5000) \
+DATABASE_URL=file:dolssh_sync.db?_pragma=busy_timeout(5000) \
 JWT_SECRET=change-me-in-production \
 go run ./cmd/api
 ```
@@ -186,7 +186,7 @@ go run ./cmd/api
 ```bash
 cd services/sync-api
 DB_DRIVER=sqlite \
-DATABASE_URL=file:keyterm_sync.db?_pragma=busy_timeout(5000) \
+DATABASE_URL=file:dolssh_sync.db?_pragma=busy_timeout(5000) \
 JWT_SECRET=change-me-in-production \
 ./dist/sync-api
 ```
@@ -228,7 +228,7 @@ JWT_SECRET=change-me-in-production \
 ## 릴리스 체크리스트
 
 - `npm test` 통과
-- `npm run typecheck --workspace @keyterm/desktop` 통과
+- `npm run typecheck --workspace @dolssh/desktop` 통과
 - `services/ssh-core` 테스트/빌드 통과
 - `services/sync-api` 테스트/빌드 통과
 - `JWT_SECRET` 운영값 적용

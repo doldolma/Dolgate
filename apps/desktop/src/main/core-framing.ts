@@ -1,4 +1,4 @@
-import type { CoreEvent, CoreRequest, CoreStreamFrame } from '@keyterm/shared';
+import type { CoreEvent, CoreRequest, CoreStreamFrame } from '@dolssh/shared';
 
 const FRAME_HEADER_SIZE = 9;
 

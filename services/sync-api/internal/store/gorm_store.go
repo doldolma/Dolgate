@@ -12,7 +12,7 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 
-	syncmodel "keyterm/services/sync-api/internal/sync"
+	syncmodel "dolssh/services/sync-api/internal/sync"
 )
 
 type userRow struct {

@@ -12,7 +12,7 @@ import type {
   SftpRenameInput,
   TransferJobEvent,
   TransferStartInput
-} from '@keyterm/shared';
+} from '@dolssh/shared';
 import { ipcChannels } from '../common/ipc-channels';
 
 const streamListeners = new Map<string, Set<(chunk: Uint8Array) => void>>();
@@ -151,5 +151,5 @@ const api: DesktopApi = {
   }
 };
 
-// window.keyterm 하나만 renderer에 공개해서 표면적을 작게 유지한다.
-contextBridge.exposeInMainWorld('keyterm', api);
+// window.dolssh 하나만 renderer에 공개해서 표면적을 작게 유지한다.
+contextBridge.exposeInMainWorld('dolssh', api);

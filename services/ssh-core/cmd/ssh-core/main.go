@@ -8,9 +8,9 @@ import (
 	"os"
 	"sync"
 
-	"keyterm/services/ssh-core/internal/protocol"
-	coresftp "keyterm/services/ssh-core/internal/sftp"
-	"keyterm/services/ssh-core/internal/sshsession"
+	"dolssh/services/ssh-core/internal/protocol"
+	coresftp "dolssh/services/ssh-core/internal/sftp"
+	"dolssh/services/ssh-core/internal/sshsession"
 )
 
 type eventWriter struct {

@@ -1,4 +1,4 @@
-import type { TerminalTab } from '@keyterm/shared';
+import type { TerminalTab } from '@dolssh/shared';
 
 interface AppTitleBarProps {
   tabs: TerminalTab[];
@@ -13,7 +13,7 @@ export function AppTitleBar({ tabs, activeWorkspaceTab, onSelectHome, onSelectSf
   return (
     <header className="app-titlebar">
       {/* 타이틀바 전체는 드래그 가능하지만, 실제 상호작용 요소들만 명시적으로 no-drag 처리한다. */}
-      <div className="titlebar-brand">KeyTerm</div>
+      <div className="titlebar-brand">dolssh</div>
       <div className="titlebar-tabs">
         <button type="button" className={`workspace-tab home ${activeWorkspaceTab === 'home' ? 'active' : ''}`} onClick={onSelectHome}>
           Home

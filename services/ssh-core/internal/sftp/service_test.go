@@ -17,8 +17,8 @@ import (
 	pkgsftp "github.com/pkg/sftp"
 	"golang.org/x/crypto/ssh"
 
-	"keyterm/services/ssh-core/internal/protocol"
-	coresftp "keyterm/services/ssh-core/internal/sftp"
+	"dolssh/services/ssh-core/internal/protocol"
+	coresftp "dolssh/services/ssh-core/internal/sftp"
 )
 
 type sftpTestServer struct {

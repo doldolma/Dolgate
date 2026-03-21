@@ -1,4 +1,4 @@
-import type { HostRecord } from '@keyterm/shared';
+import type { HostRecord } from '@dolssh/shared';
 import { HostForm } from './HostForm';
 
 interface HostDrawerProps {

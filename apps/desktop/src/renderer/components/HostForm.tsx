@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import type { HostDraft, HostRecord } from '@keyterm/shared';
+import type { HostDraft, HostRecord } from '@dolssh/shared';
 
 const defaultDraft: HostDraft = {
   label: '',
@@ -54,7 +54,7 @@ export function HostForm({ host, defaultGroupPath = null, hideTitle = false, onS
   }, [defaultGroupPath, host]);
 
   async function pickPrivateKey(): Promise<void> {
-    const selected = await window.keyterm.shell.pickPrivateKey();
+    const selected = await window.dolssh.shell.pickPrivateKey();
     if (!selected) {
       return;
     }

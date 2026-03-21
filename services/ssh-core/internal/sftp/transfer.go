@@ -13,7 +13,7 @@ import (
 
 	sftppkg "github.com/pkg/sftp"
 
-	"keyterm/services/ssh-core/internal/protocol"
+	"dolssh/services/ssh-core/internal/protocol"
 )
 
 type filesystemAccessor interface {

@@ -1,4 +1,4 @@
-module keyterm/services/sync-api
+module dolssh/services/sync-api
 
 go 1.25
 

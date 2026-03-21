@@ -1,5 +1,5 @@
 {
-  "name": "@keyterm/desktop",
+  "name": "@dolssh/desktop",
   "version": "0.1.0",
   "private": true,
   "main": ".vite/build/main.js",
@@ -15,7 +15,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@keyterm/shared": "0.1.0",
+    "@dolssh/shared": "0.1.0",
     "better-sqlite3": "^11.8.1",
     "fuse.js": "^7.0.0",
     "keytar": "^7.9.0",

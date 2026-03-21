@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import Fuse from 'fuse.js';
-import type { GroupRecord, HostRecord, TerminalTab } from '@keyterm/shared';
+import type { GroupRecord, HostRecord, TerminalTab } from '@dolssh/shared';
 
 interface HostBrowserProps {
   hosts: HostRecord[];

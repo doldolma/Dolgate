@@ -8,8 +8,8 @@ import (
 
 	"golang.org/x/crypto/ssh"
 
-	"keyterm/services/ssh-core/internal/protocol"
-	"keyterm/services/ssh-core/internal/sshconn"
+	"dolssh/services/ssh-core/internal/protocol"
+	"dolssh/services/ssh-core/internal/sshconn"
 )
 
 // EventEmitter는 상태 이벤트를 상위 레이어로 흘려보내는 함수 타입이다.

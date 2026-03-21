@@ -10,7 +10,7 @@ export function HomeNavigation({ activeSection, onSelectSection }: HomeNavigatio
     <aside className="home-navigation">
       <div className="home-navigation__header">
         <div className="eyebrow">Workspace</div>
-        <h1>KeyTerm</h1>
+        <h1>dolssh</h1>
       </div>
 
       <nav className="home-navigation__menu" aria-label="Home navigation">

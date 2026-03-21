@@ -3,7 +3,7 @@ import { Terminal } from 'xterm';
 import { FitAddon } from 'xterm-addon-fit';
 import { useAppStore } from '../store/appStore';
 import { createTerminalResizeScheduler } from './terminal-resize';
-import type { AppTheme } from '@keyterm/shared';
+import type { AppTheme } from '@dolssh/shared';
 
 interface TerminalThemePalette {
   background: string;
@@ -71,12 +71,12 @@ function TerminalSessionView({ sessionId, active, theme }: TerminalSessionViewPr
     fitAddon.fit();
     terminal.onData((data) => {
       // 사용자가 입력한 키 입력을 즉시 SSH 코어로 흘려보낸다.
-      void window.keyterm.ssh.write(sessionId, data);
+      void window.dolssh.ssh.write(sessionId, data);
     });
     terminal.onBinary((data) => {
       // onBinary는 마우스 보고처럼 raw byte가 필요한 입력을 위해 별도 경로를 사용한다.
       const bytes = Uint8Array.from(data, (char) => char.charCodeAt(0));
-      void window.keyterm.ssh.writeBinary(sessionId, bytes);
+      void window.dolssh.ssh.writeBinary(sessionId, bytes);
     });
 
     terminalRef.current = terminal;
@@ -93,7 +93,7 @@ function TerminalSessionView({ sessionId, active, theme }: TerminalSessionViewPr
         // 일부 macOS/Electron 조합에서는 fit 이후 canvas가 다시 그려지지 않아 refresh를 한 번 강제한다.
         refreshViewport();
       },
-      sendResize: ({ cols, rows }) => window.keyterm.ssh.resize(sessionId, cols, rows)
+      sendResize: ({ cols, rows }) => window.dolssh.ssh.resize(sessionId, cols, rows)
     });
 
     const handlePointerActivate = () => {
@@ -148,7 +148,7 @@ function TerminalSessionView({ sessionId, active, theme }: TerminalSessionViewPr
 
   useEffect(() => {
     // 터미널 출력은 renderer store를 거치지 않고 xterm에 직접 넣어 렌더 hot path를 짧게 유지한다.
-    return window.keyterm.ssh.onData(sessionId, (chunk) => {
+    return window.dolssh.ssh.onData(sessionId, (chunk) => {
       terminalRef.current?.write(chunk);
     });
   }, [sessionId]);

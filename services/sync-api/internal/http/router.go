@@ -8,9 +8,9 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"keyterm/services/sync-api/internal/auth"
-	"keyterm/services/sync-api/internal/store"
-	syncmodel "keyterm/services/sync-api/internal/sync"
+	"dolssh/services/sync-api/internal/auth"
+	"dolssh/services/sync-api/internal/store"
+	syncmodel "dolssh/services/sync-api/internal/sync"
 )
 
 type authRequest struct {
