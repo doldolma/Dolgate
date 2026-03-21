@@ -1,5 +1,6 @@
 import { createStore } from 'zustand/vanilla';
 import type {
+  ActivityLogRecord,
   AppSettings,
   CoreEvent,
   DesktopApi,
@@ -7,10 +8,17 @@ import type {
   FileEntry,
   GroupRecord,
   HostDraft,
+  HostKeyProbeResult,
   HostRecord,
   HostSecretInput,
+  KnownHostRecord,
+  PortForwardDraft,
+  PortForwardRuleRecord,
+  PortForwardRuntimeEvent,
+  PortForwardRuntimeRecord,
   SftpEndpointSummary,
   SftpPaneId,
+  SecretMetadataRecord,
   TerminalTab,
   TransferJob,
   TransferJobEvent,
@@ -18,7 +26,7 @@ import type {
 } from '@dolssh/shared';
 
 export type WorkspaceTabId = 'home' | 'sftp' | string;
-export type HomeSection = 'hosts' | 'settings';
+export type HomeSection = 'hosts' | 'portForwarding' | 'knownHosts' | 'logs' | 'keychain' | 'settings';
 export type SftpSourceKind = 'local' | 'host';
 export type HostDrawerState =
   | { mode: 'closed' }
@@ -47,6 +55,27 @@ export interface PendingConflictDialog {
   names: string[];
 }
 
+export interface PendingHostKeyPrompt {
+  probe: HostKeyProbeResult;
+  action:
+    | {
+        kind: 'ssh';
+        hostId: string;
+        cols: number;
+        rows: number;
+      }
+    | {
+        kind: 'sftp';
+        paneId: SftpPaneId;
+        hostId: string;
+      }
+    | {
+        kind: 'portForward';
+        ruleId: string;
+        hostId: string;
+      };
+}
+
 export interface SftpState {
   localHomePath: string;
   leftPane: SftpPaneState;
@@ -60,6 +89,11 @@ export interface AppState {
   hosts: HostRecord[];
   groups: GroupRecord[];
   tabs: TerminalTab[];
+  portForwards: PortForwardRuleRecord[];
+  portForwardRuntimes: PortForwardRuntimeRecord[];
+  knownHosts: KnownHostRecord[];
+  activityLogs: ActivityLogRecord[];
+  keychainEntries: SecretMetadataRecord[];
   activeWorkspaceTab: WorkspaceTabId;
   homeSection: HomeSection;
   hostDrawer: HostDrawerState;
@@ -68,6 +102,7 @@ export interface AppState {
   settings: AppSettings;
   isReady: boolean;
   sftp: SftpState;
+  pendingHostKeyPrompt: PendingHostKeyPrompt | null;
   setSearchQuery: (value: string) => void;
   activateHome: () => void;
   activateSftp: () => void;
@@ -78,14 +113,25 @@ export interface AppState {
   closeHostDrawer: () => void;
   navigateGroup: (path: string | null) => void;
   bootstrap: () => Promise<void>;
+  refreshOperationalData: () => Promise<void>;
   createGroup: (name: string) => Promise<void>;
   saveHost: (hostId: string | null, draft: HostDraft, secrets?: HostSecretInput) => Promise<void>;
   removeHost: (hostId: string) => Promise<void>;
   connectHost: (hostId: string, cols: number, rows: number) => Promise<void>;
   disconnectTab: (sessionId: string) => Promise<void>;
   updateSettings: (input: Partial<AppSettings>) => Promise<void>;
+  savePortForward: (ruleId: string | null, draft: PortForwardDraft) => Promise<void>;
+  removePortForward: (ruleId: string) => Promise<void>;
+  startPortForward: (ruleId: string) => Promise<void>;
+  stopPortForward: (ruleId: string) => Promise<void>;
+  removeKnownHost: (id: string) => Promise<void>;
+  clearLogs: () => Promise<void>;
+  removeKeychainSecret: (hostId: string) => Promise<void>;
+  acceptPendingHostKeyPrompt: (mode: 'trust' | 'replace') => Promise<void>;
+  dismissPendingHostKeyPrompt: () => void;
   handleCoreEvent: (event: CoreEvent<Record<string, unknown>>) => void;
   handleTransferEvent: (event: TransferJobEvent) => void;
+  handlePortForwardEvent: (event: PortForwardRuntimeEvent) => void;
   setSftpPaneSource: (paneId: SftpPaneId, sourceKind: SftpSourceKind) => Promise<void>;
   setSftpPaneFilter: (paneId: SftpPaneId, query: string) => void;
   setSftpHostSearchQuery: (paneId: SftpPaneId, query: string) => void;
@@ -155,6 +201,22 @@ function sortGroups(groups: GroupRecord[]): GroupRecord[] {
   return [...groups].sort((a, b) => a.path.localeCompare(b.path));
 }
 
+function sortPortForwards(rules: PortForwardRuleRecord[]): PortForwardRuleRecord[] {
+  return [...rules].sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime() || a.label.localeCompare(b.label));
+}
+
+function sortKnownHosts(records: KnownHostRecord[]): KnownHostRecord[] {
+  return [...records].sort((a, b) => a.host.localeCompare(b.host) || a.port - b.port);
+}
+
+function sortLogs(records: ActivityLogRecord[]): ActivityLogRecord[] {
+  return [...records].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+}
+
+function sortKeychainEntries(entries: SecretMetadataRecord[]): SecretMetadataRecord[] {
+  return [...entries].sort((a, b) => a.hostLabel.localeCompare(b.hostLabel) || a.hostname.localeCompare(b.hostname));
+}
+
 function normalizeGroupPath(groupPath?: string | null): string | null {
   const normalized = (groupPath ?? '')
     .split('/')
@@ -179,6 +241,11 @@ function parentPath(targetPath: string): string {
 function upsertTransferJob(transfers: TransferJob[], job: TransferJob): TransferJob[] {
   const next = [job, ...transfers.filter((item) => item.id !== job.id)];
   return next.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
+}
+
+function upsertForwardRuntime(runtimes: PortForwardRuntimeRecord[], runtime: PortForwardRuntimeRecord): PortForwardRuntimeRecord[] {
+  const next = [runtime, ...runtimes.filter((item) => item.ruleId !== runtime.ruleId)];
+  return next.sort((a, b) => a.ruleId.localeCompare(b.ruleId));
 }
 
 function resolveTargetItems(pane: SftpPaneState, draggedPath: string): FileEntry[] {
@@ -216,7 +283,38 @@ function updatePaneState(state: AppState, paneId: SftpPaneId, nextPane: SftpPane
   };
 }
 
+function toTrustInput(probe: HostKeyProbeResult) {
+  return {
+    hostId: probe.hostId,
+    hostLabel: probe.hostLabel,
+    host: probe.host,
+    port: probe.port,
+    algorithm: probe.algorithm,
+    publicKeyBase64: probe.publicKeyBase64,
+    fingerprintSha256: probe.fingerprintSha256
+  };
+}
+
 export function createAppStore(api: DesktopApi) {
+  const syncOperationalData = async (
+    set: (next: AppState | Partial<AppState> | ((state: AppState) => AppState | Partial<AppState>)) => void
+  ) => {
+    const [snapshot, knownHosts, activityLogs, keychainEntries] = await Promise.all([
+      api.portForwards.list(),
+      api.knownHosts.list(),
+      api.logs.list(),
+      api.keychain.list()
+    ]);
+
+    set({
+      portForwards: sortPortForwards(snapshot.rules),
+      portForwardRuntimes: snapshot.runtimes,
+      knownHosts: sortKnownHosts(knownHosts),
+      activityLogs: sortLogs(activityLogs),
+      keychainEntries: sortKeychainEntries(keychainEntries)
+    });
+  };
+
   const loadPaneListing = async (
     set: (next: AppState | Partial<AppState> | ((state: AppState) => AppState | Partial<AppState>)) => void,
     get: () => AppState,
@@ -279,119 +377,25 @@ export function createAppStore(api: DesktopApi) {
     }
   };
 
-  return createStore<AppState>((set, get) => ({
-    hosts: [],
-    groups: [],
-    tabs: [],
-    activeWorkspaceTab: 'home',
-    homeSection: 'hosts',
-    hostDrawer: { mode: 'closed' },
-    currentGroupPath: null,
-    searchQuery: '',
-    settings: defaultSettings,
-    isReady: false,
-    sftp: defaultSftpState,
-    setSearchQuery: (value) => set({ searchQuery: value }),
-    activateHome: () => set({ activeWorkspaceTab: 'home' }),
-    activateSftp: () => set({ activeWorkspaceTab: 'sftp' }),
-    activateSession: (sessionId) => set({ activeWorkspaceTab: sessionId }),
-    openHomeSection: (section) =>
-      set({
-        activeWorkspaceTab: 'home',
-        homeSection: section,
-        hostDrawer: section === 'settings' ? { mode: 'closed' } : get().hostDrawer
-      }),
-    openCreateHostDrawer: () =>
-      set({
-        activeWorkspaceTab: 'home',
-        homeSection: 'hosts',
-        hostDrawer: { mode: 'create', defaultGroupPath: get().currentGroupPath }
-      }),
-    openEditHostDrawer: (hostId) =>
-      set({
-        activeWorkspaceTab: 'home',
-        homeSection: 'hosts',
-        hostDrawer: { mode: 'edit', hostId }
-      }),
-    closeHostDrawer: () => set({ hostDrawer: { mode: 'closed' } }),
-    navigateGroup: (path) =>
-      set({
-        activeWorkspaceTab: 'home',
-        homeSection: 'hosts',
-        currentGroupPath: normalizeGroupPath(path),
-        hostDrawer: { mode: 'closed' }
-      }),
-    bootstrap: async () => {
-      // 앱 시작 시 로컬 DB의 호스트, 살아 있는 SSH 탭, 설정과 SFTP 기본 로컬 경로를 함께 읽어 초기 워크스페이스를 구성한다.
-      const [hosts, groups, tabs, settings, localHomePath] = await Promise.all([
-        api.hosts.list(),
-        api.groups.list(),
-        api.tabs.list(),
-        api.settings.get(),
-        api.files.getHomeDirectory()
-      ]);
-      const localListing = await api.files.list(localHomePath);
-      set({
-        hosts: sortHosts(hosts),
-        groups: sortGroups(groups),
-        tabs,
-        activeWorkspaceTab: 'home',
-        homeSection: 'hosts',
-        hostDrawer: { mode: 'closed' },
-        currentGroupPath: null,
-        settings,
-        isReady: true,
-        sftp: {
-          localHomePath,
-          leftPane: {
-            ...createEmptyPane('left'),
-            sourceKind: 'local',
-            currentPath: localListing.path,
-            lastLocalPath: localListing.path,
-            history: [localListing.path],
-            historyIndex: 0,
-            entries: localListing.entries
-          },
-          rightPane: createEmptyPane('right'),
-          transfers: [],
-          pendingConflictDialog: null
-        }
-      });
-    },
-    createGroup: async (name) => {
-      const next = await api.groups.create(name, get().currentGroupPath);
-      set((state) => ({
-        groups: sortGroups([...state.groups.filter((group) => group.id !== next.id), next])
-      }));
-    },
-    saveHost: async (hostId, draft, secrets) => {
-      // 생성/수정 경로를 하나의 액션으로 유지해 우측 드로어가 단일 폼만 재사용하게 한다.
-      const next = hostId ? await api.hosts.update(hostId, draft, secrets) : await api.hosts.create(draft, secrets);
-      const hosts = sortHosts([...get().hosts.filter((host) => host.id !== next.id), next]);
-      set({
-        hosts,
-        hostDrawer: { mode: 'edit', hostId: next.id }
-      });
-    },
-    removeHost: async (hostId) => {
-      await api.hosts.remove(hostId);
-      const currentDrawer = get().hostDrawer;
-      set({
-        hosts: get().hosts.filter((host) => host.id !== hostId),
-        hostDrawer: currentDrawer.mode === 'edit' && currentDrawer.hostId === hostId ? { mode: 'closed' } : currentDrawer
-      });
-    },
-    connectHost: async (hostId, cols, rows) => {
-      // 연결 성공 전에도 세션 탭을 즉시 띄워 사용자가 진행 상황을 놓치지 않게 한다.
-      const host = get().hosts.find((item) => item.id === hostId);
+  const runTrustedAction = async (
+    get: () => AppState,
+    action: PendingHostKeyPrompt['action'],
+    set: (next: AppState | Partial<AppState> | ((state: AppState) => AppState | Partial<AppState>)) => void
+  ) => {
+    if (action.kind === 'ssh') {
+      const host = get().hosts.find((item) => item.id === action.hostId);
       if (!host) {
         return;
       }
-      const { sessionId } = await api.ssh.connect({ hostId, cols, rows });
+      const { sessionId } = await api.ssh.connect({
+        hostId: action.hostId,
+        cols: action.cols,
+        rows: action.rows
+      });
       const tab: TerminalTab = {
         id: sessionId,
         title: host.label,
-        hostId,
+        hostId: action.hostId,
         sessionId,
         status: 'connecting',
         lastEventAt: new Date().toISOString()
@@ -402,174 +406,31 @@ export function createAppStore(api: DesktopApi) {
         homeSection: 'hosts',
         hostDrawer: { mode: 'closed' }
       }));
-    },
-    disconnectTab: async (sessionId) => {
-      // 탭 닫기는 곧 세션 종료 요청이므로, 실제 closed 이벤트를 받을 때까지 상태를 남겨둔다.
-      await api.ssh.disconnect(sessionId);
-      set((state) => ({
-        tabs: state.tabs.map((tab) =>
-          tab.sessionId === sessionId
-            ? {
-                ...tab,
-                status: 'disconnecting',
-                lastEventAt: new Date().toISOString()
-              }
-            : tab
-        )
-      }));
-    },
-    updateSettings: async (input) => {
-      const settings = await api.settings.update(input);
-      set({ settings });
-    },
-    handleCoreEvent: (event) => {
-      const sessionId = event.sessionId;
-      if (!sessionId) {
-        return;
-      }
-      set((state) => {
-        if (event.type === 'closed') {
-          const tabs = state.tabs.filter((tab) => tab.sessionId !== sessionId);
-          return {
-            tabs,
-            activeWorkspaceTab: state.activeWorkspaceTab === sessionId ? 'home' : state.activeWorkspaceTab
-          };
-        }
+      return;
+    }
 
-        const tabs = state.tabs.map((tab) => {
-          if (tab.sessionId !== sessionId) {
-            return tab;
-          }
-
-          let nextStatus: TabStatus = tab.status;
-          if (event.type === 'connected') {
-            nextStatus = 'connected';
-          }
-          let errorMessage = tab.errorMessage;
-          if (event.type === 'error') {
-            nextStatus = 'error';
-            errorMessage = String(event.payload.message ?? 'SSH error');
-          }
-          return {
-            ...tab,
-            status: nextStatus,
-            errorMessage,
-            lastEventAt: new Date().toISOString()
-          };
-        });
-
-        return { tabs };
-      });
-    },
-    handleTransferEvent: (event) => {
-      set((state) => ({
-        sftp: {
-          ...state.sftp,
-          transfers: upsertTransferJob(state.sftp.transfers, event.job)
-        }
-      }));
-
-      if (event.job.status === 'completed' && event.job.request) {
-        const request = event.job.request;
-        const state = get();
-        for (const paneId of ['left', 'right'] as const) {
-          const pane = getPane(state, paneId);
-          const paneRef =
-            pane.sourceKind === 'local'
-              ? { kind: 'local' as const, path: pane.currentPath }
-              : pane.endpoint
-                ? { kind: 'remote' as const, endpointId: pane.endpoint.id, path: pane.currentPath }
-                : null;
-          if (!paneRef) {
-            continue;
-          }
-          if (
-            paneRef.kind === request.target.kind &&
-            paneRef.path === request.target.path &&
-            (paneRef.kind === 'local' || (request.target.kind === 'remote' && paneRef.endpointId === request.target.endpointId))
-          ) {
-            void get().refreshSftpPane(paneId);
-          }
-        }
-      }
-    },
-    setSftpPaneSource: async (paneId, sourceKind) => {
-      const pane = getPane(get(), paneId);
-      if (pane.sourceKind === sourceKind) {
-        return;
-      }
-      if (pane.endpoint) {
-        await api.sftp.disconnect(pane.endpoint.id);
-      }
-
-      const nextBasePane: SftpPaneState = {
-        ...pane,
-        sourceKind,
-        endpoint: null,
-        currentPath: sourceKind === 'local' ? pane.lastLocalPath || get().sftp.localHomePath : '',
-        history: sourceKind === 'local' ? [pane.lastLocalPath || get().sftp.localHomePath] : [],
-        historyIndex: sourceKind === 'local' ? 0 : -1,
-        entries: [],
-        selectedPaths: [],
-        errorMessage: undefined,
-        isLoading: false
-      };
-
-      set((state) => ({
-        sftp: updatePaneState(state, paneId, nextBasePane)
-      }));
-
-      if (sourceKind === 'local') {
-        await loadPaneListing(set, get, paneId, nextBasePane.currentPath, { pushToHistory: false });
-      }
-    },
-    setSftpPaneFilter: (paneId, query) =>
-      set((state) => {
-        const pane = getPane(state, paneId);
-        return {
-          sftp: updatePaneState(state, paneId, {
-            ...pane,
-            filterQuery: query
-          })
-        };
-      }),
-    setSftpHostSearchQuery: (paneId, query) =>
-      set((state) => ({
-        sftp: updatePaneState(state, paneId, {
-          ...getPane(state, paneId),
-          hostSearchQuery: query
-        })
-      })),
-    selectSftpHost: (paneId, hostId) =>
-      set((state) => ({
-        sftp: updatePaneState(state, paneId, {
-          ...getPane(state, paneId),
-          selectedHostId: hostId
-        })
-      })),
-    connectSftpHost: async (paneId, hostId) => {
-      const pane = getPane(get(), paneId);
+    if (action.kind === 'sftp') {
+      const pane = getPane(get(), action.paneId);
       if (pane.endpoint) {
         await api.sftp.disconnect(pane.endpoint.id);
       }
       set((state) => ({
         activeWorkspaceTab: 'sftp',
-        sftp: updatePaneState(state, paneId, {
-          ...getPane(state, paneId),
+        sftp: updatePaneState(state, action.paneId, {
+          ...getPane(state, action.paneId),
           sourceKind: 'host',
           endpoint: null,
           entries: [],
           isLoading: true,
           errorMessage: undefined,
-          selectedHostId: hostId
+          selectedHostId: action.hostId
         })
       }));
-
       try {
-        const endpoint = await api.sftp.connect({ hostId });
+        const endpoint = await api.sftp.connect({ hostId: action.hostId });
         set((state) => ({
-          sftp: updatePaneState(state, paneId, {
-            ...getPane(state, paneId),
+          sftp: updatePaneState(state, action.paneId, {
+            ...getPane(state, action.paneId),
             sourceKind: 'host',
             endpoint,
             currentPath: endpoint.path,
@@ -579,11 +440,11 @@ export function createAppStore(api: DesktopApi) {
             errorMessage: undefined
           })
         }));
-        await loadPaneListing(set, get, paneId, endpoint.path, { pushToHistory: false });
+        await loadPaneListing(set, get, action.paneId, endpoint.path, { pushToHistory: false });
       } catch (error) {
         set((state) => ({
-          sftp: updatePaneState(state, paneId, {
-            ...getPane(state, paneId),
+          sftp: updatePaneState(state, action.paneId, {
+            ...getPane(state, action.paneId),
             sourceKind: 'host',
             endpoint: null,
             entries: [],
@@ -592,226 +453,645 @@ export function createAppStore(api: DesktopApi) {
           })
         }));
       }
-    },
-    openSftpEntry: async (paneId, entryPath) => {
-      const pane = getPane(get(), paneId);
-      const entry = pane.entries.find((item) => item.path === entryPath);
-      if (!entry || !entry.isDirectory) {
-        return;
-      }
-      await loadPaneListing(set, get, paneId, entry.path, { pushToHistory: true });
-    },
-    refreshSftpPane: async (paneId) => {
-      const pane = getPane(get(), paneId);
-      if (pane.sourceKind === 'host' && !pane.endpoint) {
-        return;
-      }
-      await loadPaneListing(set, get, paneId, pane.currentPath, { pushToHistory: false });
-    },
-    navigateSftpBack: async (paneId) => {
-      const pane = getPane(get(), paneId);
-      if (pane.historyIndex <= 0) {
-        return;
-      }
-      const nextPath = pane.history[pane.historyIndex - 1];
+      return;
+    }
+
+    try {
+      const runtime = await api.portForwards.start(action.ruleId);
       set((state) => ({
-        sftp: updatePaneState(state, paneId, {
-          ...getPane(state, paneId),
-          historyIndex: getPane(state, paneId).historyIndex - 1
-        })
+        homeSection: 'portForwarding',
+        portForwardRuntimes: upsertForwardRuntime(state.portForwardRuntimes, runtime)
       }));
-      await loadPaneListing(set, get, paneId, nextPath, { pushToHistory: false });
-    },
-    navigateSftpForward: async (paneId) => {
-      const pane = getPane(get(), paneId);
-      if (pane.historyIndex >= pane.history.length - 1) {
-        return;
-      }
-      const nextPath = pane.history[pane.historyIndex + 1];
-      set((state) => ({
-        sftp: updatePaneState(state, paneId, {
-          ...getPane(state, paneId),
-          historyIndex: getPane(state, paneId).historyIndex + 1
-        })
-      }));
-      await loadPaneListing(set, get, paneId, nextPath, { pushToHistory: false });
-    },
-    navigateSftpParent: async (paneId) => {
-      const pane = getPane(get(), paneId);
-      if (!pane.currentPath) {
-        return;
-      }
-      await loadPaneListing(set, get, paneId, parentPath(pane.currentPath), { pushToHistory: true });
-    },
-    navigateSftpBreadcrumb: async (paneId, nextPath) => {
-      await loadPaneListing(set, get, paneId, nextPath, { pushToHistory: true });
-    },
-    selectSftpEntry: (paneId, entryPath) =>
-      set((state) => ({
-        sftp: updatePaneState(state, paneId, {
-          ...getPane(state, paneId),
-          selectedPaths: [entryPath]
-        })
-      })),
-    createSftpDirectory: async (paneId, name) => {
-      const pane = getPane(get(), paneId);
-      if (!name.trim()) {
-        return;
-      }
-      if (pane.sourceKind === 'local') {
-        await api.files.mkdir(pane.currentPath, name.trim());
-      } else if (pane.endpoint) {
-        await api.sftp.mkdir({
-          endpointId: pane.endpoint.id,
-          path: pane.currentPath,
-          name: name.trim()
-        });
-      }
-      await get().refreshSftpPane(paneId);
-    },
-    renameSftpSelection: async (paneId, nextName) => {
-      const pane = getPane(get(), paneId);
-      const targetPath = pane.selectedPaths[0];
-      if (!targetPath || !nextName.trim()) {
-        return;
-      }
-      if (pane.sourceKind === 'local') {
-        await api.files.rename(targetPath, nextName.trim());
-      } else if (pane.endpoint) {
-        await api.sftp.rename({
-          endpointId: pane.endpoint.id,
-          path: targetPath,
-          nextName: nextName.trim()
-        });
-      }
-      await get().refreshSftpPane(paneId);
-    },
-    deleteSftpSelection: async (paneId) => {
-      const pane = getPane(get(), paneId);
-      if (pane.selectedPaths.length === 0) {
-        return;
-      }
-      if (pane.sourceKind === 'local') {
-        await api.files.delete(pane.selectedPaths);
-      } else if (pane.endpoint) {
-        await api.sftp.delete({
-          endpointId: pane.endpoint.id,
-          paths: pane.selectedPaths
-        });
-      }
-      await get().refreshSftpPane(paneId);
-    },
-    prepareSftpTransfer: async (sourcePaneId, targetPaneId, targetPath, draggedPath) => {
-      const state = get();
-      const sourcePane = getPane(state, sourcePaneId);
-      const targetPane = getPane(state, targetPaneId);
-      const items = resolveTargetItems(sourcePane, draggedPath);
-      if (items.length === 0) {
-        return;
-      }
+    } catch {
+      // 시작 실패는 main/core가 런타임 에러 이벤트와 활동 로그로 전달하므로 여기서는 중복 예외를 올리지 않는다.
+    }
+  };
 
-      const sourceRef =
-        sourcePane.sourceKind === 'local'
-          ? { kind: 'local' as const, path: sourcePane.currentPath }
-          : sourcePane.endpoint
-            ? { kind: 'remote' as const, endpointId: sourcePane.endpoint.id, path: sourcePane.currentPath }
-            : null;
-      const targetRef =
-        targetPane.sourceKind === 'local'
-          ? { kind: 'local' as const, path: targetPath }
-          : targetPane.endpoint
-            ? { kind: 'remote' as const, endpointId: targetPane.endpoint.id, path: targetPath }
-            : null;
-      if (!sourceRef || !targetRef) {
-        return;
+  const ensureTrustedHost = async (
+    set: (next: AppState | Partial<AppState> | ((state: AppState) => AppState | Partial<AppState>)) => void,
+    input: { hostId: string; action: PendingHostKeyPrompt['action'] }
+  ): Promise<boolean> => {
+    const probe = await api.knownHosts.probeHost({ hostId: input.hostId });
+    if (probe.status === 'trusted') {
+      return true;
+    }
+    set({
+      pendingHostKeyPrompt: {
+        probe,
+        action: input.action
       }
+    });
+    return false;
+  };
 
-      const destinationListing =
-        targetPane.sourceKind === 'local'
-          ? await api.files.list(targetPath)
-          : await api.sftp.list({
-              endpointId: targetPane.endpoint?.id ?? '',
-              path: targetPath
-            });
+  const store = createStore<AppState>((set, get) => {
+    return {
+      hosts: [],
+      groups: [],
+      tabs: [],
+      portForwards: [],
+      portForwardRuntimes: [],
+      knownHosts: [],
+      activityLogs: [],
+      keychainEntries: [],
+      activeWorkspaceTab: 'home',
+      homeSection: 'hosts',
+      hostDrawer: { mode: 'closed' },
+      currentGroupPath: null,
+      searchQuery: '',
+      settings: defaultSettings,
+      isReady: false,
+      sftp: defaultSftpState,
+      pendingHostKeyPrompt: null,
+      setSearchQuery: (value) => set({ searchQuery: value }),
+      activateHome: () => set({ activeWorkspaceTab: 'home' }),
+      activateSftp: () => set({ activeWorkspaceTab: 'sftp' }),
+      activateSession: (sessionId) => set({ activeWorkspaceTab: sessionId }),
+      openHomeSection: (section) =>
+        set({
+          activeWorkspaceTab: 'home',
+          homeSection: section,
+          hostDrawer: section === 'hosts' ? get().hostDrawer : { mode: 'closed' }
+        }),
+      openCreateHostDrawer: () =>
+        set({
+          activeWorkspaceTab: 'home',
+          homeSection: 'hosts',
+          hostDrawer: { mode: 'create', defaultGroupPath: get().currentGroupPath }
+        }),
+      openEditHostDrawer: (hostId) =>
+        set({
+          activeWorkspaceTab: 'home',
+          homeSection: 'hosts',
+          hostDrawer: { mode: 'edit', hostId }
+        }),
+      closeHostDrawer: () => set({ hostDrawer: { mode: 'closed' } }),
+      navigateGroup: (path) =>
+        set({
+          activeWorkspaceTab: 'home',
+          homeSection: 'hosts',
+          currentGroupPath: normalizeGroupPath(path),
+          hostDrawer: { mode: 'closed' }
+        }),
+      bootstrap: async () => {
+        const [hosts, groups, tabs, settings, localHomePath, snapshot, knownHosts, activityLogs, keychainEntries] = await Promise.all([
+          api.hosts.list(),
+          api.groups.list(),
+          api.tabs.list(),
+          api.settings.get(),
+          api.files.getHomeDirectory(),
+          api.portForwards.list(),
+          api.knownHosts.list(),
+          api.logs.list(),
+          api.keychain.list()
+        ]);
+        const localListing = await api.files.list(localHomePath);
+        set({
+          hosts: sortHosts(hosts),
+          groups: sortGroups(groups),
+          tabs,
+          portForwards: sortPortForwards(snapshot.rules),
+          portForwardRuntimes: snapshot.runtimes,
+          knownHosts: sortKnownHosts(knownHosts),
+          activityLogs: sortLogs(activityLogs),
+          keychainEntries: sortKeychainEntries(keychainEntries),
+          activeWorkspaceTab: 'home',
+          homeSection: 'hosts',
+          hostDrawer: { mode: 'closed' },
+          currentGroupPath: null,
+          settings,
+          isReady: true,
+          pendingHostKeyPrompt: null,
+          sftp: {
+            localHomePath,
+            leftPane: {
+              ...createEmptyPane('left'),
+              sourceKind: 'local',
+              currentPath: localListing.path,
+              lastLocalPath: localListing.path,
+              history: [localListing.path],
+              historyIndex: 0,
+              entries: localListing.entries
+            },
+            rightPane: createEmptyPane('right'),
+            transfers: [],
+            pendingConflictDialog: null
+          }
+        });
+      },
+      refreshOperationalData: async () => {
+        await syncOperationalData(set);
+      },
+      createGroup: async (name) => {
+        const next = await api.groups.create(name, get().currentGroupPath);
+        set((state) => ({
+          groups: sortGroups([...state.groups.filter((group) => group.id !== next.id), next])
+        }));
+      },
+      saveHost: async (hostId, draft, secrets) => {
+        const next = hostId ? await api.hosts.update(hostId, draft, secrets) : await api.hosts.create(draft, secrets);
+        const hosts = sortHosts([...get().hosts.filter((host) => host.id !== next.id), next]);
+        set({
+          hosts,
+          hostDrawer: { mode: 'edit', hostId: next.id }
+        });
+        await syncOperationalData(set);
+      },
+      removeHost: async (hostId) => {
+        await api.hosts.remove(hostId);
+        const currentDrawer = get().hostDrawer;
+        set({
+          hosts: get().hosts.filter((host) => host.id !== hostId),
+          hostDrawer: currentDrawer.mode === 'edit' && currentDrawer.hostId === hostId ? { mode: 'closed' } : currentDrawer
+        });
+        await syncOperationalData(set);
+      },
+      connectHost: async (hostId, cols, rows) => {
+        const trusted = await ensureTrustedHost(set, {
+          hostId,
+          action: {
+            kind: 'ssh',
+            hostId,
+            cols,
+            rows
+          }
+        });
+        if (!trusted) {
+          return;
+        }
+        await runTrustedAction(get, { kind: 'ssh', hostId, cols, rows }, set);
+      },
+      disconnectTab: async (sessionId) => {
+        await api.ssh.disconnect(sessionId);
+        set((state) => ({
+          tabs: state.tabs.map((tab) =>
+            tab.sessionId === sessionId
+              ? {
+                  ...tab,
+                  status: 'disconnecting',
+                  lastEventAt: new Date().toISOString()
+                }
+              : tab
+          )
+        }));
+      },
+      updateSettings: async (input) => {
+        const settings = await api.settings.update(input);
+        set({ settings });
+      },
+      savePortForward: async (ruleId, draft) => {
+        const next = ruleId ? await api.portForwards.update(ruleId, draft) : await api.portForwards.create(draft);
+        set((state) => ({
+          homeSection: 'portForwarding',
+          portForwards: sortPortForwards([...state.portForwards.filter((rule) => rule.id !== next.id), next])
+        }));
+      },
+      removePortForward: async (ruleId) => {
+        await api.portForwards.remove(ruleId);
+        set((state) => ({
+          portForwards: state.portForwards.filter((rule) => rule.id !== ruleId),
+          portForwardRuntimes: state.portForwardRuntimes.filter((runtime) => runtime.ruleId !== ruleId)
+        }));
+        await syncOperationalData(set);
+      },
+      startPortForward: async (ruleId) => {
+        const rule = get().portForwards.find((item) => item.id === ruleId);
+        if (!rule) {
+          return;
+        }
+        const trusted = await ensureTrustedHost(set, {
+          hostId: rule.hostId,
+          action: {
+            kind: 'portForward',
+            ruleId,
+            hostId: rule.hostId
+          }
+        });
+        if (!trusted) {
+          return;
+        }
+        await runTrustedAction(get, { kind: 'portForward', ruleId, hostId: rule.hostId }, set);
+      },
+      stopPortForward: async (ruleId) => {
+        await api.portForwards.stop(ruleId);
+        set((state) => ({
+          portForwardRuntimes: upsertForwardRuntime(state.portForwardRuntimes, {
+            ...(state.portForwardRuntimes.find((runtime) => runtime.ruleId === ruleId) ?? {
+              ruleId,
+              hostId: '',
+              mode: 'local',
+              bindAddress: '127.0.0.1',
+              bindPort: 0
+            }),
+            status: 'stopped',
+            updatedAt: new Date().toISOString(),
+            message: undefined
+          })
+        }));
+      },
+      removeKnownHost: async (id) => {
+        await api.knownHosts.remove(id);
+        set((state) => ({
+          knownHosts: state.knownHosts.filter((record) => record.id !== id)
+        }));
+        await syncOperationalData(set);
+      },
+      clearLogs: async () => {
+        await api.logs.clear();
+        set({ activityLogs: [] });
+      },
+      removeKeychainSecret: async (hostId) => {
+        await api.keychain.removeForHost(hostId);
+        await syncOperationalData(set);
+      },
+      acceptPendingHostKeyPrompt: async (mode) => {
+        const pending = get().pendingHostKeyPrompt;
+        if (!pending) {
+          return;
+        }
+        if (mode === 'replace') {
+          await api.knownHosts.replace(toTrustInput(pending.probe));
+        } else {
+          await api.knownHosts.trust(toTrustInput(pending.probe));
+        }
+        set({ pendingHostKeyPrompt: null });
+        await syncOperationalData(set);
+        await runTrustedAction(get, pending.action, set);
+      },
+      dismissPendingHostKeyPrompt: () => set({ pendingHostKeyPrompt: null }),
+      handleCoreEvent: (event) => {
+        const sessionId = event.sessionId;
+        void api.logs.list().then((activityLogs) => {
+          set({ activityLogs: sortLogs(activityLogs) });
+        });
+        if (!sessionId) {
+          return;
+        }
+        set((state) => {
+          if (event.type === 'closed') {
+            const tabs = state.tabs.filter((tab) => tab.sessionId !== sessionId);
+            return {
+              tabs,
+              activeWorkspaceTab: state.activeWorkspaceTab === sessionId ? 'home' : state.activeWorkspaceTab
+            };
+          }
 
-      const conflicts = items
-        .filter((item) => destinationListing.entries.some((entry) => entry.name === item.name))
-        .map((item) => item.name);
-      const input: TransferStartInput = {
-        source: sourceRef,
-        target: targetRef,
-        items: items.map((item) => ({
-          name: item.name,
-          path: item.path,
-          isDirectory: item.isDirectory,
-          size: item.size
+          const tabs = state.tabs.map((tab) => {
+            if (tab.sessionId !== sessionId) {
+              return tab;
+            }
+
+            let nextStatus: TabStatus = tab.status;
+            if (event.type === 'connected') {
+              nextStatus = 'connected';
+            }
+            let errorMessage = tab.errorMessage;
+            if (event.type === 'error') {
+              nextStatus = 'error';
+              errorMessage = String(event.payload.message ?? 'SSH error');
+            }
+            return {
+              ...tab,
+              status: nextStatus,
+              errorMessage,
+              lastEventAt: new Date().toISOString()
+            };
+          });
+
+          return { tabs };
+        });
+      },
+      handleTransferEvent: (event) => {
+        set((state) => ({
+          sftp: {
+            ...state.sftp,
+            transfers: upsertTransferJob(state.sftp.transfers, event.job)
+          }
+        }));
+
+        void api.logs.list().then((activityLogs) => {
+          set({ activityLogs: sortLogs(activityLogs) });
+        });
+
+        if (event.job.status === 'completed' && event.job.request) {
+          const request = event.job.request;
+          const state = get();
+          for (const paneId of ['left', 'right'] as const) {
+            const pane = getPane(state, paneId);
+            const paneRef =
+              pane.sourceKind === 'local'
+                ? { kind: 'local' as const, path: pane.currentPath }
+                : pane.endpoint
+                  ? { kind: 'remote' as const, endpointId: pane.endpoint.id, path: pane.currentPath }
+                  : null;
+            if (!paneRef) {
+              continue;
+            }
+            if (
+              paneRef.kind === request.target.kind &&
+              paneRef.path === request.target.path &&
+              (paneRef.kind === 'local' || (request.target.kind === 'remote' && paneRef.endpointId === request.target.endpointId))
+            ) {
+              void get().refreshSftpPane(paneId);
+            }
+          }
+        }
+      },
+      handlePortForwardEvent: (event) => {
+        set((state) => ({
+          portForwardRuntimes: upsertForwardRuntime(state.portForwardRuntimes, event.runtime)
+        }));
+        void api.logs.list().then((activityLogs) => {
+          set({ activityLogs: sortLogs(activityLogs) });
+        });
+      },
+      setSftpPaneSource: async (paneId, sourceKind) => {
+        const pane = getPane(get(), paneId);
+        if (pane.sourceKind === sourceKind) {
+          return;
+        }
+        if (pane.endpoint) {
+          await api.sftp.disconnect(pane.endpoint.id);
+        }
+
+        const nextBasePane: SftpPaneState = {
+          ...pane,
+          sourceKind,
+          endpoint: null,
+          currentPath: sourceKind === 'local' ? pane.lastLocalPath || get().sftp.localHomePath : '',
+          history: sourceKind === 'local' ? [pane.lastLocalPath || get().sftp.localHomePath] : [],
+          historyIndex: sourceKind === 'local' ? 0 : -1,
+          entries: [],
+          selectedPaths: [],
+          errorMessage: undefined,
+          isLoading: false
+        };
+
+        set((state) => ({
+          sftp: updatePaneState(state, paneId, nextBasePane)
+        }));
+
+        if (sourceKind === 'local') {
+          await loadPaneListing(set, get, paneId, nextBasePane.currentPath, { pushToHistory: false });
+        }
+      },
+      setSftpPaneFilter: (paneId, query) =>
+        set((state) => ({
+          sftp: updatePaneState(state, paneId, {
+            ...getPane(state, paneId),
+            filterQuery: query
+          })
         })),
-        conflictResolution: conflicts.length > 0 ? 'skip' : 'overwrite'
-      };
+      setSftpHostSearchQuery: (paneId, query) =>
+        set((state) => ({
+          sftp: updatePaneState(state, paneId, {
+            ...getPane(state, paneId),
+            hostSearchQuery: query
+          })
+        })),
+      selectSftpHost: (paneId, hostId) =>
+        set((state) => ({
+          sftp: updatePaneState(state, paneId, {
+            ...getPane(state, paneId),
+            selectedHostId: hostId
+          })
+        })),
+      connectSftpHost: async (paneId, hostId) => {
+        const trusted = await ensureTrustedHost(set, {
+          hostId,
+          action: {
+            kind: 'sftp',
+            paneId,
+            hostId
+          }
+        });
+        if (!trusted) {
+          return;
+        }
+        await runTrustedAction(get, { kind: 'sftp', paneId, hostId }, set);
+      },
+      openSftpEntry: async (paneId, entryPath) => {
+        const pane = getPane(get(), paneId);
+        const entry = pane.entries.find((item) => item.path === entryPath);
+        if (!entry || !entry.isDirectory) {
+          return;
+        }
+        await loadPaneListing(set, get, paneId, entry.path, { pushToHistory: true });
+      },
+      refreshSftpPane: async (paneId) => {
+        const pane = getPane(get(), paneId);
+        if (pane.sourceKind === 'host' && !pane.endpoint) {
+          return;
+        }
+        await loadPaneListing(set, get, paneId, pane.currentPath, { pushToHistory: false });
+      },
+      navigateSftpBack: async (paneId) => {
+        const pane = getPane(get(), paneId);
+        if (pane.historyIndex <= 0) {
+          return;
+        }
+        const nextPath = pane.history[pane.historyIndex - 1];
+        set((state) => ({
+          sftp: updatePaneState(state, paneId, {
+            ...getPane(state, paneId),
+            historyIndex: getPane(state, paneId).historyIndex - 1
+          })
+        }));
+        await loadPaneListing(set, get, paneId, nextPath, { pushToHistory: false });
+      },
+      navigateSftpForward: async (paneId) => {
+        const pane = getPane(get(), paneId);
+        if (pane.historyIndex >= pane.history.length - 1) {
+          return;
+        }
+        const nextPath = pane.history[pane.historyIndex + 1];
+        set((state) => ({
+          sftp: updatePaneState(state, paneId, {
+            ...getPane(state, paneId),
+            historyIndex: getPane(state, paneId).historyIndex + 1
+          })
+        }));
+        await loadPaneListing(set, get, paneId, nextPath, { pushToHistory: false });
+      },
+      navigateSftpParent: async (paneId) => {
+        const pane = getPane(get(), paneId);
+        if (!pane.currentPath) {
+          return;
+        }
+        await loadPaneListing(set, get, paneId, parentPath(pane.currentPath), { pushToHistory: true });
+      },
+      navigateSftpBreadcrumb: async (paneId, nextPath) => {
+        await loadPaneListing(set, get, paneId, nextPath, { pushToHistory: true });
+      },
+      selectSftpEntry: (paneId, entryPath) =>
+        set((state) => ({
+          sftp: updatePaneState(state, paneId, {
+            ...getPane(state, paneId),
+            selectedPaths: [entryPath]
+          })
+        })),
+      createSftpDirectory: async (paneId, name) => {
+        const pane = getPane(get(), paneId);
+        if (!name.trim()) {
+          return;
+        }
+        if (pane.sourceKind === 'local') {
+          await api.files.mkdir(pane.currentPath, name.trim());
+        } else if (pane.endpoint) {
+          await api.sftp.mkdir({
+            endpointId: pane.endpoint.id,
+            path: pane.currentPath,
+            name: name.trim()
+          });
+        }
+        await get().refreshSftpPane(paneId);
+      },
+      renameSftpSelection: async (paneId, nextName) => {
+        const pane = getPane(get(), paneId);
+        const targetPath = pane.selectedPaths[0];
+        if (!targetPath || !nextName.trim()) {
+          return;
+        }
+        if (pane.sourceKind === 'local') {
+          await api.files.rename(targetPath, nextName.trim());
+        } else if (pane.endpoint) {
+          await api.sftp.rename({
+            endpointId: pane.endpoint.id,
+            path: targetPath,
+            nextName: nextName.trim()
+          });
+        }
+        await get().refreshSftpPane(paneId);
+      },
+      deleteSftpSelection: async (paneId) => {
+        const pane = getPane(get(), paneId);
+        if (pane.selectedPaths.length === 0) {
+          return;
+        }
+        if (pane.sourceKind === 'local') {
+          await api.files.delete(pane.selectedPaths);
+        } else if (pane.endpoint) {
+          await api.sftp.delete({
+            endpointId: pane.endpoint.id,
+            paths: pane.selectedPaths
+          });
+        }
+        await get().refreshSftpPane(paneId);
+      },
+      prepareSftpTransfer: async (sourcePaneId, targetPaneId, targetPath, draggedPath) => {
+        const state = get();
+        const sourcePane = getPane(state, sourcePaneId);
+        const targetPane = getPane(state, targetPaneId);
+        const items = resolveTargetItems(sourcePane, draggedPath);
+        if (items.length === 0) {
+          return;
+        }
 
-      if (conflicts.length > 0) {
+        const sourceRef =
+          sourcePane.sourceKind === 'local'
+            ? { kind: 'local' as const, path: sourcePane.currentPath }
+            : sourcePane.endpoint
+              ? { kind: 'remote' as const, endpointId: sourcePane.endpoint.id, path: sourcePane.currentPath }
+              : null;
+        const targetRef =
+          targetPane.sourceKind === 'local'
+            ? { kind: 'local' as const, path: targetPath }
+            : targetPane.endpoint
+              ? { kind: 'remote' as const, endpointId: targetPane.endpoint.id, path: targetPath }
+              : null;
+        if (!sourceRef || !targetRef) {
+          return;
+        }
+
+        const destinationListing: DirectoryListing =
+          targetPane.sourceKind === 'local'
+            ? await api.files.list(targetPath)
+            : await api.sftp.list({
+                endpointId: targetPane.endpoint?.id ?? '',
+                path: targetPath
+              });
+
+        const conflicts = items
+          .filter((item) => destinationListing.entries.some((entry) => entry.name === item.name))
+          .map((item) => item.name);
+        const input: TransferStartInput = {
+          source: sourceRef,
+          target: targetRef,
+          items: items.map((item) => ({
+            name: item.name,
+            path: item.path,
+            isDirectory: item.isDirectory,
+            size: item.size
+          })),
+          conflictResolution: conflicts.length > 0 ? 'skip' : 'overwrite'
+        };
+
+        if (conflicts.length > 0) {
+          set((current) => ({
+            activeWorkspaceTab: 'sftp',
+            sftp: {
+              ...current.sftp,
+              pendingConflictDialog: {
+                input,
+                names: conflicts
+              }
+            }
+          }));
+          return;
+        }
+
+        const job = await api.sftp.startTransfer(input);
         set((current) => ({
           activeWorkspaceTab: 'sftp',
           sftp: {
             ...current.sftp,
-            pendingConflictDialog: {
-              input,
-              names: conflicts
-            }
+            transfers: upsertTransferJob(current.sftp.transfers, job)
           }
         }));
-        return;
+      },
+      resolveSftpConflict: async (resolution) => {
+        const pending = get().sftp.pendingConflictDialog;
+        if (!pending) {
+          return;
+        }
+        const job = await api.sftp.startTransfer({
+          ...pending.input,
+          conflictResolution: resolution
+        });
+        set((state) => ({
+          activeWorkspaceTab: 'sftp',
+          sftp: {
+            ...state.sftp,
+            pendingConflictDialog: null,
+            transfers: upsertTransferJob(state.sftp.transfers, job)
+          }
+        }));
+      },
+      dismissSftpConflict: () =>
+        set((state) => ({
+          sftp: {
+            ...state.sftp,
+            pendingConflictDialog: null
+          }
+        })),
+      cancelTransfer: async (jobId) => {
+        await api.sftp.cancelTransfer(jobId);
+      },
+      retryTransfer: async (jobId) => {
+        const job = get().sftp.transfers.find((item) => item.id === jobId);
+        if (!job?.request) {
+          return;
+        }
+        const nextJob = await api.sftp.startTransfer(job.request);
+        set((state) => ({
+          sftp: {
+            ...state.sftp,
+            transfers: upsertTransferJob(state.sftp.transfers, nextJob)
+          }
+        }));
       }
+    };
+  });
 
-      const job = await api.sftp.startTransfer(input);
-      set((current) => ({
-        activeWorkspaceTab: 'sftp',
-        sftp: {
-          ...current.sftp,
-          transfers: upsertTransferJob(current.sftp.transfers, job)
-        }
-      }));
-    },
-    resolveSftpConflict: async (resolution) => {
-      const pending = get().sftp.pendingConflictDialog;
-      if (!pending) {
-        return;
-      }
-      const job = await api.sftp.startTransfer({
-        ...pending.input,
-        conflictResolution: resolution
-      });
-      set((state) => ({
-        activeWorkspaceTab: 'sftp',
-        sftp: {
-          ...state.sftp,
-          pendingConflictDialog: null,
-          transfers: upsertTransferJob(state.sftp.transfers, job)
-        }
-      }));
-    },
-    dismissSftpConflict: () =>
-      set((state) => ({
-        sftp: {
-          ...state.sftp,
-          pendingConflictDialog: null
-        }
-      })),
-    cancelTransfer: async (jobId) => {
-      await api.sftp.cancelTransfer(jobId);
-    },
-    retryTransfer: async (jobId) => {
-      const job = get().sftp.transfers.find((item) => item.id === jobId);
-      if (!job?.request) {
-        return;
-      }
-      const nextJob = await api.sftp.startTransfer(job.request);
-      set((state) => ({
-        sftp: {
-          ...state.sftp,
-          transfers: upsertTransferJob(state.sftp.transfers, nextJob)
-        }
-      }));
-    }
-  }));
+  return store;
 }

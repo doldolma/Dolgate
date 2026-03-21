@@ -4,6 +4,11 @@ import { AppTitleBar } from './components/AppTitleBar';
 import { HomeNavigation } from './components/HomeNavigation';
 import { HostBrowser } from './components/HostBrowser';
 import { HostDrawer } from './components/HostDrawer';
+import { KeychainPanel } from './components/KeychainPanel';
+import { KnownHostPromptDialog } from './components/KnownHostPromptDialog';
+import { KnownHostsPanel } from './components/KnownHostsPanel';
+import { LogsPanel } from './components/LogsPanel';
+import { PortForwardingPanel } from './components/PortForwardingPanel';
 import { SettingsPanel } from './components/SettingsPanel';
 import { SftpWorkspace } from './components/SftpWorkspace';
 import { TerminalWorkspace } from './components/TerminalWorkspace';
@@ -25,12 +30,18 @@ export function App() {
   const hosts = useAppStore((state) => state.hosts);
   const groups = useAppStore((state) => state.groups);
   const tabs = useAppStore((state) => state.tabs);
+  const portForwards = useAppStore((state) => state.portForwards);
+  const portForwardRuntimes = useAppStore((state) => state.portForwardRuntimes);
+  const knownHosts = useAppStore((state) => state.knownHosts);
+  const activityLogs = useAppStore((state) => state.activityLogs);
+  const keychainEntries = useAppStore((state) => state.keychainEntries);
   const activeWorkspaceTab = useAppStore((state) => state.activeWorkspaceTab);
   const homeSection = useAppStore((state) => state.homeSection);
   const hostDrawer = useAppStore((state) => state.hostDrawer);
   const currentGroupPath = useAppStore((state) => state.currentGroupPath);
   const searchQuery = useAppStore((state) => state.searchQuery);
   const settings = useAppStore((state) => state.settings);
+  const pendingHostKeyPrompt = useAppStore((state) => state.pendingHostKeyPrompt);
   const bootstrap = useAppStore((state) => state.bootstrap);
   const setSearchQuery = useAppStore((state) => state.setSearchQuery);
   const activateHome = useAppStore((state) => state.activateHome);
@@ -47,8 +58,18 @@ export function App() {
   const disconnectTab = useAppStore((state) => state.disconnectTab);
   const activateSftp = useAppStore((state) => state.activateSftp);
   const updateSettings = useAppStore((state) => state.updateSettings);
+  const savePortForward = useAppStore((state) => state.savePortForward);
+  const removePortForward = useAppStore((state) => state.removePortForward);
+  const startPortForward = useAppStore((state) => state.startPortForward);
+  const stopPortForward = useAppStore((state) => state.stopPortForward);
+  const removeKnownHost = useAppStore((state) => state.removeKnownHost);
+  const clearLogs = useAppStore((state) => state.clearLogs);
+  const removeKeychainSecret = useAppStore((state) => state.removeKeychainSecret);
+  const acceptPendingHostKeyPrompt = useAppStore((state) => state.acceptPendingHostKeyPrompt);
+  const dismissPendingHostKeyPrompt = useAppStore((state) => state.dismissPendingHostKeyPrompt);
   const handleCoreEvent = useAppStore((state) => state.handleCoreEvent);
   const handleTransferEvent = useAppStore((state) => state.handleTransferEvent);
+  const handlePortForwardEvent = useAppStore((state) => state.handlePortForwardEvent);
   const sftp = useAppStore((state) => state.sftp);
   const setSftpPaneSource = useAppStore((state) => state.setSftpPaneSource);
   const setSftpPaneFilter = useAppStore((state) => state.setSftpPaneFilter);
@@ -73,18 +94,18 @@ export function App() {
   const [prefersDark, setPrefersDark] = useState(() => window.matchMedia('(prefers-color-scheme: dark)').matches);
 
   useEffect(() => {
-    // 앱 최초 진입 시 DB/코어 상태를 로드하고, 이후 코어 이벤트를 계속 구독한다.
     void bootstrap();
     const offCore = window.dolssh.ssh.onEvent(handleCoreEvent);
     const offTransfer = window.dolssh.sftp.onTransferEvent(handleTransferEvent);
+    const offForward = window.dolssh.portForwards.onEvent(handlePortForwardEvent);
     return () => {
       offCore();
       offTransfer();
+      offForward();
     };
-  }, [bootstrap, handleCoreEvent, handleTransferEvent]);
+  }, [bootstrap, handleCoreEvent, handleTransferEvent, handlePortForwardEvent]);
 
   useEffect(() => {
-    // system 테마를 지원하기 위해 OS 라이트/다크 모드 변경을 감지한다.
     const media = window.matchMedia('(prefers-color-scheme: dark)');
     const handleChange = (event: MediaQueryListEvent) => {
       setPrefersDark(event.matches);
@@ -96,7 +117,6 @@ export function App() {
   }, []);
 
   useEffect(() => {
-    // 삭제 등으로 선택된 호스트가 사라지면 카드 선택 상태도 함께 정리한다.
     if (selectedHostId && !hosts.some((host) => host.id === selectedHostId)) {
       setSelectedHostId(null);
     }
@@ -105,7 +125,6 @@ export function App() {
   const resolvedTheme = useMemo(() => resolveTheme(settings.theme, prefersDark), [prefersDark, settings.theme]);
 
   useEffect(() => {
-    // CSS와 xterm이 같은 토큰 집합을 사용하도록 루트 dataset에 테마를 반영한다.
     document.documentElement.dataset.theme = resolvedTheme;
     document.documentElement.dataset.themeMode = settings.theme;
   }, [resolvedTheme, settings.theme]);
@@ -120,7 +139,6 @@ export function App() {
 
   function handleSelectHost(hostId: string) {
     setSelectedHostId(hostId);
-    // 이미 편집 드로어가 열린 상태라면 한 번 클릭만으로 편집 대상을 전환한다.
     if (hostDrawer.mode === 'edit') {
       openEditHostDrawer(hostId);
     }
@@ -173,14 +191,34 @@ export function App() {
                   await connectHost(hostId, 120, 32);
                 }}
               />
-            ) : (
+            ) : null}
+
+            {homeSection === 'portForwarding' ? (
+              <PortForwardingPanel
+                hosts={hosts}
+                rules={portForwards}
+                runtimes={portForwardRuntimes}
+                onSave={savePortForward}
+                onRemove={removePortForward}
+                onStart={startPortForward}
+                onStop={stopPortForward}
+              />
+            ) : null}
+
+            {homeSection === 'knownHosts' ? <KnownHostsPanel records={knownHosts} onRemove={removeKnownHost} /> : null}
+
+            {homeSection === 'logs' ? <LogsPanel logs={activityLogs} onClear={clearLogs} /> : null}
+
+            {homeSection === 'keychain' ? <KeychainPanel entries={keychainEntries} onRemoveSecret={removeKeychainSecret} /> : null}
+
+            {homeSection === 'settings' ? (
               <SettingsPanel
                 settings={settings}
                 onChangeTheme={async (theme) => {
                   await updateSettings({ theme });
                 }}
               />
-            )}
+            ) : null}
           </main>
 
           <HostDrawer
@@ -195,10 +233,10 @@ export function App() {
             onDelete={
               currentHost
                 ? async () => {
-                  await removeHost(currentHost.id);
-                  setSelectedHostId(null);
-                  closeHostDrawer();
-                }
+                    await removeHost(currentHost.id);
+                    setSelectedHostId(null);
+                    closeHostDrawer();
+                  }
                 : undefined
             }
           />
@@ -232,14 +270,11 @@ export function App() {
         </section>
 
         <section className={`session-shell ${isHomeActive || isSftpActive ? 'hidden' : 'active'}`}>
-          {/* 세션 워크스페이스는 숨겨질 때도 언마운트하지 않아야 터미널 버퍼와 DOM 상태를 최대한 유지할 수 있다. */}
-          <TerminalWorkspace
-            sessionIds={tabs.map((tab) => tab.sessionId)}
-            activeTabId={activeSessionId}
-            theme={resolvedTheme}
-          />
+          <TerminalWorkspace sessionIds={tabs.map((tab) => tab.sessionId)} activeTabId={activeSessionId} theme={resolvedTheme} />
         </section>
       </div>
+
+      <KnownHostPromptDialog pending={pendingHostKeyPrompt} onAccept={acceptPendingHostKeyPrompt} onCancel={dismissPendingHostKeyPrompt} />
     </div>
   );
 }

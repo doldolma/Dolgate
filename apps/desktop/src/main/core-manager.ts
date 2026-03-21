@@ -4,13 +4,19 @@ import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
 import type {
+  HostKeyProbeResult,
   CoreEvent,
   CoreEventType,
   CoreRequest,
   CoreStreamFrame,
   DirectoryListing,
   FileEntry,
+  PortForwardMode,
+  PortForwardRuntimeEvent,
+  PortForwardRuntimeRecord,
   ResolvedCoreConnectPayload,
+  ResolvedHostKeyProbePayload,
+  ResolvedPortForwardStartPayload,
   ResolvedSftpConnectPayload,
   SftpDeleteInput,
   SftpEndpointSummary,
@@ -24,6 +30,21 @@ import type {
 } from '@dolssh/shared';
 import { ipcChannels } from '../common/ipc-channels';
 import { CoreFrameParser, encodeControlFrame, encodeStreamFrame } from './core-framing';
+
+interface ActivityLogInput {
+  level: 'info' | 'warn' | 'error';
+  category: 'ssh' | 'sftp' | 'forwarding' | 'known_hosts' | 'keychain';
+  message: string;
+  metadata?: Record<string, unknown> | null;
+}
+
+interface PortForwardDefinition {
+  ruleId: string;
+  hostId: string;
+  mode: PortForwardMode;
+  bindAddress: string;
+  bindPort: number;
+}
 
 function resolveRepoRoot(): string {
   // 패키징/개발 환경 모두에서 저장소 루트를 계산하기 위한 단순 기준점이다.
@@ -98,6 +119,8 @@ function toTransferJobEvent(existing: TransferJob | undefined, event: CoreEvent<
 }
 
 export class CoreManager {
+  constructor(private readonly appendLog?: (entry: ActivityLogInput) => void) {}
+
   // Go SSH 코어는 앱 전체에서 하나만 띄우고, 여러 SSH/SFTP 작업을 그 안에서 관리한다.
   private process: ChildProcessWithoutNullStreams | null = null;
   private shutdownPromise: Promise<void> | null = null;
@@ -106,6 +129,8 @@ export class CoreManager {
   private readonly tabs = new Map<string, TerminalTab>();
   private readonly sftpEndpoints = new Map<string, SftpEndpointSummary>();
   private readonly transferJobs = new Map<string, TransferJob>();
+  private readonly portForwardDefinitions = new Map<string, PortForwardDefinition>();
+  private readonly portForwardRuntimes = new Map<string, PortForwardRuntimeRecord>();
   private readonly pendingResponses = new Map<string, PendingResponse<Record<string, unknown>>>();
   private readonly lastResizeBySession = new Map<string, { cols: number; rows: number }>();
   // 바이너리 frame은 청크 경계를 보장하지 않으므로 별도 parser가 필요하다.
@@ -120,6 +145,10 @@ export class CoreManager {
 
   listTabs(): TerminalTab[] {
     return Array.from(this.tabs.values());
+  }
+
+  listPortForwardRuntimes(): PortForwardRuntimeRecord[] {
+    return Array.from(this.portForwardRuntimes.values()).sort((a, b) => a.ruleId.localeCompare(b.ruleId));
   }
 
   async shutdown(): Promise<void> {
@@ -220,6 +249,16 @@ export class CoreManager {
             }
           });
         }
+        for (const runtime of this.portForwardRuntimes.values()) {
+          this.broadcastPortForwardEvent({
+            runtime: {
+              ...runtime,
+              status: 'error',
+              updatedAt: new Date().toISOString(),
+              message
+            }
+          });
+        }
         this.broadcastTerminalEvent({
           type: 'status',
           payload: {
@@ -256,6 +295,95 @@ export class CoreManager {
     return { sessionId };
   }
 
+  async probeHostKey(payload: ResolvedHostKeyProbePayload): Promise<HostKeyProbeResult> {
+    await this.start();
+    const response = await this.requestResponse<Record<string, unknown>>(
+      {
+        id: randomUUID(),
+        type: 'probeHostKey',
+        payload
+      },
+      ['hostKeyProbed']
+    );
+    return {
+      hostId: '',
+      hostLabel: '',
+      host: payload.host,
+      port: payload.port,
+      algorithm: String(response.algorithm ?? ''),
+      publicKeyBase64: String(response.publicKeyBase64 ?? ''),
+      fingerprintSha256: String(response.fingerprintSha256 ?? ''),
+      status: 'untrusted',
+      existing: null
+    };
+  }
+
+  async startPortForward(payload: ResolvedPortForwardStartPayload & { ruleId: string; hostId: string }): Promise<PortForwardRuntimeRecord> {
+    await this.start();
+    const baseRuntime: PortForwardRuntimeRecord = {
+      ruleId: payload.ruleId,
+      hostId: payload.hostId,
+      mode: payload.mode,
+      bindAddress: payload.bindAddress,
+      bindPort: payload.bindPort,
+      status: 'starting',
+      updatedAt: new Date().toISOString()
+    };
+    this.portForwardDefinitions.set(payload.ruleId, {
+      ruleId: payload.ruleId,
+      hostId: payload.hostId,
+      mode: payload.mode,
+      bindAddress: payload.bindAddress,
+      bindPort: payload.bindPort
+    });
+    this.portForwardRuntimes.set(payload.ruleId, baseRuntime);
+    this.broadcastPortForwardEvent({ runtime: baseRuntime });
+
+    const response = await this.requestResponse<Record<string, unknown>>(
+      {
+        id: randomUUID(),
+        type: 'portForwardStart',
+        endpointId: payload.ruleId,
+        payload
+      },
+      ['portForwardStarted']
+    );
+
+    const runtime = this.buildForwardRuntime(payload.ruleId, response, 'running');
+    this.portForwardRuntimes.set(payload.ruleId, runtime);
+    this.broadcastPortForwardEvent({ runtime });
+    return runtime;
+  }
+
+  async stopPortForward(ruleId: string): Promise<void> {
+    if (!this.process) {
+      this.portForwardDefinitions.delete(ruleId);
+      this.portForwardRuntimes.delete(ruleId);
+      return;
+    }
+    await this.start();
+    await this.requestResponse(
+      {
+        id: randomUUID(),
+        type: 'portForwardStop',
+        endpointId: ruleId,
+        payload: {}
+      },
+      ['portForwardStopped']
+    );
+    this.portForwardDefinitions.delete(ruleId);
+    const runtime = this.portForwardRuntimes.get(ruleId);
+    if (runtime) {
+      this.portForwardRuntimes.set(ruleId, {
+        ...runtime,
+        status: 'stopped',
+        updatedAt: new Date().toISOString(),
+        message: undefined
+      });
+      this.broadcastPortForwardEvent({ runtime: this.portForwardRuntimes.get(ruleId)! });
+    }
+  }
+
   async sftpConnect(payload: ResolvedSftpConnectPayload & { title: string; hostId: string }): Promise<SftpEndpointSummary> {
     await this.start();
     const endpointId = randomUUID();
@@ -279,6 +407,16 @@ export class CoreManager {
       connectedAt: new Date().toISOString()
     };
     this.sftpEndpoints.set(endpointId, summary);
+    this.log({
+      level: 'info',
+      category: 'sftp',
+      message: 'SFTP 연결이 시작되었습니다.',
+      metadata: {
+        endpointId,
+        hostId: payload.hostId,
+        title: payload.title
+      }
+    });
     return summary;
   }
 
@@ -297,6 +435,12 @@ export class CoreManager {
       ['sftpDisconnected']
     );
     this.sftpEndpoints.delete(endpointId);
+    this.log({
+      level: 'info',
+      category: 'sftp',
+      message: 'SFTP 연결이 종료되었습니다.',
+      metadata: { endpointId }
+    });
   }
 
   async sftpList(input: SftpListInput): Promise<DirectoryListing> {
@@ -500,8 +644,69 @@ export class CoreManager {
       const next = toTransferJobEvent(existing, event);
       this.transferJobs.set(next.job.id, next.job);
       this.broadcastTransferEvent(next);
+      if (next.job.status === 'completed') {
+        this.log({
+          level: 'info',
+          category: 'sftp',
+          message: '파일 전송이 완료되었습니다.',
+          metadata: { jobId: next.job.id, itemCount: next.job.itemCount }
+        });
+      } else if (next.job.status === 'failed') {
+        this.log({
+          level: 'error',
+          category: 'sftp',
+          message: '파일 전송에 실패했습니다.',
+          metadata: { jobId: next.job.id, errorMessage: next.job.errorMessage ?? null }
+        });
+      } else if (next.job.status === 'cancelled') {
+        this.log({
+          level: 'warn',
+          category: 'sftp',
+          message: '파일 전송이 취소되었습니다.',
+          metadata: { jobId: next.job.id }
+        });
+      }
       if (next.job.status === 'completed' || next.job.status === 'failed' || next.job.status === 'cancelled') {
         this.transferJobs.set(next.job.id, next.job);
+      }
+      return;
+    }
+
+    if (event.type === 'portForwardStarted' || event.type === 'portForwardStopped' || event.type === 'portForwardError') {
+      const ruleId = event.endpointId ?? '';
+      const status = event.type === 'portForwardStarted' ? 'running' : event.type === 'portForwardStopped' ? 'stopped' : 'error';
+      const runtime = this.buildForwardRuntime(ruleId, event.payload, status);
+      if (status === 'stopped') {
+        this.portForwardDefinitions.delete(ruleId);
+      }
+      this.portForwardRuntimes.set(ruleId, runtime);
+      this.broadcastPortForwardEvent({ runtime });
+      if (status === 'running') {
+        this.log({
+          level: 'info',
+          category: 'forwarding',
+          message: '포트 포워딩이 시작되었습니다.',
+          metadata: {
+            ruleId,
+            bindAddress: runtime.bindAddress,
+            bindPort: runtime.bindPort,
+            mode: runtime.mode
+          }
+        });
+      } else if (status === 'stopped') {
+        this.log({
+          level: 'info',
+          category: 'forwarding',
+          message: '포트 포워딩이 중지되었습니다.',
+          metadata: { ruleId }
+        });
+      } else {
+        this.log({
+          level: 'error',
+          category: 'forwarding',
+          message: '포트 포워딩 실행 중 오류가 발생했습니다.',
+          metadata: { ruleId, message: runtime.message ?? null }
+        });
       }
       return;
     }
@@ -512,6 +717,12 @@ export class CoreManager {
         if (event.type === 'closed') {
           this.tabs.delete(event.sessionId);
           this.lastResizeBySession.delete(event.sessionId);
+          this.log({
+            level: 'info',
+            category: 'ssh',
+            message: 'SSH 세션이 종료되었습니다.',
+            metadata: { sessionId: event.sessionId, message: event.payload.message ?? null }
+          });
           this.broadcastTerminalEvent(event);
           return;
         }
@@ -528,6 +739,22 @@ export class CoreManager {
           errorMessage: event.type === 'error' ? String(event.payload.message ?? 'SSH error') : existing.errorMessage,
           lastEventAt: new Date().toISOString()
         });
+        if (event.type === 'connected') {
+          this.log({
+            level: 'info',
+            category: 'ssh',
+            message: 'SSH 세션이 연결되었습니다.',
+            metadata: { sessionId: event.sessionId, hostId: existing.hostId, title: existing.title }
+          });
+        }
+        if (event.type === 'error') {
+          this.log({
+            level: 'error',
+            category: 'ssh',
+            message: 'SSH 세션 오류가 발생했습니다.',
+            metadata: { sessionId: event.sessionId, message: event.payload.message ?? null }
+          });
+        }
       }
       this.broadcastTerminalEvent(event);
       return;
@@ -568,11 +795,11 @@ export class CoreManager {
       return;
     }
     const pending = this.pendingResponses.get(event.requestId);
-    if (!pending) {
+      if (!pending) {
       return;
     }
 
-    if (event.type === 'error' || event.type === 'sftpError') {
+    if (event.type === 'error' || event.type === 'sftpError' || event.type === 'portForwardError') {
       clearTimeout(pending.timeout);
       this.pendingResponses.delete(event.requestId);
       pending.reject(new Error(String(event.payload.message ?? 'SSH core error')));
@@ -607,7 +834,27 @@ export class CoreManager {
     this.tabs.clear();
     this.sftpEndpoints.clear();
     this.transferJobs.clear();
+    this.portForwardDefinitions.clear();
+    this.portForwardRuntimes.clear();
     this.lastResizeBySession.clear();
+  }
+
+  private buildForwardRuntime(ruleId: string, payload: Record<string, unknown>, status: PortForwardRuntimeRecord['status']): PortForwardRuntimeRecord {
+    const fallback = this.portForwardDefinitions.get(ruleId);
+    return {
+      ruleId,
+      hostId: fallback?.hostId ?? '',
+      mode:
+        payload.mode === 'remote' || payload.mode === 'dynamic'
+          ? (payload.mode as PortForwardMode)
+          : fallback?.mode ?? 'local',
+      bindAddress: String(payload.bindAddress ?? fallback?.bindAddress ?? '127.0.0.1'),
+      bindPort: Number(payload.bindPort ?? fallback?.bindPort ?? 0),
+      status,
+      message: payload.message ? String(payload.message) : undefined,
+      updatedAt: new Date().toISOString(),
+      startedAt: status === 'running' ? new Date().toISOString() : this.portForwardRuntimes.get(ruleId)?.startedAt
+    };
   }
 
   private sendControl<TPayload>(request: CoreRequest<TPayload>): void {
@@ -641,6 +888,14 @@ export class CoreManager {
     }
   }
 
+  private broadcastPortForwardEvent(event: PortForwardRuntimeEvent): void {
+    for (const window of this.windows) {
+      if (!window.isDestroyed()) {
+        window.webContents.send(ipcChannels.portForwards.event, event);
+      }
+    }
+  }
+
   private broadcastStream(metadata: CoreStreamFrame, payload: Uint8Array): void {
     if (metadata.type !== 'data') {
       return;
@@ -654,5 +909,9 @@ export class CoreManager {
         });
       }
     }
+  }
+
+  private log(entry: ActivityLogInput): void {
+    this.appendLog?.(entry);
   }
 }

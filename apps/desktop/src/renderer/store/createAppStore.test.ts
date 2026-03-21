@@ -69,6 +69,61 @@ function createMockApi(): DesktopApi {
         updatedAt: '2025-01-02T00:00:00.000Z'
       }))
     },
+    portForwards: {
+      list: vi.fn().mockResolvedValue({
+        rules: [],
+        runtimes: []
+      }),
+      create: vi.fn(),
+      update: vi.fn(),
+      remove: vi.fn().mockResolvedValue(undefined),
+      start: vi.fn().mockResolvedValue({
+        ruleId: 'forward-1',
+        hostId: 'host-1',
+        mode: 'local',
+        bindAddress: '127.0.0.1',
+        bindPort: 9000,
+        status: 'running',
+        updatedAt: '2025-01-01T00:00:00.000Z'
+      }),
+      stop: vi.fn().mockResolvedValue(undefined),
+      onEvent: vi.fn()
+    },
+    knownHosts: {
+      list: vi.fn().mockResolvedValue([]),
+      probeHost: vi.fn().mockResolvedValue({
+        hostId: 'host-1',
+        hostLabel: 'Prod',
+        host: 'prod.example.com',
+        port: 22,
+        algorithm: 'ssh-ed25519',
+        publicKeyBase64: 'AAAATEST',
+        fingerprintSha256: 'SHA256:test',
+        status: 'trusted',
+        existing: null
+      }),
+      trust: vi.fn().mockResolvedValue({
+        id: 'known-1',
+        host: 'prod.example.com',
+        port: 22,
+        algorithm: 'ssh-ed25519',
+        publicKeyBase64: 'AAAATEST',
+        fingerprintSha256: 'SHA256:test',
+        createdAt: '2025-01-01T00:00:00.000Z',
+        lastSeenAt: '2025-01-01T00:00:00.000Z',
+        updatedAt: '2025-01-01T00:00:00.000Z'
+      }),
+      replace: vi.fn(),
+      remove: vi.fn().mockResolvedValue(undefined)
+    },
+    logs: {
+      list: vi.fn().mockResolvedValue([]),
+      clear: vi.fn().mockResolvedValue(undefined)
+    },
+    keychain: {
+      list: vi.fn().mockResolvedValue([]),
+      removeForHost: vi.fn().mockResolvedValue(undefined)
+    },
     files: {
       getHomeDirectory: vi.fn().mockResolvedValue('/Users/tester'),
       list: vi.fn().mockResolvedValue({
@@ -137,6 +192,8 @@ describe('createAppStore', () => {
     expect(store.getState().settings.theme).toBe('system');
     expect(store.getState().sftp.leftPane.currentPath).toBe('/Users/tester');
     expect(store.getState().sftp.rightPane.sourceKind).toBe('host');
+    expect(store.getState().portForwards).toHaveLength(0);
+    expect(store.getState().knownHosts).toHaveLength(0);
   });
 
   it('opens create and edit drawers from home', async () => {
@@ -176,6 +233,34 @@ describe('createAppStore', () => {
     expect(store.getState().tabs[0]?.sessionId).toBe('session-1');
     expect(store.getState().activeWorkspaceTab).toBe('session-1');
     expect(store.getState().hostDrawer).toEqual({ mode: 'closed' });
+  });
+
+  it('waits for host key trust when the server is not trusted yet', async () => {
+    const api = createMockApi();
+    api.knownHosts.probeHost = vi.fn().mockResolvedValue({
+      hostId: 'host-1',
+      hostLabel: 'Prod',
+      host: 'prod.example.com',
+      port: 22,
+      algorithm: 'ssh-ed25519',
+      publicKeyBase64: 'AAAATEST',
+      fingerprintSha256: 'SHA256:test',
+      status: 'untrusted',
+      existing: null
+    });
+    const store = createAppStore(api);
+
+    await store.getState().bootstrap();
+    await store.getState().connectHost('host-1', 120, 32);
+
+    expect(store.getState().pendingHostKeyPrompt?.probe.status).toBe('untrusted');
+    expect(api.ssh.connect).not.toHaveBeenCalled();
+
+    await store.getState().acceptPendingHostKeyPrompt('trust');
+
+    expect(api.knownHosts.trust).toHaveBeenCalled();
+    expect(api.ssh.connect).toHaveBeenCalled();
+    expect(store.getState().pendingHostKeyPrompt).toBeNull();
   });
 
   it('returns to home when the last session closes', async () => {

@@ -1078,6 +1078,245 @@ input::placeholder {
   pointer-events: none;
 }
 
+.secondary-button.danger {
+  background: var(--danger-bg);
+  color: var(--danger-text);
+  border-color: color-mix(in srgb, var(--danger-text) 24%, var(--border));
+}
+
+.operations-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.operations-panel__header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.2rem 0 0.4rem;
+}
+
+.operations-panel__header p {
+  margin: 0.6rem 0 0;
+  color: var(--text-soft);
+  line-height: 1.6;
+  max-width: 760px;
+}
+
+.operations-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+}
+
+.operations-card,
+.modal-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow);
+}
+
+.operations-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1.1rem 1.15rem;
+  border-radius: 24px;
+}
+
+.operations-card__main {
+  min-width: 0;
+  flex: 1;
+}
+
+.operations-card__title-row {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  flex-wrap: wrap;
+}
+
+.operations-card__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.8rem;
+  margin-top: 0.45rem;
+  color: var(--text-soft);
+  font-size: 0.92rem;
+}
+
+.operations-card__actions {
+  display: flex;
+  gap: 0.6rem;
+  flex-shrink: 0;
+}
+
+.operations-card__message {
+  margin: 0.55rem 0 0;
+  color: var(--text-soft);
+}
+
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 1.9rem;
+  padding: 0.35rem 0.7rem;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--surface-muted) 92%, transparent 8%);
+  color: var(--text-soft);
+  border: 1px solid var(--border);
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.status-pill--running {
+  color: var(--success-text);
+  border-color: color-mix(in srgb, var(--success-text) 24%, var(--border));
+  background: color-mix(in srgb, var(--success-bg) 70%, transparent 30%);
+}
+
+.status-pill--starting {
+  color: var(--accent-strong);
+  border-color: color-mix(in srgb, var(--accent-strong) 26%, var(--border));
+  background: color-mix(in srgb, var(--accent-strong) 12%, transparent 88%);
+}
+
+.status-pill--error {
+  color: var(--danger-text);
+  border-color: color-mix(in srgb, var(--danger-text) 24%, var(--border));
+  background: color-mix(in srgb, var(--danger-bg) 70%, transparent 30%);
+}
+
+.status-pill--stopped {
+  color: var(--text-soft);
+}
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: rgba(12, 20, 32, 0.32);
+  z-index: 8;
+}
+
+.modal-card {
+  width: min(560px, calc(100vw - 2rem));
+  border-radius: 24px;
+}
+
+.modal-card__header,
+.modal-card__footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1.1rem 1.2rem;
+}
+
+.modal-card__header {
+  border-bottom: 1px solid var(--border);
+}
+
+.modal-card__header h3 {
+  margin: 0.15rem 0 0;
+}
+
+.modal-card__body {
+  padding: 1.1rem 1.2rem 1.2rem;
+}
+
+.modal-card__footer {
+  justify-content: flex-end;
+  border-top: 1px solid var(--border);
+}
+
+.form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.9rem;
+}
+
+.form-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+.form-field--compact {
+  max-width: 220px;
+}
+
+.form-field > span,
+.field-label {
+  color: var(--text-soft);
+  font-size: 0.88rem;
+}
+
+.form-error {
+  grid-column: 1 / -1;
+  color: var(--danger-text);
+}
+
+.known-host-dialog {
+  width: min(640px, calc(100vw - 2rem));
+}
+
+.known-host-dialog__summary,
+.known-host-dialog__fingerprints {
+  display: grid;
+  gap: 0.9rem;
+}
+
+.known-host-dialog__summary {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.known-host-dialog__fingerprint-card {
+  padding: 0.85rem 0.95rem;
+  border-radius: 18px;
+  background: color-mix(in srgb, var(--surface-muted) 92%, transparent 8%);
+  border: 1px solid var(--border);
+}
+
+.known-host-dialog__fingerprint-card code {
+  display: block;
+  margin-top: 0.45rem;
+  font-size: 0.86rem;
+  line-height: 1.6;
+  word-break: break-all;
+}
+
+.known-host-dialog__help {
+  margin: 1rem 0 0;
+  color: var(--text-soft);
+  line-height: 1.7;
+}
+
+.logs-toolbar {
+  display: flex;
+  gap: 0.9rem;
+  flex-wrap: wrap;
+}
+
+.log-details {
+  margin-top: 0.7rem;
+}
+
+.log-details pre {
+  margin: 0.55rem 0 0;
+  padding: 0.9rem;
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--surface-muted) 92%, transparent 8%);
+  border: 1px solid var(--border);
+  overflow: auto;
+  font-size: 0.84rem;
+}
+
 @media (max-width: 1320px) {
   .home-shell {
     grid-template-columns: 200px minmax(0, 1fr) 0;
@@ -1139,6 +1378,26 @@ input::placeholder {
   .home-toolbar {
     flex-direction: column;
     align-items: stretch;
+  }
+
+  .operations-panel__header,
+  .operations-card,
+  .modal-card__header,
+  .modal-card__footer,
+  .known-host-dialog__summary,
+  .form-grid {
+    grid-template-columns: 1fr;
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .operations-card__actions {
+    width: 100%;
+    justify-content: stretch;
+  }
+
+  .operations-card__actions button {
+    flex: 1;
   }
 
   .file-input-row,

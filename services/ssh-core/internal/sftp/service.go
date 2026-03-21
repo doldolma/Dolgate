@@ -70,13 +70,14 @@ func (s *Service) Shutdown() {
 
 func (s *Service) Connect(endpointID, requestID string, payload protocol.SFTPConnectPayload) error {
 	client, err := sshconn.DialClient(sshconn.Target{
-		Host:           payload.Host,
-		Port:           payload.Port,
-		Username:       payload.Username,
-		AuthType:       payload.AuthType,
-		Password:       payload.Password,
-		PrivateKeyPath: payload.PrivateKeyPath,
-		Passphrase:     payload.Passphrase,
+		Host:                 payload.Host,
+		Port:                 payload.Port,
+		Username:             payload.Username,
+		AuthType:             payload.AuthType,
+		Password:             payload.Password,
+		PrivateKeyPath:       payload.PrivateKeyPath,
+		Passphrase:           payload.Passphrase,
+		TrustedHostKeyBase64: payload.TrustedHostKeyBase64,
 	}, sshconn.DefaultConfig)
 	if err != nil {
 		return err

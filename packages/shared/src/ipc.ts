@@ -1,10 +1,21 @@
 import type {
+  ActivityLogRecord,
   AppSettings,
   AuthType,
+  HostKeyProbeResult,
+  KnownHostRecord,
+  KnownHostTrustInput,
+  PortForwardDraft,
+  PortForwardListSnapshot,
+  PortForwardMode,
+  PortForwardRuleRecord,
+  PortForwardRuntimeEvent,
+  PortForwardRuntimeRecord,
   DirectoryListing,
   GroupRecord,
   HostDraft,
   HostRecord,
+  SecretMetadataRecord,
   SftpEndpointSummary,
   TerminalTab,
   TransferJob,
@@ -18,6 +29,9 @@ export type CoreCommandType =
   | 'connect'
   | 'resize'
   | 'disconnect'
+  | 'probeHostKey'
+  | 'portForwardStart'
+  | 'portForwardStop'
   | 'sftpConnect'
   | 'sftpDisconnect'
   | 'sftpList'
@@ -32,6 +46,10 @@ export type CoreEventType =
   | 'data'
   | 'error'
   | 'closed'
+  | 'hostKeyProbed'
+  | 'portForwardStarted'
+  | 'portForwardStopped'
+  | 'portForwardError'
   | 'sftpConnected'
   | 'sftpDisconnected'
   | 'sftpListed'
@@ -63,6 +81,7 @@ export interface ResolvedCoreConnectPayload {
   password?: string;
   privateKeyPath?: string;
   passphrase?: string;
+  trustedHostKeyBase64: string;
   cols: number;
   rows: number;
 }
@@ -75,6 +94,28 @@ export interface ResolvedSftpConnectPayload {
   password?: string;
   privateKeyPath?: string;
   passphrase?: string;
+  trustedHostKeyBase64: string;
+}
+
+export interface ResolvedHostKeyProbePayload {
+  host: string;
+  port: number;
+}
+
+export interface ResolvedPortForwardStartPayload {
+  host: string;
+  port: number;
+  username: string;
+  authType: AuthType;
+  password?: string;
+  privateKeyPath?: string;
+  passphrase?: string;
+  trustedHostKeyBase64: string;
+  mode: PortForwardMode;
+  bindAddress: string;
+  bindPort: number;
+  targetHost?: string;
+  targetPort?: number;
 }
 
 export interface SftpListInput {
@@ -97,6 +138,10 @@ export interface SftpRenameInput {
 export interface SftpDeleteInput {
   endpointId: string;
   paths: string[];
+}
+
+export interface KnownHostProbeInput {
+  hostId: string;
 }
 
 // 모든 stdio 요청은 동일한 envelope 구조를 사용한다.
@@ -162,6 +207,30 @@ export interface DesktopApi {
   settings: {
     get: () => Promise<AppSettings>;
     update: (input: Partial<AppSettings>) => Promise<AppSettings>;
+  };
+  portForwards: {
+    list: () => Promise<PortForwardListSnapshot>;
+    create: (draft: PortForwardDraft) => Promise<PortForwardRuleRecord>;
+    update: (id: string, draft: PortForwardDraft) => Promise<PortForwardRuleRecord>;
+    remove: (id: string) => Promise<void>;
+    start: (ruleId: string) => Promise<PortForwardRuntimeRecord>;
+    stop: (ruleId: string) => Promise<void>;
+    onEvent: (listener: (event: PortForwardRuntimeEvent) => void) => () => void;
+  };
+  knownHosts: {
+    list: () => Promise<KnownHostRecord[]>;
+    probeHost: (input: KnownHostProbeInput) => Promise<HostKeyProbeResult>;
+    trust: (input: KnownHostTrustInput) => Promise<KnownHostRecord>;
+    replace: (input: KnownHostTrustInput) => Promise<KnownHostRecord>;
+    remove: (id: string) => Promise<void>;
+  };
+  logs: {
+    list: () => Promise<ActivityLogRecord[]>;
+    clear: () => Promise<void>;
+  };
+  keychain: {
+    list: () => Promise<SecretMetadataRecord[]>;
+    removeForHost: (hostId: string) => Promise<void>;
   };
   files: {
     getHomeDirectory: () => Promise<string>;

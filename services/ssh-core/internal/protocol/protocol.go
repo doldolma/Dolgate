@@ -19,6 +19,9 @@ const (
 	CommandConnect            CommandType = "connect"
 	CommandResize             CommandType = "resize"
 	CommandDisconnect         CommandType = "disconnect"
+	CommandProbeHostKey       CommandType = "probeHostKey"
+	CommandPortForwardStart   CommandType = "portForwardStart"
+	CommandPortForwardStop    CommandType = "portForwardStop"
 	CommandSFTPConnect        CommandType = "sftpConnect"
 	CommandSFTPDisconnect     CommandType = "sftpDisconnect"
 	CommandSFTPList           CommandType = "sftpList"
@@ -36,6 +39,10 @@ const (
 	EventData                  EventType = "data"
 	EventError                 EventType = "error"
 	EventClosed                EventType = "closed"
+	EventHostKeyProbed         EventType = "hostKeyProbed"
+	EventPortForwardStarted    EventType = "portForwardStarted"
+	EventPortForwardStopped    EventType = "portForwardStopped"
+	EventPortForwardError      EventType = "portForwardError"
 	EventSFTPConnected         EventType = "sftpConnected"
 	EventSFTPDisconnected      EventType = "sftpDisconnected"
 	EventSFTPListed            EventType = "sftpListed"
@@ -95,26 +102,33 @@ type Frame struct {
 
 // ConnectPayload는 main 프로세스가 비밀값을 해석한 뒤 코어에 넘기는 최종 접속 정보다.
 type ConnectPayload struct {
-	Host           string `json:"host"`
-	Port           int    `json:"port"`
-	Username       string `json:"username"`
-	AuthType       string `json:"authType"`
-	Password       string `json:"password,omitempty"`
-	PrivateKeyPath string `json:"privateKeyPath,omitempty"`
-	Passphrase     string `json:"passphrase,omitempty"`
-	Cols           int    `json:"cols"`
-	Rows           int    `json:"rows"`
+	Host                 string `json:"host"`
+	Port                 int    `json:"port"`
+	Username             string `json:"username"`
+	AuthType             string `json:"authType"`
+	Password             string `json:"password,omitempty"`
+	PrivateKeyPath       string `json:"privateKeyPath,omitempty"`
+	Passphrase           string `json:"passphrase,omitempty"`
+	TrustedHostKeyBase64 string `json:"trustedHostKeyBase64"`
+	Cols                 int    `json:"cols"`
+	Rows                 int    `json:"rows"`
 }
 
 // SFTPConnectPayload는 원격 파일 브라우저 접속을 위한 인증 정보다.
 type SFTPConnectPayload struct {
-	Host           string `json:"host"`
-	Port           int    `json:"port"`
-	Username       string `json:"username"`
-	AuthType       string `json:"authType"`
-	Password       string `json:"password,omitempty"`
-	PrivateKeyPath string `json:"privateKeyPath,omitempty"`
-	Passphrase     string `json:"passphrase,omitempty"`
+	Host                 string `json:"host"`
+	Port                 int    `json:"port"`
+	Username             string `json:"username"`
+	AuthType             string `json:"authType"`
+	Password             string `json:"password,omitempty"`
+	PrivateKeyPath       string `json:"privateKeyPath,omitempty"`
+	Passphrase           string `json:"passphrase,omitempty"`
+	TrustedHostKeyBase64 string `json:"trustedHostKeyBase64"`
+}
+
+type HostKeyProbePayload struct {
+	Host string `json:"host"`
+	Port int    `json:"port"`
 }
 
 // ResizePayload는 xterm 크기와 원격 PTY 크기를 맞추기 위한 요청이다.
@@ -161,6 +175,22 @@ type SFTPTransferStartPayload struct {
 	ConflictResolution string                  `json:"conflictResolution"`
 }
 
+type PortForwardStartPayload struct {
+	Host                 string `json:"host"`
+	Port                 int    `json:"port"`
+	Username             string `json:"username"`
+	AuthType             string `json:"authType"`
+	Password             string `json:"password,omitempty"`
+	PrivateKeyPath       string `json:"privateKeyPath,omitempty"`
+	Passphrase           string `json:"passphrase,omitempty"`
+	TrustedHostKeyBase64 string `json:"trustedHostKeyBase64"`
+	Mode                 string `json:"mode"`
+	BindAddress          string `json:"bindAddress"`
+	BindPort             int    `json:"bindPort"`
+	TargetHost           string `json:"targetHost,omitempty"`
+	TargetPort           int    `json:"targetPort,omitempty"`
+}
+
 // StatusPayload는 프로세스/세션 상태를 짧은 문자열로 표현한다.
 type StatusPayload struct {
 	Status  string `json:"status"`
@@ -179,6 +209,20 @@ type ClosedPayload struct {
 
 type SFTPConnectedPayload struct {
 	Path string `json:"path"`
+}
+
+type HostKeyProbedPayload struct {
+	Algorithm         string `json:"algorithm"`
+	PublicKeyBase64   string `json:"publicKeyBase64"`
+	FingerprintSHA256 string `json:"fingerprintSha256"`
+}
+
+type PortForwardStartedPayload struct {
+	Status      string `json:"status"`
+	Mode        string `json:"mode"`
+	BindAddress string `json:"bindAddress"`
+	BindPort    int    `json:"bindPort"`
+	Message     string `json:"message,omitempty"`
 }
 
 type AckPayload struct {

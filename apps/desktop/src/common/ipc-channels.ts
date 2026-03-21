@@ -28,6 +28,30 @@ export const ipcChannels = {
     get: 'settings:get',
     update: 'settings:update'
   },
+  portForwards: {
+    list: 'port-forwards:list',
+    create: 'port-forwards:create',
+    update: 'port-forwards:update',
+    remove: 'port-forwards:remove',
+    start: 'port-forwards:start',
+    stop: 'port-forwards:stop',
+    event: 'port-forwards:event'
+  },
+  knownHosts: {
+    list: 'known-hosts:list',
+    probeHost: 'known-hosts:probe-host',
+    trust: 'known-hosts:trust',
+    replace: 'known-hosts:replace',
+    remove: 'known-hosts:remove'
+  },
+  logs: {
+    list: 'logs:list',
+    clear: 'logs:clear'
+  },
+  keychain: {
+    list: 'keychain:list',
+    removeForHost: 'keychain:remove-for-host'
+  },
   files: {
     getHomeDirectory: 'files:get-home-directory',
     list: 'files:list',
