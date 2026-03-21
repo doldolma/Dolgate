@@ -35,15 +35,15 @@ docs/             아키텍처 및 IPC 문서
 - Go SFTP endpoint 매니저의 `connect`, `list`, `mkdir`, `rename`, `delete`
 - Local/Remote, Remote/Remote 파일 전송과 진행률 이벤트
 - GitHub Releases 기반 수동 릴리즈 + 앱 내 자동 업데이트 확인/다운로드/재시작 적용
-- Gin API의 `signup`, `login`, `refresh`, `sync` 엔드포인트
+- 브라우저 로그인 기반 `login`, `signup`, `refresh`, `exchange`, `logout`, `sync` 엔드포인트
 - GORM 기반 저장소 계층과 `sqlite/mysql` 드라이버 전환 구조
 
 ## MVP 보안 기본값
 
 - renderer는 Node API에 직접 접근하지 않습니다.
-- 호스트 비밀값은 `keytar`를 통해 OS 키체인에 저장하는 것을 기본 전제로 둡니다.
-- 동기화 서버는 `encrypted_payload`만 저장합니다.
+- 호스트 비밀값은 로컬 OS 키체인에 캐시되며, 서버에는 암호화된 `encrypted_payload`만 저장합니다.
 - refresh token은 원문이 아니라 해시만 저장합니다.
+- refresh token은 미사용 14일 만료(sliding idle expiration) 정책을 사용합니다.
 - 운영 환경에서는 반드시 HTTPS 뒤에서 sync API를 구동해야 하며, 로컬 개발에서만 `http://localhost`를 허용합니다.
 
 ## 요구 사항
@@ -79,13 +79,73 @@ npm run dev:desktop
 npm run dev:api
 ```
 
-데스크톱과 백엔드를 함께 실행:
+브라우저 로그인 + 동기화까지 포함한 전체 흐름:
 
 ```bash
 npm run dev
 ```
 
+동작 방식:
+
+- 데스크톱 앱은 시작 시 refresh token으로 세션 복구를 먼저 시도합니다.
+- 복구에 실패하면 앱 전체가 로그인 게이트로 전환되고, 브라우저에서 `https://ssh.doldolma.com/login` 로그인 후 `dolssh://auth/callback`으로 복귀해야 사용할 수 있습니다.
+- 로그인 성공 후 `groups`, `hosts`, `secrets`, `known_hosts`, `port_forwards`가 동기화되고 나서야 홈/세션 UI가 열립니다.
+- 어느 기기에서든 로그인만 하면 비밀번호, passphrase, 관리형 private key PEM까지 함께 복원되는 것을 기본 목표로 둡니다.
+
+## 설정파일
+
+데스크톱 앱 설정:
+
+- Git에 올라가는 예시 파일:
+  - [apps/desktop/config/development.example.json](/Users/heodoyeong/develop/dolsh/apps/desktop/config/development.example.json)
+  - [apps/desktop/config/desktop.example.json](/Users/heodoyeong/develop/dolsh/apps/desktop/config/desktop.example.json)
+- 실제 파일:
+  - `apps/desktop/config/development.json`
+  - `apps/desktop/config/desktop.json`
+- 사용자 override: `~/Library/Application Support/dolssh/desktop-config.json` (macOS 기준)
+
+현재 desktop 설정에서 가장 중요한 값은 `sync.serverUrl`입니다.
+
+sync API 설정:
+
+- Git에 올라가는 예시 파일: [services/sync-api/config/default.example.json](/Users/heodoyeong/develop/dolsh/services/sync-api/config/default.example.json)
+- 운영 Docker 예시 파일: [services/sync-api/config/production.example.json](/Users/heodoyeong/develop/dolsh/services/sync-api/config/production.example.json)
+- 실제 파일: `services/sync-api/config/default.json`
+- 필요하면 `DOLSSH_API_CONFIG_PATH=/absolute/path/to/config.json`으로 다른 파일을 지정할 수 있습니다.
+
+정책:
+
+- Git에는 `*.example.json`만 올립니다.
+- 실제 secret이나 운영 URL이 들어가는 `*.json` 파일은 `.gitignore`로 제외합니다.
+- 실제 파일이 없으면 앱과 서버가 자동으로 `*.example.json`을 fallback으로 읽습니다.
+
 자세한 빌드/배포 절차는 [빌드 및 배포 가이드](./docs/build-and-deploy.md)를 참고하세요.
+
+## sync API Docker 배포
+
+`sync-api`는 Docker로 독립 배포할 수 있습니다.
+
+준비:
+
+```bash
+cp services/sync-api/config/production.example.json services/sync-api/config/production.json
+mkdir -p services/sync-api/data
+```
+
+실행:
+
+```bash
+cd services/sync-api/deploy
+cp docker-compose.example.yml docker-compose.yml
+docker compose up -d --build
+```
+
+참고:
+
+- Docker 이미지는 [services/sync-api/Dockerfile](/Users/heodoyeong/develop/dolsh/services/sync-api/Dockerfile)을 사용합니다.
+- 운영 config는 `services/sync-api/config/production.json`을 `/app/config/production.json`으로 마운트합니다.
+- SQLite 파일은 `services/sync-api/data/`에 유지됩니다.
+- `ssh.doldolma.com`을 이 컨테이너로 연결하려면 reverse proxy가 필요합니다. 예시는 [nginx.sync-api.example.conf](/Users/heodoyeong/develop/dolsh/services/sync-api/deploy/nginx.sync-api.example.conf)를 참고하세요.
 
 ## 릴리즈 빌드와 GitHub Release 업로드
 
@@ -132,6 +192,9 @@ DB_DRIVER=sqlite
 PORT=8080
 DATABASE_URL=file:dolssh_sync.db?_pragma=busy_timeout(5000)
 JWT_SECRET=change-me-in-production
+LOCAL_AUTH_ENABLED=true
+LOCAL_SIGNUP_ENABLED=true
+OIDC_ENABLED=false
 ```
 
 MySQL 전환 예시:
@@ -140,6 +203,14 @@ MySQL 전환 예시:
 DB_DRIVER=mysql
 DATABASE_URL=user:password@tcp(127.0.0.1:3306)/dolssh?charset=utf8mb4&parseTime=True&loc=UTC
 JWT_SECRET=change-me-in-production
+LOCAL_AUTH_ENABLED=true
+LOCAL_SIGNUP_ENABLED=true
+OIDC_ENABLED=true
+OIDC_DISPLAY_NAME=SSO
+OIDC_ISSUER_URL=https://issuer.example.com
+OIDC_CLIENT_ID=your-client-id
+OIDC_CLIENT_SECRET=your-client-secret
+OIDC_REDIRECT_URL=https://ssh.doldolma.com/auth/oidc/callback
 ```
 
 ## 테스트 및 검증
@@ -158,7 +229,11 @@ npm run typecheck --workspace @dolssh/desktop
 
 ## 개발 메모
 
-- 데스크톱 동기화 UI는 아직 연결하지 않았고, 먼저 서버와 타입 계약을 준비한 상태입니다.
+- 데스크톱 앱은 로그인 전에는 Hosts/SFTP/SSH 화면으로 진입하지 않습니다.
+- 백엔드 `/login` 페이지가 local 폼과 OIDC SSO 버튼을 직접 렌더링하고, 데스크톱은 이를 외부 브라우저로 엽니다.
+- local/OIDC 하이브리드 모드에서는 local 로그인 폼이 기본이고, OIDC가 켜져 있으면 SSO 버튼이 아래에 추가됩니다.
+- secrets sync에는 비밀번호, private key passphrase, 관리형 private key PEM이 포함됩니다.
+- 기존 경로 기반 private key는 레거시 import 경로로만 유지하고, 새 sync 기준은 관리형 PEM입니다.
 - SSH와 SFTP 연결은 known_hosts 기반 TOFU 검증을 사용하며, 신뢰되지 않은 서버는 연결 전에 지문 확인 모달을 표시합니다.
 - SFTP는 고정 탭으로 동작하며, 기본 레이아웃은 `왼쪽 Local / 오른쪽 Host 선택`입니다.
 - SFTP 연결은 SSH 터미널 세션과 별개로 열리며, 앱 `Quit` 시 함께 종료됩니다.

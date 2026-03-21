@@ -1,7 +1,9 @@
 import type {
   ActivityLogRecord,
   AppSettings,
+  AuthState,
   AuthType,
+  ManagedSecretPayload,
   HostKeyProbeResult,
   KnownHostRecord,
   KnownHostTrustInput,
@@ -17,6 +19,7 @@ import type {
   HostRecord,
   SecretMetadataRecord,
   SftpEndpointSummary,
+  SyncStatus,
   TerminalTab,
   TransferJob,
   TransferJobEvent,
@@ -24,6 +27,7 @@ import type {
   UpdateEvent,
   UpdateState
 } from './models';
+import type { SyncPayloadV2 } from './api';
 
 // Electron main과 Go SSH 코어가 주고받는 명령/이벤트의 집합이다.
 export type CoreCommandType =
@@ -81,6 +85,7 @@ export interface ResolvedCoreConnectPayload {
   username: string;
   authType: AuthType;
   password?: string;
+  privateKeyPem?: string;
   privateKeyPath?: string;
   passphrase?: string;
   trustedHostKeyBase64: string;
@@ -94,6 +99,7 @@ export interface ResolvedSftpConnectPayload {
   username: string;
   authType: AuthType;
   password?: string;
+  privateKeyPem?: string;
   privateKeyPath?: string;
   passphrase?: string;
   trustedHostKeyBase64: string;
@@ -110,6 +116,7 @@ export interface ResolvedPortForwardStartPayload {
   username: string;
   authType: AuthType;
   password?: string;
+  privateKeyPem?: string;
   privateKeyPath?: string;
   passphrase?: string;
   trustedHostKeyBase64: string;
@@ -177,10 +184,40 @@ export interface CoreStreamFrame {
 export interface HostSecretInput {
   password?: string;
   passphrase?: string;
+  privateKeyPem?: string;
+}
+
+export interface KeychainSecretUpdateInput {
+  secretRef: string;
+  secrets: HostSecretInput;
+}
+
+export interface KeychainSecretCloneInput {
+  hostId: string;
+  sourceSecretRef: string;
+  secrets: HostSecretInput;
+}
+
+export interface AuthCallbackPayload {
+  code: string;
+  state?: string | null;
 }
 
 // preload가 renderer에 노출하는 공개 API 표면이다.
 export interface DesktopApi {
+  auth: {
+    getState: () => Promise<AuthState>;
+    bootstrap: () => Promise<AuthState>;
+    beginBrowserLogin: () => Promise<void>;
+    logout: () => Promise<void>;
+    onEvent: (listener: (state: AuthState) => void) => () => void;
+  };
+  sync: {
+    bootstrap: () => Promise<SyncStatus>;
+    pushDirty: () => Promise<SyncStatus>;
+    status: () => Promise<SyncStatus>;
+    exportDecryptedSnapshot: () => Promise<SyncPayloadV2>;
+  };
   hosts: {
     list: () => Promise<HostRecord[]>;
     create: (draft: HostDraft, secrets?: HostSecretInput) => Promise<HostRecord>;
@@ -241,7 +278,10 @@ export interface DesktopApi {
   };
   keychain: {
     list: () => Promise<SecretMetadataRecord[]>;
-    removeForHost: (hostId: string) => Promise<void>;
+    remove: (secretRef: string) => Promise<void>;
+    update: (input: KeychainSecretUpdateInput) => Promise<void>;
+    cloneForHost: (input: KeychainSecretCloneInput) => Promise<void>;
+    load: (secretRef: string) => Promise<ManagedSecretPayload | null>;
   };
   files: {
     getHomeDirectory: () => Promise<string>;

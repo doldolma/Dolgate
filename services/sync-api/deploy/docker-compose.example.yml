@@ -1,0 +1,16 @@
+services:
+  sync-api:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    image: dolssh-sync-api:latest
+    container_name: dolssh-sync-api
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      DOLSSH_API_CONFIG_PATH: /app/config/production.json
+      TZ: Asia/Seoul
+    volumes:
+      - ../config/production.json:/app/config/production.json:ro
+      - ../data:/app/data

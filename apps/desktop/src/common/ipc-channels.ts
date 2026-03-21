@@ -1,4 +1,17 @@
 export const ipcChannels = {
+  auth: {
+    getState: 'auth:get-state',
+    bootstrap: 'auth:bootstrap',
+    beginBrowserLogin: 'auth:begin-browser-login',
+    logout: 'auth:logout',
+    event: 'auth:event'
+  },
+  sync: {
+    bootstrap: 'sync:bootstrap',
+    pushDirty: 'sync:push-dirty',
+    status: 'sync:status',
+    exportDecryptedSnapshot: 'sync:export-decrypted-snapshot'
+  },
   hosts: {
     list: 'hosts:list',
     create: 'hosts:create',
@@ -59,7 +72,10 @@ export const ipcChannels = {
   },
   keychain: {
     list: 'keychain:list',
-    removeForHost: 'keychain:remove-for-host'
+    load: 'keychain:load',
+    remove: 'keychain:remove',
+    update: 'keychain:update',
+    cloneForHost: 'keychain:clone-for-host'
   },
   files: {
     getHomeDirectory: 'files:get-home-directory',

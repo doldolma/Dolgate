@@ -1,17 +1,45 @@
 package http
 
 import (
+	"context"
 	"errors"
+	"html/template"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
+	"github.com/coreos/go-oidc/v3/oidc"
 	"github.com/gin-gonic/gin"
+	"golang.org/x/oauth2"
 
 	"dolssh/services/sync-api/internal/auth"
 	"dolssh/services/sync-api/internal/store"
 	syncmodel "dolssh/services/sync-api/internal/sync"
 )
+
+type RouterConfig struct {
+	LocalAuthEnabled   bool
+	LocalSignupEnabled bool
+	OIDC               OIDCConfig
+}
+
+type OIDCConfig struct {
+	Enabled      bool
+	DisplayName  string
+	IssuerURL    string
+	ClientID     string
+	ClientSecret string
+	RedirectURL  string
+	Scopes       []string
+}
+
+type oidcRuntime struct {
+	provider *oidc.Provider
+	verifier *oidc.IDTokenVerifier
+	oauth    *oauth2.Config
+	config   OIDCConfig
+}
 
 type authRequest struct {
 	Email    string `json:"email" binding:"required,email"`
@@ -22,19 +50,292 @@ type refreshRequest struct {
 	RefreshToken string `json:"refreshToken" binding:"required"`
 }
 
-type authResponse struct {
-	UserID string         `json:"userId"`
-	Email  string         `json:"email"`
-	Tokens auth.TokenPair `json:"tokens"`
+type logoutRequest struct {
+	RefreshToken string `json:"refreshToken" binding:"required"`
 }
 
-func NewRouter(store store.Store, authService *auth.Service) *gin.Engine {
-	// 라우터는 얇게 유지하고 실제 정책은 auth/store 계층으로 위임한다.
+type exchangeRequest struct {
+	Code string `json:"code" binding:"required"`
+}
+
+type browserLoginForm struct {
+	Email       string `form:"email"`
+	Password    string `form:"password"`
+	Client      string `form:"client"`
+	RedirectURI string `form:"redirect_uri"`
+	State       string `form:"state"`
+}
+
+type browserSignupForm struct {
+	Email       string `form:"email"`
+	Password    string `form:"password"`
+	Client      string `form:"client"`
+	RedirectURI string `form:"redirect_uri"`
+	State       string `form:"state"`
+}
+
+type loginPageData struct {
+	Title              string
+	IsSignup           bool
+	ErrorMessage       string
+	Email              string
+	Client             string
+	RedirectURI        string
+	State              string
+	LocalAuthEnabled   bool
+	LocalSignupEnabled bool
+	OIDCEnabled        bool
+	OIDCDisplayName    string
+	ShowSignupLink     bool
+}
+
+func NewRouter(store store.Store, authService *auth.Service, config RouterConfig) (*gin.Engine, error) {
 	router := gin.New()
 	router.Use(gin.Logger(), gin.Recovery())
 
+	oidcRuntime, err := newOIDCRuntime(config.OIDC)
+	if err != nil {
+		return nil, err
+	}
+
 	router.GET("/healthz", func(ctx *gin.Context) {
 		ctx.JSON(http.StatusOK, gin.H{"status": "ok", "time": time.Now().UTC().Format(time.RFC3339)})
+	})
+
+	router.GET("/login", func(ctx *gin.Context) {
+		renderLoginPage(ctx, loginPageData{
+			Title:              "Sign in to dolssh",
+			IsSignup:           false,
+			Client:             ctx.Query("client"),
+			RedirectURI:        ctx.Query("redirect_uri"),
+			State:              ctx.Query("state"),
+			LocalAuthEnabled:   config.LocalAuthEnabled,
+			LocalSignupEnabled: config.LocalSignupEnabled,
+			OIDCEnabled:        oidcRuntime != nil,
+			OIDCDisplayName:    oidcButtonLabel(oidcRuntime),
+			ShowSignupLink:     config.LocalAuthEnabled && config.LocalSignupEnabled,
+		})
+	})
+
+	router.POST("/login", func(ctx *gin.Context) {
+		var form browserLoginForm
+		if err := ctx.ShouldBind(&form); err != nil {
+			renderLoginPage(ctx, loginPageData{
+				Title:              "Sign in to dolssh",
+				IsSignup:           false,
+				ErrorMessage:       err.Error(),
+				Email:              form.Email,
+				Client:             form.Client,
+				RedirectURI:        form.RedirectURI,
+				State:              form.State,
+				LocalAuthEnabled:   config.LocalAuthEnabled,
+				LocalSignupEnabled: config.LocalSignupEnabled,
+				OIDCEnabled:        oidcRuntime != nil,
+				OIDCDisplayName:    oidcButtonLabel(oidcRuntime),
+				ShowSignupLink:     config.LocalAuthEnabled && config.LocalSignupEnabled,
+			})
+			return
+		}
+		if !config.LocalAuthEnabled {
+			renderLoginPage(ctx, loginPageData{
+				Title:              "Sign in to dolssh",
+				IsSignup:           false,
+				ErrorMessage:       "이 서버에서는 비밀번호 로그인이 비활성화되어 있습니다.",
+				Email:              form.Email,
+				Client:             form.Client,
+				RedirectURI:        form.RedirectURI,
+				State:              form.State,
+				LocalAuthEnabled:   config.LocalAuthEnabled,
+				LocalSignupEnabled: config.LocalSignupEnabled,
+				OIDCEnabled:        oidcRuntime != nil,
+				OIDCDisplayName:    oidcButtonLabel(oidcRuntime),
+				ShowSignupLink:     config.LocalAuthEnabled && config.LocalSignupEnabled,
+			})
+			return
+		}
+		if err := validateDesktopRedirectURI(form.RedirectURI); err != nil {
+			ctx.String(http.StatusBadRequest, err.Error())
+			return
+		}
+
+		user, _, err := authService.Login(ctx.Request.Context(), form.Email, form.Password)
+		if err != nil {
+			renderLoginPage(ctx, loginPageData{
+				Title:              "Sign in to dolssh",
+				IsSignup:           false,
+				ErrorMessage:       "이메일 또는 비밀번호가 올바르지 않습니다.",
+				Email:              form.Email,
+				Client:             form.Client,
+				RedirectURI:        form.RedirectURI,
+				State:              form.State,
+				LocalAuthEnabled:   config.LocalAuthEnabled,
+				LocalSignupEnabled: config.LocalSignupEnabled,
+				OIDCEnabled:        oidcRuntime != nil,
+				OIDCDisplayName:    oidcButtonLabel(oidcRuntime),
+				ShowSignupLink:     config.LocalAuthEnabled && config.LocalSignupEnabled,
+			})
+			return
+		}
+
+		code, err := authService.IssueExchangeCode(ctx.Request.Context(), user)
+		if err != nil {
+			ctx.String(http.StatusInternalServerError, err.Error())
+			return
+		}
+		completeDesktopLogin(ctx, form.RedirectURI, code, form.State)
+	})
+
+	router.GET("/signup", func(ctx *gin.Context) {
+		if !config.LocalAuthEnabled || !config.LocalSignupEnabled {
+			ctx.Redirect(http.StatusFound, "/login")
+			return
+		}
+		renderLoginPage(ctx, loginPageData{
+			Title:              "Create your dolssh account",
+			IsSignup:           true,
+			Client:             ctx.Query("client"),
+			RedirectURI:        ctx.Query("redirect_uri"),
+			State:              ctx.Query("state"),
+			LocalAuthEnabled:   true,
+			LocalSignupEnabled: true,
+			OIDCEnabled:        oidcRuntime != nil,
+			OIDCDisplayName:    oidcButtonLabel(oidcRuntime),
+			ShowSignupLink:     false,
+		})
+	})
+
+	router.POST("/signup", func(ctx *gin.Context) {
+		if !config.LocalAuthEnabled || !config.LocalSignupEnabled {
+			ctx.Redirect(http.StatusFound, "/login")
+			return
+		}
+
+		var form browserSignupForm
+		if err := ctx.ShouldBind(&form); err != nil {
+			renderLoginPage(ctx, loginPageData{
+				Title:              "Create your dolssh account",
+				IsSignup:           true,
+				ErrorMessage:       err.Error(),
+				Email:              form.Email,
+				Client:             form.Client,
+				RedirectURI:        form.RedirectURI,
+				State:              form.State,
+				LocalAuthEnabled:   true,
+				LocalSignupEnabled: true,
+				OIDCEnabled:        oidcRuntime != nil,
+				OIDCDisplayName:    oidcButtonLabel(oidcRuntime),
+			})
+			return
+		}
+		if err := validateDesktopRedirectURI(form.RedirectURI); err != nil {
+			ctx.String(http.StatusBadRequest, err.Error())
+			return
+		}
+
+		user, _, err := authService.Signup(ctx.Request.Context(), form.Email, form.Password)
+		if err != nil {
+			renderLoginPage(ctx, loginPageData{
+				Title:              "Create your dolssh account",
+				IsSignup:           true,
+				ErrorMessage:       err.Error(),
+				Email:              form.Email,
+				Client:             form.Client,
+				RedirectURI:        form.RedirectURI,
+				State:              form.State,
+				LocalAuthEnabled:   true,
+				LocalSignupEnabled: true,
+				OIDCEnabled:        oidcRuntime != nil,
+				OIDCDisplayName:    oidcButtonLabel(oidcRuntime),
+			})
+			return
+		}
+		code, err := authService.IssueExchangeCode(ctx.Request.Context(), user)
+		if err != nil {
+			ctx.String(http.StatusInternalServerError, err.Error())
+			return
+		}
+		completeDesktopLogin(ctx, form.RedirectURI, code, form.State)
+	})
+
+	router.GET("/auth/oidc/start", func(ctx *gin.Context) {
+		if oidcRuntime == nil {
+			ctx.String(http.StatusNotFound, "oidc is not enabled")
+			return
+		}
+
+		client := ctx.Query("client")
+		redirectURI := ctx.Query("redirect_uri")
+		desktopState := ctx.Query("state")
+		if err := validateDesktopRedirectURI(redirectURI); err != nil {
+			ctx.String(http.StatusBadRequest, err.Error())
+			return
+		}
+		signedState, err := authService.NewBrowserLoginState(client, redirectURI, desktopState)
+		if err != nil {
+			ctx.String(http.StatusInternalServerError, err.Error())
+			return
+		}
+		ctx.Redirect(http.StatusFound, oidcRuntime.oauth.AuthCodeURL(signedState))
+	})
+
+	router.GET("/auth/oidc/callback", func(ctx *gin.Context) {
+		if oidcRuntime == nil {
+			ctx.String(http.StatusNotFound, "oidc is not enabled")
+			return
+		}
+		rawState := ctx.Query("state")
+		code := ctx.Query("code")
+		if rawState == "" || code == "" {
+			ctx.String(http.StatusBadRequest, "missing oidc callback state or code")
+			return
+		}
+
+		loginState, err := authService.ParseBrowserLoginState(rawState)
+		if err != nil {
+			ctx.String(http.StatusUnauthorized, err.Error())
+			return
+		}
+
+		token, err := oidcRuntime.oauth.Exchange(ctx.Request.Context(), code)
+		if err != nil {
+			ctx.String(http.StatusBadGateway, err.Error())
+			return
+		}
+
+		rawIDToken, ok := token.Extra("id_token").(string)
+		if !ok || rawIDToken == "" {
+			ctx.String(http.StatusBadGateway, "oidc response missing id_token")
+			return
+		}
+
+		idToken, err := oidcRuntime.verifier.Verify(ctx.Request.Context(), rawIDToken)
+		if err != nil {
+			ctx.String(http.StatusBadGateway, err.Error())
+			return
+		}
+
+		var claims struct {
+			Subject       string `json:"sub"`
+			Email         string `json:"email"`
+			EmailVerified bool   `json:"email_verified"`
+		}
+		if err := idToken.Claims(&claims); err != nil {
+			ctx.String(http.StatusBadGateway, err.Error())
+			return
+		}
+
+		user, err := authService.ResolveOIDCUser(ctx.Request.Context(), "oidc", claims.Subject, claims.Email, claims.EmailVerified)
+		if err != nil {
+			ctx.String(http.StatusInternalServerError, err.Error())
+			return
+		}
+
+		exchangeCode, err := authService.IssueExchangeCode(ctx.Request.Context(), user)
+		if err != nil {
+			ctx.String(http.StatusInternalServerError, err.Error())
+			return
+		}
+		completeDesktopLogin(ctx, loginState.RedirectURI, exchangeCode, loginState.State)
 	})
 
 	router.POST("/auth/signup", func(ctx *gin.Context) {
@@ -44,16 +345,12 @@ func NewRouter(store store.Store, authService *auth.Service) *gin.Engine {
 			return
 		}
 
-		user, tokens, err := authService.Signup(ctx.Request.Context(), request.Email, request.Password)
+		_, session, err := authService.Signup(ctx.Request.Context(), request.Email, request.Password)
 		if err != nil {
 			ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
-		ctx.JSON(http.StatusCreated, authResponse{
-			UserID: user.ID,
-			Email:  user.Email,
-			Tokens: tokens,
-		})
+		ctx.JSON(http.StatusCreated, session)
 	})
 
 	router.POST("/auth/login", func(ctx *gin.Context) {
@@ -63,9 +360,8 @@ func NewRouter(store store.Store, authService *auth.Service) *gin.Engine {
 			return
 		}
 
-		user, tokens, err := authService.Login(ctx.Request.Context(), request.Email, request.Password)
+		_, session, err := authService.Login(ctx.Request.Context(), request.Email, request.Password)
 		if err != nil {
-			// 자격 증명 오류는 401, 그 외 정책/입력 오류는 400으로 나눈다.
 			status := http.StatusUnauthorized
 			if !errors.Is(err, auth.ErrInvalidCredentials) {
 				status = http.StatusBadRequest
@@ -73,11 +369,21 @@ func NewRouter(store store.Store, authService *auth.Service) *gin.Engine {
 			ctx.JSON(status, gin.H{"error": err.Error()})
 			return
 		}
-		ctx.JSON(http.StatusOK, authResponse{
-			UserID: user.ID,
-			Email:  user.Email,
-			Tokens: tokens,
-		})
+		ctx.JSON(http.StatusOK, session)
+	})
+
+	router.POST("/auth/exchange", func(ctx *gin.Context) {
+		var request exchangeRequest
+		if err := ctx.ShouldBindJSON(&request); err != nil {
+			ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		session, err := authService.ExchangeCode(ctx.Request.Context(), request.Code)
+		if err != nil {
+			ctx.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
+			return
+		}
+		ctx.JSON(http.StatusOK, session)
 	})
 
 	router.POST("/auth/refresh", func(ctx *gin.Context) {
@@ -86,33 +392,64 @@ func NewRouter(store store.Store, authService *auth.Service) *gin.Engine {
 			ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
-		tokens, err := authService.Refresh(ctx.Request.Context(), request.RefreshToken)
+		session, err := authService.Refresh(ctx.Request.Context(), request.RefreshToken)
 		if err != nil {
 			ctx.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
 			return
 		}
-		ctx.JSON(http.StatusOK, gin.H{"tokens": tokens})
+		ctx.JSON(http.StatusOK, session)
+	})
+
+	router.POST("/auth/logout", func(ctx *gin.Context) {
+		var request logoutRequest
+		if err := ctx.ShouldBindJSON(&request); err != nil {
+			ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		if err := authService.Logout(ctx.Request.Context(), request.RefreshToken); err != nil {
+			ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		ctx.Status(http.StatusNoContent)
 	})
 
 	syncGroup := router.Group("/sync")
-	// /sync 전체는 access token 인증이 필수다.
 	syncGroup.Use(authMiddleware(authService))
 	syncGroup.GET("", func(ctx *gin.Context) {
 		userID := ctx.GetString("userId")
-		// 서버는 payload 내용을 해석하지 않고 사용자별로 레코드만 모아 반환한다.
-		hosts, err := store.ListSyncRecords(ctx.Request.Context(), userID, "hosts")
+
+		groups, err := store.ListSyncRecords(ctx.Request.Context(), userID, syncmodel.KindGroups)
 		if err != nil {
 			ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
-		snippets, err := store.ListSyncRecords(ctx.Request.Context(), userID, "snippets")
+		hosts, err := store.ListSyncRecords(ctx.Request.Context(), userID, syncmodel.KindHosts)
 		if err != nil {
 			ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
+		secrets, err := store.ListSyncRecords(ctx.Request.Context(), userID, syncmodel.KindSecrets)
+		if err != nil {
+			ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		knownHosts, err := store.ListSyncRecords(ctx.Request.Context(), userID, syncmodel.KindKnownHosts)
+		if err != nil {
+			ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		portForwards, err := store.ListSyncRecords(ctx.Request.Context(), userID, syncmodel.KindPortForwards)
+		if err != nil {
+			ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+
 		ctx.JSON(http.StatusOK, syncmodel.Payload{
-			Hosts:    hosts,
-			Snippets: snippets,
+			Groups:       groups,
+			Hosts:        hosts,
+			Secrets:      secrets,
+			KnownHosts:   knownHosts,
+			PortForwards: portForwards,
 		})
 	})
 	syncGroup.POST("", func(ctx *gin.Context) {
@@ -122,24 +459,142 @@ func NewRouter(store store.Store, authService *auth.Service) *gin.Engine {
 			ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
-		if err := store.UpsertSyncRecords(ctx.Request.Context(), userID, "hosts", payload.Hosts); err != nil {
+		if err := store.UpsertSyncRecords(ctx.Request.Context(), userID, syncmodel.KindGroups, payload.Groups); err != nil {
 			ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
-		if err := store.UpsertSyncRecords(ctx.Request.Context(), userID, "snippets", payload.Snippets); err != nil {
+		if err := store.UpsertSyncRecords(ctx.Request.Context(), userID, syncmodel.KindHosts, payload.Hosts); err != nil {
 			ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
-		// 비동기 작업까지는 아니지만, 클라이언트에게 "수락 후 반영" 의미를 주기 위해 202를 사용했다.
+		if err := store.UpsertSyncRecords(ctx.Request.Context(), userID, syncmodel.KindSecrets, payload.Secrets); err != nil {
+			ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		if err := store.UpsertSyncRecords(ctx.Request.Context(), userID, syncmodel.KindKnownHosts, payload.KnownHosts); err != nil {
+			ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		if err := store.UpsertSyncRecords(ctx.Request.Context(), userID, syncmodel.KindPortForwards, payload.PortForwards); err != nil {
+			ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
 		ctx.Status(http.StatusAccepted)
 	})
 
-	return router
+	return router, nil
+}
+
+func newOIDCRuntime(config OIDCConfig) (*oidcRuntime, error) {
+	if !config.Enabled {
+		return nil, nil
+	}
+	if config.DisplayName == "" {
+		config.DisplayName = "SSO"
+	}
+	if len(config.Scopes) == 0 {
+		config.Scopes = []string{oidc.ScopeOpenID, "profile", "email"}
+	}
+	provider, err := oidc.NewProvider(context.Background(), config.IssuerURL)
+	if err != nil {
+		return nil, err
+	}
+	return &oidcRuntime{
+		provider: provider,
+		verifier: provider.Verifier(&oidc.Config{ClientID: config.ClientID}),
+		oauth: &oauth2.Config{
+			ClientID:     config.ClientID,
+			ClientSecret: config.ClientSecret,
+			Endpoint:     provider.Endpoint(),
+			RedirectURL:  config.RedirectURL,
+			Scopes:       config.Scopes,
+		},
+		config: config,
+	}, nil
+}
+
+func oidcButtonLabel(runtime *oidcRuntime) string {
+	if runtime == nil {
+		return ""
+	}
+	if runtime.config.DisplayName != "" {
+		return runtime.config.DisplayName
+	}
+	return "SSO"
+}
+
+func validateDesktopRedirectURI(raw string) error {
+	if raw == "" {
+		return errors.New("missing redirect_uri")
+	}
+	parsed, err := url.Parse(raw)
+	if err != nil {
+		return err
+	}
+	switch parsed.Scheme {
+	case "dolssh":
+		if parsed.Host != "auth" || parsed.Path != "/callback" {
+			return errors.New("invalid redirect_uri")
+		}
+		return nil
+	case "http":
+		host := parsed.Hostname()
+		if (host != "127.0.0.1" && host != "localhost") || parsed.Path != "/auth/callback" {
+			return errors.New("invalid redirect_uri")
+		}
+		if parsed.Port() == "" {
+			return errors.New("invalid redirect_uri")
+		}
+		return nil
+	default:
+		return errors.New("invalid redirect_uri")
+	}
+}
+
+func buildDesktopCallbackURL(redirectURI string, code string, state string) string {
+	parsed, _ := url.Parse(redirectURI)
+	query := parsed.Query()
+	query.Set("code", code)
+	if state != "" {
+		query.Set("state", state)
+	}
+	parsed.RawQuery = query.Encode()
+	return parsed.String()
+}
+
+func renderLoginPage(ctx *gin.Context, data loginPageData) {
+	ctx.Header("Content-Type", "text/html; charset=utf-8")
+	if data.Title == "" {
+		data.Title = "Sign in to dolssh"
+	}
+	_ = loginPageTemplate.Execute(ctx.Writer, data)
+}
+
+func renderDesktopCallbackBridgePage(ctx *gin.Context, callbackURL string) {
+	ctx.Header("Content-Type", "text/html; charset=utf-8")
+	_ = desktopCallbackBridgeTemplate.Execute(ctx.Writer, struct {
+		CallbackURL string
+	}{
+		CallbackURL: callbackURL,
+	})
+}
+
+func completeDesktopLogin(ctx *gin.Context, redirectURI string, code string, state string) {
+	callbackURL := buildDesktopCallbackURL(redirectURI, code, state)
+	parsed, err := url.Parse(redirectURI)
+	if err != nil {
+		ctx.String(http.StatusBadRequest, err.Error())
+		return
+	}
+	if parsed.Scheme == "http" {
+		ctx.Redirect(http.StatusFound, callbackURL)
+		return
+	}
+	renderDesktopCallbackBridgePage(ctx, callbackURL)
 }
 
 func authMiddleware(authService *auth.Service) gin.HandlerFunc {
 	return func(ctx *gin.Context) {
-		// 간단한 Bearer 토큰 미들웨어로 보호된 라우트에 사용자 식별자를 주입한다.
 		authorization := ctx.GetHeader("Authorization")
 		if !strings.HasPrefix(authorization, "Bearer ") {
 			ctx.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "missing bearer token"})
@@ -157,3 +612,115 @@ func authMiddleware(authService *auth.Service) gin.HandlerFunc {
 		ctx.Next()
 	}
 }
+
+var loginPageTemplate = template.Must(template.New("login").Parse(`
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{{ .Title }}</title>
+    <style>
+      body { margin:0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background:#0f1726; color:#f5f7fb; }
+      .wrap { min-height:100vh; display:flex; align-items:center; justify-content:center; padding:40px; }
+      .card { width:100%; max-width:420px; background:#162133; border:1px solid rgba(255,255,255,.08); border-radius:24px; box-shadow:0 18px 48px rgba(0,0,0,.35); padding:32px; }
+      .eyebrow { letter-spacing:.2em; font-size:12px; text-transform:uppercase; color:#9fb0d3; margin-bottom:10px; }
+      h1 { margin:0 0 8px; font-size:34px; line-height:1.1; }
+      p { color:#9fb0d3; margin:0 0 24px; }
+      form { display:flex; flex-direction:column; gap:14px; }
+      label { display:flex; flex-direction:column; gap:8px; font-size:14px; color:#ced7eb; }
+      input { border:none; border-radius:14px; background:#0d1522; color:#f5f7fb; padding:14px 16px; font-size:15px; }
+      button, a.button { display:inline-flex; justify-content:center; align-items:center; border:none; border-radius:14px; padding:14px 16px; font-size:15px; font-weight:700; text-decoration:none; cursor:pointer; }
+      .primary { background:#5f7cff; color:white; }
+      .secondary { background:#24324a; color:white; }
+      .stack { display:flex; flex-direction:column; gap:12px; }
+      .error { background:rgba(255,92,92,.12); color:#ffb8b8; border:1px solid rgba(255,92,92,.18); border-radius:14px; padding:12px 14px; margin-bottom:18px; }
+      .foot { margin-top:16px; color:#8fa0c5; font-size:13px; }
+      .divider { margin:18px 0; border-top:1px solid rgba(255,255,255,.08); }
+      .actions { display:flex; flex-direction:column; gap:12px; }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <div class="card">
+        <div class="eyebrow">dolssh</div>
+        <h1>{{ .Title }}</h1>
+        <p>브라우저에서 로그인한 뒤 앱으로 돌아갑니다.</p>
+        {{ if .ErrorMessage }}
+          <div class="error">{{ .ErrorMessage }}</div>
+        {{ end }}
+        {{ if .LocalAuthEnabled }}
+          <form method="post" action="{{ if .IsSignup }}/signup{{ else }}/login{{ end }}">
+            <input type="hidden" name="client" value="{{ .Client }}" />
+            <input type="hidden" name="redirect_uri" value="{{ .RedirectURI }}" />
+            <input type="hidden" name="state" value="{{ .State }}" />
+            <label>Email
+              <input type="email" name="email" value="{{ .Email }}" required />
+            </label>
+            <label>Password
+              <input type="password" name="password" required minlength="8" />
+            </label>
+            <button class="primary" type="submit">{{ if .IsSignup }}Create account{{ else }}Sign in{{ end }}</button>
+          </form>
+        {{ end }}
+        {{ if and .ShowSignupLink (not .IsSignup) }}
+          <div class="foot">계정이 없나요? <a href="/signup?client={{ .Client }}&redirect_uri={{ .RedirectURI }}&state={{ .State }}" style="color:#b9c8ff">회원가입</a></div>
+        {{ end }}
+        {{ if and .LocalAuthEnabled .OIDCEnabled }}
+          <div class="divider"></div>
+        {{ end }}
+        {{ if .OIDCEnabled }}
+          <div class="actions">
+            <a class="button secondary" href="/auth/oidc/start?client={{ .Client }}&redirect_uri={{ .RedirectURI }}&state={{ .State }}">Continue with {{ .OIDCDisplayName }}</a>
+          </div>
+        {{ end }}
+      </div>
+    </div>
+  </body>
+</html>
+`))
+
+var desktopCallbackBridgeTemplate = template.Must(template.New("desktop-callback-bridge").Parse(`
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Open dolssh</title>
+    <style>
+      body { margin:0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background:#0f1726; color:#f5f7fb; }
+      .wrap { min-height:100vh; display:flex; align-items:center; justify-content:center; padding:40px; }
+      .card { width:100%; max-width:460px; background:#162133; border:1px solid rgba(255,255,255,.08); border-radius:24px; box-shadow:0 18px 48px rgba(0,0,0,.35); padding:32px; }
+      .eyebrow { letter-spacing:.2em; font-size:12px; text-transform:uppercase; color:#9fb0d3; margin-bottom:10px; }
+      h1 { margin:0 0 10px; font-size:34px; line-height:1.08; }
+      p { color:#9fb0d3; margin:0 0 22px; line-height:1.55; }
+      a.button { display:inline-flex; justify-content:center; align-items:center; gap:10px; border:none; border-radius:16px; padding:14px 18px; font-size:15px; font-weight:700; text-decoration:none; cursor:pointer; }
+      .primary { background:#24324a; color:white; border:1px solid rgba(185,200,255,.34); box-shadow:0 12px 28px rgba(0,0,0,.22); }
+      .hint { margin-top:16px; color:#8fa0c5; font-size:13px; }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <div class="card">
+        <div class="eyebrow">dolssh</div>
+        <h1>앱으로 돌아가는 중</h1>
+        <p>로그인은 완료되었습니다. dolssh 앱이 자동으로 열리지 않으면 아래 버튼을 눌러 돌아가세요.</p>
+        <a id="open-app" class="button primary" href="{{ .CallbackURL }}">dolssh 열기 ↗</a>
+        <div class="hint">앱이 이미 열려 있다면 이 탭은 닫아도 됩니다.</div>
+      </div>
+    </div>
+    <script>
+      const target = document.getElementById('open-app').getAttribute('href');
+      const openApp = () => {
+        if (!target) {
+          return;
+        }
+        window.location.href = target;
+      };
+      window.addEventListener('load', () => {
+        setTimeout(openApp, 80);
+      });
+    </script>
+  </body>
+</html>
+`))

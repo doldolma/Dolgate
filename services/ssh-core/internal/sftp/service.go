@@ -75,6 +75,7 @@ func (s *Service) Connect(endpointID, requestID string, payload protocol.SFTPCon
 		Username:             payload.Username,
 		AuthType:             payload.AuthType,
 		Password:             payload.Password,
+		PrivateKeyPEM:        payload.PrivateKeyPEM,
 		PrivateKeyPath:       payload.PrivateKeyPath,
 		Passphrase:           payload.Passphrase,
 		TrustedHostKeyBase64: payload.TrustedHostKeyBase64,

@@ -1,0 +1,7 @@
+{
+  "sync": {
+    "serverUrl": "http://localhost:8080",
+    "desktopClientId": "dolssh-desktop",
+    "redirectUri": "dolssh://auth/callback"
+  }
+}

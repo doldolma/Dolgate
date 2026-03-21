@@ -16,6 +16,7 @@ import (
 
 var ErrInvalidCredentials = errors.New("invalid credentials")
 var ErrExpiredRefreshToken = errors.New("expired refresh token")
+var ErrInvalidExchangeCode = errors.New("invalid exchange code")
 
 // TokenPair는 클라이언트가 세션을 유지하는 데 필요한 최소 정보다.
 type TokenPair struct {
@@ -24,12 +25,25 @@ type TokenPair struct {
 	ExpiresInSeconds int    `json:"expiresInSeconds"`
 }
 
+type VaultBootstrap struct {
+	KeyBase64 string `json:"keyBase64"`
+}
+
+type SessionBootstrap struct {
+	User struct {
+		ID    string `json:"id"`
+		Email string `json:"email"`
+	} `json:"user"`
+	Tokens         TokenPair      `json:"tokens"`
+	VaultBootstrap VaultBootstrap `json:"vaultBootstrap"`
+	SyncServerTime string         `json:"syncServerTime"`
+}
+
 type Service struct {
-	// 토큰 발급 정책과 저장소를 한곳에 모아 인증 흐름을 단순화한다.
-	store           store.Store
-	jwtSecret       []byte
-	accessTokenTTL  time.Duration
-	refreshTokenTTL time.Duration
+	store               store.Store
+	jwtSecret           []byte
+	accessTokenTTL      time.Duration
+	refreshTokenIdleTTL time.Duration
 }
 
 // Claims는 access token에 실어 보낼 사용자 식별 정보다.
@@ -39,63 +53,168 @@ type Claims struct {
 	jwt.RegisteredClaims
 }
 
-func NewService(store store.Store, jwtSecret string, accessTokenTTL time.Duration, refreshTokenTTL time.Duration) *Service {
+// BrowserLoginState는 OIDC 라운드트립 동안 desktop redirect 정보를 보존한다.
+type BrowserLoginState struct {
+	Client      string `json:"client"`
+	RedirectURI string `json:"redirectUri"`
+	State       string `json:"state"`
+	jwt.RegisteredClaims
+}
+
+func NewService(store store.Store, jwtSecret string, accessTokenTTL time.Duration, refreshTokenIdleTTL time.Duration) *Service {
 	return &Service{
-		store:           store,
-		jwtSecret:       []byte(jwtSecret),
-		accessTokenTTL:  accessTokenTTL,
-		refreshTokenTTL: refreshTokenTTL,
+		store:               store,
+		jwtSecret:           []byte(jwtSecret),
+		accessTokenTTL:      accessTokenTTL,
+		refreshTokenIdleTTL: refreshTokenIdleTTL,
 	}
 }
 
-func (s *Service) Signup(ctx context.Context, email string, password string) (store.User, TokenPair, error) {
-	// 비밀번호는 절대 원문 저장하지 않고 bcrypt 해시만 남긴다.
+func (s *Service) Signup(ctx context.Context, email string, password string) (store.User, SessionBootstrap, error) {
 	passwordHash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	if err != nil {
-		return store.User{}, TokenPair{}, err
+		return store.User{}, SessionBootstrap{}, err
 	}
 	user, err := s.store.CreateUser(ctx, email, string(passwordHash))
 	if err != nil {
-		return store.User{}, TokenPair{}, err
+		return store.User{}, SessionBootstrap{}, err
 	}
-	tokens, err := s.issueTokens(ctx, user)
-	return user, tokens, err
+	session, err := s.issueSession(ctx, user)
+	return user, session, err
 }
 
-func (s *Service) Login(ctx context.Context, email string, password string) (store.User, TokenPair, error) {
-	// 계정 존재 여부와 비밀번호 오류를 같은 오류로 다뤄 정보 노출을 줄인다.
+func (s *Service) Login(ctx context.Context, email string, password string) (store.User, SessionBootstrap, error) {
 	user, err := s.store.GetUserByEmail(ctx, email)
 	if err != nil {
-		return store.User{}, TokenPair{}, ErrInvalidCredentials
+		return store.User{}, SessionBootstrap{}, ErrInvalidCredentials
+	}
+	if user.PasswordHash == "" {
+		return store.User{}, SessionBootstrap{}, ErrInvalidCredentials
 	}
 	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(password)); err != nil {
-		return store.User{}, TokenPair{}, ErrInvalidCredentials
+		return store.User{}, SessionBootstrap{}, ErrInvalidCredentials
 	}
-	tokens, err := s.issueTokens(ctx, user)
-	return user, tokens, err
+	session, err := s.issueSession(ctx, user)
+	return user, session, err
 }
 
-func (s *Service) Refresh(ctx context.Context, refreshToken string) (TokenPair, error) {
-	// refresh token은 해시로 조회해 DB 유출 시 원문 토큰이 드러나지 않게 한다.
+func (s *Service) Refresh(ctx context.Context, refreshToken string) (SessionBootstrap, error) {
 	tokenHash := hashToken(refreshToken)
 	record, err := s.store.GetRefreshToken(ctx, tokenHash)
 	if err != nil {
-		return TokenPair{}, ErrInvalidCredentials
+		return SessionBootstrap{}, ErrInvalidCredentials
 	}
 	if time.Now().After(record.ExpiresAt) {
-		return TokenPair{}, ErrExpiredRefreshToken
+		_ = s.store.DeleteRefreshToken(ctx, tokenHash)
+		return SessionBootstrap{}, ErrExpiredRefreshToken
 	}
 
 	user, err := s.store.GetUserByID(ctx, record.UserID)
 	if err != nil {
-		return TokenPair{}, ErrInvalidCredentials
+		return SessionBootstrap{}, ErrInvalidCredentials
 	}
-	// refresh token에는 userId만 연결되어 있으므로 사용자 본문은 다시 조회한다.
-	return s.issueTokens(ctx, user)
+
+	// refresh 성공 시 토큰을 회전시켜 idle 14일 정책을 밀어준다.
+	if err := s.store.DeleteRefreshToken(ctx, tokenHash); err != nil {
+		return SessionBootstrap{}, err
+	}
+	return s.issueSession(ctx, user)
+}
+
+func (s *Service) Logout(ctx context.Context, refreshToken string) error {
+	if refreshToken == "" {
+		return nil
+	}
+	return s.store.DeleteRefreshToken(ctx, hashToken(refreshToken))
+}
+
+func (s *Service) IssueExchangeCode(ctx context.Context, user store.User) (string, error) {
+	code, err := randomToken()
+	if err != nil {
+		return "", err
+	}
+	if err := s.store.SaveExchangeCode(ctx, store.ExchangeCode{
+		UserID:    user.ID,
+		CodeHash:  hashToken(code),
+		ExpiresAt: time.Now().Add(2 * time.Minute),
+	}); err != nil {
+		return "", err
+	}
+	return code, nil
+}
+
+func (s *Service) ExchangeCode(ctx context.Context, code string) (SessionBootstrap, error) {
+	record, err := s.store.ConsumeExchangeCode(ctx, hashToken(code))
+	if err != nil {
+		return SessionBootstrap{}, ErrInvalidExchangeCode
+	}
+	if time.Now().After(record.ExpiresAt) {
+		return SessionBootstrap{}, ErrInvalidExchangeCode
+	}
+	user, err := s.store.GetUserByID(ctx, record.UserID)
+	if err != nil {
+		return SessionBootstrap{}, ErrInvalidExchangeCode
+	}
+	return s.issueSession(ctx, user)
+}
+
+func (s *Service) ResolveOIDCUser(ctx context.Context, provider string, subject string, email string, emailVerified bool) (store.User, error) {
+	identity, err := s.store.GetAuthIdentity(ctx, provider, subject)
+	if err == nil {
+		return s.store.GetUserByID(ctx, identity.UserID)
+	}
+
+	var user store.User
+	if emailVerified {
+		user, err = s.store.GetUserByEmail(ctx, email)
+	}
+	if err != nil || user.ID == "" {
+		user, err = s.store.CreateUser(ctx, email, "")
+		if err != nil {
+			return store.User{}, err
+		}
+	}
+
+	if err := s.store.SaveAuthIdentity(ctx, store.AuthIdentity{
+		UserID:        user.ID,
+		Provider:      provider,
+		Subject:       subject,
+		Email:         email,
+		EmailVerified: emailVerified,
+	}); err != nil {
+		return store.User{}, err
+	}
+	return user, nil
+}
+
+func (s *Service) NewBrowserLoginState(client string, redirectURI string, state string) (string, error) {
+	claims := BrowserLoginState{
+		Client:      client,
+		RedirectURI: redirectURI,
+		State:       state,
+		RegisteredClaims: jwt.RegisteredClaims{
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(10 * time.Minute)),
+			IssuedAt:  jwt.NewNumericDate(time.Now()),
+		},
+	}
+	return jwt.NewWithClaims(jwt.SigningMethodHS256, claims).SignedString(s.jwtSecret)
+}
+
+func (s *Service) ParseBrowserLoginState(token string) (*BrowserLoginState, error) {
+	parsed, err := jwt.ParseWithClaims(token, &BrowserLoginState{}, func(token *jwt.Token) (any, error) {
+		return s.jwtSecret, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	claims, ok := parsed.Claims.(*BrowserLoginState)
+	if !ok || !parsed.Valid {
+		return nil, ErrInvalidCredentials
+	}
+	return claims, nil
 }
 
 func (s *Service) ParseAccessToken(token string) (*Claims, error) {
-	// middleware에서 access token 검증 시 사용하는 공용 파서다.
 	parsed, err := jwt.ParseWithClaims(token, &Claims{}, func(token *jwt.Token) (any, error) {
 		return s.jwtSecret, nil
 	})
@@ -109,8 +228,26 @@ func (s *Service) ParseAccessToken(token string) (*Claims, error) {
 	return claims, nil
 }
 
+func (s *Service) issueSession(ctx context.Context, user store.User) (SessionBootstrap, error) {
+	tokens, err := s.issueTokens(ctx, user)
+	if err != nil {
+		return SessionBootstrap{}, err
+	}
+	vaultKey, err := s.store.GetOrCreateUserVaultKey(ctx, user.ID)
+	if err != nil {
+		return SessionBootstrap{}, err
+	}
+
+	var session SessionBootstrap
+	session.User.ID = user.ID
+	session.User.Email = user.Email
+	session.Tokens = tokens
+	session.VaultBootstrap = VaultBootstrap{KeyBase64: vaultKey.KeyBase64}
+	session.SyncServerTime = time.Now().UTC().Format(time.RFC3339)
+	return session, nil
+}
+
 func (s *Service) issueTokens(ctx context.Context, user store.User) (TokenPair, error) {
-	// access token은 짧게, refresh token은 길게 두는 전형적인 세션 전략을 따른다.
 	claims := Claims{
 		UserID: user.ID,
 		Email:  user.Email,
@@ -131,10 +268,12 @@ func (s *Service) issueTokens(ctx context.Context, user store.User) (TokenPair, 
 		return TokenPair{}, err
 	}
 
+	now := time.Now()
 	if err := s.store.SaveRefreshToken(ctx, store.RefreshToken{
-		UserID:    user.ID,
-		TokenHash: hashToken(refreshToken),
-		ExpiresAt: time.Now().Add(s.refreshTokenTTL),
+		UserID:     user.ID,
+		TokenHash:  hashToken(refreshToken),
+		ExpiresAt:  now.Add(s.refreshTokenIdleTTL),
+		LastUsedAt: now,
 	}); err != nil {
 		return TokenPair{}, err
 	}
@@ -147,7 +286,6 @@ func (s *Service) issueTokens(ctx context.Context, user store.User) (TokenPair, 
 }
 
 func randomToken() (string, error) {
-	// refresh token 원문은 충분한 엔트로피를 가진 임의 바이트에서 생성한다.
 	buffer := make([]byte, 32)
 	if _, err := rand.Read(buffer); err != nil {
 		return "", err
@@ -156,7 +294,6 @@ func randomToken() (string, error) {
 }
 
 func hashToken(raw string) string {
-	// refresh token 저장용 단방향 해시.
 	sum := sha256.Sum256([]byte(raw))
 	return hex.EncodeToString(sum[:])
 }

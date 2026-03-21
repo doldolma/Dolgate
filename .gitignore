@@ -12,6 +12,11 @@ apps/desktop/release
 apps/desktop/src/renderer/vite-env.d.ts
 services/ssh-core/bin
 services/sync-api/bin
+apps/desktop/config/development.json
+apps/desktop/config/desktop.json
+services/sync-api/config/default.json
+services/sync-api/config/production.json
+services/sync-api/data
 *.db
 *.sqlite
 *.sqlite3

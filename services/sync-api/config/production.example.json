@@ -1,0 +1,31 @@
+{
+  "server": {
+    "port": "8080"
+  },
+  "database": {
+    "driver": "sqlite",
+    "url": "file:/app/data/dolssh_sync.db?_pragma=busy_timeout(5000)"
+  },
+  "auth": {
+    "jwtSecret": "change-me-in-production",
+    "accessTokenTtlMinutes": 15,
+    "refreshTokenIdleDays": 14,
+    "local": {
+      "enabled": true,
+      "signupEnabled": true
+    },
+    "oidc": {
+      "enabled": false,
+      "displayName": "SSO",
+      "issuerUrl": "",
+      "clientId": "",
+      "clientSecret": "",
+      "redirectUrl": "https://ssh.doldolma.com/auth/oidc/callback",
+      "scopes": [
+        "openid",
+        "profile",
+        "email"
+      ]
+    }
+  }
+}

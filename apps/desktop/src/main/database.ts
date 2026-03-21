@@ -14,10 +14,12 @@ import type {
   HostRecord,
   KnownHostRecord,
   KnownHostTrustInput,
+  ManagedSecretPayload,
   PortForwardDraft,
   PortForwardRuleRecord,
   SecretMetadataRecord,
-  SecretSource
+  SecretSource,
+  SyncKind
 } from '@dolssh/shared';
 
 const MAX_ACTIVITY_LOGS = 10_000;
@@ -147,15 +149,13 @@ function toActivityLogRecord(row: Record<string, unknown>): ActivityLogRecord {
 
 function toSecretMetadataRecord(row: Record<string, unknown>): SecretMetadataRecord {
   return {
-    hostId: String(row.host_id),
-    hostLabel: String(row.host_label),
-    hostname: String(row.hostname),
-    username: String(row.username),
     secretRef: String(row.secret_ref),
+    label: String(row.label),
     hasPassword: Boolean(row.has_password),
     hasPassphrase: Boolean(row.has_passphrase),
     hasManagedPrivateKey: Boolean(row.has_managed_private_key),
     source: row.source === 'server_managed' ? 'server_managed' : 'local_keychain',
+    linkedHostCount: Number(row.linked_host_count ?? 0),
     updatedAt: String(row.updated_at)
   };
 }
@@ -263,8 +263,46 @@ export class HostRepository {
     return this.getById(id);
   }
 
+  clearSecretRef(secretRef: string): void {
+    this.db
+      .prepare(`
+        UPDATE hosts
+        SET secret_ref = NULL, updated_at = ?
+        WHERE secret_ref = ?
+      `)
+      .run(nowIso(), secretRef);
+  }
+
   remove(id: string): void {
     this.db.prepare(`DELETE FROM hosts WHERE id = ?`).run(id);
+  }
+
+  replaceAll(records: HostRecord[]): void {
+    const insert = this.db.prepare(`
+      INSERT INTO hosts (id, label, hostname, port, username, auth_type, private_key_path, secret_ref, group_name, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+
+    const transaction = this.db.transaction((rows: HostRecord[]) => {
+      this.db.prepare(`DELETE FROM hosts`).run();
+      for (const record of rows) {
+        insert.run(
+          record.id,
+          record.label,
+          record.hostname,
+          record.port,
+          record.username,
+          record.authType,
+          record.privateKeyPath ?? null,
+          record.secretRef ?? null,
+          normalizeGroupPath(record.groupName),
+          record.createdAt,
+          record.updatedAt
+        );
+      }
+    });
+
+    transaction(records);
   }
 }
 
@@ -333,6 +371,20 @@ export class GroupRepository {
       .run(id, cleanedName, nextPath, normalizedParentPath, timestamp, timestamp);
 
     return this.getByPath(nextPath)!;
+  }
+
+  replaceAll(records: GroupRecord[]): void {
+    const insert = this.db.prepare(`
+      INSERT INTO groups (id, name, path, parent_path, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `);
+    const transaction = this.db.transaction((rows: GroupRecord[]) => {
+      this.db.prepare(`DELETE FROM groups`).run();
+      for (const record of rows) {
+        insert.run(record.id, record.name, record.path, record.parentPath ?? null, record.createdAt, record.updatedAt);
+      }
+    });
+    transaction(records);
   }
 }
 
@@ -496,6 +548,31 @@ export class PortForwardRepository {
   remove(id: string): void {
     this.db.prepare(`DELETE FROM port_forwards WHERE id = ?`).run(id);
   }
+
+  replaceAll(records: PortForwardRuleRecord[]): void {
+    const insert = this.db.prepare(`
+      INSERT INTO port_forwards (id, label, host_id, mode, bind_address, bind_port, target_host, target_port, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    const transaction = this.db.transaction((rows: PortForwardRuleRecord[]) => {
+      this.db.prepare(`DELETE FROM port_forwards`).run();
+      for (const record of rows) {
+        insert.run(
+          record.id,
+          record.label,
+          record.hostId,
+          record.mode,
+          record.bindAddress,
+          record.bindPort,
+          record.targetHost ?? null,
+          record.targetPort ?? null,
+          record.createdAt,
+          record.updatedAt
+        );
+      }
+    });
+    transaction(records);
+  }
 }
 
 export class KnownHostRepository {
@@ -582,6 +659,30 @@ export class KnownHostRepository {
   remove(id: string): void {
     this.db.prepare(`DELETE FROM known_hosts WHERE id = ?`).run(id);
   }
+
+  replaceAll(records: KnownHostRecord[]): void {
+    const insert = this.db.prepare(`
+      INSERT INTO known_hosts (id, host, port, algorithm, public_key_base64, fingerprint_sha256, created_at, last_seen_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    const transaction = this.db.transaction((rows: KnownHostRecord[]) => {
+      this.db.prepare(`DELETE FROM known_hosts`).run();
+      for (const record of rows) {
+        insert.run(
+          record.id,
+          record.host,
+          record.port,
+          record.algorithm,
+          record.publicKeyBase64,
+          record.fingerprintSha256,
+          record.createdAt,
+          record.lastSeenAt,
+          record.updatedAt
+        );
+      }
+    });
+    transaction(records);
+  }
 }
 
 export class ActivityLogRepository {
@@ -665,6 +766,16 @@ export class SecretMetadataRepository {
 
   private migrate(): void {
     this.db.exec(`
+      CREATE TABLE IF NOT EXISTS keychain_entries (
+        secret_ref TEXT PRIMARY KEY,
+        label TEXT NOT NULL,
+        has_password INTEGER NOT NULL,
+        has_passphrase INTEGER NOT NULL,
+        has_managed_private_key INTEGER NOT NULL,
+        source TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+
       CREATE TABLE IF NOT EXISTS host_secret_metadata (
         host_id TEXT PRIMARY KEY,
         secret_ref TEXT NOT NULL,
@@ -675,11 +786,34 @@ export class SecretMetadataRepository {
         updated_at TEXT NOT NULL
       );
     `);
+
+    this.db.exec(`
+      INSERT OR IGNORE INTO keychain_entries (
+        secret_ref,
+        label,
+        has_password,
+        has_passphrase,
+        has_managed_private_key,
+        source,
+        updated_at
+      )
+      SELECT
+        m.secret_ref,
+        COALESCE(h.label, m.secret_ref),
+        m.has_password,
+        m.has_passphrase,
+        m.has_managed_private_key,
+        m.source,
+        m.updated_at
+      FROM host_secret_metadata m
+      LEFT JOIN hosts h ON h.id = m.host_id
+      WHERE m.secret_ref IS NOT NULL
+    `);
   }
 
   upsert(input: {
-    hostId: string;
     secretRef: string;
+    label: string;
     hasPassword: boolean;
     hasPassphrase: boolean;
     hasManagedPrivateKey?: boolean;
@@ -687,9 +821,9 @@ export class SecretMetadataRepository {
   }): void {
     this.db
       .prepare(`
-        INSERT INTO host_secret_metadata (
-          host_id,
+        INSERT INTO keychain_entries (
           secret_ref,
+          label,
           has_password,
           has_passphrase,
           has_managed_private_key,
@@ -697,8 +831,8 @@ export class SecretMetadataRepository {
           updated_at
         )
         VALUES (?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT(host_id) DO UPDATE SET
-          secret_ref = excluded.secret_ref,
+        ON CONFLICT(secret_ref) DO UPDATE SET
+          label = excluded.label,
           has_password = excluded.has_password,
           has_passphrase = excluded.has_passphrase,
           has_managed_private_key = excluded.has_managed_private_key,
@@ -706,8 +840,8 @@ export class SecretMetadataRepository {
           updated_at = excluded.updated_at
       `)
       .run(
-        input.hostId,
         input.secretRef,
+        input.label,
         input.hasPassword ? 1 : 0,
         input.hasPassphrase ? 1 : 0,
         input.hasManagedPrivateKey ? 1 : 0,
@@ -716,29 +850,195 @@ export class SecretMetadataRepository {
       );
   }
 
-  removeByHostId(hostId: string): void {
-    this.db.prepare(`DELETE FROM host_secret_metadata WHERE host_id = ?`).run(hostId);
+  remove(secretRef: string): void {
+    this.db.prepare(`DELETE FROM keychain_entries WHERE secret_ref = ?`).run(secretRef);
+  }
+
+  getBySecretRef(secretRef: string): SecretMetadataRecord | null {
+    const row = this.db
+      .prepare(`
+        SELECT
+          e.secret_ref,
+          e.label,
+          e.has_password,
+          e.has_passphrase,
+          e.has_managed_private_key,
+          e.source,
+          e.updated_at,
+          COUNT(h.id) AS linked_host_count
+        FROM keychain_entries e
+        LEFT JOIN hosts h ON h.secret_ref = e.secret_ref
+        WHERE e.secret_ref = ?
+        GROUP BY
+          e.secret_ref,
+          e.label,
+          e.has_password,
+          e.has_passphrase,
+          e.has_managed_private_key,
+          e.source,
+          e.updated_at
+      `)
+      .get(secretRef) as Record<string, unknown> | undefined;
+
+    return row ? toSecretMetadataRecord(row) : null;
   }
 
   list(): SecretMetadataRecord[] {
     return this.db
       .prepare(`
         SELECT
-          m.host_id,
-          h.label AS host_label,
-          h.hostname,
-          h.username,
-          m.secret_ref,
-          m.has_password,
-          m.has_passphrase,
-          m.has_managed_private_key,
-          m.source,
-          m.updated_at
-        FROM host_secret_metadata m
-        INNER JOIN hosts h ON h.id = m.host_id
-        ORDER BY h.label, h.hostname
+          e.secret_ref,
+          e.label,
+          e.has_password,
+          e.has_passphrase,
+          e.has_managed_private_key,
+          e.source,
+          e.updated_at,
+          COUNT(h.id) AS linked_host_count
+        FROM keychain_entries e
+        LEFT JOIN hosts h ON h.secret_ref = e.secret_ref
+        GROUP BY
+          e.secret_ref,
+          e.label,
+          e.has_password,
+          e.has_passphrase,
+          e.has_managed_private_key,
+          e.source,
+          e.updated_at
+        ORDER BY e.label, e.secret_ref
       `)
       .all()
       .map((row) => toSecretMetadataRecord(row as Record<string, unknown>));
+  }
+
+  listBySource(source: SecretSource): SecretMetadataRecord[] {
+    return this.db
+      .prepare(`
+        SELECT
+          e.secret_ref,
+          e.label,
+          e.has_password,
+          e.has_passphrase,
+          e.has_managed_private_key,
+          e.source,
+          e.updated_at,
+          COUNT(h.id) AS linked_host_count
+        FROM keychain_entries e
+        LEFT JOIN hosts h ON h.secret_ref = e.secret_ref
+        WHERE e.source = ?
+        GROUP BY
+          e.secret_ref,
+          e.label,
+          e.has_password,
+          e.has_passphrase,
+          e.has_managed_private_key,
+          e.source,
+          e.updated_at
+        ORDER BY e.label, e.secret_ref
+      `)
+      .all(source)
+      .map((row) => toSecretMetadataRecord(row as Record<string, unknown>));
+  }
+
+  replaceAll(records: SecretMetadataRecord[], source: SecretSource = 'server_managed'): void {
+    const insert = this.db.prepare(`
+      INSERT INTO keychain_entries (
+        secret_ref,
+        label,
+        has_password,
+        has_passphrase,
+        has_managed_private_key,
+        source,
+        updated_at
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `);
+    const transaction = this.db.transaction((rows: SecretMetadataRecord[]) => {
+      this.db.prepare(`DELETE FROM keychain_entries WHERE source = ?`).run(source);
+      for (const record of rows) {
+        insert.run(
+          record.secretRef,
+          record.label,
+          record.hasPassword ? 1 : 0,
+          record.hasPassphrase ? 1 : 0,
+          record.hasManagedPrivateKey ? 1 : 0,
+          source,
+          record.updatedAt
+        );
+      }
+    });
+    transaction(records);
+  }
+}
+
+export interface SyncDeletionRecord {
+  kind: SyncKind;
+  recordId: string;
+  deletedAt: string;
+}
+
+export class SyncOutboxRepository {
+  private readonly db: Database.Database;
+
+  constructor() {
+    this.db = openDatabase();
+    this.migrate();
+  }
+
+  private migrate(): void {
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS sync_outbox (
+        kind TEXT NOT NULL,
+        record_id TEXT NOT NULL,
+        deleted_at TEXT NOT NULL,
+        PRIMARY KEY (kind, record_id)
+      );
+    `);
+  }
+
+  list(): SyncDeletionRecord[] {
+    return this.db
+      .prepare(`
+        SELECT kind, record_id, deleted_at
+        FROM sync_outbox
+        ORDER BY deleted_at DESC
+      `)
+      .all()
+      .map((row) => {
+        const record = row as Record<string, unknown>;
+        return {
+          kind: String(record.kind) as SyncKind,
+          recordId: String(record.record_id),
+          deletedAt: String(record.deleted_at)
+        };
+      });
+  }
+
+  upsertDeletion(kind: SyncKind, recordId: string, deletedAt: string = nowIso()): void {
+    this.db
+      .prepare(`
+        INSERT INTO sync_outbox (kind, record_id, deleted_at)
+        VALUES (?, ?, ?)
+        ON CONFLICT(kind, record_id) DO UPDATE SET deleted_at = excluded.deleted_at
+      `)
+      .run(kind, recordId, deletedAt);
+  }
+
+  clear(kind: SyncKind, recordId: string): void {
+    this.db.prepare(`DELETE FROM sync_outbox WHERE kind = ? AND record_id = ?`).run(kind, recordId);
+  }
+
+  clearMany(records: Array<{ kind: SyncKind; recordId: string }>): void {
+    const transaction = this.db.transaction((items: Array<{ kind: SyncKind; recordId: string }>) => {
+      const stmt = this.db.prepare(`DELETE FROM sync_outbox WHERE kind = ? AND record_id = ?`);
+      for (const item of items) {
+        stmt.run(item.kind, item.recordId);
+      }
+    });
+    transaction(records);
+  }
+
+  clearAll(): void {
+    this.db.prepare(`DELETE FROM sync_outbox`).run();
   }
 }

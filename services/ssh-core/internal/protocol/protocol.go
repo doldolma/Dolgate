@@ -107,6 +107,7 @@ type ConnectPayload struct {
 	Username             string `json:"username"`
 	AuthType             string `json:"authType"`
 	Password             string `json:"password,omitempty"`
+	PrivateKeyPEM        string `json:"privateKeyPem,omitempty"`
 	PrivateKeyPath       string `json:"privateKeyPath,omitempty"`
 	Passphrase           string `json:"passphrase,omitempty"`
 	TrustedHostKeyBase64 string `json:"trustedHostKeyBase64"`
@@ -121,6 +122,7 @@ type SFTPConnectPayload struct {
 	Username             string `json:"username"`
 	AuthType             string `json:"authType"`
 	Password             string `json:"password,omitempty"`
+	PrivateKeyPEM        string `json:"privateKeyPem,omitempty"`
 	PrivateKeyPath       string `json:"privateKeyPath,omitempty"`
 	Passphrase           string `json:"passphrase,omitempty"`
 	TrustedHostKeyBase64 string `json:"trustedHostKeyBase64"`
@@ -181,6 +183,7 @@ type PortForwardStartPayload struct {
 	Username             string `json:"username"`
 	AuthType             string `json:"authType"`
 	Password             string `json:"password,omitempty"`
+	PrivateKeyPEM        string `json:"privateKeyPem,omitempty"`
 	PrivateKeyPath       string `json:"privateKeyPath,omitempty"`
 	Passphrase           string `json:"passphrase,omitempty"`
 	TrustedHostKeyBase64 string `json:"trustedHostKeyBase64"`
