@@ -1,5 +1,7 @@
 import { BrowserWindow, app } from 'electron';
 import { autoUpdater, type ProgressInfo, type UpdateInfo } from 'electron-updater';
+import { mkdirSync, writeFileSync } from 'node:fs';
+import path from 'node:path';
 import type { UpdateEvent, UpdateReleaseInfo, UpdateState } from '@dolssh/shared';
 import { ipcChannels } from '../common/ipc-channels';
 import { SettingsRepository } from './database';
@@ -13,14 +15,38 @@ const githubReleaseFeed = {
   private: false
 } as const;
 
+function decodeHtmlEntities(input: string): string {
+  return input
+    .replaceAll('&nbsp;', ' ')
+    .replaceAll('&amp;', '&')
+    .replaceAll('&lt;', '<')
+    .replaceAll('&gt;', '>')
+    .replaceAll('&quot;', '"')
+    .replaceAll('&#39;', "'");
+}
+
+function stripHtml(input: string): string {
+  return decodeHtmlEntities(
+    input
+      .replace(/<\s*br\s*\/?>/giu, '\n')
+      .replace(/<\s*\/p\s*>/giu, '\n\n')
+      .replace(/<\s*li\s*>/giu, '\n- ')
+      .replace(/<[^>]+>/g, ' ')
+  )
+    .replace(/[ \t]+\n/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .replace(/[ \t]{2,}/g, ' ')
+    .trim();
+}
+
 function normalizeReleaseNotes(notes: UpdateInfo['releaseNotes']): string | null {
   if (typeof notes === 'string') {
-    return notes;
+    return stripHtml(notes);
   }
 
   if (Array.isArray(notes)) {
     return notes
-      .map((note) => (typeof note.note === 'string' ? note.note.trim() : ''))
+      .map((note) => (typeof note.note === 'string' ? stripHtml(note.note) : ''))
       .filter(Boolean)
       .join('\n\n');
   }
@@ -46,6 +72,27 @@ function toProgressInfo(progress: ProgressInfo) {
   };
 }
 
+function ensureRuntimeUpdateConfig(): void {
+  if (!app.isPackaged) {
+    return;
+  }
+
+  const updateConfigPath = path.join(app.getPath('userData'), 'runtime-app-update.yml');
+  const updateConfigYaml = [
+    'provider: github',
+    'owner: doldolma',
+    'repo: dolssh',
+    'releaseType: release',
+    'vPrefixedTagName: true',
+    'updaterCacheDirName: dolssh-updater'
+  ].join('\n');
+
+  mkdirSync(path.dirname(updateConfigPath), { recursive: true });
+  writeFileSync(updateConfigPath, `${updateConfigYaml}\n`, 'utf8');
+  // electron-updater 타입에는 노출되지 않지만, 런타임 override setter가 존재한다.
+  (autoUpdater as typeof autoUpdater & { updateConfigPath: string }).updateConfigPath = updateConfigPath;
+}
+
 export class UpdateService {
   private readonly windows = new Set<BrowserWindow>();
   private initialCheckScheduled = false;
@@ -67,6 +114,7 @@ export class UpdateService {
     this.state.dismissedVersion = this.settings.get().dismissedUpdateVersion ?? null;
 
     if (app.isPackaged) {
+      ensureRuntimeUpdateConfig();
       // prepackaged -> electron-builder 경로에서는 app-update.yml이 번들되지 않을 수 있어서
       // GitHub Releases feed를 런타임에서 직접 주입해 파일 의존을 없앤다.
       autoUpdater.setFeedURL(githubReleaseFeed);

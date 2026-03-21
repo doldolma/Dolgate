@@ -166,14 +166,9 @@ export function AppTitleBar({
                   <p className="update-popover__message">자동 업데이트는 패키지된 릴리즈 빌드에서만 동작합니다.</p>
                 ) : null}
 
-                {updateState.release ? (
-                  <>
-                    {updateState.release.releaseName ? <div className="update-popover__release-name">{updateState.release.releaseName}</div> : null}
-                    {updateState.release.releaseNotes ? <p className="update-popover__notes">{updateState.release.releaseNotes}</p> : null}
-                  </>
-                ) : (
+                {!updateState.release ? (
                   <p className="update-popover__message">{getEmptyReleaseMessage(updateState)}</p>
-                )}
+                ) : null}
 
                 {updateState.status === 'upToDate' ? <p className="update-popover__message">현재 최신 버전을 사용 중입니다.</p> : null}
                 {updateState.status === 'downloading' ? (
