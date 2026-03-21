@@ -242,6 +242,53 @@ mkdir -p dist
 go build -o dist/sync-api ./cmd/api
 ```
 
+## sync API Docker 배포
+
+### 포함된 파일
+
+- Docker 이미지 정의: [services/sync-api/Dockerfile](/Users/heodoyeong/develop/dolsh/services/sync-api/Dockerfile)
+- Docker ignore: [services/sync-api/.dockerignore](/Users/heodoyeong/develop/dolsh/services/sync-api/.dockerignore)
+- 운영 설정 예시: [services/sync-api/config/production.example.json](/Users/heodoyeong/develop/dolsh/services/sync-api/config/production.example.json)
+- Compose 예시: [services/sync-api/deploy/docker-compose.example.yml](/Users/heodoyeong/develop/dolsh/services/sync-api/deploy/docker-compose.example.yml)
+- Nginx reverse proxy 예시: [services/sync-api/deploy/nginx.sync-api.example.conf](/Users/heodoyeong/develop/dolsh/services/sync-api/deploy/nginx.sync-api.example.conf)
+
+### 빠른 시작
+
+1. 운영 설정 파일 생성
+
+```bash
+cp services/sync-api/config/production.example.json services/sync-api/config/production.json
+mkdir -p services/sync-api/data
+```
+
+2. `production.json` 수정
+
+- `auth.jwtSecret`를 운영용 값으로 변경
+- OIDC를 쓸 경우 `auth.oidc.*` 채우기
+- MySQL을 쓸 경우 `database.driver=mysql`, `database.url=...`로 변경
+
+3. Compose 파일 준비 후 실행
+
+```bash
+cd services/sync-api/deploy
+cp docker-compose.example.yml docker-compose.yml
+docker compose up -d --build
+```
+
+4. 상태 확인
+
+```bash
+docker compose ps
+curl http://127.0.0.1:8080/healthz
+```
+
+### 운영 메모
+
+- 기본 compose 예시는 컨테이너 내부 `/app/config/production.json`을 읽도록 `DOLSSH_API_CONFIG_PATH`를 지정합니다.
+- SQLite를 계속 쓰면 DB 파일은 `services/sync-api/data/dolssh_sync.db`에 유지됩니다.
+- `https://ssh.doldolma.com`으로 실제 서비스하려면 별도 reverse proxy가 필요합니다.
+- 리버스 프록시가 지금 backend 대신 Synology 기본 페이지를 반환하면 desktop 앱은 로그인/refresh/sync를 전부 실패합니다.
+
 ## sync API 실행 환경 변수
 
 SQLite 개발 기본값:
@@ -251,6 +298,9 @@ DB_DRIVER=sqlite
 PORT=8080
 DATABASE_URL=file:dolssh_sync.db?_pragma=busy_timeout(5000)
 JWT_SECRET=change-me-in-production
+LOCAL_AUTH_ENABLED=true
+LOCAL_SIGNUP_ENABLED=true
+OIDC_ENABLED=false
 ```
 
 MySQL 전환 예시:
@@ -260,6 +310,14 @@ DB_DRIVER=mysql
 PORT=8080
 DATABASE_URL=user:password@tcp(127.0.0.1:3306)/dolssh?charset=utf8mb4&parseTime=True&loc=UTC
 JWT_SECRET=change-me-in-production
+LOCAL_AUTH_ENABLED=true
+LOCAL_SIGNUP_ENABLED=true
+OIDC_ENABLED=true
+OIDC_DISPLAY_NAME=SSO
+OIDC_ISSUER_URL=https://issuer.example.com
+OIDC_CLIENT_ID=your-client-id
+OIDC_CLIENT_SECRET=your-client-secret
+OIDC_REDIRECT_URL=https://ssh.doldolma.com/auth/oidc/callback
 ```
 
 실행:
@@ -287,6 +345,21 @@ JWT_SECRET=change-me-in-production \
 - 저장소 초기화는 앱 시작 시 GORM `AutoMigrate`로 처리됩니다.
 - 운영에서는 SQLite보다 MySQL을 권장합니다.
 - 운영에서는 반드시 HTTPS 뒤에 두고, JWT secret은 강한 값으로 교체해야 합니다.
+- refresh token은 absolute max 없이 미사용 14일 만료 정책을 사용합니다.
+- desktop은 `https://ssh.doldolma.com/login` 브라우저 페이지를 열고 `dolssh://auth/callback` 딥링크로 복귀합니다.
+- hybrid 모드에서는 local 로그인 폼이 기본이고, OIDC가 켜져 있으면 SSO 버튼이 같은 페이지 하단에 추가됩니다.
+- Git에는 `services/sync-api/config/default.example.json`만 올리고, 실제 운영 값은 `services/sync-api/config/default.json` 또는 `DOLSSH_API_CONFIG_PATH`로 주입하는 것을 권장합니다.
+
+## 설정파일 정책
+
+- desktop:
+  - 예시 파일: `apps/desktop/config/development.example.json`, `apps/desktop/config/desktop.example.json`
+  - 실제 파일: `apps/desktop/config/development.json`, `apps/desktop/config/desktop.json`
+- sync API:
+  - 예시 파일: `services/sync-api/config/default.example.json`
+  - 실제 파일: `services/sync-api/config/default.json`
+- 실제 파일이 없으면 코드가 자동으로 `*.example.json`을 fallback으로 읽습니다.
+- 실제 secret이나 운영값이 들어간 `*.json` 파일은 Git에 올리지 않고 `.gitignore`로 제외합니다.
 
 ## 데스크톱 자동 업데이트 전략
 

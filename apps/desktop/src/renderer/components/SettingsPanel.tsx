@@ -3,6 +3,7 @@ import type { AppSettings, AppTheme } from '@dolssh/shared';
 interface SettingsPanelProps {
   settings: AppSettings;
   onChangeTheme: (theme: AppTheme) => Promise<void>;
+  onLogout: () => Promise<void>;
 }
 
 const themeOptions: Array<{ value: AppTheme; title: string; description: string }> = [
@@ -23,7 +24,7 @@ const themeOptions: Array<{ value: AppTheme; title: string; description: string 
   }
 ];
 
-export function SettingsPanel({ settings, onChangeTheme }: SettingsPanelProps) {
+export function SettingsPanel({ settings, onChangeTheme, onLogout }: SettingsPanelProps) {
   return (
     <div className="settings-panel">
       <div className="settings-panel__header">
@@ -52,6 +53,19 @@ export function SettingsPanel({ settings, onChangeTheme }: SettingsPanelProps) {
             </button>
           ))}
         </div>
+      </section>
+
+      <section className="settings-card">
+        <div className="settings-card__header">
+          <div>
+            <div className="eyebrow">Session</div>
+            <h3>Account</h3>
+          </div>
+        </div>
+        <p className="settings-card__description">현재 세션을 종료하면 로컬에 캐시된 서버 관리 secret도 함께 정리되고, 다시 로그인해야 앱을 사용할 수 있습니다.</p>
+        <button type="button" className="danger-button" onClick={async () => onLogout()}>
+          로그아웃
+        </button>
       </section>
     </div>
   );

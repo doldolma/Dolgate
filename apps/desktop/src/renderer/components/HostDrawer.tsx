@@ -1,17 +1,29 @@
-import type { HostRecord } from '@dolssh/shared';
+import type { HostRecord, SecretMetadataRecord } from '@dolssh/shared';
 import { HostForm } from './HostForm';
 
 interface HostDrawerProps {
   open: boolean;
   mode: 'create' | 'edit';
   host: HostRecord | null;
+  keychainEntries: SecretMetadataRecord[];
   defaultGroupPath?: string | null;
   onClose: () => void;
   onSubmit: Parameters<typeof HostForm>[0]['onSubmit'];
   onDelete?: () => Promise<void>;
+  onEditExistingSecret?: (secretRef: string, credentialKind: 'password' | 'passphrase') => void;
 }
 
-export function HostDrawer({ open, mode, host, defaultGroupPath = null, onClose, onSubmit, onDelete }: HostDrawerProps) {
+export function HostDrawer({
+  open,
+  mode,
+  host,
+  keychainEntries,
+  defaultGroupPath = null,
+  onClose,
+  onSubmit,
+  onDelete,
+  onEditExistingSecret
+}: HostDrawerProps) {
   return (
     <aside className={`host-drawer ${open ? 'open' : ''}`} aria-hidden={!open}>
       <div className="host-drawer__header">
@@ -25,7 +37,15 @@ export function HostDrawer({ open, mode, host, defaultGroupPath = null, onClose,
       </div>
 
       <div className="host-drawer__body">
-        <HostForm hideTitle host={host} defaultGroupPath={defaultGroupPath} onSubmit={onSubmit} onDelete={onDelete} />
+        <HostForm
+          hideTitle
+          host={host}
+          keychainEntries={keychainEntries}
+          defaultGroupPath={defaultGroupPath}
+          onSubmit={onSubmit}
+          onDelete={onDelete}
+          onEditExistingSecret={onEditExistingSecret}
+        />
       </div>
     </aside>
   );

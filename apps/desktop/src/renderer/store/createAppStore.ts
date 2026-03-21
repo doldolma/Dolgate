@@ -116,6 +116,7 @@ export interface AppState {
   refreshOperationalData: () => Promise<void>;
   createGroup: (name: string) => Promise<void>;
   saveHost: (hostId: string | null, draft: HostDraft, secrets?: HostSecretInput) => Promise<void>;
+  moveHostToGroup: (hostId: string, groupPath: string | null) => Promise<void>;
   removeHost: (hostId: string) => Promise<void>;
   connectHost: (hostId: string, cols: number, rows: number) => Promise<void>;
   disconnectTab: (sessionId: string) => Promise<void>;
@@ -126,7 +127,9 @@ export interface AppState {
   stopPortForward: (ruleId: string) => Promise<void>;
   removeKnownHost: (id: string) => Promise<void>;
   clearLogs: () => Promise<void>;
-  removeKeychainSecret: (hostId: string) => Promise<void>;
+  removeKeychainSecret: (secretRef: string) => Promise<void>;
+  updateKeychainSecret: (secretRef: string, secrets: HostSecretInput) => Promise<void>;
+  cloneKeychainSecretForHost: (hostId: string, sourceSecretRef: string, secrets: HostSecretInput) => Promise<void>;
   acceptPendingHostKeyPrompt: (mode: 'trust' | 'replace') => Promise<void>;
   dismissPendingHostKeyPrompt: () => void;
   handleCoreEvent: (event: CoreEvent<Record<string, unknown>>) => void;
@@ -215,7 +218,7 @@ function sortLogs(records: ActivityLogRecord[]): ActivityLogRecord[] {
 }
 
 function sortKeychainEntries(entries: SecretMetadataRecord[]): SecretMetadataRecord[] {
-  return [...entries].sort((a, b) => a.hostLabel.localeCompare(b.hostLabel) || a.hostname.localeCompare(b.hostname));
+  return [...entries].sort((a, b) => a.label.localeCompare(b.label) || a.secretRef.localeCompare(b.secretRef));
 }
 
 function normalizeGroupPath(groupPath?: string | null): string | null {
@@ -598,6 +601,28 @@ export function createAppStore(api: DesktopApi) {
         });
         await syncOperationalData(set);
       },
+      moveHostToGroup: async (hostId, groupPath) => {
+        const current = get().hosts.find((host) => host.id === hostId);
+        if (!current) {
+          return;
+        }
+
+        const next = await api.hosts.update(hostId, {
+          label: current.label,
+          hostname: current.hostname,
+          port: current.port,
+          username: current.username,
+          authType: current.authType,
+          privateKeyPath: current.privateKeyPath ?? null,
+          secretRef: current.secretRef ?? null,
+          groupName: groupPath
+        });
+
+        set((state) => ({
+          hosts: sortHosts([...state.hosts.filter((host) => host.id !== next.id), next])
+        }));
+        await syncOperationalData(set);
+      },
       removeHost: async (hostId) => {
         await api.hosts.remove(hostId);
         const currentDrawer = get().hostDrawer;
@@ -701,8 +726,20 @@ export function createAppStore(api: DesktopApi) {
         await api.logs.clear();
         set({ activityLogs: [] });
       },
-      removeKeychainSecret: async (hostId) => {
-        await api.keychain.removeForHost(hostId);
+      removeKeychainSecret: async (secretRef) => {
+        await api.keychain.remove(secretRef);
+        await syncOperationalData(set);
+      },
+      updateKeychainSecret: async (secretRef, secrets) => {
+        await api.keychain.update({ secretRef, secrets });
+        await syncOperationalData(set);
+      },
+      cloneKeychainSecretForHost: async (hostId, sourceSecretRef, secrets) => {
+        await api.keychain.cloneForHost({
+          hostId,
+          sourceSecretRef,
+          secrets
+        });
         await syncOperationalData(set);
       },
       acceptPendingHostKeyPrompt: async (mode) => {

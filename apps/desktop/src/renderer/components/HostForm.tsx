@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import type { HostDraft, HostRecord } from '@dolssh/shared';
+import type { HostDraft, HostRecord, SecretMetadataRecord } from '@dolssh/shared';
 
 const defaultDraft: HostDraft = {
   label: '',
@@ -21,22 +21,40 @@ function createDraft(defaultGroupPath?: string | null): HostDraft {
 
 interface HostFormProps {
   host: HostRecord | null;
+  keychainEntries: SecretMetadataRecord[];
   defaultGroupPath?: string | null;
   hideTitle?: boolean;
   onSubmit: (draft: HostDraft, secrets?: { password?: string; passphrase?: string }) => Promise<void>;
   onDelete?: () => Promise<void>;
+  onEditExistingSecret?: (secretRef: string, credentialKind: 'password' | 'passphrase') => void;
 }
 
-export function HostForm({ host, defaultGroupPath = null, hideTitle = false, onSubmit, onDelete }: HostFormProps) {
+export function HostForm({
+  host,
+  keychainEntries,
+  defaultGroupPath = null,
+  hideTitle = false,
+  onSubmit,
+  onDelete,
+  onEditExistingSecret
+}: HostFormProps) {
   const [draft, setDraft] = useState<HostDraft>(createDraft(defaultGroupPath));
   const [password, setPassword] = useState('');
   const [passphrase, setPassphrase] = useState('');
+  const [credentialMode, setCredentialMode] = useState<'new' | 'existing' | 'none'>('new');
+  const [selectedSecretRef, setSelectedSecretRef] = useState('');
+
+  const reusableEntries = keychainEntries.filter((entry) =>
+    draft.authType === 'password' ? entry.hasPassword : entry.hasManagedPrivateKey || entry.hasPassphrase
+  );
 
   useEffect(() => {
     if (!host) {
       setDraft(createDraft(defaultGroupPath));
       setPassword('');
       setPassphrase('');
+      setSelectedSecretRef('');
+      setCredentialMode('new');
       return;
     }
     setDraft({
@@ -51,7 +69,20 @@ export function HostForm({ host, defaultGroupPath = null, hideTitle = false, onS
     });
     setPassword('');
     setPassphrase('');
+    setSelectedSecretRef(host.secretRef ?? '');
+    setCredentialMode(host.secretRef ? 'existing' : host.authType === 'password' ? 'new' : 'none');
   }, [defaultGroupPath, host]);
+
+  useEffect(() => {
+    if (draft.authType === 'password' && credentialMode === 'none') {
+      setCredentialMode('new');
+    }
+
+    if (credentialMode === 'existing' && selectedSecretRef && !reusableEntries.some((entry) => entry.secretRef === selectedSecretRef)) {
+      setSelectedSecretRef('');
+      setCredentialMode(draft.authType === 'password' ? 'new' : 'none');
+    }
+  }, [credentialMode, draft.authType, reusableEntries, selectedSecretRef]);
 
   async function pickPrivateKey(): Promise<void> {
     const selected = await window.dolssh.shell.pickPrivateKey();
@@ -66,10 +97,19 @@ export function HostForm({ host, defaultGroupPath = null, hideTitle = false, onS
       className="host-form"
       onSubmit={async (event) => {
         event.preventDefault();
-        await onSubmit(draft, {
-          password: password || undefined,
-          passphrase: passphrase || undefined
-        });
+        const nextDraft: HostDraft = {
+          ...draft,
+          secretRef: credentialMode === 'existing' ? selectedSecretRef || null : null
+        };
+        await onSubmit(
+          nextDraft,
+          credentialMode === 'new'
+            ? {
+                password: password || undefined,
+                passphrase: passphrase || undefined
+              }
+            : undefined
+        );
       }}
     >
       {hideTitle ? null : <div className="section-title">Host Editor</div>}
@@ -118,38 +158,83 @@ export function HostForm({ host, defaultGroupPath = null, hideTitle = false, onS
         </select>
       </label>
 
-      {draft.authType === 'password' ? (
+      <label>
+        Keychain
+        <select
+          value={credentialMode === 'existing' ? `existing:${selectedSecretRef}` : credentialMode}
+          onChange={(event) => {
+            const value = event.target.value;
+            if (value === 'new' || value === 'none') {
+              setCredentialMode(value);
+              setSelectedSecretRef('');
+              return;
+            }
+            if (value.startsWith('existing:')) {
+              setCredentialMode('existing');
+              setSelectedSecretRef(value.slice('existing:'.length));
+            }
+          }}
+        >
+          {draft.authType === 'privateKey' ? <option value="none">사용 안 함</option> : null}
+          <option value="new">새 키체인 생성</option>
+          {reusableEntries.map((entry) => (
+            <option key={entry.secretRef} value={`existing:${entry.secretRef}`}>
+              {entry.label} ({entry.linkedHostCount}개 호스트)
+            </option>
+          ))}
+        </select>
+      </label>
+
+      {draft.authType === 'password' && credentialMode === 'new' ? (
         <label>
           Password
           <input type="password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder={host ? 'Leave blank to keep' : ''} />
         </label>
-      ) : (
+      ) : null}
+
+      {credentialMode === 'existing' ? (
+        <>
+          <p className="form-note">선택한 키체인을 이 호스트와 공유합니다. 이 호스트를 삭제해도 키체인 항목은 유지됩니다.</p>
+          {host && selectedSecretRef && host.secretRef === selectedSecretRef && onEditExistingSecret ? (
+            <button
+              type="button"
+              className="secondary-button"
+              onClick={() => onEditExistingSecret(selectedSecretRef, draft.authType === 'password' ? 'password' : 'passphrase')}
+            >
+              {draft.authType === 'password' ? '비밀번호 변경' : 'Passphrase 변경'}
+            </button>
+          ) : null}
+        </>
+      ) : null}
+
+      {draft.authType === 'privateKey' ? (
         <>
           <label>
-            Private key
+            Private key file
             <div className="file-input-row">
               <input
                 value={draft.privateKeyPath ?? ''}
                 onChange={(event) => setDraft({ ...draft, privateKeyPath: event.target.value })}
                 placeholder="/Users/.../.ssh/id_ed25519"
-                required
               />
               <button type="button" className="secondary-button" onClick={pickPrivateKey}>
-                Browse
+                Import
               </button>
             </div>
           </label>
-          <label>
-            Passphrase
-            <input
-              type="password"
-              value={passphrase}
-              onChange={(event) => setPassphrase(event.target.value)}
-              placeholder={host ? 'Leave blank to keep' : ''}
-            />
-          </label>
+          {credentialMode === 'new' ? (
+            <label>
+              Passphrase
+              <input
+                type="password"
+                value={passphrase}
+                onChange={(event) => setPassphrase(event.target.value)}
+                placeholder={host ? 'Leave blank to keep' : ''}
+              />
+            </label>
+          ) : null}
         </>
-      )}
+      ) : null}
 
       <div className="form-actions">
         <button type="submit">{host ? 'Save host' : 'Create host'}</button>

@@ -21,6 +21,7 @@ type Target struct {
 	Username             string
 	AuthType             string
 	Password             string
+	PrivateKeyPEM        string
 	PrivateKeyPath       string
 	Passphrase           string
 	TrustedHostKeyBase64 string
@@ -156,14 +157,21 @@ func resolveAuthMethod(target Target) (ssh.AuthMethod, error) {
 		}
 		return ssh.Password(target.Password), nil
 	case "privateKey":
-		if target.PrivateKeyPath == "" {
-			return nil, fmt.Errorf("private key auth requires a privateKeyPath")
-		}
-		privateKey, err := os.ReadFile(target.PrivateKeyPath)
-		if err != nil {
-			return nil, fmt.Errorf("read private key: %w", err)
+		var privateKey []byte
+		if target.PrivateKeyPEM != "" {
+			privateKey = []byte(target.PrivateKeyPEM)
+		} else {
+			if target.PrivateKeyPath == "" {
+				return nil, fmt.Errorf("private key auth requires a privateKeyPem or privateKeyPath")
+			}
+			var err error
+			privateKey, err = os.ReadFile(target.PrivateKeyPath)
+			if err != nil {
+				return nil, fmt.Errorf("read private key: %w", err)
+			}
 		}
 		var signer ssh.Signer
+		var err error
 		if target.Passphrase != "" {
 			signer, err = ssh.ParsePrivateKeyWithPassphrase(privateKey, []byte(target.Passphrase))
 		} else {

@@ -1,3 +1,5 @@
+import type { AuthSession } from './api';
+
 export type AuthType = 'password' | 'privateKey';
 export type AppTheme = 'system' | 'light' | 'dark';
 export type UpdateStatus = 'idle' | 'checking' | 'available' | 'downloading' | 'downloaded' | 'upToDate' | 'error';
@@ -11,6 +13,8 @@ export type KnownHostTrustStatus = 'trusted' | 'untrusted' | 'mismatch';
 export type ActivityLogLevel = 'info' | 'warn' | 'error';
 export type ActivityLogCategory = 'ssh' | 'sftp' | 'forwarding' | 'known_hosts' | 'keychain';
 export type SecretSource = 'local_keychain' | 'server_managed';
+export type AuthStatus = 'loading' | 'unauthenticated' | 'authenticating' | 'authenticated' | 'error';
+export type SyncBootstrapStatus = 'idle' | 'syncing' | 'ready' | 'error';
 
 // HostRecord는 로컬 DB에서 읽어 renderer까지 올라오는 정규화된 호스트 모델이다.
 export interface HostRecord {
@@ -54,6 +58,21 @@ export interface AppSettings {
   theme: AppTheme;
   dismissedUpdateVersion?: string | null;
   updatedAt: string;
+}
+
+// AuthState는 desktop 로그인 게이트와 세션 복구가 읽는 최소 상태다.
+export interface AuthState {
+  status: AuthStatus;
+  session?: AuthSession | null;
+  errorMessage?: string | null;
+}
+
+// SyncStatus는 초기 hydrate와 이후 push 재시도를 UI/서비스가 추적하기 위한 상태다.
+export interface SyncStatus {
+  status: SyncBootstrapStatus;
+  lastSuccessfulSyncAt?: string | null;
+  pendingPush: boolean;
+  errorMessage?: string | null;
 }
 
 // UpdateReleaseInfo는 GitHub Releases에서 읽어온 배포 메타데이터를 정규화한 형태다.
@@ -184,16 +203,33 @@ export interface ActivityLogRecord {
 
 // SecretMetadataRecord는 원문 secret 없이 저장 위치와 존재 여부만 표현한다.
 export interface SecretMetadataRecord {
-  hostId: string;
-  hostLabel: string;
-  hostname: string;
-  username: string;
   secretRef: string;
+  label: string;
   hasPassword: boolean;
   hasPassphrase: boolean;
   hasManagedPrivateKey: boolean;
   source: SecretSource;
+  linkedHostCount: number;
   updatedAt: string;
+}
+
+// ManagedSecretPayload는 서버 sync와 로컬 keychain이 공유하는 실제 secret 본문이다.
+// privateKeyPem은 새 기기에서도 바로 SSH 접속이 가능하도록 PEM 전체를 저장한다.
+export interface ManagedSecretPayload {
+  secretRef: string;
+  label: string;
+  password?: string;
+  passphrase?: string;
+  privateKeyPem?: string;
+  source: SecretSource;
+  updatedAt: string;
+}
+
+export interface LinkedHostSummary {
+  id: string;
+  label: string;
+  hostname: string;
+  username: string;
 }
 
 // FileEntry는 local/remote 파일 브라우저가 공통으로 쓰는 단일 파일 메타데이터 모델이다.

@@ -1,0 +1,7 @@
+{
+  "sync": {
+    "serverUrl": "https://ssh.doldolma.com",
+    "desktopClientId": "dolssh-desktop",
+    "redirectUri": "dolssh://auth/callback"
+  }
+}

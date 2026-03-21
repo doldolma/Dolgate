@@ -69,6 +69,7 @@ func (s *Service) Start(ruleID, requestID string, payload protocol.PortForwardSt
 		Username:             payload.Username,
 		AuthType:             payload.AuthType,
 		Password:             payload.Password,
+		PrivateKeyPEM:        payload.PrivateKeyPEM,
 		PrivateKeyPath:       payload.PrivateKeyPath,
 		Passphrase:           payload.Passphrase,
 		TrustedHostKeyBase64: payload.TrustedHostKeyBase64,

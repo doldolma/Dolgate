@@ -2,6 +2,8 @@ package store
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"time"
@@ -18,46 +20,66 @@ import (
 type userRow struct {
 	ID           string `gorm:"column:id;primaryKey;type:varchar(191)"`
 	Email        string `gorm:"column:email;uniqueIndex;not null;type:varchar(255)"`
-	PasswordHash string `gorm:"column:password_hash;not null;type:text"`
+	PasswordHash string `gorm:"column:password_hash;not null;default:'';type:text"`
 }
 
 func (userRow) TableName() string {
 	return "users"
 }
 
+type authIdentityRow struct {
+	Provider      string `gorm:"column:provider;primaryKey;type:varchar(64)"`
+	Subject       string `gorm:"column:subject;primaryKey;type:varchar(255)"`
+	UserID        string `gorm:"column:user_id;not null;index;type:varchar(191)"`
+	Email         string `gorm:"column:email;not null;type:varchar(255)"`
+	EmailVerified bool   `gorm:"column:email_verified;not null"`
+}
+
+func (authIdentityRow) TableName() string {
+	return "auth_identities"
+}
+
 type refreshTokenRow struct {
-	UserID    string    `gorm:"column:user_id;not null;index;type:varchar(191)"`
-	TokenHash string    `gorm:"column:token_hash;primaryKey;type:varchar(191)"`
-	ExpiresAt time.Time `gorm:"column:expires_at;not null"`
+	UserID     string    `gorm:"column:user_id;not null;index;type:varchar(191)"`
+	TokenHash  string    `gorm:"column:token_hash;primaryKey;type:varchar(191)"`
+	ExpiresAt  time.Time `gorm:"column:expires_at;not null"`
+	LastUsedAt time.Time `gorm:"column:last_used_at;not null"`
 }
 
 func (refreshTokenRow) TableName() string {
 	return "refresh_tokens"
 }
 
-// SyncRecordRow는 hosts / snippets 테이블이 공유하는 컬럼 구조를 표현한다.
-type SyncRecordRow struct {
+type exchangeCodeRow struct {
+	CodeHash  string    `gorm:"column:code_hash;primaryKey;type:varchar(191)"`
+	UserID    string    `gorm:"column:user_id;not null;index;type:varchar(191)"`
+	ExpiresAt time.Time `gorm:"column:expires_at;not null"`
+}
+
+func (exchangeCodeRow) TableName() string {
+	return "auth_exchange_codes"
+}
+
+type userVaultKeyRow struct {
+	UserID    string `gorm:"column:user_id;primaryKey;type:varchar(191)"`
+	KeyBase64 string `gorm:"column:key_base64;not null;type:text"`
+}
+
+func (userVaultKeyRow) TableName() string {
+	return "user_vault_keys"
+}
+
+type syncRecordRow struct {
 	ID               string     `gorm:"column:id;primaryKey;type:varchar(191)"`
 	UserID           string     `gorm:"column:user_id;primaryKey;index;type:varchar(191)"`
+	Kind             string     `gorm:"column:kind;primaryKey;type:varchar(64)"`
 	EncryptedPayload string     `gorm:"column:encrypted_payload;not null;type:text"`
 	UpdatedAt        time.Time  `gorm:"column:updated_at;not null;autoUpdateTime:false"`
 	DeletedAt        *time.Time `gorm:"column:deleted_at"`
 }
 
-type hostRow struct {
-	SyncRecordRow
-}
-
-func (hostRow) TableName() string {
-	return "hosts"
-}
-
-type snippetRow struct {
-	SyncRecordRow
-}
-
-func (snippetRow) TableName() string {
-	return "snippets"
+func (syncRecordRow) TableName() string {
+	return "sync_records"
 }
 
 type GormStore struct {
@@ -66,7 +88,6 @@ type GormStore struct {
 }
 
 func Open(driver string, dsn string) (*GormStore, error) {
-	// GORM은 저장소 계층 안에만 두고 상위 계층은 Store 인터페이스만 보게 유지한다.
 	dialector, err := openDialector(driver, dsn)
 	if err != nil {
 		return nil, err
@@ -84,7 +105,6 @@ func Open(driver string, dsn string) (*GormStore, error) {
 		return nil, err
 	}
 
-	// SQLite는 단일 연결로 두는 편이 잠금 충돌을 줄이기 쉽다.
 	if driver == "sqlite" {
 		sqlDB.SetMaxOpenConns(1)
 		sqlDB.SetMaxIdleConns(1)
@@ -124,8 +144,14 @@ func openDialector(driver string, dsn string) (gorm.Dialector, error) {
 }
 
 func (s *GormStore) migrate() error {
-	// SQLite와 MySQL 모두에서 같은 모델로 마이그레이션이 가능하도록 GORM 모델을 통일한다.
-	return s.db.AutoMigrate(&userRow{}, &refreshTokenRow{}, &hostRow{}, &snippetRow{})
+	return s.db.AutoMigrate(
+		&userRow{},
+		&authIdentityRow{},
+		&refreshTokenRow{},
+		&exchangeCodeRow{},
+		&userVaultKeyRow{},
+		&syncRecordRow{},
+	)
 }
 
 func (s *GormStore) CreateUser(ctx context.Context, email string, passwordHash string) (User, error) {
@@ -169,20 +195,57 @@ func (s *GormStore) GetUserByID(ctx context.Context, id string) (User, error) {
 	}, nil
 }
 
+func (s *GormStore) GetAuthIdentity(ctx context.Context, provider string, subject string) (AuthIdentity, error) {
+	var row authIdentityRow
+	if err := s.db.WithContext(ctx).Where("provider = ? AND subject = ?", provider, subject).Take(&row).Error; err != nil {
+		return AuthIdentity{}, err
+	}
+	return AuthIdentity{
+		UserID:        row.UserID,
+		Provider:      row.Provider,
+		Subject:       row.Subject,
+		Email:         row.Email,
+		EmailVerified: row.EmailVerified,
+	}, nil
+}
+
+func (s *GormStore) SaveAuthIdentity(ctx context.Context, identity AuthIdentity) error {
+	row := authIdentityRow{
+		UserID:        identity.UserID,
+		Provider:      identity.Provider,
+		Subject:       identity.Subject,
+		Email:         identity.Email,
+		EmailVerified: identity.EmailVerified,
+	}
+	return s.db.WithContext(ctx).
+		Clauses(clause.OnConflict{
+			Columns: []clause.Column{
+				{Name: "provider"},
+				{Name: "subject"},
+			},
+			DoUpdates: clause.Assignments(map[string]any{
+				"user_id":        row.UserID,
+				"email":          row.Email,
+				"email_verified": row.EmailVerified,
+			}),
+		}).
+		Create(&row).Error
+}
+
 func (s *GormStore) SaveRefreshToken(ctx context.Context, token RefreshToken) error {
 	row := refreshTokenRow{
-		UserID:    token.UserID,
-		TokenHash: token.TokenHash,
-		ExpiresAt: token.ExpiresAt.UTC(),
+		UserID:     token.UserID,
+		TokenHash:  token.TokenHash,
+		ExpiresAt:  token.ExpiresAt.UTC(),
+		LastUsedAt: token.LastUsedAt.UTC(),
 	}
-
-	// token_hash를 기준으로 refresh token을 upsert해서 SQLite/MySQL 양쪽에서 같은 동작을 유지한다.
 	return s.db.WithContext(ctx).
 		Clauses(clause.OnConflict{
 			Columns: []clause.Column{{Name: "token_hash"}},
 			DoUpdates: clause.Assignments(map[string]any{
-				"user_id":    row.UserID,
-				"expires_at": row.ExpiresAt,
+				"user_id":      row.UserID,
+				"expires_at":   row.ExpiresAt,
+				"last_used_at": row.LastUsedAt,
 			}),
 		}).
 		Create(&row).Error
@@ -194,22 +257,83 @@ func (s *GormStore) GetRefreshToken(ctx context.Context, tokenHash string) (Refr
 		return RefreshToken{}, err
 	}
 	return RefreshToken{
+		UserID:     row.UserID,
+		TokenHash:  row.TokenHash,
+		ExpiresAt:  row.ExpiresAt,
+		LastUsedAt: row.LastUsedAt,
+	}, nil
+}
+
+func (s *GormStore) DeleteRefreshToken(ctx context.Context, tokenHash string) error {
+	return s.db.WithContext(ctx).Where("token_hash = ?", tokenHash).Delete(&refreshTokenRow{}).Error
+}
+
+func (s *GormStore) SaveExchangeCode(ctx context.Context, code ExchangeCode) error {
+	row := exchangeCodeRow{
+		CodeHash:  code.CodeHash,
+		UserID:    code.UserID,
+		ExpiresAt: code.ExpiresAt.UTC(),
+	}
+	return s.db.WithContext(ctx).Create(&row).Error
+}
+
+func (s *GormStore) ConsumeExchangeCode(ctx context.Context, codeHash string) (ExchangeCode, error) {
+	var row exchangeCodeRow
+	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Where("code_hash = ?", codeHash).Take(&row).Error; err != nil {
+			return err
+		}
+		return tx.Where("code_hash = ?", codeHash).Delete(&exchangeCodeRow{}).Error
+	})
+	if err != nil {
+		return ExchangeCode{}, err
+	}
+	return ExchangeCode{
 		UserID:    row.UserID,
-		TokenHash: row.TokenHash,
+		CodeHash:  row.CodeHash,
 		ExpiresAt: row.ExpiresAt,
 	}, nil
 }
 
-func (s *GormStore) ListSyncRecords(ctx context.Context, userID string, kind string) ([]syncmodel.Record, error) {
-	table, err := validateKind(kind)
-	if err != nil {
+func (s *GormStore) GetOrCreateUserVaultKey(ctx context.Context, userID string) (UserVaultKey, error) {
+	var row userVaultKeyRow
+	err := s.db.WithContext(ctx).Where("user_id = ?", userID).Take(&row).Error
+	if err == nil {
+		return UserVaultKey{
+			UserID:    row.UserID,
+			KeyBase64: row.KeyBase64,
+		}, nil
+	}
+	if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return UserVaultKey{}, err
+	}
+
+	buffer := make([]byte, 32)
+	if _, err := rand.Read(buffer); err != nil {
+		return UserVaultKey{}, err
+	}
+
+	row = userVaultKeyRow{
+		UserID:    userID,
+		KeyBase64: base64.StdEncoding.EncodeToString(buffer),
+	}
+	if err := s.db.WithContext(ctx).Create(&row).Error; err != nil {
+		return UserVaultKey{}, err
+	}
+	return UserVaultKey{
+		UserID:    row.UserID,
+		KeyBase64: row.KeyBase64,
+	}, nil
+}
+
+func (s *GormStore) ListSyncRecords(ctx context.Context, userID string, kind syncmodel.Kind) ([]syncmodel.Record, error) {
+	if err := validateKind(kind); err != nil {
 		return nil, err
 	}
 
-	var rows []SyncRecordRow
+	var rows []syncRecordRow
 	if err := s.db.WithContext(ctx).
-		Table(table).
-		Where("user_id = ?", userID).
+		Where("user_id = ? AND kind = ?", userID, string(kind)).
 		Order("updated_at DESC").
 		Find(&rows).Error; err != nil {
 		return nil, err
@@ -222,36 +346,33 @@ func (s *GormStore) ListSyncRecords(ctx context.Context, userID string, kind str
 	return records, nil
 }
 
-func (s *GormStore) UpsertSyncRecords(ctx context.Context, userID string, kind string, records []syncmodel.Record) error {
-	table, err := validateKind(kind)
-	if err != nil {
+func (s *GormStore) UpsertSyncRecords(ctx context.Context, userID string, kind syncmodel.Kind, records []syncmodel.Record) error {
+	if err := validateKind(kind); err != nil {
 		return err
 	}
 
 	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		for _, record := range records {
-			row, err := toSyncRecordRow(userID, record)
+			row, err := toSyncRecordRow(userID, kind, record)
 			if err != nil {
 				return err
 			}
 
-			var current SyncRecordRow
-			readErr := tx.Table(table).
-				Where("id = ? AND user_id = ?", row.ID, row.UserID).
-				Take(&current).Error
+			var current syncRecordRow
+			readErr := tx.Where("id = ? AND user_id = ? AND kind = ?", row.ID, row.UserID, row.Kind).Take(&current).Error
 			if readErr != nil && !errors.Is(readErr, gorm.ErrRecordNotFound) {
 				return readErr
 			}
 			if readErr == nil && current.UpdatedAt.After(row.UpdatedAt) {
-				// 서버에 더 최신 데이터가 있으면 last-write-wins 규칙에 따라 덮어쓰지 않는다.
 				continue
 			}
 
-			if err := tx.Table(table).
+			if err := tx.
 				Clauses(clause.OnConflict{
 					Columns: []clause.Column{
 						{Name: "id"},
 						{Name: "user_id"},
+						{Name: "kind"},
 					},
 					DoUpdates: clause.AssignmentColumns([]string{
 						"encrypted_payload",
@@ -267,7 +388,7 @@ func (s *GormStore) UpsertSyncRecords(ctx context.Context, userID string, kind s
 	})
 }
 
-func toSyncRecord(row SyncRecordRow) syncmodel.Record {
+func toSyncRecord(row syncRecordRow) syncmodel.Record {
 	var deletedAt *string
 	if row.DeletedAt != nil {
 		value := row.DeletedAt.UTC().Format(time.RFC3339)
@@ -282,39 +403,37 @@ func toSyncRecord(row SyncRecordRow) syncmodel.Record {
 	}
 }
 
-func toSyncRecordRow(userID string, record syncmodel.Record) (SyncRecordRow, error) {
+func toSyncRecordRow(userID string, kind syncmodel.Kind, record syncmodel.Record) (syncRecordRow, error) {
 	updatedAt, err := time.Parse(time.RFC3339, record.UpdatedAt)
 	if err != nil {
-		return SyncRecordRow{}, fmt.Errorf("invalid updated_at for record %s: %w", record.ID, err)
+		return syncRecordRow{}, fmt.Errorf("invalid updated_at for record %s: %w", record.ID, err)
 	}
 
 	var deletedAt *time.Time
 	if record.DeletedAt != nil && *record.DeletedAt != "" {
 		parsedDeletedAt, err := time.Parse(time.RFC3339, *record.DeletedAt)
 		if err != nil {
-			return SyncRecordRow{}, fmt.Errorf("invalid deleted_at for record %s: %w", record.ID, err)
+			return syncRecordRow{}, fmt.Errorf("invalid deleted_at for record %s: %w", record.ID, err)
 		}
 		parsedDeletedAt = parsedDeletedAt.UTC()
 		deletedAt = &parsedDeletedAt
 	}
 
-	return SyncRecordRow{
+	return syncRecordRow{
 		ID:               record.ID,
 		UserID:           userID,
+		Kind:             string(kind),
 		EncryptedPayload: record.EncryptedPayload,
 		UpdatedAt:        updatedAt.UTC(),
 		DeletedAt:        deletedAt,
 	}, nil
 }
 
-func validateKind(kind string) (string, error) {
-	// Table 이름은 화이트리스트로 제한해 동적 SQL 조합을 안전하게 유지한다.
+func validateKind(kind syncmodel.Kind) error {
 	switch kind {
-	case "hosts":
-		return "hosts", nil
-	case "snippets":
-		return "snippets", nil
+	case syncmodel.KindGroups, syncmodel.KindHosts, syncmodel.KindSecrets, syncmodel.KindKnownHosts, syncmodel.KindPortForwards:
+		return nil
 	default:
-		return "", fmt.Errorf("invalid sync kind: %s", kind)
+		return fmt.Errorf("invalid sync kind: %s", kind)
 	}
 }

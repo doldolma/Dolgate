@@ -1,5 +1,23 @@
 package sync
 
+type Kind string
+
+const (
+	KindGroups       Kind = "groups"
+	KindHosts        Kind = "hosts"
+	KindSecrets      Kind = "secrets"
+	KindKnownHosts   Kind = "knownHosts"
+	KindPortForwards Kind = "portForwards"
+)
+
+var AllKinds = []Kind{
+	KindGroups,
+	KindHosts,
+	KindSecrets,
+	KindKnownHosts,
+	KindPortForwards,
+}
+
 type Record struct {
 	ID               string  `json:"id"`
 	EncryptedPayload string  `json:"encrypted_payload"`
@@ -8,6 +26,9 @@ type Record struct {
 }
 
 type Payload struct {
-	Hosts    []Record `json:"hosts"`
-	Snippets []Record `json:"snippets"`
+	Groups       []Record `json:"groups"`
+	Hosts        []Record `json:"hosts"`
+	Secrets      []Record `json:"secrets"`
+	KnownHosts   []Record `json:"knownHosts"`
+	PortForwards []Record `json:"portForwards"`
 }

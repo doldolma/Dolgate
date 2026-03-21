@@ -1,12 +1,17 @@
 import { randomUUID } from 'node:crypto';
+import { readFile } from 'node:fs/promises';
 import { dialog, ipcMain, shell as electronShell } from 'electron';
 import type {
+  AuthState,
   AppSettings,
   DesktopConnectInput,
   DesktopSftpConnectInput,
   HostDraft,
   HostKeyProbeResult,
   HostSecretInput,
+  KeychainSecretCloneInput,
+  KeychainSecretUpdateInput,
+  ManagedSecretPayload,
   KnownHostProbeInput,
   KnownHostTrustInput,
   PortForwardDraft,
@@ -24,39 +29,53 @@ import {
   KnownHostRepository,
   PortForwardRepository,
   SecretMetadataRepository,
-  SettingsRepository
+  SettingsRepository,
+  SyncOutboxRepository
 } from './database';
+import { AuthService } from './auth-service';
 import { CoreManager } from './core-manager';
 import { LocalFileService } from './file-service';
 import { SecretStore } from './secret-store';
+import { SyncService } from './sync-service';
 import { UpdateService } from './update-service';
 
 async function persistSecret(
   secretStore: SecretStore,
   secretMetadata: SecretMetadataRepository,
-  hostId: string,
+  label: string,
   secrets?: HostSecretInput
 ): Promise<string | null> {
   // 비밀값이 없으면 키체인을 건드리지 않고 바로 빠져나간다.
-  if (!secrets?.password && !secrets?.passphrase) {
+  if (!secrets?.password && !secrets?.passphrase && !secrets?.privateKeyPem) {
     return null;
   }
 
-  // host:<id> 규칙을 쓰면 나중에 키체인 항목을 찾고 정리하기 쉽다.
-  const secretRef = `host:${hostId}`;
-  await secretStore.save(secretRef, JSON.stringify(secrets));
-  secretMetadata.upsert({
-    hostId,
+  const secretRef = `secret:${randomUUID()}`;
+  const updatedAt = new Date().toISOString();
+  await secretStore.save(
     secretRef,
+    JSON.stringify({
+      secretRef,
+      label,
+      password: secrets.password,
+      passphrase: secrets.passphrase,
+      privateKeyPem: secrets.privateKeyPem,
+      source: 'local_keychain',
+      updatedAt
+    } satisfies ManagedSecretPayload)
+  );
+  secretMetadata.upsert({
+    secretRef,
+    label,
     hasPassword: Boolean(secrets.password),
     hasPassphrase: Boolean(secrets.passphrase),
-    hasManagedPrivateKey: false,
+    hasManagedPrivateKey: Boolean(secrets.privateKeyPem),
     source: 'local_keychain'
   });
   return secretRef;
 }
 
-async function loadSecrets(secretStore: SecretStore, secretRef?: string | null): Promise<HostSecretInput> {
+async function loadSecrets(secretStore: SecretStore, secretRef?: string | null): Promise<ManagedSecretPayload | HostSecretInput> {
   if (!secretRef) {
     return {};
   }
@@ -64,7 +83,48 @@ async function loadSecrets(secretStore: SecretStore, secretRef?: string | null):
   if (!secretJson) {
     return {};
   }
-  return JSON.parse(secretJson) as HostSecretInput;
+  const parsed = JSON.parse(secretJson) as Record<string, unknown>;
+  return {
+    secretRef,
+    label: typeof parsed.label === 'string' ? parsed.label : secretRef,
+    password: typeof parsed.password === 'string' ? parsed.password : undefined,
+    passphrase: typeof parsed.passphrase === 'string' ? parsed.passphrase : undefined,
+    privateKeyPem: typeof parsed.privateKeyPem === 'string' ? parsed.privateKeyPem : undefined,
+    source: parsed.source === 'server_managed' ? 'server_managed' : 'local_keychain',
+    updatedAt: typeof parsed.updatedAt === 'string' ? parsed.updatedAt : new Date().toISOString()
+  } satisfies ManagedSecretPayload;
+}
+
+function hasSecretValue(secrets: HostSecretInput): boolean {
+  return Boolean(secrets.password || secrets.passphrase || secrets.privateKeyPem);
+}
+
+function mergeSecrets(current: HostSecretInput, patch: HostSecretInput): HostSecretInput {
+  return {
+    password: patch.password !== undefined ? patch.password : current.password,
+    passphrase: patch.passphrase !== undefined ? patch.passphrase : current.passphrase,
+    privateKeyPem: patch.privateKeyPem !== undefined ? patch.privateKeyPem : current.privateKeyPem
+  };
+}
+
+async function resolveManagedPrivateKeyPem(draft: HostDraft, currentSecretRef: string | null, secretStore: SecretStore): Promise<string | undefined> {
+  if (draft.authType !== 'privateKey') {
+    return undefined;
+  }
+
+  if (draft.privateKeyPath) {
+    const pem = await readFile(draft.privateKeyPath, 'utf8');
+    return pem;
+  }
+
+  if (currentSecretRef) {
+    const currentSecrets = await loadSecrets(secretStore, currentSecretRef);
+    if (currentSecrets.privateKeyPem) {
+      return currentSecrets.privateKeyPem;
+    }
+  }
+
+  return undefined;
 }
 
 function requireTrustedHostKey(knownHosts: KnownHostRepository, host: { hostname: string; port: number }): string {
@@ -124,25 +184,51 @@ export function registerIpcHandlers(
   knownHosts: KnownHostRepository,
   activityLogs: ActivityLogRepository,
   secretMetadata: SecretMetadataRepository,
+  syncOutbox: SyncOutboxRepository,
   secretStore: SecretStore,
   coreManager: CoreManager,
-  updater: UpdateService
+  updater: UpdateService,
+  authService: AuthService,
+  syncService: SyncService
 ): void {
   const localFiles = new LocalFileService();
+  const queueSync = () => {
+    void syncService.pushDirty().catch(() => undefined);
+  };
+
+  ipcMain.handle(ipcChannels.auth.getState, async () => authService.getState());
+  ipcMain.handle(ipcChannels.auth.bootstrap, async () => authService.bootstrap());
+  ipcMain.handle(ipcChannels.auth.beginBrowserLogin, async () => {
+    await authService.beginBrowserLogin();
+  });
+  ipcMain.handle(ipcChannels.auth.logout, async () => {
+    await authService.logout();
+  });
+
+  ipcMain.handle(ipcChannels.sync.bootstrap, async () => syncService.bootstrap());
+  ipcMain.handle(ipcChannels.sync.pushDirty, async () => syncService.pushDirty());
+  ipcMain.handle(ipcChannels.sync.status, async () => syncService.getState());
+  ipcMain.handle(ipcChannels.sync.exportDecryptedSnapshot, async () => syncService.exportDecryptedSnapshot());
 
   // renderer는 preload를 통해서만 이 handler들에 접근한다.
   ipcMain.handle(ipcChannels.hosts.list, async () => hosts.list());
 
   ipcMain.handle(ipcChannels.hosts.create, async (_event, draft: HostDraft, secrets?: HostSecretInput) => {
     const hostId = randomUUID();
-    const secretRef = await persistSecret(secretStore, secretMetadata, hostId, secrets);
+    const resolvedSecrets: HostSecretInput = {
+      ...secrets,
+      privateKeyPem: await resolveManagedPrivateKeyPem(draft, null, secretStore)
+    };
+    const secretRef = await persistSecret(secretStore, secretMetadata, draft.label || `${draft.username}@${draft.hostname}`, resolvedSecrets);
     if (secretRef) {
       activityLogs.append('info', 'keychain', '호스트 secret이 로컬 키체인에 저장되었습니다.', {
         hostId,
         secretRef
       });
     }
-    return hosts.create(hostId, draft, secretRef);
+    const record = hosts.create(hostId, draft, secretRef);
+    queueSync();
+    return record;
   });
 
   ipcMain.handle(ipcChannels.hosts.update, async (_event, id: string, draft: HostDraft, secrets?: HostSecretInput) => {
@@ -150,34 +236,40 @@ export function registerIpcHandlers(
     if (!current) {
       throw new Error('Host not found');
     }
-    let secretRef = current.secretRef ?? null;
-    if (secrets?.password || secrets?.passphrase) {
-      secretRef = await persistSecret(secretStore, secretMetadata, id, secrets);
+    // draft.secretRef가 명시적으로 null이면 기존 연결을 끊으려는 의도로 해석한다.
+    let secretRef = draft.secretRef !== undefined ? draft.secretRef : current.secretRef ?? null;
+    const resolvedSecrets: HostSecretInput = {
+      ...secrets,
+      privateKeyPem: await resolveManagedPrivateKeyPem(draft, current.secretRef ?? null, secretStore)
+    };
+    if (resolvedSecrets.password || resolvedSecrets.passphrase || resolvedSecrets.privateKeyPem) {
+      secretRef = await persistSecret(secretStore, secretMetadata, draft.label || `${draft.username}@${draft.hostname}`, resolvedSecrets);
       activityLogs.append('info', 'keychain', '호스트 secret이 갱신되었습니다.', {
         hostId: id,
         secretRef
       });
+    } else if (secrets) {
+      // "새 키체인" 모드에서 값을 비워 저장한 경우는 기존 secret을 유지한다.
+      // 반대로 secrets가 undefined이고 draft.secretRef가 null이면, 사용자가 명시적으로 연결을 해제한 것이다.
+      secretRef = current.secretRef ?? null;
     }
-    return hosts.update(id, draft, secretRef);
+    const record = hosts.update(id, draft, secretRef);
+    queueSync();
+    return record;
   });
 
   ipcMain.handle(ipcChannels.hosts.remove, async (_event, id: string) => {
-    const current = hosts.getById(id);
-    if (current?.secretRef) {
-      await secretStore.remove(current.secretRef);
-      secretMetadata.removeByHostId(id);
-      activityLogs.append('info', 'keychain', '호스트 secret이 삭제되었습니다.', {
-        hostId: id,
-        secretRef: current.secretRef
-      });
-    }
+    syncOutbox.upsertDeletion('hosts', id);
     hosts.remove(id);
+    queueSync();
   });
 
   ipcMain.handle(ipcChannels.groups.list, async () => groups.list());
 
   ipcMain.handle(ipcChannels.groups.create, async (_event, name: string, parentPath?: string | null) => {
-    return groups.create(randomUUID(), name, parentPath);
+    const group = groups.create(randomUUID(), name, parentPath);
+    queueSync();
+    return group;
   });
 
   ipcMain.handle(ipcChannels.ssh.connect, async (_event, input: DesktopConnectInput) => {
@@ -195,6 +287,7 @@ export function registerIpcHandlers(
       username: host.username,
       authType: host.authType,
       password: secrets.password,
+      privateKeyPem: secrets.privateKeyPem,
       privateKeyPath: host.privateKeyPath ?? undefined,
       passphrase: secrets.passphrase,
       trustedHostKeyBase64,
@@ -244,6 +337,7 @@ export function registerIpcHandlers(
       username: host.username,
       authType: host.authType,
       password: secrets.password,
+      privateKeyPem: secrets.privateKeyPem,
       privateKeyPath: host.privateKeyPath ?? undefined,
       passphrase: secrets.passphrase,
       trustedHostKeyBase64,
@@ -282,16 +376,22 @@ export function registerIpcHandlers(
   }));
 
   ipcMain.handle(ipcChannels.portForwards.create, async (_event, draft: PortForwardDraft) => {
-    return portForwards.create(draft);
+    const record = portForwards.create(draft);
+    queueSync();
+    return record;
   });
 
   ipcMain.handle(ipcChannels.portForwards.update, async (_event, id: string, draft: PortForwardDraft) => {
-    return portForwards.update(id, draft);
+    const record = portForwards.update(id, draft);
+    queueSync();
+    return record;
   });
 
   ipcMain.handle(ipcChannels.portForwards.remove, async (_event, id: string) => {
     await coreManager.stopPortForward(id).catch(() => undefined);
+    syncOutbox.upsertDeletion('portForwards', id);
     portForwards.remove(id);
+    queueSync();
   });
 
   ipcMain.handle(ipcChannels.portForwards.start, async (_event, ruleId: string) => {
@@ -315,6 +415,7 @@ export function registerIpcHandlers(
       username: host.username,
       authType: host.authType,
       password: secrets.password,
+      privateKeyPem: secrets.privateKeyPem,
       privateKeyPath: host.privateKeyPath ?? undefined,
       passphrase: secrets.passphrase,
       trustedHostKeyBase64,
@@ -343,6 +444,7 @@ export function registerIpcHandlers(
       port: input.port,
       fingerprintSha256: input.fingerprintSha256
     });
+    queueSync();
     return record;
   });
 
@@ -353,14 +455,17 @@ export function registerIpcHandlers(
       port: input.port,
       fingerprintSha256: input.fingerprintSha256
     });
+    queueSync();
     return record;
   });
 
   ipcMain.handle(ipcChannels.knownHosts.remove, async (_event, id: string) => {
+    syncOutbox.upsertDeletion('knownHosts', id);
     knownHosts.remove(id);
     activityLogs.append('info', 'known_hosts', '호스트 키를 신뢰 목록에서 제거했습니다.', {
       knownHostId: id
     });
+    queueSync();
   });
 
   ipcMain.handle(ipcChannels.logs.list, async () => activityLogs.list());
@@ -371,18 +476,102 @@ export function registerIpcHandlers(
 
   ipcMain.handle(ipcChannels.keychain.list, async () => secretMetadata.list());
 
-  ipcMain.handle(ipcChannels.keychain.removeForHost, async (_event, hostId: string) => {
-    const host = hosts.getById(hostId);
-    if (!host?.secretRef) {
-      return;
+  ipcMain.handle(ipcChannels.keychain.load, async (_event, secretRef: string) => {
+    const metadata = secretMetadata.getBySecretRef(secretRef);
+    if (!metadata) {
+      return null;
     }
-    await secretStore.remove(host.secretRef);
-    secretMetadata.removeByHostId(hostId);
-    hosts.updateSecretRef(hostId, null);
+    const raw = await secretStore.load(secretRef);
+    if (!raw) {
+      return null;
+    }
+    const payload = JSON.parse(raw) as ManagedSecretPayload;
+    return {
+      ...payload,
+      secretRef,
+      label: metadata.label,
+      source: metadata.source,
+      updatedAt: payload.updatedAt ?? metadata.updatedAt
+    } satisfies ManagedSecretPayload;
+  });
+
+  ipcMain.handle(ipcChannels.keychain.remove, async (_event, secretRef: string) => {
+    await secretStore.remove(secretRef);
+    secretMetadata.remove(secretRef);
+    hosts.clearSecretRef(secretRef);
+    syncOutbox.upsertDeletion('secrets', secretRef);
     activityLogs.append('info', 'keychain', '호스트 secret이 키체인에서 제거되었습니다.', {
-      hostId,
-      secretRef: host.secretRef
+      secretRef
     });
+    queueSync();
+  });
+
+  ipcMain.handle(ipcChannels.keychain.update, async (_event, input: KeychainSecretUpdateInput) => {
+    const currentMetadata = secretMetadata.getBySecretRef(input.secretRef);
+    if (!currentMetadata) {
+      throw new Error('Keychain secret not found');
+    }
+
+    const currentSecrets = await loadSecrets(secretStore, input.secretRef);
+    const mergedSecrets = mergeSecrets(currentSecrets, input.secrets);
+    if (!hasSecretValue(mergedSecrets)) {
+      throw new Error('업데이트할 secret 값이 없습니다.');
+    }
+
+    await secretStore.save(
+      input.secretRef,
+      JSON.stringify({
+        secretRef: input.secretRef,
+        label: currentMetadata.label,
+        password: mergedSecrets.password,
+        passphrase: mergedSecrets.passphrase,
+        privateKeyPem: mergedSecrets.privateKeyPem,
+        source: currentMetadata.source,
+        updatedAt: new Date().toISOString()
+      } satisfies ManagedSecretPayload)
+    );
+    secretMetadata.upsert({
+      secretRef: input.secretRef,
+      label: currentMetadata.label,
+      hasPassword: Boolean(mergedSecrets.password),
+      hasPassphrase: Boolean(mergedSecrets.passphrase),
+      hasManagedPrivateKey: Boolean(mergedSecrets.privateKeyPem) || currentMetadata.hasManagedPrivateKey,
+      source: currentMetadata.source
+    });
+
+    activityLogs.append('info', 'keychain', '공유 secret이 갱신되었습니다.', {
+      secretRef: input.secretRef
+    });
+    queueSync();
+  });
+
+  ipcMain.handle(ipcChannels.keychain.cloneForHost, async (_event, input: KeychainSecretCloneInput) => {
+    const host = hosts.getById(input.hostId);
+    if (!host) {
+      throw new Error('Host not found');
+    }
+    if (!host.secretRef || host.secretRef !== input.sourceSecretRef) {
+      throw new Error('Host is not linked to the selected keychain secret');
+    }
+
+    const currentSecrets = await loadSecrets(secretStore, input.sourceSecretRef);
+    const mergedSecrets = mergeSecrets(currentSecrets, input.secrets);
+    if (!hasSecretValue(mergedSecrets)) {
+      throw new Error('복제할 secret 값이 없습니다.');
+    }
+
+    const nextSecretRef = await persistSecret(secretStore, secretMetadata, host.label || `${host.username}@${host.hostname}`, mergedSecrets);
+    if (!nextSecretRef) {
+      throw new Error('새 secret을 생성하지 못했습니다.');
+    }
+
+    hosts.updateSecretRef(host.id, nextSecretRef);
+    activityLogs.append('info', 'keychain', '호스트 전용 secret을 새로 생성했습니다.', {
+      hostId: host.id,
+      sourceSecretRef: input.sourceSecretRef,
+      nextSecretRef
+    });
+    queueSync();
   });
 
   ipcMain.handle(ipcChannels.shell.pickPrivateKey, async () => {

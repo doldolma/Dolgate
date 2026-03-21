@@ -1,11 +1,14 @@
 import { contextBridge, ipcRenderer } from 'electron';
 import type {
+  AuthState,
   CoreEvent,
   DesktopApi,
   DesktopConnectInput,
   DesktopSftpConnectInput,
   HostDraft,
   HostSecretInput,
+  KeychainSecretCloneInput,
+  KeychainSecretUpdateInput,
   KnownHostProbeInput,
   KnownHostTrustInput,
   PortForwardDraft,
@@ -26,6 +29,7 @@ const backlogBytes = new Map<string, number>();
 const transferListeners = new Set<(event: TransferJobEvent) => void>();
 const portForwardListeners = new Set<(event: PortForwardRuntimeEvent) => void>();
 const updateListeners = new Set<(event: UpdateEvent) => void>();
+const authListeners = new Set<(state: AuthState) => void>();
 const MAX_SESSION_BACKLOG_BYTES = 1024 * 1024;
 
 function cloneChunk(chunk: Uint8Array): Uint8Array {
@@ -87,8 +91,32 @@ ipcRenderer.on(ipcChannels.updater.event, (_event, payload: UpdateEvent) => {
   }
 });
 
+ipcRenderer.on(ipcChannels.auth.event, (_event, payload: AuthState) => {
+  for (const listener of authListeners) {
+    listener(payload);
+  }
+});
+
 // preload는 renderer에 필요한 최소 기능만 안전하게 노출하는 보안 경계다.
 const api: DesktopApi = {
+  auth: {
+    getState: () => ipcRenderer.invoke(ipcChannels.auth.getState),
+    bootstrap: () => ipcRenderer.invoke(ipcChannels.auth.bootstrap),
+    beginBrowserLogin: () => ipcRenderer.invoke(ipcChannels.auth.beginBrowserLogin),
+    logout: () => ipcRenderer.invoke(ipcChannels.auth.logout),
+    onEvent: (listener: (state: AuthState) => void) => {
+      authListeners.add(listener);
+      return () => {
+        authListeners.delete(listener);
+      };
+    }
+  },
+  sync: {
+    bootstrap: () => ipcRenderer.invoke(ipcChannels.sync.bootstrap),
+    pushDirty: () => ipcRenderer.invoke(ipcChannels.sync.pushDirty),
+    status: () => ipcRenderer.invoke(ipcChannels.sync.status),
+    exportDecryptedSnapshot: () => ipcRenderer.invoke(ipcChannels.sync.exportDecryptedSnapshot)
+  },
   hosts: {
     list: () => ipcRenderer.invoke(ipcChannels.hosts.list),
     create: (draft: HostDraft, secrets?: HostSecretInput) => ipcRenderer.invoke(ipcChannels.hosts.create, draft, secrets),
@@ -186,7 +214,10 @@ const api: DesktopApi = {
   },
   keychain: {
     list: () => ipcRenderer.invoke(ipcChannels.keychain.list),
-    removeForHost: (hostId: string) => ipcRenderer.invoke(ipcChannels.keychain.removeForHost, hostId)
+    load: (secretRef: string) => ipcRenderer.invoke(ipcChannels.keychain.load, secretRef),
+    remove: (secretRef: string) => ipcRenderer.invoke(ipcChannels.keychain.remove, secretRef),
+    update: (input: KeychainSecretUpdateInput) => ipcRenderer.invoke(ipcChannels.keychain.update, input),
+    cloneForHost: (input: KeychainSecretCloneInput) => ipcRenderer.invoke(ipcChannels.keychain.cloneForHost, input)
   },
   files: {
     getHomeDirectory: () => ipcRenderer.invoke(ipcChannels.files.getHomeDirectory),

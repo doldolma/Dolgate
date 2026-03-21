@@ -4,6 +4,70 @@ import { createAppStore } from './createAppStore';
 
 function createMockApi(): DesktopApi {
   return {
+    auth: {
+      getState: vi.fn().mockResolvedValue({
+        status: 'authenticated',
+        session: {
+          user: { id: 'user-1', email: 'user@example.com' },
+          tokens: {
+            accessToken: 'access',
+            refreshToken: 'refresh',
+            expiresInSeconds: 900
+          },
+          vaultBootstrap: {
+            keyBase64: 'ZmFrZS12YXVsdC1rZXk='
+          },
+          syncServerTime: '2025-01-01T00:00:00.000Z'
+        },
+        errorMessage: null
+      }),
+      bootstrap: vi.fn().mockResolvedValue({
+        status: 'authenticated',
+        session: {
+          user: { id: 'user-1', email: 'user@example.com' },
+          tokens: {
+            accessToken: 'access',
+            refreshToken: 'refresh',
+            expiresInSeconds: 900
+          },
+          vaultBootstrap: {
+            keyBase64: 'ZmFrZS12YXVsdC1rZXk='
+          },
+          syncServerTime: '2025-01-01T00:00:00.000Z'
+        },
+        errorMessage: null
+      }),
+      beginBrowserLogin: vi.fn().mockResolvedValue(undefined),
+      logout: vi.fn().mockResolvedValue(undefined),
+      onEvent: vi.fn().mockReturnValue(() => undefined)
+    },
+    sync: {
+      bootstrap: vi.fn().mockResolvedValue({
+        status: 'ready',
+        lastSuccessfulSyncAt: '2025-01-01T00:00:00.000Z',
+        pendingPush: false,
+        errorMessage: null
+      }),
+      pushDirty: vi.fn().mockResolvedValue({
+        status: 'ready',
+        lastSuccessfulSyncAt: '2025-01-01T00:00:00.000Z',
+        pendingPush: false,
+        errorMessage: null
+      }),
+      status: vi.fn().mockResolvedValue({
+        status: 'ready',
+        lastSuccessfulSyncAt: '2025-01-01T00:00:00.000Z',
+        pendingPush: false,
+        errorMessage: null
+      }),
+      exportDecryptedSnapshot: vi.fn().mockResolvedValue({
+        groups: [],
+        hosts: [],
+        secrets: [],
+        knownHosts: [],
+        portForwards: []
+      })
+    },
     hosts: {
       list: vi.fn().mockResolvedValue([
         {
@@ -142,7 +206,10 @@ function createMockApi(): DesktopApi {
     },
     keychain: {
       list: vi.fn().mockResolvedValue([]),
-      removeForHost: vi.fn().mockResolvedValue(undefined)
+      load: vi.fn().mockResolvedValue(null),
+      remove: vi.fn().mockResolvedValue(undefined),
+      update: vi.fn().mockResolvedValue(undefined),
+      cloneForHost: vi.fn().mockResolvedValue(undefined)
     },
     files: {
       getHomeDirectory: vi.fn().mockResolvedValue('/Users/tester'),

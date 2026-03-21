@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from 'react';
-import type { AppTheme, HostRecord, UpdateState } from '@dolssh/shared';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import type { AppTheme, AuthState, HostRecord, LinkedHostSummary, UpdateState } from '@dolssh/shared';
 import { AppTitleBar } from './components/AppTitleBar';
 import { HomeNavigation } from './components/HomeNavigation';
 import { HostBrowser } from './components/HostBrowser';
@@ -7,8 +7,10 @@ import { HostDrawer } from './components/HostDrawer';
 import { KeychainPanel } from './components/KeychainPanel';
 import { KnownHostPromptDialog } from './components/KnownHostPromptDialog';
 import { KnownHostsPanel } from './components/KnownHostsPanel';
+import { LoginGate } from './components/LoginGate';
 import { LogsPanel } from './components/LogsPanel';
 import { PortForwardingPanel } from './components/PortForwardingPanel';
+import { SecretEditDialog, type SecretCredentialKind, type SecretEditDialogRequest } from './components/SecretEditDialog';
 import { SettingsPanel } from './components/SettingsPanel';
 import { SftpWorkspace } from './components/SftpWorkspace';
 import { TerminalWorkspace } from './components/TerminalWorkspace';
@@ -25,6 +27,15 @@ function resolveTheme(theme: AppTheme, prefersDark: boolean): 'light' | 'dark' {
   return prefersDark ? 'dark' : 'light';
 }
 
+function toLinkedHostSummary(host: HostRecord): LinkedHostSummary {
+  return {
+    id: host.id,
+    label: host.label,
+    hostname: host.hostname,
+    username: host.username
+  };
+}
+
 function createDefaultUpdateState(): UpdateState {
   return {
     enabled: false,
@@ -39,9 +50,20 @@ function createDefaultUpdateState(): UpdateState {
 }
 
 export function App() {
+  const [authState, setAuthState] = useState<AuthState>({
+    status: 'loading',
+    session: null,
+    errorMessage: null
+  });
+  const [isSyncBootstrapping, setIsSyncBootstrapping] = useState(false);
+  const [syncBootstrapError, setSyncBootstrapError] = useState<string | null>(null);
+  const [hydratedSessionUserId, setHydratedSessionUserId] = useState<string | null>(null);
   const [selectedHostId, setSelectedHostId] = useState<string | null>(null);
   const [updateState, setUpdateState] = useState<UpdateState>(createDefaultUpdateState);
   const [isUpdateInstallConfirmOpen, setIsUpdateInstallConfirmOpen] = useState(false);
+  const [secretEditRequest, setSecretEditRequest] = useState<SecretEditDialogRequest | null>(null);
+  const authBootstrapStartedRef = useRef(false);
+  const activeHydrationUserIdRef = useRef<string | null>(null);
   const hosts = useAppStore((state) => state.hosts);
   const groups = useAppStore((state) => state.groups);
   const tabs = useAppStore((state) => state.tabs);
@@ -68,6 +90,7 @@ export function App() {
   const navigateGroup = useAppStore((state) => state.navigateGroup);
   const createGroup = useAppStore((state) => state.createGroup);
   const saveHost = useAppStore((state) => state.saveHost);
+  const moveHostToGroup = useAppStore((state) => state.moveHostToGroup);
   const removeHost = useAppStore((state) => state.removeHost);
   const connectHost = useAppStore((state) => state.connectHost);
   const disconnectTab = useAppStore((state) => state.disconnectTab);
@@ -80,6 +103,8 @@ export function App() {
   const removeKnownHost = useAppStore((state) => state.removeKnownHost);
   const clearLogs = useAppStore((state) => state.clearLogs);
   const removeKeychainSecret = useAppStore((state) => state.removeKeychainSecret);
+  const updateKeychainSecret = useAppStore((state) => state.updateKeychainSecret);
+  const cloneKeychainSecretForHost = useAppStore((state) => state.cloneKeychainSecretForHost);
   const acceptPendingHostKeyPrompt = useAppStore((state) => state.acceptPendingHostKeyPrompt);
   const dismissPendingHostKeyPrompt = useAppStore((state) => state.dismissPendingHostKeyPrompt);
   const handleCoreEvent = useAppStore((state) => state.handleCoreEvent);
@@ -108,17 +133,69 @@ export function App() {
   const retryTransfer = useAppStore((state) => state.retryTransfer);
   const [prefersDark, setPrefersDark] = useState(() => window.matchMedia('(prefers-color-scheme: dark)').matches);
 
+  async function hydrateAuthenticatedWorkspace(nextState: AuthState): Promise<void> {
+    if (nextState.status !== 'authenticated' || !nextState.session) {
+      return;
+    }
+    const userId = nextState.session.user.id;
+    if (hydratedSessionUserId === userId || activeHydrationUserIdRef.current === userId) {
+      return;
+    }
+
+    activeHydrationUserIdRef.current = userId;
+    setIsSyncBootstrapping(true);
+    setSyncBootstrapError(null);
+    try {
+      await window.dolssh.sync.bootstrap();
+      await bootstrap();
+      setHydratedSessionUserId(userId);
+    } catch (error) {
+      setHydratedSessionUserId(null);
+      setSyncBootstrapError(error instanceof Error ? error.message : '초기 동기화에 실패했습니다.');
+    } finally {
+      activeHydrationUserIdRef.current = null;
+      setIsSyncBootstrapping(false);
+    }
+  }
+
   useEffect(() => {
-    void bootstrap();
     const offCore = window.dolssh.ssh.onEvent(handleCoreEvent);
     const offTransfer = window.dolssh.sftp.onTransferEvent(handleTransferEvent);
     const offForward = window.dolssh.portForwards.onEvent(handlePortForwardEvent);
+    const offAuth = window.dolssh.auth.onEvent((state) => {
+      setAuthState(state);
+      if (state.status === 'authenticated') {
+        void hydrateAuthenticatedWorkspace(state);
+        return;
+      }
+      if (state.status === 'unauthenticated' || state.status === 'error') {
+        setHydratedSessionUserId(null);
+        setSyncBootstrapError(null);
+        activeHydrationUserIdRef.current = null;
+      }
+    });
+
     return () => {
       offCore();
       offTransfer();
       offForward();
+      offAuth();
     };
-  }, [bootstrap, handleCoreEvent, handleTransferEvent, handlePortForwardEvent]);
+  }, [bootstrap, handleCoreEvent, handleTransferEvent, handlePortForwardEvent, hydratedSessionUserId]);
+
+  useEffect(() => {
+    if (authBootstrapStartedRef.current) {
+      return;
+    }
+    authBootstrapStartedRef.current = true;
+
+    void window.dolssh.auth.bootstrap().then((state) => {
+      setAuthState(state);
+      if (state.status === 'authenticated') {
+        void hydrateAuthenticatedWorkspace(state);
+      }
+    });
+  }, [bootstrap, hydratedSessionUserId]);
 
   useEffect(() => {
     let isMounted = true;
@@ -173,6 +250,40 @@ export function App() {
   const hasActivePortForwards = portForwardRuntimes.some((runtime) => runtime.status === 'starting' || runtime.status === 'running');
   const hasBlockingUpdateInstall = tabs.length > 0 || hasActiveTransfers || hasActivePortForwards;
 
+  const isAuthReady = authState.status === 'authenticated' && hydratedSessionUserId === authState.session?.user.id && !isSyncBootstrapping;
+  const needsSyncRetry = authState.status === 'authenticated' && !isSyncBootstrapping && Boolean(syncBootstrapError);
+
+  if (!isAuthReady) {
+    return (
+      <div className="app-frame app-frame--login">
+        <LoginGate
+          authState={
+            needsSyncRetry
+              ? {
+                  ...authState,
+                  errorMessage: syncBootstrapError
+                }
+              : authState
+          }
+          isSyncBootstrapping={isSyncBootstrapping}
+          onBeginLogin={async () => {
+            await window.dolssh.auth.beginBrowserLogin();
+          }}
+          actionLabel={needsSyncRetry ? '동기화 다시 시도' : undefined}
+          onAction={
+            needsSyncRetry
+              ? async () => {
+                  if (authState.status === 'authenticated') {
+                    await hydrateAuthenticatedWorkspace(authState);
+                  }
+                }
+              : undefined
+          }
+        />
+      </div>
+    );
+  }
+
   function handleSelectHost(hostId: string) {
     setSelectedHostId(hostId);
     if (hostDrawer.mode === 'edit') {
@@ -204,6 +315,54 @@ export function App() {
     }
 
     await runUpdaterAction(() => window.dolssh.updater.installAndRestart());
+  }
+
+  function openHostSecretEditor(secretRef: string, credentialKind: SecretCredentialKind) {
+    if (!currentHost) {
+      return;
+    }
+
+    const entry = keychainEntries.find((item) => item.secretRef === secretRef);
+    setSecretEditRequest({
+      source: 'host',
+      secretRef,
+      label: entry?.label ?? currentHost.label,
+      credentialKind,
+      linkedHosts: hosts.filter((host) => host.secretRef === secretRef).map(toLinkedHostSummary),
+      initialMode: 'clone-for-host',
+      initialHostId: currentHost.id
+    });
+  }
+
+  function openKeychainSecretEditor(secretRef: string, credentialKind: SecretCredentialKind) {
+    const entry = keychainEntries.find((item) => item.secretRef === secretRef);
+    if (!entry) {
+      return;
+    }
+
+    setSecretEditRequest({
+      source: 'keychain',
+      secretRef,
+      label: entry.label,
+      credentialKind,
+      linkedHosts: hosts.filter((host) => host.secretRef === secretRef).map(toLinkedHostSummary),
+      initialMode: 'update-shared',
+      initialHostId: null
+    });
+  }
+
+  async function handleRemoveSecret(secretRef: string) {
+    const entry = keychainEntries.find((item) => item.secretRef === secretRef);
+    const linkedHostCount = entry?.linkedHostCount ?? 0;
+    const confirmed = window.confirm(
+      linkedHostCount > 0
+        ? `이 secret을 삭제하면 ${linkedHostCount}개 호스트와의 키체인 연결이 해제됩니다. 호스트 자체는 삭제되지 않습니다. 계속할까요?`
+        : '이 secret을 삭제할까요?'
+    );
+    if (!confirmed) {
+      return;
+    }
+    await removeKeychainSecret(secretRef);
   }
 
   return (
@@ -252,6 +411,8 @@ export function App() {
                 }}
                 onSelectHost={handleSelectHost}
                 onEditHost={handleEditHost}
+                onMoveHostToGroup={moveHostToGroup}
+                onRemoveHost={removeHost}
                 onOpenSession={activateSession}
                 onConnectHost={async (hostId) => {
                   setSelectedHostId(hostId);
@@ -276,13 +437,18 @@ export function App() {
 
             {homeSection === 'logs' ? <LogsPanel logs={activityLogs} onClear={clearLogs} /> : null}
 
-            {homeSection === 'keychain' ? <KeychainPanel entries={keychainEntries} onRemoveSecret={removeKeychainSecret} /> : null}
+            {homeSection === 'keychain' ? (
+              <KeychainPanel entries={keychainEntries} onRemoveSecret={handleRemoveSecret} onEditSecret={openKeychainSecretEditor} />
+            ) : null}
 
             {homeSection === 'settings' ? (
               <SettingsPanel
                 settings={settings}
                 onChangeTheme={async (theme) => {
                   await updateSettings({ theme });
+                }}
+                onLogout={async () => {
+                  await window.dolssh.auth.logout();
                 }}
               />
             ) : null}
@@ -292,11 +458,13 @@ export function App() {
             open={isDrawerOpen}
             mode={hostDrawer.mode === 'create' ? 'create' : 'edit'}
             host={currentHost}
+            keychainEntries={keychainEntries}
             defaultGroupPath={hostDrawer.mode === 'create' ? hostDrawer.defaultGroupPath : currentGroupPath}
             onClose={closeHostDrawer}
             onSubmit={async (draft, secrets) => {
               await saveHost(hostDrawer.mode === 'edit' ? currentHost?.id ?? null : null, draft, secrets);
             }}
+            onEditExistingSecret={openHostSecretEditor}
             onDelete={
               currentHost
                 ? async () => {
@@ -342,6 +510,21 @@ export function App() {
       </div>
 
       <KnownHostPromptDialog pending={pendingHostKeyPrompt} onAccept={acceptPendingHostKeyPrompt} onCancel={dismissPendingHostKeyPrompt} />
+
+      <SecretEditDialog
+        request={secretEditRequest}
+        onClose={() => setSecretEditRequest(null)}
+        onSubmit={async (input) => {
+          if (input.mode === 'update-shared') {
+            await updateKeychainSecret(input.secretRef, input.secrets);
+            return;
+          }
+          if (!input.hostId) {
+            throw new Error('대상 호스트를 선택해 주세요.');
+          }
+          await cloneKeychainSecretForHost(input.hostId, input.secretRef, input.secrets);
+        }}
+      />
 
       {isUpdateInstallConfirmOpen ? (
         <div className="modal-backdrop">

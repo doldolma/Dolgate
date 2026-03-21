@@ -5,6 +5,12 @@ module.exports = {
   productName: 'dolssh',
   electronVersion: '35.0.0',
   artifactName: '${productName}-${version}-${os}-${arch}.${ext}',
+  protocols: [
+    {
+      name: 'dolssh',
+      schemes: ['dolssh']
+    }
+  ],
   directories: {
     output: 'release/dist'
   },

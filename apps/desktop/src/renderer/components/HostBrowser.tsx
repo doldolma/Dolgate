@@ -1,4 +1,5 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { createPortal } from 'react-dom';
 import Fuse from 'fuse.js';
 import type { GroupRecord, HostRecord, TerminalTab } from '@dolssh/shared';
 
@@ -15,6 +16,8 @@ interface HostBrowserProps {
   onNavigateGroup: (path: string | null) => void;
   onSelectHost: (hostId: string) => void;
   onEditHost: (hostId: string) => void;
+  onMoveHostToGroup: (hostId: string, groupPath: string | null) => Promise<void>;
+  onRemoveHost: (hostId: string) => Promise<void>;
   onConnectHost: (hostId: string) => Promise<void>;
   onOpenSession: (sessionId: string) => void;
 }
@@ -124,12 +127,41 @@ export function HostBrowser({
   onNavigateGroup,
   onSelectHost,
   onEditHost,
+  onMoveHostToGroup,
+  onRemoveHost,
   onConnectHost,
   onOpenSession
 }: HostBrowserProps) {
   const [isGroupModalOpen, setIsGroupModalOpen] = useState(false);
   const [newGroupName, setNewGroupName] = useState('');
   const [groupError, setGroupError] = useState<string | null>(null);
+  const [selectedGroupPath, setSelectedGroupPath] = useState<string | null>(null);
+  const [contextMenu, setContextMenu] = useState<{ hostId: string; x: number; y: number } | null>(null);
+  const [dragTargetGroupPath, setDragTargetGroupPath] = useState<string | null>(null);
+
+  useEffect(() => {
+    setSelectedGroupPath(null);
+  }, [currentGroupPath]);
+
+  useEffect(() => {
+    if (!contextMenu) {
+      return;
+    }
+
+    const close = () => {
+      setContextMenu(null);
+    };
+
+    window.addEventListener('click', close);
+    window.addEventListener('scroll', close, true);
+    window.addEventListener('resize', close);
+
+    return () => {
+      window.removeEventListener('click', close);
+      window.removeEventListener('scroll', close, true);
+      window.removeEventListener('resize', close);
+    };
+  }, [contextMenu]);
 
   // 현재 그룹 안에서는 그 하위 트리만 검색하고, 루트에서는 전체 호스트를 그대로 보여준다.
   const scopedHosts = useMemo(
@@ -170,6 +202,12 @@ export function HostBrowser({
   }, [currentGroupPath]);
 
   const emptyMessage = hosts.length === 0 ? '아직 등록된 호스트가 없습니다.' : searchQuery ? '검색 결과가 없습니다.' : '이 위치에는 아직 호스트가 없습니다.';
+  const contextMenuStyle = contextMenu
+    ? {
+        left: `${Math.max(12, Math.min(contextMenu.x, window.innerWidth - 172))}px`,
+        top: `${Math.max(12, Math.min(contextMenu.y, window.innerHeight - 72))}px`
+      }
+    : null;
 
   return (
     <div className="host-browser">
@@ -237,12 +275,38 @@ export function HostBrowser({
             visibleGroups.map((group) => (
               <article
                 key={group.path}
-                className="group-card group-card--interactive"
-                onClick={() => onNavigateGroup(group.path)}
+                className={`group-card group-card--interactive ${selectedGroupPath === group.path ? 'active' : ''} ${dragTargetGroupPath === group.path ? 'drop-target' : ''}`}
+                onClick={() => setSelectedGroupPath(group.path)}
+                onDoubleClick={() => onNavigateGroup(group.path)}
+                onDragOver={(event) => {
+                  event.preventDefault();
+                  event.dataTransfer.dropEffect = 'move';
+                  setDragTargetGroupPath(group.path);
+                }}
+                onDragLeave={(event) => {
+                  const nextTarget = event.relatedTarget;
+                  if (nextTarget instanceof Node && event.currentTarget.contains(nextTarget)) {
+                    return;
+                  }
+                  setDragTargetGroupPath((current) => (current === group.path ? null : current));
+                }}
+                onDrop={async (event) => {
+                  event.preventDefault();
+                  const hostId = event.dataTransfer.getData('application/x-dolssh-host-id');
+                  setDragTargetGroupPath(null);
+                  if (!hostId) {
+                    return;
+                  }
+                  await onMoveHostToGroup(hostId, group.path);
+                }}
                 role="button"
                 tabIndex={0}
                 onKeyDown={(event) => {
-                  if (event.key === 'Enter' || event.key === ' ') {
+                  if (event.key === ' ') {
+                    event.preventDefault();
+                    setSelectedGroupPath(group.path);
+                  }
+                  if (event.key === 'Enter') {
                     event.preventDefault();
                     onNavigateGroup(group.path);
                   }
@@ -286,13 +350,35 @@ export function HostBrowser({
                 <article
                   key={host.id}
                   className={`host-browser-card ${selectedHostId === host.id ? 'active' : ''}`}
-                  onClick={() => onSelectHost(host.id)}
+                  draggable
+                  onClick={() => {
+                    setContextMenu(null);
+                    onSelectHost(host.id);
+                  }}
+                  onDragStart={(event) => {
+                    onSelectHost(host.id);
+                    event.dataTransfer.effectAllowed = 'move';
+                    event.dataTransfer.setData('application/x-dolssh-host-id', host.id);
+                    event.dataTransfer.setData('text/plain', host.label);
+                  }}
+                  onDragEnd={() => {
+                    setDragTargetGroupPath(null);
+                  }}
                   onDoubleClick={async () => {
                     if (currentTab) {
                       onOpenSession(currentTab.sessionId);
                       return;
                     }
                     await onConnectHost(host.id);
+                  }}
+                  onContextMenu={(event) => {
+                    event.preventDefault();
+                    onSelectHost(host.id);
+                    setContextMenu({
+                      hostId: host.id,
+                      x: event.clientX,
+                      y: event.clientY
+                    });
                   }}
                   role="button"
                   tabIndex={0}
@@ -334,6 +420,32 @@ export function HostBrowser({
           )}
         </div>
       </div>
+
+      {contextMenu ? (
+        createPortal(
+          <div className="context-menu" style={contextMenuStyle ?? undefined} role="menu">
+            <button
+              type="button"
+              className="context-menu__item context-menu__item--danger"
+              onClick={async () => {
+                const targetHost = hosts.find((host) => host.id === contextMenu.hostId);
+                setContextMenu(null);
+                if (!targetHost) {
+                  return;
+                }
+                const confirmed = window.confirm(`"${targetHost.label}" 호스트를 삭제할까요? 연결된 키체인 항목은 유지됩니다.`);
+                if (!confirmed) {
+                  return;
+                }
+                await onRemoveHost(targetHost.id);
+              }}
+            >
+              삭제
+            </button>
+          </div>,
+          document.body
+        )
+      ) : null}
 
       {isGroupModalOpen ? (
         <div className="home-modal-backdrop" role="presentation">

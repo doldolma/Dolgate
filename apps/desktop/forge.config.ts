@@ -7,10 +7,11 @@ import { fileURLToPath } from 'node:url';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 function resolveExtraResources(): string[] {
+  const extraResources = [path.resolve(__dirname, 'config')];
   const targetPlatform = process.env.DOLSSH_TARGET_PLATFORM;
   const targetArch = process.env.DOLSSH_TARGET_ARCH;
   if (!targetPlatform || !targetArch) {
-    return [];
+    return extraResources;
   }
 
   const binDir = path.resolve(__dirname, `release/resources/${targetPlatform}/${targetArch}/bin`);
@@ -18,7 +19,8 @@ function resolveExtraResources(): string[] {
     throw new Error(`Bundled ssh-core resource directory not found: ${binDir}`);
   }
 
-  return [binDir];
+  extraResources.push(binDir);
+  return extraResources;
 }
 
 function resolveAppIcon(): string {
@@ -41,6 +43,12 @@ const config = {
     prune: false,
     executableName: 'dolssh',
     name: 'dolssh',
+    protocols: [
+      {
+        name: 'dolssh',
+        schemes: ['dolssh']
+      }
+    ],
     icon: resolveAppIcon(),
     ignore: (file: string) => {
       if (!file) {
