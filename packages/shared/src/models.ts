@@ -1,5 +1,6 @@
 export type AuthType = 'password' | 'privateKey';
 export type AppTheme = 'system' | 'light' | 'dark';
+export type UpdateStatus = 'idle' | 'checking' | 'available' | 'downloading' | 'downloaded' | 'upToDate' | 'error';
 export type SftpPaneId = 'left' | 'right';
 export type SftpEndpointKind = 'local' | 'remote';
 export type FileEntryKind = 'folder' | 'file' | 'symlink' | 'unknown';
@@ -51,7 +52,40 @@ export interface GroupRecord {
 // AppSettings는 사용자의 로컬 환경 설정을 표현한다.
 export interface AppSettings {
   theme: AppTheme;
+  dismissedUpdateVersion?: string | null;
   updatedAt: string;
+}
+
+// UpdateReleaseInfo는 GitHub Releases에서 읽어온 배포 메타데이터를 정규화한 형태다.
+export interface UpdateReleaseInfo {
+  version: string;
+  releaseName?: string | null;
+  releaseNotes?: string | null;
+  publishedAt?: string | null;
+}
+
+// UpdateProgressInfo는 다운로드 진행률을 UI가 그대로 렌더링하기 위한 뷰 모델이다.
+export interface UpdateProgressInfo {
+  percent: number;
+  bytesPerSecond: number;
+  transferred: number;
+  total: number;
+}
+
+// UpdateState는 메인 프로세스 auto updater의 현재 상태 스냅샷이다.
+export interface UpdateState {
+  enabled: boolean;
+  status: UpdateStatus;
+  currentVersion: string;
+  release?: UpdateReleaseInfo | null;
+  progress?: UpdateProgressInfo | null;
+  checkedAt?: string | null;
+  dismissedVersion?: string | null;
+  errorMessage?: string | null;
+}
+
+export interface UpdateEvent {
+  state: UpdateState;
 }
 
 // PortForwardRuleRecord는 사용자가 저장한 포워딩 규칙 자체를 표현한다.

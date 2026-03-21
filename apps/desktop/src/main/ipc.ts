@@ -29,6 +29,7 @@ import {
 import { CoreManager } from './core-manager';
 import { LocalFileService } from './file-service';
 import { SecretStore } from './secret-store';
+import { UpdateService } from './update-service';
 
 async function persistSecret(
   secretStore: SecretStore,
@@ -124,7 +125,8 @@ export function registerIpcHandlers(
   activityLogs: ActivityLogRepository,
   secretMetadata: SecretMetadataRepository,
   secretStore: SecretStore,
-  coreManager: CoreManager
+  coreManager: CoreManager,
+  updater: UpdateService
 ): void {
   const localFiles = new LocalFileService();
 
@@ -391,6 +393,24 @@ export function registerIpcHandlers(
   });
 
   ipcMain.handle(ipcChannels.tabs.list, async () => coreManager.listTabs());
+
+  ipcMain.handle(ipcChannels.updater.getState, async () => updater.getState());
+
+  ipcMain.handle(ipcChannels.updater.check, async () => {
+    await updater.check();
+  });
+
+  ipcMain.handle(ipcChannels.updater.download, async () => {
+    await updater.download();
+  });
+
+  ipcMain.handle(ipcChannels.updater.installAndRestart, async () => {
+    await updater.installAndRestart();
+  });
+
+  ipcMain.handle(ipcChannels.updater.dismissAvailable, async (_event, version: string) => {
+    await updater.dismissAvailable(version);
+  });
 
   ipcMain.handle(ipcChannels.settings.get, async () => settings.get());
 

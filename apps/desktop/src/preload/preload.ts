@@ -14,6 +14,7 @@ import type {
   SftpListInput,
   SftpMkdirInput,
   SftpRenameInput,
+  UpdateEvent,
   TransferJobEvent,
   TransferStartInput
 } from '@dolssh/shared';
@@ -24,6 +25,7 @@ const sessionBacklog = new Map<string, Uint8Array[]>();
 const backlogBytes = new Map<string, number>();
 const transferListeners = new Set<(event: TransferJobEvent) => void>();
 const portForwardListeners = new Set<(event: PortForwardRuntimeEvent) => void>();
+const updateListeners = new Set<(event: UpdateEvent) => void>();
 const MAX_SESSION_BACKLOG_BYTES = 1024 * 1024;
 
 function cloneChunk(chunk: Uint8Array): Uint8Array {
@@ -75,6 +77,12 @@ ipcRenderer.on(ipcChannels.sftp.transferEvent, (_event, payload: TransferJobEven
 
 ipcRenderer.on(ipcChannels.portForwards.event, (_event, payload: PortForwardRuntimeEvent) => {
   for (const listener of portForwardListeners) {
+    listener(payload);
+  }
+});
+
+ipcRenderer.on(ipcChannels.updater.event, (_event, payload: UpdateEvent) => {
+  for (const listener of updateListeners) {
     listener(payload);
   }
 });
@@ -132,6 +140,19 @@ const api: DesktopApi = {
   },
   tabs: {
     list: () => ipcRenderer.invoke(ipcChannels.tabs.list)
+  },
+  updater: {
+    getState: () => ipcRenderer.invoke(ipcChannels.updater.getState),
+    check: () => ipcRenderer.invoke(ipcChannels.updater.check),
+    download: () => ipcRenderer.invoke(ipcChannels.updater.download),
+    installAndRestart: () => ipcRenderer.invoke(ipcChannels.updater.installAndRestart),
+    dismissAvailable: (version: string) => ipcRenderer.invoke(ipcChannels.updater.dismissAvailable, version),
+    onEvent: (listener) => {
+      updateListeners.add(listener);
+      return () => {
+        updateListeners.delete(listener);
+      };
+    }
   },
   settings: {
     get: () => ipcRenderer.invoke(ipcChannels.settings.get),

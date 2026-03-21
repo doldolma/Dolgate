@@ -24,6 +24,14 @@ export const ipcChannels = {
   tabs: {
     list: 'tabs:list'
   },
+  updater: {
+    getState: 'updater:get-state',
+    check: 'updater:check',
+    download: 'updater:download',
+    installAndRestart: 'updater:install-and-restart',
+    dismissAvailable: 'updater:dismiss-available',
+    event: 'updater:event'
+  },
   settings: {
     get: 'settings:get',
     update: 'settings:update'

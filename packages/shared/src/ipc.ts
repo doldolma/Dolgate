@@ -20,7 +20,9 @@ import type {
   TerminalTab,
   TransferJob,
   TransferJobEvent,
-  TransferStartInput
+  TransferStartInput,
+  UpdateEvent,
+  UpdateState
 } from './models';
 
 // Electron main과 Go SSH 코어가 주고받는 명령/이벤트의 집합이다.
@@ -203,6 +205,14 @@ export interface DesktopApi {
   };
   tabs: {
     list: () => Promise<TerminalTab[]>;
+  };
+  updater: {
+    getState: () => Promise<UpdateState>;
+    check: () => Promise<void>;
+    download: () => Promise<void>;
+    installAndRestart: () => Promise<void>;
+    dismissAvailable: (version: string) => Promise<void>;
+    onEvent: (listener: (event: UpdateEvent) => void) => () => void;
   };
   settings: {
     get: () => Promise<AppSettings>;

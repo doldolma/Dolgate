@@ -3,9 +3,10 @@
 ## 한눈에 보기
 
 - 데스크톱 앱은 Electron이 뜰 때 `ssh-core`를 함께 실행합니다.
-- `ssh-core`는 현재 Electron `main` 프로세스가 child process로 자동 실행합니다.
+- `ssh-core`는 Electron `main` 프로세스가 child process로 자동 실행합니다.
 - sync API는 데스크톱과 별개로 독립 배포합니다.
-- 현재 저장소는 로컬 개발과 로컬 패키징까지는 바로 가능하지만, 데스크톱 앱의 “완전한 프로덕션 배포”를 위해서는 `ssh-core` 바이너리 번들링이 한 단계 더 필요합니다.
+- 로컬 개발에서는 `go run ./cmd/ssh-core`, 릴리즈 빌드에서는 번들된 `ssh-core` 바이너리를 사용합니다.
+- 자동 업데이트는 공개 GitHub Releases를 기준으로 동작하고, 릴리즈는 브라우저 로그인 후 자동 업로드까지 지원합니다.
 
 ## ssh-core는 언제 실행되나
 
@@ -26,23 +27,21 @@
 
 즉, 사용자가 별도로 `ssh-core`를 켤 필요는 없습니다.
 
-## 중요한 현재 제약
+## 개발 모드와 릴리즈 모드 차이
 
-지금 `ssh-core` 실행 방식은 `go run ./cmd/ssh-core`입니다.  
-그래서 현재 패키징 결과물은 “개발 머신에서의 로컬 패키징”에는 적합하지만, 일반 사용자에게 바로 배포하는 완전한 self-contained 앱은 아닙니다.
+개발 모드:
 
-현재 구조가 의미하는 바:
+- `npm run dev`
+- `CoreManager`가 `go run ./cmd/ssh-core`를 실행
+- auto update 비활성
 
-- 로컬 개발 환경에서는 잘 동작합니다.
-- Go 툴체인과 저장소 소스가 있는 환경에서는 패키징 앱 검증도 가능합니다.
-- 하지만 일반 배포용 데스크톱 앱이라면 target OS/arch용 `ssh-core` 실행 파일을 미리 빌드해 앱 리소스에 포함해야 합니다.
+릴리즈 모드:
 
-권장 다음 단계:
-
-1. `services/ssh-core`를 플랫폼별로 미리 빌드
-2. Electron 앱 리소스(`resources/bin` 등)에 포함
-3. `CoreManager`가 `go run` 대신 번들된 바이너리를 실행하도록 변경
-4. Electron Forge maker, 코드 서명, macOS notarization/Windows signing 설정 추가
+- `npm run release:dist:mac` 또는 `npm run release:dist:win`
+- 릴리즈 스크립트가 먼저 `ssh-core`를 타깃 플랫폼 바이너리로 빌드
+- Electron Forge가 prepackaged 앱을 만들고, electron-builder가 배포용 아티팩트와 업데이트 메타데이터를 생성
+- 패키지 앱은 `process.resourcesPath/bin/ssh-core(.exe)`를 실행
+- auto update 활성
 
 ## 사전 요구 사항
 
@@ -119,9 +118,101 @@ npm run build --workspace @dolssh/desktop
 - 플랫폼별 installer 생성
 - 코드 서명
 - notarization
-- `ssh-core` 바이너리 번들링
 
-즉, 현재 `npm run build --workspace @dolssh/desktop`은 “릴리스 아티팩트의 초안”에 가깝습니다.
+즉, 현재 `npm run build --workspace @dolssh/desktop`은 개발용 패키지 검증에 가깝고, 실제 배포는 아래 릴리즈 명령을 사용합니다.
+
+## 릴리즈 빌드
+
+### macOS universal
+
+```bash
+npm run release:dist:mac
+```
+
+생성 흐름:
+
+1. `ssh-core`를 `darwin/amd64`, `darwin/arm64`로 각각 빌드
+2. `lipo`로 universal `ssh-core` 생성
+3. Electron Forge가 universal prepackaged `.app` 생성
+4. electron-builder가 `dmg`, `zip`, 업데이트 메타데이터 생성
+
+### Windows x64
+
+```bash
+npm run release:dist:win
+```
+
+생성 흐름:
+
+1. `ssh-core.exe`를 `windows/amd64`로 크로스 빌드
+2. Windows 대상 네이티브 모듈 재빌드 시도
+3. Electron Forge가 `win32/x64` prepackaged 앱 생성
+4. electron-builder가 `nsis`, `latest.yml` 생성
+
+### 두 플랫폼을 순서대로 시도
+
+```bash
+npm run release:dist:mac
+npm run release:dist:win
+```
+
+참고:
+
+- macOS에서 Windows 크로스빌드는 `better-sqlite3`, `keytar` 때문에 환경 의존성이 큽니다.
+- 실패 시 최후의 fallback은 Windows 전용 빌드 머신 또는 VM입니다.
+
+## GitHub Releases 업로드
+
+브라우저 로그인 기반 publish를 쓰려면 GitHub OAuth App을 한 번 설정해야 합니다.
+
+1. GitHub에서 OAuth App을 등록합니다.
+2. OAuth App 설정에서 `Device Flow`를 활성화합니다.
+3. [apps/desktop/scripts/github-oauth-config.cjs](/Users/heodoyeong/develop/dolsh/apps/desktop/scripts/github-oauth-config.cjs)의 `DEFAULT_GITHUB_OAUTH_CLIENT_ID` 값을 실제 client ID로 바꿉니다.
+
+참고:
+
+- access token은 이번 실행 동안만 메모리에 유지되고, 파일/SQLite/키체인에는 저장하지 않습니다.
+- 필요하면 로컬 개발용으로만 `DOLSSH_GITHUB_OAUTH_CLIENT_ID` 환경변수 override를 사용할 수 있지만, 기본 흐름은 브라우저 로그인만 사용하는 방식입니다.
+
+### 자동 업로드
+
+macOS만 업로드:
+
+```bash
+npm run release:mac
+```
+
+Windows만 업로드:
+
+```bash
+npm run release:win
+```
+
+두 플랫폼 모두 업로드:
+
+```bash
+npm run release:all
+```
+
+자동 업로드 명령은 다음을 수행합니다.
+
+1. GitHub Device Flow로 브라우저 로그인을 시작합니다.
+2. 사용자가 브라우저에서 `https://github.com/login/device`에 코드 입력 후 승인을 완료합니다.
+3. `ssh-core`와 앱 아티팩트를 빌드합니다.
+4. `doldolma/dolssh` GitHub Release를 현재 버전 기준으로 생성하거나 갱신합니다.
+5. 기존과 같은 이름의 asset은 교체하고, 새 아티팩트와 업데이트 메타데이터를 업로드합니다.
+
+`npm run release:all`은 로그인 1회 후 `mac -> win` 순서로 이어서 수행합니다.
+
+### 수동 업로드를 유지하고 싶을 때
+
+1. `apps/desktop/package.json`의 버전을 올립니다.
+2. `npm run release:dist:mac`, `npm run release:dist:win`으로 아티팩트를 생성합니다.
+3. GitHub에서 `vX.Y.Z` 태그 기준 Release를 직접 만듭니다.
+4. 아래 파일을 릴리즈에 수동 업로드합니다.
+   - macOS: `.dmg`, `.zip`, `latest-mac.yml`
+   - Windows: `.exe`, `latest.yml`
+5. 설치된 앱에서 우측 상단 벨 아이콘으로 업데이트 확인/다운로드/재시작 적용을 검증합니다.
 
 ## ssh-core 단독 빌드
 
@@ -197,23 +288,26 @@ JWT_SECRET=change-me-in-production \
 - 운영에서는 SQLite보다 MySQL을 권장합니다.
 - 운영에서는 반드시 HTTPS 뒤에 두고, JWT secret은 강한 값으로 교체해야 합니다.
 
+## 데스크톱 자동 업데이트 전략
+
+- 업데이트 소스는 공개 GitHub Releases `doldolma/dolssh`
+- 앱은 시작 후 지연 체크와 수동 체크를 모두 지원
+- 자동 다운로드/자동 설치는 하지 않음
+- 사용자가 벨 아이콘 팝오버에서 `다운로드`를 눌러야 내려받기 시작
+- 다운로드 완료 후 `재시작 후 업데이트`를 눌러야 적용
+- 활성 SSH 세션, 진행 중인 전송, 포트 포워딩이 있으면 재시작 전 확인 모달을 띄움
+
 ## 권장 배포 시나리오
 
 ### 데스크톱 앱
 
-현재 바로 가능한 범위:
+현재 기준 권장 순서:
 
-1. 로컬에서 Electron 앱 패키징
-2. 개발 머신에서 실행 검증
-
-실제 사용자 배포 전 권장 작업:
-
-1. `ssh-core`를 타깃 플랫폼별로 미리 빌드
-2. Electron 앱에 함께 번들
-3. `CoreManager`가 번들 바이너리를 실행하도록 변경
-4. macOS notarization / Windows signing 설정
-5. Electron Forge maker 설정으로 `.dmg`, `.zip`, `.exe`, `.AppImage` 등 릴리스 형식 추가
-6. CI에서 플랫폼별 아티팩트 생성
+1. macOS universal 릴리즈 빌드
+2. `npm run release:mac`으로 GitHub Release 업로드
+3. 설치 앱에서 auto update 검증
+4. 동일 구조로 Windows x64 릴리즈 검증
+5. Apple notarization과 Windows code signing 자격을 실제 배포 환경에 맞게 정착
 
 ### sync API
 
@@ -234,4 +328,5 @@ JWT_SECRET=change-me-in-production \
 - `JWT_SECRET` 운영값 적용
 - sync API를 HTTPS 뒤에 배치
 - 데스크톱 앱에 번들된 `ssh-core`가 타깃 플랫폼에서 실제 실행되는지 확인
-- 호스트 키 검증을 `InsecureIgnoreHostKey()`에서 known_hosts 기반으로 교체
+- GitHub Release 태그와 앱 버전이 일치하는지 확인
+- 설치 앱의 벨 아이콘에서 업데이트 감지/다운로드/재시작 적용을 검증

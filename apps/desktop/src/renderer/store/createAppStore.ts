@@ -158,6 +158,7 @@ type TabStatus = TerminalTab['status'];
 
 const defaultSettings: AppSettings = {
   theme: 'system',
+  dismissedUpdateVersion: null,
   updatedAt: new Date(0).toISOString()
 };
 

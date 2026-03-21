@@ -59,13 +59,32 @@ function createMockApi(): DesktopApi {
     tabs: {
       list: vi.fn().mockResolvedValue([])
     },
+    updater: {
+      getState: vi.fn().mockResolvedValue({
+        enabled: false,
+        status: 'idle',
+        currentVersion: '0.1.0',
+        dismissedVersion: null,
+        release: null,
+        progress: null,
+        checkedAt: null,
+        errorMessage: null
+      }),
+      check: vi.fn().mockResolvedValue(undefined),
+      download: vi.fn().mockResolvedValue(undefined),
+      installAndRestart: vi.fn().mockResolvedValue(undefined),
+      dismissAvailable: vi.fn().mockResolvedValue(undefined),
+      onEvent: vi.fn()
+    },
     settings: {
       get: vi.fn().mockResolvedValue({
         theme: 'system',
+        dismissedUpdateVersion: null,
         updatedAt: '2025-01-01T00:00:00.000Z'
       }),
       update: vi.fn().mockImplementation(async (input) => ({
         theme: input.theme ?? 'system',
+        dismissedUpdateVersion: input.dismissedUpdateVersion ?? null,
         updatedAt: '2025-01-02T00:00:00.000Z'
       }))
     },

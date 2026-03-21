@@ -135,6 +135,118 @@ input::placeholder {
   min-width: 4rem;
 }
 
+.titlebar-actions,
+.titlebar-actions * {
+  -webkit-app-region: no-drag;
+}
+
+.titlebar-actions {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+}
+
+.titlebar-action {
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+  width: 2.8rem;
+  height: 2.8rem;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.1);
+  color: rgba(255, 255, 255, 0.95);
+}
+
+.titlebar-action.active {
+  background: rgba(255, 255, 255, 0.18);
+}
+
+.titlebar-action__icon {
+  font-size: 1.05rem;
+  line-height: 1;
+}
+
+.titlebar-action__badge {
+  position: absolute;
+  top: 0.5rem;
+  right: 0.48rem;
+  width: 0.55rem;
+  height: 0.55rem;
+  border-radius: 999px;
+  background: #ff7668;
+  box-shadow: 0 0 0 2px var(--chrome-bg);
+}
+
+.update-menu {
+  position: relative;
+}
+
+.update-popover {
+  position: absolute;
+  top: calc(100% + 0.8rem);
+  right: 0;
+  width: min(360px, calc(100vw - 2rem));
+  border-radius: 22px;
+  border: 1px solid var(--border);
+  background: var(--surface-strong);
+  box-shadow: var(--shadow);
+  color: var(--text);
+  overflow: hidden;
+  z-index: 20;
+}
+
+.update-popover__header,
+.update-popover__footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 1rem 1.1rem;
+}
+
+.update-popover__header {
+  border-bottom: 1px solid var(--border);
+}
+
+.update-popover__body {
+  display: grid;
+  gap: 0.9rem;
+  padding: 1rem 1.1rem;
+}
+
+.update-popover__release {
+  display: grid;
+  gap: 0.3rem;
+  padding: 0.9rem 0.95rem;
+  border-radius: 18px;
+  background: color-mix(in srgb, var(--surface-muted) 92%, transparent 8%);
+  border: 1px solid var(--border);
+}
+
+.update-popover__release span,
+.update-popover__message {
+  color: var(--text-soft);
+}
+
+.update-popover__release p,
+.update-popover__message,
+.update-popover__error {
+  margin: 0;
+  line-height: 1.6;
+  white-space: pre-wrap;
+}
+
+.update-popover__error {
+  color: var(--danger-text);
+}
+
+.update-popover__footer {
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  border-top: 1px solid var(--border);
+}
+
 .workspace-tab {
   display: inline-flex;
   align-items: center;
@@ -377,6 +489,11 @@ input::placeholder {
   background: color-mix(in srgb, var(--surface) 88%, transparent 12%);
   color: var(--text);
   border: 1px solid var(--border);
+}
+
+.ghost-button {
+  color: var(--text-soft);
+  padding: 0.9rem 0.6rem;
 }
 
 .danger-button {
@@ -1295,6 +1412,12 @@ input::placeholder {
   margin: 1rem 0 0;
   color: var(--text-soft);
   line-height: 1.7;
+}
+
+.update-install-dialog__message {
+  margin: 0;
+  line-height: 1.7;
+  color: var(--text-soft);
 }
 
 .logs-toolbar {

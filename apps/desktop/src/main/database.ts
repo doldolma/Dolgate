@@ -83,6 +83,7 @@ function toHostRecord(row: Record<string, unknown>): HostRecord {
 function toAppSettings(row: Record<string, unknown> | undefined): AppSettings {
   return {
     theme: row?.theme === 'light' || row?.theme === 'dark' ? (row.theme as AppTheme) : 'system',
+    dismissedUpdateVersion: row?.dismissed_update_version ? String(row.dismissed_update_version) : null,
     updatedAt: row?.updated_at ? String(row.updated_at) : nowIso()
   };
 }
@@ -349,14 +350,25 @@ export class SettingsRepository {
       CREATE TABLE IF NOT EXISTS app_settings (
         singleton_id INTEGER PRIMARY KEY CHECK (singleton_id = 1),
         theme TEXT NOT NULL,
+        dismissed_update_version TEXT,
         updated_at TEXT NOT NULL
       );
     `);
 
+    const columns = this.db
+      .prepare(`PRAGMA table_info(app_settings)`)
+      .all() as Array<{ name: string }>;
+    if (!columns.some((column) => column.name === 'dismissed_update_version')) {
+      this.db.exec(`
+        ALTER TABLE app_settings
+        ADD COLUMN dismissed_update_version TEXT
+      `);
+    }
+
     this.db
       .prepare(`
-        INSERT INTO app_settings (singleton_id, theme, updated_at)
-        VALUES (1, 'system', ?)
+        INSERT INTO app_settings (singleton_id, theme, dismissed_update_version, updated_at)
+        VALUES (1, 'system', NULL, ?)
         ON CONFLICT(singleton_id) DO NOTHING
       `)
       .run(nowIso());
@@ -365,7 +377,7 @@ export class SettingsRepository {
   get(): AppSettings {
     const row = this.db
       .prepare(`
-        SELECT theme, updated_at
+        SELECT theme, dismissed_update_version, updated_at
         FROM app_settings
         WHERE singleton_id = 1
       `)
@@ -376,13 +388,16 @@ export class SettingsRepository {
   update(input: Partial<AppSettings>): AppSettings {
     const current = this.get();
     const theme = input.theme === 'light' || input.theme === 'dark' || input.theme === 'system' ? input.theme : current.theme;
+    const dismissedUpdateVersion = Object.prototype.hasOwnProperty.call(input, 'dismissedUpdateVersion')
+      ? input.dismissedUpdateVersion ?? null
+      : current.dismissedUpdateVersion ?? null;
     this.db
       .prepare(`
         UPDATE app_settings
-        SET theme = ?, updated_at = ?
+        SET theme = ?, dismissed_update_version = ?, updated_at = ?
         WHERE singleton_id = 1
       `)
-      .run(theme, nowIso());
+      .run(theme, dismissedUpdateVersion, nowIso());
     return this.get();
   }
 }

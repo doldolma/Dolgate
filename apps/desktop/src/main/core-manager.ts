@@ -51,6 +51,37 @@ function resolveRepoRoot(): string {
   return path.resolve(app.getAppPath(), '../..');
 }
 
+function resolveBundledCorePath(): string {
+  const binaryName = process.platform === 'win32' ? 'ssh-core.exe' : 'ssh-core';
+  return path.join(process.resourcesPath, 'bin', binaryName);
+}
+
+function resolveCoreLaunchConfig(): { command: string; args: string[]; cwd: string } {
+  if (app.isPackaged) {
+    const bundledCorePath = resolveBundledCorePath();
+    if (!existsSync(bundledCorePath)) {
+      throw new Error(`Bundled ssh-core binary not found: ${bundledCorePath}`);
+    }
+    return {
+      command: bundledCorePath,
+      args: [],
+      cwd: path.dirname(bundledCorePath)
+    };
+  }
+
+  const repoRoot = resolveRepoRoot();
+  const serviceDir = path.join(repoRoot, 'services', 'ssh-core');
+  if (!existsSync(serviceDir)) {
+    throw new Error(`SSH core directory not found: ${serviceDir}`);
+  }
+
+  return {
+    command: 'go',
+    args: ['run', './cmd/ssh-core'],
+    cwd: serviceDir
+  };
+}
+
 interface PendingResponse<TPayload> {
   resolve: (payload: TPayload) => void;
   reject: (error: Error) => void;
@@ -198,15 +229,10 @@ export class CoreManager {
       return;
     }
 
-    const repoRoot = resolveRepoRoot();
-    const serviceDir = path.join(repoRoot, 'services', 'ssh-core');
+    const launchConfig = resolveCoreLaunchConfig();
 
-    if (!existsSync(serviceDir)) {
-      throw new Error(`SSH core directory not found: ${serviceDir}`);
-    }
-
-    this.process = spawn('go', ['run', './cmd/ssh-core'], {
-      cwd: serviceDir,
+    this.process = spawn(launchConfig.command, launchConfig.args, {
+      cwd: launchConfig.cwd,
       stdio: ['pipe', 'pipe', 'pipe'],
       env: process.env
     });

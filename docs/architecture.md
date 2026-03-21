@@ -8,10 +8,11 @@ dolssh는 세 개의 런타임 경계로 나뉩니다.
 
 ## 데스크톱 앱
 
-- `main`: 브라우저 윈도우, 로컬 SQLite, 키체인 접근, Go 코어 프로세스 수명주기를 관리합니다.
+- `main`: 브라우저 윈도우, 로컬 SQLite, 키체인 접근, Go 코어 프로세스 수명주기, GitHub Releases 기반 auto update를 관리합니다.
 - `preload`: `contextBridge`를 통해 renderer에 필요한 최소 API만 노출합니다.
 - `renderer`: Zustand 상태와 xterm.js 기반 탭 UI, 호스트 목록, 검색 인터페이스, 고정 `SFTP` 워크스페이스를 담당합니다.
 - 앱 시작 시 Electron `main`이 `ssh-core` child process를 자동 실행합니다.
+- 개발 모드에서는 `go run`을, 패키지된 릴리즈 앱에서는 번들된 `ssh-core` 바이너리를 실행합니다.
 - 로컬 파일 브라우징은 Electron main의 파일 서비스가 담당하고, 원격 SFTP 작업과 파일 전송은 Go 코어가 담당합니다.
 
 ## SSH 코어
@@ -21,7 +22,8 @@ dolssh는 세 개의 런타임 경계로 나뉩니다.
 - control 명령은 metadata JSON frame으로, 터미널 입출력은 raw byte stream frame으로 주고받습니다.
 - SSH 터미널 세션은 `sessionId`, SFTP endpoint는 `endpointId`, 전송 작업은 `jobId`로 구분합니다.
 - 터미널 세션 매니저와 별도로 SFTP endpoint 매니저를 두어 브라우징과 전송을 독립적으로 처리합니다.
-- 현재 구현은 `go run ./cmd/ssh-core` 기반이며, 일반 사용자용 데스크톱 배포를 위해서는 추후 플랫폼별 바이너리 번들링이 필요합니다.
+- 개발 모드에서는 `go run ./cmd/ssh-core`, 패키지된 릴리즈 앱에서는 번들된 플랫폼별 바이너리를 사용합니다.
+- 자동 업데이트는 `electron-updater`가 GitHub Releases를 조회하는 구조로 붙고, 사용자가 앱 우측 상단 알림 메뉴에서 다운로드와 재시작 적용을 직접 승인합니다.
 
 ## Sync API
 
