@@ -24,8 +24,17 @@ function resolveExtraResources(): string[] {
 const config = {
   packagerConfig: {
     asar: true,
+    prune: false,
     executableName: 'dolssh',
     name: 'dolssh',
+    ignore: (file: string) => {
+      if (!file) {
+        return false;
+      }
+
+      // Vite 산출물과 패키지 런타임 의존성만 남기고 나머지는 패키징에서 제외한다.
+      return !(file.startsWith('/.vite') || file.startsWith('/node_modules'));
+    },
     extraResource: resolveExtraResources()
   },
   rebuildConfig: {},
