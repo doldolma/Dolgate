@@ -202,6 +202,7 @@ export interface DesktopApi {
   };
   shell: {
     pickPrivateKey: () => Promise<string | null>;
+    openExternal: (url: string) => Promise<void>;
   };
   tabs: {
     list: () => Promise<TerminalTab[]>;

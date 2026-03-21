@@ -4,6 +4,15 @@ import type { UpdateEvent, UpdateReleaseInfo, UpdateState } from '@dolssh/shared
 import { ipcChannels } from '../common/ipc-channels';
 import { SettingsRepository } from './database';
 
+const githubReleaseFeed = {
+  provider: 'github',
+  owner: 'doldolma',
+  repo: 'dolssh',
+  releaseType: 'release',
+  vPrefixedTagName: true,
+  private: false
+} as const;
+
 function normalizeReleaseNotes(notes: UpdateInfo['releaseNotes']): string | null {
   if (typeof notes === 'string') {
     return notes;
@@ -41,6 +50,8 @@ export class UpdateService {
   private readonly windows = new Set<BrowserWindow>();
   private initialCheckScheduled = false;
   private pendingInstall = false;
+  private periodicCheckTimer: NodeJS.Timeout | null = null;
+  private activeCheckPromise: Promise<void> | null = null;
   private state: UpdateState = {
     enabled: app.isPackaged,
     status: 'idle',
@@ -54,6 +65,12 @@ export class UpdateService {
 
   constructor(private readonly settings: SettingsRepository) {
     this.state.dismissedVersion = this.settings.get().dismissedUpdateVersion ?? null;
+
+    if (app.isPackaged) {
+      // prepackaged -> electron-builder 경로에서는 app-update.yml이 번들되지 않을 수 있어서
+      // GitHub Releases feed를 런타임에서 직접 주입해 파일 의존을 없앤다.
+      autoUpdater.setFeedURL(githubReleaseFeed);
+    }
 
     autoUpdater.autoDownload = false;
     autoUpdater.autoInstallOnAppQuit = false;
@@ -135,6 +152,12 @@ export class UpdateService {
     setTimeout(() => {
       void this.check();
     }, delayMs);
+
+    // 앱을 오래 켜 두는 사용자를 위해 주기적으로 GitHub Releases를 다시 확인한다.
+    // 이미 새 버전을 들고 있거나 다운로드 중인 경우에는 중복 체크를 생략한다.
+    this.periodicCheckTimer = setInterval(() => {
+      void this.check();
+    }, 1000 * 60 * 60 * 4);
   }
 
   async check(): Promise<void> {
@@ -146,7 +169,19 @@ export class UpdateService {
       return;
     }
 
-    await autoUpdater.checkForUpdates();
+    if (this.activeCheckPromise) {
+      return this.activeCheckPromise;
+    }
+
+    if (this.state.status === 'available' || this.state.status === 'downloading' || this.state.status === 'downloaded') {
+      return;
+    }
+
+    this.activeCheckPromise = autoUpdater.checkForUpdates().then(() => undefined).finally(() => {
+      this.activeCheckPromise = null;
+    });
+
+    return this.activeCheckPromise;
   }
 
   async download(): Promise<void> {

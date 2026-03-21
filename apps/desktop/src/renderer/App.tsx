@@ -222,6 +222,9 @@ export function App() {
         onDismissUpdate={async (version) => {
           await runUpdaterAction(() => window.dolssh.updater.dismissAvailable(version));
         }}
+        onOpenReleasePage={async (url) => {
+          await runUpdaterAction(() => window.dolssh.shell.openExternal(url));
+        }}
       />
 
       <div className="workspace-shell">

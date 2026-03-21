@@ -21,12 +21,27 @@ function resolveExtraResources(): string[] {
   return [binDir];
 }
 
+function resolveAppIcon(): string {
+  const targetPlatform = process.env.DOLSSH_TARGET_PLATFORM ?? process.platform;
+
+  if (targetPlatform === 'win32') {
+    return path.resolve(__dirname, 'build/icons/dolssh.ico');
+  }
+
+  if (targetPlatform === 'darwin') {
+    return path.resolve(__dirname, 'build/icons/dolssh.icns');
+  }
+
+  return path.resolve(__dirname, 'build/icons/dolssh.png');
+}
+
 const config = {
   packagerConfig: {
     asar: true,
     prune: false,
     executableName: 'dolssh',
     name: 'dolssh',
+    icon: resolveAppIcon(),
     ignore: (file: string) => {
       if (!file) {
         return false;

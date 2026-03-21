@@ -19,7 +19,8 @@ export const ipcChannels = {
     data: 'ssh:stream-data'
   },
   shell: {
-    pickPrivateKey: 'shell:pick-private-key'
+    pickPrivateKey: 'shell:pick-private-key',
+    openExternal: 'shell:open-external'
   },
   tabs: {
     list: 'tabs:list'

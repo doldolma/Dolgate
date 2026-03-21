@@ -54,7 +54,8 @@ function createMockApi(): DesktopApi {
       onData: vi.fn()
     },
     shell: {
-      pickPrivateKey: vi.fn()
+      pickPrivateKey: vi.fn(),
+      openExternal: vi.fn().mockResolvedValue(undefined)
     },
     tabs: {
       list: vi.fn().mockResolvedValue([])

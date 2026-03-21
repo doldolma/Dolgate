@@ -136,7 +136,8 @@ const api: DesktopApi = {
     }
   },
   shell: {
-    pickPrivateKey: () => ipcRenderer.invoke(ipcChannels.shell.pickPrivateKey)
+    pickPrivateKey: () => ipcRenderer.invoke(ipcChannels.shell.pickPrivateKey),
+    openExternal: (url: string) => ipcRenderer.invoke(ipcChannels.shell.openExternal, url)
   },
   tabs: {
     list: () => ipcRenderer.invoke(ipcChannels.tabs.list)

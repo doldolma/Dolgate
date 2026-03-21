@@ -1,3 +1,5 @@
+const path = require('node:path');
+
 module.exports = {
   appId: 'com.doldolma.dolssh',
   productName: 'dolssh',
@@ -15,6 +17,7 @@ module.exports = {
     }
   ],
   mac: {
+    icon: path.resolve(__dirname, 'build/icons/dolssh.icns'),
     category: 'public.app-category.developer-tools',
     target: [
       {
@@ -30,9 +33,11 @@ module.exports = {
     gatekeeperAssess: false
   },
   dmg: {
-    sign: false
+    sign: false,
+    icon: path.resolve(__dirname, 'build/icons/dolssh.icns')
   },
   win: {
+    icon: path.resolve(__dirname, 'build/icons/dolssh.ico'),
     target: [
       {
         target: 'nsis',

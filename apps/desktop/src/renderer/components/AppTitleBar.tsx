@@ -13,6 +13,7 @@ interface AppTitleBarProps {
   onDownloadUpdate: () => Promise<void>;
   onInstallUpdate: () => Promise<void>;
   onDismissUpdate: (version: string) => Promise<void>;
+  onOpenReleasePage: (url: string) => Promise<void>;
 }
 
 function formatProgressPercent(updateState: UpdateState): string {
@@ -29,6 +30,42 @@ function shouldShowBadge(updateState: UpdateState): boolean {
   return updateState.status === 'available' && updateState.release?.version !== updateState.dismissedVersion;
 }
 
+function getEmptyReleaseMessage(updateState: UpdateState): string {
+  if (updateState.status === 'checking') {
+    return 'GitHub Releases에서 새 버전을 확인하고 있습니다.';
+  }
+
+  if (updateState.status === 'idle') {
+    return '아직 업데이트를 확인하지 않았습니다. 아래 버튼으로 새 릴리즈를 확인할 수 있습니다.';
+  }
+
+  return '현재 릴리즈 정보가 없습니다.';
+}
+
+function formatPublishedAt(value?: string | null): string | null {
+  if (!value) {
+    return null;
+  }
+
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return null;
+  }
+
+  return new Intl.DateTimeFormat('ko-KR', {
+    month: 'short',
+    day: 'numeric'
+  }).format(parsed);
+}
+
+function resolveReleaseUrl(updateState: UpdateState): string {
+  const version = updateState.release?.version;
+  if (!version) {
+    return 'https://github.com/doldolma/dolssh/releases';
+  }
+  return `https://github.com/doldolma/dolssh/releases/tag/v${version}`;
+}
+
 export function AppTitleBar({
   tabs,
   activeWorkspaceTab,
@@ -40,10 +77,21 @@ export function AppTitleBar({
   onCheckForUpdates,
   onDownloadUpdate,
   onInstallUpdate,
-  onDismissUpdate
+  onDismissUpdate,
+  onOpenReleasePage
 }: AppTitleBarProps) {
   const [isUpdateOpen, setIsUpdateOpen] = useState(false);
   const showBadge = shouldShowBadge(updateState);
+  const publishedAt = formatPublishedAt(updateState.release?.publishedAt);
+  const releaseUrl = resolveReleaseUrl(updateState);
+  const showDownloadAction = updateState.status === 'available';
+  const showInstallAction = updateState.status === 'downloaded';
+  const showCheckAction = !showDownloadAction && !showInstallAction;
+  const titleText = showInstallAction
+    ? '업데이트를 적용할 준비가 됐습니다'
+    : showDownloadAction
+      ? '새 dolssh 버전을 사용할 수 있습니다'
+      : '앱 업데이트';
 
   return (
     <header className="app-titlebar">
@@ -98,9 +146,17 @@ export function AppTitleBar({
           {isUpdateOpen ? (
             <div className="update-popover">
               <div className="update-popover__header">
-                <div>
-                  <div className="eyebrow">Updates</div>
-                  <strong>앱 업데이트</strong>
+                <div className="update-popover__title-group">
+                  <div className="update-popover__headline">
+                    <span className="update-popover__glyph" aria-hidden="true">
+                      ↗
+                    </span>
+                    <strong>{titleText}</strong>
+                  </div>
+                  <div className="update-popover__subline">
+                    {publishedAt ? <span>{publishedAt}</span> : null}
+                    {updateState.release?.version ? <span>Version {updateState.release.version}</span> : null}
+                  </div>
                 </div>
                 <span className="status-pill">{updateState.currentVersion}</span>
               </div>
@@ -111,16 +167,14 @@ export function AppTitleBar({
                 ) : null}
 
                 {updateState.release ? (
-                  <div className="update-popover__release">
-                    <strong>{updateState.release.releaseName || updateState.release.version}</strong>
-                    <span>버전 {updateState.release.version}</span>
-                    {updateState.release.releaseNotes ? <p>{updateState.release.releaseNotes}</p> : null}
-                  </div>
+                  <>
+                    {updateState.release.releaseName ? <div className="update-popover__release-name">{updateState.release.releaseName}</div> : null}
+                    {updateState.release.releaseNotes ? <p className="update-popover__notes">{updateState.release.releaseNotes}</p> : null}
+                  </>
                 ) : (
-                  <p className="update-popover__message">현재 릴리즈 정보가 없습니다.</p>
+                  <p className="update-popover__message">{getEmptyReleaseMessage(updateState)}</p>
                 )}
 
-                {updateState.status === 'checking' ? <p className="update-popover__message">GitHub Releases에서 새 버전을 확인하고 있습니다.</p> : null}
                 {updateState.status === 'upToDate' ? <p className="update-popover__message">현재 최신 버전을 사용 중입니다.</p> : null}
                 {updateState.status === 'downloading' ? (
                   <p className="update-popover__message">업데이트를 다운로드하는 중입니다. {formatProgressPercent(updateState)}</p>
@@ -134,11 +188,25 @@ export function AppTitleBar({
               </div>
 
               <div className="update-popover__footer">
-                <button type="button" className="secondary-button" onClick={onCheckForUpdates}>
-                  업데이트 확인
+                <button
+                  type="button"
+                  className="secondary-button"
+                  onClick={async () => {
+                    await onOpenReleasePage(releaseUrl);
+                  }}
+                >
+                  Changelog ↗
                 </button>
-                {updateState.status === 'available' ? (
+                {showCheckAction ? (
+                  <button type="button" className="primary-button" onClick={onCheckForUpdates}>
+                    업데이트 확인
+                  </button>
+                ) : null}
+                {showDownloadAction ? (
                   <>
+                    <button type="button" className="primary-button" onClick={onDownloadUpdate}>
+                      다운로드
+                    </button>
                     <button
                       type="button"
                       className="ghost-button"
@@ -150,12 +218,9 @@ export function AppTitleBar({
                     >
                       나중에
                     </button>
-                    <button type="button" className="primary-button" onClick={onDownloadUpdate}>
-                      다운로드
-                    </button>
                   </>
                 ) : null}
-                {updateState.status === 'downloaded' ? (
+                {showInstallAction ? (
                   <button type="button" className="primary-button" onClick={onInstallUpdate}>
                     재시작 후 업데이트
                   </button>

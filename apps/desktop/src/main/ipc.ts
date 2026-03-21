@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { dialog, ipcMain } from 'electron';
+import { dialog, ipcMain, shell as electronShell } from 'electron';
 import type {
   AppSettings,
   DesktopConnectInput,
@@ -219,6 +219,14 @@ export function registerIpcHandlers(
 
   ipcMain.handle(ipcChannels.ssh.disconnect, async (_event, sessionId: string) => {
     coreManager.disconnect(sessionId);
+  });
+
+  ipcMain.handle(ipcChannels.shell.openExternal, async (_event, url: string) => {
+    const target = new URL(url);
+    if (target.protocol !== 'https:' && target.protocol !== 'http:') {
+      throw new Error('외부 링크는 http 또는 https만 열 수 있습니다.');
+    }
+    await electronShell.openExternal(target.toString());
   });
 
   ipcMain.handle(ipcChannels.sftp.connect, async (_event, input: DesktopSftpConnectInput) => {

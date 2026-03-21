@@ -17,11 +17,6 @@ const items: Array<{ section: HomeSection; icon: string; label: string }> = [
 export function HomeNavigation({ activeSection, onSelectSection }: HomeNavigationProps) {
   return (
     <aside className="home-navigation">
-      <div className="home-navigation__header">
-        <div className="eyebrow">Workspace</div>
-        <h1>dolssh</h1>
-      </div>
-
       <nav className="home-navigation__menu" aria-label="Home navigation">
         {items.map((item) => (
           <button
