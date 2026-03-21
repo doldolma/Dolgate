@@ -1,6 +1,6 @@
 {
   "name": "dolssh",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "private": true,
   "workspaces": [
     "apps/*",
@@ -11,6 +11,11 @@
     "dev:desktop": "npm run dev --workspace @dolssh/desktop",
     "dev:api": "cd services/sync-api && go run ./cmd/api",
     "build": "npm run build --workspace @dolssh/desktop",
+    "release:dist:mac": "npm run release:dist:mac --workspace @dolssh/desktop",
+    "release:dist:win": "npm run release:dist:win --workspace @dolssh/desktop",
+    "release:mac": "npm run release:publish:mac --workspace @dolssh/desktop",
+    "release:win": "npm run release:publish:win --workspace @dolssh/desktop",
+    "release:all": "npm run release:all --workspace @dolssh/desktop",
     "test": "npm run test --workspace @dolssh/desktop && cd services/ssh-core && go test ./... && cd ../sync-api && go test ./...",
     "typecheck": "npm run typecheck --workspace @dolssh/desktop"
   },

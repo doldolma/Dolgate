@@ -13,6 +13,7 @@ import {
 import { CoreManager } from './core-manager';
 import { registerIpcHandlers } from './ipc';
 import { SecretStore } from './secret-store';
+import { UpdateService } from './update-service';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -28,6 +29,7 @@ const secretStore = new SecretStore();
 const coreManager = new CoreManager((entry) => {
   activityLogRepository.append(entry.level, entry.category, entry.message, entry.metadata ?? null);
 });
+const updateService = new UpdateService(settingsRepository);
 let isQuitting = false;
 
 async function createWindow(): Promise<void> {
@@ -48,6 +50,7 @@ async function createWindow(): Promise<void> {
   });
 
   coreManager.registerWindow(window);
+  updateService.registerWindow(window);
   await coreManager.start();
 
   if (MAIN_WINDOW_VITE_DEV_SERVER_URL) {
@@ -70,9 +73,11 @@ app.whenReady().then(async () => {
     activityLogRepository,
     secretMetadataRepository,
     secretStore,
-    coreManager
+    coreManager,
+    updateService
   );
   await createWindow();
+  updateService.scheduleInitialCheck();
 
   app.on('activate', async () => {
     // macOS에서는 모든 창이 닫혀도 앱이 살아 있으므로 다시 창을 열 수 있게 한다.
@@ -90,6 +95,10 @@ app.on('before-quit', (event) => {
   event.preventDefault();
   isQuitting = true;
   void coreManager.shutdown().finally(() => {
+    if (updateService.consumePendingInstall()) {
+      updateService.quitAndInstall();
+      return;
+    }
     app.quit();
   });
 });
