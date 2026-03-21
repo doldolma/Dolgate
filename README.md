@@ -110,6 +110,7 @@ sync API 설정:
 
 - Git에 올라가는 예시 파일: [services/sync-api/config/default.example.json](/Users/heodoyeong/develop/dolsh/services/sync-api/config/default.example.json)
 - 운영 Docker 예시 파일: [services/sync-api/config/production.example.json](/Users/heodoyeong/develop/dolsh/services/sync-api/config/production.example.json)
+- 운영 MySQL 예시 파일: [services/sync-api/config/production.mysql.example.json](/Users/heodoyeong/develop/dolsh/services/sync-api/config/production.mysql.example.json)
 - 실제 파일: `services/sync-api/config/default.json`
 - 필요하면 `DOLSSH_API_CONFIG_PATH=/absolute/path/to/config.json`으로 다른 파일을 지정할 수 있습니다.
 
@@ -125,7 +126,7 @@ sync API 설정:
 
 `sync-api`는 Docker로 독립 배포할 수 있습니다.
 
-준비:
+SQLite 기준 준비:
 
 ```bash
 cp services/sync-api/config/production.example.json services/sync-api/config/production.json
@@ -140,11 +141,22 @@ cp docker-compose.example.yml docker-compose.yml
 docker compose up -d --build
 ```
 
+MySQL 기준 준비:
+
+```bash
+cp services/sync-api/config/production.mysql.example.json services/sync-api/config/production.json
+mkdir -p services/sync-api/data/mysql
+cd services/sync-api/deploy
+cp docker-compose.mysql.example.yml docker-compose.yml
+docker compose up -d --build
+```
+
 참고:
 
 - Docker 이미지는 [services/sync-api/Dockerfile](/Users/heodoyeong/develop/dolsh/services/sync-api/Dockerfile)을 사용합니다.
 - 운영 config는 `services/sync-api/config/production.json`을 `/app/config/production.json`으로 마운트합니다.
 - SQLite 파일은 `services/sync-api/data/`에 유지됩니다.
+- `database.url`의 `mysql:3306`은 Docker Compose 내부 서비스명일 때만 동작합니다. Docker 밖에서 실행하면 `127.0.0.1:3306`이나 실제 DB 호스트명을 써야 합니다.
 - `ssh.doldolma.com`을 이 컨테이너로 연결하려면 reverse proxy가 필요합니다. 예시는 [nginx.sync-api.example.conf](/Users/heodoyeong/develop/dolsh/services/sync-api/deploy/nginx.sync-api.example.conf)를 참고하세요.
 
 ## 릴리즈 빌드와 GitHub Release 업로드

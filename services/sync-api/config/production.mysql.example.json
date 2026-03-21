@@ -1,0 +1,31 @@
+{
+  "server": {
+    "port": "8080"
+  },
+  "database": {
+    "driver": "mysql",
+    "url": "dolssh_user:CHANGE_ME_PASSWORD@tcp(mysql:3306)/dolssh?charset=utf8mb4&parseTime=True&loc=UTC"
+  },
+  "auth": {
+    "jwtSecret": "CHANGE_ME_TO_A_LONG_RANDOM_SECRET",
+    "accessTokenTtlMinutes": 15,
+    "refreshTokenIdleDays": 14,
+    "local": {
+      "enabled": true,
+      "signupEnabled": true
+    },
+    "oidc": {
+      "enabled": false,
+      "displayName": "SSO",
+      "issuerUrl": "",
+      "clientId": "",
+      "clientSecret": "",
+      "redirectUrl": "https://ssh.doldolma.com/auth/oidc/callback",
+      "scopes": [
+        "openid",
+        "profile",
+        "email"
+      ]
+    }
+  }
+}
