@@ -18,9 +18,11 @@ import (
 )
 
 type userRow struct {
-	ID           string `gorm:"column:id;primaryKey;type:varchar(191)"`
-	Email        string `gorm:"column:email;uniqueIndex;not null;type:varchar(255)"`
-	PasswordHash string `gorm:"column:password_hash;not null;default:'';type:text"`
+	ID    string `gorm:"column:id;primaryKey;type:varchar(191)"`
+	Email string `gorm:"column:email;uniqueIndex;not null;type:varchar(255)"`
+	// bcrypt/argon 해시는 길이가 충분히 예측 가능하므로 TEXT 대신 varchar로 두어
+	// MySQL의 "TEXT/BLOB default 금지" 제약에 걸리지 않게 한다.
+	PasswordHash string `gorm:"column:password_hash;not null;type:varchar(255)"`
 }
 
 func (userRow) TableName() string {
@@ -62,7 +64,7 @@ func (exchangeCodeRow) TableName() string {
 
 type userVaultKeyRow struct {
 	UserID    string `gorm:"column:user_id;primaryKey;type:varchar(191)"`
-	KeyBase64 string `gorm:"column:key_base64;not null;type:text"`
+	KeyBase64 string `gorm:"column:key_base64;not null;type:varchar(255)"`
 }
 
 func (userVaultKeyRow) TableName() string {

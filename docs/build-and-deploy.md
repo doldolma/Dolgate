@@ -249,16 +249,27 @@ go build -o dist/sync-api ./cmd/api
 - Docker 이미지 정의: [services/sync-api/Dockerfile](/Users/heodoyeong/develop/dolsh/services/sync-api/Dockerfile)
 - Docker ignore: [services/sync-api/.dockerignore](/Users/heodoyeong/develop/dolsh/services/sync-api/.dockerignore)
 - 운영 설정 예시: [services/sync-api/config/production.example.json](/Users/heodoyeong/develop/dolsh/services/sync-api/config/production.example.json)
+- 운영 MySQL 설정 예시: [services/sync-api/config/production.mysql.example.json](/Users/heodoyeong/develop/dolsh/services/sync-api/config/production.mysql.example.json)
 - Compose 예시: [services/sync-api/deploy/docker-compose.example.yml](/Users/heodoyeong/develop/dolsh/services/sync-api/deploy/docker-compose.example.yml)
+- MySQL 포함 Compose 예시: [services/sync-api/deploy/docker-compose.mysql.example.yml](/Users/heodoyeong/develop/dolsh/services/sync-api/deploy/docker-compose.mysql.example.yml)
 - Nginx reverse proxy 예시: [services/sync-api/deploy/nginx.sync-api.example.conf](/Users/heodoyeong/develop/dolsh/services/sync-api/deploy/nginx.sync-api.example.conf)
 
 ### 빠른 시작
 
 1. 운영 설정 파일 생성
 
+SQLite 기준:
+
 ```bash
 cp services/sync-api/config/production.example.json services/sync-api/config/production.json
 mkdir -p services/sync-api/data
+```
+
+MySQL 기준:
+
+```bash
+cp services/sync-api/config/production.mysql.example.json services/sync-api/config/production.json
+mkdir -p services/sync-api/data/mysql
 ```
 
 2. `production.json` 수정
@@ -269,9 +280,19 @@ mkdir -p services/sync-api/data
 
 3. Compose 파일 준비 후 실행
 
+SQLite 기준:
+
 ```bash
 cd services/sync-api/deploy
 cp docker-compose.example.yml docker-compose.yml
+docker compose up -d --build
+```
+
+MySQL 기준:
+
+```bash
+cd services/sync-api/deploy
+cp docker-compose.mysql.example.yml docker-compose.yml
 docker compose up -d --build
 ```
 
@@ -286,6 +307,8 @@ curl http://127.0.0.1:8080/healthz
 
 - 기본 compose 예시는 컨테이너 내부 `/app/config/production.json`을 읽도록 `DOLSSH_API_CONFIG_PATH`를 지정합니다.
 - SQLite를 계속 쓰면 DB 파일은 `services/sync-api/data/dolssh_sync.db`에 유지됩니다.
+- `database.url`의 `mysql:3306`은 Compose 내부 서비스명입니다. Docker 밖에서 `go run`이나 단독 바이너리로 실행하면 `127.0.0.1:3306` 또는 실제 DB 호스트명을 사용해야 합니다.
+- `lookup mysql on 127.0.0.11:53: no such host`가 뜨면, 현재 실행 환경에 `mysql` 서비스가 없다는 뜻입니다. 이 경우 MySQL 포함 compose를 쓰거나 DB 호스트를 실제 주소로 바꿔야 합니다.
 - `https://ssh.doldolma.com`으로 실제 서비스하려면 별도 reverse proxy가 필요합니다.
 - 리버스 프록시가 지금 backend 대신 Synology 기본 페이지를 반환하면 desktop 앱은 로그인/refresh/sync를 전부 실패합니다.
 
