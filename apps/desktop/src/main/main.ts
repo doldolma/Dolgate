@@ -1,7 +1,15 @@
 import { app, BrowserWindow } from 'electron';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { GroupRepository, HostRepository, SettingsRepository } from './database';
+import {
+  ActivityLogRepository,
+  GroupRepository,
+  HostRepository,
+  KnownHostRepository,
+  PortForwardRepository,
+  SecretMetadataRepository,
+  SettingsRepository
+} from './database';
 import { CoreManager } from './core-manager';
 import { registerIpcHandlers } from './ipc';
 import { SecretStore } from './secret-store';
@@ -12,8 +20,14 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const hostRepository = new HostRepository();
 const groupRepository = new GroupRepository();
 const settingsRepository = new SettingsRepository();
+const portForwardRepository = new PortForwardRepository();
+const knownHostRepository = new KnownHostRepository();
+const activityLogRepository = new ActivityLogRepository();
+const secretMetadataRepository = new SecretMetadataRepository();
 const secretStore = new SecretStore();
-const coreManager = new CoreManager();
+const coreManager = new CoreManager((entry) => {
+  activityLogRepository.append(entry.level, entry.category, entry.message, entry.metadata ?? null);
+});
 let isQuitting = false;
 
 async function createWindow(): Promise<void> {
@@ -47,7 +61,17 @@ async function createWindow(): Promise<void> {
 
 app.whenReady().then(async () => {
   // 앱 준비 이후에만 IPC와 창 생성을 시작한다.
-  registerIpcHandlers(hostRepository, groupRepository, settingsRepository, secretStore, coreManager);
+  registerIpcHandlers(
+    hostRepository,
+    groupRepository,
+    settingsRepository,
+    portForwardRepository,
+    knownHostRepository,
+    activityLogRepository,
+    secretMetadataRepository,
+    secretStore,
+    coreManager
+  );
   await createWindow();
 
   app.on('activate', async () => {

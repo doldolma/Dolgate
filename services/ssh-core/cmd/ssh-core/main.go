@@ -8,8 +8,10 @@ import (
 	"os"
 	"sync"
 
+	"dolssh/services/ssh-core/internal/forwarding"
 	"dolssh/services/ssh-core/internal/protocol"
 	coresftp "dolssh/services/ssh-core/internal/sftp"
+	"dolssh/services/ssh-core/internal/sshconn"
 	"dolssh/services/ssh-core/internal/sshsession"
 )
 
@@ -39,7 +41,9 @@ func main() {
 	writer := newEventWriter()
 	manager := sshsession.NewManager(writer.emit, writer.emitStream)
 	sftpService := coresftp.New(writer.emit)
+	forwardingService := forwarding.New(writer.emit)
 	defer sftpService.Shutdown()
+	defer forwardingService.Shutdown()
 
 	// 코어 기동 직후 ready 이벤트를 보내 Electron이 상태를 파악할 수 있게 한다.
 	writer.emit(protocol.Event{
@@ -66,11 +70,13 @@ func main() {
 			return
 		}
 
-		if err := dispatchFrame(manager, sftpService, writer, frame); err != nil {
+		if err := dispatchFrame(manager, sftpService, forwardingService, writer, frame); err != nil {
 			// 명령 단위 오류는 requestId/sessionId를 포함해 상위 레이어가 추적하기 쉽게 한다.
 			eventType := protocol.EventError
 			if isSFTPCommand(frame) {
 				eventType = protocol.EventSFTPError
+			} else if isPortForwardCommand(frame) {
+				eventType = protocol.EventPortForwardError
 			}
 			writer.emit(protocol.Event{
 				Type:       eventType,
@@ -86,7 +92,7 @@ func main() {
 	}
 }
 
-func dispatchFrame(manager *sshsession.Manager, sftpService *coresftp.Service, writer *eventWriter, frame protocol.Frame) error {
+func dispatchFrame(manager *sshsession.Manager, sftpService *coresftp.Service, forwardingService *forwarding.Service, writer *eventWriter, frame protocol.Frame) error {
 	if frame.Kind == protocol.FrameKindStream {
 		var metadata protocol.StreamFrame
 		if err := protocol.DecodeStreamFrame(frame, &metadata); err != nil {
@@ -102,10 +108,10 @@ func dispatchFrame(manager *sshsession.Manager, sftpService *coresftp.Service, w
 	if err := protocol.DecodeControlFrame(frame, &request); err != nil {
 		return fmt.Errorf("invalid control frame: %w", err)
 	}
-	return dispatch(manager, sftpService, writer, request)
+	return dispatch(manager, sftpService, forwardingService, writer, request)
 }
 
-func dispatch(manager *sshsession.Manager, sftpService *coresftp.Service, writer *eventWriter, request protocol.Request) error {
+func dispatch(manager *sshsession.Manager, sftpService *coresftp.Service, forwardingService *forwarding.Service, writer *eventWriter, request protocol.Request) error {
 	// payload 타입이 명령마다 다르기 때문에 여기서 명령별로 역직렬화한다.
 	switch request.Type {
 	case protocol.CommandHealth:
@@ -124,6 +130,25 @@ func dispatch(manager *sshsession.Manager, sftpService *coresftp.Service, writer
 			return err
 		}
 		return manager.Connect(request.SessionID, request.ID, payload)
+	case protocol.CommandProbeHostKey:
+		var payload protocol.HostKeyProbePayload
+		if err := json.Unmarshal(request.Payload, &payload); err != nil {
+			return err
+		}
+		result, err := sshconn.ProbeHostKey(payload.Host, payload.Port, sshconn.DefaultConfig)
+		if err != nil {
+			return err
+		}
+		writer.emit(protocol.Event{
+			Type:      protocol.EventHostKeyProbed,
+			RequestID: request.ID,
+			Payload: protocol.HostKeyProbedPayload{
+				Algorithm:         result.Algorithm,
+				PublicKeyBase64:   result.PublicKeyBase64,
+				FingerprintSHA256: result.FingerprintSHA256,
+			},
+		})
+		return nil
 	case protocol.CommandResize:
 		var payload protocol.ResizePayload
 		if err := json.Unmarshal(request.Payload, &payload); err != nil {
@@ -132,6 +157,14 @@ func dispatch(manager *sshsession.Manager, sftpService *coresftp.Service, writer
 		return manager.Resize(request.SessionID, payload.Cols, payload.Rows)
 	case protocol.CommandDisconnect:
 		return manager.Disconnect(request.SessionID)
+	case protocol.CommandPortForwardStart:
+		var payload protocol.PortForwardStartPayload
+		if err := json.Unmarshal(request.Payload, &payload); err != nil {
+			return err
+		}
+		return forwardingService.Start(request.EndpointID, request.ID, payload)
+	case protocol.CommandPortForwardStop:
+		return forwardingService.Stop(request.EndpointID, request.ID)
 	case protocol.CommandSFTPConnect:
 		var payload protocol.SFTPConnectPayload
 		if err := json.Unmarshal(request.Payload, &payload); err != nil {
@@ -246,6 +279,22 @@ func isSFTPCommand(frame protocol.Frame) bool {
 		protocol.CommandSFTPDelete,
 		protocol.CommandSFTPTransferStart,
 		protocol.CommandSFTPTransferCancel:
+		return true
+	default:
+		return false
+	}
+}
+
+func isPortForwardCommand(frame protocol.Frame) bool {
+	if frame.Kind != protocol.FrameKindControl {
+		return false
+	}
+	var request protocol.Request
+	if err := protocol.DecodeControlFrame(frame, &request); err != nil {
+		return false
+	}
+	switch request.Type {
+	case protocol.CommandPortForwardStart, protocol.CommandPortForwardStop:
 		return true
 	default:
 		return false

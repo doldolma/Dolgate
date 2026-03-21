@@ -6,6 +6,10 @@ import type {
   DesktopSftpConnectInput,
   HostDraft,
   HostSecretInput,
+  KnownHostProbeInput,
+  KnownHostTrustInput,
+  PortForwardDraft,
+  PortForwardRuntimeEvent,
   SftpDeleteInput,
   SftpListInput,
   SftpMkdirInput,
@@ -19,6 +23,7 @@ const streamListeners = new Map<string, Set<(chunk: Uint8Array) => void>>();
 const sessionBacklog = new Map<string, Uint8Array[]>();
 const backlogBytes = new Map<string, number>();
 const transferListeners = new Set<(event: TransferJobEvent) => void>();
+const portForwardListeners = new Set<(event: PortForwardRuntimeEvent) => void>();
 const MAX_SESSION_BACKLOG_BYTES = 1024 * 1024;
 
 function cloneChunk(chunk: Uint8Array): Uint8Array {
@@ -64,6 +69,12 @@ ipcRenderer.on(ipcChannels.ssh.data, (_event, payload: { sessionId: string; chun
 
 ipcRenderer.on(ipcChannels.sftp.transferEvent, (_event, payload: TransferJobEvent) => {
   for (const listener of transferListeners) {
+    listener(payload);
+  }
+});
+
+ipcRenderer.on(ipcChannels.portForwards.event, (_event, payload: PortForwardRuntimeEvent) => {
+  for (const listener of portForwardListeners) {
     listener(payload);
   }
 });
@@ -125,6 +136,35 @@ const api: DesktopApi = {
   settings: {
     get: () => ipcRenderer.invoke(ipcChannels.settings.get),
     update: (input) => ipcRenderer.invoke(ipcChannels.settings.update, input)
+  },
+  portForwards: {
+    list: () => ipcRenderer.invoke(ipcChannels.portForwards.list),
+    create: (draft: PortForwardDraft) => ipcRenderer.invoke(ipcChannels.portForwards.create, draft),
+    update: (id: string, draft: PortForwardDraft) => ipcRenderer.invoke(ipcChannels.portForwards.update, id, draft),
+    remove: (id: string) => ipcRenderer.invoke(ipcChannels.portForwards.remove, id),
+    start: (ruleId: string) => ipcRenderer.invoke(ipcChannels.portForwards.start, ruleId),
+    stop: (ruleId: string) => ipcRenderer.invoke(ipcChannels.portForwards.stop, ruleId),
+    onEvent: (listener: (event: PortForwardRuntimeEvent) => void) => {
+      portForwardListeners.add(listener);
+      return () => {
+        portForwardListeners.delete(listener);
+      };
+    }
+  },
+  knownHosts: {
+    list: () => ipcRenderer.invoke(ipcChannels.knownHosts.list),
+    probeHost: (input: KnownHostProbeInput) => ipcRenderer.invoke(ipcChannels.knownHosts.probeHost, input),
+    trust: (input: KnownHostTrustInput) => ipcRenderer.invoke(ipcChannels.knownHosts.trust, input),
+    replace: (input: KnownHostTrustInput) => ipcRenderer.invoke(ipcChannels.knownHosts.replace, input),
+    remove: (id: string) => ipcRenderer.invoke(ipcChannels.knownHosts.remove, id)
+  },
+  logs: {
+    list: () => ipcRenderer.invoke(ipcChannels.logs.list),
+    clear: () => ipcRenderer.invoke(ipcChannels.logs.clear)
+  },
+  keychain: {
+    list: () => ipcRenderer.invoke(ipcChannels.keychain.list),
+    removeForHost: (hostId: string) => ipcRenderer.invoke(ipcChannels.keychain.removeForHost, hostId)
   },
   files: {
     getHomeDirectory: () => ipcRenderer.invoke(ipcChannels.files.getHomeDirectory),

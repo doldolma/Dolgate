@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/x509"
+	"encoding/base64"
 	"encoding/pem"
 	"fmt"
 	"net"
@@ -22,9 +23,10 @@ import (
 )
 
 type sftpTestServer struct {
-	addr     string
-	listener net.Listener
-	handlers pkgsftp.Handlers
+	addr          string
+	listener      net.Listener
+	handlers      pkgsftp.Handlers
+	hostKeyBase64 string
 }
 
 func TestServiceBrowseAndManagePaths(t *testing.T) {
@@ -38,11 +40,12 @@ func TestServiceBrowseAndManagePaths(t *testing.T) {
 	defer service.Shutdown()
 
 	if err := service.Connect("endpoint-1", "req-connect", protocol.SFTPConnectPayload{
-		Host:     "127.0.0.1",
-		Port:     server.port(),
-		Username: "tester",
-		AuthType: "password",
-		Password: "s3cret",
+		Host:                 "127.0.0.1",
+		Port:                 server.port(),
+		Username:             "tester",
+		AuthType:             "password",
+		Password:             "s3cret",
+		TrustedHostKeyBase64: server.hostKeyBase64,
 	}); err != nil {
 		t.Fatalf("connect failed: %v", err)
 	}
@@ -94,11 +97,12 @@ func TestServiceTransfersLocalAndRemoteFiles(t *testing.T) {
 	defer service.Shutdown()
 
 	if err := service.Connect("endpoint-1", "req-connect", protocol.SFTPConnectPayload{
-		Host:     "127.0.0.1",
-		Port:     server.port(),
-		Username: "tester",
-		AuthType: "password",
-		Password: "s3cret",
+		Host:                 "127.0.0.1",
+		Port:                 server.port(),
+		Username:             "tester",
+		AuthType:             "password",
+		Password:             "s3cret",
+		TrustedHostKeyBase64: server.hostKeyBase64,
 	}); err != nil {
 		t.Fatalf("connect failed: %v", err)
 	}
@@ -242,9 +246,10 @@ func newSFTPTestServer(t *testing.T) (*sftpTestServer, func()) {
 	}
 
 	server := &sftpTestServer{
-		addr:     listener.Addr().String(),
-		listener: listener,
-		handlers: pkgsftp.InMemHandler(),
+		addr:          listener.Addr().String(),
+		listener:      listener,
+		handlers:      pkgsftp.InMemHandler(),
+		hostKeyBase64: base64.StdEncoding.EncodeToString(hostSigner.PublicKey().Marshal()),
 	}
 
 	var wg sync.WaitGroup

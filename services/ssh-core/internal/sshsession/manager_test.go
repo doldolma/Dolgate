@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/x509"
+	"encoding/base64"
 	"encoding/pem"
 	"fmt"
 	"io"
@@ -26,6 +27,7 @@ type sshTestServer struct {
 	listener       net.Listener
 	windowChanges  chan [2]int
 	globalRequests chan string
+	hostKeyBase64  string
 }
 
 func TestManagerPasswordFlow(t *testing.T) {
@@ -41,13 +43,14 @@ func TestManagerPasswordFlow(t *testing.T) {
 	})
 
 	err := manager.Connect("session-1", "req-1", protocol.ConnectPayload{
-		Host:     "127.0.0.1",
-		Port:     server.port(),
-		Username: "tester",
-		AuthType: "password",
-		Password: "s3cret",
-		Cols:     80,
-		Rows:     24,
+		Host:                 "127.0.0.1",
+		Port:                 server.port(),
+		Username:             "tester",
+		AuthType:             "password",
+		Password:             "s3cret",
+		TrustedHostKeyBase64: server.hostKeyBase64,
+		Cols:                 80,
+		Rows:                 24,
 	})
 	if err != nil {
 		t.Fatalf("connect failed: %v", err)
@@ -99,13 +102,14 @@ func TestManagerPrivateKeyFlow(t *testing.T) {
 	}, func(_ protocol.StreamFrame, _ []byte) {})
 
 	err := manager.Connect("session-2", "req-2", protocol.ConnectPayload{
-		Host:           "127.0.0.1",
-		Port:           server.port(),
-		Username:       "tester",
-		AuthType:       "privateKey",
-		PrivateKeyPath: keyPath,
-		Cols:           100,
-		Rows:           30,
+		Host:                 "127.0.0.1",
+		Port:                 server.port(),
+		Username:             "tester",
+		AuthType:             "privateKey",
+		PrivateKeyPath:       keyPath,
+		TrustedHostKeyBase64: server.hostKeyBase64,
+		Cols:                 100,
+		Rows:                 30,
 	})
 	if err != nil {
 		t.Fatalf("connect failed: %v", err)
@@ -126,13 +130,14 @@ func TestManagerSendsKeepAliveRequests(t *testing.T) {
 	})
 
 	err := manager.Connect("session-3", "req-3", protocol.ConnectPayload{
-		Host:     "127.0.0.1",
-		Port:     server.port(),
-		Username: "tester",
-		AuthType: "password",
-		Password: "s3cret",
-		Cols:     80,
-		Rows:     24,
+		Host:                 "127.0.0.1",
+		Port:                 server.port(),
+		Username:             "tester",
+		AuthType:             "password",
+		Password:             "s3cret",
+		TrustedHostKeyBase64: server.hostKeyBase64,
+		Cols:                 80,
+		Rows:                 24,
 	})
 	if err != nil {
 		t.Fatalf("connect failed: %v", err)
@@ -234,6 +239,7 @@ func newSSHTestServer(t *testing.T) (*sshTestServer, []byte, func()) {
 		listener:       listener,
 		windowChanges:  make(chan [2]int, 8),
 		globalRequests: make(chan string, 8),
+		hostKeyBase64:  base64.StdEncoding.EncodeToString(hostSigner.PublicKey().Marshal()),
 	}
 
 	var wg sync.WaitGroup
