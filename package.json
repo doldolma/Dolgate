@@ -1,0 +1,20 @@
+{
+  "name": "keyterm",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "npm-run-all --parallel dev:desktop dev:api",
+    "dev:desktop": "npm run dev --workspace @keyterm/desktop",
+    "dev:api": "cd services/sync-api && go run ./cmd/api",
+    "build": "npm run build --workspace @keyterm/desktop",
+    "test": "npm run test --workspace @keyterm/desktop && cd services/ssh-core && go test ./... && cd ../sync-api && go test ./...",
+    "typecheck": "npm run typecheck --workspace @keyterm/desktop"
+  },
+  "devDependencies": {
+    "npm-run-all": "^4.1.5"
+  }
+}
