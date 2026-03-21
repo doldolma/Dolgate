@@ -1,6 +1,6 @@
-# KeyTerm 아키텍처
+# dolssh 아키텍처
 
-KeyTerm은 세 개의 런타임 경계로 나뉩니다.
+dolssh는 세 개의 런타임 경계로 나뉩니다.
 
 1. UX, 로컬 저장소, OS 연동을 담당하는 Electron 데스크톱 앱
 2. SSH 세션 생명주기와 터미널 스트림을 담당하는 Go SSH 코어 프로세스

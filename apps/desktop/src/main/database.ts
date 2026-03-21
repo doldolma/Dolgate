@@ -2,7 +2,7 @@ import Database from 'better-sqlite3';
 import { app } from 'electron';
 import { mkdirSync } from 'node:fs';
 import path from 'node:path';
-import type { AppSettings, AppTheme, GroupRecord, HostDraft, HostRecord } from '@keyterm/shared';
+import type { AppSettings, AppTheme, GroupRecord, HostDraft, HostRecord } from '@dolssh/shared';
 
 function nowIso(): string {
   return new Date().toISOString();
@@ -11,7 +11,7 @@ function nowIso(): string {
 function databasePath(): string {
   const dbDir = path.join(app.getPath('userData'), 'data');
   mkdirSync(dbDir, { recursive: true });
-  return path.join(dbDir, 'keyterm.db');
+  return path.join(dbDir, 'dolssh.db');
 }
 
 function openDatabase(): Database.Database {

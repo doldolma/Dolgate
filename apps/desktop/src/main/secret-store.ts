@@ -1,6 +1,6 @@
 import keytar from 'keytar';
 
-const SERVICE_NAME = 'KeyTerm';
+const SERVICE_NAME = 'dolssh';
 
 export class SecretStore {
   async save(account: string, secret: string): Promise<string> {

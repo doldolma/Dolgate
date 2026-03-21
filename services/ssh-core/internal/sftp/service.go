@@ -12,8 +12,8 @@ import (
 
 	sftppkg "github.com/pkg/sftp"
 
-	"keyterm/services/ssh-core/internal/protocol"
-	"keyterm/services/ssh-core/internal/sshconn"
+	"dolssh/services/ssh-core/internal/protocol"
+	"dolssh/services/ssh-core/internal/sshconn"
 )
 
 // EventEmitter는 SFTP 상태와 전송 이벤트를 상위 레이어로 올리는 함수다.

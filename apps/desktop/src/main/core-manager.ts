@@ -21,7 +21,7 @@ import type {
   TransferJob,
   TransferJobEvent,
   TransferStartInput
-} from '@keyterm/shared';
+} from '@dolssh/shared';
 import { ipcChannels } from '../common/ipc-channels';
 import { CoreFrameParser, encodeControlFrame, encodeStreamFrame } from './core-framing';
 

@@ -5,17 +5,17 @@ import (
 	"os"
 	"time"
 
-	"keyterm/services/sync-api/internal/auth"
-	httpserver "keyterm/services/sync-api/internal/http"
-	"keyterm/services/sync-api/internal/store"
+	"dolssh/services/sync-api/internal/auth"
+	httpserver "dolssh/services/sync-api/internal/http"
+	"dolssh/services/sync-api/internal/store"
 )
 
 func main() {
 	// 운영 배포와 로컬 개발 모두를 위해 환경 변수 기반 설정을 사용한다.
 	dbDriver := getenv("DB_DRIVER", "sqlite")
 	port := getenv("PORT", "8080")
-	databaseURL := getenv("DATABASE_URL", "file:keyterm_sync.db?_pragma=busy_timeout(5000)")
-	jwtSecret := getenv("JWT_SECRET", "dev-keyterm-secret")
+	databaseURL := getenv("DATABASE_URL", "file:dolssh_sync.db?_pragma=busy_timeout(5000)")
+	jwtSecret := getenv("JWT_SECRET", "dev-dolssh-secret")
 
 	dbStore, err := store.Open(dbDriver, databaseURL)
 	if err != nil {

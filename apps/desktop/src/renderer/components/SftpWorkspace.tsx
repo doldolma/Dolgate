@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import type { FileEntry, HostRecord, SftpPaneId, TransferJob } from '@keyterm/shared';
+import type { FileEntry, HostRecord, SftpPaneId, TransferJob } from '@dolssh/shared';
 import type { PendingConflictDialog, SftpPaneState, SftpSourceKind, SftpState } from '../store/createAppStore';
 
 interface SftpWorkspaceProps {
@@ -226,7 +226,7 @@ function PaneBrowser({
         }}
         onDrop={(event) => {
           event.preventDefault();
-          const payload = event.dataTransfer.getData('application/x-keyterm-transfer');
+          const payload = event.dataTransfer.getData('application/x-dolssh-transfer');
           if (!payload) {
             return;
           }
@@ -254,7 +254,7 @@ function PaneBrowser({
                 draggable
                 onDragStart={(event) => {
                   event.dataTransfer.setData(
-                    'application/x-keyterm-transfer',
+                    'application/x-dolssh-transfer',
                     JSON.stringify({
                       sourcePaneId: pane.id,
                       draggedPath: entry.path
@@ -273,7 +273,7 @@ function PaneBrowser({
                     return;
                   }
                   event.preventDefault();
-                  const payload = event.dataTransfer.getData('application/x-keyterm-transfer');
+                  const payload = event.dataTransfer.getData('application/x-dolssh-transfer');
                   if (!payload) {
                     return;
                   }

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import type { AppTheme, HostRecord } from '@keyterm/shared';
+import type { AppTheme, HostRecord } from '@dolssh/shared';
 import { AppTitleBar } from './components/AppTitleBar';
 import { HomeNavigation } from './components/HomeNavigation';
 import { HostBrowser } from './components/HostBrowser';
@@ -75,8 +75,8 @@ export function App() {
   useEffect(() => {
     // 앱 최초 진입 시 DB/코어 상태를 로드하고, 이후 코어 이벤트를 계속 구독한다.
     void bootstrap();
-    const offCore = window.keyterm.ssh.onEvent(handleCoreEvent);
-    const offTransfer = window.keyterm.sftp.onTransferEvent(handleTransferEvent);
+    const offCore = window.dolssh.ssh.onEvent(handleCoreEvent);
+    const offTransfer = window.dolssh.sftp.onTransferEvent(handleTransferEvent);
     return () => {
       offCore();
       offTransfer();

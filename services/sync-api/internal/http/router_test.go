@@ -10,16 +10,16 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"keyterm/services/sync-api/internal/auth"
-	httpserver "keyterm/services/sync-api/internal/http"
-	"keyterm/services/sync-api/internal/store"
-	syncmodel "keyterm/services/sync-api/internal/sync"
+	"dolssh/services/sync-api/internal/auth"
+	httpserver "dolssh/services/sync-api/internal/http"
+	"dolssh/services/sync-api/internal/store"
+	syncmodel "dolssh/services/sync-api/internal/sync"
 )
 
 func TestAuthAndSyncFlow(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
-	sqliteStore, err := store.OpenSQLite("file:keyterm_sync_test?mode=memory&cache=shared")
+	sqliteStore, err := store.OpenSQLite("file:dolssh_sync_test?mode=memory&cache=shared")
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}
@@ -86,7 +86,7 @@ func TestAuthAndSyncFlow(t *testing.T) {
 func TestSyncRequiresAuth(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
-	sqliteStore, err := store.OpenSQLite("file:keyterm_sync_auth_test?mode=memory&cache=shared")
+	sqliteStore, err := store.OpenSQLite("file:dolssh_sync_auth_test?mode=memory&cache=shared")
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}

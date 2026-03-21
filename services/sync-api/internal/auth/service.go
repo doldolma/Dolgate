@@ -11,7 +11,7 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	"golang.org/x/crypto/bcrypt"
 
-	"keyterm/services/sync-api/internal/store"
+	"dolssh/services/sync-api/internal/store"
 )
 
 var ErrInvalidCredentials = errors.New("invalid credentials")

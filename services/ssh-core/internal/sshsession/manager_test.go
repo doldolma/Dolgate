@@ -17,8 +17,8 @@ import (
 
 	"golang.org/x/crypto/ssh"
 
-	"keyterm/services/ssh-core/internal/protocol"
-	"keyterm/services/ssh-core/internal/sshsession"
+	"dolssh/services/ssh-core/internal/protocol"
+	"dolssh/services/ssh-core/internal/sshsession"
 )
 
 type sshTestServer struct {

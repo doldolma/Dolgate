@@ -1,4 +1,4 @@
-module keyterm/services/ssh-core
+module dolssh/services/ssh-core
 
 go 1.25
 

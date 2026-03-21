@@ -1,6 +1,6 @@
-# KeyTerm
+# dolssh
 
-KeyTerm은 Electron, React, xterm.js, Go, Gin, GORM으로 구성한 크로스 플랫폼 SSH 클라이언트 MVP 스캐폴드입니다. 데스크톱 UX, SSH 런타임, 동기화 API가 서로 독립적으로 진화할 수 있도록 모노레포 구조를 잡았습니다.
+dolssh는 Electron, React, xterm.js, Go, Gin, GORM으로 구성한 크로스 플랫폼 SSH 클라이언트 MVP 스캐폴드입니다. 데스크톱 UX, SSH 런타임, 동기화 API가 서로 독립적으로 진화할 수 있도록 모노레포 구조를 잡았습니다.
 
 ## 모노레포 구조
 
@@ -69,7 +69,7 @@ npm run dev:desktop
 참고:
 
 - 데스크톱 앱은 실행 전에 `better-sqlite3`, `keytar`를 Electron ABI 기준으로 자동 재빌드합니다.
-- Electron 버전이나 Node 버전을 바꾼 뒤 네이티브 모듈 오류가 다시 나면 `npm run rebuild:native --workspace @keyterm/desktop`로 수동 재빌드할 수 있습니다.
+- Electron 버전이나 Node 버전을 바꾼 뒤 네이티브 모듈 오류가 다시 나면 `npm run rebuild:native --workspace @dolssh/desktop`로 수동 재빌드할 수 있습니다.
 
 백엔드 API만 실행:
 
@@ -90,7 +90,7 @@ npm run dev
 ```bash
 DB_DRIVER=sqlite
 PORT=8080
-DATABASE_URL=file:keyterm_sync.db?_pragma=busy_timeout(5000)
+DATABASE_URL=file:dolssh_sync.db?_pragma=busy_timeout(5000)
 JWT_SECRET=change-me-in-production
 ```
 
@@ -98,7 +98,7 @@ MySQL 전환 예시:
 
 ```bash
 DB_DRIVER=mysql
-DATABASE_URL=user:password@tcp(127.0.0.1:3306)/keyterm?charset=utf8mb4&parseTime=True&loc=UTC
+DATABASE_URL=user:password@tcp(127.0.0.1:3306)/dolssh?charset=utf8mb4&parseTime=True&loc=UTC
 JWT_SECRET=change-me-in-production
 ```
 
@@ -111,7 +111,7 @@ npm test
 추가 검증:
 
 ```bash
-npm run typecheck --workspace @keyterm/desktop
+npm run typecheck --workspace @dolssh/desktop
 (cd services/ssh-core && go test ./...)
 (cd services/sync-api && go test ./...)
 ```

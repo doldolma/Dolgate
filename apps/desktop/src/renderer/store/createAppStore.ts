@@ -15,7 +15,7 @@ import type {
   TransferJob,
   TransferJobEvent,
   TransferStartInput
-} from '@keyterm/shared';
+} from '@dolssh/shared';
 
 export type WorkspaceTabId = 'home' | 'sftp' | string;
 export type HomeSection = 'hosts' | 'settings';

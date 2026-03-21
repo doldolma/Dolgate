@@ -11,7 +11,7 @@ import type {
   SftpMkdirInput,
   SftpRenameInput,
   TransferStartInput
-} from '@keyterm/shared';
+} from '@dolssh/shared';
 import { ipcChannels } from '../common/ipc-channels';
 import { GroupRepository, HostRepository, SettingsRepository } from './database';
 import { CoreManager } from './core-manager';

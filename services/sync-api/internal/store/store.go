@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	syncmodel "keyterm/services/sync-api/internal/sync"
+	syncmodel "dolssh/services/sync-api/internal/sync"
 )
 
 type User struct {

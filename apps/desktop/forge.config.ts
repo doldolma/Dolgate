@@ -3,7 +3,9 @@ import { VitePlugin } from '@electron-forge/plugin-vite';
 
 const config = {
   packagerConfig: {
-    asar: true
+    asar: true,
+    executableName: 'dolssh',
+    name: 'dolssh'
   },
   rebuildConfig: {},
   makers: [],
