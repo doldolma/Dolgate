@@ -307,9 +307,6 @@ export class AuthService {
   }
 
   private async prepareBrowserRedirectUri(): Promise<string> {
-    if (app.isPackaged) {
-      return this.getRedirectUri();
-    }
     return this.startLoopbackCallbackServer();
   }
 
