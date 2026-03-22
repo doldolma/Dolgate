@@ -260,7 +260,9 @@ export function HostForm({
       ) : null}
 
       <div className="form-actions">
-        <button type="submit">{host ? 'Save host' : 'Create host'}</button>
+        <button type="submit" className="host-form__submit">
+          {host ? 'Save host' : 'Create host'}
+        </button>
         {host && onDelete ? (
           <button
             type="button"

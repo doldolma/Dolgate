@@ -156,6 +156,12 @@ npm run release:dist:win
 3. Electron Forge가 `win32/x64` prepackaged 앱 생성
 4. electron-builder가 `nsis`, `latest.yml` 생성
 
+Windows 설치 동작:
+
+- NSIS는 `current user` 전용 설치로 고정됩니다.
+- 설치 마법사는 `one-click` 모드로 동작합니다.
+- `all users` 설치는 지원하지 않습니다.
+
 ### 두 플랫폼을 순서대로 시도
 
 ```bash

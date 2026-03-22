@@ -194,6 +194,7 @@ npm run release:all
   - GitHub OAuth App 설정에서 `Device Flow`를 활성화해야 합니다.
 - macOS 자동 업데이트는 `zip` 아티팩트와 업데이트 메타데이터를 사용합니다.
 - Windows 자동 업데이트는 `nsis` 아티팩트와 `latest.yml`을 사용합니다.
+- Windows 설치 프로그램은 `current user` 전용 `one-click` NSIS 설치로 배포됩니다.
 - `npm run release:all`은 실제 GitHub Release 업로드를 수행합니다.
 - `release:dist:*`는 브라우저 로그인 없이 로컬 아티팩트만 생성합니다.
 - 데스크톱 저장소는 네이티브 모듈 없는 파일 기반 구조라서 이전보다 크로스플랫폼 빌드 안정성이 높습니다.

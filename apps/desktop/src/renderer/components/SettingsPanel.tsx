@@ -45,7 +45,6 @@ export function SettingsPanel({ settings, onUpdateSettings, onLogout }: Settings
       <div className="settings-panel__header">
         <div className="section-kicker">Preferences</div>
         <h2>Settings</h2>
-        <p>앱 종료는 창 닫기와 다릅니다. Cmd+Q 또는 Dock의 Quit으로 종료하면 SSH 세션도 함께 정리됩니다.</p>
       </div>
 
       <section className="settings-card">

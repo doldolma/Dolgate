@@ -52,7 +52,7 @@ module.exports = {
     ]
   },
   nsis: {
-    oneClick: false,
+    oneClick: true,
     perMachine: false,
     allowToChangeInstallationDirectory: false
   },
