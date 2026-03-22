@@ -1,5 +1,5 @@
 import { createStore } from 'zustand/vanilla';
-import { isAwsEc2HostRecord, isSshHostRecord } from '@shared';
+import { isAwsEc2HostRecord, isSshHostRecord, isWarpgateSshHostRecord } from '@shared';
 import type {
   ActivityLogRecord,
   AppSettings,
@@ -12,6 +12,8 @@ import type {
   HostKeyProbeResult,
   HostRecord,
   HostSecretInput,
+  KeyboardInteractiveChallenge,
+  KeyboardInteractivePrompt,
   KnownHostRecord,
   PortForwardDraft,
   PortForwardRuleRecord,
@@ -125,6 +127,18 @@ export interface PendingCredentialRetry {
   paneId?: SftpPaneId;
 }
 
+export interface PendingInteractiveAuth {
+  sessionId: string;
+  challengeId: string;
+  name?: string | null;
+  instruction: string;
+  prompts: KeyboardInteractivePrompt[];
+  provider: 'generic' | 'warpgate';
+  approvalUrl?: string | null;
+  authCode?: string | null;
+  autoSubmitted: boolean;
+}
+
 export interface SftpState {
   localHomePath: string;
   leftPane: SftpPaneState;
@@ -156,6 +170,7 @@ export interface AppState {
   sftp: SftpState;
   pendingHostKeyPrompt: PendingHostKeyPrompt | null;
   pendingCredentialRetry: PendingCredentialRetry | null;
+  pendingInteractiveAuth: PendingInteractiveAuth | null;
   setSearchQuery: (value: string) => void;
   toggleHostTag: (tag: string) => void;
   clearHostTagFilter: () => void;
@@ -196,6 +211,9 @@ export interface AppState {
   dismissPendingHostKeyPrompt: () => void;
   dismissPendingCredentialRetry: () => void;
   submitCredentialRetry: (secrets: HostSecretInput) => Promise<void>;
+  respondInteractiveAuth: (challengeId: string, responses: string[]) => Promise<void>;
+  reopenInteractiveAuthUrl: () => Promise<void>;
+  clearPendingInteractiveAuth: () => void;
   handleCoreEvent: (event: CoreEvent<Record<string, unknown>>) => void;
   handleTransferEvent: (event: TransferJobEvent) => void;
   handlePortForwardEvent: (event: PortForwardRuntimeEvent) => void;
@@ -553,6 +571,46 @@ function resolveCredentialRetryKind(host: HostRecord | undefined, message: strin
     : null;
 }
 
+function normalizeInteractiveText(value: string | undefined | null): string {
+  return (value ?? '').trim();
+}
+
+function parseWarpgateApprovalUrl(...parts: Array<string | undefined | null>): string | null {
+  const combined = parts.map(normalizeInteractiveText).filter(Boolean).join('\n');
+  const match = combined.match(/https?:\/\/[^\s<>"')]+/i);
+  return match ? match[0] : null;
+}
+
+function parseWarpgateAuthCode(...parts: Array<string | undefined | null>): string | null {
+  const combined = parts.map(normalizeInteractiveText).filter(Boolean).join('\n');
+  const labeledMatch = combined.match(
+    /(?:auth(?:entication)?|verification|security|device)?\s*code\s*[:=]?\s*([A-Z0-9][A-Z0-9-]{3,})/i
+  );
+  if (labeledMatch) {
+    return labeledMatch[1];
+  }
+  const tokenMatch = combined.match(/([A-Z0-9]{4,}(?:-[A-Z0-9]{2,})+)/i);
+  return tokenMatch ? tokenMatch[1] : null;
+}
+
+function isWarpgateCompletionPrompt(label: string, instruction: string): boolean {
+  return /press enter when done|press enter to continue|once authorized|after authoriz|after logging in|after completing authentication|hit enter|return to continue/i.test(
+    `${label}\n${instruction}`
+  );
+}
+
+function isWarpgateCodePrompt(label: string, instruction: string): boolean {
+  return /code|verification|security|token|device/i.test(label) || (/code/i.test(instruction) && !/press enter/i.test(label));
+}
+
+function shouldTreatAsWarpgate(host: HostRecord | undefined, challenge: KeyboardInteractiveChallenge): boolean {
+  if (!host || !isWarpgateSshHostRecord(host)) {
+    return false;
+  }
+  const sourceText = `${challenge.name ?? ''}\n${challenge.instruction}\n${challenge.prompts.map((prompt) => prompt.label).join('\n')}`;
+  return /warpgate|authorize|device authorization|device code|verification code/i.test(sourceText);
+}
+
 function upsertTransferJob(transfers: TransferJob[], job: TransferJob): TransferJob[] {
   const next = [job, ...transfers.filter((item) => item.id !== job.id)];
   return next.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
@@ -611,6 +669,8 @@ function toTrustInput(probe: HostKeyProbeResult) {
 }
 
 export function createAppStore(api: DesktopApi) {
+  const openedInteractiveBrowserChallenges = new Set<string>();
+
   const openSessionForHost = async (
     set: (next: AppState | Partial<AppState> | ((state: AppState) => AppState | Partial<AppState>)) => void,
     get: () => AppState,
@@ -870,6 +930,7 @@ export function createAppStore(api: DesktopApi) {
       sftp: defaultSftpState,
       pendingHostKeyPrompt: null,
       pendingCredentialRetry: null,
+      pendingInteractiveAuth: null,
       setSearchQuery: (value) => set({ searchQuery: value }),
       toggleHostTag: (tag) =>
         set((state) => {
@@ -945,6 +1006,7 @@ export function createAppStore(api: DesktopApi) {
           isReady: true,
           pendingHostKeyPrompt: null,
           pendingCredentialRetry: null,
+          pendingInteractiveAuth: null,
           sftp: {
             localHomePath,
             leftPane: {
@@ -1004,6 +1066,20 @@ export function createAppStore(api: DesktopApi) {
                 awsPrivateIp: current.awsPrivateIp ?? null,
                 awsState: current.awsState ?? null
               }
+            : isWarpgateSshHostRecord(current)
+              ? {
+                  kind: 'warpgate-ssh',
+                  label: current.label,
+                  groupName: groupPath,
+                  tags: current.tags ?? [],
+                  terminalThemeId: current.terminalThemeId ?? null,
+                  warpgateBaseUrl: current.warpgateBaseUrl,
+                  warpgateSshHost: current.warpgateSshHost,
+                  warpgateSshPort: current.warpgateSshPort,
+                  warpgateTargetId: current.warpgateTargetId,
+                  warpgateTargetName: current.warpgateTargetName,
+                  warpgateUsername: current.warpgateUsername
+                }
             : {
                 kind: 'ssh',
                 label: current.label,
@@ -1038,7 +1114,7 @@ export function createAppStore(api: DesktopApi) {
         if (!host) {
           return;
         }
-        if (!isSshHostRecord(host)) {
+        if (isAwsEc2HostRecord(host)) {
           await openSessionForHost(set, get, hostId, cols, rows);
           return;
         }
@@ -1386,6 +1462,25 @@ export function createAppStore(api: DesktopApi) {
       },
       dismissPendingHostKeyPrompt: () => set({ pendingHostKeyPrompt: null }),
       dismissPendingCredentialRetry: () => set({ pendingCredentialRetry: null }),
+      respondInteractiveAuth: async (challengeId, responses) => {
+        const pending = get().pendingInteractiveAuth;
+        if (!pending || pending.challengeId !== challengeId) {
+          return;
+        }
+        await api.ssh.respondKeyboardInteractive({
+          sessionId: pending.sessionId,
+          challengeId,
+          responses
+        });
+      },
+      reopenInteractiveAuthUrl: async () => {
+        const pending = get().pendingInteractiveAuth;
+        if (!pending?.approvalUrl) {
+          return;
+        }
+        await api.shell.openExternal(pending.approvalUrl);
+      },
+      clearPendingInteractiveAuth: () => set({ pendingInteractiveAuth: null }),
       submitCredentialRetry: async (secrets) => {
         const pending = get().pendingCredentialRetry;
         if (!pending) {
@@ -1430,6 +1525,97 @@ export function createAppStore(api: DesktopApi) {
         if (!sessionId) {
           return;
         }
+
+        if (event.type === 'keyboardInteractiveChallenge') {
+          const payload = event.payload as Record<string, unknown>;
+          const challenge: KeyboardInteractiveChallenge = {
+            sessionId,
+            challengeId: String(payload.challengeId ?? ''),
+            attempt: Number(payload.attempt ?? 1),
+            name: typeof payload.name === 'string' ? payload.name : null,
+            instruction: String(payload.instruction ?? ''),
+            prompts: Array.isArray(payload.prompts)
+              ? payload.prompts.map((prompt) => {
+                  const candidate = prompt as Record<string, unknown>;
+                  return {
+                    label: String(candidate.label ?? ''),
+                    echo: Boolean(candidate.echo)
+                  } satisfies KeyboardInteractivePrompt;
+                })
+              : []
+          };
+          const currentTab = get().tabs.find((tab) => tab.sessionId === sessionId);
+          const currentHost = currentTab ? get().hosts.find((host) => host.id === currentTab.hostId) : undefined;
+          const isWarpgateChallenge = shouldTreatAsWarpgate(currentHost, challenge);
+          const approvalUrl = isWarpgateChallenge
+            ? parseWarpgateApprovalUrl(challenge.instruction, challenge.name, ...challenge.prompts.map((prompt) => prompt.label))
+            : null;
+          const authCode = isWarpgateChallenge
+            ? parseWarpgateAuthCode(challenge.instruction, challenge.name, ...challenge.prompts.map((prompt) => prompt.label))
+            : null;
+          const shouldUseWarpgateUi = isWarpgateChallenge && Boolean(approvalUrl || authCode);
+
+          if (approvalUrl && !openedInteractiveBrowserChallenges.has(challenge.challengeId)) {
+            openedInteractiveBrowserChallenges.add(challenge.challengeId);
+            void api.shell.openExternal(approvalUrl).catch(() => undefined);
+          }
+
+          const autoResponses: string[] = [];
+          let canAutoRespond = challenge.prompts.length > 0;
+          for (const prompt of challenge.prompts) {
+            if (shouldUseWarpgateUi && authCode && isWarpgateCodePrompt(prompt.label, challenge.instruction)) {
+              autoResponses.push(authCode);
+              continue;
+            }
+            if (shouldUseWarpgateUi && isWarpgateCompletionPrompt(prompt.label, challenge.instruction)) {
+              autoResponses.push('');
+              continue;
+            }
+            canAutoRespond = false;
+            break;
+          }
+
+          set({
+            pendingInteractiveAuth: {
+              sessionId,
+              challengeId: challenge.challengeId,
+              name: challenge.name ?? null,
+              instruction: challenge.instruction,
+              prompts: challenge.prompts,
+              provider: shouldUseWarpgateUi ? 'warpgate' : 'generic',
+              approvalUrl,
+              authCode,
+              autoSubmitted: canAutoRespond && autoResponses.length === challenge.prompts.length && challenge.prompts.length > 0
+            }
+          });
+
+          if (canAutoRespond && autoResponses.length === challenge.prompts.length && challenge.prompts.length > 0) {
+            void api.ssh
+              .respondKeyboardInteractive({
+                sessionId,
+                challengeId: challenge.challengeId,
+                responses: autoResponses
+              })
+              .catch(() => undefined);
+          }
+          return;
+        }
+
+        if (event.type === 'keyboardInteractiveResolved') {
+          set((state) => {
+            if (!state.pendingInteractiveAuth || state.pendingInteractiveAuth.sessionId !== sessionId) {
+              return state;
+            }
+            if (state.pendingInteractiveAuth.provider === 'warpgate') {
+              return state;
+            }
+            return {
+              pendingInteractiveAuth: null
+            };
+          });
+          return;
+        }
+
         set((state) => {
           if (event.type === 'closed') {
             const tabs = state.tabs.filter((tab) => tab.sessionId !== sessionId);
@@ -1479,7 +1665,9 @@ export function createAppStore(api: DesktopApi) {
               tabs,
               workspaces: nextWorkspaces,
               tabStrip: nextTabStrip,
-              activeWorkspaceTab: nextActive
+              activeWorkspaceTab: nextActive,
+              pendingInteractiveAuth:
+                state.pendingInteractiveAuth?.sessionId === sessionId ? null : state.pendingInteractiveAuth
             };
           }
 
@@ -1512,6 +1700,12 @@ export function createAppStore(api: DesktopApi) {
 
           return {
             tabs,
+            pendingInteractiveAuth:
+              event.type === 'connected' || event.type === 'error'
+                ? state.pendingInteractiveAuth?.sessionId === sessionId
+                  ? null
+                  : state.pendingInteractiveAuth
+                : state.pendingInteractiveAuth,
             pendingCredentialRetry:
               retryKind && currentHost
                 ? {

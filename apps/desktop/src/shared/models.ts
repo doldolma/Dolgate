@@ -1,7 +1,7 @@
 import type { AuthSession } from './api';
 
-export type AuthType = 'password' | 'privateKey';
-export type HostKind = 'ssh' | 'aws-ec2';
+export type AuthType = 'password' | 'privateKey' | 'keyboardInteractive';
+export type HostKind = 'ssh' | 'aws-ec2' | 'warpgate-ssh';
 export type AppTheme = 'system' | 'light' | 'dark';
 export type TerminalThemeId =
   | 'dolssh-dark'
@@ -102,11 +102,31 @@ export interface AwsEc2HostDraft extends HostBaseDraft {
   awsState?: string | null;
 }
 
+export interface WarpgateSshHostRecord extends HostBaseRecord {
+  kind: 'warpgate-ssh';
+  warpgateBaseUrl: string;
+  warpgateSshHost: string;
+  warpgateSshPort: number;
+  warpgateTargetId: string;
+  warpgateTargetName: string;
+  warpgateUsername: string;
+}
+
+export interface WarpgateSshHostDraft extends HostBaseDraft {
+  kind: 'warpgate-ssh';
+  warpgateBaseUrl: string;
+  warpgateSshHost: string;
+  warpgateSshPort: number;
+  warpgateTargetId: string;
+  warpgateTargetName: string;
+  warpgateUsername: string;
+}
+
 // HostRecord는 로컬 스토리지와 sync payload가 공유하는 정규화된 호스트 모델이다.
-export type HostRecord = SshHostRecord | AwsEc2HostRecord;
+export type HostRecord = SshHostRecord | AwsEc2HostRecord | WarpgateSshHostRecord;
 
 // HostDraft는 생성/수정 폼에서 사용하는 입력 전용 모델이다.
-export type HostDraft = SshHostDraft | AwsEc2HostDraft;
+export type HostDraft = SshHostDraft | AwsEc2HostDraft | WarpgateSshHostDraft;
 
 export function isSshHostRecord(host: HostRecord): host is SshHostRecord {
   return host.kind === 'ssh';
@@ -116,12 +136,20 @@ export function isAwsEc2HostRecord(host: HostRecord): host is AwsEc2HostRecord {
   return host.kind === 'aws-ec2';
 }
 
+export function isWarpgateSshHostRecord(host: HostRecord): host is WarpgateSshHostRecord {
+  return host.kind === 'warpgate-ssh';
+}
+
 export function isSshHostDraft(host: HostDraft): host is SshHostDraft {
   return host.kind === 'ssh';
 }
 
 export function isAwsEc2HostDraft(host: HostDraft): host is AwsEc2HostDraft {
   return host.kind === 'aws-ec2';
+}
+
+export function isWarpgateSshHostDraft(host: HostDraft): host is WarpgateSshHostDraft {
+  return host.kind === 'warpgate-ssh';
 }
 
 export function getHostSearchText(host: HostRecord): string[] {
@@ -137,6 +165,17 @@ export function getHostSearchText(host: HostRecord): string[] {
       ...(host.tags ?? [])
     ];
   }
+  if (host.kind === 'warpgate-ssh') {
+    return [
+      host.label,
+      host.warpgateTargetName,
+      host.warpgateTargetId,
+      host.warpgateUsername,
+      host.warpgateBaseUrl,
+      host.groupName ?? '',
+      ...(host.tags ?? [])
+    ];
+  }
   return [host.label, host.hostname, host.username, host.groupName ?? '', ...(host.tags ?? [])];
 }
 
@@ -145,12 +184,19 @@ export function getHostSubtitle(host: HostRecord): string {
     const parts = ['AWS', host.awsRegion, host.awsPrivateIp || host.awsInstanceId].filter(Boolean);
     return parts.join(' • ');
   }
+  if (host.kind === 'warpgate-ssh') {
+    const target = host.warpgateTargetName || host.warpgateTargetId;
+    return ['Warpgate', host.warpgateUsername, target].filter(Boolean).join(' • ');
+  }
   return `${host.username}@${host.hostname}:${host.port}`;
 }
 
 export function getHostBadgeLabel(host: HostRecord): string {
   if (host.kind === 'aws-ec2') {
     return 'AWS';
+  }
+  if (host.kind === 'warpgate-ssh') {
+    return 'WARPGATE';
   }
   return host.authType === 'privateKey' ? 'K' : 'S';
 }
@@ -261,6 +307,33 @@ export interface AwsEc2InstanceSummary {
   platform?: string | null;
   privateIp?: string | null;
   state?: string | null;
+}
+
+export interface WarpgateTargetSummary {
+  id: string;
+  name: string;
+  kind: 'ssh';
+}
+
+export interface WarpgateConnectionInfo {
+  baseUrl: string;
+  sshHost: string;
+  sshPort: number;
+  username?: string | null;
+}
+
+export interface KeyboardInteractivePrompt {
+  label: string;
+  echo: boolean;
+}
+
+export interface KeyboardInteractiveChallenge {
+  sessionId: string;
+  challengeId: string;
+  attempt: number;
+  name?: string | null;
+  instruction: string;
+  prompts: KeyboardInteractivePrompt[];
 }
 
 // PortForwardRuleRecord는 사용자가 저장한 포워딩 규칙 자체를 표현한다.

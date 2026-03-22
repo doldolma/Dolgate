@@ -109,6 +109,21 @@ function createMockApi(): DesktopApi {
       listRegions: vi.fn().mockResolvedValue([]),
       listEc2Instances: vi.fn().mockResolvedValue([])
     },
+    warpgate: {
+      testConnection: vi.fn().mockResolvedValue({
+        baseUrl: 'https://warpgate.example.com',
+        sshHost: 'warpgate.example.com',
+        sshPort: 2222,
+        username: 'example.user'
+      }),
+      getConnectionInfo: vi.fn().mockResolvedValue({
+        baseUrl: 'https://warpgate.example.com',
+        sshHost: 'warpgate.example.com',
+        sshPort: 2222,
+        username: 'example.user'
+      }),
+      listSshTargets: vi.fn().mockResolvedValue([])
+    },
     groups: {
       list: vi.fn().mockResolvedValue([
         {
@@ -138,6 +153,7 @@ function createMockApi(): DesktopApi {
       writeBinary: vi.fn().mockResolvedValue(undefined),
       resize: vi.fn().mockResolvedValue(undefined),
       disconnect: vi.fn().mockResolvedValue(undefined),
+      respondKeyboardInteractive: vi.fn().mockResolvedValue(undefined),
       onEvent: vi.fn(),
       onData: vi.fn()
     },

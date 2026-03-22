@@ -38,12 +38,25 @@ type HostKeyProbeResult struct {
 	FingerprintSHA256 string
 }
 
+type InteractivePrompt struct {
+	Label string
+	Echo  bool
+}
+
+type InteractiveChallenge struct {
+	Name        string
+	Instruction string
+	Prompts     []InteractivePrompt
+}
+
+type InteractiveResponder func(challenge InteractiveChallenge) ([]string, error)
+
 var DefaultConfig = Config{
 	TCPDialTimeout:       10 * time.Second,
 	TCPKeepAliveInterval: 30 * time.Second,
 }
 
-func DialClient(target Target, config Config) (*ssh.Client, error) {
+func DialClient(target Target, config Config, responder InteractiveResponder) (*ssh.Client, error) {
 	if config.TCPDialTimeout == 0 {
 		config.TCPDialTimeout = DefaultConfig.TCPDialTimeout
 	}
@@ -51,7 +64,7 @@ func DialClient(target Target, config Config) (*ssh.Client, error) {
 		config.TCPKeepAliveInterval = DefaultConfig.TCPKeepAliveInterval
 	}
 
-	authMethod, err := resolveAuthMethod(target)
+	authMethods, err := resolveAuthMethods(target, responder)
 	if err != nil {
 		return nil, err
 	}
@@ -63,7 +76,7 @@ func DialClient(target Target, config Config) (*ssh.Client, error) {
 
 	clientConfig := &ssh.ClientConfig{
 		User:            target.Username,
-		Auth:            []ssh.AuthMethod{authMethod},
+		Auth:            authMethods,
 		HostKeyCallback: hostKeyCallback,
 		Timeout:         config.TCPDialTimeout,
 	}
@@ -149,13 +162,40 @@ func strictHostKeyCallback(trustedHostKeyBase64 string) (ssh.HostKeyCallback, er
 	}, nil
 }
 
-func resolveAuthMethod(target Target) (ssh.AuthMethod, error) {
+func resolveKeyboardInteractiveAuthMethod(responder InteractiveResponder) ssh.AuthMethod {
+	return ssh.KeyboardInteractive(func(user, instruction string, questions []string, echos []bool) ([]string, error) {
+		if responder == nil {
+			return nil, fmt.Errorf("keyboard-interactive responder is not configured")
+		}
+		prompts := make([]InteractivePrompt, 0, len(questions))
+		for index, question := range questions {
+			echo := false
+			if index < len(echos) {
+				echo = echos[index]
+			}
+			prompts = append(prompts, InteractivePrompt{
+				Label: question,
+				Echo:  echo,
+			})
+		}
+		return responder(InteractiveChallenge{
+			Name:        user,
+			Instruction: instruction,
+			Prompts:     prompts,
+		})
+	})
+}
+
+func resolveAuthMethods(target Target, responder InteractiveResponder) ([]ssh.AuthMethod, error) {
 	switch target.AuthType {
 	case "password":
 		if target.Password == "" {
 			return nil, fmt.Errorf("password auth requires a password")
 		}
-		return ssh.Password(target.Password), nil
+		return []ssh.AuthMethod{
+			ssh.Password(target.Password),
+			resolveKeyboardInteractiveAuthMethod(responder),
+		}, nil
 	case "privateKey":
 		var privateKey []byte
 		if target.PrivateKeyPEM != "" {
@@ -180,7 +220,12 @@ func resolveAuthMethod(target Target) (ssh.AuthMethod, error) {
 		if err != nil {
 			return nil, fmt.Errorf("parse private key: %w", err)
 		}
-		return ssh.PublicKeys(signer), nil
+		return []ssh.AuthMethod{
+			ssh.PublicKeys(signer),
+			resolveKeyboardInteractiveAuthMethod(responder),
+		}, nil
+	case "keyboardInteractive":
+		return []ssh.AuthMethod{resolveKeyboardInteractiveAuthMethod(responder)}, nil
 	default:
 		return nil, fmt.Errorf("unsupported auth type: %s", target.AuthType)
 	}

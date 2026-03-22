@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import {
   isAwsEc2HostDraft,
+  isWarpgateSshHostDraft,
   isSshHostDraft,
   isSshHostRecord
 } from '@shared';
@@ -26,7 +27,9 @@ import type {
   SyncKind,
   TerminalFontFamilyId,
   TerminalPreferencesRecord,
-  TerminalThemeId
+  TerminalThemeId,
+  WarpgateSshHostDraft,
+  WarpgateSshHostRecord
 } from '@shared';
 import { getDesktopStateStorage, type SyncDeletionRecord } from './state-storage';
 
@@ -88,6 +91,13 @@ function compareHosts(left: HostRecord, right: HostRecord): number {
       }
       return left.awsInstanceId.localeCompare(right.awsInstanceId);
     }
+    if (left.kind === 'warpgate-ssh' && right.kind === 'warpgate-ssh') {
+      const hostCompare = left.warpgateSshHost.localeCompare(right.warpgateSshHost);
+      if (hostCompare !== 0) {
+        return hostCompare;
+      }
+      return left.warpgateTargetName.localeCompare(right.warpgateTargetName);
+    }
     return 0;
   }
   return left.kind.localeCompare(right.kind);
@@ -127,9 +137,18 @@ function normalizeIncomingHostRecord(record: HostRecord): HostRecord {
       terminalThemeId: normalizeTerminalThemeId(record.terminalThemeId)
     };
   }
+  if (record.kind === 'warpgate-ssh') {
+    return {
+      ...record,
+      groupName: normalizeGroupPath(record.groupName),
+      tags: normalizeTags(record.tags),
+      terminalThemeId: normalizeTerminalThemeId(record.terminalThemeId)
+    };
+  }
 
   const legacyRecord = record as unknown as Partial<SshHostRecord> &
-    Partial<AwsEc2HostRecord> & { id: string; label: string; createdAt: string; updatedAt: string };
+    Partial<AwsEc2HostRecord> &
+    Partial<WarpgateSshHostRecord> & { id: string; label: string; createdAt: string; updatedAt: string };
   if (typeof legacyRecord.hostname === 'string' && typeof legacyRecord.port === 'number' && typeof legacyRecord.username === 'string') {
     return {
       id: legacyRecord.id,
@@ -168,6 +187,32 @@ function normalizeIncomingHostRecord(record: HostRecord): HostRecord {
       awsPlatform: legacyRecord.awsPlatform ?? null,
       awsPrivateIp: legacyRecord.awsPrivateIp ?? null,
       awsState: legacyRecord.awsState ?? null,
+      createdAt: legacyRecord.createdAt,
+      updatedAt: legacyRecord.updatedAt
+    };
+  }
+
+  if (
+    typeof legacyRecord.warpgateBaseUrl === 'string' &&
+    typeof legacyRecord.warpgateSshHost === 'string' &&
+    typeof legacyRecord.warpgateSshPort === 'number' &&
+    typeof legacyRecord.warpgateTargetId === 'string' &&
+    typeof legacyRecord.warpgateTargetName === 'string' &&
+    typeof legacyRecord.warpgateUsername === 'string'
+  ) {
+    return {
+      id: legacyRecord.id,
+      kind: 'warpgate-ssh',
+      label: legacyRecord.label,
+      groupName: normalizeGroupPath(legacyRecord.groupName),
+      tags: normalizeTags(legacyRecord.tags),
+      terminalThemeId: normalizeTerminalThemeId(legacyRecord.terminalThemeId),
+      warpgateBaseUrl: legacyRecord.warpgateBaseUrl,
+      warpgateSshHost: legacyRecord.warpgateSshHost,
+      warpgateSshPort: legacyRecord.warpgateSshPort,
+      warpgateTargetId: legacyRecord.warpgateTargetId,
+      warpgateTargetName: legacyRecord.warpgateTargetName,
+      warpgateUsername: legacyRecord.warpgateUsername,
       createdAt: legacyRecord.createdAt,
       updatedAt: legacyRecord.updatedAt
     };
@@ -215,12 +260,39 @@ function toAwsHostRecord(id: string, draft: AwsEc2HostDraft, timestamp: string, 
   };
 }
 
+function toWarpgateHostRecord(
+  id: string,
+  draft: WarpgateSshHostDraft,
+  timestamp: string,
+  current?: WarpgateSshHostRecord
+): WarpgateSshHostRecord {
+  return {
+    id,
+    kind: 'warpgate-ssh',
+    label: draft.label,
+    warpgateBaseUrl: draft.warpgateBaseUrl,
+    warpgateSshHost: draft.warpgateSshHost,
+    warpgateSshPort: draft.warpgateSshPort,
+    warpgateTargetId: draft.warpgateTargetId,
+    warpgateTargetName: draft.warpgateTargetName,
+    warpgateUsername: draft.warpgateUsername,
+    groupName: normalizeGroupPath(draft.groupName),
+    tags: normalizeTags(draft.tags),
+    terminalThemeId: normalizeTerminalThemeId(draft.terminalThemeId),
+    createdAt: current?.createdAt ?? timestamp,
+    updatedAt: timestamp
+  };
+}
+
 function toHostRecord(id: string, draft: HostDraft, secretRef: string | null, timestamp: string, current?: HostRecord): HostRecord {
   if (isSshHostDraft(draft)) {
     return toSshHostRecord(id, draft, secretRef, timestamp, current?.kind === 'ssh' ? current : undefined);
   }
   if (isAwsEc2HostDraft(draft)) {
     return toAwsHostRecord(id, draft, timestamp, current && current.kind === 'aws-ec2' ? current : undefined);
+  }
+  if (isWarpgateSshHostDraft(draft)) {
+    return toWarpgateHostRecord(id, draft, timestamp, current && current.kind === 'warpgate-ssh' ? current : undefined);
   }
   throw new Error('Unsupported host draft type');
 }

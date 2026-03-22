@@ -14,6 +14,7 @@ interface HostBrowserProps {
   onSearchChange: (query: string) => void;
   onCreateHost: () => void;
   onOpenAwsImport: () => void;
+  onOpenWarpgateImport: () => void;
   onCreateGroup: (name: string) => Promise<void>;
   onNavigateGroup: (path: string | null) => void;
   onSelectHost: (hostId: string) => void;
@@ -118,6 +119,7 @@ export function HostBrowser({
   onSearchChange,
   onCreateHost,
   onOpenAwsImport,
+  onOpenWarpgateImport,
   onCreateGroup,
   onNavigateGroup,
   onSelectHost,
@@ -229,6 +231,9 @@ export function HostBrowser({
         <div className="home-toolbar__actions">
           <button type="button" className="secondary-button" onClick={onOpenAwsImport}>
             Import from AWS
+          </button>
+          <button type="button" className="secondary-button" onClick={onOpenWarpgateImport}>
+            Import from Warpgate
           </button>
           <button
             type="button"
@@ -343,7 +348,7 @@ export function HostBrowser({
               <strong>{emptyMessage}</strong>
               <p>
                 {hosts.length === 0
-                  ? 'New Host 또는 Import from AWS를 눌러 첫 번째 연결 대상을 추가해보세요.'
+                  ? 'New Host 또는 Import from AWS/Warpgate를 눌러 첫 번째 연결 대상을 추가해보세요.'
                   : searchQuery
                     ? '검색어를 지우거나 다른 호스트명으로 다시 찾아보세요.'
                     : 'New Host를 눌러 이 위치에 호스트를 추가하거나, 다른 그룹으로 이동해 장치를 확인해보세요.'}

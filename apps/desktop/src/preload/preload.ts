@@ -7,6 +7,7 @@ import type {
   DesktopSftpConnectInput,
   HostDraft,
   HostSecretInput,
+  KeyboardInteractiveRespondInput,
   KeychainSecretCloneInput,
   KeychainSecretUpdateInput,
   KnownHostProbeInput,
@@ -134,12 +135,18 @@ const api: DesktopApi = {
     listRegions: (profileName: string) => ipcRenderer.invoke(ipcChannels.aws.listRegions, profileName),
     listEc2Instances: (profileName: string, region: string) => ipcRenderer.invoke(ipcChannels.aws.listEc2Instances, profileName, region)
   },
+  warpgate: {
+    testConnection: (baseUrl: string, token: string) => ipcRenderer.invoke(ipcChannels.warpgate.testConnection, baseUrl, token),
+    getConnectionInfo: (baseUrl: string, token: string) => ipcRenderer.invoke(ipcChannels.warpgate.getConnectionInfo, baseUrl, token),
+    listSshTargets: (baseUrl: string, token: string) => ipcRenderer.invoke(ipcChannels.warpgate.listSshTargets, baseUrl, token)
+  },
   ssh: {
     connect: (input: DesktopConnectInput) => ipcRenderer.invoke(ipcChannels.ssh.connect, input),
     write: (sessionId: string, data: string) => ipcRenderer.invoke(ipcChannels.ssh.write, sessionId, data),
     writeBinary: (sessionId: string, data: Uint8Array) => ipcRenderer.invoke(ipcChannels.ssh.writeBinary, sessionId, data),
     resize: (sessionId: string, cols: number, rows: number) => ipcRenderer.invoke(ipcChannels.ssh.resize, sessionId, cols, rows),
     disconnect: (sessionId: string) => ipcRenderer.invoke(ipcChannels.ssh.disconnect, sessionId),
+    respondKeyboardInteractive: (input: KeyboardInteractiveRespondInput) => ipcRenderer.invoke(ipcChannels.ssh.respondKeyboardInteractive, input),
     onEvent: (listener: (event: CoreEvent) => void) => {
       // 구독 해제 함수를 함께 반환해서 React effect cleanup과 자연스럽게 맞춘다.
       const wrapped = (_event: Electron.IpcRendererEvent, payload: CoreEvent) => listener(payload);

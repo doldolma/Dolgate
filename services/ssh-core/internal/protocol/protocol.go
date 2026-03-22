@@ -15,43 +15,46 @@ type StreamType string
 
 const (
 	// health는 코어 생존 여부 확인용이고, 나머지는 SSH 세션 조작 명령이다.
-	CommandHealth             CommandType = "health"
-	CommandConnect            CommandType = "connect"
-	CommandResize             CommandType = "resize"
-	CommandDisconnect         CommandType = "disconnect"
-	CommandProbeHostKey       CommandType = "probeHostKey"
-	CommandPortForwardStart   CommandType = "portForwardStart"
-	CommandPortForwardStop    CommandType = "portForwardStop"
-	CommandSFTPConnect        CommandType = "sftpConnect"
-	CommandSFTPDisconnect     CommandType = "sftpDisconnect"
-	CommandSFTPList           CommandType = "sftpList"
-	CommandSFTPMkdir          CommandType = "sftpMkdir"
-	CommandSFTPRename         CommandType = "sftpRename"
-	CommandSFTPDelete         CommandType = "sftpDelete"
-	CommandSFTPTransferStart  CommandType = "sftpTransferStart"
-	CommandSFTPTransferCancel CommandType = "sftpTransferCancel"
+	CommandHealth                     CommandType = "health"
+	CommandConnect                    CommandType = "connect"
+	CommandKeyboardInteractiveRespond CommandType = "keyboardInteractiveRespond"
+	CommandResize                     CommandType = "resize"
+	CommandDisconnect                 CommandType = "disconnect"
+	CommandProbeHostKey               CommandType = "probeHostKey"
+	CommandPortForwardStart           CommandType = "portForwardStart"
+	CommandPortForwardStop            CommandType = "portForwardStop"
+	CommandSFTPConnect                CommandType = "sftpConnect"
+	CommandSFTPDisconnect             CommandType = "sftpDisconnect"
+	CommandSFTPList                   CommandType = "sftpList"
+	CommandSFTPMkdir                  CommandType = "sftpMkdir"
+	CommandSFTPRename                 CommandType = "sftpRename"
+	CommandSFTPDelete                 CommandType = "sftpDelete"
+	CommandSFTPTransferStart          CommandType = "sftpTransferStart"
+	CommandSFTPTransferCancel         CommandType = "sftpTransferCancel"
 )
 
 const (
 	// status는 프로세스 전체 상태, connected/data/error/closed는 세션 단위 이벤트다.
-	EventStatus                EventType = "status"
-	EventConnected             EventType = "connected"
-	EventData                  EventType = "data"
-	EventError                 EventType = "error"
-	EventClosed                EventType = "closed"
-	EventHostKeyProbed         EventType = "hostKeyProbed"
-	EventPortForwardStarted    EventType = "portForwardStarted"
-	EventPortForwardStopped    EventType = "portForwardStopped"
-	EventPortForwardError      EventType = "portForwardError"
-	EventSFTPConnected         EventType = "sftpConnected"
-	EventSFTPDisconnected      EventType = "sftpDisconnected"
-	EventSFTPListed            EventType = "sftpListed"
-	EventSFTPAck               EventType = "sftpAck"
-	EventSFTPError             EventType = "sftpError"
-	EventSFTPTransferProgress  EventType = "sftpTransferProgress"
-	EventSFTPTransferCompleted EventType = "sftpTransferCompleted"
-	EventSFTPTransferFailed    EventType = "sftpTransferFailed"
-	EventSFTPTransferCancelled EventType = "sftpTransferCancelled"
+	EventStatus                       EventType = "status"
+	EventConnected                    EventType = "connected"
+	EventData                         EventType = "data"
+	EventError                        EventType = "error"
+	EventClosed                       EventType = "closed"
+	EventHostKeyProbed                EventType = "hostKeyProbed"
+	EventKeyboardInteractiveChallenge EventType = "keyboardInteractiveChallenge"
+	EventKeyboardInteractiveResolved  EventType = "keyboardInteractiveResolved"
+	EventPortForwardStarted           EventType = "portForwardStarted"
+	EventPortForwardStopped           EventType = "portForwardStopped"
+	EventPortForwardError             EventType = "portForwardError"
+	EventSFTPConnected                EventType = "sftpConnected"
+	EventSFTPDisconnected             EventType = "sftpDisconnected"
+	EventSFTPListed                   EventType = "sftpListed"
+	EventSFTPAck                      EventType = "sftpAck"
+	EventSFTPError                    EventType = "sftpError"
+	EventSFTPTransferProgress         EventType = "sftpTransferProgress"
+	EventSFTPTransferCompleted        EventType = "sftpTransferCompleted"
+	EventSFTPTransferFailed           EventType = "sftpTransferFailed"
+	EventSFTPTransferCancelled        EventType = "sftpTransferCancelled"
 )
 
 const (
@@ -131,6 +134,24 @@ type SFTPConnectPayload struct {
 type HostKeyProbePayload struct {
 	Host string `json:"host"`
 	Port int    `json:"port"`
+}
+
+type KeyboardInteractivePrompt struct {
+	Label string `json:"label"`
+	Echo  bool   `json:"echo"`
+}
+
+type KeyboardInteractiveChallengePayload struct {
+	ChallengeID string                      `json:"challengeId"`
+	Attempt     int                         `json:"attempt"`
+	Name        string                      `json:"name,omitempty"`
+	Instruction string                      `json:"instruction"`
+	Prompts     []KeyboardInteractivePrompt `json:"prompts"`
+}
+
+type KeyboardInteractiveRespondPayload struct {
+	ChallengeID string   `json:"challengeId"`
+	Responses   []string `json:"responses"`
 }
 
 // ResizePayload는 xterm 크기와 원격 PTY 크기를 맞추기 위한 요청이다.

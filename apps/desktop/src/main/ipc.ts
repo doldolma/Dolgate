@@ -3,20 +3,22 @@ import { readFile } from 'node:fs/promises';
 import { dialog, ipcMain, shell as electronShell } from 'electron';
 import {
   isAwsEc2HostRecord,
+  isWarpgateSshHostRecord,
   isSshHostDraft,
   isSshHostRecord
 } from '@shared';
 import type {
-  AwsEc2HostRecord,
   AuthState,
   AppSettings,
   DesktopConnectInput,
   DesktopSftpConnectInput,
+  HostRecord,
   HostDraft,
   HostKeyProbeResult,
   HostSecretInput,
   KeychainSecretCloneInput,
   KeychainSecretUpdateInput,
+  KeyboardInteractiveRespondInput,
   ManagedSecretPayload,
   KnownHostProbeInput,
   KnownHostTrustInput,
@@ -45,6 +47,7 @@ import { LocalFileService } from './file-service';
 import { SecretStore } from './secret-store';
 import { isSyncAuthenticationError, SyncService } from './sync-service';
 import { UpdateService } from './update-service';
+import { WarpgateService } from './warpgate-service';
 
 async function persistSecret(
   secretStore: SecretStore,
@@ -153,15 +156,18 @@ async function buildHostKeyProbeResult(
   if (!host) {
     throw new Error('Host not found');
   }
-  if (!isSshHostRecord(host)) {
+  if (!isSshHostRecord(host) && !isWarpgateSshHostRecord(host)) {
     throw new Error('AWS EC2 host는 known_hosts 검증을 사용하지 않습니다.');
   }
 
+  const probeHost = isWarpgateSshHostRecord(host) ? host.warpgateSshHost : host.hostname;
+  const probePort = isWarpgateSshHostRecord(host) ? host.warpgateSshPort : host.port;
+
   const probed = await coreManager.probeHostKey({
-    host: host.hostname,
-    port: host.port
+    host: probeHost,
+    port: probePort
   });
-  const existing = knownHosts.getByHostPort(host.hostname, host.port);
+  const existing = knownHosts.getByHostPort(probeHost, probePort);
   const status =
     !existing
       ? 'untrusted'
@@ -170,14 +176,14 @@ async function buildHostKeyProbeResult(
         : 'mismatch';
 
   if (status === 'trusted') {
-    knownHosts.touch(host.hostname, host.port);
+    knownHosts.touch(probeHost, probePort);
   }
 
   return {
     hostId: host.id,
     hostLabel: host.label,
-    host: host.hostname,
-    port: host.port,
+    host: probeHost,
+    port: probePort,
     algorithm: probed.algorithm,
     publicKeyBase64: probed.publicKeyBase64,
     fingerprintSha256: probed.fingerprintSha256,
@@ -195,11 +201,27 @@ function assertSshHost(host: ReturnType<HostRepository['getById']>): asserts hos
   }
 }
 
-function describeHostLabel(host: HostDraft | AwsEc2HostRecord): string {
+function describeHostLabel(host: HostDraft | HostRecord): string {
   if (host.kind === 'aws-ec2') {
     return host.label || host.awsInstanceName || host.awsInstanceId;
   }
+  if (host.kind === 'warpgate-ssh') {
+    return host.label || `${host.warpgateUsername}:${host.warpgateTargetName}`;
+  }
   return host.label || `${host.username}@${host.hostname}`;
+}
+
+function describeHostTarget(host: HostDraft | ReturnType<HostRepository['getById']>): string | null {
+  if (!host) {
+    return null;
+  }
+  if (host.kind === 'ssh') {
+    return host.hostname;
+  }
+  if (host.kind === 'aws-ec2') {
+    return host.awsInstanceId;
+  }
+  return host.warpgateTargetId;
 }
 
 export function registerIpcHandlers(
@@ -213,6 +235,7 @@ export function registerIpcHandlers(
   syncOutbox: SyncOutboxRepository,
   secretStore: SecretStore,
   awsService: AwsService,
+  warpgateService: WarpgateService,
   coreManager: CoreManager,
   updater: UpdateService,
   authService: AuthService,
@@ -327,7 +350,7 @@ export function registerIpcHandlers(
       hostId: record.id,
       label: record.label,
       kind: record.kind,
-      target: record.kind === 'ssh' ? record.hostname : record.awsInstanceId,
+      target: describeHostTarget(record),
       groupName: record.groupName ?? null
     });
     queueSync();
@@ -364,7 +387,7 @@ export function registerIpcHandlers(
       hostId: record.id,
       label: record.label,
       kind: record.kind,
-      target: record.kind === 'ssh' ? record.hostname : record.awsInstanceId,
+      target: describeHostTarget(record),
       groupName: record.groupName ?? null
     });
     queueSync();
@@ -380,7 +403,7 @@ export function registerIpcHandlers(
         hostId: current.id,
         label: current.label,
         kind: current.kind,
-        target: current.kind === 'ssh' ? current.hostname : current.awsInstanceId
+        target: describeHostTarget(current)
       });
     }
     queueSync();
@@ -414,6 +437,18 @@ export function registerIpcHandlers(
     return awsService.listEc2Instances(profileName, region);
   });
 
+  ipcMain.handle(ipcChannels.warpgate.testConnection, async (_event, baseUrl: string, token: string) => {
+    return warpgateService.testConnection(baseUrl, token);
+  });
+
+  ipcMain.handle(ipcChannels.warpgate.getConnectionInfo, async (_event, baseUrl: string, token: string) => {
+    return warpgateService.getConnectionInfo(baseUrl, token);
+  });
+
+  ipcMain.handle(ipcChannels.warpgate.listSshTargets, async (_event, baseUrl: string, token: string) => {
+    return warpgateService.listSshTargets(baseUrl, token);
+  });
+
   ipcMain.handle(ipcChannels.ssh.connect, async (_event, input: DesktopConnectInput) => {
     const host = hosts.getById(input.hostId);
     if (!host) {
@@ -430,6 +465,26 @@ export function registerIpcHandlers(
         hostId: host.id,
         title: input.title?.trim() || host.label
       });
+    }
+
+    if (isWarpgateSshHostRecord(host)) {
+      const trustedHostKeyBase64 = requireTrustedHostKey(knownHosts, {
+        hostname: host.warpgateSshHost,
+        port: host.warpgateSshPort
+      });
+      const title = input.title?.trim() || host.label;
+      const connection = await coreManager.connect({
+        host: host.warpgateSshHost,
+        port: host.warpgateSshPort,
+        username: `${host.warpgateUsername}:${host.warpgateTargetName}`,
+        authType: 'keyboardInteractive',
+        trustedHostKeyBase64,
+        cols: input.cols,
+        rows: input.rows,
+        hostId: host.id,
+        title
+      });
+      return connection;
     }
 
     const trustedHostKeyBase64 = requireTrustedHostKey(knownHosts, host);
@@ -476,6 +531,10 @@ export function registerIpcHandlers(
 
   ipcMain.handle(ipcChannels.ssh.disconnect, async (_event, sessionId: string) => {
     coreManager.disconnect(sessionId);
+  });
+
+  ipcMain.handle(ipcChannels.ssh.respondKeyboardInteractive, async (_event, input: KeyboardInteractiveRespondInput) => {
+    await coreManager.respondKeyboardInteractive(input);
   });
 
   ipcMain.handle(ipcChannels.shell.openExternal, async (_event, url: string) => {

@@ -233,6 +233,36 @@ function normalizeHostRecord(value: unknown): HostRecord | null {
     };
   }
 
+  if (value.kind === 'warpgate-ssh') {
+    if (
+      typeof value.warpgateBaseUrl !== 'string' ||
+      typeof value.warpgateSshHost !== 'string' ||
+      typeof value.warpgateSshPort !== 'number' ||
+      typeof value.warpgateTargetId !== 'string' ||
+      typeof value.warpgateTargetName !== 'string' ||
+      typeof value.warpgateUsername !== 'string'
+    ) {
+      return null;
+    }
+
+    return {
+      id: value.id,
+      kind: 'warpgate-ssh',
+      label: value.label,
+      groupName: typeof value.groupName === 'string' ? value.groupName : null,
+      tags,
+      terminalThemeId: isTerminalThemeId(value.terminalThemeId) ? value.terminalThemeId : null,
+      warpgateBaseUrl: value.warpgateBaseUrl,
+      warpgateSshHost: value.warpgateSshHost,
+      warpgateSshPort: value.warpgateSshPort,
+      warpgateTargetId: value.warpgateTargetId,
+      warpgateTargetName: value.warpgateTargetName,
+      warpgateUsername: value.warpgateUsername,
+      createdAt: typeof value.createdAt === 'string' ? value.createdAt : nowIso(),
+      updatedAt: typeof value.updatedAt === 'string' ? value.updatedAt : nowIso()
+    };
+  }
+
   if (value.kind !== 'ssh' && typeof value.hostname !== 'string') {
     return null;
   }

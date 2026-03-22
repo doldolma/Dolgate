@@ -14,6 +14,7 @@ import type {
   PortForwardMode,
   PortForwardRuntimeEvent,
   PortForwardRuntimeRecord,
+  KeyboardInteractiveRespondInput,
   ResolvedCoreConnectPayload,
   ResolvedHostKeyProbePayload,
   ResolvedPortForwardStartPayload,
@@ -870,6 +871,19 @@ export class CoreManager {
       type: 'disconnect',
       sessionId,
       payload: {}
+    });
+  }
+
+  async respondKeyboardInteractive(input: KeyboardInteractiveRespondInput): Promise<void> {
+    await this.start();
+    this.sendControl({
+      id: randomUUID(),
+      type: 'keyboardInteractiveRespond',
+      sessionId: input.sessionId,
+      payload: {
+        challengeId: input.challengeId,
+        responses: input.responses
+      }
     });
   }
 

@@ -79,7 +79,7 @@ func (s *Service) Connect(endpointID, requestID string, payload protocol.SFTPCon
 		PrivateKeyPath:       payload.PrivateKeyPath,
 		Passphrase:           payload.Passphrase,
 		TrustedHostKeyBase64: payload.TrustedHostKeyBase64,
-	}, sshconn.DefaultConfig)
+	}, sshconn.DefaultConfig, nil)
 	if err != nil {
 		return err
 	}

@@ -1404,6 +1404,61 @@ input::placeholder {
   color: var(--danger-text);
 }
 
+.terminal-interactive-auth {
+  margin: 0.55rem 0.55rem 0;
+  padding: 0.9rem 1rem;
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--surface-raised) 84%, var(--accent-strong) 16%);
+  border: 1px solid color-mix(in srgb, var(--accent-strong) 22%, var(--border) 78%);
+  color: var(--text);
+  display: grid;
+  gap: 0.7rem;
+}
+
+.terminal-interactive-auth p,
+.terminal-interactive-auth strong,
+.terminal-interactive-auth code,
+.terminal-interactive-auth pre {
+  margin: 0;
+}
+
+.terminal-interactive-auth__eyebrow {
+  font-size: 0.76rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-soft);
+}
+
+.terminal-interactive-auth__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+}
+
+.terminal-interactive-auth__code code,
+.terminal-interactive-auth__raw {
+  padding: 0.18rem 0.3rem;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface) 88%, transparent 12%);
+}
+
+.terminal-interactive-auth__raw {
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--text-soft);
+  font-size: 0.84rem;
+}
+
+.terminal-interactive-auth__form {
+  display: grid;
+  gap: 0.7rem;
+}
+
+.terminal-interactive-auth__field {
+  display: grid;
+  gap: 0.35rem;
+}
+
 .host-browser__error-banner {
   margin-bottom: 1rem;
 }
@@ -1852,6 +1907,10 @@ input::placeholder {
   font-size: 0.92rem;
 }
 
+.operations-card__field {
+  margin-top: 0.9rem;
+}
+
 .operations-card__actions {
   display: flex;
   gap: 0.6rem;
@@ -1913,6 +1972,14 @@ input::placeholder {
   border-radius: 24px;
 }
 
+.warpgate-import-dialog {
+  width: min(720px, calc(100vw - 2rem));
+  max-height: calc(100vh - 2rem);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
 .modal-card__header,
 .modal-card__footer {
   display: flex;
@@ -1932,6 +1999,11 @@ input::placeholder {
 
 .modal-card__body {
   padding: 1.1rem 1.2rem 1.2rem;
+}
+
+.warpgate-import-dialog .modal-card__body {
+  min-height: 0;
+  overflow: auto;
 }
 
 .modal-card__footer {

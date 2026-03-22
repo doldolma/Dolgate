@@ -17,6 +17,7 @@ import { SecretEditDialog, type SecretCredentialKind, type SecretEditDialogReque
 import { SettingsPanel } from './components/SettingsPanel';
 import { SftpWorkspace } from './components/SftpWorkspace';
 import { TerminalWorkspace } from './components/TerminalWorkspace';
+import { WarpgateImportDialog } from './components/WarpgateImportDialog';
 import type { DynamicTabStripItem, WorkspaceDropDirection, WorkspaceTab } from './store/createAppStore';
 import { useAppStore } from './store/appStore';
 
@@ -141,6 +142,7 @@ export function App() {
   const [hydratedSessionUserId, setHydratedSessionUserId] = useState<string | null>(null);
   const [selectedHostId, setSelectedHostId] = useState<string | null>(null);
   const [isAwsImportOpen, setIsAwsImportOpen] = useState(false);
+  const [isWarpgateImportOpen, setIsWarpgateImportOpen] = useState(false);
   const [hostBrowserError, setHostBrowserError] = useState<string | null>(null);
   const [draggedSession, setDraggedSession] = useState<DraggedSessionPayload | null>(null);
   const [updateState, setUpdateState] = useState<UpdateState>(createDefaultUpdateState);
@@ -549,6 +551,11 @@ export function App() {
                   setSelectedHostId(null);
                   setIsAwsImportOpen(true);
                 }}
+                onOpenWarpgateImport={() => {
+                  setHostBrowserError(null);
+                  setSelectedHostId(null);
+                  setIsWarpgateImportOpen(true);
+                }}
                 onCreateGroup={createGroup}
                 onNavigateGroup={(path) => {
                   setHostBrowserError(null);
@@ -632,6 +639,15 @@ export function App() {
             open={isAwsImportOpen}
             currentGroupPath={currentGroupPath}
             onClose={() => setIsAwsImportOpen(false)}
+            onImport={async (draft) => {
+              await saveHost(null, draft);
+            }}
+          />
+
+          <WarpgateImportDialog
+            open={isWarpgateImportOpen}
+            currentGroupPath={currentGroupPath}
+            onClose={() => setIsWarpgateImportOpen(false)}
             onImport={async (draft) => {
               await saveHost(null, draft);
             }}

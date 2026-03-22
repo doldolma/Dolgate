@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { isAwsEc2HostRecord, isSshHostDraft, isSshHostRecord } from '@shared';
+import { isAwsEc2HostRecord, isSshHostDraft, isSshHostRecord, isWarpgateSshHostRecord } from '@shared';
 import type { HostDraft, HostRecord, SecretMetadataRecord, TerminalThemeId } from '@shared';
 import { terminalThemePresets } from '../lib/terminal-presets';
 
@@ -137,6 +137,29 @@ export function HostForm({
         awsPlatform: host.awsPlatform ?? null,
         awsPrivateIp: host.awsPrivateIp ?? null,
         awsState: host.awsState ?? null
+      });
+      setPassword('');
+      setPassphrase('');
+      setSelectedSecretRef('');
+      setCredentialMode('none');
+      setTagTokens(dedupeTags(host.tags ?? []));
+      setTagInput('');
+      return;
+    }
+
+    if (isWarpgateSshHostRecord(host)) {
+      setDraft({
+        kind: 'warpgate-ssh',
+        label: host.label,
+        tags: host.tags ?? [],
+        groupName: host.groupName ?? '',
+        terminalThemeId: host.terminalThemeId ?? null,
+        warpgateBaseUrl: host.warpgateBaseUrl,
+        warpgateSshHost: host.warpgateSshHost,
+        warpgateSshPort: host.warpgateSshPort,
+        warpgateTargetId: host.warpgateTargetId,
+        warpgateTargetName: host.warpgateTargetName,
+        warpgateUsername: host.warpgateUsername
       });
       setPassword('');
       setPassphrase('');
@@ -332,6 +355,45 @@ export function HostForm({
           <label>
             State
             <input value={draft.awsState ?? ''} readOnly />
+          </label>
+        </>
+      ) : draft.kind === 'warpgate-ssh' ? (
+        <>
+          {renderTerminalThemeField(draft.terminalThemeId ?? null, (terminalThemeId) => setDraft((current) => ({ ...current, terminalThemeId })))}
+
+          <label>
+            Warpgate URL
+            <input value={draft.warpgateBaseUrl} readOnly />
+          </label>
+          <label>
+            Warpgate SSH Endpoint
+            <input value={`${draft.warpgateSshHost}:${draft.warpgateSshPort}`} readOnly />
+          </label>
+          <label>
+            Target
+            <input value={draft.warpgateTargetName} readOnly />
+          </label>
+          <label>
+            Target ID
+            <input value={draft.warpgateTargetId} readOnly />
+          </label>
+          <label>
+            Warpgate Username
+            <input
+              value={draft.warpgateUsername}
+              onChange={(event) =>
+                setDraft((current) =>
+                  current.kind === 'warpgate-ssh'
+                    ? {
+                        ...current,
+                        warpgateUsername: event.target.value
+                      }
+                    : current
+                )
+              }
+              placeholder="example.user"
+              required
+            />
           </label>
         </>
       ) : sshDraft ? (

@@ -6,6 +6,7 @@ import type {
   AwsProfileSummary,
   AuthState,
   AuthType,
+  KeyboardInteractiveChallenge,
   ManagedSecretPayload,
   HostKeyProbeResult,
   KnownHostRecord,
@@ -28,7 +29,9 @@ import type {
   TransferJobEvent,
   TransferStartInput,
   UpdateEvent,
-  UpdateState
+  UpdateState,
+  WarpgateConnectionInfo,
+  WarpgateTargetSummary
 } from './models';
 import type { SyncPayloadV2 } from './api';
 
@@ -39,6 +42,7 @@ export type CoreCommandType =
   | 'resize'
   | 'disconnect'
   | 'probeHostKey'
+  | 'keyboardInteractiveRespond'
   | 'portForwardStart'
   | 'portForwardStop'
   | 'sftpConnect'
@@ -56,6 +60,8 @@ export type CoreEventType =
   | 'error'
   | 'closed'
   | 'hostKeyProbed'
+  | 'keyboardInteractiveChallenge'
+  | 'keyboardInteractiveResolved'
   | 'portForwardStarted'
   | 'portForwardStopped'
   | 'portForwardError'
@@ -97,6 +103,12 @@ export interface ResolvedCoreConnectPayload {
   trustedHostKeyBase64: string;
   cols: number;
   rows: number;
+}
+
+export interface KeyboardInteractiveRespondInput {
+  sessionId: string;
+  challengeId: string;
+  responses: string[];
 }
 
 export interface ResolvedSftpConnectPayload {
@@ -241,12 +253,18 @@ export interface DesktopApi {
     listRegions: (profileName: string) => Promise<string[]>;
     listEc2Instances: (profileName: string, region: string) => Promise<AwsEc2InstanceSummary[]>;
   };
+  warpgate: {
+    testConnection: (baseUrl: string, token: string) => Promise<WarpgateConnectionInfo>;
+    getConnectionInfo: (baseUrl: string, token: string) => Promise<WarpgateConnectionInfo>;
+    listSshTargets: (baseUrl: string, token: string) => Promise<WarpgateTargetSummary[]>;
+  };
   ssh: {
     connect: (input: DesktopConnectInput) => Promise<{ sessionId: string }>;
     write: (sessionId: string, data: string) => Promise<void>;
     writeBinary: (sessionId: string, data: Uint8Array) => Promise<void>;
     resize: (sessionId: string, cols: number, rows: number) => Promise<void>;
     disconnect: (sessionId: string) => Promise<void>;
+    respondKeyboardInteractive: (input: KeyboardInteractiveRespondInput) => Promise<void>;
     onEvent: (listener: (event: CoreEvent) => void) => () => void;
     onData: (sessionId: string, listener: (chunk: Uint8Array) => void) => () => void;
   };

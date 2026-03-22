@@ -129,7 +129,19 @@ func dispatch(manager *sshsession.Manager, sftpService *coresftp.Service, forwar
 		if err := json.Unmarshal(request.Payload, &payload); err != nil {
 			return err
 		}
-		return manager.Connect(request.SessionID, request.ID, payload)
+		go func(requestID, sessionID string, payload protocol.ConnectPayload) {
+			if err := manager.Connect(sessionID, requestID, payload); err != nil {
+				writer.emit(protocol.Event{
+					Type:      protocol.EventError,
+					RequestID: requestID,
+					SessionID: sessionID,
+					Payload: protocol.ErrorPayload{
+						Message: err.Error(),
+					},
+				})
+			}
+		}(request.ID, request.SessionID, payload)
+		return nil
 	case protocol.CommandProbeHostKey:
 		var payload protocol.HostKeyProbePayload
 		if err := json.Unmarshal(request.Payload, &payload); err != nil {
@@ -157,6 +169,12 @@ func dispatch(manager *sshsession.Manager, sftpService *coresftp.Service, forwar
 		return manager.Resize(request.SessionID, payload.Cols, payload.Rows)
 	case protocol.CommandDisconnect:
 		return manager.Disconnect(request.SessionID)
+	case protocol.CommandKeyboardInteractiveRespond:
+		var payload protocol.KeyboardInteractiveRespondPayload
+		if err := json.Unmarshal(request.Payload, &payload); err != nil {
+			return err
+		}
+		return manager.RespondKeyboardInteractive(request.SessionID, payload.ChallengeID, payload.Responses)
 	case protocol.CommandPortForwardStart:
 		var payload protocol.PortForwardStartPayload
 		if err := json.Unmarshal(request.Payload, &payload); err != nil {

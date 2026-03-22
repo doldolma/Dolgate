@@ -19,6 +19,7 @@ import { registerIpcHandlers } from './ipc';
 import { SecretStore } from './secret-store';
 import { SyncService } from './sync-service';
 import { UpdateService } from './update-service';
+import { WarpgateService } from './warpgate-service';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -34,6 +35,7 @@ const syncOutboxRepository = new SyncOutboxRepository();
 const secretStore = new SecretStore();
 const desktopConfigService = new DesktopConfigService();
 const awsService = new AwsService();
+const warpgateService = new WarpgateService(secretStore);
 const appendActivityLog = (entry: { level: 'info' | 'warn' | 'error'; category: 'session' | 'audit'; message: string; metadata?: Record<string, unknown> | null }) => {
   activityLogRepository.append(entry.level, entry.category, entry.message, entry.metadata ?? null);
 };
@@ -214,6 +216,7 @@ app.whenReady().then(async () => {
     syncOutboxRepository,
     secretStore,
     awsService,
+    warpgateService,
     coreManager,
     updateService,
     authService,

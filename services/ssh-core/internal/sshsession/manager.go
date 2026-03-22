@@ -43,11 +43,12 @@ var defaultManagerConfig = ManagerConfig{
 
 type Manager struct {
 	// 여러 SSH 세션을 sessionId 기준으로 관리한다.
-	mu         sync.RWMutex
-	sessions   map[string]*sessionHandle
-	emit       EventEmitter
-	emitStream StreamEmitter
-	config     ManagerConfig
+	mu                sync.RWMutex
+	sessions          map[string]*sessionHandle
+	pendingChallenges map[string]chan []string
+	emit              EventEmitter
+	emitStream        StreamEmitter
+	config            ManagerConfig
 }
 
 func NewManager(emit EventEmitter, stream StreamEmitter) *Manager {
@@ -66,14 +67,16 @@ func NewManagerWithConfig(emit EventEmitter, stream StreamEmitter, config Manage
 	}
 
 	return &Manager{
-		sessions:   make(map[string]*sessionHandle),
-		emit:       emit,
-		emitStream: stream,
-		config:     config,
+		sessions:          make(map[string]*sessionHandle),
+		pendingChallenges: make(map[string]chan []string),
+		emit:              emit,
+		emitStream:        stream,
+		config:            config,
 	}
 }
 
 func (m *Manager) Connect(sessionID, requestID string, payload protocol.ConnectPayload) error {
+	attempt := 0
 	client, err := sshconn.DialClient(sshconn.Target{
 		Host:                 payload.Host,
 		Port:                 payload.Port,
@@ -87,6 +90,53 @@ func (m *Manager) Connect(sessionID, requestID string, payload protocol.ConnectP
 	}, sshconn.Config{
 		TCPDialTimeout:       m.config.TCPDialTimeout,
 		TCPKeepAliveInterval: m.config.TCPKeepAliveInterval,
+	}, func(challenge sshconn.InteractiveChallenge) ([]string, error) {
+		attempt += 1
+		challengeID := fmt.Sprintf("%s-%d", sessionID, attempt)
+		responseCh := make(chan []string, 1)
+		m.mu.Lock()
+		m.pendingChallenges[challengeID] = responseCh
+		m.mu.Unlock()
+		defer func() {
+			m.mu.Lock()
+			delete(m.pendingChallenges, challengeID)
+			m.mu.Unlock()
+		}()
+
+		prompts := make([]protocol.KeyboardInteractivePrompt, 0, len(challenge.Prompts))
+		for _, prompt := range challenge.Prompts {
+			prompts = append(prompts, protocol.KeyboardInteractivePrompt{
+				Label: prompt.Label,
+				Echo:  prompt.Echo,
+			})
+		}
+
+		m.emit(protocol.Event{
+			Type:      protocol.EventKeyboardInteractiveChallenge,
+			RequestID: requestID,
+			SessionID: sessionID,
+			Payload: protocol.KeyboardInteractiveChallengePayload{
+				ChallengeID: challengeID,
+				Attempt:     attempt,
+				Name:        challenge.Name,
+				Instruction: challenge.Instruction,
+				Prompts:     prompts,
+			},
+		})
+
+		responses, ok := <-responseCh
+		if !ok {
+			return nil, fmt.Errorf("keyboard-interactive challenge was cancelled")
+		}
+		m.emit(protocol.Event{
+			Type:      protocol.EventKeyboardInteractiveResolved,
+			RequestID: requestID,
+			SessionID: sessionID,
+			Payload: map[string]any{
+				"challengeId": challengeID,
+			},
+		})
+		return responses, nil
 	})
 	if err != nil {
 		return err
@@ -178,6 +228,22 @@ func (m *Manager) Connect(sessionID, requestID string, payload protocol.ConnectP
 	}
 
 	return nil
+}
+
+func (m *Manager) RespondKeyboardInteractive(sessionID, challengeID string, responses []string) error {
+	m.mu.Lock()
+	responseCh, ok := m.pendingChallenges[challengeID]
+	m.mu.Unlock()
+	if !ok {
+		return fmt.Errorf("keyboard-interactive challenge %s not found for session %s", challengeID, sessionID)
+	}
+
+	select {
+	case responseCh <- responses:
+		return nil
+	default:
+		return fmt.Errorf("keyboard-interactive challenge %s already has a pending response", challengeID)
+	}
 }
 
 func (m *Manager) WriteBytes(sessionID string, data []byte) error {
@@ -280,7 +346,22 @@ func (m *Manager) closeSession(sessionID string, message string) {
 	if ok {
 		delete(m.sessions, sessionID)
 	}
+	challengeIDs := make([]string, 0)
+	for challengeID := range m.pendingChallenges {
+		if len(challengeID) >= len(sessionID)+1 && challengeID[:len(sessionID)] == sessionID && challengeID[len(sessionID)] == '-' {
+			challengeIDs = append(challengeIDs, challengeID)
+		}
+	}
+	challenges := make([]chan []string, 0, len(challengeIDs))
+	for _, challengeID := range challengeIDs {
+		challenges = append(challenges, m.pendingChallenges[challengeID])
+		delete(m.pendingChallenges, challengeID)
+	}
 	m.mu.Unlock()
+
+	for _, challenge := range challenges {
+		close(challenge)
+	}
 
 	if !ok {
 		return

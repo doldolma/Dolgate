@@ -29,12 +29,18 @@ export const ipcChannels = {
     listRegions: 'aws:list-regions',
     listEc2Instances: 'aws:list-ec2-instances'
   },
+  warpgate: {
+    testConnection: 'warpgate:test-connection',
+    getConnectionInfo: 'warpgate:get-connection-info',
+    listSshTargets: 'warpgate:list-ssh-targets'
+  },
   ssh: {
     connect: 'ssh:connect',
     write: 'ssh:write',
     writeBinary: 'ssh:write-binary',
     resize: 'ssh:resize',
     disconnect: 'ssh:disconnect',
+    respondKeyboardInteractive: 'ssh:respond-keyboard-interactive',
     event: 'ssh:core-event',
     data: 'ssh:stream-data'
   },

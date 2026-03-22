@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Terminal } from 'xterm';
 import { FitAddon } from 'xterm-addon-fit';
 import type { AppSettings, HostRecord, TerminalTab } from '@shared';
-import type { WorkspaceDropDirection, WorkspaceLayoutNode, WorkspaceTab } from '../store/createAppStore';
+import type { PendingInteractiveAuth, WorkspaceDropDirection, WorkspaceLayoutNode, WorkspaceTab } from '../store/createAppStore';
 import { useAppStore } from '../store/appStore';
 import { getTerminalFontOption, getTerminalThemePreset, type TerminalThemeDefinition } from '../lib/terminal-presets';
 import { createTerminalResizeScheduler } from './terminal-resize';
@@ -52,6 +52,7 @@ interface TerminalSessionViewProps {
   style?: React.CSSProperties;
   showHeader?: boolean;
   draggingDisabled?: boolean;
+  interactiveAuth: PendingInteractiveAuth | null;
   onFocus?: () => void;
   onClose?: () => Promise<void>;
   onStartDrag?: () => void;
@@ -197,6 +198,7 @@ function TerminalSessionView({
   style,
   showHeader = false,
   draggingDisabled = false,
+  interactiveAuth,
   onFocus,
   onClose,
   onStartDrag,
@@ -208,6 +210,18 @@ function TerminalSessionView({
   const resizeSchedulerRef = useRef<ReturnType<typeof createTerminalResizeScheduler> | null>(null);
   const tabs = useAppStore((state) => state.tabs);
   const currentTab = tabs.find((tab) => tab.sessionId === sessionId);
+  const respondInteractiveAuth = useAppStore((state) => state.respondInteractiveAuth);
+  const reopenInteractiveAuthUrl = useAppStore((state) => state.reopenInteractiveAuthUrl);
+  const clearPendingInteractiveAuth = useAppStore((state) => state.clearPendingInteractiveAuth);
+  const [promptResponses, setPromptResponses] = useState<string[]>([]);
+
+  useEffect(() => {
+    if (!interactiveAuth || interactiveAuth.sessionId !== sessionId) {
+      setPromptResponses([]);
+      return;
+    }
+    setPromptResponses(interactiveAuth.prompts.map(() => ''));
+  }, [interactiveAuth, sessionId]);
 
   function refreshViewport() {
     const terminal = terminalRef.current;
@@ -376,6 +390,98 @@ function TerminalSessionView({
         </div>
       ) : null}
       {currentTab?.errorMessage ? <div className="terminal-error-banner">{currentTab.errorMessage}</div> : null}
+      {interactiveAuth ? (
+        <div className="terminal-interactive-auth">
+          {interactiveAuth.provider === 'warpgate' ? (
+            <>
+              <div className="terminal-interactive-auth__eyebrow">Warpgate Approval</div>
+              <strong>Warpgate 승인을 기다리는 중입니다.</strong>
+              <p>
+                브라우저에서 Warpgate 로그인 후 <code>Authorize</code>를 눌러 주세요. 가능한 입력은 앱이 자동으로 처리합니다.
+              </p>
+              {interactiveAuth.authCode ? (
+                <p className="terminal-interactive-auth__code">
+                  인증 코드 <code>{interactiveAuth.authCode}</code> 는 자동으로 입력됩니다.
+                </p>
+              ) : null}
+              <div className="terminal-interactive-auth__actions">
+                {interactiveAuth.approvalUrl ? (
+                  <button
+                    type="button"
+                    className="secondary-button"
+                    onClick={() => {
+                      void reopenInteractiveAuthUrl();
+                    }}
+                  >
+                    브라우저 다시 열기
+                  </button>
+                ) : null}
+                {interactiveAuth.approvalUrl ? (
+                  <button
+                    type="button"
+                    className="secondary-button"
+                    onClick={async () => {
+                      await navigator.clipboard.writeText(interactiveAuth.approvalUrl ?? '');
+                    }}
+                  >
+                    링크 복사
+                  </button>
+                ) : null}
+                <button
+                  type="button"
+                  className="secondary-button"
+                  onClick={() => {
+                    clearPendingInteractiveAuth();
+                  }}
+                >
+                  닫기
+                </button>
+              </div>
+              <pre className="terminal-interactive-auth__raw">{interactiveAuth.instruction}</pre>
+            </>
+          ) : (
+            <form
+              className="terminal-interactive-auth__form"
+              onSubmit={(event) => {
+                event.preventDefault();
+                void respondInteractiveAuth(interactiveAuth.challengeId, promptResponses);
+              }}
+            >
+              <div className="terminal-interactive-auth__eyebrow">Additional Authentication</div>
+              <strong>추가 인증 입력이 필요합니다.</strong>
+              {interactiveAuth.instruction ? <p>{interactiveAuth.instruction}</p> : null}
+              {interactiveAuth.prompts.map((prompt, index) => (
+                <label key={`${interactiveAuth.challengeId}:${index}`} className="terminal-interactive-auth__field">
+                  <span>{prompt.label || `Prompt ${index + 1}`}</span>
+                  <input
+                    type={prompt.echo ? 'text' : 'password'}
+                    value={promptResponses[index] ?? ''}
+                    onChange={(inputEvent) => {
+                      const nextResponses = [...promptResponses];
+                      nextResponses[index] = inputEvent.target.value;
+                      setPromptResponses(nextResponses);
+                    }}
+                  />
+                </label>
+              ))}
+              <div className="terminal-interactive-auth__actions">
+                <button type="submit" className="primary-button">
+                  응답 보내기
+                </button>
+                <button
+                  type="button"
+                  className="secondary-button"
+                  onClick={() => {
+                    clearPendingInteractiveAuth();
+                  }}
+                >
+                  닫기
+                </button>
+              </div>
+            </form>
+          )}
+        </div>
+      ) : null}
       <div ref={containerRef} className="terminal-canvas" />
     </div>
   );
@@ -414,6 +520,7 @@ export function TerminalWorkspace({
   const workspaceRef = useRef<HTMLDivElement | null>(null);
   const [dropPreview, setDropPreview] = useState<DropPreview | null>(null);
   const [resizingHandle, setResizingHandle] = useState<SplitHandlePlacement | null>(null);
+  const pendingInteractiveAuth = useAppStore((state) => state.pendingInteractiveAuth);
 
   const workspaceLayout = useMemo(() => {
     if (!activeWorkspace) {
@@ -614,6 +721,7 @@ export function TerminalWorkspace({
               appearance={appearanceBySessionId.get(tab.sessionId) ?? resolveTerminalAppearanceForSession(settings, hosts, tab)}
               style={activeWorkspace ? undefined : rectStyle}
               showHeader={Boolean(activeWorkspace && placement)}
+              interactiveAuth={pendingInteractiveAuth?.sessionId === tab.sessionId ? pendingInteractiveAuth : null}
               onFocus={
                 activeWorkspace
                   ? () => {
