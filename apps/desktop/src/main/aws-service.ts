@@ -93,12 +93,12 @@ async function resolveExecutable(command: string): Promise<string> {
   throw new Error(command);
 }
 
-function runCommand(command: string, args: string[], timeoutMs = 30_000): Promise<CommandResult> {
+function runCommand(command: string, args: string[], timeoutMs = 30_000, envOverride?: NodeJS.ProcessEnv): Promise<CommandResult> {
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, {
       stdio: ['ignore', 'pipe', 'pipe'],
       windowsHide: true,
-      env: process.env
+      env: envOverride ?? process.env
     });
 
     let stdout = '';
@@ -147,6 +147,28 @@ function runCommand(command: string, args: string[], timeoutMs = 30_000): Promis
   });
 }
 
+export async function resolveAwsExecutable(command: 'aws' | 'session-manager-plugin'): Promise<string> {
+  return resolveExecutable(command);
+}
+
+export async function buildAwsCommandEnv(): Promise<NodeJS.ProcessEnv> {
+  const env = { ...process.env };
+  const resolvedDirs = new Set<string>();
+
+  for (const command of ['aws', 'session-manager-plugin'] as const) {
+    try {
+      const executablePath = await resolveExecutable(command);
+      resolvedDirs.add(path.dirname(executablePath));
+    } catch {
+      // missing optional tool is handled by caller-specific availability checks
+    }
+  }
+
+  const mergedPathEntries = [...resolvedDirs, ...splitPathEnv()];
+  env.PATH = [...new Set(mergedPathEntries)].join(path.delimiter);
+  return env;
+}
+
 function parseJson<T>(raw: string, fallbackMessage: string): T {
   try {
     return JSON.parse(raw) as T;
@@ -166,7 +188,8 @@ function normalizeAwsCliError(stderr: string, fallback: string): Error {
 export class AwsService {
   private async runResolvedCommand(command: string, args: string[], timeoutMs = 30_000): Promise<CommandResult> {
     const executablePath = await resolveExecutable(command);
-    return runCommand(executablePath, args, timeoutMs);
+    const env = await buildAwsCommandEnv();
+    return runCommand(executablePath, args, timeoutMs, env);
   }
 
   async ensureAwsCliAvailable(): Promise<void> {

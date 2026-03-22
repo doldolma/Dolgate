@@ -1263,7 +1263,7 @@ input::placeholder {
 .terminal-workspace {
   position: relative;
   overflow: hidden;
-  border-radius: 32px;
+  border-radius: 22px;
   background:
     radial-gradient(circle at top left, color-mix(in srgb, var(--accent-strong) 10%, transparent 90%), transparent 32%),
     color-mix(in srgb, var(--surface) 94%, transparent 6%);
@@ -1424,13 +1424,13 @@ input::placeholder {
   min-width: 0;
   position: relative;
   overflow: hidden;
-  border-radius: 28px;
+  border-radius: 16px;
   padding: 0;
   margin: 0.55rem;
 }
 
 .terminal-session--pane .terminal-canvas {
-  border-radius: 0 0 22px 22px;
+  border-radius: 0 0 14px 14px;
   background: color-mix(in srgb, var(--surface) 96%, transparent 4%);
   border: 1px solid var(--border);
   border-top: none;
@@ -1438,7 +1438,7 @@ input::placeholder {
 }
 
 .terminal-workspace--split .terminal-canvas {
-  border-radius: 0 0 22px 22px;
+  border-radius: 0 0 14px 14px;
 }
 
 .terminal-canvas .xterm,
@@ -1449,7 +1449,7 @@ input::placeholder {
 }
 
 .terminal-canvas .xterm-viewport {
-  border-radius: 18px;
+  border-radius: 10px;
 }
 
 .workspace-drop-preview {

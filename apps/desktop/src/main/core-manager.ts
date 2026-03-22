@@ -30,6 +30,7 @@ import type {
 } from '@shared';
 import { ipcChannels } from '../common/ipc-channels';
 import { CoreFrameParser, encodeControlFrame, encodeStreamFrame } from './core-framing';
+import { buildAwsCommandEnv, resolveAwsExecutable } from './aws-service';
 
 interface ActivityLogInput {
   level: 'info' | 'warn' | 'error';
@@ -353,18 +354,23 @@ export class CoreManager {
     };
     this.tabs.set(sessionId, tab);
 
+    const awsExecutablePath = await resolveAwsExecutable('aws');
+    const awsCommandEnv = await buildAwsCommandEnv();
+    let receivedOutput = false;
+
     const child = spawn(
-      'aws',
+      awsExecutablePath,
       ['ssm', 'start-session', '--target', payload.instanceId, '--profile', payload.profileName, '--region', payload.region],
       {
         stdio: ['pipe', 'pipe', 'pipe'],
         windowsHide: true,
-        env: process.env
+        env: awsCommandEnv
       }
     );
     this.awsSessions.set(sessionId, { process: child, stderr: '' });
 
     child.stdout.on('data', (chunk: Buffer) => {
+      receivedOutput = true;
       this.broadcastStream(
         {
           type: 'data',
@@ -447,6 +453,15 @@ export class CoreManager {
       const message =
         runtime?.stderr.trim() ||
         `AWS SSM 세션이 종료되었습니다. (code=${code ?? 'null'}, signal=${signal ?? 'null'})`;
+      if (!receivedOutput && (code ?? 0) !== 0) {
+        this.broadcastTerminalEvent({
+          type: 'error',
+          sessionId,
+          payload: {
+            message
+          }
+        });
+      }
       this.log({
         level: code === 0 || code === null ? 'info' : 'warn',
         category: 'session',
