@@ -1,3 +1,6 @@
+import { access } from 'node:fs/promises';
+import { constants as fsConstants } from 'node:fs';
+import path from 'node:path';
 import { spawn } from 'node:child_process';
 import type { AwsEc2InstanceSummary, AwsProfileStatus, AwsProfileSummary } from '@shared';
 
@@ -11,6 +14,83 @@ interface CommandResult {
 
 interface CommandError extends Error {
   code?: string;
+}
+
+const resolvedExecutableCache = new Map<string, string | null>();
+
+function splitPathEnv(): string[] {
+  const rawPath = process.env.PATH ?? '';
+  return rawPath
+    .split(path.delimiter)
+    .map((segment) => segment.trim())
+    .filter(Boolean);
+}
+
+function getExecutableCandidates(command: string): string[] {
+  const candidates = new Set<string>();
+  const pathEntries = splitPathEnv();
+
+  if (process.platform === 'win32') {
+    const suffixes = ['.exe', '.cmd', '.bat', ''];
+    for (const entry of pathEntries) {
+      for (const suffix of suffixes) {
+        candidates.add(path.join(entry, `${command}${suffix}`));
+      }
+    }
+
+    if (command === 'aws') {
+      candidates.add('C:\\Program Files\\Amazon\\AWSCLIV2\\aws.exe');
+    }
+    if (command === 'session-manager-plugin') {
+      candidates.add('C:\\Program Files\\Amazon\\SessionManagerPlugin\\bin\\session-manager-plugin.exe');
+    }
+    return [...candidates];
+  }
+
+  for (const entry of pathEntries) {
+    candidates.add(path.join(entry, command));
+  }
+
+  if (process.platform === 'darwin') {
+    candidates.add(`/opt/homebrew/bin/${command}`);
+    candidates.add(`/usr/local/bin/${command}`);
+    candidates.add(`/usr/bin/${command}`);
+  } else {
+    candidates.add(`/usr/local/bin/${command}`);
+    candidates.add(`/usr/bin/${command}`);
+    candidates.add(`/bin/${command}`);
+  }
+
+  return [...candidates];
+}
+
+async function pathExists(candidatePath: string): Promise<boolean> {
+  try {
+    await access(candidatePath, fsConstants.X_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function resolveExecutable(command: string): Promise<string> {
+  if (resolvedExecutableCache.has(command)) {
+    const cached = resolvedExecutableCache.get(command);
+    if (cached) {
+      return cached;
+    }
+    throw new Error(command);
+  }
+
+  for (const candidate of getExecutableCandidates(command)) {
+    if (await pathExists(candidate)) {
+      resolvedExecutableCache.set(command, candidate);
+      return candidate;
+    }
+  }
+
+  resolvedExecutableCache.set(command, null);
+  throw new Error(command);
 }
 
 function runCommand(command: string, args: string[], timeoutMs = 30_000): Promise<CommandResult> {
@@ -75,19 +155,6 @@ function parseJson<T>(raw: string, fallbackMessage: string): T {
   }
 }
 
-async function commandExists(command: string, args: string[]): Promise<boolean> {
-  try {
-    await runCommand(command, args, 10_000);
-    return true;
-  } catch (error) {
-    const commandError = error as CommandError;
-    if (commandError?.code === 'ENOENT') {
-      return false;
-    }
-    return true;
-  }
-}
-
 function normalizeAwsCliError(stderr: string, fallback: string): Error {
   const message = stderr.trim();
   if (!message) {
@@ -97,23 +164,37 @@ function normalizeAwsCliError(stderr: string, fallback: string): Error {
 }
 
 export class AwsService {
+  private async runResolvedCommand(command: string, args: string[], timeoutMs = 30_000): Promise<CommandResult> {
+    const executablePath = await resolveExecutable(command);
+    return runCommand(executablePath, args, timeoutMs);
+  }
+
   async ensureAwsCliAvailable(): Promise<void> {
-    const available = await commandExists('aws', ['--version']);
-    if (!available) {
+    try {
+      const result = await this.runResolvedCommand('aws', ['--version'], 10_000);
+      if (result.exitCode !== 0) {
+        throw new Error('aws --version failed');
+      }
+    } catch (error) {
       throw new Error('AWS CLI가 설치되어 있지 않습니다. `aws --version`이 동작해야 합니다.');
     }
   }
 
   async ensureSessionManagerPluginAvailable(): Promise<void> {
-    const available = await commandExists('session-manager-plugin', ['--version']);
-    if (!available) {
+    try {
+      const result = await this.runResolvedCommand('session-manager-plugin', ['--version'], 10_000);
+      if (result.exitCode !== 0) {
+        throw new Error('session-manager-plugin --version failed');
+      }
+      return;
+    } catch {
       throw new Error('AWS Session Manager Plugin이 설치되어 있지 않아 SSM 세션을 열 수 없습니다.');
     }
   }
 
   async listProfiles(): Promise<AwsProfileSummary[]> {
     await this.ensureAwsCliAvailable();
-    const result = await runCommand('aws', ['configure', 'list-profiles']);
+    const result = await this.runResolvedCommand('aws', ['configure', 'list-profiles']);
     if (result.exitCode !== 0) {
       throw normalizeAwsCliError(result.stderr, 'AWS 프로필 목록을 읽지 못했습니다.');
     }
@@ -126,7 +207,7 @@ export class AwsService {
   }
 
   private async readConfigValue(profileName: string, key: string): Promise<string> {
-    const result = await runCommand('aws', ['configure', 'get', key, '--profile', profileName]);
+    const result = await this.runResolvedCommand('aws', ['configure', 'get', key, '--profile', profileName]);
     if (result.exitCode !== 0) {
       return '';
     }
@@ -139,11 +220,13 @@ export class AwsService {
     const [ssoStartUrl, ssoSession, pluginAvailable] = await Promise.all([
       this.readConfigValue(profileName, 'sso_start_url'),
       this.readConfigValue(profileName, 'sso_session'),
-      commandExists('session-manager-plugin', ['--version'])
+      resolveExecutable('session-manager-plugin')
+        .then(() => true)
+        .catch(() => false)
     ]);
     const isSsoProfile = Boolean(ssoStartUrl || ssoSession);
 
-    const identity = await runCommand('aws', ['sts', 'get-caller-identity', '--profile', profileName, '--output', 'json']);
+    const identity = await this.runResolvedCommand('aws', ['sts', 'get-caller-identity', '--profile', profileName, '--output', 'json']);
     if (identity.exitCode === 0) {
       const payload = parseJson<{ Account?: string; Arn?: string }>(identity.stdout, 'AWS 프로필 상태 응답을 해석하지 못했습니다.');
       return {
@@ -174,7 +257,7 @@ export class AwsService {
       throw new Error('이 프로필은 브라우저 로그인 대신 AWS CLI 자격 증명이 필요합니다.');
     }
 
-    const result = await runCommand('aws', ['sso', 'login', '--profile', profileName], 5 * 60_000);
+    const result = await this.runResolvedCommand('aws', ['sso', 'login', '--profile', profileName], 5 * 60_000);
     if (result.exitCode !== 0) {
       throw normalizeAwsCliError(result.stderr, 'AWS SSO 로그인에 실패했습니다.');
     }
@@ -182,7 +265,7 @@ export class AwsService {
 
   async listRegions(profileName: string): Promise<string[]> {
     await this.ensureAwsCliAvailable();
-    const result = await runCommand('aws', [
+    const result = await this.runResolvedCommand('aws', [
       'ec2',
       'describe-regions',
       '--profile',
@@ -205,7 +288,7 @@ export class AwsService {
 
   async listEc2Instances(profileName: string, region: string): Promise<AwsEc2InstanceSummary[]> {
     await this.ensureAwsCliAvailable();
-    const result = await runCommand(
+    const result = await this.runResolvedCommand(
       'aws',
       ['ec2', 'describe-instances', '--profile', profileName, '--region', region, '--output', 'json'],
       60_000
