@@ -540,9 +540,7 @@ export function App() {
             {homeSection === 'settings' ? (
               <SettingsPanel
                 settings={settings}
-                onChangeTheme={async (theme) => {
-                  await updateSettings({ theme });
-                }}
+                onUpdateSettings={updateSettings}
                 onLogout={async () => {
                   await window.dolssh.auth.logout();
                 }}
@@ -603,11 +601,12 @@ export function App() {
         <section className={`session-shell ${isSessionViewActive ? 'active' : 'hidden'}`}>
           <TerminalWorkspace
             tabs={tabs}
+            hosts={hosts}
+            settings={settings}
             activeSessionId={activeSessionId}
             activeWorkspace={activeWorkspace}
             draggedSession={draggedSession}
             canDropDraggedSession={canDropDraggedSession}
-            theme={resolvedTheme}
             onCloseSession={disconnectTab}
             onStartPaneDrag={(workspaceId, sessionId) => {
               setDraggedSession({

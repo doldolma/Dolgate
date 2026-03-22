@@ -206,6 +206,9 @@ type TabStatus = TerminalTab['status'];
 
 const defaultSettings: AppSettings = {
   theme: 'system',
+  globalTerminalThemeId: 'dolssh-dark',
+  terminalFontFamily: 'sf-mono',
+  terminalFontSize: 13,
   dismissedUpdateVersion: null,
   updatedAt: new Date(0).toISOString()
 };
@@ -1100,6 +1103,9 @@ export function createAppStore(api: DesktopApi) {
       updateSettings: async (input) => {
         const settings = await api.settings.update(input);
         set({ settings });
+        if (input.globalTerminalThemeId) {
+          void api.sync.pushDirty();
+        }
       },
       savePortForward: async (ruleId, draft) => {
         const next = ruleId ? await api.portForwards.update(ruleId, draft) : await api.portForwards.create(draft);

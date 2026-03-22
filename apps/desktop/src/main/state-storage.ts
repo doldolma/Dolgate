@@ -19,7 +19,9 @@ import type {
   HostRecord,
   KnownHostRecord,
   PortForwardRuleRecord,
-  SecretMetadataRecord
+  SecretMetadataRecord,
+  TerminalFontFamilyId,
+  TerminalThemeId
 } from '@shared';
 import type { SyncKind } from '@shared';
 
@@ -47,6 +49,13 @@ export interface DesktopStateFile {
   settings: {
     theme: AppTheme;
     updatedAt: string;
+  };
+  terminal: {
+    globalThemeId: TerminalThemeId;
+    globalThemeUpdatedAt: string;
+    fontFamily: TerminalFontFamilyId;
+    fontSize: number;
+    localUpdatedAt: string;
   };
   updater: {
     dismissedVersion: string | null;
@@ -96,6 +105,45 @@ function isObject(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
 
+function isTerminalThemeId(value: unknown): value is TerminalThemeId {
+  return (
+    value === 'dolssh-dark' ||
+    value === 'dolssh-light' ||
+    value === 'kanagawa-wave' ||
+    value === 'kanagawa-dragon' ||
+    value === 'kanagawa-lotus' ||
+    value === 'everforest-dark' ||
+    value === 'everforest-light' ||
+    value === 'night-owl' ||
+    value === 'light-owl' ||
+    value === 'rose-pine' ||
+    value === 'hacker-green' ||
+    value === 'hacker-blue' ||
+    value === 'hacker-red'
+  );
+}
+
+function isTerminalFontFamilyId(value: unknown): value is TerminalFontFamilyId {
+  return (
+    value === 'sf-mono' ||
+    value === 'menlo' ||
+    value === 'monaco' ||
+    value === 'consolas' ||
+    value === 'cascadia-mono' ||
+    value === 'jetbrains-mono' ||
+    value === 'fira-code' ||
+    value === 'ibm-plex-mono' ||
+    value === 'source-code-pro'
+  );
+}
+
+function normalizeTerminalFontSize(value: unknown): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    return 13;
+  }
+  return Math.min(18, Math.max(11, Math.round(value)));
+}
+
 function createDefaultStateFile(): DesktopStateFile {
   const timestamp = nowIso();
   return {
@@ -103,6 +151,13 @@ function createDefaultStateFile(): DesktopStateFile {
     settings: {
       theme: 'system',
       updatedAt: timestamp
+    },
+    terminal: {
+      globalThemeId: 'dolssh-dark',
+      globalThemeUpdatedAt: timestamp,
+      fontFamily: 'sf-mono',
+      fontSize: 13,
+      localUpdatedAt: timestamp
     },
     updater: {
       dismissedVersion: null,
@@ -150,6 +205,7 @@ function normalizeStateFile(value: unknown): DesktopStateFile {
   }
 
   const settings = isObject(value.settings) ? value.settings : {};
+  const terminal = isObject(value.terminal) ? value.terminal : {};
   const updater = isObject(value.updater) ? value.updater : {};
   const auth = isObject(value.auth) ? value.auth : {};
   const sync = isObject(value.sync) ? value.sync : {};
@@ -170,6 +226,14 @@ function normalizeStateFile(value: unknown): DesktopStateFile {
     settings: {
       theme: settings.theme === 'light' || settings.theme === 'dark' ? settings.theme : 'system',
       updatedAt: typeof settings.updatedAt === 'string' ? settings.updatedAt : fallback.settings.updatedAt
+    },
+    terminal: {
+      globalThemeId: isTerminalThemeId(terminal.globalThemeId) ? terminal.globalThemeId : fallback.terminal.globalThemeId,
+      globalThemeUpdatedAt:
+        typeof terminal.globalThemeUpdatedAt === 'string' ? terminal.globalThemeUpdatedAt : fallback.terminal.globalThemeUpdatedAt,
+      fontFamily: isTerminalFontFamilyId(terminal.fontFamily) ? terminal.fontFamily : fallback.terminal.fontFamily,
+      fontSize: normalizeTerminalFontSize(terminal.fontSize),
+      localUpdatedAt: typeof terminal.localUpdatedAt === 'string' ? terminal.localUpdatedAt : fallback.terminal.localUpdatedAt
     },
     updater: {
       dismissedVersion: typeof updater.dismissedVersion === 'string' ? updater.dismissedVersion : null,

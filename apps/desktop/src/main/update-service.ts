@@ -72,6 +72,22 @@ function toProgressInfo(progress: ProgressInfo) {
   };
 }
 
+function normalizeUpdaterError(error: unknown): string {
+  const message = error == null ? '' : String((error as { message?: string }).message || error);
+  const lowered = message.toLowerCase();
+
+  if (
+    lowered.includes('code signature at url') ||
+    lowered.includes('did not pass validation') ||
+    lowered.includes('code object is not signed at all') ||
+    message.includes('코드 객체가 전혀 서명되지')
+  ) {
+    return '이 mac 릴리즈는 코드 서명되지 않은 앱이라 자동 업데이트를 적용할 수 없습니다. 나중에 서명된 버전이 배포되면 앱 안에서 바로 업데이트할 수 있습니다.';
+  }
+
+  return message || '업데이트 확인 중 알 수 없는 오류가 발생했습니다.';
+}
+
 function ensureRuntimeUpdateConfig(): void {
   if (!app.isPackaged) {
     return;
@@ -175,7 +191,7 @@ export class UpdateService {
       this.patchState({
         status: 'error',
         checkedAt: new Date().toISOString(),
-        errorMessage: error == null ? '업데이트 확인 중 알 수 없는 오류가 발생했습니다.' : String(error.message || error),
+        errorMessage: normalizeUpdaterError(error),
         progress: null
       });
     });

@@ -8,9 +8,18 @@ import type {
   SecretMetadataRecord,
   SyncPayloadV2,
   SyncRecord,
-  SyncStatus
+  SyncStatus,
+  TerminalPreferencesRecord
 } from '@shared';
-import { GroupRepository, HostRepository, KnownHostRepository, PortForwardRepository, SecretMetadataRepository, SyncOutboxRepository } from './database';
+import {
+  GroupRepository,
+  HostRepository,
+  KnownHostRepository,
+  PortForwardRepository,
+  SecretMetadataRepository,
+  SettingsRepository,
+  SyncOutboxRepository
+} from './database';
 import { SecretStore } from './secret-store';
 import { AuthService } from './auth-service';
 import { getDesktopStateStorage } from './state-storage';
@@ -34,7 +43,18 @@ function defaultSyncStatus(): SyncStatus {
 }
 
 function totalRecordCount(payload: SyncPayloadV2): number {
-  return payload.groups.length + payload.hosts.length + payload.secrets.length + payload.knownHosts.length + payload.portForwards.length;
+  return payload.groups.length + payload.hosts.length + payload.secrets.length + payload.knownHosts.length + payload.portForwards.length + payload.preferences.length;
+}
+
+function normalizeSyncPayload(payload: Partial<SyncPayloadV2> | null | undefined): SyncPayloadV2 {
+  return {
+    groups: Array.isArray(payload?.groups) ? payload.groups : [],
+    hosts: Array.isArray(payload?.hosts) ? payload.hosts : [],
+    secrets: Array.isArray(payload?.secrets) ? payload.secrets : [],
+    knownHosts: Array.isArray(payload?.knownHosts) ? payload.knownHosts : [],
+    portForwards: Array.isArray(payload?.portForwards) ? payload.portForwards : [],
+    preferences: Array.isArray(payload?.preferences) ? payload.preferences : []
+  };
 }
 
 function encodeEncryptedPayload(plaintext: string, keyBase64: string): string {
@@ -134,6 +154,7 @@ export class SyncService {
     private readonly portForwards: PortForwardRepository,
     private readonly knownHosts: KnownHostRepository,
     private readonly secretMetadata: SecretMetadataRepository,
+    private readonly settings: SettingsRepository,
     private readonly secretStore: SecretStore,
     private readonly outbox: SyncOutboxRepository
   ) {}
@@ -238,6 +259,7 @@ export class SyncService {
     this.groups.replaceAll([]);
     this.knownHosts.replaceAll([]);
     this.portForwards.replaceAll([]);
+    this.settings.clearSyncedTerminalPreferences();
     this.outbox.clearAll();
     this.patchState(defaultSyncStatus());
   }
@@ -276,7 +298,7 @@ export class SyncService {
 
   private async fetchRemoteSnapshot(): Promise<SyncPayloadV2> {
     const response = await this.fetchWithAuthRetry(new URL('/sync', this.authService.getServerUrl()), {}, '동기화 데이터 조회에 실패했습니다.');
-    return (await response.json()) as SyncPayloadV2;
+    return normalizeSyncPayload((await response.json()) as Partial<SyncPayloadV2>);
   }
 
   private async pushSnapshot(payload: SyncPayloadV2): Promise<void> {
@@ -296,6 +318,9 @@ export class SyncService {
     const hosts = this.hosts.list().map((record) => this.toSyncRecord(record.id, record.updatedAt, record, vaultKeyBase64));
     const knownHosts = this.knownHosts.list().map((record) => this.toSyncRecord(record.id, record.updatedAt, record, vaultKeyBase64));
     const portForwards = this.portForwards.list().map((record) => this.toSyncRecord(record.id, record.updatedAt, record, vaultKeyBase64));
+    const preferences = [this.settings.getSyncedTerminalPreferences()].map((record) =>
+      this.toSyncRecord(record.id, record.updatedAt, record, vaultKeyBase64)
+    );
 
     const secretEntries = this.secretMetadata.list();
     const secrets: SyncRecord[] = [];
@@ -313,7 +338,8 @@ export class SyncService {
         hosts,
         secrets,
         knownHosts,
-        portForwards
+        portForwards,
+        preferences
       };
     }
 
@@ -341,6 +367,9 @@ export class SyncService {
         case 'portForwards':
           portForwards.push(record);
           break;
+        case 'preferences':
+          preferences.push(record);
+          break;
       }
     }
 
@@ -349,7 +378,8 @@ export class SyncService {
       hosts,
       secrets,
       knownHosts,
-      portForwards
+      portForwards,
+      preferences
     };
   }
 
@@ -372,6 +402,9 @@ export class SyncService {
     const portForwards = payload.portForwards
       .filter((record) => !record.deleted_at)
       .map((record) => decodeEncryptedPayload<PortForwardRuleRecord>(record.encrypted_payload, vaultKeyBase64));
+    const preferences = payload.preferences
+      .filter((record) => !record.deleted_at)
+      .map((record) => decodeEncryptedPayload<TerminalPreferencesRecord>(record.encrypted_payload, vaultKeyBase64));
     const secrets = payload.secrets
       .filter((record) => !record.deleted_at)
       .map((record) => decodeEncryptedPayload<ManagedSecretPayload>(record.encrypted_payload, vaultKeyBase64));
@@ -380,6 +413,7 @@ export class SyncService {
     this.hosts.replaceAll(hosts);
     this.knownHosts.replaceAll(knownHosts);
     this.portForwards.replaceAll(portForwards);
+    this.settings.replaceSyncedTerminalPreferences(preferences[0] ?? null);
 
     const existingServerSecrets = this.secretMetadata.listBySource('server_managed');
     const nextSecretRefs = new Set(secrets.map((secret) => secret.secretRef));
@@ -443,4 +477,4 @@ export class SyncService {
   }
 }
 
-type SyncRecordKind = 'groups' | 'hosts' | 'secrets' | 'knownHosts' | 'portForwards';
+type SyncRecordKind = 'groups' | 'hosts' | 'secrets' | 'knownHosts' | 'portForwards' | 'preferences';

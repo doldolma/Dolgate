@@ -14,7 +14,10 @@ import type {
   PortForwardRuleRecord,
   SecretMetadataRecord,
   SecretSource,
-  SyncKind
+  SyncKind,
+  TerminalFontFamilyId,
+  TerminalPreferencesRecord,
+  TerminalThemeId
 } from '@shared';
 import { getDesktopStateStorage, type SyncDeletionRecord } from './state-storage';
 
@@ -55,6 +58,10 @@ function compareDeletedAtDesc(left: SyncDeletionRecord, right: SyncDeletionRecor
   return right.deletedAt.localeCompare(left.deletedAt);
 }
 
+function normalizeTerminalThemeId(terminalThemeId?: TerminalThemeId | null): TerminalThemeId | null {
+  return terminalThemeId ?? null;
+}
+
 function toHostRecord(id: string, draft: HostDraft, secretRef: string | null, timestamp: string, current?: HostRecord): HostRecord {
   return {
     id,
@@ -66,6 +73,7 @@ function toHostRecord(id: string, draft: HostDraft, secretRef: string | null, ti
     privateKeyPath: draft.privateKeyPath ?? null,
     secretRef: secretRef ?? draft.secretRef ?? null,
     groupName: normalizeGroupPath(draft.groupName),
+    terminalThemeId: normalizeTerminalThemeId(draft.terminalThemeId),
     createdAt: current?.createdAt ?? timestamp,
     updatedAt: timestamp
   };
@@ -77,6 +85,10 @@ function withLinkedHostCount(record: SecretMetadataRecord, hosts: HostRecord[]):
     linkedHostCount: hosts.filter((host) => host.secretRef === record.secretRef).length
   };
 }
+
+const DEFAULT_GLOBAL_TERMINAL_THEME_ID: TerminalThemeId = 'dolssh-dark';
+const DEFAULT_TERMINAL_FONT_FAMILY: TerminalFontFamilyId = 'sf-mono';
+const DEFAULT_TERMINAL_FONT_SIZE = 13;
 
 const stateStorage = getDesktopStateStorage();
 
@@ -121,6 +133,7 @@ export class HostRepository {
         nextRecord = {
           ...entry,
           secretRef,
+          terminalThemeId: normalizeTerminalThemeId(entry.terminalThemeId),
           updatedAt: nowIso()
         };
         return nextRecord;
@@ -155,7 +168,8 @@ export class HostRepository {
     stateStorage.updateState((state) => {
       state.data.hosts = records.map((record) => ({
         ...record,
-        groupName: normalizeGroupPath(record.groupName)
+        groupName: normalizeGroupPath(record.groupName),
+        terminalThemeId: normalizeTerminalThemeId(record.terminalThemeId)
       }));
     });
   }
@@ -218,9 +232,37 @@ export class SettingsRepository {
     const state = stateStorage.getState();
     return {
       theme: state.settings.theme,
+      globalTerminalThemeId: state.terminal.globalThemeId,
+      terminalFontFamily: state.terminal.fontFamily,
+      terminalFontSize: state.terminal.fontSize,
       dismissedUpdateVersion: state.updater.dismissedVersion,
-      updatedAt: state.updater.updatedAt.localeCompare(state.settings.updatedAt) > 0 ? state.updater.updatedAt : state.settings.updatedAt
+      updatedAt: [
+        state.settings.updatedAt,
+        state.updater.updatedAt,
+        state.terminal.globalThemeUpdatedAt,
+        state.terminal.localUpdatedAt
+      ].sort((left, right) => right.localeCompare(left))[0]
     };
+  }
+
+  getSyncedTerminalPreferences(): TerminalPreferencesRecord {
+    const state = stateStorage.getState();
+    return {
+      id: 'global-terminal',
+      globalTerminalThemeId: state.terminal.globalThemeId,
+      updatedAt: state.terminal.globalThemeUpdatedAt
+    };
+  }
+
+  replaceSyncedTerminalPreferences(record: TerminalPreferencesRecord | null): void {
+    stateStorage.updateState((state) => {
+      state.terminal.globalThemeId = record?.globalTerminalThemeId ?? DEFAULT_GLOBAL_TERMINAL_THEME_ID;
+      state.terminal.globalThemeUpdatedAt = record?.updatedAt ?? nowIso();
+    });
+  }
+
+  clearSyncedTerminalPreferences(): void {
+    this.replaceSyncedTerminalPreferences(null);
   }
 
   update(input: Partial<AppSettings>): AppSettings {
@@ -231,13 +273,37 @@ export class SettingsRepository {
         state.settings.updatedAt = nowIso();
       }
 
+      if (input.globalTerminalThemeId) {
+        state.terminal.globalThemeId = input.globalTerminalThemeId;
+        state.terminal.globalThemeUpdatedAt = nowIso();
+      }
+
+      if (input.terminalFontFamily) {
+        state.terminal.fontFamily = input.terminalFontFamily;
+        state.terminal.localUpdatedAt = nowIso();
+      }
+
+      if (typeof input.terminalFontSize === 'number' && Number.isFinite(input.terminalFontSize)) {
+        state.terminal.fontSize = Math.min(18, Math.max(11, Math.round(input.terminalFontSize)));
+        state.terminal.localUpdatedAt = nowIso();
+      }
+
       if (Object.prototype.hasOwnProperty.call(input, 'dismissedUpdateVersion')) {
         state.updater.dismissedVersion = input.dismissedUpdateVersion ?? null;
         state.updater.updatedAt = nowIso();
       }
 
-      if (!Object.prototype.hasOwnProperty.call(input, 'dismissedUpdateVersion') && input.theme == null) {
+      if (
+        !Object.prototype.hasOwnProperty.call(input, 'dismissedUpdateVersion') &&
+        input.theme == null &&
+        input.globalTerminalThemeId == null &&
+        input.terminalFontFamily == null &&
+        input.terminalFontSize == null
+      ) {
         state.settings.theme = current.theme as AppTheme;
+        state.terminal.globalThemeId = current.globalTerminalThemeId ?? DEFAULT_GLOBAL_TERMINAL_THEME_ID;
+        state.terminal.fontFamily = current.terminalFontFamily ?? DEFAULT_TERMINAL_FONT_FAMILY;
+        state.terminal.fontSize = current.terminalFontSize ?? DEFAULT_TERMINAL_FONT_SIZE;
       }
     });
     return this.get();
@@ -525,4 +591,3 @@ export class SyncOutboxRepository {
     });
   }
 }
-

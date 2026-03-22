@@ -46,6 +46,7 @@ const syncService = new SyncService(
   portForwardRepository,
   knownHostRepository,
   secretMetadataRepository,
+  settingsRepository,
   secretStore,
   syncOutboxRepository
 );

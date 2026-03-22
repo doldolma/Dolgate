@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
-import type { HostDraft, HostRecord, SecretMetadataRecord } from '@shared';
+import type { HostDraft, HostRecord, SecretMetadataRecord, TerminalThemeId } from '@shared';
+import { terminalThemePresets } from '../lib/terminal-presets';
 
 const defaultDraft: HostDraft = {
   label: '',
@@ -9,7 +10,8 @@ const defaultDraft: HostDraft = {
   authType: 'password',
   privateKeyPath: '',
   secretRef: null,
-  groupName: ''
+  groupName: '',
+  terminalThemeId: null
 };
 
 function createDraft(defaultGroupPath?: string | null): HostDraft {
@@ -65,7 +67,8 @@ export function HostForm({
       authType: host.authType,
       privateKeyPath: host.privateKeyPath ?? '',
       secretRef: host.secretRef,
-      groupName: host.groupName ?? ''
+      groupName: host.groupName ?? '',
+      terminalThemeId: host.terminalThemeId ?? null
     });
     setPassword('');
     setPassphrase('');
@@ -155,6 +158,26 @@ export function HostForm({
         >
           <option value="password">Password</option>
           <option value="privateKey">Private key</option>
+        </select>
+      </label>
+
+      <label>
+        Terminal Theme
+        <select
+          value={draft.terminalThemeId ?? ''}
+          onChange={(event) =>
+            setDraft({
+              ...draft,
+              terminalThemeId: event.target.value ? (event.target.value as TerminalThemeId) : null
+            })
+          }
+        >
+          <option value="">Use global theme</option>
+          {terminalThemePresets.map((preset) => (
+            <option key={preset.id} value={preset.id}>
+              {preset.title}
+            </option>
+          ))}
         </select>
       </label>
 

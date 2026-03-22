@@ -2,6 +2,30 @@ import type { AuthSession } from './api';
 
 export type AuthType = 'password' | 'privateKey';
 export type AppTheme = 'system' | 'light' | 'dark';
+export type TerminalThemeId =
+  | 'dolssh-dark'
+  | 'dolssh-light'
+  | 'kanagawa-wave'
+  | 'kanagawa-dragon'
+  | 'kanagawa-lotus'
+  | 'everforest-dark'
+  | 'everforest-light'
+  | 'night-owl'
+  | 'light-owl'
+  | 'rose-pine'
+  | 'hacker-green'
+  | 'hacker-blue'
+  | 'hacker-red';
+export type TerminalFontFamilyId =
+  | 'sf-mono'
+  | 'menlo'
+  | 'monaco'
+  | 'consolas'
+  | 'cascadia-mono'
+  | 'jetbrains-mono'
+  | 'fira-code'
+  | 'ibm-plex-mono'
+  | 'source-code-pro';
 export type UpdateStatus = 'idle' | 'checking' | 'available' | 'downloading' | 'downloaded' | 'upToDate' | 'error';
 export type SftpPaneId = 'left' | 'right';
 export type SftpEndpointKind = 'local' | 'remote';
@@ -27,6 +51,7 @@ export interface HostRecord {
   privateKeyPath?: string | null;
   secretRef?: string | null;
   groupName?: string | null;
+  terminalThemeId?: TerminalThemeId | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -41,6 +66,7 @@ export interface HostDraft {
   privateKeyPath?: string | null;
   secretRef?: string | null;
   groupName?: string | null;
+  terminalThemeId?: TerminalThemeId | null;
 }
 
 // GroupRecord는 홈 화면의 그룹 브라우징이 쓰는 계층형 그룹 메타데이터다.
@@ -53,10 +79,22 @@ export interface GroupRecord {
   updatedAt: string;
 }
 
+export interface TerminalAppearanceSettings {
+  globalTerminalThemeId: TerminalThemeId;
+  terminalFontFamily: TerminalFontFamilyId;
+  terminalFontSize: number;
+}
+
 // AppSettings는 사용자의 로컬 환경 설정을 표현한다.
-export interface AppSettings {
+export interface AppSettings extends TerminalAppearanceSettings {
   theme: AppTheme;
   dismissedUpdateVersion?: string | null;
+  updatedAt: string;
+}
+
+export interface TerminalPreferencesRecord {
+  id: 'global-terminal';
+  globalTerminalThemeId: TerminalThemeId;
   updatedAt: string;
 }
 
@@ -105,6 +143,11 @@ export interface UpdateState {
 
 export interface UpdateEvent {
   state: UpdateState;
+}
+
+export interface TerminalThemePreset {
+  id: TerminalThemeId;
+  title: string;
 }
 
 // PortForwardRuleRecord는 사용자가 저장한 포워딩 규칙 자체를 표현한다.

@@ -59,6 +59,15 @@ function createSyncService() {
     load: vi.fn().mockResolvedValue(null),
     save: vi.fn().mockResolvedValue(undefined)
   };
+  const settings = {
+    getSyncedTerminalPreferences: vi.fn().mockReturnValue({
+      id: 'global-terminal',
+      globalTerminalThemeId: 'dolssh-dark',
+      updatedAt: '2026-03-22T00:00:00.000Z'
+    }),
+    replaceSyncedTerminalPreferences: vi.fn(),
+    clearSyncedTerminalPreferences: vi.fn()
+  };
   const outbox = {
     clearAll: vi.fn(),
     list: vi.fn().mockReturnValue([])
@@ -70,6 +79,7 @@ function createSyncService() {
     portForwards as never,
     knownHosts as never,
     secretMetadata as never,
+    settings as never,
     secretStore as never,
     outbox as never
   );
@@ -82,6 +92,7 @@ function createSyncService() {
     portForwards,
     knownHosts,
     secretMetadata,
+    settings,
     secretStore,
     outbox
   };
@@ -93,7 +104,7 @@ afterEach(() => {
 
 describe('SyncService', () => {
   it('purges all synced cache and every local secret on logout', async () => {
-    const { service, hosts, groups, portForwards, knownHosts, secretMetadata, secretStore, outbox } = createSyncService();
+    const { service, hosts, groups, portForwards, knownHosts, secretMetadata, settings, secretStore, outbox } = createSyncService();
 
     await service.purgeSyncedCache();
 
@@ -107,6 +118,7 @@ describe('SyncService', () => {
     expect(groups.replaceAll).toHaveBeenCalledWith([]);
     expect(knownHosts.replaceAll).toHaveBeenCalledWith([]);
     expect(portForwards.replaceAll).toHaveBeenCalledWith([]);
+    expect(settings.clearSyncedTerminalPreferences).toHaveBeenCalledWith();
     expect(outbox.clearAll).toHaveBeenCalledWith();
     expect(service.getState()).toEqual({
       status: 'idle',
@@ -140,7 +152,8 @@ describe('SyncService', () => {
               hosts: [],
               secrets: [],
               knownHosts: [],
-              portForwards: []
+              portForwards: [],
+              preferences: []
             }),
             {
               status: 200,
@@ -149,6 +162,14 @@ describe('SyncService', () => {
               }
             }
           )
+        )
+        .mockResolvedValueOnce(
+          new Response(null, {
+            status: 202,
+            headers: {
+              'content-type': 'application/json'
+            }
+          })
         )
     );
 

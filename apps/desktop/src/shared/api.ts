@@ -30,7 +30,7 @@ export interface BrowserAuthExchangeRequest {
   code: string;
 }
 
-export type SyncKind = 'groups' | 'hosts' | 'secrets' | 'knownHosts' | 'portForwards';
+export type SyncKind = 'groups' | 'hosts' | 'secrets' | 'knownHosts' | 'portForwards' | 'preferences';
 
 // 서버는 payload를 해석하지 않고 암호문 그대로 저장한다.
 export interface SyncRecord {
@@ -47,4 +47,5 @@ export interface SyncPayloadV2 {
   secrets: SyncRecord[];
   knownHosts: SyncRecord[];
   portForwards: SyncRecord[];
+  preferences: SyncRecord[];
 }

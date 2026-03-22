@@ -8,6 +8,7 @@ const (
 	KindSecrets      Kind = "secrets"
 	KindKnownHosts   Kind = "knownHosts"
 	KindPortForwards Kind = "portForwards"
+	KindPreferences  Kind = "preferences"
 )
 
 var AllKinds = []Kind{
@@ -16,6 +17,7 @@ var AllKinds = []Kind{
 	KindSecrets,
 	KindKnownHosts,
 	KindPortForwards,
+	KindPreferences,
 }
 
 type Record struct {
@@ -31,4 +33,5 @@ type Payload struct {
 	Secrets      []Record `json:"secrets"`
 	KnownHosts   []Record `json:"knownHosts"`
 	PortForwards []Record `json:"portForwards"`
+	Preferences  []Record `json:"preferences"`
 }

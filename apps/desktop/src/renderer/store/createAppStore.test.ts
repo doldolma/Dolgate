@@ -67,7 +67,8 @@ function createMockApi(): DesktopApi {
         hosts: [],
         secrets: [],
         knownHosts: [],
-        portForwards: []
+        portForwards: [],
+        preferences: []
       })
     },
     hosts: {
@@ -82,6 +83,7 @@ function createMockApi(): DesktopApi {
           privateKeyPath: null,
           secretRef: 'host:host-1',
           groupName: 'Servers',
+          terminalThemeId: null,
           createdAt: '2025-01-01T00:00:00.000Z',
           updatedAt: '2025-01-01T00:00:00.000Z'
         }
@@ -149,11 +151,17 @@ function createMockApi(): DesktopApi {
     settings: {
       get: vi.fn().mockResolvedValue({
         theme: 'system',
+        globalTerminalThemeId: 'dolssh-dark',
+        terminalFontFamily: 'sf-mono',
+        terminalFontSize: 13,
         dismissedUpdateVersion: null,
         updatedAt: '2025-01-01T00:00:00.000Z'
       }),
       update: vi.fn().mockImplementation(async (input) => ({
         theme: input.theme ?? 'system',
+        globalTerminalThemeId: input.globalTerminalThemeId ?? 'dolssh-dark',
+        terminalFontFamily: input.terminalFontFamily ?? 'sf-mono',
+        terminalFontSize: input.terminalFontSize ?? 13,
         dismissedUpdateVersion: input.dismissedUpdateVersion ?? null,
         updatedAt: '2025-01-02T00:00:00.000Z'
       }))

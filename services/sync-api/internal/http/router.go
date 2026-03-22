@@ -443,6 +443,11 @@ func NewRouter(store store.Store, authService *auth.Service, config RouterConfig
 			ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
+		preferences, err := store.ListSyncRecords(ctx.Request.Context(), userID, syncmodel.KindPreferences)
+		if err != nil {
+			ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
 
 		ctx.JSON(http.StatusOK, syncmodel.Payload{
 			Groups:       groups,
@@ -450,6 +455,7 @@ func NewRouter(store store.Store, authService *auth.Service, config RouterConfig
 			Secrets:      secrets,
 			KnownHosts:   knownHosts,
 			PortForwards: portForwards,
+			Preferences:  preferences,
 		})
 	})
 	syncGroup.POST("", func(ctx *gin.Context) {
@@ -476,6 +482,10 @@ func NewRouter(store store.Store, authService *auth.Service, config RouterConfig
 			return
 		}
 		if err := store.UpsertSyncRecords(ctx.Request.Context(), userID, syncmodel.KindPortForwards, payload.PortForwards); err != nil {
+			ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		if err := store.UpsertSyncRecords(ctx.Request.Context(), userID, syncmodel.KindPreferences, payload.Preferences); err != nil {
 			ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}

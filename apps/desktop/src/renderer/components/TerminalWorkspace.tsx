@@ -1,22 +1,16 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Terminal } from 'xterm';
 import { FitAddon } from 'xterm-addon-fit';
-import type { AppTheme, TerminalTab } from '@shared';
+import type { AppSettings, HostRecord, TerminalTab } from '@shared';
 import type { WorkspaceDropDirection, WorkspaceLayoutNode, WorkspaceTab } from '../store/createAppStore';
 import { useAppStore } from '../store/appStore';
+import { getTerminalFontOption, getTerminalThemePreset, type TerminalThemeDefinition } from '../lib/terminal-presets';
 import { createTerminalResizeScheduler } from './terminal-resize';
 
 interface DraggedSessionPayload {
   sessionId: string;
   source: 'standalone-tab' | 'workspace-pane';
   workspaceId?: string;
-}
-
-interface TerminalThemePalette {
-  background: string;
-  foreground: string;
-  cursor: string;
-  selectionBackground: string;
 }
 
 interface Rect {
@@ -50,7 +44,11 @@ interface TerminalSessionViewProps {
   visible: boolean;
   active: boolean;
   layoutKey: string;
-  theme: Exclude<AppTheme, 'system'>;
+  appearance: {
+    theme: TerminalThemeDefinition['theme'];
+    fontFamily: string;
+    fontSize: number;
+  };
   style?: React.CSSProperties;
   showHeader?: boolean;
   draggingDisabled?: boolean;
@@ -62,35 +60,18 @@ interface TerminalSessionViewProps {
 
 interface TerminalWorkspaceProps {
   tabs: TerminalTab[];
+  hosts: HostRecord[];
+  settings: AppSettings;
   activeSessionId: string | null;
   activeWorkspace: WorkspaceTab | null;
   draggedSession: DraggedSessionPayload | null;
   canDropDraggedSession: boolean;
-  theme: Exclude<AppTheme, 'system'>;
   onCloseSession: (sessionId: string) => Promise<void>;
   onStartPaneDrag: (workspaceId: string, sessionId: string) => void;
   onEndSessionDrag: () => void;
   onSplitSessionDrop: (sessionId: string, direction: WorkspaceDropDirection, targetSessionId?: string) => boolean;
   onFocusWorkspaceSession: (workspaceId: string, sessionId: string) => void;
   onResizeWorkspaceSplit: (workspaceId: string, splitId: string, ratio: number) => void;
-}
-
-function terminalTheme(theme: Exclude<AppTheme, 'system'>): TerminalThemePalette {
-  if (theme === 'light') {
-    return {
-      background: '#f7fafc',
-      foreground: '#1e2a35',
-      cursor: '#2468ff',
-      selectionBackground: 'rgba(36, 104, 255, 0.18)'
-    };
-  }
-
-  return {
-    background: '#0b1220',
-    foreground: '#d9e4ee',
-    cursor: '#8ed1c2',
-    selectionBackground: 'rgba(142, 209, 194, 0.16)'
-  };
 }
 
 function toPercentRectStyle(rect: Rect): React.CSSProperties {
@@ -212,7 +193,7 @@ function TerminalSessionView({
   visible,
   active,
   layoutKey,
-  theme,
+  appearance,
   style,
   showHeader = false,
   draggingDisabled = false,
@@ -243,9 +224,9 @@ function TerminalSessionView({
 
     const terminal = new Terminal({
       cursorBlink: true,
-      fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
-      fontSize: 13,
-      theme: terminalTheme(theme)
+      fontFamily: appearance.fontFamily,
+      fontSize: appearance.fontSize,
+      theme: appearance.theme
     });
     const fitAddon = new FitAddon();
     terminal.loadAddon(fitAddon);
@@ -319,9 +300,12 @@ function TerminalSessionView({
     if (!terminalRef.current) {
       return;
     }
-    terminalRef.current.options.theme = terminalTheme(theme);
+    terminalRef.current.options.theme = appearance.theme;
+    terminalRef.current.options.fontFamily = appearance.fontFamily;
+    terminalRef.current.options.fontSize = appearance.fontSize;
+    resizeSchedulerRef.current?.request();
     refreshViewport();
-  }, [theme]);
+  }, [appearance]);
 
   useEffect(() => window.dolssh.ssh.onData(sessionId, (chunk) => {
     terminalRef.current?.write(chunk);
@@ -397,13 +381,29 @@ function TerminalSessionView({
   );
 }
 
+function resolveTerminalAppearanceForSession(
+  settings: AppSettings,
+  hosts: HostRecord[],
+  tab: TerminalTab
+): TerminalSessionViewProps['appearance'] {
+  const host = hosts.find((record) => record.id === tab.hostId);
+  const themePreset = getTerminalThemePreset(host?.terminalThemeId ?? settings.globalTerminalThemeId);
+  const fontOption = getTerminalFontOption(settings.terminalFontFamily);
+  return {
+    theme: themePreset.theme,
+    fontFamily: fontOption.stack,
+    fontSize: settings.terminalFontSize
+  };
+}
+
 export function TerminalWorkspace({
   tabs,
+  hosts,
+  settings,
   activeSessionId,
   activeWorkspace,
   draggedSession,
   canDropDraggedSession,
-  theme,
   onCloseSession,
   onStartPaneDrag,
   onEndSessionDrag,
@@ -434,6 +434,14 @@ export function TerminalWorkspace({
     );
     return { placements, handles };
   }, [activeWorkspace]);
+
+  const appearanceBySessionId = useMemo(() => {
+    const next = new Map<string, TerminalSessionViewProps['appearance']>();
+    for (const tab of tabs) {
+      next.set(tab.sessionId, resolveTerminalAppearanceForSession(settings, hosts, tab));
+    }
+    return next;
+  }, [hosts, settings.globalTerminalThemeId, settings.terminalFontFamily, settings.terminalFontSize, tabs]);
 
   useEffect(() => {
     if (draggedSession?.source !== 'standalone-tab' || !canDropDraggedSession) {
@@ -603,7 +611,7 @@ export function TerminalWorkspace({
               visible={visible}
               active={activeWorkspace ? activeWorkspace.activeSessionId === tab.sessionId : activeSessionId === tab.sessionId}
               layoutKey={placement ? `${placement.rect.x}:${placement.rect.y}:${placement.rect.width}:${placement.rect.height}` : 'hidden'}
-              theme={theme}
+              appearance={appearanceBySessionId.get(tab.sessionId) ?? resolveTerminalAppearanceForSession(settings, hosts, tab)}
               style={activeWorkspace ? undefined : rectStyle}
               showHeader={Boolean(activeWorkspace && placement)}
               onFocus={

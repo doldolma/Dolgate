@@ -91,6 +91,13 @@ func TestAuthRefreshAndSyncFlow(t *testing.T) {
 				UpdatedAt:        "2026-03-21T15:00:00Z",
 			},
 		},
+		Preferences: []syncmodel.Record{
+			{
+				ID:               "global-terminal",
+				EncryptedPayload: "ciphertext-preferences",
+				UpdatedAt:        "2026-03-21T15:00:00Z",
+			},
+		},
 	}
 	payloadBytes, _ := json.Marshal(payload)
 
@@ -115,7 +122,7 @@ func TestAuthRefreshAndSyncFlow(t *testing.T) {
 	if err := json.Unmarshal(getSyncRecorder.Body.Bytes(), &syncResponse); err != nil {
 		t.Fatalf("decode sync response: %v", err)
 	}
-	if len(syncResponse.Groups) != 1 || len(syncResponse.Hosts) != 1 || len(syncResponse.Secrets) != 1 {
+	if len(syncResponse.Groups) != 1 || len(syncResponse.Hosts) != 1 || len(syncResponse.Secrets) != 1 || len(syncResponse.Preferences) != 1 {
 		t.Fatalf("unexpected sync response: %#v", syncResponse)
 	}
 
