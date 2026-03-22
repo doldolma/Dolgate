@@ -34,10 +34,10 @@ dolssh는 세 개의 런타임 경계로 나뉩니다.
 - refresh token은 해시만 저장하며, 미사용 14일 만료(sliding idle expiration)와 rotation 정책을 사용합니다.
 - 동기화 레코드는 `groups`, `hosts`, `secrets`, `known_hosts`, `port_forwards` 단위의 generic `sync_records` 구조에 저장합니다.
 - secrets는 비밀번호, passphrase, 관리형 private key PEM까지 포함하지만 서버에는 ciphertext만 저장합니다.
-- 저장소 계층은 GORM으로 구현하고, 기본 드라이버는 SQLite지만 추후 MySQL로 교체할 수 있게 열어 둡니다.
+- 저장소 계층은 GORM으로 구현하고, SQLite와 MySQL을 모두 지원합니다.
 
 ## 보안 기본값
 
 - renderer는 Node 권한을 직접 가지지 않습니다.
-- 호스트 자격 증명과 키 passphrase는 로컬 OS 키체인에 캐시하되, 서버 복원 기준은 로그인 세션이 전달하는 vault bootstrap입니다.
+- 호스트 자격 증명과 키 passphrase는 Electron `safeStorage` 기반 encrypted local store에 캐시하되, 서버 복원 기준은 로그인 세션이 전달하는 vault bootstrap입니다.
 - 백엔드는 HTTPS 전용 배포를 기준으로 설계했고, 평문 HTTP는 로컬 개발에만 허용합니다.

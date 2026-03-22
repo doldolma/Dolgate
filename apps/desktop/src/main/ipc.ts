@@ -640,7 +640,7 @@ export function registerIpcHandlers(
   });
 
   ipcMain.handle(ipcChannels.shell.pickPrivateKey, async () => {
-    // 개인키 인증은 MVP에서 파일 경로 선택 방식으로 단순화했다.
+    // 사용자가 선택한 개인키 파일을 읽어 managed PEM secret으로 가져오기 위한 선택기다.
     const result = await dialog.showOpenDialog({
       properties: ['openFile'],
       filters: [
