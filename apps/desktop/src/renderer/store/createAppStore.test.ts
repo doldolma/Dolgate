@@ -75,6 +75,7 @@ function createMockApi(): DesktopApi {
       list: vi.fn().mockResolvedValue([
         {
           id: 'host-1',
+          kind: 'ssh',
           label: 'Prod',
           hostname: 'prod.example.com',
           port: 22,
@@ -91,6 +92,22 @@ function createMockApi(): DesktopApi {
       create: vi.fn(),
       update: vi.fn(),
       remove: vi.fn().mockResolvedValue(undefined)
+    },
+    aws: {
+      listProfiles: vi.fn().mockResolvedValue([]),
+      getProfileStatus: vi.fn().mockResolvedValue({
+        profileName: 'default',
+        available: true,
+        isSsoProfile: false,
+        isAuthenticated: false,
+        accountId: null,
+        arn: null,
+        errorMessage: null,
+        missingTools: []
+      }),
+      login: vi.fn().mockResolvedValue(undefined),
+      listRegions: vi.fn().mockResolvedValue([]),
+      listEc2Instances: vi.fn().mockResolvedValue([])
     },
     groups: {
       list: vi.fn().mockResolvedValue([
@@ -226,6 +243,12 @@ function createMockApi(): DesktopApi {
     },
     files: {
       getHomeDirectory: vi.fn().mockResolvedValue('/Users/tester'),
+      getParentPath: vi.fn().mockImplementation(async (targetPath: string) => {
+        if (targetPath === '/Users/tester') {
+          return '/Users';
+        }
+        return '/Users/tester';
+      }),
       list: vi.fn().mockResolvedValue({
         path: '/Users/tester',
         entries: [

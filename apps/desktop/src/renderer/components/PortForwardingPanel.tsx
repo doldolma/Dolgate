@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { isSshHostRecord } from '@shared';
 import type { HostRecord, PortForwardDraft, PortForwardRuleRecord, PortForwardRuntimeRecord } from '@shared';
 
 interface PortForwardingPanelProps {
@@ -50,7 +51,8 @@ function statusLabel(runtime?: PortForwardRuntimeRecord) {
 
 export function PortForwardingPanel({ hosts, rules, runtimes, onSave, onRemove, onStart, onStop }: PortForwardingPanelProps) {
   const [editingRuleId, setEditingRuleId] = useState<string | null>(null);
-  const [draft, setDraft] = useState<PortForwardDraft>(() => emptyDraft(hosts[0]?.id));
+  const sshHosts = useMemo(() => hosts.filter(isSshHostRecord), [hosts]);
+  const [draft, setDraft] = useState<PortForwardDraft>(() => emptyDraft(sshHosts[0]?.id));
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -58,7 +60,7 @@ export function PortForwardingPanel({ hosts, rules, runtimes, onSave, onRemove, 
 
   function openCreate() {
     setEditingRuleId(null);
-    setDraft(emptyDraft(hosts[0]?.id));
+    setDraft(emptyDraft(sshHosts[0]?.id));
     setError(null);
     setIsModalOpen(true);
   }
@@ -117,7 +119,7 @@ export function PortForwardingPanel({ hosts, rules, runtimes, onSave, onRemove, 
         ) : (
           rules.map((rule) => {
             const runtime = runtimeMap.get(rule.id);
-            const host = hosts.find((item) => item.id === rule.hostId);
+            const host = sshHosts.find((item) => item.id === rule.hostId);
             const isRunning = runtime?.status === 'running' || runtime?.status === 'starting';
             return (
               <article key={rule.id} className="operations-card">
@@ -128,7 +130,7 @@ export function PortForwardingPanel({ hosts, rules, runtimes, onSave, onRemove, 
                   </div>
                   <div className="operations-card__meta">
                     <span>{rule.mode.toUpperCase()}</span>
-                    <span>{host ? `${host.label} (${host.hostname})` : 'Unknown host'}</span>
+                    <span>{host ? `${host.label} (${host.hostname})` : 'Unknown SSH host'}</span>
                     <span>
                       {rule.bindAddress}:{runtime?.bindPort ?? rule.bindPort}
                     </span>
@@ -176,7 +178,7 @@ export function PortForwardingPanel({ hosts, rules, runtimes, onSave, onRemove, 
                 <span>Host</span>
                 <select value={draft.hostId} onChange={(event) => setDraft((current) => ({ ...current, hostId: event.target.value }))}>
                   <option value="">Select host</option>
-                  {hosts.map((host) => (
+                  {sshHosts.map((host) => (
                     <option key={host.id} value={host.id}>
                       {host.label} ({host.hostname})
                     </option>

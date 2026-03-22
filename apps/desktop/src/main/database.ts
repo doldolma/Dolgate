@@ -1,10 +1,17 @@
 import { randomUUID } from 'node:crypto';
+import {
+  isAwsEc2HostDraft,
+  isSshHostDraft,
+  isSshHostRecord
+} from '@shared';
 import type {
   ActivityLogCategory,
   ActivityLogLevel,
   ActivityLogRecord,
   AppSettings,
   AppTheme,
+  AwsEc2HostDraft,
+  AwsEc2HostRecord,
   GroupRecord,
   HostDraft,
   HostRecord,
@@ -14,6 +21,8 @@ import type {
   PortForwardRuleRecord,
   SecretMetadataRecord,
   SecretSource,
+  SshHostDraft,
+  SshHostRecord,
   SyncKind,
   TerminalFontFamilyId,
   TerminalPreferencesRecord,
@@ -34,6 +43,31 @@ function normalizeGroupPath(groupPath?: string | null): string | null {
   return normalized.length > 0 ? normalized : null;
 }
 
+function normalizeTags(tags?: string[] | null): string[] {
+  if (!Array.isArray(tags)) {
+    return [];
+  }
+
+  const seen = new Set<string>();
+  const normalized: string[] = [];
+  for (const value of tags) {
+    if (typeof value !== 'string') {
+      continue;
+    }
+    const tag = value.trim();
+    if (!tag) {
+      continue;
+    }
+    const key = tag.toLocaleLowerCase();
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    normalized.push(tag);
+  }
+  return normalized;
+}
+
 function compareHosts(left: HostRecord, right: HostRecord): number {
   const groupCompare = (left.groupName ?? '').localeCompare(right.groupName ?? '');
   if (groupCompare !== 0) {
@@ -43,7 +77,20 @@ function compareHosts(left: HostRecord, right: HostRecord): number {
   if (labelCompare !== 0) {
     return labelCompare;
   }
-  return left.hostname.localeCompare(right.hostname);
+  if (isSshHostRecord(left) && isSshHostRecord(right)) {
+    return left.hostname.localeCompare(right.hostname);
+  }
+  if (left.kind === right.kind) {
+    if (left.kind === 'aws-ec2' && right.kind === 'aws-ec2') {
+      const regionCompare = left.awsRegion.localeCompare(right.awsRegion);
+      if (regionCompare !== 0) {
+        return regionCompare;
+      }
+      return left.awsInstanceId.localeCompare(right.awsInstanceId);
+    }
+    return 0;
+  }
+  return left.kind.localeCompare(right.kind);
 }
 
 function compareLabels(left: { label: string; secretRef?: string }, right: { label: string; secretRef?: string }): number {
@@ -62,9 +109,77 @@ function normalizeTerminalThemeId(terminalThemeId?: TerminalThemeId | null): Ter
   return terminalThemeId ?? null;
 }
 
-function toHostRecord(id: string, draft: HostDraft, secretRef: string | null, timestamp: string, current?: HostRecord): HostRecord {
+function normalizeIncomingHostRecord(record: HostRecord): HostRecord {
+  if (record.kind === 'aws-ec2') {
+    return {
+      ...record,
+      groupName: normalizeGroupPath(record.groupName),
+      tags: normalizeTags(record.tags),
+      terminalThemeId: normalizeTerminalThemeId(record.terminalThemeId)
+    };
+  }
+
+  if (record.kind === 'ssh') {
+    return {
+      ...record,
+      groupName: normalizeGroupPath(record.groupName),
+      tags: normalizeTags(record.tags),
+      terminalThemeId: normalizeTerminalThemeId(record.terminalThemeId)
+    };
+  }
+
+  const legacyRecord = record as unknown as Partial<SshHostRecord> &
+    Partial<AwsEc2HostRecord> & { id: string; label: string; createdAt: string; updatedAt: string };
+  if (typeof legacyRecord.hostname === 'string' && typeof legacyRecord.port === 'number' && typeof legacyRecord.username === 'string') {
+    return {
+      id: legacyRecord.id,
+      kind: 'ssh',
+      label: legacyRecord.label,
+      groupName: normalizeGroupPath(legacyRecord.groupName),
+      tags: normalizeTags(legacyRecord.tags),
+      terminalThemeId: normalizeTerminalThemeId(legacyRecord.terminalThemeId),
+      hostname: legacyRecord.hostname,
+      port: legacyRecord.port,
+      username: legacyRecord.username,
+      authType: legacyRecord.authType === 'privateKey' ? 'privateKey' : 'password',
+      privateKeyPath: legacyRecord.privateKeyPath ?? null,
+      secretRef: legacyRecord.secretRef ?? null,
+      createdAt: legacyRecord.createdAt,
+      updatedAt: legacyRecord.updatedAt
+    };
+  }
+
+  if (
+    typeof legacyRecord.awsProfileName === 'string' &&
+    typeof legacyRecord.awsRegion === 'string' &&
+    typeof legacyRecord.awsInstanceId === 'string'
+  ) {
+    return {
+      id: legacyRecord.id,
+      kind: 'aws-ec2',
+      label: legacyRecord.label,
+      groupName: normalizeGroupPath(legacyRecord.groupName),
+      tags: normalizeTags(legacyRecord.tags),
+      terminalThemeId: normalizeTerminalThemeId(legacyRecord.terminalThemeId),
+      awsProfileName: legacyRecord.awsProfileName,
+      awsRegion: legacyRecord.awsRegion,
+      awsInstanceId: legacyRecord.awsInstanceId,
+      awsInstanceName: legacyRecord.awsInstanceName ?? null,
+      awsPlatform: legacyRecord.awsPlatform ?? null,
+      awsPrivateIp: legacyRecord.awsPrivateIp ?? null,
+      awsState: legacyRecord.awsState ?? null,
+      createdAt: legacyRecord.createdAt,
+      updatedAt: legacyRecord.updatedAt
+    };
+  }
+
+  throw new Error('Unsupported host record');
+}
+
+function toSshHostRecord(id: string, draft: SshHostDraft, secretRef: string | null, timestamp: string, current?: SshHostRecord): SshHostRecord {
   return {
     id,
+    kind: 'ssh',
     label: draft.label,
     hostname: draft.hostname,
     port: draft.port,
@@ -73,16 +188,47 @@ function toHostRecord(id: string, draft: HostDraft, secretRef: string | null, ti
     privateKeyPath: draft.privateKeyPath ?? null,
     secretRef: secretRef ?? draft.secretRef ?? null,
     groupName: normalizeGroupPath(draft.groupName),
+    tags: normalizeTags(draft.tags),
     terminalThemeId: normalizeTerminalThemeId(draft.terminalThemeId),
     createdAt: current?.createdAt ?? timestamp,
     updatedAt: timestamp
   };
 }
 
+function toAwsHostRecord(id: string, draft: AwsEc2HostDraft, timestamp: string, current?: AwsEc2HostRecord): AwsEc2HostRecord {
+  return {
+    id,
+    kind: 'aws-ec2',
+    label: draft.label,
+    awsProfileName: draft.awsProfileName,
+    awsRegion: draft.awsRegion,
+    awsInstanceId: draft.awsInstanceId,
+    awsInstanceName: draft.awsInstanceName ?? null,
+    awsPlatform: draft.awsPlatform ?? null,
+    awsPrivateIp: draft.awsPrivateIp ?? null,
+    awsState: draft.awsState ?? null,
+    groupName: normalizeGroupPath(draft.groupName),
+    tags: normalizeTags(draft.tags),
+    terminalThemeId: normalizeTerminalThemeId(draft.terminalThemeId),
+    createdAt: current?.createdAt ?? timestamp,
+    updatedAt: timestamp
+  };
+}
+
+function toHostRecord(id: string, draft: HostDraft, secretRef: string | null, timestamp: string, current?: HostRecord): HostRecord {
+  if (isSshHostDraft(draft)) {
+    return toSshHostRecord(id, draft, secretRef, timestamp, current?.kind === 'ssh' ? current : undefined);
+  }
+  if (isAwsEc2HostDraft(draft)) {
+    return toAwsHostRecord(id, draft, timestamp, current && current.kind === 'aws-ec2' ? current : undefined);
+  }
+  throw new Error('Unsupported host draft type');
+}
+
 function withLinkedHostCount(record: SecretMetadataRecord, hosts: HostRecord[]): SecretMetadataRecord {
   return {
     ...record,
-    linkedHostCount: hosts.filter((host) => host.secretRef === record.secretRef).length
+    linkedHostCount: hosts.filter((host) => isSshHostRecord(host) && host.secretRef === record.secretRef).length
   };
 }
 
@@ -127,12 +273,13 @@ export class HostRepository {
     let nextRecord: HostRecord | null = null;
     stateStorage.updateState((state) => {
       state.data.hosts = state.data.hosts.map((entry) => {
-        if (entry.id !== id) {
+        if (entry.id !== id || !isSshHostRecord(entry)) {
           return entry;
         }
         nextRecord = {
           ...entry,
           secretRef,
+          tags: normalizeTags(entry.tags),
           terminalThemeId: normalizeTerminalThemeId(entry.terminalThemeId),
           updatedAt: nowIso()
         };
@@ -146,7 +293,7 @@ export class HostRepository {
     const timestamp = nowIso();
     stateStorage.updateState((state) => {
       state.data.hosts = state.data.hosts.map((entry) => {
-        if (entry.secretRef !== secretRef) {
+        if (!isSshHostRecord(entry) || entry.secretRef !== secretRef) {
           return entry;
         }
         return {
@@ -166,11 +313,7 @@ export class HostRepository {
 
   replaceAll(records: HostRecord[]): void {
     stateStorage.updateState((state) => {
-      state.data.hosts = records.map((record) => ({
-        ...record,
-        groupName: normalizeGroupPath(record.groupName),
-        terminalThemeId: normalizeTerminalThemeId(record.terminalThemeId)
-      }));
+      state.data.hosts = records.map(normalizeIncomingHostRecord);
     });
   }
 }

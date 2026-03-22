@@ -35,19 +35,39 @@ function compareEntries(a: FileEntry, b: FileEntry): number {
   return a.name.localeCompare(b.name);
 }
 
+function isSkippableEntryError(error: unknown): boolean {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+  const code = 'code' in error ? String((error as NodeJS.ErrnoException).code ?? '') : '';
+  return code === 'EBUSY' || code === 'EPERM' || code === 'EACCES';
+}
+
 export class LocalFileService {
   async getHomeDirectory(): Promise<string> {
     return app.getPath('home');
   }
 
+  async getParentPath(targetPath: string): Promise<string> {
+    const currentPath = path.resolve(targetPath);
+    const parent = path.dirname(currentPath);
+    if (parent === currentPath) {
+      return currentPath;
+    }
+    return parent;
+  }
+
   async list(targetPath: string): Promise<DirectoryListing> {
     const currentPath = path.resolve(targetPath);
     const names = await fs.readdir(currentPath);
-    const entries = await Promise.all(
-      names.map(async (name) => {
-        const entryPath = path.join(currentPath, name);
+    const entries: FileEntry[] = [];
+    let skippedEntryCount = 0;
+
+    for (const name of names) {
+      const entryPath = path.join(currentPath, name);
+      try {
         const stats = await fs.lstat(entryPath);
-        return {
+        entries.push({
           name,
           path: entryPath,
           isDirectory: stats.isDirectory(),
@@ -55,13 +75,23 @@ export class LocalFileService {
           mtime: toIsoTime(stats.mtimeMs),
           kind: resolveKind(stats),
           permissions: toPermissions(stats.mode)
-        } satisfies FileEntry;
-      })
-    );
+        } satisfies FileEntry);
+      } catch (error) {
+        if (isSkippableEntryError(error)) {
+          skippedEntryCount += 1;
+          continue;
+        }
+        throw error;
+      }
+    }
 
     return {
       path: currentPath,
-      entries: entries.sort(compareEntries)
+      entries: entries.sort(compareEntries),
+      warnings:
+        skippedEntryCount > 0
+          ? [`잠겨 있거나 접근할 수 없는 항목 ${skippedEntryCount}개는 표시되지 않았습니다.`]
+          : undefined
     };
   }
 

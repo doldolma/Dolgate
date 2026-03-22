@@ -198,6 +198,67 @@ function normalizeStoredEncryptedValue(value: unknown): StoredEncryptedValue | n
   };
 }
 
+function normalizeHostRecord(value: unknown): HostRecord | null {
+  if (!isObject(value) || typeof value.id !== 'string' || typeof value.label !== 'string') {
+    return null;
+  }
+
+  const tags = Array.isArray(value.tags)
+    ? value.tags
+        .filter((item): item is string => typeof item === 'string')
+        .map((item) => item.trim())
+        .filter(Boolean)
+    : [];
+
+  if (value.kind === 'aws-ec2') {
+    if (typeof value.awsProfileName !== 'string' || typeof value.awsRegion !== 'string' || typeof value.awsInstanceId !== 'string') {
+      return null;
+    }
+    return {
+      id: value.id,
+      kind: 'aws-ec2',
+      label: value.label,
+      groupName: typeof value.groupName === 'string' ? value.groupName : null,
+      tags,
+      terminalThemeId: isTerminalThemeId(value.terminalThemeId) ? value.terminalThemeId : null,
+      awsProfileName: value.awsProfileName,
+      awsRegion: value.awsRegion,
+      awsInstanceId: value.awsInstanceId,
+      awsInstanceName: typeof value.awsInstanceName === 'string' ? value.awsInstanceName : null,
+      awsPlatform: typeof value.awsPlatform === 'string' ? value.awsPlatform : null,
+      awsPrivateIp: typeof value.awsPrivateIp === 'string' ? value.awsPrivateIp : null,
+      awsState: typeof value.awsState === 'string' ? value.awsState : null,
+      createdAt: typeof value.createdAt === 'string' ? value.createdAt : nowIso(),
+      updatedAt: typeof value.updatedAt === 'string' ? value.updatedAt : nowIso()
+    };
+  }
+
+  if (value.kind !== 'ssh' && typeof value.hostname !== 'string') {
+    return null;
+  }
+
+  if (typeof value.hostname !== 'string' || typeof value.port !== 'number' || typeof value.username !== 'string') {
+    return null;
+  }
+
+  return {
+    id: value.id,
+    kind: 'ssh',
+    label: value.label,
+    groupName: typeof value.groupName === 'string' ? value.groupName : null,
+    tags,
+    terminalThemeId: isTerminalThemeId(value.terminalThemeId) ? value.terminalThemeId : null,
+    hostname: value.hostname,
+    port: value.port,
+    username: value.username,
+    authType: value.authType === 'privateKey' ? 'privateKey' : 'password',
+    privateKeyPath: typeof value.privateKeyPath === 'string' ? value.privateKeyPath : null,
+    secretRef: typeof value.secretRef === 'string' ? value.secretRef : null,
+    createdAt: typeof value.createdAt === 'string' ? value.createdAt : nowIso(),
+    updatedAt: typeof value.updatedAt === 'string' ? value.updatedAt : nowIso()
+  };
+}
+
 function normalizeStateFile(value: unknown): DesktopStateFile {
   const fallback = createDefaultStateFile();
   if (!isObject(value)) {
@@ -251,7 +312,7 @@ function normalizeStateFile(value: unknown): DesktopStateFile {
     },
     data: {
       groups: Array.isArray(data.groups) ? (data.groups as GroupRecord[]) : [],
-      hosts: Array.isArray(data.hosts) ? (data.hosts as HostRecord[]) : [],
+      hosts: Array.isArray(data.hosts) ? data.hosts.map(normalizeHostRecord).filter((entry): entry is HostRecord => entry !== null) : [],
       knownHosts: Array.isArray(data.knownHosts) ? (data.knownHosts as KnownHostRecord[]) : [],
       portForwards: Array.isArray(data.portForwards) ? (data.portForwards as PortForwardRuleRecord[]) : [],
       secretMetadata: Array.isArray(data.secretMetadata) ? (data.secretMetadata as SecretMetadataRecord[]) : [],

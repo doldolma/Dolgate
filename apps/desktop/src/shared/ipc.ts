@@ -1,6 +1,9 @@
 import type {
   ActivityLogRecord,
   AppSettings,
+  AwsEc2InstanceSummary,
+  AwsProfileStatus,
+  AwsProfileSummary,
   AuthState,
   AuthType,
   ManagedSecretPayload,
@@ -73,10 +76,12 @@ export interface DesktopConnectInput {
   cols: number;
   rows: number;
   title?: string;
+  secrets?: HostSecretInput;
 }
 
 export interface DesktopSftpConnectInput {
   hostId: string;
+  secrets?: HostSecretInput;
 }
 
 // main 프로세스가 키체인과 DB를 합쳐 최종적으로 Go 코어에 보내는 payload다.
@@ -229,6 +234,13 @@ export interface DesktopApi {
     list: () => Promise<GroupRecord[]>;
     create: (name: string, parentPath?: string | null) => Promise<GroupRecord>;
   };
+  aws: {
+    listProfiles: () => Promise<AwsProfileSummary[]>;
+    getProfileStatus: (profileName: string) => Promise<AwsProfileStatus>;
+    login: (profileName: string) => Promise<void>;
+    listRegions: (profileName: string) => Promise<string[]>;
+    listEc2Instances: (profileName: string, region: string) => Promise<AwsEc2InstanceSummary[]>;
+  };
   ssh: {
     connect: (input: DesktopConnectInput) => Promise<{ sessionId: string }>;
     write: (sessionId: string, data: string) => Promise<void>;
@@ -297,6 +309,7 @@ export interface DesktopApi {
   };
   files: {
     getHomeDirectory: () => Promise<string>;
+    getParentPath: (targetPath: string) => Promise<string>;
     list: (path: string) => Promise<DirectoryListing>;
     mkdir: (path: string, name: string) => Promise<void>;
     rename: (path: string, nextName: string) => Promise<void>;

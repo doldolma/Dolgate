@@ -1,6 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { getHostSecretRef, isSshHostRecord } from '@shared';
 import type { AppTheme, AuthState, HostRecord, LinkedHostSummary, UpdateState } from '@shared';
 import { AppTitleBar } from './components/AppTitleBar';
+import { AwsImportDialog } from './components/AwsImportDialog';
+import { CredentialRetryDialog } from './components/CredentialRetryDialog';
 import { HomeNavigation } from './components/HomeNavigation';
 import { HostBrowser } from './components/HostBrowser';
 import { HostDrawer } from './components/HostDrawer';
@@ -28,7 +31,28 @@ function resolveTheme(theme: AppTheme, prefersDark: boolean): 'light' | 'dark' {
   return prefersDark ? 'dark' : 'light';
 }
 
-function toLinkedHostSummary(host: HostRecord): LinkedHostSummary {
+function detectDesktopPlatform(): 'darwin' | 'win32' | 'linux' | 'unknown' {
+  const userAgent = navigator.userAgent.toLowerCase();
+  const userAgentData = navigator as Navigator & {
+    userAgentData?: {
+      platform?: string;
+    };
+  };
+  const platform = (userAgentData.userAgentData?.platform ?? navigator.platform ?? '').toLowerCase();
+
+  if (platform.includes('mac') || userAgent.includes('mac os')) {
+    return 'darwin';
+  }
+  if (platform.includes('win') || userAgent.includes('windows')) {
+    return 'win32';
+  }
+  if (platform.includes('linux') || userAgent.includes('linux')) {
+    return 'linux';
+  }
+  return 'unknown';
+}
+
+function toLinkedHostSummary(host: Extract<HostRecord, { kind: 'ssh' }>): LinkedHostSummary {
   return {
     id: host.id,
     label: host.label,
@@ -116,6 +140,8 @@ export function App() {
   const [syncBootstrapError, setSyncBootstrapError] = useState<string | null>(null);
   const [hydratedSessionUserId, setHydratedSessionUserId] = useState<string | null>(null);
   const [selectedHostId, setSelectedHostId] = useState<string | null>(null);
+  const [isAwsImportOpen, setIsAwsImportOpen] = useState(false);
+  const [hostBrowserError, setHostBrowserError] = useState<string | null>(null);
   const [draggedSession, setDraggedSession] = useState<DraggedSessionPayload | null>(null);
   const [updateState, setUpdateState] = useState<UpdateState>(createDefaultUpdateState);
   const [isUpdateInstallConfirmOpen, setIsUpdateInstallConfirmOpen] = useState(false);
@@ -139,6 +165,7 @@ export function App() {
   const searchQuery = useAppStore((state) => state.searchQuery);
   const settings = useAppStore((state) => state.settings);
   const pendingHostKeyPrompt = useAppStore((state) => state.pendingHostKeyPrompt);
+  const pendingCredentialRetry = useAppStore((state) => state.pendingCredentialRetry);
   const bootstrap = useAppStore((state) => state.bootstrap);
   const setSearchQuery = useAppStore((state) => state.setSearchQuery);
   const activateHome = useAppStore((state) => state.activateHome);
@@ -158,6 +185,7 @@ export function App() {
   const closeWorkspace = useAppStore((state) => state.closeWorkspace);
   const splitSessionIntoWorkspace = useAppStore((state) => state.splitSessionIntoWorkspace);
   const detachSessionFromWorkspace = useAppStore((state) => state.detachSessionFromWorkspace);
+  const reorderDynamicTab = useAppStore((state) => state.reorderDynamicTab);
   const focusWorkspaceSession = useAppStore((state) => state.focusWorkspaceSession);
   const resizeWorkspaceSplit = useAppStore((state) => state.resizeWorkspaceSplit);
   const activateSftp = useAppStore((state) => state.activateSftp);
@@ -173,6 +201,8 @@ export function App() {
   const cloneKeychainSecretForHost = useAppStore((state) => state.cloneKeychainSecretForHost);
   const acceptPendingHostKeyPrompt = useAppStore((state) => state.acceptPendingHostKeyPrompt);
   const dismissPendingHostKeyPrompt = useAppStore((state) => state.dismissPendingHostKeyPrompt);
+  const dismissPendingCredentialRetry = useAppStore((state) => state.dismissPendingCredentialRetry);
+  const submitCredentialRetry = useAppStore((state) => state.submitCredentialRetry);
   const handleCoreEvent = useAppStore((state) => state.handleCoreEvent);
   const handleTransferEvent = useAppStore((state) => state.handleTransferEvent);
   const handlePortForwardEvent = useAppStore((state) => state.handlePortForwardEvent);
@@ -198,6 +228,7 @@ export function App() {
   const cancelTransfer = useAppStore((state) => state.cancelTransfer);
   const retryTransfer = useAppStore((state) => state.retryTransfer);
   const [prefersDark, setPrefersDark] = useState(() => window.matchMedia('(prefers-color-scheme: dark)').matches);
+  const desktopPlatform = useMemo(() => detectDesktopPlatform(), []);
 
   async function hydrateAuthenticatedWorkspace(nextState: AuthState): Promise<void> {
     if (nextState.status !== 'authenticated' || !nextState.session) {
@@ -308,7 +339,8 @@ export function App() {
   useEffect(() => {
     document.documentElement.dataset.theme = resolvedTheme;
     document.documentElement.dataset.themeMode = settings.theme;
-  }, [resolvedTheme, settings.theme]);
+    document.documentElement.dataset.platform = desktopPlatform;
+  }, [desktopPlatform, resolvedTheme, settings.theme]);
 
   const isHomeActive = activeWorkspaceTab === 'home';
   const isSftpActive = activeWorkspaceTab === 'sftp';
@@ -366,6 +398,7 @@ export function App() {
   }
 
   function handleSelectHost(hostId: string) {
+    setHostBrowserError(null);
     setSelectedHostId(hostId);
     if (hostDrawer.mode === 'edit') {
       openEditHostDrawer(hostId);
@@ -373,6 +406,7 @@ export function App() {
   }
 
   function handleEditHost(hostId: string) {
+    setHostBrowserError(null);
     setSelectedHostId(hostId);
     openEditHostDrawer(hostId);
   }
@@ -399,7 +433,7 @@ export function App() {
   }
 
   function openHostSecretEditor(secretRef: string, credentialKind: SecretCredentialKind) {
-    if (!currentHost) {
+    if (!currentHost || !isSshHostRecord(currentHost)) {
       return;
     }
 
@@ -409,7 +443,10 @@ export function App() {
       secretRef,
       label: entry?.label ?? currentHost.label,
       credentialKind,
-      linkedHosts: hosts.filter((host) => host.secretRef === secretRef).map(toLinkedHostSummary),
+      linkedHosts: hosts
+        .filter(isSshHostRecord)
+        .filter((host) => getHostSecretRef(host) === secretRef)
+        .map(toLinkedHostSummary),
       initialMode: 'clone-for-host',
       initialHostId: currentHost.id
     });
@@ -426,7 +463,10 @@ export function App() {
       secretRef,
       label: entry.label,
       credentialKind,
-      linkedHosts: hosts.filter((host) => host.secretRef === secretRef).map(toLinkedHostSummary),
+      linkedHosts: hosts
+        .filter(isSshHostRecord)
+        .filter((host) => getHostSecretRef(host) === secretRef)
+        .map(toLinkedHostSummary),
       initialMode: 'update-shared',
       initialHostId: null
     });
@@ -473,6 +513,7 @@ export function App() {
         onDetachSessionToStandalone={(workspaceId, sessionId) => {
           detachSessionFromWorkspace(workspaceId, sessionId);
         }}
+        onReorderDynamicTab={reorderDynamicTab}
         onCheckForUpdates={async () => runUpdaterAction(() => window.dolssh.updater.check())}
         onDownloadUpdate={async () => runUpdaterAction(() => window.dolssh.updater.download())}
         onInstallUpdate={handleInstallUpdate}
@@ -496,13 +537,21 @@ export function App() {
                 currentGroupPath={currentGroupPath}
                 searchQuery={searchQuery}
                 selectedHostId={highlightedHostId}
+                errorMessage={hostBrowserError}
                 onSearchChange={setSearchQuery}
                 onCreateHost={() => {
+                  setHostBrowserError(null);
                   setSelectedHostId(null);
                   openCreateHostDrawer();
                 }}
+                onOpenAwsImport={() => {
+                  setHostBrowserError(null);
+                  setSelectedHostId(null);
+                  setIsAwsImportOpen(true);
+                }}
                 onCreateGroup={createGroup}
                 onNavigateGroup={(path) => {
+                  setHostBrowserError(null);
                   setSelectedHostId(null);
                   navigateGroup(path);
                 }}
@@ -511,8 +560,17 @@ export function App() {
                 onMoveHostToGroup={moveHostToGroup}
                 onRemoveHost={removeHost}
                 onConnectHost={async (hostId) => {
-                  setSelectedHostId(hostId);
-                  await connectHost(hostId, 120, 32);
+                  try {
+                    setHostBrowserError(null);
+                    setSelectedHostId(hostId);
+                    await connectHost(hostId, 120, 32);
+                  } catch (error) {
+                    setHostBrowserError(
+                      error instanceof Error
+                        ? error.message
+                        : '호스트 연결을 시작하지 못했습니다. AWS SSM 연결에는 session-manager-plugin이 필요할 수 있습니다.'
+                    );
+                  }
                 }}
               />
             ) : null}
@@ -568,6 +626,15 @@ export function App() {
                   }
                 : undefined
             }
+          />
+
+          <AwsImportDialog
+            open={isAwsImportOpen}
+            currentGroupPath={currentGroupPath}
+            onClose={() => setIsAwsImportOpen(false)}
+            onImport={async (draft) => {
+              await saveHost(null, draft);
+            }}
           />
         </section>
 
@@ -628,6 +695,19 @@ export function App() {
       </div>
 
       <KnownHostPromptDialog pending={pendingHostKeyPrompt} onAccept={acceptPendingHostKeyPrompt} onCancel={dismissPendingHostKeyPrompt} />
+
+      <CredentialRetryDialog
+        request={
+          pendingCredentialRetry
+            ? {
+                ...pendingCredentialRetry,
+                hostLabel: findHost(hosts, pendingCredentialRetry.hostId)?.label ?? 'Host'
+              }
+            : null
+        }
+        onClose={dismissPendingCredentialRetry}
+        onSubmit={submitCredentialRetry}
+      />
 
       <SecretEditDialog
         request={secretEditRequest}

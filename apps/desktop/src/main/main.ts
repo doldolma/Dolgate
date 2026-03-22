@@ -13,6 +13,7 @@ import {
 } from './database';
 import { DesktopConfigService } from './app-config';
 import { AuthService } from './auth-service';
+import { AwsService } from './aws-service';
 import { CoreManager } from './core-manager';
 import { registerIpcHandlers } from './ipc';
 import { SecretStore } from './secret-store';
@@ -32,6 +33,7 @@ const secretMetadataRepository = new SecretMetadataRepository();
 const syncOutboxRepository = new SyncOutboxRepository();
 const secretStore = new SecretStore();
 const desktopConfigService = new DesktopConfigService();
+const awsService = new AwsService();
 const appendActivityLog = (entry: { level: 'info' | 'warn' | 'error'; category: 'session' | 'audit'; message: string; metadata?: Record<string, unknown> | null }) => {
   activityLogRepository.append(entry.level, entry.category, entry.message, entry.metadata ?? null);
 };
@@ -211,6 +213,7 @@ app.whenReady().then(async () => {
     secretMetadataRepository,
     syncOutboxRepository,
     secretStore,
+    awsService,
     coreManager,
     updateService,
     authService,

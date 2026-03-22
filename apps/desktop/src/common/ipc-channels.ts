@@ -22,6 +22,13 @@ export const ipcChannels = {
     list: 'groups:list',
     create: 'groups:create'
   },
+  aws: {
+    listProfiles: 'aws:list-profiles',
+    getProfileStatus: 'aws:get-profile-status',
+    login: 'aws:login',
+    listRegions: 'aws:list-regions',
+    listEc2Instances: 'aws:list-ec2-instances'
+  },
   ssh: {
     connect: 'ssh:connect',
     write: 'ssh:write',
@@ -79,6 +86,7 @@ export const ipcChannels = {
   },
   files: {
     getHomeDirectory: 'files:get-home-directory',
+    getParentPath: 'files:get-parent-path',
     list: 'files:list',
     mkdir: 'files:mkdir',
     rename: 'files:rename',
