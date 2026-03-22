@@ -23,3 +23,4 @@ services/sync-api/data
 *.test
 .idea
 .tmp
+/tmp/
