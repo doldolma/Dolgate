@@ -1,6 +1,7 @@
 import type { AuthSession } from './api';
 
 export type AuthType = 'password' | 'privateKey';
+export type HostKind = 'ssh' | 'aws-ec2';
 export type AppTheme = 'system' | 'light' | 'dark';
 export type TerminalThemeId =
   | 'dolssh-dark'
@@ -40,33 +41,122 @@ export type SecretSource = 'local_keychain' | 'server_managed';
 export type AuthStatus = 'loading' | 'unauthenticated' | 'authenticating' | 'authenticated' | 'error';
 export type SyncBootstrapStatus = 'idle' | 'syncing' | 'ready' | 'error';
 
-// HostRecord는 로컬 DB에서 읽어 renderer까지 올라오는 정규화된 호스트 모델이다.
-export interface HostRecord {
+interface HostBaseRecord {
   id: string;
+  kind: HostKind;
   label: string;
-  hostname: string;
-  port: number;
-  username: string;
-  authType: AuthType;
-  privateKeyPath?: string | null;
-  secretRef?: string | null;
   groupName?: string | null;
+  tags?: string[];
   terminalThemeId?: TerminalThemeId | null;
   createdAt: string;
   updatedAt: string;
 }
 
-// HostDraft는 생성/수정 폼에서 사용하는 입력 전용 모델이다.
-export interface HostDraft {
+interface HostBaseDraft {
+  kind: HostKind;
   label: string;
+  groupName?: string | null;
+  tags?: string[];
+  terminalThemeId?: TerminalThemeId | null;
+}
+
+export interface SshHostRecord extends HostBaseRecord {
+  kind: 'ssh';
   hostname: string;
   port: number;
   username: string;
   authType: AuthType;
   privateKeyPath?: string | null;
   secretRef?: string | null;
-  groupName?: string | null;
-  terminalThemeId?: TerminalThemeId | null;
+}
+
+export interface SshHostDraft extends HostBaseDraft {
+  kind: 'ssh';
+  hostname: string;
+  port: number;
+  username: string;
+  authType: AuthType;
+  privateKeyPath?: string | null;
+  secretRef?: string | null;
+}
+
+export interface AwsEc2HostRecord extends HostBaseRecord {
+  kind: 'aws-ec2';
+  awsProfileName: string;
+  awsRegion: string;
+  awsInstanceId: string;
+  awsInstanceName?: string | null;
+  awsPlatform?: string | null;
+  awsPrivateIp?: string | null;
+  awsState?: string | null;
+}
+
+export interface AwsEc2HostDraft extends HostBaseDraft {
+  kind: 'aws-ec2';
+  awsProfileName: string;
+  awsRegion: string;
+  awsInstanceId: string;
+  awsInstanceName?: string | null;
+  awsPlatform?: string | null;
+  awsPrivateIp?: string | null;
+  awsState?: string | null;
+}
+
+// HostRecord는 로컬 스토리지와 sync payload가 공유하는 정규화된 호스트 모델이다.
+export type HostRecord = SshHostRecord | AwsEc2HostRecord;
+
+// HostDraft는 생성/수정 폼에서 사용하는 입력 전용 모델이다.
+export type HostDraft = SshHostDraft | AwsEc2HostDraft;
+
+export function isSshHostRecord(host: HostRecord): host is SshHostRecord {
+  return host.kind === 'ssh';
+}
+
+export function isAwsEc2HostRecord(host: HostRecord): host is AwsEc2HostRecord {
+  return host.kind === 'aws-ec2';
+}
+
+export function isSshHostDraft(host: HostDraft): host is SshHostDraft {
+  return host.kind === 'ssh';
+}
+
+export function isAwsEc2HostDraft(host: HostDraft): host is AwsEc2HostDraft {
+  return host.kind === 'aws-ec2';
+}
+
+export function getHostSearchText(host: HostRecord): string[] {
+  if (host.kind === 'aws-ec2') {
+    return [
+      host.label,
+      host.awsInstanceName ?? '',
+      host.awsInstanceId,
+      host.awsRegion,
+      host.awsProfileName,
+      host.awsPrivateIp ?? '',
+      host.groupName ?? '',
+      ...(host.tags ?? [])
+    ];
+  }
+  return [host.label, host.hostname, host.username, host.groupName ?? '', ...(host.tags ?? [])];
+}
+
+export function getHostSubtitle(host: HostRecord): string {
+  if (host.kind === 'aws-ec2') {
+    const parts = ['AWS', host.awsRegion, host.awsPrivateIp || host.awsInstanceId].filter(Boolean);
+    return parts.join(' • ');
+  }
+  return `${host.username}@${host.hostname}:${host.port}`;
+}
+
+export function getHostBadgeLabel(host: HostRecord): string {
+  if (host.kind === 'aws-ec2') {
+    return 'AWS';
+  }
+  return host.authType === 'privateKey' ? 'K' : 'S';
+}
+
+export function getHostSecretRef(host: HostRecord): string | null {
+  return host.kind === 'ssh' ? (host.secretRef ?? null) : null;
 }
 
 // GroupRecord는 홈 화면의 그룹 브라우징이 쓰는 계층형 그룹 메타데이터다.
@@ -148,6 +238,29 @@ export interface UpdateEvent {
 export interface TerminalThemePreset {
   id: TerminalThemeId;
   title: string;
+}
+
+export interface AwsProfileSummary {
+  name: string;
+}
+
+export interface AwsProfileStatus {
+  profileName: string;
+  available: boolean;
+  isSsoProfile: boolean;
+  isAuthenticated: boolean;
+  accountId?: string | null;
+  arn?: string | null;
+  errorMessage?: string | null;
+  missingTools?: string[];
+}
+
+export interface AwsEc2InstanceSummary {
+  instanceId: string;
+  name: string;
+  platform?: string | null;
+  privateIp?: string | null;
+  state?: string | null;
 }
 
 // PortForwardRuleRecord는 사용자가 저장한 포워딩 규칙 자체를 표현한다.
@@ -290,6 +403,7 @@ export interface FileEntry {
 export interface DirectoryListing {
   path: string;
   entries: FileEntry[];
+  warnings?: string[];
 }
 
 // SftpEndpointSummary는 현재 패널이 붙어 있는 remote endpoint 정보를 표현한다.

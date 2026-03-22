@@ -127,6 +127,13 @@ const api: DesktopApi = {
     list: () => ipcRenderer.invoke(ipcChannels.groups.list),
     create: (name: string, parentPath?: string | null) => ipcRenderer.invoke(ipcChannels.groups.create, name, parentPath)
   },
+  aws: {
+    listProfiles: () => ipcRenderer.invoke(ipcChannels.aws.listProfiles),
+    getProfileStatus: (profileName: string) => ipcRenderer.invoke(ipcChannels.aws.getProfileStatus, profileName),
+    login: (profileName: string) => ipcRenderer.invoke(ipcChannels.aws.login, profileName),
+    listRegions: (profileName: string) => ipcRenderer.invoke(ipcChannels.aws.listRegions, profileName),
+    listEc2Instances: (profileName: string, region: string) => ipcRenderer.invoke(ipcChannels.aws.listEc2Instances, profileName, region)
+  },
   ssh: {
     connect: (input: DesktopConnectInput) => ipcRenderer.invoke(ipcChannels.ssh.connect, input),
     write: (sessionId: string, data: string) => ipcRenderer.invoke(ipcChannels.ssh.write, sessionId, data),
@@ -221,6 +228,7 @@ const api: DesktopApi = {
   },
   files: {
     getHomeDirectory: () => ipcRenderer.invoke(ipcChannels.files.getHomeDirectory),
+    getParentPath: (targetPath: string) => ipcRenderer.invoke(ipcChannels.files.getParentPath, targetPath),
     list: (path: string) => ipcRenderer.invoke(ipcChannels.files.list, path),
     mkdir: (path: string, name: string) => ipcRenderer.invoke(ipcChannels.files.mkdir, path, name),
     rename: (path: string, nextName: string) => ipcRenderer.invoke(ipcChannels.files.rename, path, nextName),

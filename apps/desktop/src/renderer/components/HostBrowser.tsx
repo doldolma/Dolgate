@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import Fuse from 'fuse.js';
+import { getHostBadgeLabel, getHostSearchText, getHostSubtitle } from '@shared';
 import type { GroupRecord, HostRecord } from '@shared';
 
 interface HostBrowserProps {
@@ -9,8 +10,10 @@ interface HostBrowserProps {
   currentGroupPath: string | null;
   searchQuery: string;
   selectedHostId: string | null;
+  errorMessage?: string | null;
   onSearchChange: (query: string) => void;
   onCreateHost: () => void;
+  onOpenAwsImport: () => void;
   onCreateGroup: (name: string) => Promise<void>;
   onNavigateGroup: (path: string | null) => void;
   onSelectHost: (hostId: string) => void;
@@ -111,8 +114,10 @@ export function HostBrowser({
   currentGroupPath,
   searchQuery,
   selectedHostId,
+  errorMessage = null,
   onSearchChange,
   onCreateHost,
+  onOpenAwsImport,
   onCreateGroup,
   onNavigateGroup,
   onSelectHost,
@@ -158,27 +163,38 @@ export function HostBrowser({
     [currentGroupPath, hosts]
   );
 
+  const searchableHosts = useMemo(
+    () =>
+      scopedHosts.map((host) => ({
+        ...host,
+        searchText: getHostSearchText(host).join(' ')
+      })),
+    [scopedHosts]
+  );
+
   const fuse = useMemo(
     () =>
-      new Fuse(scopedHosts, {
-        keys: ['label', 'hostname', 'username', 'groupName'],
+      new Fuse(searchableHosts, {
+        keys: ['label', 'groupName', 'searchText'],
         threshold: 0.32
       }),
-    [scopedHosts]
+    [searchableHosts]
   );
 
   const visibleHosts = useMemo(() => {
     if (searchQuery) {
-      return fuse.search(searchQuery).map((result) => result.item);
+      return fuse.search(searchQuery).map((result) => {
+        const { searchText: _searchText, ...host } = result.item;
+        return host;
+      });
     }
     if (!currentGroupPath) {
-      return scopedHosts;
+      return searchableHosts;
     }
-    return scopedHosts.filter((host) => isDirectHostChild(host, currentGroupPath));
-  }, [currentGroupPath, fuse, scopedHosts, searchQuery]);
+    return searchableHosts.filter((host) => isDirectHostChild(host, currentGroupPath));
+  }, [currentGroupPath, fuse, searchableHosts, searchQuery]);
 
   const visibleGroups = useMemo(() => buildVisibleGroups(groups, hosts, currentGroupPath), [currentGroupPath, groups, hosts]);
-
   const breadcrumbs = useMemo(() => {
     if (!currentGroupPath) {
       return [];
@@ -202,18 +218,18 @@ export function HostBrowser({
     <div className="host-browser">
       <div className="home-toolbar">
         <div className="search-panel">
-          <label className="search-panel__label" htmlFor="host-search">
-            Quick Connect
-          </label>
           <input
             id="host-search"
             value={searchQuery}
             onChange={(event) => onSearchChange(event.target.value)}
-            placeholder="Find a host or ssh user@hostname..."
+            placeholder="Search hosts or instances"
             aria-label="Search hosts"
           />
         </div>
         <div className="home-toolbar__actions">
+          <button type="button" className="secondary-button" onClick={onOpenAwsImport}>
+            Import from AWS
+          </button>
           <button
             type="button"
             className="secondary-button"
@@ -231,27 +247,30 @@ export function HostBrowser({
         </div>
       </div>
 
-      <div className="host-browser__breadcrumbs">
-        <button type="button" className={`host-browser__breadcrumb ${currentGroupPath ? '' : 'active'}`} onClick={() => onNavigateGroup(null)}>
-          Hosts
-        </button>
-        {breadcrumbs.map((crumb) => (
-          <button
-            key={crumb.path}
-            type="button"
-            className={`host-browser__breadcrumb ${crumb.path === currentGroupPath ? 'active' : ''}`}
-            onClick={() => onNavigateGroup(crumb.path)}
-          >
-            {crumb.label}
+      {errorMessage ? <div className="terminal-error-banner host-browser__error-banner">{errorMessage}</div> : null}
+
+      {breadcrumbs.length > 0 ? (
+        <div className="host-browser__breadcrumbs">
+          <button type="button" className="host-browser__breadcrumb" onClick={() => onNavigateGroup(null)}>
+            Hosts
           </button>
-        ))}
-      </div>
+          {breadcrumbs.map((crumb) => (
+            <button
+              key={crumb.path}
+              type="button"
+              className={`host-browser__breadcrumb ${crumb.path === currentGroupPath ? 'active' : ''}`}
+              onClick={() => onNavigateGroup(crumb.path)}
+            >
+              {crumb.label}
+            </button>
+          ))}
+        </div>
+      ) : null}
 
       <div className="browser-section">
         <div className="browser-section__header">
           <div>
-            <div className="section-kicker">Groups</div>
-            <h2>{currentGroupPath ? `${getGroupLabel(currentGroupPath)} / Subgroups` : 'Collections'}</h2>
+            <h2>Groups</h2>
           </div>
         </div>
         <div className="group-grid">
@@ -315,8 +334,7 @@ export function HostBrowser({
       <div className="browser-section">
         <div className="browser-section__header">
           <div>
-            <div className="section-kicker">Hosts</div>
-            <h2>{currentGroupPath ? `${getGroupLabel(currentGroupPath)} / Connections` : 'Browse Connections'}</h2>
+            <h2>Hosts</h2>
           </div>
         </div>
         <div className="host-grid">
@@ -325,7 +343,7 @@ export function HostBrowser({
               <strong>{emptyMessage}</strong>
               <p>
                 {hosts.length === 0
-                  ? 'New Host를 눌러 첫 번째 SSH 연결 대상을 등록해보세요.'
+                  ? 'New Host 또는 Import from AWS를 눌러 첫 번째 연결 대상을 추가해보세요.'
                   : searchQuery
                     ? '검색어를 지우거나 다른 호스트명으로 다시 찾아보세요.'
                     : 'New Host를 눌러 이 위치에 호스트를 추가하거나, 다른 그룹으로 이동해 장치를 확인해보세요.'}
@@ -374,13 +392,20 @@ export function HostBrowser({
                     }
                   }}
                 >
-                  <div className="host-browser-card__icon">{host.authType === 'privateKey' ? 'K' : 'S'}</div>
+                  <div className="host-browser-card__icon">{getHostBadgeLabel(host)}</div>
                   <div className="host-browser-card__meta">
                     <strong>{host.label}</strong>
-                    <span>
-                      {host.username}@{host.hostname}:{host.port}
-                    </span>
+                    <span>{getHostSubtitle(host)}</span>
                     <small>{normalizeGroupPath(host.groupName) ?? 'Ungrouped'}</small>
+                    {host.tags && host.tags.length > 0 ? (
+                      <div className="host-browser-card__tags">
+                        {host.tags.map((tag) => (
+                          <span key={tag} className="host-browser-card__tag">
+                            #{tag}
+                          </span>
+                        ))}
+                      </div>
+                    ) : null}
                   </div>
                   <button
                     type="button"
@@ -431,9 +456,6 @@ export function HostBrowser({
           <div className="home-modal" role="dialog" aria-modal="true" aria-labelledby="new-group-title">
             <div className="section-kicker">Create</div>
             <h3 id="new-group-title">New Group</h3>
-            <p className="home-modal__description">
-              {currentGroupPath ? `"${getGroupLabel(currentGroupPath)}" 안에 새 그룹을 만듭니다.` : '루트 위치에 새 그룹을 만듭니다.'}
-            </p>
             <input
               value={newGroupName}
               onChange={(event) => {

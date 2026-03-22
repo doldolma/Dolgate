@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
-import type { FileEntry, HostRecord, SftpPaneId, TransferJob } from '@shared';
+import { getHostBadgeLabel, getHostSearchText, getHostSubtitle, isSshHostRecord } from '@shared';
+import type { FileEntry, HostRecord, SftpPaneId, SshHostRecord, TransferJob } from '@shared';
 import type { PendingConflictDialog, SftpPaneState, SftpSourceKind, SftpState } from '../store/createAppStore';
 
 interface SftpWorkspaceProps {
@@ -45,8 +46,8 @@ type ActionDialogState =
       value: string;
     };
 
-function groupHosts(hosts: HostRecord[]): Array<[string, HostRecord[]]> {
-  const grouped = new Map<string, HostRecord[]>();
+function groupHosts(hosts: SshHostRecord[]): Array<[string, SshHostRecord[]]> {
+  const grouped = new Map<string, SshHostRecord[]>();
   for (const host of hosts) {
     const key = host.groupName || 'Ungrouped';
     const bucket = grouped.get(key) ?? [];
@@ -217,6 +218,16 @@ function PaneBrowser({
         <input value={pane.filterQuery} onChange={(event) => onFilterChange(event.target.value)} placeholder="Filter" aria-label="Filter files" />
       </div>
 
+      {pane.warningMessages && pane.warningMessages.length > 0 ? (
+        <div className="sftp-pane__warnings">
+          {pane.warningMessages.map((warning) => (
+            <div key={warning} className="terminal-warning-banner">
+              {warning}
+            </div>
+          ))}
+        </div>
+      ) : null}
+
       {pane.errorMessage ? <div className="terminal-error-banner">{pane.errorMessage}</div> : null}
 
       <div
@@ -305,7 +316,7 @@ function PaneBrowser({
 
 interface HostPickerProps {
   pane: SftpPaneState;
-  hosts: HostRecord[];
+  hosts: SshHostRecord[];
   onActivatePaneSource: (sourceKind: SftpSourceKind) => Promise<void>;
   onHostSearchChange: (query: string) => void;
   onSelectHost: (hostId: string) => void;
@@ -318,12 +329,7 @@ function HostPicker({ pane, hosts, onActivatePaneSource, onHostSearchChange, onS
     if (!query) {
       return hosts;
     }
-    return hosts.filter((host) =>
-      [host.label, host.hostname, host.username, host.groupName ?? '']
-        .join(' ')
-        .toLowerCase()
-        .includes(query)
-    );
+    return hosts.filter((host) => getHostSearchText(host).join(' ').toLowerCase().includes(query));
   }, [hosts, pane.hostSearchQuery]);
 
   return (
@@ -372,23 +378,28 @@ function HostPicker({ pane, hosts, onActivatePaneSource, onHostSearchChange, onS
       </div>
 
       <div className="host-grid">
-        {filteredHosts.map((host) => (
-          <article
-            key={host.id}
-            className={`host-browser-card ${pane.selectedHostId === host.id ? 'active' : ''}`}
-            onClick={() => onSelectHost(host.id)}
-            onDoubleClick={() => void onConnectHost(host.id)}
-          >
-            <div className="host-browser-card__icon">{host.authType === 'privateKey' ? 'K' : 'S'}</div>
-            <div className="host-browser-card__meta">
-              <strong>{host.label}</strong>
-              <span>
-                {host.username}@{host.hostname}:{host.port}
-              </span>
-              <small>{host.groupName || 'Ungrouped'}</small>
-            </div>
-          </article>
-        ))}
+        {filteredHosts.length === 0 ? (
+          <div className="empty-callout">
+            <strong>표시할 SSH 호스트가 없습니다.</strong>
+            <p>호스트가 없다면 먼저 Home에서 SSH 호스트를 추가하거나, 검색어를 지워 다시 확인해보세요.</p>
+          </div>
+        ) : (
+          filteredHosts.map((host) => (
+            <article
+              key={host.id}
+              className={`host-browser-card ${pane.selectedHostId === host.id ? 'active' : ''}`}
+              onClick={() => onSelectHost(host.id)}
+              onDoubleClick={() => void onConnectHost(host.id)}
+            >
+              <div className="host-browser-card__icon">{getHostBadgeLabel(host)}</div>
+              <div className="host-browser-card__meta">
+                <strong>{host.label}</strong>
+                <span>{getHostSubtitle(host)}</span>
+                <small>{host.groupName || 'Ungrouped'}</small>
+              </div>
+            </article>
+          ))
+        )}
       </div>
     </div>
   );
@@ -544,6 +555,15 @@ export function SftpWorkspace({
 }: SftpWorkspaceProps) {
   const [actionDialog, setActionDialog] = useState<ActionDialogState | null>(null);
   const panes = [sftp.leftPane, sftp.rightPane] as const;
+  const sshHosts = useMemo(
+    () =>
+      hosts.filter(
+        (host): host is SshHostRecord =>
+          isSshHostRecord(host) ||
+          ('hostname' in host && typeof host.hostname === 'string' && 'port' in host && typeof host.port === 'number' && 'username' in host && typeof host.username === 'string')
+      ),
+    [hosts]
+  );
 
   return (
     <div className="sftp-workspace">
@@ -566,7 +586,7 @@ export function SftpWorkspace({
               {pane.sourceKind === 'host' && !pane.endpoint ? (
                 <HostPicker
                   pane={pane}
-                  hosts={hosts}
+                  hosts={sshHosts}
                   onActivatePaneSource={connectActions.onActivatePaneSource}
                   onHostSearchChange={(query) => onHostSearchChange(pane.id, query)}
                   onSelectHost={(hostId) => onSelectHost(pane.id, hostId)}

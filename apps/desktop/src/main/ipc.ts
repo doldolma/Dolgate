@@ -1,7 +1,13 @@
 import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { dialog, ipcMain, shell as electronShell } from 'electron';
+import {
+  isAwsEc2HostRecord,
+  isSshHostDraft,
+  isSshHostRecord
+} from '@shared';
 import type {
+  AwsEc2HostRecord,
   AuthState,
   AppSettings,
   DesktopConnectInput,
@@ -33,6 +39,7 @@ import {
   SyncOutboxRepository
 } from './database';
 import { AuthService } from './auth-service';
+import { AwsService } from './aws-service';
 import { CoreManager } from './core-manager';
 import { LocalFileService } from './file-service';
 import { SecretStore } from './secret-store';
@@ -108,7 +115,7 @@ function mergeSecrets(current: HostSecretInput, patch: HostSecretInput): HostSec
 }
 
 async function resolveManagedPrivateKeyPem(draft: HostDraft, currentSecretRef: string | null, secretStore: SecretStore): Promise<string | undefined> {
-  if (draft.authType !== 'privateKey') {
+  if (!isSshHostDraft(draft) || draft.authType !== 'privateKey') {
     return undefined;
   }
 
@@ -146,6 +153,9 @@ async function buildHostKeyProbeResult(
   if (!host) {
     throw new Error('Host not found');
   }
+  if (!isSshHostRecord(host)) {
+    throw new Error('AWS EC2 host는 known_hosts 검증을 사용하지 않습니다.');
+  }
 
   const probed = await coreManager.probeHostKey({
     host: host.hostname,
@@ -176,6 +186,22 @@ async function buildHostKeyProbeResult(
   };
 }
 
+function assertSshHost(host: ReturnType<HostRepository['getById']>): asserts host is Extract<NonNullable<ReturnType<HostRepository['getById']>>, { kind: 'ssh' }> {
+  if (!host) {
+    throw new Error('Host not found');
+  }
+  if (!isSshHostRecord(host)) {
+    throw new Error('이 기능은 SSH host에서만 사용할 수 있습니다.');
+  }
+}
+
+function describeHostLabel(host: HostDraft | AwsEc2HostRecord): string {
+  if (host.kind === 'aws-ec2') {
+    return host.label || host.awsInstanceName || host.awsInstanceId;
+  }
+  return host.label || `${host.username}@${host.hostname}`;
+}
+
 export function registerIpcHandlers(
   hosts: HostRepository,
   groups: GroupRepository,
@@ -186,6 +212,7 @@ export function registerIpcHandlers(
   secretMetadata: SecretMetadataRepository,
   syncOutbox: SyncOutboxRepository,
   secretStore: SecretStore,
+  awsService: AwsService,
   coreManager: CoreManager,
   updater: UpdateService,
   authService: AuthService,
@@ -195,6 +222,53 @@ export function registerIpcHandlers(
   const queueSync = () => {
     void syncService.pushDirty().catch(() => undefined);
   };
+  const pendingSessionSecrets = new Map<
+    string,
+    {
+      hostId: string;
+      label: string;
+      secrets: HostSecretInput;
+    }
+  >();
+
+  async function persistHostSpecificSecret(hostId: string, label: string, secrets: HostSecretInput): Promise<string | null> {
+    if (!hasSecretValue(secrets)) {
+      return null;
+    }
+
+    const secretRef = await persistSecret(secretStore, secretMetadata, label, secrets);
+    if (!secretRef) {
+      return null;
+    }
+
+    hosts.updateSecretRef(hostId, secretRef);
+    activityLogs.append('info', 'audit', '호스트 전용 인증 정보를 저장했습니다.', {
+      hostId,
+      secretRef
+    });
+    queueSync();
+    return secretRef;
+  }
+
+  coreManager.setTerminalEventHandler(async (event) => {
+    if (!event.sessionId) {
+      return;
+    }
+
+    if (event.type === 'connected') {
+      const pending = pendingSessionSecrets.get(event.sessionId);
+      if (!pending) {
+        return;
+      }
+      pendingSessionSecrets.delete(event.sessionId);
+      await persistHostSpecificSecret(pending.hostId, pending.label, pending.secrets);
+      return;
+    }
+
+    if (event.type === 'closed' || event.type === 'error') {
+      pendingSessionSecrets.delete(event.sessionId);
+    }
+  });
 
   ipcMain.handle(ipcChannels.auth.getState, async () => authService.getState());
   ipcMain.handle(ipcChannels.auth.bootstrap, async () => authService.bootstrap());
@@ -233,11 +307,15 @@ export function registerIpcHandlers(
 
   ipcMain.handle(ipcChannels.hosts.create, async (_event, draft: HostDraft, secrets?: HostSecretInput) => {
     const hostId = randomUUID();
-    const resolvedSecrets: HostSecretInput = {
-      ...secrets,
-      privateKeyPem: await resolveManagedPrivateKeyPem(draft, null, secretStore)
-    };
-    const secretRef = await persistSecret(secretStore, secretMetadata, draft.label || `${draft.username}@${draft.hostname}`, resolvedSecrets);
+    const resolvedSecrets: HostSecretInput = isSshHostDraft(draft)
+      ? {
+          ...secrets,
+          privateKeyPem: await resolveManagedPrivateKeyPem(draft, null, secretStore)
+        }
+      : {};
+    const secretRef = isSshHostDraft(draft)
+      ? await persistSecret(secretStore, secretMetadata, describeHostLabel(draft), resolvedSecrets)
+      : null;
     if (secretRef) {
       activityLogs.append('info', 'audit', '호스트 secret이 저장되었습니다.', {
         hostId,
@@ -248,7 +326,8 @@ export function registerIpcHandlers(
     activityLogs.append('info', 'audit', '호스트를 생성했습니다.', {
       hostId: record.id,
       label: record.label,
-      hostname: record.hostname,
+      kind: record.kind,
+      target: record.kind === 'ssh' ? record.hostname : record.awsInstanceId,
       groupName: record.groupName ?? null
     });
     queueSync();
@@ -261,27 +340,31 @@ export function registerIpcHandlers(
       throw new Error('Host not found');
     }
     // draft.secretRef가 명시적으로 null이면 기존 연결을 끊으려는 의도로 해석한다.
-    let secretRef = draft.secretRef !== undefined ? draft.secretRef : current.secretRef ?? null;
-    const resolvedSecrets: HostSecretInput = {
-      ...secrets,
-      privateKeyPem: await resolveManagedPrivateKeyPem(draft, current.secretRef ?? null, secretStore)
-    };
-    if (resolvedSecrets.password || resolvedSecrets.passphrase || resolvedSecrets.privateKeyPem) {
-      secretRef = await persistSecret(secretStore, secretMetadata, draft.label || `${draft.username}@${draft.hostname}`, resolvedSecrets);
+    let secretRef =
+      isSshHostDraft(draft) && isSshHostRecord(current)
+        ? (draft.secretRef !== undefined ? draft.secretRef : current.secretRef ?? null)
+        : null;
+    const resolvedSecrets: HostSecretInput = isSshHostDraft(draft)
+      ? {
+          ...secrets,
+          privateKeyPem: await resolveManagedPrivateKeyPem(draft, isSshHostRecord(current) ? (current.secretRef ?? null) : null, secretStore)
+        }
+      : {};
+    if (isSshHostDraft(draft) && (resolvedSecrets.password || resolvedSecrets.passphrase || resolvedSecrets.privateKeyPem)) {
+      secretRef = await persistSecret(secretStore, secretMetadata, describeHostLabel(draft), resolvedSecrets);
       activityLogs.append('info', 'audit', '호스트 secret이 갱신되었습니다.', {
         hostId: id,
         secretRef
       });
-    } else if (secrets) {
-      // "새 키체인" 모드에서 값을 비워 저장한 경우는 기존 secret을 유지한다.
-      // 반대로 secrets가 undefined이고 draft.secretRef가 null이면, 사용자가 명시적으로 연결을 해제한 것이다.
-      secretRef = current.secretRef ?? null;
+    } else if (isSshHostDraft(draft) && secrets) {
+      secretRef = isSshHostRecord(current) ? (current.secretRef ?? null) : null;
     }
     const record = hosts.update(id, draft, secretRef);
     activityLogs.append('info', 'audit', '호스트를 수정했습니다.', {
       hostId: record.id,
       label: record.label,
-      hostname: record.hostname,
+      kind: record.kind,
+      target: record.kind === 'ssh' ? record.hostname : record.awsInstanceId,
       groupName: record.groupName ?? null
     });
     queueSync();
@@ -296,7 +379,8 @@ export function registerIpcHandlers(
       activityLogs.append('warn', 'audit', '호스트를 삭제했습니다.', {
         hostId: current.id,
         label: current.label,
-        hostname: current.hostname
+        kind: current.kind,
+        target: current.kind === 'ssh' ? current.hostname : current.awsInstanceId
       });
     }
     queueSync();
@@ -316,16 +400,42 @@ export function registerIpcHandlers(
     return group;
   });
 
+  ipcMain.handle(ipcChannels.aws.listProfiles, async () => awsService.listProfiles());
+
+  ipcMain.handle(ipcChannels.aws.getProfileStatus, async (_event, profileName: string) => awsService.getProfileStatus(profileName));
+
+  ipcMain.handle(ipcChannels.aws.login, async (_event, profileName: string) => {
+    await awsService.login(profileName);
+  });
+
+  ipcMain.handle(ipcChannels.aws.listRegions, async (_event, profileName: string) => awsService.listRegions(profileName));
+
+  ipcMain.handle(ipcChannels.aws.listEc2Instances, async (_event, profileName: string, region: string) => {
+    return awsService.listEc2Instances(profileName, region);
+  });
+
   ipcMain.handle(ipcChannels.ssh.connect, async (_event, input: DesktopConnectInput) => {
     const host = hosts.getById(input.hostId);
     if (!host) {
       throw new Error('Host not found');
     }
 
-    const trustedHostKeyBase64 = requireTrustedHostKey(knownHosts, host);
-    const secrets = await loadSecrets(secretStore, host.secretRef);
+    if (isAwsEc2HostRecord(host)) {
+      await awsService.ensureAwsCliAvailable();
+      await awsService.ensureSessionManagerPluginAvailable();
+      return coreManager.connectAwsSession({
+        profileName: host.awsProfileName,
+        region: host.awsRegion,
+        instanceId: host.awsInstanceId,
+        hostId: host.id,
+        title: input.title?.trim() || host.label
+      });
+    }
 
-    return coreManager.connect({
+    const trustedHostKeyBase64 = requireTrustedHostKey(knownHosts, host);
+    const secrets = mergeSecrets(await loadSecrets(secretStore, host.secretRef), input.secrets ?? {});
+    const title = input.title?.trim() || host.label;
+    const connection = await coreManager.connect({
       host: host.hostname,
       port: host.port,
       username: host.username,
@@ -338,8 +448,18 @@ export function registerIpcHandlers(
       cols: input.cols,
       rows: input.rows,
       hostId: host.id,
-      title: input.title?.trim() || host.label
+      title
     });
+
+    if (input.secrets && hasSecretValue(input.secrets)) {
+      pendingSessionSecrets.set(connection.sessionId, {
+        hostId: host.id,
+        label: title,
+        secrets
+      });
+    }
+
+    return connection;
   });
 
   ipcMain.handle(ipcChannels.ssh.write, async (_event, sessionId: string, data: string) => {
@@ -368,14 +488,12 @@ export function registerIpcHandlers(
 
   ipcMain.handle(ipcChannels.sftp.connect, async (_event, input: DesktopSftpConnectInput) => {
     const host = hosts.getById(input.hostId);
-    if (!host) {
-      throw new Error('Host not found');
-    }
+    assertSshHost(host);
 
     const trustedHostKeyBase64 = requireTrustedHostKey(knownHosts, host);
-    const secrets = await loadSecrets(secretStore, host.secretRef);
+    const secrets = mergeSecrets(await loadSecrets(secretStore, host.secretRef), input.secrets ?? {});
 
-    return coreManager.sftpConnect({
+    const endpoint = await coreManager.sftpConnect({
       host: host.hostname,
       port: host.port,
       username: host.username,
@@ -388,6 +506,12 @@ export function registerIpcHandlers(
       hostId: host.id,
       title: host.label
     });
+
+    if (input.secrets && hasSecretValue(input.secrets)) {
+      await persistHostSpecificSecret(host.id, host.label, secrets);
+    }
+
+    return endpoint;
   });
 
   ipcMain.handle(ipcChannels.sftp.disconnect, async (_event, endpointId: string) => {
@@ -420,6 +544,8 @@ export function registerIpcHandlers(
   }));
 
   ipcMain.handle(ipcChannels.portForwards.create, async (_event, draft: PortForwardDraft) => {
+    const host = hosts.getById(draft.hostId);
+    assertSshHost(host);
     const record = portForwards.create(draft);
     activityLogs.append('info', 'audit', '포트 포워딩 규칙을 생성했습니다.', {
       ruleId: record.id,
@@ -432,6 +558,8 @@ export function registerIpcHandlers(
   });
 
   ipcMain.handle(ipcChannels.portForwards.update, async (_event, id: string, draft: PortForwardDraft) => {
+    const host = hosts.getById(draft.hostId);
+    assertSshHost(host);
     const record = portForwards.update(id, draft);
     activityLogs.append('info', 'audit', '포트 포워딩 규칙을 수정했습니다.', {
       ruleId: record.id,
@@ -465,9 +593,7 @@ export function registerIpcHandlers(
       throw new Error('Port forward rule not found');
     }
     const host = hosts.getById(rule.hostId);
-    if (!host) {
-      throw new Error('Host not found');
-    }
+    assertSshHost(host);
 
     const trustedHostKeyBase64 = requireTrustedHostKey(knownHosts, host);
     const secrets = await loadSecrets(secretStore, host.secretRef);
@@ -612,9 +738,7 @@ export function registerIpcHandlers(
 
   ipcMain.handle(ipcChannels.keychain.cloneForHost, async (_event, input: KeychainSecretCloneInput) => {
     const host = hosts.getById(input.hostId);
-    if (!host) {
-      throw new Error('Host not found');
-    }
+    assertSshHost(host);
     if (!host.secretRef || host.secretRef !== input.sourceSecretRef) {
       throw new Error('Host is not linked to the selected keychain secret');
     }
@@ -625,7 +749,7 @@ export function registerIpcHandlers(
       throw new Error('복제할 secret 값이 없습니다.');
     }
 
-    const nextSecretRef = await persistSecret(secretStore, secretMetadata, host.label || `${host.username}@${host.hostname}`, mergedSecrets);
+    const nextSecretRef = await persistSecret(secretStore, secretMetadata, describeHostLabel(host), mergedSecrets);
     if (!nextSecretRef) {
       throw new Error('새 secret을 생성하지 못했습니다.');
     }
@@ -679,6 +803,7 @@ export function registerIpcHandlers(
   ipcMain.handle(ipcChannels.settings.update, async (_event, input: Partial<AppSettings>) => settings.update(input));
 
   ipcMain.handle(ipcChannels.files.getHomeDirectory, async () => localFiles.getHomeDirectory());
+  ipcMain.handle(ipcChannels.files.getParentPath, async (_event, targetPath: string) => localFiles.getParentPath(targetPath));
 
   ipcMain.handle(ipcChannels.files.list, async (_event, targetPath: string) => localFiles.list(targetPath));
 

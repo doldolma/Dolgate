@@ -7,21 +7,18 @@ interface SettingsPanelProps {
   onLogout: () => Promise<void>;
 }
 
-const themeOptions: Array<{ value: AppTheme; title: string; description: string }> = [
+const themeOptions: Array<{ value: AppTheme; title: string }> = [
   {
     value: 'system',
-    title: 'System',
-    description: 'macOS 또는 Windows의 기본 라이트/다크 모드를 그대로 따라갑니다.'
+    title: 'System'
   },
   {
     value: 'light',
-    title: 'Light',
-    description: '밝은 캔버스와 부드러운 패널 대비를 사용합니다.'
+    title: 'Light'
   },
   {
     value: 'dark',
-    title: 'Dark',
-    description: '터미널 작업에 집중하기 좋은 다크 테마를 사용합니다.'
+    title: 'Dark'
   }
 ];
 
@@ -113,7 +110,6 @@ export function SettingsPanel({ settings, onUpdateSettings, onLogout }: Settings
                 </span>
               </div>
               <strong>{option.title}</strong>
-              <span>{option.description}</span>
             </button>
           ))}
         </div>
@@ -135,7 +131,6 @@ export function SettingsPanel({ settings, onUpdateSettings, onLogout }: Settings
               onClick={async () => onUpdateSettings({ theme: option.value })}
             >
               <strong>{option.title}</strong>
-              <span>{option.description}</span>
             </button>
           ))}
         </div>
@@ -148,7 +143,6 @@ export function SettingsPanel({ settings, onUpdateSettings, onLogout }: Settings
             <h3>Account</h3>
           </div>
         </div>
-        <p className="settings-card__description">현재 세션을 종료하면 로컬에 캐시된 서버 관리 secret도 함께 정리되고, 다시 로그인해야 앱을 사용할 수 있습니다.</p>
         <button type="button" className="danger-button" onClick={async () => onLogout()}>
           로그아웃
         </button>

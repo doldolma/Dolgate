@@ -1,4 +1,5 @@
 import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
+import { isSshHostRecord } from '@shared';
 import type {
   GroupRecord,
   HostRecord,
@@ -434,7 +435,7 @@ export class SyncService {
         hasPassphrase: Boolean(secret.passphrase),
         hasManagedPrivateKey: Boolean(secret.privateKeyPem),
         source: 'server_managed',
-        linkedHostCount: hosts.filter((host) => host.secretRef === secret.secretRef).length,
+        linkedHostCount: hosts.filter((host) => isSshHostRecord(host) && host.secretRef === secret.secretRef).length,
         updatedAt: secret.updatedAt
       });
     }

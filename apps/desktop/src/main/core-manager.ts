@@ -46,6 +46,11 @@ interface PortForwardDefinition {
   bindPort: number;
 }
 
+interface AwsSessionRuntime {
+  process: ChildProcessWithoutNullStreams;
+  stderr: string;
+}
+
 function resolveRepoRoot(): string {
   // 패키징/개발 환경 모두에서 저장소 루트를 계산하기 위한 단순 기준점이다.
   return path.resolve(app.getAppPath(), '../..');
@@ -164,8 +169,14 @@ export class CoreManager {
   private readonly portForwardRuntimes = new Map<string, PortForwardRuntimeRecord>();
   private readonly pendingResponses = new Map<string, PendingResponse<Record<string, unknown>>>();
   private readonly lastResizeBySession = new Map<string, { cols: number; rows: number }>();
+  private readonly awsSessions = new Map<string, AwsSessionRuntime>();
+  private onTerminalEvent?: (event: CoreEvent<Record<string, unknown>>) => void | Promise<void>;
   // 바이너리 frame은 청크 경계를 보장하지 않으므로 별도 parser가 필요하다.
   private readonly parser = new CoreFrameParser();
+
+  setTerminalEventHandler(handler: ((event: CoreEvent<Record<string, unknown>>) => void | Promise<void>) | undefined): void {
+    this.onTerminalEvent = handler;
+  }
 
   registerWindow(window: BrowserWindow): void {
     this.windows.add(window);
@@ -188,6 +199,7 @@ export class CoreManager {
     }
 
     if (!this.process) {
+      await this.shutdownAwsSessions();
       this.clearRuntimeState();
       return;
     }
@@ -211,7 +223,9 @@ export class CoreManager {
 
       currentProcess.once('exit', () => {
         clearTimeout(timeout);
-        finish();
+        void this.shutdownAwsSessions().finally(() => {
+          finish();
+        });
       });
 
       currentProcess.stdin.end();
@@ -318,6 +332,141 @@ export class CoreManager {
       sessionId,
       payload
     });
+    return { sessionId };
+  }
+
+  async connectAwsSession(payload: {
+    profileName: string;
+    region: string;
+    instanceId: string;
+    title: string;
+    hostId: string;
+  }): Promise<{ sessionId: string }> {
+    const sessionId = randomUUID();
+    const tab: TerminalTab = {
+      id: sessionId,
+      title: payload.title,
+      hostId: payload.hostId,
+      sessionId,
+      status: 'connecting',
+      lastEventAt: new Date().toISOString()
+    };
+    this.tabs.set(sessionId, tab);
+
+    const child = spawn(
+      'aws',
+      ['ssm', 'start-session', '--target', payload.instanceId, '--profile', payload.profileName, '--region', payload.region],
+      {
+        stdio: ['pipe', 'pipe', 'pipe'],
+        windowsHide: true,
+        env: process.env
+      }
+    );
+    this.awsSessions.set(sessionId, { process: child, stderr: '' });
+
+    child.stdout.on('data', (chunk: Buffer) => {
+      this.broadcastStream(
+        {
+          type: 'data',
+          sessionId
+        },
+        new Uint8Array(chunk)
+      );
+    });
+
+    child.stderr.setEncoding('utf8');
+    child.stderr.on('data', (chunk: string) => {
+      const runtime = this.awsSessions.get(sessionId);
+      if (runtime) {
+        runtime.stderr += chunk;
+      }
+    });
+
+    child.on('spawn', () => {
+      const existing = this.tabs.get(sessionId);
+      if (!existing) {
+        return;
+      }
+      this.tabs.set(sessionId, {
+        ...existing,
+        status: 'connected',
+        lastEventAt: new Date().toISOString()
+      });
+      this.broadcastTerminalEvent({
+        type: 'connected',
+        sessionId,
+        payload: {
+          transport: 'aws-ssm'
+        }
+      });
+      this.log({
+        level: 'info',
+        category: 'session',
+        message: 'AWS SSM 세션이 연결되었습니다.',
+        metadata: {
+          sessionId,
+          hostId: payload.hostId,
+          instanceId: payload.instanceId,
+          profileName: payload.profileName,
+          region: payload.region
+        }
+      });
+    });
+
+    child.on('error', (error) => {
+      this.awsSessions.delete(sessionId);
+      this.tabs.delete(sessionId);
+      this.lastResizeBySession.delete(sessionId);
+      const message = error.message || 'AWS SSM 세션을 시작하지 못했습니다.';
+      this.broadcastTerminalEvent({
+        type: 'error',
+        sessionId,
+        payload: {
+          message
+        }
+      });
+      this.broadcastTerminalEvent({
+        type: 'closed',
+        sessionId,
+        payload: {
+          message
+        }
+      });
+    });
+
+    child.on('exit', (code, signal) => {
+      if (!this.tabs.has(sessionId)) {
+        this.awsSessions.delete(sessionId);
+        this.lastResizeBySession.delete(sessionId);
+        return;
+      }
+      const runtime = this.awsSessions.get(sessionId);
+      this.awsSessions.delete(sessionId);
+      this.tabs.delete(sessionId);
+      this.lastResizeBySession.delete(sessionId);
+      const message =
+        runtime?.stderr.trim() ||
+        `AWS SSM 세션이 종료되었습니다. (code=${code ?? 'null'}, signal=${signal ?? 'null'})`;
+      this.log({
+        level: code === 0 || code === null ? 'info' : 'warn',
+        category: 'session',
+        message: 'AWS SSM 세션이 종료되었습니다.',
+        metadata: {
+          sessionId,
+          message,
+          code: code ?? null,
+          signal: signal ?? null
+        }
+      });
+      this.broadcastTerminalEvent({
+        type: 'closed',
+        sessionId,
+        payload: {
+          message
+        }
+      });
+    });
+
     return { sessionId };
   }
 
@@ -606,6 +755,11 @@ export class CoreManager {
     if (!tab || tab.status !== 'connected') {
       return;
     }
+    const awsSession = this.awsSessions.get(sessionId);
+    if (awsSession) {
+      awsSession.process.stdin.write(data);
+      return;
+    }
     this.sendStream(
       {
         type: 'write',
@@ -621,6 +775,11 @@ export class CoreManager {
     if (!tab || tab.status !== 'connected') {
       return;
     }
+    const awsSession = this.awsSessions.get(sessionId);
+    if (awsSession) {
+      awsSession.process.stdin.write(Buffer.from(data));
+      return;
+    }
     this.sendStream(
       {
         type: 'write',
@@ -634,6 +793,9 @@ export class CoreManager {
     const tab = this.tabs.get(sessionId);
     // 연결 전/실패 세션에는 resize를 보내지 않아 불필요한 오류 이벤트를 만들지 않는다.
     if (!tab || tab.status !== 'connected') {
+      return;
+    }
+    if (this.awsSessions.has(sessionId)) {
       return;
     }
     // 숨겨진 패널이나 과도한 observer 발화로 들어온 무효/중복 resize는 main에서 한 번 더 걸러준다.
@@ -657,6 +819,23 @@ export class CoreManager {
     this.lastResizeBySession.delete(sessionId);
     const tab = this.tabs.get(sessionId);
     if (!tab) {
+      return;
+    }
+    const awsSession = this.awsSessions.get(sessionId);
+    if (awsSession) {
+      if (awsSession.process.exitCode === null && !awsSession.process.killed) {
+        awsSession.process.kill('SIGTERM');
+      } else {
+        this.awsSessions.delete(sessionId);
+        this.tabs.delete(sessionId);
+        this.broadcastTerminalEvent({
+          type: 'closed',
+          sessionId,
+          payload: {
+            message: 'client requested disconnect'
+          }
+        });
+      }
       return;
     }
     // 코어에 실제 세션 핸들이 없을 수 있는 connecting/error 탭은 로컬에서 바로 닫아준다.
@@ -861,6 +1040,38 @@ export class CoreManager {
     this.portForwardDefinitions.clear();
     this.portForwardRuntimes.clear();
     this.lastResizeBySession.clear();
+    this.awsSessions.clear();
+  }
+
+  private async shutdownAwsSessions(): Promise<void> {
+    const sessions = Array.from(this.awsSessions.entries());
+    if (sessions.length === 0) {
+      return;
+    }
+
+    await Promise.all(
+      sessions.map(([sessionId, runtime]) =>
+        new Promise<void>((resolve) => {
+          const finish = () => {
+            this.awsSessions.delete(sessionId);
+            resolve();
+          };
+          runtime.process.once('exit', () => {
+            finish();
+          });
+          if (runtime.process.exitCode !== null || runtime.process.killed) {
+            finish();
+            return;
+          }
+          runtime.process.kill('SIGTERM');
+          setTimeout(() => {
+            if (runtime.process.exitCode === null && !runtime.process.killed) {
+              runtime.process.kill('SIGKILL');
+            }
+          }, 1000);
+        })
+      )
+    );
   }
 
   private buildForwardRuntime(ruleId: string, payload: Record<string, unknown>, status: PortForwardRuntimeRecord['status']): PortForwardRuntimeRecord {
@@ -902,6 +1113,7 @@ export class CoreManager {
         window.webContents.send(ipcChannels.ssh.event, event);
       }
     }
+    void this.onTerminalEvent?.(event);
   }
 
   private broadcastTransferEvent(event: TransferJobEvent): void {

@@ -1,4 +1,5 @@
 import { createStore } from 'zustand/vanilla';
+import { isAwsEc2HostRecord, isSshHostRecord } from '@shared';
 import type {
   ActivityLogRecord,
   AppSettings,
@@ -85,6 +86,7 @@ export interface SftpPaneState {
   hostSearchQuery: string;
   isLoading: boolean;
   errorMessage?: string;
+  warningMessages?: string[];
 }
 
 export interface PendingConflictDialog {
@@ -100,17 +102,27 @@ export interface PendingHostKeyPrompt {
         hostId: string;
         cols: number;
         rows: number;
+        secrets?: HostSecretInput;
       }
     | {
         kind: 'sftp';
         paneId: SftpPaneId;
         hostId: string;
+        secrets?: HostSecretInput;
       }
     | {
         kind: 'portForward';
         ruleId: string;
         hostId: string;
       };
+}
+
+export interface PendingCredentialRetry {
+  hostId: string;
+  source: 'ssh' | 'sftp';
+  credentialKind: 'password' | 'passphrase';
+  message: string;
+  paneId?: SftpPaneId;
 }
 
 export interface SftpState {
@@ -138,11 +150,15 @@ export interface AppState {
   hostDrawer: HostDrawerState;
   currentGroupPath: string | null;
   searchQuery: string;
+  selectedHostTags: string[];
   settings: AppSettings;
   isReady: boolean;
   sftp: SftpState;
   pendingHostKeyPrompt: PendingHostKeyPrompt | null;
+  pendingCredentialRetry: PendingCredentialRetry | null;
   setSearchQuery: (value: string) => void;
+  toggleHostTag: (tag: string) => void;
+  clearHostTagFilter: () => void;
   activateHome: () => void;
   activateSftp: () => void;
   activateSession: (sessionId: string) => void;
@@ -158,11 +174,12 @@ export interface AppState {
   saveHost: (hostId: string | null, draft: HostDraft, secrets?: HostSecretInput) => Promise<void>;
   moveHostToGroup: (hostId: string, groupPath: string | null) => Promise<void>;
   removeHost: (hostId: string) => Promise<void>;
-  connectHost: (hostId: string, cols: number, rows: number) => Promise<void>;
+  connectHost: (hostId: string, cols: number, rows: number, secrets?: HostSecretInput) => Promise<void>;
   disconnectTab: (sessionId: string) => Promise<void>;
   closeWorkspace: (workspaceId: string) => Promise<void>;
   splitSessionIntoWorkspace: (sessionId: string, direction: WorkspaceDropDirection, targetSessionId?: string) => boolean;
   detachSessionFromWorkspace: (workspaceId: string, sessionId: string) => void;
+  reorderDynamicTab: (source: DynamicTabStripItem, target: DynamicTabStripItem, placement: 'before' | 'after') => void;
   focusWorkspaceSession: (workspaceId: string, sessionId: string) => void;
   resizeWorkspaceSplit: (workspaceId: string, splitId: string, ratio: number) => void;
   updateSettings: (input: Partial<AppSettings>) => Promise<void>;
@@ -177,6 +194,8 @@ export interface AppState {
   cloneKeychainSecretForHost: (hostId: string, sourceSecretRef: string, secrets: HostSecretInput) => Promise<void>;
   acceptPendingHostKeyPrompt: (mode: 'trust' | 'replace') => Promise<void>;
   dismissPendingHostKeyPrompt: () => void;
+  dismissPendingCredentialRetry: () => void;
+  submitCredentialRetry: (secrets: HostSecretInput) => Promise<void>;
   handleCoreEvent: (event: CoreEvent<Record<string, unknown>>) => void;
   handleTransferEvent: (event: TransferJobEvent) => void;
   handlePortForwardEvent: (event: PortForwardRuntimeEvent) => void;
@@ -227,7 +246,8 @@ function createEmptyPane(id: SftpPaneId): SftpPaneState {
     filterQuery: '',
     selectedHostId: null,
     hostSearchQuery: '',
-    isLoading: false
+    isLoading: false,
+    warningMessages: []
   };
 }
 
@@ -247,6 +267,26 @@ function sortHosts(hosts: HostRecord[]): HostRecord[] {
     }
     return a.label.localeCompare(b.label);
   });
+}
+
+function normalizeTagValue(tag: string): string {
+  return tag.trim().toLocaleLowerCase();
+}
+
+function matchesSelectedTags(host: HostRecord, selectedTags: string[]): boolean {
+  if (selectedTags.length === 0) {
+    return true;
+  }
+  const hostTags = host.tags ?? [];
+  if (hostTags.length === 0) {
+    return false;
+  }
+  const normalizedHostTags = new Set(hostTags.map(normalizeTagValue));
+  return selectedTags.some((tag) => normalizedHostTags.has(normalizeTagValue(tag)));
+}
+
+function hasProvidedSecrets(secrets?: HostSecretInput): boolean {
+  return Boolean(secrets?.password || secrets?.passphrase || secrets?.privateKeyPem);
 }
 
 function sortGroups(groups: GroupRecord[]): GroupRecord[] {
@@ -497,6 +537,22 @@ function parentPath(targetPath: string): string {
   return normalized.slice(0, index) || '/';
 }
 
+function resolveCredentialRetryKind(host: HostRecord | undefined, message: string): 'password' | 'passphrase' | null {
+  if (!host || !isSshHostRecord(host)) {
+    return null;
+  }
+
+  if (host.authType === 'password') {
+    return /requires a password|password required|permission denied|unable to authenticate|authentication failed|ssh handshake failed/i.test(message)
+      ? 'password'
+      : null;
+  }
+
+  return /passphrase|private key|unable to authenticate|authentication failed|ssh handshake failed|parse private key/i.test(message)
+    ? 'passphrase'
+    : null;
+}
+
 function upsertTransferJob(transfers: TransferJob[], job: TransferJob): TransferJob[] {
   const next = [job, ...transfers.filter((item) => item.id !== job.id)];
   return next.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
@@ -555,6 +611,44 @@ function toTrustInput(probe: HostKeyProbeResult) {
 }
 
 export function createAppStore(api: DesktopApi) {
+  const openSessionForHost = async (
+    set: (next: AppState | Partial<AppState> | ((state: AppState) => AppState | Partial<AppState>)) => void,
+    get: () => AppState,
+    hostId: string,
+    cols: number,
+    rows: number,
+    secrets?: HostSecretInput
+  ) => {
+    const host = get().hosts.find((item) => item.id === hostId);
+    if (!host) {
+      return;
+    }
+
+    const title = buildSessionTitle(host.label, hostId, get().tabs);
+    const { sessionId } = await api.ssh.connect({
+      hostId,
+      title,
+      cols,
+      rows,
+      secrets
+    });
+    const tab: TerminalTab = {
+      id: sessionId,
+      title,
+      hostId,
+      sessionId,
+      status: 'connecting',
+      lastEventAt: new Date().toISOString()
+    };
+    set((state) => ({
+      tabs: [...state.tabs.filter((item) => item.id !== sessionId), tab],
+      tabStrip: [...state.tabStrip.filter((item) => !(item.kind === 'session' && item.sessionId === sessionId)), { kind: 'session', sessionId }],
+      activeWorkspaceTab: asSessionTabId(sessionId),
+      homeSection: 'hosts',
+      hostDrawer: { mode: 'closed' }
+    }));
+  };
+
   const syncOperationalData = async (
     set: (next: AppState | Partial<AppState> | ((state: AppState) => AppState | Partial<AppState>)) => void
   ) => {
@@ -574,6 +668,16 @@ export function createAppStore(api: DesktopApi) {
     });
   };
 
+  const refreshHostAndKeychainState = async (
+    set: (next: AppState | Partial<AppState> | ((state: AppState) => AppState | Partial<AppState>)) => void
+  ) => {
+    const [hosts, keychainEntries] = await Promise.all([api.hosts.list(), api.keychain.list()]);
+    set({
+      hosts: sortHosts(hosts),
+      keychainEntries: sortKeychainEntries(keychainEntries)
+    });
+  };
+
   const loadPaneListing = async (
     set: (next: AppState | Partial<AppState> | ((state: AppState) => AppState | Partial<AppState>)) => void,
     get: () => AppState,
@@ -587,7 +691,8 @@ export function createAppStore(api: DesktopApi) {
       sftp: updatePaneState(state, paneId, {
         ...pane,
         isLoading: true,
-        errorMessage: undefined
+        errorMessage: undefined,
+        warningMessages: []
       })
     }));
 
@@ -611,6 +716,7 @@ export function createAppStore(api: DesktopApi) {
           selectedPaths: [],
           isLoading: false,
           errorMessage: undefined,
+          warningMessages: listing.warnings ?? [],
           ...historyPatch,
           endpoint:
             latestPane.sourceKind === 'host' && latestPane.endpoint
@@ -630,7 +736,8 @@ export function createAppStore(api: DesktopApi) {
         sftp: updatePaneState(state, paneId, {
           ...getPane(state, paneId),
           isLoading: false,
-          errorMessage: error instanceof Error ? error.message : 'SFTP 목록을 읽지 못했습니다.'
+          errorMessage: error instanceof Error ? error.message : 'SFTP 목록을 읽지 못했습니다.',
+          warningMessages: []
         })
       }));
     }
@@ -642,32 +749,7 @@ export function createAppStore(api: DesktopApi) {
     set: (next: AppState | Partial<AppState> | ((state: AppState) => AppState | Partial<AppState>)) => void
   ) => {
     if (action.kind === 'ssh') {
-      const host = get().hosts.find((item) => item.id === action.hostId);
-      if (!host) {
-        return;
-      }
-      const title = buildSessionTitle(host.label, action.hostId, get().tabs);
-      const { sessionId } = await api.ssh.connect({
-        hostId: action.hostId,
-        title,
-        cols: action.cols,
-        rows: action.rows
-      });
-      const tab: TerminalTab = {
-        id: sessionId,
-        title,
-        hostId: action.hostId,
-        sessionId,
-        status: 'connecting',
-        lastEventAt: new Date().toISOString()
-      };
-      set((state) => ({
-        tabs: [...state.tabs.filter((item) => item.id !== sessionId), tab],
-        tabStrip: [...state.tabStrip.filter((item) => !(item.kind === 'session' && item.sessionId === sessionId)), { kind: 'session', sessionId }],
-        activeWorkspaceTab: asSessionTabId(sessionId),
-        homeSection: 'hosts',
-        hostDrawer: { mode: 'closed' }
-      }));
+      await openSessionForHost(set, get, action.hostId, action.cols, action.rows, action.secrets);
       return;
     }
 
@@ -689,7 +771,7 @@ export function createAppStore(api: DesktopApi) {
         })
       }));
       try {
-        const endpoint = await api.sftp.connect({ hostId: action.hostId });
+        const endpoint = await api.sftp.connect({ hostId: action.hostId, secrets: action.secrets });
         set((state) => ({
           sftp: updatePaneState(state, action.paneId, {
             ...getPane(state, action.paneId),
@@ -699,11 +781,29 @@ export function createAppStore(api: DesktopApi) {
             history: [endpoint.path],
             historyIndex: 0,
             selectedPaths: [],
-            errorMessage: undefined
+            errorMessage: undefined,
+            warningMessages: []
           })
         }));
         await loadPaneListing(set, get, action.paneId, endpoint.path, { pushToHistory: false });
+        if (hasProvidedSecrets(action.secrets)) {
+          await refreshHostAndKeychainState(set);
+        }
       } catch (error) {
+        const host = get().hosts.find((item) => item.id === action.hostId);
+        const message = error instanceof Error ? error.message : 'SFTP 연결에 실패했습니다.';
+        const credentialKind = resolveCredentialRetryKind(host, message);
+        if (credentialKind) {
+          set({
+            pendingCredentialRetry: {
+              hostId: action.hostId,
+              source: 'sftp',
+              credentialKind,
+              paneId: action.paneId,
+              message
+            }
+          });
+        }
         set((state) => ({
           sftp: updatePaneState(state, action.paneId, {
             ...getPane(state, action.paneId),
@@ -711,7 +811,8 @@ export function createAppStore(api: DesktopApi) {
             endpoint: null,
             entries: [],
             isLoading: false,
-            errorMessage: error instanceof Error ? error.message : 'SFTP 연결에 실패했습니다.'
+            errorMessage: credentialKind ? undefined : message,
+            warningMessages: []
           })
         }));
       }
@@ -763,11 +864,24 @@ export function createAppStore(api: DesktopApi) {
       hostDrawer: { mode: 'closed' },
       currentGroupPath: null,
       searchQuery: '',
+      selectedHostTags: [],
       settings: defaultSettings,
       isReady: false,
       sftp: defaultSftpState,
       pendingHostKeyPrompt: null,
+      pendingCredentialRetry: null,
       setSearchQuery: (value) => set({ searchQuery: value }),
+      toggleHostTag: (tag) =>
+        set((state) => {
+          const key = normalizeTagValue(tag);
+          const alreadySelected = state.selectedHostTags.some((value) => normalizeTagValue(value) === key);
+          return {
+            selectedHostTags: alreadySelected
+              ? state.selectedHostTags.filter((value) => normalizeTagValue(value) !== key)
+              : [...state.selectedHostTags, tag]
+          };
+        }),
+      clearHostTagFilter: () => set({ selectedHostTags: [] }),
       activateHome: () => set({ activeWorkspaceTab: 'home' }),
       activateSftp: () => set({ activeWorkspaceTab: 'sftp' }),
       activateSession: (sessionId) => set({ activeWorkspaceTab: asSessionTabId(sessionId) }),
@@ -826,9 +940,11 @@ export function createAppStore(api: DesktopApi) {
           homeSection: 'hosts',
           hostDrawer: { mode: 'closed' },
           currentGroupPath: null,
+          selectedHostTags: [],
           settings,
           isReady: true,
           pendingHostKeyPrompt: null,
+          pendingCredentialRetry: null,
           sftp: {
             localHomePath,
             leftPane: {
@@ -838,7 +954,8 @@ export function createAppStore(api: DesktopApi) {
               lastLocalPath: localListing.path,
               history: [localListing.path],
               historyIndex: 0,
-              entries: localListing.entries
+              entries: localListing.entries,
+              warningMessages: localListing.warnings ?? []
             },
             rightPane: createEmptyPane('right'),
             transfers: [],
@@ -857,11 +974,11 @@ export function createAppStore(api: DesktopApi) {
       },
       saveHost: async (hostId, draft, secrets) => {
         const next = hostId ? await api.hosts.update(hostId, draft, secrets) : await api.hosts.create(draft, secrets);
-        const hosts = sortHosts([...get().hosts.filter((host) => host.id !== next.id), next]);
         set({
-          hosts,
+          hosts: sortHosts([...get().hosts.filter((host) => host.id !== next.id), next]),
           hostDrawer: { mode: 'edit', hostId: next.id }
         });
+        await refreshHostAndKeychainState(set);
         await syncOperationalData(set);
       },
       moveHostToGroup: async (hostId, groupPath) => {
@@ -870,16 +987,37 @@ export function createAppStore(api: DesktopApi) {
           return;
         }
 
-        const next = await api.hosts.update(hostId, {
-          label: current.label,
-          hostname: current.hostname,
-          port: current.port,
-          username: current.username,
-          authType: current.authType,
-          privateKeyPath: current.privateKeyPath ?? null,
-          secretRef: current.secretRef ?? null,
-          groupName: groupPath
-        });
+        const next = await api.hosts.update(
+          hostId,
+          isAwsEc2HostRecord(current)
+            ? {
+                kind: 'aws-ec2',
+                label: current.label,
+                groupName: groupPath,
+                tags: current.tags ?? [],
+                terminalThemeId: current.terminalThemeId ?? null,
+                awsProfileName: current.awsProfileName,
+                awsRegion: current.awsRegion,
+                awsInstanceId: current.awsInstanceId,
+                awsInstanceName: current.awsInstanceName ?? null,
+                awsPlatform: current.awsPlatform ?? null,
+                awsPrivateIp: current.awsPrivateIp ?? null,
+                awsState: current.awsState ?? null
+              }
+            : {
+                kind: 'ssh',
+                label: current.label,
+                hostname: current.hostname,
+                port: current.port,
+                username: current.username,
+                authType: current.authType,
+                privateKeyPath: current.privateKeyPath ?? null,
+                secretRef: current.secretRef ?? null,
+                groupName: groupPath,
+                tags: current.tags ?? [],
+                terminalThemeId: current.terminalThemeId ?? null
+              }
+        );
 
         set((state) => ({
           hosts: sortHosts([...state.hosts.filter((host) => host.id !== next.id), next])
@@ -895,20 +1033,29 @@ export function createAppStore(api: DesktopApi) {
         });
         await syncOperationalData(set);
       },
-      connectHost: async (hostId, cols, rows) => {
+      connectHost: async (hostId, cols, rows, secrets) => {
+        const host = get().hosts.find((item) => item.id === hostId);
+        if (!host) {
+          return;
+        }
+        if (!isSshHostRecord(host)) {
+          await openSessionForHost(set, get, hostId, cols, rows);
+          return;
+        }
         const trusted = await ensureTrustedHost(set, {
           hostId,
           action: {
             kind: 'ssh',
             hostId,
             cols,
-            rows
+            rows,
+            secrets
           }
         });
         if (!trusted) {
           return;
         }
-        await runTrustedAction(get, { kind: 'ssh', hostId, cols, rows }, set);
+        await runTrustedAction(get, { kind: 'ssh', hostId, cols, rows, secrets }, set);
       },
       disconnectTab: async (sessionId) => {
         await api.ssh.disconnect(sessionId);
@@ -1075,6 +1222,45 @@ export function createAppStore(api: DesktopApi) {
           activeWorkspaceTab: asSessionTabId(sessionId)
         });
       },
+      reorderDynamicTab: (source, target, placement) => {
+        if (source.kind === 'session' && target.kind === 'session' && source.sessionId === target.sessionId) {
+          return;
+        }
+        if (source.kind === 'workspace' && target.kind === 'workspace' && source.workspaceId === target.workspaceId) {
+          return;
+        }
+
+        set((state) => {
+          const sourceIndex = state.tabStrip.findIndex((item) =>
+            source.kind === 'session'
+              ? item.kind === 'session' && item.sessionId === source.sessionId
+              : item.kind === 'workspace' && item.workspaceId === source.workspaceId
+          );
+          const targetIndex = state.tabStrip.findIndex((item) =>
+            target.kind === 'session'
+              ? item.kind === 'session' && item.sessionId === target.sessionId
+              : item.kind === 'workspace' && item.workspaceId === target.workspaceId
+          );
+          if (sourceIndex < 0 || targetIndex < 0 || sourceIndex === targetIndex) {
+            return state;
+          }
+
+          const nextTabStrip = [...state.tabStrip];
+          const [moved] = nextTabStrip.splice(sourceIndex, 1);
+          const nextTargetIndex = nextTabStrip.findIndex((item) =>
+            target.kind === 'session'
+              ? item.kind === 'session' && item.sessionId === target.sessionId
+              : item.kind === 'workspace' && item.workspaceId === target.workspaceId
+          );
+
+          if (nextTargetIndex < 0) {
+            return state;
+          }
+
+          nextTabStrip.splice(placement === 'after' ? nextTargetIndex + 1 : nextTargetIndex, 0, moved);
+          return { tabStrip: nextTabStrip };
+        });
+      },
       focusWorkspaceSession: (workspaceId, sessionId) => {
         set((state) => ({
           workspaces: state.workspaces.map((workspace) =>
@@ -1199,8 +1385,45 @@ export function createAppStore(api: DesktopApi) {
         await runTrustedAction(get, pending.action, set);
       },
       dismissPendingHostKeyPrompt: () => set({ pendingHostKeyPrompt: null }),
+      dismissPendingCredentialRetry: () => set({ pendingCredentialRetry: null }),
+      submitCredentialRetry: async (secrets) => {
+        const pending = get().pendingCredentialRetry;
+        if (!pending) {
+          return;
+        }
+
+        set({ pendingCredentialRetry: null });
+        if (pending.source === 'ssh') {
+          await get().connectHost(pending.hostId, 120, 32, secrets);
+          return;
+        }
+
+        if (!pending.paneId) {
+          return;
+        }
+
+        const host = get().hosts.find((item) => item.id === pending.hostId);
+        if (!host || !isSshHostRecord(host)) {
+          return;
+        }
+
+        const trusted = await ensureTrustedHost(set, {
+          hostId: pending.hostId,
+          action: {
+            kind: 'sftp',
+            paneId: pending.paneId,
+            hostId: pending.hostId,
+            secrets
+          }
+        });
+        if (!trusted) {
+          return;
+        }
+        await runTrustedAction(get, { kind: 'sftp', paneId: pending.paneId, hostId: pending.hostId, secrets }, set);
+      },
       handleCoreEvent: (event) => {
         const sessionId = event.sessionId;
+        const pendingRetryBeforeUpdate = get().pendingCredentialRetry;
         void api.logs.list().then((activityLogs) => {
           set({ activityLogs: sortLogs(activityLogs) });
         });
@@ -1282,8 +1505,34 @@ export function createAppStore(api: DesktopApi) {
             };
           });
 
-          return { tabs };
+          const currentTab = state.tabs.find((tab) => tab.sessionId === sessionId);
+          const currentHost = currentTab ? state.hosts.find((host) => host.id === currentTab.hostId) : undefined;
+          const retryKind =
+            event.type === 'error' ? resolveCredentialRetryKind(currentHost, String(event.payload.message ?? 'SSH error')) : null;
+
+          return {
+            tabs,
+            pendingCredentialRetry:
+              retryKind && currentHost
+                ? {
+                    hostId: currentHost.id,
+                    source: 'ssh',
+                    credentialKind: retryKind,
+                    message: String(event.payload.message ?? 'SSH error')
+                  }
+                : event.type === 'connected' && state.pendingCredentialRetry?.source === 'ssh' && state.pendingCredentialRetry.hostId === currentHost?.id
+                  ? null
+                  : state.pendingCredentialRetry
+          };
         });
+
+        if (event.type === 'connected' && pendingRetryBeforeUpdate?.source === 'ssh') {
+          const currentTab = get().tabs.find((tab) => tab.sessionId === sessionId);
+          const currentHost = currentTab ? get().hosts.find((host) => host.id === currentTab.hostId) : null;
+          if (currentHost && currentHost.id === pendingRetryBeforeUpdate.hostId) {
+            void refreshHostAndKeychainState(set);
+          }
+        }
       },
       handleTransferEvent: (event) => {
         set((state) => ({
@@ -1348,6 +1597,7 @@ export function createAppStore(api: DesktopApi) {
           entries: [],
           selectedPaths: [],
           errorMessage: undefined,
+          warningMessages: [],
           isLoading: false
         };
 
@@ -1381,6 +1631,10 @@ export function createAppStore(api: DesktopApi) {
           })
         })),
       connectSftpHost: async (paneId, hostId) => {
+        const host = get().hosts.find((item) => item.id === hostId);
+        if (!host || !isSshHostRecord(host)) {
+          return;
+        }
         const trusted = await ensureTrustedHost(set, {
           hostId,
           action: {
@@ -1442,7 +1696,8 @@ export function createAppStore(api: DesktopApi) {
         if (!pane.currentPath) {
           return;
         }
-        await loadPaneListing(set, get, paneId, parentPath(pane.currentPath), { pushToHistory: true });
+        const nextPath = pane.sourceKind === 'local' ? await api.files.getParentPath(pane.currentPath) : parentPath(pane.currentPath);
+        await loadPaneListing(set, get, paneId, nextPath, { pushToHistory: true });
       },
       navigateSftpBreadcrumb: async (paneId, nextPath) => {
         await loadPaneListing(set, get, paneId, nextPath, { pushToHistory: true });
