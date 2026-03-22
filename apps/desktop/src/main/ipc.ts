@@ -239,12 +239,18 @@ export function registerIpcHandlers(
     };
     const secretRef = await persistSecret(secretStore, secretMetadata, draft.label || `${draft.username}@${draft.hostname}`, resolvedSecrets);
     if (secretRef) {
-      activityLogs.append('info', 'keychain', '호스트 secret이 로컬 키체인에 저장되었습니다.', {
+      activityLogs.append('info', 'audit', '호스트 secret이 저장되었습니다.', {
         hostId,
         secretRef
       });
     }
     const record = hosts.create(hostId, draft, secretRef);
+    activityLogs.append('info', 'audit', '호스트를 생성했습니다.', {
+      hostId: record.id,
+      label: record.label,
+      hostname: record.hostname,
+      groupName: record.groupName ?? null
+    });
     queueSync();
     return record;
   });
@@ -262,7 +268,7 @@ export function registerIpcHandlers(
     };
     if (resolvedSecrets.password || resolvedSecrets.passphrase || resolvedSecrets.privateKeyPem) {
       secretRef = await persistSecret(secretStore, secretMetadata, draft.label || `${draft.username}@${draft.hostname}`, resolvedSecrets);
-      activityLogs.append('info', 'keychain', '호스트 secret이 갱신되었습니다.', {
+      activityLogs.append('info', 'audit', '호스트 secret이 갱신되었습니다.', {
         hostId: id,
         secretRef
       });
@@ -272,13 +278,27 @@ export function registerIpcHandlers(
       secretRef = current.secretRef ?? null;
     }
     const record = hosts.update(id, draft, secretRef);
+    activityLogs.append('info', 'audit', '호스트를 수정했습니다.', {
+      hostId: record.id,
+      label: record.label,
+      hostname: record.hostname,
+      groupName: record.groupName ?? null
+    });
     queueSync();
     return record;
   });
 
   ipcMain.handle(ipcChannels.hosts.remove, async (_event, id: string) => {
+    const current = hosts.getById(id);
     syncOutbox.upsertDeletion('hosts', id);
     hosts.remove(id);
+    if (current) {
+      activityLogs.append('warn', 'audit', '호스트를 삭제했습니다.', {
+        hostId: current.id,
+        label: current.label,
+        hostname: current.hostname
+      });
+    }
     queueSync();
   });
 
@@ -286,6 +306,12 @@ export function registerIpcHandlers(
 
   ipcMain.handle(ipcChannels.groups.create, async (_event, name: string, parentPath?: string | null) => {
     const group = groups.create(randomUUID(), name, parentPath);
+    activityLogs.append('info', 'audit', '그룹을 생성했습니다.', {
+      groupId: group.id,
+      name: group.name,
+      path: group.path,
+      parentPath: group.parentPath ?? null
+    });
     queueSync();
     return group;
   });
@@ -395,20 +421,41 @@ export function registerIpcHandlers(
 
   ipcMain.handle(ipcChannels.portForwards.create, async (_event, draft: PortForwardDraft) => {
     const record = portForwards.create(draft);
+    activityLogs.append('info', 'audit', '포트 포워딩 규칙을 생성했습니다.', {
+      ruleId: record.id,
+      label: record.label,
+      hostId: record.hostId,
+      mode: record.mode
+    });
     queueSync();
     return record;
   });
 
   ipcMain.handle(ipcChannels.portForwards.update, async (_event, id: string, draft: PortForwardDraft) => {
     const record = portForwards.update(id, draft);
+    activityLogs.append('info', 'audit', '포트 포워딩 규칙을 수정했습니다.', {
+      ruleId: record.id,
+      label: record.label,
+      hostId: record.hostId,
+      mode: record.mode
+    });
     queueSync();
     return record;
   });
 
   ipcMain.handle(ipcChannels.portForwards.remove, async (_event, id: string) => {
+    const current = portForwards.getById(id);
     await coreManager.stopPortForward(id).catch(() => undefined);
     syncOutbox.upsertDeletion('portForwards', id);
     portForwards.remove(id);
+    if (current) {
+      activityLogs.append('warn', 'audit', '포트 포워딩 규칙을 삭제했습니다.', {
+        ruleId: current.id,
+        label: current.label,
+        hostId: current.hostId,
+        mode: current.mode
+      });
+    }
     queueSync();
   });
 
@@ -457,7 +504,7 @@ export function registerIpcHandlers(
 
   ipcMain.handle(ipcChannels.knownHosts.trust, async (_event, input: KnownHostTrustInput) => {
     const record = knownHosts.trust(input);
-    activityLogs.append('info', 'known_hosts', '새 호스트 키를 신뢰 목록에 저장했습니다.', {
+    activityLogs.append('info', 'audit', '새 호스트 키를 신뢰 목록에 저장했습니다.', {
       host: input.host,
       port: input.port,
       fingerprintSha256: input.fingerprintSha256
@@ -468,7 +515,7 @@ export function registerIpcHandlers(
 
   ipcMain.handle(ipcChannels.knownHosts.replace, async (_event, input: KnownHostTrustInput) => {
     const record = knownHosts.trust(input);
-    activityLogs.append('warn', 'known_hosts', '호스트 키를 교체했습니다.', {
+    activityLogs.append('warn', 'audit', '호스트 키를 교체했습니다.', {
       host: input.host,
       port: input.port,
       fingerprintSha256: input.fingerprintSha256
@@ -480,7 +527,7 @@ export function registerIpcHandlers(
   ipcMain.handle(ipcChannels.knownHosts.remove, async (_event, id: string) => {
     syncOutbox.upsertDeletion('knownHosts', id);
     knownHosts.remove(id);
-    activityLogs.append('info', 'known_hosts', '호스트 키를 신뢰 목록에서 제거했습니다.', {
+    activityLogs.append('info', 'audit', '호스트 키를 신뢰 목록에서 제거했습니다.', {
       knownHostId: id
     });
     queueSync();
@@ -518,7 +565,7 @@ export function registerIpcHandlers(
     secretMetadata.remove(secretRef);
     hosts.clearSecretRef(secretRef);
     syncOutbox.upsertDeletion('secrets', secretRef);
-    activityLogs.append('info', 'keychain', '호스트 secret이 키체인에서 제거되었습니다.', {
+    activityLogs.append('warn', 'audit', '호스트 secret을 제거했습니다.', {
       secretRef
     });
     queueSync();
@@ -557,7 +604,7 @@ export function registerIpcHandlers(
       source: currentMetadata.source
     });
 
-    activityLogs.append('info', 'keychain', '공유 secret이 갱신되었습니다.', {
+    activityLogs.append('info', 'audit', '공유 secret을 갱신했습니다.', {
       secretRef: input.secretRef
     });
     queueSync();
@@ -584,7 +631,7 @@ export function registerIpcHandlers(
     }
 
     hosts.updateSecretRef(host.id, nextSecretRef);
-    activityLogs.append('info', 'keychain', '호스트 전용 secret을 새로 생성했습니다.', {
+    activityLogs.append('info', 'audit', '호스트 전용 secret을 새로 생성했습니다.', {
       hostId: host.id,
       sourceSecretRef: input.sourceSecretRef,
       nextSecretRef

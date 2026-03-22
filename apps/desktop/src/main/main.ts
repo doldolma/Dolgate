@@ -32,9 +32,12 @@ const secretMetadataRepository = new SecretMetadataRepository();
 const syncOutboxRepository = new SyncOutboxRepository();
 const secretStore = new SecretStore();
 const desktopConfigService = new DesktopConfigService();
-const authService = new AuthService(secretStore, desktopConfigService);
-const coreManager = new CoreManager((entry) => {
+const appendActivityLog = (entry: { level: 'info' | 'warn' | 'error'; category: 'session' | 'audit'; message: string; metadata?: Record<string, unknown> | null }) => {
   activityLogRepository.append(entry.level, entry.category, entry.message, entry.metadata ?? null);
+};
+const authService = new AuthService(secretStore, desktopConfigService, appendActivityLog);
+const coreManager = new CoreManager((entry) => {
+  appendActivityLog(entry);
 });
 const syncService = new SyncService(
   authService,
@@ -44,8 +47,7 @@ const syncService = new SyncService(
   knownHostRepository,
   secretMetadataRepository,
   secretStore,
-  syncOutboxRepository,
-  activityLogRepository
+  syncOutboxRepository
 );
 const updateService = new UpdateService(settingsRepository);
 let isQuitting = false;

@@ -10,7 +10,7 @@ import type {
   SyncRecord,
   SyncStatus
 } from '@shared';
-import { ActivityLogRepository, GroupRepository, HostRepository, KnownHostRepository, PortForwardRepository, SecretMetadataRepository, SyncOutboxRepository } from './database';
+import { GroupRepository, HostRepository, KnownHostRepository, PortForwardRepository, SecretMetadataRepository, SyncOutboxRepository } from './database';
 import { SecretStore } from './secret-store';
 import { AuthService } from './auth-service';
 import { getDesktopStateStorage } from './state-storage';
@@ -135,8 +135,7 @@ export class SyncService {
     private readonly knownHosts: KnownHostRepository,
     private readonly secretMetadata: SecretMetadataRepository,
     private readonly secretStore: SecretStore,
-    private readonly outbox: SyncOutboxRepository,
-    private readonly activityLogs: ActivityLogRepository
+    private readonly outbox: SyncOutboxRepository
   ) {}
 
   getState(): SyncStatus {
@@ -440,11 +439,6 @@ export class SyncService {
       lastSuccessfulSyncAt: this.state.lastSuccessfulSyncAt ?? null,
       pendingPush: this.state.pendingPush,
       errorMessage: this.state.errorMessage ?? null
-    });
-    this.activityLogs.append('info', 'ssh', '동기화 상태가 변경되었습니다.', {
-      status: this.state.status,
-      pendingPush: this.state.pendingPush,
-      errorMessage: this.state.errorMessage
     });
   }
 }

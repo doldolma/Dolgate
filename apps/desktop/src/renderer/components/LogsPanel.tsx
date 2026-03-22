@@ -30,7 +30,7 @@ export function LogsPanel({ logs, onClear }: LogsPanelProps) {
         <div>
           <div className="section-kicker">Diagnostics</div>
           <h2>Logs</h2>
-          <p>터미널 출력은 저장하지 않고, 연결과 전송 같은 앱 활동 이벤트만 보관합니다.</p>
+          <p>터미널 출력은 저장하지 않고, 세션 연결과 보안·설정 변경 기록만 보관합니다.</p>
         </div>
         <button type="button" className="secondary-button" onClick={() => void onClear()}>
           Clear logs
@@ -42,11 +42,8 @@ export function LogsPanel({ logs, onClear }: LogsPanelProps) {
           <span>Category</span>
           <select value={category} onChange={(event) => setCategory(event.target.value as 'all' | ActivityLogCategory)}>
             <option value="all">All</option>
-            <option value="ssh">SSH</option>
-            <option value="sftp">SFTP</option>
-            <option value="forwarding">Forwarding</option>
-            <option value="known_hosts">Known Hosts</option>
-            <option value="keychain">Keychain</option>
+            <option value="session">Session</option>
+            <option value="audit">Audit</option>
           </select>
         </label>
 
@@ -65,7 +62,7 @@ export function LogsPanel({ logs, onClear }: LogsPanelProps) {
         {visibleLogs.length === 0 ? (
           <div className="empty-callout">
             <strong>조건에 맞는 로그가 없습니다.</strong>
-            <p>연결, 전송, known host 승인 같은 동작을 하면 여기에 기록됩니다.</p>
+            <p>세션 연결 기록과 보안·설정 변경 기록만 여기에 남습니다.</p>
           </div>
         ) : (
           visibleLogs.map((log) => (

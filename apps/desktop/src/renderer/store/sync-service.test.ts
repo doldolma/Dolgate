@@ -63,10 +63,6 @@ function createSyncService() {
     clearAll: vi.fn(),
     list: vi.fn().mockReturnValue([])
   };
-  const activityLogs = {
-    append: vi.fn()
-  };
-
   const service = new SyncService(
     authService as never,
     hosts as never,
@@ -75,8 +71,7 @@ function createSyncService() {
     knownHosts as never,
     secretMetadata as never,
     secretStore as never,
-    outbox as never,
-    activityLogs as never
+    outbox as never
   );
 
   return {

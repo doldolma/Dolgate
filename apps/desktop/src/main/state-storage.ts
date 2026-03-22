@@ -206,6 +206,30 @@ function compareIsoDesc(left: { createdAt?: string; deletedAt?: string }, right:
   return rightValue.localeCompare(leftValue);
 }
 
+function normalizeActivityLogRecord(value: unknown): ActivityLogRecord | null {
+  if (!isObject(value) || typeof value.id !== 'string' || typeof value.createdAt !== 'string' || typeof value.message !== 'string') {
+    return null;
+  }
+
+  const rawCategory = typeof value.category === 'string' ? value.category : 'audit';
+  const category =
+    rawCategory === 'session' || rawCategory === 'ssh' || rawCategory === 'sftp'
+      ? 'session'
+      : 'audit';
+
+  const level = value.level === 'warn' || value.level === 'error' ? value.level : 'info';
+  const metadata = isObject(value.metadata) ? value.metadata : null;
+
+  return {
+    id: value.id,
+    level,
+    category,
+    message: value.message,
+    metadata,
+    createdAt: value.createdAt
+  };
+}
+
 class DesktopStateStorage {
   private loaded = false;
   private state = createDefaultStateFile();
@@ -337,8 +361,8 @@ class DesktopStateStorage {
     const logs: ActivityLogRecord[] = [];
     for (const line of lines) {
       try {
-        const parsed = JSON.parse(line) as ActivityLogRecord;
-        if (parsed && typeof parsed.id === 'string' && typeof parsed.createdAt === 'string') {
+        const parsed = normalizeActivityLogRecord(JSON.parse(line));
+        if (parsed) {
           logs.push(parsed);
         }
       } catch {

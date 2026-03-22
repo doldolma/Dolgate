@@ -51,6 +51,13 @@ async function toApiErrorMessage(response: Response, fallback: string): Promise<
   return text || `${fallback} (${response.status})`;
 }
 
+interface ActivityLogInput {
+  level: 'info' | 'warn' | 'error';
+  category: 'audit';
+  message: string;
+  metadata?: Record<string, unknown> | null;
+}
+
 export class AuthService {
   private readonly stateStorage = getDesktopStateStorage();
   private readonly windows = new Set<BrowserWindow>();
@@ -65,7 +72,8 @@ export class AuthService {
 
   constructor(
     private readonly secretStore: SecretStore,
-    private readonly configService: DesktopConfigService
+    private readonly configService: DesktopConfigService,
+    private readonly appendLog?: (entry: ActivityLogInput) => void
   ) {}
 
   registerWindow(window: BrowserWindow): void {
@@ -193,6 +201,15 @@ export class AuthService {
       });
       this.processedExchangeCodes.add(code);
       await this.persistSession(session);
+      this.log({
+        level: 'info',
+        category: 'audit',
+        message: '로그인되었습니다.',
+        metadata: {
+          userId: session.user.id,
+          email: session.user.email
+        }
+      });
     } finally {
       if (this.exchangeInFlightCode === code) {
         this.exchangeInFlightCode = null;
@@ -213,6 +230,17 @@ export class AuthService {
         })
       }).catch(() => undefined);
     }
+    if (this.state.status === 'authenticated' && this.state.session) {
+      this.log({
+        level: 'info',
+        category: 'audit',
+        message: '로그아웃되었습니다.',
+        metadata: {
+          userId: this.state.session.user.id,
+          email: this.state.session.user.email
+        }
+      });
+    }
     await this.clearSession({
       status: 'unauthenticated',
       errorMessage: null
@@ -220,6 +248,16 @@ export class AuthService {
   }
 
   async forceUnauthenticated(errorMessage?: string): Promise<void> {
+    if (errorMessage && /세션이 만료|token is expired|invalid claims|로그인이 필요/i.test(errorMessage)) {
+      this.log({
+        level: 'warn',
+        category: 'audit',
+        message: '세션이 만료되어 로그아웃되었습니다.',
+        metadata: {
+          errorMessage
+        }
+      });
+    }
     await this.clearSession({
       status: 'unauthenticated',
       errorMessage: errorMessage ?? null
@@ -316,6 +354,10 @@ export class AuthService {
         window.webContents.send(ipcChannels.auth.event, state);
       }
     }
+  }
+
+  private log(entry: ActivityLogInput): void {
+    this.appendLog?.(entry);
   }
 
   registerProtocolClient(): void {

@@ -33,7 +33,7 @@ import { CoreFrameParser, encodeControlFrame, encodeStreamFrame } from './core-f
 
 interface ActivityLogInput {
   level: 'info' | 'warn' | 'error';
-  category: 'ssh' | 'sftp' | 'forwarding' | 'known_hosts' | 'keychain';
+  category: 'session' | 'audit';
   message: string;
   metadata?: Record<string, unknown> | null;
 }
@@ -413,37 +413,51 @@ export class CoreManager {
   async sftpConnect(payload: ResolvedSftpConnectPayload & { title: string; hostId: string }): Promise<SftpEndpointSummary> {
     await this.start();
     const endpointId = randomUUID();
-    const requestId = randomUUID();
-    const response = await this.requestResponse<{ path: string }>(
-      {
-        id: requestId,
-        type: 'sftpConnect',
-        endpointId,
-        payload
-      },
-      ['sftpConnected']
-    );
+    try {
+      const requestId = randomUUID();
+      const response = await this.requestResponse<{ path: string }>(
+        {
+          id: requestId,
+          type: 'sftpConnect',
+          endpointId,
+          payload
+        },
+        ['sftpConnected']
+      );
 
-    const summary: SftpEndpointSummary = {
-      id: endpointId,
-      kind: 'remote',
-      hostId: payload.hostId,
-      title: payload.title,
-      path: String(response.path ?? '/'),
-      connectedAt: new Date().toISOString()
-    };
-    this.sftpEndpoints.set(endpointId, summary);
-    this.log({
-      level: 'info',
-      category: 'sftp',
-      message: 'SFTP 연결이 시작되었습니다.',
-      metadata: {
-        endpointId,
+      const summary: SftpEndpointSummary = {
+        id: endpointId,
+        kind: 'remote',
         hostId: payload.hostId,
-        title: payload.title
-      }
-    });
-    return summary;
+        title: payload.title,
+        path: String(response.path ?? '/'),
+        connectedAt: new Date().toISOString()
+      };
+      this.sftpEndpoints.set(endpointId, summary);
+      this.log({
+        level: 'info',
+        category: 'session',
+        message: 'SFTP 연결이 시작되었습니다.',
+        metadata: {
+          endpointId,
+          hostId: payload.hostId,
+          title: payload.title
+        }
+      });
+      return summary;
+    } catch (error) {
+      this.log({
+        level: 'error',
+        category: 'session',
+        message: 'SFTP 연결 오류가 발생했습니다.',
+        metadata: {
+          hostId: payload.hostId,
+          title: payload.title,
+          message: error instanceof Error ? error.message : 'unknown error'
+        }
+      });
+      throw error;
+    }
   }
 
   async sftpDisconnect(endpointId: string): Promise<void> {
@@ -451,22 +465,35 @@ export class CoreManager {
       return;
     }
     await this.start();
-    await this.requestResponse(
-      {
-        id: randomUUID(),
-        type: 'sftpDisconnect',
-        endpointId,
-        payload: {}
-      },
-      ['sftpDisconnected']
-    );
-    this.sftpEndpoints.delete(endpointId);
-    this.log({
-      level: 'info',
-      category: 'sftp',
-      message: 'SFTP 연결이 종료되었습니다.',
-      metadata: { endpointId }
-    });
+    try {
+      await this.requestResponse(
+        {
+          id: randomUUID(),
+          type: 'sftpDisconnect',
+          endpointId,
+          payload: {}
+        },
+        ['sftpDisconnected']
+      );
+      this.sftpEndpoints.delete(endpointId);
+      this.log({
+        level: 'info',
+        category: 'session',
+        message: 'SFTP 연결이 종료되었습니다.',
+        metadata: { endpointId }
+      });
+    } catch (error) {
+      this.log({
+        level: 'error',
+        category: 'session',
+        message: 'SFTP 연결 종료 중 오류가 발생했습니다.',
+        metadata: {
+          endpointId,
+          message: error instanceof Error ? error.message : 'unknown error'
+        }
+      });
+      throw error;
+    }
   }
 
   async sftpList(input: SftpListInput): Promise<DirectoryListing> {
@@ -670,28 +697,6 @@ export class CoreManager {
       const next = toTransferJobEvent(existing, event);
       this.transferJobs.set(next.job.id, next.job);
       this.broadcastTransferEvent(next);
-      if (next.job.status === 'completed') {
-        this.log({
-          level: 'info',
-          category: 'sftp',
-          message: '파일 전송이 완료되었습니다.',
-          metadata: { jobId: next.job.id, itemCount: next.job.itemCount }
-        });
-      } else if (next.job.status === 'failed') {
-        this.log({
-          level: 'error',
-          category: 'sftp',
-          message: '파일 전송에 실패했습니다.',
-          metadata: { jobId: next.job.id, errorMessage: next.job.errorMessage ?? null }
-        });
-      } else if (next.job.status === 'cancelled') {
-        this.log({
-          level: 'warn',
-          category: 'sftp',
-          message: '파일 전송이 취소되었습니다.',
-          metadata: { jobId: next.job.id }
-        });
-      }
       if (next.job.status === 'completed' || next.job.status === 'failed' || next.job.status === 'cancelled') {
         this.transferJobs.set(next.job.id, next.job);
       }
@@ -710,7 +715,7 @@ export class CoreManager {
       if (status === 'running') {
         this.log({
           level: 'info',
-          category: 'forwarding',
+          category: 'audit',
           message: '포트 포워딩이 시작되었습니다.',
           metadata: {
             ruleId,
@@ -722,16 +727,9 @@ export class CoreManager {
       } else if (status === 'stopped') {
         this.log({
           level: 'info',
-          category: 'forwarding',
+          category: 'audit',
           message: '포트 포워딩이 중지되었습니다.',
           metadata: { ruleId }
-        });
-      } else {
-        this.log({
-          level: 'error',
-          category: 'forwarding',
-          message: '포트 포워딩 실행 중 오류가 발생했습니다.',
-          metadata: { ruleId, message: runtime.message ?? null }
         });
       }
       return;
@@ -745,7 +743,7 @@ export class CoreManager {
           this.lastResizeBySession.delete(event.sessionId);
           this.log({
             level: 'info',
-            category: 'ssh',
+            category: 'session',
             message: 'SSH 세션이 종료되었습니다.',
             metadata: { sessionId: event.sessionId, message: event.payload.message ?? null }
           });
@@ -768,7 +766,7 @@ export class CoreManager {
         if (event.type === 'connected') {
           this.log({
             level: 'info',
-            category: 'ssh',
+            category: 'session',
             message: 'SSH 세션이 연결되었습니다.',
             metadata: { sessionId: event.sessionId, hostId: existing.hostId, title: existing.title }
           });
@@ -776,7 +774,7 @@ export class CoreManager {
         if (event.type === 'error') {
           this.log({
             level: 'error',
-            category: 'ssh',
+            category: 'session',
             message: 'SSH 세션 오류가 발생했습니다.',
             metadata: { sessionId: event.sessionId, message: event.payload.message ?? null }
           });
