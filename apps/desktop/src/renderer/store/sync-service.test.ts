@@ -1,17 +1,29 @@
-import { describe, expect, it, vi } from 'vitest';
-import { SyncService } from '../../main/sync-service';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { SyncAuthenticationError, SyncService, isSyncAuthenticationError } from '../../main/sync-service';
 
 function createSyncService() {
+  const authService = {
+    getAccessToken: vi.fn().mockReturnValue('access-token'),
+    getServerUrl: vi.fn().mockReturnValue('https://ssh.doldolma.com'),
+    getVaultKeyBase64: vi.fn().mockReturnValue(Buffer.alloc(32, 1).toString('base64')),
+    refreshSession: vi.fn().mockResolvedValue({
+      status: 'authenticated'
+    })
+  };
   const hosts = {
+    list: vi.fn().mockReturnValue([]),
     replaceAll: vi.fn()
   };
   const groups = {
+    list: vi.fn().mockReturnValue([]),
     replaceAll: vi.fn()
   };
   const portForwards = {
+    list: vi.fn().mockReturnValue([]),
     replaceAll: vi.fn()
   };
   const knownHosts = {
+    list: vi.fn().mockReturnValue([]),
     replaceAll: vi.fn()
   };
   const secretMetadata = {
@@ -37,20 +49,26 @@ function createSyncService() {
         updatedAt: '2026-03-22T00:00:00.000Z'
       }
     ]),
-    remove: vi.fn()
+    listBySource: vi.fn().mockReturnValue([]),
+    remove: vi.fn(),
+    replaceAll: vi.fn(),
+    upsert: vi.fn()
   };
   const secretStore = {
-    remove: vi.fn().mockResolvedValue(undefined)
+    remove: vi.fn().mockResolvedValue(undefined),
+    load: vi.fn().mockResolvedValue(null),
+    save: vi.fn().mockResolvedValue(undefined)
   };
   const outbox = {
-    clearAll: vi.fn()
+    clearAll: vi.fn(),
+    list: vi.fn().mockReturnValue([])
   };
   const activityLogs = {
     append: vi.fn()
   };
 
   const service = new SyncService(
-    {} as never,
+    authService as never,
     hosts as never,
     groups as never,
     portForwards as never,
@@ -63,6 +81,7 @@ function createSyncService() {
 
   return {
     service,
+    authService,
     hosts,
     groups,
     portForwards,
@@ -72,6 +91,10 @@ function createSyncService() {
     outbox
   };
 }
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 describe('SyncService', () => {
   it('purges all synced cache and every local secret on logout', async () => {
@@ -96,5 +119,75 @@ describe('SyncService', () => {
       pendingPush: false,
       errorMessage: null
     });
+  });
+
+  it('refreshes the access token and retries sync when /sync returns expired token', async () => {
+    const { service, authService } = createSyncService();
+    authService.getAccessToken
+      .mockReturnValueOnce('expired-access-token')
+      .mockReturnValueOnce('fresh-access-token');
+    vi.stubGlobal(
+      'fetch',
+      vi
+        .fn()
+        .mockResolvedValueOnce(
+          new Response(JSON.stringify({ error: 'token has invalid claims: token is expired' }), {
+            status: 401,
+            headers: {
+              'content-type': 'application/json'
+            }
+          })
+        )
+        .mockResolvedValueOnce(
+          new Response(
+            JSON.stringify({
+              groups: [],
+              hosts: [],
+              secrets: [],
+              knownHosts: [],
+              portForwards: []
+            }),
+            {
+              status: 200,
+              headers: {
+                'content-type': 'application/json'
+              }
+            }
+          )
+        )
+    );
+
+    const state = await service.bootstrap();
+
+    expect(authService.refreshSession).toHaveBeenCalledTimes(1);
+    expect(state.status).toBe('ready');
+  });
+
+  it('treats sync as auth failure when refresh cannot restore the session', async () => {
+    const { service, authService } = createSyncService();
+    authService.refreshSession.mockResolvedValue({
+      status: 'unauthenticated'
+    });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ error: 'token has invalid claims: token is expired' }), {
+          status: 401,
+          headers: {
+            'content-type': 'application/json'
+          }
+        })
+      )
+    );
+
+    let thrown: unknown;
+    try {
+      await service.bootstrap();
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeInstanceOf(SyncAuthenticationError);
+    expect(isSyncAuthenticationError(thrown)).toBe(true);
   });
 });

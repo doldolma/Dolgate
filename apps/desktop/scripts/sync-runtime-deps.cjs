@@ -97,39 +97,7 @@ async function collectRuntimeDependencyGraph() {
   return packages.sort((left, right) => left.name.localeCompare(right.name));
 }
 
-async function copyIfExists(source, destination) {
-  await fs.cp(source, destination, {
-    recursive: true,
-    dereference: true,
-    force: true
-  });
-}
-
 async function copyRuntimePackage(runtimePackage, destination) {
-  if (runtimePackage.name === 'better-sqlite3') {
-    await fs.mkdir(destination, { recursive: true });
-    await fs.copyFile(path.join(runtimePackage.sourceDirectory, 'package.json'), path.join(destination, 'package.json'));
-    await fs.copyFile(path.join(runtimePackage.sourceDirectory, 'LICENSE'), path.join(destination, 'LICENSE'));
-    await fs.copyFile(path.join(runtimePackage.sourceDirectory, 'README.md'), path.join(destination, 'README.md'));
-    await copyIfExists(path.join(runtimePackage.sourceDirectory, 'lib'), path.join(destination, 'lib'));
-    await copyIfExists(path.join(runtimePackage.sourceDirectory, 'src'), path.join(destination, 'src'));
-    await copyIfExists(path.join(runtimePackage.sourceDirectory, 'deps'), path.join(destination, 'deps'));
-    await fs.copyFile(path.join(runtimePackage.sourceDirectory, 'binding.gyp'), path.join(destination, 'binding.gyp'));
-    return;
-  }
-
-  if (runtimePackage.name === 'keytar') {
-    await fs.mkdir(destination, { recursive: true });
-    await fs.copyFile(path.join(runtimePackage.sourceDirectory, 'package.json'), path.join(destination, 'package.json'));
-    await fs.copyFile(path.join(runtimePackage.sourceDirectory, 'LICENSE.md'), path.join(destination, 'LICENSE.md'));
-    await fs.copyFile(path.join(runtimePackage.sourceDirectory, 'README.md'), path.join(destination, 'README.md'));
-    await fs.copyFile(path.join(runtimePackage.sourceDirectory, 'keytar.d.ts'), path.join(destination, 'keytar.d.ts'));
-    await copyIfExists(path.join(runtimePackage.sourceDirectory, 'lib'), path.join(destination, 'lib'));
-    await copyIfExists(path.join(runtimePackage.sourceDirectory, 'src'), path.join(destination, 'src'));
-    await fs.copyFile(path.join(runtimePackage.sourceDirectory, 'binding.gyp'), path.join(destination, 'binding.gyp'));
-    return;
-  }
-
   await fs.cp(runtimePackage.sourceDirectory, destination, {
     recursive: true,
     dereference: true

@@ -6,11 +6,12 @@ dolssh는 Electron, React, xterm.js, Go, Gin, GORM으로 구성한 크로스 플
 
 ```text
 apps/desktop      Electron + React 기반 데스크톱 앱
-packages/shared   공용 TypeScript 타입/계약
 services/ssh-core stdio framed binary 기반 Go SSH 코어 프로세스
 services/sync-api Go + Gin + GORM 기반 인증/암호화 동기화 API
 docs/             아키텍처 및 IPC 문서
 ```
+
+- `apps/desktop/src/shared` 안에 desktop 내부 공용 TypeScript 타입과 IPC 계약을 함께 둡니다.
 
 ## `ssh-core` 실행 방식
 
@@ -28,7 +29,7 @@ docs/             아키텍처 및 IPC 문서
 
 - xterm.js 기반 멀티 탭 터미널 UI
 - Termius 스타일의 고정 `SFTP` 탭과 듀얼 패널 파일 브라우저
-- SQLite 기반 로컬 호스트 CRUD
+- 파일 기반 로컬 호스트/그룹/설정 저장소
 - 비밀번호 인증과 개인키 인증 흐름
 - Electron main과 Go 코어 사이의 stdio IPC 브리지
 - Go SSH 세션 매니저의 `connect`, `write`, `resize`, `disconnect`
@@ -41,7 +42,7 @@ docs/             아키텍처 및 IPC 문서
 ## MVP 보안 기본값
 
 - renderer는 Node API에 직접 접근하지 않습니다.
-- 호스트 비밀값은 로컬 OS 키체인에 캐시되며, 서버에는 암호화된 `encrypted_payload`만 저장합니다.
+- 호스트 비밀값과 refresh token은 Electron `safeStorage`로 보호된 로컬 encrypted store에 캐시되며, 서버에는 암호화된 `encrypted_payload`만 저장합니다.
 - refresh token은 원문이 아니라 해시만 저장합니다.
 - refresh token은 미사용 14일 만료(sliding idle expiration) 정책을 사용합니다.
 - 운영 환경에서는 반드시 HTTPS 뒤에서 sync API를 구동해야 하며, 로컬 개발에서만 `http://localhost`를 허용합니다.
@@ -60,6 +61,11 @@ npm install
 (cd services/sync-api && go mod tidy)
 ```
 
+참고:
+
+- desktop은 monorepo hoisting을 쓰므로, 패키징 전 `sync:runtime-deps` 단계로 런타임 의존성을 `apps/desktop/node_modules`에 다시 맞춥니다.
+- 이 단계는 현재 Forge 패키징 안정성을 위해 유지합니다.
+
 ## 실행
 
 데스크톱 앱만 실행:
@@ -67,11 +73,6 @@ npm install
 ```bash
 npm run dev:desktop
 ```
-
-참고:
-
-- 데스크톱 앱은 실행 전에 `better-sqlite3`, `keytar`를 Electron ABI 기준으로 자동 재빌드합니다.
-- Electron 버전이나 Node 버전을 바꾼 뒤 네이티브 모듈 오류가 다시 나면 `npm run rebuild:native --workspace @dolssh/desktop`로 수동 재빌드할 수 있습니다.
 
 백엔드 API만 실행:
 
@@ -88,7 +89,7 @@ npm run dev
 동작 방식:
 
 - 데스크톱 앱은 시작 시 refresh token으로 세션 복구를 먼저 시도합니다.
-- 복구에 실패하면 앱 전체가 로그인 게이트로 전환되고, 브라우저에서 `https://ssh.doldolma.com/login` 로그인 후 `dolssh://auth/callback`으로 복귀해야 사용할 수 있습니다.
+- 복구에 실패하면 앱 전체가 로그인 게이트로 전환되고, 브라우저에서 `https://ssh.doldolma.com/login` 로그인 후 로컬 콜백으로 세션을 교환해야 사용할 수 있습니다.
 - 로그인 성공 후 `groups`, `hosts`, `secrets`, `known_hosts`, `port_forwards`가 동기화되고 나서야 홈/세션 UI가 열립니다.
 - 어느 기기에서든 로그인만 하면 비밀번호, passphrase, 관리형 private key PEM까지 함께 복원되는 것을 기본 목표로 둡니다.
 
@@ -195,7 +196,7 @@ npm run release:all
 - Windows 자동 업데이트는 `nsis` 아티팩트와 `latest.yml`을 사용합니다.
 - `npm run release:all`은 실제 GitHub Release 업로드를 수행합니다.
 - `release:dist:*`는 브라우저 로그인 없이 로컬 아티팩트만 생성합니다.
-- `better-sqlite3`, `keytar` 같은 네이티브 모듈 때문에 macOS에서 Windows 크로스빌드는 환경에 따라 실패할 수 있습니다. 그 경우 Windows 전용 빌드 머신이나 VM을 fallback으로 사용하세요.
+- 데스크톱 저장소는 네이티브 모듈 없는 파일 기반 구조라서 이전보다 크로스플랫폼 빌드 안정성이 높습니다.
 
 ## 백엔드 환경 변수
 

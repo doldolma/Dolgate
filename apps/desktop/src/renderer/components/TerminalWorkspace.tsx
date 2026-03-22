@@ -3,7 +3,7 @@ import { Terminal } from 'xterm';
 import { FitAddon } from 'xterm-addon-fit';
 import { useAppStore } from '../store/appStore';
 import { createTerminalResizeScheduler } from './terminal-resize';
-import type { AppTheme } from '@dolssh/shared';
+import type { AppTheme } from '@shared';
 
 interface TerminalThemePalette {
   background: string;

@@ -2,11 +2,12 @@ import { BrowserWindow, app, shell } from 'electron';
 import { randomUUID } from 'node:crypto';
 import { createServer, type Server, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import type { AuthSession } from '@dolssh/shared';
-import type { AuthState } from '@dolssh/shared';
+import type { AuthSession } from '@shared';
+import type { AuthState } from '@shared';
 import { ipcChannels } from '../common/ipc-channels';
 import type { DesktopConfigService } from './app-config';
 import { SecretStore } from './secret-store';
+import { getDesktopStateStorage } from './state-storage';
 
 const REFRESH_TOKEN_ACCOUNT = 'auth:refresh-token';
 const LOOPBACK_CALLBACK_HOST = '127.0.0.1';
@@ -51,10 +52,12 @@ async function toApiErrorMessage(response: Response, fallback: string): Promise<
 }
 
 export class AuthService {
+  private readonly stateStorage = getDesktopStateStorage();
   private readonly windows = new Set<BrowserWindow>();
   private readonly processedExchangeCodes = new Set<string>();
   private state: AuthState = createDefaultAuthState();
   private refreshTimer: NodeJS.Timeout | null = null;
+  private refreshPromise: Promise<AuthState> | null = null;
   private pendingBrowserLoginState: string | null = null;
   private exchangeInFlightCode: string | null = null;
   private onSessionInvalidated: (() => Promise<void> | void) | null = null;
@@ -102,8 +105,26 @@ export class AuthService {
       errorMessage: null
     });
 
+    return this.restoreSessionFromRefreshToken('세션을 복구하지 못했습니다.');
+  }
+
+  async refreshSession(): Promise<AuthState> {
+    if (this.refreshPromise) {
+      return this.refreshPromise;
+    }
+
+    this.refreshPromise = this.restoreSessionFromRefreshToken('세션이 만료되었습니다. 다시 로그인해 주세요.');
+    try {
+      return await this.refreshPromise;
+    } finally {
+      this.refreshPromise = null;
+    }
+  }
+
+  private async restoreSessionFromRefreshToken(fallbackMessage: string): Promise<AuthState> {
     const refreshToken = await this.secretStore.load(REFRESH_TOKEN_ACCOUNT);
     if (!refreshToken) {
+      this.stateStorage.updateAuthStatus('unauthenticated');
       this.patchState({
         status: 'unauthenticated',
         session: null,
@@ -121,7 +142,7 @@ export class AuthService {
     } catch (error) {
       await this.clearSession({
         status: 'unauthenticated',
-        errorMessage: toErrorMessage(error, '세션을 복구하지 못했습니다.')
+        errorMessage: toErrorMessage(error, fallbackMessage)
       });
       return this.state;
     }
@@ -241,6 +262,7 @@ export class AuthService {
 
   private async persistSession(session: AuthSession): Promise<void> {
     await this.secretStore.save(REFRESH_TOKEN_ACCOUNT, session.tokens.refreshToken);
+    this.stateStorage.updateAuthStatus('authenticated');
     this.patchState({
       status: 'authenticated',
       session,
@@ -255,7 +277,7 @@ export class AuthService {
     }
     const delay = Math.max(15_000, (expiresInSeconds - 60) * 1000);
     this.refreshTimer = setTimeout(() => {
-      void this.bootstrap();
+      void this.refreshSession();
     }, delay);
   }
 
@@ -273,6 +295,7 @@ export class AuthService {
       session: null,
       errorMessage: nextState.errorMessage ?? null
     };
+    this.stateStorage.updateAuthStatus('unauthenticated');
     if (this.onSessionInvalidated) {
       await this.onSessionInvalidated();
     }

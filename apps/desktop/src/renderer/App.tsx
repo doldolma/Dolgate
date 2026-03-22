@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { AppTheme, AuthState, HostRecord, LinkedHostSummary, UpdateState } from '@dolssh/shared';
+import type { AppTheme, AuthState, HostRecord, LinkedHostSummary, UpdateState } from '@shared';
 import { AppTitleBar } from './components/AppTitleBar';
 import { HomeNavigation } from './components/HomeNavigation';
 import { HostBrowser } from './components/HostBrowser';
@@ -150,7 +150,12 @@ export function App() {
       await bootstrap();
       setHydratedSessionUserId(userId);
     } catch (error) {
+      const latestAuthState = await window.dolssh.auth.getState();
       setHydratedSessionUserId(null);
+      if (latestAuthState.status !== 'authenticated') {
+        setSyncBootstrapError(null);
+        return;
+      }
       setSyncBootstrapError(error instanceof Error ? error.message : '초기 동기화에 실패했습니다.');
     } finally {
       activeHydrationUserIdRef.current = null;

@@ -3,8 +3,7 @@
   "version": "1.0.1",
   "private": true,
   "workspaces": [
-    "apps/*",
-    "packages/*"
+    "apps/*"
   ],
   "scripts": {
     "dev": "npm-run-all --parallel dev:desktop dev:api",

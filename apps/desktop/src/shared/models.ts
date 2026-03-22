@@ -259,6 +259,47 @@ export interface SftpEndpointSummary {
   connectedAt: string;
 }
 
+export interface SftpHostSelectionState {
+  query: string;
+  selectedHostId?: string | null;
+}
+
+export interface SftpPaneState {
+  id: SftpPaneId;
+  sourceKind: SftpEndpointKind;
+  currentPath: string;
+  listing?: DirectoryListing | null;
+  endpoint?: SftpEndpointSummary | null;
+  isLoading: boolean;
+  filterQuery: string;
+  history: string[];
+  historyIndex: number;
+  selectedPaths: string[];
+  hostSelection: SftpHostSelectionState;
+  errorMessage?: string | null;
+}
+
+export interface TransferJob {
+  id: string;
+  sourceLabel: string;
+  targetLabel: string;
+  itemCount: number;
+  bytesTotal: number;
+  bytesCompleted: number;
+  speedBytesPerSecond?: number | null;
+  etaSeconds?: number | null;
+  status: 'queued' | 'running' | 'completed' | 'failed' | 'cancelled';
+  startedAt: string;
+  activeItemName?: string | null;
+  errorMessage?: string | null;
+  updatedAt: string;
+  request?: TransferStartInput;
+}
+
+export interface TransferJobEvent {
+  job: TransferJob;
+}
+
 export type TransferEndpointRef =
   | {
       kind: 'local';
@@ -266,8 +307,8 @@ export type TransferEndpointRef =
     }
   | {
       kind: 'remote';
-      endpointId: string;
       path: string;
+      endpointId: string;
     };
 
 export interface TransferItemInput {
@@ -284,35 +325,12 @@ export interface TransferStartInput {
   conflictResolution: ConflictResolution;
 }
 
-// TransferJob은 SFTP 하단 전송 바가 그대로 표시하는 진행 상태 스냅샷이다.
-export interface TransferJob {
-  id: string;
-  sourceLabel: string;
-  targetLabel: string;
-  activeItemName?: string;
-  itemCount: number;
-  bytesTotal: number;
-  bytesCompleted: number;
-  speedBytesPerSecond?: number;
-  etaSeconds?: number;
-  status: 'queued' | 'running' | 'completed' | 'failed' | 'cancelled';
-  startedAt: string;
-  updatedAt: string;
-  errorMessage?: string;
-  request?: TransferStartInput;
-}
-
-export interface TransferJobEvent {
-  job: TransferJob;
-}
-
-// TerminalTab은 UI 탭과 SSH 세션 상태를 함께 추적하기 위한 뷰 모델이다.
 export interface TerminalTab {
   id: string;
-  title: string;
-  hostId: string;
   sessionId: string;
+  hostId: string;
+  title: string;
   status: 'connecting' | 'connected' | 'disconnecting' | 'closed' | 'error';
-  lastEventAt: string;
   errorMessage?: string;
+  lastEventAt: string;
 }

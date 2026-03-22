@@ -10,8 +10,8 @@
     "skipLibCheck": true,
     "baseUrl": ".",
     "paths": {
-      "@dolssh/shared": [
-        "packages/shared/src/index.ts"
+      "@shared": [
+        "apps/desktop/src/shared/index.ts"
       ]
     }
   }

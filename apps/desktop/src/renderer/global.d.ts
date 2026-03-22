@@ -1,4 +1,4 @@
-import type { DesktopApi } from '@dolssh/shared';
+import type { DesktopApi } from '@shared';
 
 declare global {
   interface Window {

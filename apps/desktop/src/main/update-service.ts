@@ -2,7 +2,7 @@ import { BrowserWindow, app } from 'electron';
 import { autoUpdater, type ProgressInfo, type UpdateInfo } from 'electron-updater';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import type { UpdateEvent, UpdateReleaseInfo, UpdateState } from '@dolssh/shared';
+import type { UpdateEvent, UpdateReleaseInfo, UpdateState } from '@shared';
 import { ipcChannels } from '../common/ipc-channels';
 import { SettingsRepository } from './database';
 

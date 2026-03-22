@@ -1,8 +1,4 @@
 import { randomUUID } from 'node:crypto';
-import Database from 'better-sqlite3';
-import { app } from 'electron';
-import { mkdirSync } from 'node:fs';
-import path from 'node:path';
 import type {
   ActivityLogCategory,
   ActivityLogLevel,
@@ -14,31 +10,16 @@ import type {
   HostRecord,
   KnownHostRecord,
   KnownHostTrustInput,
-  ManagedSecretPayload,
   PortForwardDraft,
   PortForwardRuleRecord,
   SecretMetadataRecord,
   SecretSource,
   SyncKind
-} from '@dolssh/shared';
-
-const MAX_ACTIVITY_LOGS = 10_000;
+} from '@shared';
+import { getDesktopStateStorage, type SyncDeletionRecord } from './state-storage';
 
 function nowIso(): string {
   return new Date().toISOString();
-}
-
-function databasePath(): string {
-  const dbDir = path.join(app.getPath('userData'), 'data');
-  mkdirSync(dbDir, { recursive: true });
-  return path.join(dbDir, 'dolssh.db');
-}
-
-function openDatabase(): Database.Database {
-  const db = new Database(databasePath());
-  // WAL 모드는 데스크톱 앱에서 읽기/쓰기 충돌을 줄이는 데 유리하다.
-  db.pragma('journal_mode = WAL');
-  return db;
 }
 
 function normalizeGroupPath(groupPath?: string | null): string | null {
@@ -50,301 +31,145 @@ function normalizeGroupPath(groupPath?: string | null): string | null {
   return normalized.length > 0 ? normalized : null;
 }
 
-function parseJsonObject(value: unknown): Record<string, unknown> | null {
-  if (!value || typeof value !== 'string') {
-    return null;
+function compareHosts(left: HostRecord, right: HostRecord): number {
+  const groupCompare = (left.groupName ?? '').localeCompare(right.groupName ?? '');
+  if (groupCompare !== 0) {
+    return groupCompare;
   }
-  try {
-    const parsed = JSON.parse(value) as unknown;
-    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-      return parsed as Record<string, unknown>;
-    }
-  } catch {
-    return null;
+  const labelCompare = left.label.localeCompare(right.label);
+  if (labelCompare !== 0) {
+    return labelCompare;
   }
-  return null;
+  return left.hostname.localeCompare(right.hostname);
 }
 
-// SQLite row를 renderer가 쓰는 HostRecord 형태로 변환한다.
-function toHostRecord(row: Record<string, unknown>): HostRecord {
+function compareLabels(left: { label: string; secretRef?: string }, right: { label: string; secretRef?: string }): number {
+  const labelCompare = left.label.localeCompare(right.label);
+  if (labelCompare !== 0) {
+    return labelCompare;
+  }
+  return (left.secretRef ?? '').localeCompare(right.secretRef ?? '');
+}
+
+function compareDeletedAtDesc(left: SyncDeletionRecord, right: SyncDeletionRecord): number {
+  return right.deletedAt.localeCompare(left.deletedAt);
+}
+
+function toHostRecord(id: string, draft: HostDraft, secretRef: string | null, timestamp: string, current?: HostRecord): HostRecord {
   return {
-    id: String(row.id),
-    label: String(row.label),
-    hostname: String(row.hostname),
-    port: Number(row.port),
-    username: String(row.username),
-    authType: row.auth_type === 'privateKey' ? 'privateKey' : 'password',
-    privateKeyPath: row.private_key_path ? String(row.private_key_path) : null,
-    secretRef: row.secret_ref ? String(row.secret_ref) : null,
-    groupName: row.group_name ? String(row.group_name) : null,
-    createdAt: String(row.created_at),
-    updatedAt: String(row.updated_at)
+    id,
+    label: draft.label,
+    hostname: draft.hostname,
+    port: draft.port,
+    username: draft.username,
+    authType: draft.authType,
+    privateKeyPath: draft.privateKeyPath ?? null,
+    secretRef: secretRef ?? draft.secretRef ?? null,
+    groupName: normalizeGroupPath(draft.groupName),
+    createdAt: current?.createdAt ?? timestamp,
+    updatedAt: timestamp
   };
 }
 
-function toAppSettings(row: Record<string, unknown> | undefined): AppSettings {
+function withLinkedHostCount(record: SecretMetadataRecord, hosts: HostRecord[]): SecretMetadataRecord {
   return {
-    theme: row?.theme === 'light' || row?.theme === 'dark' ? (row.theme as AppTheme) : 'system',
-    dismissedUpdateVersion: row?.dismissed_update_version ? String(row.dismissed_update_version) : null,
-    updatedAt: row?.updated_at ? String(row.updated_at) : nowIso()
+    ...record,
+    linkedHostCount: hosts.filter((host) => host.secretRef === record.secretRef).length
   };
 }
 
-function toGroupRecord(row: Record<string, unknown>): GroupRecord {
-  return {
-    id: String(row.id),
-    name: String(row.name),
-    path: String(row.path),
-    parentPath: row.parent_path ? String(row.parent_path) : null,
-    createdAt: String(row.created_at),
-    updatedAt: String(row.updated_at)
-  };
-}
-
-function toPortForwardRecord(row: Record<string, unknown>): PortForwardRuleRecord {
-  return {
-    id: String(row.id),
-    label: String(row.label),
-    hostId: String(row.host_id),
-    mode: row.mode === 'remote' || row.mode === 'dynamic' ? (row.mode as 'remote' | 'dynamic') : 'local',
-    bindAddress: String(row.bind_address),
-    bindPort: Number(row.bind_port),
-    targetHost: row.target_host ? String(row.target_host) : null,
-    targetPort: row.target_port === null || row.target_port === undefined ? null : Number(row.target_port),
-    createdAt: String(row.created_at),
-    updatedAt: String(row.updated_at)
-  };
-}
-
-function toKnownHostRecord(row: Record<string, unknown>): KnownHostRecord {
-  return {
-    id: String(row.id),
-    host: String(row.host),
-    port: Number(row.port),
-    algorithm: String(row.algorithm),
-    publicKeyBase64: String(row.public_key_base64),
-    fingerprintSha256: String(row.fingerprint_sha256),
-    createdAt: String(row.created_at),
-    lastSeenAt: String(row.last_seen_at),
-    updatedAt: String(row.updated_at)
-  };
-}
-
-function toActivityLogRecord(row: Record<string, unknown>): ActivityLogRecord {
-  return {
-    id: String(row.id),
-    level: row.level === 'warn' || row.level === 'error' ? (row.level as ActivityLogLevel) : 'info',
-    category:
-      row.category === 'sftp' ||
-      row.category === 'forwarding' ||
-      row.category === 'known_hosts' ||
-      row.category === 'keychain'
-        ? (row.category as ActivityLogCategory)
-        : 'ssh',
-    message: String(row.message),
-    metadata: parseJsonObject(row.metadata_json),
-    createdAt: String(row.created_at)
-  };
-}
-
-function toSecretMetadataRecord(row: Record<string, unknown>): SecretMetadataRecord {
-  return {
-    secretRef: String(row.secret_ref),
-    label: String(row.label),
-    hasPassword: Boolean(row.has_password),
-    hasPassphrase: Boolean(row.has_passphrase),
-    hasManagedPrivateKey: Boolean(row.has_managed_private_key),
-    source: row.source === 'server_managed' ? 'server_managed' : 'local_keychain',
-    linkedHostCount: Number(row.linked_host_count ?? 0),
-    updatedAt: String(row.updated_at)
-  };
-}
+const stateStorage = getDesktopStateStorage();
 
 export class HostRepository {
-  private readonly db: Database.Database;
-
-  constructor() {
-    // 앱 사용자 데이터 디렉터리 아래에 로컬 DB를 둬서 운영체제별 경로 차이를 숨긴다.
-    this.db = openDatabase();
-    this.migrate();
-  }
-
-  private migrate(): void {
-    // hosts 테이블은 여전히 로컬 호스트 메타데이터의 단일 소스다.
-    this.db.exec(`
-      CREATE TABLE IF NOT EXISTS hosts (
-        id TEXT PRIMARY KEY,
-        label TEXT NOT NULL,
-        hostname TEXT NOT NULL,
-        port INTEGER NOT NULL,
-        username TEXT NOT NULL,
-        auth_type TEXT NOT NULL,
-        private_key_path TEXT,
-        secret_ref TEXT,
-        group_name TEXT,
-        created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL
-      );
-    `);
-  }
-
   list(): HostRecord[] {
-    const stmt = this.db.prepare(`
-      SELECT id, label, hostname, port, username, auth_type, private_key_path, secret_ref, group_name, created_at, updated_at
-      FROM hosts
-      ORDER BY COALESCE(group_name, ''), label, hostname
-    `);
-    return stmt.all().map((row) => toHostRecord(row as Record<string, unknown>));
+    return stateStorage.getState().data.hosts.sort(compareHosts);
   }
 
   getById(id: string): HostRecord | null {
-    const stmt = this.db.prepare(`
-      SELECT id, label, hostname, port, username, auth_type, private_key_path, secret_ref, group_name, created_at, updated_at
-      FROM hosts
-      WHERE id = ?
-    `);
-    const row = stmt.get(id) as Record<string, unknown> | undefined;
-    return row ? toHostRecord(row) : null;
+    return stateStorage.getState().data.hosts.find((record) => record.id === id) ?? null;
   }
 
   create(id: string, draft: HostDraft, secretRef?: string | null): HostRecord {
     const timestamp = nowIso();
-    this.db
-      .prepare(`
-        INSERT INTO hosts (id, label, hostname, port, username, auth_type, private_key_path, secret_ref, group_name, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `)
-      .run(
-        id,
-        draft.label,
-        draft.hostname,
-        draft.port,
-        draft.username,
-        draft.authType,
-        draft.privateKeyPath ?? null,
-        secretRef ?? draft.secretRef ?? null,
-        normalizeGroupPath(draft.groupName),
-        timestamp,
-        timestamp
-      );
-    return this.getById(id)!;
+    const record = toHostRecord(id, draft, secretRef ?? null, timestamp);
+    stateStorage.updateState((state) => {
+      state.data.hosts.push(record);
+    });
+    return record;
   }
 
   update(id: string, draft: HostDraft, secretRef?: string | null): HostRecord {
-    this.db
-      .prepare(`
-        UPDATE hosts
-        SET label = ?, hostname = ?, port = ?, username = ?, auth_type = ?, private_key_path = ?, secret_ref = ?, group_name = ?, updated_at = ?
-        WHERE id = ?
-      `)
-      .run(
-        draft.label,
-        draft.hostname,
-        draft.port,
-        draft.username,
-        draft.authType,
-        draft.privateKeyPath ?? null,
-        secretRef ?? draft.secretRef ?? null,
-        normalizeGroupPath(draft.groupName),
-        nowIso(),
-        id
-      );
-    return this.getById(id)!;
+    const current = this.getById(id);
+    if (!current) {
+      throw new Error('Host not found');
+    }
+
+    const record = toHostRecord(id, draft, secretRef ?? null, nowIso(), current);
+    stateStorage.updateState((state) => {
+      state.data.hosts = state.data.hosts.map((entry) => (entry.id === id ? record : entry));
+    });
+    return record;
   }
 
   updateSecretRef(id: string, secretRef: string | null): HostRecord | null {
-    this.db
-      .prepare(`
-        UPDATE hosts
-        SET secret_ref = ?, updated_at = ?
-        WHERE id = ?
-      `)
-      .run(secretRef, nowIso(), id);
-    return this.getById(id);
+    let nextRecord: HostRecord | null = null;
+    stateStorage.updateState((state) => {
+      state.data.hosts = state.data.hosts.map((entry) => {
+        if (entry.id !== id) {
+          return entry;
+        }
+        nextRecord = {
+          ...entry,
+          secretRef,
+          updatedAt: nowIso()
+        };
+        return nextRecord;
+      });
+    });
+    return nextRecord;
   }
 
   clearSecretRef(secretRef: string): void {
-    this.db
-      .prepare(`
-        UPDATE hosts
-        SET secret_ref = NULL, updated_at = ?
-        WHERE secret_ref = ?
-      `)
-      .run(nowIso(), secretRef);
+    const timestamp = nowIso();
+    stateStorage.updateState((state) => {
+      state.data.hosts = state.data.hosts.map((entry) => {
+        if (entry.secretRef !== secretRef) {
+          return entry;
+        }
+        return {
+          ...entry,
+          secretRef: null,
+          updatedAt: timestamp
+        };
+      });
+    });
   }
 
   remove(id: string): void {
-    this.db.prepare(`DELETE FROM hosts WHERE id = ?`).run(id);
+    stateStorage.updateState((state) => {
+      state.data.hosts = state.data.hosts.filter((entry) => entry.id !== id);
+    });
   }
 
   replaceAll(records: HostRecord[]): void {
-    const insert = this.db.prepare(`
-      INSERT INTO hosts (id, label, hostname, port, username, auth_type, private_key_path, secret_ref, group_name, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `);
-
-    const transaction = this.db.transaction((rows: HostRecord[]) => {
-      this.db.prepare(`DELETE FROM hosts`).run();
-      for (const record of rows) {
-        insert.run(
-          record.id,
-          record.label,
-          record.hostname,
-          record.port,
-          record.username,
-          record.authType,
-          record.privateKeyPath ?? null,
-          record.secretRef ?? null,
-          normalizeGroupPath(record.groupName),
-          record.createdAt,
-          record.updatedAt
-        );
-      }
+    stateStorage.updateState((state) => {
+      state.data.hosts = records.map((record) => ({
+        ...record,
+        groupName: normalizeGroupPath(record.groupName)
+      }));
     });
-
-    transaction(records);
   }
 }
 
 export class GroupRepository {
-  private readonly db: Database.Database;
-
-  constructor() {
-    // 그룹도 같은 로컬 DB에 저장해 홈 화면의 탐색 상태와 일관되게 유지한다.
-    this.db = openDatabase();
-    this.migrate();
-  }
-
-  private migrate(): void {
-    this.db.exec(`
-      CREATE TABLE IF NOT EXISTS groups (
-        id TEXT PRIMARY KEY,
-        name TEXT NOT NULL,
-        path TEXT NOT NULL UNIQUE,
-        parent_path TEXT,
-        created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL
-      );
-    `);
-  }
-
   list(): GroupRecord[] {
-    const stmt = this.db.prepare(`
-      SELECT id, name, path, parent_path, created_at, updated_at
-      FROM groups
-      ORDER BY path
-    `);
-    return stmt.all().map((row) => toGroupRecord(row as Record<string, unknown>));
+    return stateStorage
+      .getState()
+      .data.groups.sort((left, right) => left.path.localeCompare(right.path));
   }
 
   getByPath(targetPath: string): GroupRecord | null {
-    const stmt = this.db.prepare(`
-      SELECT id, name, path, parent_path, created_at, updated_at
-      FROM groups
-      WHERE path = ?
-    `);
-    const row = stmt.get(targetPath) as Record<string, unknown> | undefined;
-    return row ? toGroupRecord(row) : null;
+    return stateStorage.getState().data.groups.find((record) => record.path === targetPath) ?? null;
   }
 
   create(id: string, name: string, parentPath?: string | null): GroupRecord {
@@ -363,454 +188,230 @@ export class GroupRepository {
     }
 
     const timestamp = nowIso();
-    this.db
-      .prepare(`
-        INSERT INTO groups (id, name, path, parent_path, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?)
-      `)
-      .run(id, cleanedName, nextPath, normalizedParentPath, timestamp, timestamp);
+    const record: GroupRecord = {
+      id,
+      name: cleanedName,
+      path: nextPath,
+      parentPath: normalizedParentPath,
+      createdAt: timestamp,
+      updatedAt: timestamp
+    };
 
-    return this.getByPath(nextPath)!;
+    stateStorage.updateState((state) => {
+      state.data.groups.push(record);
+    });
+    return record;
   }
 
   replaceAll(records: GroupRecord[]): void {
-    const insert = this.db.prepare(`
-      INSERT INTO groups (id, name, path, parent_path, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?)
-    `);
-    const transaction = this.db.transaction((rows: GroupRecord[]) => {
-      this.db.prepare(`DELETE FROM groups`).run();
-      for (const record of rows) {
-        insert.run(record.id, record.name, record.path, record.parentPath ?? null, record.createdAt, record.updatedAt);
-      }
+    stateStorage.updateState((state) => {
+      state.data.groups = records.map((record) => ({
+        ...record,
+        parentPath: normalizeGroupPath(record.parentPath)
+      }));
     });
-    transaction(records);
   }
 }
 
 export class SettingsRepository {
-  private readonly db: Database.Database;
-
-  constructor() {
-    // 설정도 동일한 로컬 DB에 넣어 백업과 관리 경로를 단순하게 유지한다.
-    this.db = openDatabase();
-    this.migrate();
-  }
-
-  private migrate(): void {
-    this.db.exec(`
-      CREATE TABLE IF NOT EXISTS app_settings (
-        singleton_id INTEGER PRIMARY KEY CHECK (singleton_id = 1),
-        theme TEXT NOT NULL,
-        dismissed_update_version TEXT,
-        updated_at TEXT NOT NULL
-      );
-    `);
-
-    const columns = this.db
-      .prepare(`PRAGMA table_info(app_settings)`)
-      .all() as Array<{ name: string }>;
-    if (!columns.some((column) => column.name === 'dismissed_update_version')) {
-      this.db.exec(`
-        ALTER TABLE app_settings
-        ADD COLUMN dismissed_update_version TEXT
-      `);
-    }
-
-    this.db
-      .prepare(`
-        INSERT INTO app_settings (singleton_id, theme, dismissed_update_version, updated_at)
-        VALUES (1, 'system', NULL, ?)
-        ON CONFLICT(singleton_id) DO NOTHING
-      `)
-      .run(nowIso());
-  }
-
   get(): AppSettings {
-    const row = this.db
-      .prepare(`
-        SELECT theme, dismissed_update_version, updated_at
-        FROM app_settings
-        WHERE singleton_id = 1
-      `)
-      .get() as Record<string, unknown> | undefined;
-    return toAppSettings(row);
+    const state = stateStorage.getState();
+    return {
+      theme: state.settings.theme,
+      dismissedUpdateVersion: state.updater.dismissedVersion,
+      updatedAt: state.updater.updatedAt.localeCompare(state.settings.updatedAt) > 0 ? state.updater.updatedAt : state.settings.updatedAt
+    };
   }
 
   update(input: Partial<AppSettings>): AppSettings {
     const current = this.get();
-    const theme = input.theme === 'light' || input.theme === 'dark' || input.theme === 'system' ? input.theme : current.theme;
-    const dismissedUpdateVersion = Object.prototype.hasOwnProperty.call(input, 'dismissedUpdateVersion')
-      ? input.dismissedUpdateVersion ?? null
-      : current.dismissedUpdateVersion ?? null;
-    this.db
-      .prepare(`
-        UPDATE app_settings
-        SET theme = ?, dismissed_update_version = ?, updated_at = ?
-        WHERE singleton_id = 1
-      `)
-      .run(theme, dismissedUpdateVersion, nowIso());
+    stateStorage.updateState((state) => {
+      if (input.theme === 'light' || input.theme === 'dark' || input.theme === 'system') {
+        state.settings.theme = input.theme;
+        state.settings.updatedAt = nowIso();
+      }
+
+      if (Object.prototype.hasOwnProperty.call(input, 'dismissedUpdateVersion')) {
+        state.updater.dismissedVersion = input.dismissedUpdateVersion ?? null;
+        state.updater.updatedAt = nowIso();
+      }
+
+      if (!Object.prototype.hasOwnProperty.call(input, 'dismissedUpdateVersion') && input.theme == null) {
+        state.settings.theme = current.theme as AppTheme;
+      }
+    });
     return this.get();
   }
 }
 
 export class PortForwardRepository {
-  private readonly db: Database.Database;
-
-  constructor() {
-    this.db = openDatabase();
-    this.migrate();
-  }
-
-  private migrate(): void {
-    this.db.exec(`
-      CREATE TABLE IF NOT EXISTS port_forwards (
-        id TEXT PRIMARY KEY,
-        label TEXT NOT NULL,
-        host_id TEXT NOT NULL,
-        mode TEXT NOT NULL,
-        bind_address TEXT NOT NULL,
-        bind_port INTEGER NOT NULL,
-        target_host TEXT,
-        target_port INTEGER,
-        created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL
-      );
-    `);
-  }
-
   list(): PortForwardRuleRecord[] {
-    return this.db
-      .prepare(`
-        SELECT id, label, host_id, mode, bind_address, bind_port, target_host, target_port, created_at, updated_at
-        FROM port_forwards
-        ORDER BY updated_at DESC, label
-      `)
-      .all()
-      .map((row) => toPortForwardRecord(row as Record<string, unknown>));
+    return stateStorage
+      .getState()
+      .data.portForwards.sort((left, right) => {
+        const updatedCompare = right.updatedAt.localeCompare(left.updatedAt);
+        if (updatedCompare !== 0) {
+          return updatedCompare;
+        }
+        return left.label.localeCompare(right.label);
+      });
   }
 
   getById(id: string): PortForwardRuleRecord | null {
-    const row = this.db
-      .prepare(`
-        SELECT id, label, host_id, mode, bind_address, bind_port, target_host, target_port, created_at, updated_at
-        FROM port_forwards
-        WHERE id = ?
-      `)
-      .get(id) as Record<string, unknown> | undefined;
-    return row ? toPortForwardRecord(row) : null;
+    return stateStorage.getState().data.portForwards.find((record) => record.id === id) ?? null;
   }
 
   create(draft: PortForwardDraft): PortForwardRuleRecord {
-    const id = randomUUID();
     const timestamp = nowIso();
-    this.db
-      .prepare(`
-        INSERT INTO port_forwards (id, label, host_id, mode, bind_address, bind_port, target_host, target_port, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `)
-      .run(
-        id,
-        draft.label.trim(),
-        draft.hostId,
-        draft.mode,
-        draft.bindAddress.trim(),
-        draft.bindPort,
-        draft.mode === 'dynamic' ? null : draft.targetHost?.trim() ?? null,
-        draft.mode === 'dynamic' ? null : draft.targetPort ?? null,
-        timestamp,
-        timestamp
-      );
-    return this.getById(id)!;
+    const record: PortForwardRuleRecord = {
+      id: randomUUID(),
+      label: draft.label.trim(),
+      hostId: draft.hostId,
+      mode: draft.mode,
+      bindAddress: draft.bindAddress.trim(),
+      bindPort: draft.bindPort,
+      targetHost: draft.mode === 'dynamic' ? null : draft.targetHost?.trim() ?? null,
+      targetPort: draft.mode === 'dynamic' ? null : draft.targetPort ?? null,
+      createdAt: timestamp,
+      updatedAt: timestamp
+    };
+    stateStorage.updateState((state) => {
+      state.data.portForwards.push(record);
+    });
+    return record;
   }
 
   update(id: string, draft: PortForwardDraft): PortForwardRuleRecord {
-    this.db
-      .prepare(`
-        UPDATE port_forwards
-        SET label = ?, host_id = ?, mode = ?, bind_address = ?, bind_port = ?, target_host = ?, target_port = ?, updated_at = ?
-        WHERE id = ?
-      `)
-      .run(
-        draft.label.trim(),
-        draft.hostId,
-        draft.mode,
-        draft.bindAddress.trim(),
-        draft.bindPort,
-        draft.mode === 'dynamic' ? null : draft.targetHost?.trim() ?? null,
-        draft.mode === 'dynamic' ? null : draft.targetPort ?? null,
-        nowIso(),
-        id
-      );
-    return this.getById(id)!;
+    const current = this.getById(id);
+    if (!current) {
+      throw new Error('Port forward rule not found');
+    }
+
+    const record: PortForwardRuleRecord = {
+      ...current,
+      label: draft.label.trim(),
+      hostId: draft.hostId,
+      mode: draft.mode,
+      bindAddress: draft.bindAddress.trim(),
+      bindPort: draft.bindPort,
+      targetHost: draft.mode === 'dynamic' ? null : draft.targetHost?.trim() ?? null,
+      targetPort: draft.mode === 'dynamic' ? null : draft.targetPort ?? null,
+      updatedAt: nowIso()
+    };
+
+    stateStorage.updateState((state) => {
+      state.data.portForwards = state.data.portForwards.map((entry) => (entry.id === id ? record : entry));
+    });
+    return record;
   }
 
   remove(id: string): void {
-    this.db.prepare(`DELETE FROM port_forwards WHERE id = ?`).run(id);
+    stateStorage.updateState((state) => {
+      state.data.portForwards = state.data.portForwards.filter((entry) => entry.id !== id);
+    });
   }
 
   replaceAll(records: PortForwardRuleRecord[]): void {
-    const insert = this.db.prepare(`
-      INSERT INTO port_forwards (id, label, host_id, mode, bind_address, bind_port, target_host, target_port, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `);
-    const transaction = this.db.transaction((rows: PortForwardRuleRecord[]) => {
-      this.db.prepare(`DELETE FROM port_forwards`).run();
-      for (const record of rows) {
-        insert.run(
-          record.id,
-          record.label,
-          record.hostId,
-          record.mode,
-          record.bindAddress,
-          record.bindPort,
-          record.targetHost ?? null,
-          record.targetPort ?? null,
-          record.createdAt,
-          record.updatedAt
-        );
-      }
+    stateStorage.updateState((state) => {
+      state.data.portForwards = records.map((record) => ({ ...record }));
     });
-    transaction(records);
   }
 }
 
 export class KnownHostRepository {
-  private readonly db: Database.Database;
-
-  constructor() {
-    this.db = openDatabase();
-    this.migrate();
-  }
-
-  private migrate(): void {
-    this.db.exec(`
-      CREATE TABLE IF NOT EXISTS known_hosts (
-        id TEXT PRIMARY KEY,
-        host TEXT NOT NULL,
-        port INTEGER NOT NULL,
-        algorithm TEXT NOT NULL,
-        public_key_base64 TEXT NOT NULL,
-        fingerprint_sha256 TEXT NOT NULL,
-        created_at TEXT NOT NULL,
-        last_seen_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL,
-        UNIQUE(host, port)
-      );
-    `);
-  }
-
   list(): KnownHostRecord[] {
-    return this.db
-      .prepare(`
-        SELECT id, host, port, algorithm, public_key_base64, fingerprint_sha256, created_at, last_seen_at, updated_at
-        FROM known_hosts
-        ORDER BY host, port
-      `)
-      .all()
-      .map((row) => toKnownHostRecord(row as Record<string, unknown>));
+    return stateStorage
+      .getState()
+      .data.knownHosts.sort((left, right) => {
+        const hostCompare = left.host.localeCompare(right.host);
+        if (hostCompare !== 0) {
+          return hostCompare;
+        }
+        return left.port - right.port;
+      });
   }
 
   getByHostPort(host: string, port: number): KnownHostRecord | null {
-    const row = this.db
-      .prepare(`
-        SELECT id, host, port, algorithm, public_key_base64, fingerprint_sha256, created_at, last_seen_at, updated_at
-        FROM known_hosts
-        WHERE host = ? AND port = ?
-      `)
-      .get(host, port) as Record<string, unknown> | undefined;
-    return row ? toKnownHostRecord(row) : null;
+    return stateStorage.getState().data.knownHosts.find((record) => record.host === host && record.port === port) ?? null;
   }
 
   trust(input: KnownHostTrustInput): KnownHostRecord {
     const current = this.getByHostPort(input.host, input.port);
     const timestamp = nowIso();
-    if (current) {
-      this.db
-        .prepare(`
-          UPDATE known_hosts
-          SET algorithm = ?, public_key_base64 = ?, fingerprint_sha256 = ?, last_seen_at = ?, updated_at = ?
-          WHERE id = ?
-        `)
-        .run(input.algorithm, input.publicKeyBase64, input.fingerprintSha256, timestamp, timestamp, current.id);
-      return this.getByHostPort(input.host, input.port)!;
-    }
+    const record: KnownHostRecord = {
+      id: current?.id ?? randomUUID(),
+      host: input.host,
+      port: input.port,
+      algorithm: input.algorithm,
+      publicKeyBase64: input.publicKeyBase64,
+      fingerprintSha256: input.fingerprintSha256,
+      createdAt: current?.createdAt ?? timestamp,
+      lastSeenAt: timestamp,
+      updatedAt: timestamp
+    };
 
-    const id = randomUUID();
-    this.db
-      .prepare(`
-        INSERT INTO known_hosts (id, host, port, algorithm, public_key_base64, fingerprint_sha256, created_at, last_seen_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `)
-      .run(id, input.host, input.port, input.algorithm, input.publicKeyBase64, input.fingerprintSha256, timestamp, timestamp, timestamp);
-    return this.getByHostPort(input.host, input.port)!;
+    stateStorage.updateState((state) => {
+      if (current) {
+        state.data.knownHosts = state.data.knownHosts.map((entry) => (entry.id === current.id ? record : entry));
+        return;
+      }
+      state.data.knownHosts.push(record);
+    });
+    return record;
   }
 
   touch(host: string, port: number): void {
-    this.db
-      .prepare(`
-        UPDATE known_hosts
-        SET last_seen_at = ?, updated_at = ?
-        WHERE host = ? AND port = ?
-      `)
-      .run(nowIso(), nowIso(), host, port);
+    const timestamp = nowIso();
+    stateStorage.updateState((state) => {
+      state.data.knownHosts = state.data.knownHosts.map((entry) => {
+        if (entry.host !== host || entry.port !== port) {
+          return entry;
+        }
+        return {
+          ...entry,
+          lastSeenAt: timestamp,
+          updatedAt: timestamp
+        };
+      });
+    });
   }
 
   remove(id: string): void {
-    this.db.prepare(`DELETE FROM known_hosts WHERE id = ?`).run(id);
+    stateStorage.updateState((state) => {
+      state.data.knownHosts = state.data.knownHosts.filter((entry) => entry.id !== id);
+    });
   }
 
   replaceAll(records: KnownHostRecord[]): void {
-    const insert = this.db.prepare(`
-      INSERT INTO known_hosts (id, host, port, algorithm, public_key_base64, fingerprint_sha256, created_at, last_seen_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `);
-    const transaction = this.db.transaction((rows: KnownHostRecord[]) => {
-      this.db.prepare(`DELETE FROM known_hosts`).run();
-      for (const record of rows) {
-        insert.run(
-          record.id,
-          record.host,
-          record.port,
-          record.algorithm,
-          record.publicKeyBase64,
-          record.fingerprintSha256,
-          record.createdAt,
-          record.lastSeenAt,
-          record.updatedAt
-        );
-      }
+    stateStorage.updateState((state) => {
+      state.data.knownHosts = records.map((record) => ({ ...record }));
     });
-    transaction(records);
   }
 }
 
 export class ActivityLogRepository {
-  private readonly db: Database.Database;
-
-  constructor() {
-    this.db = openDatabase();
-    this.migrate();
-  }
-
-  private migrate(): void {
-    this.db.exec(`
-      CREATE TABLE IF NOT EXISTS activity_logs (
-        id TEXT PRIMARY KEY,
-        level TEXT NOT NULL,
-        category TEXT NOT NULL,
-        message TEXT NOT NULL,
-        metadata_json TEXT,
-        created_at TEXT NOT NULL
-      );
-    `);
-  }
-
   list(): ActivityLogRecord[] {
-    return this.db
-      .prepare(`
-        SELECT id, level, category, message, metadata_json, created_at
-        FROM activity_logs
-        ORDER BY created_at DESC
-      `)
-      .all()
-      .map((row) => toActivityLogRecord(row as Record<string, unknown>));
+    return stateStorage.listActivityLogs();
   }
 
   append(level: ActivityLogLevel, category: ActivityLogCategory, message: string, metadata?: Record<string, unknown> | null): ActivityLogRecord {
-    const id = randomUUID();
-    const createdAt = nowIso();
-    this.db
-      .prepare(`
-        INSERT INTO activity_logs (id, level, category, message, metadata_json, created_at)
-        VALUES (?, ?, ?, ?, ?, ?)
-      `)
-      .run(id, level, category, message, metadata ? JSON.stringify(metadata) : null, createdAt);
-    this.prune();
-    return {
-      id,
+    const record: ActivityLogRecord = {
+      id: randomUUID(),
       level,
       category,
       message,
       metadata: metadata ?? null,
-      createdAt
+      createdAt: nowIso()
     };
+    return stateStorage.appendActivityLog(record);
   }
 
   clear(): void {
-    this.db.prepare(`DELETE FROM activity_logs`).run();
-  }
-
-  private prune(): void {
-    this.db
-      .prepare(`
-        DELETE FROM activity_logs
-        WHERE id IN (
-          SELECT id
-          FROM activity_logs
-          ORDER BY created_at DESC
-          LIMIT -1 OFFSET ?
-        )
-      `)
-      .run(MAX_ACTIVITY_LOGS);
+    stateStorage.clearActivityLogs();
   }
 }
 
 export class SecretMetadataRepository {
-  private readonly db: Database.Database;
-
-  constructor() {
-    this.db = openDatabase();
-    this.migrate();
-  }
-
-  private migrate(): void {
-    this.db.exec(`
-      CREATE TABLE IF NOT EXISTS keychain_entries (
-        secret_ref TEXT PRIMARY KEY,
-        label TEXT NOT NULL,
-        has_password INTEGER NOT NULL,
-        has_passphrase INTEGER NOT NULL,
-        has_managed_private_key INTEGER NOT NULL,
-        source TEXT NOT NULL,
-        updated_at TEXT NOT NULL
-      );
-
-      CREATE TABLE IF NOT EXISTS host_secret_metadata (
-        host_id TEXT PRIMARY KEY,
-        secret_ref TEXT NOT NULL,
-        has_password INTEGER NOT NULL,
-        has_passphrase INTEGER NOT NULL,
-        has_managed_private_key INTEGER NOT NULL,
-        source TEXT NOT NULL,
-        updated_at TEXT NOT NULL
-      );
-    `);
-
-    this.db.exec(`
-      INSERT OR IGNORE INTO keychain_entries (
-        secret_ref,
-        label,
-        has_password,
-        has_passphrase,
-        has_managed_private_key,
-        source,
-        updated_at
-      )
-      SELECT
-        m.secret_ref,
-        COALESCE(h.label, m.secret_ref),
-        m.has_password,
-        m.has_passphrase,
-        m.has_managed_private_key,
-        m.source,
-        m.updated_at
-      FROM host_secret_metadata m
-      LEFT JOIN hosts h ON h.id = m.host_id
-      WHERE m.secret_ref IS NOT NULL
-    `);
-  }
-
   upsert(input: {
     secretRef: string;
     label: string;
@@ -819,226 +420,109 @@ export class SecretMetadataRepository {
     hasManagedPrivateKey?: boolean;
     source?: SecretSource;
   }): void {
-    this.db
-      .prepare(`
-        INSERT INTO keychain_entries (
-          secret_ref,
-          label,
-          has_password,
-          has_passphrase,
-          has_managed_private_key,
-          source,
-          updated_at
-        )
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT(secret_ref) DO UPDATE SET
-          label = excluded.label,
-          has_password = excluded.has_password,
-          has_passphrase = excluded.has_passphrase,
-          has_managed_private_key = excluded.has_managed_private_key,
-          source = excluded.source,
-          updated_at = excluded.updated_at
-      `)
-      .run(
-        input.secretRef,
-        input.label,
-        input.hasPassword ? 1 : 0,
-        input.hasPassphrase ? 1 : 0,
-        input.hasManagedPrivateKey ? 1 : 0,
-        input.source ?? 'local_keychain',
-        nowIso()
-      );
+    stateStorage.updateState((state) => {
+      const timestamp = nowIso();
+      const nextRecord: SecretMetadataRecord = {
+        secretRef: input.secretRef,
+        label: input.label,
+        hasPassword: input.hasPassword,
+        hasPassphrase: input.hasPassphrase,
+        hasManagedPrivateKey: input.hasManagedPrivateKey ?? false,
+        source: input.source ?? 'local_keychain',
+        linkedHostCount: 0,
+        updatedAt: timestamp
+      };
+
+      const currentIndex = state.data.secretMetadata.findIndex((record) => record.secretRef === input.secretRef);
+      if (currentIndex >= 0) {
+        state.data.secretMetadata[currentIndex] = {
+          ...state.data.secretMetadata[currentIndex],
+          ...nextRecord
+        };
+        return;
+      }
+      state.data.secretMetadata.push(nextRecord);
+    });
   }
 
   remove(secretRef: string): void {
-    this.db.prepare(`DELETE FROM keychain_entries WHERE secret_ref = ?`).run(secretRef);
+    stateStorage.updateState((state) => {
+      state.data.secretMetadata = state.data.secretMetadata.filter((record) => record.secretRef !== secretRef);
+    });
   }
 
   getBySecretRef(secretRef: string): SecretMetadataRecord | null {
-    const row = this.db
-      .prepare(`
-        SELECT
-          e.secret_ref,
-          e.label,
-          e.has_password,
-          e.has_passphrase,
-          e.has_managed_private_key,
-          e.source,
-          e.updated_at,
-          COUNT(h.id) AS linked_host_count
-        FROM keychain_entries e
-        LEFT JOIN hosts h ON h.secret_ref = e.secret_ref
-        WHERE e.secret_ref = ?
-        GROUP BY
-          e.secret_ref,
-          e.label,
-          e.has_password,
-          e.has_passphrase,
-          e.has_managed_private_key,
-          e.source,
-          e.updated_at
-      `)
-      .get(secretRef) as Record<string, unknown> | undefined;
-
-    return row ? toSecretMetadataRecord(row) : null;
+    const state = stateStorage.getState();
+    const record = state.data.secretMetadata.find((entry) => entry.secretRef === secretRef);
+    return record ? withLinkedHostCount(record, state.data.hosts) : null;
   }
 
   list(): SecretMetadataRecord[] {
-    return this.db
-      .prepare(`
-        SELECT
-          e.secret_ref,
-          e.label,
-          e.has_password,
-          e.has_passphrase,
-          e.has_managed_private_key,
-          e.source,
-          e.updated_at,
-          COUNT(h.id) AS linked_host_count
-        FROM keychain_entries e
-        LEFT JOIN hosts h ON h.secret_ref = e.secret_ref
-        GROUP BY
-          e.secret_ref,
-          e.label,
-          e.has_password,
-          e.has_passphrase,
-          e.has_managed_private_key,
-          e.source,
-          e.updated_at
-        ORDER BY e.label, e.secret_ref
-      `)
-      .all()
-      .map((row) => toSecretMetadataRecord(row as Record<string, unknown>));
+    const state = stateStorage.getState();
+    return state.data.secretMetadata.map((record) => withLinkedHostCount(record, state.data.hosts)).sort(compareLabels);
   }
 
   listBySource(source: SecretSource): SecretMetadataRecord[] {
-    return this.db
-      .prepare(`
-        SELECT
-          e.secret_ref,
-          e.label,
-          e.has_password,
-          e.has_passphrase,
-          e.has_managed_private_key,
-          e.source,
-          e.updated_at,
-          COUNT(h.id) AS linked_host_count
-        FROM keychain_entries e
-        LEFT JOIN hosts h ON h.secret_ref = e.secret_ref
-        WHERE e.source = ?
-        GROUP BY
-          e.secret_ref,
-          e.label,
-          e.has_password,
-          e.has_passphrase,
-          e.has_managed_private_key,
-          e.source,
-          e.updated_at
-        ORDER BY e.label, e.secret_ref
-      `)
-      .all(source)
-      .map((row) => toSecretMetadataRecord(row as Record<string, unknown>));
+    const state = stateStorage.getState();
+    return state.data.secretMetadata
+      .filter((record) => record.source === source)
+      .map((record) => withLinkedHostCount(record, state.data.hosts))
+      .sort(compareLabels);
   }
 
   replaceAll(records: SecretMetadataRecord[], source: SecretSource = 'server_managed'): void {
-    const insert = this.db.prepare(`
-      INSERT INTO keychain_entries (
-        secret_ref,
-        label,
-        has_password,
-        has_passphrase,
-        has_managed_private_key,
+    stateStorage.updateState((state) => {
+      const remaining = state.data.secretMetadata.filter((record) => record.source !== source);
+      const nextRecords = records.map((record) => ({
+        ...record,
         source,
-        updated_at
-      )
-      VALUES (?, ?, ?, ?, ?, ?, ?)
-    `);
-    const transaction = this.db.transaction((rows: SecretMetadataRecord[]) => {
-      this.db.prepare(`DELETE FROM keychain_entries WHERE source = ?`).run(source);
-      for (const record of rows) {
-        insert.run(
-          record.secretRef,
-          record.label,
-          record.hasPassword ? 1 : 0,
-          record.hasPassphrase ? 1 : 0,
-          record.hasManagedPrivateKey ? 1 : 0,
-          source,
-          record.updatedAt
-        );
-      }
+        linkedHostCount: 0
+      }));
+      state.data.secretMetadata = [...remaining, ...nextRecords];
     });
-    transaction(records);
   }
 }
 
-export interface SyncDeletionRecord {
-  kind: SyncKind;
-  recordId: string;
-  deletedAt: string;
-}
+export { SyncDeletionRecord };
 
 export class SyncOutboxRepository {
-  private readonly db: Database.Database;
-
-  constructor() {
-    this.db = openDatabase();
-    this.migrate();
-  }
-
-  private migrate(): void {
-    this.db.exec(`
-      CREATE TABLE IF NOT EXISTS sync_outbox (
-        kind TEXT NOT NULL,
-        record_id TEXT NOT NULL,
-        deleted_at TEXT NOT NULL,
-        PRIMARY KEY (kind, record_id)
-      );
-    `);
-  }
-
   list(): SyncDeletionRecord[] {
-    return this.db
-      .prepare(`
-        SELECT kind, record_id, deleted_at
-        FROM sync_outbox
-        ORDER BY deleted_at DESC
-      `)
-      .all()
-      .map((row) => {
-        const record = row as Record<string, unknown>;
-        return {
-          kind: String(record.kind) as SyncKind,
-          recordId: String(record.record_id),
-          deletedAt: String(record.deleted_at)
-        };
-      });
+    return stateStorage.getState().data.syncOutbox.sort(compareDeletedAtDesc);
   }
 
   upsertDeletion(kind: SyncKind, recordId: string, deletedAt: string = nowIso()): void {
-    this.db
-      .prepare(`
-        INSERT INTO sync_outbox (kind, record_id, deleted_at)
-        VALUES (?, ?, ?)
-        ON CONFLICT(kind, record_id) DO UPDATE SET deleted_at = excluded.deleted_at
-      `)
-      .run(kind, recordId, deletedAt);
+    stateStorage.updateState((state) => {
+      const currentIndex = state.data.syncOutbox.findIndex((entry) => entry.kind === kind && entry.recordId === recordId);
+      const nextRecord: SyncDeletionRecord = {
+        kind,
+        recordId,
+        deletedAt
+      };
+      if (currentIndex >= 0) {
+        state.data.syncOutbox[currentIndex] = nextRecord;
+        return;
+      }
+      state.data.syncOutbox.push(nextRecord);
+    });
   }
 
   clear(kind: SyncKind, recordId: string): void {
-    this.db.prepare(`DELETE FROM sync_outbox WHERE kind = ? AND record_id = ?`).run(kind, recordId);
+    stateStorage.updateState((state) => {
+      state.data.syncOutbox = state.data.syncOutbox.filter((entry) => !(entry.kind === kind && entry.recordId === recordId));
+    });
   }
 
   clearMany(records: Array<{ kind: SyncKind; recordId: string }>): void {
-    const transaction = this.db.transaction((items: Array<{ kind: SyncKind; recordId: string }>) => {
-      const stmt = this.db.prepare(`DELETE FROM sync_outbox WHERE kind = ? AND record_id = ?`);
-      for (const item of items) {
-        stmt.run(item.kind, item.recordId);
-      }
+    const keys = new Set(records.map((record) => `${record.kind}:${record.recordId}`));
+    stateStorage.updateState((state) => {
+      state.data.syncOutbox = state.data.syncOutbox.filter((entry) => !keys.has(`${entry.kind}:${entry.recordId}`));
     });
-    transaction(records);
   }
 
   clearAll(): void {
-    this.db.prepare(`DELETE FROM sync_outbox`).run();
+    stateStorage.updateState((state) => {
+      state.data.syncOutbox = [];
+    });
   }
 }
+

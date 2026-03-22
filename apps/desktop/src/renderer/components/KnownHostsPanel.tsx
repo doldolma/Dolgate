@@ -1,4 +1,4 @@
-import type { KnownHostRecord } from '@dolssh/shared';
+import type { KnownHostRecord } from '@shared';
 
 interface KnownHostsPanelProps {
   records: KnownHostRecord[];

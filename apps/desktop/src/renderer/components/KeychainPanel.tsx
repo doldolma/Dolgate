@@ -1,4 +1,4 @@
-import type { SecretMetadataRecord } from '@dolssh/shared';
+import type { SecretMetadataRecord } from '@shared';
 
 interface KeychainPanelProps {
   entries: SecretMetadataRecord[];

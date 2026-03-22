@@ -8,11 +8,11 @@ dolssh는 세 개의 런타임 경계로 나뉩니다.
 
 ## 데스크톱 앱
 
-- `main`: 브라우저 윈도우, 로컬 SQLite, 키체인 접근, 브라우저 로그인, 서버 동기화, Go 코어 프로세스 수명주기, GitHub Releases 기반 auto update를 관리합니다.
+- `main`: 브라우저 윈도우, 로컬 파일 저장소, encrypted secret store, 브라우저 로그인, 서버 동기화, Go 코어 프로세스 수명주기, GitHub Releases 기반 auto update를 관리합니다.
 - `preload`: `contextBridge`를 통해 renderer에 필요한 최소 API만 노출합니다.
 - `renderer`: Zustand 상태와 xterm.js 기반 탭 UI, 로그인 게이트, 호스트 목록, 검색 인터페이스, 고정 `SFTP` 워크스페이스를 담당합니다.
 - 앱 시작 시 먼저 refresh token으로 로그인 복구를 시도하고, 성공 후에만 실제 workspace를 마운트합니다.
-- 새 로그인은 데스크톱이 backend `/login` 페이지를 외부 브라우저로 열고, 성공 시 `dolssh://auth/callback` 딥링크로 복귀합니다.
+- 새 로그인은 데스크톱이 backend `/login` 페이지를 외부 브라우저로 열고, 성공 시 로컬 loopback 콜백으로 세션을 교환합니다.
 - 앱 시작 시 Electron `main`이 `ssh-core`를 즉시 띄우는 대신, 실제 연결 시점에 child process를 lazily 시작합니다.
 - 개발 모드에서는 `go run`을, 패키지된 릴리즈 앱에서는 번들된 `ssh-core` 바이너리를 실행합니다.
 - 로컬 파일 브라우징은 Electron main의 파일 서비스가 담당하고, 원격 SFTP 작업과 파일 전송은 Go 코어가 담당합니다.

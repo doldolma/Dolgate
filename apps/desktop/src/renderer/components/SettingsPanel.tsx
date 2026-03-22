@@ -1,4 +1,4 @@
-import type { AppSettings, AppTheme } from '@dolssh/shared';
+import type { AppSettings, AppTheme } from '@shared';
 
 interface SettingsPanelProps {
   settings: AppSettings;

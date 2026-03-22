@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { DesktopApi } from '@dolssh/shared';
+import type { DesktopApi } from '@shared';
 import { createAppStore } from './createAppStore';
 
 function createMockApi(): DesktopApi {

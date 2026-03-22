@@ -262,7 +262,7 @@ export interface DesktopApi {
     update: (id: string, draft: PortForwardDraft) => Promise<PortForwardRuleRecord>;
     remove: (id: string) => Promise<void>;
     start: (ruleId: string) => Promise<PortForwardRuntimeRecord>;
-    stop: (ruleId: string) => Promise<void>;
+    stop: (ruleId: string) => Promise<PortForwardRuntimeRecord>;
     onEvent: (listener: (event: PortForwardRuntimeEvent) => void) => () => void;
   };
   knownHosts: {
@@ -278,17 +278,10 @@ export interface DesktopApi {
   };
   keychain: {
     list: () => Promise<SecretMetadataRecord[]>;
+    load: (secretRef: string) => Promise<ManagedSecretPayload | HostSecretInput | null>;
     remove: (secretRef: string) => Promise<void>;
     update: (input: KeychainSecretUpdateInput) => Promise<void>;
     cloneForHost: (input: KeychainSecretCloneInput) => Promise<void>;
-    load: (secretRef: string) => Promise<ManagedSecretPayload | null>;
-  };
-  files: {
-    getHomeDirectory: () => Promise<string>;
-    list: (path: string) => Promise<DirectoryListing>;
-    mkdir: (path: string, name: string) => Promise<void>;
-    rename: (path: string, nextName: string) => Promise<void>;
-    delete: (paths: string[]) => Promise<void>;
   };
   sftp: {
     connect: (input: DesktopSftpConnectInput) => Promise<SftpEndpointSummary>;
@@ -300,5 +293,12 @@ export interface DesktopApi {
     startTransfer: (input: TransferStartInput) => Promise<TransferJob>;
     cancelTransfer: (jobId: string) => Promise<void>;
     onTransferEvent: (listener: (event: TransferJobEvent) => void) => () => void;
+  };
+  files: {
+    getHomeDirectory: () => Promise<string>;
+    list: (path: string) => Promise<DirectoryListing>;
+    mkdir: (path: string, name: string) => Promise<void>;
+    rename: (path: string, nextName: string) => Promise<void>;
+    delete: (paths: string[]) => Promise<void>;
   };
 }

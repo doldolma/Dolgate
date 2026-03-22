@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import type { HostDraft, HostRecord, SecretMetadataRecord } from '@dolssh/shared';
+import type { HostDraft, HostRecord, SecretMetadataRecord } from '@shared';
 
 const defaultDraft: HostDraft = {
   label: '',

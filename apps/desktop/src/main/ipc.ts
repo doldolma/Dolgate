@@ -20,7 +20,7 @@ import type {
   SftpMkdirInput,
   SftpRenameInput,
   TransferStartInput
-} from '@dolssh/shared';
+} from '@shared';
 import { ipcChannels } from '../common/ipc-channels';
 import {
   ActivityLogRepository,
@@ -36,7 +36,7 @@ import { AuthService } from './auth-service';
 import { CoreManager } from './core-manager';
 import { LocalFileService } from './file-service';
 import { SecretStore } from './secret-store';
-import { SyncService } from './sync-service';
+import { isSyncAuthenticationError, SyncService } from './sync-service';
 import { UpdateService } from './update-service';
 
 async function persistSecret(
@@ -205,8 +205,26 @@ export function registerIpcHandlers(
     await authService.logout();
   });
 
-  ipcMain.handle(ipcChannels.sync.bootstrap, async () => syncService.bootstrap());
-  ipcMain.handle(ipcChannels.sync.pushDirty, async () => syncService.pushDirty());
+  ipcMain.handle(ipcChannels.sync.bootstrap, async () => {
+    try {
+      return await syncService.bootstrap();
+    } catch (error) {
+      if (isSyncAuthenticationError(error) && authService.getState().status === 'authenticated') {
+        await authService.forceUnauthenticated('세션이 만료되었습니다. 다시 로그인해 주세요.');
+      }
+      throw error;
+    }
+  });
+  ipcMain.handle(ipcChannels.sync.pushDirty, async () => {
+    try {
+      return await syncService.pushDirty();
+    } catch (error) {
+      if (isSyncAuthenticationError(error) && authService.getState().status === 'authenticated') {
+        await authService.forceUnauthenticated('세션이 만료되었습니다. 다시 로그인해 주세요.');
+      }
+      throw error;
+    }
+  });
   ipcMain.handle(ipcChannels.sync.status, async () => syncService.getState());
   ipcMain.handle(ipcChannels.sync.exportDecryptedSnapshot, async () => syncService.exportDecryptedSnapshot());
 

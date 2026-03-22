@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 1,
+  "settings": {
+    "theme": "system",
+    "updatedAt": "2026-03-21T21:11:36.278Z"
+  },
+  "updater": {
+    "dismissedVersion": null,
+    "updatedAt": "2026-03-21T21:11:36.278Z"
+  },
+  "auth": {
+    "status": "unknown",
+    "updatedAt": "2026-03-21T21:11:36.278Z"
+  },
+  "sync": {
+    "lastSuccessfulSyncAt": null,
+    "pendingPush": false,
+    "errorMessage": null,
+    "updatedAt": "2026-03-21T21:11:36.278Z"
+  },
+  "data": {
+    "groups": [],
+    "hosts": [],
+    "knownHosts": [],
+    "portForwards": [],
+    "secretMetadata": [],
+    "syncOutbox": []
+  },
+  "secure": {
+    "refreshToken": null,
+    "managedSecretsByRef": {}
+  }
+}

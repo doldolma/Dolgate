@@ -1,4 +1,4 @@
-import type { HostRecord, SecretMetadataRecord } from '@dolssh/shared';
+import type { HostRecord, SecretMetadataRecord } from '@shared';
 import { HostForm } from './HostForm';
 
 interface HostDrawerProps {

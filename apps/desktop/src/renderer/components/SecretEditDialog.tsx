@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import type { LinkedHostSummary } from '@dolssh/shared';
+import type { LinkedHostSummary } from '@shared';
 
 export type SecretEditMode = 'update-shared' | 'clone-for-host';
 export type SecretCredentialKind = 'password' | 'passphrase';

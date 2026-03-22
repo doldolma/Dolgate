@@ -9,12 +9,20 @@ import type {
   SyncPayloadV2,
   SyncRecord,
   SyncStatus
-} from '@dolssh/shared';
+} from '@shared';
 import { ActivityLogRepository, GroupRepository, HostRepository, KnownHostRepository, PortForwardRepository, SecretMetadataRepository, SyncOutboxRepository } from './database';
 import { SecretStore } from './secret-store';
 import { AuthService } from './auth-service';
+import { getDesktopStateStorage } from './state-storage';
 
 const RETRY_DELAY_MS = 30_000;
+
+export class SyncAuthenticationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'SyncAuthenticationError';
+  }
+}
 
 function defaultSyncStatus(): SyncStatus {
   return {
@@ -70,7 +78,39 @@ async function toApiErrorMessage(response: Response, fallback: string): Promise<
     return `${fallback} 서버가 API 응답 대신 HTML 페이지를 반환했습니다. 배포 주소 또는 리버스 프록시 설정을 확인해 주세요. (${response.status})`;
   }
 
+  try {
+    const parsed = JSON.parse(text) as { error?: unknown; message?: unknown };
+    if (typeof parsed.error === 'string' && parsed.error.trim()) {
+      return parsed.error;
+    }
+    if (typeof parsed.message === 'string' && parsed.message.trim()) {
+      return parsed.message;
+    }
+  } catch {
+    // JSON이 아니면 그대로 아래 fallback 경로를 탄다.
+  }
+
   return text || `${fallback} (${response.status})`;
+}
+
+function isLikelyAuthError(response: Response, message: string): boolean {
+  if (response.status === 401 || response.status === 403) {
+    return true;
+  }
+
+  return /token is expired|invalid claims|unauthorized|forbidden|jwt|로그인이 필요합니다|세션이 만료/i.test(message);
+}
+
+async function toApiError(response: Response, fallback: string): Promise<Error> {
+  const message = await toApiErrorMessage(response, fallback);
+  if (isLikelyAuthError(response, message)) {
+    return new SyncAuthenticationError(message);
+  }
+  return new Error(message);
+}
+
+export function isSyncAuthenticationError(error: unknown): error is SyncAuthenticationError {
+  return error instanceof SyncAuthenticationError;
 }
 
 async function loadManagedSecret(secretStore: SecretStore, secretRef: string): Promise<ManagedSecretPayload | null> {
@@ -82,6 +122,7 @@ async function loadManagedSecret(secretStore: SecretStore, secretRef: string): P
 }
 
 export class SyncService {
+  private readonly stateStorage = getDesktopStateStorage();
   private state: SyncStatus = defaultSyncStatus();
   private pushTimer: NodeJS.Timeout | null = null;
   private pushPromise: Promise<SyncStatus> | null = null;
@@ -202,30 +243,52 @@ export class SyncService {
     this.patchState(defaultSyncStatus());
   }
 
-  private async fetchRemoteSnapshot(): Promise<SyncPayloadV2> {
-    const response = await fetch(new URL('/sync', this.authService.getServerUrl()), {
-      headers: {
-        Authorization: `Bearer ${this.authService.getAccessToken()}`
-      }
-    });
-    if (!response.ok) {
-      throw new Error(await toApiErrorMessage(response, '동기화 데이터 조회에 실패했습니다.'));
+  private withAccessToken(init: RequestInit | undefined, accessToken: string): RequestInit {
+    const headers = new Headers(init?.headers ?? {});
+    headers.set('Authorization', `Bearer ${accessToken}`);
+    return {
+      ...init,
+      headers
+    };
+  }
+
+  private async fetchWithAuthRetry(url: URL, init: RequestInit, fallback: string): Promise<Response> {
+    let response = await fetch(url, this.withAccessToken(init, this.authService.getAccessToken()));
+    if (response.ok) {
+      return response;
     }
+
+    const firstFailureMessage = await toApiErrorMessage(response, fallback);
+    if (!isLikelyAuthError(response, firstFailureMessage)) {
+      throw new Error(firstFailureMessage);
+    }
+
+    const refreshed = await this.authService.refreshSession();
+    if (refreshed.status !== 'authenticated') {
+      throw new SyncAuthenticationError(firstFailureMessage || '세션이 만료되었습니다. 다시 로그인해 주세요.');
+    }
+
+    response = await fetch(url, this.withAccessToken(init, this.authService.getAccessToken()));
+    if (!response.ok) {
+      throw await toApiError(response, fallback);
+    }
+    return response;
+  }
+
+  private async fetchRemoteSnapshot(): Promise<SyncPayloadV2> {
+    const response = await this.fetchWithAuthRetry(new URL('/sync', this.authService.getServerUrl()), {}, '동기화 데이터 조회에 실패했습니다.');
     return (await response.json()) as SyncPayloadV2;
   }
 
   private async pushSnapshot(payload: SyncPayloadV2): Promise<void> {
-    const response = await fetch(new URL('/sync', this.authService.getServerUrl()), {
+    const response = await this.fetchWithAuthRetry(new URL('/sync', this.authService.getServerUrl()), {
       method: 'POST',
       headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${this.authService.getAccessToken()}`
+        'Content-Type': 'application/json'
       },
       body: JSON.stringify(payload)
-    });
-    if (!response.ok) {
-      throw new Error(await toApiErrorMessage(response, '동기화 업로드에 실패했습니다.'));
-    }
+    }, '동기화 업로드에 실패했습니다.');
+    void response;
   }
 
   private async buildEncryptedSnapshot(includeDeletions: boolean): Promise<SyncPayloadV2> {
@@ -373,6 +436,11 @@ export class SyncService {
       ...this.state,
       ...patch
     };
+    this.stateStorage.updateSyncState({
+      lastSuccessfulSyncAt: this.state.lastSuccessfulSyncAt ?? null,
+      pendingPush: this.state.pendingPush,
+      errorMessage: this.state.errorMessage ?? null
+    });
     this.activityLogs.append('info', 'ssh', '동기화 상태가 변경되었습니다.', {
       status: this.state.status,
       pendingPush: this.state.pendingPush,

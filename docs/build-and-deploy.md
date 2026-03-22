@@ -110,8 +110,15 @@ npm run build --workspace @dolssh/desktop
 현재 이 명령이 하는 일:
 
 - Electron main/preload/renderer 번들을 빌드
+- `sync:runtime-deps`로 hoisted 런타임 의존성을 `apps/desktop/node_modules` 아래에 다시 맞춤
 - Electron Forge로 앱 패키징
 - 로컬 머신 기준으로 실행 가능한 앱 번들 생성
+
+`sync:runtime-deps`를 남겨둔 이유:
+
+- 현재 desktop은 monorepo hoisting을 쓰고 있고,
+- Forge 패키징은 `apps/desktop/node_modules`를 기준으로 파일을 모으기 때문에,
+- 이 단계가 없으면 런타임 의존성이 패키지 앱에 누락될 수 있습니다.
 
 아직 하지 않는 일:
 
@@ -158,8 +165,8 @@ npm run release:dist:win
 
 참고:
 
-- macOS에서 Windows 크로스빌드는 `better-sqlite3`, `keytar` 때문에 환경 의존성이 큽니다.
-- 실패 시 최후의 fallback은 Windows 전용 빌드 머신 또는 VM입니다.
+- 데스크톱 로컬 저장소는 파일 기반이라 네이티브 DB/키체인 모듈 의존성이 없습니다.
+- 그래도 Windows 아티팩트는 실제 Windows 머신 또는 CI runner에서 한 번 검증하는 것을 권장합니다.
 
 ## GitHub Releases 업로드
 
@@ -171,7 +178,7 @@ npm run release:dist:win
 
 참고:
 
-- access token은 이번 실행 동안만 메모리에 유지되고, 파일/SQLite/키체인에는 저장하지 않습니다.
+- access token은 이번 실행 동안만 메모리에 유지되고, 로컬 파일이나 encrypted store에 저장하지 않습니다.
 - 필요하면 로컬 개발용으로만 `DOLSSH_GITHUB_OAUTH_CLIENT_ID` 환경변수 override를 사용할 수 있지만, 기본 흐름은 브라우저 로그인만 사용하는 방식입니다.
 
 ### 자동 업로드

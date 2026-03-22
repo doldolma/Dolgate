@@ -1,4 +1,4 @@
-import type { AuthState } from '@dolssh/shared';
+import type { AuthState } from '@shared';
 
 interface LoginGateProps {
   authState: AuthState;

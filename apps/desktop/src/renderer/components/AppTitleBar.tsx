@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import type { TerminalTab, UpdateState } from '@dolssh/shared';
+import type { TerminalTab, UpdateState } from '@shared';
 
 interface AppTitleBarProps {
   tabs: TerminalTab[];

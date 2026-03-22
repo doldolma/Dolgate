@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import Fuse from 'fuse.js';
-import type { GroupRecord, HostRecord, TerminalTab } from '@dolssh/shared';
+import type { GroupRecord, HostRecord, TerminalTab } from '@shared';
 
 interface HostBrowserProps {
   hosts: HostRecord[];

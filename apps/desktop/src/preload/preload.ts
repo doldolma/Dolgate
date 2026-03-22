@@ -20,7 +20,7 @@ import type {
   UpdateEvent,
   TransferJobEvent,
   TransferStartInput
-} from '@dolssh/shared';
+} from '@shared';
 import { ipcChannels } from '../common/ipc-channels';
 
 const streamListeners = new Map<string, Set<(chunk: Uint8Array) => void>>();

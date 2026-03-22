@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import type { FileEntry, HostRecord, SftpPaneId, TransferJob } from '@dolssh/shared';
+import type { FileEntry, HostRecord, SftpPaneId, TransferJob } from '@shared';
 import type { PendingConflictDialog, SftpPaneState, SftpSourceKind, SftpState } from '../store/createAppStore';
 
 interface SftpWorkspaceProps {

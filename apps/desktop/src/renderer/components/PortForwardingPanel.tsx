@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import type { HostRecord, PortForwardDraft, PortForwardRuleRecord, PortForwardRuntimeRecord } from '@dolssh/shared';
+import type { HostRecord, PortForwardDraft, PortForwardRuleRecord, PortForwardRuntimeRecord } from '@shared';
 
 interface PortForwardingPanelProps {
   hosts: HostRecord[];

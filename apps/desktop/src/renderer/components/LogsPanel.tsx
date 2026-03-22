@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import type { ActivityLogCategory, ActivityLogLevel, ActivityLogRecord } from '@dolssh/shared';
+import type { ActivityLogCategory, ActivityLogLevel, ActivityLogRecord } from '@shared';
 
 interface LogsPanelProps {
   logs: ActivityLogRecord[];

@@ -1,7 +1,7 @@
 import { app } from 'electron';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import type { DirectoryListing, FileEntry, FileEntryKind } from '@dolssh/shared';
+import type { DirectoryListing, FileEntry, FileEntryKind } from '@shared';
 
 function toIsoTime(valueMs: number): string {
   return new Date(valueMs).toISOString();
