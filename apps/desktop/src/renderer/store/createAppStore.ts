@@ -25,13 +25,50 @@ import type {
   TransferStartInput
 } from '@shared';
 
-export type WorkspaceTabId = 'home' | 'sftp' | string;
+export type SessionWorkspaceTabId = `session:${string}`;
+export type SplitWorkspaceTabId = `workspace:${string}`;
+export type WorkspaceTabId = 'home' | 'sftp' | SessionWorkspaceTabId | SplitWorkspaceTabId;
 export type HomeSection = 'hosts' | 'portForwarding' | 'knownHosts' | 'logs' | 'keychain' | 'settings';
 export type SftpSourceKind = 'local' | 'host';
+export type WorkspaceDropDirection = 'left' | 'right' | 'top' | 'bottom';
 export type HostDrawerState =
   | { mode: 'closed' }
   | { mode: 'create'; defaultGroupPath: string | null }
   | { mode: 'edit'; hostId: string };
+
+export interface WorkspaceLeafNode {
+  id: string;
+  kind: 'leaf';
+  sessionId: string;
+}
+
+export interface WorkspaceSplitNode {
+  id: string;
+  kind: 'split';
+  axis: 'horizontal' | 'vertical';
+  ratio: number;
+  first: WorkspaceLayoutNode;
+  second: WorkspaceLayoutNode;
+}
+
+export type WorkspaceLayoutNode = WorkspaceLeafNode | WorkspaceSplitNode;
+
+export interface WorkspaceTab {
+  id: string;
+  title: string;
+  layout: WorkspaceLayoutNode;
+  activeSessionId: string;
+}
+
+export type DynamicTabStripItem =
+  | {
+      kind: 'session';
+      sessionId: string;
+    }
+  | {
+      kind: 'workspace';
+      workspaceId: string;
+    };
 
 export interface SftpPaneState {
   id: SftpPaneId;
@@ -89,6 +126,8 @@ export interface AppState {
   hosts: HostRecord[];
   groups: GroupRecord[];
   tabs: TerminalTab[];
+  workspaces: WorkspaceTab[];
+  tabStrip: DynamicTabStripItem[];
   portForwards: PortForwardRuleRecord[];
   portForwardRuntimes: PortForwardRuntimeRecord[];
   knownHosts: KnownHostRecord[];
@@ -107,6 +146,7 @@ export interface AppState {
   activateHome: () => void;
   activateSftp: () => void;
   activateSession: (sessionId: string) => void;
+  activateWorkspace: (workspaceId: string) => void;
   openHomeSection: (section: HomeSection) => void;
   openCreateHostDrawer: () => void;
   openEditHostDrawer: (hostId: string) => void;
@@ -120,6 +160,11 @@ export interface AppState {
   removeHost: (hostId: string) => Promise<void>;
   connectHost: (hostId: string, cols: number, rows: number) => Promise<void>;
   disconnectTab: (sessionId: string) => Promise<void>;
+  closeWorkspace: (workspaceId: string) => Promise<void>;
+  splitSessionIntoWorkspace: (sessionId: string, direction: WorkspaceDropDirection, targetSessionId?: string) => boolean;
+  detachSessionFromWorkspace: (workspaceId: string, sessionId: string) => void;
+  focusWorkspaceSession: (workspaceId: string, sessionId: string) => void;
+  resizeWorkspaceSplit: (workspaceId: string, splitId: string, ratio: number) => void;
   updateSettings: (input: Partial<AppSettings>) => Promise<void>;
   savePortForward: (ruleId: string | null, draft: PortForwardDraft) => Promise<void>;
   removePortForward: (ruleId: string) => Promise<void>;
@@ -219,6 +264,213 @@ function sortLogs(records: ActivityLogRecord[]): ActivityLogRecord[] {
 
 function sortKeychainEntries(entries: SecretMetadataRecord[]): SecretMetadataRecord[] {
   return [...entries].sort((a, b) => a.label.localeCompare(b.label) || a.secretRef.localeCompare(b.secretRef));
+}
+
+function asSessionTabId(sessionId: string): SessionWorkspaceTabId {
+  return `session:${sessionId}`;
+}
+
+function asWorkspaceTabId(workspaceId: string): SplitWorkspaceTabId {
+  return `workspace:${workspaceId}`;
+}
+
+function createWorkspaceLeaf(sessionId: string): WorkspaceLeafNode {
+  return {
+    id: globalThis.crypto.randomUUID(),
+    kind: 'leaf',
+    sessionId
+  };
+}
+
+function directionAxis(direction: WorkspaceDropDirection): WorkspaceSplitNode['axis'] {
+  return direction === 'left' || direction === 'right' ? 'horizontal' : 'vertical';
+}
+
+function createWorkspaceSplit(
+  existingSessionId: string,
+  incomingSessionId: string,
+  direction: WorkspaceDropDirection
+): WorkspaceLayoutNode {
+  const existingLeaf = createWorkspaceLeaf(existingSessionId);
+  const incomingLeaf = createWorkspaceLeaf(incomingSessionId);
+  const prependIncoming = direction === 'left' || direction === 'top';
+  return {
+    id: globalThis.crypto.randomUUID(),
+    kind: 'split',
+    axis: directionAxis(direction),
+    ratio: 0.5,
+    first: prependIncoming ? incomingLeaf : existingLeaf,
+    second: prependIncoming ? existingLeaf : incomingLeaf
+  };
+}
+
+function listWorkspaceSessionIds(node: WorkspaceLayoutNode): string[] {
+  if (node.kind === 'leaf') {
+    return [node.sessionId];
+  }
+  return [...listWorkspaceSessionIds(node.first), ...listWorkspaceSessionIds(node.second)];
+}
+
+function countWorkspaceSessions(node: WorkspaceLayoutNode): number {
+  return listWorkspaceSessionIds(node).length;
+}
+
+function findFirstWorkspaceSessionId(node: WorkspaceLayoutNode): string {
+  return node.kind === 'leaf' ? node.sessionId : findFirstWorkspaceSessionId(node.first);
+}
+
+function insertSessionIntoWorkspaceLayout(
+  node: WorkspaceLayoutNode,
+  targetSessionId: string,
+  incomingSessionId: string,
+  direction: WorkspaceDropDirection
+): { layout: WorkspaceLayoutNode; inserted: boolean } {
+  if (node.kind === 'leaf') {
+    if (node.sessionId !== targetSessionId) {
+      return { layout: node, inserted: false };
+    }
+    return {
+      layout: createWorkspaceSplit(targetSessionId, incomingSessionId, direction),
+      inserted: true
+    };
+  }
+
+  const nextFirst = insertSessionIntoWorkspaceLayout(node.first, targetSessionId, incomingSessionId, direction);
+  if (nextFirst.inserted) {
+    return {
+      layout: {
+        ...node,
+        first: nextFirst.layout
+      },
+      inserted: true
+    };
+  }
+
+  const nextSecond = insertSessionIntoWorkspaceLayout(node.second, targetSessionId, incomingSessionId, direction);
+  if (nextSecond.inserted) {
+    return {
+      layout: {
+        ...node,
+        second: nextSecond.layout
+      },
+      inserted: true
+    };
+  }
+
+  return { layout: node, inserted: false };
+}
+
+function removeSessionFromWorkspaceLayout(node: WorkspaceLayoutNode, sessionId: string): WorkspaceLayoutNode | null {
+  if (node.kind === 'leaf') {
+    return node.sessionId === sessionId ? null : node;
+  }
+
+  const nextFirst = removeSessionFromWorkspaceLayout(node.first, sessionId);
+  const nextSecond = removeSessionFromWorkspaceLayout(node.second, sessionId);
+
+  if (!nextFirst && !nextSecond) {
+    return null;
+  }
+  if (!nextFirst) {
+    return nextSecond;
+  }
+  if (!nextSecond) {
+    return nextFirst;
+  }
+
+  return {
+    ...node,
+    first: nextFirst,
+    second: nextSecond
+  };
+}
+
+function updateWorkspaceSplitRatio(node: WorkspaceLayoutNode, splitId: string, ratio: number): WorkspaceLayoutNode {
+  if (node.kind === 'leaf') {
+    return node;
+  }
+
+  const clampedRatio = Math.min(0.8, Math.max(0.2, ratio));
+  if (node.id === splitId) {
+    return {
+      ...node,
+      ratio: clampedRatio
+    };
+  }
+
+  return {
+    ...node,
+    first: updateWorkspaceSplitRatio(node.first, splitId, clampedRatio),
+    second: updateWorkspaceSplitRatio(node.second, splitId, clampedRatio)
+  };
+}
+
+function buildSessionTitle(label: string, hostId: string, tabs: TerminalTab[]): string {
+  const existingTitles = new Set(tabs.filter((tab) => tab.hostId === hostId).map((tab) => tab.title));
+  if (!existingTitles.has(label)) {
+    return label;
+  }
+
+  let suffix = 1;
+  while (existingTitles.has(`${label} (${suffix})`)) {
+    suffix += 1;
+  }
+  return `${label} (${suffix})`;
+}
+
+function buildWorkspaceTitle(workspaces: WorkspaceTab[]): string {
+  const existingTitles = new Set(workspaces.map((workspace) => workspace.title));
+  if (!existingTitles.has('Workspace')) {
+    return 'Workspace';
+  }
+
+  let suffix = 1;
+  while (existingTitles.has(`Workspace (${suffix})`)) {
+    suffix += 1;
+  }
+  return `Workspace (${suffix})`;
+}
+
+function resolveNextVisibleTab(
+  tabStrip: DynamicTabStripItem[],
+  removedIndex: number
+): WorkspaceTabId {
+  const nextItem = tabStrip[removedIndex] ?? tabStrip[removedIndex - 1];
+  if (!nextItem) {
+    return 'home';
+  }
+  return nextItem.kind === 'session' ? asSessionTabId(nextItem.sessionId) : asWorkspaceTabId(nextItem.workspaceId);
+}
+
+function resolveAdjacentTarget(
+  tabStrip: DynamicTabStripItem[],
+  workspaces: WorkspaceTab[],
+  sessionId: string
+): DynamicTabStripItem | null {
+  const currentIndex = tabStrip.findIndex((item) => item.kind === 'session' && item.sessionId === sessionId);
+  if (currentIndex < 0) {
+    return null;
+  }
+
+  const candidateIndexes = [currentIndex + 1, currentIndex - 1];
+  for (const index of candidateIndexes) {
+    const candidate = tabStrip[index];
+    if (!candidate) {
+      continue;
+    }
+    if (candidate.kind === 'workspace') {
+      const workspace = workspaces.find((item) => item.id === candidate.workspaceId);
+      if (!workspace) {
+        continue;
+      }
+      if (countWorkspaceSessions(workspace.layout) >= 4) {
+        continue;
+      }
+    }
+    return candidate;
+  }
+
+  return null;
 }
 
 function normalizeGroupPath(groupPath?: string | null): string | null {
@@ -391,14 +643,16 @@ export function createAppStore(api: DesktopApi) {
       if (!host) {
         return;
       }
+      const title = buildSessionTitle(host.label, action.hostId, get().tabs);
       const { sessionId } = await api.ssh.connect({
         hostId: action.hostId,
+        title,
         cols: action.cols,
         rows: action.rows
       });
       const tab: TerminalTab = {
         id: sessionId,
-        title: host.label,
+        title,
         hostId: action.hostId,
         sessionId,
         status: 'connecting',
@@ -406,7 +660,8 @@ export function createAppStore(api: DesktopApi) {
       };
       set((state) => ({
         tabs: [...state.tabs.filter((item) => item.id !== sessionId), tab],
-        activeWorkspaceTab: sessionId,
+        tabStrip: [...state.tabStrip.filter((item) => !(item.kind === 'session' && item.sessionId === sessionId)), { kind: 'session', sessionId }],
+        activeWorkspaceTab: asSessionTabId(sessionId),
         homeSection: 'hosts',
         hostDrawer: { mode: 'closed' }
       }));
@@ -493,6 +748,8 @@ export function createAppStore(api: DesktopApi) {
       hosts: [],
       groups: [],
       tabs: [],
+      workspaces: [],
+      tabStrip: [],
       portForwards: [],
       portForwardRuntimes: [],
       knownHosts: [],
@@ -510,7 +767,8 @@ export function createAppStore(api: DesktopApi) {
       setSearchQuery: (value) => set({ searchQuery: value }),
       activateHome: () => set({ activeWorkspaceTab: 'home' }),
       activateSftp: () => set({ activeWorkspaceTab: 'sftp' }),
-      activateSession: (sessionId) => set({ activeWorkspaceTab: sessionId }),
+      activateSession: (sessionId) => set({ activeWorkspaceTab: asSessionTabId(sessionId) }),
+      activateWorkspace: (workspaceId) => set({ activeWorkspaceTab: asWorkspaceTabId(workspaceId) }),
       openHomeSection: (section) =>
         set({
           activeWorkspaceTab: 'home',
@@ -554,6 +812,8 @@ export function createAppStore(api: DesktopApi) {
           hosts: sortHosts(hosts),
           groups: sortGroups(groups),
           tabs,
+          workspaces: [],
+          tabStrip: tabs.map((tab) => ({ kind: 'session' as const, sessionId: tab.sessionId })),
           portForwards: sortPortForwards(snapshot.rules),
           portForwardRuntimes: snapshot.runtimes,
           knownHosts: sortKnownHosts(knownHosts),
@@ -658,6 +918,182 @@ export function createAppStore(api: DesktopApi) {
                   lastEventAt: new Date().toISOString()
                 }
               : tab
+          )
+        }));
+      },
+      closeWorkspace: async (workspaceId) => {
+        const workspace = get().workspaces.find((item) => item.id === workspaceId);
+        if (!workspace) {
+          return;
+        }
+
+        const sessionIds = listWorkspaceSessionIds(workspace.layout);
+        await Promise.all(sessionIds.map((sessionId) => api.ssh.disconnect(sessionId)));
+        set((state) => {
+          const workspaceIndex = state.tabStrip.findIndex((item) => item.kind === 'workspace' && item.workspaceId === workspaceId);
+          const nextTabStrip = state.tabStrip.filter((item) => !(item.kind === 'workspace' && item.workspaceId === workspaceId));
+          const nextActive =
+            state.activeWorkspaceTab === asWorkspaceTabId(workspaceId)
+              ? resolveNextVisibleTab(nextTabStrip, workspaceIndex >= 0 ? workspaceIndex : nextTabStrip.length)
+              : state.activeWorkspaceTab;
+
+          return {
+            workspaces: state.workspaces.filter((item) => item.id !== workspaceId),
+            tabStrip: nextTabStrip,
+            tabs: state.tabs.map((tab) =>
+              sessionIds.includes(tab.sessionId)
+                ? {
+                    ...tab,
+                    status: 'disconnecting',
+                    lastEventAt: new Date().toISOString()
+                  }
+                : tab
+            ),
+            activeWorkspaceTab: nextActive
+          };
+        });
+      },
+      splitSessionIntoWorkspace: (sessionId, direction, targetSessionId) => {
+        const state = get();
+        const adjacent = resolveAdjacentTarget(state.tabStrip, state.workspaces, sessionId);
+        if (!adjacent) {
+          return false;
+        }
+
+        if (adjacent.kind === 'session') {
+          const currentIndex = state.tabStrip.findIndex((item) => item.kind === 'session' && item.sessionId === sessionId);
+          const adjacentIndex = state.tabStrip.findIndex((item) => item.kind === 'session' && item.sessionId === adjacent.sessionId);
+          if (currentIndex < 0 || adjacentIndex < 0) {
+            return false;
+          }
+
+          const workspaceId = globalThis.crypto.randomUUID();
+          const workspace: WorkspaceTab = {
+            id: workspaceId,
+            title: buildWorkspaceTitle(state.workspaces),
+            layout: createWorkspaceSplit(adjacent.sessionId, sessionId, direction),
+            activeSessionId: sessionId
+          };
+          const nextTabStrip = state.tabStrip.filter(
+            (item) =>
+              !(
+                item.kind === 'session' &&
+                (item.sessionId === sessionId || item.sessionId === adjacent.sessionId)
+              )
+          );
+          const insertIndex = Math.min(currentIndex, adjacentIndex);
+          nextTabStrip.splice(insertIndex, 0, { kind: 'workspace', workspaceId });
+
+          set({
+            workspaces: [...state.workspaces, workspace],
+            tabStrip: nextTabStrip,
+            activeWorkspaceTab: asWorkspaceTabId(workspaceId)
+          });
+          return true;
+        }
+
+        const workspace = state.workspaces.find((item) => item.id === adjacent.workspaceId);
+        if (!workspace || countWorkspaceSessions(workspace.layout) >= 4) {
+          return false;
+        }
+
+        const resolvedTargetSessionId =
+          targetSessionId && listWorkspaceSessionIds(workspace.layout).includes(targetSessionId)
+            ? targetSessionId
+            : listWorkspaceSessionIds(workspace.layout).includes(workspace.activeSessionId)
+              ? workspace.activeSessionId
+              : findFirstWorkspaceSessionId(workspace.layout);
+        const nextLayout = insertSessionIntoWorkspaceLayout(workspace.layout, resolvedTargetSessionId, sessionId, direction);
+        if (!nextLayout.inserted) {
+          return false;
+        }
+
+        set({
+          workspaces: state.workspaces.map((item) =>
+            item.id === workspace.id
+              ? {
+                  ...item,
+                  layout: nextLayout.layout,
+                  activeSessionId: sessionId
+                }
+              : item
+          ),
+          tabStrip: state.tabStrip.filter((item) => !(item.kind === 'session' && item.sessionId === sessionId)),
+          activeWorkspaceTab: asWorkspaceTabId(workspace.id)
+        });
+        return true;
+      },
+      detachSessionFromWorkspace: (workspaceId, sessionId) => {
+        const state = get();
+        const workspace = state.workspaces.find((item) => item.id === workspaceId);
+        if (!workspace) {
+          return;
+        }
+
+        const workspaceIndex = state.tabStrip.findIndex((item) => item.kind === 'workspace' && item.workspaceId === workspaceId);
+        const reducedLayout = removeSessionFromWorkspaceLayout(workspace.layout, sessionId);
+        if (!reducedLayout) {
+          return;
+        }
+
+        const insertIndex = workspaceIndex < 0 ? state.tabStrip.length : workspaceIndex + 1;
+
+        if (reducedLayout.kind === 'leaf') {
+          const nextTabStrip = state.tabStrip.filter((item) => !(item.kind === 'workspace' && item.workspaceId === workspaceId));
+          nextTabStrip.splice(workspaceIndex >= 0 ? workspaceIndex : nextTabStrip.length, 0, { kind: 'session', sessionId: reducedLayout.sessionId });
+          nextTabStrip.splice(
+            workspaceIndex >= 0 ? workspaceIndex + 1 : nextTabStrip.length,
+            0,
+            { kind: 'session', sessionId }
+          );
+
+          set({
+            workspaces: state.workspaces.filter((item) => item.id !== workspaceId),
+            tabStrip: nextTabStrip,
+            activeWorkspaceTab: asSessionTabId(sessionId)
+          });
+          return;
+        }
+
+        const nextTabStrip = [...state.tabStrip];
+        nextTabStrip.splice(insertIndex, 0, { kind: 'session', sessionId });
+        set({
+          workspaces: state.workspaces.map((item) =>
+            item.id === workspaceId
+              ? {
+                  ...item,
+                  layout: reducedLayout,
+                  activeSessionId:
+                    item.activeSessionId === sessionId ? findFirstWorkspaceSessionId(reducedLayout) : item.activeSessionId
+                }
+              : item
+          ),
+          tabStrip: nextTabStrip,
+          activeWorkspaceTab: asSessionTabId(sessionId)
+        });
+      },
+      focusWorkspaceSession: (workspaceId, sessionId) => {
+        set((state) => ({
+          workspaces: state.workspaces.map((workspace) =>
+            workspace.id === workspaceId
+              ? {
+                  ...workspace,
+                  activeSessionId: sessionId
+                }
+              : workspace
+          ),
+          activeWorkspaceTab: asWorkspaceTabId(workspaceId)
+        }));
+      },
+      resizeWorkspaceSplit: (workspaceId, splitId, ratio) => {
+        set((state) => ({
+          workspaces: state.workspaces.map((workspace) =>
+            workspace.id === workspaceId
+              ? {
+                  ...workspace,
+                  layout: updateWorkspaceSplitRatio(workspace.layout, splitId, ratio)
+                }
+              : workspace
           )
         }));
       },
@@ -768,9 +1204,53 @@ export function createAppStore(api: DesktopApi) {
         set((state) => {
           if (event.type === 'closed') {
             const tabs = state.tabs.filter((tab) => tab.sessionId !== sessionId);
+            const standaloneIndex = state.tabStrip.findIndex((item) => item.kind === 'session' && item.sessionId === sessionId);
+            let nextTabStrip = state.tabStrip.filter((item) => !(item.kind === 'session' && item.sessionId === sessionId));
+            let nextWorkspaces = state.workspaces;
+            let nextActive = state.activeWorkspaceTab;
+
+            const owningWorkspace = state.workspaces.find((workspace) => listWorkspaceSessionIds(workspace.layout).includes(sessionId));
+            if (owningWorkspace) {
+              const reducedLayout = removeSessionFromWorkspaceLayout(owningWorkspace.layout, sessionId);
+              if (!reducedLayout) {
+                nextWorkspaces = state.workspaces.filter((workspace) => workspace.id !== owningWorkspace.id);
+                const workspaceIndex = state.tabStrip.findIndex((item) => item.kind === 'workspace' && item.workspaceId === owningWorkspace.id);
+                nextTabStrip = state.tabStrip.filter((item) => !(item.kind === 'workspace' && item.workspaceId === owningWorkspace.id));
+                if (nextActive === asWorkspaceTabId(owningWorkspace.id)) {
+                  nextActive = resolveNextVisibleTab(nextTabStrip, workspaceIndex >= 0 ? workspaceIndex : nextTabStrip.length);
+                }
+              } else if (reducedLayout.kind === 'leaf') {
+                const workspaceIndex = state.tabStrip.findIndex((item) => item.kind === 'workspace' && item.workspaceId === owningWorkspace.id);
+                nextWorkspaces = state.workspaces.filter((workspace) => workspace.id !== owningWorkspace.id);
+                nextTabStrip = state.tabStrip.filter((item) => !(item.kind === 'workspace' && item.workspaceId === owningWorkspace.id));
+                nextTabStrip.splice(workspaceIndex >= 0 ? workspaceIndex : nextTabStrip.length, 0, {
+                  kind: 'session',
+                  sessionId: reducedLayout.sessionId
+                });
+                if (nextActive === asWorkspaceTabId(owningWorkspace.id)) {
+                  nextActive = asSessionTabId(reducedLayout.sessionId);
+                }
+              } else {
+                nextWorkspaces = state.workspaces.map((workspace) =>
+                  workspace.id === owningWorkspace.id
+                    ? {
+                        ...workspace,
+                        layout: reducedLayout,
+                        activeSessionId:
+                          workspace.activeSessionId === sessionId ? findFirstWorkspaceSessionId(reducedLayout) : workspace.activeSessionId
+                      }
+                    : workspace
+                );
+              }
+            } else if (nextActive === asSessionTabId(sessionId)) {
+              nextActive = resolveNextVisibleTab(nextTabStrip, standaloneIndex >= 0 ? standaloneIndex : nextTabStrip.length);
+            }
+
             return {
               tabs,
-              activeWorkspaceTab: state.activeWorkspaceTab === sessionId ? 'home' : state.activeWorkspaceTab
+              workspaces: nextWorkspaces,
+              tabStrip: nextTabStrip,
+              activeWorkspaceTab: nextActive
             };
           }
 

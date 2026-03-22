@@ -1,15 +1,78 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Terminal } from 'xterm';
 import { FitAddon } from 'xterm-addon-fit';
+import type { AppTheme, TerminalTab } from '@shared';
+import type { WorkspaceDropDirection, WorkspaceLayoutNode, WorkspaceTab } from '../store/createAppStore';
 import { useAppStore } from '../store/appStore';
 import { createTerminalResizeScheduler } from './terminal-resize';
-import type { AppTheme } from '@shared';
+
+interface DraggedSessionPayload {
+  sessionId: string;
+  source: 'standalone-tab' | 'workspace-pane';
+  workspaceId?: string;
+}
 
 interface TerminalThemePalette {
   background: string;
   foreground: string;
   cursor: string;
   selectionBackground: string;
+}
+
+interface Rect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+interface SessionPlacement {
+  sessionId: string;
+  rect: Rect;
+}
+
+interface SplitHandlePlacement {
+  splitId: string;
+  axis: 'horizontal' | 'vertical';
+  rect: Rect;
+  ratio: number;
+}
+
+interface DropPreview {
+  direction: WorkspaceDropDirection;
+  targetSessionId?: string;
+  rect: Rect;
+}
+
+interface TerminalSessionViewProps {
+  sessionId: string;
+  title: string;
+  visible: boolean;
+  active: boolean;
+  layoutKey: string;
+  theme: Exclude<AppTheme, 'system'>;
+  style?: React.CSSProperties;
+  showHeader?: boolean;
+  draggingDisabled?: boolean;
+  onFocus?: () => void;
+  onClose?: () => Promise<void>;
+  onStartDrag?: () => void;
+  onEndDrag?: () => void;
+}
+
+interface TerminalWorkspaceProps {
+  tabs: TerminalTab[];
+  activeSessionId: string | null;
+  activeWorkspace: WorkspaceTab | null;
+  draggedSession: DraggedSessionPayload | null;
+  canDropDraggedSession: boolean;
+  theme: Exclude<AppTheme, 'system'>;
+  onCloseSession: (sessionId: string) => Promise<void>;
+  onStartPaneDrag: (workspaceId: string, sessionId: string) => void;
+  onEndSessionDrag: () => void;
+  onSplitSessionDrop: (sessionId: string, direction: WorkspaceDropDirection, targetSessionId?: string) => boolean;
+  onFocusWorkspaceSession: (workspaceId: string, sessionId: string) => void;
+  onResizeWorkspaceSplit: (workspaceId: string, splitId: string, ratio: number) => void;
 }
 
 function terminalTheme(theme: Exclude<AppTheme, 'system'>): TerminalThemePalette {
@@ -30,14 +93,134 @@ function terminalTheme(theme: Exclude<AppTheme, 'system'>): TerminalThemePalette
   };
 }
 
-interface TerminalSessionViewProps {
-  sessionId: string;
-  active: boolean;
-  theme: Exclude<AppTheme, 'system'>;
+function toPercentRectStyle(rect: Rect): React.CSSProperties {
+  return {
+    left: `${rect.x * 100}%`,
+    top: `${rect.y * 100}%`,
+    width: `${rect.width * 100}%`,
+    height: `${rect.height * 100}%`
+  };
 }
 
-function TerminalSessionView({ sessionId, active, theme }: TerminalSessionViewProps) {
-  // xterm 인스턴스는 React state가 아니라 ref로 들고 있어야 리렌더마다 재생성되지 않는다.
+function directionPreviewRect(rect: Rect, direction: WorkspaceDropDirection): Rect {
+  if (direction === 'left') {
+    return { ...rect, width: rect.width * 0.5 };
+  }
+  if (direction === 'right') {
+    return { ...rect, x: rect.x + rect.width * 0.5, width: rect.width * 0.5 };
+  }
+  if (direction === 'top') {
+    return { ...rect, height: rect.height * 0.5 };
+  }
+  return {
+    ...rect,
+    y: rect.y + rect.height * 0.5,
+    height: rect.height * 0.5
+  };
+}
+
+function resolveDropDirection(clientX: number, clientY: number, rect: DOMRect): WorkspaceDropDirection {
+  const normalizedX = rect.width <= 0 ? 0.5 : Math.min(1, Math.max(0, (clientX - rect.left) / rect.width));
+  const normalizedY = rect.height <= 0 ? 0.5 : Math.min(1, Math.max(0, (clientY - rect.top) / rect.height));
+  const distances: Array<{ direction: WorkspaceDropDirection; value: number }> = [
+    { direction: 'left', value: normalizedX },
+    { direction: 'right', value: 1 - normalizedX },
+    { direction: 'top', value: normalizedY },
+    { direction: 'bottom', value: 1 - normalizedY }
+  ];
+
+  distances.sort((left, right) => left.value - right.value);
+  return distances[0].direction;
+}
+
+function collectWorkspacePlacements(
+  node: WorkspaceLayoutNode,
+  rect: Rect,
+  placements: SessionPlacement[],
+  handles: SplitHandlePlacement[]
+) {
+  if (node.kind === 'leaf') {
+    placements.push({
+      sessionId: node.sessionId,
+      rect
+    });
+    return;
+  }
+
+  handles.push({
+    splitId: node.id,
+    axis: node.axis,
+    rect,
+    ratio: node.ratio
+  });
+
+  if (node.axis === 'horizontal') {
+    const firstWidth = rect.width * node.ratio;
+    collectWorkspacePlacements(
+      node.first,
+      {
+        x: rect.x,
+        y: rect.y,
+        width: firstWidth,
+        height: rect.height
+      },
+      placements,
+      handles
+    );
+    collectWorkspacePlacements(
+      node.second,
+      {
+        x: rect.x + firstWidth,
+        y: rect.y,
+        width: rect.width - firstWidth,
+        height: rect.height
+      },
+      placements,
+      handles
+    );
+    return;
+  }
+
+  const firstHeight = rect.height * node.ratio;
+  collectWorkspacePlacements(
+    node.first,
+    {
+      x: rect.x,
+      y: rect.y,
+      width: rect.width,
+      height: firstHeight
+    },
+    placements,
+    handles
+  );
+  collectWorkspacePlacements(
+    node.second,
+    {
+      x: rect.x,
+      y: rect.y + firstHeight,
+      width: rect.width,
+      height: rect.height - firstHeight
+    },
+    placements,
+    handles
+  );
+}
+
+function TerminalSessionView({
+  sessionId,
+  title,
+  visible,
+  active,
+  layoutKey,
+  theme,
+  style,
+  showHeader = false,
+  draggingDisabled = false,
+  onFocus,
+  onClose,
+  onStartDrag,
+  onEndDrag
+}: TerminalSessionViewProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const terminalRef = useRef<Terminal | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
@@ -58,7 +241,6 @@ function TerminalSessionView({ sessionId, active, theme }: TerminalSessionViewPr
       return;
     }
 
-    // 터미널 인스턴스는 세션별로 한 번만 생성한다.
     const terminal = new Terminal({
       cursorBlink: true,
       fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
@@ -70,11 +252,9 @@ function TerminalSessionView({ sessionId, active, theme }: TerminalSessionViewPr
     terminal.open(containerRef.current);
     fitAddon.fit();
     terminal.onData((data) => {
-      // 사용자가 입력한 키 입력을 즉시 SSH 코어로 흘려보낸다.
       void window.dolssh.ssh.write(sessionId, data);
     });
     terminal.onBinary((data) => {
-      // onBinary는 마우스 보고처럼 raw byte가 필요한 입력을 위해 별도 경로를 사용한다.
       const bytes = Uint8Array.from(data, (char) => char.charCodeAt(0));
       void window.dolssh.ssh.writeBinary(sessionId, bytes);
     });
@@ -90,14 +270,13 @@ function TerminalSessionView({ sessionId, active, theme }: TerminalSessionViewPr
         rows: terminal.rows
       }),
       afterResize: () => {
-        // 일부 macOS/Electron 조합에서는 fit 이후 canvas가 다시 그려지지 않아 refresh를 한 번 강제한다.
         refreshViewport();
       },
       sendResize: ({ cols, rows }) => window.dolssh.ssh.resize(sessionId, cols, rows)
     });
 
     const handlePointerActivate = () => {
-      // 클릭이나 포커스 이후에 viewport가 검게 보이는 경우를 막기 위해 layout 동기화와 repaint를 함께 건다.
+      onFocus?.();
       resizeSchedulerRef.current?.request();
       requestAnimationFrame(() => {
         refreshViewport();
@@ -117,7 +296,6 @@ function TerminalSessionView({ sessionId, active, theme }: TerminalSessionViewPr
     containerRef.current.addEventListener('focusout', handleFocusOut);
 
     const resizeObserver = new ResizeObserver(() => {
-      // 크기 변경은 즉시 감지하되, 실제 resize 전송은 같은 프레임 안에서 한 번만 실행한다.
       resizeSchedulerRef.current?.request();
     });
     resizeObserver.observe(containerRef.current);
@@ -138,7 +316,6 @@ function TerminalSessionView({ sessionId, active, theme }: TerminalSessionViewPr
   }, [sessionId]);
 
   useEffect(() => {
-    // xterm도 앱 테마 전환에 맞춰 즉시 색상을 바꿔 홈/세션의 시각 언어를 일관되게 유지한다.
     if (!terminalRef.current) {
       return;
     }
@@ -146,75 +323,346 @@ function TerminalSessionView({ sessionId, active, theme }: TerminalSessionViewPr
     refreshViewport();
   }, [theme]);
 
-  useEffect(() => {
-    // 터미널 출력은 renderer store를 거치지 않고 xterm에 직접 넣어 렌더 hot path를 짧게 유지한다.
-    return window.dolssh.ssh.onData(sessionId, (chunk) => {
-      terminalRef.current?.write(chunk);
-    });
-  }, [sessionId]);
+  useEffect(() => window.dolssh.ssh.onData(sessionId, (chunk) => {
+    terminalRef.current?.write(chunk);
+  }), [sessionId]);
 
   useEffect(() => {
-    if (active) {
-      // 탭이 활성화될 때 숨겨져 있던 동안 바뀐 레이아웃을 다음 프레임 기준으로 다시 측정한다.
+    if (!visible) {
+      return;
+    }
+    resizeSchedulerRef.current?.request();
+    requestAnimationFrame(() => {
+      resizeSchedulerRef.current?.request();
+      requestAnimationFrame(() => {
+        refreshViewport();
+      });
+    });
+  }, [layoutKey, visible]);
+
+  useEffect(() => {
+    if (active && visible) {
       terminalRef.current?.focus();
       resizeSchedulerRef.current?.request();
       requestAnimationFrame(() => {
         refreshViewport();
       });
     }
-  }, [active]);
+  }, [active, visible]);
 
   return (
-    <div className={`terminal-session ${active ? 'active' : ''}`}>
+    <div
+      className={`terminal-session ${visible ? 'visible' : 'hidden'} ${active ? 'active' : ''} ${showHeader ? 'terminal-session--pane' : ''}`}
+      style={style}
+      onMouseDown={() => {
+        onFocus?.();
+      }}
+    >
+      {showHeader ? (
+        <div
+          className={`terminal-pane-header ${active ? 'active' : ''}`}
+          draggable={!draggingDisabled}
+          onDragStart={(event) => {
+            if (draggingDisabled || !onStartDrag) {
+              event.preventDefault();
+              return;
+            }
+            event.dataTransfer.effectAllowed = 'move';
+            event.dataTransfer.setData('application/x-dolssh-session-id', sessionId);
+            onStartDrag();
+          }}
+          onDragEnd={() => {
+            onEndDrag?.();
+          }}
+        >
+          <button type="button" className="terminal-pane-header__title" onClick={onFocus}>
+            {title}
+          </button>
+          <button
+            type="button"
+            className="terminal-pane-header__close"
+            aria-label={`${title} 세션 종료`}
+            onClick={() => {
+              void onClose?.();
+            }}
+            disabled={!onClose || currentTab?.status === 'disconnecting'}
+          >
+            ×
+          </button>
+        </div>
+      ) : null}
       {currentTab?.errorMessage ? <div className="terminal-error-banner">{currentTab.errorMessage}</div> : null}
       <div ref={containerRef} className="terminal-canvas" />
     </div>
   );
 }
 
-interface TerminalWorkspaceProps {
-  sessionIds: string[];
-  activeTabId: string | null;
-  theme: Exclude<AppTheme, 'system'>;
-}
+export function TerminalWorkspace({
+  tabs,
+  activeSessionId,
+  activeWorkspace,
+  draggedSession,
+  canDropDraggedSession,
+  theme,
+  onCloseSession,
+  onStartPaneDrag,
+  onEndSessionDrag,
+  onSplitSessionDrop,
+  onFocusWorkspaceSession,
+  onResizeWorkspaceSplit
+}: TerminalWorkspaceProps) {
+  const workspaceRef = useRef<HTMLDivElement | null>(null);
+  const [dropPreview, setDropPreview] = useState<DropPreview | null>(null);
+  const [resizingHandle, setResizingHandle] = useState<SplitHandlePlacement | null>(null);
 
-export function TerminalWorkspace({ sessionIds, activeTabId, theme }: TerminalWorkspaceProps) {
-  if (sessionIds.length === 0) {
+  const workspaceLayout = useMemo(() => {
+    if (!activeWorkspace) {
+      return null;
+    }
+    const placements: SessionPlacement[] = [];
+    const handles: SplitHandlePlacement[] = [];
+    collectWorkspacePlacements(
+      activeWorkspace.layout,
+      {
+        x: 0,
+        y: 0,
+        width: 1,
+        height: 1
+      },
+      placements,
+      handles
+    );
+    return { placements, handles };
+  }, [activeWorkspace]);
+
+  useEffect(() => {
+    if (draggedSession?.source !== 'standalone-tab' || !canDropDraggedSession) {
+      setDropPreview(null);
+    }
+  }, [canDropDraggedSession, draggedSession]);
+
+  useEffect(() => {
+    if (!resizingHandle) {
+      return;
+    }
+
+    const handlePointerMove = (event: MouseEvent) => {
+      const container = workspaceRef.current;
+      if (!container || !activeWorkspace) {
+        return;
+      }
+      const bounds = container.getBoundingClientRect();
+      const splitLeft = bounds.left + resizingHandle.rect.x * bounds.width;
+      const splitTop = bounds.top + resizingHandle.rect.y * bounds.height;
+      const splitWidth = resizingHandle.rect.width * bounds.width;
+      const splitHeight = resizingHandle.rect.height * bounds.height;
+
+      if (resizingHandle.axis === 'horizontal' && splitWidth > 0) {
+        const ratio = (event.clientX - splitLeft) / splitWidth;
+        onResizeWorkspaceSplit(activeWorkspace.id, resizingHandle.splitId, ratio);
+        return;
+      }
+
+      if (resizingHandle.axis === 'vertical' && splitHeight > 0) {
+        const ratio = (event.clientY - splitTop) / splitHeight;
+        onResizeWorkspaceSplit(activeWorkspace.id, resizingHandle.splitId, ratio);
+      }
+    };
+
+    const handlePointerUp = () => {
+      setResizingHandle(null);
+    };
+
+    window.addEventListener('mousemove', handlePointerMove);
+    window.addEventListener('mouseup', handlePointerUp);
+    return () => {
+      window.removeEventListener('mousemove', handlePointerMove);
+      window.removeEventListener('mouseup', handlePointerUp);
+    };
+  }, [activeWorkspace, onResizeWorkspaceSplit, resizingHandle]);
+
+  if (tabs.length === 0) {
     return (
       <div className="terminal-empty">
         <div className="empty-state-card">
           <div className="section-title">연결 준비 완료</div>
           <h3>첫 SSH 세션을 시작해보세요</h3>
-          <p>오른쪽에서 호스트를 생성한 뒤 왼쪽 목록에서 Connect를 누르면 여기에서 원격 터미널 탭이 열립니다.</p>
-          <div className="empty-steps">
-            <div>
-              <strong>1</strong>
-              <span>Host Editor에 접속 정보를 입력합니다.</span>
-            </div>
-            <div>
-              <strong>2</strong>
-              <span>Create host로 저장합니다.</span>
-            </div>
-            <div>
-              <strong>3</strong>
-              <span>왼쪽 목록에서 Connect를 눌러 세션을 엽니다.</span>
-            </div>
-          </div>
+          <p>호스트 카드를 더블클릭하면 새 세션이 탭으로 열리고, 탭을 아래로 끌어내리면 여러 세션을 나란히 볼 수 있습니다.</p>
         </div>
       </div>
     );
   }
 
+  const visibleSessionIds = new Set<string>();
+  const placementBySessionId = new Map<string, SessionPlacement>();
+
+  if (activeWorkspace && workspaceLayout) {
+    for (const placement of workspaceLayout.placements) {
+      visibleSessionIds.add(placement.sessionId);
+      placementBySessionId.set(placement.sessionId, placement);
+    }
+  } else if (activeSessionId) {
+    visibleSessionIds.add(activeSessionId);
+    placementBySessionId.set(activeSessionId, {
+      sessionId: activeSessionId,
+      rect: { x: 0, y: 0, width: 1, height: 1 }
+    });
+  }
+
+  const handleStandaloneDropPreview = (event: React.DragEvent<HTMLDivElement>) => {
+    if (draggedSession?.source !== 'standalone-tab' || !canDropDraggedSession || !activeSessionId) {
+      return;
+    }
+    event.preventDefault();
+    const bounds = event.currentTarget.getBoundingClientRect();
+    const direction = resolveDropDirection(event.clientX, event.clientY, bounds);
+    const rootRect = { x: 0, y: 0, width: 1, height: 1 };
+    setDropPreview({
+      direction,
+      targetSessionId: activeSessionId,
+      rect: directionPreviewRect(rootRect, direction)
+    });
+  };
+
   return (
-    <div className="terminal-workspace">
-      {sessionIds.map((sessionId) => (
-        <TerminalSessionView
-          key={sessionId}
-          sessionId={sessionId}
-          active={activeTabId === sessionId}
-          theme={theme}
-        />
-      ))}
+    <div
+      ref={workspaceRef}
+      className={`terminal-workspace ${activeWorkspace ? 'terminal-workspace--split' : 'terminal-workspace--standalone'} ${
+        draggedSession?.source === 'standalone-tab' && canDropDraggedSession ? 'drag-accepting' : ''
+      }`}
+      onDragLeave={(event) => {
+        const nextTarget = event.relatedTarget;
+        if (nextTarget instanceof Node && event.currentTarget.contains(nextTarget)) {
+          return;
+        }
+        setDropPreview(null);
+      }}
+      onDragOver={!activeWorkspace ? handleStandaloneDropPreview : undefined}
+      onDrop={
+        !activeWorkspace
+          ? (event) => {
+              if (draggedSession?.source !== 'standalone-tab' || !dropPreview) {
+                return;
+              }
+              event.preventDefault();
+              onSplitSessionDrop(draggedSession.sessionId, dropPreview.direction);
+              setDropPreview(null);
+              onEndSessionDrag();
+            }
+          : undefined
+      }
+    >
+      {tabs.map((tab) => {
+        const placement = placementBySessionId.get(tab.sessionId);
+        const visible = visibleSessionIds.has(tab.sessionId);
+        const isWorkspacePane = Boolean(activeWorkspace && placement);
+        const rectStyle = placement ? toPercentRectStyle(placement.rect) : undefined;
+
+        return (
+          <div
+            key={`${tab.sessionId}:${activeWorkspace ? 'workspace' : 'standalone'}`}
+            className={isWorkspacePane ? 'terminal-pane-slot' : undefined}
+            style={isWorkspacePane ? rectStyle : undefined}
+            onDragOver={
+              isWorkspacePane
+                ? (event) => {
+                    if (draggedSession?.source !== 'standalone-tab' || !canDropDraggedSession) {
+                      return;
+                    }
+                    event.preventDefault();
+                    const bounds = event.currentTarget.getBoundingClientRect();
+                    const direction = resolveDropDirection(event.clientX, event.clientY, bounds);
+                    if (!placement) {
+                      return;
+                    }
+                    setDropPreview({
+                      direction,
+                      targetSessionId: tab.sessionId,
+                      rect: directionPreviewRect(placement.rect, direction)
+                    });
+                  }
+                : undefined
+            }
+            onDrop={
+              isWorkspacePane
+                ? (event) => {
+                    if (draggedSession?.source !== 'standalone-tab' || !dropPreview) {
+                      return;
+                    }
+                    event.preventDefault();
+                    onSplitSessionDrop(draggedSession.sessionId, dropPreview.direction, tab.sessionId);
+                    setDropPreview(null);
+                    onEndSessionDrag();
+                  }
+                : undefined
+            }
+          >
+            <TerminalSessionView
+              sessionId={tab.sessionId}
+              title={tab.title}
+              visible={visible}
+              active={activeWorkspace ? activeWorkspace.activeSessionId === tab.sessionId : activeSessionId === tab.sessionId}
+              layoutKey={placement ? `${placement.rect.x}:${placement.rect.y}:${placement.rect.width}:${placement.rect.height}` : 'hidden'}
+              theme={theme}
+              style={activeWorkspace ? undefined : rectStyle}
+              showHeader={Boolean(activeWorkspace && placement)}
+              onFocus={
+                activeWorkspace
+                  ? () => {
+                      onFocusWorkspaceSession(activeWorkspace.id, tab.sessionId);
+                    }
+                  : undefined
+              }
+              onClose={
+                placement
+                  ? async () => {
+                      await onCloseSession(tab.sessionId);
+                    }
+                  : undefined
+              }
+              onStartDrag={
+                activeWorkspace && placement
+                  ? () => {
+                      onStartPaneDrag(activeWorkspace.id, tab.sessionId);
+                    }
+                  : undefined
+              }
+              onEndDrag={activeWorkspace && placement ? onEndSessionDrag : undefined}
+            />
+          </div>
+        );
+      })}
+
+      {activeWorkspace && workspaceLayout
+        ? workspaceLayout.handles.map((handle) => {
+            const style: React.CSSProperties =
+              handle.axis === 'horizontal'
+                ? {
+                    left: `${(handle.rect.x + handle.rect.width * handle.ratio) * 100}%`,
+                    top: `${handle.rect.y * 100}%`,
+                    height: `${handle.rect.height * 100}%`
+                  }
+                : {
+                    top: `${(handle.rect.y + handle.rect.height * handle.ratio) * 100}%`,
+                    left: `${handle.rect.x * 100}%`,
+                    width: `${handle.rect.width * 100}%`
+                  };
+
+            return (
+              <div
+                key={handle.splitId}
+                className={`workspace-split-handle ${handle.axis === 'horizontal' ? 'vertical' : 'horizontal'}`}
+                style={style}
+                onMouseDown={(event) => {
+                  event.preventDefault();
+                  setResizingHandle(handle);
+                }}
+              />
+            );
+          })
+        : null}
+
+      {dropPreview ? <div className="workspace-drop-preview" style={toPercentRectStyle(dropPreview.rect)} /> : null}
     </div>
   );
 }
