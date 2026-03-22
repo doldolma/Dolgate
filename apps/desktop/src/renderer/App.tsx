@@ -14,6 +14,7 @@ import { SecretEditDialog, type SecretCredentialKind, type SecretEditDialogReque
 import { SettingsPanel } from './components/SettingsPanel';
 import { SftpWorkspace } from './components/SftpWorkspace';
 import { TerminalWorkspace } from './components/TerminalWorkspace';
+import type { DynamicTabStripItem, WorkspaceDropDirection, WorkspaceTab } from './store/createAppStore';
 import { useAppStore } from './store/appStore';
 
 function findHost(hosts: HostRecord[], hostId: string | null): HostRecord | null {
@@ -49,6 +50,62 @@ function createDefaultUpdateState(): UpdateState {
   };
 }
 
+interface DraggedSessionPayload {
+  sessionId: string;
+  source: 'standalone-tab' | 'workspace-pane';
+  workspaceId?: string;
+}
+
+function resolveAdjacentTabCandidate(
+  tabStrip: DynamicTabStripItem[],
+  workspaces: WorkspaceTab[],
+  sessionId: string
+): DynamicTabStripItem | null {
+  const currentIndex = tabStrip.findIndex((item) => item.kind === 'session' && item.sessionId === sessionId);
+  if (currentIndex < 0) {
+    return null;
+  }
+
+  const candidateIndexes = [currentIndex + 1, currentIndex - 1];
+  for (const index of candidateIndexes) {
+    const candidate = tabStrip[index];
+    if (!candidate) {
+      continue;
+    }
+    if (candidate.kind === 'workspace') {
+      const workspace = workspaces.find((item) => item.id === candidate.workspaceId);
+      if (!workspace) {
+        continue;
+      }
+      const paneCount = workspace.layout.kind === 'leaf' ? 1 : undefined;
+      const sessionCount = paneCount ?? countWorkspacePanes(workspace);
+      if (sessionCount >= 4) {
+        continue;
+      }
+    }
+    return candidate;
+  }
+
+  return null;
+}
+
+function countWorkspacePanes(workspace: WorkspaceTab): number {
+  const stack = [workspace.layout];
+  let count = 0;
+  while (stack.length > 0) {
+    const node = stack.pop();
+    if (!node) {
+      continue;
+    }
+    if (node.kind === 'leaf') {
+      count += 1;
+      continue;
+    }
+    stack.push(node.first, node.second);
+  }
+  return count;
+}
+
 export function App() {
   const [authState, setAuthState] = useState<AuthState>({
     status: 'loading',
@@ -59,6 +116,7 @@ export function App() {
   const [syncBootstrapError, setSyncBootstrapError] = useState<string | null>(null);
   const [hydratedSessionUserId, setHydratedSessionUserId] = useState<string | null>(null);
   const [selectedHostId, setSelectedHostId] = useState<string | null>(null);
+  const [draggedSession, setDraggedSession] = useState<DraggedSessionPayload | null>(null);
   const [updateState, setUpdateState] = useState<UpdateState>(createDefaultUpdateState);
   const [isUpdateInstallConfirmOpen, setIsUpdateInstallConfirmOpen] = useState(false);
   const [secretEditRequest, setSecretEditRequest] = useState<SecretEditDialogRequest | null>(null);
@@ -67,6 +125,8 @@ export function App() {
   const hosts = useAppStore((state) => state.hosts);
   const groups = useAppStore((state) => state.groups);
   const tabs = useAppStore((state) => state.tabs);
+  const workspaces = useAppStore((state) => state.workspaces);
+  const tabStrip = useAppStore((state) => state.tabStrip);
   const portForwards = useAppStore((state) => state.portForwards);
   const portForwardRuntimes = useAppStore((state) => state.portForwardRuntimes);
   const knownHosts = useAppStore((state) => state.knownHosts);
@@ -83,6 +143,7 @@ export function App() {
   const setSearchQuery = useAppStore((state) => state.setSearchQuery);
   const activateHome = useAppStore((state) => state.activateHome);
   const activateSession = useAppStore((state) => state.activateSession);
+  const activateWorkspace = useAppStore((state) => state.activateWorkspace);
   const openHomeSection = useAppStore((state) => state.openHomeSection);
   const openCreateHostDrawer = useAppStore((state) => state.openCreateHostDrawer);
   const openEditHostDrawer = useAppStore((state) => state.openEditHostDrawer);
@@ -94,6 +155,11 @@ export function App() {
   const removeHost = useAppStore((state) => state.removeHost);
   const connectHost = useAppStore((state) => state.connectHost);
   const disconnectTab = useAppStore((state) => state.disconnectTab);
+  const closeWorkspace = useAppStore((state) => state.closeWorkspace);
+  const splitSessionIntoWorkspace = useAppStore((state) => state.splitSessionIntoWorkspace);
+  const detachSessionFromWorkspace = useAppStore((state) => state.detachSessionFromWorkspace);
+  const focusWorkspaceSession = useAppStore((state) => state.focusWorkspaceSession);
+  const resizeWorkspaceSplit = useAppStore((state) => state.resizeWorkspaceSplit);
   const activateSftp = useAppStore((state) => state.activateSftp);
   const updateSettings = useAppStore((state) => state.updateSettings);
   const savePortForward = useAppStore((state) => state.savePortForward);
@@ -246,7 +312,12 @@ export function App() {
 
   const isHomeActive = activeWorkspaceTab === 'home';
   const isSftpActive = activeWorkspaceTab === 'sftp';
-  const activeSessionId = isHomeActive || isSftpActive ? null : activeWorkspaceTab;
+  const activeSessionId = activeWorkspaceTab.startsWith('session:') ? activeWorkspaceTab.slice('session:'.length) : null;
+  const activeWorkspace =
+    activeWorkspaceTab.startsWith('workspace:')
+      ? workspaces.find((workspace) => workspace.id === activeWorkspaceTab.slice('workspace:'.length)) ?? null
+      : null;
+  const isSessionViewActive = !isHomeActive && !isSftpActive;
   const editingHostId = hostDrawer.mode === 'edit' ? hostDrawer.hostId : null;
   const currentHost = findHost(hosts, editingHostId);
   const isDrawerOpen = isHomeActive && homeSection === 'hosts' && hostDrawer.mode !== 'closed';
@@ -257,6 +328,11 @@ export function App() {
 
   const isAuthReady = authState.status === 'authenticated' && hydratedSessionUserId === authState.session?.user.id && !isSyncBootstrapping;
   const needsSyncRetry = authState.status === 'authenticated' && !isSyncBootstrapping && Boolean(syncBootstrapError);
+  const adjacentDropCandidate =
+    draggedSession?.source === 'standalone-tab'
+      ? resolveAdjacentTabCandidate(tabStrip, workspaces, draggedSession.sessionId)
+      : null;
+  const canDropDraggedSession = Boolean(adjacentDropCandidate);
 
   if (!isAuthReady) {
     return (
@@ -374,12 +450,29 @@ export function App() {
     <div className={`app-frame ${isHomeActive ? 'home-active' : 'session-active'}`}>
       <AppTitleBar
         tabs={tabs}
+        workspaces={workspaces}
+        tabStrip={tabStrip}
         activeWorkspaceTab={activeWorkspaceTab}
+        draggedSession={draggedSession}
         updateState={updateState}
         onSelectHome={activateHome}
         onSelectSftp={activateSftp}
         onSelectSession={activateSession}
+        onSelectWorkspace={activateWorkspace}
         onCloseSession={disconnectTab}
+        onCloseWorkspace={closeWorkspace}
+        onStartSessionDrag={(sessionId) => {
+          setDraggedSession({
+            sessionId,
+            source: 'standalone-tab'
+          });
+        }}
+        onEndSessionDrag={() => {
+          setDraggedSession(null);
+        }}
+        onDetachSessionToStandalone={(workspaceId, sessionId) => {
+          detachSessionFromWorkspace(workspaceId, sessionId);
+        }}
         onCheckForUpdates={async () => runUpdaterAction(() => window.dolssh.updater.check())}
         onDownloadUpdate={async () => runUpdaterAction(() => window.dolssh.updater.download())}
         onInstallUpdate={handleInstallUpdate}
@@ -400,7 +493,6 @@ export function App() {
               <HostBrowser
                 hosts={hosts}
                 groups={groups}
-                tabs={tabs}
                 currentGroupPath={currentGroupPath}
                 searchQuery={searchQuery}
                 selectedHostId={highlightedHostId}
@@ -418,7 +510,6 @@ export function App() {
                 onEditHost={handleEditHost}
                 onMoveHostToGroup={moveHostToGroup}
                 onRemoveHost={removeHost}
-                onOpenSession={activateSession}
                 onConnectHost={async (hostId) => {
                   setSelectedHostId(hostId);
                   await connectHost(hostId, 120, 32);
@@ -509,8 +600,31 @@ export function App() {
           />
         </section>
 
-        <section className={`session-shell ${isHomeActive || isSftpActive ? 'hidden' : 'active'}`}>
-          <TerminalWorkspace sessionIds={tabs.map((tab) => tab.sessionId)} activeTabId={activeSessionId} theme={resolvedTheme} />
+        <section className={`session-shell ${isSessionViewActive ? 'active' : 'hidden'}`}>
+          <TerminalWorkspace
+            tabs={tabs}
+            activeSessionId={activeSessionId}
+            activeWorkspace={activeWorkspace}
+            draggedSession={draggedSession}
+            canDropDraggedSession={canDropDraggedSession}
+            theme={resolvedTheme}
+            onCloseSession={disconnectTab}
+            onStartPaneDrag={(workspaceId, sessionId) => {
+              setDraggedSession({
+                sessionId,
+                source: 'workspace-pane',
+                workspaceId
+              });
+            }}
+            onEndSessionDrag={() => {
+              setDraggedSession(null);
+            }}
+            onSplitSessionDrop={(sessionId, direction, targetSessionId) =>
+              splitSessionIntoWorkspace(sessionId, direction, targetSessionId)
+            }
+            onFocusWorkspaceSession={focusWorkspaceSession}
+            onResizeWorkspaceSplit={resizeWorkspaceSplit}
+          />
         </section>
       </div>
 

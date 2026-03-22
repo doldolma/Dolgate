@@ -72,6 +72,7 @@ export interface DesktopConnectInput {
   hostId: string;
   cols: number;
   rows: number;
+  title?: string;
 }
 
 export interface DesktopSftpConnectInput {

@@ -1,12 +1,11 @@
 import { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import Fuse from 'fuse.js';
-import type { GroupRecord, HostRecord, TerminalTab } from '@shared';
+import type { GroupRecord, HostRecord } from '@shared';
 
 interface HostBrowserProps {
   hosts: HostRecord[];
   groups: GroupRecord[];
-  tabs: TerminalTab[];
   currentGroupPath: string | null;
   searchQuery: string;
   selectedHostId: string | null;
@@ -19,7 +18,6 @@ interface HostBrowserProps {
   onMoveHostToGroup: (hostId: string, groupPath: string | null) => Promise<void>;
   onRemoveHost: (hostId: string) => Promise<void>;
   onConnectHost: (hostId: string) => Promise<void>;
-  onOpenSession: (sessionId: string) => void;
 }
 
 interface GroupCardView {
@@ -107,17 +105,9 @@ function buildVisibleGroups(groups: GroupRecord[], hosts: HostRecord[], currentG
     });
 }
 
-function findLatestTab(tabs: TerminalTab[], hostId: string): TerminalTab | null {
-  const matchingTabs = tabs
-    .filter((tab) => tab.hostId === hostId)
-    .sort((a, b) => new Date(b.lastEventAt).getTime() - new Date(a.lastEventAt).getTime());
-  return matchingTabs[0] ?? null;
-}
-
 export function HostBrowser({
   hosts,
   groups,
-  tabs,
   currentGroupPath,
   searchQuery,
   selectedHostId,
@@ -129,8 +119,7 @@ export function HostBrowser({
   onEditHost,
   onMoveHostToGroup,
   onRemoveHost,
-  onConnectHost,
-  onOpenSession
+  onConnectHost
 }: HostBrowserProps) {
   const [isGroupModalOpen, setIsGroupModalOpen] = useState(false);
   const [newGroupName, setNewGroupName] = useState('');
@@ -344,8 +333,6 @@ export function HostBrowser({
             </div>
           ) : (
             visibleHosts.map((host) => {
-              const currentTab = findLatestTab(tabs, host.id);
-
               return (
                 <article
                   key={host.id}
@@ -365,10 +352,6 @@ export function HostBrowser({
                     setDragTargetGroupPath(null);
                   }}
                   onDoubleClick={async () => {
-                    if (currentTab) {
-                      onOpenSession(currentTab.sessionId);
-                      return;
-                    }
                     await onConnectHost(host.id);
                   }}
                   onContextMenu={(event) => {
@@ -386,10 +369,6 @@ export function HostBrowser({
                     if (event.key === 'Enter') {
                       event.preventDefault();
                       void (async () => {
-                        if (currentTab) {
-                          onOpenSession(currentTab.sessionId);
-                          return;
-                        }
                         await onConnectHost(host.id);
                       })();
                     }

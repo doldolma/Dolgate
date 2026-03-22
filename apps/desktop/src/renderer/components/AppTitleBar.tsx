@@ -1,20 +1,51 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import type { TerminalTab, UpdateState } from '@shared';
+import type { DynamicTabStripItem, WorkspaceTab, WorkspaceTabId } from '../store/createAppStore';
+
+interface DraggedSessionPayload {
+  sessionId: string;
+  source: 'standalone-tab' | 'workspace-pane';
+  workspaceId?: string;
+}
 
 interface AppTitleBarProps {
   tabs: TerminalTab[];
-  activeWorkspaceTab: 'home' | 'sftp' | string;
+  workspaces: WorkspaceTab[];
+  tabStrip: DynamicTabStripItem[];
+  activeWorkspaceTab: WorkspaceTabId;
+  draggedSession: DraggedSessionPayload | null;
   updateState: UpdateState;
   onSelectHome: () => void;
   onSelectSftp: () => void;
   onSelectSession: (sessionId: string) => void;
+  onSelectWorkspace: (workspaceId: string) => void;
   onCloseSession: (sessionId: string) => Promise<void>;
+  onCloseWorkspace: (workspaceId: string) => Promise<void>;
+  onStartSessionDrag: (sessionId: string) => void;
+  onEndSessionDrag: () => void;
+  onDetachSessionToStandalone: (workspaceId: string, sessionId: string) => void;
   onCheckForUpdates: () => Promise<void>;
   onDownloadUpdate: () => Promise<void>;
   onInstallUpdate: () => Promise<void>;
   onDismissUpdate: (version: string) => Promise<void>;
   onOpenReleasePage: (url: string) => Promise<void>;
 }
+
+type TitlebarDynamicItem =
+  | {
+      kind: 'session';
+      sessionId: string;
+      title: string;
+      status: TerminalTab['status'];
+      active: boolean;
+    }
+  | {
+      kind: 'workspace';
+      workspaceId: string;
+      title: string;
+      paneCount: number;
+      active: boolean;
+    };
 
 function formatProgressPercent(updateState: UpdateState): string {
   if (!updateState.progress) {
@@ -66,14 +97,39 @@ function resolveReleaseUrl(updateState: UpdateState): string {
   return `https://github.com/doldolma/dolssh/releases/tag/v${version}`;
 }
 
+function countWorkspacePanes(workspace: WorkspaceTab): number {
+  const stack = [workspace.layout];
+  let count = 0;
+  while (stack.length > 0) {
+    const node = stack.pop();
+    if (!node) {
+      continue;
+    }
+    if (node.kind === 'leaf') {
+      count += 1;
+      continue;
+    }
+    stack.push(node.first, node.second);
+  }
+  return count;
+}
+
 export function AppTitleBar({
   tabs,
+  workspaces,
+  tabStrip,
   activeWorkspaceTab,
+  draggedSession,
   updateState,
   onSelectHome,
   onSelectSftp,
   onSelectSession,
+  onSelectWorkspace,
   onCloseSession,
+  onCloseWorkspace,
+  onStartSessionDrag,
+  onEndSessionDrag,
+  onDetachSessionToStandalone,
   onCheckForUpdates,
   onDownloadUpdate,
   onInstallUpdate,
@@ -81,6 +137,42 @@ export function AppTitleBar({
   onOpenReleasePage
 }: AppTitleBarProps) {
   const [isUpdateOpen, setIsUpdateOpen] = useState(false);
+  const [isDetachHovering, setIsDetachHovering] = useState(false);
+
+  const dynamicItems = useMemo<TitlebarDynamicItem[]>(
+    () =>
+      tabStrip
+        .map((item) => {
+          if (item.kind === 'session') {
+            const tab = tabs.find((candidate) => candidate.sessionId === item.sessionId);
+            if (!tab) {
+              return null;
+            }
+            return {
+              kind: 'session',
+              sessionId: tab.sessionId,
+              title: tab.title,
+              status: tab.status,
+              active: activeWorkspaceTab === `session:${tab.sessionId}`
+            } satisfies TitlebarDynamicItem;
+          }
+
+          const workspace = workspaces.find((candidate) => candidate.id === item.workspaceId);
+          if (!workspace) {
+            return null;
+          }
+          return {
+            kind: 'workspace',
+            workspaceId: workspace.id,
+            title: workspace.title,
+            paneCount: countWorkspacePanes(workspace),
+            active: activeWorkspaceTab === `workspace:${workspace.id}`
+          } satisfies TitlebarDynamicItem;
+        })
+        .filter((item): item is TitlebarDynamicItem => item !== null),
+    [activeWorkspaceTab, tabStrip, tabs, workspaces]
+  );
+
   const showBadge = shouldShowBadge(updateState);
   const publishedAt = formatPublishedAt(updateState.release?.publishedAt);
   const releaseUrl = resolveReleaseUrl(updateState);
@@ -93,40 +185,111 @@ export function AppTitleBar({
       ? '새 dolssh 버전을 사용할 수 있습니다'
       : '앱 업데이트';
 
+  const canDetachToTabs = draggedSession?.source === 'workspace-pane' && Boolean(draggedSession.workspaceId);
+
   return (
     <header className="app-titlebar">
-      {/* 타이틀바 전체는 드래그 가능하지만, 실제 상호작용 요소들만 명시적으로 no-drag 처리한다. */}
       <div className="titlebar-brand">dolssh</div>
-      <div className="titlebar-tabs">
+      <div
+        className={`titlebar-tabs ${isDetachHovering ? 'detach-hover' : ''}`}
+        onDragOver={(event) => {
+          if (!canDetachToTabs) {
+            return;
+          }
+          event.preventDefault();
+          event.dataTransfer.dropEffect = 'move';
+          setIsDetachHovering(true);
+        }}
+        onDragLeave={(event) => {
+          const nextTarget = event.relatedTarget;
+          if (nextTarget instanceof Node && event.currentTarget.contains(nextTarget)) {
+            return;
+          }
+          setIsDetachHovering(false);
+        }}
+        onDrop={(event) => {
+          if (!draggedSession || draggedSession.source !== 'workspace-pane' || !draggedSession.workspaceId) {
+            return;
+          }
+          event.preventDefault();
+          setIsDetachHovering(false);
+          onDetachSessionToStandalone(draggedSession.workspaceId, draggedSession.sessionId);
+          onEndSessionDrag();
+        }}
+      >
         <button type="button" className={`workspace-tab home ${activeWorkspaceTab === 'home' ? 'active' : ''}`} onClick={onSelectHome}>
           Home
         </button>
         <button type="button" className={`workspace-tab sftp ${activeWorkspaceTab === 'sftp' ? 'active' : ''}`} onClick={onSelectSftp}>
           SFTP
         </button>
-        {tabs.map((tab) => (
-          <div key={tab.id} className={`workspace-tab-shell ${activeWorkspaceTab === tab.id ? 'active' : ''}`}>
-            <button
-              type="button"
-              className={`workspace-tab ${activeWorkspaceTab === tab.id ? 'active' : ''}`}
-              onClick={() => onSelectSession(tab.id)}
-            >
-              <span className="workspace-tab__title">{tab.title}</span>
-            </button>
-            <button
-              type="button"
-              className="workspace-tab__close"
-              aria-label={`${tab.title} 세션 종료`}
-              onClick={async (event) => {
-                event.stopPropagation();
-                await onCloseSession(tab.sessionId);
-              }}
-              disabled={tab.status === 'disconnecting'}
-            >
-              ×
-            </button>
-          </div>
-        ))}
+        {dynamicItems.map((item) => {
+          if (item.kind === 'session') {
+            return (
+              <div
+                key={item.sessionId}
+                className={`workspace-tab-shell ${item.active ? 'active' : ''}`}
+                draggable
+                onDragStart={(event) => {
+                  event.dataTransfer.effectAllowed = 'move';
+                  event.dataTransfer.setData('application/x-dolssh-session-id', item.sessionId);
+                  onStartSessionDrag(item.sessionId);
+                }}
+                onDragEnd={() => {
+                  setIsDetachHovering(false);
+                  onEndSessionDrag();
+                }}
+              >
+                <button
+                  type="button"
+                  className={`workspace-tab ${item.active ? 'active' : ''}`}
+                  onClick={() => onSelectSession(item.sessionId)}
+                >
+                  <span className="workspace-tab__title">{item.title}</span>
+                </button>
+                <button
+                  type="button"
+                  className="workspace-tab__close"
+                  aria-label={`${item.title} 세션 종료`}
+                  onClick={async (event) => {
+                    event.stopPropagation();
+                    await onCloseSession(item.sessionId);
+                  }}
+                  disabled={item.status === 'disconnecting'}
+                >
+                  ×
+                </button>
+              </div>
+            );
+          }
+
+          return (
+            <div key={item.workspaceId} className={`workspace-tab-shell workspace-tab-shell--workspace ${item.active ? 'active' : ''}`}>
+              <button
+                type="button"
+                className={`workspace-tab workspace-tab--workspace ${item.active ? 'active' : ''}`}
+                onClick={() => onSelectWorkspace(item.workspaceId)}
+              >
+                <span className="workspace-tab__glyph" aria-hidden="true">
+                  ⊞
+                </span>
+                <span className="workspace-tab__title">{item.title}</span>
+                <span className="workspace-tab__count">{item.paneCount}</span>
+              </button>
+              <button
+                type="button"
+                className="workspace-tab__close"
+                aria-label={`${item.title} 닫기`}
+                onClick={async (event) => {
+                  event.stopPropagation();
+                  await onCloseWorkspace(item.workspaceId);
+                }}
+              >
+                ×
+              </button>
+            </div>
+          );
+        })}
       </div>
       <div className="titlebar-spacer" />
       <div className="titlebar-actions">

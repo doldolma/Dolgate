@@ -3,6 +3,8 @@ import type { DesktopApi } from '@shared';
 import { createAppStore } from './createAppStore';
 
 function createMockApi(): DesktopApi {
+  let sessionCounter = 0;
+
   return {
     auth: {
       getState: vi.fn().mockResolvedValue({
@@ -109,7 +111,10 @@ function createMockApi(): DesktopApi {
       }))
     },
     ssh: {
-      connect: vi.fn().mockResolvedValue({ sessionId: 'session-1' }),
+      connect: vi.fn().mockImplementation(async () => {
+        sessionCounter += 1;
+        return { sessionId: `session-${sessionCounter}` };
+      }),
       write: vi.fn().mockResolvedValue(undefined),
       writeBinary: vi.fn().mockResolvedValue(undefined),
       resize: vi.fn().mockResolvedValue(undefined),
@@ -318,8 +323,21 @@ describe('createAppStore', () => {
     await store.getState().connectHost('host-1', 120, 32);
 
     expect(store.getState().tabs[0]?.sessionId).toBe('session-1');
-    expect(store.getState().activeWorkspaceTab).toBe('session-1');
+    expect(store.getState().tabs[0]?.title).toBe('Prod');
+    expect(store.getState().tabStrip).toEqual([{ kind: 'session', sessionId: 'session-1' }]);
+    expect(store.getState().activeWorkspaceTab).toBe('session:session-1');
     expect(store.getState().hostDrawer).toEqual({ mode: 'closed' });
+  });
+
+  it('creates a new titled session each time the same host is connected', async () => {
+    const store = createAppStore(createMockApi());
+
+    await store.getState().bootstrap();
+    await store.getState().connectHost('host-1', 120, 32);
+    await store.getState().connectHost('host-1', 120, 32);
+
+    expect(store.getState().tabs.map((tab) => tab.title)).toEqual(['Prod', 'Prod (1)']);
+    expect(store.getState().activeWorkspaceTab).toBe('session:session-2');
   });
 
   it('waits for host key trust when the server is not trusted yet', async () => {
@@ -391,5 +409,48 @@ describe('createAppStore', () => {
     expect(store.getState().activeWorkspaceTab).toBe('sftp');
     expect(store.getState().sftp.rightPane.endpoint?.id).toBe('endpoint-1');
     expect(store.getState().sftp.rightPane.currentPath).toBe('/home/ubuntu');
+  });
+
+  it('creates and expands a workspace from adjacent tabs', async () => {
+    const store = createAppStore(createMockApi());
+
+    await store.getState().bootstrap();
+    await store.getState().connectHost('host-1', 120, 32);
+    await store.getState().connectHost('host-1', 120, 32);
+    await store.getState().connectHost('host-1', 120, 32);
+
+    const created = store.getState().splitSessionIntoWorkspace('session-1', 'right');
+    expect(created).toBe(true);
+    expect(store.getState().workspaces).toHaveLength(1);
+    expect(store.getState().tabStrip).toEqual([
+      { kind: 'workspace', workspaceId: store.getState().workspaces[0]?.id },
+      { kind: 'session', sessionId: 'session-3' }
+    ]);
+
+    const expanded = store.getState().splitSessionIntoWorkspace('session-3', 'bottom', 'session-2');
+    expect(expanded).toBe(true);
+    expect(store.getState().workspaces).toHaveLength(1);
+    expect(store.getState().tabStrip).toEqual([{ kind: 'workspace', workspaceId: store.getState().workspaces[0]?.id }]);
+  });
+
+  it('detaches a workspace pane back into standalone tabs and collapses single-pane workspaces', async () => {
+    const store = createAppStore(createMockApi());
+
+    await store.getState().bootstrap();
+    await store.getState().connectHost('host-1', 120, 32);
+    await store.getState().connectHost('host-1', 120, 32);
+
+    store.getState().splitSessionIntoWorkspace('session-1', 'right');
+    const workspaceId = store.getState().workspaces[0]?.id;
+    expect(workspaceId).toBeTruthy();
+
+    store.getState().detachSessionFromWorkspace(workspaceId!, 'session-1');
+
+    expect(store.getState().workspaces).toHaveLength(0);
+    expect(store.getState().tabStrip).toEqual([
+      { kind: 'session', sessionId: 'session-2' },
+      { kind: 'session', sessionId: 'session-1' }
+    ]);
+    expect(store.getState().activeWorkspaceTab).toBe('session:session-1');
   });
 });

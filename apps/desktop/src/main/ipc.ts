@@ -338,7 +338,7 @@ export function registerIpcHandlers(
       cols: input.cols,
       rows: input.rows,
       hostId: host.id,
-      title: host.label
+      title: input.title?.trim() || host.label
     });
   });
 
