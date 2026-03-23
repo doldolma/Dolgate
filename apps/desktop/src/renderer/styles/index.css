@@ -7,6 +7,8 @@
   --surface: rgba(255, 255, 255, 0.86);
   --surface-strong: rgba(255, 255, 255, 0.96);
   --surface-muted: rgba(236, 243, 247, 0.92);
+  --dialog-surface: #ffffff;
+  --dialog-surface-muted: #f7fafd;
   --border: rgba(124, 144, 166, 0.16);
   --text: #1f2b3a;
   --text-soft: #6e8095;
@@ -27,6 +29,8 @@
   --surface: rgba(16, 26, 40, 0.88);
   --surface-strong: rgba(18, 30, 46, 0.96);
   --surface-muted: rgba(18, 28, 42, 0.88);
+  --dialog-surface: #162537;
+  --dialog-surface-muted: #1a2c40;
   --border: rgba(148, 170, 195, 0.14);
   --text: #edf4fb;
   --text-soft: #8ba1b8;
@@ -877,6 +881,7 @@ input::placeholder {
 }
 
 .group-card {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 1rem;
@@ -911,6 +916,11 @@ input::placeholder {
   background: var(--chrome-bg);
   color: #fff;
   font-weight: 700;
+}
+
+.group-card__body {
+  min-width: 0;
+  flex: 1;
 }
 
 .group-card span,
@@ -1118,7 +1128,7 @@ input::placeholder {
   width: min(420px, calc(100vw - 2rem));
   padding: 1.2rem;
   border-radius: 22px;
-  background: var(--surface-strong);
+  background: var(--dialog-surface);
   border: 1px solid var(--border);
   box-shadow: 0 20px 60px rgba(18, 30, 44, 0.22);
 }
@@ -1137,6 +1147,12 @@ input::placeholder {
 
 .home-modal__error {
   color: var(--danger-text);
+}
+
+.home-modal__copy {
+  margin: 0.75rem 0 0;
+  color: var(--text-soft);
+  line-height: 1.6;
 }
 
 .host-drawer {
@@ -1946,7 +1962,7 @@ input::placeholder {
   width: min(440px, calc(100vw - 2rem));
   padding: 1.2rem;
   border-radius: 22px;
-  background: var(--surface-strong);
+  background: var(--dialog-surface);
   border: 1px solid var(--border);
   box-shadow: 0 20px 60px rgba(18, 30, 44, 0.22);
 }
@@ -2001,9 +2017,14 @@ input::placeholder {
   gap: 0.9rem;
 }
 
-.operations-card,
-.modal-card {
+.operations-card {
   background: var(--surface);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow);
+}
+
+.modal-card {
+  background: var(--dialog-surface);
   border: 1px solid var(--border);
   box-shadow: var(--shadow);
 }
@@ -2101,6 +2122,16 @@ input::placeholder {
 .modal-card {
   width: min(560px, calc(100vw - 2rem));
   border-radius: 24px;
+}
+
+.home-modal input,
+.home-modal select,
+.sftp-modal input,
+.sftp-modal select,
+.modal-card input,
+.modal-card select,
+.modal-card textarea {
+  background: var(--dialog-surface-muted);
 }
 
 .warpgate-import-dialog {

@@ -20,7 +20,8 @@ export const ipcChannels = {
   },
   groups: {
     list: 'groups:list',
-    create: 'groups:create'
+    create: 'groups:create',
+    remove: 'groups:remove'
   },
   aws: {
     listProfiles: 'aws:list-profiles',

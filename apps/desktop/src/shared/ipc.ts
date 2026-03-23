@@ -19,6 +19,8 @@ import type {
   PortForwardRuntimeRecord,
   DirectoryListing,
   GroupRecord,
+  GroupRemoveMode,
+  GroupRemoveResult,
   HostDraft,
   HostRecord,
   SecretMetadataRecord,
@@ -246,6 +248,7 @@ export interface DesktopApi {
   groups: {
     list: () => Promise<GroupRecord[]>;
     create: (name: string, parentPath?: string | null) => Promise<GroupRecord>;
+    remove: (path: string, mode: GroupRemoveMode) => Promise<GroupRemoveResult>;
   };
   aws: {
     listProfiles: () => Promise<AwsProfileSummary[]>;

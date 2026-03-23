@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { GroupRecord, HostRecord } from '@shared';
-import { buildVisibleGroups, collectGroupPaths, isDirectHostChild, isGroupWithinPath, normalizeGroupPath } from './HostBrowser';
+import { buildVisibleGroups, collectGroupPaths, getGroupDeleteDialogVariant, isDirectHostChild, isGroupWithinPath, normalizeGroupPath } from './HostBrowser';
 
 const groups: GroupRecord[] = [
   {
@@ -84,8 +84,14 @@ describe('HostBrowser helpers', () => {
   });
 
   it('identifies only direct host children for the current group', () => {
-    expect(isDirectHostChild(hosts[0], 'Servers')).toBe(true);
-    expect(isDirectHostChild(hosts[1], 'Servers')).toBe(false);
-    expect(isDirectHostChild(hosts[1], 'Servers/Nested')).toBe(true);
+    expect(isDirectHostChild(hosts[0].groupName ?? null, 'Servers')).toBe(true);
+    expect(isDirectHostChild(hosts[1].groupName ?? null, 'Servers')).toBe(false);
+    expect(isDirectHostChild(hosts[1].groupName ?? null, 'Servers/Nested')).toBe(true);
+  });
+
+  it('chooses the right delete dialog variant based on descendant counts', () => {
+    expect(getGroupDeleteDialogVariant(0, 0)).toBe('simple');
+    expect(getGroupDeleteDialogVariant(1, 0)).toBe('with-descendants');
+    expect(getGroupDeleteDialogVariant(0, 2)).toBe('with-descendants');
   });
 });

@@ -8,6 +8,7 @@ import type {
   DesktopWindowState,
   HostDraft,
   HostSecretInput,
+  GroupRemoveMode,
   KeyboardInteractiveRespondInput,
   KeychainSecretCloneInput,
   KeychainSecretUpdateInput,
@@ -134,7 +135,8 @@ const api: DesktopApi = {
   },
   groups: {
     list: () => ipcRenderer.invoke(ipcChannels.groups.list),
-    create: (name: string, parentPath?: string | null) => ipcRenderer.invoke(ipcChannels.groups.create, name, parentPath)
+    create: (name: string, parentPath?: string | null) => ipcRenderer.invoke(ipcChannels.groups.create, name, parentPath),
+    remove: (path: string, mode: GroupRemoveMode) => ipcRenderer.invoke(ipcChannels.groups.remove, path, mode)
   },
   aws: {
     listProfiles: () => ipcRenderer.invoke(ipcChannels.aws.listProfiles),

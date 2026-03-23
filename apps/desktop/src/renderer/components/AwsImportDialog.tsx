@@ -8,17 +8,36 @@ interface AwsImportDialogProps {
   onImport: (draft: HostDraft) => Promise<void>;
 }
 
-function defaultStatus(profileName: string): AwsProfileStatus {
-  return {
-    profileName,
-    available: false,
-    isSsoProfile: false,
-    isAuthenticated: false,
-    accountId: null,
-    arn: null,
-    errorMessage: null,
-    missingTools: []
-  };
+export function shouldShowAwsProfileAuthError(profileStatus: AwsProfileStatus | null, isLoadingStatus: boolean): boolean {
+  return Boolean(profileStatus && !isLoadingStatus && !profileStatus.isAuthenticated);
+}
+
+export function shouldDisableAwsProfileSelect(input: {
+  isLoadingProfiles: boolean;
+  isLoadingStatus: boolean;
+  isLoadingRegions: boolean;
+  isLoadingInstances: boolean;
+  isLoggingIn: boolean;
+  profileCount: number;
+}): boolean {
+  return (
+    input.isLoadingProfiles ||
+    input.isLoadingStatus ||
+    input.isLoadingRegions ||
+    input.isLoadingInstances ||
+    input.isLoggingIn ||
+    input.profileCount === 0
+  );
+}
+
+export function shouldDisableAwsRegionSelect(input: {
+  isLoadingStatus: boolean;
+  isLoadingRegions: boolean;
+  isLoadingInstances: boolean;
+  isLoggingIn: boolean;
+  regionCount: number;
+}): boolean {
+  return input.isLoadingStatus || input.isLoadingRegions || input.isLoadingInstances || input.isLoggingIn || input.regionCount === 0;
 }
 
 export function AwsImportDialog({ open, currentGroupPath, onClose, onImport }: AwsImportDialogProps) {
@@ -74,8 +93,9 @@ export function AwsImportDialog({ open, currentGroupPath, onClose, onImport }: A
       return;
     }
 
+    let cancelled = false;
     setIsLoadingStatus(true);
-    setProfileStatus(defaultStatus(selectedProfile));
+    setProfileStatus(null);
     setRegions([]);
     setSelectedRegion('');
     setInstances([]);
@@ -84,61 +104,101 @@ export function AwsImportDialog({ open, currentGroupPath, onClose, onImport }: A
     void window.dolssh.aws
       .getProfileStatus(selectedProfile)
       .then((status) => {
+        if (cancelled) {
+          return;
+        }
         setProfileStatus(status);
       })
       .catch((loadError) => {
+        if (cancelled) {
+          return;
+        }
         setError(loadError instanceof Error ? loadError.message : 'AWS 프로필 상태를 확인하지 못했습니다.');
       })
       .finally(() => {
-        setIsLoadingStatus(false);
+        if (!cancelled) {
+          setIsLoadingStatus(false);
+        }
       });
+
+    return () => {
+      cancelled = true;
+    };
   }, [open, selectedProfile]);
 
   useEffect(() => {
     if (!open || !selectedProfile || !profileStatus?.isAuthenticated) {
+      setIsLoadingRegions(false);
       setRegions([]);
       setSelectedRegion('');
       setInstances([]);
       return;
     }
 
+    let cancelled = false;
     setIsLoadingRegions(true);
     setError(null);
 
     void window.dolssh.aws
       .listRegions(selectedProfile)
       .then((nextRegions) => {
+        if (cancelled) {
+          return;
+        }
         setRegions(nextRegions);
         setSelectedRegion((current) => (current && nextRegions.includes(current) ? current : nextRegions[0] ?? ''));
       })
       .catch((loadError) => {
+        if (cancelled) {
+          return;
+        }
         setError(loadError instanceof Error ? loadError.message : 'AWS 리전 목록을 불러오지 못했습니다.');
       })
       .finally(() => {
-        setIsLoadingRegions(false);
+        if (!cancelled) {
+          setIsLoadingRegions(false);
+        }
       });
+
+    return () => {
+      cancelled = true;
+    };
   }, [open, profileStatus?.isAuthenticated, selectedProfile]);
 
   useEffect(() => {
     if (!open || !selectedProfile || !selectedRegion || !profileStatus?.isAuthenticated) {
+      setIsLoadingInstances(false);
       setInstances([]);
       return;
     }
 
+    let cancelled = false;
     setIsLoadingInstances(true);
     setError(null);
 
     void window.dolssh.aws
       .listEc2Instances(selectedProfile, selectedRegion)
       .then((items) => {
+        if (cancelled) {
+          return;
+        }
         setInstances(items);
       })
       .catch((loadError) => {
+        if (cancelled) {
+          return;
+        }
         setError(loadError instanceof Error ? loadError.message : 'EC2 인스턴스 목록을 불러오지 못했습니다.');
       })
       .finally(() => {
-        setIsLoadingInstances(false);
+        if (!cancelled) {
+          setIsLoadingInstances(false);
+        }
       });
+
+    return () => {
+      cancelled = true;
+    };
   }, [open, profileStatus?.isAuthenticated, selectedProfile, selectedRegion]);
 
   const missingTools = useMemo(() => profileStatus?.missingTools ?? [], [profileStatus?.missingTools]);
@@ -175,7 +235,20 @@ export function AwsImportDialog({ open, currentGroupPath, onClose, onImport }: A
           <div className="form-grid">
             <label className="form-field">
               <span>Profile</span>
-              <select value={selectedProfile} onChange={(event) => setSelectedProfile(event.target.value)} disabled={isLoadingProfiles || profiles.length === 0}>
+              <select
+                value={selectedProfile}
+                onChange={(event) => setSelectedProfile(event.target.value)}
+                disabled={
+                  shouldDisableAwsProfileSelect({
+                    isLoadingProfiles,
+                    isLoadingStatus,
+                    isLoadingRegions,
+                    isLoadingInstances,
+                    isLoggingIn,
+                    profileCount: profiles.length
+                  })
+                }
+              >
                 {profiles.length === 0 ? <option value="">No profiles found</option> : null}
                 {profiles.map((profile) => (
                   <option key={profile.name} value={profile.name}>
@@ -191,7 +264,15 @@ export function AwsImportDialog({ open, currentGroupPath, onClose, onImport }: A
                 <select
                   value={selectedRegion}
                   onChange={(event) => setSelectedRegion(event.target.value)}
-                  disabled={isLoadingRegions || regions.length === 0}
+                  disabled={
+                    shouldDisableAwsRegionSelect({
+                      isLoadingStatus,
+                      isLoadingRegions,
+                      isLoadingInstances,
+                      isLoggingIn,
+                      regionCount: regions.length
+                    })
+                  }
                 >
                   {regions.length === 0 ? <option value="">No regions found</option> : null}
                   {regions.map((region) => (
@@ -206,7 +287,7 @@ export function AwsImportDialog({ open, currentGroupPath, onClose, onImport }: A
 
           {loadingMessage ? <div className="aws-import-dialog__loading">{loadingMessage}</div> : null}
 
-          {profileStatus && !profileStatus.isAuthenticated ? (
+          {shouldShowAwsProfileAuthError(profileStatus, isLoadingStatus) && profileStatus ? (
             <div className="terminal-error-banner">
               {profileStatus.isSsoProfile
                 ? '이 프로필은 아직 로그인되지 않았습니다. 브라우저에서 AWS SSO 로그인을 완료해 주세요.'

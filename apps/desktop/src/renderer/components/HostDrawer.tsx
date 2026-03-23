@@ -6,6 +6,7 @@ interface HostDrawerProps {
   mode: 'create' | 'edit';
   host: HostRecord | null;
   keychainEntries: SecretMetadataRecord[];
+  groupOptions: Array<{ value: string | null; label: string }>;
   defaultGroupPath?: string | null;
   onClose: () => void;
   onSubmit: Parameters<typeof HostForm>[0]['onSubmit'];
@@ -18,6 +19,7 @@ export function HostDrawer({
   mode,
   host,
   keychainEntries,
+  groupOptions,
   defaultGroupPath = null,
   onClose,
   onSubmit,
@@ -41,6 +43,7 @@ export function HostDrawer({
           hideTitle
           host={host}
           keychainEntries={keychainEntries}
+          groupOptions={groupOptions}
           defaultGroupPath={defaultGroupPath}
           onSubmit={onSubmit}
           onDelete={onDelete}
