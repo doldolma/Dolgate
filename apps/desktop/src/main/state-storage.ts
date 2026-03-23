@@ -56,6 +56,11 @@ export interface DesktopStateFile {
     globalThemeUpdatedAt: string;
     fontFamily: TerminalFontFamilyId;
     fontSize: number;
+    scrollbackLines: number;
+    lineHeight: number;
+    letterSpacing: number;
+    minimumContrastRatio: number;
+    altIsMeta: boolean;
     webglEnabled: boolean;
     localUpdatedAt: string;
   };
@@ -151,6 +156,38 @@ function normalizeTerminalFontSize(value: unknown): number {
   return Math.min(18, Math.max(11, Math.round(value)));
 }
 
+function normalizeTerminalScrollbackLines(value: unknown): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    return 5000;
+  }
+  return Math.min(25_000, Math.max(1_000, Math.round(value)));
+}
+
+function normalizeTerminalLineHeight(value: unknown): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    return 1;
+  }
+  return Math.min(2, Math.max(1, Number(value)));
+}
+
+function normalizeTerminalLetterSpacing(value: unknown): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    return 0;
+  }
+  return Math.min(2, Math.max(0, Math.round(value)));
+}
+
+function normalizeTerminalMinimumContrastRatio(value: unknown): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    return 1;
+  }
+  return Math.min(21, Math.max(1, Number(value)));
+}
+
+function normalizeTerminalAltIsMeta(value: unknown): boolean {
+  return typeof value === 'boolean' ? value : false;
+}
+
 function normalizeTerminalWebglEnabled(value: unknown): boolean {
   return typeof value === 'boolean' ? value : true;
 }
@@ -169,6 +206,11 @@ function createDefaultStateFile(): DesktopStateFile {
       globalThemeUpdatedAt: timestamp,
       fontFamily: 'sf-mono',
       fontSize: 13,
+      scrollbackLines: 5000,
+      lineHeight: 1,
+      letterSpacing: 0,
+      minimumContrastRatio: 1,
+      altIsMeta: false,
       webglEnabled: true,
       localUpdatedAt: timestamp
     },
@@ -338,6 +380,11 @@ function normalizeStateFile(value: unknown): DesktopStateFile {
         typeof terminal.globalThemeUpdatedAt === 'string' ? terminal.globalThemeUpdatedAt : fallback.terminal.globalThemeUpdatedAt,
       fontFamily: isTerminalFontFamilyId(terminal.fontFamily) ? terminal.fontFamily : fallback.terminal.fontFamily,
       fontSize: normalizeTerminalFontSize(terminal.fontSize),
+      scrollbackLines: normalizeTerminalScrollbackLines(terminal.scrollbackLines),
+      lineHeight: normalizeTerminalLineHeight(terminal.lineHeight),
+      letterSpacing: normalizeTerminalLetterSpacing(terminal.letterSpacing),
+      minimumContrastRatio: normalizeTerminalMinimumContrastRatio(terminal.minimumContrastRatio),
+      altIsMeta: normalizeTerminalAltIsMeta(terminal.altIsMeta),
       webglEnabled: normalizeTerminalWebglEnabled(terminal.webglEnabled),
       localUpdatedAt: typeof terminal.localUpdatedAt === 'string' ? terminal.localUpdatedAt : fallback.terminal.localUpdatedAt
     },

@@ -308,9 +308,22 @@ function withLinkedHostCount(record: SecretMetadataRecord, hosts: HostRecord[]):
 const DEFAULT_GLOBAL_TERMINAL_THEME_ID: TerminalThemeId = 'dolssh-dark';
 const DEFAULT_TERMINAL_FONT_FAMILY: TerminalFontFamilyId = 'sf-mono';
 const DEFAULT_TERMINAL_FONT_SIZE = 13;
+const DEFAULT_TERMINAL_SCROLLBACK_LINES = 5000;
+const DEFAULT_TERMINAL_LINE_HEIGHT = 1;
+const DEFAULT_TERMINAL_LETTER_SPACING = 0;
+const DEFAULT_TERMINAL_MINIMUM_CONTRAST_RATIO = 1;
+const DEFAULT_TERMINAL_ALT_IS_META = false;
 const DEFAULT_TERMINAL_WEBGL_ENABLED = true;
 
 const stateStorage = getDesktopStateStorage();
+
+function clampInteger(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, Math.round(value)));
+}
+
+function clampNumber(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value));
+}
 
 export class HostRepository {
   list(): HostRecord[] {
@@ -539,6 +552,11 @@ export class SettingsRepository {
       globalTerminalThemeId: state.terminal.globalThemeId,
       terminalFontFamily: state.terminal.fontFamily,
       terminalFontSize: state.terminal.fontSize,
+      terminalScrollbackLines: state.terminal.scrollbackLines,
+      terminalLineHeight: state.terminal.lineHeight,
+      terminalLetterSpacing: state.terminal.letterSpacing,
+      terminalMinimumContrastRatio: state.terminal.minimumContrastRatio,
+      terminalAltIsMeta: state.terminal.altIsMeta,
       terminalWebglEnabled: state.terminal.webglEnabled,
       serverUrl: serverUrlOverride || this.getDefaultServerUrl(),
       serverUrlOverride,
@@ -591,7 +609,32 @@ export class SettingsRepository {
       }
 
       if (typeof input.terminalFontSize === 'number' && Number.isFinite(input.terminalFontSize)) {
-        state.terminal.fontSize = Math.min(18, Math.max(11, Math.round(input.terminalFontSize)));
+        state.terminal.fontSize = clampInteger(input.terminalFontSize, 11, 18);
+        state.terminal.localUpdatedAt = nowIso();
+      }
+
+      if (typeof input.terminalScrollbackLines === 'number' && Number.isFinite(input.terminalScrollbackLines)) {
+        state.terminal.scrollbackLines = clampInteger(input.terminalScrollbackLines, 1000, 25000);
+        state.terminal.localUpdatedAt = nowIso();
+      }
+
+      if (typeof input.terminalLineHeight === 'number' && Number.isFinite(input.terminalLineHeight)) {
+        state.terminal.lineHeight = clampNumber(input.terminalLineHeight, 1, 2);
+        state.terminal.localUpdatedAt = nowIso();
+      }
+
+      if (typeof input.terminalLetterSpacing === 'number' && Number.isFinite(input.terminalLetterSpacing)) {
+        state.terminal.letterSpacing = clampInteger(input.terminalLetterSpacing, 0, 2);
+        state.terminal.localUpdatedAt = nowIso();
+      }
+
+      if (typeof input.terminalMinimumContrastRatio === 'number' && Number.isFinite(input.terminalMinimumContrastRatio)) {
+        state.terminal.minimumContrastRatio = clampNumber(input.terminalMinimumContrastRatio, 1, 21);
+        state.terminal.localUpdatedAt = nowIso();
+      }
+
+      if (typeof input.terminalAltIsMeta === 'boolean') {
+        state.terminal.altIsMeta = input.terminalAltIsMeta;
         state.terminal.localUpdatedAt = nowIso();
       }
 
@@ -625,6 +668,11 @@ export class SettingsRepository {
         input.globalTerminalThemeId == null &&
         input.terminalFontFamily == null &&
         input.terminalFontSize == null &&
+        input.terminalScrollbackLines == null &&
+        input.terminalLineHeight == null &&
+        input.terminalLetterSpacing == null &&
+        input.terminalMinimumContrastRatio == null &&
+        input.terminalAltIsMeta == null &&
         input.terminalWebglEnabled == null
       ) {
         state.settings.theme = current.theme as AppTheme;
@@ -632,6 +680,12 @@ export class SettingsRepository {
         state.terminal.globalThemeId = current.globalTerminalThemeId ?? DEFAULT_GLOBAL_TERMINAL_THEME_ID;
         state.terminal.fontFamily = current.terminalFontFamily ?? DEFAULT_TERMINAL_FONT_FAMILY;
         state.terminal.fontSize = current.terminalFontSize ?? DEFAULT_TERMINAL_FONT_SIZE;
+        state.terminal.scrollbackLines = current.terminalScrollbackLines ?? DEFAULT_TERMINAL_SCROLLBACK_LINES;
+        state.terminal.lineHeight = current.terminalLineHeight ?? DEFAULT_TERMINAL_LINE_HEIGHT;
+        state.terminal.letterSpacing = current.terminalLetterSpacing ?? DEFAULT_TERMINAL_LETTER_SPACING;
+        state.terminal.minimumContrastRatio =
+          current.terminalMinimumContrastRatio ?? DEFAULT_TERMINAL_MINIMUM_CONTRAST_RATIO;
+        state.terminal.altIsMeta = current.terminalAltIsMeta ?? DEFAULT_TERMINAL_ALT_IS_META;
         state.terminal.webglEnabled = current.terminalWebglEnabled ?? DEFAULT_TERMINAL_WEBGL_ENABLED;
       }
     });

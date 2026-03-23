@@ -715,6 +715,7 @@ export function App() {
             {homeSection === 'settings' ? (
               <SettingsPanel
                 settings={settings}
+                desktopPlatform={desktopPlatform}
                 onUpdateSettings={updateSettings}
                 onLogout={async () => {
                   await window.dolssh.auth.logout();

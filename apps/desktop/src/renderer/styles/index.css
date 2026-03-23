@@ -1429,6 +1429,18 @@ input::placeholder {
   color: var(--text-soft);
 }
 
+.terminal-setting-field p {
+  margin: 0;
+  font-size: 0.78rem;
+  line-height: 1.45;
+  color: var(--text-soft);
+}
+
+.terminal-setting-field input,
+.terminal-setting-field select {
+  width: 100%;
+}
+
 .terminal-setting-toggle {
   display: flex;
   align-items: center;
@@ -1571,7 +1583,7 @@ input::placeholder {
 .terminal-workspace {
   position: relative;
   overflow: hidden;
-  border-radius: 22px;
+  border-radius: 10px;
   background:
     radial-gradient(circle at top left, color-mix(in srgb, var(--accent-strong) 10%, transparent 90%), transparent 32%),
     color-mix(in srgb, var(--surface) 94%, transparent 6%);
@@ -1666,7 +1678,7 @@ input::placeholder {
   justify-content: space-between;
   gap: 0.5rem;
   padding: 0.45rem 0.55rem 0.4rem;
-  border-radius: 18px 18px 0 0;
+  border-radius: 6px 6px 0 0;
   background: color-mix(in srgb, var(--surface-muted) 92%, transparent 8%);
   border: 1px solid color-mix(in srgb, var(--border) 88%, transparent 12%);
   border-bottom: none;
@@ -1694,7 +1706,7 @@ input::placeholder {
   place-items: center;
   width: 1.55rem;
   height: 1.55rem;
-  border-radius: 999px;
+  border-radius: 6px;
   background: color-mix(in srgb, var(--surface) 88%, transparent 12%);
   color: var(--text-soft);
   flex-shrink: 0;
@@ -1775,6 +1787,37 @@ input::placeholder {
   gap: 0.35rem;
 }
 
+.terminal-search-overlay {
+  position: absolute;
+  top: 1rem;
+  right: 1rem;
+  z-index: 6;
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.55rem;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface-raised) 94%, transparent 6%);
+  border: 1px solid color-mix(in srgb, var(--border) 90%, transparent 10%);
+  box-shadow: 0 16px 34px color-mix(in srgb, var(--shadow-color) 16%, transparent 84%);
+}
+
+.terminal-search-overlay input {
+  min-width: 220px;
+  height: 2.2rem;
+  border-radius: 6px;
+}
+
+.terminal-search-overlay__button {
+  height: 2.2rem;
+  padding: 0 0.85rem;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--surface) 88%, transparent 12%);
+  color: var(--text);
+  font-size: 0.82rem;
+  font-weight: 600;
+}
+
 .host-browser__error-banner {
   margin-bottom: 1rem;
 }
@@ -1799,13 +1842,14 @@ input::placeholder {
   min-width: 0;
   position: relative;
   overflow: hidden;
-  border-radius: 16px;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--surface) 96%, transparent 4%);
   padding: 0;
   margin: 0.55rem;
 }
 
 .terminal-session--pane .terminal-canvas {
-  border-radius: 0 0 14px 14px;
+  border-radius: 0 0 6px 6px;
   background: color-mix(in srgb, var(--surface) 96%, transparent 4%);
   border: 1px solid var(--border);
   border-top: none;
@@ -1813,7 +1857,7 @@ input::placeholder {
 }
 
 .terminal-workspace--split .terminal-canvas {
-  border-radius: 0 0 14px 14px;
+  border-radius: 0 0 6px 6px;
 }
 
 .terminal-canvas .xterm,
@@ -1824,7 +1868,8 @@ input::placeholder {
 }
 
 .terminal-canvas .xterm-viewport {
-  border-radius: 10px;
+  background: transparent;
+  border-radius: 0;
 }
 
 .workspace-drop-preview {
@@ -2556,6 +2601,18 @@ input::placeholder {
   .theme-options,
   .terminal-settings-grid {
     grid-template-columns: 1fr;
+  }
+
+  .terminal-search-overlay {
+    left: 0.75rem;
+    right: 0.75rem;
+    flex-wrap: wrap;
+  }
+
+  .terminal-search-overlay input {
+    min-width: 0;
+    width: 100%;
+    flex-basis: 100%;
   }
 
   .home-toolbar {

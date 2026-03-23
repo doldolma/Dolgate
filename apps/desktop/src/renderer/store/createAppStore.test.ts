@@ -216,6 +216,11 @@ function createMockApi(): DesktopApi {
         globalTerminalThemeId: 'dolssh-dark',
         terminalFontFamily: 'sf-mono',
         terminalFontSize: 13,
+        terminalScrollbackLines: 5000,
+        terminalLineHeight: 1,
+        terminalLetterSpacing: 0,
+        terminalMinimumContrastRatio: 1,
+        terminalAltIsMeta: false,
         terminalWebglEnabled: true,
         serverUrl: 'https://ssh.doldolma.com',
         serverUrlOverride: null,
@@ -227,6 +232,11 @@ function createMockApi(): DesktopApi {
         globalTerminalThemeId: input.globalTerminalThemeId ?? 'dolssh-dark',
         terminalFontFamily: input.terminalFontFamily ?? 'sf-mono',
         terminalFontSize: input.terminalFontSize ?? 13,
+        terminalScrollbackLines: input.terminalScrollbackLines ?? 5000,
+        terminalLineHeight: input.terminalLineHeight ?? 1,
+        terminalLetterSpacing: input.terminalLetterSpacing ?? 0,
+        terminalMinimumContrastRatio: input.terminalMinimumContrastRatio ?? 1,
+        terminalAltIsMeta: input.terminalAltIsMeta ?? false,
         terminalWebglEnabled: input.terminalWebglEnabled ?? true,
         serverUrl:
           typeof input.serverUrlOverride === 'string' && input.serverUrlOverride.trim()

@@ -48,6 +48,11 @@ interface TerminalSessionViewProps {
     theme: TerminalThemeDefinition['theme'];
     fontFamily: string;
     fontSize: number;
+    scrollbackLines: number;
+    lineHeight: number;
+    letterSpacing: number;
+    minimumContrastRatio: number;
+    macOptionIsMeta?: boolean;
   };
   terminalWebglEnabled: boolean;
   style?: React.CSSProperties;
@@ -58,6 +63,24 @@ interface TerminalSessionViewProps {
   onClose?: () => Promise<void>;
   onStartDrag?: () => void;
   onEndDrag?: () => void;
+}
+
+function isMacPlatform(): boolean {
+  if (typeof navigator === 'undefined') {
+    return false;
+  }
+
+  return /mac/i.test(navigator.userAgent) || /mac/i.test(navigator.platform);
+}
+
+export function shouldOpenTerminalSearch(input: {
+  active: boolean;
+  visible: boolean;
+  key: string;
+  ctrlKey: boolean;
+  metaKey: boolean;
+}): boolean {
+  return input.active && input.visible && (input.metaKey || input.ctrlKey) && input.key.toLowerCase() === 'f';
 }
 
 interface TerminalWorkspaceProps {
@@ -216,6 +239,10 @@ function TerminalSessionView({
   const reopenInteractiveAuthUrl = useAppStore((state) => state.reopenInteractiveAuthUrl);
   const clearPendingInteractiveAuth = useAppStore((state) => state.clearPendingInteractiveAuth);
   const [promptResponses, setPromptResponses] = useState<string[]>([]);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [terminalInitError, setTerminalInitError] = useState<string | null>(null);
+  const searchInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     if (!interactiveAuth || interactiveAuth.sessionId !== sessionId) {
@@ -224,6 +251,10 @@ function TerminalSessionView({
     }
     setPromptResponses(interactiveAuth.prompts.map(() => ''));
   }, [interactiveAuth, sessionId]);
+
+  useEffect(() => {
+    setTerminalInitError(null);
+  }, [sessionId]);
 
   function refreshViewport() {
     const terminal = terminalRef.current;
@@ -238,17 +269,25 @@ function TerminalSessionView({
       return;
     }
 
-    const runtime = createTerminalRuntime({
-      container: containerRef.current,
-      appearance,
-      onData: (data) => {
-        void window.dolssh.ssh.write(sessionId, data);
-      },
-      onBinary: (data) => {
-        const bytes = Uint8Array.from(data, (char) => char.charCodeAt(0));
-        void window.dolssh.ssh.writeBinary(sessionId, bytes);
-      }
-    });
+    let runtime: TerminalRuntime;
+    try {
+      runtime = createTerminalRuntime({
+        container: containerRef.current,
+        appearance,
+        onData: (data) => {
+          void window.dolssh.ssh.write(sessionId, data);
+        },
+        onBinary: (data) => {
+          const bytes = Uint8Array.from(data, (char) => char.charCodeAt(0));
+          void window.dolssh.ssh.writeBinary(sessionId, bytes);
+        }
+      });
+      setTerminalInitError(null);
+    } catch (error) {
+      console.error('Failed to initialize terminal runtime.', error);
+      setTerminalInitError('터미널을 초기화하지 못했습니다. 설정을 확인하거나 앱을 다시 열어주세요.');
+      return;
+    }
 
     terminalRef.current = runtime.terminal;
     runtimeRef.current = runtime;
@@ -323,15 +362,28 @@ function TerminalSessionView({
   }, [terminalWebglEnabled]);
 
   useEffect(() => window.dolssh.ssh.onData(sessionId, (chunk) => {
-    terminalRef.current?.write(chunk);
+    runtimeRef.current?.write(chunk);
   }), [sessionId]);
+
+  useEffect(() => {
+    if (!searchOpen) {
+      return;
+    }
+
+    requestAnimationFrame(() => {
+      searchInputRef.current?.focus();
+      searchInputRef.current?.select();
+    });
+  }, [searchOpen]);
 
   useEffect(() => {
     if (!visible) {
       return;
     }
+    runtimeRef.current?.syncDisplayMetrics();
     resizeSchedulerRef.current?.request();
     requestAnimationFrame(() => {
+      runtimeRef.current?.syncDisplayMetrics();
       resizeSchedulerRef.current?.request();
       requestAnimationFrame(() => {
         refreshViewport();
@@ -341,7 +393,8 @@ function TerminalSessionView({
 
   useEffect(() => {
     if (active && visible) {
-      terminalRef.current?.focus();
+      runtimeRef.current?.syncDisplayMetrics();
+      runtimeRef.current?.focus();
       resizeSchedulerRef.current?.request();
       requestAnimationFrame(() => {
         refreshViewport();
@@ -349,10 +402,56 @@ function TerminalSessionView({
     }
   }, [active, visible]);
 
+  useEffect(() => {
+    const handleWindowResize = () => {
+      runtimeRef.current?.syncDisplayMetrics();
+    };
+
+    window.addEventListener('resize', handleWindowResize);
+    return () => {
+      window.removeEventListener('resize', handleWindowResize);
+    };
+  }, []);
+
+  function closeSearchOverlay() {
+    setSearchOpen(false);
+    setSearchQuery('');
+    runtimeRef.current?.clearSearch();
+    runtimeRef.current?.focus();
+  }
+
   return (
     <div
       className={`terminal-session ${visible ? 'visible' : 'hidden'} ${active ? 'active' : ''} ${showHeader ? 'terminal-session--pane' : ''}`}
       style={style}
+      onKeyDownCapture={(event) => {
+        if (
+          shouldOpenTerminalSearch({
+            active,
+            visible,
+            key: event.key,
+            ctrlKey: event.ctrlKey,
+            metaKey: event.metaKey
+          })
+        ) {
+          event.preventDefault();
+          setSearchOpen(true);
+          return;
+        }
+
+        if (!active || !visible) {
+          return;
+        }
+
+        if (!searchOpen) {
+          return;
+        }
+
+        if (event.key === 'Escape') {
+          event.preventDefault();
+          closeSearchOverlay();
+        }
+      }}
       onMouseDown={() => {
         onFocus?.();
       }}
@@ -391,6 +490,7 @@ function TerminalSessionView({
         </div>
       ) : null}
       {currentTab?.errorMessage ? <div className="terminal-error-banner">{currentTab.errorMessage}</div> : null}
+      {terminalInitError ? <div className="terminal-error-banner">{terminalInitError}</div> : null}
       {interactiveAuth ? (
         <div className="terminal-interactive-auth">
           {interactiveAuth.provider === 'warpgate' ? (
@@ -483,6 +583,66 @@ function TerminalSessionView({
           )}
         </div>
       ) : null}
+      {searchOpen ? (
+        <div className="terminal-search-overlay" onMouseDown={(event) => event.stopPropagation()}>
+          <input
+            ref={searchInputRef}
+            aria-label="Search terminal output"
+            type="text"
+            value={searchQuery}
+            placeholder="Search terminal output"
+            onBlur={() => {
+              runtimeRef.current?.blurSearch();
+            }}
+            onChange={(event) => {
+              const nextQuery = event.target.value;
+              setSearchQuery(nextQuery);
+              if (!nextQuery.trim()) {
+                runtimeRef.current?.clearSearch();
+                return;
+              }
+              runtimeRef.current?.findNext(nextQuery);
+            }}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') {
+                event.preventDefault();
+                if (event.shiftKey) {
+                  runtimeRef.current?.findPrevious(searchQuery);
+                  return;
+                }
+                runtimeRef.current?.findNext(searchQuery);
+                return;
+              }
+
+              if (event.key === 'Escape') {
+                event.preventDefault();
+                closeSearchOverlay();
+              }
+            }}
+          />
+          <button
+            type="button"
+            className="terminal-search-overlay__button"
+            onClick={() => {
+              runtimeRef.current?.findPrevious(searchQuery);
+            }}
+          >
+            Prev
+          </button>
+          <button
+            type="button"
+            className="terminal-search-overlay__button"
+            onClick={() => {
+              runtimeRef.current?.findNext(searchQuery);
+            }}
+          >
+            Next
+          </button>
+          <button type="button" className="terminal-search-overlay__button" onClick={closeSearchOverlay}>
+            Close
+          </button>
+        </div>
+      ) : null}
       <div ref={containerRef} className="terminal-canvas" />
     </div>
   );
@@ -499,7 +659,12 @@ function resolveTerminalAppearanceForSession(
   return {
     theme: themePreset.theme,
     fontFamily: fontOption.stack,
-    fontSize: settings.terminalFontSize
+    fontSize: settings.terminalFontSize,
+    scrollbackLines: settings.terminalScrollbackLines,
+    lineHeight: settings.terminalLineHeight,
+    letterSpacing: settings.terminalLetterSpacing,
+    minimumContrastRatio: settings.terminalMinimumContrastRatio,
+    macOptionIsMeta: isMacPlatform() ? settings.terminalAltIsMeta : undefined
   };
 }
 
@@ -549,7 +714,18 @@ export function TerminalWorkspace({
       next.set(tab.sessionId, resolveTerminalAppearanceForSession(settings, hosts, tab));
     }
     return next;
-  }, [hosts, settings.globalTerminalThemeId, settings.terminalFontFamily, settings.terminalFontSize, tabs]);
+  }, [
+    hosts,
+    settings.globalTerminalThemeId,
+    settings.terminalFontFamily,
+    settings.terminalFontSize,
+    settings.terminalScrollbackLines,
+    settings.terminalLineHeight,
+    settings.terminalLetterSpacing,
+    settings.terminalMinimumContrastRatio,
+    settings.terminalAltIsMeta,
+    tabs
+  ]);
 
   useEffect(() => {
     if (draggedSession?.source !== 'standalone-tab' || !canDropDraggedSession) {

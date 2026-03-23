@@ -186,24 +186,45 @@ describe('SettingsRepository', () => {
 
     expect(settings.get().serverUrl).toBe('https://bundled.example.com');
     expect(settings.get().serverUrlOverride).toBeNull();
+    expect(settings.get().terminalScrollbackLines).toBe(5000);
     expect(settings.get().terminalWebglEnabled).toBe(true);
 
     const updated = settings.update({
       serverUrlOverride: 'https://custom.example.com',
+      terminalScrollbackLines: 99999,
+      terminalLineHeight: 2.5,
+      terminalLetterSpacing: -10,
+      terminalMinimumContrastRatio: 99,
+      terminalAltIsMeta: true,
       terminalWebglEnabled: false
     });
 
     expect(updated.serverUrl).toBe('https://custom.example.com');
     expect(updated.serverUrlOverride).toBe('https://custom.example.com');
+    expect(updated.terminalScrollbackLines).toBe(25000);
+    expect(updated.terminalLineHeight).toBe(2);
+    expect(updated.terminalLetterSpacing).toBe(0);
+    expect(updated.terminalMinimumContrastRatio).toBe(21);
+    expect(updated.terminalAltIsMeta).toBe(true);
     expect(updated.terminalWebglEnabled).toBe(false);
 
     const reset = settings.update({
       serverUrlOverride: null,
+      terminalScrollbackLines: 800,
+      terminalLineHeight: 0.5,
+      terminalLetterSpacing: 99,
+      terminalMinimumContrastRatio: 0,
+      terminalAltIsMeta: false,
       terminalWebglEnabled: true
     });
 
     expect(reset.serverUrl).toBe('https://bundled.example.com');
     expect(reset.serverUrlOverride).toBeNull();
+    expect(reset.terminalScrollbackLines).toBe(1000);
+    expect(reset.terminalLineHeight).toBe(1);
+    expect(reset.terminalLetterSpacing).toBe(2);
+    expect(reset.terminalMinimumContrastRatio).toBe(1);
+    expect(reset.terminalAltIsMeta).toBe(false);
     expect(reset.terminalWebglEnabled).toBe(true);
   });
 });

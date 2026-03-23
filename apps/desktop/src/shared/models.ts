@@ -226,6 +226,11 @@ export interface TerminalAppearanceSettings {
   globalTerminalThemeId: TerminalThemeId;
   terminalFontFamily: TerminalFontFamilyId;
   terminalFontSize: number;
+  terminalScrollbackLines: number;
+  terminalLineHeight: number;
+  terminalLetterSpacing: number;
+  terminalMinimumContrastRatio: number;
+  terminalAltIsMeta: boolean;
   terminalWebglEnabled: boolean;
 }
 

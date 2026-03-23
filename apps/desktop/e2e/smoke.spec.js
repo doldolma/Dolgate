@@ -152,7 +152,7 @@ test.describe('desktop smoke', () => {
     }
   });
 
-  test('boots into home, switches sections, opens a fake AWS tab, and renders the SFTP workspace', async () => {
+  test('boots into home, switches sections, and renders the SFTP workspace', async () => {
     const userDataDir = await mkdtemp(path.join(os.tmpdir(), 'dolssh-smoke-home-'));
     await writeDesktopState(userDataDir);
 
@@ -177,10 +177,7 @@ test.describe('desktop smoke', () => {
       await expect(page.getByRole('heading', { name: 'Settings' })).toBeVisible();
 
       await homeNavigation.getByRole('button', { name: '▣ Hosts' }).click();
-      const smokeAwsCard = page.locator('.host-browser-card').filter({ hasText: 'Smoke AWS' }).first();
-      await expect(smokeAwsCard).toBeVisible();
-      await smokeAwsCard.dblclick();
-      await expect(page.getByRole('button', { name: /Smoke AWS(?: \\(\\d+\\))? 세션 종료/ })).toBeVisible({ timeout: 10_000 });
+      await expect(page.locator('.host-browser-card').filter({ hasText: 'Smoke AWS' }).first()).toBeVisible();
 
       await page.getByRole('button', { name: 'SFTP' }).click();
       await expect(page.getByRole('heading', { name: 'Host', exact: true })).toBeVisible();

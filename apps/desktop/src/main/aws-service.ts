@@ -6,6 +6,10 @@ import type { AwsEc2InstanceSummary, AwsProfileStatus, AwsProfileSummary } from 
 
 const REGION_DISCOVERY_REGION = 'us-east-1';
 
+function isE2EFakeAwsSessionEnabled(): boolean {
+  return process.env.DOLSSH_E2E_FAKE_AWS_SESSION === '1';
+}
+
 interface CommandResult {
   stdout: string;
   stderr: string;
@@ -193,6 +197,10 @@ export class AwsService {
   }
 
   async ensureAwsCliAvailable(): Promise<void> {
+    if (isE2EFakeAwsSessionEnabled()) {
+      return;
+    }
+
     try {
       const result = await this.runResolvedCommand('aws', ['--version'], 10_000);
       if (result.exitCode !== 0) {
@@ -204,6 +212,10 @@ export class AwsService {
   }
 
   async ensureSessionManagerPluginAvailable(): Promise<void> {
+    if (isE2EFakeAwsSessionEnabled()) {
+      return;
+    }
+
     try {
       const result = await this.runResolvedCommand('session-manager-plugin', ['--version'], 10_000);
       if (result.exitCode !== 0) {
@@ -238,6 +250,18 @@ export class AwsService {
   }
 
   async getProfileStatus(profileName: string): Promise<AwsProfileStatus> {
+    if (isE2EFakeAwsSessionEnabled()) {
+      return {
+        profileName,
+        available: true,
+        isSsoProfile: false,
+        isAuthenticated: true,
+        accountId: '000000000000',
+        arn: 'arn:aws:iam::000000000000:user/dolssh-smoke',
+        missingTools: []
+      };
+    }
+
     await this.ensureAwsCliAvailable();
 
     const [ssoStartUrl, ssoSession, pluginAvailable] = await Promise.all([
@@ -274,6 +298,10 @@ export class AwsService {
   }
 
   async login(profileName: string): Promise<void> {
+    if (isE2EFakeAwsSessionEnabled()) {
+      return;
+    }
+
     await this.ensureAwsCliAvailable();
     const status = await this.getProfileStatus(profileName);
     if (!status.isSsoProfile) {
