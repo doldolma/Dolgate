@@ -30,7 +30,7 @@ interface GroupCardView {
   hostCount: number;
 }
 
-function normalizeGroupPath(groupPath?: string | null): string | null {
+export function normalizeGroupPath(groupPath?: string | null): string | null {
   const normalized = (groupPath ?? '')
     .split('/')
     .map((segment) => segment.trim())
@@ -39,7 +39,7 @@ function normalizeGroupPath(groupPath?: string | null): string | null {
   return normalized.length > 0 ? normalized : null;
 }
 
-function getParentGroupPath(groupPath?: string | null): string | null {
+export function getParentGroupPath(groupPath?: string | null): string | null {
   const normalized = normalizeGroupPath(groupPath);
   if (!normalized || !normalized.includes('/')) {
     return null;
@@ -47,12 +47,12 @@ function getParentGroupPath(groupPath?: string | null): string | null {
   return normalized.slice(0, normalized.lastIndexOf('/'));
 }
 
-function getGroupLabel(groupPath: string): string {
+export function getGroupLabel(groupPath: string): string {
   const parts = groupPath.split('/');
   return parts[parts.length - 1];
 }
 
-function isGroupWithinPath(groupPath: string | null, currentGroupPath: string | null): boolean {
+export function isGroupWithinPath(groupPath: string | null, currentGroupPath: string | null): boolean {
   if (!currentGroupPath) {
     return true;
   }
@@ -62,12 +62,12 @@ function isGroupWithinPath(groupPath: string | null, currentGroupPath: string | 
   return groupPath === currentGroupPath || groupPath.startsWith(`${currentGroupPath}/`);
 }
 
-function isDirectHostChild(host: HostRecord, currentGroupPath: string | null): boolean {
+export function isDirectHostChild(host: HostRecord, currentGroupPath: string | null): boolean {
   const hostGroupPath = normalizeGroupPath(host.groupName);
   return hostGroupPath === currentGroupPath;
 }
 
-function collectGroupPaths(groups: GroupRecord[], hosts: HostRecord[]): string[] {
+export function collectGroupPaths(groups: GroupRecord[], hosts: HostRecord[]): string[] {
   const paths = new Set<string>();
 
   const appendPathWithAncestors = (targetPath?: string | null) => {
@@ -92,7 +92,7 @@ function collectGroupPaths(groups: GroupRecord[], hosts: HostRecord[]): string[]
   return [...paths].sort((a, b) => a.localeCompare(b));
 }
 
-function buildVisibleGroups(groups: GroupRecord[], hosts: HostRecord[], currentGroupPath: string | null): GroupCardView[] {
+export function buildVisibleGroups(groups: GroupRecord[], hosts: HostRecord[], currentGroupPath: string | null): GroupCardView[] {
   const explicitGroupMap = new Map(groups.map((group) => [group.path, group]));
   return collectGroupPaths(groups, hosts)
     .filter((groupPath) => getParentGroupPath(groupPath) === currentGroupPath)

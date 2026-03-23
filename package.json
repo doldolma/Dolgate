@@ -15,7 +15,17 @@
     "release:mac": "npm run release:publish:mac --workspace @dolssh/desktop",
     "release:win": "npm run release:publish:win --workspace @dolssh/desktop",
     "release:all": "npm run release:all --workspace @dolssh/desktop",
-    "test": "npm run test --workspace @dolssh/desktop && cd services/ssh-core && go test ./... && cd ../sync-api && go test ./...",
+    "test": "npm run test:fast",
+    "test:fast": "npm run test:desktop && npm run test:services",
+    "test:desktop": "npm run test --workspace @dolssh/desktop",
+    "test:desktop:main": "npm run test:desktop:main --workspace @dolssh/desktop",
+    "test:desktop:renderer": "npm run test:desktop:renderer --workspace @dolssh/desktop",
+    "test:desktop:smoke": "npm run test:desktop:smoke --workspace @dolssh/desktop",
+    "test:ssh-core": "cd services/ssh-core && go test ./... -cover",
+    "test:sync-api": "cd services/sync-api && go test ./... -cover",
+    "test:services": "npm run test:ssh-core && npm run test:sync-api",
+    "test:smoke": "npm run test:desktop:smoke",
+    "test:all": "npm run test:fast && npm run test:smoke",
     "typecheck": "npm run typecheck --workspace @dolssh/desktop"
   },
   "devDependencies": {

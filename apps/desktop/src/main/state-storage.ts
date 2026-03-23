@@ -90,6 +90,11 @@ function nowIso(): string {
 }
 
 function resolveUserDataPath(): string {
+  const override = process.env.DOLSSH_USER_DATA_DIR?.trim();
+  if (override) {
+    return path.resolve(override);
+  }
+
   if (app?.getPath) {
     return app.getPath('userData');
   }
@@ -584,4 +589,8 @@ export function getDesktopStateStorage(): DesktopStateStorage {
     desktopStateStorage = new DesktopStateStorage();
   }
   return desktopStateStorage;
+}
+
+export function resetDesktopStateStorageForTests(): void {
+  desktopStateStorage = null;
 }

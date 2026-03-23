@@ -4,12 +4,15 @@
     "jsx": "react-jsx",
     "types": [
       "node",
-      "vite/client"
+      "vite/client",
+      "@testing-library/jest-dom"
     ]
   },
   "include": [
     "src",
+    "e2e",
     "forge.config.ts",
+    "playwright.config.ts",
     "vite.*.config.ts"
   ]
 }

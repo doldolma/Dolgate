@@ -222,6 +222,10 @@ npm run release:dist:mac
 npm run release:dist:win
 ```
 
+주의:
+
+- `node-pty` 같은 네이티브 Electron 런타임 의존성이 포함되므로, 대상 플랫폼용 릴리즈는 해당 플랫폼 환경에서 의존성을 설치/재빌드한 뒤 패키징하는 것을 권장합니다.
+
 GitHub Release 업로드까지 수행:
 
 ```bash
@@ -258,15 +262,42 @@ npm run release:all
 ## 테스트와 검증
 
 ```bash
-npm test
+npm run test:fast
 ```
 
-추가 검증:
+테스트 층:
+
+- `fast`: 외부 네트워크나 실제 AWS/SSH 없이 돌아가는 단위 테스트와 경량 통합 테스트입니다. 개발 중 기본 회귀 체크로 사용합니다.
+- `smoke`: Electron 앱을 실제로 띄워 로그인 게이트, 홈 섹션 전환, 가짜 AWS 세션 탭 생성, SFTP 기본 렌더링까지 확인합니다.
+- `manual`: Windows SSM 실제 입력, 실제 SSH/SFTP 연결, 릴리즈 빌드 실행, 업데이트 경로처럼 OS/외부 환경 의존 시나리오는 수동 체크리스트로 검증합니다.
+
+주요 명령:
 
 ```bash
+npm run test:fast
+npm run test:desktop
+npm run test:desktop:main
+npm run test:desktop:renderer
+npm run test:services
+npm run test:ssh-core
+npm run test:sync-api
+npm run test:smoke
+npm run test:all
 npm run typecheck --workspace @dolssh/desktop
-(cd services/ssh-core && go test ./...)
-(cd services/sync-api && go test ./...)
+```
+
+수동 체크리스트를 권장하는 경우:
+
+- Windows에서 AWS SSM 연결 후 일반 문자, Enter, 화살표 키, Backspace, Tab, Ctrl+C 입력 확인
+- 실제 SSH 터미널 연결과 known_hosts / credential retry 흐름 확인
+- 실제 SFTP 연결과 업로드/다운로드/충돌 처리 확인
+- 패키징된 macOS/Windows 앱 실행과 업데이트 확인
+
+원칙:
+
+- 기본 자동 테스트는 외부 네트워크, 실제 AWS 계정, 실제 SSH 서버를 요구하지 않도록 유지합니다.
+- `test:smoke`는 opt-in 로컬 검증으로 두고 기본 `npm test`에는 포함하지 않습니다.
+- 기능 수정이나 버그 수정 시에는 관련 모듈 테스트를 함께 추가하는 흐름을 기본으로 합니다.
 ```
 
 ## 문서

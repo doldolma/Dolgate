@@ -31,6 +31,12 @@ import type {
 } from '@shared';
 import { ipcChannels } from '../common/ipc-channels';
 import { CoreFrameParser, encodeControlFrame, encodeStreamFrame } from './core-framing';
+import {
+  createInMemoryInteractiveSessionRunner,
+  createNodePtyInteractiveSessionRunner,
+  type InteractiveSessionLaunchConfig,
+  type InteractiveSessionRunner
+} from './interactive-session-runner';
 import { buildAwsCommandEnv, resolveAwsExecutable } from './aws-service';
 
 interface ActivityLogInput {
@@ -49,8 +55,34 @@ interface PortForwardDefinition {
 }
 
 interface AwsSessionRuntime {
-  process: ChildProcessWithoutNullStreams;
-  stderr: string;
+  runner: InteractiveSessionRunner;
+  outputTail: string;
+  disconnectRequested: boolean;
+  errorNotified: boolean;
+}
+
+type InteractiveSessionRunnerFactory = (config: InteractiveSessionLaunchConfig) => InteractiveSessionRunner;
+
+const defaultInteractiveSessionRunnerFactory: InteractiveSessionRunnerFactory = (config) => createNodePtyInteractiveSessionRunner(config);
+const awsDefaultCols = 120;
+const awsDefaultRows = 32;
+const maxAwsOutputTailLength = 8192;
+
+function isE2EFakeAwsSessionEnabled(): boolean {
+  return process.env.DOLSSH_E2E_FAKE_AWS_SESSION === '1';
+}
+
+function appendAwsOutputTail(current: string, chunk: Uint8Array): string {
+  const next = current + Buffer.from(chunk).toString('utf8');
+  if (next.length <= maxAwsOutputTailLength) {
+    return next;
+  }
+  return next.slice(-maxAwsOutputTailLength);
+}
+
+function resolveAwsSessionMessage(runtime: AwsSessionRuntime | undefined, fallback: string): string {
+  const candidate = runtime?.outputTail.trim();
+  return candidate || fallback;
 }
 
 function resolveRepoRoot(): string {
@@ -157,7 +189,10 @@ function toTransferJobEvent(existing: TransferJob | undefined, event: CoreEvent<
 }
 
 export class CoreManager {
-  constructor(private readonly appendLog?: (entry: ActivityLogInput) => void) {}
+  constructor(
+    private readonly appendLog?: (entry: ActivityLogInput) => void,
+    private readonly createInteractiveSessionRunner: InteractiveSessionRunnerFactory = defaultInteractiveSessionRunnerFactory
+  ) {}
 
   // Go SSH 코어는 앱 전체에서 하나만 띄우고, 여러 SSH/SFTP 작업을 그 안에서 관리한다.
   private process: ChildProcessWithoutNullStreams | null = null;
@@ -355,106 +390,93 @@ export class CoreManager {
     };
     this.tabs.set(sessionId, tab);
 
-    const awsExecutablePath = await resolveAwsExecutable('aws');
-    const awsCommandEnv = await buildAwsCommandEnv();
-    let receivedOutput = false;
-
-    const child = spawn(
-      awsExecutablePath,
-      ['ssm', 'start-session', '--target', payload.instanceId, '--profile', payload.profileName, '--region', payload.region],
-      {
-        stdio: ['pipe', 'pipe', 'pipe'],
-        windowsHide: true,
-        env: awsCommandEnv
+    let runner: InteractiveSessionRunner;
+    try {
+      if (isE2EFakeAwsSessionEnabled()) {
+        runner = createInMemoryInteractiveSessionRunner('Connected to fake AWS SSM smoke session.\r\n');
+      } else {
+        const awsExecutablePath = await resolveAwsExecutable('aws');
+        const awsCommandEnv = await buildAwsCommandEnv();
+        runner = this.createInteractiveSessionRunner({
+          command: awsExecutablePath,
+          args: ['ssm', 'start-session', '--target', payload.instanceId, '--profile', payload.profileName, '--region', payload.region],
+          cols: awsDefaultCols,
+          rows: awsDefaultRows,
+          env: awsCommandEnv,
+          name: 'xterm-256color'
+        });
       }
-    );
-    this.awsSessions.set(sessionId, { process: child, stderr: '' });
+    } catch (error) {
+      this.tabs.delete(sessionId);
+      this.lastResizeBySession.delete(sessionId);
+      throw (error instanceof Error ? error : new Error('AWS SSM 세션을 시작하지 못했습니다.'));
+    }
 
-    child.stdout.on('data', (chunk: Buffer) => {
-      receivedOutput = true;
+    const runtime: AwsSessionRuntime = {
+      runner,
+      outputTail: '',
+      disconnectRequested: false,
+      errorNotified: false
+    };
+    this.awsSessions.set(sessionId, runtime);
+
+    const disposeData = runner.onData((chunk) => {
+      const current = this.awsSessions.get(sessionId);
+      if (current) {
+        current.outputTail = appendAwsOutputTail(current.outputTail, chunk);
+      }
       this.broadcastStream(
         {
           type: 'data',
           sessionId
         },
-        new Uint8Array(chunk)
+        chunk
       );
     });
 
-    child.stderr.setEncoding('utf8');
-    child.stderr.on('data', (chunk: string) => {
-      const runtime = this.awsSessions.get(sessionId);
-      if (runtime) {
-        runtime.stderr += chunk;
-      }
-    });
-
-    child.on('spawn', () => {
-      const existing = this.tabs.get(sessionId);
-      if (!existing) {
+    const disposeError = runner.onError((error) => {
+      const current = this.awsSessions.get(sessionId);
+      if (!current || current.disconnectRequested || current.errorNotified) {
         return;
       }
-      this.tabs.set(sessionId, {
-        ...existing,
-        status: 'connected',
-        lastEventAt: new Date().toISOString()
-      });
-      this.broadcastTerminalEvent({
-        type: 'connected',
-        sessionId,
-        payload: {
-          transport: 'aws-ssm'
-        }
-      });
+      current.errorNotified = true;
       this.log({
-        level: 'info',
+        level: 'error',
         category: 'session',
-        message: 'AWS SSM 세션이 연결되었습니다.',
+        message: 'AWS SSM 세션 오류가 발생했습니다.',
         metadata: {
           sessionId,
-          hostId: payload.hostId,
-          instanceId: payload.instanceId,
-          profileName: payload.profileName,
-          region: payload.region
+          message: error.message
         }
       });
-    });
-
-    child.on('error', (error) => {
-      this.awsSessions.delete(sessionId);
-      this.tabs.delete(sessionId);
-      this.lastResizeBySession.delete(sessionId);
-      const message = error.message || 'AWS SSM 세션을 시작하지 못했습니다.';
       this.broadcastTerminalEvent({
         type: 'error',
         sessionId,
         payload: {
-          message
-        }
-      });
-      this.broadcastTerminalEvent({
-        type: 'closed',
-        sessionId,
-        payload: {
-          message
+          message: error.message || 'AWS SSM 세션 오류가 발생했습니다.'
         }
       });
     });
 
-    child.on('exit', (code, signal) => {
+    const disposeExit = runner.onExit(({ exitCode, signal }) => {
+      disposeData();
+      disposeError();
+      disposeExit();
+
       if (!this.tabs.has(sessionId)) {
         this.awsSessions.delete(sessionId);
         this.lastResizeBySession.delete(sessionId);
         return;
       }
-      const runtime = this.awsSessions.get(sessionId);
+
+      const current = this.awsSessions.get(sessionId);
       this.awsSessions.delete(sessionId);
       this.tabs.delete(sessionId);
       this.lastResizeBySession.delete(sessionId);
-      const message =
-        runtime?.stderr.trim() ||
-        `AWS SSM 세션이 종료되었습니다. (code=${code ?? 'null'}, signal=${signal ?? 'null'})`;
-      if (!receivedOutput && (code ?? 0) !== 0) {
+
+      const fallbackMessage = `AWS SSM 세션이 종료되었습니다. (code=${exitCode ?? 'null'}, signal=${signal ?? 'null'})`;
+      const message = current?.disconnectRequested ? 'client requested disconnect' : resolveAwsSessionMessage(current, fallbackMessage);
+      if (!current?.disconnectRequested && exitCode !== 0 && !current?.errorNotified) {
         this.broadcastTerminalEvent({
           type: 'error',
           sessionId,
@@ -464,13 +486,13 @@ export class CoreManager {
         });
       }
       this.log({
-        level: code === 0 || code === null ? 'info' : 'warn',
+        level: exitCode === 0 || exitCode === null ? 'info' : 'warn',
         category: 'session',
         message: 'AWS SSM 세션이 종료되었습니다.',
         metadata: {
           sessionId,
           message,
-          code: code ?? null,
+          code: exitCode ?? null,
           signal: signal ?? null
         }
       });
@@ -481,6 +503,34 @@ export class CoreManager {
           message
         }
       });
+    });
+
+    const existing = this.tabs.get(sessionId);
+    if (existing) {
+      this.tabs.set(sessionId, {
+        ...existing,
+        status: 'connected',
+        lastEventAt: new Date().toISOString()
+      });
+    }
+    this.broadcastTerminalEvent({
+      type: 'connected',
+      sessionId,
+      payload: {
+        transport: 'aws-ssm'
+      }
+    });
+    this.log({
+      level: 'info',
+      category: 'session',
+      message: 'AWS SSM 세션이 연결되었습니다.',
+      metadata: {
+        sessionId,
+        hostId: payload.hostId,
+        instanceId: payload.instanceId,
+        profileName: payload.profileName,
+        region: payload.region
+      }
     });
 
     return { sessionId };
@@ -773,7 +823,7 @@ export class CoreManager {
     }
     const awsSession = this.awsSessions.get(sessionId);
     if (awsSession) {
-      awsSession.process.stdin.write(data);
+      awsSession.runner.write(data);
       return;
     }
     this.sendStream(
@@ -793,7 +843,7 @@ export class CoreManager {
     }
     const awsSession = this.awsSessions.get(sessionId);
     if (awsSession) {
-      awsSession.process.stdin.write(Buffer.from(data));
+      awsSession.runner.writeBinary(data);
       return;
     }
     this.sendStream(
@@ -811,9 +861,6 @@ export class CoreManager {
     if (!tab || tab.status !== 'connected') {
       return;
     }
-    if (this.awsSessions.has(sessionId)) {
-      return;
-    }
     // 숨겨진 패널이나 과도한 observer 발화로 들어온 무효/중복 resize는 main에서 한 번 더 걸러준다.
     if (cols <= 0 || rows <= 0) {
       return;
@@ -823,6 +870,11 @@ export class CoreManager {
       return;
     }
     this.lastResizeBySession.set(sessionId, { cols, rows });
+    const awsSession = this.awsSessions.get(sessionId);
+    if (awsSession) {
+      awsSession.runner.resize(cols, rows);
+      return;
+    }
     this.sendControl({
       id: randomUUID(),
       type: 'resize',
@@ -839,19 +891,8 @@ export class CoreManager {
     }
     const awsSession = this.awsSessions.get(sessionId);
     if (awsSession) {
-      if (awsSession.process.exitCode === null && !awsSession.process.killed) {
-        awsSession.process.kill('SIGTERM');
-      } else {
-        this.awsSessions.delete(sessionId);
-        this.tabs.delete(sessionId);
-        this.broadcastTerminalEvent({
-          type: 'closed',
-          sessionId,
-          payload: {
-            message: 'client requested disconnect'
-          }
-        });
-      }
+      awsSession.disconnectRequested = true;
+      awsSession.runner.kill();
       return;
     }
     // 코어에 실제 세션 핸들이 없을 수 있는 connecting/error 탭은 로컬에서 바로 닫아준다.
@@ -1081,22 +1122,24 @@ export class CoreManager {
     await Promise.all(
       sessions.map(([sessionId, runtime]) =>
         new Promise<void>((resolve) => {
+          let finished = false;
           const finish = () => {
+            if (finished) {
+              return;
+            }
+            finished = true;
             this.awsSessions.delete(sessionId);
             resolve();
           };
-          runtime.process.once('exit', () => {
+          const disposeExit = runtime.runner.onExit(() => {
+            disposeExit();
             finish();
           });
-          if (runtime.process.exitCode !== null || runtime.process.killed) {
-            finish();
-            return;
-          }
-          runtime.process.kill('SIGTERM');
+          runtime.disconnectRequested = true;
+          runtime.runner.kill();
           setTimeout(() => {
-            if (runtime.process.exitCode === null && !runtime.process.killed) {
-              runtime.process.kill('SIGKILL');
-            }
+            disposeExit();
+            finish();
           }, 1000);
         })
       )

@@ -43,6 +43,10 @@ function defaultSyncStatus(): SyncStatus {
   };
 }
 
+function isE2ESyncDisabled(): boolean {
+  return process.env.DOLSSH_E2E_DISABLE_SYNC === '1';
+}
+
 function totalRecordCount(payload: SyncPayloadV2): number {
   return payload.groups.length + payload.hosts.length + payload.secrets.length + payload.knownHosts.length + payload.portForwards.length + payload.preferences.length;
 }
@@ -165,6 +169,16 @@ export class SyncService {
   }
 
   async bootstrap(): Promise<SyncStatus> {
+    if (isE2ESyncDisabled()) {
+      this.patchState({
+        status: 'ready',
+        lastSuccessfulSyncAt: new Date().toISOString(),
+        pendingPush: false,
+        errorMessage: null
+      });
+      return this.state;
+    }
+
     this.patchState({
       status: 'syncing',
       errorMessage: null
@@ -201,6 +215,16 @@ export class SyncService {
   }
 
   async pushDirty(): Promise<SyncStatus> {
+    if (isE2ESyncDisabled()) {
+      this.patchState({
+        status: 'ready',
+        lastSuccessfulSyncAt: new Date().toISOString(),
+        pendingPush: false,
+        errorMessage: null
+      });
+      return this.state;
+    }
+
     if (this.pushPromise) {
       return this.pushPromise;
     }

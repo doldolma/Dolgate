@@ -28,23 +28,28 @@
     "release:publish:mac": "node ./scripts/release-publish.cjs mac",
     "release:publish:win": "node ./scripts/release-publish.cjs win",
     "release:all": "node ./scripts/release-publish.cjs all",
-    "test": "vitest run --config vite.renderer.config.ts",
+    "test": "npm run test:desktop:main && npm run test:desktop:renderer",
+    "test:desktop:main": "vitest run --config vite.main.config.ts",
+    "test:desktop:renderer": "vitest run --config vite.renderer.config.ts",
+    "test:desktop:smoke": "npm run build && playwright test -c playwright.config.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "electron-updater": "^6.3.9",
     "fuse.js": "^7.0.0",
+    "node-pty": "^1.1.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "xterm": "^5.3.0",
     "xterm-addon-fit": "^0.8.0",
-    "zustand": "^5.0.3",
-    "electron-updater": "^6.3.9"
+    "zustand": "^5.0.3"
   },
   "devDependencies": {
-    "@electron/notarize": "^3.0.1",
     "@electron-forge/cli": "^7.8.1",
     "@electron-forge/plugin-auto-unpack-natives": "^7.8.1",
     "@electron-forge/plugin-vite": "^7.8.1",
+    "@electron/notarize": "^3.0.1",
+    "@playwright/test": "^1.58.2",
     "@testing-library/jest-dom": "^6.6.3",
     "@testing-library/react": "^16.2.0",
     "@types/node": "^22.13.10",

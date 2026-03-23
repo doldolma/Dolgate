@@ -5,6 +5,7 @@ const sharedEntry = fileURLToPath(new URL('./src/shared/index.ts', import.meta.u
 
 export default defineConfig({
   resolve: {
+    dedupe: ['react', 'react-dom'],
     alias: {
       '@shared': sharedEntry
     }

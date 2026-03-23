@@ -51,6 +51,20 @@ async function toApiErrorMessage(response: Response, fallback: string): Promise<
   return text || `${fallback} (${response.status})`;
 }
 
+function readE2EAuthSessionFromEnv(): AuthSession | null {
+  const raw = process.env.DOLSSH_E2E_AUTH_SESSION_JSON?.trim();
+  if (!raw) {
+    return null;
+  }
+
+  const parsed = JSON.parse(raw) as unknown;
+  if (!isAuthSession(parsed)) {
+    throw new Error('DOLSSH_E2E_AUTH_SESSION_JSON 값이 올바른 AuthSession 형식이 아닙니다.');
+  }
+
+  return parsed;
+}
+
 interface ActivityLogInput {
   level: 'info' | 'warn' | 'error';
   category: 'audit';
@@ -105,6 +119,17 @@ export class AuthService {
 
   async bootstrap(): Promise<AuthState> {
     if (this.state.status === 'authenticated') {
+      return this.state;
+    }
+
+    const e2eSession = readE2EAuthSessionFromEnv();
+    if (e2eSession) {
+      this.stateStorage.updateAuthStatus('authenticated');
+      this.patchState({
+        status: 'authenticated',
+        session: e2eSession,
+        errorMessage: null
+      });
       return this.state;
     }
 

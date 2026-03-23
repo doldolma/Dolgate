@@ -46,7 +46,7 @@ type ActionDialogState =
       value: string;
     };
 
-function groupHosts(hosts: SshHostRecord[]): Array<[string, SshHostRecord[]]> {
+export function groupHosts(hosts: SshHostRecord[]): Array<[string, SshHostRecord[]]> {
   const grouped = new Map<string, SshHostRecord[]>();
   for (const host of hosts) {
     const key = host.groupName || 'Ungrouped';
@@ -57,7 +57,7 @@ function groupHosts(hosts: SshHostRecord[]): Array<[string, SshHostRecord[]]> {
   return Array.from(grouped.entries()).sort(([a], [b]) => a.localeCompare(b));
 }
 
-function visibleEntries(pane: SftpPaneState): FileEntry[] {
+export function visibleEntries(pane: SftpPaneState): FileEntry[] {
   if (!pane.filterQuery.trim()) {
     return pane.entries;
   }
@@ -65,7 +65,7 @@ function visibleEntries(pane: SftpPaneState): FileEntry[] {
   return pane.entries.filter((entry) => entry.name.toLowerCase().includes(query));
 }
 
-function breadcrumbParts(targetPath: string): Array<{ label: string; path: string }> {
+export function breadcrumbParts(targetPath: string): Array<{ label: string; path: string }> {
   if (!targetPath || targetPath === '/') {
     return [{ label: '/', path: '/' }];
   }
