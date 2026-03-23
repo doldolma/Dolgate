@@ -37,6 +37,10 @@ export function SettingsPanel({ settings, onUpdateSettings, onLogout }: Settings
     await onUpdateSettings({ terminalFontSize });
   }
 
+  async function handleChangeTerminalWebglEnabled(terminalWebglEnabled: boolean) {
+    await onUpdateSettings({ terminalWebglEnabled });
+  }
+
   return (
     <div className="settings-panel">
       <div className="settings-panel__header">
@@ -79,6 +83,20 @@ export function SettingsPanel({ settings, onUpdateSettings, onLogout }: Settings
                 </option>
               ))}
             </select>
+          </label>
+
+          <label className="terminal-setting-toggle" htmlFor="terminal-webgl-enabled">
+            <div>
+              <span>WebGL Renderer</span>
+              <p>지원되지 않는 환경에서는 자동으로 기본 렌더러로 전환합니다.</p>
+            </div>
+            <input
+              id="terminal-webgl-enabled"
+              aria-label="WebGL Renderer"
+              type="checkbox"
+              checked={settings.terminalWebglEnabled}
+              onChange={async (event) => handleChangeTerminalWebglEnabled(event.target.checked)}
+            />
           </label>
         </div>
 

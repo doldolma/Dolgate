@@ -56,6 +56,7 @@ export interface DesktopStateFile {
     globalThemeUpdatedAt: string;
     fontFamily: TerminalFontFamilyId;
     fontSize: number;
+    webglEnabled: boolean;
     localUpdatedAt: string;
   };
   updater: {
@@ -150,6 +151,10 @@ function normalizeTerminalFontSize(value: unknown): number {
   return Math.min(18, Math.max(11, Math.round(value)));
 }
 
+function normalizeTerminalWebglEnabled(value: unknown): boolean {
+  return typeof value === 'boolean' ? value : true;
+}
+
 function createDefaultStateFile(): DesktopStateFile {
   const timestamp = nowIso();
   return {
@@ -164,6 +169,7 @@ function createDefaultStateFile(): DesktopStateFile {
       globalThemeUpdatedAt: timestamp,
       fontFamily: 'sf-mono',
       fontSize: 13,
+      webglEnabled: true,
       localUpdatedAt: timestamp
     },
     updater: {
@@ -332,6 +338,7 @@ function normalizeStateFile(value: unknown): DesktopStateFile {
         typeof terminal.globalThemeUpdatedAt === 'string' ? terminal.globalThemeUpdatedAt : fallback.terminal.globalThemeUpdatedAt,
       fontFamily: isTerminalFontFamilyId(terminal.fontFamily) ? terminal.fontFamily : fallback.terminal.fontFamily,
       fontSize: normalizeTerminalFontSize(terminal.fontSize),
+      webglEnabled: normalizeTerminalWebglEnabled(terminal.webglEnabled),
       localUpdatedAt: typeof terminal.localUpdatedAt === 'string' ? terminal.localUpdatedAt : fallback.terminal.localUpdatedAt
     },
     updater: {

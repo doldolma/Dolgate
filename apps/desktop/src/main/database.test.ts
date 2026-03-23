@@ -186,19 +186,24 @@ describe('SettingsRepository', () => {
 
     expect(settings.get().serverUrl).toBe('https://bundled.example.com');
     expect(settings.get().serverUrlOverride).toBeNull();
+    expect(settings.get().terminalWebglEnabled).toBe(true);
 
     const updated = settings.update({
-      serverUrlOverride: 'https://custom.example.com'
+      serverUrlOverride: 'https://custom.example.com',
+      terminalWebglEnabled: false
     });
 
     expect(updated.serverUrl).toBe('https://custom.example.com');
     expect(updated.serverUrlOverride).toBe('https://custom.example.com');
+    expect(updated.terminalWebglEnabled).toBe(false);
 
     const reset = settings.update({
-      serverUrlOverride: null
+      serverUrlOverride: null,
+      terminalWebglEnabled: true
     });
 
     expect(reset.serverUrl).toBe('https://bundled.example.com');
     expect(reset.serverUrlOverride).toBeNull();
+    expect(reset.terminalWebglEnabled).toBe(true);
   });
 });
