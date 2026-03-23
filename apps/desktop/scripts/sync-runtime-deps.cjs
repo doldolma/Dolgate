@@ -8,6 +8,7 @@ const desktopPackage = require(path.join(desktopRoot, 'package.json'));
 
 const targetNodeModules = path.join(desktopRoot, 'node_modules');
 const markerPath = path.join(targetNodeModules, '.dolssh-runtime-deps.json');
+const nativeWindowsOnlyPackages = new Set(['node-pty']);
 
 function isWorkspacePackage(packageName) {
   return packageName.startsWith('@dolssh/');
@@ -19,6 +20,18 @@ function isBuiltinDependency(packageName) {
 
 function packageNameToPath(packageName) {
   return path.join(targetNodeModules, ...packageName.split('/'));
+}
+
+function resolveTargetPlatform() {
+  return process.env.DOLSSH_TARGET_PLATFORM || null;
+}
+
+function shouldIncludeRuntimePackage(packageName, targetPlatform = resolveTargetPlatform()) {
+  if (targetPlatform && targetPlatform !== 'win32' && nativeWindowsOnlyPackages.has(packageName)) {
+    return false;
+  }
+
+  return true;
 }
 
 async function readMarker() {
@@ -62,7 +75,10 @@ function resolveInstalledPackageJson(packageName) {
 }
 
 async function collectRuntimeDependencyGraph() {
-  const queue = Object.keys(desktopPackage.dependencies || {}).filter((packageName) => !isWorkspacePackage(packageName));
+  const targetPlatform = resolveTargetPlatform();
+  const queue = Object.keys(desktopPackage.dependencies || {}).filter(
+    (packageName) => !isWorkspacePackage(packageName) && shouldIncludeRuntimePackage(packageName, targetPlatform)
+  );
   const visited = new Set();
   const packages = [];
 
@@ -88,7 +104,12 @@ async function collectRuntimeDependencyGraph() {
     };
 
     for (const childName of Object.keys(childDependencies)) {
-      if (!visited.has(childName) && !isWorkspacePackage(childName) && !isBuiltinDependency(childName)) {
+      if (
+        !visited.has(childName) &&
+        !isWorkspacePackage(childName) &&
+        !isBuiltinDependency(childName) &&
+        shouldIncludeRuntimePackage(childName, targetPlatform)
+      ) {
         queue.push(childName);
       }
     }
@@ -108,6 +129,7 @@ async function copyRuntimeDependencies() {
   await fs.mkdir(targetNodeModules, { recursive: true });
   await removePreviouslyCopiedPackages();
 
+  const targetPlatform = resolveTargetPlatform();
   const packages = await collectRuntimeDependencyGraph();
 
   for (const runtimePackage of packages) {
@@ -128,7 +150,8 @@ async function copyRuntimeDependencies() {
     )
   );
 
-  console.log(`desktop runtime dependency sync 완료: ${packages.length}개 패키지`);
+  const targetLabel = targetPlatform ? ` (${targetPlatform})` : '';
+  console.log(`desktop runtime dependency sync 완료${targetLabel}: ${packages.length}개 패키지`);
 }
 
 if (require.main === module) {
@@ -139,5 +162,7 @@ if (require.main === module) {
 }
 
 module.exports = {
-  copyRuntimeDependencies
+  copyRuntimeDependencies,
+  shouldIncludeRuntimePackage,
+  resolveTargetPlatform
 };

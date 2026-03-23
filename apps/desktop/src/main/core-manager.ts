@@ -33,7 +33,7 @@ import { ipcChannels } from '../common/ipc-channels';
 import { CoreFrameParser, encodeControlFrame, encodeStreamFrame } from './core-framing';
 import {
   createInMemoryInteractiveSessionRunner,
-  createNodePtyInteractiveSessionRunner,
+  createDefaultInteractiveSessionRunner,
   type InteractiveSessionLaunchConfig,
   type InteractiveSessionRunner
 } from './interactive-session-runner';
@@ -63,7 +63,7 @@ interface AwsSessionRuntime {
 
 type InteractiveSessionRunnerFactory = (config: InteractiveSessionLaunchConfig) => InteractiveSessionRunner;
 
-const defaultInteractiveSessionRunnerFactory: InteractiveSessionRunnerFactory = (config) => createNodePtyInteractiveSessionRunner(config);
+const defaultInteractiveSessionRunnerFactory: InteractiveSessionRunnerFactory = (config) => createDefaultInteractiveSessionRunner(config);
 const awsDefaultCols = 120;
 const awsDefaultRows = 32;
 const maxAwsOutputTailLength = 8192;

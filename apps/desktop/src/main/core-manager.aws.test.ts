@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { CoreEvent } from '@shared';
 import { ipcChannels } from '../common/ipc-channels';
-import type { InteractiveSessionLaunchConfig, InteractiveSessionRunner } from './interactive-session-runner';
+import type { InteractiveSessionExitEvent, InteractiveSessionLaunchConfig, InteractiveSessionRunner } from './interactive-session-runner';
 
 vi.mock('electron', () => ({
   app: {
@@ -33,7 +33,7 @@ class FakeInteractiveSessionRunner implements InteractiveSessionRunner {
   readonly resizes: Array<{ cols: number; rows: number }> = [];
   killCount = 0;
   private readonly dataListeners = new Set<(chunk: Uint8Array) => void>();
-  private readonly exitListeners = new Set<(event: { exitCode: number; signal?: number }) => void>();
+  private readonly exitListeners = new Set<(event: InteractiveSessionExitEvent) => void>();
   private readonly errorListeners = new Set<(error: Error) => void>();
 
   write(data: string): void {
@@ -59,7 +59,7 @@ class FakeInteractiveSessionRunner implements InteractiveSessionRunner {
     };
   }
 
-  onExit(listener: (event: { exitCode: number; signal?: number }) => void): () => void {
+  onExit(listener: (event: InteractiveSessionExitEvent) => void): () => void {
     this.exitListeners.add(listener);
     return () => {
       this.exitListeners.delete(listener);
@@ -80,7 +80,7 @@ class FakeInteractiveSessionRunner implements InteractiveSessionRunner {
     }
   }
 
-  emitExit(event: { exitCode: number; signal?: number }): void {
+  emitExit(event: InteractiveSessionExitEvent): void {
     for (const listener of this.exitListeners) {
       listener(event);
     }

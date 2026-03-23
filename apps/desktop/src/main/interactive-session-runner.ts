@@ -1,8 +1,9 @@
+import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { createRequire } from 'node:module';
 
 export interface InteractiveSessionExitEvent {
-  exitCode: number;
-  signal?: number;
+  exitCode: number | null;
+  signal?: number | NodeJS.Signals | null;
 }
 
 export interface InteractiveSessionLaunchConfig {
@@ -27,6 +28,23 @@ export interface InteractiveSessionRunner {
 
 type NodePtyLike = Pick<import('node-pty').IPty, 'write' | 'resize' | 'kill' | 'onData' | 'onExit'>;
 type NodePtyModule = typeof import('node-pty');
+type SpawnProcessOptions = {
+  cwd?: string;
+  env?: NodeJS.ProcessEnv;
+  stdio: ['pipe', 'pipe', 'pipe'];
+  windowsHide?: boolean;
+};
+type SpawnProcessFactory = (
+  command: string,
+  args: string[],
+  options: SpawnProcessOptions
+) => ChildProcessWithoutNullStreams;
+
+interface DefaultInteractiveSessionRunnerOptions {
+  platform?: NodeJS.Platform;
+  createNodePtyRunner?: (config: InteractiveSessionLaunchConfig) => InteractiveSessionRunner;
+  createSpawnRunner?: (config: InteractiveSessionLaunchConfig) => InteractiveSessionRunner;
+}
 
 const require = createRequire(import.meta.url);
 let cachedNodePtyModule: NodePtyModule | null = null;
@@ -47,6 +65,10 @@ function toUint8Array(chunk: string | Uint8Array): Uint8Array {
   return typeof chunk === 'string' ? new Uint8Array(Buffer.from(chunk, 'utf8')) : new Uint8Array(chunk);
 }
 
+function mergeOutputChunk(chunk: string | Buffer): Uint8Array {
+  return typeof chunk === 'string' ? new Uint8Array(Buffer.from(chunk, 'utf8')) : new Uint8Array(chunk);
+}
+
 function loadNodePty(): NodePtyModule {
   if (cachedNodePtyModule) {
     return cachedNodePtyModule;
@@ -63,21 +85,33 @@ function loadNodePty(): NodePtyModule {
   }
 }
 
-export function wrapNodePtyProcess(ptyProcess: NodePtyLike): InteractiveSessionRunner {
+function createErrorEmitter() {
   const errorListeners = new Set<(error: Error) => void>();
 
-  const emitError = (error: unknown, fallbackMessage: string) => {
-    const resolvedError = toError(error, fallbackMessage);
-    for (const listener of errorListeners) {
-      listener(resolvedError);
+  return {
+    add(listener: (error: Error) => void) {
+      errorListeners.add(listener);
+      return () => {
+        errorListeners.delete(listener);
+      };
+    },
+    emit(error: unknown, fallbackMessage: string) {
+      const resolvedError = toError(error, fallbackMessage);
+      for (const listener of errorListeners) {
+        listener(resolvedError);
+      }
     }
   };
+}
+
+export function wrapNodePtyProcess(ptyProcess: NodePtyLike): InteractiveSessionRunner {
+  const errorEmitter = createErrorEmitter();
 
   const safelyRun = (operation: () => void, fallbackMessage: string) => {
     try {
       operation();
     } catch (error) {
-      emitError(error, fallbackMessage);
+      errorEmitter.emit(error, fallbackMessage);
     }
   };
 
@@ -122,10 +156,92 @@ export function wrapNodePtyProcess(ptyProcess: NodePtyLike): InteractiveSessionR
       };
     },
     onError(listener) {
-      errorListeners.add(listener);
+      return errorEmitter.add(listener);
+    }
+  };
+}
+
+export function wrapChildProcessInteractiveSession(process: ChildProcessWithoutNullStreams): InteractiveSessionRunner {
+  const dataListeners = new Set<(chunk: Uint8Array) => void>();
+  const exitListeners = new Set<(event: InteractiveSessionExitEvent) => void>();
+  const errorEmitter = createErrorEmitter();
+
+  const emitData = (chunk: string | Buffer) => {
+    const payload = mergeOutputChunk(chunk);
+    for (const listener of dataListeners) {
+      listener(payload);
+    }
+  };
+
+  process.stdout.on('data', (chunk: string | Buffer) => {
+    emitData(chunk);
+  });
+
+  process.stderr.on('data', (chunk: string | Buffer) => {
+    emitData(chunk);
+  });
+
+  process.stdout.on('error', (error) => {
+    errorEmitter.emit(error, 'AWS 세션 stdout을 읽는 중 오류가 발생했습니다.');
+  });
+
+  process.stderr.on('error', (error) => {
+    errorEmitter.emit(error, 'AWS 세션 stderr를 읽는 중 오류가 발생했습니다.');
+  });
+
+  process.stdin.on('error', (error) => {
+    errorEmitter.emit(error, 'AWS 세션 stdin에 입력을 전달하지 못했습니다.');
+  });
+
+  process.on('error', (error) => {
+    errorEmitter.emit(error, 'AWS 세션 프로세스를 시작하지 못했습니다.');
+  });
+
+  process.on('exit', (exitCode, signal) => {
+    for (const listener of exitListeners) {
+      listener({ exitCode, signal });
+    }
+  });
+
+  const safelyRun = (operation: () => void, fallbackMessage: string) => {
+    try {
+      operation();
+    } catch (error) {
+      errorEmitter.emit(error, fallbackMessage);
+    }
+  };
+
+  return {
+    write(data) {
+      safelyRun(() => {
+        process.stdin.write(data);
+      }, 'AWS 세션에 입력을 전달하지 못했습니다.');
+    },
+    writeBinary(data) {
+      safelyRun(() => {
+        process.stdin.write(Buffer.from(data));
+      }, 'AWS 세션에 바이너리 입력을 전달하지 못했습니다.');
+    },
+    resize() {},
+    kill() {
+      safelyRun(() => {
+        process.kill();
+      }, 'AWS 세션 프로세스를 종료하지 못했습니다.');
+    },
+    onData(listener) {
+      dataListeners.add(listener);
       return () => {
-        errorListeners.delete(listener);
+        dataListeners.delete(listener);
       };
+    },
+    onExit(listener) {
+      exitListeners.add(listener);
+      return () => {
+        exitListeners.delete(listener);
+      };
+    },
+    onError(listener) {
+      return errorEmitter.add(listener);
     }
   };
 }
@@ -191,4 +307,31 @@ export function createNodePtyInteractiveSessionRunner(config: InteractiveSession
   });
 
   return wrapNodePtyProcess(ptyProcess);
+}
+
+export function createSpawnInteractiveSessionRunner(
+  config: InteractiveSessionLaunchConfig,
+  spawnProcess: SpawnProcessFactory = spawn
+): InteractiveSessionRunner {
+  const childProcess = spawnProcess(config.command, config.args, {
+    cwd: config.cwd,
+    env: config.env,
+    stdio: ['pipe', 'pipe', 'pipe'],
+    windowsHide: true
+  });
+
+  return wrapChildProcessInteractiveSession(childProcess);
+}
+
+export function createDefaultInteractiveSessionRunner(
+  config: InteractiveSessionLaunchConfig,
+  options: DefaultInteractiveSessionRunnerOptions = {}
+): InteractiveSessionRunner {
+  const platform = options.platform ?? process.platform;
+
+  if (platform === 'win32') {
+    return (options.createNodePtyRunner ?? createNodePtyInteractiveSessionRunner)(config);
+  }
+
+  return (options.createSpawnRunner ?? createSpawnInteractiveSessionRunner)(config);
 }
