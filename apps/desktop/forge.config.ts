@@ -5,6 +5,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const targetPlatform = process.env.DOLSSH_TARGET_PLATFORM ?? process.platform;
 
 function resolveExtraResources(): string[] {
   const extraResources = [path.resolve(__dirname, 'config')];
@@ -24,8 +25,6 @@ function resolveExtraResources(): string[] {
 }
 
 function resolveAppIcon(): string {
-  const targetPlatform = process.env.DOLSSH_TARGET_PLATFORM ?? process.platform;
-
   if (targetPlatform === 'win32') {
     return path.resolve(__dirname, 'build/icons/dolssh.ico');
   }
@@ -53,6 +52,10 @@ const config = {
     ignore: (file: string) => {
       if (!file) {
         return false;
+      }
+
+      if (targetPlatform !== 'win32' && file.startsWith('/node_modules/node-pty')) {
+        return true;
       }
 
       // Vite 산출물과 패키지 런타임 의존성만 남기고 나머지는 패키징에서 제외한다.
