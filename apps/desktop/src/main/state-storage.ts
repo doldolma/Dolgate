@@ -48,6 +48,7 @@ export interface DesktopStateFile {
   schemaVersion: number;
   settings: {
     theme: AppTheme;
+    serverUrlOverride: string | null;
     updatedAt: string;
   };
   terminal: {
@@ -155,6 +156,7 @@ function createDefaultStateFile(): DesktopStateFile {
     schemaVersion: DESKTOP_STATE_SCHEMA_VERSION,
     settings: {
       theme: 'system',
+      serverUrlOverride: null,
       updatedAt: timestamp
     },
     terminal: {
@@ -321,6 +323,7 @@ function normalizeStateFile(value: unknown): DesktopStateFile {
     schemaVersion: DESKTOP_STATE_SCHEMA_VERSION,
     settings: {
       theme: settings.theme === 'light' || settings.theme === 'dark' ? settings.theme : 'system',
+      serverUrlOverride: typeof settings.serverUrlOverride === 'string' && settings.serverUrlOverride.trim() ? settings.serverUrlOverride.trim() : null,
       updatedAt: typeof settings.updatedAt === 'string' ? settings.updatedAt : fallback.settings.updatedAt
     },
     terminal: {

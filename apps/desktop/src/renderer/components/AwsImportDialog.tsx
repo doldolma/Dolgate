@@ -220,7 +220,7 @@ export function AwsImportDialog({ open, currentGroupPath, onClose, onImport }: A
 
   return (
     <div className="modal-backdrop" role="presentation">
-      <div className="modal-card" role="dialog" aria-modal="true" aria-labelledby="aws-import-title">
+      <div className="modal-card aws-import-dialog" role="dialog" aria-modal="true" aria-labelledby="aws-import-title">
         <div className="modal-card__header">
           <div>
             <div className="section-kicker">AWS</div>
@@ -333,7 +333,8 @@ export function AwsImportDialog({ open, currentGroupPath, onClose, onImport }: A
           {error ? <div className="terminal-error-banner">{error}</div> : null}
 
           {profileStatus?.isAuthenticated && selectedRegion ? (
-            <div className="operations-list">
+            <div className="aws-import-dialog__instance-list" data-testid="aws-import-instance-list">
+              <div className="operations-list">
               {instances.length === 0 && !isLoadingInstances ? (
                 <div className="empty-callout">
                   <strong>이 리전에 가져올 수 있는 EC2 인스턴스가 없습니다.</strong>
@@ -380,6 +381,7 @@ export function AwsImportDialog({ open, currentGroupPath, onClose, onImport }: A
                   </article>
                 ))
               )}
+              </div>
             </div>
           ) : null}
         </div>

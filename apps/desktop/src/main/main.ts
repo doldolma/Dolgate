@@ -28,20 +28,20 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // main 프로세스에서 공유하는 런타임 인스턴스들이다.
 const hostRepository = new HostRepository();
 const groupRepository = new GroupRepository();
-const settingsRepository = new SettingsRepository();
+const desktopConfigService = new DesktopConfigService();
+const settingsRepository = new SettingsRepository(desktopConfigService);
 const portForwardRepository = new PortForwardRepository();
 const knownHostRepository = new KnownHostRepository();
 const activityLogRepository = new ActivityLogRepository();
 const secretMetadataRepository = new SecretMetadataRepository();
 const syncOutboxRepository = new SyncOutboxRepository();
 const secretStore = new SecretStore();
-const desktopConfigService = new DesktopConfigService();
 const awsService = new AwsService();
 const warpgateService = new WarpgateService(secretStore);
 const appendActivityLog = (entry: { level: 'info' | 'warn' | 'error'; category: 'session' | 'audit'; message: string; metadata?: Record<string, unknown> | null }) => {
   activityLogRepository.append(entry.level, entry.category, entry.message, entry.metadata ?? null);
 };
-const authService = new AuthService(secretStore, desktopConfigService, appendActivityLog);
+const authService = new AuthService(secretStore, desktopConfigService, settingsRepository, appendActivityLog);
 const coreManager = new CoreManager((entry) => {
   appendActivityLog(entry);
 });

@@ -9,6 +9,7 @@ async function loadRepositories(): Promise<{
   tempDir: string;
   HostRepository: DatabaseModule['HostRepository'];
   GroupRepository: DatabaseModule['GroupRepository'];
+  SettingsRepository: DatabaseModule['SettingsRepository'];
 }> {
   const tempDir = mkdtempSync(path.join(os.tmpdir(), 'dolssh-desktop-db-'));
   process.env.DOLSSH_USER_DATA_DIR = tempDir;
@@ -21,7 +22,8 @@ async function loadRepositories(): Promise<{
   return {
     tempDir,
     HostRepository: databaseModule.HostRepository,
-    GroupRepository: databaseModule.GroupRepository
+    GroupRepository: databaseModule.GroupRepository,
+    SettingsRepository: databaseModule.SettingsRepository
   };
 }
 
@@ -166,5 +168,37 @@ describe('GroupRepository.remove', () => {
     expect(result.hosts.map((host) => [host.id, host.groupName])).toEqual([['host-implicit', 'root']]);
     expect(result.removedGroupIds).toEqual([]);
     expect(result.removedHostIds).toEqual([]);
+  });
+});
+
+describe('SettingsRepository', () => {
+  it('persists a login server override and resolves the effective server URL', async () => {
+    const { SettingsRepository } = await loadRepositories();
+    const settings = new SettingsRepository({
+      getConfig: () => ({
+        sync: {
+          serverUrl: 'https://bundled.example.com',
+          desktopClientId: 'dolssh-desktop',
+          redirectUri: 'dolssh://auth/callback'
+        }
+      })
+    } as never);
+
+    expect(settings.get().serverUrl).toBe('https://bundled.example.com');
+    expect(settings.get().serverUrlOverride).toBeNull();
+
+    const updated = settings.update({
+      serverUrlOverride: 'https://custom.example.com'
+    });
+
+    expect(updated.serverUrl).toBe('https://custom.example.com');
+    expect(updated.serverUrlOverride).toBe('https://custom.example.com');
+
+    const reset = settings.update({
+      serverUrlOverride: null
+    });
+
+    expect(reset.serverUrl).toBe('https://bundled.example.com');
+    expect(reset.serverUrlOverride).toBeNull();
   });
 });

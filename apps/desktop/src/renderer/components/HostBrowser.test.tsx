@@ -1,6 +1,16 @@
 import { describe, expect, it } from 'vitest';
+import {
+  buildVisibleGroups,
+  collectGroupPaths,
+  filterHostsInGroupTree,
+  getGroupDeleteDialogVariant,
+  getHostTagsToggleLabel,
+  isDirectHostChild,
+  isGroupWithinPath,
+  normalizeGroupPath
+} from '@shared';
 import type { GroupRecord, HostRecord } from '@shared';
-import { buildVisibleGroups, collectGroupPaths, getGroupDeleteDialogVariant, isDirectHostChild, isGroupWithinPath, normalizeGroupPath } from './HostBrowser';
+import { getHostBrowserCardClassName } from './HostBrowser';
 
 const groups: GroupRecord[] = [
   {
@@ -93,5 +103,20 @@ describe('HostBrowser helpers', () => {
     expect(getGroupDeleteDialogVariant(0, 0)).toBe('simple');
     expect(getGroupDeleteDialogVariant(1, 0)).toBe('with-descendants');
     expect(getGroupDeleteDialogVariant(0, 2)).toBe('with-descendants');
+  });
+
+  it('shows subtree hosts when a parent group is selected', () => {
+    expect(filterHostsInGroupTree(hosts, 'Servers').map((host) => host.label)).toEqual(['App', 'DB']);
+  });
+
+  it('keeps tags hidden until the toggle is pressed', () => {
+    expect(getHostTagsToggleLabel(false, 1)).toBe('Tags (1)');
+    expect(getHostTagsToggleLabel(true, 1)).toBe('Hide tags');
+  });
+
+  it('uses a fixed collapsed host card class and only adds the expanded class when tags are open', () => {
+    expect(getHostBrowserCardClassName(false, false)).toBe('host-browser-card');
+    expect(getHostBrowserCardClassName(true, false)).toBe('host-browser-card active');
+    expect(getHostBrowserCardClassName(false, true)).toBe('host-browser-card host-browser-card--expanded');
   });
 });

@@ -149,6 +149,13 @@ export interface PendingInteractiveAuth {
   autoSubmitted: boolean;
 }
 
+export interface PendingAwsAuthFlow {
+  hostId: string;
+  hostLabel: string;
+  stage: 'checking-profile' | 'browser-login' | 'retrying-session';
+  message: string;
+}
+
 export interface SftpState {
   localHomePath: string;
   leftPane: SftpPaneState;
@@ -181,6 +188,7 @@ export interface AppState {
   pendingHostKeyPrompt: PendingHostKeyPrompt | null;
   pendingCredentialRetry: PendingCredentialRetry | null;
   pendingInteractiveAuth: PendingInteractiveAuth | null;
+  pendingAwsAuthFlow: PendingAwsAuthFlow | null;
   setSearchQuery: (value: string) => void;
   toggleHostTag: (tag: string) => void;
   clearHostTagFilter: () => void;
@@ -258,6 +266,8 @@ const defaultSettings: AppSettings = {
   globalTerminalThemeId: 'dolssh-dark',
   terminalFontFamily: 'sf-mono',
   terminalFontSize: 13,
+  serverUrl: 'https://ssh.doldolma.com',
+  serverUrlOverride: null,
   dismissedUpdateVersion: null,
   updatedAt: new Date(0).toISOString()
 };
@@ -693,6 +703,34 @@ function toTrustInput(probe: HostKeyProbeResult) {
 export function createAppStore(api: DesktopApi) {
   const openedInteractiveBrowserChallenges = new Set<string>();
 
+  const ensureAwsHostAuthentication = async (
+    host: Extract<HostRecord, { kind: 'aws-ec2' }>,
+    onStageChange: (stage: PendingAwsAuthFlow['stage'], message: string) => void
+  ) => {
+    onStageChange('checking-profile', `${host.awsProfileName} 프로필 인증 상태를 확인하는 중입니다.`);
+    const status = await api.aws.getProfileStatus(host.awsProfileName);
+    if (status.isAuthenticated) {
+      return;
+    }
+
+    if (!status.isSsoProfile) {
+      throw new Error(status.errorMessage || `${host.awsProfileName} 프로필에 AWS CLI 자격 증명이 필요합니다.`);
+    }
+
+    onStageChange('browser-login', `브라우저에서 ${host.awsProfileName} AWS 로그인을 진행하는 중입니다.`);
+    try {
+      await api.aws.login(host.awsProfileName);
+    } catch (error) {
+      throw new Error(error instanceof Error ? error.message : 'AWS SSO 로그인을 시작하지 못했습니다.');
+    }
+
+    onStageChange('checking-profile', `${host.awsProfileName} 프로필 로그인 결과를 확인하는 중입니다.`);
+    const refreshedStatus = await api.aws.getProfileStatus(host.awsProfileName);
+    if (!refreshedStatus.isAuthenticated) {
+      throw new Error(refreshedStatus.errorMessage || 'AWS SSO 로그인 후에도 인증이 확인되지 않았습니다.');
+    }
+  };
+
   const openSessionForHost = async (
     set: (next: AppState | Partial<AppState> | ((state: AppState) => AppState | Partial<AppState>)) => void,
     get: () => AppState,
@@ -953,6 +991,7 @@ export function createAppStore(api: DesktopApi) {
       pendingHostKeyPrompt: null,
       pendingCredentialRetry: null,
       pendingInteractiveAuth: null,
+      pendingAwsAuthFlow: null,
       setSearchQuery: (value) => set({ searchQuery: value }),
       toggleHostTag: (tag) =>
         set((state) => {
@@ -1029,6 +1068,7 @@ export function createAppStore(api: DesktopApi) {
           pendingHostKeyPrompt: null,
           pendingCredentialRetry: null,
           pendingInteractiveAuth: null,
+          pendingAwsAuthFlow: null,
           sftp: {
             localHomePath,
             leftPane: {
@@ -1145,7 +1185,30 @@ export function createAppStore(api: DesktopApi) {
           return;
         }
         if (isAwsEc2HostRecord(host)) {
-          await openSessionForHost(set, get, hostId, cols, rows);
+          if (get().pendingAwsAuthFlow?.hostId === hostId) {
+            return;
+          }
+
+          const setAwsAuthStage = (stage: PendingAwsAuthFlow['stage'], message: string) => {
+            set({
+              pendingAwsAuthFlow: {
+                hostId: host.id,
+                hostLabel: host.label,
+                stage,
+                message
+              }
+            });
+          };
+
+          try {
+            await ensureAwsHostAuthentication(host, setAwsAuthStage);
+            setAwsAuthStage('retrying-session', `${host.label} SSM 연결을 다시 시도하는 중입니다.`);
+            await openSessionForHost(set, get, hostId, cols, rows);
+            set({ pendingAwsAuthFlow: null });
+          } catch (error) {
+            set({ pendingAwsAuthFlow: null });
+            throw error;
+          }
           return;
         }
         const trusted = await ensureTrustedHost(set, {

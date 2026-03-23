@@ -231,6 +231,8 @@ export interface TerminalAppearanceSettings {
 // AppSettings는 사용자의 로컬 환경 설정을 표현한다.
 export interface AppSettings extends TerminalAppearanceSettings {
   theme: AppTheme;
+  serverUrl: string;
+  serverUrlOverride?: string | null;
   dismissedUpdateVersion?: string | null;
   updatedAt: string;
 }

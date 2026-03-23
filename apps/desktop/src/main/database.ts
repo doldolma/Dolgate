@@ -1,12 +1,14 @@
 import { randomUUID } from 'node:crypto';
 import {
   getGroupLabel,
+  getServerUrlValidationMessage,
   getParentGroupPath,
   isAwsEc2HostDraft,
   isGroupWithinPath,
   isWarpgateSshHostDraft,
   isSshHostDraft,
   isSshHostRecord,
+  normalizeServerUrl,
   normalizeGroupPath,
   stripRemovedGroupSegment
 } from '@shared';
@@ -38,6 +40,7 @@ import type {
   WarpgateSshHostDraft,
   WarpgateSshHostRecord
 } from '@shared';
+import { DesktopConfigService } from './app-config';
 import { getDesktopStateStorage, type SyncDeletionRecord } from './state-storage';
 
 function nowIso(): string {
@@ -521,13 +524,22 @@ export class GroupRepository {
 }
 
 export class SettingsRepository {
+  constructor(private readonly configService: DesktopConfigService = new DesktopConfigService()) {}
+
+  private getDefaultServerUrl(): string {
+    return this.configService.getConfig().sync.serverUrl;
+  }
+
   get(): AppSettings {
     const state = stateStorage.getState();
+    const serverUrlOverride = state.settings.serverUrlOverride ?? null;
     return {
       theme: state.settings.theme,
       globalTerminalThemeId: state.terminal.globalThemeId,
       terminalFontFamily: state.terminal.fontFamily,
       terminalFontSize: state.terminal.fontSize,
+      serverUrl: serverUrlOverride || this.getDefaultServerUrl(),
+      serverUrlOverride,
       dismissedUpdateVersion: state.updater.dismissedVersion,
       updatedAt: [
         state.settings.updatedAt,
@@ -581,6 +593,19 @@ export class SettingsRepository {
         state.terminal.localUpdatedAt = nowIso();
       }
 
+      if (Object.prototype.hasOwnProperty.call(input, 'serverUrlOverride')) {
+        const nextValue =
+          typeof input.serverUrlOverride === 'string' && input.serverUrlOverride.trim() ? input.serverUrlOverride.trim() : null;
+        if (nextValue) {
+          const validationMessage = getServerUrlValidationMessage(nextValue);
+          if (validationMessage) {
+            throw new Error(validationMessage);
+          }
+        }
+        state.settings.serverUrlOverride = nextValue ? normalizeServerUrl(nextValue) : null;
+        state.settings.updatedAt = nowIso();
+      }
+
       if (Object.prototype.hasOwnProperty.call(input, 'dismissedUpdateVersion')) {
         state.updater.dismissedVersion = input.dismissedUpdateVersion ?? null;
         state.updater.updatedAt = nowIso();
@@ -588,12 +613,14 @@ export class SettingsRepository {
 
       if (
         !Object.prototype.hasOwnProperty.call(input, 'dismissedUpdateVersion') &&
+        !Object.prototype.hasOwnProperty.call(input, 'serverUrlOverride') &&
         input.theme == null &&
         input.globalTerminalThemeId == null &&
         input.terminalFontFamily == null &&
         input.terminalFontSize == null
       ) {
         state.settings.theme = current.theme as AppTheme;
+        state.settings.serverUrlOverride = current.serverUrlOverride ?? null;
         state.terminal.globalThemeId = current.globalTerminalThemeId ?? DEFAULT_GLOBAL_TERMINAL_THEME_ID;
         state.terminal.fontFamily = current.terminalFontFamily ?? DEFAULT_TERMINAL_FONT_FAMILY;
         state.terminal.fontSize = current.terminalFontSize ?? DEFAULT_TERMINAL_FONT_SIZE;

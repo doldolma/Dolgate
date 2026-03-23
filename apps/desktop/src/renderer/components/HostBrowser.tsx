@@ -4,9 +4,12 @@ import Fuse from 'fuse.js';
 import {
   buildVisibleGroups,
   collectGroupPaths,
+  filterHostsInGroupTree,
+  getGroupDeleteDialogVariant,
   getHostBadgeLabel,
   getHostSearchText,
   getHostSubtitle,
+  getHostTagsToggleLabel,
   isGroupWithinPath,
   normalizeGroupPath
 } from '@shared';
@@ -15,15 +18,18 @@ import type { GroupRecord, GroupRemoveMode, HostRecord } from '@shared';
 export {
   buildVisibleGroups,
   collectGroupPaths,
+  filterHostsInGroupTree,
+  getGroupDeleteDialogVariant,
   getGroupLabel,
+  getHostTagsToggleLabel,
   getParentGroupPath,
   isDirectHostChild,
   isGroupWithinPath,
   normalizeGroupPath
 } from '@shared';
 
-export function getGroupDeleteDialogVariant(childGroupCount: number, hostCount: number): 'simple' | 'with-descendants' {
-  return childGroupCount > 0 || hostCount > 0 ? 'with-descendants' : 'simple';
+export function getHostBrowserCardClassName(isSelected: boolean, isTagsExpanded: boolean): string {
+  return ['host-browser-card', isSelected ? 'active' : null, isTagsExpanded ? 'host-browser-card--expanded' : null].filter(Boolean).join(' ');
 }
 
 interface GroupDeleteTarget {
@@ -56,6 +62,7 @@ interface HostBrowserProps {
   searchQuery: string;
   selectedHostId: string | null;
   errorMessage?: string | null;
+  statusMessage?: string | null;
   onSearchChange: (query: string) => void;
   onCreateHost: () => void;
   onOpenAwsImport: () => void;
@@ -77,6 +84,7 @@ export function HostBrowser({
   searchQuery,
   selectedHostId,
   errorMessage = null,
+  statusMessage = null,
   onSearchChange,
   onCreateHost,
   onOpenAwsImport,
@@ -99,6 +107,7 @@ export function HostBrowser({
   const [isRemovingGroup, setIsRemovingGroup] = useState(false);
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const [dragTargetGroupPath, setDragTargetGroupPath] = useState<string | null>(null);
+  const [expandedHostTags, setExpandedHostTags] = useState<string[]>([]);
 
   useEffect(() => {
     setSelectedGroupPath(null);
@@ -125,10 +134,7 @@ export function HostBrowser({
   }, [contextMenu]);
 
   // 현재 그룹 안에서는 그 하위 트리만 검색하고, 루트에서는 전체 호스트를 그대로 보여준다.
-  const scopedHosts = useMemo(
-    () => hosts.filter((host) => isGroupWithinPath(normalizeGroupPath(host.groupName), currentGroupPath)),
-    [currentGroupPath, hosts]
-  );
+  const scopedHosts = useMemo(() => filterHostsInGroupTree(hosts, currentGroupPath), [currentGroupPath, hosts]);
 
   const searchableHosts = useMemo(
     () =>
@@ -155,10 +161,7 @@ export function HostBrowser({
         return host;
       });
     }
-    if (!currentGroupPath) {
-      return searchableHosts;
-    }
-    return searchableHosts.filter((host) => normalizeGroupPath(host.groupName) === currentGroupPath);
+    return searchableHosts;
   }, [currentGroupPath, fuse, searchableHosts, searchQuery]);
 
   const allGroupPaths = useMemo(() => collectGroupPaths(groups, hosts), [groups, hosts]);
@@ -200,6 +203,10 @@ export function HostBrowser({
     }
   }, [selectedGroupPath, visibleGroups]);
 
+  useEffect(() => {
+    setExpandedHostTags((current) => current.filter((hostId) => hosts.some((host) => host.id === hostId && (host.tags?.length ?? 0) > 0)));
+  }, [hosts]);
+
   return (
     <div className="host-browser">
       <div className="home-toolbar">
@@ -236,6 +243,7 @@ export function HostBrowser({
         </div>
       </div>
 
+      {statusMessage ? <div className="terminal-status-banner host-browser__status-banner">{statusMessage}</div> : null}
       {errorMessage ? <div className="terminal-error-banner host-browser__error-banner">{errorMessage}</div> : null}
 
       {breadcrumbs.length > 0 ? (
@@ -350,10 +358,11 @@ export function HostBrowser({
             </div>
           ) : (
             visibleHosts.map((host) => {
+              const isTagsExpanded = expandedHostTags.includes(host.id);
               return (
                 <article
                   key={host.id}
-                  className={`host-browser-card ${selectedHostId === host.id ? 'active' : ''}`}
+                  className={getHostBrowserCardClassName(selectedHostId === host.id, isTagsExpanded)}
                   draggable
                   onClick={() => {
                     setContextMenu(null);
@@ -397,27 +406,44 @@ export function HostBrowser({
                     <strong>{host.label}</strong>
                     <span>{getHostSubtitle(host)}</span>
                     <small>{normalizeGroupPath(host.groupName) ?? 'Ungrouped'}</small>
+                  </div>
+                  <div className="host-browser-card__actions">
+                    <button
+                      type="button"
+                      className="host-browser-card__edit"
+                      aria-label={`${host.label} 수정`}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        onEditHost(host.id);
+                      }}
+                    >
+                      ✎
+                    </button>
                     {host.tags && host.tags.length > 0 ? (
-                      <div className="host-browser-card__tags">
-                        {host.tags.map((tag) => (
-                          <span key={tag} className="host-browser-card__tag">
-                            #{tag}
-                          </span>
-                        ))}
-                      </div>
+                      <button
+                        type="button"
+                        className="host-browser-card__tags-toggle"
+                        aria-expanded={isTagsExpanded}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          setExpandedHostTags((current) =>
+                            current.includes(host.id) ? current.filter((entry) => entry !== host.id) : [...current, host.id]
+                          );
+                        }}
+                      >
+                        {getHostTagsToggleLabel(isTagsExpanded, host.tags.length)}
+                      </button>
                     ) : null}
                   </div>
-                  <button
-                    type="button"
-                    className="host-browser-card__edit"
-                    aria-label={`${host.label} 수정`}
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      onEditHost(host.id);
-                    }}
-                  >
-                    ✎
-                  </button>
+                  {host.tags && host.tags.length > 0 && isTagsExpanded ? (
+                    <div className="host-browser-card__tags-panel">
+                      {host.tags.map((tag) => (
+                        <span key={tag} className="host-browser-card__tag">
+                          #{tag}
+                        </span>
+                      ))}
+                    </div>
+                  ) : null}
                 </article>
               );
             })

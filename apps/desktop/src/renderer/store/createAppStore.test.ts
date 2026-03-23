@@ -2,6 +2,21 @@ import { describe, expect, it, vi } from 'vitest';
 import type { DesktopApi } from '@shared';
 import { createAppStore } from './createAppStore';
 
+function createDeferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+}
+
+async function flushMicrotasks() {
+  await Promise.resolve();
+  await Promise.resolve();
+}
+
 function createMockApi(): DesktopApi {
   let sessionCounter = 0;
 
@@ -201,6 +216,8 @@ function createMockApi(): DesktopApi {
         globalTerminalThemeId: 'dolssh-dark',
         terminalFontFamily: 'sf-mono',
         terminalFontSize: 13,
+        serverUrl: 'https://ssh.doldolma.com',
+        serverUrlOverride: null,
         dismissedUpdateVersion: null,
         updatedAt: '2025-01-01T00:00:00.000Z'
       }),
@@ -209,6 +226,14 @@ function createMockApi(): DesktopApi {
         globalTerminalThemeId: input.globalTerminalThemeId ?? 'dolssh-dark',
         terminalFontFamily: input.terminalFontFamily ?? 'sf-mono',
         terminalFontSize: input.terminalFontSize ?? 13,
+        serverUrl:
+          typeof input.serverUrlOverride === 'string' && input.serverUrlOverride.trim()
+            ? input.serverUrlOverride.trim()
+            : 'https://ssh.doldolma.com',
+        serverUrlOverride:
+          typeof input.serverUrlOverride === 'string' && input.serverUrlOverride.trim()
+            ? input.serverUrlOverride.trim()
+            : null,
         dismissedUpdateVersion: input.dismissedUpdateVersion ?? null,
         updatedAt: '2025-01-02T00:00:00.000Z'
       }))
@@ -475,6 +500,226 @@ describe('createAppStore', () => {
 
     expect(api.settings.update).toHaveBeenCalledWith({ theme: 'dark' });
     expect(store.getState().settings.theme).toBe('dark');
+  });
+
+  it('starts AWS SSO login and retries the session connect once when the profile is expired', async () => {
+    const api = createMockApi();
+    api.hosts.list = vi.fn().mockResolvedValue([
+      {
+        id: 'aws-host-1',
+        kind: 'aws-ec2',
+        label: 'AWS Prod',
+        awsProfileName: 'sso-profile',
+        awsRegion: 'ap-northeast-2',
+        awsInstanceId: 'i-1234567890',
+        awsInstanceName: 'aws-prod',
+        awsPlatform: 'linux',
+        awsPrivateIp: '10.0.0.10',
+        awsState: 'running',
+        groupName: 'Servers',
+        tags: [],
+        terminalThemeId: null,
+        createdAt: '2025-01-01T00:00:00.000Z',
+        updatedAt: '2025-01-01T00:00:00.000Z'
+      }
+    ]);
+    api.aws.getProfileStatus = vi
+      .fn()
+      .mockResolvedValueOnce({
+        profileName: 'sso-profile',
+        available: true,
+        isSsoProfile: true,
+        isAuthenticated: false,
+        accountId: null,
+        arn: null,
+        errorMessage: '브라우저 로그인이 필요합니다.',
+        missingTools: []
+      })
+      .mockResolvedValueOnce({
+        profileName: 'sso-profile',
+        available: true,
+        isSsoProfile: true,
+        isAuthenticated: true,
+        accountId: '123456789012',
+        arn: 'arn:aws:iam::123456789012:user/test',
+        errorMessage: null,
+        missingTools: []
+      });
+    const store = createAppStore(api);
+
+    await store.getState().bootstrap();
+    await store.getState().connectHost('aws-host-1', 120, 32);
+
+    expect(api.aws.login).toHaveBeenCalledWith('sso-profile');
+    expect(api.ssh.connect).toHaveBeenCalledTimes(1);
+    expect(store.getState().tabs[0]?.title).toBe('AWS Prod');
+    expect(store.getState().pendingAwsAuthFlow).toBeNull();
+  });
+
+  it('surfaces a targeted AWS credential message for non-SSO profiles and does not open a session', async () => {
+    const api = createMockApi();
+    api.hosts.list = vi.fn().mockResolvedValue([
+      {
+        id: 'aws-host-2',
+        kind: 'aws-ec2',
+        label: 'AWS Legacy',
+        awsProfileName: 'legacy-profile',
+        awsRegion: 'us-east-1',
+        awsInstanceId: 'i-9999999999',
+        awsInstanceName: 'legacy',
+        awsPlatform: 'linux',
+        awsPrivateIp: '10.0.0.20',
+        awsState: 'running',
+        groupName: null,
+        tags: [],
+        terminalThemeId: null,
+        createdAt: '2025-01-01T00:00:00.000Z',
+        updatedAt: '2025-01-01T00:00:00.000Z'
+      }
+    ]);
+    api.aws.getProfileStatus = vi.fn().mockResolvedValue({
+      profileName: 'legacy-profile',
+      available: true,
+      isSsoProfile: false,
+      isAuthenticated: false,
+      accountId: null,
+      arn: null,
+      errorMessage: '이 프로필은 AWS CLI 자격 증명이 필요합니다.',
+      missingTools: []
+    });
+    const store = createAppStore(api);
+
+    await store.getState().bootstrap();
+
+    await expect(store.getState().connectHost('aws-host-2', 120, 32)).rejects.toThrow('이 프로필은 AWS CLI 자격 증명이 필요합니다.');
+    expect(api.aws.login).not.toHaveBeenCalled();
+    expect(api.ssh.connect).not.toHaveBeenCalled();
+  });
+
+  it('tracks aws auth progress and clears it after the retried session finishes connecting', async () => {
+    const api = createMockApi();
+    api.hosts.list = vi.fn().mockResolvedValue([
+      {
+        id: 'aws-host-1',
+        kind: 'aws-ec2',
+        label: 'AWS Prod',
+        awsProfileName: 'sso-profile',
+        awsRegion: 'ap-northeast-2',
+        awsInstanceId: 'i-1234567890',
+        awsInstanceName: 'aws-prod',
+        awsPlatform: 'linux',
+        awsPrivateIp: '10.0.0.10',
+        awsState: 'running',
+        groupName: 'Servers',
+        tags: [],
+        terminalThemeId: null,
+        createdAt: '2025-01-01T00:00:00.000Z',
+        updatedAt: '2025-01-01T00:00:00.000Z'
+      }
+    ]);
+
+    const firstStatus = createDeferred<Awaited<ReturnType<DesktopApi['aws']['getProfileStatus']>>>();
+    const secondStatus = createDeferred<Awaited<ReturnType<DesktopApi['aws']['getProfileStatus']>>>();
+    const login = createDeferred<void>();
+    const connect = createDeferred<{ sessionId: string }>();
+
+    api.aws.getProfileStatus = vi.fn().mockImplementationOnce(() => firstStatus.promise).mockImplementationOnce(() => secondStatus.promise);
+    api.aws.login = vi.fn().mockImplementation(() => login.promise);
+    api.ssh.connect = vi.fn().mockImplementation(() => connect.promise);
+
+    const store = createAppStore(api);
+    await store.getState().bootstrap();
+
+    const connectPromise = store.getState().connectHost('aws-host-1', 120, 32);
+    expect(store.getState().pendingAwsAuthFlow?.stage).toBe('checking-profile');
+
+    firstStatus.resolve({
+      profileName: 'sso-profile',
+      available: true,
+      isSsoProfile: true,
+      isAuthenticated: false,
+      accountId: null,
+      arn: null,
+      errorMessage: '브라우저 로그인이 필요합니다.',
+      missingTools: []
+    });
+    await flushMicrotasks();
+
+    expect(store.getState().pendingAwsAuthFlow?.stage).toBe('browser-login');
+
+    login.resolve(undefined);
+    await flushMicrotasks();
+
+    secondStatus.resolve({
+      profileName: 'sso-profile',
+      available: true,
+      isSsoProfile: true,
+      isAuthenticated: true,
+      accountId: '123456789012',
+      arn: 'arn:aws:iam::123456789012:user/test',
+      errorMessage: null,
+      missingTools: []
+    });
+    await flushMicrotasks();
+
+    expect(store.getState().pendingAwsAuthFlow?.stage).toBe('retrying-session');
+    expect(store.getState().pendingAwsAuthFlow?.message).toContain('AWS Prod SSM 연결을 다시 시도하는 중입니다.');
+
+    connect.resolve({ sessionId: 'session-1' });
+    await connectPromise;
+
+    expect(store.getState().pendingAwsAuthFlow).toBeNull();
+  });
+
+  it('ignores duplicate aws connect attempts for the same host while auth recovery is already in progress', async () => {
+    const api = createMockApi();
+    api.hosts.list = vi.fn().mockResolvedValue([
+      {
+        id: 'aws-host-1',
+        kind: 'aws-ec2',
+        label: 'AWS Prod',
+        awsProfileName: 'sso-profile',
+        awsRegion: 'ap-northeast-2',
+        awsInstanceId: 'i-1234567890',
+        awsInstanceName: 'aws-prod',
+        awsPlatform: 'linux',
+        awsPrivateIp: '10.0.0.10',
+        awsState: 'running',
+        groupName: 'Servers',
+        tags: [],
+        terminalThemeId: null,
+        createdAt: '2025-01-01T00:00:00.000Z',
+        updatedAt: '2025-01-01T00:00:00.000Z'
+      }
+    ]);
+
+    const status = createDeferred<Awaited<ReturnType<DesktopApi['aws']['getProfileStatus']>>>();
+    api.aws.getProfileStatus = vi.fn().mockImplementation(() => status.promise);
+
+    const store = createAppStore(api);
+    await store.getState().bootstrap();
+
+    const firstConnect = store.getState().connectHost('aws-host-1', 120, 32);
+    const secondConnect = store.getState().connectHost('aws-host-1', 120, 32);
+
+    expect(api.aws.getProfileStatus).toHaveBeenCalledTimes(1);
+    expect(store.getState().pendingAwsAuthFlow?.stage).toBe('checking-profile');
+
+    status.resolve({
+      profileName: 'sso-profile',
+      available: true,
+      isSsoProfile: true,
+      isAuthenticated: true,
+      accountId: '123456789012',
+      arn: 'arn:aws:iam::123456789012:user/test',
+      errorMessage: null,
+      missingTools: []
+    });
+
+    await Promise.all([firstConnect, secondConnect]);
+
+    expect(api.ssh.connect).toHaveBeenCalledTimes(1);
+    expect(store.getState().pendingAwsAuthFlow).toBeNull();
   });
 
   it('keeps a fixed sftp workspace with local bootstrap and host connect', async () => {

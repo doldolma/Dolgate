@@ -121,8 +121,8 @@ describe('SftpWorkspace helpers', () => {
     ]);
   });
 
-  it('shows only direct hosts without search and searches within the current subtree', () => {
-    expect(visibleHostPickerHosts(sshHosts, 'Production', '')).toEqual([sshHosts[0]]);
+  it('shows subtree hosts without search and searches within the current subtree', () => {
+    expect(visibleHostPickerHosts(sshHosts, 'Production', '')).toEqual([sshHosts[0], sshHosts[2]]);
     expect(visibleHostPickerHosts(sshHosts, 'Production', 'api')).toEqual([sshHosts[2]]);
     expect(visibleHostPickerHosts(sshHosts, null, '')).toEqual(sshHosts);
   });

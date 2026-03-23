@@ -19,6 +19,7 @@ import { SettingsPanel } from './components/SettingsPanel';
 import { SftpWorkspace } from './components/SftpWorkspace';
 import { TerminalWorkspace } from './components/TerminalWorkspace';
 import { WarpgateImportDialog } from './components/WarpgateImportDialog';
+import { appStore } from './store/appStore';
 import type { DynamicTabStripItem, WorkspaceDropDirection, WorkspaceTab } from './store/createAppStore';
 import { useAppStore } from './store/appStore';
 
@@ -154,6 +155,7 @@ export function App() {
   const [draggedSession, setDraggedSession] = useState<DraggedSessionPayload | null>(null);
   const [updateState, setUpdateState] = useState<UpdateState>(createDefaultUpdateState);
   const [windowState, setWindowState] = useState<DesktopWindowState>(createDefaultWindowState);
+  const [isLoginServerSettingsLoading, setIsLoginServerSettingsLoading] = useState(true);
   const [isUpdateInstallConfirmOpen, setIsUpdateInstallConfirmOpen] = useState(false);
   const [secretEditRequest, setSecretEditRequest] = useState<SecretEditDialogRequest | null>(null);
   const authBootstrapStartedRef = useRef(false);
@@ -176,6 +178,7 @@ export function App() {
   const settings = useAppStore((state) => state.settings);
   const pendingHostKeyPrompt = useAppStore((state) => state.pendingHostKeyPrompt);
   const pendingCredentialRetry = useAppStore((state) => state.pendingCredentialRetry);
+  const pendingAwsAuthFlow = useAppStore((state) => state.pendingAwsAuthFlow);
   const bootstrap = useAppStore((state) => state.bootstrap);
   const setSearchQuery = useAppStore((state) => state.setSearchQuery);
   const activateHome = useAppStore((state) => state.activateHome);
@@ -298,6 +301,27 @@ export function App() {
   }, [bootstrap, handleCoreEvent, handleTransferEvent, handlePortForwardEvent, hydratedSessionUserId]);
 
   useEffect(() => {
+    let isMounted = true;
+    void window.dolssh.settings
+      .get()
+      .then((nextSettings) => {
+        if (!isMounted) {
+          return;
+        }
+        appStore.setState({ settings: nextSettings });
+      })
+      .finally(() => {
+        if (isMounted) {
+          setIsLoginServerSettingsLoading(false);
+        }
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  useEffect(() => {
     if (authBootstrapStartedRef.current) {
       return;
     }
@@ -401,6 +425,20 @@ export function App() {
   const canDropDraggedSession = Boolean(adjacentDropCandidate);
 
   if (!isAuthReady) {
+    async function saveLoginServerUrl(nextServerUrl: string): Promise<void> {
+      const nextSettings = await window.dolssh.settings.update({
+        serverUrlOverride: nextServerUrl
+      });
+      appStore.setState({ settings: nextSettings });
+    }
+
+    async function resetLoginServerUrl(): Promise<void> {
+      const nextSettings = await window.dolssh.settings.update({
+        serverUrlOverride: null
+      });
+      appStore.setState({ settings: nextSettings });
+    }
+
     return (
       <div className="app-frame app-frame--login">
         <div className="login-window-chrome">
@@ -432,9 +470,14 @@ export function App() {
               : authState
           }
           isSyncBootstrapping={isSyncBootstrapping}
+          serverUrl={settings.serverUrl}
+          hasServerUrlOverride={Boolean(settings.serverUrlOverride)}
+          isLoadingServerUrl={isLoginServerSettingsLoading}
           onBeginLogin={async () => {
             await window.dolssh.auth.beginBrowserLogin();
           }}
+          onSaveServerUrl={saveLoginServerUrl}
+          onResetServerUrl={resetLoginServerUrl}
           actionLabel={needsSyncRetry ? '동기화 다시 시도' : undefined}
           onAction={
             needsSyncRetry
@@ -605,6 +648,7 @@ export function App() {
                 searchQuery={searchQuery}
                 selectedHostId={highlightedHostId}
                 errorMessage={hostBrowserError}
+                statusMessage={pendingAwsAuthFlow?.message ?? null}
                 onSearchChange={setSearchQuery}
                 onCreateHost={() => {
                   setHostBrowserError(null);

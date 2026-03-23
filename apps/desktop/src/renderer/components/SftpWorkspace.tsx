@@ -1,10 +1,10 @@
 import { useMemo, useState } from 'react';
 import {
   buildVisibleGroups,
+  filterHostsInGroupTree,
   getHostBadgeLabel,
   getHostSearchText,
   getHostSubtitle,
-  isGroupWithinPath,
   isSshHostRecord,
   normalizeGroupPath
 } from '@shared';
@@ -83,15 +83,12 @@ export function hostPickerBreadcrumbs(groupPath: string | null): Array<{ label: 
 }
 
 export function visibleHostPickerHosts(hosts: SshHostRecord[], groupPath: string | null, query: string): SshHostRecord[] {
-  const scopedHosts = hosts.filter((host) => isGroupWithinPath(normalizeGroupPath(host.groupName), groupPath));
+  const scopedHosts = filterHostsInGroupTree(hosts, groupPath);
   const normalizedQuery = query.trim().toLowerCase();
   if (normalizedQuery) {
     return scopedHosts.filter((host) => getHostSearchText(host).join(' ').toLowerCase().includes(normalizedQuery));
   }
-  if (!groupPath) {
-    return scopedHosts;
-  }
-  return scopedHosts.filter((host) => normalizeGroupPath(host.groupName) === groupPath);
+  return scopedHosts;
 }
 
 export function getSftpPaneTitle(pane: Pick<SftpPaneState, 'sourceKind' | 'endpoint'>): string {
@@ -377,7 +374,7 @@ function HostPicker({
   onSelectHost,
   onConnectHost
 }: HostPickerProps) {
-  const scopedHosts = useMemo(() => hosts.filter((host) => isGroupWithinPath(normalizeGroupPath(host.groupName), pane.hostGroupPath)), [hosts, pane.hostGroupPath]);
+  const scopedHosts = useMemo(() => filterHostsInGroupTree(hosts, pane.hostGroupPath), [hosts, pane.hostGroupPath]);
   const visibleGroups = useMemo(() => buildVisibleGroups(groups, scopedHosts, pane.hostGroupPath), [groups, pane.hostGroupPath, scopedHosts]);
   const visibleHosts = useMemo(() => visibleHostPickerHosts(hosts, pane.hostGroupPath, pane.hostSearchQuery), [hosts, pane.hostGroupPath, pane.hostSearchQuery]);
   const breadcrumbs = useMemo(() => hostPickerBreadcrumbs(pane.hostGroupPath), [pane.hostGroupPath]);

@@ -103,6 +103,10 @@ func NewRouter(store store.Store, authService *auth.Service, config RouterConfig
 	})
 
 	router.GET("/login", func(ctx *gin.Context) {
+		if shouldRedirectDirectlyToOIDC(config, oidcRuntime) {
+			redirectToOIDCStart(ctx)
+			return
+		}
 		renderLoginPage(ctx, loginPageData{
 			Title:              "Sign in to dolssh",
 			IsSignup:           false,
@@ -186,6 +190,10 @@ func NewRouter(store store.Store, authService *auth.Service, config RouterConfig
 	})
 
 	router.GET("/signup", func(ctx *gin.Context) {
+		if shouldRedirectDirectlyToOIDC(config, oidcRuntime) {
+			redirectToOIDCStart(ctx)
+			return
+		}
 		if !config.LocalAuthEnabled || !config.LocalSignupEnabled {
 			ctx.Redirect(http.StatusFound, "/login")
 			return
@@ -493,6 +501,18 @@ func NewRouter(store store.Store, authService *auth.Service, config RouterConfig
 	})
 
 	return router, nil
+}
+
+func shouldRedirectDirectlyToOIDC(config RouterConfig, runtime *oidcRuntime) bool {
+	return !config.LocalAuthEnabled && runtime != nil
+}
+
+func redirectToOIDCStart(ctx *gin.Context) {
+	target := url.URL{
+		Path:     "/auth/oidc/start",
+		RawQuery: ctx.Request.URL.RawQuery,
+	}
+	ctx.Redirect(http.StatusFound, target.String())
 }
 
 func newOIDCRuntime(config OIDCConfig) (*oidcRuntime, error) {

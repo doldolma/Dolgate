@@ -87,16 +87,11 @@ function shouldShowBadge(updateState: UpdateState): boolean {
   return updateState.status === 'available' && updateState.release?.version !== updateState.dismissedVersion;
 }
 
-function getEmptyReleaseMessage(updateState: UpdateState): string {
+export function getEmptyReleaseMessage(updateState: UpdateState): string | null {
   if (updateState.status === 'checking') {
     return 'GitHub Releases에서 새 버전을 확인하고 있습니다.';
   }
-
-  if (updateState.status === 'idle') {
-    return '아직 업데이트를 확인하지 않았습니다. 아래 버튼으로 새 릴리즈를 확인할 수 있습니다.';
-  }
-
-  return '현재 릴리즈 정보가 없습니다.';
+  return null;
 }
 
 function formatPublishedAt(value?: string | null): string | null {
@@ -511,7 +506,7 @@ export function AppTitleBar({
                   <p className="update-popover__message">자동 업데이트는 패키지된 릴리즈 빌드에서만 동작합니다.</p>
                 ) : null}
 
-                {!updateState.release ? (
+                {!updateState.release && getEmptyReleaseMessage(updateState) ? (
                   <p className="update-popover__message">{getEmptyReleaseMessage(updateState)}</p>
                 ) : null}
 

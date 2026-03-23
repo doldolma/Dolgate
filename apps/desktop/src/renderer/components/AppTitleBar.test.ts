@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import { getEmptyReleaseMessage } from './AppTitleBar';
 import { getWindowControlDescriptors } from './DesktopWindowControls';
 
 describe('getWindowControlDescriptors', () => {
@@ -57,5 +58,20 @@ describe('getWindowControlDescriptors', () => {
     expect(onMaximizeWindow).toHaveBeenCalledTimes(1);
     expect(onRestoreWindow).not.toHaveBeenCalled();
     expect(onCloseWindow).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not show an empty release placeholder when release metadata is absent', () => {
+    expect(
+      getEmptyReleaseMessage({
+        enabled: true,
+        status: 'idle',
+        currentVersion: '1.0.0',
+        release: null,
+        progress: null,
+        checkedAt: null,
+        dismissedVersion: null,
+        errorMessage: null
+      })
+    ).toBeNull();
   });
 });

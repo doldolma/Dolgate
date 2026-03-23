@@ -6,6 +6,7 @@ import type { AuthSession } from '@shared';
 import type { AuthState } from '@shared';
 import { ipcChannels } from '../common/ipc-channels';
 import type { DesktopConfigService } from './app-config';
+import type { SettingsRepository } from './database';
 import { SecretStore } from './secret-store';
 import { getDesktopStateStorage } from './state-storage';
 
@@ -87,6 +88,7 @@ export class AuthService {
   constructor(
     private readonly secretStore: SecretStore,
     private readonly configService: DesktopConfigService,
+    private readonly settings: SettingsRepository,
     private readonly appendLog?: (entry: ActivityLogInput) => void
   ) {}
 
@@ -98,7 +100,7 @@ export class AuthService {
   }
 
   getServerUrl(): string {
-    return this.configService.getConfig().sync.serverUrl;
+    return this.settings.get().serverUrl;
   }
 
   getDesktopClientId(): string {

@@ -46,6 +46,10 @@ export function isDirectHostChild(groupPath: string | null, currentGroupPath: st
   return normalizeGroupPath(groupPath) === currentGroupPath;
 }
 
+export function filterHostsInGroupTree<T extends Pick<HostRecord, 'groupName'>>(hosts: T[], currentGroupPath: string | null): T[] {
+  return hosts.filter((host) => isGroupWithinPath(normalizeGroupPath(host.groupName), currentGroupPath));
+}
+
 export function collectGroupPaths(groups: GroupRecord[], hosts: HostRecord[]): string[] {
   const paths = new Set<string>();
 
@@ -125,4 +129,12 @@ export function buildGroupOptions(
       label: path
     }))
   ];
+}
+
+export function getHostTagsToggleLabel(isExpanded: boolean, tagCount: number): string {
+  return isExpanded ? 'Hide tags' : `Tags (${tagCount})`;
+}
+
+export function getGroupDeleteDialogVariant(childGroupCount: number, hostCount: number): 'simple' | 'with-descendants' {
+  return childGroupCount > 0 || hostCount > 0 ? 'with-descendants' : 'simple';
 }

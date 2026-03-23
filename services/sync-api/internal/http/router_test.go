@@ -19,6 +19,13 @@ import (
 )
 
 func createTestRouter(t *testing.T) *gin.Engine {
+	return createTestRouterWithConfig(t, httpserver.RouterConfig{
+		LocalAuthEnabled:   true,
+		LocalSignupEnabled: true,
+	})
+}
+
+func createTestRouterWithConfig(t *testing.T, config httpserver.RouterConfig) *gin.Engine {
 	t.Helper()
 
 	sqliteStore, err := store.OpenSQLite("file:dolssh_sync_test?mode=memory&cache=shared")
@@ -26,14 +33,36 @@ func createTestRouter(t *testing.T) *gin.Engine {
 		t.Fatalf("open sqlite: %v", err)
 	}
 	authService := auth.NewService(sqliteStore, "test-secret", 15*time.Minute, time.Hour)
-	router, err := httpserver.NewRouter(sqliteStore, authService, httpserver.RouterConfig{
-		LocalAuthEnabled:   true,
-		LocalSignupEnabled: true,
-	})
+	router, err := httpserver.NewRouter(sqliteStore, authService, config)
 	if err != nil {
 		t.Fatalf("new router: %v", err)
 	}
 	return router
+}
+
+func createOIDCTestServer(t *testing.T) *httptest.Server {
+	t.Helper()
+
+	var server *httptest.Server
+	server = httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		switch request.URL.Path {
+		case "/.well-known/openid-configuration":
+			writer.Header().Set("Content-Type", "application/json")
+			_, _ = writer.Write([]byte(`{
+				"issuer":"` + server.URL + `",
+				"authorization_endpoint":"` + server.URL + `/authorize",
+				"token_endpoint":"` + server.URL + `/token",
+				"jwks_uri":"` + server.URL + `/keys"
+			}`))
+		case "/keys":
+			writer.Header().Set("Content-Type", "application/json")
+			_, _ = writer.Write([]byte(`{"keys":[]}`))
+		default:
+			http.NotFound(writer, request)
+		}
+	}))
+
+	return server
 }
 
 func TestAuthRefreshAndSyncFlow(t *testing.T) {
@@ -199,5 +228,46 @@ func TestBrowserSignupAcceptsLoopbackRedirectURI(t *testing.T) {
 	}
 	if !strings.Contains(location, "state=state-123") {
 		t.Fatalf("expected state in redirect location: %s", location)
+	}
+}
+
+func TestOIDCOnlyLoginRedirectsImmediately(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	oidcServer := createOIDCTestServer(t)
+	defer oidcServer.Close()
+
+	router := createTestRouterWithConfig(t, httpserver.RouterConfig{
+		LocalAuthEnabled:   false,
+		LocalSignupEnabled: false,
+		OIDC: httpserver.OIDCConfig{
+			Enabled:      true,
+			DisplayName:  "SSO",
+			IssuerURL:    oidcServer.URL,
+			ClientID:     "dolssh-desktop",
+			ClientSecret: "secret",
+			RedirectURL:  "http://127.0.0.1/callback",
+		},
+	})
+
+	request := httptest.NewRequest(http.MethodGet, "/login?client=dolssh-desktop&redirect_uri=dolssh://auth/callback&state=test-state", nil)
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusFound {
+		t.Fatalf("expected redirect, got %d", recorder.Code)
+	}
+	if recorder.Header().Get("Location") != "/auth/oidc/start?client=dolssh-desktop&redirect_uri=dolssh://auth/callback&state=test-state" {
+		t.Fatalf("unexpected login redirect location: %s", recorder.Header().Get("Location"))
+	}
+
+	signupRequest := httptest.NewRequest(http.MethodGet, "/signup?client=dolssh-desktop&redirect_uri=dolssh://auth/callback&state=test-state", nil)
+	signupRecorder := httptest.NewRecorder()
+	router.ServeHTTP(signupRecorder, signupRequest)
+
+	if signupRecorder.Code != http.StatusFound {
+		t.Fatalf("expected signup redirect, got %d", signupRecorder.Code)
+	}
+	if signupRecorder.Header().Get("Location") != "/auth/oidc/start?client=dolssh-desktop&redirect_uri=dolssh://auth/callback&state=test-state" {
+		t.Fatalf("unexpected signup redirect location: %s", signupRecorder.Header().Get("Location"))
 	}
 }
