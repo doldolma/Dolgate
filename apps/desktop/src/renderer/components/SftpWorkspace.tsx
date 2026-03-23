@@ -1,14 +1,24 @@
 import { useMemo, useState } from 'react';
-import { getHostBadgeLabel, getHostSearchText, getHostSubtitle, isSshHostRecord } from '@shared';
-import type { FileEntry, HostRecord, SftpPaneId, SshHostRecord, TransferJob } from '@shared';
+import {
+  buildVisibleGroups,
+  getHostBadgeLabel,
+  getHostSearchText,
+  getHostSubtitle,
+  isGroupWithinPath,
+  isSshHostRecord,
+  normalizeGroupPath
+} from '@shared';
+import type { FileEntry, GroupRecord, HostRecord, SftpPaneId, SshHostRecord, TransferJob } from '@shared';
 import type { PendingConflictDialog, SftpPaneState, SftpSourceKind, SftpState } from '../store/createAppStore';
 
 interface SftpWorkspaceProps {
   hosts: HostRecord[];
+  groups: GroupRecord[];
   sftp: SftpState;
   onActivatePaneSource: (paneId: SftpPaneId, sourceKind: SftpSourceKind) => Promise<void>;
   onPaneFilterChange: (paneId: SftpPaneId, query: string) => void;
   onHostSearchChange: (paneId: SftpPaneId, query: string) => void;
+  onNavigateHostGroup: (paneId: SftpPaneId, path: string | null) => void;
   onSelectHost: (paneId: SftpPaneId, hostId: string) => void;
   onConnectHost: (paneId: SftpPaneId, hostId: string) => Promise<void>;
   onOpenEntry: (paneId: SftpPaneId, entryPath: string) => Promise<void>;
@@ -55,6 +65,37 @@ export function groupHosts(hosts: SshHostRecord[]): Array<[string, SshHostRecord
     grouped.set(key, bucket);
   }
   return Array.from(grouped.entries()).sort(([a], [b]) => a.localeCompare(b));
+}
+
+export function hostPickerBreadcrumbs(groupPath: string | null): Array<{ label: string; path: string | null }> {
+  const normalizedPath = normalizeGroupPath(groupPath);
+  if (!normalizedPath) {
+    return [{ label: 'Hosts', path: null }];
+  }
+  const segments = normalizedPath.split('/');
+  return [
+    { label: 'Hosts', path: null },
+    ...segments.map((segment, index) => ({
+      label: segment,
+      path: segments.slice(0, index + 1).join('/')
+    }))
+  ];
+}
+
+export function visibleHostPickerHosts(hosts: SshHostRecord[], groupPath: string | null, query: string): SshHostRecord[] {
+  const scopedHosts = hosts.filter((host) => isGroupWithinPath(normalizeGroupPath(host.groupName), groupPath));
+  const normalizedQuery = query.trim().toLowerCase();
+  if (normalizedQuery) {
+    return scopedHosts.filter((host) => getHostSearchText(host).join(' ').toLowerCase().includes(normalizedQuery));
+  }
+  if (!groupPath) {
+    return scopedHosts;
+  }
+  return scopedHosts.filter((host) => normalizeGroupPath(host.groupName) === groupPath);
+}
+
+export function getSftpPaneTitle(pane: Pick<SftpPaneState, 'sourceKind' | 'endpoint'>): string {
+  return pane.sourceKind === 'local' ? 'Local' : pane.endpoint?.title ?? 'Host';
 }
 
 export function visibleEntries(pane: SftpPaneState): FileEntry[] {
@@ -284,6 +325,7 @@ function PaneBrowser({
                     return;
                   }
                   event.preventDefault();
+                  event.stopPropagation();
                   const payload = event.dataTransfer.getData('application/x-dolssh-transfer');
                   if (!payload) {
                     return;
@@ -316,21 +358,30 @@ function PaneBrowser({
 
 interface HostPickerProps {
   pane: SftpPaneState;
+  groups: GroupRecord[];
   hosts: SshHostRecord[];
   onActivatePaneSource: (sourceKind: SftpSourceKind) => Promise<void>;
   onHostSearchChange: (query: string) => void;
+  onNavigateHostGroup: (path: string | null) => void;
   onSelectHost: (hostId: string) => void;
   onConnectHost: (hostId: string) => Promise<void>;
 }
 
-function HostPicker({ pane, hosts, onActivatePaneSource, onHostSearchChange, onSelectHost, onConnectHost }: HostPickerProps) {
-  const filteredHosts = useMemo(() => {
-    const query = pane.hostSearchQuery.trim().toLowerCase();
-    if (!query) {
-      return hosts;
-    }
-    return hosts.filter((host) => getHostSearchText(host).join(' ').toLowerCase().includes(query));
-  }, [hosts, pane.hostSearchQuery]);
+function HostPicker({
+  pane,
+  groups,
+  hosts,
+  onActivatePaneSource,
+  onHostSearchChange,
+  onNavigateHostGroup,
+  onSelectHost,
+  onConnectHost
+}: HostPickerProps) {
+  const scopedHosts = useMemo(() => hosts.filter((host) => isGroupWithinPath(normalizeGroupPath(host.groupName), pane.hostGroupPath)), [hosts, pane.hostGroupPath]);
+  const visibleGroups = useMemo(() => buildVisibleGroups(groups, scopedHosts, pane.hostGroupPath), [groups, pane.hostGroupPath, scopedHosts]);
+  const visibleHosts = useMemo(() => visibleHostPickerHosts(hosts, pane.hostGroupPath, pane.hostSearchQuery), [hosts, pane.hostGroupPath, pane.hostSearchQuery]);
+  const breadcrumbs = useMemo(() => hostPickerBreadcrumbs(pane.hostGroupPath), [pane.hostGroupPath]);
+  const isEmpty = visibleGroups.length === 0 && visibleHosts.length === 0;
 
   return (
     <div className="sftp-pane__content sftp-host-picker">
@@ -346,45 +397,70 @@ function HostPicker({ pane, hosts, onActivatePaneSource, onHostSearchChange, onS
       </div>
 
       <div className="search-panel">
-        <label className="search-panel__label" htmlFor={`${pane.id}-host-search`}>
-          Select Host
-        </label>
         <input
           id={`${pane.id}-host-search`}
           value={pane.hostSearchQuery}
           onChange={(event) => onHostSearchChange(event.target.value)}
+          aria-label="Search hosts"
           placeholder="Search hosts..."
         />
       </div>
 
-      <div className="browser-section">
-        <div className="browser-section__header">
-          <div>
-            <div className="section-kicker">Groups</div>
-            <h2>Available Hosts</h2>
-          </div>
+      {breadcrumbs.length > 0 ? (
+        <div className="host-browser__breadcrumbs">
+          {breadcrumbs.map((crumb) => (
+            <button
+              key={crumb.path ?? 'root'}
+              type="button"
+              className={`host-browser__breadcrumb ${crumb.path === pane.hostGroupPath ? 'active' : ''}`}
+              onClick={() => onNavigateHostGroup(crumb.path)}
+            >
+              {crumb.label}
+            </button>
+          ))}
         </div>
+      ) : null}
+
+      {visibleGroups.length > 0 ? (
         <div className="group-grid">
-          {groupHosts(filteredHosts).map(([groupName, entries]) => (
-            <article key={groupName} className="group-card">
-              <div className="group-card__icon">{groupName.slice(0, 1).toUpperCase()}</div>
+          {visibleGroups.map((group) => (
+            <article
+              key={group.path}
+              className="group-card group-card--interactive"
+              onClick={() => onNavigateHostGroup(group.path)}
+              role="button"
+              tabIndex={0}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter' || event.key === ' ') {
+                  event.preventDefault();
+                  onNavigateHostGroup(group.path);
+                }
+              }}
+            >
+              <div className="group-card__icon">{group.name.slice(0, 1).toUpperCase()}</div>
               <div>
-                <strong>{groupName}</strong>
-                <span>{entries.length} hosts</span>
+                <strong>{group.name}</strong>
+                <span>{group.hostCount} hosts</span>
               </div>
             </article>
           ))}
         </div>
-      </div>
+      ) : null}
 
       <div className="host-grid">
-        {filteredHosts.length === 0 ? (
+        {isEmpty ? (
           <div className="empty-callout">
-            <strong>표시할 SSH 호스트가 없습니다.</strong>
-            <p>호스트가 없다면 먼저 Home에서 SSH 호스트를 추가하거나, 검색어를 지워 다시 확인해보세요.</p>
+            <strong>{hosts.length === 0 ? '표시할 SSH 호스트가 없습니다.' : pane.hostSearchQuery ? '검색 결과가 없습니다.' : '이 위치에는 아직 SSH 호스트가 없습니다.'}</strong>
+            <p>
+              {hosts.length === 0
+                ? 'Home에서 SSH 호스트를 추가한 뒤 다시 확인해보세요.'
+                : pane.hostSearchQuery
+                  ? '검색어를 지우거나 다른 이름으로 다시 찾아보세요.'
+                  : '다른 그룹으로 이동하거나 Home에서 호스트 구성을 확인해보세요.'}
+            </p>
           </div>
         ) : (
-          filteredHosts.map((host) => (
+          visibleHosts.map((host) => (
             <article
               key={host.id}
               className={`host-browser-card ${pane.selectedHostId === host.id ? 'active' : ''}`}
@@ -531,10 +607,12 @@ function ActionDialog({
 
 export function SftpWorkspace({
   hosts,
+  groups,
   sftp,
   onActivatePaneSource,
   onPaneFilterChange,
   onHostSearchChange,
+  onNavigateHostGroup,
   onSelectHost,
   onConnectHost,
   onOpenEntry,
@@ -578,17 +656,18 @@ export function SftpWorkspace({
             <section key={pane.id} className="sftp-pane">
               <header className="sftp-pane__header">
                 <div>
-                  <div className="section-kicker">{pane.id === 'left' ? 'Left Pane' : 'Right Pane'}</div>
-                  <h2>{pane.sourceKind === 'local' ? 'Local' : pane.endpoint?.title ?? 'Select Host'}</h2>
+                  <h2>{getSftpPaneTitle(pane)}</h2>
                 </div>
               </header>
 
               {pane.sourceKind === 'host' && !pane.endpoint ? (
                 <HostPicker
                   pane={pane}
+                  groups={groups}
                   hosts={sshHosts}
                   onActivatePaneSource={connectActions.onActivatePaneSource}
                   onHostSearchChange={(query) => onHostSearchChange(pane.id, query)}
+                  onNavigateHostGroup={(path) => onNavigateHostGroup(pane.id, path)}
                   onSelectHost={(hostId) => onSelectHost(pane.id, hostId)}
                   onConnectHost={(hostId) => onConnectHost(pane.id, hostId)}
                 />

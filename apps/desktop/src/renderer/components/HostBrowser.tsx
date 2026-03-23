@@ -1,8 +1,53 @@
 import { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import Fuse from 'fuse.js';
-import { getHostBadgeLabel, getHostSearchText, getHostSubtitle } from '@shared';
-import type { GroupRecord, HostRecord } from '@shared';
+import {
+  buildVisibleGroups,
+  collectGroupPaths,
+  getHostBadgeLabel,
+  getHostSearchText,
+  getHostSubtitle,
+  isGroupWithinPath,
+  normalizeGroupPath
+} from '@shared';
+import type { GroupRecord, GroupRemoveMode, HostRecord } from '@shared';
+
+export {
+  buildVisibleGroups,
+  collectGroupPaths,
+  getGroupLabel,
+  getParentGroupPath,
+  isDirectHostChild,
+  isGroupWithinPath,
+  normalizeGroupPath
+} from '@shared';
+
+export function getGroupDeleteDialogVariant(childGroupCount: number, hostCount: number): 'simple' | 'with-descendants' {
+  return childGroupCount > 0 || hostCount > 0 ? 'with-descendants' : 'simple';
+}
+
+interface GroupDeleteTarget {
+  path: string;
+  name: string;
+  hostCount: number;
+  childGroupCount: number;
+}
+
+interface HostContextMenuState {
+  kind: 'host';
+  hostId: string;
+  x: number;
+  y: number;
+}
+
+interface GroupContextMenuState {
+  kind: 'group';
+  group: GroupDeleteTarget;
+  x: number;
+  y: number;
+}
+
+type ContextMenuState = HostContextMenuState | GroupContextMenuState;
 
 interface HostBrowserProps {
   hosts: HostRecord[];
@@ -16,97 +61,13 @@ interface HostBrowserProps {
   onOpenAwsImport: () => void;
   onOpenWarpgateImport: () => void;
   onCreateGroup: (name: string) => Promise<void>;
+  onRemoveGroup: (path: string, mode: GroupRemoveMode) => Promise<void>;
   onNavigateGroup: (path: string | null) => void;
   onSelectHost: (hostId: string) => void;
   onEditHost: (hostId: string) => void;
   onMoveHostToGroup: (hostId: string, groupPath: string | null) => Promise<void>;
   onRemoveHost: (hostId: string) => Promise<void>;
   onConnectHost: (hostId: string) => Promise<void>;
-}
-
-interface GroupCardView {
-  path: string;
-  name: string;
-  hostCount: number;
-}
-
-export function normalizeGroupPath(groupPath?: string | null): string | null {
-  const normalized = (groupPath ?? '')
-    .split('/')
-    .map((segment) => segment.trim())
-    .filter(Boolean)
-    .join('/');
-  return normalized.length > 0 ? normalized : null;
-}
-
-export function getParentGroupPath(groupPath?: string | null): string | null {
-  const normalized = normalizeGroupPath(groupPath);
-  if (!normalized || !normalized.includes('/')) {
-    return null;
-  }
-  return normalized.slice(0, normalized.lastIndexOf('/'));
-}
-
-export function getGroupLabel(groupPath: string): string {
-  const parts = groupPath.split('/');
-  return parts[parts.length - 1];
-}
-
-export function isGroupWithinPath(groupPath: string | null, currentGroupPath: string | null): boolean {
-  if (!currentGroupPath) {
-    return true;
-  }
-  if (!groupPath) {
-    return false;
-  }
-  return groupPath === currentGroupPath || groupPath.startsWith(`${currentGroupPath}/`);
-}
-
-export function isDirectHostChild(host: HostRecord, currentGroupPath: string | null): boolean {
-  const hostGroupPath = normalizeGroupPath(host.groupName);
-  return hostGroupPath === currentGroupPath;
-}
-
-export function collectGroupPaths(groups: GroupRecord[], hosts: HostRecord[]): string[] {
-  const paths = new Set<string>();
-
-  const appendPathWithAncestors = (targetPath?: string | null) => {
-    const normalized = normalizeGroupPath(targetPath);
-    if (!normalized) {
-      return;
-    }
-    const segments = normalized.split('/');
-    for (let index = 0; index < segments.length; index += 1) {
-      paths.add(segments.slice(0, index + 1).join('/'));
-    }
-  };
-
-  for (const group of groups) {
-    appendPathWithAncestors(group.path);
-  }
-
-  for (const host of hosts) {
-    appendPathWithAncestors(host.groupName);
-  }
-
-  return [...paths].sort((a, b) => a.localeCompare(b));
-}
-
-export function buildVisibleGroups(groups: GroupRecord[], hosts: HostRecord[], currentGroupPath: string | null): GroupCardView[] {
-  const explicitGroupMap = new Map(groups.map((group) => [group.path, group]));
-  return collectGroupPaths(groups, hosts)
-    .filter((groupPath) => getParentGroupPath(groupPath) === currentGroupPath)
-    .map((groupPath) => {
-      const hostCount = hosts.filter((host) => {
-        const hostGroupPath = normalizeGroupPath(host.groupName);
-        return Boolean(hostGroupPath && (hostGroupPath === groupPath || hostGroupPath.startsWith(`${groupPath}/`)));
-      }).length;
-      return {
-        path: groupPath,
-        name: explicitGroupMap.get(groupPath)?.name ?? getGroupLabel(groupPath),
-        hostCount
-      };
-    });
 }
 
 export function HostBrowser({
@@ -121,6 +82,7 @@ export function HostBrowser({
   onOpenAwsImport,
   onOpenWarpgateImport,
   onCreateGroup,
+  onRemoveGroup,
   onNavigateGroup,
   onSelectHost,
   onEditHost,
@@ -132,7 +94,10 @@ export function HostBrowser({
   const [newGroupName, setNewGroupName] = useState('');
   const [groupError, setGroupError] = useState<string | null>(null);
   const [selectedGroupPath, setSelectedGroupPath] = useState<string | null>(null);
-  const [contextMenu, setContextMenu] = useState<{ hostId: string; x: number; y: number } | null>(null);
+  const [groupDeleteTarget, setGroupDeleteTarget] = useState<GroupDeleteTarget | null>(null);
+  const [groupDeleteError, setGroupDeleteError] = useState<string | null>(null);
+  const [isRemovingGroup, setIsRemovingGroup] = useState(false);
+  const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const [dragTargetGroupPath, setDragTargetGroupPath] = useState<string | null>(null);
 
   useEffect(() => {
@@ -193,9 +158,10 @@ export function HostBrowser({
     if (!currentGroupPath) {
       return searchableHosts;
     }
-    return searchableHosts.filter((host) => isDirectHostChild(host, currentGroupPath));
+    return searchableHosts.filter((host) => normalizeGroupPath(host.groupName) === currentGroupPath);
   }, [currentGroupPath, fuse, searchableHosts, searchQuery]);
 
+  const allGroupPaths = useMemo(() => collectGroupPaths(groups, hosts), [groups, hosts]);
   const visibleGroups = useMemo(() => buildVisibleGroups(groups, hosts, currentGroupPath), [currentGroupPath, groups, hosts]);
   const breadcrumbs = useMemo(() => {
     if (!currentGroupPath) {
@@ -215,6 +181,24 @@ export function HostBrowser({
         top: `${Math.max(12, Math.min(contextMenu.y, window.innerHeight - 72))}px`
       }
     : null;
+
+  function buildGroupDeleteTarget(path: string, name: string): GroupDeleteTarget {
+    return {
+      path,
+      name,
+      hostCount: hosts.filter((host) => isGroupWithinPath(normalizeGroupPath(host.groupName), path)).length,
+      childGroupCount: allGroupPaths.filter((candidatePath) => candidatePath !== path && candidatePath.startsWith(`${path}/`)).length
+    };
+  }
+
+  useEffect(() => {
+    if (!selectedGroupPath) {
+      return;
+    }
+    if (!visibleGroups.some((group) => group.path === selectedGroupPath)) {
+      setSelectedGroupPath(null);
+    }
+  }, [selectedGroupPath, visibleGroups]);
 
   return (
     <div className="host-browser">
@@ -291,6 +275,16 @@ export function HostBrowser({
                 className={`group-card group-card--interactive ${selectedGroupPath === group.path ? 'active' : ''} ${dragTargetGroupPath === group.path ? 'drop-target' : ''}`}
                 onClick={() => setSelectedGroupPath(group.path)}
                 onDoubleClick={() => onNavigateGroup(group.path)}
+                onContextMenu={(event) => {
+                  event.preventDefault();
+                  setSelectedGroupPath(group.path);
+                  setContextMenu({
+                    kind: 'group',
+                    group: buildGroupDeleteTarget(group.path, group.name),
+                    x: event.clientX,
+                    y: event.clientY
+                  });
+                }}
                 onDragOver={(event) => {
                   event.preventDefault();
                   event.dataTransfer.dropEffect = 'move';
@@ -326,7 +320,7 @@ export function HostBrowser({
                 }}
               >
                 <div className="group-card__icon">{group.name.slice(0, 1).toUpperCase()}</div>
-                <div>
+                <div className="group-card__body">
                   <strong>{group.name}</strong>
                   <span>{group.hostCount} hosts</span>
                 </div>
@@ -381,6 +375,7 @@ export function HostBrowser({
                     event.preventDefault();
                     onSelectHost(host.id);
                     setContextMenu({
+                      kind: 'host',
                       hostId: host.id,
                       x: event.clientX,
                       y: event.clientY
@@ -433,24 +428,38 @@ export function HostBrowser({
       {contextMenu ? (
         createPortal(
           <div className="context-menu" style={contextMenuStyle ?? undefined} role="menu">
-            <button
-              type="button"
-              className="context-menu__item context-menu__item--danger"
-              onClick={async () => {
-                const targetHost = hosts.find((host) => host.id === contextMenu.hostId);
-                setContextMenu(null);
-                if (!targetHost) {
-                  return;
-                }
-                const confirmed = window.confirm(`"${targetHost.label}" 호스트를 삭제할까요? 연결된 키체인 항목은 유지됩니다.`);
-                if (!confirmed) {
-                  return;
-                }
-                await onRemoveHost(targetHost.id);
-              }}
-            >
-              삭제
-            </button>
+            {contextMenu.kind === 'host' ? (
+              <button
+                type="button"
+                className="context-menu__item context-menu__item--danger"
+                onClick={async () => {
+                  const targetHost = hosts.find((host) => host.id === contextMenu.hostId);
+                  setContextMenu(null);
+                  if (!targetHost) {
+                    return;
+                  }
+                  const confirmed = window.confirm(`"${targetHost.label}" 호스트를 삭제할까요? 연결된 키체인 항목은 유지됩니다.`);
+                  if (!confirmed) {
+                    return;
+                  }
+                  await onRemoveHost(targetHost.id);
+                }}
+              >
+                삭제
+              </button>
+            ) : (
+              <button
+                type="button"
+                className="context-menu__item context-menu__item--danger"
+                onClick={() => {
+                  setGroupDeleteTarget(contextMenu.group);
+                  setGroupDeleteError(null);
+                  setContextMenu(null);
+                }}
+              >
+                삭제
+              </button>
+            )}
           </div>,
           document.body
         )
@@ -498,6 +507,85 @@ export function HostBrowser({
                 }}
               >
                 Create group
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {groupDeleteTarget ? (
+        <div className="home-modal-backdrop" role="presentation">
+          <div className="home-modal" role="dialog" aria-modal="true" aria-labelledby="delete-group-title">
+            <div className="section-kicker">Delete</div>
+            <h3 id="delete-group-title">{groupDeleteTarget.name} 그룹을 삭제할까요?</h3>
+            {getGroupDeleteDialogVariant(groupDeleteTarget.childGroupCount, groupDeleteTarget.hostCount) === 'with-descendants' ? (
+              <p className="home-modal__copy">
+                하위 그룹 {groupDeleteTarget.childGroupCount}개와 호스트 {groupDeleteTarget.hostCount}개가 함께 영향을 받습니다.
+              </p>
+            ) : (
+              <p className="home-modal__copy">이 그룹은 비어 있습니다. 삭제하면 바로 사라집니다.</p>
+            )}
+            {groupDeleteError ? <p className="home-modal__error">{groupDeleteError}</p> : null}
+            <div className="home-modal__actions">
+              <button
+                type="button"
+                className="secondary-button"
+                onClick={() => {
+                  setGroupDeleteTarget(null);
+                  setGroupDeleteError(null);
+                }}
+                disabled={isRemovingGroup}
+              >
+                취소
+              </button>
+              {getGroupDeleteDialogVariant(groupDeleteTarget.childGroupCount, groupDeleteTarget.hostCount) === 'with-descendants' ? (
+                <button
+                  type="button"
+                  className="secondary-button"
+                  disabled={isRemovingGroup}
+                  onClick={async () => {
+                    try {
+                      setIsRemovingGroup(true);
+                      await onRemoveGroup(groupDeleteTarget.path, 'reparent-descendants');
+                      setSelectedGroupPath((current) => (current === groupDeleteTarget.path ? null : current));
+                      setGroupDeleteTarget(null);
+                      setGroupDeleteError(null);
+                    } catch (error) {
+                      setGroupDeleteError(error instanceof Error ? error.message : '그룹을 삭제하지 못했습니다.');
+                    } finally {
+                      setIsRemovingGroup(false);
+                    }
+                  }}
+                >
+                  하위 항목 유지
+                </button>
+              ) : null}
+              <button
+                type="button"
+                className="secondary-button danger"
+                disabled={isRemovingGroup}
+                onClick={async () => {
+                    try {
+                      setIsRemovingGroup(true);
+                      await onRemoveGroup(
+                        groupDeleteTarget.path,
+                        getGroupDeleteDialogVariant(groupDeleteTarget.childGroupCount, groupDeleteTarget.hostCount) === 'with-descendants'
+                          ? 'delete-subtree'
+                          : 'reparent-descendants'
+                      );
+                    setSelectedGroupPath((current) => (current === groupDeleteTarget.path ? null : current));
+                    setGroupDeleteTarget(null);
+                    setGroupDeleteError(null);
+                  } catch (error) {
+                    setGroupDeleteError(error instanceof Error ? error.message : '그룹을 삭제하지 못했습니다.');
+                  } finally {
+                    setIsRemovingGroup(false);
+                  }
+                }}
+              >
+                {getGroupDeleteDialogVariant(groupDeleteTarget.childGroupCount, groupDeleteTarget.hostCount) === 'with-descendants'
+                  ? '하위 항목까지 삭제'
+                  : '삭제'}
               </button>
             </div>
           </div>

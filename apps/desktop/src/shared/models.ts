@@ -215,6 +215,13 @@ export interface GroupRecord {
   updatedAt: string;
 }
 
+export type GroupRemoveMode = 'delete-subtree' | 'reparent-descendants';
+
+export interface GroupRemoveResult {
+  groups: GroupRecord[];
+  hosts: HostRecord[];
+}
+
 export interface TerminalAppearanceSettings {
   globalTerminalThemeId: TerminalThemeId;
   terminalFontFamily: TerminalFontFamilyId;

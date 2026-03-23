@@ -55,6 +55,7 @@ function appendPendingTag(tags: string[], pendingInput: string): string[] {
 interface HostFormProps {
   host: HostRecord | null;
   keychainEntries: SecretMetadataRecord[];
+  groupOptions: Array<{ value: string | null; label: string }>;
   defaultGroupPath?: string | null;
   hideTitle?: boolean;
   onSubmit: (draft: HostDraft, secrets?: { password?: string; passphrase?: string }) => Promise<void>;
@@ -87,6 +88,7 @@ function renderTerminalThemeField(
 export function HostForm({
   host,
   keychainEntries,
+  groupOptions,
   defaultGroupPath = null,
   hideTitle = false,
   onSubmit,
@@ -280,7 +282,13 @@ export function HostForm({
       </label>
       <label>
         Group
-        <input value={draft.groupName ?? ''} onChange={(event) => setDraft({ ...draft, groupName: event.target.value })} placeholder="Servers" />
+        <select value={draft.groupName ?? ''} onChange={(event) => setDraft({ ...draft, groupName: event.target.value || '' })}>
+          {groupOptions.map((option) => (
+            <option key={option.value ?? 'ungrouped'} value={option.value ?? ''}>
+              {option.label}
+            </option>
+          ))}
+        </select>
       </label>
       <label>
         Tags

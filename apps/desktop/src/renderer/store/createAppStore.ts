@@ -1,5 +1,13 @@
 import { createStore } from 'zustand/vanilla';
-import { isAwsEc2HostRecord, isSshHostRecord, isWarpgateSshHostRecord } from '@shared';
+import {
+  getParentGroupPath,
+  isAwsEc2HostRecord,
+  isGroupWithinPath,
+  isSshHostRecord,
+  isWarpgateSshHostRecord,
+  normalizeGroupPath,
+  stripRemovedGroupSegment
+} from '@shared';
 import type {
   ActivityLogRecord,
   AppSettings,
@@ -8,6 +16,7 @@ import type {
   DirectoryListing,
   FileEntry,
   GroupRecord,
+  GroupRemoveMode,
   HostDraft,
   HostKeyProbeResult,
   HostRecord,
@@ -77,6 +86,7 @@ export interface SftpPaneState {
   id: SftpPaneId;
   sourceKind: SftpSourceKind;
   endpoint: SftpEndpointSummary | null;
+  hostGroupPath: string | null;
   currentPath: string;
   lastLocalPath: string;
   history: string[];
@@ -186,6 +196,7 @@ export interface AppState {
   bootstrap: () => Promise<void>;
   refreshOperationalData: () => Promise<void>;
   createGroup: (name: string) => Promise<void>;
+  removeGroup: (path: string, mode: GroupRemoveMode) => Promise<void>;
   saveHost: (hostId: string | null, draft: HostDraft, secrets?: HostSecretInput) => Promise<void>;
   moveHostToGroup: (hostId: string, groupPath: string | null) => Promise<void>;
   removeHost: (hostId: string) => Promise<void>;
@@ -220,6 +231,7 @@ export interface AppState {
   setSftpPaneSource: (paneId: SftpPaneId, sourceKind: SftpSourceKind) => Promise<void>;
   setSftpPaneFilter: (paneId: SftpPaneId, query: string) => void;
   setSftpHostSearchQuery: (paneId: SftpPaneId, query: string) => void;
+  navigateSftpHostGroup: (paneId: SftpPaneId, path: string | null) => void;
   selectSftpHost: (paneId: SftpPaneId, hostId: string) => void;
   connectSftpHost: (paneId: SftpPaneId, hostId: string) => Promise<void>;
   openSftpEntry: (paneId: SftpPaneId, entryPath: string) => Promise<void>;
@@ -255,6 +267,7 @@ function createEmptyPane(id: SftpPaneId): SftpPaneState {
     id,
     sourceKind: id === 'left' ? 'local' : 'host',
     endpoint: null,
+    hostGroupPath: null,
     currentPath: '',
     lastLocalPath: '',
     history: [],
@@ -534,15 +547,6 @@ function resolveAdjacentTarget(
   return null;
 }
 
-function normalizeGroupPath(groupPath?: string | null): string | null {
-  const normalized = (groupPath ?? '')
-    .split('/')
-    .map((segment) => segment.trim())
-    .filter(Boolean)
-    .join('/');
-  return normalized.length > 0 ? normalized : null;
-}
-
 function parentPath(targetPath: string): string {
   if (!targetPath || targetPath === '/') {
     return targetPath || '/';
@@ -553,6 +557,24 @@ function parentPath(targetPath: string): string {
     return '/';
   }
   return normalized.slice(0, index) || '/';
+}
+
+function resolveCurrentGroupPathAfterGroupRemoval(
+  currentGroupPath: string | null,
+  removedGroupPath: string,
+  mode: GroupRemoveMode
+): string | null {
+  const normalizedCurrentPath = normalizeGroupPath(currentGroupPath);
+  const normalizedRemovedPath = normalizeGroupPath(removedGroupPath);
+  if (!normalizedCurrentPath || !normalizedRemovedPath || !isGroupWithinPath(normalizedCurrentPath, normalizedRemovedPath)) {
+    return normalizedCurrentPath;
+  }
+
+  if (mode === 'delete-subtree') {
+    return getParentGroupPath(normalizedRemovedPath);
+  }
+
+  return stripRemovedGroupSegment(normalizedCurrentPath, normalizedRemovedPath);
 }
 
 function resolveCredentialRetryKind(host: HostRecord | undefined, message: string): 'password' | 'passphrase' | null {
@@ -1032,6 +1054,14 @@ export function createAppStore(api: DesktopApi) {
         const next = await api.groups.create(name, get().currentGroupPath);
         set((state) => ({
           groups: sortGroups([...state.groups.filter((group) => group.id !== next.id), next])
+        }));
+      },
+      removeGroup: async (path, mode) => {
+        const result = await api.groups.remove(path, mode);
+        set((state) => ({
+          groups: sortGroups(result.groups),
+          hosts: sortHosts(result.hosts),
+          currentGroupPath: resolveCurrentGroupPathAfterGroupRemoval(state.currentGroupPath, path, mode)
         }));
       },
       saveHost: async (hostId, draft, secrets) => {
@@ -1785,6 +1815,7 @@ export function createAppStore(api: DesktopApi) {
           ...pane,
           sourceKind,
           endpoint: null,
+          hostGroupPath: null,
           currentPath: sourceKind === 'local' ? pane.lastLocalPath || get().sftp.localHomePath : '',
           history: sourceKind === 'local' ? [pane.lastLocalPath || get().sftp.localHomePath] : [],
           historyIndex: sourceKind === 'local' ? 0 : -1,
@@ -1792,6 +1823,8 @@ export function createAppStore(api: DesktopApi) {
           selectedPaths: [],
           errorMessage: undefined,
           warningMessages: [],
+          selectedHostId: null,
+          hostSearchQuery: '',
           isLoading: false
         };
 
@@ -1815,6 +1848,14 @@ export function createAppStore(api: DesktopApi) {
           sftp: updatePaneState(state, paneId, {
             ...getPane(state, paneId),
             hostSearchQuery: query
+          })
+        })),
+      navigateSftpHostGroup: (paneId, path) =>
+        set((state) => ({
+          sftp: updatePaneState(state, paneId, {
+            ...getPane(state, paneId),
+            hostGroupPath: normalizeGroupPath(path),
+            selectedHostId: null
           })
         })),
       selectSftpHost: (paneId, hostId) =>

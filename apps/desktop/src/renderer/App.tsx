@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { getHostSecretRef, isSshHostRecord } from '@shared';
+import { buildGroupOptions, getHostSecretRef, isSshHostRecord } from '@shared';
 import type { AppTheme, AuthState, DesktopWindowState, HostRecord, LinkedHostSummary, UpdateState } from '@shared';
 import { AppTitleBar } from './components/AppTitleBar';
 import { AwsImportDialog } from './components/AwsImportDialog';
@@ -187,6 +187,7 @@ export function App() {
   const closeHostDrawer = useAppStore((state) => state.closeHostDrawer);
   const navigateGroup = useAppStore((state) => state.navigateGroup);
   const createGroup = useAppStore((state) => state.createGroup);
+  const removeGroup = useAppStore((state) => state.removeGroup);
   const saveHost = useAppStore((state) => state.saveHost);
   const moveHostToGroup = useAppStore((state) => state.moveHostToGroup);
   const removeHost = useAppStore((state) => state.removeHost);
@@ -220,6 +221,7 @@ export function App() {
   const setSftpPaneSource = useAppStore((state) => state.setSftpPaneSource);
   const setSftpPaneFilter = useAppStore((state) => state.setSftpPaneFilter);
   const setSftpHostSearchQuery = useAppStore((state) => state.setSftpHostSearchQuery);
+  const navigateSftpHostGroup = useAppStore((state) => state.navigateSftpHostGroup);
   const selectSftpHost = useAppStore((state) => state.selectSftpHost);
   const connectSftpHost = useAppStore((state) => state.connectSftpHost);
   const openSftpEntry = useAppStore((state) => state.openSftpEntry);
@@ -380,6 +382,10 @@ export function App() {
   const isSessionViewActive = !isHomeActive && !isSftpActive;
   const editingHostId = hostDrawer.mode === 'edit' ? hostDrawer.hostId : null;
   const currentHost = findHost(hosts, editingHostId);
+  const groupOptions = useMemo(
+    () => buildGroupOptions(groups, hosts, [currentHost?.groupName, hostDrawer.mode === 'create' ? hostDrawer.defaultGroupPath : currentGroupPath]),
+    [currentGroupPath, currentHost?.groupName, groups, hostDrawer, hosts]
+  );
   const isDrawerOpen = isHomeActive && homeSection === 'hosts' && hostDrawer.mode !== 'closed';
   const highlightedHostId = editingHostId ?? selectedHostId;
   const hasActiveTransfers = sftp.transfers.some((job) => job.status === 'queued' || job.status === 'running');
@@ -616,6 +622,7 @@ export function App() {
                   setIsWarpgateImportOpen(true);
                 }}
                 onCreateGroup={createGroup}
+                onRemoveGroup={removeGroup}
                 onNavigateGroup={(path) => {
                   setHostBrowserError(null);
                   setSelectedHostId(null);
@@ -677,6 +684,7 @@ export function App() {
             mode={hostDrawer.mode === 'create' ? 'create' : 'edit'}
             host={currentHost}
             keychainEntries={keychainEntries}
+            groupOptions={groupOptions}
             defaultGroupPath={hostDrawer.mode === 'create' ? hostDrawer.defaultGroupPath : currentGroupPath}
             onClose={closeHostDrawer}
             onSubmit={async (draft, secrets) => {
@@ -716,10 +724,12 @@ export function App() {
         <section className={`sftp-shell ${isSftpActive ? 'active' : 'hidden'}`}>
           <SftpWorkspace
             hosts={hosts}
+            groups={groups}
             sftp={sftp}
             onActivatePaneSource={setSftpPaneSource}
             onPaneFilterChange={setSftpPaneFilter}
             onHostSearchChange={setSftpHostSearchQuery}
+            onNavigateHostGroup={navigateSftpHostGroup}
             onSelectHost={selectSftpHost}
             onConnectHost={connectSftpHost}
             onOpenEntry={openSftpEntry}

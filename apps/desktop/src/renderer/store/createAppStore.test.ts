@@ -142,7 +142,11 @@ function createMockApi(): DesktopApi {
         parentPath: parentPath ?? null,
         createdAt: '2025-01-03T00:00:00.000Z',
         updatedAt: '2025-01-03T00:00:00.000Z'
-      }))
+      })),
+      remove: vi.fn().mockResolvedValue({
+        groups: [],
+        hosts: []
+      })
     },
     ssh: {
       connect: vi.fn().mockImplementation(async () => {
@@ -371,6 +375,24 @@ describe('createAppStore', () => {
 
     expect(api.groups.create).toHaveBeenCalledWith('Production', 'Servers');
     expect(store.getState().groups.some((group) => group.path === 'Servers/Production')).toBe(true);
+  });
+
+  it('replaces hosts and groups after removing a group subtree', async () => {
+    const api = createMockApi();
+    api.groups.remove = vi.fn().mockResolvedValue({
+      groups: [],
+      hosts: []
+    });
+    const store = createAppStore(api);
+
+    await store.getState().bootstrap();
+    store.getState().navigateGroup('Servers');
+    await store.getState().removeGroup('Servers', 'delete-subtree');
+
+    expect(api.groups.remove).toHaveBeenCalledWith('Servers', 'delete-subtree');
+    expect(store.getState().groups).toEqual([]);
+    expect(store.getState().hosts).toEqual([]);
+    expect(store.getState().currentGroupPath).toBeNull();
   });
 
   it('opens a new session tab and moves to focus mode on connect', async () => {

@@ -1,9 +1,14 @@
 import { randomUUID } from 'node:crypto';
 import {
+  getGroupLabel,
+  getParentGroupPath,
   isAwsEc2HostDraft,
+  isGroupWithinPath,
   isWarpgateSshHostDraft,
   isSshHostDraft,
-  isSshHostRecord
+  isSshHostRecord,
+  normalizeGroupPath,
+  stripRemovedGroupSegment
 } from '@shared';
 import type {
   ActivityLogCategory,
@@ -14,6 +19,8 @@ import type {
   AwsEc2HostDraft,
   AwsEc2HostRecord,
   GroupRecord,
+  GroupRemoveMode,
+  GroupRemoveResult,
   HostDraft,
   HostRecord,
   KnownHostRecord,
@@ -35,15 +42,6 @@ import { getDesktopStateStorage, type SyncDeletionRecord } from './state-storage
 
 function nowIso(): string {
   return new Date().toISOString();
-}
-
-function normalizeGroupPath(groupPath?: string | null): string | null {
-  const normalized = (groupPath ?? '')
-    .split('/')
-    .map((segment) => segment.trim())
-    .filter(Boolean)
-    .join('/');
-  return normalized.length > 0 ? normalized : null;
 }
 
 function normalizeTags(tags?: string[] | null): string[] {
@@ -430,6 +428,86 @@ export class GroupRepository {
       state.data.groups.push(record);
     });
     return record;
+  }
+
+  remove(
+    targetPath: string,
+    mode: GroupRemoveMode
+  ): GroupRemoveResult & {
+    removedGroupIds: string[];
+    removedHostIds: string[];
+  } {
+    const normalizedTargetPath = normalizeGroupPath(targetPath);
+    if (!normalizedTargetPath) {
+      throw new Error('Group path is invalid');
+    }
+
+    const removedGroupIds: string[] = [];
+    const removedHostIds: string[] = [];
+    const nextState = stateStorage.updateState((state) => {
+      const timestamp = nowIso();
+
+      const affectedGroups = state.data.groups.filter((record) => isGroupWithinPath(record.path, normalizedTargetPath));
+      const affectedHosts = state.data.hosts.filter((record) => isGroupWithinPath(normalizeGroupPath(record.groupName), normalizedTargetPath));
+
+      if (affectedGroups.length === 0 && affectedHosts.length === 0) {
+        throw new Error('Group not found');
+      }
+
+      if (mode === 'delete-subtree') {
+        removedGroupIds.push(...affectedGroups.map((record) => record.id));
+        removedHostIds.push(...affectedHosts.map((record) => record.id));
+        state.data.groups = state.data.groups.filter((record) => !isGroupWithinPath(record.path, normalizedTargetPath));
+        state.data.hosts = state.data.hosts.filter((record) => !isGroupWithinPath(normalizeGroupPath(record.groupName), normalizedTargetPath));
+        return;
+      }
+
+      const remainingGroups = state.data.groups.filter((record) => !isGroupWithinPath(record.path, normalizedTargetPath));
+      const nextGroupsByPath = new Map<string, GroupRecord>();
+      for (const record of remainingGroups) {
+        nextGroupsByPath.set(record.path, record);
+      }
+
+      for (const record of affectedGroups) {
+        if (record.path === normalizedTargetPath) {
+          removedGroupIds.push(record.id);
+          continue;
+        }
+        const rebasedPath = stripRemovedGroupSegment(record.path, normalizedTargetPath);
+        if (!rebasedPath || nextGroupsByPath.has(rebasedPath)) {
+          removedGroupIds.push(record.id);
+          continue;
+        }
+        nextGroupsByPath.set(rebasedPath, {
+          ...record,
+          name: getGroupLabel(rebasedPath),
+          path: rebasedPath,
+          parentPath: getParentGroupPath(rebasedPath),
+          updatedAt: timestamp
+        });
+      }
+
+      state.data.groups = [...nextGroupsByPath.values()];
+      state.data.hosts = state.data.hosts.map((record) => {
+        const hostGroupPath = normalizeGroupPath(record.groupName);
+        if (!isGroupWithinPath(hostGroupPath, normalizedTargetPath)) {
+          return record;
+        }
+        const nextGroupPath = stripRemovedGroupSegment(hostGroupPath, normalizedTargetPath);
+        return normalizeIncomingHostRecord({
+          ...record,
+          groupName: nextGroupPath,
+          updatedAt: timestamp
+        });
+      });
+    });
+
+    return {
+      groups: nextState.data.groups.sort((left, right) => left.path.localeCompare(right.path)),
+      hosts: nextState.data.hosts.sort(compareHosts),
+      removedGroupIds,
+      removedHostIds
+    };
   }
 
   replaceAll(records: GroupRecord[]): void {

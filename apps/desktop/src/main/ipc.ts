@@ -15,6 +15,7 @@ import type {
   HostRecord,
   HostDraft,
   HostKeyProbeResult,
+  GroupRemoveMode,
   HostSecretInput,
   KeychainSecretCloneInput,
   KeychainSecretUpdateInput,
@@ -435,6 +436,27 @@ export function registerIpcHandlers(
     });
     queueSync();
     return group;
+  });
+
+  ipcMain.handle(ipcChannels.groups.remove, async (_event, path: string, mode: GroupRemoveMode) => {
+    const result = groups.remove(path, mode);
+    for (const groupId of result.removedGroupIds) {
+      syncOutbox.upsertDeletion('groups', groupId);
+    }
+    for (const hostId of result.removedHostIds) {
+      syncOutbox.upsertDeletion('hosts', hostId);
+    }
+    activityLogs.append('warn', 'audit', '그룹을 삭제했습니다.', {
+      path,
+      mode,
+      removedGroupCount: result.removedGroupIds.length,
+      removedHostCount: result.removedHostIds.length
+    });
+    queueSync();
+    return {
+      groups: result.groups,
+      hosts: result.hosts
+    };
   });
 
   ipcMain.handle(ipcChannels.aws.listProfiles, async () => awsService.listProfiles());

@@ -181,7 +181,10 @@ test.describe('desktop smoke', () => {
       await expect(page.getByRole('button', { name: 'Smoke AWS 세션 종료' })).toBeVisible();
 
       await page.getByRole('button', { name: 'SFTP' }).click();
-      await expect(page.getByRole('heading', { name: 'Available Hosts' })).toBeVisible();
+      await expect(page.getByRole('heading', { name: 'Host', exact: true })).toBeVisible();
+      await expect(page.getByPlaceholder('Search hosts...')).toBeVisible();
+      await expect(page.locator('.sftp-host-picker .group-card').filter({ hasText: 'Production' }).first()).toBeVisible();
+      await page.locator('.sftp-host-picker .group-card').filter({ hasText: 'Production' }).first().click();
       await expect(page.locator('.sftp-host-picker .host-browser-card').filter({ hasText: 'Smoke SSH' }).first()).toBeVisible();
     } finally {
       await app.close();
