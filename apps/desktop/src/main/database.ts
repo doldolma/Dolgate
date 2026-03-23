@@ -308,6 +308,7 @@ function withLinkedHostCount(record: SecretMetadataRecord, hosts: HostRecord[]):
 const DEFAULT_GLOBAL_TERMINAL_THEME_ID: TerminalThemeId = 'dolssh-dark';
 const DEFAULT_TERMINAL_FONT_FAMILY: TerminalFontFamilyId = 'sf-mono';
 const DEFAULT_TERMINAL_FONT_SIZE = 13;
+const DEFAULT_TERMINAL_WEBGL_ENABLED = true;
 
 const stateStorage = getDesktopStateStorage();
 
@@ -538,6 +539,7 @@ export class SettingsRepository {
       globalTerminalThemeId: state.terminal.globalThemeId,
       terminalFontFamily: state.terminal.fontFamily,
       terminalFontSize: state.terminal.fontSize,
+      terminalWebglEnabled: state.terminal.webglEnabled,
       serverUrl: serverUrlOverride || this.getDefaultServerUrl(),
       serverUrlOverride,
       dismissedUpdateVersion: state.updater.dismissedVersion,
@@ -593,6 +595,11 @@ export class SettingsRepository {
         state.terminal.localUpdatedAt = nowIso();
       }
 
+      if (typeof input.terminalWebglEnabled === 'boolean') {
+        state.terminal.webglEnabled = input.terminalWebglEnabled;
+        state.terminal.localUpdatedAt = nowIso();
+      }
+
       if (Object.prototype.hasOwnProperty.call(input, 'serverUrlOverride')) {
         const nextValue =
           typeof input.serverUrlOverride === 'string' && input.serverUrlOverride.trim() ? input.serverUrlOverride.trim() : null;
@@ -617,13 +624,15 @@ export class SettingsRepository {
         input.theme == null &&
         input.globalTerminalThemeId == null &&
         input.terminalFontFamily == null &&
-        input.terminalFontSize == null
+        input.terminalFontSize == null &&
+        input.terminalWebglEnabled == null
       ) {
         state.settings.theme = current.theme as AppTheme;
         state.settings.serverUrlOverride = current.serverUrlOverride ?? null;
         state.terminal.globalThemeId = current.globalTerminalThemeId ?? DEFAULT_GLOBAL_TERMINAL_THEME_ID;
         state.terminal.fontFamily = current.terminalFontFamily ?? DEFAULT_TERMINAL_FONT_FAMILY;
         state.terminal.fontSize = current.terminalFontSize ?? DEFAULT_TERMINAL_FONT_SIZE;
+        state.terminal.webglEnabled = current.terminalWebglEnabled ?? DEFAULT_TERMINAL_WEBGL_ENABLED;
       }
     });
     return this.get();

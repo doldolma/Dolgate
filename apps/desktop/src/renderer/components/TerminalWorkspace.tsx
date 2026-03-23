@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Terminal } from 'xterm';
-import { FitAddon } from 'xterm-addon-fit';
 import type { AppSettings, HostRecord, TerminalTab } from '@shared';
+import type { Terminal } from '@xterm/xterm';
 import type { PendingInteractiveAuth, WorkspaceDropDirection, WorkspaceLayoutNode, WorkspaceTab } from '../store/createAppStore';
+import { createTerminalRuntime, type TerminalRuntime } from '../lib/terminal-runtime';
 import { useAppStore } from '../store/appStore';
 import { getTerminalFontOption, getTerminalThemePreset, type TerminalThemeDefinition } from '../lib/terminal-presets';
 import { createTerminalResizeScheduler } from './terminal-resize';
@@ -49,6 +49,7 @@ interface TerminalSessionViewProps {
     fontFamily: string;
     fontSize: number;
   };
+  terminalWebglEnabled: boolean;
   style?: React.CSSProperties;
   showHeader?: boolean;
   draggingDisabled?: boolean;
@@ -195,6 +196,7 @@ function TerminalSessionView({
   active,
   layoutKey,
   appearance,
+  terminalWebglEnabled,
   style,
   showHeader = false,
   draggingDisabled = false,
@@ -206,7 +208,7 @@ function TerminalSessionView({
 }: TerminalSessionViewProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const terminalRef = useRef<Terminal | null>(null);
-  const fitAddonRef = useRef<FitAddon | null>(null);
+  const runtimeRef = useRef<TerminalRuntime | null>(null);
   const resizeSchedulerRef = useRef<ReturnType<typeof createTerminalResizeScheduler> | null>(null);
   const tabs = useAppStore((state) => state.tabs);
   const currentTab = tabs.find((tab) => tab.sessionId === sessionId);
@@ -236,33 +238,27 @@ function TerminalSessionView({
       return;
     }
 
-    const terminal = new Terminal({
-      cursorBlink: true,
-      fontFamily: appearance.fontFamily,
-      fontSize: appearance.fontSize,
-      theme: appearance.theme
-    });
-    const fitAddon = new FitAddon();
-    terminal.loadAddon(fitAddon);
-    terminal.open(containerRef.current);
-    fitAddon.fit();
-    terminal.onData((data) => {
-      void window.dolssh.ssh.write(sessionId, data);
-    });
-    terminal.onBinary((data) => {
-      const bytes = Uint8Array.from(data, (char) => char.charCodeAt(0));
-      void window.dolssh.ssh.writeBinary(sessionId, bytes);
+    const runtime = createTerminalRuntime({
+      container: containerRef.current,
+      appearance,
+      onData: (data) => {
+        void window.dolssh.ssh.write(sessionId, data);
+      },
+      onBinary: (data) => {
+        const bytes = Uint8Array.from(data, (char) => char.charCodeAt(0));
+        void window.dolssh.ssh.writeBinary(sessionId, bytes);
+      }
     });
 
-    terminalRef.current = terminal;
-    fitAddonRef.current = fitAddon;
+    terminalRef.current = runtime.terminal;
+    runtimeRef.current = runtime;
     resizeSchedulerRef.current = createTerminalResizeScheduler({
       fit: () => {
-        fitAddon.fit();
+        runtime.fitAddon.fit();
       },
       readSize: () => ({
-        cols: terminal.cols,
-        rows: terminal.rows
+        cols: runtime.terminal.cols,
+        rows: runtime.terminal.rows
       }),
       afterResize: () => {
         refreshViewport();
@@ -304,22 +300,27 @@ function TerminalSessionView({
       containerRef.current?.removeEventListener('focusout', handleFocusOut);
       resizeSchedulerRef.current?.reset();
       resizeSchedulerRef.current = null;
-      terminal.dispose();
+      runtime.dispose();
+      runtimeRef.current = null;
       terminalRef.current = null;
-      fitAddonRef.current = null;
     };
   }, [sessionId]);
 
   useEffect(() => {
-    if (!terminalRef.current) {
+    if (!runtimeRef.current) {
       return;
     }
-    terminalRef.current.options.theme = appearance.theme;
-    terminalRef.current.options.fontFamily = appearance.fontFamily;
-    terminalRef.current.options.fontSize = appearance.fontSize;
+    runtimeRef.current.setAppearance(appearance);
     resizeSchedulerRef.current?.request();
     refreshViewport();
   }, [appearance]);
+
+  useEffect(() => {
+    if (!runtimeRef.current) {
+      return;
+    }
+    void runtimeRef.current.setWebglEnabled(terminalWebglEnabled);
+  }, [terminalWebglEnabled]);
 
   useEffect(() => window.dolssh.ssh.onData(sessionId, (chunk) => {
     terminalRef.current?.write(chunk);
@@ -719,6 +720,7 @@ export function TerminalWorkspace({
               active={activeWorkspace ? activeWorkspace.activeSessionId === tab.sessionId : activeSessionId === tab.sessionId}
               layoutKey={placement ? `${placement.rect.x}:${placement.rect.y}:${placement.rect.width}:${placement.rect.height}` : 'hidden'}
               appearance={appearanceBySessionId.get(tab.sessionId) ?? resolveTerminalAppearanceForSession(settings, hosts, tab)}
+              terminalWebglEnabled={settings.terminalWebglEnabled}
               style={activeWorkspace ? undefined : rectStyle}
               showHeader={Boolean(activeWorkspace && placement)}
               interactiveAuth={pendingInteractiveAuth?.sessionId === tab.sessionId ? pendingInteractiveAuth : null}

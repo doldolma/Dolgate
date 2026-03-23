@@ -266,6 +266,7 @@ const defaultSettings: AppSettings = {
   globalTerminalThemeId: 'dolssh-dark',
   terminalFontFamily: 'sf-mono',
   terminalFontSize: 13,
+  terminalWebglEnabled: true,
   serverUrl: 'https://ssh.doldolma.com',
   serverUrlOverride: null,
   dismissedUpdateVersion: null,

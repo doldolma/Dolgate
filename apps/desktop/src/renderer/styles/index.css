@@ -1429,6 +1429,44 @@ input::placeholder {
   color: var(--text-soft);
 }
 
+.terminal-setting-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  min-height: 72px;
+  padding: 0.95rem 1rem;
+  border-radius: 20px;
+  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--surface-muted) 90%, transparent 10%);
+  color: var(--text);
+}
+
+.terminal-setting-toggle > div {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.terminal-setting-toggle span {
+  font-size: 0.9rem;
+  color: var(--text);
+}
+
+.terminal-setting-toggle p {
+  margin: 0;
+  font-size: 0.8rem;
+  line-height: 1.45;
+  color: var(--text-soft);
+}
+
+.terminal-setting-toggle input {
+  width: 1rem;
+  height: 1rem;
+  accent-color: var(--accent-strong);
+  flex-shrink: 0;
+}
+
 .terminal-theme-header {
   margin-top: 0.2rem;
 }

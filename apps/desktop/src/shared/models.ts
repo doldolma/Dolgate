@@ -226,6 +226,7 @@ export interface TerminalAppearanceSettings {
   globalTerminalThemeId: TerminalThemeId;
   terminalFontFamily: TerminalFontFamilyId;
   terminalFontSize: number;
+  terminalWebglEnabled: boolean;
 }
 
 // AppSettings는 사용자의 로컬 환경 설정을 표현한다.
