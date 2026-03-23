@@ -28,6 +28,7 @@ import type {
   TransferJob,
   TransferJobEvent,
   TransferStartInput,
+  DesktopWindowState,
   UpdateEvent,
   UpdateState,
   WarpgateConnectionInfo,
@@ -271,6 +272,14 @@ export interface DesktopApi {
   shell: {
     pickPrivateKey: () => Promise<string | null>;
     openExternal: (url: string) => Promise<void>;
+  };
+  window: {
+    getState: () => Promise<DesktopWindowState>;
+    minimize: () => Promise<void>;
+    maximize: () => Promise<void>;
+    restore: () => Promise<void>;
+    close: () => Promise<void>;
+    onStateChanged: (listener: (state: DesktopWindowState) => void) => () => void;
   };
   tabs: {
     list: () => Promise<TerminalTab[]>;

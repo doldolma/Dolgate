@@ -48,6 +48,14 @@ export const ipcChannels = {
     pickPrivateKey: 'shell:pick-private-key',
     openExternal: 'shell:open-external'
   },
+  window: {
+    getState: 'window:get-state',
+    minimize: 'window:minimize',
+    maximize: 'window:maximize',
+    restore: 'window:restore',
+    close: 'window:close',
+    stateChanged: 'window:state-changed'
+  },
   tabs: {
     list: 'tabs:list'
   },

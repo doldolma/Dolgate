@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { getHostSecretRef, isSshHostRecord } from '@shared';
-import type { AppTheme, AuthState, HostRecord, LinkedHostSummary, UpdateState } from '@shared';
+import type { AppTheme, AuthState, DesktopWindowState, HostRecord, LinkedHostSummary, UpdateState } from '@shared';
 import { AppTitleBar } from './components/AppTitleBar';
 import { AwsImportDialog } from './components/AwsImportDialog';
 import { CredentialRetryDialog } from './components/CredentialRetryDialog';
@@ -12,6 +12,7 @@ import { KnownHostPromptDialog } from './components/KnownHostPromptDialog';
 import { KnownHostsPanel } from './components/KnownHostsPanel';
 import { LoginGate } from './components/LoginGate';
 import { LogsPanel } from './components/LogsPanel';
+import { DesktopWindowControls } from './components/DesktopWindowControls';
 import { PortForwardingPanel } from './components/PortForwardingPanel';
 import { SecretEditDialog, type SecretCredentialKind, type SecretEditDialogRequest } from './components/SecretEditDialog';
 import { SettingsPanel } from './components/SettingsPanel';
@@ -72,6 +73,12 @@ function createDefaultUpdateState(): UpdateState {
     progress: null,
     checkedAt: null,
     errorMessage: null
+  };
+}
+
+function createDefaultWindowState(): DesktopWindowState {
+  return {
+    isMaximized: false
   };
 }
 
@@ -146,6 +153,7 @@ export function App() {
   const [hostBrowserError, setHostBrowserError] = useState<string | null>(null);
   const [draggedSession, setDraggedSession] = useState<DraggedSessionPayload | null>(null);
   const [updateState, setUpdateState] = useState<UpdateState>(createDefaultUpdateState);
+  const [windowState, setWindowState] = useState<DesktopWindowState>(createDefaultWindowState);
   const [isUpdateInstallConfirmOpen, setIsUpdateInstallConfirmOpen] = useState(false);
   const [secretEditRequest, setSecretEditRequest] = useState<SecretEditDialogRequest | null>(null);
   const authBootstrapStartedRef = useRef(false);
@@ -320,6 +328,24 @@ export function App() {
   }, []);
 
   useEffect(() => {
+    let isMounted = true;
+    void window.dolssh.window.getState().then((state) => {
+      if (isMounted) {
+        setWindowState(state);
+      }
+    });
+
+    const offWindowState = window.dolssh.window.onStateChanged((state) => {
+      setWindowState(state);
+    });
+
+    return () => {
+      isMounted = false;
+      offWindowState();
+    };
+  }, []);
+
+  useEffect(() => {
     const media = window.matchMedia('(prefers-color-scheme: dark)');
     const handleChange = (event: MediaQueryListEvent) => {
       setPrefersDark(event.matches);
@@ -371,6 +397,25 @@ export function App() {
   if (!isAuthReady) {
     return (
       <div className="app-frame app-frame--login">
+        <div className="login-window-chrome">
+          <div className="login-window-chrome__spacer" />
+          <DesktopWindowControls
+            desktopPlatform={desktopPlatform}
+            windowState={windowState}
+            onMinimizeWindow={async () => {
+              await window.dolssh.window.minimize();
+            }}
+            onMaximizeWindow={async () => {
+              await window.dolssh.window.maximize();
+            }}
+            onRestoreWindow={async () => {
+              await window.dolssh.window.restore();
+            }}
+            onCloseWindow={async () => {
+              await window.dolssh.window.close();
+            }}
+          />
+        </div>
         <LoginGate
           authState={
             needsSyncRetry
@@ -491,12 +536,14 @@ export function App() {
   return (
     <div className={`app-frame ${isHomeActive ? 'home-active' : 'session-active'}`}>
       <AppTitleBar
+        desktopPlatform={desktopPlatform}
         tabs={tabs}
         workspaces={workspaces}
         tabStrip={tabStrip}
         activeWorkspaceTab={activeWorkspaceTab}
         draggedSession={draggedSession}
         updateState={updateState}
+        windowState={windowState}
         onSelectHome={activateHome}
         onSelectSftp={activateSftp}
         onSelectSession={activateSession}
@@ -524,6 +571,18 @@ export function App() {
         }}
         onOpenReleasePage={async (url) => {
           await runUpdaterAction(() => window.dolssh.shell.openExternal(url));
+        }}
+        onMinimizeWindow={async () => {
+          await window.dolssh.window.minimize();
+        }}
+        onMaximizeWindow={async () => {
+          await window.dolssh.window.maximize();
+        }}
+        onRestoreWindow={async () => {
+          await window.dolssh.window.restore();
+        }}
+        onCloseWindow={async () => {
+          await window.dolssh.window.close();
         }}
       />
 

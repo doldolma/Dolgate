@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
-import { dialog, ipcMain, shell as electronShell } from 'electron';
+import { BrowserWindow, dialog, ipcMain, shell as electronShell } from 'electron';
 import {
   isAwsEc2HostRecord,
   isWarpgateSshHostRecord,
@@ -222,6 +222,20 @@ function describeHostTarget(host: HostDraft | ReturnType<HostRepository['getById
     return host.awsInstanceId;
   }
   return host.warpgateTargetId;
+}
+
+function resolveWindowFromSender(sender: Electron.WebContents): BrowserWindow {
+  const window = BrowserWindow.fromWebContents(sender);
+  if (!window) {
+    throw new Error('호출한 브라우저 윈도우를 찾을 수 없습니다.');
+  }
+  return window;
+}
+
+function buildWindowState(window: BrowserWindow) {
+  return {
+    isMaximized: window.isMaximized()
+  };
 }
 
 export function registerIpcHandlers(
@@ -543,6 +557,24 @@ export function registerIpcHandlers(
       throw new Error('외부 링크는 http 또는 https만 열 수 있습니다.');
     }
     await electronShell.openExternal(target.toString());
+  });
+
+  ipcMain.handle(ipcChannels.window.getState, async (event) => buildWindowState(resolveWindowFromSender(event.sender)));
+
+  ipcMain.handle(ipcChannels.window.minimize, async (event) => {
+    resolveWindowFromSender(event.sender).minimize();
+  });
+
+  ipcMain.handle(ipcChannels.window.maximize, async (event) => {
+    resolveWindowFromSender(event.sender).maximize();
+  });
+
+  ipcMain.handle(ipcChannels.window.restore, async (event) => {
+    resolveWindowFromSender(event.sender).restore();
+  });
+
+  ipcMain.handle(ipcChannels.window.close, async (event) => {
+    resolveWindowFromSender(event.sender).close();
   });
 
   ipcMain.handle(ipcChannels.sftp.connect, async (_event, input: DesktopSftpConnectInput) => {

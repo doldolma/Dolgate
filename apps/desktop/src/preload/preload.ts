@@ -5,6 +5,7 @@ import type {
   DesktopApi,
   DesktopConnectInput,
   DesktopSftpConnectInput,
+  DesktopWindowState,
   HostDraft,
   HostSecretInput,
   KeyboardInteractiveRespondInput,
@@ -31,6 +32,7 @@ const transferListeners = new Set<(event: TransferJobEvent) => void>();
 const portForwardListeners = new Set<(event: PortForwardRuntimeEvent) => void>();
 const updateListeners = new Set<(event: UpdateEvent) => void>();
 const authListeners = new Set<(state: AuthState) => void>();
+const windowStateListeners = new Set<(state: DesktopWindowState) => void>();
 const MAX_SESSION_BACKLOG_BYTES = 1024 * 1024;
 
 function cloneChunk(chunk: Uint8Array): Uint8Array {
@@ -94,6 +96,12 @@ ipcRenderer.on(ipcChannels.updater.event, (_event, payload: UpdateEvent) => {
 
 ipcRenderer.on(ipcChannels.auth.event, (_event, payload: AuthState) => {
   for (const listener of authListeners) {
+    listener(payload);
+  }
+});
+
+ipcRenderer.on(ipcChannels.window.stateChanged, (_event, payload: DesktopWindowState) => {
+  for (const listener of windowStateListeners) {
     listener(payload);
   }
 });
@@ -180,6 +188,19 @@ const api: DesktopApi = {
   shell: {
     pickPrivateKey: () => ipcRenderer.invoke(ipcChannels.shell.pickPrivateKey),
     openExternal: (url: string) => ipcRenderer.invoke(ipcChannels.shell.openExternal, url)
+  },
+  window: {
+    getState: () => ipcRenderer.invoke(ipcChannels.window.getState),
+    minimize: () => ipcRenderer.invoke(ipcChannels.window.minimize),
+    maximize: () => ipcRenderer.invoke(ipcChannels.window.maximize),
+    restore: () => ipcRenderer.invoke(ipcChannels.window.restore),
+    close: () => ipcRenderer.invoke(ipcChannels.window.close),
+    onStateChanged: (listener: (state: DesktopWindowState) => void) => {
+      windowStateListeners.add(listener);
+      return () => {
+        windowStateListeners.delete(listener);
+      };
+    }
   },
   tabs: {
     list: () => ipcRenderer.invoke(ipcChannels.tabs.list)

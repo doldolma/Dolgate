@@ -161,6 +161,16 @@ function createMockApi(): DesktopApi {
       pickPrivateKey: vi.fn(),
       openExternal: vi.fn().mockResolvedValue(undefined)
     },
+    window: {
+      getState: vi.fn().mockResolvedValue({
+        isMaximized: false
+      }),
+      minimize: vi.fn().mockResolvedValue(undefined),
+      maximize: vi.fn().mockResolvedValue(undefined),
+      restore: vi.fn().mockResolvedValue(undefined),
+      close: vi.fn().mockResolvedValue(undefined),
+      onStateChanged: vi.fn().mockReturnValue(() => undefined)
+    },
     tabs: {
       list: vi.fn().mockResolvedValue([])
     },

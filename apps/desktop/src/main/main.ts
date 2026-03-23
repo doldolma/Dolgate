@@ -1,6 +1,7 @@
 import { app, BrowserWindow } from 'electron';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import type { DesktopWindowState } from '@shared';
 import {
   ActivityLogRepository,
   GroupRepository,
@@ -14,6 +15,7 @@ import {
 import { DesktopConfigService } from './app-config';
 import { AuthService } from './auth-service';
 import { AwsService } from './aws-service';
+import { ipcChannels } from '../common/ipc-channels';
 import { CoreManager } from './core-manager';
 import { registerIpcHandlers } from './ipc';
 import { SecretStore } from './secret-store';
@@ -118,6 +120,24 @@ async function handleAuthCallbackUrl(rawUrl: string): Promise<void> {
   }
 }
 
+function buildWindowState(window: BrowserWindow): DesktopWindowState {
+  return {
+    isMaximized: window.isMaximized()
+  };
+}
+
+function wireWindowStateEvents(window: BrowserWindow): void {
+  const emitState = () => {
+    if (window.isDestroyed()) {
+      return;
+    }
+    window.webContents.send(ipcChannels.window.stateChanged, buildWindowState(window));
+  };
+
+  window.on('maximize', emitState);
+  window.on('unmaximize', emitState);
+}
+
 async function createWindow(): Promise<void> {
   // renderer는 항상 preload를 거쳐서만 시스템 기능을 사용하게 강제한다.
   const window = new BrowserWindow({
@@ -126,8 +146,9 @@ async function createWindow(): Promise<void> {
     minWidth: 1080,
     minHeight: 700,
     show: false,
-    titleBarStyle: 'hiddenInset',
     backgroundColor: '#0d141a',
+    ...(process.platform === 'win32' ? { frame: false } : {}),
+    ...(process.platform === 'darwin' ? { titleBarStyle: 'hiddenInset' as const } : {}),
     webPreferences: {
       // forge + vite 출력에서는 main.js와 preload.js가 같은 build 디렉터리에 놓인다.
       preload: path.join(__dirname, 'preload.js'),
@@ -135,6 +156,12 @@ async function createWindow(): Promise<void> {
       nodeIntegration: false
     }
   });
+
+  if (process.platform === 'win32') {
+    window.removeMenu();
+  }
+
+  wireWindowStateEvents(window);
 
   coreManager.registerWindow(window);
   authService.registerWindow(window);

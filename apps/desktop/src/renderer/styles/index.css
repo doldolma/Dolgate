@@ -101,15 +101,28 @@ input::placeholder {
 }
 
 .app-frame--login {
-  justify-content: center;
+  position: relative;
 }
 
 .login-gate {
   min-height: 0;
-  height: 100%;
+  flex: 1;
   display: grid;
   place-items: center;
   padding: 2.5rem;
+}
+
+.login-window-chrome {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  min-height: 64px;
+  padding: 0.85rem 1rem 0;
+  -webkit-app-region: drag;
+}
+
+.login-window-chrome__spacer {
+  flex: 1;
 }
 
 .login-gate__card {
@@ -255,6 +268,124 @@ input::placeholder {
   display: flex;
   align-items: center;
   gap: 0.7rem;
+}
+
+.desktop-window-controls,
+.desktop-window-controls * {
+  -webkit-app-region: no-drag;
+}
+
+.desktop-window-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.16rem;
+  margin-left: 0.22rem;
+}
+
+.app-titlebar .desktop-window-controls {
+  align-self: center;
+}
+
+.login-window-chrome .desktop-window-controls {
+  align-self: center;
+}
+
+.window-control {
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+  width: 2.4rem;
+  height: 2.4rem;
+  border-radius: 10px;
+  color: rgba(255, 255, 255, 0.9);
+  transition:
+    background-color 140ms ease,
+    color 140ms ease;
+}
+
+.window-control:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.window-control:active {
+  background: rgba(255, 255, 255, 0.16);
+}
+
+.window-control--close:hover {
+  background: #d95454;
+  color: #fff;
+}
+
+.window-control--close:active {
+  background: #bb4545;
+}
+
+.window-control__icon {
+  position: relative;
+  display: block;
+  width: 10px;
+  height: 10px;
+}
+
+.window-control__icon--minimize::before,
+.window-control__icon--close::before,
+.window-control__icon--close::after,
+.window-control__icon--restore::before,
+.window-control__icon--restore::after {
+  content: '';
+  position: absolute;
+  display: block;
+}
+
+.window-control__icon--minimize::before {
+  top: 7px;
+  left: 0;
+  width: 10px;
+  height: 1px;
+  background: currentColor;
+}
+
+.window-control__icon--maximize {
+  width: 10px;
+  height: 9px;
+  border: 1px solid currentColor;
+}
+
+.window-control__icon--restore::before,
+.window-control__icon--restore::after {
+  width: 8px;
+  height: 7px;
+  border: 1px solid currentColor;
+}
+
+.window-control__icon--restore::before {
+  top: 0;
+  right: 0;
+}
+
+.window-control__icon--restore::after {
+  left: 0;
+  bottom: 0;
+  background: var(--chrome-bg);
+}
+
+.window-control__icon--close::before,
+.window-control__icon--close::after {
+  top: calc(50% - 0.65px);
+  left: 0;
+  width: 10px;
+  height: 1.3px;
+  background: currentColor;
+  border-radius: 999px;
+  transform-origin: center;
+}
+
+.window-control__icon--close::before {
+  transform: rotate(45deg);
+}
+
+.window-control__icon--close::after {
+  transform: rotate(-45deg);
 }
 
 .titlebar-action {

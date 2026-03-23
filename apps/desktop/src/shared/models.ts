@@ -281,6 +281,10 @@ export interface UpdateEvent {
   state: UpdateState;
 }
 
+export interface DesktopWindowState {
+  isMaximized: boolean;
+}
+
 export interface TerminalThemePreset {
   id: TerminalThemeId;
   title: string;

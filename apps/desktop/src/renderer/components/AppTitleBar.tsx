@@ -1,6 +1,7 @@
 import { useMemo, useRef, useState } from 'react';
-import type { TerminalTab, UpdateState } from '@shared';
+import type { DesktopWindowState, TerminalTab, UpdateState } from '@shared';
 import type { DynamicTabStripItem, WorkspaceTab, WorkspaceTabId } from '../store/createAppStore';
+import { DesktopWindowControls, type DesktopPlatform } from './DesktopWindowControls';
 
 interface DraggedSessionPayload {
   sessionId: string;
@@ -9,12 +10,14 @@ interface DraggedSessionPayload {
 }
 
 interface AppTitleBarProps {
+  desktopPlatform: DesktopPlatform;
   tabs: TerminalTab[];
   workspaces: WorkspaceTab[];
   tabStrip: DynamicTabStripItem[];
   activeWorkspaceTab: WorkspaceTabId;
   draggedSession: DraggedSessionPayload | null;
   updateState: UpdateState;
+  windowState: DesktopWindowState;
   onSelectHome: () => void;
   onSelectSftp: () => void;
   onSelectSession: (sessionId: string) => void;
@@ -30,6 +33,10 @@ interface AppTitleBarProps {
   onInstallUpdate: () => Promise<void>;
   onDismissUpdate: (version: string) => Promise<void>;
   onOpenReleasePage: (url: string) => Promise<void>;
+  onMinimizeWindow: () => Promise<void>;
+  onMaximizeWindow: () => Promise<void>;
+  onRestoreWindow: () => Promise<void>;
+  onCloseWindow: () => Promise<void>;
 }
 
 type TitlebarDynamicItem =
@@ -134,12 +141,14 @@ function countWorkspacePanes(workspace: WorkspaceTab): number {
 }
 
 export function AppTitleBar({
+  desktopPlatform,
   tabs,
   workspaces,
   tabStrip,
   activeWorkspaceTab,
   draggedSession,
   updateState,
+  windowState,
   onSelectHome,
   onSelectSftp,
   onSelectSession,
@@ -154,7 +163,11 @@ export function AppTitleBar({
   onDownloadUpdate,
   onInstallUpdate,
   onDismissUpdate,
-  onOpenReleasePage
+  onOpenReleasePage,
+  onMinimizeWindow,
+  onMaximizeWindow,
+  onRestoreWindow,
+  onCloseWindow
 }: AppTitleBarProps) {
   const [isUpdateOpen, setIsUpdateOpen] = useState(false);
   const [isDetachHovering, setIsDetachHovering] = useState(false);
@@ -561,6 +574,14 @@ export function AppTitleBar({
             </div>
           ) : null}
         </div>
+        <DesktopWindowControls
+          desktopPlatform={desktopPlatform}
+          windowState={windowState}
+          onMinimizeWindow={onMinimizeWindow}
+          onMaximizeWindow={onMaximizeWindow}
+          onRestoreWindow={onRestoreWindow}
+          onCloseWindow={onCloseWindow}
+        />
       </div>
     </header>
   );
