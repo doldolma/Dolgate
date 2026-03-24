@@ -37,50 +37,51 @@ import type {
   UpdateEvent,
   UpdateState,
   WarpgateConnectionInfo,
-  WarpgateTargetSummary
-} from './models';
-import type { SyncPayloadV2 } from './api';
+  WarpgateTargetSummary,
+} from "./models";
+import type { SyncPayloadV2 } from "./api";
 
 // Electron main과 Go SSH 코어가 주고받는 명령/이벤트의 집합이다.
 export type CoreCommandType =
-  | 'health'
-  | 'connect'
-  | 'resize'
-  | 'disconnect'
-  | 'probeHostKey'
-  | 'keyboardInteractiveRespond'
-  | 'portForwardStart'
-  | 'portForwardStop'
-  | 'sftpConnect'
-  | 'sftpDisconnect'
-  | 'sftpList'
-  | 'sftpMkdir'
-  | 'sftpRename'
-  | 'sftpDelete'
-  | 'sftpTransferStart'
-  | 'sftpTransferCancel';
+  | "health"
+  | "connect"
+  | "awsConnect"
+  | "resize"
+  | "disconnect"
+  | "probeHostKey"
+  | "keyboardInteractiveRespond"
+  | "portForwardStart"
+  | "portForwardStop"
+  | "sftpConnect"
+  | "sftpDisconnect"
+  | "sftpList"
+  | "sftpMkdir"
+  | "sftpRename"
+  | "sftpDelete"
+  | "sftpTransferStart"
+  | "sftpTransferCancel";
 export type CoreEventType =
-  | 'status'
-  | 'connected'
-  | 'data'
-  | 'error'
-  | 'closed'
-  | 'hostKeyProbed'
-  | 'keyboardInteractiveChallenge'
-  | 'keyboardInteractiveResolved'
-  | 'portForwardStarted'
-  | 'portForwardStopped'
-  | 'portForwardError'
-  | 'sftpConnected'
-  | 'sftpDisconnected'
-  | 'sftpListed'
-  | 'sftpAck'
-  | 'sftpError'
-  | 'sftpTransferProgress'
-  | 'sftpTransferCompleted'
-  | 'sftpTransferFailed'
-  | 'sftpTransferCancelled';
-export type CoreStreamType = 'write' | 'data';
+  | "status"
+  | "connected"
+  | "data"
+  | "error"
+  | "closed"
+  | "hostKeyProbed"
+  | "keyboardInteractiveChallenge"
+  | "keyboardInteractiveResolved"
+  | "portForwardStarted"
+  | "portForwardStopped"
+  | "portForwardError"
+  | "sftpConnected"
+  | "sftpDisconnected"
+  | "sftpListed"
+  | "sftpAck"
+  | "sftpError"
+  | "sftpTransferProgress"
+  | "sftpTransferCompleted"
+  | "sftpTransferFailed"
+  | "sftpTransferCancelled";
+export type CoreStreamType = "write" | "data";
 
 // renderer는 hostId만 넘기고, 실제 비밀값 해석은 main 프로세스가 담당한다.
 export interface DesktopConnectInput {
@@ -107,6 +108,14 @@ export interface ResolvedCoreConnectPayload {
   privateKeyPath?: string;
   passphrase?: string;
   trustedHostKeyBase64: string;
+  cols: number;
+  rows: number;
+}
+
+export interface ResolvedAwsConnectPayload {
+  profileName: string;
+  region: string;
+  instanceId: string;
   cols: number;
   rows: number;
 }
@@ -244,8 +253,15 @@ export interface DesktopApi {
   };
   hosts: {
     list: () => Promise<HostRecord[]>;
-    create: (draft: HostDraft, secrets?: HostSecretInput) => Promise<HostRecord>;
-    update: (id: string, draft: HostDraft, secrets?: HostSecretInput) => Promise<HostRecord>;
+    create: (
+      draft: HostDraft,
+      secrets?: HostSecretInput,
+    ) => Promise<HostRecord>;
+    update: (
+      id: string,
+      draft: HostDraft,
+      secrets?: HostSecretInput,
+    ) => Promise<HostRecord>;
     remove: (id: string) => Promise<void>;
   };
   groups: {
@@ -258,16 +274,30 @@ export interface DesktopApi {
     getProfileStatus: (profileName: string) => Promise<AwsProfileStatus>;
     login: (profileName: string) => Promise<void>;
     listRegions: (profileName: string) => Promise<string[]>;
-    listEc2Instances: (profileName: string, region: string) => Promise<AwsEc2InstanceSummary[]>;
+    listEc2Instances: (
+      profileName: string,
+      region: string,
+    ) => Promise<AwsEc2InstanceSummary[]>;
   };
   warpgate: {
-    testConnection: (baseUrl: string, token: string) => Promise<WarpgateConnectionInfo>;
-    getConnectionInfo: (baseUrl: string, token: string) => Promise<WarpgateConnectionInfo>;
-    listSshTargets: (baseUrl: string, token: string) => Promise<WarpgateTargetSummary[]>;
+    testConnection: (
+      baseUrl: string,
+      token: string,
+    ) => Promise<WarpgateConnectionInfo>;
+    getConnectionInfo: (
+      baseUrl: string,
+      token: string,
+    ) => Promise<WarpgateConnectionInfo>;
+    listSshTargets: (
+      baseUrl: string,
+      token: string,
+    ) => Promise<WarpgateTargetSummary[]>;
   };
   termius: {
     probeLocal: () => Promise<TermiusProbeResult>;
-    importSelection: (input: TermiusImportSelectionInput) => Promise<TermiusImportResult>;
+    importSelection: (
+      input: TermiusImportSelectionInput,
+    ) => Promise<TermiusImportResult>;
     discardSnapshot: (snapshotId: string) => Promise<void>;
   };
   ssh: {
@@ -276,9 +306,14 @@ export interface DesktopApi {
     writeBinary: (sessionId: string, data: Uint8Array) => Promise<void>;
     resize: (sessionId: string, cols: number, rows: number) => Promise<void>;
     disconnect: (sessionId: string) => Promise<void>;
-    respondKeyboardInteractive: (input: KeyboardInteractiveRespondInput) => Promise<void>;
+    respondKeyboardInteractive: (
+      input: KeyboardInteractiveRespondInput,
+    ) => Promise<void>;
     onEvent: (listener: (event: CoreEvent) => void) => () => void;
-    onData: (sessionId: string, listener: (chunk: Uint8Array) => void) => () => void;
+    onData: (
+      sessionId: string,
+      listener: (chunk: Uint8Array) => void,
+    ) => () => void;
   };
   shell: {
     pickPrivateKey: () => Promise<string | null>;
@@ -290,7 +325,9 @@ export interface DesktopApi {
     maximize: () => Promise<void>;
     restore: () => Promise<void>;
     close: () => Promise<void>;
-    onStateChanged: (listener: (state: DesktopWindowState) => void) => () => void;
+    onStateChanged: (
+      listener: (state: DesktopWindowState) => void,
+    ) => () => void;
   };
   tabs: {
     list: () => Promise<TerminalTab[]>;
@@ -310,7 +347,10 @@ export interface DesktopApi {
   portForwards: {
     list: () => Promise<PortForwardListSnapshot>;
     create: (draft: PortForwardDraft) => Promise<PortForwardRuleRecord>;
-    update: (id: string, draft: PortForwardDraft) => Promise<PortForwardRuleRecord>;
+    update: (
+      id: string,
+      draft: PortForwardDraft,
+    ) => Promise<PortForwardRuleRecord>;
     remove: (id: string) => Promise<void>;
     start: (ruleId: string) => Promise<PortForwardRuntimeRecord>;
     stop: (ruleId: string) => Promise<PortForwardRuntimeRecord>;
@@ -329,7 +369,9 @@ export interface DesktopApi {
   };
   keychain: {
     list: () => Promise<SecretMetadataRecord[]>;
-    load: (secretRef: string) => Promise<ManagedSecretPayload | HostSecretInput | null>;
+    load: (
+      secretRef: string,
+    ) => Promise<ManagedSecretPayload | HostSecretInput | null>;
     remove: (secretRef: string) => Promise<void>;
     update: (input: KeychainSecretUpdateInput) => Promise<void>;
     cloneForHost: (input: KeychainSecretCloneInput) => Promise<void>;
@@ -343,7 +385,9 @@ export interface DesktopApi {
     delete: (input: SftpDeleteInput) => Promise<void>;
     startTransfer: (input: TransferStartInput) => Promise<TransferJob>;
     cancelTransfer: (jobId: string) => Promise<void>;
-    onTransferEvent: (listener: (event: TransferJobEvent) => void) => () => void;
+    onTransferEvent: (
+      listener: (event: TransferJobEvent) => void,
+    ) => () => void;
   };
   files: {
     getHomeDirectory: () => Promise<string>;

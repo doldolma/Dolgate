@@ -242,6 +242,7 @@ function TerminalSessionView({
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [terminalInitError, setTerminalInitError] = useState<string | null>(null);
+  const [hasReceivedOutput, setHasReceivedOutput] = useState(false);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
@@ -254,6 +255,7 @@ function TerminalSessionView({
 
   useEffect(() => {
     setTerminalInitError(null);
+    setHasReceivedOutput(false);
   }, [sessionId]);
 
   function refreshViewport() {
@@ -362,8 +364,21 @@ function TerminalSessionView({
   }, [terminalWebglEnabled]);
 
   useEffect(() => window.dolssh.ssh.onData(sessionId, (chunk) => {
+    if (chunk.byteLength > 0) {
+      setHasReceivedOutput(true);
+    }
     runtimeRef.current?.write(chunk);
   }), [sessionId]);
+
+  const shouldShowConnectionOverlay =
+    !terminalInitError &&
+    !hasReceivedOutput &&
+    (currentTab?.status === 'connecting' || currentTab?.status === 'connected');
+
+  const connectionOverlayMessage =
+    currentTab?.status === 'connecting'
+      ? '세션을 연결하는 중입니다...'
+      : '원격 셸이 첫 출력을 보내는 중입니다...';
 
   useEffect(() => {
     if (!searchOpen) {
@@ -643,7 +658,14 @@ function TerminalSessionView({
           </button>
         </div>
       ) : null}
-      <div ref={containerRef} className="terminal-canvas" />
+      <div ref={containerRef} className="terminal-canvas">
+        {shouldShowConnectionOverlay ? (
+          <div className="terminal-connection-overlay">
+            <strong>Connecting</strong>
+            <span>{connectionOverlayMessage}</span>
+          </div>
+        ) : null}
+      </div>
     </div>
   );
 }

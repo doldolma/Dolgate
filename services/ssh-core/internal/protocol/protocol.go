@@ -17,6 +17,7 @@ const (
 	// health는 코어 생존 여부 확인용이고, 나머지는 SSH 세션 조작 명령이다.
 	CommandHealth                     CommandType = "health"
 	CommandConnect                    CommandType = "connect"
+	CommandAWSConnect                 CommandType = "awsConnect"
 	CommandKeyboardInteractiveRespond CommandType = "keyboardInteractiveRespond"
 	CommandResize                     CommandType = "resize"
 	CommandDisconnect                 CommandType = "disconnect"
@@ -116,6 +117,14 @@ type ConnectPayload struct {
 	TrustedHostKeyBase64 string `json:"trustedHostKeyBase64"`
 	Cols                 int    `json:"cols"`
 	Rows                 int    `json:"rows"`
+}
+
+type AWSConnectPayload struct {
+	ProfileName string `json:"profileName"`
+	Region      string `json:"region"`
+	InstanceID  string `json:"instanceId"`
+	Cols        int    `json:"cols"`
+	Rows        int    `json:"rows"`
 }
 
 // SFTPConnectPayload는 원격 파일 브라우저 접속을 위한 인증 정보다.

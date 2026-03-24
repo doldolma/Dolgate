@@ -52,4 +52,13 @@ describe('SettingsPanel', () => {
     expect(onUpdateSettings).toHaveBeenCalledWith({ terminalMinimumContrastRatio: 3 });
     expect(onUpdateSettings).toHaveBeenCalledWith({ terminalAltIsMeta: true });
   });
+
+  it('hides mac-only terminal fonts on Windows', () => {
+    render(<SettingsPanel settings={{ ...settings, terminalFontFamily: 'consolas' }} desktopPlatform="win32" onUpdateSettings={vi.fn()} onLogout={vi.fn()} />);
+
+    expect(screen.queryByRole('option', { name: 'SF Mono' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: 'Menlo' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: 'Monaco' })).not.toBeInTheDocument();
+    expect(screen.getByRole('option', { name: 'Consolas' })).toBeInTheDocument();
+  });
 });
