@@ -1,8 +1,8 @@
-import { BrowserWindow, app } from 'electron';
-import { randomUUID } from 'node:crypto';
-import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
-import { existsSync } from 'node:fs';
-import path from 'node:path';
+import { BrowserWindow, app } from "electron";
+import { randomUUID } from "node:crypto";
+import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { existsSync } from "node:fs";
+import path from "node:path";
 import type {
   HostKeyProbeResult,
   CoreEvent,
@@ -15,6 +15,7 @@ import type {
   PortForwardRuntimeEvent,
   PortForwardRuntimeRecord,
   KeyboardInteractiveRespondInput,
+  ResolvedAwsConnectPayload,
   ResolvedCoreConnectPayload,
   ResolvedHostKeyProbePayload,
   ResolvedPortForwardStartPayload,
@@ -27,21 +28,18 @@ import type {
   TerminalTab,
   TransferJob,
   TransferJobEvent,
-  TransferStartInput
-} from '@shared';
-import { ipcChannels } from '../common/ipc-channels';
-import { CoreFrameParser, encodeControlFrame, encodeStreamFrame } from './core-framing';
+  TransferStartInput,
+} from "@shared";
+import { ipcChannels } from "../common/ipc-channels";
 import {
-  createInMemoryInteractiveSessionRunner,
-  createDefaultInteractiveSessionRunner,
-  type InteractiveSessionLaunchConfig,
-  type InteractiveSessionRunner
-} from './interactive-session-runner';
-import { buildAwsCommandEnv, resolveAwsExecutable } from './aws-service';
+  CoreFrameParser,
+  encodeControlFrame,
+  encodeStreamFrame,
+} from "./core-framing";
 
 interface ActivityLogInput {
-  level: 'info' | 'warn' | 'error';
-  category: 'session' | 'audit';
+  level: "info" | "warn" | "error";
+  category: "session" | "audit";
   message: string;
   metadata?: Record<string, unknown> | null;
 }
@@ -54,48 +52,58 @@ interface PortForwardDefinition {
   bindPort: number;
 }
 
-interface AwsSessionRuntime {
-  runner: InteractiveSessionRunner;
-  outputTail: string;
-  disconnectRequested: boolean;
-  errorNotified: boolean;
-}
-
-type InteractiveSessionRunnerFactory = (config: InteractiveSessionLaunchConfig) => InteractiveSessionRunner;
-
-const defaultInteractiveSessionRunnerFactory: InteractiveSessionRunnerFactory = (config) => createDefaultInteractiveSessionRunner(config);
-const awsDefaultCols = 120;
-const awsDefaultRows = 32;
-const maxAwsOutputTailLength = 8192;
-
-function isE2EFakeAwsSessionEnabled(): boolean {
-  return process.env.DOLSSH_E2E_FAKE_AWS_SESSION === '1';
-}
-
-function appendAwsOutputTail(current: string, chunk: Uint8Array): string {
-  const next = current + Buffer.from(chunk).toString('utf8');
-  if (next.length <= maxAwsOutputTailLength) {
-    return next;
-  }
-  return next.slice(-maxAwsOutputTailLength);
-}
-
-function resolveAwsSessionMessage(runtime: AwsSessionRuntime | undefined, fallback: string): string {
-  const candidate = runtime?.outputTail.trim();
-  return candidate || fallback;
-}
+type SessionTransport = "ssh" | "aws-ssm";
 
 function resolveRepoRoot(): string {
-  // 패키징/개발 환경 모두에서 저장소 루트를 계산하기 위한 단순 기준점이다.
-  return path.resolve(app.getAppPath(), '../..');
+  const candidates = [
+    path.resolve(app.getAppPath(), "../.."),
+    path.resolve(app.getAppPath(), "../../.."),
+    path.resolve(app.getAppPath(), "../../../.."),
+    path.resolve(__dirname, "../../.."),
+    path.resolve(__dirname, "../../../.."),
+    path.resolve(__dirname, "../../../../.."),
+  ];
+
+  for (const candidate of new Set(candidates)) {
+    if (
+      existsSync(path.join(candidate, "services", "ssh-core")) &&
+      existsSync(path.join(candidate, "apps", "desktop"))
+    ) {
+      return candidate;
+    }
+  }
+
+  throw new Error(
+    `Repository root could not be resolved from appPath=${app.getAppPath()} and __dirname=${__dirname}`,
+  );
 }
 
 function resolveBundledCorePath(): string {
-  const binaryName = process.platform === 'win32' ? 'ssh-core.exe' : 'ssh-core';
-  return path.join(process.resourcesPath, 'bin', binaryName);
+  const binaryName = process.platform === "win32" ? "ssh-core.exe" : "ssh-core";
+  return path.join(process.resourcesPath, "bin", binaryName);
 }
 
-function resolveCoreLaunchConfig(): { command: string; args: string[]; cwd: string } {
+function resolveDevCoreBinaryPath(): string {
+  const binaryName = process.platform === "win32" ? "ssh-core.exe" : "ssh-core";
+  const repoRoot = resolveRepoRoot();
+  return path.join(
+    repoRoot,
+    "apps",
+    "desktop",
+    "release",
+    "resources",
+    process.platform,
+    "x64",
+    "bin",
+    binaryName,
+  );
+}
+
+function resolveCoreLaunchConfig(): {
+  command: string;
+  args: string[];
+  cwd: string;
+} {
   if (app.isPackaged) {
     const bundledCorePath = resolveBundledCorePath();
     if (!existsSync(bundledCorePath)) {
@@ -104,20 +112,34 @@ function resolveCoreLaunchConfig(): { command: string; args: string[]; cwd: stri
     return {
       command: bundledCorePath,
       args: [],
-      cwd: path.dirname(bundledCorePath)
+      cwd: path.dirname(bundledCorePath),
     };
   }
 
   const repoRoot = resolveRepoRoot();
-  const serviceDir = path.join(repoRoot, 'services', 'ssh-core');
+  const serviceDir = path.join(repoRoot, "services", "ssh-core");
   if (!existsSync(serviceDir)) {
     throw new Error(`SSH core directory not found: ${serviceDir}`);
   }
 
+  if (process.platform === "win32") {
+    const devCoreBinaryPath = resolveDevCoreBinaryPath();
+    if (!existsSync(devCoreBinaryPath)) {
+      throw new Error(
+        `Local ssh-core dev binary not found: ${devCoreBinaryPath}`,
+      );
+    }
+    return {
+      command: devCoreBinaryPath,
+      args: [],
+      cwd: path.dirname(devCoreBinaryPath),
+    };
+  }
+
   return {
-    command: 'go',
-    args: ['run', './cmd/ssh-core'],
-    cwd: serviceDir
+    command: "go",
+    args: ["run", "./cmd/ssh-core"],
+    cwd: serviceDir,
   };
 }
 
@@ -129,70 +151,93 @@ interface PendingResponse<TPayload> {
 }
 
 function isTransferEvent(type: CoreEventType): boolean {
-  return type === 'sftpTransferProgress' || type === 'sftpTransferCompleted' || type === 'sftpTransferFailed' || type === 'sftpTransferCancelled';
+  return (
+    type === "sftpTransferProgress" ||
+    type === "sftpTransferCompleted" ||
+    type === "sftpTransferFailed" ||
+    type === "sftpTransferCancelled"
+  );
 }
 
-function toDirectoryListing(payload: Record<string, unknown>): DirectoryListing {
+function toDirectoryListing(
+  payload: Record<string, unknown>,
+): DirectoryListing {
   return {
-    path: String(payload.path ?? '/'),
+    path: String(payload.path ?? "/"),
     entries: Array.isArray(payload.entries)
       ? payload.entries.map((entry) => {
           const candidate = entry as Record<string, unknown>;
           return {
-            name: String(candidate.name ?? ''),
-            path: String(candidate.path ?? ''),
+            name: String(candidate.name ?? ""),
+            path: String(candidate.path ?? ""),
             isDirectory: Boolean(candidate.isDirectory),
             size: Number(candidate.size ?? 0),
             mtime: String(candidate.mtime ?? new Date(0).toISOString()),
             kind:
-              candidate.kind === 'folder' || candidate.kind === 'file' || candidate.kind === 'symlink' || candidate.kind === 'unknown'
+              candidate.kind === "folder" ||
+              candidate.kind === "file" ||
+              candidate.kind === "symlink" ||
+              candidate.kind === "unknown"
                 ? candidate.kind
-                : 'unknown',
-            permissions: candidate.permissions ? String(candidate.permissions) : undefined
+                : "unknown",
+            permissions: candidate.permissions
+              ? String(candidate.permissions)
+              : undefined,
           } satisfies FileEntry;
         })
-      : []
+      : [],
   };
 }
 
-function toTransferJobEvent(existing: TransferJob | undefined, event: CoreEvent<Record<string, unknown>>): TransferJobEvent {
+function toTransferJobEvent(
+  existing: TransferJob | undefined,
+  event: CoreEvent<Record<string, unknown>>,
+): TransferJobEvent {
   const payload = event.payload;
   const now = new Date().toISOString();
   const nextStatus =
-    event.type === 'sftpTransferCompleted'
-      ? 'completed'
-      : event.type === 'sftpTransferFailed'
-        ? 'failed'
-        : event.type === 'sftpTransferCancelled'
-          ? 'cancelled'
-          : 'running';
+    event.type === "sftpTransferCompleted"
+      ? "completed"
+      : event.type === "sftpTransferFailed"
+        ? "failed"
+        : event.type === "sftpTransferCancelled"
+          ? "cancelled"
+          : "running";
 
   return {
     job: {
-      id: event.jobId ?? existing?.id ?? '',
-      sourceLabel: existing?.sourceLabel ?? 'Unknown',
-      targetLabel: existing?.targetLabel ?? 'Unknown',
+      id: event.jobId ?? existing?.id ?? "",
+      sourceLabel: existing?.sourceLabel ?? "Unknown",
+      targetLabel: existing?.targetLabel ?? "Unknown",
       itemCount: existing?.itemCount ?? 0,
       bytesTotal: Number(payload.bytesTotal ?? existing?.bytesTotal ?? 0),
-      bytesCompleted: Number(payload.bytesCompleted ?? existing?.bytesCompleted ?? 0),
+      bytesCompleted: Number(
+        payload.bytesCompleted ?? existing?.bytesCompleted ?? 0,
+      ),
       speedBytesPerSecond:
-        typeof payload.speedBytesPerSecond === 'number' ? payload.speedBytesPerSecond : existing?.speedBytesPerSecond,
-      etaSeconds: typeof payload.etaSeconds === 'number' ? payload.etaSeconds : existing?.etaSeconds,
+        typeof payload.speedBytesPerSecond === "number"
+          ? payload.speedBytesPerSecond
+          : existing?.speedBytesPerSecond,
+      etaSeconds:
+        typeof payload.etaSeconds === "number"
+          ? payload.etaSeconds
+          : existing?.etaSeconds,
       status: nextStatus,
       startedAt: existing?.startedAt ?? now,
       updatedAt: now,
-      activeItemName: payload.activeItemName ? String(payload.activeItemName) : existing?.activeItemName,
-      errorMessage: payload.message ? String(payload.message) : existing?.errorMessage,
-      request: existing?.request
-    }
+      activeItemName: payload.activeItemName
+        ? String(payload.activeItemName)
+        : existing?.activeItemName,
+      errorMessage: payload.message
+        ? String(payload.message)
+        : existing?.errorMessage,
+      request: existing?.request,
+    },
   };
 }
 
 export class CoreManager {
-  constructor(
-    private readonly appendLog?: (entry: ActivityLogInput) => void,
-    private readonly createInteractiveSessionRunner: InteractiveSessionRunnerFactory = defaultInteractiveSessionRunnerFactory
-  ) {}
+  constructor(private readonly appendLog?: (entry: ActivityLogInput) => void) {}
 
   // Go SSH 코어는 앱 전체에서 하나만 띄우고, 여러 SSH/SFTP 작업을 그 안에서 관리한다.
   private process: ChildProcessWithoutNullStreams | null = null;
@@ -202,22 +247,40 @@ export class CoreManager {
   private readonly tabs = new Map<string, TerminalTab>();
   private readonly sftpEndpoints = new Map<string, SftpEndpointSummary>();
   private readonly transferJobs = new Map<string, TransferJob>();
-  private readonly portForwardDefinitions = new Map<string, PortForwardDefinition>();
-  private readonly portForwardRuntimes = new Map<string, PortForwardRuntimeRecord>();
-  private readonly pendingResponses = new Map<string, PendingResponse<Record<string, unknown>>>();
-  private readonly lastResizeBySession = new Map<string, { cols: number; rows: number }>();
-  private readonly awsSessions = new Map<string, AwsSessionRuntime>();
-  private onTerminalEvent?: (event: CoreEvent<Record<string, unknown>>) => void | Promise<void>;
+  private readonly portForwardDefinitions = new Map<
+    string,
+    PortForwardDefinition
+  >();
+  private readonly portForwardRuntimes = new Map<
+    string,
+    PortForwardRuntimeRecord
+  >();
+  private readonly pendingResponses = new Map<
+    string,
+    PendingResponse<Record<string, unknown>>
+  >();
+  private readonly lastResizeBySession = new Map<
+    string,
+    { cols: number; rows: number }
+  >();
+  private readonly sessionTransportById = new Map<string, SessionTransport>();
+  private onTerminalEvent?: (
+    event: CoreEvent<Record<string, unknown>>,
+  ) => void | Promise<void>;
   // 바이너리 frame은 청크 경계를 보장하지 않으므로 별도 parser가 필요하다.
   private readonly parser = new CoreFrameParser();
 
-  setTerminalEventHandler(handler: ((event: CoreEvent<Record<string, unknown>>) => void | Promise<void>) | undefined): void {
+  setTerminalEventHandler(
+    handler:
+      | ((event: CoreEvent<Record<string, unknown>>) => void | Promise<void>)
+      | undefined,
+  ): void {
     this.onTerminalEvent = handler;
   }
 
   registerWindow(window: BrowserWindow): void {
     this.windows.add(window);
-    window.on('closed', () => {
+    window.on("closed", () => {
       this.windows.delete(window);
     });
   }
@@ -227,7 +290,9 @@ export class CoreManager {
   }
 
   listPortForwardRuntimes(): PortForwardRuntimeRecord[] {
-    return Array.from(this.portForwardRuntimes.values()).sort((a, b) => a.ruleId.localeCompare(b.ruleId));
+    return Array.from(this.portForwardRuntimes.values()).sort((a, b) =>
+      a.ruleId.localeCompare(b.ruleId),
+    );
   }
 
   async shutdown(): Promise<void> {
@@ -236,7 +301,6 @@ export class CoreManager {
     }
 
     if (!this.process) {
-      await this.shutdownAwsSessions();
       this.clearRuntimeState();
       return;
     }
@@ -254,20 +318,18 @@ export class CoreManager {
 
       const timeout = setTimeout(() => {
         if (currentProcess.exitCode === null && !currentProcess.killed) {
-          currentProcess.kill('SIGKILL');
+          currentProcess.kill("SIGKILL");
         }
       }, 1500);
 
-      currentProcess.once('exit', () => {
+      currentProcess.once("exit", () => {
         clearTimeout(timeout);
-        void this.shutdownAwsSessions().finally(() => {
-          finish();
-        });
+        finish();
       });
 
       currentProcess.stdin.end();
       if (currentProcess.exitCode === null && !currentProcess.killed) {
-        currentProcess.kill('SIGTERM');
+        currentProcess.kill("SIGTERM");
       }
     });
 
@@ -284,64 +346,65 @@ export class CoreManager {
 
     this.process = spawn(launchConfig.command, launchConfig.args, {
       cwd: launchConfig.cwd,
-      stdio: ['pipe', 'pipe', 'pipe'],
-      env: process.env
+      stdio: ["pipe", "pipe", "pipe"],
+      env: process.env,
+      windowsHide: true,
     });
 
     // stdout은 control + raw stream이 섞인 framed binary 채널이다.
-    this.process.stdout.on('data', (chunk: Buffer) => {
+    this.process.stdout.on("data", (chunk: Buffer) => {
       this.consumeStdout(chunk);
     });
 
     // stderr는 운영 중 진단 메시지를 위해 별도 error 이벤트로 내린다.
-    this.process.stderr.setEncoding('utf8');
-    this.process.stderr.on('data', (chunk: string) => {
+    this.process.stderr.setEncoding("utf8");
+    this.process.stderr.on("data", (chunk: string) => {
       this.broadcastTerminalEvent({
-        type: 'error',
+        type: "error",
         payload: {
-          message: chunk.trim() || 'SSH core error'
-        }
+          message: chunk.trim() || "SSH core error",
+        },
       });
     });
 
-    this.process.on('exit', (code, signal) => {
-      const message = `SSH core exited (code=${code ?? 'null'}, signal=${signal ?? 'null'})`;
+    this.process.on("exit", (code, signal) => {
+      const message = `SSH core exited (code=${code ?? "null"}, signal=${signal ?? "null"})`;
       if (!this.isShuttingDown) {
         for (const sessionId of this.tabs.keys()) {
           this.broadcastTerminalEvent({
-            type: 'closed',
+            type: "closed",
             sessionId,
             payload: {
-              message
-            }
+              message,
+            },
           });
         }
         for (const [jobId, existing] of this.transferJobs.entries()) {
           this.broadcastTransferEvent({
             job: {
               ...existing,
-              status: 'failed',
+              status: "failed",
               updatedAt: new Date().toISOString(),
-              errorMessage: message
-            }
+              errorMessage: message,
+            },
           });
         }
         for (const runtime of this.portForwardRuntimes.values()) {
           this.broadcastPortForwardEvent({
             runtime: {
               ...runtime,
-              status: 'error',
+              status: "error",
               updatedAt: new Date().toISOString(),
-              message
-            }
+              message,
+            },
           });
         }
         this.broadcastTerminalEvent({
-          type: 'status',
+          type: "status",
           payload: {
-            status: 'stopped',
-            message
-          }
+            status: "stopped",
+            message,
+          },
         });
       }
       this.rejectAllPending(message);
@@ -351,23 +414,26 @@ export class CoreManager {
     });
   }
 
-  async connect(payload: ResolvedCoreConnectPayload & { title: string; hostId: string }): Promise<{ sessionId: string }> {
+  async connect(
+    payload: ResolvedCoreConnectPayload & { title: string; hostId: string },
+  ): Promise<{ sessionId: string }> {
     await this.start();
     // 세션 ID는 Electron 쪽에서 먼저 발급해서 탭과 SSH 세션을 동일한 식별자로 묶는다.
     const sessionId = randomUUID();
+    this.sessionTransportById.set(sessionId, "ssh");
     this.tabs.set(sessionId, {
       id: sessionId,
       title: payload.title,
       hostId: payload.hostId,
       sessionId,
-      status: 'connecting',
-      lastEventAt: new Date().toISOString()
+      status: "connecting",
+      lastEventAt: new Date().toISOString(),
     });
     this.sendControl<ResolvedCoreConnectPayload>({
       id: randomUUID(),
-      type: 'connect',
+      type: "connect",
       sessionId,
-      payload
+      payload,
     });
     return { sessionId };
   }
@@ -376,190 +442,72 @@ export class CoreManager {
     profileName: string;
     region: string;
     instanceId: string;
+    cols: number;
+    rows: number;
     title: string;
     hostId: string;
   }): Promise<{ sessionId: string }> {
+    await this.start();
     const sessionId = randomUUID();
+    this.sessionTransportById.set(sessionId, "aws-ssm");
     const tab: TerminalTab = {
       id: sessionId,
       title: payload.title,
       hostId: payload.hostId,
       sessionId,
-      status: 'connecting',
-      lastEventAt: new Date().toISOString()
+      status: "connecting",
+      lastEventAt: new Date().toISOString(),
     };
     this.tabs.set(sessionId, tab);
 
-    let runner: InteractiveSessionRunner;
-    try {
-      if (isE2EFakeAwsSessionEnabled()) {
-        runner = createInMemoryInteractiveSessionRunner('Connected to fake AWS SSM smoke session.\r\n');
-      } else {
-        const awsExecutablePath = await resolveAwsExecutable('aws');
-        const awsCommandEnv = await buildAwsCommandEnv();
-        runner = this.createInteractiveSessionRunner({
-          command: awsExecutablePath,
-          args: ['ssm', 'start-session', '--target', payload.instanceId, '--profile', payload.profileName, '--region', payload.region],
-          cols: awsDefaultCols,
-          rows: awsDefaultRows,
-          env: awsCommandEnv,
-          name: 'xterm-256color'
-        });
-      }
-    } catch (error) {
-      this.tabs.delete(sessionId);
-      this.lastResizeBySession.delete(sessionId);
-      throw (error instanceof Error ? error : new Error('AWS SSM 세션을 시작하지 못했습니다.'));
-    }
-
-    const runtime: AwsSessionRuntime = {
-      runner,
-      outputTail: '',
-      disconnectRequested: false,
-      errorNotified: false
+    const resolvedPayload: ResolvedAwsConnectPayload = {
+      profileName: payload.profileName,
+      region: payload.region,
+      instanceId: payload.instanceId,
+      cols: payload.cols,
+      rows: payload.rows,
     };
-    this.awsSessions.set(sessionId, runtime);
-
-    const disposeData = runner.onData((chunk) => {
-      const current = this.awsSessions.get(sessionId);
-      if (current) {
-        current.outputTail = appendAwsOutputTail(current.outputTail, chunk);
-      }
-      this.broadcastStream(
-        {
-          type: 'data',
-          sessionId
-        },
-        chunk
-      );
-    });
-
-    const disposeError = runner.onError((error) => {
-      const current = this.awsSessions.get(sessionId);
-      if (!current || current.disconnectRequested || current.errorNotified) {
-        return;
-      }
-      current.errorNotified = true;
-      this.log({
-        level: 'error',
-        category: 'session',
-        message: 'AWS SSM 세션 오류가 발생했습니다.',
-        metadata: {
-          sessionId,
-          message: error.message
-        }
-      });
-      this.broadcastTerminalEvent({
-        type: 'error',
-        sessionId,
-        payload: {
-          message: error.message || 'AWS SSM 세션 오류가 발생했습니다.'
-        }
-      });
-    });
-
-    const disposeExit = runner.onExit(({ exitCode, signal }) => {
-      disposeData();
-      disposeError();
-      disposeExit();
-
-      if (!this.tabs.has(sessionId)) {
-        this.awsSessions.delete(sessionId);
-        this.lastResizeBySession.delete(sessionId);
-        return;
-      }
-
-      const current = this.awsSessions.get(sessionId);
-      this.awsSessions.delete(sessionId);
-      this.tabs.delete(sessionId);
-      this.lastResizeBySession.delete(sessionId);
-
-      const fallbackMessage = `AWS SSM 세션이 종료되었습니다. (code=${exitCode ?? 'null'}, signal=${signal ?? 'null'})`;
-      const message = current?.disconnectRequested ? 'client requested disconnect' : resolveAwsSessionMessage(current, fallbackMessage);
-      if (!current?.disconnectRequested && exitCode !== 0 && !current?.errorNotified) {
-        this.broadcastTerminalEvent({
-          type: 'error',
-          sessionId,
-          payload: {
-            message
-          }
-        });
-      }
-      this.log({
-        level: exitCode === 0 || exitCode === null ? 'info' : 'warn',
-        category: 'session',
-        message: 'AWS SSM 세션이 종료되었습니다.',
-        metadata: {
-          sessionId,
-          message,
-          code: exitCode ?? null,
-          signal: signal ?? null
-        }
-      });
-      this.broadcastTerminalEvent({
-        type: 'closed',
-        sessionId,
-        payload: {
-          message
-        }
-      });
-    });
-
-    const existing = this.tabs.get(sessionId);
-    if (existing) {
-      this.tabs.set(sessionId, {
-        ...existing,
-        status: 'connected',
-        lastEventAt: new Date().toISOString()
-      });
-    }
-    this.broadcastTerminalEvent({
-      type: 'connected',
+    this.sendControl<ResolvedAwsConnectPayload>({
+      id: randomUUID(),
+      type: "awsConnect",
       sessionId,
-      payload: {
-        transport: 'aws-ssm'
-      }
-    });
-    this.log({
-      level: 'info',
-      category: 'session',
-      message: 'AWS SSM 세션이 연결되었습니다.',
-      metadata: {
-        sessionId,
-        hostId: payload.hostId,
-        instanceId: payload.instanceId,
-        profileName: payload.profileName,
-        region: payload.region
-      }
+      payload: resolvedPayload,
     });
 
     return { sessionId };
   }
 
-  async probeHostKey(payload: ResolvedHostKeyProbePayload): Promise<HostKeyProbeResult> {
+  async probeHostKey(
+    payload: ResolvedHostKeyProbePayload,
+  ): Promise<HostKeyProbeResult> {
     await this.start();
     const response = await this.requestResponse<Record<string, unknown>>(
       {
         id: randomUUID(),
-        type: 'probeHostKey',
-        payload
+        type: "probeHostKey",
+        payload,
       },
-      ['hostKeyProbed']
+      ["hostKeyProbed"],
     );
     return {
-      hostId: '',
-      hostLabel: '',
+      hostId: "",
+      hostLabel: "",
       host: payload.host,
       port: payload.port,
-      algorithm: String(response.algorithm ?? ''),
-      publicKeyBase64: String(response.publicKeyBase64 ?? ''),
-      fingerprintSha256: String(response.fingerprintSha256 ?? ''),
-      status: 'untrusted',
-      existing: null
+      algorithm: String(response.algorithm ?? ""),
+      publicKeyBase64: String(response.publicKeyBase64 ?? ""),
+      fingerprintSha256: String(response.fingerprintSha256 ?? ""),
+      status: "untrusted",
+      existing: null,
     };
   }
 
-  async startPortForward(payload: ResolvedPortForwardStartPayload & { ruleId: string; hostId: string }): Promise<PortForwardRuntimeRecord> {
+  async startPortForward(
+    payload: ResolvedPortForwardStartPayload & {
+      ruleId: string;
+      hostId: string;
+    },
+  ): Promise<PortForwardRuntimeRecord> {
     await this.start();
     const baseRuntime: PortForwardRuntimeRecord = {
       ruleId: payload.ruleId,
@@ -567,15 +515,15 @@ export class CoreManager {
       mode: payload.mode,
       bindAddress: payload.bindAddress,
       bindPort: payload.bindPort,
-      status: 'starting',
-      updatedAt: new Date().toISOString()
+      status: "starting",
+      updatedAt: new Date().toISOString(),
     };
     this.portForwardDefinitions.set(payload.ruleId, {
       ruleId: payload.ruleId,
       hostId: payload.hostId,
       mode: payload.mode,
       bindAddress: payload.bindAddress,
-      bindPort: payload.bindPort
+      bindPort: payload.bindPort,
     });
     this.portForwardRuntimes.set(payload.ruleId, baseRuntime);
     this.broadcastPortForwardEvent({ runtime: baseRuntime });
@@ -583,14 +531,18 @@ export class CoreManager {
     const response = await this.requestResponse<Record<string, unknown>>(
       {
         id: randomUUID(),
-        type: 'portForwardStart',
+        type: "portForwardStart",
         endpointId: payload.ruleId,
-        payload
+        payload,
       },
-      ['portForwardStarted']
+      ["portForwardStarted"],
     );
 
-    const runtime = this.buildForwardRuntime(payload.ruleId, response, 'running');
+    const runtime = this.buildForwardRuntime(
+      payload.ruleId,
+      response,
+      "running",
+    );
     this.portForwardRuntimes.set(payload.ruleId, runtime);
     this.broadcastPortForwardEvent({ runtime });
     return runtime;
@@ -606,26 +558,30 @@ export class CoreManager {
     await this.requestResponse(
       {
         id: randomUUID(),
-        type: 'portForwardStop',
+        type: "portForwardStop",
         endpointId: ruleId,
-        payload: {}
+        payload: {},
       },
-      ['portForwardStopped']
+      ["portForwardStopped"],
     );
     this.portForwardDefinitions.delete(ruleId);
     const runtime = this.portForwardRuntimes.get(ruleId);
     if (runtime) {
       this.portForwardRuntimes.set(ruleId, {
         ...runtime,
-        status: 'stopped',
+        status: "stopped",
         updatedAt: new Date().toISOString(),
-        message: undefined
+        message: undefined,
       });
-      this.broadcastPortForwardEvent({ runtime: this.portForwardRuntimes.get(ruleId)! });
+      this.broadcastPortForwardEvent({
+        runtime: this.portForwardRuntimes.get(ruleId)!,
+      });
     }
   }
 
-  async sftpConnect(payload: ResolvedSftpConnectPayload & { title: string; hostId: string }): Promise<SftpEndpointSummary> {
+  async sftpConnect(
+    payload: ResolvedSftpConnectPayload & { title: string; hostId: string },
+  ): Promise<SftpEndpointSummary> {
     await this.start();
     const endpointId = randomUUID();
     try {
@@ -633,43 +589,43 @@ export class CoreManager {
       const response = await this.requestResponse<{ path: string }>(
         {
           id: requestId,
-          type: 'sftpConnect',
+          type: "sftpConnect",
           endpointId,
-          payload
+          payload,
         },
-        ['sftpConnected']
+        ["sftpConnected"],
       );
 
       const summary: SftpEndpointSummary = {
         id: endpointId,
-        kind: 'remote',
+        kind: "remote",
         hostId: payload.hostId,
         title: payload.title,
-        path: String(response.path ?? '/'),
-        connectedAt: new Date().toISOString()
+        path: String(response.path ?? "/"),
+        connectedAt: new Date().toISOString(),
       };
       this.sftpEndpoints.set(endpointId, summary);
       this.log({
-        level: 'info',
-        category: 'session',
-        message: 'SFTP 연결이 시작되었습니다.',
+        level: "info",
+        category: "session",
+        message: "SFTP 연결이 시작되었습니다.",
         metadata: {
           endpointId,
           hostId: payload.hostId,
-          title: payload.title
-        }
+          title: payload.title,
+        },
       });
       return summary;
     } catch (error) {
       this.log({
-        level: 'error',
-        category: 'session',
-        message: 'SFTP 연결 오류가 발생했습니다.',
+        level: "error",
+        category: "session",
+        message: "SFTP 연결 오류가 발생했습니다.",
         metadata: {
           hostId: payload.hostId,
           title: payload.title,
-          message: error instanceof Error ? error.message : 'unknown error'
-        }
+          message: error instanceof Error ? error.message : "unknown error",
+        },
       });
       throw error;
     }
@@ -684,28 +640,28 @@ export class CoreManager {
       await this.requestResponse(
         {
           id: randomUUID(),
-          type: 'sftpDisconnect',
+          type: "sftpDisconnect",
           endpointId,
-          payload: {}
+          payload: {},
         },
-        ['sftpDisconnected']
+        ["sftpDisconnected"],
       );
       this.sftpEndpoints.delete(endpointId);
       this.log({
-        level: 'info',
-        category: 'session',
-        message: 'SFTP 연결이 종료되었습니다.',
-        metadata: { endpointId }
+        level: "info",
+        category: "session",
+        message: "SFTP 연결이 종료되었습니다.",
+        metadata: { endpointId },
       });
     } catch (error) {
       this.log({
-        level: 'error',
-        category: 'session',
-        message: 'SFTP 연결 종료 중 오류가 발생했습니다.',
+        level: "error",
+        category: "session",
+        message: "SFTP 연결 종료 중 오류가 발생했습니다.",
         metadata: {
           endpointId,
-          message: error instanceof Error ? error.message : 'unknown error'
-        }
+          message: error instanceof Error ? error.message : "unknown error",
+        },
       });
       throw error;
     }
@@ -716,13 +672,13 @@ export class CoreManager {
     const response = await this.requestResponse(
       {
         id: randomUUID(),
-        type: 'sftpList',
+        type: "sftpList",
         endpointId: input.endpointId,
         payload: {
-          path: input.path
-        }
+          path: input.path,
+        },
       },
-      ['sftpListed']
+      ["sftpListed"],
     );
 
     const listing = toDirectoryListing(response);
@@ -730,7 +686,7 @@ export class CoreManager {
     if (endpoint) {
       this.sftpEndpoints.set(input.endpointId, {
         ...endpoint,
-        path: listing.path
+        path: listing.path,
       });
     }
     return listing;
@@ -741,11 +697,11 @@ export class CoreManager {
     await this.requestResponse(
       {
         id: randomUUID(),
-        type: 'sftpMkdir',
+        type: "sftpMkdir",
         endpointId: input.endpointId,
-        payload: input
+        payload: input,
       },
-      ['sftpAck']
+      ["sftpAck"],
     );
   }
 
@@ -754,11 +710,11 @@ export class CoreManager {
     await this.requestResponse(
       {
         id: randomUUID(),
-        type: 'sftpRename',
+        type: "sftpRename",
         endpointId: input.endpointId,
-        payload: input
+        payload: input,
       },
-      ['sftpAck']
+      ["sftpAck"],
     );
   }
 
@@ -767,11 +723,11 @@ export class CoreManager {
     await this.requestResponse(
       {
         id: randomUUID(),
-        type: 'sftpDelete',
+        type: "sftpDelete",
         endpointId: input.endpointId,
-        payload: input
+        payload: input,
       },
-      ['sftpAck']
+      ["sftpAck"],
     );
   }
 
@@ -786,18 +742,18 @@ export class CoreManager {
       itemCount: input.items.length,
       bytesTotal: input.items.reduce((sum, item) => sum + item.size, 0),
       bytesCompleted: 0,
-      status: 'queued',
+      status: "queued",
       startedAt: now,
       updatedAt: now,
-      request: input
+      request: input,
     };
     this.transferJobs.set(jobId, job);
     this.broadcastTransferEvent({ job });
     this.sendControl({
       id: randomUUID(),
-      type: 'sftpTransferStart',
+      type: "sftpTransferStart",
       jobId,
-      payload: input
+      payload: input,
     });
     return job;
   }
@@ -809,56 +765,46 @@ export class CoreManager {
     await this.start();
     this.sendControl({
       id: randomUUID(),
-      type: 'sftpTransferCancel',
+      type: "sftpTransferCancel",
       jobId,
-      payload: {}
+      payload: {},
     });
   }
 
   write(sessionId: string, data: string): void {
     const tab = this.tabs.get(sessionId);
     // 아직 연결이 성립되지 않은 탭의 입력은 코어로 보내지 않아 "session not found" 오류를 막는다.
-    if (!tab || tab.status !== 'connected') {
-      return;
-    }
-    const awsSession = this.awsSessions.get(sessionId);
-    if (awsSession) {
-      awsSession.runner.write(data);
+    if (!tab || tab.status !== "connected") {
       return;
     }
     this.sendStream(
       {
-        type: 'write',
-        sessionId
+        type: "write",
+        sessionId,
       },
-      Buffer.from(data, 'utf8')
+      Buffer.from(data, "utf8"),
     );
   }
 
   writeBinary(sessionId: string, data: Uint8Array): void {
     const tab = this.tabs.get(sessionId);
     // 마우스 보고 등 raw 입력도 연결 완료 이후에만 전달한다.
-    if (!tab || tab.status !== 'connected') {
-      return;
-    }
-    const awsSession = this.awsSessions.get(sessionId);
-    if (awsSession) {
-      awsSession.runner.writeBinary(data);
+    if (!tab || tab.status !== "connected") {
       return;
     }
     this.sendStream(
       {
-        type: 'write',
-        sessionId
+        type: "write",
+        sessionId,
       },
-      data
+      data,
     );
   }
 
   resize(sessionId: string, cols: number, rows: number): void {
     const tab = this.tabs.get(sessionId);
     // 연결 전/실패 세션에는 resize를 보내지 않아 불필요한 오류 이벤트를 만들지 않는다.
-    if (!tab || tab.status !== 'connected') {
+    if (!tab || tab.status !== "connected") {
       return;
     }
     // 숨겨진 패널이나 과도한 observer 발화로 들어온 무효/중복 resize는 main에서 한 번 더 걸러준다.
@@ -870,16 +816,11 @@ export class CoreManager {
       return;
     }
     this.lastResizeBySession.set(sessionId, { cols, rows });
-    const awsSession = this.awsSessions.get(sessionId);
-    if (awsSession) {
-      awsSession.runner.resize(cols, rows);
-      return;
-    }
     this.sendControl({
       id: randomUUID(),
-      type: 'resize',
+      type: "resize",
       sessionId,
-      payload: { cols, rows }
+      payload: { cols, rows },
     });
   }
 
@@ -889,48 +830,45 @@ export class CoreManager {
     if (!tab) {
       return;
     }
-    const awsSession = this.awsSessions.get(sessionId);
-    if (awsSession) {
-      awsSession.disconnectRequested = true;
-      awsSession.runner.kill();
-      return;
-    }
     // 코어에 실제 세션 핸들이 없을 수 있는 connecting/error 탭은 로컬에서 바로 닫아준다.
-    if (!this.process || tab.status !== 'connected') {
+    if (!this.process || tab.status !== "connected") {
+      this.sessionTransportById.delete(sessionId);
       this.tabs.delete(sessionId);
       this.broadcastTerminalEvent({
-        type: 'closed',
+        type: "closed",
         sessionId,
         payload: {
-          message: 'client requested disconnect'
-        }
+          message: "client requested disconnect",
+        },
       });
       return;
     }
     this.sendControl({
       id: randomUUID(),
-      type: 'disconnect',
+      type: "disconnect",
       sessionId,
-      payload: {}
+      payload: {},
     });
   }
 
-  async respondKeyboardInteractive(input: KeyboardInteractiveRespondInput): Promise<void> {
+  async respondKeyboardInteractive(
+    input: KeyboardInteractiveRespondInput,
+  ): Promise<void> {
     await this.start();
     this.sendControl({
       id: randomUUID(),
-      type: 'keyboardInteractiveRespond',
+      type: "keyboardInteractiveRespond",
       sessionId: input.sessionId,
       payload: {
         challengeId: input.challengeId,
-        responses: input.responses
-      }
+        responses: input.responses,
+      },
     });
   }
 
   private consumeStdout(chunk: Buffer): void {
     for (const frame of this.parser.push(chunk)) {
-      if (frame.kind === 'control') {
+      if (frame.kind === "control") {
         this.handleControlEvent(frame.metadata);
         continue;
       }
@@ -942,43 +880,58 @@ export class CoreManager {
     this.resolvePendingResponse(event);
 
     if (isTransferEvent(event.type)) {
-      const existing = event.jobId ? this.transferJobs.get(event.jobId) : undefined;
+      const existing = event.jobId
+        ? this.transferJobs.get(event.jobId)
+        : undefined;
       const next = toTransferJobEvent(existing, event);
       this.transferJobs.set(next.job.id, next.job);
       this.broadcastTransferEvent(next);
-      if (next.job.status === 'completed' || next.job.status === 'failed' || next.job.status === 'cancelled') {
+      if (
+        next.job.status === "completed" ||
+        next.job.status === "failed" ||
+        next.job.status === "cancelled"
+      ) {
         this.transferJobs.set(next.job.id, next.job);
       }
       return;
     }
 
-    if (event.type === 'portForwardStarted' || event.type === 'portForwardStopped' || event.type === 'portForwardError') {
-      const ruleId = event.endpointId ?? '';
-      const status = event.type === 'portForwardStarted' ? 'running' : event.type === 'portForwardStopped' ? 'stopped' : 'error';
+    if (
+      event.type === "portForwardStarted" ||
+      event.type === "portForwardStopped" ||
+      event.type === "portForwardError"
+    ) {
+      const ruleId = event.endpointId ?? "";
+      const status =
+        event.type === "portForwardStarted"
+          ? "running"
+          : event.type === "portForwardStopped"
+            ? "stopped"
+            : "error";
       const runtime = this.buildForwardRuntime(ruleId, event.payload, status);
-      if (status === 'stopped') {
+      if (status === "stopped") {
         this.portForwardDefinitions.delete(ruleId);
       }
       this.portForwardRuntimes.set(ruleId, runtime);
       this.broadcastPortForwardEvent({ runtime });
-      if (status === 'running') {
+      if (status === "running") {
         this.log({
-          level: 'info',
-          category: 'audit',
-          message: '포트 포워딩이 시작되었습니다.',
+          level: "info",
+          category: "audit",
+          message: "포트 포워딩이 시작되었습니다.",
           metadata: {
             ruleId,
             bindAddress: runtime.bindAddress,
             bindPort: runtime.bindPort,
-            mode: runtime.mode
-          }
+            mode: runtime.mode,
+          },
         });
-      } else if (status === 'stopped') {
+      } else if (status === "stopped") {
         this.log({
-          level: 'info',
-          category: 'audit',
-          message: '포트 포워딩이 중지되었습니다.',
-          metadata: { ruleId }
+          level: "info",
+          category: "audit",
+          message: "포트 포워딩이 중지되었습니다.",
+          metadata: { ruleId },
         });
       }
       return;
@@ -986,46 +939,73 @@ export class CoreManager {
 
     if (event.sessionId) {
       const existing = this.tabs.get(event.sessionId);
+      const transport = this.sessionTransportById.get(event.sessionId) ?? "ssh";
+      const isAwsSession = transport === "aws-ssm";
+      if (!existing && event.type === "closed") {
+        this.sessionTransportById.delete(event.sessionId);
+      }
       if (existing) {
-        if (event.type === 'closed') {
+        if (event.type === "closed") {
+          this.sessionTransportById.delete(event.sessionId);
           this.tabs.delete(event.sessionId);
           this.lastResizeBySession.delete(event.sessionId);
           this.log({
-            level: 'info',
-            category: 'session',
-            message: 'SSH 세션이 종료되었습니다.',
-            metadata: { sessionId: event.sessionId, message: event.payload.message ?? null }
+            level: "info",
+            category: "session",
+            message: isAwsSession
+              ? "AWS SSM 세션이 종료되었습니다."
+              : "SSH 세션이 종료되었습니다.",
+            metadata: {
+              sessionId: event.sessionId,
+              message: event.payload.message ?? null,
+            },
           });
           this.broadcastTerminalEvent(event);
           return;
         }
         // 코어 이벤트를 탭 상태로 축약해 renderer가 바로 표시할 수 있게 한다.
         const nextStatus =
-          event.type === 'connected'
-            ? 'connected'
-            : event.type === 'error'
-              ? 'error'
+          event.type === "connected"
+            ? "connected"
+            : event.type === "error"
+              ? "error"
               : existing.status;
         this.tabs.set(event.sessionId, {
           ...existing,
           status: nextStatus,
-          errorMessage: event.type === 'error' ? String(event.payload.message ?? 'SSH error') : existing.errorMessage,
-          lastEventAt: new Date().toISOString()
+          errorMessage:
+            event.type === "error"
+              ? String(event.payload.message ?? "SSH error")
+              : existing.errorMessage,
+          lastEventAt: new Date().toISOString(),
         });
-        if (event.type === 'connected') {
+        if (event.type === "connected") {
           this.log({
-            level: 'info',
-            category: 'session',
-            message: 'SSH 세션이 연결되었습니다.',
-            metadata: { sessionId: event.sessionId, hostId: existing.hostId, title: existing.title }
+            level: "info",
+            category: "session",
+            message: isAwsSession
+              ? "AWS SSM 세션이 연결되었습니다."
+              : "SSH 세션이 연결되었습니다.",
+            metadata: {
+              sessionId: event.sessionId,
+              hostId: existing.hostId,
+              title: existing.title,
+              transport,
+            },
           });
         }
-        if (event.type === 'error') {
+        if (event.type === "error") {
           this.log({
-            level: 'error',
-            category: 'session',
-            message: 'SSH 세션 오류가 발생했습니다.',
-            metadata: { sessionId: event.sessionId, message: event.payload.message ?? null }
+            level: "error",
+            category: "session",
+            message: isAwsSession
+              ? "AWS SSM 세션 오류가 발생했습니다."
+              : "SSH 세션 오류가 발생했습니다.",
+            metadata: {
+              sessionId: event.sessionId,
+              message: event.payload.message ?? null,
+              transport,
+            },
           });
         }
       }
@@ -1033,49 +1013,59 @@ export class CoreManager {
       return;
     }
 
-    if (event.type === 'status' || event.type === 'error') {
+    if (event.type === "status" || event.type === "error") {
       this.broadcastTerminalEvent(event);
     }
   }
 
   private requestResponse<TPayload extends Record<string, unknown>>(
     request: CoreRequest<unknown>,
-    expectedTypes: CoreEventType[]
+    expectedTypes: CoreEventType[],
   ): Promise<TPayload> {
     if (!this.process) {
-      throw new Error('SSH core process is not running');
+      throw new Error("SSH core process is not running");
     }
 
     return new Promise<TPayload>((resolve, reject) => {
       const timeout = setTimeout(() => {
         this.pendingResponses.delete(request.id);
-        reject(new Error(`Timed out waiting for SSH core response: ${request.type}`));
+        reject(
+          new Error(`Timed out waiting for SSH core response: ${request.type}`),
+        );
       }, 8000);
 
       this.pendingResponses.set(request.id, {
         resolve: (payload) => resolve(payload as TPayload),
         reject,
         expectedTypes: new Set(expectedTypes),
-        timeout
+        timeout,
       });
 
       this.sendControl(request);
     });
   }
 
-  private resolvePendingResponse(event: CoreEvent<Record<string, unknown>>): void {
+  private resolvePendingResponse(
+    event: CoreEvent<Record<string, unknown>>,
+  ): void {
     if (!event.requestId) {
       return;
     }
     const pending = this.pendingResponses.get(event.requestId);
-      if (!pending) {
+    if (!pending) {
       return;
     }
 
-    if (event.type === 'error' || event.type === 'sftpError' || event.type === 'portForwardError') {
+    if (
+      event.type === "error" ||
+      event.type === "sftpError" ||
+      event.type === "portForwardError"
+    ) {
       clearTimeout(pending.timeout);
       this.pendingResponses.delete(event.requestId);
-      pending.reject(new Error(String(event.payload.message ?? 'SSH core error')));
+      pending.reject(
+        new Error(String(event.payload.message ?? "SSH core error")),
+      );
       return;
     }
 
@@ -1096,11 +1086,13 @@ export class CoreManager {
     }
   }
 
-  private describeTransferEndpoint(endpoint: TransferStartInput['source']): string {
-    if (endpoint.kind === 'local') {
-      return 'Local';
+  private describeTransferEndpoint(
+    endpoint: TransferStartInput["source"],
+  ): string {
+    if (endpoint.kind === "local") {
+      return "Local";
     }
-    return this.sftpEndpoints.get(endpoint.endpointId)?.title ?? 'Remote';
+    return this.sftpEndpoints.get(endpoint.endpointId)?.title ?? "Remote";
   }
 
   private clearRuntimeState(): void {
@@ -1110,75 +1102,53 @@ export class CoreManager {
     this.portForwardDefinitions.clear();
     this.portForwardRuntimes.clear();
     this.lastResizeBySession.clear();
-    this.awsSessions.clear();
+    this.sessionTransportById.clear();
   }
 
-  private async shutdownAwsSessions(): Promise<void> {
-    const sessions = Array.from(this.awsSessions.entries());
-    if (sessions.length === 0) {
-      return;
-    }
-
-    await Promise.all(
-      sessions.map(([sessionId, runtime]) =>
-        new Promise<void>((resolve) => {
-          let finished = false;
-          const finish = () => {
-            if (finished) {
-              return;
-            }
-            finished = true;
-            this.awsSessions.delete(sessionId);
-            resolve();
-          };
-          const disposeExit = runtime.runner.onExit(() => {
-            disposeExit();
-            finish();
-          });
-          runtime.disconnectRequested = true;
-          runtime.runner.kill();
-          setTimeout(() => {
-            disposeExit();
-            finish();
-          }, 1000);
-        })
-      )
-    );
-  }
-
-  private buildForwardRuntime(ruleId: string, payload: Record<string, unknown>, status: PortForwardRuntimeRecord['status']): PortForwardRuntimeRecord {
+  private buildForwardRuntime(
+    ruleId: string,
+    payload: Record<string, unknown>,
+    status: PortForwardRuntimeRecord["status"],
+  ): PortForwardRuntimeRecord {
     const fallback = this.portForwardDefinitions.get(ruleId);
     return {
       ruleId,
-      hostId: fallback?.hostId ?? '',
+      hostId: fallback?.hostId ?? "",
       mode:
-        payload.mode === 'remote' || payload.mode === 'dynamic'
+        payload.mode === "remote" || payload.mode === "dynamic"
           ? (payload.mode as PortForwardMode)
-          : fallback?.mode ?? 'local',
-      bindAddress: String(payload.bindAddress ?? fallback?.bindAddress ?? '127.0.0.1'),
+          : (fallback?.mode ?? "local"),
+      bindAddress: String(
+        payload.bindAddress ?? fallback?.bindAddress ?? "127.0.0.1",
+      ),
       bindPort: Number(payload.bindPort ?? fallback?.bindPort ?? 0),
       status,
       message: payload.message ? String(payload.message) : undefined,
       updatedAt: new Date().toISOString(),
-      startedAt: status === 'running' ? new Date().toISOString() : this.portForwardRuntimes.get(ruleId)?.startedAt
+      startedAt:
+        status === "running"
+          ? new Date().toISOString()
+          : this.portForwardRuntimes.get(ruleId)?.startedAt,
     };
   }
 
   private sendControl<TPayload>(request: CoreRequest<TPayload>): void {
     if (!this.process) {
-      throw new Error('SSH core process is not running');
+      throw new Error("SSH core process is not running");
     }
     this.process.stdin.write(encodeControlFrame(request));
   }
 
   private sendStream(metadata: CoreStreamFrame, payload: Uint8Array): void {
     if (!this.process) {
-      throw new Error('SSH core process is not running');
+      throw new Error("SSH core process is not running");
     }
     this.process.stdin.write(encodeStreamFrame(metadata, payload));
   }
 
-  private broadcastTerminalEvent(event: CoreEvent<Record<string, unknown>>): void {
+  private broadcastTerminalEvent(
+    event: CoreEvent<Record<string, unknown>>,
+  ): void {
     // 여러 윈도우가 열려 있어도 동일한 코어 상태를 함께 받도록 fan-out 한다.
     for (const window of this.windows) {
       if (!window.isDestroyed()) {
@@ -1204,8 +1174,11 @@ export class CoreManager {
     }
   }
 
-  private broadcastStream(metadata: CoreStreamFrame, payload: Uint8Array): void {
-    if (metadata.type !== 'data') {
+  private broadcastStream(
+    metadata: CoreStreamFrame,
+    payload: Uint8Array,
+  ): void {
+    if (metadata.type !== "data") {
       return;
     }
     // 터미널 데이터는 별도 채널로 보내 renderer store를 거치지 않고 xterm으로 직결한다.
@@ -1213,7 +1186,7 @@ export class CoreManager {
       if (!window.isDestroyed()) {
         window.webContents.send(ipcChannels.ssh.data, {
           sessionId: metadata.sessionId,
-          chunk: new Uint8Array(payload)
+          chunk: new Uint8Array(payload),
         });
       }
     }

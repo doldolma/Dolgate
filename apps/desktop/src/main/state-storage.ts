@@ -149,6 +149,20 @@ function isTerminalFontFamilyId(value: unknown): value is TerminalFontFamilyId {
   );
 }
 
+function isMacOnlyTerminalFontFamily(value: TerminalFontFamilyId): boolean {
+  return value === 'sf-mono' || value === 'menlo' || value === 'monaco';
+}
+
+function resolveDefaultTerminalFontFamily(platform: NodeJS.Platform = process.platform): TerminalFontFamilyId {
+  if (platform === 'win32') {
+    return 'consolas';
+  }
+  if (platform === 'linux') {
+    return 'jetbrains-mono';
+  }
+  return 'sf-mono';
+}
+
 function normalizeTerminalFontSize(value: unknown): number {
   if (typeof value !== 'number' || !Number.isFinite(value)) {
     return 13;
@@ -188,12 +202,26 @@ function normalizeTerminalAltIsMeta(value: unknown): boolean {
   return typeof value === 'boolean' ? value : false;
 }
 
+function normalizeTerminalFontFamily(value: unknown, fallback: TerminalFontFamilyId): TerminalFontFamilyId {
+  const normalized = isTerminalFontFamilyId(value) ? value : fallback;
+  if (process.platform !== 'darwin' && isMacOnlyTerminalFontFamily(normalized)) {
+    return resolveDefaultTerminalFontFamily();
+  }
+  return normalized;
+}
+
+function resolveDefaultTerminalWebglEnabled(_platform: NodeJS.Platform = process.platform): boolean {
+  return true;
+}
+
 function normalizeTerminalWebglEnabled(value: unknown): boolean {
-  return typeof value === 'boolean' ? value : true;
+  return typeof value === 'boolean' ? value : resolveDefaultTerminalWebglEnabled();
 }
 
 function createDefaultStateFile(): DesktopStateFile {
   const timestamp = nowIso();
+  const defaultTerminalFontFamily = resolveDefaultTerminalFontFamily();
+  const defaultTerminalWebglEnabled = resolveDefaultTerminalWebglEnabled();
   return {
     schemaVersion: DESKTOP_STATE_SCHEMA_VERSION,
     settings: {
@@ -204,14 +232,14 @@ function createDefaultStateFile(): DesktopStateFile {
     terminal: {
       globalThemeId: 'dolssh-dark',
       globalThemeUpdatedAt: timestamp,
-      fontFamily: 'sf-mono',
+      fontFamily: defaultTerminalFontFamily,
       fontSize: 13,
       scrollbackLines: 5000,
       lineHeight: 1,
       letterSpacing: 0,
       minimumContrastRatio: 1,
       altIsMeta: false,
-      webglEnabled: true,
+      webglEnabled: defaultTerminalWebglEnabled,
       localUpdatedAt: timestamp
     },
     updater: {
@@ -358,6 +386,8 @@ function normalizeStateFile(value: unknown): DesktopStateFile {
   const data = isObject(value.data) ? value.data : {};
   const secure = isObject(value.secure) ? value.secure : {};
   const managedSecrets = isObject(secure.managedSecretsByRef) ? secure.managedSecretsByRef : {};
+  const normalizedTerminalFontFamily = normalizeTerminalFontFamily(terminal.fontFamily, fallback.terminal.fontFamily);
+  const normalizedTerminalWebglEnabled = normalizeTerminalWebglEnabled(terminal.webglEnabled);
 
   const normalizedManagedSecrets: Record<string, StoredEncryptedValue> = {};
   for (const [secretRef, record] of Object.entries(managedSecrets)) {
@@ -378,14 +408,14 @@ function normalizeStateFile(value: unknown): DesktopStateFile {
       globalThemeId: isTerminalThemeId(terminal.globalThemeId) ? terminal.globalThemeId : fallback.terminal.globalThemeId,
       globalThemeUpdatedAt:
         typeof terminal.globalThemeUpdatedAt === 'string' ? terminal.globalThemeUpdatedAt : fallback.terminal.globalThemeUpdatedAt,
-      fontFamily: isTerminalFontFamilyId(terminal.fontFamily) ? terminal.fontFamily : fallback.terminal.fontFamily,
+      fontFamily: normalizedTerminalFontFamily,
       fontSize: normalizeTerminalFontSize(terminal.fontSize),
       scrollbackLines: normalizeTerminalScrollbackLines(terminal.scrollbackLines),
       lineHeight: normalizeTerminalLineHeight(terminal.lineHeight),
       letterSpacing: normalizeTerminalLetterSpacing(terminal.letterSpacing),
       minimumContrastRatio: normalizeTerminalMinimumContrastRatio(terminal.minimumContrastRatio),
       altIsMeta: normalizeTerminalAltIsMeta(terminal.altIsMeta),
-      webglEnabled: normalizeTerminalWebglEnabled(terminal.webglEnabled),
+      webglEnabled: normalizedTerminalWebglEnabled,
       localUpdatedAt: typeof terminal.localUpdatedAt === 'string' ? terminal.localUpdatedAt : fallback.terminal.localUpdatedAt
     },
     updater: {

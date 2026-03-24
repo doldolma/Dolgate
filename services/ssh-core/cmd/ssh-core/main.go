@@ -8,6 +8,7 @@ import (
 	"os"
 	"sync"
 
+	"dolssh/services/ssh-core/internal/awssession"
 	"dolssh/services/ssh-core/internal/forwarding"
 	"dolssh/services/ssh-core/internal/protocol"
 	coresftp "dolssh/services/ssh-core/internal/sftp"
@@ -40,6 +41,7 @@ func main() {
 	// main은 "stdin에서 요청 읽기 -> SSH 세션 매니저 디스패치 -> stdout 이벤트 출력"만 담당한다.
 	writer := newEventWriter()
 	manager := sshsession.NewManager(writer.emit, writer.emitStream)
+	awsManager := awssession.NewManager(writer.emit, writer.emitStream)
 	sftpService := coresftp.New(writer.emit)
 	forwardingService := forwarding.New(writer.emit)
 	defer sftpService.Shutdown()
@@ -70,7 +72,7 @@ func main() {
 			return
 		}
 
-		if err := dispatchFrame(manager, sftpService, forwardingService, writer, frame); err != nil {
+		if err := dispatchFrame(manager, awsManager, sftpService, forwardingService, writer, frame); err != nil {
 			// 명령 단위 오류는 requestId/sessionId를 포함해 상위 레이어가 추적하기 쉽게 한다.
 			eventType := protocol.EventError
 			if isSFTPCommand(frame) {
@@ -92,7 +94,14 @@ func main() {
 	}
 }
 
-func dispatchFrame(manager *sshsession.Manager, sftpService *coresftp.Service, forwardingService *forwarding.Service, writer *eventWriter, frame protocol.Frame) error {
+func dispatchFrame(
+	manager *sshsession.Manager,
+	awsManager *awssession.Manager,
+	sftpService *coresftp.Service,
+	forwardingService *forwarding.Service,
+	writer *eventWriter,
+	frame protocol.Frame,
+) error {
 	if frame.Kind == protocol.FrameKindStream {
 		var metadata protocol.StreamFrame
 		if err := protocol.DecodeStreamFrame(frame, &metadata); err != nil {
@@ -101,6 +110,9 @@ func dispatchFrame(manager *sshsession.Manager, sftpService *coresftp.Service, f
 		if metadata.Type != protocol.StreamTypeWrite {
 			return fmt.Errorf("unsupported stream type: %s", metadata.Type)
 		}
+		if awsManager.HasSession(metadata.SessionID) {
+			return awsManager.WriteBytes(metadata.SessionID, frame.Payload)
+		}
 		return manager.WriteBytes(metadata.SessionID, frame.Payload)
 	}
 
@@ -108,10 +120,17 @@ func dispatchFrame(manager *sshsession.Manager, sftpService *coresftp.Service, f
 	if err := protocol.DecodeControlFrame(frame, &request); err != nil {
 		return fmt.Errorf("invalid control frame: %w", err)
 	}
-	return dispatch(manager, sftpService, forwardingService, writer, request)
+	return dispatch(manager, awsManager, sftpService, forwardingService, writer, request)
 }
 
-func dispatch(manager *sshsession.Manager, sftpService *coresftp.Service, forwardingService *forwarding.Service, writer *eventWriter, request protocol.Request) error {
+func dispatch(
+	manager *sshsession.Manager,
+	awsManager *awssession.Manager,
+	sftpService *coresftp.Service,
+	forwardingService *forwarding.Service,
+	writer *eventWriter,
+	request protocol.Request,
+) error {
 	// payload 타입이 명령마다 다르기 때문에 여기서 명령별로 역직렬화한다.
 	switch request.Type {
 	case protocol.CommandHealth:
@@ -131,6 +150,24 @@ func dispatch(manager *sshsession.Manager, sftpService *coresftp.Service, forwar
 		}
 		go func(requestID, sessionID string, payload protocol.ConnectPayload) {
 			if err := manager.Connect(sessionID, requestID, payload); err != nil {
+				writer.emit(protocol.Event{
+					Type:      protocol.EventError,
+					RequestID: requestID,
+					SessionID: sessionID,
+					Payload: protocol.ErrorPayload{
+						Message: err.Error(),
+					},
+				})
+			}
+		}(request.ID, request.SessionID, payload)
+		return nil
+	case protocol.CommandAWSConnect:
+		var payload protocol.AWSConnectPayload
+		if err := json.Unmarshal(request.Payload, &payload); err != nil {
+			return err
+		}
+		go func(requestID, sessionID string, payload protocol.AWSConnectPayload) {
+			if err := awsManager.Connect(sessionID, requestID, payload); err != nil {
 				writer.emit(protocol.Event{
 					Type:      protocol.EventError,
 					RequestID: requestID,
@@ -166,8 +203,14 @@ func dispatch(manager *sshsession.Manager, sftpService *coresftp.Service, forwar
 		if err := json.Unmarshal(request.Payload, &payload); err != nil {
 			return err
 		}
+		if awsManager.HasSession(request.SessionID) {
+			return awsManager.Resize(request.SessionID, payload.Cols, payload.Rows)
+		}
 		return manager.Resize(request.SessionID, payload.Cols, payload.Rows)
 	case protocol.CommandDisconnect:
+		if awsManager.HasSession(request.SessionID) {
+			return awsManager.Disconnect(request.SessionID)
+		}
 		return manager.Disconnect(request.SessionID)
 	case protocol.CommandKeyboardInteractiveRespond:
 		var payload protocol.KeyboardInteractiveRespondPayload

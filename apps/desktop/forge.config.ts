@@ -54,10 +54,6 @@ const config = {
         return false;
       }
 
-      if (targetPlatform !== 'win32' && file.startsWith('/node_modules/node-pty')) {
-        return true;
-      }
-
       // Vite 산출물과 패키지 런타임 의존성만 남기고 나머지는 패키징에서 제외한다.
       return !(file.startsWith('/.vite') || file.startsWith('/node_modules'));
     },

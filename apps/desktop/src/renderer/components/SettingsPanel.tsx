@@ -24,8 +24,14 @@ const themeOptions: Array<{ value: AppTheme; title: string }> = [
 ];
 
 const fontSizeOptions = Array.from({ length: 8 }, (_, index) => index + 11);
+const macOnlyTerminalFonts = new Set<TerminalFontFamilyId>(['sf-mono', 'menlo', 'monaco']);
 
 export function SettingsPanel({ settings, desktopPlatform, onUpdateSettings, onLogout }: SettingsPanelProps) {
+  const visibleTerminalFontOptions =
+    desktopPlatform === 'darwin'
+      ? terminalFontOptions
+      : terminalFontOptions.filter((option) => !macOnlyTerminalFonts.has(option.id));
+
   async function handleChangeTerminalTheme(globalTerminalThemeId: TerminalThemeId) {
     await onUpdateSettings({ globalTerminalThemeId });
   }
@@ -84,7 +90,7 @@ export function SettingsPanel({ settings, desktopPlatform, onUpdateSettings, onL
               value={settings.terminalFontFamily}
               onChange={async (event) => handleChangeTerminalFontFamily(event.target.value as TerminalFontFamilyId)}
             >
-              {terminalFontOptions.map((option) => (
+              {visibleTerminalFontOptions.map((option) => (
                 <option key={option.id} value={option.id}>
                   {option.title}
                 </option>
