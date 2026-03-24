@@ -1039,6 +1039,11 @@ input::placeholder {
   flex-shrink: 0;
 }
 
+.host-browser-card__icon--compact {
+  font-size: 0.8rem;
+  letter-spacing: -0.02em;
+}
+
 .host-browser-card__meta {
   min-width: 0;
 }
@@ -1812,9 +1817,16 @@ input::placeholder {
   gap: 0.35rem;
   padding: 1.2rem;
   text-align: center;
-  pointer-events: none;
   background: color-mix(in srgb, var(--surface) 72%, transparent 28%);
   color: var(--text-soft);
+}
+
+.terminal-connection-overlay--blocking {
+  pointer-events: none;
+}
+
+.terminal-connection-overlay--error {
+  pointer-events: auto;
 }
 
 .terminal-connection-overlay strong,
@@ -1831,6 +1843,12 @@ input::placeholder {
 
 .terminal-connection-overlay span {
   font-size: 0.86rem;
+}
+
+.terminal-connection-overlay__actions {
+  display: flex;
+  gap: 0.65rem;
+  margin-top: 0.35rem;
 }
 
 .terminal-search-overlay input {
@@ -2611,6 +2629,21 @@ input::placeholder {
 
 .known-host-dialog__summary {
   grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.known-host-dialog__summary-field {
+  display: flex;
+  align-items: baseline;
+  gap: 0.45rem;
+  flex-wrap: wrap;
+}
+
+.known-host-dialog__summary-field strong {
+  word-break: break-word;
+}
+
+.known-host-dialog__fingerprints {
+  margin-top: 0.45rem;
 }
 
 .known-host-dialog__fingerprint-card {
