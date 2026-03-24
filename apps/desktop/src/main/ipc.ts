@@ -19,6 +19,7 @@ import type {
   AuthState,
   AppSettings,
   DesktopConnectInput,
+  DesktopLocalConnectInput,
   DesktopSftpConnectInput,
   HostRecord,
   HostDraft,
@@ -254,6 +255,20 @@ function assertSshHost(
   }
   if (!isSshHostRecord(host)) {
     throw new Error("이 기능은 SSH host에서만 사용할 수 있습니다.");
+  }
+}
+
+function assertAwsEc2Host(
+  host: ReturnType<HostRepository["getById"]>,
+): asserts host is Extract<
+  NonNullable<ReturnType<HostRepository["getById"]>>,
+  { kind: "aws-ec2" }
+> {
+  if (!host) {
+    throw new Error("Host not found");
+  }
+  if (!isAwsEc2HostRecord(host)) {
+    throw new Error("이 기능은 AWS host에서만 사용할 수 있습니다.");
   }
 }
 
@@ -939,6 +954,17 @@ export function registerIpcHandlers(
   );
 
   ipcMain.handle(
+    ipcChannels.ssh.connectLocal,
+    async (_event, input: DesktopLocalConnectInput) => {
+      return coreManager.connectLocalSession({
+        cols: input.cols,
+        rows: input.rows,
+        title: input.title?.trim() || "Terminal",
+      });
+    },
+  );
+
+  ipcMain.handle(
     ipcChannels.ssh.write,
     async (_event, sessionId: string, data: string) => {
       coreManager.write(sessionId, data);
@@ -1092,13 +1118,18 @@ export function registerIpcHandlers(
     ipcChannels.portForwards.create,
     async (_event, draft: PortForwardDraft) => {
       const host = hosts.getById(draft.hostId);
-      assertSshHost(host);
+      if (draft.transport === "aws-ssm") {
+        assertAwsEc2Host(host);
+      } else {
+        assertSshHost(host);
+      }
       const record = portForwards.create(draft);
       activityLogs.append("info", "audit", "포트 포워딩 규칙을 생성했습니다.", {
         ruleId: record.id,
         label: record.label,
         hostId: record.hostId,
-        mode: record.mode,
+        transport: record.transport,
+        mode: record.transport === "ssh" ? record.mode : record.targetKind,
       });
       queueSync();
       return record;
@@ -1109,13 +1140,18 @@ export function registerIpcHandlers(
     ipcChannels.portForwards.update,
     async (_event, id: string, draft: PortForwardDraft) => {
       const host = hosts.getById(draft.hostId);
-      assertSshHost(host);
+      if (draft.transport === "aws-ssm") {
+        assertAwsEc2Host(host);
+      } else {
+        assertSshHost(host);
+      }
       const record = portForwards.update(id, draft);
       activityLogs.append("info", "audit", "포트 포워딩 규칙을 수정했습니다.", {
         ruleId: record.id,
         label: record.label,
         hostId: record.hostId,
-        mode: record.mode,
+        transport: record.transport,
+        mode: record.transport === "ssh" ? record.mode : record.targetKind,
       });
       queueSync();
       return record;
@@ -1138,7 +1174,8 @@ export function registerIpcHandlers(
             ruleId: current.id,
             label: current.label,
             hostId: current.hostId,
-            mode: current.mode,
+            transport: current.transport,
+            mode: current.transport === "ssh" ? current.mode : current.targetKind,
           },
         );
       }
@@ -1154,8 +1191,76 @@ export function registerIpcHandlers(
         throw new Error("Port forward rule not found");
       }
       const host = hosts.getById(rule.hostId);
-      assertSshHost(host);
+      if (rule.transport === "aws-ssm") {
+        assertAwsEc2Host(host);
+        const publishRuntime = (status: "starting" | "error", message?: string) =>
+          coreManager.setPortForwardRuntime({
+            ruleId: rule.id,
+            hostId: host.id,
+            transport: "aws-ssm",
+            mode: "local",
+            bindAddress: "127.0.0.1",
+            bindPort: rule.bindPort,
+            status,
+            updatedAt: new Date().toISOString(),
+            message,
+            startedAt:
+              status === "starting"
+                ? coreManager
+                    .listPortForwardRuntimes()
+                    .find((runtime) => runtime.ruleId === rule.id)?.startedAt
+                : undefined,
+          });
 
+        try {
+          publishRuntime("starting", "Checking AWS profile");
+          let profileStatus = await awsService.getProfileStatus(host.awsProfileName);
+          if (!profileStatus.isAuthenticated) {
+            if (!profileStatus.isSsoProfile) {
+              throw new Error(profileStatus.errorMessage || "이 프로필은 AWS CLI 자격 증명이 필요합니다.");
+            }
+            publishRuntime("starting", "Opening AWS SSO login");
+            await awsService.login(host.awsProfileName);
+            publishRuntime("starting", "Checking AWS profile");
+            profileStatus = await awsService.getProfileStatus(host.awsProfileName);
+            if (!profileStatus.isAuthenticated) {
+              throw new Error(profileStatus.errorMessage || "AWS SSO 로그인 결과를 확인하지 못했습니다.");
+            }
+          }
+
+          publishRuntime("starting", "Checking SSM managed instance");
+          const isManaged = await awsService.isManagedInstance(
+            host.awsProfileName,
+            host.awsRegion,
+            host.awsInstanceId,
+          );
+          if (!isManaged) {
+            throw new Error("SSM Agent 또는 managed instance 상태를 확인해 주세요.");
+          }
+
+          publishRuntime("starting", "Starting SSM port forward");
+          return coreManager.startSsmPortForward({
+            ruleId: rule.id,
+            hostId: host.id,
+            profileName: host.awsProfileName,
+            region: host.awsRegion,
+            instanceId: host.awsInstanceId,
+            bindAddress: "127.0.0.1",
+            bindPort: rule.bindPort,
+            targetKind: rule.targetKind,
+            targetPort: rule.targetPort,
+            remoteHost: rule.targetKind === "remote-host" ? rule.remoteHost ?? undefined : undefined,
+          });
+        } catch (error) {
+          publishRuntime(
+            "error",
+            error instanceof Error ? error.message : "AWS SSM port forward를 시작하지 못했습니다.",
+          );
+          throw error;
+        }
+      }
+
+      assertSshHost(host);
       const trustedHostKeyBase64 = requireTrustedHostKey(knownHosts, host);
       const secrets = await loadSecrets(secretStore, host.secretRef);
 

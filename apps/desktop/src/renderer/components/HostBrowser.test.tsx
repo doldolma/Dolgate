@@ -10,7 +10,7 @@ import {
   normalizeGroupPath
 } from '@shared';
 import type { GroupRecord, HostRecord } from '@shared';
-import { getHostBrowserCardClassName } from './HostBrowser';
+import { getHostBrowserCardClassName, getHostBrowserEmptyCalloutMessage, HOST_BROWSER_IMPORT_MENU_LABELS } from './HostBrowser';
 
 const groups: GroupRecord[] = [
   {
@@ -118,5 +118,15 @@ describe('HostBrowser helpers', () => {
     expect(getHostBrowserCardClassName(false, false)).toBe('host-browser-card');
     expect(getHostBrowserCardClassName(true, false)).toBe('host-browser-card active');
     expect(getHostBrowserCardClassName(false, true)).toBe('host-browser-card host-browser-card--expanded');
+  });
+
+  it('defines import actions for the split-button menu in the expected order', () => {
+    expect(HOST_BROWSER_IMPORT_MENU_LABELS).toEqual(['Import from AWS', 'Import from Termius', 'Import from Warpgate']);
+  });
+
+  it('updates the empty-state copy to reference the import menu', () => {
+    expect(getHostBrowserEmptyCalloutMessage(0, '')).toBe('New Host 또는 Import 메뉴를 눌러 첫 번째 연결 대상을 추가해보세요.');
+    expect(getHostBrowserEmptyCalloutMessage(2, 'nas')).toBe('검색어를 지우거나 다른 호스트명으로 다시 찾아보세요.');
+    expect(getHostBrowserEmptyCalloutMessage(2, '')).toBe('New Host를 눌러 이 위치에 호스트를 추가하거나, 다른 그룹으로 이동해 장치를 확인해보세요.');
   });
 });

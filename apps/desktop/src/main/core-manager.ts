@@ -12,13 +12,16 @@ import type {
   DirectoryListing,
   FileEntry,
   PortForwardMode,
+  PortForwardTransport,
   PortForwardRuntimeEvent,
   PortForwardRuntimeRecord,
   KeyboardInteractiveRespondInput,
   ResolvedAwsConnectPayload,
   ResolvedCoreConnectPayload,
   ResolvedHostKeyProbePayload,
+  ResolvedLocalConnectPayload,
   ResolvedPortForwardStartPayload,
+  ResolvedSsmPortForwardStartPayload,
   ResolvedSftpConnectPayload,
   SftpDeleteInput,
   SftpEndpointSummary,
@@ -47,12 +50,13 @@ interface ActivityLogInput {
 interface PortForwardDefinition {
   ruleId: string;
   hostId: string;
+  transport: PortForwardTransport;
   mode: PortForwardMode;
   bindAddress: string;
   bindPort: number;
 }
 
-type SessionTransport = "ssh" | "aws-ssm";
+type SessionTransport = "ssh" | "aws-ssm" | "local-shell";
 
 function resolveRepoRoot(): string {
   const candidates = [
@@ -299,6 +303,12 @@ export class CoreManager {
     );
   }
 
+  setPortForwardRuntime(runtime: PortForwardRuntimeRecord): PortForwardRuntimeRecord {
+    this.portForwardRuntimes.set(runtime.ruleId, runtime);
+    this.broadcastPortForwardEvent({ runtime });
+    return runtime;
+  }
+
   async shutdown(): Promise<void> {
     if (this.shutdownPromise) {
       return this.shutdownPromise;
@@ -428,6 +438,7 @@ export class CoreManager {
     this.tabs.set(sessionId, {
       id: sessionId,
       title: payload.title,
+      source: "host",
       hostId: payload.hostId,
       sessionId,
       status: "connecting",
@@ -457,6 +468,7 @@ export class CoreManager {
     const tab: TerminalTab = {
       id: sessionId,
       title: payload.title,
+      source: "host",
       hostId: payload.hostId,
       sessionId,
       status: "connecting",
@@ -478,6 +490,36 @@ export class CoreManager {
       payload: resolvedPayload,
     });
 
+    return { sessionId };
+  }
+
+  async connectLocalSession(payload: {
+    cols: number;
+    rows: number;
+    title: string;
+  }): Promise<{ sessionId: string }> {
+    await this.start();
+    const sessionId = randomUUID();
+    this.sessionTransportById.set(sessionId, "local-shell");
+    this.tabs.set(sessionId, {
+      id: sessionId,
+      title: payload.title,
+      source: "local",
+      hostId: null,
+      sessionId,
+      status: "connecting",
+      lastEventAt: new Date().toISOString(),
+    });
+    this.sendControl<ResolvedLocalConnectPayload>({
+      id: randomUUID(),
+      type: "localConnect",
+      sessionId,
+      payload: {
+        cols: payload.cols,
+        rows: payload.rows,
+        title: payload.title,
+      },
+    });
     return { sessionId };
   }
 
@@ -516,6 +558,7 @@ export class CoreManager {
     const baseRuntime: PortForwardRuntimeRecord = {
       ruleId: payload.ruleId,
       hostId: payload.hostId,
+      transport: "ssh",
       mode: payload.mode,
       bindAddress: payload.bindAddress,
       bindPort: payload.bindPort,
@@ -525,6 +568,7 @@ export class CoreManager {
     this.portForwardDefinitions.set(payload.ruleId, {
       ruleId: payload.ruleId,
       hostId: payload.hostId,
+      transport: "ssh",
       mode: payload.mode,
       bindAddress: payload.bindAddress,
       bindPort: payload.bindPort,
@@ -552,6 +596,54 @@ export class CoreManager {
     return runtime;
   }
 
+  async startSsmPortForward(
+    payload: ResolvedSsmPortForwardStartPayload & {
+      ruleId: string;
+      hostId: string;
+    },
+  ): Promise<PortForwardRuntimeRecord> {
+    await this.start();
+    const baseRuntime: PortForwardRuntimeRecord = {
+      ruleId: payload.ruleId,
+      hostId: payload.hostId,
+      transport: "aws-ssm",
+      mode: "local",
+      bindAddress: payload.bindAddress,
+      bindPort: payload.bindPort,
+      status: "starting",
+      updatedAt: new Date().toISOString(),
+    };
+    this.portForwardDefinitions.set(payload.ruleId, {
+      ruleId: payload.ruleId,
+      hostId: payload.hostId,
+      transport: "aws-ssm",
+      mode: "local",
+      bindAddress: payload.bindAddress,
+      bindPort: payload.bindPort,
+    });
+    this.portForwardRuntimes.set(payload.ruleId, baseRuntime);
+    this.broadcastPortForwardEvent({ runtime: baseRuntime });
+
+    const response = await this.requestResponse<Record<string, unknown>>(
+      {
+        id: randomUUID(),
+        type: "ssmPortForwardStart",
+        endpointId: payload.ruleId,
+        payload,
+      },
+      ["portForwardStarted"],
+    );
+
+    const runtime = this.buildForwardRuntime(
+      payload.ruleId,
+      response,
+      "running",
+    );
+    this.portForwardRuntimes.set(payload.ruleId, runtime);
+    this.broadcastPortForwardEvent({ runtime });
+    return runtime;
+  }
+
   async stopPortForward(ruleId: string): Promise<void> {
     if (!this.process) {
       this.portForwardDefinitions.delete(ruleId);
@@ -559,10 +651,14 @@ export class CoreManager {
       return;
     }
     await this.start();
+    const definition = this.portForwardDefinitions.get(ruleId);
     await this.requestResponse(
       {
         id: randomUUID(),
-        type: "portForwardStop",
+        type:
+          definition?.transport === "aws-ssm"
+            ? "ssmPortForwardStop"
+            : "portForwardStop",
         endpointId: ruleId,
         payload: {},
       },
@@ -967,6 +1063,7 @@ export class CoreManager {
       const existing = this.tabs.get(event.sessionId);
       const transport = this.sessionTransportById.get(event.sessionId) ?? "ssh";
       const isAwsSession = transport === "aws-ssm";
+      const isLocalSession = transport === "local-shell";
       if (!existing && event.type === "closed") {
         this.sessionTransportById.delete(event.sessionId);
       }
@@ -979,9 +1076,11 @@ export class CoreManager {
           this.log({
             level: "info",
             category: "session",
-            message: isAwsSession
-              ? "AWS SSM 세션이 종료되었습니다."
-              : "SSH 세션이 종료되었습니다.",
+            message: isLocalSession
+              ? "로컬 터미널 세션이 종료되었습니다."
+              : isAwsSession
+                ? "AWS SSM 세션이 종료되었습니다."
+                : "SSH 세션이 종료되었습니다.",
             metadata: {
               sessionId: event.sessionId,
               message: event.payload.message ?? null,
@@ -1011,9 +1110,11 @@ export class CoreManager {
           this.log({
             level: "info",
             category: "session",
-            message: isAwsSession
-              ? "AWS SSM 세션이 연결되었습니다."
-              : "SSH 세션이 연결되었습니다.",
+            message: isLocalSession
+              ? "로컬 터미널 세션이 연결되었습니다."
+              : isAwsSession
+                ? "AWS SSM 세션이 연결되었습니다."
+                : "SSH 세션이 연결되었습니다.",
             metadata: {
               sessionId: event.sessionId,
               hostId: existing.hostId,
@@ -1026,9 +1127,11 @@ export class CoreManager {
           this.log({
             level: "error",
             category: "session",
-            message: isAwsSession
-              ? "AWS SSM 세션 오류가 발생했습니다."
-              : "SSH 세션 오류가 발생했습니다.",
+            message: isLocalSession
+              ? "로컬 터미널 세션 오류가 발생했습니다."
+              : isAwsSession
+                ? "AWS SSM 세션 오류가 발생했습니다."
+                : "SSH 세션 오류가 발생했습니다.",
             metadata: {
               sessionId: event.sessionId,
               message: event.payload.message ?? null,
@@ -1140,11 +1243,16 @@ export class CoreManager {
     status: PortForwardRuntimeRecord["status"],
   ): PortForwardRuntimeRecord {
     const fallback = this.portForwardDefinitions.get(ruleId);
+    const transport =
+      payload.transport === "aws-ssm" || payload.transport === "ssh"
+        ? (payload.transport as PortForwardTransport)
+        : (fallback?.transport ?? "ssh");
     return {
       ruleId,
       hostId: fallback?.hostId ?? "",
+      transport,
       mode:
-        payload.mode === "remote" || payload.mode === "dynamic"
+        payload.mode === "remote" || payload.mode === "dynamic" || payload.mode === "local"
           ? (payload.mode as PortForwardMode)
           : (fallback?.mode ?? "local"),
       bindAddress: String(
