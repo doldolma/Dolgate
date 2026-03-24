@@ -1802,6 +1802,37 @@ input::placeholder {
   box-shadow: 0 16px 34px color-mix(in srgb, var(--shadow-color) 16%, transparent 84%);
 }
 
+.terminal-connection-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  display: grid;
+  align-content: center;
+  justify-items: center;
+  gap: 0.35rem;
+  padding: 1.2rem;
+  text-align: center;
+  pointer-events: none;
+  background: color-mix(in srgb, var(--surface) 72%, transparent 28%);
+  color: var(--text-soft);
+}
+
+.terminal-connection-overlay strong,
+.terminal-connection-overlay span {
+  margin: 0;
+}
+
+.terminal-connection-overlay strong {
+  color: var(--text);
+  font-size: 0.92rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.terminal-connection-overlay span {
+  font-size: 0.86rem;
+}
+
 .terminal-search-overlay input {
   min-width: 220px;
   height: 2.2rem;

@@ -306,7 +306,8 @@ function withLinkedHostCount(record: SecretMetadataRecord, hosts: HostRecord[]):
 }
 
 const DEFAULT_GLOBAL_TERMINAL_THEME_ID: TerminalThemeId = 'dolssh-dark';
-const DEFAULT_TERMINAL_FONT_FAMILY: TerminalFontFamilyId = 'sf-mono';
+const DEFAULT_TERMINAL_FONT_FAMILY: TerminalFontFamilyId =
+  process.platform === 'win32' ? 'consolas' : process.platform === 'linux' ? 'jetbrains-mono' : 'sf-mono';
 const DEFAULT_TERMINAL_FONT_SIZE = 13;
 const DEFAULT_TERMINAL_SCROLLBACK_LINES = 5000;
 const DEFAULT_TERMINAL_LINE_HEIGHT = 1;
@@ -314,6 +315,17 @@ const DEFAULT_TERMINAL_LETTER_SPACING = 0;
 const DEFAULT_TERMINAL_MINIMUM_CONTRAST_RATIO = 1;
 const DEFAULT_TERMINAL_ALT_IS_META = false;
 const DEFAULT_TERMINAL_WEBGL_ENABLED = true;
+
+function isMacOnlyTerminalFontFamily(value: TerminalFontFamilyId): boolean {
+  return value === 'sf-mono' || value === 'menlo' || value === 'monaco';
+}
+
+function normalizeTerminalFontFamilyForPlatform(value: TerminalFontFamilyId): TerminalFontFamilyId {
+  if (process.platform !== 'darwin' && isMacOnlyTerminalFontFamily(value)) {
+    return DEFAULT_TERMINAL_FONT_FAMILY;
+  }
+  return value;
+}
 
 const stateStorage = getDesktopStateStorage();
 
@@ -604,7 +616,7 @@ export class SettingsRepository {
       }
 
       if (input.terminalFontFamily) {
-        state.terminal.fontFamily = input.terminalFontFamily;
+        state.terminal.fontFamily = normalizeTerminalFontFamilyForPlatform(input.terminalFontFamily);
         state.terminal.localUpdatedAt = nowIso();
       }
 

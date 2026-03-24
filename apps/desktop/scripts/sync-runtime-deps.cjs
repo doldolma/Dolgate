@@ -8,7 +8,6 @@ const desktopPackage = require(path.join(desktopRoot, 'package.json'));
 
 const targetNodeModules = path.join(desktopRoot, 'node_modules');
 const markerPath = path.join(targetNodeModules, '.dolssh-runtime-deps.json');
-const nativeWindowsOnlyPackages = new Set(['node-pty']);
 
 function isWorkspacePackage(packageName) {
   return packageName.startsWith('@dolssh/');
@@ -27,10 +26,7 @@ function resolveTargetPlatform() {
 }
 
 function shouldIncludeRuntimePackage(packageName, targetPlatform = resolveTargetPlatform()) {
-  if (targetPlatform && targetPlatform !== 'win32' && nativeWindowsOnlyPackages.has(packageName)) {
-    return false;
-  }
-
+  void targetPlatform;
   return true;
 }
 

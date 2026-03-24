@@ -12,17 +12,15 @@ describe('sync-runtime-deps target filtering', () => {
     vi.unstubAllEnvs();
   });
 
-  it('excludes node-pty from non-Windows targets and keeps other runtime packages', () => {
-    expect(syncRuntimeDeps.shouldIncludeRuntimePackage('node-pty', 'darwin')).toBe(false);
-    expect(syncRuntimeDeps.shouldIncludeRuntimePackage('node-pty', 'linux')).toBe(false);
-    expect(syncRuntimeDeps.shouldIncludeRuntimePackage('node-pty', 'win32')).toBe(true);
+  it('keeps runtime packages regardless of target platform', () => {
     expect(syncRuntimeDeps.shouldIncludeRuntimePackage('react', 'darwin')).toBe(true);
+    expect(syncRuntimeDeps.shouldIncludeRuntimePackage('react', 'win32')).toBe(true);
   });
 
   it('reads the target platform from the environment when present', () => {
     vi.stubEnv('DOLSSH_TARGET_PLATFORM', 'darwin');
 
     expect(syncRuntimeDeps.resolveTargetPlatform()).toBe('darwin');
-    expect(syncRuntimeDeps.shouldIncludeRuntimePackage('node-pty')).toBe(false);
+    expect(syncRuntimeDeps.shouldIncludeRuntimePackage('react')).toBe(true);
   });
 });
