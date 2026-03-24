@@ -275,6 +275,10 @@ export class CoreManager {
   private onTerminalEvent?: (
     event: CoreEvent<Record<string, unknown>>,
   ) => void | Promise<void>;
+  private onTerminalStream?: (
+    sessionId: string,
+    chunk: Uint8Array,
+  ) => void | Promise<void>;
   // 바이너리 frame은 청크 경계를 보장하지 않으므로 별도 parser가 필요하다.
   private readonly parser = new CoreFrameParser();
 
@@ -284,6 +288,14 @@ export class CoreManager {
       | undefined,
   ): void {
     this.onTerminalEvent = handler;
+  }
+
+  setTerminalStreamHandler(
+    handler:
+      | ((sessionId: string, chunk: Uint8Array) => void | Promise<void>)
+      | undefined,
+  ): void {
+    this.onTerminalStream = handler;
   }
 
   registerWindow(window: BrowserWindow): void {
@@ -1327,6 +1339,7 @@ export class CoreManager {
         });
       }
     }
+    void this.onTerminalStream?.(metadata.sessionId, new Uint8Array(payload));
   }
 
   private log(entry: ActivityLogInput): void {

@@ -218,6 +218,10 @@ export function App() {
   const openLocalTerminal = useAppStore((state) => state.openLocalTerminal);
   const connectHost = useAppStore((state) => state.connectHost);
   const retrySessionConnection = useAppStore((state) => state.retrySessionConnection);
+  const startSessionShare = useAppStore((state) => state.startSessionShare);
+  const updateSessionShareSnapshot = useAppStore((state) => state.updateSessionShareSnapshot);
+  const setSessionShareInputEnabled = useAppStore((state) => state.setSessionShareInputEnabled);
+  const stopSessionShare = useAppStore((state) => state.stopSessionShare);
   const disconnectTab = useAppStore((state) => state.disconnectTab);
   const closeWorkspace = useAppStore((state) => state.closeWorkspace);
   const splitSessionIntoWorkspace = useAppStore((state) => state.splitSessionIntoWorkspace);
@@ -243,6 +247,7 @@ export function App() {
   const handleCoreEvent = useAppStore((state) => state.handleCoreEvent);
   const handleTransferEvent = useAppStore((state) => state.handleTransferEvent);
   const handlePortForwardEvent = useAppStore((state) => state.handlePortForwardEvent);
+  const handleSessionShareEvent = useAppStore((state) => state.handleSessionShareEvent);
   const sftp = useAppStore((state) => state.sftp);
   const setSftpPaneSource = useAppStore((state) => state.setSftpPaneSource);
   const setSftpPaneFilter = useAppStore((state) => state.setSftpPaneFilter);
@@ -302,6 +307,7 @@ export function App() {
     const offCore = window.dolssh.ssh.onEvent(handleCoreEvent);
     const offTransfer = window.dolssh.sftp.onTransferEvent(handleTransferEvent);
     const offForward = window.dolssh.portForwards.onEvent(handlePortForwardEvent);
+    const offSessionShare = window.dolssh.sessionShares.onEvent(handleSessionShareEvent);
     const offAuth = window.dolssh.auth.onEvent((state) => {
       setAuthState(state);
       if (state.status === 'authenticated') {
@@ -319,9 +325,10 @@ export function App() {
       offCore();
       offTransfer();
       offForward();
+      offSessionShare();
       offAuth();
     };
-  }, [bootstrap, handleCoreEvent, handleTransferEvent, handlePortForwardEvent, hydratedSessionUserId]);
+  }, [bootstrap, handleCoreEvent, handlePortForwardEvent, handleSessionShareEvent, handleTransferEvent, hydratedSessionUserId]);
 
   useEffect(() => {
     let isMounted = true;
@@ -891,6 +898,10 @@ export function App() {
             canDropDraggedSession={canDropDraggedSession}
             onCloseSession={disconnectTab}
             onRetryConnection={retrySessionConnection}
+            onStartSessionShare={startSessionShare}
+            onUpdateSessionShareSnapshot={updateSessionShareSnapshot}
+            onSetSessionShareInputEnabled={setSessionShareInputEnabled}
+            onStopSessionShare={stopSessionShare}
             onStartPaneDrag={(workspaceId, sessionId) => {
               setDraggedSession({
                 sessionId,

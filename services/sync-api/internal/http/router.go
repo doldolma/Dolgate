@@ -92,6 +92,8 @@ type loginPageData struct {
 func NewRouter(store store.Store, authService *auth.Service, config RouterConfig) (*gin.Engine, error) {
 	router := gin.New()
 	router.Use(gin.Logger(), gin.Recovery())
+	shareHub := NewSessionShareHub()
+	shareAssetHandler := http.StripPrefix("/share/assets/", http.FileServer(http.FS(mustShareAssetFS())))
 
 	oidcRuntime, err := newOIDCRuntime(config.OIDC)
 	if err != nil {
@@ -421,6 +423,94 @@ func NewRouter(store store.Store, authService *auth.Service, config RouterConfig
 		ctx.Status(http.StatusNoContent)
 	})
 
+	sessionShareGroup := router.Group("/api/session-shares")
+	sessionShareGroup.Use(authMiddleware(authService))
+	sessionShareGroup.POST("", func(ctx *gin.Context) {
+		var request createSessionShareRequest
+		if err := ctx.ShouldBindJSON(&request); err != nil {
+			ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		if request.SessionID == "" || request.Title == "" || request.Cols <= 0 || request.Rows <= 0 {
+			ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid session share payload"})
+			return
+		}
+
+		userID := ctx.GetString("userId")
+		response := shareHub.Create(userID, request, requestBaseURL(ctx.Request))
+		ctx.JSON(http.StatusCreated, response)
+	})
+	sessionShareGroup.POST("/:shareId/input", func(ctx *gin.Context) {
+		var request struct {
+			InputEnabled bool `json:"inputEnabled"`
+		}
+		if err := ctx.ShouldBindJSON(&request); err != nil {
+			ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+
+		updated, err := shareHub.SetInputEnabled(ctx.GetString("userId"), ctx.Param("shareId"), request.InputEnabled)
+		if err != nil {
+			ctx.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+			return
+		}
+		ctx.JSON(http.StatusOK, gin.H{"updated": updated})
+	})
+	sessionShareGroup.DELETE("/:shareId", func(ctx *gin.Context) {
+		if err := shareHub.Delete(ctx.GetString("userId"), ctx.Param("shareId"), "세션 공유가 종료되었습니다."); err != nil {
+			ctx.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+			return
+		}
+		ctx.Status(http.StatusNoContent)
+	})
+
+	router.GET("/api/session-shares/:shareId/owner/ws", func(ctx *gin.Context) {
+		ownerToken := ctx.Query("token")
+		shareID := ctx.Param("shareId")
+		if ownerToken == "" || !shareHub.HasOwnerToken(shareID, ownerToken) {
+			ctx.JSON(http.StatusUnauthorized, gin.H{"error": "session share not found"})
+			return
+		}
+		if err := shareHub.HandleOwnerWebSocket(ctx.Writer, ctx.Request, shareID, ownerToken); err != nil {
+			if !ctx.Writer.Written() {
+				ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			}
+		}
+	})
+
+	router.GET("/share/assets/*filepath", func(ctx *gin.Context) {
+		applyShareResponseHeaders(ctx)
+		shareAssetHandler.ServeHTTP(ctx.Writer, ctx.Request)
+	})
+	router.GET("/share/:shareId/:viewerToken", func(ctx *gin.Context) {
+		shareID := ctx.Param("shareId")
+		viewerToken := ctx.Param("viewerToken")
+		if !shareHub.HasViewerToken(shareID, viewerToken) {
+			ctx.String(http.StatusNotFound, "session share not found")
+			return
+		}
+		applyShareResponseHeaders(ctx)
+		ctx.Header("Content-Type", "text/html; charset=utf-8")
+		_ = shareViewerTemplate.Execute(ctx.Writer, viewerPageData{
+			ShareID:      shareID,
+			ViewerToken:  viewerToken,
+			AssetVersion: shareAssetVersion,
+		})
+	})
+	router.GET("/share/:shareId/:viewerToken/ws", func(ctx *gin.Context) {
+		shareID := ctx.Param("shareId")
+		viewerToken := ctx.Param("viewerToken")
+		if !shareHub.HasViewerToken(shareID, viewerToken) {
+			ctx.String(http.StatusNotFound, "session share not found")
+			return
+		}
+		if err := shareHub.HandleViewerWebSocket(ctx.Writer, ctx.Request, shareID, viewerToken); err != nil {
+			if !ctx.Writer.Written() {
+				ctx.String(http.StatusInternalServerError, err.Error())
+			}
+		}
+	})
+
 	syncGroup := router.Group("/sync")
 	syncGroup.Use(authMiddleware(authService))
 	syncGroup.GET("", func(ctx *gin.Context) {
@@ -641,6 +731,29 @@ func authMiddleware(authService *auth.Service) gin.HandlerFunc {
 		ctx.Set("userId", claims.UserID)
 		ctx.Next()
 	}
+}
+
+func applyShareResponseHeaders(ctx *gin.Context) {
+	ctx.Header("Cache-Control", "no-store")
+	ctx.Header("Pragma", "no-cache")
+	ctx.Header("X-Robots-Tag", "noindex, nofollow")
+}
+
+func requestBaseURL(request *http.Request) string {
+	scheme := strings.TrimSpace(strings.Split(request.Header.Get("X-Forwarded-Proto"), ",")[0])
+	if scheme == "" {
+		if request.TLS != nil {
+			scheme = "https"
+		} else {
+			scheme = "http"
+		}
+	}
+
+	host := strings.TrimSpace(strings.Split(request.Header.Get("X-Forwarded-Host"), ",")[0])
+	if host == "" {
+		host = request.Host
+	}
+	return scheme + "://" + host
 }
 
 var loginPageTemplate = template.Must(template.New("login").Parse(`

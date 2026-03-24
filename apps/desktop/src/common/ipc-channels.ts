@@ -51,6 +51,13 @@ export const ipcChannels = {
     event: 'ssh:core-event',
     data: 'ssh:stream-data'
   },
+  sessionShares: {
+    start: 'session-shares:start',
+    updateSnapshot: 'session-shares:update-snapshot',
+    setInputEnabled: 'session-shares:set-input-enabled',
+    stop: 'session-shares:stop',
+    event: 'session-shares:event'
+  },
   shell: {
     pickPrivateKey: 'shell:pick-private-key',
     openExternal: 'shell:open-external'
