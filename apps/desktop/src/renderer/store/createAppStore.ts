@@ -28,6 +28,10 @@ import type {
   PortForwardRuleRecord,
   PortForwardRuntimeEvent,
   PortForwardRuntimeRecord,
+  SessionShareEvent,
+  SessionShareSnapshotInput,
+  SessionShareStartInput,
+  SessionShareState,
   SftpEndpointSummary,
   SftpPaneId,
   SecretMetadataRecord,
@@ -218,6 +222,10 @@ export interface AppState {
   openLocalTerminal: (cols: number, rows: number) => Promise<void>;
   connectHost: (hostId: string, cols: number, rows: number, secrets?: HostSecretInput) => Promise<void>;
   retrySessionConnection: (sessionId: string, secrets?: HostSecretInput) => Promise<void>;
+  startSessionShare: (input: SessionShareStartInput) => Promise<void>;
+  updateSessionShareSnapshot: (input: SessionShareSnapshotInput) => Promise<void>;
+  setSessionShareInputEnabled: (sessionId: string, inputEnabled: boolean) => Promise<void>;
+  stopSessionShare: (sessionId: string) => Promise<void>;
   disconnectTab: (sessionId: string) => Promise<void>;
   closeWorkspace: (workspaceId: string) => Promise<void>;
   splitSessionIntoWorkspace: (sessionId: string, direction: WorkspaceDropDirection, targetSessionId?: string) => boolean;
@@ -245,6 +253,7 @@ export interface AppState {
   updatePendingConnectionSize: (sessionId: string, cols: number, rows: number) => void;
   markSessionOutput: (sessionId: string) => void;
   handleCoreEvent: (event: CoreEvent<Record<string, unknown>>) => void;
+  handleSessionShareEvent: (event: SessionShareEvent) => void;
   handleTransferEvent: (event: TransferJobEvent) => void;
   handlePortForwardEvent: (event: PortForwardRuntimeEvent) => void;
   setSftpPaneSource: (paneId: SftpPaneId, sourceKind: SftpSourceKind) => Promise<void>;
@@ -588,6 +597,35 @@ function createConnectionProgress(
   };
 }
 
+function createInactiveSessionShareState(): SessionShareState {
+  return {
+    status: 'inactive',
+    shareUrl: null,
+    inputEnabled: false,
+    viewerCount: 0,
+    errorMessage: null
+  };
+}
+
+function normalizeSessionShareState(state?: SessionShareState | null): SessionShareState {
+  return state ?? createInactiveSessionShareState();
+}
+
+function setSessionShareState(
+  tabs: TerminalTab[],
+  sessionId: string,
+  nextState: SessionShareState
+): TerminalTab[] {
+  return tabs.map((tab) =>
+    tab.sessionId === sessionId
+      ? {
+          ...tab,
+          sessionShare: nextState
+        }
+      : tab
+  );
+}
+
 function createPendingSessionTab(input: {
   sessionId: string;
   source: 'host' | 'local';
@@ -603,6 +641,7 @@ function createPendingSessionTab(input: {
     title: input.title,
     status: 'pending',
     connectionProgress: input.progress,
+    sessionShare: createInactiveSessionShareState(),
     hasReceivedOutput: false,
     lastEventAt: new Date().toISOString()
   };
@@ -1675,6 +1714,7 @@ export function createAppStore(api: DesktopApi) {
           groups: sortGroups(groups),
           tabs: tabs.map((tab) => ({
             ...tab,
+            sessionShare: normalizeSessionShareState(tab.sessionShare),
             hasReceivedOutput: tab.status === 'connected' ? true : (tab.hasReceivedOutput ?? false)
           })),
           workspaces: [],
@@ -1912,7 +1952,60 @@ export function createAppStore(api: DesktopApi) {
 
         await startSessionConnectionFlow(set, get, host.id, latestCols, latestRows, secrets, pendingSessionId);
       },
+      startSessionShare: async (input) => {
+        const { sessionId } = input;
+        const tab = get().tabs.find((item) => item.sessionId === sessionId);
+        if (!tab || tab.source !== 'host' || tab.status !== 'connected') {
+          return;
+        }
+
+        set((state) => ({
+          tabs: setSessionShareState(state.tabs, sessionId, {
+            status: 'starting',
+            shareUrl: tab.sessionShare?.shareUrl ?? null,
+            inputEnabled: tab.sessionShare?.inputEnabled ?? false,
+            viewerCount: tab.sessionShare?.viewerCount ?? 0,
+            errorMessage: null
+          })
+        }));
+
+        const nextState = await api.sessionShares.start(input);
+        set((state) => ({
+          tabs: setSessionShareState(state.tabs, sessionId, nextState)
+        }));
+      },
+      updateSessionShareSnapshot: async (input) => {
+        const { sessionId } = input;
+        const tab = get().tabs.find((item) => item.sessionId === sessionId);
+        if (!tab || tab.sessionShare?.status !== 'active') {
+          return;
+        }
+        await api.sessionShares.updateSnapshot(input);
+      },
+      setSessionShareInputEnabled: async (sessionId, inputEnabled) => {
+        const tab = get().tabs.find((item) => item.sessionId === sessionId);
+        if (!tab || tab.sessionShare?.status === 'inactive') {
+          return;
+        }
+        const nextState = await api.sessionShares.setInputEnabled({
+          sessionId,
+          inputEnabled
+        });
+        set((state) => ({
+          tabs: setSessionShareState(state.tabs, sessionId, nextState)
+        }));
+      },
+      stopSessionShare: async (sessionId) => {
+        await api.sessionShares.stop(sessionId);
+        set((state) => ({
+          tabs: setSessionShareState(state.tabs, sessionId, createInactiveSessionShareState())
+        }));
+      },
       disconnectTab: async (sessionId) => {
+        const currentShare = get().tabs.find((tab) => tab.sessionId === sessionId)?.sessionShare;
+        if (currentShare && currentShare.status !== 'inactive') {
+          await api.sessionShares.stop(sessionId).catch(() => undefined);
+        }
         if (isPendingSessionId(sessionId)) {
           set((state) => removeSessionFromState(state, sessionId));
           return;
@@ -2599,6 +2692,11 @@ export function createAppStore(api: DesktopApi) {
             void refreshHostAndKeychainState(set);
           }
         }
+      },
+      handleSessionShareEvent: (event) => {
+        set((state) => ({
+          tabs: setSessionShareState(state.tabs, event.sessionId, event.state)
+        }));
       },
       handleTransferEvent: (event) => {
         set((state) => ({

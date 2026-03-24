@@ -20,6 +20,7 @@ import { ipcChannels } from '../common/ipc-channels';
 import { CoreManager } from './core-manager';
 import { registerIpcHandlers } from './ipc';
 import { SecretStore } from './secret-store';
+import { SessionShareService } from './session-share-service';
 import { SyncService } from './sync-service';
 import { TermiusImportService } from './termius-import-service';
 import { UpdateService } from './update-service';
@@ -90,6 +91,7 @@ if (termiusHelperArgIndex >= 0) {
     secretStore,
     syncOutboxRepository
   );
+  const sessionShareService = new SessionShareService(authService, coreManager);
   const updateService = new UpdateService(settingsRepository);
   let isQuitting = false;
   let pendingAuthCallbackUrl: string | null = null;
@@ -199,6 +201,7 @@ if (termiusHelperArgIndex >= 0) {
 
     coreManager.registerWindow(window);
     authService.registerWindow(window);
+    sessionShareService.registerWindow(window);
     updateService.registerWindow(window);
 
     window.once('ready-to-show', () => {
@@ -259,6 +262,7 @@ if (termiusHelperArgIndex >= 0) {
 
   authService.setOnSessionInvalidated(async () => {
     // 인증 세션이 사라지면 SSH/SFTP/포워딩 런타임도 함께 정리해서 로그인 게이트 뒤에 연결이 남지 않게 한다.
+    await sessionShareService.shutdown();
     await coreManager.shutdown();
     await syncService.purgeSyncedCache();
   });
@@ -282,7 +286,8 @@ if (termiusHelperArgIndex >= 0) {
       updateService,
       authService,
       syncService,
-      termiusImportService
+      termiusImportService,
+      sessionShareService
     );
     await createWindow();
     if (pendingAuthCallbackUrl) {
@@ -307,12 +312,14 @@ if (termiusHelperArgIndex >= 0) {
     }
     event.preventDefault();
     isQuitting = true;
-    void coreManager.shutdown().finally(() => {
+    void sessionShareService.shutdown().finally(() => {
+      void coreManager.shutdown().finally(() => {
       if (updateService.consumePendingInstall()) {
         updateService.quitAndInstall();
         return;
       }
       app.quit();
+      });
     });
   });
 

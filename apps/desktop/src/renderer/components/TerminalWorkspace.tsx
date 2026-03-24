@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { AppSettings, HostRecord, TerminalTab } from '@shared';
+import type { AppSettings, HostRecord, SessionShareSnapshotInput, SessionShareStartInput, TerminalTab } from '@shared';
 import type { Terminal } from '@xterm/xterm';
 import type { PendingInteractiveAuth, WorkspaceDropDirection, WorkspaceLayoutNode, WorkspaceTab } from '../store/createAppStore';
 import { createTerminalRuntime, type TerminalRuntime } from '../lib/terminal-runtime';
@@ -62,6 +62,10 @@ interface TerminalSessionViewProps {
   onFocus?: () => void;
   onClose?: () => Promise<void>;
   onRetry?: () => Promise<void>;
+  onStartSessionShare?: (input: SessionShareStartInput) => Promise<void>;
+  onUpdateSessionShareSnapshot?: (input: SessionShareSnapshotInput) => Promise<void>;
+  onSetSessionShareInputEnabled?: (sessionId: string, inputEnabled: boolean) => Promise<void>;
+  onStopSessionShare?: (sessionId: string) => Promise<void>;
   onStartDrag?: () => void;
   onEndDrag?: () => void;
 }
@@ -157,6 +161,10 @@ interface TerminalWorkspaceProps {
   canDropDraggedSession: boolean;
   onCloseSession: (sessionId: string) => Promise<void>;
   onRetryConnection: (sessionId: string) => Promise<void>;
+  onStartSessionShare: (input: SessionShareStartInput) => Promise<void>;
+  onUpdateSessionShareSnapshot: (input: SessionShareSnapshotInput) => Promise<void>;
+  onSetSessionShareInputEnabled: (sessionId: string, inputEnabled: boolean) => Promise<void>;
+  onStopSessionShare: (sessionId: string) => Promise<void>;
   onStartPaneDrag: (workspaceId: string, sessionId: string) => void;
   onEndSessionDrag: () => void;
   onSplitSessionDrop: (sessionId: string, direction: WorkspaceDropDirection, targetSessionId?: string) => boolean;
@@ -292,6 +300,10 @@ function TerminalSessionView({
   onFocus,
   onClose,
   onRetry,
+  onStartSessionShare,
+  onUpdateSessionShareSnapshot,
+  onSetSessionShareInputEnabled,
+  onStopSessionShare,
   onStartDrag,
   onEndDrag
 }: TerminalSessionViewProps) {
@@ -309,11 +321,16 @@ function TerminalSessionView({
   const [promptResponses, setPromptResponses] = useState<string[]>([]);
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [sharePopoverOpen, setSharePopoverOpen] = useState(false);
+  const [shareCopyStatus, setShareCopyStatus] = useState<string | null>(null);
   const [terminalInitError, setTerminalInitError] = useState<string | null>(null);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
+  const sharePopoverRef = useRef<HTMLDivElement | null>(null);
   const previousSessionStatusRef = useRef<TerminalTab['status'] | null>(null);
   const liveSessionIdRef = useRef(sessionId);
   const liveSessionStatusRef = useRef<TerminalTab['status'] | null>(currentTab?.status ?? null);
+  const liveSessionShareStatusRef = useRef(currentTab?.sessionShare?.status ?? 'inactive');
+  const shareSnapshotDirtyRef = useRef(false);
 
   useEffect(() => {
     if (!interactiveAuth || interactiveAuth.sessionId !== sessionId) {
@@ -331,7 +348,44 @@ function TerminalSessionView({
   useEffect(() => {
     liveSessionIdRef.current = sessionId;
     liveSessionStatusRef.current = currentTab?.status ?? null;
-  }, [currentTab?.status, sessionId]);
+    liveSessionShareStatusRef.current = currentTab?.sessionShare?.status ?? 'inactive';
+  }, [currentTab?.sessionShare?.status, currentTab?.status, sessionId]);
+
+  useEffect(() => {
+    setSharePopoverOpen(false);
+    setShareCopyStatus(null);
+    shareSnapshotDirtyRef.current = false;
+  }, [sessionId]);
+
+  useEffect(() => {
+    if (!sharePopoverOpen) {
+      return;
+    }
+
+    const handlePointerDown = (event: MouseEvent) => {
+      const target = event.target;
+      if (!(target instanceof Node)) {
+        return;
+      }
+      if (sharePopoverRef.current?.contains(target)) {
+        return;
+      }
+      setSharePopoverOpen(false);
+    };
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setSharePopoverOpen(false);
+      }
+    };
+
+    window.addEventListener('mousedown', handlePointerDown);
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.removeEventListener('mousedown', handlePointerDown);
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [sharePopoverOpen]);
 
   function refreshViewport() {
     const terminal = terminalRef.current;
@@ -339,6 +393,64 @@ function TerminalSessionView({
       return;
     }
     terminal.refresh(0, terminal.rows - 1);
+  }
+
+  function captureShareSnapshot():
+    | Pick<
+        SessionShareSnapshotInput,
+        'snapshot' | 'cols' | 'rows' | 'terminalAppearance' | 'viewportPx'
+      >
+    | null {
+    const runtime = runtimeRef.current;
+    const container = containerRef.current;
+    if (!runtime || !container) {
+      return null;
+    }
+
+    const bounds = container.getBoundingClientRect();
+    const viewportWidth = Math.max(0, Math.round(bounds.width));
+    const viewportHeight = Math.max(0, Math.round(bounds.height));
+
+    return {
+      snapshot: runtime.captureSnapshot(),
+      cols: runtime.terminal.cols,
+      rows: runtime.terminal.rows,
+      terminalAppearance: {
+        fontFamily: appearance.fontFamily,
+        fontSize: appearance.fontSize,
+        lineHeight: appearance.lineHeight,
+        letterSpacing: appearance.letterSpacing
+      },
+      viewportPx:
+        viewportWidth > 0 && viewportHeight > 0
+          ? {
+              width: viewportWidth,
+              height: viewportHeight
+            }
+          : null
+    };
+  }
+
+  async function pushShareSnapshot(kind: 'refresh' | 'resync' = 'refresh') {
+    if (currentTab?.sessionShare?.status !== 'active') {
+      return;
+    }
+
+    const payload = captureShareSnapshot();
+    if (!payload) {
+      return;
+    }
+
+    if (kind === 'refresh' && !shareSnapshotDirtyRef.current) {
+      return;
+    }
+
+    shareSnapshotDirtyRef.current = false;
+    await onUpdateSessionShareSnapshot?.({
+      sessionId,
+      ...payload,
+      kind
+    });
   }
 
   useEffect(() => {
@@ -388,6 +500,21 @@ function TerminalSessionView({
       }),
       afterResize: () => {
         refreshViewport();
+        if (liveSessionShareStatusRef.current !== 'active') {
+          return;
+        }
+
+        const payload = captureShareSnapshot();
+        if (!payload) {
+          return;
+        }
+
+        shareSnapshotDirtyRef.current = false;
+        void onUpdateSessionShareSnapshot?.({
+          sessionId: liveSessionIdRef.current,
+          ...payload,
+          kind: 'resync'
+        });
       },
       sendResize: ({ cols, rows }) => {
         const currentSessionId = liveSessionIdRef.current;
@@ -460,10 +587,13 @@ function TerminalSessionView({
       window.dolssh.ssh.onData(sessionId, (chunk) => {
         if (chunk.byteLength > 0) {
           markSessionOutput(sessionId);
+          if (currentTab?.sessionShare?.status === 'active') {
+            shareSnapshotDirtyRef.current = true;
+          }
         }
         runtimeRef.current?.write(chunk);
       }),
-    [markSessionOutput, sessionId]
+    [currentTab?.sessionShare?.status, markSessionOutput, sessionId]
   );
 
   const shouldShowConnectionOverlay = shouldShowSessionOverlay(currentTab, terminalInitError);
@@ -493,8 +623,11 @@ function TerminalSessionView({
       requestAnimationFrame(() => {
         refreshViewport();
       });
+      if (currentTab?.sessionShare?.status === 'active') {
+        void pushShareSnapshot('refresh');
+      }
     });
-  }, [layoutKey, visible]);
+  }, [currentTab?.sessionShare?.status, layoutKey, visible]);
 
   useEffect(() => {
     const previousStatus = previousSessionStatusRef.current;
@@ -523,6 +656,20 @@ function TerminalSessionView({
   }, [active, visible]);
 
   useEffect(() => {
+    if (currentTab?.sessionShare?.status !== 'active') {
+      return;
+    }
+
+    const timer = window.setInterval(() => {
+      void pushShareSnapshot('refresh');
+    }, 2000);
+
+    return () => {
+      window.clearInterval(timer);
+    };
+  }, [currentTab?.sessionShare?.status, sessionId]);
+
+  useEffect(() => {
     const handleWindowResize = () => {
       runtimeRef.current?.syncDisplayMetrics();
     };
@@ -538,6 +685,38 @@ function TerminalSessionView({
     setSearchQuery('');
     runtimeRef.current?.clearSearch();
     runtimeRef.current?.focus();
+  }
+
+  const shareState = currentTab?.sessionShare ?? null;
+  const canShareSession = currentTab?.source === 'host';
+  const canStartShare = canShareSession && currentTab?.status === 'connected' && shareState?.status !== 'starting';
+
+  async function handleStartShare() {
+    const payload = captureShareSnapshot();
+    if (!payload || !canShareSession) {
+      return;
+    }
+
+    await onStartSessionShare?.({
+      sessionId,
+      title,
+      ...payload
+    });
+    setSharePopoverOpen(true);
+    setShareCopyStatus(null);
+  }
+
+  async function handleCopyShareUrl() {
+    if (!shareState?.shareUrl) {
+      return;
+    }
+
+    try {
+      await navigator.clipboard.writeText(shareState.shareUrl);
+      setShareCopyStatus('링크를 복사했습니다.');
+    } catch {
+      setShareCopyStatus('링크를 복사하지 못했습니다.');
+    }
   }
 
   return (
@@ -576,6 +755,105 @@ function TerminalSessionView({
         onFocus?.();
       }}
     >
+      {canShareSession ? (
+        <div
+          ref={sharePopoverRef}
+          className={`terminal-share-anchor ${showHeader ? 'terminal-share-anchor--pane' : ''}`}
+        >
+          <button
+            type="button"
+            className="terminal-share-button"
+            onClick={() => {
+              setSharePopoverOpen((open) => !open);
+              setShareCopyStatus(null);
+            }}
+          >
+            Share
+          </button>
+          {sharePopoverOpen ? (
+            <div className="terminal-share-popover">
+              {shareState?.status === 'inactive' || !shareState ? (
+                <>
+                  <div className="terminal-share-popover__eyebrow">Session Share</div>
+                  <strong>현재 세션을 브라우저로 공유합니다.</strong>
+                  <p>링크를 아는 사용자는 로그인 없이 접속할 수 있습니다.</p>
+                  <button
+                    type="button"
+                    className="primary-button terminal-share-popover__action"
+                    onClick={() => {
+                      void handleStartShare();
+                    }}
+                    disabled={!canStartShare}
+                  >
+                    공유 시작
+                  </button>
+                </>
+              ) : (
+                <>
+                  <div className="terminal-share-popover__eyebrow">Session Share</div>
+                  <strong>{shareState.status === 'starting' ? '공유를 준비하는 중입니다.' : '공유 링크가 준비되었습니다.'}</strong>
+                  {shareState.errorMessage ? <p className="terminal-share-popover__error">{shareState.errorMessage}</p> : null}
+                  {shareState.shareUrl ? (
+                    <div className="terminal-share-popover__url">{shareState.shareUrl}</div>
+                  ) : (
+                    <p>공유 링크를 생성하는 중입니다.</p>
+                  )}
+                  <div className="terminal-share-popover__meta">
+                    <span>시청자 {shareState.viewerCount}명</span>
+                    <div className="terminal-share-popover__mode" role="group" aria-label="세션 공유 입력 모드">
+                      <button
+                        type="button"
+                        className={`terminal-share-popover__mode-button ${!shareState.inputEnabled ? 'is-active' : ''}`}
+                        onClick={() => {
+                          void onSetSessionShareInputEnabled?.(sessionId, false);
+                        }}
+                        disabled={shareState.status !== 'active' && shareState.status !== 'starting'}
+                        aria-pressed={!shareState.inputEnabled}
+                      >
+                        읽기 전용
+                      </button>
+                      <button
+                        type="button"
+                        className={`terminal-share-popover__mode-button ${shareState.inputEnabled ? 'is-active' : ''}`}
+                        onClick={() => {
+                          void onSetSessionShareInputEnabled?.(sessionId, true);
+                        }}
+                        disabled={shareState.status !== 'active' && shareState.status !== 'starting'}
+                        aria-pressed={shareState.inputEnabled}
+                      >
+                        입력 허용
+                      </button>
+                    </div>
+                  </div>
+                  {shareCopyStatus ? <div className="terminal-share-popover__hint">{shareCopyStatus}</div> : null}
+                  <div className="terminal-share-popover__actions">
+                    <button
+                      type="button"
+                      className="secondary-button"
+                      onClick={() => {
+                        void handleCopyShareUrl();
+                      }}
+                      disabled={!shareState.shareUrl}
+                    >
+                      링크 복사
+                    </button>
+                    <button
+                      type="button"
+                      className="ghost-button terminal-share-popover__danger"
+                      onClick={() => {
+                        void onStopSessionShare?.(sessionId);
+                        setSharePopoverOpen(false);
+                      }}
+                    >
+                      공유 종료
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
+          ) : null}
+        </div>
+      ) : null}
       {showHeader ? (
         <div
           className={`terminal-pane-header ${active ? 'active' : ''}`}
@@ -832,6 +1110,10 @@ export function TerminalWorkspace({
   canDropDraggedSession,
   onCloseSession,
   onRetryConnection,
+  onStartSessionShare,
+  onUpdateSessionShareSnapshot,
+  onSetSessionShareInputEnabled,
+  onStopSessionShare,
   onStartPaneDrag,
   onEndSessionDrag,
   onSplitSessionDrop,
@@ -1055,6 +1337,10 @@ export function TerminalWorkspace({
               style={activeWorkspace ? undefined : rectStyle}
               showHeader={Boolean(activeWorkspace && placement)}
               interactiveAuth={pendingInteractiveAuth?.sessionId === tab.sessionId ? pendingInteractiveAuth : null}
+              onStartSessionShare={onStartSessionShare}
+              onUpdateSessionShareSnapshot={onUpdateSessionShareSnapshot}
+              onSetSessionShareInputEnabled={onSetSessionShareInputEnabled}
+              onStopSessionShare={onStopSessionShare}
               onFocus={
                 activeWorkspace
                   ? () => {

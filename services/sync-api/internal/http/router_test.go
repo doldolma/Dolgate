@@ -276,3 +276,79 @@ func TestOIDCOnlyLoginRedirectsImmediately(t *testing.T) {
 		t.Fatalf("unexpected signup redirect location: %s", signupRecorder.Header().Get("Location"))
 	}
 }
+
+func TestSessionShareCreateAndViewerPage(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := createTestRouter(t)
+
+	signupBody := bytes.NewBufferString(`{"email":"share@example.com","password":"supersecure"}`)
+	signupRequest := httptest.NewRequest(http.MethodPost, "/auth/signup", signupBody)
+	signupRequest.Header.Set("Content-Type", "application/json")
+	signupRecorder := httptest.NewRecorder()
+	router.ServeHTTP(signupRecorder, signupRequest)
+	if signupRecorder.Code != http.StatusCreated {
+		t.Fatalf("expected signup to succeed, got %d: %s", signupRecorder.Code, signupRecorder.Body.String())
+	}
+
+	var signupResponse struct {
+		Tokens struct {
+			AccessToken string `json:"accessToken"`
+		} `json:"tokens"`
+	}
+	if err := json.Unmarshal(signupRecorder.Body.Bytes(), &signupResponse); err != nil {
+		t.Fatalf("decode signup response: %v", err)
+	}
+
+	createBody := bytes.NewBufferString(`{
+		"sessionId":"session-1",
+		"title":"Prod Shell",
+		"hostLabel":"prod.example.com",
+		"cols":120,
+		"rows":32,
+		"snapshot":"\u001b[2J"
+	}`)
+	createRequest := httptest.NewRequest(http.MethodPost, "/api/session-shares", createBody)
+	createRequest.Header.Set("Authorization", "Bearer "+signupResponse.Tokens.AccessToken)
+	createRequest.Header.Set("Content-Type", "application/json")
+	createRecorder := httptest.NewRecorder()
+	router.ServeHTTP(createRecorder, createRequest)
+	if createRecorder.Code != http.StatusCreated {
+		t.Fatalf("expected share create to succeed, got %d: %s", createRecorder.Code, createRecorder.Body.String())
+	}
+
+	var createResponse struct {
+		ShareID   string `json:"shareId"`
+		ViewerURL string `json:"viewerUrl"`
+	}
+	if err := json.Unmarshal(createRecorder.Body.Bytes(), &createResponse); err != nil {
+		t.Fatalf("decode share create response: %v", err)
+	}
+	if createResponse.ShareID == "" || createResponse.ViewerURL == "" {
+		t.Fatalf("expected share identifiers in response: %s", createRecorder.Body.String())
+	}
+
+	viewerURL, err := url.Parse(createResponse.ViewerURL)
+	if err != nil {
+		t.Fatalf("parse viewer url: %v", err)
+	}
+
+	viewerRequest := httptest.NewRequest(http.MethodGet, viewerURL.RequestURI(), nil)
+	viewerRecorder := httptest.NewRecorder()
+	router.ServeHTTP(viewerRecorder, viewerRequest)
+	if viewerRecorder.Code != http.StatusOK {
+		t.Fatalf("expected viewer page to load, got %d: %s", viewerRecorder.Code, viewerRecorder.Body.String())
+	}
+	if !strings.Contains(viewerRecorder.Body.String(), `data-share-id="`) {
+		t.Fatalf("expected viewer page html to contain share metadata: %s", viewerRecorder.Body.String())
+	}
+	if !strings.Contains(viewerRecorder.Body.String(), `/share/assets/viewer.js?v=`) {
+		t.Fatalf("expected viewer page html to contain versioned viewer asset url: %s", viewerRecorder.Body.String())
+	}
+
+	invalidViewerRequest := httptest.NewRequest(http.MethodGet, "/share/"+createResponse.ShareID+"/invalid-token", nil)
+	invalidViewerRecorder := httptest.NewRecorder()
+	router.ServeHTTP(invalidViewerRecorder, invalidViewerRequest)
+	if invalidViewerRecorder.Code != http.StatusNotFound {
+		t.Fatalf("expected invalid viewer token to fail, got %d", invalidViewerRecorder.Code)
+	}
+}

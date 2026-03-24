@@ -697,6 +697,149 @@ export type TerminalConnectionStage =
 
 export type TerminalConnectionBlockingKind = 'none' | 'dialog' | 'panel' | 'browser';
 export type TerminalSessionSource = 'host' | 'local';
+export type SessionShareStatus = 'inactive' | 'starting' | 'active' | 'error';
+export type SessionShareSnapshotKind = 'refresh' | 'resync';
+
+export interface SessionShareTerminalAppearance {
+  fontFamily: string;
+  fontSize: number;
+  lineHeight: number;
+  letterSpacing: number;
+}
+
+export interface SessionShareViewportPx {
+  width: number;
+  height: number;
+}
+
+export interface SessionShareState {
+  status: SessionShareStatus;
+  shareUrl: string | null;
+  inputEnabled: boolean;
+  viewerCount: number;
+  errorMessage?: string | null;
+}
+
+export interface SessionShareStartInput {
+  sessionId: string;
+  title: string;
+  snapshot: string;
+  cols: number;
+  rows: number;
+  terminalAppearance: SessionShareTerminalAppearance;
+  viewportPx: SessionShareViewportPx | null;
+}
+
+export interface SessionShareSnapshotInput {
+  sessionId: string;
+  snapshot: string;
+  cols: number;
+  rows: number;
+  kind: SessionShareSnapshotKind;
+  terminalAppearance: SessionShareTerminalAppearance;
+  viewportPx: SessionShareViewportPx | null;
+}
+
+export interface SessionShareInputToggleInput {
+  sessionId: string;
+  inputEnabled: boolean;
+}
+
+export interface SessionShareEvent {
+  sessionId: string;
+  state: SessionShareState;
+}
+
+export type SessionShareOwnerMessage =
+  | {
+      type: 'hello';
+      title: string;
+      hostLabel: string;
+      cols: number;
+      rows: number;
+      snapshot: string;
+      terminalAppearance: SessionShareTerminalAppearance;
+      viewportPx: SessionShareViewportPx | null;
+    }
+  | {
+      type: 'output';
+      data: string;
+    }
+  | {
+      type: 'resize';
+      cols: number;
+      rows: number;
+      terminalAppearance: SessionShareTerminalAppearance;
+      viewportPx: SessionShareViewportPx | null;
+    }
+  | {
+      type: 'snapshot';
+      snapshot: string;
+      cols: number;
+      rows: number;
+      snapshotKind: SessionShareSnapshotKind;
+      terminalAppearance: SessionShareTerminalAppearance;
+      viewportPx: SessionShareViewportPx | null;
+    }
+  | {
+      type: 'input-enabled';
+      inputEnabled: boolean;
+    }
+  | {
+      type: 'session-ended';
+    };
+
+export type SessionShareViewerMessage =
+  | {
+      type: 'init';
+      title: string;
+      hostLabel: string;
+      cols: number;
+      rows: number;
+      inputEnabled: boolean;
+      viewerCount: number;
+      terminalAppearance: SessionShareTerminalAppearance;
+      viewportPx: SessionShareViewportPx | null;
+    }
+  | {
+      type: 'snapshot-init';
+      snapshot: string;
+      terminalAppearance: SessionShareTerminalAppearance;
+      viewportPx: SessionShareViewportPx | null;
+    }
+  | {
+      type: 'snapshot-resync';
+      snapshot: string;
+      terminalAppearance: SessionShareTerminalAppearance;
+      viewportPx: SessionShareViewportPx | null;
+    }
+  | {
+      type: 'replay';
+      entries: string[];
+    }
+  | {
+      type: 'output';
+      data: string;
+    }
+  | {
+      type: 'resize';
+      cols: number;
+      rows: number;
+      terminalAppearance: SessionShareTerminalAppearance;
+      viewportPx: SessionShareViewportPx | null;
+    }
+  | {
+      type: 'input-enabled';
+      inputEnabled: boolean;
+    }
+  | {
+      type: 'viewer-count';
+      viewerCount: number;
+    }
+  | {
+      type: 'share-ended';
+      message: string;
+    };
 
 export interface TerminalConnectionProgress {
   stage: TerminalConnectionStage;
@@ -714,6 +857,7 @@ export interface TerminalTab {
   status: 'pending' | 'connecting' | 'connected' | 'disconnecting' | 'closed' | 'error';
   errorMessage?: string;
   connectionProgress?: TerminalConnectionProgress | null;
+  sessionShare?: SessionShareState | null;
   hasReceivedOutput?: boolean;
   lastEventAt: string;
 }
