@@ -255,4 +255,42 @@ describe("CoreManager AWS SSM sessions", () => {
     );
     expect(dataEvent).toBeTruthy();
   });
+
+  it("caches resize requests while connecting and flushes the latest size once the session connects", async () => {
+    const fakeProcess = createFakeChildProcess();
+    spawnMock.mockReturnValue(fakeProcess.child);
+
+    const manager = new CoreManager();
+    const { sessionId } = await manager.connectAwsSession({
+      profileName: "default",
+      region: "ap-northeast-2",
+      instanceId: "i-resize",
+      cols: 120,
+      rows: 32,
+      title: "Resize Host",
+      hostId: "host-3",
+    });
+
+    manager.resize(sessionId, 180, 52);
+    manager.resize(sessionId, 200, 60);
+
+    expect(fakeProcess.writes).toHaveLength(1);
+    expect(decodeControlFrame(fakeProcess.writes[0]).type).toBe("awsConnect");
+
+    fakeProcess.emitControl({
+      type: "connected",
+      sessionId,
+      payload: {
+        status: "connected",
+      },
+    });
+
+    expect(fakeProcess.writes).toHaveLength(2);
+    const resizeRequest = decodeControlFrame(fakeProcess.writes[1]);
+    expect(resizeRequest.type).toBe("resize");
+    expect(resizeRequest.payload).toMatchObject({ cols: 200, rows: 60 });
+
+    manager.resize(sessionId, 200, 60);
+    expect(fakeProcess.writes).toHaveLength(2);
+  });
 });

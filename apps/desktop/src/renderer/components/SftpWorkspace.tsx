@@ -457,21 +457,26 @@ function HostPicker({
             </p>
           </div>
         ) : (
-          visibleHosts.map((host) => (
-            <article
-              key={host.id}
-              className={`host-browser-card ${pane.selectedHostId === host.id ? 'active' : ''}`}
-              onClick={() => onSelectHost(host.id)}
-              onDoubleClick={() => void onConnectHost(host.id)}
-            >
-              <div className="host-browser-card__icon">{getHostBadgeLabel(host)}</div>
-              <div className="host-browser-card__meta">
-                <strong>{host.label}</strong>
-                <span>{getHostSubtitle(host)}</span>
-                <small>{host.groupName || 'Ungrouped'}</small>
-              </div>
-            </article>
-          ))
+          visibleHosts.map((host) => {
+            const badgeLabel = getHostBadgeLabel(host);
+            return (
+              <article
+                key={host.id}
+                className={`host-browser-card ${pane.selectedHostId === host.id ? 'active' : ''}`}
+                onClick={() => onSelectHost(host.id)}
+                onDoubleClick={() => void onConnectHost(host.id)}
+              >
+                <div className={`host-browser-card__icon ${badgeLabel.length > 3 ? 'host-browser-card__icon--compact' : ''}`}>
+                  {badgeLabel}
+                </div>
+                <div className="host-browser-card__meta">
+                  <strong>{host.label}</strong>
+                  <span>{getHostSubtitle(host)}</span>
+                  <small>{host.groupName || 'Ungrouped'}</small>
+                </div>
+              </article>
+            );
+          })
         )}
       </div>
     </div>
