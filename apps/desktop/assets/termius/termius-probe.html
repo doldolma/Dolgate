@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Termius Import Collector</title>
+  </head>
+  <body>
+    <script>
+      const { ipcRenderer } = require('electron');
+
+      const TARGET_STORES = [
+        { database: 'groups', store: 'groups' },
+        { database: 'hosts', store: 'hosts' },
+        { database: 'keys', store: 'keys' },
+        { database: 'multi_keys', store: 'multi_keys' },
+        { database: 'ssh_certificates', store: 'ssh_certificates' },
+        { database: 'ssh_configs', store: 'ssh_configs' },
+        { database: 'ssh_config_identities', store: 'ssh_config_identities' },
+        { database: 'ssh_config_identities_shared', store: 'ssh_config_identities_shared' },
+        { database: 'ssh_identities', store: 'ssh_identities' }
+      ];
+
+      function requestToPromise(request) {
+        return new Promise((resolve, reject) => {
+          request.onsuccess = () => resolve(request.result);
+          request.onerror = () => reject(request.error || new Error('IndexedDB request failed'));
+        });
+      }
+
+      function transactionDone(transaction) {
+        return new Promise((resolve, reject) => {
+          transaction.oncomplete = () => resolve();
+          transaction.onerror = () => reject(transaction.error || new Error('IndexedDB transaction failed'));
+          transaction.onabort = () => reject(transaction.error || new Error('IndexedDB transaction aborted'));
+        });
+      }
+
+      function sanitizeRecord(record) {
+        if (record == null) {
+          return record;
+        }
+
+        try {
+          return JSON.parse(JSON.stringify(record));
+        } catch (_error) {
+          return String(record);
+        }
+      }
+
+      async function openDatabase(name) {
+        return new Promise((resolve, reject) => {
+          const request = indexedDB.open(name);
+          request.onsuccess = () => resolve(request.result);
+          request.onerror = () => reject(request.error || new Error(`Failed to open ${name}`));
+        });
+      }
+
+      async function collectStore(target) {
+        const db = await openDatabase(target.database);
+
+        if (!db.objectStoreNames.contains(target.store)) {
+          db.close();
+          throw new Error(`Object store "${target.store}" does not exist in database "${target.database}"`);
+        }
+
+        const transaction = db.transaction(target.store, 'readonly');
+        const store = transaction.objectStore(target.store);
+        const records = await requestToPromise(store.getAll());
+        await transactionDone(transaction);
+        db.close();
+
+        return records.map(sanitizeRecord);
+      }
+
+      async function collectLocalStorageEntries() {
+        const entries = {};
+
+        for (const key of Object.keys(localStorage).sort()) {
+          entries[key] = localStorage.getItem(key);
+        }
+
+        return entries;
+      }
+
+      async function run() {
+        const databases = typeof indexedDB.databases === 'function' ? await indexedDB.databases() : [];
+        const stores = {};
+        const warnings = [];
+
+        for (const target of TARGET_STORES) {
+          try {
+            stores[target.store] = {
+              database: target.database,
+              records: await collectStore(target)
+            };
+          } catch (error) {
+            warnings.push(`Could not collect ${target.database}/${target.store}: ${error.message || error}`);
+            stores[target.store] = {
+              database: target.database,
+              records: []
+            };
+          }
+        }
+
+        ipcRenderer.send('collect:result', {
+          locationHref: location.href,
+          localStorageEntries: await collectLocalStorageEntries(),
+          databases,
+          stores,
+          warnings
+        });
+      }
+
+      run().catch((error) => {
+        ipcRenderer.send('collect:result', {
+          error: error.stack || error.message
+        });
+      });
+    </script>
+  </body>
+</html>

@@ -2,10 +2,13 @@ import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { BrowserWindow, dialog, ipcMain, shell as electronShell } from 'electron';
 import {
+  getGroupLabel,
+  getParentGroupPath,
   isAwsEc2HostRecord,
   isWarpgateSshHostRecord,
   isSshHostDraft,
-  isSshHostRecord
+  isSshHostRecord,
+  normalizeGroupPath
 } from '@shared';
 import type {
   AuthState,
@@ -28,6 +31,8 @@ import type {
   SftpListInput,
   SftpMkdirInput,
   SftpRenameInput,
+  TermiusImportSelectionInput,
+  TermiusImportWarning,
   TransferStartInput
 } from '@shared';
 import { ipcChannels } from '../common/ipc-channels';
@@ -47,6 +52,16 @@ import { CoreManager } from './core-manager';
 import { LocalFileService } from './file-service';
 import { SecretStore } from './secret-store';
 import { isSyncAuthenticationError, SyncService } from './sync-service';
+import {
+  buildTermiusEntityKey,
+  buildTermiusGroupAncestorPaths,
+  collectSelectedTermiusGroupPaths,
+  collectSelectedTermiusHosts,
+  resolveTermiusCredential,
+  resolveTermiusHostPort,
+  resolveTermiusHostUsername,
+  TermiusImportService
+} from './termius-import-service';
 import { UpdateService } from './update-service';
 import { WarpgateService } from './warpgate-service';
 
@@ -239,6 +254,22 @@ function buildWindowState(window: BrowserWindow) {
   };
 }
 
+function buildSshDuplicateKey(hostname: string, port: number, username: string): string {
+  return `${hostname}\u0000${port}\u0000${username}`;
+}
+
+async function persistImportedTermiusSecret(
+  secretStore: SecretStore,
+  secretMetadata: SecretMetadataRepository,
+  label: string,
+  secrets: HostSecretInput
+): Promise<string | null> {
+  if (!hasSecretValue(secrets)) {
+    return null;
+  }
+  return persistSecret(secretStore, secretMetadata, label, secrets);
+}
+
 export function registerIpcHandlers(
   hosts: HostRepository,
   groups: GroupRepository,
@@ -254,7 +285,8 @@ export function registerIpcHandlers(
   coreManager: CoreManager,
   updater: UpdateService,
   authService: AuthService,
-  syncService: SyncService
+  syncService: SyncService,
+  termiusImportService: TermiusImportService
 ): void {
   const localFiles = new LocalFileService();
   const queueSync = () => {
@@ -483,6 +515,155 @@ export function registerIpcHandlers(
 
   ipcMain.handle(ipcChannels.warpgate.listSshTargets, async (_event, baseUrl: string, token: string) => {
     return warpgateService.listSshTargets(baseUrl, token);
+  });
+
+  ipcMain.handle(ipcChannels.termius.probeLocal, async () => {
+    return termiusImportService.probeLocal();
+  });
+
+  ipcMain.handle(ipcChannels.termius.discardSnapshot, async (_event, snapshotId: string) => {
+    termiusImportService.discardSnapshot(snapshotId);
+  });
+
+  ipcMain.handle(ipcChannels.termius.importSelection, async (_event, input: TermiusImportSelectionInput) => {
+    const snapshot = termiusImportService.getSnapshot(input.snapshotId);
+    if (!snapshot) {
+      throw new Error('Termius import snapshot을 찾지 못했습니다. 목록을 다시 불러와 주세요.');
+    }
+
+    const selectedHosts = collectSelectedTermiusHosts(snapshot, input);
+    const selectedGroupPaths = collectSelectedTermiusGroupPaths(snapshot, input);
+    const existingGroupPaths = new Set(groups.list().map((group) => group.path));
+    const knownSshHosts = new Set(
+      hosts
+        .list()
+        .filter(isSshHostRecord)
+        .map((host) => buildSshDuplicateKey(host.hostname, host.port, host.username))
+    );
+    const sharedSecretRefs = new Map<string, string>();
+    const warnings: TermiusImportWarning[] = [
+      ...(snapshot.bundle.meta?.warnings ?? []).map((message) => ({ message }))
+    ];
+
+    let createdGroupCount = 0;
+    let createdHostCount = 0;
+    let createdSecretCount = 0;
+    let skippedHostCount = 0;
+
+    for (const groupPath of selectedGroupPaths) {
+      for (const candidatePath of buildTermiusGroupAncestorPaths(groupPath)) {
+        if (existingGroupPaths.has(candidatePath)) {
+          continue;
+        }
+        const group = groups.create(randomUUID(), getGroupLabel(candidatePath), getParentGroupPath(candidatePath));
+        existingGroupPaths.add(group.path);
+        createdGroupCount += 1;
+      }
+    }
+
+    for (const host of selectedHosts) {
+      const label = host.name?.trim() || host.address?.trim() || 'Imported Host';
+      const hostname = host.address?.trim();
+      const port = resolveTermiusHostPort(host);
+      const username = resolveTermiusHostUsername(host);
+      const groupPath = normalizeGroupPath(host.groupPath);
+      const hostKey = buildTermiusEntityKey(host.id, host.localId, `${label}|${host.address ?? ''}|${host.groupPath ?? ''}`);
+
+      if (!hostname || !port || !username) {
+        warnings.push({
+          code: 'missing-required-fields',
+          message: `${label}: address, port, username 중 일부가 없어 건너뛰었습니다.`
+        });
+        skippedHostCount += 1;
+        continue;
+      }
+
+      const duplicateKey = buildSshDuplicateKey(hostname, port, username);
+      if (knownSshHosts.has(duplicateKey)) {
+        warnings.push({
+          code: 'duplicate-host',
+          message: `${label}: 동일한 SSH 호스트가 이미 있어 건너뛰었습니다.`
+        });
+        skippedHostCount += 1;
+        continue;
+      }
+
+      for (const candidatePath of buildTermiusGroupAncestorPaths(groupPath)) {
+        if (existingGroupPaths.has(candidatePath)) {
+          continue;
+        }
+        groups.create(randomUUID(), getGroupLabel(candidatePath), getParentGroupPath(candidatePath));
+        existingGroupPaths.add(candidatePath);
+        createdGroupCount += 1;
+      }
+
+      const credential = resolveTermiusCredential(host);
+      let secretRef: string | null = null;
+
+      if (credential.hasCredential) {
+        const sharedSecretKey = credential.sharedSecretKey ?? `host:${hostKey}`;
+        const cachedSecretRef = sharedSecretRefs.get(sharedSecretKey);
+        if (cachedSecretRef) {
+          secretRef = cachedSecretRef;
+        } else {
+          secretRef = await persistImportedTermiusSecret(secretStore, secretMetadata, credential.sharedSecretLabel, credential.secrets);
+          if (secretRef) {
+            sharedSecretRefs.set(sharedSecretKey, secretRef);
+            createdSecretCount += 1;
+          }
+        }
+      } else {
+        warnings.push({
+          code: 'missing-credentials',
+          message: `${label}: 저장 가능한 credential이 없어 비밀번호 없이 호스트만 가져왔습니다.`
+        });
+      }
+
+      hosts.create(
+        randomUUID(),
+        {
+          kind: 'ssh',
+          label,
+          groupName: groupPath,
+          tags: [],
+          terminalThemeId: null,
+          hostname,
+          port,
+          username,
+          authType: credential.authType,
+          privateKeyPath: null
+        },
+        secretRef
+      );
+      knownSshHosts.add(duplicateKey);
+      createdHostCount += 1;
+    }
+
+    if (createdGroupCount > 0 || createdHostCount > 0 || createdSecretCount > 0) {
+      activityLogs.append('info', 'audit', 'Termius 로컬 데이터를 가져왔습니다.', {
+        createdGroupCount,
+        createdHostCount,
+        createdSecretCount,
+        skippedHostCount,
+        termiusDataDir: snapshot.bundle.meta?.termiusDataDir ?? null
+      });
+      queueSync();
+    }
+
+    if (warnings.length > 0) {
+      activityLogs.append('warn', 'audit', 'Termius import 중 일부 항목을 건너뛰거나 경고가 발생했습니다.', {
+        warningCount: warnings.length
+      });
+    }
+
+    termiusImportService.discardSnapshot(input.snapshotId);
+    return {
+      createdGroupCount,
+      createdHostCount,
+      createdSecretCount,
+      skippedHostCount,
+      warnings
+    };
   });
 
   ipcMain.handle(ipcChannels.ssh.connect, async (_event, input: DesktopConnectInput) => {

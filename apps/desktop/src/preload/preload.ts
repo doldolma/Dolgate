@@ -150,6 +150,11 @@ const api: DesktopApi = {
     getConnectionInfo: (baseUrl: string, token: string) => ipcRenderer.invoke(ipcChannels.warpgate.getConnectionInfo, baseUrl, token),
     listSshTargets: (baseUrl: string, token: string) => ipcRenderer.invoke(ipcChannels.warpgate.listSshTargets, baseUrl, token)
   },
+  termius: {
+    probeLocal: () => ipcRenderer.invoke(ipcChannels.termius.probeLocal),
+    importSelection: (input) => ipcRenderer.invoke(ipcChannels.termius.importSelection, input),
+    discardSnapshot: (snapshotId: string) => ipcRenderer.invoke(ipcChannels.termius.discardSnapshot, snapshotId)
+  },
   ssh: {
     connect: (input: DesktopConnectInput) => ipcRenderer.invoke(ipcChannels.ssh.connect, input),
     write: (sessionId: string, data: string) => ipcRenderer.invoke(ipcChannels.ssh.write, sessionId, data),

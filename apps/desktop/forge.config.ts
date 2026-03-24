@@ -8,7 +8,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const targetPlatform = process.env.DOLSSH_TARGET_PLATFORM ?? process.platform;
 
 function resolveExtraResources(): string[] {
-  const extraResources = [path.resolve(__dirname, 'config')];
+  const extraResources = [path.resolve(__dirname, 'config'), path.resolve(__dirname, 'assets')];
   const targetPlatform = process.env.DOLSSH_TARGET_PLATFORM;
   const targetArch = process.env.DOLSSH_TARGET_ARCH;
   if (!targetPlatform || !targetArch) {

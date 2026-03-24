@@ -27,6 +27,9 @@ import type {
   SftpEndpointSummary,
   SyncStatus,
   TerminalTab,
+  TermiusImportResult,
+  TermiusImportSelectionInput,
+  TermiusProbeResult,
   TransferJob,
   TransferJobEvent,
   TransferStartInput,
@@ -261,6 +264,11 @@ export interface DesktopApi {
     testConnection: (baseUrl: string, token: string) => Promise<WarpgateConnectionInfo>;
     getConnectionInfo: (baseUrl: string, token: string) => Promise<WarpgateConnectionInfo>;
     listSshTargets: (baseUrl: string, token: string) => Promise<WarpgateTargetSummary[]>;
+  };
+  termius: {
+    probeLocal: () => Promise<TermiusProbeResult>;
+    importSelection: (input: TermiusImportSelectionInput) => Promise<TermiusImportResult>;
+    discardSnapshot: (snapshotId: string) => Promise<void>;
   };
   ssh: {
     connect: (input: DesktopConnectInput) => Promise<{ sessionId: string }>;

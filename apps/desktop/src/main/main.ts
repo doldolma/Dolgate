@@ -20,6 +20,7 @@ import { CoreManager } from './core-manager';
 import { registerIpcHandlers } from './ipc';
 import { SecretStore } from './secret-store';
 import { SyncService } from './sync-service';
+import { TermiusImportService } from './termius-import-service';
 import { UpdateService } from './update-service';
 import { WarpgateService } from './warpgate-service';
 
@@ -38,6 +39,7 @@ const syncOutboxRepository = new SyncOutboxRepository();
 const secretStore = new SecretStore();
 const awsService = new AwsService();
 const warpgateService = new WarpgateService(secretStore);
+const termiusImportService = new TermiusImportService();
 const appendActivityLog = (entry: { level: 'info' | 'warn' | 'error'; category: 'session' | 'audit'; message: string; metadata?: Record<string, unknown> | null }) => {
   activityLogRepository.append(entry.level, entry.category, entry.message, entry.metadata ?? null);
 };
@@ -247,7 +249,8 @@ app.whenReady().then(async () => {
     coreManager,
     updateService,
     authService,
-    syncService
+    syncService,
+    termiusImportService
   );
   await createWindow();
   if (pendingAuthCallbackUrl) {

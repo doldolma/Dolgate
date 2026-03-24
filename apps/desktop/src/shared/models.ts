@@ -40,6 +40,7 @@ export type ActivityLogCategory = 'session' | 'audit';
 export type SecretSource = 'local_keychain' | 'server_managed';
 export type AuthStatus = 'loading' | 'unauthenticated' | 'authenticating' | 'authenticated' | 'error';
 export type SyncBootstrapStatus = 'idle' | 'syncing' | 'ready' | 'error';
+export type TermiusProbeStatus = 'ready' | 'unsupported' | 'not-installed' | 'no-data' | 'error';
 
 interface HostBaseRecord {
   id: string;
@@ -220,6 +221,68 @@ export type GroupRemoveMode = 'delete-subtree' | 'reparent-descendants';
 export interface GroupRemoveResult {
   groups: GroupRecord[];
   hosts: HostRecord[];
+}
+
+export interface TermiusImportCounts {
+  groups: number;
+  hosts: number;
+  keys: number;
+  multiKeys: number;
+  sshConfigs: number;
+  sshConfigIdentities: number;
+  identities: number;
+}
+
+export interface TermiusImportWarning {
+  code?: string | null;
+  message: string;
+}
+
+export interface TermiusImportGroupPreview {
+  path: string;
+  name: string;
+  parentPath?: string | null;
+  hostCount: number;
+}
+
+export interface TermiusImportHostPreview {
+  key: string;
+  name: string;
+  address: string | null;
+  groupPath?: string | null;
+  port: number | null;
+  username: string | null;
+  hasPassword: boolean;
+  hasPrivateKey: boolean;
+  identityName: string | null;
+}
+
+export interface TermiusProbeResult {
+  status: TermiusProbeStatus;
+  snapshotId?: string | null;
+  message?: string | null;
+  meta?: {
+    counts: TermiusImportCounts;
+    warnings: TermiusImportWarning[];
+    termiusDataDir?: string | null;
+    exportedAt?: string | null;
+  } | null;
+  groups: TermiusImportGroupPreview[];
+  hosts: TermiusImportHostPreview[];
+}
+
+export interface TermiusImportSelectionInput {
+  snapshotId: string;
+  selectedGroupPaths: string[];
+  selectedHostKeys: string[];
+}
+
+export interface TermiusImportResult {
+  createdGroupCount: number;
+  createdHostCount: number;
+  createdSecretCount: number;
+  skippedHostCount: number;
+  warnings: TermiusImportWarning[];
 }
 
 export interface TerminalAppearanceSettings {
