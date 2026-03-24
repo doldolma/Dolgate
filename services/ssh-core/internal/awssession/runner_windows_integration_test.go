@@ -33,13 +33,14 @@ func (c *capturedOutput) snapshot() string {
 }
 
 func TestWindowsConPTYRunnerRoutesOutputInputAndResize(t *testing.T) {
-	fixturePath := buildConPTYFixtureBinary(t)
+	fixture := buildConPTYFixtureBinary(t)
 
 	runner, err := startPlatformAWSRunner(protocol.AWSConnectPayload{
 		Cols: 120,
 		Rows: 32,
 	}, awsCommandRuntime{
-		executablePath: fixturePath,
+		executablePath: fixture.fixturePath,
+		wrapperPath:    fixture.wrapperPath,
 		env:            os.Environ(),
 	})
 	if err != nil {
@@ -70,6 +71,7 @@ func TestWindowsConPTYRunnerRoutesOutputInputAndResize(t *testing.T) {
 	}()
 
 	waitForOutputContains(t, output, "FAKE AWS SSM READY", waitResult, waitErr)
+	waitForOutputContains(t, output, "SIZE:120x32", waitResult, waitErr)
 
 	if err := runner.Write([]byte("hello-from-conpty\r\n")); err != nil {
 		t.Fatalf("write failed: %v", err)
@@ -96,19 +98,37 @@ func TestWindowsConPTYRunnerRoutesOutputInputAndResize(t *testing.T) {
 	<-copyDone
 }
 
-func buildConPTYFixtureBinary(t *testing.T) string {
+type builtConPTYFixture struct {
+	fixturePath string
+	wrapperPath string
+}
+
+func buildConPTYFixtureBinary(t *testing.T) builtConPTYFixture {
 	t.Helper()
 
 	tempDir := t.TempDir()
-	outputPath := filepath.Join(tempDir, "conpty-fixture.exe")
-	command := exec.Command("go", "build", "-o", outputPath, ".")
-	command.Dir = filepath.Join(".", "testfixture")
-	command.Env = append(os.Environ(), "CGO_ENABLED=0")
-	result, err := command.CombinedOutput()
+	fixturePath := filepath.Join(tempDir, "conpty-fixture.exe")
+	fixtureCommand := exec.Command("go", "build", "-o", fixturePath, ".")
+	fixtureCommand.Dir = filepath.Join(".", "testfixture")
+	fixtureCommand.Env = append(os.Environ(), "CGO_ENABLED=0")
+	result, err := fixtureCommand.CombinedOutput()
 	if err != nil {
 		t.Fatalf("failed to build conpty fixture: %v\n%s", err, result)
 	}
-	return outputPath
+
+	wrapperPath := filepath.Join(tempDir, "aws-conpty-wrapper.exe")
+	wrapperCommand := exec.Command("go", "build", "-o", wrapperPath, "../../cmd/aws-conpty-wrapper")
+	wrapperCommand.Dir = "."
+	wrapperCommand.Env = append(os.Environ(), "CGO_ENABLED=0")
+	result, err = wrapperCommand.CombinedOutput()
+	if err != nil {
+		t.Fatalf("failed to build aws conpty wrapper: %v\n%s", err, result)
+	}
+
+	return builtConPTYFixture{
+		fixturePath: fixturePath,
+		wrapperPath: wrapperPath,
+	}
 }
 
 func copyReaderOutput(output *capturedOutput, reader io.Reader) {

@@ -164,6 +164,22 @@ async function buildWindowsAwsFixture() {
   };
 }
 
+async function getCapturedTerminalSizes(page) {
+  return page.evaluate(() => {
+    const e2e = window.__dolsshE2E;
+    if (!e2e || typeof e2e.getTerminalOutputs !== "function") {
+      return [];
+    }
+
+    return Object.values(e2e.getTerminalOutputs()).flatMap((output) =>
+      Array.from(output.matchAll(/SIZE:(\d+)x(\d+)/g), (match) => ({
+        cols: Number(match[1]),
+        rows: Number(match[2]),
+      })),
+    );
+  });
+}
+
 test.describe("desktop smoke", () => {
   test("shows the login gate when no session is bootstrapped", async () => {
     const userDataDir = await mkdtemp(
@@ -276,6 +292,14 @@ test.describe("desktop smoke", () => {
 
     try {
       const page = await app.firstWindow();
+      await app.evaluate(({ BrowserWindow }) => {
+        const [window] = BrowserWindow.getAllWindows();
+        window?.setSize(1100, 760);
+      });
+      await page.waitForFunction(() => window.innerWidth <= 1100, {
+        timeout: 15_000,
+      });
+
       const awsCard = page
         .locator(".host-browser-card")
         .filter({ hasText: "Smoke AWS" })
@@ -296,6 +320,20 @@ test.describe("desktop smoke", () => {
         },
         { timeout: 15_000 },
       );
+      await page.waitForFunction(() => {
+        const e2e = window.__dolsshE2E;
+        if (!e2e || typeof e2e.getTerminalOutputs !== "function") {
+          return false;
+        }
+
+        return Object.values(e2e.getTerminalOutputs()).some((output) =>
+          /SIZE:\d+x\d+/.test(output),
+        );
+      }, { timeout: 15_000 });
+
+      const initialSizes = await getCapturedTerminalSizes(page);
+      const initialSize = initialSizes.at(-1);
+      expect(initialSize).toBeTruthy();
 
       await page.locator(".terminal-session.active .terminal-canvas").click();
       await page.keyboard.type("hello-from-playwright");
@@ -313,6 +351,56 @@ test.describe("desktop smoke", () => {
         },
         { timeout: 15_000 },
       );
+
+      await app.evaluate(({ BrowserWindow }) => {
+        const [window] = BrowserWindow.getAllWindows();
+        window?.setSize(1500, 1000);
+      });
+      await page.waitForFunction(() => window.innerWidth >= 1200, {
+        timeout: 15_000,
+      });
+      await page.waitForTimeout(300);
+
+      await page.locator(".terminal-session.active .terminal-canvas").click();
+      await page.keyboard.type("__REPORT_SIZE__");
+      await page.keyboard.press("Enter");
+      await page.waitForFunction(
+        (expectedSize) => {
+          const e2e = window.__dolsshE2E;
+          if (!e2e || typeof e2e.getTerminalOutputs !== "function") {
+            return false;
+          }
+
+          const sizes = Object.values(e2e.getTerminalOutputs()).flatMap(
+            (output) =>
+              Array.from(output.matchAll(/SIZE:(\d+)x(\d+)/g), (match) => ({
+                cols: Number(match[1]),
+                rows: Number(match[2]),
+              })),
+          );
+
+          return sizes.some(
+            (size) =>
+              size.cols !== expectedSize.cols || size.rows !== expectedSize.rows,
+          );
+        },
+        initialSize,
+        { timeout: 15_000 },
+      );
+
+      const terminalSizes = await getCapturedTerminalSizes(page);
+      const resizedSize = [...terminalSizes]
+        .reverse()
+        .find(
+          (size) =>
+            size.cols !== initialSize.cols || size.rows !== initialSize.rows,
+        );
+
+      expect(resizedSize).toBeTruthy();
+      expect(
+        resizedSize.cols > initialSize.cols ||
+          resizedSize.rows > initialSize.rows,
+      ).toBe(true);
     } finally {
       await app.close();
       await rm(userDataDir, { recursive: true, force: true });

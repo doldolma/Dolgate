@@ -11,3 +11,7 @@ func resolveRuntimeToolPath(command string) (string, error) {
 func runtimeEnvPathCaseInsensitive() bool {
 	return false
 }
+
+func resolveConPTYWrapperPath() (string, error) {
+	return "", nil
+}

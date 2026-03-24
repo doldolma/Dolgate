@@ -96,12 +96,11 @@ func startPlatformAWSRunner(payload protocol.AWSConnectPayload, runtime awsComma
 		StartupInfo:             windows.StartupInfo{Cb: uint32(unsafe.Sizeof(windows.StartupInfoEx{}))},
 		ProcThreadAttributeList: attributeList.List(),
 	}
-	startupInfo.Flags |= windows.STARTF_USESTDHANDLES
-	startupInfo.StdInput = inputPipe[0]
-	startupInfo.StdOutput = outputPipe[1]
-	startupInfo.StdErr = outputPipe[1]
 
 	commandLine := windows.ComposeCommandLine(append([]string{runtime.executablePath}, runtime.args...))
+	if runtime.wrapperPath != "" {
+		commandLine = windows.ComposeCommandLine(append([]string{runtime.wrapperPath, runtime.executablePath}, runtime.args...))
+	}
 	commandLine16, err := windows.UTF16PtrFromString(commandLine)
 	if err != nil {
 		return nil, fmt.Errorf("command line encoding failed: %w", err)
@@ -116,12 +115,15 @@ func startPlatformAWSRunner(payload protocol.AWSConnectPayload, runtime awsComma
 		envPtr = &envBlock[0]
 	}
 	var processInfo windows.ProcessInformation
+	// Let ConPTY provide the hosted process with its console handles instead of
+	// reusing the pseudoconsole pipes as stdio. Windows CLIs such as the AWS
+	// Session Manager plugin probe os.Stdout for terminal size updates.
 	if err := windows.CreateProcess(
 		nil,
 		commandLine16,
 		nil,
 		nil,
-		true,
+		false,
 		windows.CREATE_DEFAULT_ERROR_MODE|windows.CREATE_UNICODE_ENVIRONMENT|windows.EXTENDED_STARTUPINFO_PRESENT,
 		envPtr,
 		nil,

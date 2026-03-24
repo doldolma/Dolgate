@@ -16,6 +16,11 @@ func openTestStore(t *testing.T) *GormStore {
 	if err != nil {
 		t.Fatalf("OpenSQLite() error = %v", err)
 	}
+	t.Cleanup(func() {
+		if err := store.Close(); err != nil {
+			t.Fatalf("Close() error = %v", err)
+		}
+	})
 	return store
 }
 
