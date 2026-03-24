@@ -25,6 +25,11 @@ import type {
   HostDraft,
   HostRecord,
   SecretMetadataRecord,
+  SessionShareEvent,
+  SessionShareInputToggleInput,
+  SessionShareSnapshotInput,
+  SessionShareStartInput,
+  SessionShareState,
   SftpEndpointSummary,
   SyncStatus,
   TerminalTab,
@@ -344,6 +349,15 @@ export interface DesktopApi {
       sessionId: string,
       listener: (chunk: Uint8Array) => void,
     ) => () => void;
+  };
+  sessionShares: {
+    start: (input: SessionShareStartInput) => Promise<SessionShareState>;
+    updateSnapshot: (input: SessionShareSnapshotInput) => Promise<void>;
+    setInputEnabled: (
+      input: SessionShareInputToggleInput,
+    ) => Promise<SessionShareState>;
+    stop: (sessionId: string) => Promise<void>;
+    onEvent: (listener: (event: SessionShareEvent) => void) => () => void;
   };
   shell: {
     pickPrivateKey: () => Promise<string | null>;

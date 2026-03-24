@@ -33,6 +33,9 @@ import type {
   KnownHostProbeInput,
   KnownHostTrustInput,
   PortForwardDraft,
+  SessionShareInputToggleInput,
+  SessionShareSnapshotInput,
+  SessionShareStartInput,
   SftpDeleteInput,
   SftpListInput,
   SftpMkdirInput,
@@ -57,6 +60,7 @@ import { AwsService } from "./aws-service";
 import { CoreManager } from "./core-manager";
 import { LocalFileService } from "./file-service";
 import { SecretStore } from "./secret-store";
+import { SessionShareService } from "./session-share-service";
 import { isSyncAuthenticationError, SyncService } from "./sync-service";
 import {
   buildTermiusEntityKey,
@@ -348,6 +352,7 @@ export function registerIpcHandlers(
   authService: AuthService,
   syncService: SyncService,
   termiusImportService: TermiusImportService,
+  sessionShareService: SessionShareService,
 ): void {
   const localFiles = new LocalFileService();
   const queueSync = () => {
@@ -396,6 +401,7 @@ export function registerIpcHandlers(
   }
 
   coreManager.setTerminalEventHandler(async (event) => {
+    sessionShareService.handleTerminalEvent(event);
     if (!event.sessionId) {
       return;
     }
@@ -417,6 +423,9 @@ export function registerIpcHandlers(
     if (event.type === "closed" || event.type === "error") {
       pendingSessionSecrets.delete(event.sessionId);
     }
+  });
+  coreManager.setTerminalStreamHandler((sessionId, chunk) => {
+    sessionShareService.handleTerminalStream(sessionId, chunk);
   });
 
   ipcMain.handle(ipcChannels.auth.getState, async () => authService.getState());
@@ -463,6 +472,29 @@ export function registerIpcHandlers(
   ipcMain.handle(ipcChannels.sync.status, async () => syncService.getState());
   ipcMain.handle(ipcChannels.sync.exportDecryptedSnapshot, async () =>
     syncService.exportDecryptedSnapshot(),
+  );
+
+  ipcMain.handle(
+    ipcChannels.sessionShares.start,
+    async (_event, input: SessionShareStartInput) =>
+      sessionShareService.start(input),
+  );
+  ipcMain.handle(
+    ipcChannels.sessionShares.updateSnapshot,
+    async (_event, input: SessionShareSnapshotInput) => {
+      await sessionShareService.updateSnapshot(input);
+    },
+  );
+  ipcMain.handle(
+    ipcChannels.sessionShares.setInputEnabled,
+    async (_event, input: SessionShareInputToggleInput) =>
+      sessionShareService.setInputEnabled(input),
+  );
+  ipcMain.handle(
+    ipcChannels.sessionShares.stop,
+    async (_event, sessionId: string) => {
+      await sessionShareService.stop(sessionId);
+    },
   );
 
   // renderer는 preload를 통해서만 이 handler들에 접근한다.

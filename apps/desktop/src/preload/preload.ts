@@ -17,6 +17,10 @@ import type {
   KnownHostTrustInput,
   PortForwardDraft,
   PortForwardRuntimeEvent,
+  SessionShareEvent,
+  SessionShareInputToggleInput,
+  SessionShareSnapshotInput,
+  SessionShareStartInput,
   SftpDeleteInput,
   SftpListInput,
   SftpMkdirInput,
@@ -37,6 +41,7 @@ const portForwardListeners = new Set<
 const updateListeners = new Set<(event: UpdateEvent) => void>();
 const authListeners = new Set<(state: AuthState) => void>();
 const windowStateListeners = new Set<(state: DesktopWindowState) => void>();
+const sessionShareListeners = new Set<(event: SessionShareEvent) => void>();
 const e2eTerminalCaptureEnabled =
   process.env.DOLSSH_E2E_CAPTURE_TERMINAL === "1";
 const e2eTerminalDecoder = new TextDecoder();
@@ -128,6 +133,15 @@ ipcRenderer.on(
   ipcChannels.window.stateChanged,
   (_event, payload: DesktopWindowState) => {
     for (const listener of windowStateListeners) {
+      listener(payload);
+    }
+  },
+);
+
+ipcRenderer.on(
+  ipcChannels.sessionShares.event,
+  (_event, payload: SessionShareEvent) => {
+    for (const listener of sessionShareListeners) {
       listener(payload);
     }
   },
@@ -245,6 +259,22 @@ const api: DesktopApi = {
         if (currentListeners.size === 0) {
           streamListeners.delete(sessionId);
         }
+      };
+    },
+  },
+  sessionShares: {
+    start: (input: SessionShareStartInput) =>
+      ipcRenderer.invoke(ipcChannels.sessionShares.start, input),
+    updateSnapshot: (input: SessionShareSnapshotInput) =>
+      ipcRenderer.invoke(ipcChannels.sessionShares.updateSnapshot, input),
+    setInputEnabled: (input: SessionShareInputToggleInput) =>
+      ipcRenderer.invoke(ipcChannels.sessionShares.setInputEnabled, input),
+    stop: (sessionId: string) =>
+      ipcRenderer.invoke(ipcChannels.sessionShares.stop, sessionId),
+    onEvent: (listener: (event: SessionShareEvent) => void) => {
+      sessionShareListeners.add(listener);
+      return () => {
+        sessionShareListeners.delete(listener);
       };
     },
   },

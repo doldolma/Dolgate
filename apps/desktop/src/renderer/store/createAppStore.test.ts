@@ -180,6 +180,25 @@ function createMockApi(): DesktopApi {
       onEvent: vi.fn(),
       onData: vi.fn()
     },
+    sessionShares: {
+      start: vi.fn().mockResolvedValue({
+        status: 'active',
+        shareUrl: 'https://sync.example.com/share/share-1/token-1',
+        inputEnabled: false,
+        viewerCount: 0,
+        errorMessage: null
+      }),
+      updateSnapshot: vi.fn().mockResolvedValue(undefined),
+      setInputEnabled: vi.fn().mockImplementation(async ({ inputEnabled }) => ({
+        status: 'active',
+        shareUrl: 'https://sync.example.com/share/share-1/token-1',
+        inputEnabled,
+        viewerCount: 0,
+        errorMessage: null
+      })),
+      stop: vi.fn().mockResolvedValue(undefined),
+      onEvent: vi.fn().mockReturnValue(() => undefined)
+    },
     shell: {
       pickPrivateKey: vi.fn(),
       openExternal: vi.fn().mockResolvedValue(undefined)
