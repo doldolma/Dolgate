@@ -17,6 +17,7 @@ type awsCommandRuntime struct {
 	executablePath string
 	args           []string
 	env            []string
+	wrapperPath    string
 }
 
 func resolveAWSRuntime(payload protocol.AWSConnectPayload) (awsCommandRuntime, error) {
@@ -35,10 +36,15 @@ func resolveAWSRuntimeWithResolver(payload protocol.AWSConnectPayload, resolver 
 	}
 
 	pathValue := buildRuntimePathValue(filepath.Dir(awsPath), filepath.Dir(pluginPath))
+	wrapperPath, err := resolveConPTYWrapperPath()
+	if err != nil {
+		return awsCommandRuntime{}, err
+	}
 	return awsCommandRuntime{
 		executablePath: awsPath,
 		args:           buildAWSArgs(payload),
 		env:            mergeChildEnv(pathValue, runtimeEnvPathCaseInsensitive()),
+		wrapperPath:    wrapperPath,
 	}, nil
 }
 
@@ -48,9 +54,15 @@ func resolveProcessBackedFakeRuntime() (awsCommandRuntime, error) {
 		return awsCommandRuntime{}, fmt.Errorf("process-backed fake AWS session fixture path is not configured")
 	}
 
+	wrapperPath, err := resolveConPTYWrapperPath()
+	if err != nil {
+		return awsCommandRuntime{}, err
+	}
+
 	return awsCommandRuntime{
 		executablePath: fixturePath,
 		env:            os.Environ(),
+		wrapperPath:    wrapperPath,
 	}, nil
 }
 

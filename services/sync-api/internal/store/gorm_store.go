@@ -121,6 +121,7 @@ func Open(driver string, dsn string) (*GormStore, error) {
 		driver: driver,
 	}
 	if err := store.migrate(); err != nil {
+		_ = sqlDB.Close()
 		return nil, err
 	}
 	return store, nil
@@ -132,6 +133,18 @@ func OpenSQLite(dsn string) (*GormStore, error) {
 
 func OpenMySQL(dsn string) (*GormStore, error) {
 	return Open("mysql", dsn)
+}
+
+func (s *GormStore) Close() error {
+	if s == nil || s.db == nil {
+		return nil
+	}
+
+	sqlDB, err := s.db.DB()
+	if err != nil {
+		return err
+	}
+	return sqlDB.Close()
 }
 
 func openDialector(driver string, dsn string) (gorm.Dialector, error) {

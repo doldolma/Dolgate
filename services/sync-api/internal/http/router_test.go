@@ -32,6 +32,11 @@ func createTestRouterWithConfig(t *testing.T, config httpserver.RouterConfig) *g
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}
+	t.Cleanup(func() {
+		if err := sqliteStore.Close(); err != nil {
+			t.Fatalf("close sqlite: %v", err)
+		}
+	})
 	authService := auth.NewService(sqliteStore, "test-secret", 15*time.Minute, time.Hour)
 	router, err := httpserver.NewRouter(sqliteStore, authService, config)
 	if err != nil {

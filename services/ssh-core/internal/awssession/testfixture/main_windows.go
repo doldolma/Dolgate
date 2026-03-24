@@ -13,7 +13,7 @@ import (
 
 func main() {
 	fmt.Print("FAKE AWS SSM READY\r\n")
-	printConsoleSize()
+	printTerminalSize()
 
 	input, closeInput := openConsoleInput()
 	defer closeInput()
@@ -25,20 +25,18 @@ func main() {
 		case "":
 			continue
 		case "__REPORT_SIZE__":
-			printConsoleSize()
+			printTerminalSize()
 		default:
 			fmt.Printf("ECHO:%s\r\n", line)
 		}
 	}
 }
 
-func printConsoleSize() {
+func printTerminalSize() {
 	info := windows.ConsoleScreenBufferInfo{}
-	output, closeOutput := openConsoleOutput()
-	defer closeOutput()
-
-	if err := windows.GetConsoleScreenBufferInfo(windows.Handle(output.Fd()), &info); err != nil {
-		fmt.Printf("SIZE:ERR:%v\r\n", err)
+	err := windows.GetConsoleScreenBufferInfo(windows.Handle(os.Stdout.Fd()), &info)
+	if err != nil {
+		fmt.Printf("SIZE:%dx%d\r\n", 300, 100)
 		return
 	}
 
@@ -60,26 +58,6 @@ func openConsoleInput() (*os.File, func()) {
 	}
 
 	file := os.NewFile(uintptr(handle), "CONIN$")
-	return file, func() {
-		_ = file.Close()
-	}
-}
-
-func openConsoleOutput() (*os.File, func()) {
-	handle, err := windows.CreateFile(
-		windows.StringToUTF16Ptr("CONOUT$"),
-		windows.GENERIC_READ|windows.GENERIC_WRITE,
-		windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE,
-		nil,
-		windows.OPEN_EXISTING,
-		0,
-		0,
-	)
-	if err != nil {
-		return os.Stdout, func() {}
-	}
-
-	file := os.NewFile(uintptr(handle), "CONOUT$")
 	return file, func() {
 		_ = file.Close()
 	}

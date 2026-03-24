@@ -17,6 +17,11 @@ func newTestService(t *testing.T) (*Service, store.Store) {
 	if err != nil {
 		t.Fatalf("OpenSQLite() error = %v", err)
 	}
+	t.Cleanup(func() {
+		if err := backingStore.Close(); err != nil {
+			t.Fatalf("Close() error = %v", err)
+		}
+	})
 
 	return NewService(backingStore, "test-secret", 15*time.Minute, 14*24*time.Hour), backingStore
 }

@@ -11,6 +11,8 @@ import (
 )
 
 func TestResolveAWSRuntimeWithResolverBuildsRuntimeArgsAndEnv(t *testing.T) {
+	setTestConPTYWrapperPath(t)
+
 	t.Setenv("PATH", strings.Join([]string{
 		filepath.Join("existing", "bin"),
 		filepath.Join("second", "bin"),
@@ -70,6 +72,8 @@ func TestResolveAWSRuntimeWithResolverBuildsRuntimeArgsAndEnv(t *testing.T) {
 }
 
 func TestResolveAWSRuntimeWithResolverReturnsExplicitMissingToolErrors(t *testing.T) {
+	setTestConPTYWrapperPath(t)
+
 	payload := protocol.AWSConnectPayload{
 		ProfileName: "default",
 		Region:      "us-east-1",

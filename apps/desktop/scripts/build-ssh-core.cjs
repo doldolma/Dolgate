@@ -14,7 +14,11 @@ function run(command, args, options = {}) {
 }
 
 function buildGoBinary(serviceDir, outputPath, goos, goarch) {
-  run('go', ['build', '-trimpath', '-o', outputPath, './cmd/ssh-core'], {
+  buildGoCommand(serviceDir, outputPath, goos, goarch, './cmd/ssh-core');
+}
+
+function buildGoCommand(serviceDir, outputPath, goos, goarch, entrypoint) {
+  run('go', ['build', '-trimpath', '-o', outputPath, entrypoint], {
     cwd: serviceDir,
     env: {
       ...process.env,
@@ -47,8 +51,14 @@ function buildDarwinUniversal(serviceDir, releaseRoot, targetRoot) {
 }
 
 function buildWindowsX64(serviceDir, targetRoot) {
-  const outputPath = path.join(targetRoot, 'ssh-core.exe');
-  buildGoBinary(serviceDir, outputPath, 'windows', 'amd64');
+  buildGoBinary(serviceDir, path.join(targetRoot, 'ssh-core.exe'), 'windows', 'amd64');
+  buildGoCommand(
+    serviceDir,
+    path.join(targetRoot, 'aws-conpty-wrapper.exe'),
+    'windows',
+    'amd64',
+    './cmd/aws-conpty-wrapper'
+  );
 }
 
 function main() {

@@ -22,6 +22,11 @@ func main() {
 	if err != nil {
 		log.Fatalf("open store: %v", err)
 	}
+	defer func() {
+		if err := dbStore.Close(); err != nil {
+			log.Printf("close store: %v", err)
+		}
+	}()
 
 	authService := auth.NewService(
 		dbStore,
