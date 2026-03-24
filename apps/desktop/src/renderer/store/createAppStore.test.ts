@@ -168,6 +168,10 @@ function createMockApi(): DesktopApi {
         sessionCounter += 1;
         return { sessionId: `session-${sessionCounter}` };
       }),
+      connectLocal: vi.fn().mockImplementation(async () => {
+        sessionCounter += 1;
+        return { sessionId: `local-session-${sessionCounter}` };
+      }),
       write: vi.fn().mockResolvedValue(undefined),
       writeBinary: vi.fn().mockResolvedValue(undefined),
       resize: vi.fn().mockResolvedValue(undefined),
@@ -261,6 +265,7 @@ function createMockApi(): DesktopApi {
       start: vi.fn().mockResolvedValue({
         ruleId: 'forward-1',
         hostId: 'host-1',
+        transport: 'ssh',
         mode: 'local',
         bindAddress: '127.0.0.1',
         bindPort: 9000,
@@ -488,6 +493,52 @@ describe('createAppStore', () => {
 
     expect(store.getState().tabs[0]?.sessionId).toBe('session-1');
     expect(store.getState().tabs[0]?.status).toBe('connecting');
+  });
+
+  it('opens a local terminal tab immediately and replaces the pending id when connected', async () => {
+    const api = createMockApi();
+    const connectLocal = createDeferred<{ sessionId: string }>();
+    api.ssh.connectLocal = vi.fn().mockImplementation(() => connectLocal.promise);
+    const store = createAppStore(api);
+
+    await store.getState().bootstrap();
+
+    const openPromise = store.getState().openLocalTerminal(120, 32);
+    await flushMicrotasks();
+
+    expect(store.getState().tabs[0]?.source).toBe('local');
+    expect(store.getState().tabs[0]?.title).toBe('Terminal');
+    expect(store.getState().tabs[0]?.sessionId.startsWith('pending:')).toBe(true);
+    expect(store.getState().tabs[0]?.connectionProgress?.message).toBe('로컬 터미널을 시작하는 중입니다.');
+
+    connectLocal.resolve({ sessionId: 'local-session-1' });
+    await openPromise;
+
+    expect(store.getState().tabs[0]?.sessionId).toBe('local-session-1');
+    expect(store.getState().tabs[0]?.source).toBe('local');
+    expect(store.getState().activeWorkspaceTab).toBe('session:local-session-1');
+  });
+
+  it('retries a failed local session in the same tab context', async () => {
+    const api = createMockApi();
+    const store = createAppStore(api);
+
+    await store.getState().bootstrap();
+    await store.getState().openLocalTerminal(120, 32);
+
+    store.getState().handleCoreEvent({
+      type: 'error',
+      sessionId: 'local-session-1',
+      payload: {
+        message: 'failed to start shell'
+      }
+    });
+
+    await store.getState().retrySessionConnection('local-session-1');
+
+    expect(api.ssh.disconnect).toHaveBeenCalledWith('local-session-1');
+    expect(api.ssh.connectLocal).toHaveBeenCalledTimes(2);
+    expect(store.getState().tabs[0]?.source).toBe('local');
   });
 
   it('creates a new titled session each time the same host is connected', async () => {

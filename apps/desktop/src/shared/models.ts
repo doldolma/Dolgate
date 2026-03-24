@@ -33,6 +33,8 @@ export type SftpEndpointKind = 'local' | 'remote';
 export type FileEntryKind = 'folder' | 'file' | 'symlink' | 'unknown';
 export type ConflictResolution = 'overwrite' | 'skip' | 'keepBoth';
 export type PortForwardMode = 'local' | 'remote' | 'dynamic';
+export type PortForwardTransport = 'ssh' | 'aws-ssm';
+export type AwsSsmPortForwardTargetKind = 'instance-port' | 'remote-host';
 export type PortForwardStatus = 'stopped' | 'starting' | 'running' | 'error';
 export type KnownHostTrustStatus = 'trusted' | 'untrusted' | 'mismatch';
 export type ActivityLogLevel = 'info' | 'warn' | 'error';
@@ -418,36 +420,65 @@ export interface KeyboardInteractiveChallenge {
   prompts: KeyboardInteractivePrompt[];
 }
 
-// PortForwardRuleRecord는 사용자가 저장한 포워딩 규칙 자체를 표현한다.
-export interface PortForwardRuleRecord {
+interface PortForwardRuleBaseRecord {
   id: string;
   label: string;
   hostId: string;
-  mode: PortForwardMode;
+  transport: PortForwardTransport;
   bindAddress: string;
   bindPort: number;
-  targetHost?: string | null;
-  targetPort?: number | null;
   createdAt: string;
   updatedAt: string;
 }
 
-// PortForwardDraft는 생성/수정 폼에서 사용하는 입력 전용 모델이다.
-export interface PortForwardDraft {
-  label: string;
-  hostId: string;
+export interface SshPortForwardRuleRecord extends PortForwardRuleBaseRecord {
+  transport: 'ssh';
   mode: PortForwardMode;
-  bindAddress: string;
-  bindPort: number;
   targetHost?: string | null;
   targetPort?: number | null;
 }
+
+export interface AwsSsmPortForwardRuleRecord extends PortForwardRuleBaseRecord {
+  transport: 'aws-ssm';
+  targetKind: AwsSsmPortForwardTargetKind;
+  targetPort: number;
+  remoteHost?: string | null;
+}
+
+// PortForwardRuleRecord는 사용자가 저장한 포워딩 규칙 자체를 표현한다.
+export type PortForwardRuleRecord = SshPortForwardRuleRecord | AwsSsmPortForwardRuleRecord;
+
+interface PortForwardDraftBase {
+  label: string;
+  hostId: string;
+  transport: PortForwardTransport;
+  bindAddress: string;
+  bindPort: number;
+}
+
+export interface SshPortForwardDraft extends PortForwardDraftBase {
+  transport: 'ssh';
+  mode: PortForwardMode;
+  targetHost?: string | null;
+  targetPort?: number | null;
+}
+
+export interface AwsSsmPortForwardDraft extends PortForwardDraftBase {
+  transport: 'aws-ssm';
+  targetKind: AwsSsmPortForwardTargetKind;
+  targetPort: number;
+  remoteHost?: string | null;
+}
+
+// PortForwardDraft는 생성/수정 폼에서 사용하는 입력 전용 모델이다.
+export type PortForwardDraft = SshPortForwardDraft | AwsSsmPortForwardDraft;
 
 // PortForwardRuntimeRecord는 현재 메모리에서 살아 있는 실행 상태 스냅샷이다.
 export interface PortForwardRuntimeRecord {
   ruleId: string;
   hostId: string;
-  mode: PortForwardMode;
+  transport: PortForwardTransport;
+  mode?: PortForwardMode;
   bindAddress: string;
   bindPort: number;
   status: PortForwardStatus;
@@ -463,6 +494,22 @@ export interface PortForwardRuntimeEvent {
 export interface PortForwardListSnapshot {
   rules: PortForwardRuleRecord[];
   runtimes: PortForwardRuntimeRecord[];
+}
+
+export function isSshPortForwardRuleRecord(rule: PortForwardRuleRecord): rule is SshPortForwardRuleRecord {
+  return rule.transport === 'ssh';
+}
+
+export function isAwsSsmPortForwardRuleRecord(rule: PortForwardRuleRecord): rule is AwsSsmPortForwardRuleRecord {
+  return rule.transport === 'aws-ssm';
+}
+
+export function isSshPortForwardDraft(rule: PortForwardDraft): rule is SshPortForwardDraft {
+  return rule.transport === 'ssh';
+}
+
+export function isAwsSsmPortForwardDraft(rule: PortForwardDraft): rule is AwsSsmPortForwardDraft {
+  return rule.transport === 'aws-ssm';
 }
 
 // KnownHostRecord는 신뢰된 호스트 키 한 건을 나타낸다.
@@ -649,6 +696,7 @@ export type TerminalConnectionStage =
   | 'waiting-shell';
 
 export type TerminalConnectionBlockingKind = 'none' | 'dialog' | 'panel' | 'browser';
+export type TerminalSessionSource = 'host' | 'local';
 
 export interface TerminalConnectionProgress {
   stage: TerminalConnectionStage;
@@ -660,7 +708,8 @@ export interface TerminalConnectionProgress {
 export interface TerminalTab {
   id: string;
   sessionId: string;
-  hostId: string;
+  source: TerminalSessionSource;
+  hostId: string | null;
   title: string;
   status: 'pending' | 'connecting' | 'connected' | 'disconnecting' | 'closed' | 'error';
   errorMessage?: string;

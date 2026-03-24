@@ -806,7 +806,8 @@ function resolveTerminalAppearanceForSession(
   hosts: HostRecord[],
   tab: TerminalTab
 ): TerminalSessionViewProps['appearance'] {
-  const host = hosts.find((record) => record.id === tab.hostId);
+  const host =
+    tab.source === 'host' && tab.hostId ? hosts.find((record) => record.id === tab.hostId) : undefined;
   const themePreset = getTerminalThemePreset(host?.terminalThemeId ?? settings.globalTerminalThemeId);
   const fontOption = getTerminalFontOption(settings.terminalFontFamily);
   return {

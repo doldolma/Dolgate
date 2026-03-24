@@ -122,6 +122,7 @@ func (s *Service) Start(ruleID, requestID string, payload protocol.PortForwardSt
 		RequestID:  requestID,
 		EndpointID: ruleID,
 		Payload: protocol.PortForwardStartedPayload{
+			Transport:   "ssh",
 			Status:      "running",
 			Mode:        payload.Mode,
 			BindAddress: actualBindAddress,

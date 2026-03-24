@@ -831,6 +831,106 @@ input::placeholder {
 .home-toolbar__actions {
   display: flex;
   gap: 0.75rem;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.split-button {
+  position: relative;
+  display: inline-flex;
+  align-items: stretch;
+  min-width: 0;
+  gap: 0;
+  border-radius: 14px;
+  overflow: visible;
+}
+
+.split-button__main {
+  min-width: 7rem;
+  padding-inline: 1.05rem;
+  border-radius: 0;
+}
+
+.split-button__toggle {
+  width: 2.45rem;
+  min-width: 2.45rem;
+  padding: 0;
+  border-radius: 0;
+  display: inline-grid;
+  place-items: center;
+  position: relative;
+}
+
+.split-button__toggle::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0.72rem;
+  bottom: 0.72rem;
+  width: 1px;
+  background: color-mix(in srgb, var(--accent-contrast) 18%, transparent 82%);
+}
+
+.split-button__toggle:hover,
+.split-button__toggle:focus-visible,
+.split-button__main:hover,
+.split-button__main:focus-visible {
+  filter: brightness(1.03);
+}
+
+.split-button__chevron {
+  display: inline-grid;
+  place-items: center;
+  width: 0.98rem;
+  height: 0.72rem;
+  transform: none;
+  transition: transform 140ms ease;
+}
+
+.split-button__chevron svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.split-button__toggle[aria-expanded='true'] .split-button__chevron {
+  transform: rotate(180deg);
+}
+
+.split-button__chevron path {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.split-button__menu {
+  position: absolute;
+  top: calc(100% + 0.45rem);
+  right: 0;
+  z-index: 10;
+  min-width: 14rem;
+  padding: 0.45rem;
+  border-radius: 16px;
+  border: 1px solid var(--border);
+  background: var(--surface-strong);
+  box-shadow: 0 20px 60px rgba(18, 30, 44, 0.24);
+}
+
+.split-button__menu-item {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  padding: 0.78rem 0.85rem;
+  border-radius: 12px;
+  color: var(--text);
+  text-align: left;
+}
+
+.split-button__menu-item:hover,
+.split-button__menu-item:focus-visible {
+  background: color-mix(in srgb, var(--surface-muted) 92%, transparent 8%);
 }
 
 .host-browser__breadcrumbs,
@@ -885,6 +985,24 @@ input::placeholder {
   background: color-mix(in srgb, var(--surface) 88%, transparent 12%);
   color: var(--text);
   border: 1px solid var(--border);
+}
+
+.split-button > .split-button__main.primary-button {
+  min-width: 7.25rem;
+  padding: 0.9rem 1.15rem;
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}
+
+.split-button > .split-button__toggle.primary-button {
+  width: 2.45rem;
+  min-width: 2.45rem;
+  padding: 0;
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+  display: inline-grid;
+  place-items: center;
+  flex: 0 0 2.45rem;
 }
 
 .ghost-button {
@@ -2261,6 +2379,34 @@ input::placeholder {
   display: flex;
   flex-direction: column;
   gap: 1rem;
+}
+
+.operations-tabs {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.3rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--surface-muted) 86%, transparent 14%);
+  width: fit-content;
+}
+
+.operations-tab {
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-soft);
+  border-radius: 999px;
+  padding: 0.55rem 0.95rem;
+  font-size: 0.92rem;
+  font-weight: 700;
+}
+
+.operations-tab.active {
+  background: var(--surface);
+  color: var(--text);
+  border-color: var(--border);
+  box-shadow: var(--shadow);
 }
 
 .operations-panel__header {

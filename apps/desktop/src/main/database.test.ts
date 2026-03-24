@@ -9,6 +9,7 @@ async function loadRepositories(): Promise<{
   tempDir: string;
   HostRepository: DatabaseModule['HostRepository'];
   GroupRepository: DatabaseModule['GroupRepository'];
+  PortForwardRepository: DatabaseModule['PortForwardRepository'];
   SettingsRepository: DatabaseModule['SettingsRepository'];
 }> {
   const tempDir = mkdtempSync(path.join(os.tmpdir(), 'dolssh-desktop-db-'));
@@ -23,6 +24,7 @@ async function loadRepositories(): Promise<{
     tempDir,
     HostRepository: databaseModule.HostRepository,
     GroupRepository: databaseModule.GroupRepository,
+    PortForwardRepository: databaseModule.PortForwardRepository,
     SettingsRepository: databaseModule.SettingsRepository
   };
 }
@@ -226,5 +228,32 @@ describe('SettingsRepository', () => {
     expect(reset.terminalMinimumContrastRatio).toBe(1);
     expect(reset.terminalAltIsMeta).toBe(false);
     expect(reset.terminalWebglEnabled).toBe(true);
+  });
+});
+
+describe('PortForwardRepository', () => {
+  it('stores AWS SSM port forward rules with a fixed localhost bind address', async () => {
+    const { PortForwardRepository } = await loadRepositories();
+    const forwards = new PortForwardRepository();
+
+    const record = forwards.create({
+      transport: 'aws-ssm',
+      label: 'RDS via bastion',
+      hostId: 'aws-host-1',
+      bindAddress: '0.0.0.0',
+      bindPort: 15432,
+      targetKind: 'remote-host',
+      targetPort: 5432,
+      remoteHost: 'db.internal'
+    });
+
+    expect(record).toMatchObject({
+      transport: 'aws-ssm',
+      bindAddress: '127.0.0.1',
+      bindPort: 15432,
+      targetKind: 'remote-host',
+      targetPort: 5432,
+      remoteHost: 'db.internal'
+    });
   });
 });

@@ -14,11 +14,13 @@ import {
 import path from 'node:path';
 import type {
   ActivityLogRecord,
+  AwsSsmPortForwardRuleRecord,
   AppTheme,
   GroupRecord,
   HostRecord,
   KnownHostRecord,
   PortForwardRuleRecord,
+  SshPortForwardRuleRecord,
   SecretMetadataRecord,
   TerminalFontFamilyId,
   TerminalThemeId
@@ -216,6 +218,62 @@ function resolveDefaultTerminalWebglEnabled(_platform: NodeJS.Platform = process
 
 function normalizeTerminalWebglEnabled(value: unknown): boolean {
   return typeof value === 'boolean' ? value : resolveDefaultTerminalWebglEnabled();
+}
+
+function normalizePortForwardRule(value: unknown): PortForwardRuleRecord | null {
+  if (
+    !isObject(value) ||
+    typeof value.id !== 'string' ||
+    typeof value.label !== 'string' ||
+    typeof value.hostId !== 'string' ||
+    typeof value.bindAddress !== 'string' ||
+    typeof value.bindPort !== 'number' ||
+    !Number.isFinite(value.bindPort) ||
+    typeof value.createdAt !== 'string' ||
+    typeof value.updatedAt !== 'string'
+  ) {
+    return null;
+  }
+
+  const transport = value.transport === 'aws-ssm' ? 'aws-ssm' : 'ssh';
+  if (transport === 'aws-ssm') {
+    const targetKind = value.targetKind === 'remote-host' ? 'remote-host' : 'instance-port';
+    if (typeof value.targetPort !== 'number' || !Number.isFinite(value.targetPort)) {
+      return null;
+    }
+
+    const record: AwsSsmPortForwardRuleRecord = {
+      id: value.id,
+      label: value.label.trim(),
+      hostId: value.hostId,
+      transport,
+      bindAddress: value.bindAddress.trim() || '127.0.0.1',
+      bindPort: Math.round(value.bindPort),
+      targetKind,
+      targetPort: Math.round(value.targetPort),
+      remoteHost: targetKind === 'remote-host' && typeof value.remoteHost === 'string' ? value.remoteHost.trim() : null,
+      createdAt: value.createdAt,
+      updatedAt: value.updatedAt
+    };
+    return record;
+  }
+
+  const rawMode = value.mode;
+  const mode = rawMode === 'remote' || rawMode === 'dynamic' ? rawMode : 'local';
+  const record: SshPortForwardRuleRecord = {
+    id: value.id,
+    label: value.label.trim(),
+    hostId: value.hostId,
+    transport,
+    mode,
+    bindAddress: value.bindAddress.trim(),
+    bindPort: Math.round(value.bindPort),
+    targetHost: mode === 'dynamic' ? null : typeof value.targetHost === 'string' ? value.targetHost.trim() : null,
+    targetPort: mode === 'dynamic' ? null : typeof value.targetPort === 'number' && Number.isFinite(value.targetPort) ? Math.round(value.targetPort) : null,
+    createdAt: value.createdAt,
+    updatedAt: value.updatedAt
+  };
+  return record;
 }
 
 function createDefaultStateFile(): DesktopStateFile {
@@ -436,7 +494,11 @@ function normalizeStateFile(value: unknown): DesktopStateFile {
       groups: Array.isArray(data.groups) ? (data.groups as GroupRecord[]) : [],
       hosts: Array.isArray(data.hosts) ? data.hosts.map(normalizeHostRecord).filter((entry): entry is HostRecord => entry !== null) : [],
       knownHosts: Array.isArray(data.knownHosts) ? (data.knownHosts as KnownHostRecord[]) : [],
-      portForwards: Array.isArray(data.portForwards) ? (data.portForwards as PortForwardRuleRecord[]) : [],
+      portForwards: Array.isArray(data.portForwards)
+        ? data.portForwards
+            .map(normalizePortForwardRule)
+            .filter((entry): entry is PortForwardRuleRecord => entry !== null)
+        : [],
       secretMetadata: Array.isArray(data.secretMetadata) ? (data.secretMetadata as SecretMetadataRecord[]) : [],
       syncOutbox: Array.isArray(data.syncOutbox) ? (data.syncOutbox as SyncDeletionRecord[]) : []
     },

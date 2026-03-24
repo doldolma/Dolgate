@@ -293,4 +293,62 @@ describe("CoreManager AWS SSM sessions", () => {
     manager.resize(sessionId, 200, 60);
     expect(fakeProcess.writes).toHaveLength(2);
   });
+
+  it("uses dedicated SSM port forward commands for AWS forwarding runtimes", async () => {
+    const fakeProcess = createFakeChildProcess();
+    spawnMock.mockReturnValue(fakeProcess.child);
+
+    const manager = new CoreManager();
+
+    const startPromise = manager.startSsmPortForward({
+      ruleId: "rule-ssm-1",
+      hostId: "aws-host-1",
+      profileName: "default",
+      region: "ap-northeast-2",
+      instanceId: "i-ssm",
+      bindAddress: "127.0.0.1",
+      bindPort: 15432,
+      targetKind: "remote-host",
+      targetPort: 5432,
+      remoteHost: "db.internal",
+    });
+
+    await Promise.resolve();
+
+    const startRequest = decodeControlFrame(fakeProcess.writes[0]);
+    expect(startRequest.type).toBe("ssmPortForwardStart");
+    expect(startRequest.endpointId).toBe("rule-ssm-1");
+
+    fakeProcess.emitControl({
+      type: "portForwardStarted",
+      requestId: startRequest.id,
+      endpointId: "rule-ssm-1",
+      payload: {
+        transport: "aws-ssm",
+        mode: "local",
+        bindAddress: "127.0.0.1",
+        bindPort: 15432,
+        status: "running",
+      },
+    });
+
+    await startPromise;
+    const stopPromise = manager.stopPortForward("rule-ssm-1");
+    await Promise.resolve();
+
+    const stopRequest = decodeControlFrame(fakeProcess.writes[1]);
+    expect(stopRequest.type).toBe("ssmPortForwardStop");
+    expect(stopRequest.endpointId).toBe("rule-ssm-1");
+
+    fakeProcess.emitControl({
+      type: "portForwardStopped",
+      requestId: stopRequest.id,
+      endpointId: "rule-ssm-1",
+      payload: {
+        message: "stopped",
+      },
+    });
+
+    await stopPromise;
+  });
 });

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import Fuse from 'fuse.js';
 import {
@@ -30,6 +30,12 @@ export {
 
 export function getHostBrowserCardClassName(isSelected: boolean, isTagsExpanded: boolean): string {
   return ['host-browser-card', isSelected ? 'active' : null, isTagsExpanded ? 'host-browser-card--expanded' : null].filter(Boolean).join(' ');
+}
+
+export const HOST_BROWSER_IMPORT_MENU_LABELS = ['Import from AWS', 'Import from Termius', 'Import from Warpgate'] as const;
+
+export function getHostBrowserEmptyCalloutMessage(hostCount: number, searchQuery: string): string {
+  return hostCount === 0 ? 'New Host 또는 Import 메뉴를 눌러 첫 번째 연결 대상을 추가해보세요.' : searchQuery ? '검색어를 지우거나 다른 호스트명으로 다시 찾아보세요.' : 'New Host를 눌러 이 위치에 호스트를 추가하거나, 다른 그룹으로 이동해 장치를 확인해보세요.';
 }
 
 interface GroupDeleteTarget {
@@ -64,6 +70,7 @@ interface HostBrowserProps {
   errorMessage?: string | null;
   statusMessage?: string | null;
   onSearchChange: (query: string) => void;
+  onOpenLocalTerminal: () => void;
   onCreateHost: () => void;
   onOpenAwsImport: () => void;
   onOpenTermiusImport: () => void;
@@ -87,6 +94,7 @@ export function HostBrowser({
   errorMessage = null,
   statusMessage = null,
   onSearchChange,
+  onOpenLocalTerminal,
   onCreateHost,
   onOpenAwsImport,
   onOpenTermiusImport,
@@ -110,6 +118,8 @@ export function HostBrowser({
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const [dragTargetGroupPath, setDragTargetGroupPath] = useState<string | null>(null);
   const [expandedHostTags, setExpandedHostTags] = useState<string[]>([]);
+  const [isImportMenuOpen, setIsImportMenuOpen] = useState(false);
+  const importMenuRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     setSelectedGroupPath(null);
@@ -209,6 +219,38 @@ export function HostBrowser({
     setExpandedHostTags((current) => current.filter((hostId) => hosts.some((host) => host.id === hostId && (host.tags?.length ?? 0) > 0)));
   }, [hosts]);
 
+  useEffect(() => {
+    if (!isImportMenuOpen) {
+      return;
+    }
+
+    const handlePointerDown = (event: MouseEvent) => {
+      if (!importMenuRef.current?.contains(event.target as Node)) {
+        setIsImportMenuOpen(false);
+      }
+    };
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setIsImportMenuOpen(false);
+      }
+    };
+
+    const handleResize = () => {
+      setIsImportMenuOpen(false);
+    };
+
+    window.addEventListener('mousedown', handlePointerDown);
+    window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('resize', handleResize);
+
+    return () => {
+      window.removeEventListener('mousedown', handlePointerDown);
+      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('resize', handleResize);
+    };
+  }, [isImportMenuOpen]);
+
   return (
     <div className="host-browser">
       <div className="home-toolbar">
@@ -222,19 +264,21 @@ export function HostBrowser({
           />
         </div>
         <div className="home-toolbar__actions">
-          <button type="button" className="secondary-button" onClick={onOpenAwsImport}>
-            Import from AWS
-          </button>
-          <button type="button" className="secondary-button" onClick={onOpenTermiusImport}>
-            Import from Termius
-          </button>
-          <button type="button" className="secondary-button" onClick={onOpenWarpgateImport}>
-            Import from Warpgate
+          <button
+            type="button"
+            className="secondary-button"
+            onClick={() => {
+              setIsImportMenuOpen(false);
+              onOpenLocalTerminal();
+            }}
+          >
+            TERMINAL
           </button>
           <button
             type="button"
             className="secondary-button"
             onClick={() => {
+              setIsImportMenuOpen(false);
               setIsGroupModalOpen(true);
               setNewGroupName('');
               setGroupError(null);
@@ -242,9 +286,62 @@ export function HostBrowser({
           >
             New Group
           </button>
-          <button type="button" className="primary-button" onClick={onCreateHost}>
-            New Host
-          </button>
+          <div className="split-button" ref={importMenuRef}>
+            <button
+              type="button"
+              className="primary-button split-button__main"
+              onClick={() => {
+                setIsImportMenuOpen(false);
+                onCreateHost();
+              }}
+            >
+              New Host
+            </button>
+            <button
+              type="button"
+              className="primary-button split-button__toggle"
+              aria-label="Open import menu"
+              aria-expanded={isImportMenuOpen}
+              aria-haspopup="menu"
+              onClick={() => {
+                setIsImportMenuOpen((current) => !current);
+              }}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter' || event.key === ' ') {
+                  event.preventDefault();
+                  setIsImportMenuOpen((current) => !current);
+                }
+              }}
+            >
+              <span className="split-button__chevron" aria-hidden="true">
+                <svg viewBox="0 0 12 8" focusable="false">
+                  <path d="M1 1.25 6 6.25 11 1.25" />
+                </svg>
+              </span>
+            </button>
+            {isImportMenuOpen ? (
+              <div className="split-button__menu" role="menu" aria-label="Import host menu">
+                {[
+                  { label: HOST_BROWSER_IMPORT_MENU_LABELS[0], onSelect: onOpenAwsImport },
+                  { label: HOST_BROWSER_IMPORT_MENU_LABELS[1], onSelect: onOpenTermiusImport },
+                  { label: HOST_BROWSER_IMPORT_MENU_LABELS[2], onSelect: onOpenWarpgateImport }
+                ].map((item) => (
+                  <button
+                    key={item.label}
+                    type="button"
+                    className="split-button__menu-item"
+                    role="menuitem"
+                    onClick={() => {
+                      setIsImportMenuOpen(false);
+                      item.onSelect();
+                    }}
+                  >
+                    {item.label}
+                  </button>
+                ))}
+              </div>
+            ) : null}
+          </div>
         </div>
       </div>
 
@@ -353,13 +450,7 @@ export function HostBrowser({
           {visibleHosts.length === 0 ? (
             <div className="empty-callout">
               <strong>{emptyMessage}</strong>
-              <p>
-                {hosts.length === 0
-                  ? 'New Host 또는 Import from AWS/Warpgate를 눌러 첫 번째 연결 대상을 추가해보세요.'
-                  : searchQuery
-                    ? '검색어를 지우거나 다른 호스트명으로 다시 찾아보세요.'
-                    : 'New Host를 눌러 이 위치에 호스트를 추가하거나, 다른 그룹으로 이동해 장치를 확인해보세요.'}
-              </p>
+              <p>{getHostBrowserEmptyCalloutMessage(hosts.length, searchQuery)}</p>
             </div>
           ) : (
             visibleHosts.map((host) => {

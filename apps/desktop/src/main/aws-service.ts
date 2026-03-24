@@ -382,6 +382,54 @@ export class AwsService {
     }
   }
 
+  async isManagedInstance(
+    profileName: string,
+    region: string,
+    instanceId: string,
+  ): Promise<boolean> {
+    if (isE2EFakeAwsSessionEnabled()) {
+      return true;
+    }
+
+    await this.ensureAwsCliAvailable();
+    await this.ensureSessionManagerPluginAvailable();
+
+    const result = await this.runResolvedCommand("aws", [
+      "ssm",
+      "describe-instance-information",
+      "--profile",
+      profileName,
+      "--region",
+      region,
+      "--filters",
+      `Key=InstanceIds,Values=${instanceId}`,
+      "--output",
+      "json",
+    ]);
+    if (result.exitCode !== 0) {
+      throw normalizeAwsCliError(
+        result.stderr,
+        "SSM managed instance 상태를 확인하지 못했습니다.",
+      );
+    }
+
+    const payload = parseJson<{
+      InstanceInformationList?: Array<{
+        InstanceId?: string;
+        PingStatus?: string;
+      }>;
+    }>(
+      result.stdout,
+      "SSM managed instance 응답을 해석하지 못했습니다.",
+    );
+
+    return (payload.InstanceInformationList ?? []).some(
+      (item) =>
+        item.InstanceId?.trim() === instanceId &&
+        (item.PingStatus?.trim() ?? "") !== "Inactive",
+    );
+  }
+
   async listRegions(profileName: string): Promise<string[]> {
     await this.ensureAwsCliAvailable();
     const result = await this.runResolvedCommand("aws", [

@@ -10,10 +10,12 @@ import (
 
 	"dolssh/services/ssh-core/internal/awssession"
 	"dolssh/services/ssh-core/internal/forwarding"
+	"dolssh/services/ssh-core/internal/localsession"
 	"dolssh/services/ssh-core/internal/protocol"
 	coresftp "dolssh/services/ssh-core/internal/sftp"
 	"dolssh/services/ssh-core/internal/sshconn"
 	"dolssh/services/ssh-core/internal/sshsession"
+	"dolssh/services/ssh-core/internal/ssmforward"
 )
 
 type eventWriter struct {
@@ -42,10 +44,13 @@ func main() {
 	writer := newEventWriter()
 	manager := sshsession.NewManager(writer.emit, writer.emitStream)
 	awsManager := awssession.NewManager(writer.emit, writer.emitStream)
+	localManager := localsession.NewManager(writer.emit, writer.emitStream)
 	sftpService := coresftp.New(writer.emit)
 	forwardingService := forwarding.New(writer.emit)
+	ssmForwardingService := ssmforward.New(writer.emit)
 	defer sftpService.Shutdown()
 	defer forwardingService.Shutdown()
+	defer ssmForwardingService.Shutdown()
 
 	// 코어 기동 직후 ready 이벤트를 보내 Electron이 상태를 파악할 수 있게 한다.
 	writer.emit(protocol.Event{
@@ -72,7 +77,7 @@ func main() {
 			return
 		}
 
-		if err := dispatchFrame(manager, awsManager, sftpService, forwardingService, writer, frame); err != nil {
+		if err := dispatchFrame(manager, awsManager, localManager, sftpService, forwardingService, ssmForwardingService, writer, frame); err != nil {
 			// 명령 단위 오류는 requestId/sessionId를 포함해 상위 레이어가 추적하기 쉽게 한다.
 			eventType := protocol.EventError
 			if isSFTPCommand(frame) {
@@ -97,8 +102,10 @@ func main() {
 func dispatchFrame(
 	manager *sshsession.Manager,
 	awsManager *awssession.Manager,
+	localManager *localsession.Manager,
 	sftpService *coresftp.Service,
 	forwardingService *forwarding.Service,
+	ssmForwardingService *ssmforward.Service,
 	writer *eventWriter,
 	frame protocol.Frame,
 ) error {
@@ -113,6 +120,9 @@ func dispatchFrame(
 		if awsManager.HasSession(metadata.SessionID) {
 			return awsManager.WriteBytes(metadata.SessionID, frame.Payload)
 		}
+		if localManager.HasSession(metadata.SessionID) {
+			return localManager.WriteBytes(metadata.SessionID, frame.Payload)
+		}
 		return manager.WriteBytes(metadata.SessionID, frame.Payload)
 	}
 
@@ -120,14 +130,16 @@ func dispatchFrame(
 	if err := protocol.DecodeControlFrame(frame, &request); err != nil {
 		return fmt.Errorf("invalid control frame: %w", err)
 	}
-	return dispatch(manager, awsManager, sftpService, forwardingService, writer, request)
+	return dispatch(manager, awsManager, localManager, sftpService, forwardingService, ssmForwardingService, writer, request)
 }
 
 func dispatch(
 	manager *sshsession.Manager,
 	awsManager *awssession.Manager,
+	localManager *localsession.Manager,
 	sftpService *coresftp.Service,
 	forwardingService *forwarding.Service,
+	ssmForwardingService *ssmforward.Service,
 	writer *eventWriter,
 	request protocol.Request,
 ) error {
@@ -179,6 +191,24 @@ func dispatch(
 			}
 		}(request.ID, request.SessionID, payload)
 		return nil
+	case protocol.CommandLocalConnect:
+		var payload protocol.LocalConnectPayload
+		if err := json.Unmarshal(request.Payload, &payload); err != nil {
+			return err
+		}
+		go func(requestID, sessionID string, payload protocol.LocalConnectPayload) {
+			if err := localManager.Connect(sessionID, requestID, payload); err != nil {
+				writer.emit(protocol.Event{
+					Type:      protocol.EventError,
+					RequestID: requestID,
+					SessionID: sessionID,
+					Payload: protocol.ErrorPayload{
+						Message: err.Error(),
+					},
+				})
+			}
+		}(request.ID, request.SessionID, payload)
+		return nil
 	case protocol.CommandProbeHostKey:
 		var payload protocol.HostKeyProbePayload
 		if err := json.Unmarshal(request.Payload, &payload); err != nil {
@@ -206,10 +236,16 @@ func dispatch(
 		if awsManager.HasSession(request.SessionID) {
 			return awsManager.Resize(request.SessionID, payload.Cols, payload.Rows)
 		}
+		if localManager.HasSession(request.SessionID) {
+			return localManager.Resize(request.SessionID, payload.Cols, payload.Rows)
+		}
 		return manager.Resize(request.SessionID, payload.Cols, payload.Rows)
 	case protocol.CommandDisconnect:
 		if awsManager.HasSession(request.SessionID) {
 			return awsManager.Disconnect(request.SessionID)
+		}
+		if localManager.HasSession(request.SessionID) {
+			return localManager.Disconnect(request.SessionID)
 		}
 		return manager.Disconnect(request.SessionID)
 	case protocol.CommandKeyboardInteractiveRespond:
@@ -224,8 +260,16 @@ func dispatch(
 			return err
 		}
 		return forwardingService.Start(request.EndpointID, request.ID, payload)
+	case protocol.CommandSSMPortForwardStart:
+		var payload protocol.SSMPortForwardStartPayload
+		if err := json.Unmarshal(request.Payload, &payload); err != nil {
+			return err
+		}
+		return ssmForwardingService.Start(request.EndpointID, request.ID, payload)
 	case protocol.CommandPortForwardStop:
 		return forwardingService.Stop(request.EndpointID, request.ID)
+	case protocol.CommandSSMPortForwardStop:
+		return ssmForwardingService.Stop(request.EndpointID, request.ID)
 	case protocol.CommandSFTPConnect:
 		var payload protocol.SFTPConnectPayload
 		if err := json.Unmarshal(request.Payload, &payload); err != nil {
@@ -355,7 +399,7 @@ func isPortForwardCommand(frame protocol.Frame) bool {
 		return false
 	}
 	switch request.Type {
-	case protocol.CommandPortForwardStart, protocol.CommandPortForwardStop:
+	case protocol.CommandPortForwardStart, protocol.CommandSSMPortForwardStart, protocol.CommandPortForwardStop, protocol.CommandSSMPortForwardStop:
 		return true
 	default:
 		return false

@@ -724,18 +724,7 @@ export class PortForwardRepository {
 
   create(draft: PortForwardDraft): PortForwardRuleRecord {
     const timestamp = nowIso();
-    const record: PortForwardRuleRecord = {
-      id: randomUUID(),
-      label: draft.label.trim(),
-      hostId: draft.hostId,
-      mode: draft.mode,
-      bindAddress: draft.bindAddress.trim(),
-      bindPort: draft.bindPort,
-      targetHost: draft.mode === 'dynamic' ? null : draft.targetHost?.trim() ?? null,
-      targetPort: draft.mode === 'dynamic' ? null : draft.targetPort ?? null,
-      createdAt: timestamp,
-      updatedAt: timestamp
-    };
+    const record = this.toRecord(randomUUID(), draft, timestamp, timestamp);
     stateStorage.updateState((state) => {
       state.data.portForwards.push(record);
     });
@@ -748,17 +737,7 @@ export class PortForwardRepository {
       throw new Error('Port forward rule not found');
     }
 
-    const record: PortForwardRuleRecord = {
-      ...current,
-      label: draft.label.trim(),
-      hostId: draft.hostId,
-      mode: draft.mode,
-      bindAddress: draft.bindAddress.trim(),
-      bindPort: draft.bindPort,
-      targetHost: draft.mode === 'dynamic' ? null : draft.targetHost?.trim() ?? null,
-      targetPort: draft.mode === 'dynamic' ? null : draft.targetPort ?? null,
-      updatedAt: nowIso()
-    };
+    const record = this.toRecord(id, draft, current.createdAt, nowIso());
 
     stateStorage.updateState((state) => {
       state.data.portForwards = state.data.portForwards.map((entry) => (entry.id === id ? record : entry));
@@ -776,6 +755,39 @@ export class PortForwardRepository {
     stateStorage.updateState((state) => {
       state.data.portForwards = records.map((record) => ({ ...record }));
     });
+  }
+
+  private toRecord(id: string, draft: PortForwardDraft, createdAt: string, updatedAt: string): PortForwardRuleRecord {
+    const label = draft.label.trim();
+    if (draft.transport === 'aws-ssm') {
+      return {
+        id,
+        label,
+        hostId: draft.hostId,
+        transport: 'aws-ssm',
+        bindAddress: '127.0.0.1',
+        bindPort: draft.bindPort,
+        targetKind: draft.targetKind,
+        targetPort: draft.targetPort,
+        remoteHost: draft.targetKind === 'remote-host' ? draft.remoteHost?.trim() ?? null : null,
+        createdAt,
+        updatedAt
+      };
+    }
+
+    return {
+      id,
+      label,
+      hostId: draft.hostId,
+      transport: 'ssh',
+      mode: draft.mode,
+      bindAddress: draft.bindAddress.trim(),
+      bindPort: draft.bindPort,
+      targetHost: draft.mode === 'dynamic' ? null : draft.targetHost?.trim() ?? null,
+      targetPort: draft.mode === 'dynamic' ? null : draft.targetPort ?? null,
+      createdAt,
+      updatedAt
+    };
   }
 }
 

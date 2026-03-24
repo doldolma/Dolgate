@@ -155,7 +155,8 @@ export interface PendingInteractiveAuth {
 
 interface PendingConnectionAttempt {
   sessionId: string;
-  hostId: string;
+  source: 'host' | 'local';
+  hostId: string | null;
   title: string;
   latestCols: number;
   latestRows: number;
@@ -214,6 +215,7 @@ export interface AppState {
   saveHost: (hostId: string | null, draft: HostDraft, secrets?: HostSecretInput) => Promise<void>;
   moveHostToGroup: (hostId: string, groupPath: string | null) => Promise<void>;
   removeHost: (hostId: string) => Promise<void>;
+  openLocalTerminal: (cols: number, rows: number) => Promise<void>;
   connectHost: (hostId: string, cols: number, rows: number, secrets?: HostSecretInput) => Promise<void>;
   retrySessionConnection: (sessionId: string, secrets?: HostSecretInput) => Promise<void>;
   disconnectTab: (sessionId: string) => Promise<void>;
@@ -540,8 +542,18 @@ function updateWorkspaceSplitRatio(node: WorkspaceLayoutNode, splitId: string, r
   };
 }
 
-function buildSessionTitle(label: string, hostId: string, tabs: TerminalTab[]): string {
-  const existingTitles = new Set(tabs.filter((tab) => tab.hostId === hostId).map((tab) => tab.title));
+function buildSessionTitle(
+  label: string,
+  scope: { source: 'host'; hostId: string } | { source: 'local' },
+  tabs: TerminalTab[]
+): string {
+  const existingTitles = new Set(
+    tabs
+      .filter((tab) =>
+        scope.source === 'local' ? tab.source === 'local' : tab.source === 'host' && tab.hostId === scope.hostId
+      )
+      .map((tab) => tab.title)
+  );
   if (!existingTitles.has(label)) {
     return label;
   }
@@ -578,13 +590,15 @@ function createConnectionProgress(
 
 function createPendingSessionTab(input: {
   sessionId: string;
-  hostId: string;
+  source: 'host' | 'local';
+  hostId: string | null;
   title: string;
   progress: TerminalConnectionProgress;
 }): TerminalTab {
   return {
     id: input.sessionId,
     sessionId: input.sessionId,
+    source: input.source,
     hostId: input.hostId,
     title: input.title,
     status: 'pending',
@@ -599,7 +613,7 @@ function findPendingConnectionAttempt(state: AppState, sessionId: string): Pendi
 }
 
 function findPendingConnectionAttemptByHost(state: AppState, hostId: string): PendingConnectionAttempt | null {
-  return state.pendingConnectionAttempts.find((attempt) => attempt.hostId === hostId) ?? null;
+  return state.pendingConnectionAttempts.find((attempt) => attempt.source === 'host' && attempt.hostId === hostId) ?? null;
 }
 
 function replaceSessionIdInLayout(node: WorkspaceLayoutNode, previousSessionId: string, nextSessionId: string): WorkspaceLayoutNode {
@@ -869,8 +883,16 @@ function resolveConnectingProgress(host: HostRecord): TerminalConnectionProgress
   return createConnectionProgress('connecting', `${host.label} SSH 세션을 연결하는 중입니다.`);
 }
 
+function resolveLocalStartingProgress(): TerminalConnectionProgress {
+  return createConnectionProgress('connecting', '로컬 터미널을 시작하는 중입니다.');
+}
+
 function resolveWaitingShellProgress(host: HostRecord): TerminalConnectionProgress {
   return createConnectionProgress('waiting-shell', `${host.label} 원격 셸이 첫 출력을 보내는 중입니다.`);
+}
+
+function resolveLocalWaitingShellProgress(): TerminalConnectionProgress {
+  return createConnectionProgress('waiting-shell', '셸이 준비되는 중입니다.');
 }
 
 function resolveCredentialRetryProgress(
@@ -1096,9 +1118,10 @@ export function createAppStore(api: DesktopApi) {
   ): string => {
     const sessionId = existingSessionId ?? createPendingSessionId();
     const existingTab = existingSessionId ? get().tabs.find((tab) => tab.sessionId === existingSessionId) ?? null : null;
-    const title = existingTab?.title ?? buildSessionTitle(host.label, host.id, get().tabs);
+    const title = existingTab?.title ?? buildSessionTitle(host.label, { source: 'host', hostId: host.id }, get().tabs);
     const tab = createPendingSessionTab({
       sessionId,
+      source: 'host',
       hostId: host.id,
       title,
       progress
@@ -1109,7 +1132,61 @@ export function createAppStore(api: DesktopApi) {
         ...state.pendingConnectionAttempts.filter((attempt) => attempt.sessionId !== sessionId),
         {
           sessionId,
+          source: 'host' as const,
           hostId: host.id,
+          title,
+          latestCols: cols,
+          latestRows: rows
+        }
+      ];
+
+      if (existingTab) {
+        return {
+          tabs: state.tabs.map((item) => (item.sessionId === sessionId ? tab : item)),
+          pendingConnectionAttempts: nextAttempts,
+          ...activateSessionContextInState(state, sessionId)
+        };
+      }
+
+      return {
+        tabs: [...state.tabs.filter((item) => item.sessionId !== sessionId), tab],
+        tabStrip: [...state.tabStrip.filter((item) => !(item.kind === 'session' && item.sessionId === sessionId)), { kind: 'session', sessionId }],
+        activeWorkspaceTab: asSessionTabId(sessionId),
+        homeSection: 'hosts',
+        hostDrawer: { mode: 'closed' },
+        pendingConnectionAttempts: nextAttempts
+      };
+    });
+
+    return sessionId;
+  };
+
+  const createPendingSessionTabForLocal = (
+    set: (next: AppState | Partial<AppState> | ((state: AppState) => AppState | Partial<AppState>)) => void,
+    get: () => AppState,
+    cols: number,
+    rows: number,
+    progress: TerminalConnectionProgress,
+    existingSessionId?: string
+  ): string => {
+    const sessionId = existingSessionId ?? createPendingSessionId();
+    const existingTab = existingSessionId ? get().tabs.find((tab) => tab.sessionId === existingSessionId) ?? null : null;
+    const title = existingTab?.title ?? buildSessionTitle('Terminal', { source: 'local' }, get().tabs);
+    const tab = createPendingSessionTab({
+      sessionId,
+      source: 'local',
+      hostId: null,
+      title,
+      progress
+    });
+
+    set((state) => {
+      const nextAttempts = [
+        ...state.pendingConnectionAttempts.filter((attempt) => attempt.sessionId !== sessionId),
+        {
+          sessionId,
+          source: 'local' as const,
+          hostId: null,
           title,
           latestCols: cols,
           latestRows: rows
@@ -1187,6 +1264,53 @@ export function createAppStore(api: DesktopApi) {
     }
   };
 
+  const startPendingLocalSessionConnect = async (
+    set: (next: AppState | Partial<AppState> | ((state: AppState) => AppState | Partial<AppState>)) => void,
+    get: () => AppState,
+    sessionId: string
+  ) => {
+    const state = get();
+    const attempt = findPendingConnectionAttempt(state, sessionId);
+    if (!attempt || attempt.source !== 'local') {
+      return;
+    }
+
+    const currentProgressStage = state.tabs.find((tab) => tab.sessionId === sessionId)?.connectionProgress?.stage;
+    if (currentProgressStage !== 'retrying-session') {
+      updateSessionProgress(set, sessionId, resolveLocalStartingProgress());
+    }
+
+    try {
+      const connection = await api.ssh.connectLocal({
+        title: attempt.title,
+        cols: attempt.latestCols,
+        rows: attempt.latestRows
+      });
+      const latestAttempt = findPendingConnectionAttempt(get(), sessionId);
+      if (!latestAttempt) {
+        await api.ssh.disconnect(connection.sessionId).catch(() => undefined);
+        return;
+      }
+
+      set((currentState) => ({
+        ...replaceSessionReferencesInState(currentState, sessionId, connection.sessionId, (tab) => ({
+          ...tab,
+          source: 'local',
+          hostId: null,
+          status: 'connecting',
+          errorMessage: undefined,
+          connectionProgress: resolveLocalStartingProgress(),
+          hasReceivedOutput: false,
+          lastEventAt: new Date().toISOString()
+        })),
+        pendingConnectionAttempts: currentState.pendingConnectionAttempts.filter((attemptItem) => attemptItem.sessionId !== sessionId)
+      }));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '로컬 터미널을 시작하지 못했습니다.';
+      markSessionError(set, sessionId, message);
+    }
+  };
+
   const startSessionConnectionFlow = async (
     set: (next: AppState | Partial<AppState> | ((state: AppState) => AppState | Partial<AppState>)) => void,
     get: () => AppState,
@@ -1242,6 +1366,23 @@ export function createAppStore(api: DesktopApi) {
         error instanceof Error
           ? error.message
           : '호스트 연결을 시작하지 못했습니다. AWS SSM 연결에는 session-manager-plugin이 필요할 수 있습니다.';
+      markSessionError(set, sessionId, message);
+    }
+  };
+
+  const startLocalTerminalFlow = async (
+    set: (next: AppState | Partial<AppState> | ((state: AppState) => AppState | Partial<AppState>)) => void,
+    get: () => AppState,
+    cols: number,
+    rows: number,
+    reuseSessionId?: string
+  ) => {
+    const sessionId = createPendingSessionTabForLocal(set, get, cols, rows, resolveLocalStartingProgress(), reuseSessionId);
+
+    try {
+      await startPendingLocalSessionConnect(set, get, sessionId);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '로컬 터미널을 시작하지 못했습니다.';
       markSessionError(set, sessionId, message);
     }
   };
@@ -1672,6 +1813,9 @@ export function createAppStore(api: DesktopApi) {
         });
         await syncOperationalData(set);
       },
+      openLocalTerminal: async (cols, rows) => {
+        await startLocalTerminalFlow(set, get, cols, rows);
+      },
       connectHost: async (hostId, cols, rows, secrets) => {
         const host = get().hosts.find((item) => item.id === hostId);
         if (!host) {
@@ -1690,7 +1834,44 @@ export function createAppStore(api: DesktopApi) {
           return;
         }
 
-        const host = get().hosts.find((item) => item.id === currentTab.hostId);
+        if (currentTab.source === 'local') {
+          const pendingSessionId = createPendingSessionId();
+          const currentAttempt = findPendingConnectionAttempt(get(), sessionId);
+          const latestCols = currentAttempt?.latestCols ?? 120;
+          const latestRows = currentAttempt?.latestRows ?? 32;
+
+          set((state) => ({
+            ...replaceSessionReferencesInState(state, sessionId, pendingSessionId, (tab) =>
+              createPendingSessionTab({
+                sessionId: pendingSessionId,
+                source: 'local',
+                hostId: null,
+                title: tab.title,
+                progress: createConnectionProgress('retrying-session', '로컬 터미널을 다시 시작하는 중입니다.')
+              })
+            ),
+            pendingConnectionAttempts: [
+              ...state.pendingConnectionAttempts.filter((attempt) => attempt.sessionId !== sessionId),
+              {
+                sessionId: pendingSessionId,
+                source: 'local' as const,
+                hostId: null,
+                title: currentTab.title,
+                latestCols,
+                latestRows
+              }
+            ]
+          }));
+
+          if (!isPendingSessionId(sessionId)) {
+            await api.ssh.disconnect(sessionId).catch(() => undefined);
+          }
+
+          await startLocalTerminalFlow(set, get, latestCols, latestRows, pendingSessionId);
+          return;
+        }
+
+        const host = currentTab.hostId ? get().hosts.find((item) => item.id === currentTab.hostId) : null;
         if (!host) {
           return;
         }
@@ -1704,6 +1885,7 @@ export function createAppStore(api: DesktopApi) {
           ...replaceSessionReferencesInState(state, sessionId, pendingSessionId, (tab) =>
             createPendingSessionTab({
               sessionId: pendingSessionId,
+              source: 'host',
               hostId: tab.hostId,
               title: tab.title,
               progress: isAwsEc2HostRecord(host)
@@ -1715,6 +1897,7 @@ export function createAppStore(api: DesktopApi) {
             ...state.pendingConnectionAttempts.filter((attempt) => attempt.sessionId !== sessionId),
             {
               sessionId: pendingSessionId,
+              source: 'host' as const,
               hostId: host.id,
               title: currentTab.title,
               latestCols,
@@ -1997,26 +2180,30 @@ export function createAppStore(api: DesktopApi) {
         if (!rule) {
           return;
         }
-        const trusted = await ensureTrustedHost(set, {
-          hostId: rule.hostId,
-          action: {
-            kind: 'portForward',
-            ruleId,
-            hostId: rule.hostId
+        if (rule.transport === 'ssh') {
+          const trusted = await ensureTrustedHost(set, {
+            hostId: rule.hostId,
+            action: {
+              kind: 'portForward',
+              ruleId,
+              hostId: rule.hostId
+            }
+          });
+          if (!trusted) {
+            return;
           }
-        });
-        if (!trusted) {
-          return;
         }
         await runTrustedAction(get, null, { kind: 'portForward', ruleId, hostId: rule.hostId }, set);
       },
       stopPortForward: async (ruleId) => {
         await api.portForwards.stop(ruleId);
+        const rule = get().portForwards.find((item) => item.id === ruleId);
         set((state) => ({
           portForwardRuntimes: upsertForwardRuntime(state.portForwardRuntimes, {
             ...(state.portForwardRuntimes.find((runtime) => runtime.ruleId === ruleId) ?? {
               ruleId,
               hostId: '',
+              transport: rule?.transport ?? 'ssh',
               mode: 'local',
               bindAddress: '127.0.0.1',
               bindPort: 0
@@ -2206,7 +2393,10 @@ export function createAppStore(api: DesktopApi) {
               : []
           };
           const currentTab = get().tabs.find((tab) => tab.sessionId === sessionId);
-          const currentHost = currentTab ? get().hosts.find((host) => host.id === currentTab.hostId) : undefined;
+          const currentHost =
+            currentTab?.source === 'host' && currentTab.hostId
+              ? get().hosts.find((host) => host.id === currentTab.hostId)
+              : undefined;
           const isWarpgateChallenge = shouldTreatAsWarpgate(currentHost, challenge);
           const approvalUrl = isWarpgateChallenge
             ? parseWarpgateApprovalUrl(challenge.instruction, challenge.name, ...challenge.prompts.map((prompt) => prompt.label))
@@ -2291,7 +2481,10 @@ export function createAppStore(api: DesktopApi) {
         if (event.type === 'keyboardInteractiveResolved') {
           set((state) => {
             const currentTab = state.tabs.find((tab) => tab.sessionId === sessionId);
-            const currentHost = currentTab ? state.hosts.find((host) => host.id === currentTab.hostId) : undefined;
+            const currentHost =
+              currentTab?.source === 'host' && currentTab.hostId
+                ? state.hosts.find((host) => host.id === currentTab.hostId)
+                : undefined;
 
             if (!state.pendingInteractiveAuth || state.pendingInteractiveAuth.sessionId !== sessionId) {
               return state;
@@ -2326,14 +2519,19 @@ export function createAppStore(api: DesktopApi) {
           if (!currentTab) {
             return state;
           }
-          const currentHost = state.hosts.find((host) => host.id === currentTab.hostId);
+          const currentHost =
+            currentTab.source === 'host' && currentTab.hostId
+              ? state.hosts.find((host) => host.id === currentTab.hostId)
+              : undefined;
           const errorMessage = String(event.payload.message ?? 'SSH error');
           const retryKind = event.type === 'error' ? resolveCredentialRetryKind(currentHost, errorMessage) : null;
           const nextProgress =
             event.type === 'connected'
-              ? currentHost
-                ? resolveWaitingShellProgress(currentHost)
-                : createConnectionProgress('waiting-shell', '원격 셸이 첫 출력을 보내는 중입니다.')
+              ? currentTab.source === 'local'
+                ? resolveLocalWaitingShellProgress()
+                : currentHost
+                  ? resolveWaitingShellProgress(currentHost)
+                  : createConnectionProgress('waiting-shell', '원격 셸이 첫 출력을 보내는 중입니다.')
               : event.type === 'error'
                 ? retryKind && currentHost
                   ? resolveCredentialRetryProgress(currentHost, retryKind)
@@ -2393,7 +2591,10 @@ export function createAppStore(api: DesktopApi) {
 
         if (event.type === 'connected' && pendingRetryBeforeUpdate?.source === 'ssh') {
           const currentTab = get().tabs.find((tab) => tab.sessionId === sessionId);
-          const currentHost = currentTab ? get().hosts.find((host) => host.id === currentTab.hostId) : null;
+          const currentHost =
+            currentTab?.source === 'host' && currentTab.hostId
+              ? get().hosts.find((host) => host.id === currentTab.hostId) ?? null
+              : null;
           if (currentHost && currentHost.id === pendingRetryBeforeUpdate.hostId) {
             void refreshHostAndKeychainState(set);
           }
