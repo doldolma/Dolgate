@@ -1,13 +1,18 @@
-import { access } from 'node:fs/promises';
-import { constants as fsConstants } from 'node:fs';
-import path from 'node:path';
-import { spawn } from 'node:child_process';
-import type { AwsEc2InstanceSummary, AwsProfileStatus, AwsProfileSummary } from '@shared';
+import { access } from "node:fs/promises";
+import { constants as fsConstants } from "node:fs";
+import path from "node:path";
+import { spawn } from "node:child_process";
+import type {
+  AwsEc2InstanceSummary,
+  AwsProfileStatus,
+  AwsProfileSummary,
+} from "@shared";
 
-const REGION_DISCOVERY_REGION = 'us-east-1';
+const REGION_DISCOVERY_REGION = "us-east-1";
 
 function isE2EFakeAwsSessionEnabled(): boolean {
-  return process.env.DOLSSH_E2E_FAKE_AWS_SESSION === '1';
+  const mode = process.env.DOLSSH_E2E_FAKE_AWS_SESSION;
+  return mode === "1" || mode === "process";
 }
 
 interface CommandResult {
@@ -23,7 +28,7 @@ interface CommandError extends Error {
 const resolvedExecutableCache = new Map<string, string | null>();
 
 function splitPathEnv(): string[] {
-  const rawPath = process.env.PATH ?? '';
+  const rawPath = process.env.PATH ?? "";
   return rawPath
     .split(path.delimiter)
     .map((segment) => segment.trim())
@@ -34,19 +39,23 @@ function getExecutableCandidates(command: string): string[] {
   const candidates = new Set<string>();
   const pathEntries = splitPathEnv();
 
-  if (process.platform === 'win32') {
-    const suffixes = ['.exe', '.cmd', '.bat', ''];
-    for (const entry of pathEntries) {
-      for (const suffix of suffixes) {
-        candidates.add(path.join(entry, `${command}${suffix}`));
-      }
+  if (process.platform === "win32") {
+    if (command === "aws") {
+      candidates.add("C:\\Program Files\\Amazon\\AWSCLIV2\\aws.exe");
+    }
+    if (command === "session-manager-plugin") {
+      candidates.add(
+        "C:\\Program Files\\Amazon\\SessionManagerPlugin\\bin\\session-manager-plugin.exe",
+      );
     }
 
-    if (command === 'aws') {
-      candidates.add('C:\\Program Files\\Amazon\\AWSCLIV2\\aws.exe');
+    for (const entry of pathEntries) {
+      candidates.add(path.join(entry, `${command}.exe`));
     }
-    if (command === 'session-manager-plugin') {
-      candidates.add('C:\\Program Files\\Amazon\\SessionManagerPlugin\\bin\\session-manager-plugin.exe');
+    for (const entry of pathEntries) {
+      candidates.add(path.join(entry, `${command}.cmd`));
+      candidates.add(path.join(entry, `${command}.bat`));
+      candidates.add(path.join(entry, command));
     }
     return [...candidates];
   }
@@ -55,7 +64,7 @@ function getExecutableCandidates(command: string): string[] {
     candidates.add(path.join(entry, command));
   }
 
-  if (process.platform === 'darwin') {
+  if (process.platform === "darwin") {
     candidates.add(`/opt/homebrew/bin/${command}`);
     candidates.add(`/usr/local/bin/${command}`);
     candidates.add(`/usr/bin/${command}`);
@@ -97,16 +106,21 @@ async function resolveExecutable(command: string): Promise<string> {
   throw new Error(command);
 }
 
-function runCommand(command: string, args: string[], timeoutMs = 30_000, envOverride?: NodeJS.ProcessEnv): Promise<CommandResult> {
+function runCommand(
+  command: string,
+  args: string[],
+  timeoutMs = 30_000,
+  envOverride?: NodeJS.ProcessEnv,
+): Promise<CommandResult> {
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, {
-      stdio: ['ignore', 'pipe', 'pipe'],
+      stdio: ["ignore", "pipe", "pipe"],
       windowsHide: true,
-      env: envOverride ?? process.env
+      env: envOverride ?? process.env,
     });
 
-    let stdout = '';
-    let stderr = '';
+    let stdout = "";
+    let stderr = "";
     let settled = false;
 
     const finish = (callback: () => void) => {
@@ -118,40 +132,42 @@ function runCommand(command: string, args: string[], timeoutMs = 30_000, envOver
       callback();
     };
 
-    child.stdout.setEncoding('utf8');
-    child.stdout.on('data', (chunk: string) => {
+    child.stdout.setEncoding("utf8");
+    child.stdout.on("data", (chunk: string) => {
       stdout += chunk;
     });
 
-    child.stderr.setEncoding('utf8');
-    child.stderr.on('data', (chunk: string) => {
+    child.stderr.setEncoding("utf8");
+    child.stderr.on("data", (chunk: string) => {
       stderr += chunk;
     });
 
-    child.on('error', (error) => {
+    child.on("error", (error) => {
       finish(() => reject(error));
     });
 
-    child.on('exit', (code) => {
+    child.on("exit", (code) => {
       finish(() => {
         resolve({
           stdout,
           stderr,
-          exitCode: code ?? 0
+          exitCode: code ?? 0,
         });
       });
     });
 
     const timeout = setTimeout(() => {
       finish(() => {
-        child.kill('SIGKILL');
+        child.kill("SIGKILL");
         reject(new Error(`${command} 명령 실행이 제한 시간을 초과했습니다.`));
       });
     }, timeoutMs);
   });
 }
 
-export async function resolveAwsExecutable(command: 'aws' | 'session-manager-plugin'): Promise<string> {
+export async function resolveAwsExecutable(
+  command: "aws" | "session-manager-plugin",
+): Promise<string> {
   return resolveExecutable(command);
 }
 
@@ -159,7 +175,7 @@ export async function buildAwsCommandEnv(): Promise<NodeJS.ProcessEnv> {
   const env = { ...process.env };
   const resolvedDirs = new Set<string>();
 
-  for (const command of ['aws', 'session-manager-plugin'] as const) {
+  for (const command of ["aws", "session-manager-plugin"] as const) {
     try {
       const executablePath = await resolveExecutable(command);
       resolvedDirs.add(path.dirname(executablePath));
@@ -190,7 +206,11 @@ function normalizeAwsCliError(stderr: string, fallback: string): Error {
 }
 
 export class AwsService {
-  private async runResolvedCommand(command: string, args: string[], timeoutMs = 30_000): Promise<CommandResult> {
+  private async runResolvedCommand(
+    command: string,
+    args: string[],
+    timeoutMs = 30_000,
+  ): Promise<CommandResult> {
     const executablePath = await resolveExecutable(command);
     const env = await buildAwsCommandEnv();
     return runCommand(executablePath, args, timeoutMs, env);
@@ -202,12 +222,18 @@ export class AwsService {
     }
 
     try {
-      const result = await this.runResolvedCommand('aws', ['--version'], 10_000);
+      const result = await this.runResolvedCommand(
+        "aws",
+        ["--version"],
+        10_000,
+      );
       if (result.exitCode !== 0) {
-        throw new Error('aws --version failed');
+        throw new Error("aws --version failed");
       }
     } catch (error) {
-      throw new Error('AWS CLI가 설치되어 있지 않습니다. `aws --version`이 동작해야 합니다.');
+      throw new Error(
+        "AWS CLI가 설치되어 있지 않습니다. `aws --version`이 동작해야 합니다.",
+      );
     }
   }
 
@@ -217,21 +243,33 @@ export class AwsService {
     }
 
     try {
-      const result = await this.runResolvedCommand('session-manager-plugin', ['--version'], 10_000);
+      const result = await this.runResolvedCommand(
+        "session-manager-plugin",
+        ["--version"],
+        10_000,
+      );
       if (result.exitCode !== 0) {
-        throw new Error('session-manager-plugin --version failed');
+        throw new Error("session-manager-plugin --version failed");
       }
       return;
     } catch {
-      throw new Error('AWS Session Manager Plugin이 설치되어 있지 않아 SSM 세션을 열 수 없습니다.');
+      throw new Error(
+        "AWS Session Manager Plugin이 설치되어 있지 않아 SSM 세션을 열 수 없습니다.",
+      );
     }
   }
 
   async listProfiles(): Promise<AwsProfileSummary[]> {
     await this.ensureAwsCliAvailable();
-    const result = await this.runResolvedCommand('aws', ['configure', 'list-profiles']);
+    const result = await this.runResolvedCommand("aws", [
+      "configure",
+      "list-profiles",
+    ]);
     if (result.exitCode !== 0) {
-      throw normalizeAwsCliError(result.stderr, 'AWS 프로필 목록을 읽지 못했습니다.');
+      throw normalizeAwsCliError(
+        result.stderr,
+        "AWS 프로필 목록을 읽지 못했습니다.",
+      );
     }
 
     return result.stdout
@@ -241,10 +279,19 @@ export class AwsService {
       .map((name) => ({ name }));
   }
 
-  private async readConfigValue(profileName: string, key: string): Promise<string> {
-    const result = await this.runResolvedCommand('aws', ['configure', 'get', key, '--profile', profileName]);
+  private async readConfigValue(
+    profileName: string,
+    key: string,
+  ): Promise<string> {
+    const result = await this.runResolvedCommand("aws", [
+      "configure",
+      "get",
+      key,
+      "--profile",
+      profileName,
+    ]);
     if (result.exitCode !== 0) {
-      return '';
+      return "";
     }
     return result.stdout.trim();
   }
@@ -256,26 +303,36 @@ export class AwsService {
         available: true,
         isSsoProfile: false,
         isAuthenticated: true,
-        accountId: '000000000000',
-        arn: 'arn:aws:iam::000000000000:user/dolssh-smoke',
-        missingTools: []
+        accountId: "000000000000",
+        arn: "arn:aws:iam::000000000000:user/dolssh-smoke",
+        missingTools: [],
       };
     }
 
     await this.ensureAwsCliAvailable();
 
     const [ssoStartUrl, ssoSession, pluginAvailable] = await Promise.all([
-      this.readConfigValue(profileName, 'sso_start_url'),
-      this.readConfigValue(profileName, 'sso_session'),
-      resolveExecutable('session-manager-plugin')
+      this.readConfigValue(profileName, "sso_start_url"),
+      this.readConfigValue(profileName, "sso_session"),
+      resolveExecutable("session-manager-plugin")
         .then(() => true)
-        .catch(() => false)
+        .catch(() => false),
     ]);
     const isSsoProfile = Boolean(ssoStartUrl || ssoSession);
 
-    const identity = await this.runResolvedCommand('aws', ['sts', 'get-caller-identity', '--profile', profileName, '--output', 'json']);
+    const identity = await this.runResolvedCommand("aws", [
+      "sts",
+      "get-caller-identity",
+      "--profile",
+      profileName,
+      "--output",
+      "json",
+    ]);
     if (identity.exitCode === 0) {
-      const payload = parseJson<{ Account?: string; Arn?: string }>(identity.stdout, 'AWS 프로필 상태 응답을 해석하지 못했습니다.');
+      const payload = parseJson<{ Account?: string; Arn?: string }>(
+        identity.stdout,
+        "AWS 프로필 상태 응답을 해석하지 못했습니다.",
+      );
       return {
         profileName,
         available: true,
@@ -283,7 +340,7 @@ export class AwsService {
         isAuthenticated: true,
         accountId: payload.Account ?? null,
         arn: payload.Arn ?? null,
-        missingTools: pluginAvailable ? [] : ['session-manager-plugin']
+        missingTools: pluginAvailable ? [] : ["session-manager-plugin"],
       };
     }
 
@@ -292,8 +349,10 @@ export class AwsService {
       available: true,
       isSsoProfile,
       isAuthenticated: false,
-      errorMessage: isSsoProfile ? '브라우저 로그인이 필요합니다.' : '이 프로필은 AWS CLI 자격 증명이 필요합니다.',
-      missingTools: pluginAvailable ? [] : ['session-manager-plugin']
+      errorMessage: isSsoProfile
+        ? "브라우저 로그인이 필요합니다."
+        : "이 프로필은 AWS CLI 자격 증명이 필요합니다.",
+      missingTools: pluginAvailable ? [] : ["session-manager-plugin"],
     };
   }
 
@@ -305,47 +364,77 @@ export class AwsService {
     await this.ensureAwsCliAvailable();
     const status = await this.getProfileStatus(profileName);
     if (!status.isSsoProfile) {
-      throw new Error('이 프로필은 브라우저 로그인 대신 AWS CLI 자격 증명이 필요합니다.');
+      throw new Error(
+        "이 프로필은 브라우저 로그인 대신 AWS CLI 자격 증명이 필요합니다.",
+      );
     }
 
-    const result = await this.runResolvedCommand('aws', ['sso', 'login', '--profile', profileName], 5 * 60_000);
+    const result = await this.runResolvedCommand(
+      "aws",
+      ["sso", "login", "--profile", profileName],
+      5 * 60_000,
+    );
     if (result.exitCode !== 0) {
-      throw normalizeAwsCliError(result.stderr, 'AWS SSO 로그인에 실패했습니다.');
+      throw normalizeAwsCliError(
+        result.stderr,
+        "AWS SSO 로그인에 실패했습니다.",
+      );
     }
   }
 
   async listRegions(profileName: string): Promise<string[]> {
     await this.ensureAwsCliAvailable();
-    const result = await this.runResolvedCommand('aws', [
-      'ec2',
-      'describe-regions',
-      '--profile',
+    const result = await this.runResolvedCommand("aws", [
+      "ec2",
+      "describe-regions",
+      "--profile",
       profileName,
-      '--region',
+      "--region",
       REGION_DISCOVERY_REGION,
-      '--output',
-      'json'
+      "--output",
+      "json",
     ]);
     if (result.exitCode !== 0) {
-      throw normalizeAwsCliError(result.stderr, 'AWS 리전 목록을 읽지 못했습니다.');
+      throw normalizeAwsCliError(
+        result.stderr,
+        "AWS 리전 목록을 읽지 못했습니다.",
+      );
     }
 
-    const payload = parseJson<{ Regions?: Array<{ RegionName?: string }> }>(result.stdout, 'AWS 리전 목록 응답을 해석하지 못했습니다.');
+    const payload = parseJson<{ Regions?: Array<{ RegionName?: string }> }>(
+      result.stdout,
+      "AWS 리전 목록 응답을 해석하지 못했습니다.",
+    );
     return (payload.Regions ?? [])
-      .map((region) => region.RegionName?.trim() ?? '')
+      .map((region) => region.RegionName?.trim() ?? "")
       .filter(Boolean)
       .sort((left, right) => left.localeCompare(right));
   }
 
-  async listEc2Instances(profileName: string, region: string): Promise<AwsEc2InstanceSummary[]> {
+  async listEc2Instances(
+    profileName: string,
+    region: string,
+  ): Promise<AwsEc2InstanceSummary[]> {
     await this.ensureAwsCliAvailable();
     const result = await this.runResolvedCommand(
-      'aws',
-      ['ec2', 'describe-instances', '--profile', profileName, '--region', region, '--output', 'json'],
-      60_000
+      "aws",
+      [
+        "ec2",
+        "describe-instances",
+        "--profile",
+        profileName,
+        "--region",
+        region,
+        "--output",
+        "json",
+      ],
+      60_000,
     );
     if (result.exitCode !== 0) {
-      throw normalizeAwsCliError(result.stderr, 'EC2 인스턴스 목록을 읽지 못했습니다.');
+      throw normalizeAwsCliError(
+        result.stderr,
+        "EC2 인스턴스 목록을 읽지 못했습니다.",
+      );
     }
 
     const payload = parseJson<{
@@ -359,7 +448,7 @@ export class AwsService {
           Tags?: Array<{ Key?: string; Value?: string }>;
         }>;
       }>;
-    }>(result.stdout, 'EC2 인스턴스 응답을 해석하지 못했습니다.');
+    }>(result.stdout, "EC2 인스턴스 응답을 해석하지 못했습니다.");
 
     const instances: AwsEc2InstanceSummary[] = [];
     for (const reservation of payload.Reservations ?? []) {
@@ -368,17 +457,26 @@ export class AwsService {
         if (!instanceId) {
           continue;
         }
-        const nameTag = instance.Tags?.find((tag) => tag.Key === 'Name')?.Value?.trim();
+        const nameTag = instance.Tags?.find(
+          (tag) => tag.Key === "Name",
+        )?.Value?.trim();
         instances.push({
           instanceId,
           name: nameTag || instanceId,
-          platform: instance.PlatformDetails?.trim() || instance.Platform?.trim() || null,
+          platform:
+            instance.PlatformDetails?.trim() ||
+            instance.Platform?.trim() ||
+            null,
           privateIp: instance.PrivateIpAddress?.trim() || null,
-          state: instance.State?.Name?.trim() || null
+          state: instance.State?.Name?.trim() || null,
         });
       }
     }
 
-    return instances.sort((left, right) => left.name.localeCompare(right.name) || left.instanceId.localeCompare(right.instanceId));
+    return instances.sort(
+      (left, right) =>
+        left.name.localeCompare(right.name) ||
+        left.instanceId.localeCompare(right.instanceId),
+    );
   }
 }

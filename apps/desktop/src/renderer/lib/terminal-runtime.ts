@@ -134,18 +134,52 @@ function applyTerminalAppearance(terminal: Terminal, appearance: TerminalRuntime
   }
 }
 
-function toTerminalTextChunk(decoder: TextDecoder, data: Uint8Array | string): { text: string; size: number } {
+type QueuedTerminalChunk =
+  | {
+      kind: 'text';
+      value: string;
+      size: number;
+    }
+  | {
+      kind: 'binary';
+      value: Uint8Array;
+      size: number;
+    };
+
+function toTerminalChunk(data: Uint8Array | string): QueuedTerminalChunk {
   if (typeof data === 'string') {
     return {
-      text: data,
+      kind: 'text',
+      value: data,
       size: data.length
     };
   }
 
   return {
-    text: decoder.decode(data, { stream: true }),
+    kind: 'binary',
+    value: data,
     size: data.byteLength
   };
+}
+
+function mergeQueuedChunks(chunks: QueuedTerminalChunk[]): string | Uint8Array {
+  const [firstChunk] = chunks;
+  if (!firstChunk) {
+    return '';
+  }
+
+  if (firstChunk.kind === 'text') {
+    return chunks.map((chunk) => chunk.value as string).join('');
+  }
+
+  const totalBytes = chunks.reduce((sum, chunk) => sum + chunk.size, 0);
+  const merged = new Uint8Array(totalBytes);
+  let offset = 0;
+  for (const chunk of chunks) {
+    merged.set(chunk.value as Uint8Array, offset);
+    offset += chunk.size;
+  }
+  return merged;
 }
 
 function createTerminalLinkProvider(
@@ -243,8 +277,7 @@ export function createTerminalRuntime({
   let writeInFlight = false;
   let queuedSize = 0;
   let searchAddonLoaded = false;
-  const queuedChunks: string[] = [];
-  const decoder = new TextDecoder();
+  const queuedChunks: QueuedTerminalChunk[] = [];
 
   const disposeDataSubscription = terminal.onData(onData);
   const disposeBinarySubscription = terminal.onBinary(onBinary);
@@ -296,11 +329,24 @@ export function createTerminalRuntime({
       pendingFrameHandle = null;
     }
 
-    const nextChunk = queuedChunks.join('');
-    queuedChunks.length = 0;
-    queuedSize = 0;
+    const firstChunk = queuedChunks[0];
+    if (!firstChunk) {
+      return;
+    }
+    const chunkKind = firstChunk.kind;
+    const nextChunks: QueuedTerminalChunk[] = [];
+    let drainedSize = 0;
+    while (queuedChunks.length > 0 && queuedChunks[0]?.kind === chunkKind) {
+      const drained = queuedChunks.shift();
+      if (!drained) {
+        break;
+      }
+      nextChunks.push(drained);
+      drainedSize += drained.size;
+    }
+    queuedSize = Math.max(0, queuedSize - drainedSize);
     writeInFlight = true;
-    terminal.write(nextChunk, () => {
+    terminal.write(mergeQueuedChunks(nextChunks), () => {
       writeInFlight = false;
       if (disposed) {
         return;
@@ -356,12 +402,12 @@ export function createTerminalRuntime({
         return;
       }
 
-      const nextChunk = toTerminalTextChunk(decoder, data);
-      if (!nextChunk.text) {
+      const nextChunk = toTerminalChunk(data);
+      if (nextChunk.size <= 0) {
         return;
       }
 
-      queuedChunks.push(nextChunk.text);
+      queuedChunks.push(nextChunk);
       queuedSize += nextChunk.size;
 
       if (queuedSize >= WRITE_FLUSH_THRESHOLD_BYTES) {

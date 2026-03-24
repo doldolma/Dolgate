@@ -21,7 +21,7 @@ function createAppearance(): TerminalRuntimeAppearance {
 function createFakeTerminal(lineText = 'visit https://example.com/docs now') {
   const dataListeners: Array<(value: string) => void> = [];
   const binaryListeners: Array<(value: string) => void> = [];
-  const writes: Array<{ value: string; callback?: () => void }> = [];
+  const writes: Array<{ value: string | Uint8Array; callback?: () => void }> = [];
   let registeredLinkProvider: ILinkProvider | null = null;
 
   const terminal = {
@@ -49,7 +49,7 @@ function createFakeTerminal(lineText = 'visit https://example.com/docs now') {
     dispose: vi.fn(),
     refresh: vi.fn(),
     focus: vi.fn(),
-    write: vi.fn((value: string, callback?: () => void) => {
+    write: vi.fn((value: string | Uint8Array, callback?: () => void) => {
       writes.push({ value, callback });
     }),
     onData: vi.fn((listener: (value: string) => void) => {
@@ -228,6 +228,51 @@ describe('terminal-runtime', () => {
     secondFlushCallback?.(32);
     expect(writes).toHaveLength(2);
     expect(writes[1]?.value).toBe('secondthird');
+  });
+
+  it('preserves raw binary chunks for full-screen terminal applications', () => {
+    const { terminal, writes, triggerWriteCallback } = createFakeTerminal();
+    const fitAddon = {
+      fit: vi.fn(),
+      activate: vi.fn(),
+      dispose: vi.fn()
+    };
+    const scheduleAnimationFrame = vi.fn((_callback: (time: number) => void) => 1);
+    const runtime = createTerminalRuntime({
+      container: document.createElement('div'),
+      appearance: createAppearance(),
+      onData: vi.fn(),
+      onBinary: vi.fn(),
+      dependencies: {
+        createTerminal: (() => terminal) as never,
+        createFitAddon: (() => fitAddon) as never,
+        createSearchAddon: (() => ({
+          activate: vi.fn(),
+          dispose: vi.fn(),
+          findNext: vi.fn(() => true),
+          findPrevious: vi.fn(() => true),
+          clearDecorations: vi.fn(),
+          clearActiveDecoration: vi.fn()
+        })) as never,
+        createUnicode11Addon: (() => ({ activate: vi.fn(), dispose: vi.fn() })) as never,
+        scheduleAnimationFrame,
+        cancelScheduledAnimationFrame: vi.fn(),
+        openExternal: vi.fn()
+      }
+    });
+
+    runtime.write(Uint8Array.from([0x1b, 0x5b, 0x3f, 0x31, 0x30, 0x34, 0x39, 0x68]));
+    runtime.write(Uint8Array.from([0x1b, 0x5b, 0x48]));
+
+    const flushCallback = scheduleAnimationFrame.mock.calls[0]?.[0] as ((time: number) => void) | undefined;
+    flushCallback?.(16);
+
+    expect(writes).toHaveLength(1);
+    expect(writes[0]?.value).toEqual(
+      Uint8Array.from([0x1b, 0x5b, 0x3f, 0x31, 0x30, 0x34, 0x39, 0x68, 0x1b, 0x5b, 0x48])
+    );
+
+    triggerWriteCallback(0);
   });
 
   it('cancels pending flushes when disposed', () => {

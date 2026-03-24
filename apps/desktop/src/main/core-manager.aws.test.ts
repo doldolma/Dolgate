@@ -1,96 +1,40 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { CoreEvent } from '@shared';
-import { ipcChannels } from '../common/ipc-channels';
-import type { InteractiveSessionExitEvent, InteractiveSessionLaunchConfig, InteractiveSessionRunner } from './interactive-session-runner';
+import { EventEmitter } from "node:events";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { CoreEvent, CoreRequest } from "@shared";
+import { ipcChannels } from "../common/ipc-channels";
+import { encodeControlFrame } from "./core-framing";
 
-vi.mock('electron', () => ({
+const { spawnMock } = vi.hoisted(() => ({
+  spawnMock: vi.fn(),
+}));
+
+vi.mock("electron", () => ({
   app: {
-    getAppPath: () => '/tmp/dolssh',
-    isPackaged: false
+    getAppPath: () => "/tmp/dolssh",
+    isPackaged: false,
   },
-  BrowserWindow: class {}
+  BrowserWindow: class {},
 }));
 
-vi.mock('./aws-service', () => ({
-  resolveAwsExecutable: vi.fn(async () => '/usr/bin/aws'),
-  buildAwsCommandEnv: vi.fn(async () => ({
-    PATH: '/usr/bin'
-  }))
+vi.mock("node:fs", async () => {
+  const actual = await vi.importActual<typeof import("node:fs")>("node:fs");
+  return {
+    ...actual,
+    existsSync: vi.fn(() => true),
+  };
+});
+
+vi.mock("node:child_process", () => ({
+  spawn: spawnMock,
 }));
 
-import { CoreManager } from './core-manager';
+import { CoreManager } from "./core-manager";
 
 interface ActivityLogEntry {
-  level: 'info' | 'warn' | 'error';
-  category: 'session' | 'audit';
+  level: "info" | "warn" | "error";
+  category: "session" | "audit";
   message: string;
   metadata?: Record<string, unknown> | null;
-}
-
-class FakeInteractiveSessionRunner implements InteractiveSessionRunner {
-  readonly writes: string[] = [];
-  readonly binaryWrites: Uint8Array[] = [];
-  readonly resizes: Array<{ cols: number; rows: number }> = [];
-  killCount = 0;
-  private readonly dataListeners = new Set<(chunk: Uint8Array) => void>();
-  private readonly exitListeners = new Set<(event: InteractiveSessionExitEvent) => void>();
-  private readonly errorListeners = new Set<(error: Error) => void>();
-
-  write(data: string): void {
-    this.writes.push(data);
-  }
-
-  writeBinary(data: Uint8Array): void {
-    this.binaryWrites.push(new Uint8Array(data));
-  }
-
-  resize(cols: number, rows: number): void {
-    this.resizes.push({ cols, rows });
-  }
-
-  kill(): void {
-    this.killCount += 1;
-  }
-
-  onData(listener: (chunk: Uint8Array) => void): () => void {
-    this.dataListeners.add(listener);
-    return () => {
-      this.dataListeners.delete(listener);
-    };
-  }
-
-  onExit(listener: (event: InteractiveSessionExitEvent) => void): () => void {
-    this.exitListeners.add(listener);
-    return () => {
-      this.exitListeners.delete(listener);
-    };
-  }
-
-  onError(listener: (error: Error) => void): () => void {
-    this.errorListeners.add(listener);
-    return () => {
-      this.errorListeners.delete(listener);
-    };
-  }
-
-  emitData(chunk: string | Uint8Array): void {
-    const payload = typeof chunk === 'string' ? new Uint8Array(Buffer.from(chunk, 'utf8')) : new Uint8Array(chunk);
-    for (const listener of this.dataListeners) {
-      listener(payload);
-    }
-  }
-
-  emitExit(event: InteractiveSessionExitEvent): void {
-    for (const listener of this.exitListeners) {
-      listener(event);
-    }
-  }
-
-  emitError(message: string): void {
-    for (const listener of this.errorListeners) {
-      listener(new Error(message));
-    }
-  }
 }
 
 function createFakeWindow() {
@@ -103,115 +47,212 @@ function createFakeWindow() {
       webContents: {
         send: vi.fn((channel: string, payload: unknown) => {
           sent.push({ channel, payload });
-        })
-      }
-    }
+        }),
+      },
+    },
   };
 }
 
-describe('CoreManager AWS SSM sessions', () => {
+function decodeControlFrame(
+  buffer: Buffer,
+): CoreRequest<Record<string, unknown>> {
+  const metadataLength = buffer.readUInt32BE(1);
+  return JSON.parse(
+    buffer.subarray(9, 9 + metadataLength).toString("utf8"),
+  ) as CoreRequest<Record<string, unknown>>;
+}
+
+function createFakeChildProcess() {
+  const stdout = new EventEmitter() as EventEmitter & {
+    setEncoding: ReturnType<typeof vi.fn>;
+  };
+  const stderr = new EventEmitter() as EventEmitter & {
+    setEncoding: ReturnType<typeof vi.fn>;
+  };
+  stdout.setEncoding = vi.fn();
+  stderr.setEncoding = vi.fn();
+
+  const writes: Buffer[] = [];
+  const child = new EventEmitter() as EventEmitter & {
+    stdin: { write: ReturnType<typeof vi.fn>; end: ReturnType<typeof vi.fn> };
+    stdout: typeof stdout;
+    stderr: typeof stderr;
+    kill: ReturnType<typeof vi.fn>;
+    exitCode: number | null;
+    killed: boolean;
+  };
+
+  child.stdin = {
+    write: vi.fn((chunk: Uint8Array) => {
+      writes.push(Buffer.from(chunk));
+      return true;
+    }),
+    end: vi.fn(),
+  };
+  child.stdout = stdout;
+  child.stderr = stderr;
+  child.kill = vi.fn((signal?: NodeJS.Signals) => {
+    child.killed = true;
+    child.emit("exit", 0, signal ?? null);
+    return true;
+  });
+  child.exitCode = null;
+  child.killed = false;
+
+  return {
+    child,
+    writes,
+    emitControl(event: CoreEvent<Record<string, unknown>>) {
+      child.stdout.emit("data", encodeControlFrame(event));
+    },
+  };
+}
+
+describe("CoreManager AWS SSM sessions", () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
-  it('routes text input, binary input, resize, and output through the interactive runner', async () => {
+  it("sends awsConnect to ssh-core and routes terminal writes through framed IO", async () => {
     const logs: ActivityLogEntry[] = [];
-    const events: CoreEvent<Record<string, unknown>>[] = [];
-    const runner = new FakeInteractiveSessionRunner();
-    let launchConfig: InteractiveSessionLaunchConfig | null = null;
-    const manager = new CoreManager(
-      (entry) => {
-        logs.push(entry);
-      },
-      (config) => {
-        launchConfig = config;
-        return runner;
-      }
-    );
+    const fakeProcess = createFakeChildProcess();
+    spawnMock.mockReturnValue(fakeProcess.child);
+
+    const manager = new CoreManager((entry) => {
+      logs.push(entry);
+    });
     const fakeWindow = createFakeWindow();
+    const events: CoreEvent<Record<string, unknown>>[] = [];
     manager.registerWindow(fakeWindow.window as never);
     manager.setTerminalEventHandler((event) => {
       events.push(event);
     });
 
     const { sessionId } = await manager.connectAwsSession({
-      profileName: 'default',
-      region: 'ap-northeast-2',
-      instanceId: 'i-1234567890',
-      title: 'AWS Host',
-      hostId: 'host-1'
+      profileName: "default",
+      region: "ap-northeast-2",
+      instanceId: "i-1234567890",
+      cols: 180,
+      rows: 48,
+      title: "AWS Host",
+      hostId: "host-1",
     });
 
-    expect(launchConfig).toMatchObject({
-      command: '/usr/bin/aws',
-      args: ['ssm', 'start-session', '--target', 'i-1234567890', '--profile', 'default', '--region', 'ap-northeast-2'],
-      cols: 120,
-      rows: 32,
-      name: 'xterm-256color'
+    const connectRequest = decodeControlFrame(fakeProcess.writes[0]);
+    expect(connectRequest.type).toBe("awsConnect");
+    expect(connectRequest.sessionId).toBe(sessionId);
+    expect(connectRequest.payload).toMatchObject({
+      profileName: "default",
+      region: "ap-northeast-2",
+      instanceId: "i-1234567890",
+      cols: 180,
+      rows: 48,
     });
-    expect(events.at(0)?.type).toBe('connected');
 
-    manager.write(sessionId, 'ls -al\r');
-    manager.writeBinary(sessionId, new Uint8Array([0x1b, 0x5b, 0x41]));
-    manager.resize(sessionId, 180, 48);
-    runner.emitData('hello\r\n');
+    fakeProcess.emitControl({
+      type: "connected",
+      sessionId,
+      payload: {
+        status: "connected",
+      },
+    });
 
-    expect(runner.writes).toEqual(['ls -al\r']);
-    expect(runner.binaryWrites).toEqual([new Uint8Array([0x1b, 0x5b, 0x41])]);
-    expect(runner.resizes).toEqual([{ cols: 180, rows: 48 }]);
+    manager.write(sessionId, "ls -al\r");
+    manager.resize(sessionId, 200, 60);
+    manager.disconnect(sessionId);
 
-    const dataEvent = fakeWindow.sent.find((entry) => entry.channel === ipcChannels.ssh.data);
-    expect(dataEvent).toBeTruthy();
-    expect(Buffer.from((dataEvent?.payload as { chunk: Uint8Array }).chunk).toString('utf8')).toBe('hello\r\n');
-    expect(logs.some((entry) => entry.message === 'AWS SSM 세션이 연결되었습니다.')).toBe(true);
+    const resizeRequest = decodeControlFrame(fakeProcess.writes[2]);
+    const disconnectRequest = decodeControlFrame(fakeProcess.writes[3]);
+
+    expect(decodeControlFrame(fakeProcess.writes[0]).type).toBe("awsConnect");
+    expect(resizeRequest.type).toBe("resize");
+    expect(resizeRequest.payload).toMatchObject({ cols: 200, rows: 60 });
+    expect(disconnectRequest.type).toBe("disconnect");
+    expect(
+      events.some(
+        (event) => event.type === "connected" && event.sessionId === sessionId,
+      ),
+    ).toBe(true);
+    expect(
+      logs.some((entry) => entry.message === "AWS SSM 세션이 연결되었습니다."),
+    ).toBe(true);
   });
 
-  it('emits error and closed events on abnormal exit and cleans up after disconnect', async () => {
+  it("keeps AWS-specific logs and terminal events when ssh-core emits error and closed", async () => {
+    const logs: ActivityLogEntry[] = [];
+    const fakeProcess = createFakeChildProcess();
+    spawnMock.mockReturnValue(fakeProcess.child);
+
+    const manager = new CoreManager((entry) => {
+      logs.push(entry);
+    });
+    const fakeWindow = createFakeWindow();
     const events: CoreEvent<Record<string, unknown>>[] = [];
-    const runner = new FakeInteractiveSessionRunner();
-    const manager = new CoreManager(undefined, () => runner);
+    manager.registerWindow(fakeWindow.window as never);
     manager.setTerminalEventHandler((event) => {
       events.push(event);
     });
 
     const { sessionId } = await manager.connectAwsSession({
-      profileName: 'default',
-      region: 'us-east-1',
-      instanceId: 'i-abcd',
-      title: 'Broken Host',
-      hostId: 'host-2'
+      profileName: "default",
+      region: "us-east-1",
+      instanceId: "i-abcd",
+      cols: 120,
+      rows: 32,
+      title: "Broken Host",
+      hostId: "host-2",
     });
 
-    runner.emitData('session-manager-plugin failed');
-    runner.emitExit({ exitCode: 1 });
+    fakeProcess.emitControl({
+      type: "connected",
+      sessionId,
+      payload: {
+        status: "connected",
+      },
+    });
+    fakeProcess.child.stdout.emit(
+      "data",
+      Buffer.concat([
+        encodeControlFrame({
+          type: "error",
+          sessionId,
+          payload: {
+            message: "session-manager-plugin failed",
+          },
+        }),
+        encodeControlFrame({
+          type: "closed",
+          sessionId,
+          payload: {
+            message: "AWS SSM session exited with code 1",
+          },
+        }),
+      ]),
+    );
 
-    expect(events.some((event) => event.type === 'error' && event.sessionId === sessionId)).toBe(true);
-    expect(events.some((event) => event.type === 'closed' && event.sessionId === sessionId)).toBe(true);
+    expect(
+      events.some(
+        (event) => event.type === "error" && event.sessionId === sessionId,
+      ),
+    ).toBe(true);
+    expect(
+      events.some(
+        (event) => event.type === "closed" && event.sessionId === sessionId,
+      ),
+    ).toBe(true);
+    expect(
+      logs.some(
+        (entry) => entry.message === "AWS SSM 세션 오류가 발생했습니다.",
+      ),
+    ).toBe(true);
+    expect(
+      logs.some((entry) => entry.message === "AWS SSM 세션이 종료되었습니다."),
+    ).toBe(true);
     expect(manager.listTabs()).toEqual([]);
 
-    const disconnectRunner = new FakeInteractiveSessionRunner();
-    const disconnectManager = new CoreManager(undefined, () => disconnectRunner);
-    const disconnectEvents: CoreEvent<Record<string, unknown>>[] = [];
-    disconnectManager.setTerminalEventHandler((event) => {
-      disconnectEvents.push(event);
-    });
-
-    const connection = await disconnectManager.connectAwsSession({
-      profileName: 'default',
-      region: 'us-west-2',
-      instanceId: 'i-disconnect',
-      title: 'Disconnect Host',
-      hostId: 'host-3'
-    });
-
-    disconnectManager.disconnect(connection.sessionId);
-    expect(disconnectRunner.killCount).toBe(1);
-
-    disconnectRunner.emitExit({ exitCode: 0 });
-    const closedEvent = disconnectEvents.find((event) => event.type === 'closed' && event.sessionId === connection.sessionId);
-    expect(closedEvent?.payload).toMatchObject({
-      message: 'client requested disconnect'
-    });
-    expect(disconnectManager.listTabs()).toEqual([]);
+    const dataEvent = fakeWindow.sent.find(
+      (entry) => entry.channel === ipcChannels.ssh.event,
+    );
+    expect(dataEvent).toBeTruthy();
   });
 });

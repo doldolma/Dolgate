@@ -31,6 +31,7 @@ import type {
   SftpEndpointSummary,
   SftpPaneId,
   SecretMetadataRecord,
+  TerminalFontFamilyId,
   TerminalTab,
   TransferJob,
   TransferJobEvent,
@@ -262,10 +263,46 @@ export interface AppState {
 
 type TabStatus = TerminalTab['status'];
 
+function detectRendererPlatform(): 'darwin' | 'win32' | 'linux' | 'unknown' {
+  if (typeof navigator === 'undefined') {
+    return 'unknown';
+  }
+
+  const userAgent = navigator.userAgent.toLowerCase();
+  const userAgentData = navigator as Navigator & {
+    userAgentData?: {
+      platform?: string;
+    };
+  };
+  const platform = (userAgentData.userAgentData?.platform ?? navigator.platform ?? '').toLowerCase();
+
+  if (platform.includes('mac') || userAgent.includes('mac os')) {
+    return 'darwin';
+  }
+  if (platform.includes('win') || userAgent.includes('windows')) {
+    return 'win32';
+  }
+  if (platform.includes('linux') || userAgent.includes('linux')) {
+    return 'linux';
+  }
+  return 'unknown';
+}
+
+function resolveRendererDefaultTerminalFontFamily(): TerminalFontFamilyId {
+  const platform = detectRendererPlatform();
+  if (platform === 'win32') {
+    return 'consolas';
+  }
+  if (platform === 'linux') {
+    return 'jetbrains-mono';
+  }
+  return 'sf-mono';
+}
+
 const defaultSettings: AppSettings = {
   theme: 'system',
   globalTerminalThemeId: 'dolssh-dark',
-  terminalFontFamily: 'sf-mono',
+  terminalFontFamily: resolveRendererDefaultTerminalFontFamily(),
   terminalFontSize: 13,
   terminalScrollbackLines: 5000,
   terminalLineHeight: 1,

@@ -39,16 +39,18 @@ export interface TerminalFontOption {
   stack: string;
 }
 
+const windowsMonoFallback = '"Cascadia Mono", Consolas, "D2Coding", "NanumGothicCoding", "GulimChe", "DotumChe", "Malgun Gothic", monospace';
+
 export const terminalFontOptions: TerminalFontOption[] = [
-  { id: 'sf-mono', title: 'SF Mono', stack: '"SF Mono", "SFMono-Regular", Menlo, Monaco, Consolas, monospace' },
-  { id: 'menlo', title: 'Menlo', stack: 'Menlo, Monaco, "SF Mono", Consolas, monospace' },
-  { id: 'monaco', title: 'Monaco', stack: 'Monaco, Menlo, "SF Mono", Consolas, monospace' },
-  { id: 'consolas', title: 'Consolas', stack: 'Consolas, "Cascadia Mono", Menlo, Monaco, monospace' },
-  { id: 'cascadia-mono', title: 'Cascadia Mono', stack: '"Cascadia Mono", Consolas, "SF Mono", monospace' },
-  { id: 'jetbrains-mono', title: 'JetBrains Mono', stack: '"JetBrains Mono", "Cascadia Mono", Consolas, monospace' },
-  { id: 'fira-code', title: 'Fira Code', stack: '"Fira Code", "JetBrains Mono", Consolas, monospace' },
-  { id: 'ibm-plex-mono', title: 'IBM Plex Mono', stack: '"IBM Plex Mono", "SF Mono", Menlo, Consolas, monospace' },
-  { id: 'source-code-pro', title: 'Source Code Pro', stack: '"Source Code Pro", "SF Mono", Menlo, Consolas, monospace' }
+  { id: 'sf-mono', title: 'SF Mono', stack: `"SF Mono", "SFMono-Regular", Menlo, Monaco, ${windowsMonoFallback}` },
+  { id: 'menlo', title: 'Menlo', stack: `Menlo, Monaco, "SF Mono", ${windowsMonoFallback}` },
+  { id: 'monaco', title: 'Monaco', stack: `Monaco, Menlo, "SF Mono", ${windowsMonoFallback}` },
+  { id: 'consolas', title: 'Consolas', stack: `Consolas, ${windowsMonoFallback}` },
+  { id: 'cascadia-mono', title: 'Cascadia Mono', stack: `"Cascadia Mono", Consolas, "D2Coding", "NanumGothicCoding", "GulimChe", "DotumChe", "Malgun Gothic", monospace` },
+  { id: 'jetbrains-mono', title: 'JetBrains Mono', stack: `"JetBrains Mono", ${windowsMonoFallback}` },
+  { id: 'fira-code', title: 'Fira Code', stack: `"Fira Code", "JetBrains Mono", ${windowsMonoFallback}` },
+  { id: 'ibm-plex-mono', title: 'IBM Plex Mono', stack: `"IBM Plex Mono", "SF Mono", Menlo, ${windowsMonoFallback}` },
+  { id: 'source-code-pro', title: 'Source Code Pro', stack: `"Source Code Pro", "SF Mono", Menlo, ${windowsMonoFallback}` }
 ];
 
 export const terminalThemePresets: TerminalThemeDefinition[] = [
