@@ -1,9 +1,12 @@
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { app, BrowserWindow, ipcMain } = require('electron');
+const { spawn } = require('node:child_process');
 
 const OUTPUT_BASENAME = 'data.json';
+const MODE_COLLECT = 'collect';
+const MODE_NATIVE_DECRYPT = 'native-decrypt';
+const DEBUG_ENABLED = process.env.DOLSSH_TERMIUS_DEBUG === '1';
 const COPY_ITEMS = ['IndexedDB', 'Local Storage', 'databases', 'Local State', 'Preferences'];
 const LOCAL_CREDENTIAL_KEYS = [
   'apiKey',
@@ -34,14 +37,43 @@ const SENSITIVE_KEY_PARTS = [
   'personalkey'
 ];
 
+function debugLog(message) {
+  if (!DEBUG_ENABLED) {
+    return;
+  }
+
+  process.stderr.write(`[dolssh-termius-helper] ${message}\n`);
+}
+
 function parseArgs(argv) {
   const options = {
+    mode: MODE_COLLECT,
+    inputPath: null,
     outPath: null,
     probeFile: path.join(__dirname, 'termius-probe.html')
   };
 
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
+
+    if (arg === '--native-decrypt') {
+      options.mode = MODE_NATIVE_DECRYPT;
+      continue;
+    }
+
+    if (arg === '--input') {
+      index += 1;
+      if (index >= argv.length) {
+        throw new Error('--input requires a file path');
+      }
+      options.inputPath = path.resolve(argv[index]);
+      continue;
+    }
+
+    if (arg.startsWith('--input=')) {
+      options.inputPath = path.resolve(arg.slice('--input='.length));
+      continue;
+    }
 
     if (arg === '--out') {
       index += 1;
@@ -74,6 +106,10 @@ function parseArgs(argv) {
 
   if (!options.outPath) {
     throw new Error('Missing required --out <path>');
+  }
+
+  if (options.mode === MODE_NATIVE_DECRYPT && !options.inputPath) {
+    throw new Error('Missing required --input <path> for native decrypt mode');
   }
 
   return options;
@@ -126,15 +162,65 @@ function toResourcesRoot(appRoot) {
     return null;
   }
 
-  if (appRoot.endsWith('.app')) {
-    return path.join(appRoot, 'Contents', 'Resources');
+  const resolvedAppRoot = path.resolve(appRoot);
+  const basename = path.basename(resolvedAppRoot);
+
+  if (resolvedAppRoot.endsWith('.app')) {
+    return path.join(resolvedAppRoot, 'Contents', 'Resources');
   }
 
-  if (path.basename(appRoot) === 'Resources') {
-    return appRoot;
+  if (basename === 'Resources') {
+    return resolvedAppRoot;
   }
 
-  return path.join(appRoot, 'resources');
+  if (basename.toLowerCase() === 'termius.exe') {
+    return path.join(path.dirname(resolvedAppRoot), 'resources');
+  }
+
+  if (basename === 'Termius' && path.basename(path.dirname(resolvedAppRoot)) === 'MacOS') {
+    return path.join(path.dirname(path.dirname(resolvedAppRoot)), 'Resources');
+  }
+
+  return path.join(resolvedAppRoot, 'resources');
+}
+
+function toExecutablePath(appRoot) {
+  if (!appRoot) {
+    return null;
+  }
+
+  const resolvedAppRoot = path.resolve(appRoot);
+  const basename = path.basename(resolvedAppRoot);
+
+  if (process.platform === 'win32') {
+    if (basename.toLowerCase() === 'termius.exe') {
+      return resolvedAppRoot;
+    }
+
+    if (basename === 'Resources') {
+      return path.join(path.dirname(resolvedAppRoot), 'Termius.exe');
+    }
+
+    return path.join(resolvedAppRoot, 'Termius.exe');
+  }
+
+  if (process.platform === 'darwin') {
+    if (basename === 'Termius' && path.basename(path.dirname(resolvedAppRoot)) === 'MacOS') {
+      return resolvedAppRoot;
+    }
+
+    if (resolvedAppRoot.endsWith('.app')) {
+      return path.join(resolvedAppRoot, 'Contents', 'MacOS', path.basename(resolvedAppRoot, '.app'));
+    }
+
+    if (basename === 'Resources') {
+      const contentsDir = path.dirname(resolvedAppRoot);
+      const appBundleName = path.basename(path.dirname(contentsDir), '.app') || 'Termius';
+      return path.join(contentsDir, 'MacOS', appBundleName);
+    }
+  }
+
+  return null;
 }
 
 function collectWindowsAppCandidates() {
@@ -219,6 +305,9 @@ function resolveTermiusRuntimeConfig(env = process.env) {
   const defaults = getPlatformDefaults();
   const appCandidates = uniquePaths([env.TERMIUS_APP_ROOT, env.TERMIUS_APP_PATH, ...defaults.appCandidates]);
   const resourceCandidates = uniquePaths(appCandidates.map(toResourcesRoot));
+  const executableCandidates = env.TERMIUS_EXECUTABLE_PATH
+    ? uniquePaths([env.TERMIUS_EXECUTABLE_PATH])
+    : uniquePaths(appCandidates.map(toExecutablePath));
   const libCandidates = env.TERMIUS_LIB_PATH
     ? uniquePaths([env.TERMIUS_LIB_PATH])
     : resourceCandidates.map((resourcesRoot) => buildPackagePath(resourcesRoot, 'libtermius'));
@@ -227,11 +316,12 @@ function resolveTermiusRuntimeConfig(env = process.env) {
     : resourceCandidates.map((resourcesRoot) => buildPackagePath(resourcesRoot, 'keytar'));
   const dataCandidates = env.TERMIUS_DATA_DIR ? uniquePaths([env.TERMIUS_DATA_DIR]) : defaults.dataCandidates;
 
+  const executablePath = firstExistingPath(executableCandidates);
   const libPath = firstExistingPath(libCandidates);
   const keytarPath = firstExistingPath(keytarCandidates);
   const dataDir = firstExistingPath(dataCandidates);
 
-  if (!libPath || !keytarPath) {
+  if (!executablePath || !libPath || !keytarPath) {
     throw new Error(
       env.TERMIUS_LIB_PATH || env.TERMIUS_KEYTAR_PATH
         ? 'Termius native module paths were not found.'
@@ -244,6 +334,7 @@ function resolveTermiusRuntimeConfig(env = process.env) {
   }
 
   return {
+    executablePath,
     dataDir,
     libPath,
     keytarPath,
@@ -320,7 +411,7 @@ function createProfileCopyDir() {
   return path.join(os.tmpdir(), `dolssh-termius-profile-${process.pid}-${formatTimestamp()}`);
 }
 
-function waitForRendererCollection(window) {
+function waitForRendererCollection(ipcMain, window) {
   return new Promise((resolve, reject) => {
     const timeout = setTimeout(() => {
       reject(new Error('Timed out waiting for renderer collection'));
@@ -334,6 +425,54 @@ function waitForRendererCollection(window) {
     window.webContents.once('did-fail-load', (_event, code, description) => {
       clearTimeout(timeout);
       reject(new Error(`Renderer failed to load (${code}): ${description}`));
+    });
+  });
+}
+
+function getElectronBindings() {
+  return require('electron');
+}
+
+function installHelperAppLifecycleGuard(app) {
+  const preventAutoQuit = (event) => {
+    event.preventDefault();
+  };
+
+  app.on('window-all-closed', preventAutoQuit);
+
+  return () => {
+    app.removeListener('window-all-closed', preventAutoQuit);
+  };
+}
+
+function runChildProcess(command, args, envOverride) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, args, {
+      stdio: ['ignore', 'pipe', 'pipe'],
+      windowsHide: true,
+      env: envOverride ?? process.env
+    });
+
+    let stdout = '';
+    let stderr = '';
+
+    child.stdout.setEncoding('utf8');
+    child.stdout.on('data', (chunk) => {
+      stdout += chunk;
+    });
+
+    child.stderr.setEncoding('utf8');
+    child.stderr.on('data', (chunk) => {
+      stderr += chunk;
+    });
+
+    child.on('error', reject);
+    child.on('exit', (code) => {
+      resolve({
+        code: code ?? 0,
+        stdout,
+        stderr
+      });
     });
   });
 }
@@ -929,11 +1068,14 @@ function buildExportBundle({ rendererPayload, dataDir, copiedProfileDir, keytarS
   };
 }
 
-async function exportTermiusData({ dataDir, profileCopyDir, options, cryptoApi, keytar, keytarService }) {
+async function collectRendererPayload({ dataDir, profileCopyDir, probeFile }) {
+  const { app, BrowserWindow, ipcMain } = getElectronBindings();
+  debugLog(`collect start dataDir=${dataDir} profileCopyDir=${profileCopyDir}`);
   const copiedItems = snapshotProfile(dataDir, profileCopyDir);
   app.setPath('userData', profileCopyDir);
 
   await app.whenReady();
+  debugLog(`electron ready copiedItems=${copiedItems.join(',')}`);
 
   const window = new BrowserWindow({
     show: false,
@@ -943,13 +1085,38 @@ async function exportTermiusData({ dataDir, profileCopyDir, options, cryptoApi, 
     }
   });
 
-  await window.loadFile(options.probeFile);
-  const rendererPayload = await waitForRendererCollection(window);
+  try {
+    debugLog(`loading probe file ${probeFile}`);
+    await window.loadFile(probeFile);
+    debugLog('probe file loaded');
+    const rendererPayload = await waitForRendererCollection(ipcMain, window);
+    debugLog(
+      `renderer payload received stores=${Object.keys(rendererPayload?.stores || {}).join(',')} warnings=${(rendererPayload?.warnings || []).length}`
+    );
+    if (rendererPayload.error) {
+      throw new Error(rendererPayload.error);
+    }
 
-  if (rendererPayload.error) {
-    throw new Error(rendererPayload.error);
+    return {
+      copiedItems,
+      rendererPayload
+    };
+  } finally {
+    if (!window.isDestroyed()) {
+      window.destroy();
+    }
   }
+}
 
+async function exportTermiusDataFromRendererPayload({
+  copiedItems,
+  dataDir,
+  profileCopyDir,
+  rendererPayload,
+  cryptoApi,
+  keytar,
+  keytarService
+}) {
   const bundle = buildExportBundle({
     rendererPayload,
     dataDir,
@@ -1080,29 +1247,108 @@ function writeFile(targetPath, content) {
   fs.writeFileSync(targetPath, content, 'utf8');
 }
 
-async function main() {
-  const options = parseArgs(process.argv.slice(1));
-  const runtimeConfig = resolveTermiusRuntimeConfig(process.env);
-  const profileCopyDir = createProfileCopyDir();
-  const { cryptoApi, keytar } = loadNativeModules(runtimeConfig.libPath, runtimeConfig.keytarPath);
+async function runNativeDecryptHelper(executablePath, inputPath, outputPath) {
+  debugLog(`native decrypt start executable=${executablePath}`);
+  const result = await runChildProcess(
+    executablePath,
+    [__filename, '--native-decrypt', '--input', inputPath, '--out', outputPath],
+    {
+      ...process.env,
+      ELECTRON_RUN_AS_NODE: '1'
+    }
+  );
 
-  try {
-    const payload = await exportTermiusData({
-      dataDir: runtimeConfig.dataDir,
-      profileCopyDir,
-      options,
-      cryptoApi,
-      keytar,
-      keytarService: runtimeConfig.keytarService
-    });
-    writeFile(options.outPath, `${JSON.stringify(payload, null, 2)}\n`);
-  } finally {
-    fs.rmSync(profileCopyDir, { recursive: true, force: true });
-    await app.quit();
+  if (result.code !== 0) {
+    throw new Error(result.stderr.trim() || 'Termius native decrypt helper failed.');
   }
+
+  debugLog(`native decrypt done output=${outputPath}`);
 }
 
-main().catch((error) => {
-  process.stderr.write(`${error.stack || error.message}\n`);
-  app.exit(1);
-});
+async function runTermiusNativeDecryptHelper(options) {
+  debugLog(`native mode start input=${options.inputPath} out=${options.outPath}`);
+  const input = JSON.parse(fs.readFileSync(options.inputPath, 'utf8'));
+  const { cryptoApi, keytar } = loadNativeModules(input.libPath, input.keytarPath);
+  const payload = await exportTermiusDataFromRendererPayload({
+    copiedItems: input.copiedItems,
+    dataDir: input.dataDir,
+    profileCopyDir: input.profileCopyDir,
+    rendererPayload: input.rendererPayload,
+    cryptoApi,
+    keytar,
+    keytarService: input.keytarService
+  });
+
+  writeFile(options.outPath, `${JSON.stringify(payload, null, 2)}\n`);
+  debugLog(`native mode wrote output=${options.outPath}`);
+}
+
+async function runTermiusHelper(argv = process.argv.slice(1)) {
+  const options = parseArgs(argv);
+  debugLog(`helper start mode=${options.mode} out=${options.outPath}`);
+  if (options.mode === MODE_NATIVE_DECRYPT) {
+    await runTermiusNativeDecryptHelper(options);
+    return;
+  }
+
+  const { app } = getElectronBindings();
+  const disposeLifecycleGuard = installHelperAppLifecycleGuard(app);
+  const runtimeConfig = resolveTermiusRuntimeConfig(process.env);
+  const profileCopyDir = createProfileCopyDir();
+  const nativeDecryptInputPath = path.join(profileCopyDir, 'native-decrypt-input.json');
+
+  try {
+    const { copiedItems, rendererPayload } = await collectRendererPayload({
+      dataDir: runtimeConfig.dataDir,
+      profileCopyDir,
+      probeFile: options.probeFile
+    });
+
+    debugLog(`writing native decrypt input=${nativeDecryptInputPath}`);
+    writeFile(
+      nativeDecryptInputPath,
+      `${JSON.stringify(
+        {
+          copiedItems,
+          dataDir: runtimeConfig.dataDir,
+          profileCopyDir,
+          rendererPayload,
+          libPath: runtimeConfig.libPath,
+          keytarPath: runtimeConfig.keytarPath,
+          keytarService: runtimeConfig.keytarService
+        },
+        null,
+        2
+      )}\n`
+    );
+
+    await runNativeDecryptHelper(runtimeConfig.executablePath, nativeDecryptInputPath, options.outPath);
+  } finally {
+    disposeLifecycleGuard();
+    debugLog(`cleanup profileCopyDir=${profileCopyDir}`);
+    try {
+      fs.rmSync(profileCopyDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      debugLog(`cleanup skipped: ${message}`);
+    }
+  }
+
+  app.exit(0);
+}
+
+module.exports = {
+  runTermiusHelper
+};
+
+if (require.main === module) {
+  runTermiusHelper().catch((error) => {
+    process.stderr.write(`${error.stack || error.message}\n`);
+    try {
+      const { app } = getElectronBindings();
+      app.exit(1);
+    } catch {
+      process.exitCode = 1;
+    }
+  });
+}

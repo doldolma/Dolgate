@@ -1,3 +1,4 @@
+import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import type { TermiusImportSelectionInput } from '@shared';
 import {
@@ -144,11 +145,11 @@ describe('Termius import helpers', () => {
   });
 
   it('derives real Electron executables from npm wrapper paths for packaged builds', () => {
-    expect(deriveElectronExecutableCandidate('/tmp/termius-exporter/node_modules/.bin/electron', 'darwin')).toBe(
-      '/tmp/termius-exporter/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron'
+    const baseDir = path.resolve(path.sep, 'tmp', 'termius-exporter', 'node_modules', 'electron');
+
+    expect(deriveElectronExecutableCandidate(path.join(baseDir, '..', '.bin', 'electron'), 'darwin')).toBe(
+      path.join(baseDir, 'dist', 'Electron.app', 'Contents', 'MacOS', 'Electron')
     );
-    expect(deriveElectronExecutableCandidate('/tmp/termius-exporter/node_modules/electron/cli.js', 'win32')).toBe(
-      '/tmp/termius-exporter/node_modules/electron/dist/electron.exe'
-    );
+    expect(deriveElectronExecutableCandidate(path.join(baseDir, 'cli.js'), 'win32')).toBe(path.join(baseDir, 'dist', 'electron.exe'));
   });
 });
