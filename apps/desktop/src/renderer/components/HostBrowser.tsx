@@ -66,6 +66,7 @@ interface HostBrowserProps {
   onSearchChange: (query: string) => void;
   onCreateHost: () => void;
   onOpenAwsImport: () => void;
+  onOpenTermiusImport: () => void;
   onOpenWarpgateImport: () => void;
   onCreateGroup: (name: string) => Promise<void>;
   onRemoveGroup: (path: string, mode: GroupRemoveMode) => Promise<void>;
@@ -88,6 +89,7 @@ export function HostBrowser({
   onSearchChange,
   onCreateHost,
   onOpenAwsImport,
+  onOpenTermiusImport,
   onOpenWarpgateImport,
   onCreateGroup,
   onRemoveGroup,
@@ -222,6 +224,9 @@ export function HostBrowser({
         <div className="home-toolbar__actions">
           <button type="button" className="secondary-button" onClick={onOpenAwsImport}>
             Import from AWS
+          </button>
+          <button type="button" className="secondary-button" onClick={onOpenTermiusImport}>
+            Import from Termius
           </button>
           <button type="button" className="secondary-button" onClick={onOpenWarpgateImport}>
             Import from Warpgate

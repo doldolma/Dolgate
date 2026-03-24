@@ -2367,6 +2367,14 @@ input::placeholder {
   overflow: hidden;
 }
 
+.termius-import-dialog {
+  width: min(960px, calc(100vw - 2rem));
+  max-height: calc(100vh - 2rem);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
 .modal-card__header,
 .modal-card__footer {
   display: flex;
@@ -2399,11 +2407,116 @@ input::placeholder {
   overflow: auto;
 }
 
+.termius-import-dialog .modal-card__body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.95rem;
+  min-height: 0;
+}
+
 .aws-import-dialog__instance-list {
   min-height: 0;
   overflow-y: auto;
   margin-top: 0.95rem;
   padding-right: 0.1rem;
+}
+
+.termius-import-dialog__controls,
+.termius-import-dialog__selection-actions,
+.termius-import-dialog__summary,
+.termius-import-dialog__badges {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  flex-wrap: wrap;
+}
+
+.termius-import-dialog__controls {
+  align-items: flex-end;
+}
+
+.termius-import-dialog__controls .form-field {
+  flex: 1;
+}
+
+.termius-import-dialog__summary {
+  color: var(--text-soft);
+  font-size: 0.84rem;
+}
+
+.termius-import-dialog__warnings {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+.termius-import-dialog__list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+  min-height: 0;
+}
+
+.termius-import-dialog__section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+  min-height: 0;
+}
+
+.termius-import-dialog__section h4 {
+  margin: 0;
+}
+
+.termius-import-dialog__items {
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.45rem;
+  border-radius: 18px;
+  border: 1px solid var(--border);
+  background: var(--dialog-surface-muted);
+}
+
+.termius-import-dialog__item {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 0.75rem;
+  padding: 0.75rem 0.8rem;
+  border-radius: 14px;
+  border: 1px solid var(--border);
+  background: var(--dialog-surface);
+}
+
+.termius-import-dialog__item input {
+  margin-top: 0.15rem;
+}
+
+.termius-import-dialog__item-body {
+  min-width: 0;
+}
+
+.termius-import-dialog__item-body strong,
+.termius-import-dialog__item-body span,
+.termius-import-dialog__item-body small {
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.termius-import-dialog__item-body strong {
+  margin-bottom: 0.12rem;
+}
+
+.termius-import-dialog__item-body span,
+.termius-import-dialog__item-body small {
+  color: var(--text-soft);
+  font-size: 0.8rem;
 }
 
 .modal-card__footer {

@@ -35,6 +35,11 @@ export const ipcChannels = {
     getConnectionInfo: 'warpgate:get-connection-info',
     listSshTargets: 'warpgate:list-ssh-targets'
   },
+  termius: {
+    probeLocal: 'termius:probe-local',
+    importSelection: 'termius:import-selection',
+    discardSnapshot: 'termius:discard-snapshot'
+  },
   ssh: {
     connect: 'ssh:connect',
     write: 'ssh:write',

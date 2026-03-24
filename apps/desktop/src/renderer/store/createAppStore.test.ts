@@ -334,6 +334,29 @@ function createMockApi(): DesktopApi {
       rename: vi.fn().mockResolvedValue(undefined),
       delete: vi.fn().mockResolvedValue(undefined)
     },
+    termius: {
+      probeLocal: vi.fn().mockResolvedValue({
+        status: 'no-data',
+        warnings: [],
+        counts: {
+          groups: 0,
+          hosts: 0,
+          identities: 0,
+          sshConfigs: 0,
+          sshConfigIdentities: 0
+        },
+        termiusDataDir: null,
+        exportedAt: null
+      }),
+      importSelection: vi.fn().mockResolvedValue({
+        createdGroupCount: 0,
+        createdHostCount: 0,
+        createdSecretCount: 0,
+        skippedHostCount: 0,
+        warnings: []
+      }),
+      discardSnapshot: vi.fn().mockResolvedValue(undefined)
+    },
     sftp: {
       connect: vi.fn().mockResolvedValue({
         id: 'endpoint-1',

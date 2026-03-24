@@ -18,6 +18,7 @@ import { SecretEditDialog, type SecretCredentialKind, type SecretEditDialogReque
 import { SettingsPanel } from './components/SettingsPanel';
 import { SftpWorkspace } from './components/SftpWorkspace';
 import { TerminalWorkspace } from './components/TerminalWorkspace';
+import { TermiusImportDialog } from './components/TermiusImportDialog';
 import { WarpgateImportDialog } from './components/WarpgateImportDialog';
 import { appStore } from './store/appStore';
 import type { DynamicTabStripItem, WorkspaceDropDirection, WorkspaceTab } from './store/createAppStore';
@@ -150,8 +151,10 @@ export function App() {
   const [hydratedSessionUserId, setHydratedSessionUserId] = useState<string | null>(null);
   const [selectedHostId, setSelectedHostId] = useState<string | null>(null);
   const [isAwsImportOpen, setIsAwsImportOpen] = useState(false);
+  const [isTermiusImportOpen, setIsTermiusImportOpen] = useState(false);
   const [isWarpgateImportOpen, setIsWarpgateImportOpen] = useState(false);
   const [hostBrowserError, setHostBrowserError] = useState<string | null>(null);
+  const [hostBrowserStatus, setHostBrowserStatus] = useState<string | null>(null);
   const [draggedSession, setDraggedSession] = useState<DraggedSessionPayload | null>(null);
   const [updateState, setUpdateState] = useState<UpdateState>(createDefaultUpdateState);
   const [windowState, setWindowState] = useState<DesktopWindowState>(createDefaultWindowState);
@@ -180,6 +183,7 @@ export function App() {
   const pendingCredentialRetry = useAppStore((state) => state.pendingCredentialRetry);
   const pendingAwsAuthFlow = useAppStore((state) => state.pendingAwsAuthFlow);
   const bootstrap = useAppStore((state) => state.bootstrap);
+  const refreshHostCatalog = useAppStore((state) => state.refreshHostCatalog);
   const setSearchQuery = useAppStore((state) => state.setSearchQuery);
   const activateHome = useAppStore((state) => state.activateHome);
   const activateSession = useAppStore((state) => state.activateSession);
@@ -495,6 +499,7 @@ export function App() {
 
   function handleSelectHost(hostId: string) {
     setHostBrowserError(null);
+    setHostBrowserStatus(null);
     setSelectedHostId(hostId);
     if (hostDrawer.mode === 'edit') {
       openEditHostDrawer(hostId);
@@ -503,6 +508,7 @@ export function App() {
 
   function handleEditHost(hostId: string) {
     setHostBrowserError(null);
+    setHostBrowserStatus(null);
     setSelectedHostId(hostId);
     openEditHostDrawer(hostId);
   }
@@ -648,20 +654,29 @@ export function App() {
                 searchQuery={searchQuery}
                 selectedHostId={highlightedHostId}
                 errorMessage={hostBrowserError}
-                statusMessage={pendingAwsAuthFlow?.message ?? null}
+                statusMessage={pendingAwsAuthFlow?.message ?? hostBrowserStatus}
                 onSearchChange={setSearchQuery}
                 onCreateHost={() => {
                   setHostBrowserError(null);
+                  setHostBrowserStatus(null);
                   setSelectedHostId(null);
                   openCreateHostDrawer();
                 }}
                 onOpenAwsImport={() => {
                   setHostBrowserError(null);
+                  setHostBrowserStatus(null);
                   setSelectedHostId(null);
                   setIsAwsImportOpen(true);
                 }}
+                onOpenTermiusImport={() => {
+                  setHostBrowserError(null);
+                  setHostBrowserStatus(null);
+                  setSelectedHostId(null);
+                  setIsTermiusImportOpen(true);
+                }}
                 onOpenWarpgateImport={() => {
                   setHostBrowserError(null);
+                  setHostBrowserStatus(null);
                   setSelectedHostId(null);
                   setIsWarpgateImportOpen(true);
                 }}
@@ -669,6 +684,7 @@ export function App() {
                 onRemoveGroup={removeGroup}
                 onNavigateGroup={(path) => {
                   setHostBrowserError(null);
+                  setHostBrowserStatus(null);
                   setSelectedHostId(null);
                   navigateGroup(path);
                 }}
@@ -753,6 +769,18 @@ export function App() {
             onClose={() => setIsAwsImportOpen(false)}
             onImport={async (draft) => {
               await saveHost(null, draft);
+            }}
+          />
+
+          <TermiusImportDialog
+            open={isTermiusImportOpen}
+            onClose={() => setIsTermiusImportOpen(false)}
+            onImported={async (result) => {
+              await refreshHostCatalog();
+              setHostBrowserStatus(
+                `Termius에서 ${result.createdHostCount}개 호스트, ${result.createdGroupCount}개 그룹, ${result.createdSecretCount}개 secret을 가져왔습니다.${result.skippedHostCount > 0 ? ` 기존/불완전 호스트 ${result.skippedHostCount}개는 건너뛰었습니다.` : ''}`
+              );
+              setHostBrowserError(result.warnings[0]?.message ?? null);
             }}
           />
 

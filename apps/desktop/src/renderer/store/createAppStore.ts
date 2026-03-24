@@ -202,6 +202,7 @@ export interface AppState {
   closeHostDrawer: () => void;
   navigateGroup: (path: string | null) => void;
   bootstrap: () => Promise<void>;
+  refreshHostCatalog: () => Promise<void>;
   refreshOperationalData: () => Promise<void>;
   createGroup: (name: string) => Promise<void>;
   removeGroup: (path: string, mode: GroupRemoveMode) => Promise<void>;
@@ -1095,6 +1096,14 @@ export function createAppStore(api: DesktopApi) {
       },
       refreshOperationalData: async () => {
         await syncOperationalData(set);
+      },
+      refreshHostCatalog: async () => {
+        const [nextHosts, nextGroups, nextKeychainEntries] = await Promise.all([api.hosts.list(), api.groups.list(), api.keychain.list()]);
+        set({
+          hosts: sortHosts(nextHosts),
+          groups: sortGroups(nextGroups),
+          keychainEntries: sortKeychainEntries(nextKeychainEntries)
+        });
       },
       createGroup: async (name) => {
         const next = await api.groups.create(name, get().currentGroupPath);
