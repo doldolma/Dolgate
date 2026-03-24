@@ -61,6 +61,7 @@ interface TerminalSessionViewProps {
   interactiveAuth: PendingInteractiveAuth | null;
   onFocus?: () => void;
   onClose?: () => Promise<void>;
+  onRetry?: () => Promise<void>;
   onStartDrag?: () => void;
   onEndDrag?: () => void;
 }
@@ -83,6 +84,69 @@ export function shouldOpenTerminalSearch(input: {
   return input.active && input.visible && (input.metaKey || input.ctrlKey) && input.key.toLowerCase() === 'f';
 }
 
+export function didTerminalSessionJustConnect(
+  previousStatus: TerminalTab['status'] | null | undefined,
+  nextStatus: TerminalTab['status'] | null | undefined
+): boolean {
+  return previousStatus !== 'connected' && nextStatus === 'connected';
+}
+
+function isPendingConnectionSessionId(sessionId: string): boolean {
+  return sessionId.startsWith('pending:');
+}
+
+function shouldShowSessionOverlay(tab: TerminalTab | undefined, terminalInitError: string | null): boolean {
+  if (!tab || terminalInitError) {
+    return false;
+  }
+
+  if (tab.status === 'pending' || tab.status === 'connecting' || tab.status === 'error') {
+    return true;
+  }
+
+  return tab.status === 'connected' && !tab.hasReceivedOutput;
+}
+
+function resolveOverlayTitle(tab: TerminalTab | undefined): string {
+  if (!tab) {
+    return 'Connecting';
+  }
+
+  if (tab.status === 'error') {
+    return 'Connection Failed';
+  }
+
+  if (tab.connectionProgress?.blockingKind === 'browser') {
+    return 'Continue in Browser';
+  }
+
+  if (tab.connectionProgress?.blockingKind === 'dialog' || tab.connectionProgress?.blockingKind === 'panel') {
+    return 'Action Required';
+  }
+
+  if (tab.status === 'connected') {
+    return 'Connected';
+  }
+
+  return 'Connecting';
+}
+
+function resolveOverlayMessage(tab: TerminalTab | undefined): string {
+  if (tab?.connectionProgress?.message) {
+    return tab.connectionProgress.message;
+  }
+
+  if (tab?.status === 'connected') {
+    return '원격 셸이 첫 출력을 보내는 중입니다...';
+  }
+
+  if (tab?.status === 'error') {
+    return tab.errorMessage ?? '세션 연결에 실패했습니다.';
+  }
+
+  return '세션을 연결하는 중입니다...';
+}
+
 interface TerminalWorkspaceProps {
   tabs: TerminalTab[];
   hosts: HostRecord[];
@@ -92,6 +156,7 @@ interface TerminalWorkspaceProps {
   draggedSession: DraggedSessionPayload | null;
   canDropDraggedSession: boolean;
   onCloseSession: (sessionId: string) => Promise<void>;
+  onRetryConnection: (sessionId: string) => Promise<void>;
   onStartPaneDrag: (workspaceId: string, sessionId: string) => void;
   onEndSessionDrag: () => void;
   onSplitSessionDrop: (sessionId: string, direction: WorkspaceDropDirection, targetSessionId?: string) => boolean;
@@ -226,6 +291,7 @@ function TerminalSessionView({
   interactiveAuth,
   onFocus,
   onClose,
+  onRetry,
   onStartDrag,
   onEndDrag
 }: TerminalSessionViewProps) {
@@ -238,12 +304,16 @@ function TerminalSessionView({
   const respondInteractiveAuth = useAppStore((state) => state.respondInteractiveAuth);
   const reopenInteractiveAuthUrl = useAppStore((state) => state.reopenInteractiveAuthUrl);
   const clearPendingInteractiveAuth = useAppStore((state) => state.clearPendingInteractiveAuth);
+  const updatePendingConnectionSize = useAppStore((state) => state.updatePendingConnectionSize);
+  const markSessionOutput = useAppStore((state) => state.markSessionOutput);
   const [promptResponses, setPromptResponses] = useState<string[]>([]);
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [terminalInitError, setTerminalInitError] = useState<string | null>(null);
-  const [hasReceivedOutput, setHasReceivedOutput] = useState(false);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
+  const previousSessionStatusRef = useRef<TerminalTab['status'] | null>(null);
+  const liveSessionIdRef = useRef(sessionId);
+  const liveSessionStatusRef = useRef<TerminalTab['status'] | null>(currentTab?.status ?? null);
 
   useEffect(() => {
     if (!interactiveAuth || interactiveAuth.sessionId !== sessionId) {
@@ -255,8 +325,13 @@ function TerminalSessionView({
 
   useEffect(() => {
     setTerminalInitError(null);
-    setHasReceivedOutput(false);
+    previousSessionStatusRef.current = null;
   }, [sessionId]);
+
+  useEffect(() => {
+    liveSessionIdRef.current = sessionId;
+    liveSessionStatusRef.current = currentTab?.status ?? null;
+  }, [currentTab?.status, sessionId]);
 
   function refreshViewport() {
     const terminal = terminalRef.current;
@@ -277,11 +352,21 @@ function TerminalSessionView({
         container: containerRef.current,
         appearance,
         onData: (data) => {
-          void window.dolssh.ssh.write(sessionId, data);
+          const currentSessionId = liveSessionIdRef.current;
+          const currentStatus = liveSessionStatusRef.current;
+          if (isPendingConnectionSessionId(currentSessionId) || currentStatus === 'pending' || currentStatus === 'error' || currentStatus === 'disconnecting') {
+            return;
+          }
+          void window.dolssh.ssh.write(currentSessionId, data);
         },
         onBinary: (data) => {
+          const currentSessionId = liveSessionIdRef.current;
+          const currentStatus = liveSessionStatusRef.current;
+          if (isPendingConnectionSessionId(currentSessionId) || currentStatus === 'pending' || currentStatus === 'error' || currentStatus === 'disconnecting') {
+            return;
+          }
           const bytes = Uint8Array.from(data, (char) => char.charCodeAt(0));
-          void window.dolssh.ssh.writeBinary(sessionId, bytes);
+          void window.dolssh.ssh.writeBinary(currentSessionId, bytes);
         }
       });
       setTerminalInitError(null);
@@ -304,7 +389,14 @@ function TerminalSessionView({
       afterResize: () => {
         refreshViewport();
       },
-      sendResize: ({ cols, rows }) => window.dolssh.ssh.resize(sessionId, cols, rows)
+      sendResize: ({ cols, rows }) => {
+        const currentSessionId = liveSessionIdRef.current;
+        if (isPendingConnectionSessionId(currentSessionId)) {
+          updatePendingConnectionSize(currentSessionId, cols, rows);
+          return Promise.resolve();
+        }
+        return window.dolssh.ssh.resize(currentSessionId, cols, rows);
+      }
     });
 
     const handlePointerActivate = () => {
@@ -363,22 +455,20 @@ function TerminalSessionView({
     void runtimeRef.current.setWebglEnabled(terminalWebglEnabled);
   }, [terminalWebglEnabled]);
 
-  useEffect(() => window.dolssh.ssh.onData(sessionId, (chunk) => {
-    if (chunk.byteLength > 0) {
-      setHasReceivedOutput(true);
-    }
-    runtimeRef.current?.write(chunk);
-  }), [sessionId]);
+  useEffect(
+    () =>
+      window.dolssh.ssh.onData(sessionId, (chunk) => {
+        if (chunk.byteLength > 0) {
+          markSessionOutput(sessionId);
+        }
+        runtimeRef.current?.write(chunk);
+      }),
+    [markSessionOutput, sessionId]
+  );
 
-  const shouldShowConnectionOverlay =
-    !terminalInitError &&
-    !hasReceivedOutput &&
-    (currentTab?.status === 'connecting' || currentTab?.status === 'connected');
-
-  const connectionOverlayMessage =
-    currentTab?.status === 'connecting'
-      ? '세션을 연결하는 중입니다...'
-      : '원격 셸이 첫 출력을 보내는 중입니다...';
+  const shouldShowConnectionOverlay = shouldShowSessionOverlay(currentTab, terminalInitError);
+  const connectionOverlayTitle = resolveOverlayTitle(currentTab);
+  const connectionOverlayMessage = resolveOverlayMessage(currentTab);
 
   useEffect(() => {
     if (!searchOpen) {
@@ -405,6 +495,21 @@ function TerminalSessionView({
       });
     });
   }, [layoutKey, visible]);
+
+  useEffect(() => {
+    const previousStatus = previousSessionStatusRef.current;
+    previousSessionStatusRef.current = currentTab?.status ?? null;
+
+    if (!didTerminalSessionJustConnect(previousStatus, currentTab?.status)) {
+      return;
+    }
+
+    runtimeRef.current?.syncDisplayMetrics();
+    resizeSchedulerRef.current?.request();
+    requestAnimationFrame(() => {
+      refreshViewport();
+    });
+  }, [currentTab?.status]);
 
   useEffect(() => {
     if (active && visible) {
@@ -660,9 +765,35 @@ function TerminalSessionView({
       ) : null}
       <div ref={containerRef} className="terminal-canvas">
         {shouldShowConnectionOverlay ? (
-          <div className="terminal-connection-overlay">
-            <strong>Connecting</strong>
+          <div
+            className={`terminal-connection-overlay ${
+              currentTab?.status === 'error' ? 'terminal-connection-overlay--error' : 'terminal-connection-overlay--blocking'
+            }`}
+          >
+            <strong>{connectionOverlayTitle}</strong>
             <span>{connectionOverlayMessage}</span>
+            {currentTab?.status === 'error' ? (
+              <div className="terminal-connection-overlay__actions">
+                <button
+                  type="button"
+                  className="secondary-button"
+                  onClick={() => {
+                    void onRetry?.();
+                  }}
+                >
+                  Retry
+                </button>
+                <button
+                  type="button"
+                  className="secondary-button"
+                  onClick={() => {
+                    void onClose?.();
+                  }}
+                >
+                  Close
+                </button>
+              </div>
+            ) : null}
           </div>
         ) : null}
       </div>
@@ -699,6 +830,7 @@ export function TerminalWorkspace({
   draggedSession,
   canDropDraggedSession,
   onCloseSession,
+  onRetryConnection,
   onStartPaneDrag,
   onEndSessionDrag,
   onSplitSessionDrop,
@@ -929,12 +1061,13 @@ export function TerminalWorkspace({
                     }
                   : undefined
               }
-              onClose={
-                placement
-                  ? async () => {
-                      await onCloseSession(tab.sessionId);
-                    }
-                  : undefined
+              onClose={async () => {
+                await onCloseSession(tab.sessionId);
+              }}
+              onRetry={
+                async () => {
+                  await onRetryConnection(tab.sessionId);
+                }
               }
               onStartDrag={
                 activeWorkspace && placement

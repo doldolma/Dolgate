@@ -197,7 +197,7 @@ export function getHostBadgeLabel(host: HostRecord): string {
     return 'AWS';
   }
   if (host.kind === 'warpgate-ssh') {
-    return 'WARPGATE';
+    return 'WARP';
   }
   return host.authType === 'privateKey' ? 'K' : 'S';
 }
@@ -637,12 +637,34 @@ export interface TransferStartInput {
   conflictResolution: ConflictResolution;
 }
 
+export type TerminalConnectionStage =
+  | 'host-key-check'
+  | 'awaiting-host-trust'
+  | 'checking-profile'
+  | 'browser-login'
+  | 'retrying-session'
+  | 'connecting'
+  | 'awaiting-credentials'
+  | 'waiting-interactive-auth'
+  | 'waiting-shell';
+
+export type TerminalConnectionBlockingKind = 'none' | 'dialog' | 'panel' | 'browser';
+
+export interface TerminalConnectionProgress {
+  stage: TerminalConnectionStage;
+  message: string;
+  blockingKind: TerminalConnectionBlockingKind;
+  retryable: boolean;
+}
+
 export interface TerminalTab {
   id: string;
   sessionId: string;
   hostId: string;
   title: string;
-  status: 'connecting' | 'connected' | 'disconnecting' | 'closed' | 'error';
+  status: 'pending' | 'connecting' | 'connected' | 'disconnecting' | 'closed' | 'error';
   errorMessage?: string;
+  connectionProgress?: TerminalConnectionProgress | null;
+  hasReceivedOutput?: boolean;
   lastEventAt: string;
 }

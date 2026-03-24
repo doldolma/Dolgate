@@ -364,6 +364,7 @@ export function HostBrowser({
           ) : (
             visibleHosts.map((host) => {
               const isTagsExpanded = expandedHostTags.includes(host.id);
+              const badgeLabel = getHostBadgeLabel(host);
               return (
                 <article
                   key={host.id}
@@ -406,7 +407,9 @@ export function HostBrowser({
                     }
                   }}
                 >
-                  <div className="host-browser-card__icon">{getHostBadgeLabel(host)}</div>
+                  <div className={`host-browser-card__icon ${badgeLabel.length > 3 ? 'host-browser-card__icon--compact' : ''}`}>
+                    {badgeLabel}
+                  </div>
                   <div className="host-browser-card__meta">
                     <strong>{host.label}</strong>
                     <span>{getHostSubtitle(host)}</span>
