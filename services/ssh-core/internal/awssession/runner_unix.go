@@ -6,79 +6,84 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
+	"strings"
 	"syscall"
+
+	"github.com/creack/pty"
 
 	"dolssh/services/ssh-core/internal/protocol"
 )
 
-type unixProcessRunner struct {
+type unixPTYRunner struct {
 	command *exec.Cmd
-	stdin   io.WriteCloser
-	stdout  io.ReadCloser
-	stderr  io.ReadCloser
+	ptyFile *os.File
 }
 
-func startPlatformAWSRunner(_ protocol.AWSConnectPayload, runtime awsCommandRuntime) (sessionRunner, error) {
+func startPlatformAWSRunner(payload protocol.AWSConnectPayload, runtime awsCommandRuntime) (sessionRunner, error) {
+	cols, rows := normalizedSize(payload.Cols, payload.Rows)
 	command := exec.Command(runtime.executablePath, runtime.args...)
-	command.Env = runtime.env
+	command.Env = ensureUnixTerminalEnv(runtime.env)
 
-	stdin, err := command.StdinPipe()
+	ptyFile, err := pty.StartWithSize(command, &pty.Winsize{
+		Cols: uint16(cols),
+		Rows: uint16(rows),
+	})
 	if err != nil {
-		return nil, fmt.Errorf("stdin pipe failed: %w", err)
+		return nil, fmt.Errorf("aws ssm session pty start failed: %w", err)
 	}
 
-	stdout, err := command.StdoutPipe()
-	if err != nil {
-		return nil, fmt.Errorf("stdout pipe failed: %w", err)
-	}
-
-	stderr, err := command.StderrPipe()
-	if err != nil {
-		return nil, fmt.Errorf("stderr pipe failed: %w", err)
-	}
-
-	if err := command.Start(); err != nil {
-		return nil, fmt.Errorf("aws ssm session start failed: %w", err)
-	}
-
-	return &unixProcessRunner{
+	return &unixPTYRunner{
 		command: command,
-		stdin:   stdin,
-		stdout:  stdout,
-		stderr:  stderr,
+		ptyFile: ptyFile,
 	}, nil
 }
 
-func (r *unixProcessRunner) Write(data []byte) error {
-	_, err := r.stdin.Write(data)
+func ensureUnixTerminalEnv(env []string) []string {
+	nextEnv := append([]string(nil), env...)
+	for index, entry := range nextEnv {
+		key, value, found := strings.Cut(entry, "=")
+		if !found || key != "TERM" {
+			continue
+		}
+		if strings.TrimSpace(value) == "" {
+			nextEnv[index] = "TERM=xterm-256color"
+		}
+		return nextEnv
+	}
+	return append(nextEnv, "TERM=xterm-256color")
+}
+
+func (r *unixPTYRunner) Write(data []byte) error {
+	_, err := r.ptyFile.Write(data)
 	return err
 }
 
-func (r *unixProcessRunner) Resize(cols, rows int) error {
-	_, _ = normalizedSize(cols, rows)
-	return nil
+func (r *unixPTYRunner) Resize(cols, rows int) error {
+	cols, rows = normalizedSize(cols, rows)
+	return pty.Setsize(r.ptyFile, &pty.Winsize{
+		Cols: uint16(cols),
+		Rows: uint16(rows),
+	})
 }
 
-func (r *unixProcessRunner) Kill() error {
+func (r *unixPTYRunner) Kill() error {
 	if r.command.Process == nil {
 		return nil
 	}
 	return ignoreProcessDone(r.command.Process.Kill())
 }
 
-func (r *unixProcessRunner) Close() error {
-	_ = r.stdin.Close()
-	_ = r.stdout.Close()
-	_ = r.stderr.Close()
-	return nil
+func (r *unixPTYRunner) Close() error {
+	return r.ptyFile.Close()
 }
 
-func (r *unixProcessRunner) Streams() []io.Reader {
-	return []io.Reader{r.stdout, r.stderr}
+func (r *unixPTYRunner) Streams() []io.Reader {
+	return []io.Reader{r.ptyFile}
 }
 
-func (r *unixProcessRunner) Wait() (sessionExit, error) {
+func (r *unixPTYRunner) Wait() (sessionExit, error) {
 	err := r.command.Wait()
 	if err == nil {
 		return sessionExit{ExitCode: 0}, nil

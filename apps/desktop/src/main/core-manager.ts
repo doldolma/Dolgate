@@ -259,7 +259,11 @@ export class CoreManager {
     string,
     PendingResponse<Record<string, unknown>>
   >();
-  private readonly lastResizeBySession = new Map<
+  private readonly desiredResizeBySession = new Map<
+    string,
+    { cols: number; rows: number }
+  >();
+  private readonly sentResizeBySession = new Map<
     string,
     { cols: number; rows: number }
   >();
@@ -803,29 +807,51 @@ export class CoreManager {
 
   resize(sessionId: string, cols: number, rows: number): void {
     const tab = this.tabs.get(sessionId);
-    // 연결 전/실패 세션에는 resize를 보내지 않아 불필요한 오류 이벤트를 만들지 않는다.
-    if (!tab || tab.status !== "connected") {
+    if (!tab) {
       return;
     }
     // 숨겨진 패널이나 과도한 observer 발화로 들어온 무효/중복 resize는 main에서 한 번 더 걸러준다.
     if (cols <= 0 || rows <= 0) {
       return;
     }
-    const lastSize = this.lastResizeBySession.get(sessionId);
-    if (lastSize?.cols === cols && lastSize.rows === rows) {
+    const nextSize = { cols, rows };
+    const desiredSize = this.desiredResizeBySession.get(sessionId);
+    if (desiredSize?.cols === cols && desiredSize.rows === rows) {
+      this.flushResizeIfReady(sessionId);
       return;
     }
-    this.lastResizeBySession.set(sessionId, { cols, rows });
+    this.desiredResizeBySession.set(sessionId, nextSize);
+    this.flushResizeIfReady(sessionId);
+  }
+
+  private flushResizeIfReady(sessionId: string): void {
+    const tab = this.tabs.get(sessionId);
+    if (!tab || tab.status !== "connected") {
+      return;
+    }
+
+    const desiredSize = this.desiredResizeBySession.get(sessionId);
+    if (!desiredSize) {
+      return;
+    }
+
+    const sentSize = this.sentResizeBySession.get(sessionId);
+    if (sentSize?.cols === desiredSize.cols && sentSize.rows === desiredSize.rows) {
+      return;
+    }
+
+    this.sentResizeBySession.set(sessionId, desiredSize);
     this.sendControl({
       id: randomUUID(),
       type: "resize",
       sessionId,
-      payload: { cols, rows },
+      payload: desiredSize,
     });
   }
 
   disconnect(sessionId: string): void {
-    this.lastResizeBySession.delete(sessionId);
+    this.desiredResizeBySession.delete(sessionId);
+    this.sentResizeBySession.delete(sessionId);
     const tab = this.tabs.get(sessionId);
     if (!tab) {
       return;
@@ -948,7 +974,8 @@ export class CoreManager {
         if (event.type === "closed") {
           this.sessionTransportById.delete(event.sessionId);
           this.tabs.delete(event.sessionId);
-          this.lastResizeBySession.delete(event.sessionId);
+          this.desiredResizeBySession.delete(event.sessionId);
+          this.sentResizeBySession.delete(event.sessionId);
           this.log({
             level: "info",
             category: "session",
@@ -980,6 +1007,7 @@ export class CoreManager {
           lastEventAt: new Date().toISOString(),
         });
         if (event.type === "connected") {
+          this.flushResizeIfReady(event.sessionId);
           this.log({
             level: "info",
             category: "session",
@@ -1101,7 +1129,8 @@ export class CoreManager {
     this.transferJobs.clear();
     this.portForwardDefinitions.clear();
     this.portForwardRuntimes.clear();
-    this.lastResizeBySession.clear();
+    this.desiredResizeBySession.clear();
+    this.sentResizeBySession.clear();
     this.sessionTransportById.clear();
   }
 

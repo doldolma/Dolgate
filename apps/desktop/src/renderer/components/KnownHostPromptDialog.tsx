@@ -28,14 +28,14 @@ export function KnownHostPromptDialog({ pending, onAccept, onCancel }: KnownHost
 
         <div className="modal-card__body">
           <div className="known-host-dialog__summary">
-            <div>
-              <span className="field-label">Host</span>
+            <div className="known-host-dialog__summary-field">
+              <span className="field-label">Host:</span>
               <strong>
                 {pending.probe.hostLabel} ({pending.probe.host}:{pending.probe.port})
               </strong>
             </div>
-            <div>
-              <span className="field-label">Algorithm</span>
+            <div className="known-host-dialog__summary-field">
+              <span className="field-label">Algorithm:</span>
               <strong>{pending.probe.algorithm}</strong>
             </div>
           </div>

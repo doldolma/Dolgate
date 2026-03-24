@@ -31,6 +31,7 @@ import type {
   SftpEndpointSummary,
   SftpPaneId,
   SecretMetadataRecord,
+  TerminalConnectionProgress,
   TerminalFontFamilyId,
   TerminalTab,
   TransferJob,
@@ -108,6 +109,7 @@ export interface PendingConflictDialog {
 }
 
 export interface PendingHostKeyPrompt {
+  sessionId?: string | null;
   probe: HostKeyProbeResult;
   action:
     | {
@@ -131,6 +133,7 @@ export interface PendingHostKeyPrompt {
 }
 
 export interface PendingCredentialRetry {
+  sessionId?: string | null;
   hostId: string;
   source: 'ssh' | 'sftp';
   credentialKind: 'password' | 'passphrase';
@@ -150,11 +153,12 @@ export interface PendingInteractiveAuth {
   autoSubmitted: boolean;
 }
 
-export interface PendingAwsAuthFlow {
+interface PendingConnectionAttempt {
+  sessionId: string;
   hostId: string;
-  hostLabel: string;
-  stage: 'checking-profile' | 'browser-login' | 'retrying-session';
-  message: string;
+  title: string;
+  latestCols: number;
+  latestRows: number;
 }
 
 export interface SftpState {
@@ -189,7 +193,7 @@ export interface AppState {
   pendingHostKeyPrompt: PendingHostKeyPrompt | null;
   pendingCredentialRetry: PendingCredentialRetry | null;
   pendingInteractiveAuth: PendingInteractiveAuth | null;
-  pendingAwsAuthFlow: PendingAwsAuthFlow | null;
+  pendingConnectionAttempts: PendingConnectionAttempt[];
   setSearchQuery: (value: string) => void;
   toggleHostTag: (tag: string) => void;
   clearHostTagFilter: () => void;
@@ -211,6 +215,7 @@ export interface AppState {
   moveHostToGroup: (hostId: string, groupPath: string | null) => Promise<void>;
   removeHost: (hostId: string) => Promise<void>;
   connectHost: (hostId: string, cols: number, rows: number, secrets?: HostSecretInput) => Promise<void>;
+  retrySessionConnection: (sessionId: string, secrets?: HostSecretInput) => Promise<void>;
   disconnectTab: (sessionId: string) => Promise<void>;
   closeWorkspace: (workspaceId: string) => Promise<void>;
   splitSessionIntoWorkspace: (sessionId: string, direction: WorkspaceDropDirection, targetSessionId?: string) => boolean;
@@ -235,6 +240,8 @@ export interface AppState {
   respondInteractiveAuth: (challengeId: string, responses: string[]) => Promise<void>;
   reopenInteractiveAuthUrl: () => Promise<void>;
   clearPendingInteractiveAuth: () => void;
+  updatePendingConnectionSize: (sessionId: string, cols: number, rows: number) => void;
+  markSessionOutput: (sessionId: string) => void;
   handleCoreEvent: (event: CoreEvent<Record<string, unknown>>) => void;
   handleTransferEvent: (event: TransferJobEvent) => void;
   handlePortForwardEvent: (event: PortForwardRuntimeEvent) => void;
@@ -546,6 +553,201 @@ function buildSessionTitle(label: string, hostId: string, tabs: TerminalTab[]): 
   return `${label} (${suffix})`;
 }
 
+const PENDING_SESSION_PREFIX = 'pending:';
+
+function createPendingSessionId(): string {
+  return `${PENDING_SESSION_PREFIX}${globalThis.crypto.randomUUID()}`;
+}
+
+function isPendingSessionId(sessionId: string): boolean {
+  return sessionId.startsWith(PENDING_SESSION_PREFIX);
+}
+
+function createConnectionProgress(
+  stage: TerminalConnectionProgress['stage'],
+  message: string,
+  options: Partial<Pick<TerminalConnectionProgress, 'blockingKind' | 'retryable'>> = {}
+): TerminalConnectionProgress {
+  return {
+    stage,
+    message,
+    blockingKind: options.blockingKind ?? 'none',
+    retryable: options.retryable ?? false
+  };
+}
+
+function createPendingSessionTab(input: {
+  sessionId: string;
+  hostId: string;
+  title: string;
+  progress: TerminalConnectionProgress;
+}): TerminalTab {
+  return {
+    id: input.sessionId,
+    sessionId: input.sessionId,
+    hostId: input.hostId,
+    title: input.title,
+    status: 'pending',
+    connectionProgress: input.progress,
+    hasReceivedOutput: false,
+    lastEventAt: new Date().toISOString()
+  };
+}
+
+function findPendingConnectionAttempt(state: AppState, sessionId: string): PendingConnectionAttempt | null {
+  return state.pendingConnectionAttempts.find((attempt) => attempt.sessionId === sessionId) ?? null;
+}
+
+function findPendingConnectionAttemptByHost(state: AppState, hostId: string): PendingConnectionAttempt | null {
+  return state.pendingConnectionAttempts.find((attempt) => attempt.hostId === hostId) ?? null;
+}
+
+function replaceSessionIdInLayout(node: WorkspaceLayoutNode, previousSessionId: string, nextSessionId: string): WorkspaceLayoutNode {
+  if (node.kind === 'leaf') {
+    return node.sessionId === previousSessionId
+      ? {
+          ...node,
+          sessionId: nextSessionId
+        }
+      : node;
+  }
+
+  return {
+    ...node,
+    first: replaceSessionIdInLayout(node.first, previousSessionId, nextSessionId),
+    second: replaceSessionIdInLayout(node.second, previousSessionId, nextSessionId)
+  };
+}
+
+function replaceSessionReferencesInState(
+  state: AppState,
+  previousSessionId: string,
+  nextSessionId: string,
+  transformTab?: (tab: TerminalTab) => TerminalTab
+): Partial<AppState> {
+  return {
+    tabs: state.tabs.map((tab) => {
+      if (tab.sessionId !== previousSessionId) {
+        return tab;
+      }
+      const nextTab: TerminalTab = {
+        ...tab,
+        id: nextSessionId,
+        sessionId: nextSessionId
+      };
+      return transformTab ? transformTab(nextTab) : nextTab;
+    }),
+    tabStrip: state.tabStrip.map((item) =>
+      item.kind === 'session' && item.sessionId === previousSessionId ? { kind: 'session', sessionId: nextSessionId } : item
+    ),
+    workspaces: state.workspaces.map((workspace) => ({
+      ...workspace,
+      layout: replaceSessionIdInLayout(workspace.layout, previousSessionId, nextSessionId),
+      activeSessionId: workspace.activeSessionId === previousSessionId ? nextSessionId : workspace.activeSessionId
+    })),
+    activeWorkspaceTab:
+      state.activeWorkspaceTab === asSessionTabId(previousSessionId) ? asSessionTabId(nextSessionId) : state.activeWorkspaceTab,
+    pendingHostKeyPrompt:
+      state.pendingHostKeyPrompt?.sessionId === previousSessionId
+        ? {
+            ...state.pendingHostKeyPrompt,
+            sessionId: nextSessionId
+          }
+        : state.pendingHostKeyPrompt,
+    pendingCredentialRetry:
+      state.pendingCredentialRetry?.sessionId === previousSessionId
+        ? {
+            ...state.pendingCredentialRetry,
+            sessionId: nextSessionId
+          }
+        : state.pendingCredentialRetry,
+    pendingInteractiveAuth:
+      state.pendingInteractiveAuth?.sessionId === previousSessionId
+        ? {
+            ...state.pendingInteractiveAuth,
+            sessionId: nextSessionId
+          }
+        : state.pendingInteractiveAuth
+  };
+}
+
+function removeSessionFromState(state: AppState, sessionId: string): Partial<AppState> {
+  const tabs = state.tabs.filter((tab) => tab.sessionId !== sessionId);
+  const standaloneIndex = state.tabStrip.findIndex((item) => item.kind === 'session' && item.sessionId === sessionId);
+  let nextTabStrip = state.tabStrip.filter((item) => !(item.kind === 'session' && item.sessionId === sessionId));
+  let nextWorkspaces = state.workspaces;
+  let nextActive = state.activeWorkspaceTab;
+
+  const owningWorkspace = state.workspaces.find((workspace) => listWorkspaceSessionIds(workspace.layout).includes(sessionId));
+  if (owningWorkspace) {
+    const reducedLayout = removeSessionFromWorkspaceLayout(owningWorkspace.layout, sessionId);
+    if (!reducedLayout) {
+      nextWorkspaces = state.workspaces.filter((workspace) => workspace.id !== owningWorkspace.id);
+      const workspaceIndex = state.tabStrip.findIndex((item) => item.kind === 'workspace' && item.workspaceId === owningWorkspace.id);
+      nextTabStrip = state.tabStrip.filter((item) => !(item.kind === 'workspace' && item.workspaceId === owningWorkspace.id));
+      if (nextActive === asWorkspaceTabId(owningWorkspace.id)) {
+        nextActive = resolveNextVisibleTab(nextTabStrip, workspaceIndex >= 0 ? workspaceIndex : nextTabStrip.length);
+      }
+    } else if (reducedLayout.kind === 'leaf') {
+      const workspaceIndex = state.tabStrip.findIndex((item) => item.kind === 'workspace' && item.workspaceId === owningWorkspace.id);
+      nextWorkspaces = state.workspaces.filter((workspace) => workspace.id !== owningWorkspace.id);
+      nextTabStrip = state.tabStrip.filter((item) => !(item.kind === 'workspace' && item.workspaceId === owningWorkspace.id));
+      nextTabStrip.splice(workspaceIndex >= 0 ? workspaceIndex : nextTabStrip.length, 0, {
+        kind: 'session',
+        sessionId: reducedLayout.sessionId
+      });
+      if (nextActive === asWorkspaceTabId(owningWorkspace.id)) {
+        nextActive = asSessionTabId(reducedLayout.sessionId);
+      }
+    } else {
+      nextWorkspaces = state.workspaces.map((workspace) =>
+        workspace.id === owningWorkspace.id
+          ? {
+              ...workspace,
+              layout: reducedLayout,
+              activeSessionId:
+                workspace.activeSessionId === sessionId ? findFirstWorkspaceSessionId(reducedLayout) : workspace.activeSessionId
+            }
+          : workspace
+      );
+    }
+  } else if (nextActive === asSessionTabId(sessionId)) {
+    nextActive = resolveNextVisibleTab(nextTabStrip, standaloneIndex >= 0 ? standaloneIndex : nextTabStrip.length);
+  }
+
+  return {
+    tabs,
+    workspaces: nextWorkspaces,
+    tabStrip: nextTabStrip,
+    activeWorkspaceTab: nextActive,
+    pendingHostKeyPrompt: state.pendingHostKeyPrompt?.sessionId === sessionId ? null : state.pendingHostKeyPrompt,
+    pendingCredentialRetry: state.pendingCredentialRetry?.sessionId === sessionId ? null : state.pendingCredentialRetry,
+    pendingInteractiveAuth: state.pendingInteractiveAuth?.sessionId === sessionId ? null : state.pendingInteractiveAuth,
+    pendingConnectionAttempts: state.pendingConnectionAttempts.filter((attempt) => attempt.sessionId !== sessionId)
+  };
+}
+
+function activateSessionContextInState(state: AppState, sessionId: string): Partial<AppState> {
+  const owningWorkspace = state.workspaces.find((workspace) => listWorkspaceSessionIds(workspace.layout).includes(sessionId));
+  if (!owningWorkspace) {
+    return {
+      activeWorkspaceTab: asSessionTabId(sessionId)
+    };
+  }
+
+  return {
+    workspaces: state.workspaces.map((workspace) =>
+      workspace.id === owningWorkspace.id
+        ? {
+            ...workspace,
+            activeSessionId: sessionId
+          }
+        : workspace
+    ),
+    activeWorkspaceTab: asWorkspaceTabId(owningWorkspace.id)
+  };
+}
+
 function buildWorkspaceTitle(workspaces: WorkspaceTab[]): string {
   const existingTitles = new Set(workspaces.map((workspace) => workspace.title));
   if (!existingTitles.has('Workspace')) {
@@ -645,6 +847,52 @@ function resolveCredentialRetryKind(host: HostRecord | undefined, message: strin
   return /passphrase|private key|unable to authenticate|authentication failed|ssh handshake failed|parse private key/i.test(message)
     ? 'passphrase'
     : null;
+}
+
+function resolveHostKeyCheckProgress(host: HostRecord): TerminalConnectionProgress {
+  return createConnectionProgress('host-key-check', `${host.label} 호스트 키를 확인하는 중입니다.`);
+}
+
+function resolveAwaitingHostTrustProgress(host: HostRecord): TerminalConnectionProgress {
+  return createConnectionProgress('awaiting-host-trust', `${host.label} 호스트 키 확인이 필요합니다.`, {
+    blockingKind: 'dialog'
+  });
+}
+
+function resolveConnectingProgress(host: HostRecord): TerminalConnectionProgress {
+  if (isAwsEc2HostRecord(host)) {
+    return createConnectionProgress('connecting', `${host.label} SSM 세션을 시작하는 중입니다.`);
+  }
+  if (isWarpgateSshHostRecord(host)) {
+    return createConnectionProgress('connecting', `${host.label} Warpgate SSH 세션을 연결하는 중입니다.`);
+  }
+  return createConnectionProgress('connecting', `${host.label} SSH 세션을 연결하는 중입니다.`);
+}
+
+function resolveWaitingShellProgress(host: HostRecord): TerminalConnectionProgress {
+  return createConnectionProgress('waiting-shell', `${host.label} 원격 셸이 첫 출력을 보내는 중입니다.`);
+}
+
+function resolveCredentialRetryProgress(
+  host: HostRecord,
+  credentialKind: PendingCredentialRetry['credentialKind']
+): TerminalConnectionProgress {
+  return createConnectionProgress(
+    'awaiting-credentials',
+    credentialKind === 'password'
+      ? `${host.label} 비밀번호를 다시 입력해 주세요.`
+      : `${host.label} passphrase를 다시 입력해 주세요.`,
+    {
+      blockingKind: 'dialog',
+      retryable: true
+    }
+  );
+}
+
+function resolveErrorProgress(message: string, retryable = true): TerminalConnectionProgress {
+  return createConnectionProgress('connecting', message, {
+    retryable
+  });
 }
 
 function normalizeInteractiveText(value: string | undefined | null): string {
@@ -749,9 +997,9 @@ export function createAppStore(api: DesktopApi) {
 
   const ensureAwsHostAuthentication = async (
     host: Extract<HostRecord, { kind: 'aws-ec2' }>,
-    onStageChange: (stage: PendingAwsAuthFlow['stage'], message: string) => void
+    onStageChange: (progress: TerminalConnectionProgress) => void
   ) => {
-    onStageChange('checking-profile', `${host.awsProfileName} 프로필 인증 상태를 확인하는 중입니다.`);
+    onStageChange(createConnectionProgress('checking-profile', `${host.awsProfileName} 프로필 인증 상태를 확인하는 중입니다.`));
     const status = await api.aws.getProfileStatus(host.awsProfileName);
     if (status.isAuthenticated) {
       return;
@@ -761,56 +1009,241 @@ export function createAppStore(api: DesktopApi) {
       throw new Error(status.errorMessage || `${host.awsProfileName} 프로필에 AWS CLI 자격 증명이 필요합니다.`);
     }
 
-    onStageChange('browser-login', `브라우저에서 ${host.awsProfileName} AWS 로그인을 진행하는 중입니다.`);
+    onStageChange(
+      createConnectionProgress('browser-login', `브라우저에서 ${host.awsProfileName} AWS 로그인을 진행하는 중입니다.`, {
+        blockingKind: 'browser'
+      })
+    );
     try {
       await api.aws.login(host.awsProfileName);
     } catch (error) {
       throw new Error(error instanceof Error ? error.message : 'AWS SSO 로그인을 시작하지 못했습니다.');
     }
 
-    onStageChange('checking-profile', `${host.awsProfileName} 프로필 로그인 결과를 확인하는 중입니다.`);
+    onStageChange(createConnectionProgress('checking-profile', `${host.awsProfileName} 프로필 로그인 결과를 확인하는 중입니다.`));
     const refreshedStatus = await api.aws.getProfileStatus(host.awsProfileName);
     if (!refreshedStatus.isAuthenticated) {
       throw new Error(refreshedStatus.errorMessage || 'AWS SSO 로그인 후에도 인증이 확인되지 않았습니다.');
     }
   };
 
-  const openSessionForHost = async (
+  const updateSessionProgress = (
+    set: (next: AppState | Partial<AppState> | ((state: AppState) => AppState | Partial<AppState>)) => void,
+    sessionId: string,
+    progress: TerminalConnectionProgress,
+    status: TerminalTab['status'] = 'pending'
+  ) => {
+    set((state) => {
+      if (!state.tabs.some((tab) => tab.sessionId === sessionId)) {
+        return state;
+      }
+      return {
+        tabs: state.tabs.map((tab) =>
+          tab.sessionId === sessionId
+            ? {
+                ...tab,
+                status,
+                errorMessage: undefined,
+                connectionProgress: progress,
+                lastEventAt: new Date().toISOString()
+              }
+            : tab
+        )
+      };
+    });
+  };
+
+  const markSessionError = (
+    set: (next: AppState | Partial<AppState> | ((state: AppState) => AppState | Partial<AppState>)) => void,
+    sessionId: string,
+    message: string,
+    options: {
+      progress?: TerminalConnectionProgress | null;
+      retryable?: boolean;
+    } = {}
+  ) => {
+    set((state) => {
+      if (!state.tabs.some((tab) => tab.sessionId === sessionId)) {
+        return {
+          pendingConnectionAttempts: state.pendingConnectionAttempts.filter((attempt) => attempt.sessionId !== sessionId)
+        };
+      }
+      return {
+        tabs: state.tabs.map((tab) =>
+          tab.sessionId === sessionId
+            ? {
+                ...tab,
+                status: 'error',
+                errorMessage: message,
+                connectionProgress: options.progress ?? resolveErrorProgress(message, options.retryable ?? true),
+                lastEventAt: new Date().toISOString()
+              }
+            : tab
+        ),
+        pendingConnectionAttempts: state.pendingConnectionAttempts.filter((attempt) => attempt.sessionId !== sessionId)
+      };
+    });
+  };
+
+  const createPendingSessionTabForHost = (
+    set: (next: AppState | Partial<AppState> | ((state: AppState) => AppState | Partial<AppState>)) => void,
+    get: () => AppState,
+    host: HostRecord,
+    cols: number,
+    rows: number,
+    progress: TerminalConnectionProgress,
+    existingSessionId?: string
+  ): string => {
+    const sessionId = existingSessionId ?? createPendingSessionId();
+    const existingTab = existingSessionId ? get().tabs.find((tab) => tab.sessionId === existingSessionId) ?? null : null;
+    const title = existingTab?.title ?? buildSessionTitle(host.label, host.id, get().tabs);
+    const tab = createPendingSessionTab({
+      sessionId,
+      hostId: host.id,
+      title,
+      progress
+    });
+
+    set((state) => {
+      const nextAttempts = [
+        ...state.pendingConnectionAttempts.filter((attempt) => attempt.sessionId !== sessionId),
+        {
+          sessionId,
+          hostId: host.id,
+          title,
+          latestCols: cols,
+          latestRows: rows
+        }
+      ];
+
+      if (existingTab) {
+        return {
+          tabs: state.tabs.map((item) => (item.sessionId === sessionId ? tab : item)),
+          pendingConnectionAttempts: nextAttempts,
+          ...activateSessionContextInState(state, sessionId)
+        };
+      }
+
+      return {
+        tabs: [...state.tabs.filter((item) => item.sessionId !== sessionId), tab],
+        tabStrip: [...state.tabStrip.filter((item) => !(item.kind === 'session' && item.sessionId === sessionId)), { kind: 'session', sessionId }],
+        activeWorkspaceTab: asSessionTabId(sessionId),
+        homeSection: 'hosts',
+        hostDrawer: { mode: 'closed' },
+        pendingConnectionAttempts: nextAttempts
+      };
+    });
+
+    return sessionId;
+  };
+
+  const startPendingSessionConnect = async (
+    set: (next: AppState | Partial<AppState> | ((state: AppState) => AppState | Partial<AppState>)) => void,
+    get: () => AppState,
+    sessionId: string,
+    hostId: string,
+    secrets?: HostSecretInput
+  ) => {
+    const state = get();
+    const attempt = findPendingConnectionAttempt(state, sessionId);
+    const host = state.hosts.find((item) => item.id === hostId);
+    if (!attempt || !host) {
+      return;
+    }
+
+    const currentProgressStage = state.tabs.find((tab) => tab.sessionId === sessionId)?.connectionProgress?.stage;
+    if (currentProgressStage !== 'retrying-session') {
+      updateSessionProgress(set, sessionId, resolveConnectingProgress(host));
+    }
+
+    try {
+      const connection = await api.ssh.connect({
+        hostId,
+        title: attempt.title,
+        cols: attempt.latestCols,
+        rows: attempt.latestRows,
+        secrets
+      });
+      const latestAttempt = findPendingConnectionAttempt(get(), sessionId);
+      if (!latestAttempt) {
+        await api.ssh.disconnect(connection.sessionId).catch(() => undefined);
+        return;
+      }
+
+      set((currentState) => ({
+        ...replaceSessionReferencesInState(currentState, sessionId, connection.sessionId, (tab) => ({
+          ...tab,
+          status: 'connecting',
+          errorMessage: undefined,
+          connectionProgress: resolveConnectingProgress(host),
+          hasReceivedOutput: false,
+          lastEventAt: new Date().toISOString()
+        })),
+        pendingConnectionAttempts: currentState.pendingConnectionAttempts.filter((attemptItem) => attemptItem.sessionId !== sessionId)
+      }));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '호스트 연결을 시작하지 못했습니다.';
+      markSessionError(set, sessionId, message);
+    }
+  };
+
+  const startSessionConnectionFlow = async (
     set: (next: AppState | Partial<AppState> | ((state: AppState) => AppState | Partial<AppState>)) => void,
     get: () => AppState,
     hostId: string,
     cols: number,
     rows: number,
-    secrets?: HostSecretInput
+    secrets?: HostSecretInput,
+    reuseSessionId?: string
   ) => {
     const host = get().hosts.find((item) => item.id === hostId);
     if (!host) {
       return;
     }
 
-    const title = buildSessionTitle(host.label, hostId, get().tabs);
-    const { sessionId } = await api.ssh.connect({
-      hostId,
-      title,
-      cols,
-      rows,
-      secrets
-    });
-    const tab: TerminalTab = {
-      id: sessionId,
-      title,
-      hostId,
-      sessionId,
-      status: 'connecting',
-      lastEventAt: new Date().toISOString()
-    };
-    set((state) => ({
-      tabs: [...state.tabs.filter((item) => item.id !== sessionId), tab],
-      tabStrip: [...state.tabStrip.filter((item) => !(item.kind === 'session' && item.sessionId === sessionId)), { kind: 'session', sessionId }],
-      activeWorkspaceTab: asSessionTabId(sessionId),
-      homeSection: 'hosts',
-      hostDrawer: { mode: 'closed' }
-    }));
+    const initialProgress = isAwsEc2HostRecord(host)
+      ? createConnectionProgress('checking-profile', `${host.awsProfileName} 프로필 인증 상태를 확인하는 중입니다.`)
+      : resolveHostKeyCheckProgress(host);
+    const sessionId = createPendingSessionTabForHost(set, get, host, cols, rows, initialProgress, reuseSessionId);
+
+    try {
+      if (isAwsEc2HostRecord(host)) {
+        await ensureAwsHostAuthentication(host, (progress) => {
+          updateSessionProgress(set, sessionId, progress);
+        });
+        updateSessionProgress(
+          set,
+          sessionId,
+          createConnectionProgress('retrying-session', `${host.label} SSM 연결을 다시 시도하는 중입니다.`)
+        );
+        await startPendingSessionConnect(set, get, sessionId, host.id, secrets);
+        return;
+      }
+
+      const trusted = await ensureTrustedHost(set, {
+        hostId,
+        sessionId,
+        action: {
+          kind: 'ssh',
+          hostId,
+          cols,
+          rows,
+          secrets
+        }
+      });
+      if (!trusted) {
+        updateSessionProgress(set, sessionId, resolveAwaitingHostTrustProgress(host));
+        return;
+      }
+
+      await startPendingSessionConnect(set, get, sessionId, host.id, secrets);
+    } catch (error) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : '호스트 연결을 시작하지 못했습니다. AWS SSM 연결에는 session-manager-plugin이 필요할 수 있습니다.';
+      markSessionError(set, sessionId, message);
+    }
   };
 
   const syncOperationalData = async (
@@ -909,11 +1342,15 @@ export function createAppStore(api: DesktopApi) {
 
   const runTrustedAction = async (
     get: () => AppState,
+    sessionId: string | null,
     action: PendingHostKeyPrompt['action'],
     set: (next: AppState | Partial<AppState> | ((state: AppState) => AppState | Partial<AppState>)) => void
   ) => {
     if (action.kind === 'ssh') {
-      await openSessionForHost(set, get, action.hostId, action.cols, action.rows, action.secrets);
+      if (!sessionId) {
+        return;
+      }
+      await startPendingSessionConnect(set, get, sessionId, action.hostId, action.secrets);
       return;
     }
 
@@ -996,7 +1433,7 @@ export function createAppStore(api: DesktopApi) {
 
   const ensureTrustedHost = async (
     set: (next: AppState | Partial<AppState> | ((state: AppState) => AppState | Partial<AppState>)) => void,
-    input: { hostId: string; action: PendingHostKeyPrompt['action'] }
+    input: { hostId: string; sessionId?: string | null; action: PendingHostKeyPrompt['action'] }
   ): Promise<boolean> => {
     const probe = await api.knownHosts.probeHost({ hostId: input.hostId });
     if (probe.status === 'trusted') {
@@ -1004,6 +1441,7 @@ export function createAppStore(api: DesktopApi) {
     }
     set({
       pendingHostKeyPrompt: {
+        sessionId: input.sessionId ?? null,
         probe,
         action: input.action
       }
@@ -1035,7 +1473,7 @@ export function createAppStore(api: DesktopApi) {
       pendingHostKeyPrompt: null,
       pendingCredentialRetry: null,
       pendingInteractiveAuth: null,
-      pendingAwsAuthFlow: null,
+      pendingConnectionAttempts: [],
       setSearchQuery: (value) => set({ searchQuery: value }),
       toggleHostTag: (tag) =>
         set((state) => {
@@ -1094,7 +1532,10 @@ export function createAppStore(api: DesktopApi) {
         set({
           hosts: sortHosts(hosts),
           groups: sortGroups(groups),
-          tabs,
+          tabs: tabs.map((tab) => ({
+            ...tab,
+            hasReceivedOutput: tab.status === 'connected' ? true : (tab.hasReceivedOutput ?? false)
+          })),
           workspaces: [],
           tabStrip: tabs.map((tab) => ({ kind: 'session' as const, sessionId: tab.sessionId })),
           portForwards: sortPortForwards(snapshot.rules),
@@ -1112,7 +1553,7 @@ export function createAppStore(api: DesktopApi) {
           pendingHostKeyPrompt: null,
           pendingCredentialRetry: null,
           pendingInteractiveAuth: null,
-          pendingAwsAuthFlow: null,
+          pendingConnectionAttempts: [],
           sftp: {
             localHomePath,
             leftPane: {
@@ -1236,49 +1677,71 @@ export function createAppStore(api: DesktopApi) {
         if (!host) {
           return;
         }
-        if (isAwsEc2HostRecord(host)) {
-          if (get().pendingAwsAuthFlow?.hostId === hostId) {
-            return;
-          }
-
-          const setAwsAuthStage = (stage: PendingAwsAuthFlow['stage'], message: string) => {
-            set({
-              pendingAwsAuthFlow: {
-                hostId: host.id,
-                hostLabel: host.label,
-                stage,
-                message
-              }
-            });
-          };
-
-          try {
-            await ensureAwsHostAuthentication(host, setAwsAuthStage);
-            setAwsAuthStage('retrying-session', `${host.label} SSM 연결을 다시 시도하는 중입니다.`);
-            await openSessionForHost(set, get, hostId, cols, rows);
-            set({ pendingAwsAuthFlow: null });
-          } catch (error) {
-            set({ pendingAwsAuthFlow: null });
-            throw error;
-          }
+        const existingPendingAttempt = findPendingConnectionAttemptByHost(get(), hostId);
+        if (existingPendingAttempt) {
+          set((state) => activateSessionContextInState(state, existingPendingAttempt.sessionId));
           return;
         }
-        const trusted = await ensureTrustedHost(set, {
-          hostId,
-          action: {
-            kind: 'ssh',
-            hostId,
-            cols,
-            rows,
-            secrets
-          }
-        });
-        if (!trusted) {
+        await startSessionConnectionFlow(set, get, hostId, cols, rows, secrets);
+      },
+      retrySessionConnection: async (sessionId, secrets) => {
+        const currentTab = get().tabs.find((tab) => tab.sessionId === sessionId);
+        if (!currentTab) {
           return;
         }
-        await runTrustedAction(get, { kind: 'ssh', hostId, cols, rows, secrets }, set);
+
+        const host = get().hosts.find((item) => item.id === currentTab.hostId);
+        if (!host) {
+          return;
+        }
+
+        const pendingSessionId = createPendingSessionId();
+        const currentAttempt = findPendingConnectionAttempt(get(), sessionId);
+        const latestCols = currentAttempt?.latestCols ?? 120;
+        const latestRows = currentAttempt?.latestRows ?? 32;
+
+        set((state) => ({
+          ...replaceSessionReferencesInState(state, sessionId, pendingSessionId, (tab) =>
+            createPendingSessionTab({
+              sessionId: pendingSessionId,
+              hostId: tab.hostId,
+              title: tab.title,
+              progress: isAwsEc2HostRecord(host)
+                ? createConnectionProgress('checking-profile', `${host.awsProfileName} 프로필 인증 상태를 확인하는 중입니다.`)
+                : resolveHostKeyCheckProgress(host)
+            })
+          ),
+          pendingConnectionAttempts: [
+            ...state.pendingConnectionAttempts.filter((attempt) => attempt.sessionId !== sessionId),
+            {
+              sessionId: pendingSessionId,
+              hostId: host.id,
+              title: currentTab.title,
+              latestCols,
+              latestRows
+            }
+          ]
+        }));
+
+        if (!isPendingSessionId(sessionId)) {
+          await api.ssh.disconnect(sessionId).catch(() => undefined);
+        }
+
+        await startSessionConnectionFlow(set, get, host.id, latestCols, latestRows, secrets, pendingSessionId);
       },
       disconnectTab: async (sessionId) => {
+        if (isPendingSessionId(sessionId)) {
+          set((state) => removeSessionFromState(state, sessionId));
+          return;
+        }
+
+        const currentTab = get().tabs.find((tab) => tab.sessionId === sessionId);
+        if (currentTab?.status === 'error') {
+          await api.ssh.disconnect(sessionId).catch(() => undefined);
+          set((state) => removeSessionFromState(state, sessionId));
+          return;
+        }
+
         await api.ssh.disconnect(sessionId);
         set((state) => ({
           tabs: state.tabs.map((tab) =>
@@ -1545,7 +2008,7 @@ export function createAppStore(api: DesktopApi) {
         if (!trusted) {
           return;
         }
-        await runTrustedAction(get, { kind: 'portForward', ruleId, hostId: rule.hostId }, set);
+        await runTrustedAction(get, null, { kind: 'portForward', ruleId, hostId: rule.hostId }, set);
       },
       stopPortForward: async (ruleId) => {
         await api.portForwards.stop(ruleId);
@@ -1603,10 +2066,33 @@ export function createAppStore(api: DesktopApi) {
         }
         set({ pendingHostKeyPrompt: null });
         await syncOperationalData(set);
-        await runTrustedAction(get, pending.action, set);
+        await runTrustedAction(get, pending.sessionId ?? null, pending.action, set);
       },
-      dismissPendingHostKeyPrompt: () => set({ pendingHostKeyPrompt: null }),
-      dismissPendingCredentialRetry: () => set({ pendingCredentialRetry: null }),
+      dismissPendingHostKeyPrompt: () => {
+        const pending = get().pendingHostKeyPrompt;
+        if (pending?.sessionId) {
+          const message = `${pending.probe.hostLabel} 호스트 키 확인이 취소되었습니다.`;
+          markSessionError(set, pending.sessionId, message, {
+            progress: resolveErrorProgress(message)
+          });
+          set({ pendingHostKeyPrompt: null });
+          return;
+        }
+        set({ pendingHostKeyPrompt: null });
+      },
+      dismissPendingCredentialRetry: () => {
+        const pending = get().pendingCredentialRetry;
+        if (pending?.sessionId) {
+          const host = get().hosts.find((item) => item.id === pending.hostId);
+          const message = `${host?.label ?? '세션'} 인증 입력이 취소되었습니다.`;
+          markSessionError(set, pending.sessionId, message, {
+            progress: resolveErrorProgress(message)
+          });
+          set({ pendingCredentialRetry: null });
+          return;
+        }
+        set({ pendingCredentialRetry: null });
+      },
       respondInteractiveAuth: async (challengeId, responses) => {
         const pending = get().pendingInteractiveAuth;
         if (!pending || pending.challengeId !== challengeId) {
@@ -1626,6 +2112,32 @@ export function createAppStore(api: DesktopApi) {
         await api.shell.openExternal(pending.approvalUrl);
       },
       clearPendingInteractiveAuth: () => set({ pendingInteractiveAuth: null }),
+      updatePendingConnectionSize: (sessionId, cols, rows) => {
+        set((state) => ({
+          pendingConnectionAttempts: state.pendingConnectionAttempts.map((attempt) =>
+            attempt.sessionId === sessionId
+              ? {
+                  ...attempt,
+                  latestCols: cols,
+                  latestRows: rows
+                }
+              : attempt
+          )
+        }));
+      },
+      markSessionOutput: (sessionId) => {
+        set((state) => ({
+          tabs: state.tabs.map((tab) =>
+            tab.sessionId === sessionId
+              ? {
+                  ...tab,
+                  hasReceivedOutput: true,
+                  connectionProgress: tab.status === 'connected' ? null : tab.connectionProgress
+                }
+              : tab
+          )
+        }));
+      },
       submitCredentialRetry: async (secrets) => {
         const pending = get().pendingCredentialRetry;
         if (!pending) {
@@ -1634,7 +2146,11 @@ export function createAppStore(api: DesktopApi) {
 
         set({ pendingCredentialRetry: null });
         if (pending.source === 'ssh') {
-          await get().connectHost(pending.hostId, 120, 32, secrets);
+          if (pending.sessionId) {
+            await get().retrySessionConnection(pending.sessionId, secrets);
+          } else {
+            await get().connectHost(pending.hostId, 120, 32, secrets);
+          }
           return;
         }
 
@@ -1659,7 +2175,7 @@ export function createAppStore(api: DesktopApi) {
         if (!trusted) {
           return;
         }
-        await runTrustedAction(get, { kind: 'sftp', paneId: pending.paneId, hostId: pending.hostId, secrets }, set);
+        await runTrustedAction(get, null, { kind: 'sftp', paneId: pending.paneId, hostId: pending.hostId, secrets }, set);
       },
       handleCoreEvent: (event) => {
         const sessionId = event.sessionId;
@@ -1720,18 +2236,44 @@ export function createAppStore(api: DesktopApi) {
             break;
           }
 
-          set({
-            pendingInteractiveAuth: {
-              sessionId,
-              challengeId: challenge.challengeId,
-              name: challenge.name ?? null,
-              instruction: challenge.instruction,
-              prompts: challenge.prompts,
-              provider: shouldUseWarpgateUi ? 'warpgate' : 'generic',
-              approvalUrl,
-              authCode,
-              autoSubmitted: canAutoRespond && autoResponses.length === challenge.prompts.length && challenge.prompts.length > 0
-            }
+          set((state) => {
+            const currentTab = state.tabs.find((tab) => tab.sessionId === sessionId);
+            const progress = createConnectionProgress(
+              'waiting-interactive-auth',
+              shouldUseWarpgateUi
+                ? `${currentHost?.label ?? '세션'} Warpgate 승인을 기다리는 중입니다.`
+                : `${currentHost?.label ?? '세션'} 추가 인증 응답이 필요합니다.`,
+              {
+                blockingKind: 'panel'
+              }
+            );
+
+            return {
+              tabs: currentTab
+                ? state.tabs.map((tab) =>
+                    tab.sessionId === sessionId
+                      ? {
+                          ...tab,
+                          status: 'connecting',
+                          connectionProgress: progress,
+                          lastEventAt: new Date().toISOString()
+                        }
+                      : tab
+                  )
+                : state.tabs,
+              pendingInteractiveAuth: {
+                sessionId,
+                challengeId: challenge.challengeId,
+                name: challenge.name ?? null,
+                instruction: challenge.instruction,
+                prompts: challenge.prompts,
+                provider: shouldUseWarpgateUi ? 'warpgate' : 'generic',
+                approvalUrl,
+                authCode,
+                autoSubmitted: canAutoRespond && autoResponses.length === challenge.prompts.length && challenge.prompts.length > 0
+              },
+              ...activateSessionContextInState(state, sessionId)
+            };
           });
 
           if (canAutoRespond && autoResponses.length === challenge.prompts.length && challenge.prompts.length > 0) {
@@ -1748,6 +2290,9 @@ export function createAppStore(api: DesktopApi) {
 
         if (event.type === 'keyboardInteractiveResolved') {
           set((state) => {
+            const currentTab = state.tabs.find((tab) => tab.sessionId === sessionId);
+            const currentHost = currentTab ? state.hosts.find((host) => host.id === currentTab.hostId) : undefined;
+
             if (!state.pendingInteractiveAuth || state.pendingInteractiveAuth.sessionId !== sessionId) {
               return state;
             }
@@ -1755,7 +2300,18 @@ export function createAppStore(api: DesktopApi) {
               return state;
             }
             return {
-              pendingInteractiveAuth: null
+              pendingInteractiveAuth: null,
+              tabs: currentTab
+                ? state.tabs.map((tab) =>
+                    tab.sessionId === sessionId
+                      ? {
+                          ...tab,
+                          connectionProgress: currentHost ? resolveConnectingProgress(currentHost) : tab.connectionProgress,
+                          lastEventAt: new Date().toISOString()
+                        }
+                      : tab
+                  )
+                : state.tabs
             };
           });
           return;
@@ -1763,58 +2319,26 @@ export function createAppStore(api: DesktopApi) {
 
         set((state) => {
           if (event.type === 'closed') {
-            const tabs = state.tabs.filter((tab) => tab.sessionId !== sessionId);
-            const standaloneIndex = state.tabStrip.findIndex((item) => item.kind === 'session' && item.sessionId === sessionId);
-            let nextTabStrip = state.tabStrip.filter((item) => !(item.kind === 'session' && item.sessionId === sessionId));
-            let nextWorkspaces = state.workspaces;
-            let nextActive = state.activeWorkspaceTab;
-
-            const owningWorkspace = state.workspaces.find((workspace) => listWorkspaceSessionIds(workspace.layout).includes(sessionId));
-            if (owningWorkspace) {
-              const reducedLayout = removeSessionFromWorkspaceLayout(owningWorkspace.layout, sessionId);
-              if (!reducedLayout) {
-                nextWorkspaces = state.workspaces.filter((workspace) => workspace.id !== owningWorkspace.id);
-                const workspaceIndex = state.tabStrip.findIndex((item) => item.kind === 'workspace' && item.workspaceId === owningWorkspace.id);
-                nextTabStrip = state.tabStrip.filter((item) => !(item.kind === 'workspace' && item.workspaceId === owningWorkspace.id));
-                if (nextActive === asWorkspaceTabId(owningWorkspace.id)) {
-                  nextActive = resolveNextVisibleTab(nextTabStrip, workspaceIndex >= 0 ? workspaceIndex : nextTabStrip.length);
-                }
-              } else if (reducedLayout.kind === 'leaf') {
-                const workspaceIndex = state.tabStrip.findIndex((item) => item.kind === 'workspace' && item.workspaceId === owningWorkspace.id);
-                nextWorkspaces = state.workspaces.filter((workspace) => workspace.id !== owningWorkspace.id);
-                nextTabStrip = state.tabStrip.filter((item) => !(item.kind === 'workspace' && item.workspaceId === owningWorkspace.id));
-                nextTabStrip.splice(workspaceIndex >= 0 ? workspaceIndex : nextTabStrip.length, 0, {
-                  kind: 'session',
-                  sessionId: reducedLayout.sessionId
-                });
-                if (nextActive === asWorkspaceTabId(owningWorkspace.id)) {
-                  nextActive = asSessionTabId(reducedLayout.sessionId);
-                }
-              } else {
-                nextWorkspaces = state.workspaces.map((workspace) =>
-                  workspace.id === owningWorkspace.id
-                    ? {
-                        ...workspace,
-                        layout: reducedLayout,
-                        activeSessionId:
-                          workspace.activeSessionId === sessionId ? findFirstWorkspaceSessionId(reducedLayout) : workspace.activeSessionId
-                      }
-                    : workspace
-                );
-              }
-            } else if (nextActive === asSessionTabId(sessionId)) {
-              nextActive = resolveNextVisibleTab(nextTabStrip, standaloneIndex >= 0 ? standaloneIndex : nextTabStrip.length);
-            }
-
-            return {
-              tabs,
-              workspaces: nextWorkspaces,
-              tabStrip: nextTabStrip,
-              activeWorkspaceTab: nextActive,
-              pendingInteractiveAuth:
-                state.pendingInteractiveAuth?.sessionId === sessionId ? null : state.pendingInteractiveAuth
-            };
+            return removeSessionFromState(state, sessionId);
           }
+
+          const currentTab = state.tabs.find((tab) => tab.sessionId === sessionId);
+          if (!currentTab) {
+            return state;
+          }
+          const currentHost = state.hosts.find((host) => host.id === currentTab.hostId);
+          const errorMessage = String(event.payload.message ?? 'SSH error');
+          const retryKind = event.type === 'error' ? resolveCredentialRetryKind(currentHost, errorMessage) : null;
+          const nextProgress =
+            event.type === 'connected'
+              ? currentHost
+                ? resolveWaitingShellProgress(currentHost)
+                : createConnectionProgress('waiting-shell', '원격 셸이 첫 출력을 보내는 중입니다.')
+              : event.type === 'error'
+                ? retryKind && currentHost
+                  ? resolveCredentialRetryProgress(currentHost, retryKind)
+                  : resolveErrorProgress(errorMessage)
+                : currentTab.connectionProgress;
 
           const tabs = state.tabs.map((tab) => {
             if (tab.sessionId !== sessionId) {
@@ -1825,23 +2349,18 @@ export function createAppStore(api: DesktopApi) {
             if (event.type === 'connected') {
               nextStatus = 'connected';
             }
-            let errorMessage = tab.errorMessage;
             if (event.type === 'error') {
               nextStatus = 'error';
-              errorMessage = String(event.payload.message ?? 'SSH error');
             }
             return {
               ...tab,
               status: nextStatus,
-              errorMessage,
+              errorMessage: event.type === 'error' ? errorMessage : undefined,
+              connectionProgress: nextProgress,
+              hasReceivedOutput: event.type === 'connected' ? false : tab.hasReceivedOutput,
               lastEventAt: new Date().toISOString()
             };
           });
-
-          const currentTab = state.tabs.find((tab) => tab.sessionId === sessionId);
-          const currentHost = currentTab ? state.hosts.find((host) => host.id === currentTab.hostId) : undefined;
-          const retryKind =
-            event.type === 'error' ? resolveCredentialRetryKind(currentHost, String(event.payload.message ?? 'SSH error')) : null;
 
           return {
             tabs,
@@ -1854,12 +2373,19 @@ export function createAppStore(api: DesktopApi) {
             pendingCredentialRetry:
               retryKind && currentHost
                 ? {
+                    sessionId,
                     hostId: currentHost.id,
                     source: 'ssh',
                     credentialKind: retryKind,
-                    message: String(event.payload.message ?? 'SSH error')
+                    message: errorMessage
                   }
-                : event.type === 'connected' && state.pendingCredentialRetry?.source === 'ssh' && state.pendingCredentialRetry.hostId === currentHost?.id
+                : event.type === 'connected' &&
+                    state.pendingCredentialRetry?.source === 'ssh' &&
+                    (
+                      state.pendingCredentialRetry.sessionId
+                        ? state.pendingCredentialRetry.sessionId === sessionId
+                        : state.pendingCredentialRetry.hostId === currentHost?.id
+                    )
                   ? null
                   : state.pendingCredentialRetry
           };
@@ -1996,7 +2522,7 @@ export function createAppStore(api: DesktopApi) {
         if (!trusted) {
           return;
         }
-        await runTrustedAction(get, { kind: 'sftp', paneId, hostId }, set);
+        await runTrustedAction(get, null, { kind: 'sftp', paneId, hostId }, set);
       },
       openSftpEntry: async (paneId, entryPath) => {
         const pane = getPane(get(), paneId);

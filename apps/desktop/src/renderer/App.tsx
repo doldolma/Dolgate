@@ -140,6 +140,24 @@ function countWorkspacePanes(workspace: WorkspaceTab): number {
   return count;
 }
 
+function workspaceContainsSession(workspace: WorkspaceTab, sessionId: string): boolean {
+  const stack = [workspace.layout];
+  while (stack.length > 0) {
+    const node = stack.pop();
+    if (!node) {
+      continue;
+    }
+    if (node.kind === 'leaf') {
+      if (node.sessionId === sessionId) {
+        return true;
+      }
+      continue;
+    }
+    stack.push(node.first, node.second);
+  }
+  return false;
+}
+
 export function App() {
   const [authState, setAuthState] = useState<AuthState>({
     status: 'loading',
@@ -181,7 +199,6 @@ export function App() {
   const settings = useAppStore((state) => state.settings);
   const pendingHostKeyPrompt = useAppStore((state) => state.pendingHostKeyPrompt);
   const pendingCredentialRetry = useAppStore((state) => state.pendingCredentialRetry);
-  const pendingAwsAuthFlow = useAppStore((state) => state.pendingAwsAuthFlow);
   const bootstrap = useAppStore((state) => state.bootstrap);
   const refreshHostCatalog = useAppStore((state) => state.refreshHostCatalog);
   const setSearchQuery = useAppStore((state) => state.setSearchQuery);
@@ -199,6 +216,7 @@ export function App() {
   const moveHostToGroup = useAppStore((state) => state.moveHostToGroup);
   const removeHost = useAppStore((state) => state.removeHost);
   const connectHost = useAppStore((state) => state.connectHost);
+  const retrySessionConnection = useAppStore((state) => state.retrySessionConnection);
   const disconnectTab = useAppStore((state) => state.disconnectTab);
   const closeWorkspace = useAppStore((state) => state.closeWorkspace);
   const splitSessionIntoWorkspace = useAppStore((state) => state.splitSessionIntoWorkspace);
@@ -428,6 +446,40 @@ export function App() {
       : null;
   const canDropDraggedSession = Boolean(adjacentDropCandidate);
 
+  useEffect(() => {
+    if (pendingHostKeyPrompt?.sessionId) {
+      const owningWorkspace = workspaces.find((workspace) => workspaceContainsSession(workspace, pendingHostKeyPrompt.sessionId!));
+      if (owningWorkspace) {
+        if (activeWorkspaceTab === `workspace:${owningWorkspace.id}` && owningWorkspace.activeSessionId === pendingHostKeyPrompt.sessionId) {
+          return;
+        }
+        focusWorkspaceSession(owningWorkspace.id, pendingHostKeyPrompt.sessionId);
+        return;
+      }
+      if (activeWorkspaceTab === `session:${pendingHostKeyPrompt.sessionId}`) {
+        return;
+      }
+      activateSession(pendingHostKeyPrompt.sessionId);
+    }
+  }, [activateSession, activeWorkspaceTab, focusWorkspaceSession, pendingHostKeyPrompt?.sessionId, workspaces]);
+
+  useEffect(() => {
+    if (pendingCredentialRetry?.sessionId) {
+      const owningWorkspace = workspaces.find((workspace) => workspaceContainsSession(workspace, pendingCredentialRetry.sessionId!));
+      if (owningWorkspace) {
+        if (activeWorkspaceTab === `workspace:${owningWorkspace.id}` && owningWorkspace.activeSessionId === pendingCredentialRetry.sessionId) {
+          return;
+        }
+        focusWorkspaceSession(owningWorkspace.id, pendingCredentialRetry.sessionId);
+        return;
+      }
+      if (activeWorkspaceTab === `session:${pendingCredentialRetry.sessionId}`) {
+        return;
+      }
+      activateSession(pendingCredentialRetry.sessionId);
+    }
+  }, [activateSession, activeWorkspaceTab, focusWorkspaceSession, pendingCredentialRetry?.sessionId, workspaces]);
+
   if (!isAuthReady) {
     async function saveLoginServerUrl(nextServerUrl: string): Promise<void> {
       const nextSettings = await window.dolssh.settings.update({
@@ -654,7 +706,7 @@ export function App() {
                 searchQuery={searchQuery}
                 selectedHostId={highlightedHostId}
                 errorMessage={hostBrowserError}
-                statusMessage={pendingAwsAuthFlow?.message ?? hostBrowserStatus}
+                statusMessage={hostBrowserStatus}
                 onSearchChange={setSearchQuery}
                 onCreateHost={() => {
                   setHostBrowserError(null);
@@ -698,11 +750,7 @@ export function App() {
                     setSelectedHostId(hostId);
                     await connectHost(hostId, 120, 32);
                   } catch (error) {
-                    setHostBrowserError(
-                      error instanceof Error
-                        ? error.message
-                        : '호스트 연결을 시작하지 못했습니다. AWS SSM 연결에는 session-manager-plugin이 필요할 수 있습니다.'
-                    );
+                    setHostBrowserError(error instanceof Error ? error.message : '호스트 연결을 시작하지 못했습니다.');
                   }
                 }}
               />
@@ -833,6 +881,7 @@ export function App() {
             draggedSession={draggedSession}
             canDropDraggedSession={canDropDraggedSession}
             onCloseSession={disconnectTab}
+            onRetryConnection={retrySessionConnection}
             onStartPaneDrag={(workspaceId, sessionId) => {
               setDraggedSession({
                 sessionId,

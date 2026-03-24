@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { shouldOpenTerminalSearch } from './TerminalWorkspace';
+import { didTerminalSessionJustConnect, shouldOpenTerminalSearch } from './TerminalWorkspace';
 
 describe('TerminalWorkspace search shortcut helper', () => {
   it('opens search only for visible active panes on Cmd/Ctrl+F', () => {
@@ -54,5 +54,13 @@ describe('TerminalWorkspace search shortcut helper', () => {
         metaKey: false
       })
     ).toBe(false);
+  });
+
+  it('requests a resize resync only when a session transitions into connected', () => {
+    expect(didTerminalSessionJustConnect(null, 'connected')).toBe(true);
+    expect(didTerminalSessionJustConnect('connecting', 'connected')).toBe(true);
+    expect(didTerminalSessionJustConnect('connected', 'connected')).toBe(false);
+    expect(didTerminalSessionJustConnect('error', 'error')).toBe(false);
+    expect(didTerminalSessionJustConnect('connected', 'closed')).toBe(false);
   });
 });

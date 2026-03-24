@@ -468,6 +468,28 @@ describe('createAppStore', () => {
     expect(store.getState().hostDrawer).toEqual({ mode: 'closed' });
   });
 
+  it('creates a pending tab immediately before the real session id is resolved', async () => {
+    const api = createMockApi();
+    const connect = createDeferred<{ sessionId: string }>();
+    api.ssh.connect = vi.fn().mockImplementation(() => connect.promise);
+    const store = createAppStore(api);
+
+    await store.getState().bootstrap();
+
+    const connectPromise = store.getState().connectHost('host-1', 120, 32);
+    await flushMicrotasks();
+
+    expect(store.getState().tabs[0]?.sessionId.startsWith('pending:')).toBe(true);
+    expect(store.getState().tabs[0]?.status).toBe('pending');
+    expect(store.getState().tabs[0]?.connectionProgress?.stage).toBe('connecting');
+
+    connect.resolve({ sessionId: 'session-1' });
+    await connectPromise;
+
+    expect(store.getState().tabs[0]?.sessionId).toBe('session-1');
+    expect(store.getState().tabs[0]?.status).toBe('connecting');
+  });
+
   it('creates a new titled session each time the same host is connected', async () => {
     const store = createAppStore(createMockApi());
 
@@ -497,6 +519,8 @@ describe('createAppStore', () => {
     await store.getState().bootstrap();
     await store.getState().connectHost('host-1', 120, 32);
 
+    expect(store.getState().tabs[0]?.sessionId.startsWith('pending:')).toBe(true);
+    expect(store.getState().tabs[0]?.connectionProgress?.stage).toBe('awaiting-host-trust');
     expect(store.getState().pendingHostKeyPrompt?.probe.status).toBe('untrusted');
     expect(api.ssh.connect).not.toHaveBeenCalled();
 
@@ -588,7 +612,7 @@ describe('createAppStore', () => {
     expect(api.aws.login).toHaveBeenCalledWith('sso-profile');
     expect(api.ssh.connect).toHaveBeenCalledTimes(1);
     expect(store.getState().tabs[0]?.title).toBe('AWS Prod');
-    expect(store.getState().pendingAwsAuthFlow).toBeNull();
+    expect(store.getState().pendingConnectionAttempts).toEqual([]);
   });
 
   it('surfaces a targeted AWS credential message for non-SSO profiles and does not open a session', async () => {
@@ -626,12 +650,15 @@ describe('createAppStore', () => {
 
     await store.getState().bootstrap();
 
-    await expect(store.getState().connectHost('aws-host-2', 120, 32)).rejects.toThrow('이 프로필은 AWS CLI 자격 증명이 필요합니다.');
+    await store.getState().connectHost('aws-host-2', 120, 32);
+
     expect(api.aws.login).not.toHaveBeenCalled();
     expect(api.ssh.connect).not.toHaveBeenCalled();
+    expect(store.getState().tabs[0]?.status).toBe('error');
+    expect(store.getState().tabs[0]?.errorMessage).toBe('이 프로필은 AWS CLI 자격 증명이 필요합니다.');
   });
 
-  it('tracks aws auth progress and clears it after the retried session finishes connecting', async () => {
+  it('tracks aws auth progress in the pending session tab and clears it after the retried session starts', async () => {
     const api = createMockApi();
     api.hosts.list = vi.fn().mockResolvedValue([
       {
@@ -666,7 +693,11 @@ describe('createAppStore', () => {
     await store.getState().bootstrap();
 
     const connectPromise = store.getState().connectHost('aws-host-1', 120, 32);
-    expect(store.getState().pendingAwsAuthFlow?.stage).toBe('checking-profile');
+    await flushMicrotasks();
+
+    const pendingSessionId = store.getState().tabs[0]?.sessionId;
+    expect(pendingSessionId?.startsWith('pending:')).toBe(true);
+    expect(store.getState().tabs[0]?.connectionProgress?.stage).toBe('checking-profile');
 
     firstStatus.resolve({
       profileName: 'sso-profile',
@@ -680,7 +711,7 @@ describe('createAppStore', () => {
     });
     await flushMicrotasks();
 
-    expect(store.getState().pendingAwsAuthFlow?.stage).toBe('browser-login');
+    expect(store.getState().tabs[0]?.connectionProgress?.stage).toBe('browser-login');
 
     login.resolve(undefined);
     await flushMicrotasks();
@@ -697,13 +728,14 @@ describe('createAppStore', () => {
     });
     await flushMicrotasks();
 
-    expect(store.getState().pendingAwsAuthFlow?.stage).toBe('retrying-session');
-    expect(store.getState().pendingAwsAuthFlow?.message).toContain('AWS Prod SSM 연결을 다시 시도하는 중입니다.');
+    expect(store.getState().tabs[0]?.connectionProgress?.stage).toBe('retrying-session');
+    expect(store.getState().tabs[0]?.connectionProgress?.message).toContain('AWS Prod SSM 연결을 다시 시도하는 중입니다.');
 
     connect.resolve({ sessionId: 'session-1' });
     await connectPromise;
 
-    expect(store.getState().pendingAwsAuthFlow).toBeNull();
+    expect(store.getState().pendingConnectionAttempts).toEqual([]);
+    expect(store.getState().tabs[0]?.sessionId).toBe('session-1');
   });
 
   it('ignores duplicate aws connect attempts for the same host while auth recovery is already in progress', async () => {
@@ -738,7 +770,8 @@ describe('createAppStore', () => {
     const secondConnect = store.getState().connectHost('aws-host-1', 120, 32);
 
     expect(api.aws.getProfileStatus).toHaveBeenCalledTimes(1);
-    expect(store.getState().pendingAwsAuthFlow?.stage).toBe('checking-profile');
+    await flushMicrotasks();
+    expect(store.getState().tabs[0]?.connectionProgress?.stage).toBe('checking-profile');
 
     status.resolve({
       profileName: 'sso-profile',
@@ -754,7 +787,7 @@ describe('createAppStore', () => {
     await Promise.all([firstConnect, secondConnect]);
 
     expect(api.ssh.connect).toHaveBeenCalledTimes(1);
-    expect(store.getState().pendingAwsAuthFlow).toBeNull();
+    expect(store.getState().pendingConnectionAttempts).toEqual([]);
   });
 
   it('keeps a fixed sftp workspace with local bootstrap and host connect', async () => {
