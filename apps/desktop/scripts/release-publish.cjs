@@ -25,13 +25,30 @@ function getNpmCommand() {
   return process.platform === 'win32' ? 'npm.cmd' : 'npm';
 }
 
+function quoteWindowsCommandArg(value) {
+  if (!value) {
+    return '""';
+  }
+
+  if (!/[\s"]/u.test(value)) {
+    return value;
+  }
+
+  return `"${value.replace(/(\\*)"/g, '$1$1\\"').replace(/(\\+)$/g, '$1$1')}"`;
+}
+
 function runCommand(command, args, options = {}) {
   return new Promise((resolve, reject) => {
-    const child = spawn(command, args, {
+    const spawnOptions = {
       cwd: options.cwd,
       env: options.env ?? process.env,
       stdio: 'inherit'
-    });
+    };
+
+    const child =
+      process.platform === 'win32'
+        ? spawn(process.env.ComSpec || 'cmd.exe', ['/d', '/s', '/c', [command, ...args].map(quoteWindowsCommandArg).join(' ')], spawnOptions)
+        : spawn(command, args, spawnOptions);
 
     child.on('error', reject);
     child.on('exit', (code) => {
