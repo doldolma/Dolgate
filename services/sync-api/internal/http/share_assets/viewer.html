@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>dolssh Session Share</title>
+    <link rel="stylesheet" href="/share/assets/vendor/xterm.css?v={{ .AssetVersion }}" />
+    <link rel="stylesheet" href="/share/assets/viewer.css?v={{ .AssetVersion }}" />
+  </head>
+  <body data-share-id="{{ .ShareID }}" data-viewer-token="{{ .ViewerToken }}">
+    <header class="viewer-header">
+      <div class="viewer-header__titles">
+        <div class="viewer-header__eyebrow">dolssh</div>
+        <strong id="viewer-title">Shared Session</strong>
+      </div>
+      <div class="viewer-header__status" id="viewer-status">Connecting</div>
+    </header>
+    <main class="viewer-shell">
+      <div id="viewer-terminal-viewport" class="viewer-terminal-viewport">
+        <div id="viewer-terminal-stage" class="viewer-terminal-stage">
+          <div id="viewer-terminal" class="viewer-terminal"></div>
+        </div>
+      </div>
+    </main>
+    <script src="/share/assets/vendor/xterm.js?v={{ .AssetVersion }}"></script>
+    <script src="/share/assets/viewer.js?v={{ .AssetVersion }}"></script>
+  </body>
+</html>

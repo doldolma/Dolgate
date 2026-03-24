@@ -30,6 +30,7 @@ export interface TerminalRuntime {
   terminal: Terminal;
   fitAddon: FitAddon;
   write: (data: Uint8Array | string) => void;
+  captureSnapshot: () => string;
   setAppearance: (appearance: TerminalRuntimeAppearance) => void;
   setWebglEnabled: (enabled: boolean) => Promise<void>;
   syncDisplayMetrics: () => void;
@@ -249,6 +250,25 @@ function safeWarn(logger: Pick<Console, 'warn'>, message: string, error?: unknow
   logger.warn(message);
 }
 
+function sanitizeTerminalLine(line: string): string {
+  return line.replace(/\u00a0/g, ' ');
+}
+
+function buildViewportSnapshot(terminal: Terminal): string {
+  const buffer = terminal.buffer.active;
+  const viewportY = buffer.viewportY;
+  const lines: string[] = [];
+
+  for (let index = 0; index < terminal.rows; index += 1) {
+    const line = buffer.getLine(viewportY + index);
+    lines.push(sanitizeTerminalLine(line?.translateToString(true) ?? ''));
+  }
+
+  const cursorRow = Math.min(terminal.rows, Math.max(1, buffer.cursorY + 1));
+  const cursorCol = Math.min(terminal.cols, Math.max(1, buffer.cursorX + 1));
+  return `\u001b[2J\u001b[H${lines.join('\r\n')}\u001b[${cursorRow};${cursorCol}H`;
+}
+
 export function createTerminalRuntime({
   container,
   appearance,
@@ -416,6 +436,9 @@ export function createTerminalRuntime({
       }
 
       scheduleFlush();
+    },
+    captureSnapshot() {
+      return buildViewportSnapshot(terminal);
     },
     setAppearance(nextAppearance) {
       applyTerminalAppearance(terminal, nextAppearance);
