@@ -24,3 +24,4 @@ services/sync-api/data
 .idea
 .tmp
 /tmp/
+/data.json
