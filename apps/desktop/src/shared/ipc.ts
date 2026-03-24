@@ -1,6 +1,7 @@
 import type {
   ActivityLogRecord,
   AppSettings,
+  AwsSsmPortForwardTargetKind,
   AwsEc2InstanceSummary,
   AwsProfileStatus,
   AwsProfileSummary,
@@ -46,12 +47,15 @@ export type CoreCommandType =
   | "health"
   | "connect"
   | "awsConnect"
+  | "localConnect"
   | "resize"
   | "disconnect"
   | "probeHostKey"
   | "keyboardInteractiveRespond"
   | "portForwardStart"
+  | "ssmPortForwardStart"
   | "portForwardStop"
+  | "ssmPortForwardStop"
   | "sftpConnect"
   | "sftpDisconnect"
   | "sftpList"
@@ -92,6 +96,12 @@ export interface DesktopConnectInput {
   secrets?: HostSecretInput;
 }
 
+export interface DesktopLocalConnectInput {
+  cols: number;
+  rows: number;
+  title?: string;
+}
+
 export interface DesktopSftpConnectInput {
   hostId: string;
   secrets?: HostSecretInput;
@@ -118,6 +128,12 @@ export interface ResolvedAwsConnectPayload {
   instanceId: string;
   cols: number;
   rows: number;
+}
+
+export interface ResolvedLocalConnectPayload {
+  cols: number;
+  rows: number;
+  title?: string;
 }
 
 export interface KeyboardInteractiveRespondInput {
@@ -158,6 +174,17 @@ export interface ResolvedPortForwardStartPayload {
   bindPort: number;
   targetHost?: string;
   targetPort?: number;
+}
+
+export interface ResolvedSsmPortForwardStartPayload {
+  profileName: string;
+  region: string;
+  instanceId: string;
+  bindAddress: string;
+  bindPort: number;
+  targetKind: AwsSsmPortForwardTargetKind;
+  targetPort: number;
+  remoteHost?: string;
 }
 
 export interface SftpListInput {
@@ -302,6 +329,9 @@ export interface DesktopApi {
   };
   ssh: {
     connect: (input: DesktopConnectInput) => Promise<{ sessionId: string }>;
+    connectLocal: (
+      input: DesktopLocalConnectInput,
+    ) => Promise<{ sessionId: string }>;
     write: (sessionId: string, data: string) => Promise<void>;
     writeBinary: (sessionId: string, data: Uint8Array) => Promise<void>;
     resize: (sessionId: string, cols: number, rows: number) => Promise<void>;

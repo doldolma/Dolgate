@@ -4,6 +4,7 @@ import type {
   CoreEvent,
   DesktopApi,
   DesktopConnectInput,
+  DesktopLocalConnectInput,
   DesktopSftpConnectInput,
   DesktopWindowState,
   HostDraft,
@@ -202,6 +203,8 @@ const api: DesktopApi = {
   ssh: {
     connect: (input: DesktopConnectInput) =>
       ipcRenderer.invoke(ipcChannels.ssh.connect, input),
+    connectLocal: (input: DesktopLocalConnectInput) =>
+      ipcRenderer.invoke(ipcChannels.ssh.connectLocal, input),
     write: (sessionId: string, data: string) =>
       ipcRenderer.invoke(ipcChannels.ssh.write, sessionId, data),
     writeBinary: (sessionId: string, data: Uint8Array) =>
