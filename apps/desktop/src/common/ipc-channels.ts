@@ -42,6 +42,7 @@ export const ipcChannels = {
   },
   ssh: {
     connect: 'ssh:connect',
+    connectLocal: 'ssh:connect-local',
     write: 'ssh:write',
     writeBinary: 'ssh:write-binary',
     resize: 'ssh:resize',

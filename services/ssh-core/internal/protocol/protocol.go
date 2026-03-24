@@ -18,12 +18,15 @@ const (
 	CommandHealth                     CommandType = "health"
 	CommandConnect                    CommandType = "connect"
 	CommandAWSConnect                 CommandType = "awsConnect"
+	CommandLocalConnect               CommandType = "localConnect"
 	CommandKeyboardInteractiveRespond CommandType = "keyboardInteractiveRespond"
 	CommandResize                     CommandType = "resize"
 	CommandDisconnect                 CommandType = "disconnect"
 	CommandProbeHostKey               CommandType = "probeHostKey"
 	CommandPortForwardStart           CommandType = "portForwardStart"
+	CommandSSMPortForwardStart        CommandType = "ssmPortForwardStart"
 	CommandPortForwardStop            CommandType = "portForwardStop"
+	CommandSSMPortForwardStop         CommandType = "ssmPortForwardStop"
 	CommandSFTPConnect                CommandType = "sftpConnect"
 	CommandSFTPDisconnect             CommandType = "sftpDisconnect"
 	CommandSFTPList                   CommandType = "sftpList"
@@ -127,6 +130,12 @@ type AWSConnectPayload struct {
 	Rows        int    `json:"rows"`
 }
 
+type LocalConnectPayload struct {
+	Cols  int    `json:"cols"`
+	Rows  int    `json:"rows"`
+	Title string `json:"title,omitempty"`
+}
+
 // SFTPConnectPayload는 원격 파일 브라우저 접속을 위한 인증 정보다.
 type SFTPConnectPayload struct {
 	Host                 string `json:"host"`
@@ -224,6 +233,17 @@ type PortForwardStartPayload struct {
 	TargetPort           int    `json:"targetPort,omitempty"`
 }
 
+type SSMPortForwardStartPayload struct {
+	ProfileName string `json:"profileName"`
+	Region      string `json:"region"`
+	InstanceID  string `json:"instanceId"`
+	BindAddress string `json:"bindAddress"`
+	BindPort    int    `json:"bindPort"`
+	TargetKind  string `json:"targetKind"`
+	TargetPort  int    `json:"targetPort"`
+	RemoteHost  string `json:"remoteHost,omitempty"`
+}
+
 // StatusPayload는 프로세스/세션 상태를 짧은 문자열로 표현한다.
 type StatusPayload struct {
 	Status  string `json:"status"`
@@ -251,6 +271,7 @@ type HostKeyProbedPayload struct {
 }
 
 type PortForwardStartedPayload struct {
+	Transport   string `json:"transport,omitempty"`
 	Status      string `json:"status"`
 	Mode        string `json:"mode"`
 	BindAddress string `json:"bindAddress"`

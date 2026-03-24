@@ -215,6 +215,7 @@ export function App() {
   const saveHost = useAppStore((state) => state.saveHost);
   const moveHostToGroup = useAppStore((state) => state.moveHostToGroup);
   const removeHost = useAppStore((state) => state.removeHost);
+  const openLocalTerminal = useAppStore((state) => state.openLocalTerminal);
   const connectHost = useAppStore((state) => state.connectHost);
   const retrySessionConnection = useAppStore((state) => state.retrySessionConnection);
   const disconnectTab = useAppStore((state) => state.disconnectTab);
@@ -708,6 +709,14 @@ export function App() {
                 errorMessage={hostBrowserError}
                 statusMessage={hostBrowserStatus}
                 onSearchChange={setSearchQuery}
+                onOpenLocalTerminal={() => {
+                  setHostBrowserError(null);
+                  setHostBrowserStatus(null);
+                  setSelectedHostId(null);
+                  void openLocalTerminal(120, 32).catch((error) => {
+                    setHostBrowserError(error instanceof Error ? error.message : '로컬 터미널을 시작하지 못했습니다.');
+                  });
+                }}
                 onCreateHost={() => {
                   setHostBrowserError(null);
                   setHostBrowserStatus(null);
