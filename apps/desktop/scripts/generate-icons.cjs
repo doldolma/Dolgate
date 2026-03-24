@@ -7,14 +7,16 @@ const sourceSvg = path.join(desktopDir, 'assets', 'icons', 'dolssh-icon.svg');
 const buildDir = path.join(desktopDir, 'build', 'icons');
 const pngDir = path.join(buildDir, 'png');
 const iconsetDir = path.join(buildDir, 'dolssh.iconset');
+const requiredOutputs = ['dolssh.icns', 'dolssh.ico', 'dolssh.png'].map((fileName) => path.join(buildDir, fileName));
 
 const pngSizes = [16, 32, 48, 64, 128, 256, 512, 1024];
 
-function ensureCommand(command) {
+function hasCommand(command) {
   try {
-    execFileSync('which', [command], { stdio: 'ignore' });
+    execFileSync(process.platform === 'win32' ? 'where.exe' : 'which', [command], { stdio: 'ignore' });
+    return true;
   } catch {
-    throw new Error(`${command} 명령을 찾을 수 없습니다. macOS 기본 도구 또는 librsvg가 필요합니다.`);
+    return false;
   }
 }
 
@@ -90,9 +92,27 @@ function buildIco(pngMap) {
   return icoPath;
 }
 
+function hasGeneratedIcons() {
+  return requiredOutputs.every((outputPath) => fs.existsSync(outputPath));
+}
+
 function main() {
-  ensureCommand('rsvg-convert');
-  ensureCommand('iconutil');
+  const hasRsvgConvert = hasCommand('rsvg-convert');
+  const hasIconutil = hasCommand('iconutil');
+  const canGenerateIcons = hasRsvgConvert && hasIconutil;
+
+  if (!canGenerateIcons) {
+    if (hasGeneratedIcons()) {
+      console.log('아이콘 생성 도구가 없어 기존 아이콘 산출물을 재사용합니다.');
+      return;
+    }
+
+    const missingCommands = [
+      ...(hasRsvgConvert ? [] : ['rsvg-convert']),
+      ...(hasIconutil ? [] : ['iconutil'])
+    ];
+    throw new Error(`${missingCommands.join(', ')} 명령을 찾을 수 없습니다. 기존 아이콘 산출물이 없어서 빌드를 계속할 수 없습니다.`);
+  }
 
   resetDirectory(buildDir);
   fs.mkdirSync(pngDir, { recursive: true });

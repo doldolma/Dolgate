@@ -2,6 +2,7 @@ import { access, mkdtemp, readFile, realpath, rm } from 'node:fs/promises';
 import { constants as fsConstants } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { createRequire } from 'node:module';
 import { randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { app } from 'electron';
@@ -16,6 +17,8 @@ import type {
   TermiusProbeStatus
 } from '@shared';
 import { normalizeGroupPath } from '@shared';
+
+const require = createRequire(import.meta.url);
 
 interface CommandResult {
   stdout: string;
@@ -398,13 +401,29 @@ function resolveTermiusHelperAssetPath(filename: string): string {
 function resolveHelperElectronCandidates(): string[] {
   const helperName = process.platform === 'win32' ? 'electron.cmd' : 'electron';
   const homeDir = os.homedir();
+  let localElectronPath: string | null = null;
+
+  try {
+    const electronPackagePath = require.resolve('electron/package.json');
+    const electronPackageDir = path.dirname(electronPackagePath);
+    localElectronPath =
+      process.platform === 'darwin'
+        ? path.join(electronPackageDir, 'dist', 'Electron.app', 'Contents', 'MacOS', 'Electron')
+        : process.platform === 'win32'
+          ? path.join(electronPackageDir, 'dist', 'electron.exe')
+          : path.join(electronPackageDir, 'dist', 'electron');
+  } catch {
+    // Ignore missing local Electron packages and fall back to explicit helper runtime paths.
+  }
 
   return [
     process.env.DOLSSH_TERMIUS_HELPER_ELECTRON?.trim() || null,
+    localElectronPath,
     path.join(homeDir, 'WebstormProjects', 'termius-exporter', 'node_modules', '.bin', helperName),
     path.join(homeDir, 'develop', 'termius-exporter', 'node_modules', '.bin', helperName),
     path.resolve(process.cwd(), '../termius-exporter/node_modules/.bin', helperName),
-    path.resolve(process.cwd(), '../../termius-exporter/node_modules/.bin', helperName)
+    path.resolve(process.cwd(), '../../termius-exporter/node_modules/.bin', helperName),
+    path.resolve(process.cwd(), '../../../termius-exporter/node_modules/.bin', helperName)
   ].filter((value): value is string => Boolean(value));
 }
 
@@ -551,14 +570,15 @@ export class TermiusImportService {
       throw new Error(`Unsupported platform: ${process.platform}`);
     }
 
-    const helperElectron = await this.resolveHelperElectronPath();
-    const helperScript = resolveTermiusHelperAssetPath('termius-helper.cjs');
     const helperProbeFile = resolveTermiusHelperAssetPath('termius-probe.html');
     const helperTempRoot = await mkdtemp(path.join(os.tmpdir(), 'dolssh-termius-export-'));
     const outputPath = path.join(helperTempRoot, 'termius-export.json');
 
     try {
-      const result = await runHelper(helperElectron, [helperScript, '--out', outputPath, '--probe-file', helperProbeFile], process.env);
+      const helperArgs = ['--dolssh-termius-helper', '--out', outputPath, '--probe-file', helperProbeFile];
+      const result = app.isPackaged
+        ? await runHelper(process.execPath, helperArgs, process.env)
+        : await runHelper(process.execPath, [path.resolve(__dirname, '../..'), ...helperArgs], process.env);
       if (result.exitCode !== 0) {
         throw new Error(result.stderr.trim() || 'Termius import helper failed.');
       }
