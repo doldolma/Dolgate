@@ -20,6 +20,15 @@
   --danger-bg: rgba(210, 93, 93, 0.14);
   --danger-text: #b53a3a;
   --shadow: 0 16px 40px rgba(40, 56, 78, 0.08);
+  --share-surface: #ffffff;
+  --share-surface-muted: #f3f7fb;
+  --share-border: #c7d3e0;
+  --share-text: #1f2b3a;
+  --share-text-soft: #5f7388;
+  --share-active-surface: #dfe8ff;
+  --share-active-border: #9fb6ff;
+  --share-danger-surface: #fff1f1;
+  --share-danger-border: #f0caca;
 }
 
 :root[data-theme='dark'] {
@@ -42,6 +51,15 @@
   --danger-bg: rgba(214, 84, 84, 0.18);
   --danger-text: #ffb5b5;
   --shadow: 0 16px 40px rgba(0, 0, 0, 0.3);
+  --share-surface: #162537;
+  --share-surface-muted: #1c2d41;
+  --share-border: #30465f;
+  --share-text: #edf4fb;
+  --share-text-soft: #9fb2c6;
+  --share-active-surface: #2a4168;
+  --share-active-border: #6e91e8;
+  --share-danger-surface: #3a2429;
+  --share-danger-border: #6a4048;
 }
 
 * {
@@ -1805,9 +1823,9 @@ input::placeholder {
   min-width: 4.75rem;
   padding: 0.52rem 0.8rem;
   border-radius: 10px;
-  background: color-mix(in srgb, var(--surface-muted) 88%, transparent 12%);
-  border: 1px solid color-mix(in srgb, var(--border) 84%, transparent 16%);
-  color: var(--text);
+  background: var(--share-surface);
+  border: 1px solid var(--share-border);
+  color: var(--share-text);
   font-size: 0.85rem;
   font-weight: 600;
   box-shadow: 0 10px 22px rgba(0, 0, 0, 0.16);
@@ -1820,8 +1838,9 @@ input::placeholder {
   width: min(22rem, 72vw);
   padding: 0.95rem;
   border-radius: 14px;
-  border: 1px solid color-mix(in srgb, var(--border) 88%, transparent 12%);
-  background: color-mix(in srgb, var(--surface-raised) 96%, transparent 4%);
+  border: 1px solid var(--share-border);
+  background: var(--share-surface);
+  color: var(--share-text);
   box-shadow: 0 18px 42px rgba(0, 0, 0, 0.22);
   display: grid;
   gap: 0.75rem;
@@ -1839,15 +1858,15 @@ input::placeholder {
   font-size: 0.7rem;
   letter-spacing: 0.12em;
   text-transform: uppercase;
-  color: var(--text-soft);
+  color: var(--share-text-soft);
 }
 
 .terminal-share-popover__url {
   padding: 0.7rem 0.8rem;
   border-radius: 10px;
-  background: color-mix(in srgb, var(--surface) 88%, transparent 12%);
-  border: 1px solid color-mix(in srgb, var(--border) 84%, transparent 16%);
-  color: var(--text-soft);
+  background: var(--share-surface-muted);
+  border: 1px solid var(--share-border);
+  color: var(--share-text-soft);
   font-size: 0.82rem;
   line-height: 1.5;
   word-break: break-all;
@@ -1859,48 +1878,53 @@ input::placeholder {
   justify-content: space-between;
   gap: 0.75rem;
   flex-wrap: wrap;
-  color: var(--text-soft);
+  color: var(--share-text-soft);
   font-size: 0.84rem;
 }
 
 .terminal-share-popover__mode {
   display: inline-flex;
+  gap: 0.2rem;
   align-items: center;
   padding: 0.2rem;
   border-radius: 999px;
-  background: color-mix(in srgb, var(--surface) 92%, transparent 8%);
-  border: 1px solid color-mix(in srgb, var(--border) 84%, transparent 16%);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  background: var(--share-surface-muted);
+  border: 1px solid var(--share-border);
+  box-shadow: none;
 }
 
 .terminal-share-popover__mode-button {
   min-width: 5.2rem;
   padding: 0.42rem 0.78rem;
   border-radius: 999px;
-  color: var(--text-soft);
+  border: 1px solid transparent;
+  background: var(--share-surface-muted);
+  color: var(--share-text-soft);
   font-size: 0.8rem;
   font-weight: 600;
   transition: background-color 140ms ease, color 140ms ease, box-shadow 140ms ease;
 }
 
 .terminal-share-popover__mode-button:hover:not(:disabled) {
-  color: var(--text);
+  color: var(--share-text);
 }
 
 .terminal-share-popover__mode-button.is-active {
-  background: color-mix(in srgb, var(--accent-strong) 18%, transparent 82%);
-  color: var(--text);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent-strong) 24%, transparent 76%);
+  background: var(--share-active-surface);
+  border-color: var(--share-active-border);
+  color: var(--share-text);
+  box-shadow: none;
 }
 
 .terminal-share-popover__mode-button:disabled {
-  opacity: 0.55;
+  opacity: 1;
+  color: var(--share-text-soft);
   cursor: wait;
 }
 
 .terminal-share-popover__hint {
   font-size: 0.8rem;
-  color: var(--text-soft);
+  color: var(--share-text-soft);
 }
 
 .terminal-share-popover__error {
@@ -1915,12 +1939,27 @@ input::placeholder {
   gap: 0.65rem;
 }
 
+.terminal-share-popover .secondary-button {
+  background: var(--share-surface-muted);
+  border: 1px solid var(--share-border);
+  color: var(--share-text);
+}
+
+.terminal-share-popover .ghost-button {
+  background: var(--share-surface-muted);
+  border: 1px solid var(--share-border);
+  color: var(--share-text-soft);
+  padding: 0.9rem 1rem;
+}
+
 .terminal-share-popover__action {
   width: 100%;
 }
 
 .terminal-share-popover__danger {
-  padding-inline: 0.5rem;
+  background: var(--share-danger-surface);
+  border: 1px solid var(--share-danger-border);
+  padding-inline: 1rem;
   color: var(--danger-text);
 }
 
