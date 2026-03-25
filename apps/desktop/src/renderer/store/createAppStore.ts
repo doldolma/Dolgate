@@ -2702,17 +2702,33 @@ export function createAppStore(api: DesktopApi) {
         }));
       },
       markSessionOutput: (sessionId) => {
-        set((state) => ({
-          tabs: state.tabs.map((tab) =>
-            tab.sessionId === sessionId
-              ? {
-                  ...tab,
-                  hasReceivedOutput: true,
-                  connectionProgress: tab.status === 'connected' ? null : tab.connectionProgress
-                }
-              : tab
-          )
-        }));
+        set((state) => {
+          const tabIndex = state.tabs.findIndex((tab) => tab.sessionId === sessionId);
+          if (tabIndex < 0) {
+            return state;
+          }
+
+          const currentTab = state.tabs[tabIndex];
+          if (!currentTab) {
+            return state;
+          }
+
+          const nextConnectionProgress = currentTab.status === 'connected' ? null : currentTab.connectionProgress;
+          if (currentTab.hasReceivedOutput === true && nextConnectionProgress === currentTab.connectionProgress) {
+            return state;
+          }
+
+          const nextTabs = state.tabs.slice();
+          nextTabs[tabIndex] = {
+            ...currentTab,
+            hasReceivedOutput: true,
+            connectionProgress: nextConnectionProgress
+          };
+
+          return {
+            tabs: nextTabs
+          };
+        });
       },
       submitCredentialRetry: async (secrets) => {
         const pending = get().pendingCredentialRetry;

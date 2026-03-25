@@ -30,6 +30,7 @@ export interface TerminalRuntime {
   terminal: Terminal;
   fitAddon: FitAddon;
   write: (data: Uint8Array | string) => void;
+  scheduleAfterWriteDrain: (callback: () => void) => void;
   captureSnapshot: () => string;
   setAppearance: (appearance: TerminalRuntimeAppearance) => void;
   setWebglEnabled: (enabled: boolean) => Promise<void>;
@@ -296,6 +297,7 @@ export function createTerminalRuntime({
   let pendingFrameHandle: number | null = null;
   let writeInFlight = false;
   let queuedSize = 0;
+  let pendingWriteDrainCallback: (() => void) | null = null;
   let searchAddonLoaded = false;
   const queuedChunks: QueuedTerminalChunk[] = [];
 
@@ -339,6 +341,16 @@ export function createTerminalRuntime({
     safeWarn(logger, message, error);
   };
 
+  const flushPendingWriteDrainCallback = () => {
+    if (disposed || writeInFlight || queuedChunks.length > 0) {
+      return;
+    }
+
+    const nextCallback = pendingWriteDrainCallback;
+    pendingWriteDrainCallback = null;
+    nextCallback?.();
+  };
+
   const flushWriteQueue = () => {
     if (disposed || writeInFlight || queuedChunks.length === 0) {
       return;
@@ -380,7 +392,9 @@ export function createTerminalRuntime({
           pendingFrameHandle = null;
           flushWriteQueue();
         });
+        return;
       }
+      flushPendingWriteDrainCallback();
     });
   };
 
@@ -436,6 +450,14 @@ export function createTerminalRuntime({
       }
 
       scheduleFlush();
+    },
+    scheduleAfterWriteDrain(callback) {
+      if (disposed) {
+        return;
+      }
+
+      pendingWriteDrainCallback = callback;
+      flushPendingWriteDrainCallback();
     },
     captureSnapshot() {
       return buildViewportSnapshot(terminal);
@@ -536,6 +558,7 @@ export function createTerminalRuntime({
         cancelScheduledAnimationFrame(pendingFrameHandle);
         pendingFrameHandle = null;
       }
+      pendingWriteDrainCallback = null;
       queuedChunks.length = 0;
       queuedSize = 0;
       clearWebglAddon();

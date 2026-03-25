@@ -78,6 +78,19 @@ function isMacPlatform(): boolean {
   return /mac/i.test(navigator.userAgent) || /mac/i.test(navigator.platform);
 }
 
+function debugSessionShareRenderer(message: string, payload?: Record<string, unknown>) {
+  if (!import.meta.env.DEV) {
+    return;
+  }
+
+  if (payload) {
+    console.debug(`[session-share] ${message}`, payload);
+    return;
+  }
+
+  console.debug(`[session-share] ${message}`);
+}
+
 export function shouldOpenTerminalSearch(input: {
   active: boolean;
   visible: boolean;
@@ -93,6 +106,30 @@ export function didTerminalSessionJustConnect(
   nextStatus: TerminalTab['status'] | null | undefined
 ): boolean {
   return previousStatus !== 'connected' && nextStatus === 'connected';
+}
+
+export function resolveTerminalRuntimeWebglEnabled(input: {
+  isMac: boolean;
+  terminalWebglEnabled: boolean;
+  sessionSource: TerminalTab['source'] | null | undefined;
+  shareStatus: TerminalTab['sessionShare'] extends { status: infer T } ? T : string | null | undefined;
+}): boolean {
+  if (input.isMac && input.sessionSource === 'host' && input.shareStatus === 'active') {
+    return false;
+  }
+
+  return input.terminalWebglEnabled;
+}
+
+export function mergeSessionShareSnapshotKinds(
+  currentKind: SessionShareSnapshotInput['kind'] | null,
+  nextKind: SessionShareSnapshotInput['kind']
+): SessionShareSnapshotInput['kind'] {
+  if (currentKind === 'resync' || nextKind === 'resync') {
+    return 'resync';
+  }
+
+  return 'refresh';
 }
 
 function isPendingConnectionSessionId(sessionId: string): boolean {
@@ -330,7 +367,11 @@ function TerminalSessionView({
   const liveSessionIdRef = useRef(sessionId);
   const liveSessionStatusRef = useRef<TerminalTab['status'] | null>(currentTab?.status ?? null);
   const liveSessionShareStatusRef = useRef(currentTab?.sessionShare?.status ?? 'inactive');
+  const liveAppearanceRef = useRef(appearance);
+  const liveUpdateSessionShareSnapshotRef = useRef(onUpdateSessionShareSnapshot);
   const shareSnapshotDirtyRef = useRef(false);
+  const pendingShareSnapshotKindRef = useRef<SessionShareSnapshotInput['kind'] | null>(null);
+  const shareSnapshotInFlightRef = useRef(false);
 
   useEffect(() => {
     if (!interactiveAuth || interactiveAuth.sessionId !== sessionId) {
@@ -352,10 +393,30 @@ function TerminalSessionView({
   }, [currentTab?.sessionShare?.status, currentTab?.status, sessionId]);
 
   useEffect(() => {
+    liveAppearanceRef.current = appearance;
+  }, [appearance]);
+
+  useEffect(() => {
+    liveUpdateSessionShareSnapshotRef.current = onUpdateSessionShareSnapshot;
+  }, [onUpdateSessionShareSnapshot]);
+
+  useEffect(() => {
     setSharePopoverOpen(false);
     setShareCopyStatus(null);
     shareSnapshotDirtyRef.current = false;
+    pendingShareSnapshotKindRef.current = null;
+    shareSnapshotInFlightRef.current = false;
   }, [sessionId]);
+
+  useEffect(() => {
+    if (currentTab?.sessionShare?.status === 'active') {
+      return;
+    }
+
+    shareSnapshotDirtyRef.current = false;
+    pendingShareSnapshotKindRef.current = null;
+    shareSnapshotInFlightRef.current = false;
+  }, [currentTab?.sessionShare?.status]);
 
   useEffect(() => {
     if (!sharePopoverOpen) {
@@ -416,10 +477,10 @@ function TerminalSessionView({
       cols: runtime.terminal.cols,
       rows: runtime.terminal.rows,
       terminalAppearance: {
-        fontFamily: appearance.fontFamily,
-        fontSize: appearance.fontSize,
-        lineHeight: appearance.lineHeight,
-        letterSpacing: appearance.letterSpacing
+        fontFamily: liveAppearanceRef.current.fontFamily,
+        fontSize: liveAppearanceRef.current.fontSize,
+        lineHeight: liveAppearanceRef.current.lineHeight,
+        letterSpacing: liveAppearanceRef.current.letterSpacing
       },
       viewportPx:
         viewportWidth > 0 && viewportHeight > 0
@@ -431,13 +492,58 @@ function TerminalSessionView({
     };
   }
 
-  async function pushShareSnapshot(kind: 'refresh' | 'resync' = 'refresh') {
-    if (currentTab?.sessionShare?.status !== 'active') {
+  async function flushRequestedShareSnapshot() {
+    const runtime = runtimeRef.current;
+    const updateSnapshot = liveUpdateSessionShareSnapshotRef.current;
+    const kind = pendingShareSnapshotKindRef.current;
+
+    if (!runtime || !updateSnapshot || !kind || liveSessionShareStatusRef.current !== 'active') {
       return;
     }
 
+    if (kind === 'refresh' && !shareSnapshotDirtyRef.current) {
+      pendingShareSnapshotKindRef.current = null;
+      return;
+    }
+
+    pendingShareSnapshotKindRef.current = null;
+    shareSnapshotInFlightRef.current = true;
+    debugSessionShareRenderer('snapshot flushed', {
+      sessionId: liveSessionIdRef.current,
+      kind
+    });
+
     const payload = captureShareSnapshot();
-    if (!payload) {
+    try {
+      if (!payload) {
+        return;
+      }
+
+      shareSnapshotDirtyRef.current = false;
+      await updateSnapshot({
+        sessionId: liveSessionIdRef.current,
+        ...payload,
+        kind
+      });
+    } finally {
+      shareSnapshotInFlightRef.current = false;
+      if (pendingShareSnapshotKindRef.current) {
+        runtime.scheduleAfterWriteDrain(() => {
+          debugSessionShareRenderer('owner runtime write drain reached', {
+            sessionId: liveSessionIdRef.current,
+            kind: pendingShareSnapshotKindRef.current
+          });
+          if (shareSnapshotInFlightRef.current) {
+            return;
+          }
+          void flushRequestedShareSnapshot();
+        });
+      }
+    }
+  }
+
+  function requestShareSnapshot(kind: 'refresh' | 'resync' = 'refresh') {
+    if (liveSessionShareStatusRef.current !== 'active') {
       return;
     }
 
@@ -445,11 +551,21 @@ function TerminalSessionView({
       return;
     }
 
-    shareSnapshotDirtyRef.current = false;
-    await onUpdateSessionShareSnapshot?.({
-      sessionId,
-      ...payload,
-      kind
+    pendingShareSnapshotKindRef.current = mergeSessionShareSnapshotKinds(pendingShareSnapshotKindRef.current, kind);
+    debugSessionShareRenderer('snapshot requested', {
+      sessionId: liveSessionIdRef.current,
+      kind: pendingShareSnapshotKindRef.current
+    });
+
+    runtimeRef.current?.scheduleAfterWriteDrain(() => {
+      debugSessionShareRenderer('owner runtime write drain reached', {
+        sessionId: liveSessionIdRef.current,
+        kind: pendingShareSnapshotKindRef.current
+      });
+      if (shareSnapshotInFlightRef.current) {
+        return;
+      }
+      void flushRequestedShareSnapshot();
     });
   }
 
@@ -503,18 +619,7 @@ function TerminalSessionView({
         if (liveSessionShareStatusRef.current !== 'active') {
           return;
         }
-
-        const payload = captureShareSnapshot();
-        if (!payload) {
-          return;
-        }
-
-        shareSnapshotDirtyRef.current = false;
-        void onUpdateSessionShareSnapshot?.({
-          sessionId: liveSessionIdRef.current,
-          ...payload,
-          kind: 'resync'
-        });
+        requestShareSnapshot('resync');
       },
       sendResize: ({ cols, rows }) => {
         const currentSessionId = liveSessionIdRef.current;
@@ -576,24 +681,41 @@ function TerminalSessionView({
   }, [appearance]);
 
   useEffect(() => {
+    const nextWebglEnabled = resolveTerminalRuntimeWebglEnabled({
+      isMac: isMacPlatform(),
+      terminalWebglEnabled,
+      sessionSource: currentTab?.source,
+      shareStatus: currentTab?.sessionShare?.status
+    });
     if (!runtimeRef.current) {
       return;
     }
-    void runtimeRef.current.setWebglEnabled(terminalWebglEnabled);
-  }, [terminalWebglEnabled]);
+
+    debugSessionShareRenderer(nextWebglEnabled ? 'restoring owner WebGL renderer' : 'disabling owner WebGL renderer', {
+      sessionId,
+      isMac: isMacPlatform(),
+      shareStatus: currentTab?.sessionShare?.status ?? 'inactive'
+    });
+    void runtimeRef.current.setWebglEnabled(nextWebglEnabled);
+  }, [currentTab?.sessionShare?.status, currentTab?.source, sessionId, terminalWebglEnabled]);
 
   useEffect(
     () =>
       window.dolssh.ssh.onData(sessionId, (chunk) => {
         if (chunk.byteLength > 0) {
+          debugSessionShareRenderer('terminal stream chunk received', {
+            sessionId,
+            byteLength: chunk.byteLength,
+            shareStatus: liveSessionShareStatusRef.current
+          });
           markSessionOutput(sessionId);
-          if (currentTab?.sessionShare?.status === 'active') {
+          if (liveSessionShareStatusRef.current === 'active') {
             shareSnapshotDirtyRef.current = true;
           }
         }
         runtimeRef.current?.write(chunk);
       }),
-    [currentTab?.sessionShare?.status, markSessionOutput, sessionId]
+    [markSessionOutput, sessionId]
   );
 
   const shouldShowConnectionOverlay = shouldShowSessionOverlay(currentTab, terminalInitError);
@@ -623,8 +745,8 @@ function TerminalSessionView({
       requestAnimationFrame(() => {
         refreshViewport();
       });
-      if (currentTab?.sessionShare?.status === 'active') {
-        void pushShareSnapshot('refresh');
+      if (liveSessionShareStatusRef.current === 'active') {
+        requestShareSnapshot('refresh');
       }
     });
   }, [currentTab?.sessionShare?.status, layoutKey, visible]);
@@ -661,7 +783,7 @@ function TerminalSessionView({
     }
 
     const timer = window.setInterval(() => {
-      void pushShareSnapshot('refresh');
+      requestShareSnapshot('refresh');
     }, 2000);
 
     return () => {

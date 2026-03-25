@@ -230,6 +230,84 @@ describe('terminal-runtime', () => {
     expect(writes[1]?.value).toBe('secondthird');
   });
 
+  it('runs write-drain callbacks only after the queued output finishes flushing', () => {
+    const { terminal, writes, triggerWriteCallback } = createFakeTerminal();
+    const fitAddon = {
+      fit: vi.fn(),
+      activate: vi.fn(),
+      dispose: vi.fn()
+    };
+    const scheduleAnimationFrame = vi.fn((_callback: (time: number) => void) => 1);
+    const runtime = createTerminalRuntime({
+      container: document.createElement('div'),
+      appearance: createAppearance(),
+      onData: vi.fn(),
+      onBinary: vi.fn(),
+      dependencies: {
+        createTerminal: (() => terminal) as never,
+        createFitAddon: (() => fitAddon) as never,
+        createSearchAddon: (() => ({
+          activate: vi.fn(),
+          dispose: vi.fn(),
+          findNext: vi.fn(() => true),
+          findPrevious: vi.fn(() => true),
+          clearDecorations: vi.fn(),
+          clearActiveDecoration: vi.fn()
+        })) as never,
+        createUnicode11Addon: (() => ({ activate: vi.fn(), dispose: vi.fn() })) as never,
+        scheduleAnimationFrame,
+        cancelScheduledAnimationFrame: vi.fn(),
+        openExternal: vi.fn()
+      }
+    });
+
+    runtime.write('busy');
+    const flushCallback = scheduleAnimationFrame.mock.calls[0]?.[0] as ((time: number) => void) | undefined;
+    flushCallback?.(16);
+
+    const firstCallback = vi.fn();
+    const secondCallback = vi.fn();
+    runtime.scheduleAfterWriteDrain(firstCallback);
+    runtime.scheduleAfterWriteDrain(secondCallback);
+
+    expect(firstCallback).not.toHaveBeenCalled();
+    expect(secondCallback).not.toHaveBeenCalled();
+
+    triggerWriteCallback(0);
+
+    expect(firstCallback).not.toHaveBeenCalled();
+    expect(secondCallback).toHaveBeenCalledTimes(1);
+  });
+
+  it('runs write-drain callbacks immediately when the queue is already idle', () => {
+    const { terminal } = createFakeTerminal();
+    const runtime = createTerminalRuntime({
+      container: document.createElement('div'),
+      appearance: createAppearance(),
+      onData: vi.fn(),
+      onBinary: vi.fn(),
+      dependencies: {
+        createTerminal: (() => terminal) as never,
+        createFitAddon: (() => ({ fit: vi.fn(), activate: vi.fn(), dispose: vi.fn() })) as never,
+        createSearchAddon: (() => ({
+          activate: vi.fn(),
+          dispose: vi.fn(),
+          findNext: vi.fn(() => true),
+          findPrevious: vi.fn(() => true),
+          clearDecorations: vi.fn(),
+          clearActiveDecoration: vi.fn()
+        })) as never,
+        createUnicode11Addon: (() => ({ activate: vi.fn(), dispose: vi.fn() })) as never,
+        openExternal: vi.fn()
+      }
+    });
+
+    const callback = vi.fn();
+    runtime.scheduleAfterWriteDrain(callback);
+
+    expect(callback).toHaveBeenCalledTimes(1);
+  });
+
   it('preserves raw binary chunks for full-screen terminal applications', () => {
     const { terminal, writes, triggerWriteCallback } = createFakeTerminal();
     const fitAddon = {

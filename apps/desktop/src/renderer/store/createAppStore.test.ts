@@ -975,6 +975,21 @@ describe('createAppStore', () => {
     expect(store.getState().sftp.rightPane.currentPath).toBe('/home/ubuntu');
   });
 
+  it('treats repeated markSessionOutput calls as a no-op after the first output arrives', async () => {
+    const store = createAppStore(createMockApi());
+
+    await store.getState().bootstrap();
+    await store.getState().connectHost('host-1', 120, 32);
+
+    store.getState().markSessionOutput('session-1');
+    const tabsAfterFirstOutput = store.getState().tabs;
+
+    store.getState().markSessionOutput('session-1');
+
+    expect(store.getState().tabs).toBe(tabsAfterFirstOutput);
+    expect(store.getState().tabs[0]?.hasReceivedOutput).toBe(true);
+  });
+
   it('creates and expands a workspace from adjacent tabs', async () => {
     const store = createAppStore(createMockApi());
 
