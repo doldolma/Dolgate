@@ -508,6 +508,7 @@ describe('createAppStore', () => {
     expect(store.getState().groups).toHaveLength(1);
     expect(store.getState().activeWorkspaceTab).toBe('home');
     expect(store.getState().homeSection).toBe('hosts');
+    expect(store.getState().settingsSection).toBe('general');
     expect(store.getState().currentGroupPath).toBeNull();
     expect(store.getState().settings.theme).toBe('system');
     expect(store.getState().sftp.leftPane.currentPath).toBe('/Users/tester');
@@ -525,6 +526,24 @@ describe('createAppStore', () => {
 
     store.getState().openEditHostDrawer('host-1');
     expect(store.getState().hostDrawer).toEqual({ mode: 'edit', hostId: 'host-1' });
+  });
+
+  it('normalizes legacy known hosts and keychain sections into settings subsections', async () => {
+    const store = createAppStore(createMockApi());
+
+    await store.getState().bootstrap();
+
+    store.getState().openHomeSection('knownHosts' as never);
+    expect(store.getState().homeSection).toBe('settings');
+    expect(store.getState().settingsSection).toBe('security');
+
+    store.getState().openHomeSection('keychain' as never);
+    expect(store.getState().homeSection).toBe('settings');
+    expect(store.getState().settingsSection).toBe('secrets');
+
+    store.getState().openSettingsSection('general');
+    expect(store.getState().homeSection).toBe('settings');
+    expect(store.getState().settingsSection).toBe('general');
   });
 
   it('navigates groups and creates a group at the current location', async () => {

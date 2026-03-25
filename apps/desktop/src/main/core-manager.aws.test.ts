@@ -28,7 +28,7 @@ vi.mock("node:child_process", () => ({
   spawn: spawnMock,
 }));
 
-import { CoreManager } from "./core-manager";
+import { buildCoreChildEnv, CoreManager } from "./core-manager";
 
 interface ActivityLogEntry {
   level: "info" | "warn" | "error";
@@ -111,6 +111,42 @@ function createFakeChildProcess() {
 describe("CoreManager AWS SSM sessions", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+  });
+
+  it("prepends standard Unix tool directories for packaged ssh-core child envs", () => {
+    const env = buildCoreChildEnv(
+      {
+        PATH: "/Users/heodoyeong/.local/bin:/usr/bin",
+      },
+      {
+        platform: "darwin",
+        isPackaged: true,
+      },
+    );
+
+    expect(env.PATH?.split(":")).toEqual([
+      "/opt/homebrew/bin",
+      "/usr/local/bin",
+      "/usr/bin",
+      "/bin",
+      "/usr/sbin",
+      "/sbin",
+      "/Users/heodoyeong/.local/bin",
+    ]);
+  });
+
+  it("keeps the original PATH in dev mode", () => {
+    const env = buildCoreChildEnv(
+      {
+        PATH: "/Users/heodoyeong/.local/bin:/usr/bin",
+      },
+      {
+        platform: "darwin",
+        isPackaged: false,
+      },
+    );
+
+    expect(env.PATH).toBe("/Users/heodoyeong/.local/bin:/usr/bin");
   });
 
   it("sends awsConnect to ssh-core and routes terminal writes through framed IO", async () => {

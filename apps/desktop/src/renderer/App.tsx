@@ -7,9 +7,7 @@ import { CredentialRetryDialog } from './components/CredentialRetryDialog';
 import { HomeNavigation } from './components/HomeNavigation';
 import { HostBrowser } from './components/HostBrowser';
 import { HostDrawer } from './components/HostDrawer';
-import { KeychainPanel } from './components/KeychainPanel';
 import { KnownHostPromptDialog } from './components/KnownHostPromptDialog';
-import { KnownHostsPanel } from './components/KnownHostsPanel';
 import { LoginGate } from './components/LoginGate';
 import { LogsPanel } from './components/LogsPanel';
 import { DesktopWindowControls } from './components/DesktopWindowControls';
@@ -193,6 +191,7 @@ export function App() {
   const keychainEntries = useAppStore((state) => state.keychainEntries);
   const activeWorkspaceTab = useAppStore((state) => state.activeWorkspaceTab);
   const homeSection = useAppStore((state) => state.homeSection);
+  const settingsSection = useAppStore((state) => state.settingsSection);
   const hostDrawer = useAppStore((state) => state.hostDrawer);
   const currentGroupPath = useAppStore((state) => state.currentGroupPath);
   const searchQuery = useAppStore((state) => state.searchQuery);
@@ -206,6 +205,7 @@ export function App() {
   const activateSession = useAppStore((state) => state.activateSession);
   const activateWorkspace = useAppStore((state) => state.activateWorkspace);
   const openHomeSection = useAppStore((state) => state.openHomeSection);
+  const openSettingsSection = useAppStore((state) => state.openSettingsSection);
   const openCreateHostDrawer = useAppStore((state) => state.openCreateHostDrawer);
   const openEditHostDrawer = useAppStore((state) => state.openEditHostDrawer);
   const closeHostDrawer = useAppStore((state) => state.closeHostDrawer);
@@ -789,19 +789,20 @@ export function App() {
               />
             ) : null}
 
-            {homeSection === 'knownHosts' ? <KnownHostsPanel records={knownHosts} onRemove={removeKnownHost} /> : null}
-
             {homeSection === 'logs' ? <LogsPanel logs={activityLogs} onClear={clearLogs} /> : null}
-
-            {homeSection === 'keychain' ? (
-              <KeychainPanel entries={keychainEntries} onRemoveSecret={handleRemoveSecret} onEditSecret={openKeychainSecretEditor} />
-            ) : null}
 
             {homeSection === 'settings' ? (
               <SettingsPanel
+                activeSection={settingsSection}
                 settings={settings}
+                knownHosts={knownHosts}
+                keychainEntries={keychainEntries}
                 desktopPlatform={desktopPlatform}
+                onSelectSection={openSettingsSection}
                 onUpdateSettings={updateSettings}
+                onRemoveKnownHost={removeKnownHost}
+                onRemoveSecret={handleRemoveSecret}
+                onEditSecret={openKeychainSecretEditor}
                 onLogout={async () => {
                   await window.dolssh.auth.logout();
                 }}
@@ -821,6 +822,7 @@ export function App() {
               await saveHost(hostDrawer.mode === 'edit' ? currentHost?.id ?? null : null, draft, secrets);
             }}
             onEditExistingSecret={openHostSecretEditor}
+            onOpenSecrets={() => openSettingsSection('secrets')}
             onDelete={
               currentHost
                 ? async () => {
@@ -931,7 +933,15 @@ export function App() {
         </section>
       </div>
 
-      <KnownHostPromptDialog pending={pendingHostKeyPrompt} onAccept={acceptPendingHostKeyPrompt} onCancel={dismissPendingHostKeyPrompt} />
+      <KnownHostPromptDialog
+        pending={pendingHostKeyPrompt}
+        onAccept={acceptPendingHostKeyPrompt}
+        onCancel={dismissPendingHostKeyPrompt}
+        onOpenSecuritySettings={() => {
+          dismissPendingHostKeyPrompt();
+          openSettingsSection('security');
+        }}
+      />
 
       <CredentialRetryDialog
         request={

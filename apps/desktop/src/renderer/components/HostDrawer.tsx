@@ -12,6 +12,7 @@ interface HostDrawerProps {
   onSubmit: Parameters<typeof HostForm>[0]['onSubmit'];
   onDelete?: () => Promise<void>;
   onEditExistingSecret?: (secretRef: string, credentialKind: 'password' | 'passphrase') => void;
+  onOpenSecrets?: () => void;
 }
 
 export function HostDrawer({
@@ -24,7 +25,8 @@ export function HostDrawer({
   onClose,
   onSubmit,
   onDelete,
-  onEditExistingSecret
+  onEditExistingSecret,
+  onOpenSecrets
 }: HostDrawerProps) {
   return (
     <aside className={`host-drawer ${open ? 'open' : ''}`} aria-hidden={!open}>
@@ -48,6 +50,7 @@ export function HostDrawer({
           onSubmit={onSubmit}
           onDelete={onDelete}
           onEditExistingSecret={onEditExistingSecret}
+          onOpenSecrets={onOpenSecrets}
         />
       </div>
     </aside>

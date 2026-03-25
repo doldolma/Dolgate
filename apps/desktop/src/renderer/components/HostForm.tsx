@@ -61,6 +61,7 @@ interface HostFormProps {
   onSubmit: (draft: HostDraft, secrets?: { password?: string; passphrase?: string }) => Promise<void>;
   onDelete?: () => Promise<void>;
   onEditExistingSecret?: (secretRef: string, credentialKind: 'password' | 'passphrase') => void;
+  onOpenSecrets?: () => void;
 }
 
 function renderTerminalThemeField(
@@ -93,7 +94,8 @@ export function HostForm({
   hideTitle = false,
   onSubmit,
   onDelete,
-  onEditExistingSecret
+  onEditExistingSecret,
+  onOpenSecrets
 }: HostFormProps) {
   const [draft, setDraft] = useState<HostDraft>(createDraft(defaultGroupPath));
   const [tagTokens, setTagTokens] = useState<string[]>([]);
@@ -481,6 +483,12 @@ export function HostForm({
               ))}
             </select>
           </label>
+
+          {onOpenSecrets && keychainEntries.length > 0 ? (
+            <button type="button" className="host-form__inline-action" onClick={onOpenSecrets}>
+              Secrets 열기
+            </button>
+          ) : null}
 
           {sshDraft.authType === 'password' && credentialMode === 'new' ? (
             <label>

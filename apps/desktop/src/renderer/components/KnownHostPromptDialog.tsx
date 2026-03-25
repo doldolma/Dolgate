@@ -4,9 +4,10 @@ interface KnownHostPromptDialogProps {
   pending: PendingHostKeyPrompt | null;
   onAccept: (mode: 'trust' | 'replace') => Promise<void>;
   onCancel: () => void;
+  onOpenSecuritySettings?: () => void;
 }
 
-export function KnownHostPromptDialog({ pending, onAccept, onCancel }: KnownHostPromptDialogProps) {
+export function KnownHostPromptDialog({ pending, onAccept, onCancel, onOpenSecuritySettings }: KnownHostPromptDialogProps) {
   if (!pending) {
     return null;
   }
@@ -61,6 +62,11 @@ export function KnownHostPromptDialog({ pending, onAccept, onCancel }: KnownHost
         </div>
 
         <div className="modal-card__footer">
+          {onOpenSecuritySettings ? (
+            <button type="button" className="ghost-button" onClick={onOpenSecuritySettings}>
+              Security settings
+            </button>
+          ) : null}
           <button type="button" className="secondary-button" onClick={onCancel}>
             취소
           </button>

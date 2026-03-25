@@ -59,6 +59,59 @@ interface PortForwardDefinition {
 
 type SessionTransport = "ssh" | "aws-ssm" | "local-shell";
 
+const packagedUnixCorePathEntries = [
+  "/opt/homebrew/bin",
+  "/usr/local/bin",
+  "/usr/bin",
+  "/bin",
+  "/usr/sbin",
+  "/sbin",
+];
+
+function splitPathEntries(rawPath: string | undefined): string[] {
+  return (rawPath ?? "")
+    .split(path.delimiter)
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+}
+
+function mergeUniquePathEntries(preferredEntries: string[], rawPath: string | undefined): string {
+  const entries: string[] = [];
+  const seen = new Set<string>();
+
+  const appendUnique = (entry: string) => {
+    const normalized = entry.trim();
+    if (!normalized || seen.has(normalized)) {
+      return;
+    }
+    seen.add(normalized);
+    entries.push(normalized);
+  };
+
+  preferredEntries.forEach(appendUnique);
+  splitPathEntries(rawPath).forEach(appendUnique);
+  return entries.join(path.delimiter);
+}
+
+export function buildCoreChildEnv(
+  baseEnv: NodeJS.ProcessEnv = process.env,
+  options?: {
+    platform?: NodeJS.Platform;
+    isPackaged?: boolean;
+  },
+): NodeJS.ProcessEnv {
+  const platform = options?.platform ?? process.platform;
+  const isPackaged = options?.isPackaged ?? app.isPackaged;
+  const env = { ...baseEnv };
+
+  if (platform === "win32" || !isPackaged) {
+    return env;
+  }
+
+  env.PATH = mergeUniquePathEntries(packagedUnixCorePathEntries, env.PATH);
+  return env;
+}
+
 function resolveRepoRoot(): string {
   const candidates = [
     path.resolve(app.getAppPath(), "../.."),
@@ -374,7 +427,7 @@ export class CoreManager {
     this.process = spawn(launchConfig.command, launchConfig.args, {
       cwd: launchConfig.cwd,
       stdio: ["pipe", "pipe", "pipe"],
-      env: process.env,
+      env: buildCoreChildEnv(process.env),
       windowsHide: true,
     });
 

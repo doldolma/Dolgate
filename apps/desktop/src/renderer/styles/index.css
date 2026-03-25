@@ -1472,6 +1472,17 @@ input::placeholder {
   line-height: 1.5;
 }
 
+.host-form__inline-action {
+  align-self: flex-start;
+  margin-top: -0.2rem;
+  padding: 0.15rem 0;
+  border: 0;
+  background: transparent;
+  color: var(--accent-strong);
+  font-size: 0.88rem;
+  font-weight: 600;
+}
+
 .row.two-col {
   display: grid;
   grid-template-columns: 120px minmax(0, 1fr);
@@ -1540,6 +1551,10 @@ input::placeholder {
   margin: 0.65rem 0 0;
   max-width: 720px;
   line-height: 1.6;
+}
+
+.settings-panel__tabs {
+  margin-top: -0.15rem;
 }
 
 .settings-card {

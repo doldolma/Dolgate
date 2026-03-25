@@ -46,7 +46,8 @@ import type {
 export type SessionWorkspaceTabId = `session:${string}`;
 export type SplitWorkspaceTabId = `workspace:${string}`;
 export type WorkspaceTabId = 'home' | 'sftp' | SessionWorkspaceTabId | SplitWorkspaceTabId;
-export type HomeSection = 'hosts' | 'portForwarding' | 'knownHosts' | 'logs' | 'keychain' | 'settings';
+export type HomeSection = 'hosts' | 'portForwarding' | 'logs' | 'settings';
+export type SettingsSection = 'general' | 'security' | 'secrets';
 export type SftpSourceKind = 'local' | 'host';
 export type WorkspaceDropDirection = 'left' | 'right' | 'top' | 'bottom';
 export type HostDrawerState =
@@ -196,6 +197,7 @@ export interface AppState {
   keychainEntries: SecretMetadataRecord[];
   activeWorkspaceTab: WorkspaceTabId;
   homeSection: HomeSection;
+  settingsSection: SettingsSection;
   hostDrawer: HostDrawerState;
   currentGroupPath: string | null;
   searchQuery: string;
@@ -215,6 +217,7 @@ export interface AppState {
   activateSession: (sessionId: string) => void;
   activateWorkspace: (workspaceId: string) => void;
   openHomeSection: (section: HomeSection) => void;
+  openSettingsSection: (section: SettingsSection) => void;
   openCreateHostDrawer: () => void;
   openEditHostDrawer: (hostId: string) => void;
   closeHostDrawer: () => void;
@@ -295,6 +298,29 @@ export interface AppState {
   cancelTransfer: (jobId: string) => Promise<void>;
   retryTransfer: (jobId: string) => Promise<void>;
   dismissTransfer: (jobId: string) => void;
+}
+
+function normalizeHomeSectionInput(section: HomeSection | 'knownHosts' | 'keychain'): {
+  homeSection: HomeSection;
+  settingsSection?: SettingsSection;
+} {
+  if (section === 'knownHosts') {
+    return {
+      homeSection: 'settings',
+      settingsSection: 'security'
+    };
+  }
+
+  if (section === 'keychain') {
+    return {
+      homeSection: 'settings',
+      settingsSection: 'secrets'
+    };
+  }
+
+  return {
+    homeSection: section
+  };
 }
 
 type TabStatus = TerminalTab['status'];
@@ -1899,6 +1925,7 @@ export function createAppStore(api: DesktopApi) {
       keychainEntries: [],
       activeWorkspaceTab: 'home',
       homeSection: 'hosts',
+      settingsSection: 'general',
       hostDrawer: { mode: 'closed' },
       currentGroupPath: null,
       searchQuery: '',
@@ -1927,10 +1954,22 @@ export function createAppStore(api: DesktopApi) {
       activateSession: (sessionId) => set({ activeWorkspaceTab: asSessionTabId(sessionId) }),
       activateWorkspace: (workspaceId) => set({ activeWorkspaceTab: asWorkspaceTabId(workspaceId) }),
       openHomeSection: (section) =>
+        set((state) => {
+          const nextSection = normalizeHomeSectionInput(section);
+          return {
+            activeWorkspaceTab: 'home',
+            homeSection: nextSection.homeSection,
+            settingsSection:
+              nextSection.homeSection === 'settings' ? (nextSection.settingsSection ?? state.settingsSection) : state.settingsSection,
+            hostDrawer: nextSection.homeSection === 'hosts' ? get().hostDrawer : { mode: 'closed' }
+          };
+        }),
+      openSettingsSection: (section) =>
         set({
           activeWorkspaceTab: 'home',
-          homeSection: section,
-          hostDrawer: section === 'hosts' ? get().hostDrawer : { mode: 'closed' }
+          homeSection: 'settings',
+          settingsSection: section,
+          hostDrawer: { mode: 'closed' }
         }),
       openCreateHostDrawer: () =>
         set({
@@ -1982,6 +2021,7 @@ export function createAppStore(api: DesktopApi) {
           keychainEntries: sortKeychainEntries(keychainEntries),
           activeWorkspaceTab: 'home',
           homeSection: 'hosts',
+          settingsSection: 'general',
           hostDrawer: { mode: 'closed' },
           currentGroupPath: null,
           selectedHostTags: [],

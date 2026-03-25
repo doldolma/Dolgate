@@ -2,10 +2,10 @@
 
 package awssession
 
-import "os/exec"
+import "dolssh/services/ssh-core/internal/awstools"
 
 func resolveRuntimeToolPath(command string) (string, error) {
-	return exec.LookPath(command)
+	return awstools.ResolveExecutable(command)
 }
 
 func runtimeEnvPathCaseInsensitive() bool {
