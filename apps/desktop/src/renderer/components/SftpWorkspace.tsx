@@ -262,6 +262,22 @@ function buildTransferDirection(job: TransferJob): string {
   return `${job.sourceLabel} -> ${job.targetLabel}`;
 }
 
+export function buildTransferCardTitle(job: TransferJob): string {
+  const firstRequestedItemName = job.request?.items[0]?.name?.trim();
+  if (firstRequestedItemName) {
+    if (job.itemCount > 1) {
+      return `${firstRequestedItemName} 외 ${job.itemCount - 1}개`;
+    }
+    return firstRequestedItemName;
+  }
+
+  if (job.activeItemName) {
+    return job.activeItemName;
+  }
+
+  return buildTransferDirection(job);
+}
+
 function isBrowsablePane(pane: SftpPaneState): boolean {
   return pane.sourceKind === 'local' || Boolean(pane.endpoint);
 }
@@ -839,8 +855,8 @@ function TransferBar({
         return (
           <article key={job.id} className={`transfer-card ${job.status}`}>
             <div className="transfer-card__top">
-              <strong className="transfer-card__name" title={job.activeItemName || buildTransferDirection(job)}>
-                {job.activeItemName || buildTransferDirection(job)}
+              <strong className="transfer-card__name" title={buildTransferCardTitle(job)}>
+                {buildTransferCardTitle(job)}
               </strong>
               <span className="transfer-card__status" title={job.status}>
                 {job.status}

@@ -644,7 +644,7 @@ export function App() {
     const linkedHostCount = entry?.linkedHostCount ?? 0;
     const confirmed = window.confirm(
       linkedHostCount > 0
-        ? `이 secret을 삭제하면 ${linkedHostCount}개 호스트와의 키체인 연결이 해제됩니다. 호스트 자체는 삭제되지 않습니다. 계속할까요?`
+        ? `이 secret을 삭제하면 ${linkedHostCount}개 호스트와의 secret 연결이 해제됩니다. 호스트 자체는 삭제되지 않습니다. 계속할까요?`
         : '이 secret을 삭제할까요?'
     );
     if (!confirmed) {
@@ -797,6 +797,7 @@ export function App() {
                 settings={settings}
                 knownHosts={knownHosts}
                 keychainEntries={keychainEntries}
+                currentUserEmail={authState.session?.user.email ?? null}
                 desktopPlatform={desktopPlatform}
                 onSelectSection={openSettingsSection}
                 onUpdateSettings={updateSettings}
@@ -821,6 +822,14 @@ export function App() {
             onSubmit={async (draft, secrets) => {
               await saveHost(hostDrawer.mode === 'edit' ? currentHost?.id ?? null : null, draft, secrets);
             }}
+            onConnect={
+              currentHost
+                ? async (hostId) => {
+                    await connectHost(hostId, 120, 32);
+                    closeHostDrawer();
+                  }
+                : undefined
+            }
             onEditExistingSecret={openHostSecretEditor}
             onOpenSecrets={() => openSettingsSection('secrets')}
             onDelete={

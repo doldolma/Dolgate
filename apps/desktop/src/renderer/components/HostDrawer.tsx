@@ -10,6 +10,7 @@ interface HostDrawerProps {
   defaultGroupPath?: string | null;
   onClose: () => void;
   onSubmit: Parameters<typeof HostForm>[0]['onSubmit'];
+  onConnect?: Parameters<typeof HostForm>[0]['onConnect'];
   onDelete?: () => Promise<void>;
   onEditExistingSecret?: (secretRef: string, credentialKind: 'password' | 'passphrase') => void;
   onOpenSecrets?: () => void;
@@ -24,6 +25,7 @@ export function HostDrawer({
   defaultGroupPath = null,
   onClose,
   onSubmit,
+  onConnect,
   onDelete,
   onEditExistingSecret,
   onOpenSecrets
@@ -48,6 +50,7 @@ export function HostDrawer({
           groupOptions={groupOptions}
           defaultGroupPath={defaultGroupPath}
           onSubmit={onSubmit}
+          onConnect={onConnect}
           onDelete={onDelete}
           onEditExistingSecret={onEditExistingSecret}
           onOpenSecrets={onOpenSecrets}

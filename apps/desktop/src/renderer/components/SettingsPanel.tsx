@@ -16,6 +16,7 @@ interface SettingsPanelProps {
   settings: AppSettings;
   knownHosts: KnownHostRecord[];
   keychainEntries: SecretMetadataRecord[];
+  currentUserEmail?: string | null;
   desktopPlatform: 'darwin' | 'win32' | 'linux' | 'unknown';
   onSelectSection: (section: SettingsSection) => void;
   onUpdateSettings: (input: Partial<AppSettings>) => Promise<void>;
@@ -54,6 +55,7 @@ export function SettingsPanel({
   settings,
   knownHosts,
   keychainEntries,
+  currentUserEmail = null,
   desktopPlatform,
   onSelectSection,
   onUpdateSettings,
@@ -312,6 +314,16 @@ export function SettingsPanel({
                 <h3>Account</h3>
               </div>
             </div>
+            <dl className="settings-account-summary">
+              <div>
+                <dt>Email</dt>
+                <dd>{currentUserEmail ?? '—'}</dd>
+              </div>
+              <div>
+                <dt>Server</dt>
+                <dd>{settings.serverUrl || '—'}</dd>
+              </div>
+            </dl>
             <button type="button" className="danger-button" onClick={async () => onLogout()}>
               로그아웃
             </button>

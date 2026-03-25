@@ -563,7 +563,7 @@ export function HostBrowser({
                   if (!targetHost) {
                     return;
                   }
-                  const confirmed = window.confirm(`"${targetHost.label}" 호스트를 삭제할까요? 연결된 키체인 항목은 유지됩니다.`);
+                  const confirmed = window.confirm(`"${targetHost.label}" 호스트를 삭제할까요? 연결된 secret 항목은 유지됩니다.`);
                   if (!confirmed) {
                     return;
                   }

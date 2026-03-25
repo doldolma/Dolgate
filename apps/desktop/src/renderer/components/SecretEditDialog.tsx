@@ -62,7 +62,7 @@ export function SecretEditDialog({ request, onClose, onSubmit }: SecretEditDialo
       <div className="modal-card secret-edit-dialog" role="dialog" aria-modal="true" aria-labelledby="secret-edit-title">
         <div className="modal-card__header">
           <div>
-            <div className="eyebrow">Keychain</div>
+            <div className="eyebrow">Secret</div>
             <h3 id="secret-edit-title">{credentialLabel} 변경</h3>
           </div>
           <button type="button" className="icon-button" onClick={onClose} aria-label="Close secret editor">
@@ -71,7 +71,7 @@ export function SecretEditDialog({ request, onClose, onSubmit }: SecretEditDialo
         </div>
         <div className="modal-card__body">
           <p className="secret-edit-dialog__description">
-            <strong>{request.label}</strong> 키체인 항목의 {credentialLabel.toLowerCase()}를 새 값으로 바꿉니다. 현재 값은 표시하지 않습니다.
+            <strong>{request.label}</strong> secret 항목의 {credentialLabel.toLowerCase()}를 새 값으로 바꿉니다. 현재 값은 표시하지 않습니다.
           </p>
 
           <div className="secret-edit-dialog__scope">

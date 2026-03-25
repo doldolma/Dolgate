@@ -99,7 +99,7 @@ func TestWindowsConPTYRunnerRoutesOutputInputAndResize(t *testing.T) {
 }
 
 func TestResolveWindowsShellExecutableWithLookupPrefersComspecThenFallbacks(t *testing.T) {
-	resolved, err := resolveWindowsShellExecutableWithLookup(`C:\custom\cmd.exe`, func(candidate string) bool {
+	resolved, err := resolveWindowsShellExecutableWithLookup([]string{`C:\custom\cmd.exe`, "cmd.exe"}, func(candidate string) bool {
 		return candidate == `C:\custom\cmd.exe`
 	})
 	if err != nil {
@@ -109,7 +109,7 @@ func TestResolveWindowsShellExecutableWithLookupPrefersComspecThenFallbacks(t *t
 		t.Fatalf("resolved shell = %q", resolved)
 	}
 
-	resolved, err = resolveWindowsShellExecutableWithLookup(`C:\missing\cmd.exe`, func(candidate string) bool {
+	resolved, err = resolveWindowsShellExecutableWithLookup([]string{`C:\missing\cmd.exe`, "cmd.exe"}, func(candidate string) bool {
 		return candidate == "cmd.exe"
 	})
 	if err != nil {
@@ -117,6 +117,42 @@ func TestResolveWindowsShellExecutableWithLookupPrefersComspecThenFallbacks(t *t
 	}
 	if resolved != "cmd.exe" {
 		t.Fatalf("resolved shell = %q", resolved)
+	}
+}
+
+func TestResolveWindowsShellExecutableWithLookupIgnoresNonCmdComSpec(t *testing.T) {
+	resolved, err := resolveWindowsShellExecutableWithLookup([]string{`C:\Program Files\PowerShell\7\pwsh.exe`, `C:\Windows\System32\cmd.exe`}, func(candidate string) bool {
+		return candidate == `C:\Windows\System32\cmd.exe`
+	})
+	if err != nil {
+		t.Fatalf("expected cmd fallback, got error: %v", err)
+	}
+	if resolved != `C:\Windows\System32\cmd.exe` {
+		t.Fatalf("resolved shell = %q", resolved)
+	}
+}
+
+func TestBuildWindowsLocalShellEnvSeedsCommandProcessorVariables(t *testing.T) {
+	env := buildWindowsLocalShellEnv([]string{
+		`PATH=C:\Users\heodoyeong\bin;C:\Tools`,
+	}, `C:\Windows\System32\cmd.exe`)
+
+	got := map[string]string{}
+	for _, entry := range env {
+		parts := strings.SplitN(entry, "=", 2)
+		if len(parts) == 2 {
+			got[parts[0]] = parts[1]
+		}
+	}
+
+	if got["COMSPEC"] != `C:\Windows\System32\cmd.exe` {
+		t.Fatalf("COMSPEC = %q", got["COMSPEC"])
+	}
+	if got["SystemRoot"] != `C:\Windows` {
+		t.Fatalf("SystemRoot = %q", got["SystemRoot"])
+	}
+	if got["windir"] != `C:\Windows` {
+		t.Fatalf("windir = %q", got["windir"])
 	}
 }
 

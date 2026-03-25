@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 	"unicode/utf16"
@@ -160,24 +161,37 @@ func resolveLocalRuntime() (localCommandRuntime, error) {
 
 	return localCommandRuntime{
 		executablePath:   executablePath,
-		args:             nil,
-		env:              os.Environ(),
+		args:             []string{"/d", "/k", "prompt $P$G"},
+		env:              buildWindowsLocalShellEnv(os.Environ(), executablePath),
 		workingDirectory: resolveUserHomeDirectory(),
 	}, nil
 }
 
 func resolveWindowsShellExecutable() (string, error) {
-	return resolveWindowsShellExecutableWithLookup(os.Getenv("COMSPEC"), isWindowsShellUsable)
+	return resolveWindowsShellExecutableWithLookup(
+		[]string{
+			os.Getenv("COMSPEC"),
+			os.Getenv("ComSpec"),
+			resolveWindowsCommandProcessorCandidate(os.Getenv("SystemRoot")),
+			resolveWindowsCommandProcessorCandidate(os.Getenv("windir")),
+			`C:\Windows\System32\cmd.exe`,
+			"cmd.exe",
+		},
+		isWindowsShellUsable,
+	)
 }
 
-func resolveWindowsShellExecutableWithLookup(comspec string, canUse func(string) bool) (string, error) {
-	if candidate := strings.TrimSpace(comspec); candidate != "" && canUse(candidate) {
-		return candidate, nil
+func resolveWindowsShellExecutableWithLookup(candidates []string, canUse func(string) bool) (string, error) {
+	for _, candidate := range candidates {
+		normalized := strings.TrimSpace(candidate)
+		if normalized == "" || !isWindowsCommandProcessorCandidate(normalized) {
+			continue
+		}
+		if canUse(normalized) {
+			return normalized, nil
+		}
 	}
-	if canUse("cmd.exe") {
-		return "cmd.exe", nil
-	}
-	return "", fmt.Errorf("could not resolve a usable local shell")
+	return "", fmt.Errorf("could not resolve a usable local Windows cmd shell")
 }
 
 func isWindowsShellUsable(candidate string) bool {
@@ -190,6 +204,71 @@ func isWindowsShellUsable(candidate string) bool {
 	}
 	_, err := exec.LookPath(candidate)
 	return err == nil
+}
+
+func isWindowsCommandProcessorCandidate(candidate string) bool {
+	base := strings.ToLower(filepath.Base(candidate))
+	return base == "cmd" || base == "cmd.exe"
+}
+
+func resolveWindowsCommandProcessorCandidate(root string) string {
+	normalizedRoot := strings.TrimSpace(root)
+	if normalizedRoot == "" {
+		return ""
+	}
+	return filepath.Join(normalizedRoot, "System32", "cmd.exe")
+}
+
+func buildWindowsLocalShellEnv(base []string, executablePath string) []string {
+	env := make([]string, 0, len(base)+4)
+	seen := make(map[string]int, len(base)+4)
+	windowsRoot := inferWindowsRootFromExecutable(executablePath)
+
+	appendOrReplace := func(key, value string) {
+		if strings.TrimSpace(value) == "" {
+			return
+		}
+		normalizedKey := strings.ToLower(key)
+		entry := fmt.Sprintf("%s=%s", key, value)
+		if index, ok := seen[normalizedKey]; ok {
+			env[index] = entry
+			return
+		}
+		seen[normalizedKey] = len(env)
+		env = append(env, entry)
+	}
+
+	for _, entry := range base {
+		parts := strings.SplitN(entry, "=", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		appendOrReplace(parts[0], parts[1])
+	}
+
+	appendOrReplace("COMSPEC", executablePath)
+	if windowsRoot != "" {
+		appendOrReplace("SystemRoot", windowsRoot)
+		appendOrReplace("windir", windowsRoot)
+	}
+	return env
+}
+
+func inferWindowsRootFromExecutable(executablePath string) string {
+	normalizedPath := strings.TrimSpace(executablePath)
+	if normalizedPath == "" {
+		return ""
+	}
+	cleaned := filepath.Clean(normalizedPath)
+	if !isWindowsCommandProcessorCandidate(cleaned) {
+		return ""
+	}
+
+	system32Dir := filepath.Dir(cleaned)
+	if !strings.EqualFold(filepath.Base(system32Dir), "System32") {
+		return ""
+	}
+	return filepath.Dir(system32Dir)
 }
 
 func resolveUserHomeDirectory() string {

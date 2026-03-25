@@ -149,6 +149,31 @@ describe("CoreManager AWS SSM sessions", () => {
     expect(env.PATH).toBe("/Users/heodoyeong/.local/bin:/usr/bin");
   });
 
+  it("seeds packaged Windows ssh-core child envs with cmd and system paths", () => {
+    const env = buildCoreChildEnv(
+      {
+        PATH: "C:\\Users\\heodoyeong\\bin;C:\\Tools",
+        SystemRoot: "C:\\Windows",
+      },
+      {
+        platform: "win32",
+        isPackaged: true,
+      },
+    );
+
+    expect(env.PATH?.split(";")).toEqual([
+      "C:\\Windows\\System32",
+      "C:\\Windows",
+      "C:\\Windows\\System32\\Wbem",
+      "C:\\Windows\\System32\\WindowsPowerShell\\v1.0",
+      "C:\\Users\\heodoyeong\\bin",
+      "C:\\Tools",
+    ]);
+    expect(env.ComSpec).toBe("C:\\Windows\\System32\\cmd.exe");
+    expect(env.windir).toBe("C:\\Windows");
+    expect(env.SystemRoot).toBe("C:\\Windows");
+  });
+
   it("sends awsConnect to ssh-core and routes terminal writes through framed IO", async () => {
     const logs: ActivityLogEntry[] = [];
     const fakeProcess = createFakeChildProcess();

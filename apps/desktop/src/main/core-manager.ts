@@ -68,29 +68,125 @@ const packagedUnixCorePathEntries = [
   "/sbin",
 ];
 
-function splitPathEntries(rawPath: string | undefined): string[] {
+type PathDelimiter = ":" | ";";
+
+function splitPathEntries(
+  rawPath: string | undefined,
+  delimiter: PathDelimiter = path.delimiter,
+): string[] {
   return (rawPath ?? "")
-    .split(path.delimiter)
+    .split(delimiter)
     .map((entry) => entry.trim())
     .filter(Boolean);
 }
 
-function mergeUniquePathEntries(preferredEntries: string[], rawPath: string | undefined): string {
+function mergeUniquePathEntries(
+  preferredEntries: string[],
+  rawPath: string | undefined,
+  options?: {
+    delimiter?: PathDelimiter;
+    caseInsensitive?: boolean;
+  },
+): string {
+  const delimiter: PathDelimiter = options?.delimiter ?? path.delimiter;
+  const caseInsensitive = options?.caseInsensitive ?? false;
   const entries: string[] = [];
   const seen = new Set<string>();
 
   const appendUnique = (entry: string) => {
     const normalized = entry.trim();
-    if (!normalized || seen.has(normalized)) {
+    const seenKey = caseInsensitive ? normalized.toLowerCase() : normalized;
+    if (!normalized || seen.has(seenKey)) {
       return;
     }
-    seen.add(normalized);
+    seen.add(seenKey);
     entries.push(normalized);
   };
 
   preferredEntries.forEach(appendUnique);
-  splitPathEntries(rawPath).forEach(appendUnique);
-  return entries.join(path.delimiter);
+  splitPathEntries(rawPath, delimiter).forEach(appendUnique);
+  return entries.join(delimiter);
+}
+
+function lookupEnvValue(
+  env: NodeJS.ProcessEnv,
+  key: string,
+  options?: { caseInsensitive?: boolean },
+): string | undefined {
+  if (!options?.caseInsensitive) {
+    return env[key];
+  }
+
+  const target = key.toLowerCase();
+  for (const [candidate, value] of Object.entries(env)) {
+    if (candidate.toLowerCase() === target) {
+      return value;
+    }
+  }
+  return undefined;
+}
+
+function resolveExistingEnvKey(
+  env: NodeJS.ProcessEnv,
+  key: string,
+  options?: { caseInsensitive?: boolean },
+): string | null {
+  if (!options?.caseInsensitive) {
+    return Object.prototype.hasOwnProperty.call(env, key) ? key : null;
+  }
+
+  const target = key.toLowerCase();
+  for (const candidate of Object.keys(env)) {
+    if (candidate.toLowerCase() === target) {
+      return candidate;
+    }
+  }
+  return null;
+}
+
+function buildPackagedWindowsCorePathEntries(
+  env: NodeJS.ProcessEnv,
+): { pathEntries: string[]; cmdExecutablePath: string | null; windowsRoot: string | null } {
+  const systemRoot =
+    lookupEnvValue(env, "SystemRoot", { caseInsensitive: true }) ??
+    lookupEnvValue(env, "windir", { caseInsensitive: true }) ??
+    "C:\\Windows";
+  const win32 = path.win32;
+  const windowsRoot = systemRoot.trim() || "C:\\Windows";
+  const cmdExecutablePath = win32.join(windowsRoot, "System32", "cmd.exe");
+
+  return {
+    pathEntries: [
+      win32.join(windowsRoot, "System32"),
+      windowsRoot,
+      win32.join(windowsRoot, "System32", "Wbem"),
+      win32.join(windowsRoot, "System32", "WindowsPowerShell", "v1.0"),
+    ],
+    cmdExecutablePath,
+    windowsRoot,
+  };
+}
+
+function assignEnvValue(
+  env: NodeJS.ProcessEnv,
+  key: string,
+  value: string,
+  options?: { caseInsensitive?: boolean; fallbackKey?: string },
+): void {
+  const existingKey =
+    resolveExistingEnvKey(env, key, {
+      caseInsensitive: options?.caseInsensitive,
+    }) ?? options?.fallbackKey ?? key;
+  env[existingKey] = value;
+
+  if (options?.caseInsensitive) {
+    const target = existingKey.toLowerCase();
+    for (const candidate of Object.keys(env)) {
+      if (candidate !== existingKey && candidate.toLowerCase() === target) {
+        delete env[candidate];
+      }
+    }
+  }
 }
 
 export function buildCoreChildEnv(
@@ -104,7 +200,53 @@ export function buildCoreChildEnv(
   const isPackaged = options?.isPackaged ?? app.isPackaged;
   const env = { ...baseEnv };
 
-  if (platform === "win32" || !isPackaged) {
+  if (!isPackaged) {
+    return env;
+  }
+
+  if (platform === "win32") {
+    const { pathEntries, cmdExecutablePath, windowsRoot } =
+      buildPackagedWindowsCorePathEntries(env);
+    const delimiter = path.win32.delimiter;
+    const currentPathValue = lookupEnvValue(env, "PATH", { caseInsensitive: true });
+    assignEnvValue(
+      env,
+      "PATH",
+      mergeUniquePathEntries(pathEntries, currentPathValue, {
+        delimiter,
+        caseInsensitive: true,
+      }),
+      {
+        caseInsensitive: true,
+        fallbackKey: "Path",
+      },
+    );
+    if (windowsRoot) {
+      assignEnvValue(
+        env,
+        "SystemRoot",
+        lookupEnvValue(env, "SystemRoot", { caseInsensitive: true }) ?? windowsRoot,
+        {
+          caseInsensitive: true,
+          fallbackKey: "SystemRoot",
+        },
+      );
+      assignEnvValue(
+        env,
+        "windir",
+        lookupEnvValue(env, "windir", { caseInsensitive: true }) ?? windowsRoot,
+        {
+          caseInsensitive: true,
+          fallbackKey: "windir",
+        },
+      );
+    }
+    if (!lookupEnvValue(env, "COMSPEC", { caseInsensitive: true }) && cmdExecutablePath) {
+      assignEnvValue(env, "COMSPEC", cmdExecutablePath, {
+        caseInsensitive: true,
+        fallbackKey: "ComSpec",
+      });
+    }
     return env;
   }
 

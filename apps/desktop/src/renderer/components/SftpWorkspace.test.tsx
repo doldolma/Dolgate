@@ -3,6 +3,7 @@ import type { SshHostRecord } from '@shared';
 import type { SftpPaneState } from '../store/createAppStore';
 import {
   breadcrumbParts,
+  buildTransferCardTitle,
   canTransferBetweenSftpPanes,
   encodeInternalTransferPayload,
   formatEta,
@@ -276,5 +277,32 @@ describe('SftpWorkspace helpers', () => {
         types: ['Files']
       })
     ).toBe(false);
+  });
+
+  it('builds a stable summary title for multi-file transfers', () => {
+    expect(
+      buildTransferCardTitle({
+        id: 'job-1',
+        sourceLabel: 'Local',
+        targetLabel: 'nas',
+        itemCount: 3,
+        bytesTotal: 300,
+        bytesCompleted: 150,
+        status: 'running',
+        startedAt: '2025-01-01T00:00:00.000Z',
+        updatedAt: '2025-01-01T00:00:01.000Z',
+        activeItemName: 'second.txt',
+        request: {
+          source: { kind: 'local', path: '/Users/tester' },
+          target: { kind: 'remote', endpointId: 'endpoint-1', path: '/home/tester' },
+          items: [
+            { name: 'first.txt', path: '/Users/tester/first.txt', isDirectory: false, size: 100 },
+            { name: 'second.txt', path: '/Users/tester/second.txt', isDirectory: false, size: 100 },
+            { name: 'third.txt', path: '/Users/tester/third.txt', isDirectory: false, size: 100 }
+          ],
+          conflictResolution: 'overwrite'
+        }
+      })
+    ).toBe('first.txt 외 2개');
   });
 });

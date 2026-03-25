@@ -1628,6 +1628,7 @@ export function createAppStore(api: DesktopApi) {
         const selectedPaths = preserveSelection
           ? latestPane.selectedPaths.filter((entryPath) => availablePaths.has(entryPath))
           : [];
+        const nextFilterQuery = latestPane.currentPath === listing.path ? latestPane.filterQuery : '';
         const selectionAnchorPath =
           preserveSelection &&
           latestPane.selectionAnchorPath &&
@@ -1641,6 +1642,7 @@ export function createAppStore(api: DesktopApi) {
           entries: listing.entries,
           selectedPaths,
           selectionAnchorPath,
+          filterQuery: nextFilterQuery,
           isLoading: false,
           errorMessage: undefined,
           warningMessages: listing.warnings ?? [],

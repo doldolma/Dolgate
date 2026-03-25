@@ -62,6 +62,7 @@ function renderSettingsPanel(overrides: Partial<Parameters<typeof SettingsPanel>
       settings={settings}
       knownHosts={knownHosts}
       keychainEntries={keychainEntries}
+      currentUserEmail="user@example.com"
       desktopPlatform="darwin"
       onSelectSection={onSelectSection}
       onUpdateSettings={onUpdateSettings}
@@ -146,11 +147,18 @@ describe('SettingsPanel', () => {
   it('renders keychain entries inside the secrets section', () => {
     const { onEditSecret, onRemoveSecret } = renderSettingsPanel({ activeSection: 'secrets' });
 
-    expect(screen.getByRole('heading', { name: 'Keychain' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Secrets' })).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Edit password' }));
     fireEvent.click(screen.getByRole('button', { name: 'Delete secret' }));
 
     expect(onEditSecret).toHaveBeenCalledWith('secret-1', 'password');
     expect(onRemoveSecret).toHaveBeenCalledWith('secret-1');
+  });
+
+  it('shows the signed-in email and current server in the account section', () => {
+    renderSettingsPanel();
+
+    expect(screen.getByText('user@example.com')).toBeInTheDocument();
+    expect(screen.getByText('https://ssh.doldolma.com')).toBeInTheDocument();
   });
 });

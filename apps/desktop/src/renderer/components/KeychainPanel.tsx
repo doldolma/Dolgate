@@ -12,7 +12,7 @@ export function KeychainPanel({ entries, onRemoveSecret, onEditSecret }: Keychai
       <div className="operations-panel__header">
         <div>
           <div className="section-kicker">Secrets</div>
-          <h2>Keychain</h2>
+          <h2>Secrets</h2>
           <p>원문 비밀번호와 패스프레이즈는 표시하지 않고, 저장 여부와 삭제만 관리합니다.</p>
         </div>
       </div>
@@ -21,7 +21,7 @@ export function KeychainPanel({ entries, onRemoveSecret, onEditSecret }: Keychai
         {entries.length === 0 ? (
           <div className="empty-callout">
             <strong>저장된 secret이 없습니다.</strong>
-            <p>호스트 저장 시 새 키체인을 만들거나 기존 키체인을 연결하면 이 목록에 표시됩니다.</p>
+            <p>호스트 저장 시 새 secret을 만들거나 기존 secret을 연결하면 이 목록에 표시됩니다.</p>
           </div>
         ) : (
           entries.map((entry) => (

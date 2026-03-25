@@ -1503,6 +1503,17 @@ input::placeholder {
   flex: 1;
 }
 
+.host-form__save-status {
+  margin: 0.1rem 0 0;
+  font-size: 0.86rem;
+  line-height: 1.4;
+  color: var(--text-soft);
+}
+
+.host-form__save-status--error {
+  color: color-mix(in srgb, var(--danger) 82%, white 18%);
+}
+
 .host-form__submit {
   border-radius: 16px;
   padding: 0.95rem 1.1rem;
@@ -1564,6 +1575,32 @@ input::placeholder {
 
 .settings-card__header {
   margin-bottom: 1rem;
+}
+
+.settings-account-summary {
+  display: grid;
+  gap: 0.85rem;
+  margin: 0 0 1rem;
+}
+
+.settings-account-summary > div {
+  display: grid;
+  gap: 0.25rem;
+  padding: 0.9rem 1rem;
+  border-radius: 18px;
+  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--surface-muted) 90%, transparent 10%);
+}
+
+.settings-account-summary dt {
+  font-size: 0.84rem;
+  color: var(--text-soft);
+}
+
+.settings-account-summary dd {
+  margin: 0;
+  color: var(--text);
+  word-break: break-all;
 }
 
 .terminal-settings-grid {

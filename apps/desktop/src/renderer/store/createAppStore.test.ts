@@ -546,6 +546,54 @@ describe('createAppStore', () => {
     expect(store.getState().settingsSection).toBe('general');
   });
 
+  it('clears the SFTP filter only when the pane path changes', async () => {
+    const api = createMockApi();
+    api.files.list = vi.fn().mockImplementation(async (targetPath: string) => {
+      if (targetPath === '/Users/tester/Desktop') {
+        return {
+          path: '/Users/tester/Desktop',
+          entries: [
+            {
+              name: 'notes.txt',
+              path: '/Users/tester/Desktop/notes.txt',
+              isDirectory: false,
+              size: 12,
+              mtime: '2025-01-01T00:00:00.000Z',
+              kind: 'file',
+              permissions: 'rw-r--r--'
+            }
+          ]
+        };
+      }
+      return {
+        path: '/Users/tester',
+        entries: [
+          {
+            name: 'Desktop',
+            path: '/Users/tester/Desktop',
+            isDirectory: true,
+            size: 0,
+            mtime: '2025-01-01T00:00:00.000Z',
+            kind: 'folder',
+            permissions: 'rwxr-xr-x'
+          }
+        ]
+      };
+    });
+    const store = createAppStore(api);
+
+    await store.getState().bootstrap();
+    store.getState().setSftpPaneFilter('left', 'desk');
+    expect(store.getState().sftp.leftPane.filterQuery).toBe('desk');
+
+    await store.getState().refreshSftpPane('left');
+    expect(store.getState().sftp.leftPane.filterQuery).toBe('desk');
+
+    await store.getState().openSftpEntry('left', '/Users/tester/Desktop');
+    expect(store.getState().sftp.leftPane.currentPath).toBe('/Users/tester/Desktop');
+    expect(store.getState().sftp.leftPane.filterQuery).toBe('');
+  });
+
   it('navigates groups and creates a group at the current location', async () => {
     const api = createMockApi();
     const store = createAppStore(api);
