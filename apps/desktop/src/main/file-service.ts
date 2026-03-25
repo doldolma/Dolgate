@@ -48,6 +48,10 @@ export class LocalFileService {
     return app.getPath('home');
   }
 
+  async getDownloadsDirectory(): Promise<string> {
+    return app.getPath('downloads');
+  }
+
   async getParentPath(targetPath: string): Promise<string> {
     const currentPath = path.resolve(targetPath);
     const parent = path.dirname(currentPath);
@@ -104,6 +108,10 @@ export class LocalFileService {
     const absolutePath = path.resolve(targetPath);
     const nextPath = path.join(path.dirname(absolutePath), nextName);
     await fs.rename(absolutePath, nextPath);
+  }
+
+  async chmod(targetPath: string, mode: number): Promise<void> {
+    await fs.chmod(path.resolve(targetPath), mode);
   }
 
   async delete(paths: string[]): Promise<void> {

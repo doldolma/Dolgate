@@ -408,8 +408,8 @@ function TerminalSessionView({
     }
 
     const bounds = container.getBoundingClientRect();
-    const viewportWidth = Math.max(0, Math.round(bounds.width));
-    const viewportHeight = Math.max(0, Math.round(bounds.height));
+    const viewportWidth = Math.max(0, Math.floor(bounds.width));
+    const viewportHeight = Math.max(0, Math.floor(bounds.height));
 
     return {
       snapshot: runtime.captureSnapshot(),

@@ -21,6 +21,7 @@ import type {
   SessionShareInputToggleInput,
   SessionShareSnapshotInput,
   SessionShareStartInput,
+  SftpChmodInput,
   SftpDeleteInput,
   SftpListInput,
   SftpMkdirInput,
@@ -366,6 +367,8 @@ const api: DesktopApi = {
   files: {
     getHomeDirectory: () =>
       ipcRenderer.invoke(ipcChannels.files.getHomeDirectory),
+    getDownloadsDirectory: () =>
+      ipcRenderer.invoke(ipcChannels.files.getDownloadsDirectory),
     getParentPath: (targetPath: string) =>
       ipcRenderer.invoke(ipcChannels.files.getParentPath, targetPath),
     list: (path: string) => ipcRenderer.invoke(ipcChannels.files.list, path),
@@ -373,6 +376,8 @@ const api: DesktopApi = {
       ipcRenderer.invoke(ipcChannels.files.mkdir, path, name),
     rename: (path: string, nextName: string) =>
       ipcRenderer.invoke(ipcChannels.files.rename, path, nextName),
+    chmod: (path: string, mode: number) =>
+      ipcRenderer.invoke(ipcChannels.files.chmod, path, mode),
     delete: (paths: string[]) =>
       ipcRenderer.invoke(ipcChannels.files.delete, paths),
   },
@@ -387,6 +392,8 @@ const api: DesktopApi = {
       ipcRenderer.invoke(ipcChannels.sftp.mkdir, input),
     rename: (input: SftpRenameInput) =>
       ipcRenderer.invoke(ipcChannels.sftp.rename, input),
+    chmod: (input: SftpChmodInput) =>
+      ipcRenderer.invoke(ipcChannels.sftp.chmod, input),
     delete: (input: SftpDeleteInput) =>
       ipcRenderer.invoke(ipcChannels.sftp.delete, input),
     startTransfer: (input: TransferStartInput) =>

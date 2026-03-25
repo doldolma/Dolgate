@@ -114,10 +114,12 @@ export const ipcChannels = {
   },
   files: {
     getHomeDirectory: 'files:get-home-directory',
+    getDownloadsDirectory: 'files:get-downloads-directory',
     getParentPath: 'files:get-parent-path',
     list: 'files:list',
     mkdir: 'files:mkdir',
     rename: 'files:rename',
+    chmod: 'files:chmod',
     delete: 'files:delete'
   },
   sftp: {
@@ -126,6 +128,7 @@ export const ipcChannels = {
     list: 'sftp:list',
     mkdir: 'sftp:mkdir',
     rename: 'sftp:rename',
+    chmod: 'sftp:chmod',
     delete: 'sftp:delete',
     startTransfer: 'sftp:start-transfer',
     cancelTransfer: 'sftp:cancel-transfer',

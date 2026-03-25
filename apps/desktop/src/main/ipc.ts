@@ -36,6 +36,7 @@ import type {
   SessionShareInputToggleInput,
   SessionShareSnapshotInput,
   SessionShareStartInput,
+  SftpChmodInput,
   SftpDeleteInput,
   SftpListInput,
   SftpMkdirInput,
@@ -1122,6 +1123,13 @@ export function registerIpcHandlers(
   );
 
   ipcMain.handle(
+    ipcChannels.sftp.chmod,
+    async (_event, input: SftpChmodInput) => {
+      await coreManager.sftpChmod(input);
+    },
+  );
+
+  ipcMain.handle(
     ipcChannels.sftp.delete,
     async (_event, input: SftpDeleteInput) => {
       await coreManager.sftpDelete(input);
@@ -1559,6 +1567,9 @@ export function registerIpcHandlers(
   ipcMain.handle(ipcChannels.files.getHomeDirectory, async () =>
     localFiles.getHomeDirectory(),
   );
+  ipcMain.handle(ipcChannels.files.getDownloadsDirectory, async () =>
+    localFiles.getDownloadsDirectory(),
+  );
   ipcMain.handle(
     ipcChannels.files.getParentPath,
     async (_event, targetPath: string) => localFiles.getParentPath(targetPath),
@@ -1579,6 +1590,13 @@ export function registerIpcHandlers(
     ipcChannels.files.rename,
     async (_event, targetPath: string, nextName: string) => {
       await localFiles.rename(targetPath, nextName);
+    },
+  );
+
+  ipcMain.handle(
+    ipcChannels.files.chmod,
+    async (_event, targetPath: string, mode: number) => {
+      await localFiles.chmod(targetPath, mode);
     },
   );
 

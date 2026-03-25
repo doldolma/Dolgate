@@ -264,12 +264,17 @@ export function App() {
   const selectSftpEntry = useAppStore((state) => state.selectSftpEntry);
   const createSftpDirectory = useAppStore((state) => state.createSftpDirectory);
   const renameSftpSelection = useAppStore((state) => state.renameSftpSelection);
+  const changeSftpSelectionPermissions = useAppStore((state) => state.changeSftpSelectionPermissions);
   const deleteSftpSelection = useAppStore((state) => state.deleteSftpSelection);
+  const downloadSftpSelection = useAppStore((state) => state.downloadSftpSelection);
   const prepareSftpTransfer = useAppStore((state) => state.prepareSftpTransfer);
+  const prepareSftpExternalTransfer = useAppStore((state) => state.prepareSftpExternalTransfer);
+  const transferSftpSelectionToPane = useAppStore((state) => state.transferSftpSelectionToPane);
   const resolveSftpConflict = useAppStore((state) => state.resolveSftpConflict);
   const dismissSftpConflict = useAppStore((state) => state.dismissSftpConflict);
   const cancelTransfer = useAppStore((state) => state.cancelTransfer);
   const retryTransfer = useAppStore((state) => state.retryTransfer);
+  const dismissTransfer = useAppStore((state) => state.dismissTransfer);
   const [prefersDark, setPrefersDark] = useState(() => window.matchMedia('(prefers-color-scheme: dark)').matches);
   const desktopPlatform = useMemo(() => detectDesktopPlatform(), []);
 
@@ -878,12 +883,17 @@ export function App() {
             onSelectEntry={selectSftpEntry}
             onCreateDirectory={createSftpDirectory}
             onRenameSelection={renameSftpSelection}
+            onChangeSelectionPermissions={changeSftpSelectionPermissions}
             onDeleteSelection={deleteSftpSelection}
+            onDownloadSelection={downloadSftpSelection}
             onPrepareTransfer={prepareSftpTransfer}
+            onPrepareExternalTransfer={prepareSftpExternalTransfer}
+            onTransferSelectionToPane={transferSftpSelectionToPane}
             onResolveConflict={resolveSftpConflict}
             onDismissConflict={dismissSftpConflict}
             onCancelTransfer={cancelTransfer}
             onRetryTransfer={retryTransfer}
+            onDismissTransfer={dismissTransfer}
           />
         </section>
 

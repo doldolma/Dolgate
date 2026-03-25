@@ -23,6 +23,7 @@ import type {
   ResolvedPortForwardStartPayload,
   ResolvedSsmPortForwardStartPayload,
   ResolvedSftpConnectPayload,
+  SftpChmodInput,
   SftpDeleteInput,
   SftpEndpointSummary,
   SftpListInput,
@@ -823,6 +824,19 @@ export class CoreManager {
       {
         id: randomUUID(),
         type: "sftpRename",
+        endpointId: input.endpointId,
+        payload: input,
+      },
+      ["sftpAck"],
+    );
+  }
+
+  async sftpChmod(input: SftpChmodInput): Promise<void> {
+    await this.start();
+    await this.requestResponse(
+      {
+        id: randomUUID(),
+        type: "sftpChmod",
         endpointId: input.endpointId,
         payload: input,
       },

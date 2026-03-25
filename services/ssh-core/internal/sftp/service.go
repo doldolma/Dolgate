@@ -223,6 +223,27 @@ func (s *Service) Rename(endpointID, requestID string, payload protocol.SFTPRena
 	return nil
 }
 
+func (s *Service) Chmod(endpointID, requestID string, payload protocol.SFTPChmodPayload) error {
+	handle, err := s.getEndpoint(endpointID)
+	if err != nil {
+		return err
+	}
+
+	if err := handle.sftp.Chmod(payload.Path, os.FileMode(payload.Mode)); err != nil {
+		return err
+	}
+
+	s.emit(protocol.Event{
+		Type:       protocol.EventSFTPAck,
+		RequestID:  requestID,
+		EndpointID: endpointID,
+		Payload: protocol.AckPayload{
+			Message: "path permissions updated",
+		},
+	})
+	return nil
+}
+
 func (s *Service) Delete(endpointID, requestID string, payload protocol.SFTPDeletePayload) error {
 	handle, err := s.getEndpoint(endpointID)
 	if err != nil {

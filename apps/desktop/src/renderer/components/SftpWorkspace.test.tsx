@@ -1,7 +1,23 @@
 import { describe, expect, it } from 'vitest';
 import type { SshHostRecord } from '@shared';
 import type { SftpPaneState } from '../store/createAppStore';
-import { breadcrumbParts, getSftpPaneTitle, groupHosts, hostPickerBreadcrumbs, visibleEntries, visibleHostPickerHosts } from './SftpWorkspace';
+import {
+  breadcrumbParts,
+  canTransferBetweenSftpPanes,
+  encodeInternalTransferPayload,
+  formatEta,
+  formatTransferSpeed,
+  getSftpPaneTitle,
+  groupHosts,
+  hasInternalTransferData,
+  hostPickerBreadcrumbs,
+  isSftpTransferArrowDisabled,
+  parseInternalTransferPayload,
+  permissionMatrixFromString,
+  permissionMatrixToMode,
+  visibleEntries,
+  visibleHostPickerHosts
+} from './SftpWorkspace';
 
 const sshHosts: SshHostRecord[] = [
   {
@@ -84,11 +100,52 @@ const pane: SftpPaneState = {
     }
   ],
   selectedPaths: [],
+  selectionAnchorPath: null,
   filterQuery: 'read',
   selectedHostId: null,
   hostSearchQuery: '',
   isLoading: false
 };
+
+function createPaneState(overrides: Partial<SftpPaneState> = {}): SftpPaneState {
+  return {
+    id: 'left',
+    sourceKind: 'local',
+    endpoint: null,
+    hostGroupPath: null,
+    currentPath: '/Users/tester/projects',
+    lastLocalPath: '/Users/tester/projects',
+    history: ['/Users/tester/projects'],
+    historyIndex: 0,
+    entries: [
+      {
+        name: 'README.md',
+        path: '/Users/tester/projects/README.md',
+        isDirectory: false,
+        size: 12,
+        mtime: '2025-01-01T00:00:00.000Z',
+        kind: 'file',
+        permissions: 'rw-r--r--'
+      },
+      {
+        name: 'src',
+        path: '/Users/tester/projects/src',
+        isDirectory: true,
+        size: 0,
+        mtime: '2025-01-01T00:00:00.000Z',
+        kind: 'folder',
+        permissions: 'drwxr-xr-x'
+      }
+    ],
+    selectedPaths: [],
+    selectionAnchorPath: null,
+    filterQuery: '',
+    selectedHostId: null,
+    hostSearchQuery: '',
+    isLoading: false,
+    ...overrides
+  };
+}
 
 describe('SftpWorkspace helpers', () => {
   it('groups SSH hosts by group name and falls back to Ungrouped', () => {
@@ -143,5 +200,81 @@ describe('SftpWorkspace helpers', () => {
       })
     ).toBe('Prod SSH');
     expect(getSftpPaneTitle({ sourceKind: 'host', endpoint: null })).toBe('Host');
+  });
+
+  it('parses permission strings and converts them to octal mode', () => {
+    expect(permissionMatrixFromString('drwxr-xr-x')).toEqual({
+      owner: { read: true, write: true, execute: true },
+      group: { read: true, write: false, execute: true },
+      other: { read: true, write: false, execute: true }
+    });
+    expect(
+      permissionMatrixToMode({
+        owner: { read: true, write: true, execute: true },
+        group: { read: true, write: false, execute: true },
+        other: { read: true, write: false, execute: false }
+      })
+    ).toBe(0o754);
+  });
+
+  it('disables center transfer arrows until both panes are browsable', () => {
+    const leftPane = createPaneState({
+      id: 'left',
+      sourceKind: 'local',
+      selectedPaths: ['/Users/tester/projects/README.md']
+    });
+    const rightHostPicker = createPaneState({
+      id: 'right',
+      sourceKind: 'host',
+      endpoint: null,
+      entries: [],
+      selectedPaths: []
+    });
+
+    expect(canTransferBetweenSftpPanes(leftPane, rightHostPicker)).toBe(false);
+    expect(isSftpTransferArrowDisabled(leftPane, rightHostPicker)).toBe(true);
+  });
+
+  it('formats transfer speed and eta for running transfer cards', () => {
+    expect(formatTransferSpeed(2 * 1024 * 1024)).toBe('2.0 MB/s');
+    expect(formatEta(125)).toBe('남은 시간 2분 5초');
+    expect(formatTransferSpeed(null)).toBeNull();
+    expect(formatEta(0)).toBeNull();
+  });
+
+  it('accepts internal drag payloads from the text/plain fallback channel', () => {
+    const payload = encodeInternalTransferPayload({
+      sourcePaneId: 'left',
+      draggedPath: '/Users/tester/projects/README.md'
+    });
+
+    expect(
+      parseInternalTransferPayload({
+        getData: (type: string) => (type === 'text/plain' ? payload : '')
+      })
+    ).toEqual({
+      sourcePaneId: 'left',
+      draggedPath: '/Users/tester/projects/README.md'
+    });
+  });
+
+  it('treats both custom mime and text/plain as internal transfer drags during dragover', () => {
+    expect(
+      hasInternalTransferData({
+        types: ['application/x-dolssh-transfer']
+      })
+    ).toBe(true);
+
+    expect(
+      hasInternalTransferData({
+        types: ['text/plain']
+      })
+    ).toBe(true);
+
+    expect(
+      hasInternalTransferData({
+        types: ['Files']
+      })
+    ).toBe(false);
   });
 });

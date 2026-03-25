@@ -32,6 +32,7 @@ const (
 	CommandSFTPList                   CommandType = "sftpList"
 	CommandSFTPMkdir                  CommandType = "sftpMkdir"
 	CommandSFTPRename                 CommandType = "sftpRename"
+	CommandSFTPChmod                  CommandType = "sftpChmod"
 	CommandSFTPDelete                 CommandType = "sftpDelete"
 	CommandSFTPTransferStart          CommandType = "sftpTransferStart"
 	CommandSFTPTransferCancel         CommandType = "sftpTransferCancel"
@@ -190,6 +191,11 @@ type SFTPMkdirPayload struct {
 type SFTPRenamePayload struct {
 	Path     string `json:"path"`
 	NextName string `json:"nextName"`
+}
+
+type SFTPChmodPayload struct {
+	Path string `json:"path"`
+	Mode int    `json:"mode"`
 }
 
 type SFTPDeletePayload struct {

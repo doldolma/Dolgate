@@ -9,6 +9,7 @@
   const terminalNode = document.getElementById("viewer-terminal");
   const textEncoder = new TextEncoder();
   const DEFAULT_FALLBACK_SCALE = 0.85;
+  const VIEWPORT_SAFE_GUTTER_PX = 6;
 
   if (!shareId || !viewerToken || !window.Terminal || !viewportNode || !stageNode || !terminalNode) {
     return;
@@ -207,8 +208,8 @@
       return null;
     }
 
-    const width = Math.round(Number(input.width));
-    const height = Math.round(Number(input.height));
+    const width = Math.floor(Number(input.width));
+    const height = Math.floor(Number(input.height));
     if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) {
       return null;
     }
@@ -267,8 +268,10 @@
 
     setStageDimensions(baseViewport.width, baseViewport.height);
 
-    const widthScale = availableWidth / baseViewport.width;
-    const heightScale = availableHeight / baseViewport.height;
+    const safeWidth = Math.max(0, availableWidth - VIEWPORT_SAFE_GUTTER_PX);
+    const safeHeight = Math.max(0, availableHeight - VIEWPORT_SAFE_GUTTER_PX);
+    const widthScale = safeWidth / baseViewport.width;
+    const heightScale = safeHeight / baseViewport.height;
     const scale = Math.min(widthScale, heightScale, 1);
     stageNode.style.transform = `scale(${Number.isFinite(scale) && scale > 0 ? scale : DEFAULT_FALLBACK_SCALE})`;
   }
