@@ -99,12 +99,20 @@ export interface SftpPaneState {
   historyIndex: number;
   entries: FileEntry[];
   selectedPaths: string[];
+  selectionAnchorPath: string | null;
   filterQuery: string;
   selectedHostId: string | null;
   hostSearchQuery: string;
   isLoading: boolean;
   errorMessage?: string;
   warningMessages?: string[];
+}
+
+export interface SftpEntrySelectionInput {
+  entryPath: string | null;
+  visibleEntryPaths?: string[];
+  toggle?: boolean;
+  range?: boolean;
 }
 
 export interface PendingConflictDialog {
@@ -268,15 +276,25 @@ export interface AppState {
   navigateSftpForward: (paneId: SftpPaneId) => Promise<void>;
   navigateSftpParent: (paneId: SftpPaneId) => Promise<void>;
   navigateSftpBreadcrumb: (paneId: SftpPaneId, nextPath: string) => Promise<void>;
-  selectSftpEntry: (paneId: SftpPaneId, entryPath: string) => void;
+  selectSftpEntry: (paneId: SftpPaneId, input: SftpEntrySelectionInput) => void;
   createSftpDirectory: (paneId: SftpPaneId, name: string) => Promise<void>;
   renameSftpSelection: (paneId: SftpPaneId, nextName: string) => Promise<void>;
+  changeSftpSelectionPermissions: (paneId: SftpPaneId, mode: number) => Promise<void>;
   deleteSftpSelection: (paneId: SftpPaneId) => Promise<void>;
-  prepareSftpTransfer: (sourcePaneId: SftpPaneId, targetPaneId: SftpPaneId, targetPath: string, draggedPath: string) => Promise<void>;
+  downloadSftpSelection: (paneId: SftpPaneId) => Promise<void>;
+  prepareSftpTransfer: (
+    sourcePaneId: SftpPaneId,
+    targetPaneId: SftpPaneId,
+    targetPath: string,
+    draggedPath?: string | null
+  ) => Promise<void>;
+  prepareSftpExternalTransfer: (targetPaneId: SftpPaneId, targetPath: string, droppedPaths: string[]) => Promise<void>;
+  transferSftpSelectionToPane: (sourcePaneId: SftpPaneId, targetPaneId: SftpPaneId) => Promise<void>;
   resolveSftpConflict: (resolution: 'overwrite' | 'skip' | 'keepBoth') => Promise<void>;
   dismissSftpConflict: () => void;
   cancelTransfer: (jobId: string) => Promise<void>;
   retryTransfer: (jobId: string) => Promise<void>;
+  dismissTransfer: (jobId: string) => void;
 }
 
 type TabStatus = TerminalTab['status'];
@@ -346,6 +364,7 @@ function createEmptyPane(id: SftpPaneId): SftpPaneState {
     historyIndex: -1,
     entries: [],
     selectedPaths: [],
+    selectionAnchorPath: null,
     filterQuery: '',
     selectedHostId: null,
     hostSearchQuery: '',
@@ -996,9 +1015,14 @@ function shouldTreatAsWarpgate(host: HostRecord | undefined, challenge: Keyboard
   return /warpgate|authorize|device authorization|device code|verification code/i.test(sourceText);
 }
 
-function upsertTransferJob(transfers: TransferJob[], job: TransferJob): TransferJob[] {
-  const next = [job, ...transfers.filter((item) => item.id !== job.id)];
-  return next.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
+export function upsertTransferJob(transfers: TransferJob[], job: TransferJob): TransferJob[] {
+  const existingIndex = transfers.findIndex((item) => item.id === job.id);
+  if (existingIndex >= 0) {
+    return transfers.map((item, index) => (index === existingIndex ? job : item));
+  }
+  return [job, ...transfers].sort(
+    (a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime(),
+  );
 }
 
 function upsertForwardRuntime(runtimes: PortForwardRuntimeRecord[], runtime: PortForwardRuntimeRecord): PortForwardRuntimeRecord[] {
@@ -1006,12 +1030,100 @@ function upsertForwardRuntime(runtimes: PortForwardRuntimeRecord[], runtime: Por
   return next.sort((a, b) => a.ruleId.localeCompare(b.ruleId));
 }
 
-function resolveTargetItems(pane: SftpPaneState, draggedPath: string): FileEntry[] {
+function basenameFromPath(targetPath: string): string {
+  const normalized = targetPath.replace(/[\\/]+$/, '');
+  const separatorIndex = Math.max(normalized.lastIndexOf('/'), normalized.lastIndexOf('\\'));
+  return separatorIndex >= 0 ? normalized.slice(separatorIndex + 1) : normalized;
+}
+
+function resolveSftpVisibleEntryPaths(pane: SftpPaneState, provided?: string[]): string[] {
+  if (provided && provided.length > 0) {
+    const available = new Set(pane.entries.map((entry) => entry.path));
+    return provided.filter((entryPath) => available.has(entryPath));
+  }
+  return pane.entries
+    .filter((entry) => {
+      if (!pane.filterQuery.trim()) {
+        return true;
+      }
+      return entry.name.toLowerCase().includes(pane.filterQuery.trim().toLowerCase());
+    })
+    .map((entry) => entry.path);
+}
+
+function resolveNextSftpSelection(
+  pane: SftpPaneState,
+  input: SftpEntrySelectionInput,
+): Pick<SftpPaneState, "selectedPaths" | "selectionAnchorPath"> {
+  if (!input.entryPath) {
+    return {
+      selectedPaths: [],
+      selectionAnchorPath: null,
+    };
+  }
+
+  const entryExists = pane.entries.some((entry) => entry.path === input.entryPath);
+  if (!entryExists) {
+    return {
+      selectedPaths: pane.selectedPaths,
+      selectionAnchorPath: pane.selectionAnchorPath,
+    };
+  }
+
+  if (input.range) {
+    const visiblePaths = resolveSftpVisibleEntryPaths(pane, input.visibleEntryPaths);
+    const anchorPath =
+      pane.selectionAnchorPath && visiblePaths.includes(pane.selectionAnchorPath)
+        ? pane.selectionAnchorPath
+        : null;
+    const targetIndex = visiblePaths.indexOf(input.entryPath);
+    if (!anchorPath || targetIndex < 0) {
+      return {
+        selectedPaths: [input.entryPath],
+        selectionAnchorPath: input.entryPath,
+      };
+    }
+    const anchorIndex = visiblePaths.indexOf(anchorPath);
+    const start = Math.min(anchorIndex, targetIndex);
+    const end = Math.max(anchorIndex, targetIndex);
+    return {
+      selectedPaths: visiblePaths.slice(start, end + 1),
+      selectionAnchorPath: anchorPath,
+    };
+  }
+
+  if (input.toggle) {
+    const nextSelected = pane.selectedPaths.includes(input.entryPath)
+      ? pane.selectedPaths.filter((entryPath) => entryPath !== input.entryPath)
+      : [...pane.selectedPaths, input.entryPath];
+    return {
+      selectedPaths: nextSelected,
+      selectionAnchorPath: input.entryPath,
+    };
+  }
+
+  return {
+    selectedPaths: [input.entryPath],
+    selectionAnchorPath: input.entryPath,
+  };
+}
+
+function resolveTransferItemsFromPane(
+  pane: SftpPaneState,
+  draggedPath?: string | null,
+): FileEntry[] {
+  if (!draggedPath) {
+    return pane.entries.filter((entry) => pane.selectedPaths.includes(entry.path));
+  }
   const selected = pane.entries.filter((entry) => pane.selectedPaths.includes(entry.path));
   if (selected.some((entry) => entry.path === draggedPath)) {
     return selected;
   }
   return pane.entries.filter((entry) => entry.path === draggedPath);
+}
+
+function isBrowsableSftpPane(pane: SftpPaneState): boolean {
+  return pane.sourceKind === "local" || Boolean(pane.endpoint);
 }
 
 function pushHistory(pane: SftpPaneState, nextPath: string): Pick<SftpPaneState, 'history' | 'historyIndex'> {
@@ -1485,12 +1597,24 @@ export function createAppStore(api: DesktopApi) {
       set((state) => {
         const latestPane = getPane(state, paneId);
         const historyPatch = options.pushToHistory ? pushHistory(latestPane, listing.path) : { history: latestPane.history, historyIndex: latestPane.historyIndex };
+        const preserveSelection = !options.pushToHistory && latestPane.currentPath === listing.path;
+        const availablePaths = new Set(listing.entries.map((entry) => entry.path));
+        const selectedPaths = preserveSelection
+          ? latestPane.selectedPaths.filter((entryPath) => availablePaths.has(entryPath))
+          : [];
+        const selectionAnchorPath =
+          preserveSelection &&
+          latestPane.selectionAnchorPath &&
+          availablePaths.has(latestPane.selectionAnchorPath)
+            ? latestPane.selectionAnchorPath
+            : null;
         const nextPane: SftpPaneState = {
           ...latestPane,
           currentPath: listing.path,
           lastLocalPath: latestPane.sourceKind === 'local' ? listing.path : latestPane.lastLocalPath,
           entries: listing.entries,
-          selectedPaths: [],
+          selectedPaths,
+          selectionAnchorPath,
           isLoading: false,
           errorMessage: undefined,
           warningMessages: listing.warnings ?? [],
@@ -1520,6 +1644,135 @@ export function createAppStore(api: DesktopApi) {
     }
   };
 
+  const setSftpPaneWarnings = (
+    set: (next: AppState | Partial<AppState> | ((state: AppState) => AppState | Partial<AppState>)) => void,
+    paneId: SftpPaneId,
+    warnings: string[],
+  ) => {
+    set((state) => ({
+      sftp: updatePaneState(state, paneId, {
+        ...getPane(state, paneId),
+        warningMessages: warnings,
+      }),
+    }));
+  };
+
+  const buildSftpTransferEndpoint = (
+    pane: SftpPaneState,
+    targetPath: string,
+  ) => {
+    if (pane.sourceKind === "local") {
+      return {
+        kind: "local" as const,
+        path: targetPath,
+      };
+    }
+    if (!pane.endpoint) {
+      return null;
+    }
+    return {
+      kind: "remote" as const,
+      endpointId: pane.endpoint.id,
+      path: targetPath,
+    };
+  };
+
+  const startSftpTransferForItems = async (
+    set: (next: AppState | Partial<AppState> | ((state: AppState) => AppState | Partial<AppState>)) => void,
+    input: {
+      sourcePane: SftpPaneState;
+      targetPane: SftpPaneState;
+      targetPath: string;
+      items: FileEntry[];
+    },
+  ) => {
+    if (input.items.length === 0) {
+      return;
+    }
+
+    const source = buildSftpTransferEndpoint(input.sourcePane, input.sourcePane.currentPath);
+    const target = buildSftpTransferEndpoint(input.targetPane, input.targetPath);
+    if (!source || !target) {
+      return;
+    }
+
+    const destinationListing: DirectoryListing =
+      input.targetPane.sourceKind === "local"
+        ? await api.files.list(input.targetPath)
+        : await api.sftp.list({
+            endpointId: input.targetPane.endpoint?.id ?? "",
+            path: input.targetPath,
+          });
+
+    const conflicts = input.items
+      .filter((item) =>
+        destinationListing.entries.some((entry) => entry.name === item.name),
+      )
+      .map((item) => item.name);
+
+    const transferInput: TransferStartInput = {
+      source,
+      target,
+      items: input.items.map((item) => ({
+        name: item.name,
+        path: item.path,
+        isDirectory: item.isDirectory,
+        size: item.size,
+      })),
+      conflictResolution: conflicts.length > 0 ? "skip" : "overwrite",
+    };
+
+    if (conflicts.length > 0) {
+      set((state) => ({
+        activeWorkspaceTab: "sftp",
+        sftp: {
+          ...state.sftp,
+          pendingConflictDialog: {
+            input: transferInput,
+            names: conflicts,
+          },
+        },
+      }));
+      return;
+    }
+
+    const job = await api.sftp.startTransfer(transferInput);
+    set((state) => ({
+      activeWorkspaceTab: "sftp",
+      sftp: {
+        ...state.sftp,
+        transfers: upsertTransferJob(state.sftp.transfers, job),
+      },
+    }));
+  };
+
+  const resolveLocalTransferItemsFromPaths = async (paths: string[]) => {
+    const uniquePaths = Array.from(
+      new Set(paths.map((targetPath) => targetPath.trim()).filter(Boolean)),
+    );
+    const listingCache = new Map<string, DirectoryListing>();
+    const items: FileEntry[] = [];
+    const warnings: string[] = [];
+
+    for (const targetPath of uniquePaths) {
+      const parent = await api.files.getParentPath(targetPath);
+      const cacheKey = parent;
+      let listing = listingCache.get(cacheKey);
+      if (!listing) {
+        listing = await api.files.list(parent);
+        listingCache.set(cacheKey, listing);
+      }
+      const matched = listing.entries.find((entry) => entry.path === targetPath);
+      if (!matched) {
+        warnings.push(`${basenameFromPath(targetPath)} 항목을 읽지 못했습니다.`);
+        continue;
+      }
+      items.push(matched);
+    }
+
+    return { items, warnings };
+  };
+
   const runTrustedAction = async (
     get: () => AppState,
     sessionId: string | null,
@@ -1539,18 +1792,20 @@ export function createAppStore(api: DesktopApi) {
       if (pane.endpoint) {
         await api.sftp.disconnect(pane.endpoint.id);
       }
-      set((state) => ({
-        activeWorkspaceTab: 'sftp',
-        sftp: updatePaneState(state, action.paneId, {
-          ...getPane(state, action.paneId),
-          sourceKind: 'host',
-          endpoint: null,
-          entries: [],
-          isLoading: true,
-          errorMessage: undefined,
-          selectedHostId: action.hostId
-        })
-      }));
+        set((state) => ({
+          activeWorkspaceTab: 'sftp',
+          sftp: updatePaneState(state, action.paneId, {
+            ...getPane(state, action.paneId),
+            sourceKind: 'host',
+            endpoint: null,
+            entries: [],
+            isLoading: true,
+            errorMessage: undefined,
+            selectedPaths: [],
+            selectionAnchorPath: null,
+            selectedHostId: action.hostId
+          })
+        }));
       try {
         const endpoint = await api.sftp.connect({ hostId: action.hostId, secrets: action.secrets });
         set((state) => ({
@@ -1562,6 +1817,7 @@ export function createAppStore(api: DesktopApi) {
             history: [endpoint.path],
             historyIndex: 0,
             selectedPaths: [],
+            selectionAnchorPath: null,
             errorMessage: undefined,
             warningMessages: []
           })
@@ -2761,6 +3017,7 @@ export function createAppStore(api: DesktopApi) {
           historyIndex: sourceKind === 'local' ? 0 : -1,
           entries: [],
           selectedPaths: [],
+          selectionAnchorPath: null,
           errorMessage: undefined,
           warningMessages: [],
           selectedHostId: null,
@@ -2877,13 +3134,16 @@ export function createAppStore(api: DesktopApi) {
       navigateSftpBreadcrumb: async (paneId, nextPath) => {
         await loadPaneListing(set, get, paneId, nextPath, { pushToHistory: true });
       },
-      selectSftpEntry: (paneId, entryPath) =>
-        set((state) => ({
-          sftp: updatePaneState(state, paneId, {
-            ...getPane(state, paneId),
-            selectedPaths: [entryPath]
-          })
-        })),
+      selectSftpEntry: (paneId, input) =>
+        set((state) => {
+          const pane = getPane(state, paneId);
+          return {
+            sftp: updatePaneState(state, paneId, {
+              ...pane,
+              ...resolveNextSftpSelection(pane, input)
+            })
+          };
+        }),
       createSftpDirectory: async (paneId, name) => {
         const pane = getPane(get(), paneId);
         if (!name.trim()) {
@@ -2903,7 +3163,7 @@ export function createAppStore(api: DesktopApi) {
       renameSftpSelection: async (paneId, nextName) => {
         const pane = getPane(get(), paneId);
         const targetPath = pane.selectedPaths[0];
-        if (!targetPath || !nextName.trim()) {
+        if (!targetPath || pane.selectedPaths.length !== 1 || !nextName.trim()) {
           return;
         }
         if (pane.sourceKind === 'local') {
@@ -2913,6 +3173,23 @@ export function createAppStore(api: DesktopApi) {
             endpointId: pane.endpoint.id,
             path: targetPath,
             nextName: nextName.trim()
+          });
+        }
+        await get().refreshSftpPane(paneId);
+      },
+      changeSftpSelectionPermissions: async (paneId, mode) => {
+        const pane = getPane(get(), paneId);
+        const targetPath = pane.selectedPaths[0];
+        if (!targetPath || pane.selectedPaths.length !== 1) {
+          return;
+        }
+        if (pane.sourceKind === "local") {
+          await api.files.chmod(targetPath, mode);
+        } else if (pane.endpoint) {
+          await api.sftp.chmod({
+            endpointId: pane.endpoint.id,
+            path: targetPath,
+            mode,
           });
         }
         await get().refreshSftpPane(paneId);
@@ -2932,76 +3209,87 @@ export function createAppStore(api: DesktopApi) {
         }
         await get().refreshSftpPane(paneId);
       },
-      prepareSftpTransfer: async (sourcePaneId, targetPaneId, targetPath, draggedPath) => {
+      downloadSftpSelection: async (paneId) => {
+        const state = get();
+        const sourcePane = getPane(state, paneId);
+        if (sourcePane.sourceKind !== "host" || !sourcePane.endpoint || sourcePane.selectedPaths.length !== 1) {
+          return;
+        }
+        const selectedItem = sourcePane.entries.find((entry) => entry.path === sourcePane.selectedPaths[0]);
+        if (!selectedItem || selectedItem.isDirectory) {
+          return;
+        }
+        const downloadsPath = await api.files.getDownloadsDirectory();
+        const targetPane: SftpPaneState = {
+          ...createEmptyPane("left"),
+          sourceKind: "local",
+          currentPath: downloadsPath,
+          lastLocalPath: downloadsPath,
+        };
+        await startSftpTransferForItems(set, {
+          sourcePane,
+          targetPane,
+          targetPath: downloadsPath,
+          items: [selectedItem],
+        });
+      },
+      prepareSftpTransfer: async (sourcePaneId, targetPaneId, targetPath, draggedPath = null) => {
         const state = get();
         const sourcePane = getPane(state, sourcePaneId);
         const targetPane = getPane(state, targetPaneId);
-        const items = resolveTargetItems(sourcePane, draggedPath);
+        const items = resolveTransferItemsFromPane(sourcePane, draggedPath);
+        await startSftpTransferForItems(set, {
+          sourcePane,
+          targetPane,
+          targetPath,
+          items,
+        });
+      },
+      prepareSftpExternalTransfer: async (targetPaneId, targetPath, droppedPaths) => {
+        const targetPane = getPane(get(), targetPaneId);
+        if (targetPane.sourceKind !== "host" || !targetPane.endpoint) {
+          return;
+        }
+        const { items, warnings } = await resolveLocalTransferItemsFromPaths(droppedPaths);
+        if (warnings.length > 0) {
+          setSftpPaneWarnings(set, targetPaneId, warnings);
+        }
         if (items.length === 0) {
-          return;
-        }
-
-        const sourceRef =
-          sourcePane.sourceKind === 'local'
-            ? { kind: 'local' as const, path: sourcePane.currentPath }
-            : sourcePane.endpoint
-              ? { kind: 'remote' as const, endpointId: sourcePane.endpoint.id, path: sourcePane.currentPath }
-              : null;
-        const targetRef =
-          targetPane.sourceKind === 'local'
-            ? { kind: 'local' as const, path: targetPath }
-            : targetPane.endpoint
-              ? { kind: 'remote' as const, endpointId: targetPane.endpoint.id, path: targetPath }
-              : null;
-        if (!sourceRef || !targetRef) {
-          return;
-        }
-
-        const destinationListing: DirectoryListing =
-          targetPane.sourceKind === 'local'
-            ? await api.files.list(targetPath)
-            : await api.sftp.list({
-                endpointId: targetPane.endpoint?.id ?? '',
-                path: targetPath
-              });
-
-        const conflicts = items
-          .filter((item) => destinationListing.entries.some((entry) => entry.name === item.name))
-          .map((item) => item.name);
-        const input: TransferStartInput = {
-          source: sourceRef,
-          target: targetRef,
-          items: items.map((item) => ({
-            name: item.name,
-            path: item.path,
-            isDirectory: item.isDirectory,
-            size: item.size
-          })),
-          conflictResolution: conflicts.length > 0 ? 'skip' : 'overwrite'
-        };
-
-        if (conflicts.length > 0) {
-          set((current) => ({
-            activeWorkspaceTab: 'sftp',
-            sftp: {
-              ...current.sftp,
-              pendingConflictDialog: {
-                input,
-                names: conflicts
-              }
-            }
-          }));
-          return;
-        }
-
-        const job = await api.sftp.startTransfer(input);
-        set((current) => ({
-          activeWorkspaceTab: 'sftp',
-          sftp: {
-            ...current.sftp,
-            transfers: upsertTransferJob(current.sftp.transfers, job)
+          if (warnings.length === 0) {
+            setSftpPaneWarnings(set, targetPaneId, ["드롭한 항목 경로를 읽지 못했습니다."]);
           }
-        }));
+          return;
+        }
+        const sourcePane: SftpPaneState = {
+          ...createEmptyPane("left"),
+          sourceKind: "local",
+          currentPath: "",
+          lastLocalPath: "",
+          entries: items,
+          selectedPaths: items.map((item) => item.path),
+          selectionAnchorPath: items[0]?.path ?? null,
+        };
+        await startSftpTransferForItems(set, {
+          sourcePane,
+          targetPane,
+          targetPath,
+          items,
+        });
+      },
+      transferSftpSelectionToPane: async (sourcePaneId, targetPaneId) => {
+        const state = get();
+        const sourcePane = getPane(state, sourcePaneId);
+        const targetPane = getPane(state, targetPaneId);
+        if (!isBrowsableSftpPane(sourcePane) || !isBrowsableSftpPane(targetPane)) {
+          return;
+        }
+        const items = resolveTransferItemsFromPane(sourcePane);
+        await startSftpTransferForItems(set, {
+          sourcePane,
+          targetPane,
+          targetPath: targetPane.currentPath,
+          items,
+        });
       },
       resolveSftpConflict: async (resolution) => {
         const pending = get().sftp.pendingConflictDialog;
@@ -3041,6 +3329,14 @@ export function createAppStore(api: DesktopApi) {
           sftp: {
             ...state.sftp,
             transfers: upsertTransferJob(state.sftp.transfers, nextJob)
+          }
+        }));
+      },
+      dismissTransfer: (jobId) => {
+        set((state) => ({
+          sftp: {
+            ...state.sftp,
+            transfers: state.sftp.transfers.filter((job) => job.id !== jobId)
           }
         }));
       }

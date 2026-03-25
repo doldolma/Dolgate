@@ -296,6 +296,12 @@ func dispatch(
 			return err
 		}
 		return sftpService.Rename(request.EndpointID, request.ID, payload)
+	case protocol.CommandSFTPChmod:
+		var payload protocol.SFTPChmodPayload
+		if err := json.Unmarshal(request.Payload, &payload); err != nil {
+			return err
+		}
+		return sftpService.Chmod(request.EndpointID, request.ID, payload)
 	case protocol.CommandSFTPDelete:
 		var payload protocol.SFTPDeletePayload
 		if err := json.Unmarshal(request.Payload, &payload); err != nil {
@@ -381,6 +387,7 @@ func isSFTPCommand(frame protocol.Frame) bool {
 		protocol.CommandSFTPList,
 		protocol.CommandSFTPMkdir,
 		protocol.CommandSFTPRename,
+		protocol.CommandSFTPChmod,
 		protocol.CommandSFTPDelete,
 		protocol.CommandSFTPTransferStart,
 		protocol.CommandSFTPTransferCancel:

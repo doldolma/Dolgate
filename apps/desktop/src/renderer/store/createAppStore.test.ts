@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { DesktopApi } from '@shared';
-import { createAppStore } from './createAppStore';
+import { createAppStore, upsertTransferJob } from './createAppStore';
 
 function createDeferred<T>() {
   let resolve!: (value: T | PromiseLike<T>) => void;
@@ -334,6 +334,7 @@ function createMockApi(): DesktopApi {
     },
     files: {
       getHomeDirectory: vi.fn().mockResolvedValue('/Users/tester'),
+      getDownloadsDirectory: vi.fn().mockResolvedValue('/Users/tester/Downloads'),
       getParentPath: vi.fn().mockImplementation(async (targetPath: string) => {
         if (targetPath === '/Users/tester') {
           return '/Users';
@@ -356,6 +357,7 @@ function createMockApi(): DesktopApi {
       }),
       mkdir: vi.fn().mockResolvedValue(undefined),
       rename: vi.fn().mockResolvedValue(undefined),
+      chmod: vi.fn().mockResolvedValue(undefined),
       delete: vi.fn().mockResolvedValue(undefined)
     },
     termius: {
@@ -397,6 +399,7 @@ function createMockApi(): DesktopApi {
       }),
       mkdir: vi.fn().mockResolvedValue(undefined),
       rename: vi.fn().mockResolvedValue(undefined),
+      chmod: vi.fn().mockResolvedValue(undefined),
       delete: vi.fn().mockResolvedValue(undefined),
       startTransfer: vi.fn().mockResolvedValue({
         id: 'job-1',
@@ -414,6 +417,86 @@ function createMockApi(): DesktopApi {
     }
   };
 }
+
+describe('upsertTransferJob', () => {
+  it('keeps an existing transfer in place when progress updates arrive', () => {
+    const olderJob = {
+      id: 'job-1',
+      status: 'running',
+      sourceLabel: 'Local',
+      targetLabel: 'nas',
+      activeItemName: 'older.bin',
+      bytesCompleted: 10,
+      bytesTotal: 100,
+      startedAt: '2025-01-01T00:00:00.000Z',
+      updatedAt: '2025-01-01T00:00:01.000Z',
+      speedBytesPerSecond: 100,
+      etaSeconds: 1,
+    } as const;
+    const newerJob = {
+      id: 'job-2',
+      status: 'running',
+      sourceLabel: 'Local',
+      targetLabel: 'nas',
+      activeItemName: 'newer.bin',
+      bytesCompleted: 20,
+      bytesTotal: 100,
+      startedAt: '2025-01-01T00:00:10.000Z',
+      updatedAt: '2025-01-01T00:00:11.000Z',
+      speedBytesPerSecond: 100,
+      etaSeconds: 1,
+    } as const;
+
+    const transfers = upsertTransferJob([], olderJob as never);
+    const orderedTransfers = upsertTransferJob(transfers, newerJob as never);
+    const updatedOlderJob = {
+      ...olderJob,
+      bytesCompleted: 80,
+      updatedAt: '2025-01-01T00:00:20.000Z',
+    };
+
+    const nextTransfers = upsertTransferJob(orderedTransfers, updatedOlderJob as never);
+
+    expect(nextTransfers.map((job) => job.id)).toEqual(['job-2', 'job-1']);
+    expect(nextTransfers[1]).toMatchObject({ id: 'job-1', bytesCompleted: 80 });
+  });
+
+  it('removes a dismissed transfer card by id', async () => {
+    const store = createAppStore(createMockApi());
+    await store.getState().bootstrap();
+
+    store.getState().handleTransferEvent({
+      job: {
+        id: 'job-1',
+        sourceLabel: 'Local',
+        targetLabel: 'nas',
+        itemCount: 1,
+        bytesTotal: 100,
+        bytesCompleted: 100,
+        status: 'completed',
+        startedAt: '2025-01-01T00:00:00.000Z',
+        updatedAt: '2025-01-01T00:00:10.000Z'
+      }
+    });
+    store.getState().handleTransferEvent({
+      job: {
+        id: 'job-2',
+        sourceLabel: 'Local',
+        targetLabel: 'nas',
+        itemCount: 1,
+        bytesTotal: 200,
+        bytesCompleted: 100,
+        status: 'running',
+        startedAt: '2025-01-01T00:00:20.000Z',
+        updatedAt: '2025-01-01T00:00:21.000Z'
+      }
+    });
+
+    store.getState().dismissTransfer('job-1');
+
+    expect(store.getState().sftp.transfers.map((job) => job.id)).toEqual(['job-2']);
+  });
+});
 
 describe('createAppStore', () => {
   it('bootstraps home workspace and settings from desktop api', async () => {

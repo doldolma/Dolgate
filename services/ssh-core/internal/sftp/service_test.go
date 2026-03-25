@@ -25,7 +25,7 @@ import (
 type sftpTestServer struct {
 	addr          string
 	listener      net.Listener
-	handlers      pkgsftp.Handlers
+	rootDir       string
 	hostKeyBase64 string
 }
 
@@ -77,6 +77,23 @@ func TestServiceBrowseAndManagePaths(t *testing.T) {
 		t.Fatalf("rename failed: %v", err)
 	}
 	waitForEvent(t, events, protocol.EventSFTPAck)
+
+	if err := service.Chmod("endpoint-1", "req-chmod", protocol.SFTPChmodPayload{
+		Path: filepath.ToSlash(filepath.Join(rootPath, "notes")),
+		Mode: 0o755,
+	}); err != nil {
+		t.Fatalf("chmod failed: %v", err)
+	}
+	waitForEvent(t, events, protocol.EventSFTPAck)
+
+	if err := service.List("endpoint-1", "req-list-after-chmod", protocol.SFTPListPayload{Path: rootPath}); err != nil {
+		t.Fatalf("list after chmod failed: %v", err)
+	}
+	listedAfterChmod := waitForEvent(t, events, protocol.EventSFTPListed)
+	listingAfterChmod := listedAfterChmod.Payload.(protocol.SFTPListedPayload)
+	if len(listingAfterChmod.Entries) != 1 || listingAfterChmod.Entries[0].Permissions != "drwxr-xr-x" {
+		t.Fatalf("unexpected listing after chmod: %#v", listingAfterChmod.Entries)
+	}
 
 	if err := service.Delete("endpoint-1", "req-delete", protocol.SFTPDeletePayload{
 		Paths: []string{filepath.ToSlash(filepath.Join(rootPath, "notes"))},
@@ -248,7 +265,7 @@ func newSFTPTestServer(t *testing.T) (*sftpTestServer, func()) {
 	server := &sftpTestServer{
 		addr:          listener.Addr().String(),
 		listener:      listener,
-		handlers:      pkgsftp.InMemHandler(),
+		rootDir:       t.TempDir(),
 		hostKeyBase64: base64.StdEncoding.EncodeToString(hostSigner.PublicKey().Marshal()),
 	}
 
@@ -261,7 +278,7 @@ func newSFTPTestServer(t *testing.T) (*sftpTestServer, func()) {
 			if err != nil {
 				return
 			}
-			go handleSFTPConnection(conn, serverConfig, server.handlers)
+			go handleSFTPConnection(conn, serverConfig, server.rootDir)
 		}
 	}()
 
@@ -278,7 +295,7 @@ func (s *sftpTestServer) port() int {
 	return port
 }
 
-func handleSFTPConnection(raw net.Conn, config *ssh.ServerConfig, handlers pkgsftp.Handlers) {
+func handleSFTPConnection(raw net.Conn, config *ssh.ServerConfig, rootDir string) {
 	serverConn, chans, reqs, err := ssh.NewServerConn(raw, config)
 	if err != nil {
 		return
@@ -311,8 +328,12 @@ func handleSFTPConnection(raw net.Conn, config *ssh.ServerConfig, handlers pkgsf
 						return
 					}
 					_ = req.Reply(true, nil)
-					server := pkgsftp.NewRequestServer(ch, handlers)
+					server, err := pkgsftp.NewServer(ch, pkgsftp.WithServerWorkingDirectory(rootDir))
+					if err != nil {
+						return
+					}
 					_ = server.Serve()
+					_ = server.Close()
 					return
 				default:
 					_ = req.Reply(false, nil)
