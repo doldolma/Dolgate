@@ -12,6 +12,8 @@ import (
 	"golang.org/x/sys/windows"
 )
 
+const utf8CodePage = 65001
+
 func main() {
 	os.Exit(run(os.Args[1:]))
 }
@@ -20,6 +22,11 @@ func run(args []string) int {
 	if len(args) == 0 {
 		_, _ = fmt.Fprintln(os.Stderr, "usage: aws-conpty-wrapper <command> [args...]")
 		return 2
+	}
+
+	if err := enableConsoleUTF8(); err != nil {
+		_, _ = fmt.Fprintf(os.Stderr, "enable UTF-8 console: %v\n", err)
+		return 1
 	}
 
 	consoleInput, closeInput, err := openConsoleFile(
@@ -88,6 +95,16 @@ func run(args []string) int {
 	}
 
 	return 0
+}
+
+func enableConsoleUTF8() error {
+	if err := windows.SetConsoleCP(utf8CodePage); err != nil {
+		return err
+	}
+	if err := windows.SetConsoleOutputCP(utf8CodePage); err != nil {
+		return err
+	}
+	return nil
 }
 
 func openConsoleFile(name string, access uint32) (*os.File, func(), error) {
