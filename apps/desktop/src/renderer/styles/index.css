@@ -2261,10 +2261,34 @@ input::placeholder {
 
 .sftp-workspace__panes {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
   gap: 1rem;
   min-height: 0;
   flex: 1;
+}
+
+.sftp-transfer-gutter {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  gap: 0.65rem;
+  min-height: 0;
+  width: 3.5rem;
+}
+
+.sftp-transfer-gutter.hidden {
+  display: none;
+}
+
+.sftp-transfer-arrow {
+  width: 3rem;
+  height: 3rem;
+  padding: 0;
+  border-radius: 16px;
+  font-size: 1.2rem;
+  font-weight: 700;
+  white-space: nowrap;
 }
 
 .sftp-pane {
@@ -2296,6 +2320,10 @@ input::placeholder {
   gap: 0.85rem;
   min-height: 0;
   padding: 0 1rem 1rem;
+}
+
+.sftp-pane__content--browser {
+  flex: 1;
 }
 
 .sftp-pane__toolbar,
@@ -2332,6 +2360,7 @@ input::placeholder {
   border-radius: 16px;
   background: color-mix(in srgb, var(--surface-strong) 92%, transparent 8%);
   border: 1px solid var(--border);
+  flex-shrink: 0;
 }
 
 .sftp-source-toggle button,
@@ -2340,6 +2369,21 @@ input::placeholder {
 .sftp-action-button,
 .sftp-mini-button {
   border-radius: 12px;
+  white-space: nowrap;
+}
+
+.sftp-pane__toolbar {
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 0.75rem;
+}
+
+.sftp-pane__toolbar-actions {
+  flex: 1;
+  min-width: 0;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  align-items: center;
 }
 
 .sftp-source-toggle button {
@@ -2361,6 +2405,11 @@ input::placeholder {
   width: 2.3rem;
   height: 2.3rem;
   padding: 0;
+  flex: 0 0 auto;
+}
+
+.sftp-action-button {
+  flex: 0 0 auto;
 }
 
 .sftp-breadcrumbs {
@@ -2376,6 +2425,15 @@ input::placeholder {
 
 .sftp-filter-row input {
   border-radius: 14px;
+}
+
+.context-menu__item:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.context-menu__item:disabled:hover {
+  background: transparent;
 }
 
 .sftp-pane__warnings {
@@ -2403,6 +2461,11 @@ input::placeholder {
 
 .sftp-table-shell.loading {
   opacity: 0.82;
+}
+
+.sftp-table-shell.drop-target {
+  border-color: color-mix(in srgb, var(--accent-strong) 62%, var(--border) 38%);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent-strong) 38%, transparent 62%);
 }
 
 .sftp-table {
@@ -2464,18 +2527,25 @@ input::placeholder {
   margin-top: 0.2rem;
 }
 
+.sftp-host-picker .search-panel {
+  flex: 0 0 auto;
+}
+
 .sftp-transfer-bar {
   overflow-x: auto;
   padding-bottom: 0.2rem;
+  align-items: stretch;
 }
 
 .transfer-card {
-  min-width: 260px;
+  flex: 0 0 360px;
+  width: 360px;
   padding: 0.85rem 0.95rem;
   border-radius: 18px;
   background: var(--surface);
   border: 1px solid var(--border);
   box-shadow: var(--shadow);
+  overflow: hidden;
 }
 
 .transfer-card.failed {
@@ -2491,6 +2561,68 @@ input::placeholder {
   margin-top: 0.35rem;
   color: var(--text-soft);
   font-size: 0.86rem;
+}
+
+.transfer-card__top,
+.transfer-card__meta {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.75rem;
+  align-items: center;
+}
+
+.transfer-card__name,
+.transfer-card__direction,
+.transfer-card__status,
+.transfer-card__percent,
+.transfer-card__bytes,
+.transfer-card__speed {
+  min-width: 0;
+  white-space: nowrap;
+}
+
+.transfer-card__name,
+.transfer-card__direction,
+.transfer-card__status {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.transfer-card__status,
+.transfer-card__percent {
+  justify-self: end;
+  text-align: right;
+}
+
+.transfer-card__actions {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas:
+    'bytes action'
+    'speed action';
+  gap: 0.35rem 0.85rem;
+  align-items: center;
+}
+
+.transfer-card__speed {
+  white-space: nowrap;
+  grid-area: speed;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.transfer-card__bytes {
+  grid-area: bytes;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.transfer-card__actions .sftp-inline-button {
+  grid-area: action;
+  justify-self: end;
+  align-self: center;
 }
 
 .transfer-card__progress {
@@ -2527,6 +2659,29 @@ input::placeholder {
 
 .sftp-modal input {
   margin-top: 0.9rem;
+}
+
+.sftp-permissions-grid {
+  display: grid;
+  grid-template-columns: minmax(72px, auto) repeat(3, minmax(54px, 1fr));
+  gap: 0.65rem 0.8rem;
+  align-items: center;
+  margin-top: 1rem;
+}
+
+.sftp-permissions-toggle {
+  display: grid;
+  place-items: center;
+}
+
+.sftp-permissions-toggle input {
+  margin: 0;
+}
+
+.sftp-permissions-preview {
+  margin-top: 0.95rem;
+  color: var(--text-soft);
+  font-size: 0.9rem;
 }
 
 .sftp-loading-indicator {
@@ -3047,9 +3202,12 @@ input::placeholder {
   .group-grid,
   .host-grid,
   .theme-options,
-  .terminal-settings-grid,
-  .sftp-workspace__panes {
+  .terminal-settings-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .sftp-workspace__panes {
+    grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
   }
 }
 
@@ -3069,6 +3227,10 @@ input::placeholder {
 
   .sftp-workspace__panes {
     grid-template-columns: 1fr;
+  }
+
+  .sftp-transfer-gutter {
+    display: none;
   }
 
   .host-drawer {

@@ -15,7 +15,7 @@ type viewerPageData struct {
 	AssetVersion string
 }
 
-const shareAssetVersion = "20260325-viewer-input-v3"
+const shareAssetVersion = "20260325-viewer-fit-v1"
 
 func mustShareAssetFS() fs.FS {
 	assetFS, err := fs.Sub(shareAssets, "share_assets")

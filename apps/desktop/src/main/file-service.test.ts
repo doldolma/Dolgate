@@ -54,6 +54,7 @@ describe('LocalFileService', () => {
     mockedHomeDirectory = '/Users/smoke';
 
     expect(await service.getHomeDirectory()).toBe('/Users/smoke');
+    expect(await service.getDownloadsDirectory()).toBe(os.tmpdir());
     expect(await service.getParentPath(path.join(tempDir, 'nested', 'child'))).toBe(path.join(tempDir, 'nested'));
 
     await service.mkdir(tempDir, 'created');
@@ -61,6 +62,13 @@ describe('LocalFileService', () => {
 
     await service.rename(path.join(tempDir, 'created', 'before.txt'), 'after.txt');
     await expect(fs.readFile(path.join(tempDir, 'created', 'after.txt'), 'utf8')).resolves.toBe('payload');
+
+    await service.chmod(path.join(tempDir, 'created', 'after.txt'), 0o640);
+    await expect(fs.stat(path.join(tempDir, 'created', 'after.txt'))).resolves.toMatchObject({
+      mode: expect.any(Number)
+    });
+    const stats = await fs.stat(path.join(tempDir, 'created', 'after.txt'));
+    expect(stats.mode & 0o777).toBe(0o640);
 
     await service.delete([path.join(tempDir, 'created', 'after.txt'), path.join(tempDir, 'created')]);
 

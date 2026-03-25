@@ -1,4 +1,6 @@
-import { useMemo, useState } from 'react';
+import { Fragment, useEffect, useMemo, useState } from 'react';
+import type { DragEvent } from 'react';
+import { createPortal } from 'react-dom';
 import {
   buildVisibleGroups,
   filterHostsInGroupTree,
@@ -9,7 +11,13 @@ import {
   normalizeGroupPath
 } from '@shared';
 import type { FileEntry, GroupRecord, HostRecord, SftpPaneId, SshHostRecord, TransferJob } from '@shared';
-import type { PendingConflictDialog, SftpPaneState, SftpSourceKind, SftpState } from '../store/createAppStore';
+import type {
+  PendingConflictDialog,
+  SftpEntrySelectionInput,
+  SftpPaneState,
+  SftpSourceKind,
+  SftpState
+} from '../store/createAppStore';
 
 interface SftpWorkspaceProps {
   hosts: HostRecord[];
@@ -27,15 +35,25 @@ interface SftpWorkspaceProps {
   onNavigateForward: (paneId: SftpPaneId) => Promise<void>;
   onNavigateParent: (paneId: SftpPaneId) => Promise<void>;
   onNavigateBreadcrumb: (paneId: SftpPaneId, nextPath: string) => Promise<void>;
-  onSelectEntry: (paneId: SftpPaneId, entryPath: string) => void;
+  onSelectEntry: (paneId: SftpPaneId, input: SftpEntrySelectionInput) => void;
   onCreateDirectory: (paneId: SftpPaneId, name: string) => Promise<void>;
   onRenameSelection: (paneId: SftpPaneId, nextName: string) => Promise<void>;
+  onChangeSelectionPermissions: (paneId: SftpPaneId, mode: number) => Promise<void>;
   onDeleteSelection: (paneId: SftpPaneId) => Promise<void>;
-  onPrepareTransfer: (sourcePaneId: SftpPaneId, targetPaneId: SftpPaneId, targetPath: string, draggedPath: string) => Promise<void>;
+  onDownloadSelection: (paneId: SftpPaneId) => Promise<void>;
+  onPrepareTransfer: (
+    sourcePaneId: SftpPaneId,
+    targetPaneId: SftpPaneId,
+    targetPath: string,
+    draggedPath?: string | null
+  ) => Promise<void>;
+  onPrepareExternalTransfer: (targetPaneId: SftpPaneId, targetPath: string, droppedPaths: string[]) => Promise<void>;
+  onTransferSelectionToPane: (sourcePaneId: SftpPaneId, targetPaneId: SftpPaneId) => Promise<void>;
   onResolveConflict: (resolution: 'overwrite' | 'skip' | 'keepBoth') => Promise<void>;
   onDismissConflict: () => void;
   onCancelTransfer: (jobId: string) => Promise<void>;
   onRetryTransfer: (jobId: string) => Promise<void>;
+  onDismissTransfer: (jobId: string) => void;
 }
 
 type ActionDialogState =
@@ -55,6 +73,29 @@ type ActionDialogState =
       submitLabel: string;
       value: string;
     };
+
+type PermissionSection = 'owner' | 'group' | 'other';
+type PermissionKey = 'read' | 'write' | 'execute';
+
+export interface PermissionMatrixState {
+  owner: Record<PermissionKey, boolean>;
+  group: Record<PermissionKey, boolean>;
+  other: Record<PermissionKey, boolean>;
+}
+
+interface PermissionDialogState {
+  paneId: SftpPaneId;
+  path: string;
+  name: string;
+  matrix: PermissionMatrixState;
+}
+
+interface ContextMenuState {
+  paneId: SftpPaneId;
+  entryPath: string;
+  x: number;
+  y: number;
+}
 
 export function groupHosts(hosts: SshHostRecord[]): Array<[string, SshHostRecord[]]> {
   const grouped = new Map<string, SshHostRecord[]>();
@@ -120,6 +161,50 @@ export function breadcrumbParts(targetPath: string): Array<{ label: string; path
   return result;
 }
 
+function normalizePermissionString(value?: string | null): string {
+  const normalized = (value ?? '---------').trim();
+  if (normalized.length >= 9) {
+    return normalized.slice(-9);
+  }
+  return normalized.padEnd(9, '-').slice(0, 9);
+}
+
+export function permissionMatrixFromString(value?: string | null): PermissionMatrixState {
+  const normalized = normalizePermissionString(value);
+  return {
+    owner: {
+      read: normalized[0] === 'r',
+      write: normalized[1] === 'w',
+      execute: normalized[2] === 'x'
+    },
+    group: {
+      read: normalized[3] === 'r',
+      write: normalized[4] === 'w',
+      execute: normalized[5] === 'x'
+    },
+    other: {
+      read: normalized[6] === 'r',
+      write: normalized[7] === 'w',
+      execute: normalized[8] === 'x'
+    }
+  };
+}
+
+export function permissionMatrixToMode(matrix: PermissionMatrixState): number {
+  const sections: PermissionSection[] = ['owner', 'group', 'other'];
+  return sections.reduce((mode, section, index) => {
+    const value =
+      (matrix[section].read ? 4 : 0) +
+      (matrix[section].write ? 2 : 0) +
+      (matrix[section].execute ? 1 : 0);
+    return mode | (value << ((2 - index) * 3));
+  }, 0);
+}
+
+function formatPermissionMode(mode: number): string {
+  return `0${mode.toString(8).padStart(3, '0')}`;
+}
+
 function formatSize(size: number): string {
   if (!size) {
     return '--';
@@ -134,6 +219,30 @@ function formatSize(size: number): string {
     return `${(size / (1024 * 1024)).toFixed(1)} MB`;
   }
   return `${(size / (1024 * 1024 * 1024)).toFixed(1)} GB`;
+}
+
+export function formatTransferSpeed(bytesPerSecond?: number | null): string | null {
+  if (!bytesPerSecond || bytesPerSecond <= 0) {
+    return null;
+  }
+  return `${formatSize(bytesPerSecond)}/s`;
+}
+
+export function formatEta(seconds?: number | null): string | null {
+  if (!seconds || seconds <= 0) {
+    return null;
+  }
+  if (seconds < 60) {
+    return `남은 시간 ${seconds}초`;
+  }
+  const minutes = Math.floor(seconds / 60);
+  const remainder = seconds % 60;
+  if (minutes < 60) {
+    return remainder > 0 ? `남은 시간 ${minutes}분 ${remainder}초` : `남은 시간 ${minutes}분`;
+  }
+  const hours = Math.floor(minutes / 60);
+  const minuteRemainder = minutes % 60;
+  return minuteRemainder > 0 ? `남은 시간 ${hours}시간 ${minuteRemainder}분` : `남은 시간 ${hours}시간`;
 }
 
 function formatDate(value: string): string {
@@ -153,6 +262,59 @@ function buildTransferDirection(job: TransferJob): string {
   return `${job.sourceLabel} -> ${job.targetLabel}`;
 }
 
+function isBrowsablePane(pane: SftpPaneState): boolean {
+  return pane.sourceKind === 'local' || Boolean(pane.endpoint);
+}
+
+export function canTransferBetweenSftpPanes(leftPane: SftpPaneState, rightPane: SftpPaneState): boolean {
+  return isBrowsablePane(leftPane) && isBrowsablePane(rightPane);
+}
+
+export function isSftpTransferArrowDisabled(sourcePane: SftpPaneState, targetPane: SftpPaneState): boolean {
+  return !canTransferBetweenSftpPanes(sourcePane, targetPane) || sourcePane.selectedPaths.length === 0;
+}
+
+function extractDroppedAbsolutePaths(dataTransfer: DataTransfer): string[] {
+  return Array.from(dataTransfer.files)
+    .map((file) => (file as File & { path?: string }).path)
+    .filter((value): value is string => Boolean(value));
+}
+
+interface InternalTransferPayload {
+  sourcePaneId: SftpPaneId;
+  draggedPath: string;
+}
+
+export function encodeInternalTransferPayload(payload: InternalTransferPayload): string {
+  return `dolssh-transfer:${JSON.stringify(payload)}`;
+}
+
+export function parseInternalTransferPayload(dataTransfer: Pick<DataTransfer, 'getData'>): InternalTransferPayload | null {
+  const directPayload = dataTransfer.getData('application/x-dolssh-transfer');
+  if (directPayload) {
+    try {
+      return JSON.parse(directPayload) as InternalTransferPayload;
+    } catch {
+      return null;
+    }
+  }
+
+  const textPayload = dataTransfer.getData('text/plain');
+  if (!textPayload.startsWith('dolssh-transfer:')) {
+    return null;
+  }
+  try {
+    return JSON.parse(textPayload.slice('dolssh-transfer:'.length)) as InternalTransferPayload;
+  } catch {
+    return null;
+  }
+}
+
+export function hasInternalTransferData(dataTransfer: Pick<DataTransfer, 'types'>): boolean {
+  const types = Array.from(dataTransfer.types ?? []);
+  return types.includes('application/x-dolssh-transfer') || types.includes('text/plain');
+}
+
 interface PaneBrowserProps {
   pane: SftpPaneState;
   onActivatePaneSource: (sourceKind: SftpSourceKind) => Promise<void>;
@@ -162,12 +324,15 @@ interface PaneBrowserProps {
   onNavigateParent: () => Promise<void>;
   onNavigateBreadcrumb: (nextPath: string) => Promise<void>;
   onRefresh: () => Promise<void>;
-  onSelectEntry: (entryPath: string) => void;
+  onSelectEntry: (input: SftpEntrySelectionInput) => void;
   onOpenEntry: (entryPath: string) => Promise<void>;
   onOpenCreateDirectoryDialog: () => void;
   onOpenRenameDialog: () => void;
+  onOpenPermissionsDialog: () => void;
   onDeleteSelection: () => Promise<void>;
-  onPrepareTransfer: (targetPath: string, draggedPath: string) => Promise<void>;
+  onDownloadSelection: () => Promise<void>;
+  onPrepareTransfer: (sourcePaneId: SftpPaneId, targetPath: string, draggedPath?: string | null) => Promise<void>;
+  onPrepareExternalTransfer: (targetPath: string, droppedPaths: string[]) => Promise<void>;
 }
 
 function PaneBrowser({
@@ -183,13 +348,67 @@ function PaneBrowser({
   onOpenEntry,
   onOpenCreateDirectoryDialog,
   onOpenRenameDialog,
+  onOpenPermissionsDialog,
   onDeleteSelection,
-  onPrepareTransfer
+  onDownloadSelection,
+  onPrepareTransfer,
+  onPrepareExternalTransfer
 }: PaneBrowserProps) {
   const entries = useMemo(() => visibleEntries(pane), [pane]);
+  const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
+  const [isDropTargetActive, setIsDropTargetActive] = useState(false);
+
+  useEffect(() => {
+    if (!contextMenu) {
+      return;
+    }
+    const close = () => setContextMenu(null);
+    window.addEventListener('click', close);
+    window.addEventListener('scroll', close, true);
+    window.addEventListener('resize', close);
+    return () => {
+      window.removeEventListener('click', close);
+      window.removeEventListener('scroll', close, true);
+      window.removeEventListener('resize', close);
+    };
+  }, [contextMenu]);
+
+  const selectedEntry =
+    pane.selectedPaths.length === 1
+      ? pane.entries.find((entry) => entry.path === pane.selectedPaths[0]) ?? null
+      : null;
+  const canDownloadSelection =
+    pane.sourceKind === 'host' && Boolean(pane.endpoint) && Boolean(selectedEntry) && !selectedEntry?.isDirectory;
+  const contextMenuStyle = contextMenu
+    ? {
+        left: `${Math.max(12, Math.min(contextMenu.x, window.innerWidth - 196))}px`,
+        top: `${Math.max(12, Math.min(contextMenu.y, window.innerHeight - 220))}px`
+      }
+    : null;
+
+  const handleInternalDrop = (event: DragEvent, targetPath: string) => {
+    const parsed = parseInternalTransferPayload(event.dataTransfer);
+    if (!parsed) {
+      return false;
+    }
+    if (parsed.sourcePaneId === pane.id && targetPath === pane.currentPath) {
+      return false;
+    }
+    void onPrepareTransfer(parsed.sourcePaneId, targetPath, parsed.draggedPath);
+    return true;
+  };
+
+  const handleExternalDrop = (event: DragEvent, targetPath: string) => {
+    if (pane.sourceKind !== 'host' || !pane.endpoint) {
+      return false;
+    }
+    const droppedPaths = extractDroppedAbsolutePaths(event.dataTransfer);
+    void onPrepareExternalTransfer(targetPath, droppedPaths);
+    return true;
+  };
 
   return (
-    <div className="sftp-pane__content">
+    <div className="sftp-pane__content sftp-pane__content--browser">
       <div className="sftp-pane__toolbar">
         <div className="sftp-source-toggle">
           <button type="button" className={pane.sourceKind === 'local' ? 'active' : ''} onClick={() => void onActivatePaneSource('local')}>
@@ -233,6 +452,14 @@ function PaneBrowser({
           <button
             type="button"
             className="secondary-button sftp-action-button"
+            onClick={onOpenPermissionsDialog}
+            disabled={pane.selectedPaths.length !== 1 || pane.isLoading}
+          >
+            권한
+          </button>
+          <button
+            type="button"
+            className="secondary-button sftp-action-button"
             onClick={() => void onDeleteSelection()}
             disabled={pane.selectedPaths.length === 0 || pane.isLoading}
           >
@@ -269,21 +496,47 @@ function PaneBrowser({
       {pane.errorMessage ? <div className="terminal-error-banner">{pane.errorMessage}</div> : null}
 
       <div
-        className={`sftp-table-shell ${pane.isLoading ? 'loading' : ''}`}
+        className={`sftp-table-shell ${pane.isLoading ? 'loading' : ''} ${isDropTargetActive ? 'drop-target' : ''}`}
+        data-pane-id={pane.id}
+        aria-label={`SFTP browser ${pane.id}`}
+        onClick={(event) => {
+          if (event.target === event.currentTarget) {
+            onSelectEntry({ entryPath: null });
+          }
+        }}
         onDragOver={(event) => {
+          const hasInternal = hasInternalTransferData(event.dataTransfer);
+          const hasExternalFiles = event.dataTransfer.files.length > 0 && pane.sourceKind === 'host' && Boolean(pane.endpoint);
+          if (!hasInternal && !hasExternalFiles) {
+            return;
+          }
           event.preventDefault();
+          event.dataTransfer.dropEffect = 'copy';
+          setIsDropTargetActive(true);
+        }}
+        onDragLeave={(event) => {
+          if (event.currentTarget.contains(event.relatedTarget as Node | null)) {
+            return;
+          }
+          setIsDropTargetActive(false);
         }}
         onDrop={(event) => {
+          setIsDropTargetActive(false);
+          const hasInternal = handleInternalDrop(event, pane.currentPath);
+          if (!hasInternal) {
+            const handledExternal = handleExternalDrop(event, pane.currentPath);
+            if (!handledExternal) {
+              return;
+            }
+          }
           event.preventDefault();
-          const payload = event.dataTransfer.getData('application/x-dolssh-transfer');
-          if (!payload) {
-            return;
+        }}
+        onContextMenu={(event) => {
+          if (event.target === event.currentTarget) {
+            event.preventDefault();
+            onSelectEntry({ entryPath: null });
+            setContextMenu(null);
           }
-          const parsed = JSON.parse(payload) as { sourcePaneId: SftpPaneId; draggedPath: string };
-          if (parsed.sourcePaneId === pane.id) {
-            return;
-          }
-          void onPrepareTransfer(pane.currentPath, parsed.draggedPath);
         }}
       >
         <table className="sftp-table">
@@ -302,36 +555,65 @@ function PaneBrowser({
                 className={pane.selectedPaths.includes(entry.path) ? 'selected' : ''}
                 draggable
                 onDragStart={(event) => {
+                  const payload = JSON.stringify({
+                    sourcePaneId: pane.id,
+                    draggedPath: entry.path
+                  });
                   event.dataTransfer.setData(
                     'application/x-dolssh-transfer',
-                    JSON.stringify({
-                      sourcePaneId: pane.id,
-                      draggedPath: entry.path
-                    })
+                    payload
                   );
+                  event.dataTransfer.setData('text/plain', encodeInternalTransferPayload({ sourcePaneId: pane.id, draggedPath: entry.path }));
+                  event.dataTransfer.effectAllowed = 'copyMove';
                 }}
-                onClick={() => onSelectEntry(entry.path)}
+                onClick={(event) =>
+                  onSelectEntry({
+                    entryPath: entry.path,
+                    visibleEntryPaths: entries.map((item) => item.path),
+                    toggle: event.metaKey || event.ctrlKey,
+                    range: event.shiftKey
+                  })
+                }
+                onContextMenu={(event) => {
+                  event.preventDefault();
+                  if (!pane.selectedPaths.includes(entry.path)) {
+                    onSelectEntry({
+                      entryPath: entry.path,
+                      visibleEntryPaths: entries.map((item) => item.path)
+                    });
+                  }
+                  setContextMenu({
+                    paneId: pane.id,
+                    entryPath: entry.path,
+                    x: event.clientX,
+                    y: event.clientY
+                  });
+                }}
                 onDoubleClick={() => void onOpenEntry(entry.path)}
                 onDragOver={(event) => {
-                  if (entry.isDirectory) {
-                    event.preventDefault();
-                  }
-                }}
-                onDrop={(event) => {
-                  if (!entry.isDirectory) {
+                  const hasInternal = hasInternalTransferData(event.dataTransfer);
+                  const hasExternalFiles = event.dataTransfer.files.length > 0 && pane.sourceKind === 'host' && Boolean(pane.endpoint);
+                  if (!entry.isDirectory || (!hasInternal && !hasExternalFiles)) {
                     return;
                   }
                   event.preventDefault();
+                  event.dataTransfer.dropEffect = 'copy';
+                  setIsDropTargetActive(true);
+                }}
+                onDrop={(event) => {
+                  setIsDropTargetActive(false);
+                  if (!entry.isDirectory) {
+                    return;
+                  }
+                  const hasInternal = handleInternalDrop(event, entry.path);
+                  if (!hasInternal) {
+                    const handledExternal = handleExternalDrop(event, entry.path);
+                    if (!handledExternal) {
+                      return;
+                    }
+                  }
+                  event.preventDefault();
                   event.stopPropagation();
-                  const payload = event.dataTransfer.getData('application/x-dolssh-transfer');
-                  if (!payload) {
-                    return;
-                  }
-                  const parsed = JSON.parse(payload) as { sourcePaneId: SftpPaneId; draggedPath: string };
-                  if (parsed.sourcePaneId === pane.id) {
-                    return;
-                  }
-                  void onPrepareTransfer(entry.path, parsed.draggedPath);
                 }}
               >
                 <td>
@@ -349,6 +631,58 @@ function PaneBrowser({
         </table>
         {pane.isLoading ? <div className="sftp-loading-indicator">목록을 새로 읽는 중...</div> : null}
       </div>
+
+      {contextMenu
+        ? createPortal(
+            <div className="context-menu" style={contextMenuStyle ?? undefined} role="menu">
+              <button
+                type="button"
+                className="context-menu__item"
+                disabled={pane.selectedPaths.length !== 1}
+                onClick={() => {
+                  setContextMenu(null);
+                  onOpenRenameDialog();
+                }}
+              >
+                이름 변경
+              </button>
+              <button
+                type="button"
+                className="context-menu__item"
+                disabled={pane.selectedPaths.length !== 1}
+                onClick={() => {
+                  setContextMenu(null);
+                  onOpenPermissionsDialog();
+                }}
+              >
+                권한 수정
+              </button>
+              <button
+                type="button"
+                className="context-menu__item"
+                disabled={!canDownloadSelection}
+                onClick={() => {
+                  setContextMenu(null);
+                  void onDownloadSelection();
+                }}
+              >
+                다운로드
+              </button>
+              <button
+                type="button"
+                className="context-menu__item context-menu__item--danger"
+                disabled={pane.selectedPaths.length === 0}
+                onClick={() => {
+                  setContextMenu(null);
+                  void onDeleteSelection();
+                }}
+              >
+                삭제
+              </button>
+            </div>,
+            document.body
+          )
+        : null}
     </div>
   );
 }
@@ -486,11 +820,13 @@ function HostPicker({
 function TransferBar({
   transfers,
   onCancelTransfer,
-  onRetryTransfer
+  onRetryTransfer,
+  onDismissTransfer
 }: {
   transfers: TransferJob[];
   onCancelTransfer: (jobId: string) => Promise<void>;
   onRetryTransfer: (jobId: string) => Promise<void>;
+  onDismissTransfer: (jobId: string) => void;
 }) {
   if (transfers.length === 0) {
     return null;
@@ -503,20 +839,32 @@ function TransferBar({
         return (
           <article key={job.id} className={`transfer-card ${job.status}`}>
             <div className="transfer-card__top">
-              <strong>{job.activeItemName || buildTransferDirection(job)}</strong>
-              <span>{job.status}</span>
+              <strong className="transfer-card__name" title={job.activeItemName || buildTransferDirection(job)}>
+                {job.activeItemName || buildTransferDirection(job)}
+              </strong>
+              <span className="transfer-card__status" title={job.status}>
+                {job.status}
+              </span>
             </div>
             <div className="transfer-card__meta">
-              <span>{buildTransferDirection(job)}</span>
-              <span>{job.bytesTotal > 0 ? `${progress}%` : '--'}</span>
+              <span className="transfer-card__direction" title={buildTransferDirection(job)}>
+                {buildTransferDirection(job)}
+              </span>
+              <span className="transfer-card__percent">{job.bytesTotal > 0 ? `${progress}%` : '--'}</span>
             </div>
             <div className="transfer-card__progress">
               <div style={{ width: `${progress}%` }} />
             </div>
             <div className="transfer-card__actions">
-              <span>
+              <span className="transfer-card__bytes">
                 {formatSize(job.bytesCompleted)} / {formatSize(job.bytesTotal)}
               </span>
+              {job.status === 'running' ? (
+                <span className="transfer-card__speed">
+                  {formatTransferSpeed(job.speedBytesPerSecond) ?? '속도 계산 중'}
+                  {formatEta(job.etaSeconds) ? ` · ${formatEta(job.etaSeconds)}` : ''}
+                </span>
+              ) : null}
               {job.status === 'running' ? (
                 <button type="button" className="secondary-button sftp-inline-button" onClick={() => void onCancelTransfer(job.id)}>
                   취소
@@ -525,6 +873,11 @@ function TransferBar({
               {job.status === 'failed' ? (
                 <button type="button" className="secondary-button sftp-inline-button" onClick={() => void onRetryTransfer(job.id)}>
                   재시도
+                </button>
+              ) : null}
+              {job.status !== 'running' && job.status !== 'queued' ? (
+                <button type="button" className="secondary-button sftp-inline-button" onClick={() => onDismissTransfer(job.id)}>
+                  닫기
                 </button>
               ) : null}
             </div>
@@ -607,6 +960,72 @@ function ActionDialog({
   );
 }
 
+function PermissionDialog({
+  dialog,
+  onToggle,
+  onClose,
+  onSubmit
+}: {
+  dialog: PermissionDialogState | null;
+  onToggle: (section: PermissionSection, key: PermissionKey) => void;
+  onClose: () => void;
+  onSubmit: () => Promise<void>;
+}) {
+  if (!dialog) {
+    return null;
+  }
+
+  const mode = permissionMatrixToMode(dialog.matrix);
+  const rows: Array<{ section: PermissionSection; label: string }> = [
+    { section: 'owner', label: 'Owner' },
+    { section: 'group', label: 'Group' },
+    { section: 'other', label: 'Other' }
+  ];
+  const columns: Array<{ key: PermissionKey; label: string }> = [
+    { key: 'read', label: 'Read' },
+    { key: 'write', label: 'Write' },
+    { key: 'execute', label: 'Execute' }
+  ];
+
+  return (
+    <div className="sftp-modal-backdrop" role="presentation">
+      <div className="sftp-modal">
+        <div className="section-kicker">Permissions</div>
+        <h3>{dialog.name} 권한 수정</h3>
+        <div className="sftp-permissions-grid">
+          <div />
+          {columns.map((column) => (
+            <strong key={column.key}>{column.label}</strong>
+          ))}
+          {rows.map((row) => (
+            <Fragment key={row.section}>
+              <span>{row.label}</span>
+              {columns.map((column) => (
+                <label key={`${row.section}-${column.key}`} className="sftp-permissions-toggle">
+                  <input
+                    type="checkbox"
+                    checked={dialog.matrix[row.section][column.key]}
+                    onChange={() => onToggle(row.section, column.key)}
+                  />
+                </label>
+              ))}
+            </Fragment>
+          ))}
+        </div>
+        <div className="sftp-permissions-preview">Mode {formatPermissionMode(mode)}</div>
+        <div className="sftp-modal__actions">
+          <button type="button" className="secondary-button" onClick={onClose}>
+            취소
+          </button>
+          <button type="button" className="primary-button" onClick={() => void onSubmit()}>
+            적용
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function SftpWorkspace({
   hosts,
   groups,
@@ -626,14 +1045,20 @@ export function SftpWorkspace({
   onSelectEntry,
   onCreateDirectory,
   onRenameSelection,
+  onChangeSelectionPermissions,
   onDeleteSelection,
+  onDownloadSelection,
   onPrepareTransfer,
+  onPrepareExternalTransfer,
+  onTransferSelectionToPane,
   onResolveConflict,
   onDismissConflict,
   onCancelTransfer,
-  onRetryTransfer
+  onRetryTransfer,
+  onDismissTransfer
 }: SftpWorkspaceProps) {
   const [actionDialog, setActionDialog] = useState<ActionDialogState | null>(null);
+  const [permissionDialog, setPermissionDialog] = useState<PermissionDialogState | null>(null);
   const panes = [sftp.leftPane, sftp.rightPane] as const;
   const sshHosts = useMemo(
     () =>
@@ -644,17 +1069,19 @@ export function SftpWorkspace({
       ),
     [hosts]
   );
+  const leftPane = sftp.leftPane;
+  const rightPane = sftp.rightPane;
+  const canTransferBetweenPanes = canTransferBetweenSftpPanes(leftPane, rightPane);
 
   return (
     <div className="sftp-workspace">
       <div className="sftp-workspace__panes">
-        {panes.map((pane) => {
-          const targetPaneId = pane.id === 'left' ? 'right' : 'left';
+        {panes.map((pane, index) => {
           const connectActions = {
             onActivatePaneSource: (sourceKind: SftpSourceKind) => onActivatePaneSource(pane.id, sourceKind)
           };
 
-          return (
+          const section = (
             <section key={pane.id} className="sftp-pane">
               <header className="sftp-pane__header">
                 <div>
@@ -683,7 +1110,7 @@ export function SftpWorkspace({
                   onNavigateParent={() => onNavigateParent(pane.id)}
                   onNavigateBreadcrumb={(nextPath) => onNavigateBreadcrumb(pane.id, nextPath)}
                   onRefresh={() => onRefreshPane(pane.id)}
-                  onSelectEntry={(entryPath) => onSelectEntry(pane.id, entryPath)}
+                  onSelectEntry={(input) => onSelectEntry(pane.id, input)}
                   onOpenEntry={(entryPath) => onOpenEntry(pane.id, entryPath)}
                   onOpenCreateDirectoryDialog={() => {
                     setActionDialog({
@@ -709,24 +1136,88 @@ export function SftpWorkspace({
                       value: selected.name
                     });
                   }}
+                  onOpenPermissionsDialog={() => {
+                    const selected = pane.entries.find((entry) => pane.selectedPaths.includes(entry.path));
+                    if (!selected) {
+                      return;
+                    }
+                    setPermissionDialog({
+                      paneId: pane.id,
+                      path: selected.path,
+                      name: selected.name,
+                      matrix: permissionMatrixFromString(selected.permissions)
+                    });
+                  }}
                   onDeleteSelection={async () => {
                     if (pane.selectedPaths.length === 0) {
                       return;
                     }
-                    if (!window.confirm('선택한 항목을 삭제할까요?')) {
+                    const selectedEntries = pane.entries.filter((entry) => pane.selectedPaths.includes(entry.path));
+                    const message =
+                      selectedEntries.length === 1 && selectedEntries[0]
+                        ? `"${selectedEntries[0].name}" 항목을 삭제할까요?`
+                        : `선택한 ${pane.selectedPaths.length}개 항목을 삭제할까요?`;
+                    if (!window.confirm(message)) {
                       return;
                     }
                     await onDeleteSelection(pane.id);
                   }}
-                  onPrepareTransfer={(targetPath, draggedPath) => onPrepareTransfer(targetPaneId, pane.id, targetPath, draggedPath)}
+                  onDownloadSelection={() => onDownloadSelection(pane.id)}
+                  onPrepareTransfer={(sourcePaneId, targetPath, draggedPath) => onPrepareTransfer(sourcePaneId, pane.id, targetPath, draggedPath)}
+                  onPrepareExternalTransfer={(targetPath, droppedPaths) => onPrepareExternalTransfer(pane.id, targetPath, droppedPaths)}
                 />
               )}
             </section>
           );
+
+          if (index === 0) {
+            return (
+              <Fragment key={pane.id}>
+                {section}
+                <div className="sftp-transfer-gutter" aria-label="Pane transfer controls">
+                  <button
+                    type="button"
+                    className="secondary-button sftp-transfer-arrow"
+                    aria-label="Transfer selection from left pane to right pane"
+                    onClick={() => void onTransferSelectionToPane('left', 'right')}
+                    disabled={isSftpTransferArrowDisabled(leftPane, rightPane)}
+                    title={
+                      canTransferBetweenPanes
+                        ? '왼쪽 선택 항목을 오른쪽 현재 폴더로 전송'
+                        : '양쪽 pane이 모두 파일 브라우저일 때 사용할 수 있습니다.'
+                    }
+                  >
+                    →
+                  </button>
+                  <button
+                    type="button"
+                    className="secondary-button sftp-transfer-arrow"
+                    aria-label="Transfer selection from right pane to left pane"
+                    onClick={() => void onTransferSelectionToPane('right', 'left')}
+                    disabled={isSftpTransferArrowDisabled(rightPane, leftPane)}
+                    title={
+                      canTransferBetweenPanes
+                        ? '오른쪽 선택 항목을 왼쪽 현재 폴더로 전송'
+                        : '양쪽 pane이 모두 파일 브라우저일 때 사용할 수 있습니다.'
+                    }
+                  >
+                    ←
+                  </button>
+                </div>
+              </Fragment>
+            );
+          }
+
+          return <Fragment key={pane.id}>{section}</Fragment>;
         })}
       </div>
 
-      <TransferBar transfers={sftp.transfers} onCancelTransfer={onCancelTransfer} onRetryTransfer={onRetryTransfer} />
+      <TransferBar
+        transfers={sftp.transfers}
+        onCancelTransfer={onCancelTransfer}
+        onRetryTransfer={onRetryTransfer}
+        onDismissTransfer={onDismissTransfer}
+      />
 
       <ConflictDialog
         pendingConflictDialog={sftp.pendingConflictDialog}
@@ -752,6 +1243,36 @@ export function SftpWorkspace({
             await onRenameSelection(actionDialog.paneId, actionDialog.value.trim());
           }
           setActionDialog(null);
+        }}
+      />
+
+      <PermissionDialog
+        dialog={permissionDialog}
+        onToggle={(section, key) => {
+          setPermissionDialog((current) =>
+            current
+              ? {
+                  ...current,
+                  matrix: {
+                    ...current.matrix,
+                    [section]: {
+                      ...current.matrix[section],
+                      [key]: !current.matrix[section][key]
+                    }
+                  }
+                }
+              : current
+          );
+        }}
+        onClose={() => {
+          setPermissionDialog(null);
+        }}
+        onSubmit={async () => {
+          if (!permissionDialog) {
+            return;
+          }
+          await onChangeSelectionPermissions(permissionDialog.paneId, permissionMatrixToMode(permissionDialog.matrix));
+          setPermissionDialog(null);
         }}
       />
     </div>

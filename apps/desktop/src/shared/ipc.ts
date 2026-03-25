@@ -66,6 +66,7 @@ export type CoreCommandType =
   | "sftpList"
   | "sftpMkdir"
   | "sftpRename"
+  | "sftpChmod"
   | "sftpDelete"
   | "sftpTransferStart"
   | "sftpTransferCancel";
@@ -212,6 +213,12 @@ export interface SftpRenameInput {
 export interface SftpDeleteInput {
   endpointId: string;
   paths: string[];
+}
+
+export interface SftpChmodInput {
+  endpointId: string;
+  path: string;
+  mode: number;
 }
 
 export interface KnownHostProbeInput {
@@ -426,6 +433,7 @@ export interface DesktopApi {
     list: (input: SftpListInput) => Promise<DirectoryListing>;
     mkdir: (input: SftpMkdirInput) => Promise<void>;
     rename: (input: SftpRenameInput) => Promise<void>;
+    chmod: (input: SftpChmodInput) => Promise<void>;
     delete: (input: SftpDeleteInput) => Promise<void>;
     startTransfer: (input: TransferStartInput) => Promise<TransferJob>;
     cancelTransfer: (jobId: string) => Promise<void>;
@@ -435,10 +443,12 @@ export interface DesktopApi {
   };
   files: {
     getHomeDirectory: () => Promise<string>;
+    getDownloadsDirectory: () => Promise<string>;
     getParentPath: (targetPath: string) => Promise<string>;
     list: (path: string) => Promise<DirectoryListing>;
     mkdir: (path: string, name: string) => Promise<void>;
     rename: (path: string, nextName: string) => Promise<void>;
+    chmod: (path: string, mode: number) => Promise<void>;
     delete: (paths: string[]) => Promise<void>;
   };
 }
