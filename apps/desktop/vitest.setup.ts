@@ -7,6 +7,9 @@ if (typeof HTMLCanvasElement !== 'undefined') {
     configurable: true,
     writable: true,
     value: () => ({
+      createLinearGradient: () => ({
+        addColorStop: () => undefined
+      }),
       fillRect: () => undefined,
       clearRect: () => undefined,
       getImageData: () => ({

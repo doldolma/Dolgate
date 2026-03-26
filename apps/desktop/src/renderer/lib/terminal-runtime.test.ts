@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { IDisposable, ILinkProvider } from '@xterm/xterm';
+import type { IDisposable, ILinkProvider } from 'xterm';
 import { createTerminalRuntime, type TerminalRuntimeAppearance } from './terminal-runtime';
 
 function createAppearance(): TerminalRuntimeAppearance {
@@ -230,6 +230,47 @@ describe('terminal-runtime', () => {
     expect(writes[1]?.value).toBe('secondthird');
   });
 
+  it('merges queued text chunks into a single write', () => {
+    const { terminal, writes, triggerWriteCallback } = createFakeTerminal();
+    const fitAddon = {
+      fit: vi.fn(),
+      activate: vi.fn(),
+      dispose: vi.fn()
+    };
+    const scheduleAnimationFrame = vi.fn((_callback: (time: number) => void) => 1);
+    const runtime = createTerminalRuntime({
+      container: document.createElement('div'),
+      appearance: createAppearance(),
+      onData: vi.fn(),
+      onBinary: vi.fn(),
+      dependencies: {
+        createTerminal: (() => terminal) as never,
+        createFitAddon: (() => fitAddon) as never,
+        createSearchAddon: (() => ({
+          activate: vi.fn(),
+          dispose: vi.fn(),
+          findNext: vi.fn(() => true),
+          findPrevious: vi.fn(() => true),
+          clearDecorations: vi.fn(),
+          clearActiveDecoration: vi.fn()
+        })) as never,
+        createUnicode11Addon: (() => ({ activate: vi.fn(), dispose: vi.fn() })) as never,
+        scheduleAnimationFrame,
+        cancelScheduledAnimationFrame: vi.fn(),
+        openExternal: vi.fn()
+      }
+    });
+
+    runtime.write('a'.repeat(7_000));
+    runtime.write('b'.repeat(3_000));
+
+    const firstFlushCallback = scheduleAnimationFrame.mock.calls[0]?.[0] as ((time: number) => void) | undefined;
+    firstFlushCallback?.(16);
+
+    expect(writes).toHaveLength(1);
+    expect(typeof writes[0]?.value).toBe('string');
+    expect((writes[0]?.value as string).length).toBe(10_000);
+  });
   it('runs write-drain callbacks only after the queued output finishes flushing', () => {
     const { terminal, writes, triggerWriteCallback } = createFakeTerminal();
     const fitAddon = {
