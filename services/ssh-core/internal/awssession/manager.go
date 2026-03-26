@@ -89,6 +89,14 @@ func (m *Manager) WriteBytes(sessionID string, data []byte) error {
 	return session.runner.Write(data)
 }
 
+func (m *Manager) SendControlSignal(sessionID, signal string) error {
+	session, err := m.getSession(sessionID)
+	if err != nil {
+		return err
+	}
+	return session.runner.SendControlSignal(signal)
+}
+
 func (m *Manager) Resize(sessionID string, cols, rows int) error {
 	session, err := m.getSession(sessionID)
 	if err != nil {

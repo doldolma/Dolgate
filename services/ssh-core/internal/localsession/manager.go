@@ -61,7 +61,8 @@ func (m *Manager) Connect(sessionID, requestID string, payload protocol.LocalCon
 		RequestID: requestID,
 		SessionID: sessionID,
 		Payload: protocol.StatusPayload{
-			Status: "connected",
+			Status:    "connected",
+			ShellKind: runner.ShellKind(),
 		},
 	})
 

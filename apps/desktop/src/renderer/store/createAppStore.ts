@@ -1,13 +1,14 @@
-import { createStore } from 'zustand/vanilla';
+import { createStore } from "zustand/vanilla";
 import {
+  DEFAULT_SFTP_BROWSER_COLUMN_WIDTHS,
   getParentGroupPath,
   isAwsEc2HostRecord,
   isGroupWithinPath,
   isSshHostRecord,
   isWarpgateSshHostRecord,
   normalizeGroupPath,
-  stripRemovedGroupSegment
-} from '@shared';
+  stripRemovedGroupSegment,
+} from "@shared";
 import type {
   ActivityLogRecord,
   AppSettings,
@@ -40,31 +41,35 @@ import type {
   TerminalTab,
   TransferJob,
   TransferJobEvent,
-  TransferStartInput
-} from '@shared';
+  TransferStartInput,
+} from "@shared";
 
 export type SessionWorkspaceTabId = `session:${string}`;
 export type SplitWorkspaceTabId = `workspace:${string}`;
-export type WorkspaceTabId = 'home' | 'sftp' | SessionWorkspaceTabId | SplitWorkspaceTabId;
-export type HomeSection = 'hosts' | 'portForwarding' | 'logs' | 'settings';
-export type SettingsSection = 'general' | 'security' | 'secrets';
-export type SftpSourceKind = 'local' | 'host';
-export type WorkspaceDropDirection = 'left' | 'right' | 'top' | 'bottom';
+export type WorkspaceTabId =
+  | "home"
+  | "sftp"
+  | SessionWorkspaceTabId
+  | SplitWorkspaceTabId;
+export type HomeSection = "hosts" | "portForwarding" | "logs" | "settings";
+export type SettingsSection = "general" | "security" | "secrets";
+export type SftpSourceKind = "local" | "host";
+export type WorkspaceDropDirection = "left" | "right" | "top" | "bottom";
 export type HostDrawerState =
-  | { mode: 'closed' }
-  | { mode: 'create'; defaultGroupPath: string | null }
-  | { mode: 'edit'; hostId: string };
+  | { mode: "closed" }
+  | { mode: "create"; defaultGroupPath: string | null }
+  | { mode: "edit"; hostId: string };
 
 export interface WorkspaceLeafNode {
   id: string;
-  kind: 'leaf';
+  kind: "leaf";
   sessionId: string;
 }
 
 export interface WorkspaceSplitNode {
   id: string;
-  kind: 'split';
-  axis: 'horizontal' | 'vertical';
+  kind: "split";
+  axis: "horizontal" | "vertical";
   ratio: number;
   first: WorkspaceLayoutNode;
   second: WorkspaceLayoutNode;
@@ -81,11 +86,11 @@ export interface WorkspaceTab {
 
 export type DynamicTabStripItem =
   | {
-      kind: 'session';
+      kind: "session";
       sessionId: string;
     }
   | {
-      kind: 'workspace';
+      kind: "workspace";
       workspaceId: string;
     };
 
@@ -93,6 +98,7 @@ export interface SftpPaneState {
   id: SftpPaneId;
   sourceKind: SftpSourceKind;
   endpoint: SftpEndpointSummary | null;
+  connectingHostId?: string | null;
   hostGroupPath: string | null;
   currentPath: string;
   lastLocalPath: string;
@@ -126,20 +132,20 @@ export interface PendingHostKeyPrompt {
   probe: HostKeyProbeResult;
   action:
     | {
-        kind: 'ssh';
+        kind: "ssh";
         hostId: string;
         cols: number;
         rows: number;
         secrets?: HostSecretInput;
       }
     | {
-        kind: 'sftp';
+        kind: "sftp";
         paneId: SftpPaneId;
         hostId: string;
         secrets?: HostSecretInput;
       }
     | {
-        kind: 'portForward';
+        kind: "portForward";
         ruleId: string;
         hostId: string;
       };
@@ -148,8 +154,8 @@ export interface PendingHostKeyPrompt {
 export interface PendingCredentialRetry {
   sessionId?: string | null;
   hostId: string;
-  source: 'ssh' | 'sftp';
-  credentialKind: 'password' | 'passphrase';
+  source: "ssh" | "sftp";
+  credentialKind: "password" | "passphrase";
   message: string;
   paneId?: SftpPaneId;
 }
@@ -160,7 +166,7 @@ export interface PendingInteractiveAuth {
   name?: string | null;
   instruction: string;
   prompts: KeyboardInteractivePrompt[];
-  provider: 'generic' | 'warpgate';
+  provider: "generic" | "warpgate";
   approvalUrl?: string | null;
   authCode?: string | null;
   autoSubmitted: boolean;
@@ -168,7 +174,7 @@ export interface PendingInteractiveAuth {
 
 interface PendingConnectionAttempt {
   sessionId: string;
-  source: 'host' | 'local';
+  source: "host" | "local";
   hostId: string | null;
   title: string;
   latestCols: number;
@@ -227,47 +233,96 @@ export interface AppState {
   refreshOperationalData: () => Promise<void>;
   createGroup: (name: string) => Promise<void>;
   removeGroup: (path: string, mode: GroupRemoveMode) => Promise<void>;
-  saveHost: (hostId: string | null, draft: HostDraft, secrets?: HostSecretInput) => Promise<void>;
+  saveHost: (
+    hostId: string | null,
+    draft: HostDraft,
+    secrets?: HostSecretInput,
+  ) => Promise<void>;
   moveHostToGroup: (hostId: string, groupPath: string | null) => Promise<void>;
   removeHost: (hostId: string) => Promise<void>;
   openLocalTerminal: (cols: number, rows: number) => Promise<void>;
-  connectHost: (hostId: string, cols: number, rows: number, secrets?: HostSecretInput) => Promise<void>;
-  retrySessionConnection: (sessionId: string, secrets?: HostSecretInput) => Promise<void>;
+  connectHost: (
+    hostId: string,
+    cols: number,
+    rows: number,
+    secrets?: HostSecretInput,
+  ) => Promise<void>;
+  retrySessionConnection: (
+    sessionId: string,
+    secrets?: HostSecretInput,
+  ) => Promise<void>;
   startSessionShare: (input: SessionShareStartInput) => Promise<void>;
-  updateSessionShareSnapshot: (input: SessionShareSnapshotInput) => Promise<void>;
-  setSessionShareInputEnabled: (sessionId: string, inputEnabled: boolean) => Promise<void>;
+  updateSessionShareSnapshot: (
+    input: SessionShareSnapshotInput,
+  ) => Promise<void>;
+  setSessionShareInputEnabled: (
+    sessionId: string,
+    inputEnabled: boolean,
+  ) => Promise<void>;
   stopSessionShare: (sessionId: string) => Promise<void>;
   disconnectTab: (sessionId: string) => Promise<void>;
   closeWorkspace: (workspaceId: string) => Promise<void>;
-  splitSessionIntoWorkspace: (sessionId: string, direction: WorkspaceDropDirection, targetSessionId?: string) => boolean;
+  splitSessionIntoWorkspace: (
+    sessionId: string,
+    direction: WorkspaceDropDirection,
+    targetSessionId?: string,
+  ) => boolean;
   detachSessionFromWorkspace: (workspaceId: string, sessionId: string) => void;
-  reorderDynamicTab: (source: DynamicTabStripItem, target: DynamicTabStripItem, placement: 'before' | 'after') => void;
+  reorderDynamicTab: (
+    source: DynamicTabStripItem,
+    target: DynamicTabStripItem,
+    placement: "before" | "after",
+  ) => void;
   focusWorkspaceSession: (workspaceId: string, sessionId: string) => void;
-  resizeWorkspaceSplit: (workspaceId: string, splitId: string, ratio: number) => void;
+  resizeWorkspaceSplit: (
+    workspaceId: string,
+    splitId: string,
+    ratio: number,
+  ) => void;
   updateSettings: (input: Partial<AppSettings>) => Promise<void>;
-  savePortForward: (ruleId: string | null, draft: PortForwardDraft) => Promise<void>;
+  savePortForward: (
+    ruleId: string | null,
+    draft: PortForwardDraft,
+  ) => Promise<void>;
   removePortForward: (ruleId: string) => Promise<void>;
   startPortForward: (ruleId: string) => Promise<void>;
   stopPortForward: (ruleId: string) => Promise<void>;
   removeKnownHost: (id: string) => Promise<void>;
   clearLogs: () => Promise<void>;
   removeKeychainSecret: (secretRef: string) => Promise<void>;
-  updateKeychainSecret: (secretRef: string, secrets: HostSecretInput) => Promise<void>;
-  cloneKeychainSecretForHost: (hostId: string, sourceSecretRef: string, secrets: HostSecretInput) => Promise<void>;
-  acceptPendingHostKeyPrompt: (mode: 'trust' | 'replace') => Promise<void>;
+  updateKeychainSecret: (
+    secretRef: string,
+    secrets: HostSecretInput,
+  ) => Promise<void>;
+  cloneKeychainSecretForHost: (
+    hostId: string,
+    sourceSecretRef: string,
+    secrets: HostSecretInput,
+  ) => Promise<void>;
+  acceptPendingHostKeyPrompt: (mode: "trust" | "replace") => Promise<void>;
   dismissPendingHostKeyPrompt: () => void;
   dismissPendingCredentialRetry: () => void;
   submitCredentialRetry: (secrets: HostSecretInput) => Promise<void>;
-  respondInteractiveAuth: (challengeId: string, responses: string[]) => Promise<void>;
+  respondInteractiveAuth: (
+    challengeId: string,
+    responses: string[],
+  ) => Promise<void>;
   reopenInteractiveAuthUrl: () => Promise<void>;
   clearPendingInteractiveAuth: () => void;
-  updatePendingConnectionSize: (sessionId: string, cols: number, rows: number) => void;
+  updatePendingConnectionSize: (
+    sessionId: string,
+    cols: number,
+    rows: number,
+  ) => void;
   markSessionOutput: (sessionId: string) => void;
   handleCoreEvent: (event: CoreEvent<Record<string, unknown>>) => void;
   handleSessionShareEvent: (event: SessionShareEvent) => void;
   handleTransferEvent: (event: TransferJobEvent) => void;
   handlePortForwardEvent: (event: PortForwardRuntimeEvent) => void;
-  setSftpPaneSource: (paneId: SftpPaneId, sourceKind: SftpSourceKind) => Promise<void>;
+  setSftpPaneSource: (
+    paneId: SftpPaneId,
+    sourceKind: SftpSourceKind,
+  ) => Promise<void>;
   setSftpPaneFilter: (paneId: SftpPaneId, query: string) => void;
   setSftpHostSearchQuery: (paneId: SftpPaneId, query: string) => void;
   navigateSftpHostGroup: (paneId: SftpPaneId, path: string | null) => void;
@@ -278,56 +333,73 @@ export interface AppState {
   navigateSftpBack: (paneId: SftpPaneId) => Promise<void>;
   navigateSftpForward: (paneId: SftpPaneId) => Promise<void>;
   navigateSftpParent: (paneId: SftpPaneId) => Promise<void>;
-  navigateSftpBreadcrumb: (paneId: SftpPaneId, nextPath: string) => Promise<void>;
+  navigateSftpBreadcrumb: (
+    paneId: SftpPaneId,
+    nextPath: string,
+  ) => Promise<void>;
   selectSftpEntry: (paneId: SftpPaneId, input: SftpEntrySelectionInput) => void;
   createSftpDirectory: (paneId: SftpPaneId, name: string) => Promise<void>;
   renameSftpSelection: (paneId: SftpPaneId, nextName: string) => Promise<void>;
-  changeSftpSelectionPermissions: (paneId: SftpPaneId, mode: number) => Promise<void>;
+  changeSftpSelectionPermissions: (
+    paneId: SftpPaneId,
+    mode: number,
+  ) => Promise<void>;
   deleteSftpSelection: (paneId: SftpPaneId) => Promise<void>;
   downloadSftpSelection: (paneId: SftpPaneId) => Promise<void>;
   prepareSftpTransfer: (
     sourcePaneId: SftpPaneId,
     targetPaneId: SftpPaneId,
     targetPath: string,
-    draggedPath?: string | null
+    draggedPath?: string | null,
   ) => Promise<void>;
-  prepareSftpExternalTransfer: (targetPaneId: SftpPaneId, targetPath: string, droppedPaths: string[]) => Promise<void>;
-  transferSftpSelectionToPane: (sourcePaneId: SftpPaneId, targetPaneId: SftpPaneId) => Promise<void>;
-  resolveSftpConflict: (resolution: 'overwrite' | 'skip' | 'keepBoth') => Promise<void>;
+  prepareSftpExternalTransfer: (
+    targetPaneId: SftpPaneId,
+    targetPath: string,
+    droppedPaths: string[],
+  ) => Promise<void>;
+  transferSftpSelectionToPane: (
+    sourcePaneId: SftpPaneId,
+    targetPaneId: SftpPaneId,
+  ) => Promise<void>;
+  resolveSftpConflict: (
+    resolution: "overwrite" | "skip" | "keepBoth",
+  ) => Promise<void>;
   dismissSftpConflict: () => void;
   cancelTransfer: (jobId: string) => Promise<void>;
   retryTransfer: (jobId: string) => Promise<void>;
   dismissTransfer: (jobId: string) => void;
 }
 
-function normalizeHomeSectionInput(section: HomeSection | 'knownHosts' | 'keychain'): {
+function normalizeHomeSectionInput(
+  section: HomeSection | "knownHosts" | "keychain",
+): {
   homeSection: HomeSection;
   settingsSection?: SettingsSection;
 } {
-  if (section === 'knownHosts') {
+  if (section === "knownHosts") {
     return {
-      homeSection: 'settings',
-      settingsSection: 'security'
+      homeSection: "settings",
+      settingsSection: "security",
     };
   }
 
-  if (section === 'keychain') {
+  if (section === "keychain") {
     return {
-      homeSection: 'settings',
-      settingsSection: 'secrets'
+      homeSection: "settings",
+      settingsSection: "secrets",
     };
   }
 
   return {
-    homeSection: section
+    homeSection: section,
   };
 }
 
-type TabStatus = TerminalTab['status'];
+type TabStatus = TerminalTab["status"];
 
-function detectRendererPlatform(): 'darwin' | 'win32' | 'linux' | 'unknown' {
-  if (typeof navigator === 'undefined') {
-    return 'unknown';
+function detectRendererPlatform(): "darwin" | "win32" | "linux" | "unknown" {
+  if (typeof navigator === "undefined") {
+    return "unknown";
   }
 
   const userAgent = navigator.userAgent.toLowerCase();
@@ -336,34 +408,38 @@ function detectRendererPlatform(): 'darwin' | 'win32' | 'linux' | 'unknown' {
       platform?: string;
     };
   };
-  const platform = (userAgentData.userAgentData?.platform ?? navigator.platform ?? '').toLowerCase();
+  const platform = (
+    userAgentData.userAgentData?.platform ??
+    navigator.platform ??
+    ""
+  ).toLowerCase();
 
-  if (platform.includes('mac') || userAgent.includes('mac os')) {
-    return 'darwin';
+  if (platform.includes("mac") || userAgent.includes("mac os")) {
+    return "darwin";
   }
-  if (platform.includes('win') || userAgent.includes('windows')) {
-    return 'win32';
+  if (platform.includes("win") || userAgent.includes("windows")) {
+    return "win32";
   }
-  if (platform.includes('linux') || userAgent.includes('linux')) {
-    return 'linux';
+  if (platform.includes("linux") || userAgent.includes("linux")) {
+    return "linux";
   }
-  return 'unknown';
+  return "unknown";
 }
 
 function resolveRendererDefaultTerminalFontFamily(): TerminalFontFamilyId {
   const platform = detectRendererPlatform();
-  if (platform === 'win32') {
-    return 'consolas';
+  if (platform === "win32") {
+    return "consolas";
   }
-  if (platform === 'linux') {
-    return 'jetbrains-mono';
+  if (platform === "linux") {
+    return "jetbrains-mono";
   }
-  return 'sf-mono';
+  return "sf-mono";
 }
 
 const defaultSettings: AppSettings = {
-  theme: 'system',
-  globalTerminalThemeId: 'dolssh-dark',
+  theme: "system",
+  globalTerminalThemeId: "dolssh-dark",
   terminalFontFamily: resolveRendererDefaultTerminalFontFamily(),
   terminalFontSize: 13,
   terminalScrollbackLines: 5000,
@@ -372,44 +448,46 @@ const defaultSettings: AppSettings = {
   terminalMinimumContrastRatio: 1,
   terminalAltIsMeta: false,
   terminalWebglEnabled: true,
-  serverUrl: 'https://ssh.doldolma.com',
+  sftpBrowserColumnWidths: { ...DEFAULT_SFTP_BROWSER_COLUMN_WIDTHS },
+  serverUrl: "https://ssh.doldolma.com",
   serverUrlOverride: null,
   dismissedUpdateVersion: null,
-  updatedAt: new Date(0).toISOString()
+  updatedAt: new Date(0).toISOString(),
 };
 
 function createEmptyPane(id: SftpPaneId): SftpPaneState {
   return {
     id,
-    sourceKind: id === 'left' ? 'local' : 'host',
+    sourceKind: id === "left" ? "local" : "host",
     endpoint: null,
+    connectingHostId: null,
     hostGroupPath: null,
-    currentPath: '',
-    lastLocalPath: '',
+    currentPath: "",
+    lastLocalPath: "",
     history: [],
     historyIndex: -1,
     entries: [],
     selectedPaths: [],
     selectionAnchorPath: null,
-    filterQuery: '',
+    filterQuery: "",
     selectedHostId: null,
-    hostSearchQuery: '',
+    hostSearchQuery: "",
     isLoading: false,
-    warningMessages: []
+    warningMessages: [],
   };
 }
 
 const defaultSftpState: SftpState = {
-  localHomePath: '',
-  leftPane: createEmptyPane('left'),
-  rightPane: createEmptyPane('right'),
+  localHomePath: "",
+  leftPane: createEmptyPane("left"),
+  rightPane: createEmptyPane("right"),
   transfers: [],
-  pendingConflictDialog: null
+  pendingConflictDialog: null,
 };
 
 function sortHosts(hosts: HostRecord[]): HostRecord[] {
   return [...hosts].sort((a, b) => {
-    const groupCompare = (a.groupName ?? '').localeCompare(b.groupName ?? '');
+    const groupCompare = (a.groupName ?? "").localeCompare(b.groupName ?? "");
     if (groupCompare !== 0) {
       return groupCompare;
     }
@@ -421,7 +499,10 @@ function normalizeTagValue(tag: string): string {
   return tag.trim().toLocaleLowerCase();
 }
 
-function matchesSelectedTags(host: HostRecord, selectedTags: string[]): boolean {
+function matchesSelectedTags(
+  host: HostRecord,
+  selectedTags: string[],
+): boolean {
   if (selectedTags.length === 0) {
     return true;
   }
@@ -430,31 +511,50 @@ function matchesSelectedTags(host: HostRecord, selectedTags: string[]): boolean 
     return false;
   }
   const normalizedHostTags = new Set(hostTags.map(normalizeTagValue));
-  return selectedTags.some((tag) => normalizedHostTags.has(normalizeTagValue(tag)));
+  return selectedTags.some((tag) =>
+    normalizedHostTags.has(normalizeTagValue(tag)),
+  );
 }
 
 function hasProvidedSecrets(secrets?: HostSecretInput): boolean {
-  return Boolean(secrets?.password || secrets?.passphrase || secrets?.privateKeyPem);
+  return Boolean(
+    secrets?.password || secrets?.passphrase || secrets?.privateKeyPem,
+  );
 }
 
 function sortGroups(groups: GroupRecord[]): GroupRecord[] {
   return [...groups].sort((a, b) => a.path.localeCompare(b.path));
 }
 
-function sortPortForwards(rules: PortForwardRuleRecord[]): PortForwardRuleRecord[] {
-  return [...rules].sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime() || a.label.localeCompare(b.label));
+function sortPortForwards(
+  rules: PortForwardRuleRecord[],
+): PortForwardRuleRecord[] {
+  return [...rules].sort(
+    (a, b) =>
+      new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime() ||
+      a.label.localeCompare(b.label),
+  );
 }
 
 function sortKnownHosts(records: KnownHostRecord[]): KnownHostRecord[] {
-  return [...records].sort((a, b) => a.host.localeCompare(b.host) || a.port - b.port);
+  return [...records].sort(
+    (a, b) => a.host.localeCompare(b.host) || a.port - b.port,
+  );
 }
 
 function sortLogs(records: ActivityLogRecord[]): ActivityLogRecord[] {
-  return [...records].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  return [...records].sort(
+    (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+  );
 }
 
-function sortKeychainEntries(entries: SecretMetadataRecord[]): SecretMetadataRecord[] {
-  return [...entries].sort((a, b) => a.label.localeCompare(b.label) || a.secretRef.localeCompare(b.secretRef));
+function sortKeychainEntries(
+  entries: SecretMetadataRecord[],
+): SecretMetadataRecord[] {
+  return [...entries].sort(
+    (a, b) =>
+      a.label.localeCompare(b.label) || a.secretRef.localeCompare(b.secretRef),
+  );
 }
 
 function asSessionTabId(sessionId: string): SessionWorkspaceTabId {
@@ -468,38 +568,45 @@ function asWorkspaceTabId(workspaceId: string): SplitWorkspaceTabId {
 function createWorkspaceLeaf(sessionId: string): WorkspaceLeafNode {
   return {
     id: globalThis.crypto.randomUUID(),
-    kind: 'leaf',
-    sessionId
+    kind: "leaf",
+    sessionId,
   };
 }
 
-function directionAxis(direction: WorkspaceDropDirection): WorkspaceSplitNode['axis'] {
-  return direction === 'left' || direction === 'right' ? 'horizontal' : 'vertical';
+function directionAxis(
+  direction: WorkspaceDropDirection,
+): WorkspaceSplitNode["axis"] {
+  return direction === "left" || direction === "right"
+    ? "horizontal"
+    : "vertical";
 }
 
 function createWorkspaceSplit(
   existingSessionId: string,
   incomingSessionId: string,
-  direction: WorkspaceDropDirection
+  direction: WorkspaceDropDirection,
 ): WorkspaceLayoutNode {
   const existingLeaf = createWorkspaceLeaf(existingSessionId);
   const incomingLeaf = createWorkspaceLeaf(incomingSessionId);
-  const prependIncoming = direction === 'left' || direction === 'top';
+  const prependIncoming = direction === "left" || direction === "top";
   return {
     id: globalThis.crypto.randomUUID(),
-    kind: 'split',
+    kind: "split",
     axis: directionAxis(direction),
     ratio: 0.5,
     first: prependIncoming ? incomingLeaf : existingLeaf,
-    second: prependIncoming ? existingLeaf : incomingLeaf
+    second: prependIncoming ? existingLeaf : incomingLeaf,
   };
 }
 
 function listWorkspaceSessionIds(node: WorkspaceLayoutNode): string[] {
-  if (node.kind === 'leaf') {
+  if (node.kind === "leaf") {
     return [node.sessionId];
   }
-  return [...listWorkspaceSessionIds(node.first), ...listWorkspaceSessionIds(node.second)];
+  return [
+    ...listWorkspaceSessionIds(node.first),
+    ...listWorkspaceSessionIds(node.second),
+  ];
 }
 
 function countWorkspaceSessions(node: WorkspaceLayoutNode): number {
@@ -507,52 +614,71 @@ function countWorkspaceSessions(node: WorkspaceLayoutNode): number {
 }
 
 function findFirstWorkspaceSessionId(node: WorkspaceLayoutNode): string {
-  return node.kind === 'leaf' ? node.sessionId : findFirstWorkspaceSessionId(node.first);
+  return node.kind === "leaf"
+    ? node.sessionId
+    : findFirstWorkspaceSessionId(node.first);
 }
 
 function insertSessionIntoWorkspaceLayout(
   node: WorkspaceLayoutNode,
   targetSessionId: string,
   incomingSessionId: string,
-  direction: WorkspaceDropDirection
+  direction: WorkspaceDropDirection,
 ): { layout: WorkspaceLayoutNode; inserted: boolean } {
-  if (node.kind === 'leaf') {
+  if (node.kind === "leaf") {
     if (node.sessionId !== targetSessionId) {
       return { layout: node, inserted: false };
     }
     return {
-      layout: createWorkspaceSplit(targetSessionId, incomingSessionId, direction),
-      inserted: true
+      layout: createWorkspaceSplit(
+        targetSessionId,
+        incomingSessionId,
+        direction,
+      ),
+      inserted: true,
     };
   }
 
-  const nextFirst = insertSessionIntoWorkspaceLayout(node.first, targetSessionId, incomingSessionId, direction);
+  const nextFirst = insertSessionIntoWorkspaceLayout(
+    node.first,
+    targetSessionId,
+    incomingSessionId,
+    direction,
+  );
   if (nextFirst.inserted) {
     return {
       layout: {
         ...node,
-        first: nextFirst.layout
+        first: nextFirst.layout,
       },
-      inserted: true
+      inserted: true,
     };
   }
 
-  const nextSecond = insertSessionIntoWorkspaceLayout(node.second, targetSessionId, incomingSessionId, direction);
+  const nextSecond = insertSessionIntoWorkspaceLayout(
+    node.second,
+    targetSessionId,
+    incomingSessionId,
+    direction,
+  );
   if (nextSecond.inserted) {
     return {
       layout: {
         ...node,
-        second: nextSecond.layout
+        second: nextSecond.layout,
       },
-      inserted: true
+      inserted: true,
     };
   }
 
   return { layout: node, inserted: false };
 }
 
-function removeSessionFromWorkspaceLayout(node: WorkspaceLayoutNode, sessionId: string): WorkspaceLayoutNode | null {
-  if (node.kind === 'leaf') {
+function removeSessionFromWorkspaceLayout(
+  node: WorkspaceLayoutNode,
+  sessionId: string,
+): WorkspaceLayoutNode | null {
+  if (node.kind === "leaf") {
     return node.sessionId === sessionId ? null : node;
   }
 
@@ -572,12 +698,16 @@ function removeSessionFromWorkspaceLayout(node: WorkspaceLayoutNode, sessionId: 
   return {
     ...node,
     first: nextFirst,
-    second: nextSecond
+    second: nextSecond,
   };
 }
 
-function updateWorkspaceSplitRatio(node: WorkspaceLayoutNode, splitId: string, ratio: number): WorkspaceLayoutNode {
-  if (node.kind === 'leaf') {
+function updateWorkspaceSplitRatio(
+  node: WorkspaceLayoutNode,
+  splitId: string,
+  ratio: number,
+): WorkspaceLayoutNode {
+  if (node.kind === "leaf") {
     return node;
   }
 
@@ -585,28 +715,30 @@ function updateWorkspaceSplitRatio(node: WorkspaceLayoutNode, splitId: string, r
   if (node.id === splitId) {
     return {
       ...node,
-      ratio: clampedRatio
+      ratio: clampedRatio,
     };
   }
 
   return {
     ...node,
     first: updateWorkspaceSplitRatio(node.first, splitId, clampedRatio),
-    second: updateWorkspaceSplitRatio(node.second, splitId, clampedRatio)
+    second: updateWorkspaceSplitRatio(node.second, splitId, clampedRatio),
   };
 }
 
 function buildSessionTitle(
   label: string,
-  scope: { source: 'host'; hostId: string } | { source: 'local' },
-  tabs: TerminalTab[]
+  scope: { source: "host"; hostId: string } | { source: "local" },
+  tabs: TerminalTab[],
 ): string {
   const existingTitles = new Set(
     tabs
       .filter((tab) =>
-        scope.source === 'local' ? tab.source === 'local' : tab.source === 'host' && tab.hostId === scope.hostId
+        scope.source === "local"
+          ? tab.source === "local"
+          : tab.source === "host" && tab.hostId === scope.hostId,
       )
-      .map((tab) => tab.title)
+      .map((tab) => tab.title),
   );
   if (!existingTitles.has(label)) {
     return label;
@@ -619,7 +751,7 @@ function buildSessionTitle(
   return `${label} (${suffix})`;
 }
 
-const PENDING_SESSION_PREFIX = 'pending:';
+const PENDING_SESSION_PREFIX = "pending:";
 
 function createPendingSessionId(): string {
   return `${PENDING_SESSION_PREFIX}${globalThis.crypto.randomUUID()}`;
@@ -630,50 +762,54 @@ function isPendingSessionId(sessionId: string): boolean {
 }
 
 function createConnectionProgress(
-  stage: TerminalConnectionProgress['stage'],
+  stage: TerminalConnectionProgress["stage"],
   message: string,
-  options: Partial<Pick<TerminalConnectionProgress, 'blockingKind' | 'retryable'>> = {}
+  options: Partial<
+    Pick<TerminalConnectionProgress, "blockingKind" | "retryable">
+  > = {},
 ): TerminalConnectionProgress {
   return {
     stage,
     message,
-    blockingKind: options.blockingKind ?? 'none',
-    retryable: options.retryable ?? false
+    blockingKind: options.blockingKind ?? "none",
+    retryable: options.retryable ?? false,
   };
 }
 
 function createInactiveSessionShareState(): SessionShareState {
   return {
-    status: 'inactive',
+    status: "inactive",
     shareUrl: null,
     inputEnabled: false,
     viewerCount: 0,
-    errorMessage: null
+    errorMessage: null,
   };
 }
 
-function normalizeSessionShareState(state?: SessionShareState | null): SessionShareState {
+function normalizeSessionShareState(
+  state?: SessionShareState | null,
+): SessionShareState {
   return state ?? createInactiveSessionShareState();
 }
 
 function setSessionShareState(
   tabs: TerminalTab[],
   sessionId: string,
-  nextState: SessionShareState
+  nextState: SessionShareState,
 ): TerminalTab[] {
   return tabs.map((tab) =>
     tab.sessionId === sessionId
       ? {
           ...tab,
-          sessionShare: nextState
+          sessionShare: nextState,
         }
-      : tab
+      : tab,
   );
 }
 
 function createPendingSessionTab(input: {
   sessionId: string;
-  source: 'host' | 'local';
+  source: "host" | "local";
   hostId: string | null;
   title: string;
   progress: TerminalConnectionProgress;
@@ -684,36 +820,62 @@ function createPendingSessionTab(input: {
     source: input.source,
     hostId: input.hostId,
     title: input.title,
-    status: 'pending',
+    status: "pending",
     connectionProgress: input.progress,
     sessionShare: createInactiveSessionShareState(),
     hasReceivedOutput: false,
-    lastEventAt: new Date().toISOString()
+    lastEventAt: new Date().toISOString(),
   };
 }
 
-function findPendingConnectionAttempt(state: AppState, sessionId: string): PendingConnectionAttempt | null {
-  return state.pendingConnectionAttempts.find((attempt) => attempt.sessionId === sessionId) ?? null;
+function findPendingConnectionAttempt(
+  state: AppState,
+  sessionId: string,
+): PendingConnectionAttempt | null {
+  return (
+    state.pendingConnectionAttempts.find(
+      (attempt) => attempt.sessionId === sessionId,
+    ) ?? null
+  );
 }
 
-function findPendingConnectionAttemptByHost(state: AppState, hostId: string): PendingConnectionAttempt | null {
-  return state.pendingConnectionAttempts.find((attempt) => attempt.source === 'host' && attempt.hostId === hostId) ?? null;
+function findPendingConnectionAttemptByHost(
+  state: AppState,
+  hostId: string,
+): PendingConnectionAttempt | null {
+  return (
+    state.pendingConnectionAttempts.find(
+      (attempt) => attempt.source === "host" && attempt.hostId === hostId,
+    ) ?? null
+  );
 }
 
-function replaceSessionIdInLayout(node: WorkspaceLayoutNode, previousSessionId: string, nextSessionId: string): WorkspaceLayoutNode {
-  if (node.kind === 'leaf') {
+function replaceSessionIdInLayout(
+  node: WorkspaceLayoutNode,
+  previousSessionId: string,
+  nextSessionId: string,
+): WorkspaceLayoutNode {
+  if (node.kind === "leaf") {
     return node.sessionId === previousSessionId
       ? {
           ...node,
-          sessionId: nextSessionId
+          sessionId: nextSessionId,
         }
       : node;
   }
 
   return {
     ...node,
-    first: replaceSessionIdInLayout(node.first, previousSessionId, nextSessionId),
-    second: replaceSessionIdInLayout(node.second, previousSessionId, nextSessionId)
+    first: replaceSessionIdInLayout(
+      node.first,
+      previousSessionId,
+      nextSessionId,
+    ),
+    second: replaceSessionIdInLayout(
+      node.second,
+      previousSessionId,
+      nextSessionId,
+    ),
   };
 }
 
@@ -721,7 +883,7 @@ function replaceSessionReferencesInState(
   state: AppState,
   previousSessionId: string,
   nextSessionId: string,
-  transformTab?: (tab: TerminalTab) => TerminalTab
+  transformTab?: (tab: TerminalTab) => TerminalTab,
 ): Partial<AppState> {
   return {
     tabs: state.tabs.map((tab) => {
@@ -731,69 +893,119 @@ function replaceSessionReferencesInState(
       const nextTab: TerminalTab = {
         ...tab,
         id: nextSessionId,
-        sessionId: nextSessionId
+        sessionId: nextSessionId,
       };
       return transformTab ? transformTab(nextTab) : nextTab;
     }),
     tabStrip: state.tabStrip.map((item) =>
-      item.kind === 'session' && item.sessionId === previousSessionId ? { kind: 'session', sessionId: nextSessionId } : item
+      item.kind === "session" && item.sessionId === previousSessionId
+        ? { kind: "session", sessionId: nextSessionId }
+        : item,
     ),
     workspaces: state.workspaces.map((workspace) => ({
       ...workspace,
-      layout: replaceSessionIdInLayout(workspace.layout, previousSessionId, nextSessionId),
-      activeSessionId: workspace.activeSessionId === previousSessionId ? nextSessionId : workspace.activeSessionId
+      layout: replaceSessionIdInLayout(
+        workspace.layout,
+        previousSessionId,
+        nextSessionId,
+      ),
+      activeSessionId:
+        workspace.activeSessionId === previousSessionId
+          ? nextSessionId
+          : workspace.activeSessionId,
     })),
     activeWorkspaceTab:
-      state.activeWorkspaceTab === asSessionTabId(previousSessionId) ? asSessionTabId(nextSessionId) : state.activeWorkspaceTab,
+      state.activeWorkspaceTab === asSessionTabId(previousSessionId)
+        ? asSessionTabId(nextSessionId)
+        : state.activeWorkspaceTab,
     pendingHostKeyPrompt:
       state.pendingHostKeyPrompt?.sessionId === previousSessionId
         ? {
             ...state.pendingHostKeyPrompt,
-            sessionId: nextSessionId
+            sessionId: nextSessionId,
           }
         : state.pendingHostKeyPrompt,
     pendingCredentialRetry:
       state.pendingCredentialRetry?.sessionId === previousSessionId
         ? {
             ...state.pendingCredentialRetry,
-            sessionId: nextSessionId
+            sessionId: nextSessionId,
           }
         : state.pendingCredentialRetry,
     pendingInteractiveAuth:
       state.pendingInteractiveAuth?.sessionId === previousSessionId
         ? {
             ...state.pendingInteractiveAuth,
-            sessionId: nextSessionId
+            sessionId: nextSessionId,
           }
-        : state.pendingInteractiveAuth
+        : state.pendingInteractiveAuth,
   };
 }
 
-function removeSessionFromState(state: AppState, sessionId: string): Partial<AppState> {
+function removeSessionFromState(
+  state: AppState,
+  sessionId: string,
+): Partial<AppState> {
   const tabs = state.tabs.filter((tab) => tab.sessionId !== sessionId);
-  const standaloneIndex = state.tabStrip.findIndex((item) => item.kind === 'session' && item.sessionId === sessionId);
-  let nextTabStrip = state.tabStrip.filter((item) => !(item.kind === 'session' && item.sessionId === sessionId));
+  const standaloneIndex = state.tabStrip.findIndex(
+    (item) => item.kind === "session" && item.sessionId === sessionId,
+  );
+  let nextTabStrip = state.tabStrip.filter(
+    (item) => !(item.kind === "session" && item.sessionId === sessionId),
+  );
   let nextWorkspaces = state.workspaces;
   let nextActive = state.activeWorkspaceTab;
 
-  const owningWorkspace = state.workspaces.find((workspace) => listWorkspaceSessionIds(workspace.layout).includes(sessionId));
+  const owningWorkspace = state.workspaces.find((workspace) =>
+    listWorkspaceSessionIds(workspace.layout).includes(sessionId),
+  );
   if (owningWorkspace) {
-    const reducedLayout = removeSessionFromWorkspaceLayout(owningWorkspace.layout, sessionId);
+    const reducedLayout = removeSessionFromWorkspaceLayout(
+      owningWorkspace.layout,
+      sessionId,
+    );
     if (!reducedLayout) {
-      nextWorkspaces = state.workspaces.filter((workspace) => workspace.id !== owningWorkspace.id);
-      const workspaceIndex = state.tabStrip.findIndex((item) => item.kind === 'workspace' && item.workspaceId === owningWorkspace.id);
-      nextTabStrip = state.tabStrip.filter((item) => !(item.kind === 'workspace' && item.workspaceId === owningWorkspace.id));
+      nextWorkspaces = state.workspaces.filter(
+        (workspace) => workspace.id !== owningWorkspace.id,
+      );
+      const workspaceIndex = state.tabStrip.findIndex(
+        (item) =>
+          item.kind === "workspace" && item.workspaceId === owningWorkspace.id,
+      );
+      nextTabStrip = state.tabStrip.filter(
+        (item) =>
+          !(
+            item.kind === "workspace" && item.workspaceId === owningWorkspace.id
+          ),
+      );
       if (nextActive === asWorkspaceTabId(owningWorkspace.id)) {
-        nextActive = resolveNextVisibleTab(nextTabStrip, workspaceIndex >= 0 ? workspaceIndex : nextTabStrip.length);
+        nextActive = resolveNextVisibleTab(
+          nextTabStrip,
+          workspaceIndex >= 0 ? workspaceIndex : nextTabStrip.length,
+        );
       }
-    } else if (reducedLayout.kind === 'leaf') {
-      const workspaceIndex = state.tabStrip.findIndex((item) => item.kind === 'workspace' && item.workspaceId === owningWorkspace.id);
-      nextWorkspaces = state.workspaces.filter((workspace) => workspace.id !== owningWorkspace.id);
-      nextTabStrip = state.tabStrip.filter((item) => !(item.kind === 'workspace' && item.workspaceId === owningWorkspace.id));
-      nextTabStrip.splice(workspaceIndex >= 0 ? workspaceIndex : nextTabStrip.length, 0, {
-        kind: 'session',
-        sessionId: reducedLayout.sessionId
-      });
+    } else if (reducedLayout.kind === "leaf") {
+      const workspaceIndex = state.tabStrip.findIndex(
+        (item) =>
+          item.kind === "workspace" && item.workspaceId === owningWorkspace.id,
+      );
+      nextWorkspaces = state.workspaces.filter(
+        (workspace) => workspace.id !== owningWorkspace.id,
+      );
+      nextTabStrip = state.tabStrip.filter(
+        (item) =>
+          !(
+            item.kind === "workspace" && item.workspaceId === owningWorkspace.id
+          ),
+      );
+      nextTabStrip.splice(
+        workspaceIndex >= 0 ? workspaceIndex : nextTabStrip.length,
+        0,
+        {
+          kind: "session",
+          sessionId: reducedLayout.sessionId,
+        },
+      );
       if (nextActive === asWorkspaceTabId(owningWorkspace.id)) {
         nextActive = asSessionTabId(reducedLayout.sessionId);
       }
@@ -804,13 +1016,18 @@ function removeSessionFromState(state: AppState, sessionId: string): Partial<App
               ...workspace,
               layout: reducedLayout,
               activeSessionId:
-                workspace.activeSessionId === sessionId ? findFirstWorkspaceSessionId(reducedLayout) : workspace.activeSessionId
+                workspace.activeSessionId === sessionId
+                  ? findFirstWorkspaceSessionId(reducedLayout)
+                  : workspace.activeSessionId,
             }
-          : workspace
+          : workspace,
       );
     }
   } else if (nextActive === asSessionTabId(sessionId)) {
-    nextActive = resolveNextVisibleTab(nextTabStrip, standaloneIndex >= 0 ? standaloneIndex : nextTabStrip.length);
+    nextActive = resolveNextVisibleTab(
+      nextTabStrip,
+      standaloneIndex >= 0 ? standaloneIndex : nextTabStrip.length,
+    );
   }
 
   return {
@@ -818,18 +1035,34 @@ function removeSessionFromState(state: AppState, sessionId: string): Partial<App
     workspaces: nextWorkspaces,
     tabStrip: nextTabStrip,
     activeWorkspaceTab: nextActive,
-    pendingHostKeyPrompt: state.pendingHostKeyPrompt?.sessionId === sessionId ? null : state.pendingHostKeyPrompt,
-    pendingCredentialRetry: state.pendingCredentialRetry?.sessionId === sessionId ? null : state.pendingCredentialRetry,
-    pendingInteractiveAuth: state.pendingInteractiveAuth?.sessionId === sessionId ? null : state.pendingInteractiveAuth,
-    pendingConnectionAttempts: state.pendingConnectionAttempts.filter((attempt) => attempt.sessionId !== sessionId)
+    pendingHostKeyPrompt:
+      state.pendingHostKeyPrompt?.sessionId === sessionId
+        ? null
+        : state.pendingHostKeyPrompt,
+    pendingCredentialRetry:
+      state.pendingCredentialRetry?.sessionId === sessionId
+        ? null
+        : state.pendingCredentialRetry,
+    pendingInteractiveAuth:
+      state.pendingInteractiveAuth?.sessionId === sessionId
+        ? null
+        : state.pendingInteractiveAuth,
+    pendingConnectionAttempts: state.pendingConnectionAttempts.filter(
+      (attempt) => attempt.sessionId !== sessionId,
+    ),
   };
 }
 
-function activateSessionContextInState(state: AppState, sessionId: string): Partial<AppState> {
-  const owningWorkspace = state.workspaces.find((workspace) => listWorkspaceSessionIds(workspace.layout).includes(sessionId));
+function activateSessionContextInState(
+  state: AppState,
+  sessionId: string,
+): Partial<AppState> {
+  const owningWorkspace = state.workspaces.find((workspace) =>
+    listWorkspaceSessionIds(workspace.layout).includes(sessionId),
+  );
   if (!owningWorkspace) {
     return {
-      activeWorkspaceTab: asSessionTabId(sessionId)
+      activeWorkspaceTab: asSessionTabId(sessionId),
     };
   }
 
@@ -838,18 +1071,20 @@ function activateSessionContextInState(state: AppState, sessionId: string): Part
       workspace.id === owningWorkspace.id
         ? {
             ...workspace,
-            activeSessionId: sessionId
+            activeSessionId: sessionId,
           }
-        : workspace
+        : workspace,
     ),
-    activeWorkspaceTab: asWorkspaceTabId(owningWorkspace.id)
+    activeWorkspaceTab: asWorkspaceTabId(owningWorkspace.id),
   };
 }
 
 function buildWorkspaceTitle(workspaces: WorkspaceTab[]): string {
-  const existingTitles = new Set(workspaces.map((workspace) => workspace.title));
-  if (!existingTitles.has('Workspace')) {
-    return 'Workspace';
+  const existingTitles = new Set(
+    workspaces.map((workspace) => workspace.title),
+  );
+  if (!existingTitles.has("Workspace")) {
+    return "Workspace";
   }
 
   let suffix = 1;
@@ -861,21 +1096,25 @@ function buildWorkspaceTitle(workspaces: WorkspaceTab[]): string {
 
 function resolveNextVisibleTab(
   tabStrip: DynamicTabStripItem[],
-  removedIndex: number
+  removedIndex: number,
 ): WorkspaceTabId {
   const nextItem = tabStrip[removedIndex] ?? tabStrip[removedIndex - 1];
   if (!nextItem) {
-    return 'home';
+    return "home";
   }
-  return nextItem.kind === 'session' ? asSessionTabId(nextItem.sessionId) : asWorkspaceTabId(nextItem.workspaceId);
+  return nextItem.kind === "session"
+    ? asSessionTabId(nextItem.sessionId)
+    : asWorkspaceTabId(nextItem.workspaceId);
 }
 
 function resolveAdjacentTarget(
   tabStrip: DynamicTabStripItem[],
   workspaces: WorkspaceTab[],
-  sessionId: string
+  sessionId: string,
 ): DynamicTabStripItem | null {
-  const currentIndex = tabStrip.findIndex((item) => item.kind === 'session' && item.sessionId === sessionId);
+  const currentIndex = tabStrip.findIndex(
+    (item) => item.kind === "session" && item.sessionId === sessionId,
+  );
   if (currentIndex < 0) {
     return null;
   }
@@ -886,8 +1125,10 @@ function resolveAdjacentTarget(
     if (!candidate) {
       continue;
     }
-    if (candidate.kind === 'workspace') {
-      const workspace = workspaces.find((item) => item.id === candidate.workspaceId);
+    if (candidate.kind === "workspace") {
+      const workspace = workspaces.find(
+        (item) => item.id === candidate.workspaceId,
+      );
       if (!workspace) {
         continue;
       }
@@ -902,119 +1143,176 @@ function resolveAdjacentTarget(
 }
 
 function parentPath(targetPath: string): string {
-  if (!targetPath || targetPath === '/') {
-    return targetPath || '/';
+  if (!targetPath || targetPath === "/") {
+    return targetPath || "/";
   }
-  const normalized = targetPath.length > 1 && targetPath.endsWith('/') ? targetPath.slice(0, -1) : targetPath;
-  const index = normalized.lastIndexOf('/');
+  const normalized =
+    targetPath.length > 1 && targetPath.endsWith("/")
+      ? targetPath.slice(0, -1)
+      : targetPath;
+  const index = normalized.lastIndexOf("/");
   if (index <= 0) {
-    return '/';
+    return "/";
   }
-  return normalized.slice(0, index) || '/';
+  return normalized.slice(0, index) || "/";
 }
 
 function resolveCurrentGroupPathAfterGroupRemoval(
   currentGroupPath: string | null,
   removedGroupPath: string,
-  mode: GroupRemoveMode
+  mode: GroupRemoveMode,
 ): string | null {
   const normalizedCurrentPath = normalizeGroupPath(currentGroupPath);
   const normalizedRemovedPath = normalizeGroupPath(removedGroupPath);
-  if (!normalizedCurrentPath || !normalizedRemovedPath || !isGroupWithinPath(normalizedCurrentPath, normalizedRemovedPath)) {
+  if (
+    !normalizedCurrentPath ||
+    !normalizedRemovedPath ||
+    !isGroupWithinPath(normalizedCurrentPath, normalizedRemovedPath)
+  ) {
     return normalizedCurrentPath;
   }
 
-  if (mode === 'delete-subtree') {
+  if (mode === "delete-subtree") {
     return getParentGroupPath(normalizedRemovedPath);
   }
 
   return stripRemovedGroupSegment(normalizedCurrentPath, normalizedRemovedPath);
 }
 
-function resolveCredentialRetryKind(host: HostRecord | undefined, message: string): 'password' | 'passphrase' | null {
+function resolveCredentialRetryKind(
+  host: HostRecord | undefined,
+  message: string,
+): "password" | "passphrase" | null {
   if (!host || !isSshHostRecord(host)) {
     return null;
   }
 
-  if (host.authType === 'password') {
-    return /requires a password|password required|permission denied|unable to authenticate|authentication failed|ssh handshake failed/i.test(message)
-      ? 'password'
+  if (host.authType === "password") {
+    return /requires a password|password required|permission denied|unable to authenticate|authentication failed|ssh handshake failed/i.test(
+      message,
+    )
+      ? "password"
       : null;
   }
 
-  return /passphrase|private key|unable to authenticate|authentication failed|ssh handshake failed|parse private key/i.test(message)
-    ? 'passphrase'
+  return /passphrase|private key|unable to authenticate|authentication failed|ssh handshake failed|parse private key/i.test(
+    message,
+  )
+    ? "passphrase"
     : null;
 }
 
-function resolveHostKeyCheckProgress(host: HostRecord): TerminalConnectionProgress {
-  return createConnectionProgress('host-key-check', `${host.label} 호스트 키를 확인하는 중입니다.`);
+function resolveHostKeyCheckProgress(
+  host: HostRecord,
+): TerminalConnectionProgress {
+  return createConnectionProgress(
+    "host-key-check",
+    `${host.label} 호스트 키를 확인하는 중입니다.`,
+  );
 }
 
-function resolveAwaitingHostTrustProgress(host: HostRecord): TerminalConnectionProgress {
-  return createConnectionProgress('awaiting-host-trust', `${host.label} 호스트 키 확인이 필요합니다.`, {
-    blockingKind: 'dialog'
-  });
+function resolveAwaitingHostTrustProgress(
+  host: HostRecord,
+): TerminalConnectionProgress {
+  return createConnectionProgress(
+    "awaiting-host-trust",
+    `${host.label} 호스트 키 확인이 필요합니다.`,
+    {
+      blockingKind: "dialog",
+    },
+  );
 }
 
-function resolveConnectingProgress(host: HostRecord): TerminalConnectionProgress {
+function resolveConnectingProgress(
+  host: HostRecord,
+): TerminalConnectionProgress {
   if (isAwsEc2HostRecord(host)) {
-    return createConnectionProgress('connecting', `${host.label} SSM 세션을 시작하는 중입니다.`);
+    return createConnectionProgress(
+      "connecting",
+      `${host.label} SSM 세션을 시작하는 중입니다.`,
+    );
   }
   if (isWarpgateSshHostRecord(host)) {
-    return createConnectionProgress('connecting', `${host.label} Warpgate SSH 세션을 연결하는 중입니다.`);
+    return createConnectionProgress(
+      "connecting",
+      `${host.label} Warpgate SSH 세션을 연결하는 중입니다.`,
+    );
   }
-  return createConnectionProgress('connecting', `${host.label} SSH 세션을 연결하는 중입니다.`);
+  return createConnectionProgress(
+    "connecting",
+    `${host.label} SSH 세션을 연결하는 중입니다.`,
+  );
 }
 
 function resolveLocalStartingProgress(): TerminalConnectionProgress {
-  return createConnectionProgress('connecting', '로컬 터미널을 시작하는 중입니다.');
+  return createConnectionProgress(
+    "connecting",
+    "로컬 터미널을 시작하는 중입니다.",
+  );
 }
 
-function resolveWaitingShellProgress(host: HostRecord): TerminalConnectionProgress {
-  return createConnectionProgress('waiting-shell', `${host.label} 원격 셸이 첫 출력을 보내는 중입니다.`);
+function resolveWaitingShellProgress(
+  host: HostRecord,
+): TerminalConnectionProgress {
+  return createConnectionProgress(
+    "waiting-shell",
+    `${host.label} 원격 셸이 첫 출력을 보내는 중입니다.`,
+  );
 }
 
 function resolveLocalWaitingShellProgress(): TerminalConnectionProgress {
-  return createConnectionProgress('waiting-shell', '셸이 준비되는 중입니다.');
+  return createConnectionProgress("waiting-shell", "셸이 준비되는 중입니다.");
 }
 
 function resolveCredentialRetryProgress(
   host: HostRecord,
-  credentialKind: PendingCredentialRetry['credentialKind']
+  credentialKind: PendingCredentialRetry["credentialKind"],
 ): TerminalConnectionProgress {
   return createConnectionProgress(
-    'awaiting-credentials',
-    credentialKind === 'password'
+    "awaiting-credentials",
+    credentialKind === "password"
       ? `${host.label} 비밀번호를 다시 입력해 주세요.`
       : `${host.label} passphrase를 다시 입력해 주세요.`,
     {
-      blockingKind: 'dialog',
-      retryable: true
-    }
+      blockingKind: "dialog",
+      retryable: true,
+    },
   );
 }
 
-function resolveErrorProgress(message: string, retryable = true): TerminalConnectionProgress {
-  return createConnectionProgress('connecting', message, {
-    retryable
+function resolveErrorProgress(
+  message: string,
+  retryable = true,
+): TerminalConnectionProgress {
+  return createConnectionProgress("connecting", message, {
+    retryable,
   });
 }
 
 function normalizeInteractiveText(value: string | undefined | null): string {
-  return (value ?? '').trim();
+  return (value ?? "").trim();
 }
 
-function parseWarpgateApprovalUrl(...parts: Array<string | undefined | null>): string | null {
-  const combined = parts.map(normalizeInteractiveText).filter(Boolean).join('\n');
+function parseWarpgateApprovalUrl(
+  ...parts: Array<string | undefined | null>
+): string | null {
+  const combined = parts
+    .map(normalizeInteractiveText)
+    .filter(Boolean)
+    .join("\n");
   const match = combined.match(/https?:\/\/[^\s<>"')]+/i);
   return match ? match[0] : null;
 }
 
-function parseWarpgateAuthCode(...parts: Array<string | undefined | null>): string | null {
-  const combined = parts.map(normalizeInteractiveText).filter(Boolean).join('\n');
+function parseWarpgateAuthCode(
+  ...parts: Array<string | undefined | null>
+): string | null {
+  const combined = parts
+    .map(normalizeInteractiveText)
+    .filter(Boolean)
+    .join("\n");
   const labeledMatch = combined.match(
-    /(?:auth(?:entication)?|verification|security|device)?\s*code\s*[:=]?\s*([A-Z0-9][A-Z0-9-]{3,})/i
+    /(?:auth(?:entication)?|verification|security|device)?\s*code\s*[:=]?\s*([A-Z0-9][A-Z0-9-]{3,})/i,
   );
   if (labeledMatch) {
     return labeledMatch[1];
@@ -1023,46 +1321,76 @@ function parseWarpgateAuthCode(...parts: Array<string | undefined | null>): stri
   return tokenMatch ? tokenMatch[1] : null;
 }
 
-function isWarpgateCompletionPrompt(label: string, instruction: string): boolean {
+function isWarpgateCompletionPrompt(
+  label: string,
+  instruction: string,
+): boolean {
   return /press enter when done|press enter to continue|once authorized|after authoriz|after logging in|after completing authentication|hit enter|return to continue/i.test(
-    `${label}\n${instruction}`
+    `${label}\n${instruction}`,
   );
 }
 
 function isWarpgateCodePrompt(label: string, instruction: string): boolean {
-  return /code|verification|security|token|device/i.test(label) || (/code/i.test(instruction) && !/press enter/i.test(label));
+  return (
+    /code|verification|security|token|device/i.test(label) ||
+    (/code/i.test(instruction) && !/press enter/i.test(label))
+  );
 }
 
-function shouldTreatAsWarpgate(host: HostRecord | undefined, challenge: KeyboardInteractiveChallenge): boolean {
+function shouldTreatAsWarpgate(
+  host: HostRecord | undefined,
+  challenge: KeyboardInteractiveChallenge,
+): boolean {
   if (!host || !isWarpgateSshHostRecord(host)) {
     return false;
   }
-  const sourceText = `${challenge.name ?? ''}\n${challenge.instruction}\n${challenge.prompts.map((prompt) => prompt.label).join('\n')}`;
-  return /warpgate|authorize|device authorization|device code|verification code/i.test(sourceText);
+  const sourceText = `${challenge.name ?? ""}\n${challenge.instruction}\n${challenge.prompts.map((prompt) => prompt.label).join("\n")}`;
+  return /warpgate|authorize|device authorization|device code|verification code/i.test(
+    sourceText,
+  );
 }
 
-export function upsertTransferJob(transfers: TransferJob[], job: TransferJob): TransferJob[] {
+export function upsertTransferJob(
+  transfers: TransferJob[],
+  job: TransferJob,
+): TransferJob[] {
   const existingIndex = transfers.findIndex((item) => item.id === job.id);
   if (existingIndex >= 0) {
-    return transfers.map((item, index) => (index === existingIndex ? job : item));
+    return transfers.map((item, index) =>
+      index === existingIndex ? job : item,
+    );
   }
   return [job, ...transfers].sort(
     (a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime(),
   );
 }
 
-function upsertForwardRuntime(runtimes: PortForwardRuntimeRecord[], runtime: PortForwardRuntimeRecord): PortForwardRuntimeRecord[] {
-  const next = [runtime, ...runtimes.filter((item) => item.ruleId !== runtime.ruleId)];
+function upsertForwardRuntime(
+  runtimes: PortForwardRuntimeRecord[],
+  runtime: PortForwardRuntimeRecord,
+): PortForwardRuntimeRecord[] {
+  const next = [
+    runtime,
+    ...runtimes.filter((item) => item.ruleId !== runtime.ruleId),
+  ];
   return next.sort((a, b) => a.ruleId.localeCompare(b.ruleId));
 }
 
 function basenameFromPath(targetPath: string): string {
-  const normalized = targetPath.replace(/[\\/]+$/, '');
-  const separatorIndex = Math.max(normalized.lastIndexOf('/'), normalized.lastIndexOf('\\'));
-  return separatorIndex >= 0 ? normalized.slice(separatorIndex + 1) : normalized;
+  const normalized = targetPath.replace(/[\\/]+$/, "");
+  const separatorIndex = Math.max(
+    normalized.lastIndexOf("/"),
+    normalized.lastIndexOf("\\"),
+  );
+  return separatorIndex >= 0
+    ? normalized.slice(separatorIndex + 1)
+    : normalized;
 }
 
-function resolveSftpVisibleEntryPaths(pane: SftpPaneState, provided?: string[]): string[] {
+function resolveSftpVisibleEntryPaths(
+  pane: SftpPaneState,
+  provided?: string[],
+): string[] {
   if (provided && provided.length > 0) {
     const available = new Set(pane.entries.map((entry) => entry.path));
     return provided.filter((entryPath) => available.has(entryPath));
@@ -1072,7 +1400,9 @@ function resolveSftpVisibleEntryPaths(pane: SftpPaneState, provided?: string[]):
       if (!pane.filterQuery.trim()) {
         return true;
       }
-      return entry.name.toLowerCase().includes(pane.filterQuery.trim().toLowerCase());
+      return entry.name
+        .toLowerCase()
+        .includes(pane.filterQuery.trim().toLowerCase());
     })
     .map((entry) => entry.path);
 }
@@ -1088,7 +1418,9 @@ function resolveNextSftpSelection(
     };
   }
 
-  const entryExists = pane.entries.some((entry) => entry.path === input.entryPath);
+  const entryExists = pane.entries.some(
+    (entry) => entry.path === input.entryPath,
+  );
   if (!entryExists) {
     return {
       selectedPaths: pane.selectedPaths,
@@ -1097,9 +1429,13 @@ function resolveNextSftpSelection(
   }
 
   if (input.range) {
-    const visiblePaths = resolveSftpVisibleEntryPaths(pane, input.visibleEntryPaths);
+    const visiblePaths = resolveSftpVisibleEntryPaths(
+      pane,
+      input.visibleEntryPaths,
+    );
     const anchorPath =
-      pane.selectionAnchorPath && visiblePaths.includes(pane.selectionAnchorPath)
+      pane.selectionAnchorPath &&
+      visiblePaths.includes(pane.selectionAnchorPath)
         ? pane.selectionAnchorPath
         : null;
     const targetIndex = visiblePaths.indexOf(input.entryPath);
@@ -1139,9 +1475,13 @@ function resolveTransferItemsFromPane(
   draggedPath?: string | null,
 ): FileEntry[] {
   if (!draggedPath) {
-    return pane.entries.filter((entry) => pane.selectedPaths.includes(entry.path));
+    return pane.entries.filter((entry) =>
+      pane.selectedPaths.includes(entry.path),
+    );
   }
-  const selected = pane.entries.filter((entry) => pane.selectedPaths.includes(entry.path));
+  const selected = pane.entries.filter((entry) =>
+    pane.selectedPaths.includes(entry.path),
+  );
   if (selected.some((entry) => entry.path === draggedPath)) {
     return selected;
   }
@@ -1149,33 +1489,43 @@ function resolveTransferItemsFromPane(
 }
 
 function isBrowsableSftpPane(pane: SftpPaneState): boolean {
-  return pane.sourceKind === "local" || Boolean(pane.endpoint);
+  return (
+    pane.sourceKind === "local" ||
+    (Boolean(pane.endpoint) && !pane.connectingHostId)
+  );
 }
 
-function pushHistory(pane: SftpPaneState, nextPath: string): Pick<SftpPaneState, 'history' | 'historyIndex'> {
+function pushHistory(
+  pane: SftpPaneState,
+  nextPath: string,
+): Pick<SftpPaneState, "history" | "historyIndex"> {
   const historyPrefix = pane.history.slice(0, pane.historyIndex + 1);
   if (historyPrefix[historyPrefix.length - 1] === nextPath) {
     return {
       history: historyPrefix,
-      historyIndex: historyPrefix.length - 1
+      historyIndex: historyPrefix.length - 1,
     };
   }
   const history = [...historyPrefix, nextPath];
   return {
     history,
-    historyIndex: history.length - 1
+    historyIndex: history.length - 1,
   };
 }
 
 function getPane(state: AppState, paneId: SftpPaneId): SftpPaneState {
-  return paneId === 'left' ? state.sftp.leftPane : state.sftp.rightPane;
+  return paneId === "left" ? state.sftp.leftPane : state.sftp.rightPane;
 }
 
-function updatePaneState(state: AppState, paneId: SftpPaneId, nextPane: SftpPaneState): SftpState {
+function updatePaneState(
+  state: AppState,
+  paneId: SftpPaneId,
+  nextPane: SftpPaneState,
+): SftpState {
   return {
     ...state.sftp,
-    leftPane: paneId === 'left' ? nextPane : state.sftp.leftPane,
-    rightPane: paneId === 'right' ? nextPane : state.sftp.rightPane
+    leftPane: paneId === "left" ? nextPane : state.sftp.leftPane,
+    rightPane: paneId === "right" ? nextPane : state.sftp.rightPane,
   };
 }
 
@@ -1187,7 +1537,7 @@ function toTrustInput(probe: HostKeyProbeResult) {
     port: probe.port,
     algorithm: probe.algorithm,
     publicKeyBase64: probe.publicKeyBase64,
-    fingerprintSha256: probe.fingerprintSha256
+    fingerprintSha256: probe.fingerprintSha256,
   };
 }
 
@@ -1195,42 +1545,71 @@ export function createAppStore(api: DesktopApi) {
   const openedInteractiveBrowserChallenges = new Set<string>();
 
   const ensureAwsHostAuthentication = async (
-    host: Extract<HostRecord, { kind: 'aws-ec2' }>,
-    onStageChange: (progress: TerminalConnectionProgress) => void
+    host: Extract<HostRecord, { kind: "aws-ec2" }>,
+    onStageChange: (progress: TerminalConnectionProgress) => void,
   ) => {
-    onStageChange(createConnectionProgress('checking-profile', `${host.awsProfileName} 프로필 인증 상태를 확인하는 중입니다.`));
+    onStageChange(
+      createConnectionProgress(
+        "checking-profile",
+        `${host.awsProfileName} 프로필 인증 상태를 확인하는 중입니다.`,
+      ),
+    );
     const status = await api.aws.getProfileStatus(host.awsProfileName);
     if (status.isAuthenticated) {
       return;
     }
 
     if (!status.isSsoProfile) {
-      throw new Error(status.errorMessage || `${host.awsProfileName} 프로필에 AWS CLI 자격 증명이 필요합니다.`);
+      throw new Error(
+        status.errorMessage ||
+          `${host.awsProfileName} 프로필에 AWS CLI 자격 증명이 필요합니다.`,
+      );
     }
 
     onStageChange(
-      createConnectionProgress('browser-login', `브라우저에서 ${host.awsProfileName} AWS 로그인을 진행하는 중입니다.`, {
-        blockingKind: 'browser'
-      })
+      createConnectionProgress(
+        "browser-login",
+        `브라우저에서 ${host.awsProfileName} AWS 로그인을 진행하는 중입니다.`,
+        {
+          blockingKind: "browser",
+        },
+      ),
     );
     try {
       await api.aws.login(host.awsProfileName);
     } catch (error) {
-      throw new Error(error instanceof Error ? error.message : 'AWS SSO 로그인을 시작하지 못했습니다.');
+      throw new Error(
+        error instanceof Error
+          ? error.message
+          : "AWS SSO 로그인을 시작하지 못했습니다.",
+      );
     }
 
-    onStageChange(createConnectionProgress('checking-profile', `${host.awsProfileName} 프로필 로그인 결과를 확인하는 중입니다.`));
+    onStageChange(
+      createConnectionProgress(
+        "checking-profile",
+        `${host.awsProfileName} 프로필 로그인 결과를 확인하는 중입니다.`,
+      ),
+    );
     const refreshedStatus = await api.aws.getProfileStatus(host.awsProfileName);
     if (!refreshedStatus.isAuthenticated) {
-      throw new Error(refreshedStatus.errorMessage || 'AWS SSO 로그인 후에도 인증이 확인되지 않았습니다.');
+      throw new Error(
+        refreshedStatus.errorMessage ||
+          "AWS SSO 로그인 후에도 인증이 확인되지 않았습니다.",
+      );
     }
   };
 
   const updateSessionProgress = (
-    set: (next: AppState | Partial<AppState> | ((state: AppState) => AppState | Partial<AppState>)) => void,
+    set: (
+      next:
+        | AppState
+        | Partial<AppState>
+        | ((state: AppState) => AppState | Partial<AppState>),
+    ) => void,
     sessionId: string,
     progress: TerminalConnectionProgress,
-    status: TerminalTab['status'] = 'pending'
+    status: TerminalTab["status"] = "pending",
   ) => {
     set((state) => {
       if (!state.tabs.some((tab) => tab.sessionId === sessionId)) {
@@ -1244,27 +1623,34 @@ export function createAppStore(api: DesktopApi) {
                 status,
                 errorMessage: undefined,
                 connectionProgress: progress,
-                lastEventAt: new Date().toISOString()
+                lastEventAt: new Date().toISOString(),
               }
-            : tab
-        )
+            : tab,
+        ),
       };
     });
   };
 
   const markSessionError = (
-    set: (next: AppState | Partial<AppState> | ((state: AppState) => AppState | Partial<AppState>)) => void,
+    set: (
+      next:
+        | AppState
+        | Partial<AppState>
+        | ((state: AppState) => AppState | Partial<AppState>),
+    ) => void,
     sessionId: string,
     message: string,
     options: {
       progress?: TerminalConnectionProgress | null;
       retryable?: boolean;
-    } = {}
+    } = {},
   ) => {
     set((state) => {
       if (!state.tabs.some((tab) => tab.sessionId === sessionId)) {
         return {
-          pendingConnectionAttempts: state.pendingConnectionAttempts.filter((attempt) => attempt.sessionId !== sessionId)
+          pendingConnectionAttempts: state.pendingConnectionAttempts.filter(
+            (attempt) => attempt.sessionId !== sessionId,
+          ),
         };
       }
       return {
@@ -1272,66 +1658,96 @@ export function createAppStore(api: DesktopApi) {
           tab.sessionId === sessionId
             ? {
                 ...tab,
-                status: 'error',
+                status: "error",
                 errorMessage: message,
-                connectionProgress: options.progress ?? resolveErrorProgress(message, options.retryable ?? true),
-                lastEventAt: new Date().toISOString()
+                connectionProgress:
+                  options.progress ??
+                  resolveErrorProgress(message, options.retryable ?? true),
+                lastEventAt: new Date().toISOString(),
               }
-            : tab
+            : tab,
         ),
-        pendingConnectionAttempts: state.pendingConnectionAttempts.filter((attempt) => attempt.sessionId !== sessionId)
+        pendingConnectionAttempts: state.pendingConnectionAttempts.filter(
+          (attempt) => attempt.sessionId !== sessionId,
+        ),
       };
     });
   };
 
   const createPendingSessionTabForHost = (
-    set: (next: AppState | Partial<AppState> | ((state: AppState) => AppState | Partial<AppState>)) => void,
+    set: (
+      next:
+        | AppState
+        | Partial<AppState>
+        | ((state: AppState) => AppState | Partial<AppState>),
+    ) => void,
     get: () => AppState,
     host: HostRecord,
     cols: number,
     rows: number,
     progress: TerminalConnectionProgress,
-    existingSessionId?: string
+    existingSessionId?: string,
   ): string => {
     const sessionId = existingSessionId ?? createPendingSessionId();
-    const existingTab = existingSessionId ? get().tabs.find((tab) => tab.sessionId === existingSessionId) ?? null : null;
-    const title = existingTab?.title ?? buildSessionTitle(host.label, { source: 'host', hostId: host.id }, get().tabs);
+    const existingTab = existingSessionId
+      ? (get().tabs.find((tab) => tab.sessionId === existingSessionId) ?? null)
+      : null;
+    const title =
+      existingTab?.title ??
+      buildSessionTitle(
+        host.label,
+        { source: "host", hostId: host.id },
+        get().tabs,
+      );
     const tab = createPendingSessionTab({
       sessionId,
-      source: 'host',
+      source: "host",
       hostId: host.id,
       title,
-      progress
+      progress,
     });
 
     set((state) => {
       const nextAttempts = [
-        ...state.pendingConnectionAttempts.filter((attempt) => attempt.sessionId !== sessionId),
+        ...state.pendingConnectionAttempts.filter(
+          (attempt) => attempt.sessionId !== sessionId,
+        ),
         {
           sessionId,
-          source: 'host' as const,
+          source: "host" as const,
           hostId: host.id,
           title,
           latestCols: cols,
-          latestRows: rows
-        }
+          latestRows: rows,
+        },
       ];
 
       if (existingTab) {
         return {
-          tabs: state.tabs.map((item) => (item.sessionId === sessionId ? tab : item)),
+          tabs: state.tabs.map((item) =>
+            item.sessionId === sessionId ? tab : item,
+          ),
           pendingConnectionAttempts: nextAttempts,
-          ...activateSessionContextInState(state, sessionId)
+          ...activateSessionContextInState(state, sessionId),
         };
       }
 
       return {
-        tabs: [...state.tabs.filter((item) => item.sessionId !== sessionId), tab],
-        tabStrip: [...state.tabStrip.filter((item) => !(item.kind === 'session' && item.sessionId === sessionId)), { kind: 'session', sessionId }],
+        tabs: [
+          ...state.tabs.filter((item) => item.sessionId !== sessionId),
+          tab,
+        ],
+        tabStrip: [
+          ...state.tabStrip.filter(
+            (item) =>
+              !(item.kind === "session" && item.sessionId === sessionId),
+          ),
+          { kind: "session", sessionId },
+        ],
         activeWorkspaceTab: asSessionTabId(sessionId),
-        homeSection: 'hosts',
-        hostDrawer: { mode: 'closed' },
-        pendingConnectionAttempts: nextAttempts
+        homeSection: "hosts",
+        hostDrawer: { mode: "closed" },
+        pendingConnectionAttempts: nextAttempts,
       };
     });
 
@@ -1339,52 +1755,74 @@ export function createAppStore(api: DesktopApi) {
   };
 
   const createPendingSessionTabForLocal = (
-    set: (next: AppState | Partial<AppState> | ((state: AppState) => AppState | Partial<AppState>)) => void,
+    set: (
+      next:
+        | AppState
+        | Partial<AppState>
+        | ((state: AppState) => AppState | Partial<AppState>),
+    ) => void,
     get: () => AppState,
     cols: number,
     rows: number,
     progress: TerminalConnectionProgress,
-    existingSessionId?: string
+    existingSessionId?: string,
   ): string => {
     const sessionId = existingSessionId ?? createPendingSessionId();
-    const existingTab = existingSessionId ? get().tabs.find((tab) => tab.sessionId === existingSessionId) ?? null : null;
-    const title = existingTab?.title ?? buildSessionTitle('Terminal', { source: 'local' }, get().tabs);
+    const existingTab = existingSessionId
+      ? (get().tabs.find((tab) => tab.sessionId === existingSessionId) ?? null)
+      : null;
+    const title =
+      existingTab?.title ??
+      buildSessionTitle("Terminal", { source: "local" }, get().tabs);
     const tab = createPendingSessionTab({
       sessionId,
-      source: 'local',
+      source: "local",
       hostId: null,
       title,
-      progress
+      progress,
     });
 
     set((state) => {
       const nextAttempts = [
-        ...state.pendingConnectionAttempts.filter((attempt) => attempt.sessionId !== sessionId),
+        ...state.pendingConnectionAttempts.filter(
+          (attempt) => attempt.sessionId !== sessionId,
+        ),
         {
           sessionId,
-          source: 'local' as const,
+          source: "local" as const,
           hostId: null,
           title,
           latestCols: cols,
-          latestRows: rows
-        }
+          latestRows: rows,
+        },
       ];
 
       if (existingTab) {
         return {
-          tabs: state.tabs.map((item) => (item.sessionId === sessionId ? tab : item)),
+          tabs: state.tabs.map((item) =>
+            item.sessionId === sessionId ? tab : item,
+          ),
           pendingConnectionAttempts: nextAttempts,
-          ...activateSessionContextInState(state, sessionId)
+          ...activateSessionContextInState(state, sessionId),
         };
       }
 
       return {
-        tabs: [...state.tabs.filter((item) => item.sessionId !== sessionId), tab],
-        tabStrip: [...state.tabStrip.filter((item) => !(item.kind === 'session' && item.sessionId === sessionId)), { kind: 'session', sessionId }],
+        tabs: [
+          ...state.tabs.filter((item) => item.sessionId !== sessionId),
+          tab,
+        ],
+        tabStrip: [
+          ...state.tabStrip.filter(
+            (item) =>
+              !(item.kind === "session" && item.sessionId === sessionId),
+          ),
+          { kind: "session", sessionId },
+        ],
         activeWorkspaceTab: asSessionTabId(sessionId),
-        homeSection: 'hosts',
-        hostDrawer: { mode: 'closed' },
-        pendingConnectionAttempts: nextAttempts
+        homeSection: "hosts",
+        hostDrawer: { mode: "closed" },
+        pendingConnectionAttempts: nextAttempts,
       };
     });
 
@@ -1392,11 +1830,16 @@ export function createAppStore(api: DesktopApi) {
   };
 
   const startPendingSessionConnect = async (
-    set: (next: AppState | Partial<AppState> | ((state: AppState) => AppState | Partial<AppState>)) => void,
+    set: (
+      next:
+        | AppState
+        | Partial<AppState>
+        | ((state: AppState) => AppState | Partial<AppState>),
+    ) => void,
     get: () => AppState,
     sessionId: string,
     hostId: string,
-    secrets?: HostSecretInput
+    secrets?: HostSecretInput,
   ) => {
     const state = get();
     const attempt = findPendingConnectionAttempt(state, sessionId);
@@ -1405,8 +1848,10 @@ export function createAppStore(api: DesktopApi) {
       return;
     }
 
-    const currentProgressStage = state.tabs.find((tab) => tab.sessionId === sessionId)?.connectionProgress?.stage;
-    if (currentProgressStage !== 'retrying-session') {
+    const currentProgressStage = state.tabs.find(
+      (tab) => tab.sessionId === sessionId,
+    )?.connectionProgress?.stage;
+    if (currentProgressStage !== "retrying-session") {
       updateSessionProgress(set, sessionId, resolveConnectingProgress(host));
     }
 
@@ -1416,7 +1861,7 @@ export function createAppStore(api: DesktopApi) {
         title: attempt.title,
         cols: attempt.latestCols,
         rows: attempt.latestRows,
-        secrets
+        secrets,
       });
       const latestAttempt = findPendingConnectionAttempt(get(), sessionId);
       if (!latestAttempt) {
@@ -1425,35 +1870,53 @@ export function createAppStore(api: DesktopApi) {
       }
 
       set((currentState) => ({
-        ...replaceSessionReferencesInState(currentState, sessionId, connection.sessionId, (tab) => ({
-          ...tab,
-          status: 'connecting',
-          errorMessage: undefined,
-          connectionProgress: resolveConnectingProgress(host),
-          hasReceivedOutput: false,
-          lastEventAt: new Date().toISOString()
-        })),
-        pendingConnectionAttempts: currentState.pendingConnectionAttempts.filter((attemptItem) => attemptItem.sessionId !== sessionId)
+        ...replaceSessionReferencesInState(
+          currentState,
+          sessionId,
+          connection.sessionId,
+          (tab) => ({
+            ...tab,
+            status: "connecting",
+            errorMessage: undefined,
+            connectionProgress: resolveConnectingProgress(host),
+            hasReceivedOutput: false,
+            lastEventAt: new Date().toISOString(),
+          }),
+        ),
+        pendingConnectionAttempts:
+          currentState.pendingConnectionAttempts.filter(
+            (attemptItem) => attemptItem.sessionId !== sessionId,
+          ),
       }));
     } catch (error) {
-      const message = error instanceof Error ? error.message : '호스트 연결을 시작하지 못했습니다.';
+      const message =
+        error instanceof Error
+          ? error.message
+          : "호스트 연결을 시작하지 못했습니다.";
       markSessionError(set, sessionId, message);
     }
   };
 
   const startPendingLocalSessionConnect = async (
-    set: (next: AppState | Partial<AppState> | ((state: AppState) => AppState | Partial<AppState>)) => void,
+    set: (
+      next:
+        | AppState
+        | Partial<AppState>
+        | ((state: AppState) => AppState | Partial<AppState>),
+    ) => void,
     get: () => AppState,
-    sessionId: string
+    sessionId: string,
   ) => {
     const state = get();
     const attempt = findPendingConnectionAttempt(state, sessionId);
-    if (!attempt || attempt.source !== 'local') {
+    if (!attempt || attempt.source !== "local") {
       return;
     }
 
-    const currentProgressStage = state.tabs.find((tab) => tab.sessionId === sessionId)?.connectionProgress?.stage;
-    if (currentProgressStage !== 'retrying-session') {
+    const currentProgressStage = state.tabs.find(
+      (tab) => tab.sessionId === sessionId,
+    )?.connectionProgress?.stage;
+    if (currentProgressStage !== "retrying-session") {
       updateSessionProgress(set, sessionId, resolveLocalStartingProgress());
     }
 
@@ -1461,7 +1924,7 @@ export function createAppStore(api: DesktopApi) {
       const connection = await api.ssh.connectLocal({
         title: attempt.title,
         cols: attempt.latestCols,
-        rows: attempt.latestRows
+        rows: attempt.latestRows,
       });
       const latestAttempt = findPendingConnectionAttempt(get(), sessionId);
       if (!latestAttempt) {
@@ -1470,32 +1933,48 @@ export function createAppStore(api: DesktopApi) {
       }
 
       set((currentState) => ({
-        ...replaceSessionReferencesInState(currentState, sessionId, connection.sessionId, (tab) => ({
-          ...tab,
-          source: 'local',
-          hostId: null,
-          status: 'connecting',
-          errorMessage: undefined,
-          connectionProgress: resolveLocalStartingProgress(),
-          hasReceivedOutput: false,
-          lastEventAt: new Date().toISOString()
-        })),
-        pendingConnectionAttempts: currentState.pendingConnectionAttempts.filter((attemptItem) => attemptItem.sessionId !== sessionId)
+        ...replaceSessionReferencesInState(
+          currentState,
+          sessionId,
+          connection.sessionId,
+          (tab) => ({
+            ...tab,
+            source: "local",
+            hostId: null,
+            status: "connecting",
+            errorMessage: undefined,
+            connectionProgress: resolveLocalStartingProgress(),
+            hasReceivedOutput: false,
+            lastEventAt: new Date().toISOString(),
+          }),
+        ),
+        pendingConnectionAttempts:
+          currentState.pendingConnectionAttempts.filter(
+            (attemptItem) => attemptItem.sessionId !== sessionId,
+          ),
       }));
     } catch (error) {
-      const message = error instanceof Error ? error.message : '로컬 터미널을 시작하지 못했습니다.';
+      const message =
+        error instanceof Error
+          ? error.message
+          : "로컬 터미널을 시작하지 못했습니다.";
       markSessionError(set, sessionId, message);
     }
   };
 
   const startSessionConnectionFlow = async (
-    set: (next: AppState | Partial<AppState> | ((state: AppState) => AppState | Partial<AppState>)) => void,
+    set: (
+      next:
+        | AppState
+        | Partial<AppState>
+        | ((state: AppState) => AppState | Partial<AppState>),
+    ) => void,
     get: () => AppState,
     hostId: string,
     cols: number,
     rows: number,
     secrets?: HostSecretInput,
-    reuseSessionId?: string
+    reuseSessionId?: string,
   ) => {
     const host = get().hosts.find((item) => item.id === hostId);
     if (!host) {
@@ -1503,9 +1982,20 @@ export function createAppStore(api: DesktopApi) {
     }
 
     const initialProgress = isAwsEc2HostRecord(host)
-      ? createConnectionProgress('checking-profile', `${host.awsProfileName} 프로필 인증 상태를 확인하는 중입니다.`)
+      ? createConnectionProgress(
+          "checking-profile",
+          `${host.awsProfileName} 프로필 인증 상태를 확인하는 중입니다.`,
+        )
       : resolveHostKeyCheckProgress(host);
-    const sessionId = createPendingSessionTabForHost(set, get, host, cols, rows, initialProgress, reuseSessionId);
+    const sessionId = createPendingSessionTabForHost(
+      set,
+      get,
+      host,
+      cols,
+      rows,
+      initialProgress,
+      reuseSessionId,
+    );
 
     try {
       if (isAwsEc2HostRecord(host)) {
@@ -1515,7 +2005,10 @@ export function createAppStore(api: DesktopApi) {
         updateSessionProgress(
           set,
           sessionId,
-          createConnectionProgress('retrying-session', `${host.label} SSM 연결을 다시 시도하는 중입니다.`)
+          createConnectionProgress(
+            "retrying-session",
+            `${host.label} SSM 연결을 다시 시도하는 중입니다.`,
+          ),
         );
         await startPendingSessionConnect(set, get, sessionId, host.id, secrets);
         return;
@@ -1525,15 +2018,19 @@ export function createAppStore(api: DesktopApi) {
         hostId,
         sessionId,
         action: {
-          kind: 'ssh',
+          kind: "ssh",
           hostId,
           cols,
           rows,
-          secrets
-        }
+          secrets,
+        },
       });
       if (!trusted) {
-        updateSessionProgress(set, sessionId, resolveAwaitingHostTrustProgress(host));
+        updateSessionProgress(
+          set,
+          sessionId,
+          resolveAwaitingHostTrustProgress(host),
+        );
         return;
       }
 
@@ -1542,63 +2039,97 @@ export function createAppStore(api: DesktopApi) {
       const message =
         error instanceof Error
           ? error.message
-          : '호스트 연결을 시작하지 못했습니다. AWS SSM 연결에는 session-manager-plugin이 필요할 수 있습니다.';
+          : "호스트 연결을 시작하지 못했습니다. AWS SSM 연결에는 session-manager-plugin이 필요할 수 있습니다.";
       markSessionError(set, sessionId, message);
     }
   };
 
   const startLocalTerminalFlow = async (
-    set: (next: AppState | Partial<AppState> | ((state: AppState) => AppState | Partial<AppState>)) => void,
+    set: (
+      next:
+        | AppState
+        | Partial<AppState>
+        | ((state: AppState) => AppState | Partial<AppState>),
+    ) => void,
     get: () => AppState,
     cols: number,
     rows: number,
-    reuseSessionId?: string
+    reuseSessionId?: string,
   ) => {
-    const sessionId = createPendingSessionTabForLocal(set, get, cols, rows, resolveLocalStartingProgress(), reuseSessionId);
+    const sessionId = createPendingSessionTabForLocal(
+      set,
+      get,
+      cols,
+      rows,
+      resolveLocalStartingProgress(),
+      reuseSessionId,
+    );
 
     try {
       await startPendingLocalSessionConnect(set, get, sessionId);
     } catch (error) {
-      const message = error instanceof Error ? error.message : '로컬 터미널을 시작하지 못했습니다.';
+      const message =
+        error instanceof Error
+          ? error.message
+          : "로컬 터미널을 시작하지 못했습니다.";
       markSessionError(set, sessionId, message);
     }
   };
 
   const syncOperationalData = async (
-    set: (next: AppState | Partial<AppState> | ((state: AppState) => AppState | Partial<AppState>)) => void
+    set: (
+      next:
+        | AppState
+        | Partial<AppState>
+        | ((state: AppState) => AppState | Partial<AppState>),
+    ) => void,
   ) => {
-    const [snapshot, knownHosts, activityLogs, keychainEntries] = await Promise.all([
-      api.portForwards.list(),
-      api.knownHosts.list(),
-      api.logs.list(),
-      api.keychain.list()
-    ]);
+    const [snapshot, knownHosts, activityLogs, keychainEntries] =
+      await Promise.all([
+        api.portForwards.list(),
+        api.knownHosts.list(),
+        api.logs.list(),
+        api.keychain.list(),
+      ]);
 
     set({
       portForwards: sortPortForwards(snapshot.rules),
       portForwardRuntimes: snapshot.runtimes,
       knownHosts: sortKnownHosts(knownHosts),
       activityLogs: sortLogs(activityLogs),
-      keychainEntries: sortKeychainEntries(keychainEntries)
+      keychainEntries: sortKeychainEntries(keychainEntries),
     });
   };
 
   const refreshHostAndKeychainState = async (
-    set: (next: AppState | Partial<AppState> | ((state: AppState) => AppState | Partial<AppState>)) => void
+    set: (
+      next:
+        | AppState
+        | Partial<AppState>
+        | ((state: AppState) => AppState | Partial<AppState>),
+    ) => void,
   ) => {
-    const [hosts, keychainEntries] = await Promise.all([api.hosts.list(), api.keychain.list()]);
+    const [hosts, keychainEntries] = await Promise.all([
+      api.hosts.list(),
+      api.keychain.list(),
+    ]);
     set({
       hosts: sortHosts(hosts),
-      keychainEntries: sortKeychainEntries(keychainEntries)
+      keychainEntries: sortKeychainEntries(keychainEntries),
     });
   };
 
   const loadPaneListing = async (
-    set: (next: AppState | Partial<AppState> | ((state: AppState) => AppState | Partial<AppState>)) => void,
+    set: (
+      next:
+        | AppState
+        | Partial<AppState>
+        | ((state: AppState) => AppState | Partial<AppState>),
+    ) => void,
     get: () => AppState,
     paneId: SftpPaneId,
     targetPath: string,
-    options: { pushToHistory: boolean }
+    options: { pushToHistory: boolean },
   ) => {
     const pane = getPane(get(), paneId);
 
@@ -1607,28 +2138,39 @@ export function createAppStore(api: DesktopApi) {
         ...pane,
         isLoading: true,
         errorMessage: undefined,
-        warningMessages: []
-      })
+        warningMessages: [],
+      }),
     }));
 
     try {
       const listing =
-        pane.sourceKind === 'local'
+        pane.sourceKind === "local"
           ? await api.files.list(targetPath)
           : await api.sftp.list({
-              endpointId: pane.endpoint?.id ?? '',
-              path: targetPath
+              endpointId: pane.endpoint?.id ?? "",
+              path: targetPath,
             });
 
       set((state) => {
         const latestPane = getPane(state, paneId);
-        const historyPatch = options.pushToHistory ? pushHistory(latestPane, listing.path) : { history: latestPane.history, historyIndex: latestPane.historyIndex };
-        const preserveSelection = !options.pushToHistory && latestPane.currentPath === listing.path;
-        const availablePaths = new Set(listing.entries.map((entry) => entry.path));
+        const historyPatch = options.pushToHistory
+          ? pushHistory(latestPane, listing.path)
+          : {
+              history: latestPane.history,
+              historyIndex: latestPane.historyIndex,
+            };
+        const preserveSelection =
+          !options.pushToHistory && latestPane.currentPath === listing.path;
+        const availablePaths = new Set(
+          listing.entries.map((entry) => entry.path),
+        );
         const selectedPaths = preserveSelection
-          ? latestPane.selectedPaths.filter((entryPath) => availablePaths.has(entryPath))
+          ? latestPane.selectedPaths.filter((entryPath) =>
+              availablePaths.has(entryPath),
+            )
           : [];
-        const nextFilterQuery = latestPane.currentPath === listing.path ? latestPane.filterQuery : '';
+        const nextFilterQuery =
+          latestPane.currentPath === listing.path ? latestPane.filterQuery : "";
         const selectionAnchorPath =
           preserveSelection &&
           latestPane.selectionAnchorPath &&
@@ -1638,26 +2180,30 @@ export function createAppStore(api: DesktopApi) {
         const nextPane: SftpPaneState = {
           ...latestPane,
           currentPath: listing.path,
-          lastLocalPath: latestPane.sourceKind === 'local' ? listing.path : latestPane.lastLocalPath,
+          lastLocalPath:
+            latestPane.sourceKind === "local"
+              ? listing.path
+              : latestPane.lastLocalPath,
           entries: listing.entries,
           selectedPaths,
           selectionAnchorPath,
           filterQuery: nextFilterQuery,
           isLoading: false,
+          connectingHostId: null,
           errorMessage: undefined,
           warningMessages: listing.warnings ?? [],
           ...historyPatch,
           endpoint:
-            latestPane.sourceKind === 'host' && latestPane.endpoint
+            latestPane.sourceKind === "host" && latestPane.endpoint
               ? {
                   ...latestPane.endpoint,
-                  path: listing.path
+                  path: listing.path,
                 }
-              : latestPane.endpoint
+              : latestPane.endpoint,
         };
 
         return {
-          sftp: updatePaneState(state, paneId, nextPane)
+          sftp: updatePaneState(state, paneId, nextPane),
         };
       });
     } catch (error) {
@@ -1665,15 +2211,24 @@ export function createAppStore(api: DesktopApi) {
         sftp: updatePaneState(state, paneId, {
           ...getPane(state, paneId),
           isLoading: false,
-          errorMessage: error instanceof Error ? error.message : 'SFTP 목록을 읽지 못했습니다.',
-          warningMessages: []
-        })
+          connectingHostId: null,
+          errorMessage:
+            error instanceof Error
+              ? error.message
+              : "SFTP 목록을 읽지 못했습니다.",
+          warningMessages: [],
+        }),
       }));
     }
   };
 
   const setSftpPaneWarnings = (
-    set: (next: AppState | Partial<AppState> | ((state: AppState) => AppState | Partial<AppState>)) => void,
+    set: (
+      next:
+        | AppState
+        | Partial<AppState>
+        | ((state: AppState) => AppState | Partial<AppState>),
+    ) => void,
     paneId: SftpPaneId,
     warnings: string[],
   ) => {
@@ -1706,7 +2261,12 @@ export function createAppStore(api: DesktopApi) {
   };
 
   const startSftpTransferForItems = async (
-    set: (next: AppState | Partial<AppState> | ((state: AppState) => AppState | Partial<AppState>)) => void,
+    set: (
+      next:
+        | AppState
+        | Partial<AppState>
+        | ((state: AppState) => AppState | Partial<AppState>),
+    ) => void,
     input: {
       sourcePane: SftpPaneState;
       targetPane: SftpPaneState;
@@ -1718,8 +2278,14 @@ export function createAppStore(api: DesktopApi) {
       return;
     }
 
-    const source = buildSftpTransferEndpoint(input.sourcePane, input.sourcePane.currentPath);
-    const target = buildSftpTransferEndpoint(input.targetPane, input.targetPath);
+    const source = buildSftpTransferEndpoint(
+      input.sourcePane,
+      input.sourcePane.currentPath,
+    );
+    const target = buildSftpTransferEndpoint(
+      input.targetPane,
+      input.targetPath,
+    );
     if (!source || !target) {
       return;
     }
@@ -1790,9 +2356,13 @@ export function createAppStore(api: DesktopApi) {
         listing = await api.files.list(parent);
         listingCache.set(cacheKey, listing);
       }
-      const matched = listing.entries.find((entry) => entry.path === targetPath);
+      const matched = listing.entries.find(
+        (entry) => entry.path === targetPath,
+      );
       if (!matched) {
-        warnings.push(`${basenameFromPath(targetPath)} 항목을 읽지 못했습니다.`);
+        warnings.push(
+          `${basenameFromPath(targetPath)} 항목을 읽지 못했습니다.`,
+        );
         continue;
       }
       items.push(matched);
@@ -1804,81 +2374,101 @@ export function createAppStore(api: DesktopApi) {
   const runTrustedAction = async (
     get: () => AppState,
     sessionId: string | null,
-    action: PendingHostKeyPrompt['action'],
-    set: (next: AppState | Partial<AppState> | ((state: AppState) => AppState | Partial<AppState>)) => void
+    action: PendingHostKeyPrompt["action"],
+    set: (
+      next:
+        | AppState
+        | Partial<AppState>
+        | ((state: AppState) => AppState | Partial<AppState>),
+    ) => void,
   ) => {
-    if (action.kind === 'ssh') {
+    if (action.kind === "ssh") {
       if (!sessionId) {
         return;
       }
-      await startPendingSessionConnect(set, get, sessionId, action.hostId, action.secrets);
+      await startPendingSessionConnect(
+        set,
+        get,
+        sessionId,
+        action.hostId,
+        action.secrets,
+      );
       return;
     }
 
-    if (action.kind === 'sftp') {
+    if (action.kind === "sftp") {
       const pane = getPane(get(), action.paneId);
       if (pane.endpoint) {
         await api.sftp.disconnect(pane.endpoint.id);
       }
-        set((state) => ({
-          activeWorkspaceTab: 'sftp',
-          sftp: updatePaneState(state, action.paneId, {
-            ...getPane(state, action.paneId),
-            sourceKind: 'host',
-            endpoint: null,
-            entries: [],
-            isLoading: true,
-            errorMessage: undefined,
-            selectedPaths: [],
-            selectionAnchorPath: null,
-            selectedHostId: action.hostId
-          })
-        }));
+      set((state) => ({
+        activeWorkspaceTab: "sftp",
+        sftp: updatePaneState(state, action.paneId, {
+          ...getPane(state, action.paneId),
+          sourceKind: "host",
+          endpoint: null,
+          connectingHostId: action.hostId,
+          entries: [],
+          isLoading: true,
+          errorMessage: undefined,
+          selectedPaths: [],
+          selectionAnchorPath: null,
+          selectedHostId: action.hostId,
+        }),
+      }));
       try {
-        const endpoint = await api.sftp.connect({ hostId: action.hostId, secrets: action.secrets });
+        const endpoint = await api.sftp.connect({
+          hostId: action.hostId,
+          secrets: action.secrets,
+        });
         set((state) => ({
           sftp: updatePaneState(state, action.paneId, {
             ...getPane(state, action.paneId),
-            sourceKind: 'host',
+            sourceKind: "host",
             endpoint,
+            connectingHostId: action.hostId,
             currentPath: endpoint.path,
             history: [endpoint.path],
             historyIndex: 0,
             selectedPaths: [],
             selectionAnchorPath: null,
             errorMessage: undefined,
-            warningMessages: []
-          })
+            warningMessages: [],
+          }),
         }));
-        await loadPaneListing(set, get, action.paneId, endpoint.path, { pushToHistory: false });
+        await loadPaneListing(set, get, action.paneId, endpoint.path, {
+          pushToHistory: false,
+        });
         if (hasProvidedSecrets(action.secrets)) {
           await refreshHostAndKeychainState(set);
         }
       } catch (error) {
         const host = get().hosts.find((item) => item.id === action.hostId);
-        const message = error instanceof Error ? error.message : 'SFTP 연결에 실패했습니다.';
+        const message =
+          error instanceof Error ? error.message : "SFTP 연결에 실패했습니다.";
         const credentialKind = resolveCredentialRetryKind(host, message);
         if (credentialKind) {
           set({
             pendingCredentialRetry: {
               hostId: action.hostId,
-              source: 'sftp',
+              source: "sftp",
               credentialKind,
               paneId: action.paneId,
-              message
-            }
+              message,
+            },
           });
         }
         set((state) => ({
           sftp: updatePaneState(state, action.paneId, {
             ...getPane(state, action.paneId),
-            sourceKind: 'host',
+            sourceKind: "host",
             endpoint: null,
+            connectingHostId: null,
             entries: [],
             isLoading: false,
             errorMessage: credentialKind ? undefined : message,
-            warningMessages: []
-          })
+            warningMessages: [],
+          }),
         }));
       }
       return;
@@ -1887,8 +2477,11 @@ export function createAppStore(api: DesktopApi) {
     try {
       const runtime = await api.portForwards.start(action.ruleId);
       set((state) => ({
-        homeSection: 'portForwarding',
-        portForwardRuntimes: upsertForwardRuntime(state.portForwardRuntimes, runtime)
+        homeSection: "portForwarding",
+        portForwardRuntimes: upsertForwardRuntime(
+          state.portForwardRuntimes,
+          runtime,
+        ),
       }));
     } catch {
       // 시작 실패는 main/core가 런타임 에러 이벤트와 활동 로그로 전달하므로 여기서는 중복 예외를 올리지 않는다.
@@ -1896,19 +2489,28 @@ export function createAppStore(api: DesktopApi) {
   };
 
   const ensureTrustedHost = async (
-    set: (next: AppState | Partial<AppState> | ((state: AppState) => AppState | Partial<AppState>)) => void,
-    input: { hostId: string; sessionId?: string | null; action: PendingHostKeyPrompt['action'] }
+    set: (
+      next:
+        | AppState
+        | Partial<AppState>
+        | ((state: AppState) => AppState | Partial<AppState>),
+    ) => void,
+    input: {
+      hostId: string;
+      sessionId?: string | null;
+      action: PendingHostKeyPrompt["action"];
+    },
   ): Promise<boolean> => {
     const probe = await api.knownHosts.probeHost({ hostId: input.hostId });
-    if (probe.status === 'trusted') {
+    if (probe.status === "trusted") {
       return true;
     }
     set({
       pendingHostKeyPrompt: {
         sessionId: input.sessionId ?? null,
         probe,
-        action: input.action
-      }
+        action: input.action,
+      },
     });
     return false;
   };
@@ -1925,12 +2527,12 @@ export function createAppStore(api: DesktopApi) {
       knownHosts: [],
       activityLogs: [],
       keychainEntries: [],
-      activeWorkspaceTab: 'home',
-      homeSection: 'hosts',
-      settingsSection: 'general',
-      hostDrawer: { mode: 'closed' },
+      activeWorkspaceTab: "home",
+      homeSection: "hosts",
+      settingsSection: "general",
+      hostDrawer: { mode: "closed" },
       currentGroupPath: null,
-      searchQuery: '',
+      searchQuery: "",
       selectedHostTags: [],
       settings: defaultSettings,
       isReady: false,
@@ -1943,58 +2545,82 @@ export function createAppStore(api: DesktopApi) {
       toggleHostTag: (tag) =>
         set((state) => {
           const key = normalizeTagValue(tag);
-          const alreadySelected = state.selectedHostTags.some((value) => normalizeTagValue(value) === key);
+          const alreadySelected = state.selectedHostTags.some(
+            (value) => normalizeTagValue(value) === key,
+          );
           return {
             selectedHostTags: alreadySelected
-              ? state.selectedHostTags.filter((value) => normalizeTagValue(value) !== key)
-              : [...state.selectedHostTags, tag]
+              ? state.selectedHostTags.filter(
+                  (value) => normalizeTagValue(value) !== key,
+                )
+              : [...state.selectedHostTags, tag],
           };
         }),
       clearHostTagFilter: () => set({ selectedHostTags: [] }),
-      activateHome: () => set({ activeWorkspaceTab: 'home' }),
-      activateSftp: () => set({ activeWorkspaceTab: 'sftp' }),
-      activateSession: (sessionId) => set({ activeWorkspaceTab: asSessionTabId(sessionId) }),
-      activateWorkspace: (workspaceId) => set({ activeWorkspaceTab: asWorkspaceTabId(workspaceId) }),
+      activateHome: () => set({ activeWorkspaceTab: "home" }),
+      activateSftp: () => set({ activeWorkspaceTab: "sftp" }),
+      activateSession: (sessionId) =>
+        set({ activeWorkspaceTab: asSessionTabId(sessionId) }),
+      activateWorkspace: (workspaceId) =>
+        set({ activeWorkspaceTab: asWorkspaceTabId(workspaceId) }),
       openHomeSection: (section) =>
         set((state) => {
           const nextSection = normalizeHomeSectionInput(section);
           return {
-            activeWorkspaceTab: 'home',
+            activeWorkspaceTab: "home",
             homeSection: nextSection.homeSection,
             settingsSection:
-              nextSection.homeSection === 'settings' ? (nextSection.settingsSection ?? state.settingsSection) : state.settingsSection,
-            hostDrawer: nextSection.homeSection === 'hosts' ? get().hostDrawer : { mode: 'closed' }
+              nextSection.homeSection === "settings"
+                ? (nextSection.settingsSection ?? state.settingsSection)
+                : state.settingsSection,
+            hostDrawer:
+              nextSection.homeSection === "hosts"
+                ? get().hostDrawer
+                : { mode: "closed" },
           };
         }),
       openSettingsSection: (section) =>
         set({
-          activeWorkspaceTab: 'home',
-          homeSection: 'settings',
+          activeWorkspaceTab: "home",
+          homeSection: "settings",
           settingsSection: section,
-          hostDrawer: { mode: 'closed' }
+          hostDrawer: { mode: "closed" },
         }),
       openCreateHostDrawer: () =>
         set({
-          activeWorkspaceTab: 'home',
-          homeSection: 'hosts',
-          hostDrawer: { mode: 'create', defaultGroupPath: get().currentGroupPath }
+          activeWorkspaceTab: "home",
+          homeSection: "hosts",
+          hostDrawer: {
+            mode: "create",
+            defaultGroupPath: get().currentGroupPath,
+          },
         }),
       openEditHostDrawer: (hostId) =>
         set({
-          activeWorkspaceTab: 'home',
-          homeSection: 'hosts',
-          hostDrawer: { mode: 'edit', hostId }
+          activeWorkspaceTab: "home",
+          homeSection: "hosts",
+          hostDrawer: { mode: "edit", hostId },
         }),
-      closeHostDrawer: () => set({ hostDrawer: { mode: 'closed' } }),
+      closeHostDrawer: () => set({ hostDrawer: { mode: "closed" } }),
       navigateGroup: (path) =>
         set({
-          activeWorkspaceTab: 'home',
-          homeSection: 'hosts',
+          activeWorkspaceTab: "home",
+          homeSection: "hosts",
           currentGroupPath: normalizeGroupPath(path),
-          hostDrawer: { mode: 'closed' }
+          hostDrawer: { mode: "closed" },
         }),
       bootstrap: async () => {
-        const [hosts, groups, tabs, settings, localHomePath, snapshot, knownHosts, activityLogs, keychainEntries] = await Promise.all([
+        const [
+          hosts,
+          groups,
+          tabs,
+          settings,
+          localHomePath,
+          snapshot,
+          knownHosts,
+          activityLogs,
+          keychainEntries,
+        ] = await Promise.all([
           api.hosts.list(),
           api.groups.list(),
           api.tabs.list(),
@@ -2003,7 +2629,7 @@ export function createAppStore(api: DesktopApi) {
           api.portForwards.list(),
           api.knownHosts.list(),
           api.logs.list(),
-          api.keychain.list()
+          api.keychain.list(),
         ]);
         const localListing = await api.files.list(localHomePath);
         set({
@@ -2012,19 +2638,25 @@ export function createAppStore(api: DesktopApi) {
           tabs: tabs.map((tab) => ({
             ...tab,
             sessionShare: normalizeSessionShareState(tab.sessionShare),
-            hasReceivedOutput: tab.status === 'connected' ? true : (tab.hasReceivedOutput ?? false)
+            hasReceivedOutput:
+              tab.status === "connected"
+                ? true
+                : (tab.hasReceivedOutput ?? false),
           })),
           workspaces: [],
-          tabStrip: tabs.map((tab) => ({ kind: 'session' as const, sessionId: tab.sessionId })),
+          tabStrip: tabs.map((tab) => ({
+            kind: "session" as const,
+            sessionId: tab.sessionId,
+          })),
           portForwards: sortPortForwards(snapshot.rules),
           portForwardRuntimes: snapshot.runtimes,
           knownHosts: sortKnownHosts(knownHosts),
           activityLogs: sortLogs(activityLogs),
           keychainEntries: sortKeychainEntries(keychainEntries),
-          activeWorkspaceTab: 'home',
-          homeSection: 'hosts',
-          settingsSection: 'general',
-          hostDrawer: { mode: 'closed' },
+          activeWorkspaceTab: "home",
+          homeSection: "hosts",
+          settingsSection: "general",
+          hostDrawer: { mode: "closed" },
           currentGroupPath: null,
           selectedHostTags: [],
           settings,
@@ -2036,36 +2668,43 @@ export function createAppStore(api: DesktopApi) {
           sftp: {
             localHomePath,
             leftPane: {
-              ...createEmptyPane('left'),
-              sourceKind: 'local',
+              ...createEmptyPane("left"),
+              sourceKind: "local",
               currentPath: localListing.path,
               lastLocalPath: localListing.path,
               history: [localListing.path],
               historyIndex: 0,
               entries: localListing.entries,
-              warningMessages: localListing.warnings ?? []
+              warningMessages: localListing.warnings ?? [],
             },
-            rightPane: createEmptyPane('right'),
+            rightPane: createEmptyPane("right"),
             transfers: [],
-            pendingConflictDialog: null
-          }
+            pendingConflictDialog: null,
+          },
         });
       },
       refreshOperationalData: async () => {
         await syncOperationalData(set);
       },
       refreshHostCatalog: async () => {
-        const [nextHosts, nextGroups, nextKeychainEntries] = await Promise.all([api.hosts.list(), api.groups.list(), api.keychain.list()]);
+        const [nextHosts, nextGroups, nextKeychainEntries] = await Promise.all([
+          api.hosts.list(),
+          api.groups.list(),
+          api.keychain.list(),
+        ]);
         set({
           hosts: sortHosts(nextHosts),
           groups: sortGroups(nextGroups),
-          keychainEntries: sortKeychainEntries(nextKeychainEntries)
+          keychainEntries: sortKeychainEntries(nextKeychainEntries),
         });
       },
       createGroup: async (name) => {
         const next = await api.groups.create(name, get().currentGroupPath);
         set((state) => ({
-          groups: sortGroups([...state.groups.filter((group) => group.id !== next.id), next])
+          groups: sortGroups([
+            ...state.groups.filter((group) => group.id !== next.id),
+            next,
+          ]),
         }));
       },
       removeGroup: async (path, mode) => {
@@ -2073,14 +2712,23 @@ export function createAppStore(api: DesktopApi) {
         set((state) => ({
           groups: sortGroups(result.groups),
           hosts: sortHosts(result.hosts),
-          currentGroupPath: resolveCurrentGroupPathAfterGroupRemoval(state.currentGroupPath, path, mode)
+          currentGroupPath: resolveCurrentGroupPathAfterGroupRemoval(
+            state.currentGroupPath,
+            path,
+            mode,
+          ),
         }));
       },
       saveHost: async (hostId, draft, secrets) => {
-        const next = hostId ? await api.hosts.update(hostId, draft, secrets) : await api.hosts.create(draft, secrets);
+        const next = hostId
+          ? await api.hosts.update(hostId, draft, secrets)
+          : await api.hosts.create(draft, secrets);
         set({
-          hosts: sortHosts([...get().hosts.filter((host) => host.id !== next.id), next]),
-          hostDrawer: { mode: 'edit', hostId: next.id }
+          hosts: sortHosts([
+            ...get().hosts.filter((host) => host.id !== next.id),
+            next,
+          ]),
+          hostDrawer: { mode: "edit", hostId: next.id },
         });
         await refreshHostAndKeychainState(set);
         await syncOperationalData(set);
@@ -2095,7 +2743,7 @@ export function createAppStore(api: DesktopApi) {
           hostId,
           isAwsEc2HostRecord(current)
             ? {
-                kind: 'aws-ec2',
+                kind: "aws-ec2",
                 label: current.label,
                 groupName: groupPath,
                 tags: current.tags ?? [],
@@ -2106,11 +2754,11 @@ export function createAppStore(api: DesktopApi) {
                 awsInstanceName: current.awsInstanceName ?? null,
                 awsPlatform: current.awsPlatform ?? null,
                 awsPrivateIp: current.awsPrivateIp ?? null,
-                awsState: current.awsState ?? null
+                awsState: current.awsState ?? null,
               }
             : isWarpgateSshHostRecord(current)
               ? {
-                  kind: 'warpgate-ssh',
+                  kind: "warpgate-ssh",
                   label: current.label,
                   groupName: groupPath,
                   tags: current.tags ?? [],
@@ -2120,25 +2768,28 @@ export function createAppStore(api: DesktopApi) {
                   warpgateSshPort: current.warpgateSshPort,
                   warpgateTargetId: current.warpgateTargetId,
                   warpgateTargetName: current.warpgateTargetName,
-                  warpgateUsername: current.warpgateUsername
+                  warpgateUsername: current.warpgateUsername,
                 }
-            : {
-                kind: 'ssh',
-                label: current.label,
-                hostname: current.hostname,
-                port: current.port,
-                username: current.username,
-                authType: current.authType,
-                privateKeyPath: current.privateKeyPath ?? null,
-                secretRef: current.secretRef ?? null,
-                groupName: groupPath,
-                tags: current.tags ?? [],
-                terminalThemeId: current.terminalThemeId ?? null
-              }
+              : {
+                  kind: "ssh",
+                  label: current.label,
+                  hostname: current.hostname,
+                  port: current.port,
+                  username: current.username,
+                  authType: current.authType,
+                  privateKeyPath: current.privateKeyPath ?? null,
+                  secretRef: current.secretRef ?? null,
+                  groupName: groupPath,
+                  tags: current.tags ?? [],
+                  terminalThemeId: current.terminalThemeId ?? null,
+                },
         );
 
         set((state) => ({
-          hosts: sortHosts([...state.hosts.filter((host) => host.id !== next.id), next])
+          hosts: sortHosts([
+            ...state.hosts.filter((host) => host.id !== next.id),
+            next,
+          ]),
         }));
         await syncOperationalData(set);
       },
@@ -2147,7 +2798,10 @@ export function createAppStore(api: DesktopApi) {
         const currentDrawer = get().hostDrawer;
         set({
           hosts: get().hosts.filter((host) => host.id !== hostId),
-          hostDrawer: currentDrawer.mode === 'edit' && currentDrawer.hostId === hostId ? { mode: 'closed' } : currentDrawer
+          hostDrawer:
+            currentDrawer.mode === "edit" && currentDrawer.hostId === hostId
+              ? { mode: "closed" }
+              : currentDrawer,
         });
         await syncOperationalData(set);
       },
@@ -2159,57 +2813,84 @@ export function createAppStore(api: DesktopApi) {
         if (!host) {
           return;
         }
-        const existingPendingAttempt = findPendingConnectionAttemptByHost(get(), hostId);
+        const existingPendingAttempt = findPendingConnectionAttemptByHost(
+          get(),
+          hostId,
+        );
         if (existingPendingAttempt) {
-          set((state) => activateSessionContextInState(state, existingPendingAttempt.sessionId));
+          set((state) =>
+            activateSessionContextInState(
+              state,
+              existingPendingAttempt.sessionId,
+            ),
+          );
           return;
         }
         await startSessionConnectionFlow(set, get, hostId, cols, rows, secrets);
       },
       retrySessionConnection: async (sessionId, secrets) => {
-        const currentTab = get().tabs.find((tab) => tab.sessionId === sessionId);
+        const currentTab = get().tabs.find(
+          (tab) => tab.sessionId === sessionId,
+        );
         if (!currentTab) {
           return;
         }
 
-        if (currentTab.source === 'local') {
+        if (currentTab.source === "local") {
           const pendingSessionId = createPendingSessionId();
           const currentAttempt = findPendingConnectionAttempt(get(), sessionId);
           const latestCols = currentAttempt?.latestCols ?? 120;
           const latestRows = currentAttempt?.latestRows ?? 32;
 
           set((state) => ({
-            ...replaceSessionReferencesInState(state, sessionId, pendingSessionId, (tab) =>
-              createPendingSessionTab({
-                sessionId: pendingSessionId,
-                source: 'local',
-                hostId: null,
-                title: tab.title,
-                progress: createConnectionProgress('retrying-session', '로컬 터미널을 다시 시작하는 중입니다.')
-              })
+            ...replaceSessionReferencesInState(
+              state,
+              sessionId,
+              pendingSessionId,
+              (tab) =>
+                createPendingSessionTab({
+                  sessionId: pendingSessionId,
+                  source: "local",
+                  hostId: null,
+                  title: tab.title,
+                  progress: createConnectionProgress(
+                    "retrying-session",
+                    "로컬 터미널을 다시 시작하는 중입니다.",
+                  ),
+                }),
             ),
             pendingConnectionAttempts: [
-              ...state.pendingConnectionAttempts.filter((attempt) => attempt.sessionId !== sessionId),
+              ...state.pendingConnectionAttempts.filter(
+                (attempt) => attempt.sessionId !== sessionId,
+              ),
               {
                 sessionId: pendingSessionId,
-                source: 'local' as const,
+                source: "local" as const,
                 hostId: null,
                 title: currentTab.title,
                 latestCols,
-                latestRows
-              }
-            ]
+                latestRows,
+              },
+            ],
           }));
 
           if (!isPendingSessionId(sessionId)) {
             await api.ssh.disconnect(sessionId).catch(() => undefined);
           }
 
-          await startLocalTerminalFlow(set, get, latestCols, latestRows, pendingSessionId);
+          await startLocalTerminalFlow(
+            set,
+            get,
+            latestCols,
+            latestRows,
+            pendingSessionId,
+          );
           return;
         }
 
-        const host = currentTab.hostId ? get().hosts.find((item) => item.id === currentTab.hostId) : null;
+        const host = currentTab.hostId
+          ? get().hosts.find((item) => item.id === currentTab.hostId)
+          : null;
         if (!host) {
           return;
         }
@@ -2220,88 +2901,111 @@ export function createAppStore(api: DesktopApi) {
         const latestRows = currentAttempt?.latestRows ?? 32;
 
         set((state) => ({
-          ...replaceSessionReferencesInState(state, sessionId, pendingSessionId, (tab) =>
-            createPendingSessionTab({
-              sessionId: pendingSessionId,
-              source: 'host',
-              hostId: tab.hostId,
-              title: tab.title,
-              progress: isAwsEc2HostRecord(host)
-                ? createConnectionProgress('checking-profile', `${host.awsProfileName} 프로필 인증 상태를 확인하는 중입니다.`)
-                : resolveHostKeyCheckProgress(host)
-            })
+          ...replaceSessionReferencesInState(
+            state,
+            sessionId,
+            pendingSessionId,
+            (tab) =>
+              createPendingSessionTab({
+                sessionId: pendingSessionId,
+                source: "host",
+                hostId: tab.hostId,
+                title: tab.title,
+                progress: isAwsEc2HostRecord(host)
+                  ? createConnectionProgress(
+                      "checking-profile",
+                      `${host.awsProfileName} 프로필 인증 상태를 확인하는 중입니다.`,
+                    )
+                  : resolveHostKeyCheckProgress(host),
+              }),
           ),
           pendingConnectionAttempts: [
-            ...state.pendingConnectionAttempts.filter((attempt) => attempt.sessionId !== sessionId),
+            ...state.pendingConnectionAttempts.filter(
+              (attempt) => attempt.sessionId !== sessionId,
+            ),
             {
               sessionId: pendingSessionId,
-              source: 'host' as const,
+              source: "host" as const,
               hostId: host.id,
               title: currentTab.title,
               latestCols,
-              latestRows
-            }
-          ]
+              latestRows,
+            },
+          ],
         }));
 
         if (!isPendingSessionId(sessionId)) {
           await api.ssh.disconnect(sessionId).catch(() => undefined);
         }
 
-        await startSessionConnectionFlow(set, get, host.id, latestCols, latestRows, secrets, pendingSessionId);
+        await startSessionConnectionFlow(
+          set,
+          get,
+          host.id,
+          latestCols,
+          latestRows,
+          secrets,
+          pendingSessionId,
+        );
       },
       startSessionShare: async (input) => {
         const { sessionId } = input;
         const tab = get().tabs.find((item) => item.sessionId === sessionId);
-        if (!tab || tab.source !== 'host' || tab.status !== 'connected') {
+        if (!tab || tab.source !== "host" || tab.status !== "connected") {
           return;
         }
 
         set((state) => ({
           tabs: setSessionShareState(state.tabs, sessionId, {
-            status: 'starting',
+            status: "starting",
             shareUrl: tab.sessionShare?.shareUrl ?? null,
             inputEnabled: tab.sessionShare?.inputEnabled ?? false,
             viewerCount: tab.sessionShare?.viewerCount ?? 0,
-            errorMessage: null
-          })
+            errorMessage: null,
+          }),
         }));
 
         const nextState = await api.sessionShares.start(input);
         set((state) => ({
-          tabs: setSessionShareState(state.tabs, sessionId, nextState)
+          tabs: setSessionShareState(state.tabs, sessionId, nextState),
         }));
       },
       updateSessionShareSnapshot: async (input) => {
         const { sessionId } = input;
         const tab = get().tabs.find((item) => item.sessionId === sessionId);
-        if (!tab || tab.sessionShare?.status !== 'active') {
+        if (!tab || tab.sessionShare?.status !== "active") {
           return;
         }
         await api.sessionShares.updateSnapshot(input);
       },
       setSessionShareInputEnabled: async (sessionId, inputEnabled) => {
         const tab = get().tabs.find((item) => item.sessionId === sessionId);
-        if (!tab || tab.sessionShare?.status === 'inactive') {
+        if (!tab || tab.sessionShare?.status === "inactive") {
           return;
         }
         const nextState = await api.sessionShares.setInputEnabled({
           sessionId,
-          inputEnabled
+          inputEnabled,
         });
         set((state) => ({
-          tabs: setSessionShareState(state.tabs, sessionId, nextState)
+          tabs: setSessionShareState(state.tabs, sessionId, nextState),
         }));
       },
       stopSessionShare: async (sessionId) => {
         await api.sessionShares.stop(sessionId);
         set((state) => ({
-          tabs: setSessionShareState(state.tabs, sessionId, createInactiveSessionShareState())
+          tabs: setSessionShareState(
+            state.tabs,
+            sessionId,
+            createInactiveSessionShareState(),
+          ),
         }));
       },
       disconnectTab: async (sessionId) => {
-        const currentShare = get().tabs.find((tab) => tab.sessionId === sessionId)?.sessionShare;
-        if (currentShare && currentShare.status !== 'inactive') {
+        const currentShare = get().tabs.find(
+          (tab) => tab.sessionId === sessionId,
+        )?.sessionShare;
+        if (currentShare && currentShare.status !== "inactive") {
           await api.sessionShares.stop(sessionId).catch(() => undefined);
         }
         if (isPendingSessionId(sessionId)) {
@@ -2309,8 +3013,10 @@ export function createAppStore(api: DesktopApi) {
           return;
         }
 
-        const currentTab = get().tabs.find((tab) => tab.sessionId === sessionId);
-        if (currentTab?.status === 'error') {
+        const currentTab = get().tabs.find(
+          (tab) => tab.sessionId === sessionId,
+        );
+        if (currentTab?.status === "error") {
           await api.ssh.disconnect(sessionId).catch(() => undefined);
           set((state) => removeSessionFromState(state, sessionId));
           return;
@@ -2322,55 +3028,79 @@ export function createAppStore(api: DesktopApi) {
             tab.sessionId === sessionId
               ? {
                   ...tab,
-                  status: 'disconnecting',
-                  lastEventAt: new Date().toISOString()
+                  status: "disconnecting",
+                  lastEventAt: new Date().toISOString(),
                 }
-              : tab
-          )
+              : tab,
+          ),
         }));
       },
       closeWorkspace: async (workspaceId) => {
-        const workspace = get().workspaces.find((item) => item.id === workspaceId);
+        const workspace = get().workspaces.find(
+          (item) => item.id === workspaceId,
+        );
         if (!workspace) {
           return;
         }
 
         const sessionIds = listWorkspaceSessionIds(workspace.layout);
-        await Promise.all(sessionIds.map((sessionId) => api.ssh.disconnect(sessionId)));
+        await Promise.all(
+          sessionIds.map((sessionId) => api.ssh.disconnect(sessionId)),
+        );
         set((state) => {
-          const workspaceIndex = state.tabStrip.findIndex((item) => item.kind === 'workspace' && item.workspaceId === workspaceId);
-          const nextTabStrip = state.tabStrip.filter((item) => !(item.kind === 'workspace' && item.workspaceId === workspaceId));
+          const workspaceIndex = state.tabStrip.findIndex(
+            (item) =>
+              item.kind === "workspace" && item.workspaceId === workspaceId,
+          );
+          const nextTabStrip = state.tabStrip.filter(
+            (item) =>
+              !(item.kind === "workspace" && item.workspaceId === workspaceId),
+          );
           const nextActive =
             state.activeWorkspaceTab === asWorkspaceTabId(workspaceId)
-              ? resolveNextVisibleTab(nextTabStrip, workspaceIndex >= 0 ? workspaceIndex : nextTabStrip.length)
+              ? resolveNextVisibleTab(
+                  nextTabStrip,
+                  workspaceIndex >= 0 ? workspaceIndex : nextTabStrip.length,
+                )
               : state.activeWorkspaceTab;
 
           return {
-            workspaces: state.workspaces.filter((item) => item.id !== workspaceId),
+            workspaces: state.workspaces.filter(
+              (item) => item.id !== workspaceId,
+            ),
             tabStrip: nextTabStrip,
             tabs: state.tabs.map((tab) =>
               sessionIds.includes(tab.sessionId)
                 ? {
                     ...tab,
-                    status: 'disconnecting',
-                    lastEventAt: new Date().toISOString()
+                    status: "disconnecting",
+                    lastEventAt: new Date().toISOString(),
                   }
-                : tab
+                : tab,
             ),
-            activeWorkspaceTab: nextActive
+            activeWorkspaceTab: nextActive,
           };
         });
       },
       splitSessionIntoWorkspace: (sessionId, direction, targetSessionId) => {
         const state = get();
-        const adjacent = resolveAdjacentTarget(state.tabStrip, state.workspaces, sessionId);
+        const adjacent = resolveAdjacentTarget(
+          state.tabStrip,
+          state.workspaces,
+          sessionId,
+        );
         if (!adjacent) {
           return false;
         }
 
-        if (adjacent.kind === 'session') {
-          const currentIndex = state.tabStrip.findIndex((item) => item.kind === 'session' && item.sessionId === sessionId);
-          const adjacentIndex = state.tabStrip.findIndex((item) => item.kind === 'session' && item.sessionId === adjacent.sessionId);
+        if (adjacent.kind === "session") {
+          const currentIndex = state.tabStrip.findIndex(
+            (item) => item.kind === "session" && item.sessionId === sessionId,
+          );
+          const adjacentIndex = state.tabStrip.findIndex(
+            (item) =>
+              item.kind === "session" && item.sessionId === adjacent.sessionId,
+          );
           if (currentIndex < 0 || adjacentIndex < 0) {
             return false;
           }
@@ -2379,39 +3109,57 @@ export function createAppStore(api: DesktopApi) {
           const workspace: WorkspaceTab = {
             id: workspaceId,
             title: buildWorkspaceTitle(state.workspaces),
-            layout: createWorkspaceSplit(adjacent.sessionId, sessionId, direction),
-            activeSessionId: sessionId
+            layout: createWorkspaceSplit(
+              adjacent.sessionId,
+              sessionId,
+              direction,
+            ),
+            activeSessionId: sessionId,
           };
           const nextTabStrip = state.tabStrip.filter(
             (item) =>
               !(
-                item.kind === 'session' &&
-                (item.sessionId === sessionId || item.sessionId === adjacent.sessionId)
-              )
+                item.kind === "session" &&
+                (item.sessionId === sessionId ||
+                  item.sessionId === adjacent.sessionId)
+              ),
           );
           const insertIndex = Math.min(currentIndex, adjacentIndex);
-          nextTabStrip.splice(insertIndex, 0, { kind: 'workspace', workspaceId });
+          nextTabStrip.splice(insertIndex, 0, {
+            kind: "workspace",
+            workspaceId,
+          });
 
           set({
             workspaces: [...state.workspaces, workspace],
             tabStrip: nextTabStrip,
-            activeWorkspaceTab: asWorkspaceTabId(workspaceId)
+            activeWorkspaceTab: asWorkspaceTabId(workspaceId),
           });
           return true;
         }
 
-        const workspace = state.workspaces.find((item) => item.id === adjacent.workspaceId);
+        const workspace = state.workspaces.find(
+          (item) => item.id === adjacent.workspaceId,
+        );
         if (!workspace || countWorkspaceSessions(workspace.layout) >= 4) {
           return false;
         }
 
         const resolvedTargetSessionId =
-          targetSessionId && listWorkspaceSessionIds(workspace.layout).includes(targetSessionId)
+          targetSessionId &&
+          listWorkspaceSessionIds(workspace.layout).includes(targetSessionId)
             ? targetSessionId
-            : listWorkspaceSessionIds(workspace.layout).includes(workspace.activeSessionId)
+            : listWorkspaceSessionIds(workspace.layout).includes(
+                  workspace.activeSessionId,
+                )
               ? workspace.activeSessionId
               : findFirstWorkspaceSessionId(workspace.layout);
-        const nextLayout = insertSessionIntoWorkspaceLayout(workspace.layout, resolvedTargetSessionId, sessionId, direction);
+        const nextLayout = insertSessionIntoWorkspaceLayout(
+          workspace.layout,
+          resolvedTargetSessionId,
+          sessionId,
+          direction,
+        );
         if (!nextLayout.inserted) {
           return false;
         }
@@ -2422,49 +3170,70 @@ export function createAppStore(api: DesktopApi) {
               ? {
                   ...item,
                   layout: nextLayout.layout,
-                  activeSessionId: sessionId
+                  activeSessionId: sessionId,
                 }
-              : item
+              : item,
           ),
-          tabStrip: state.tabStrip.filter((item) => !(item.kind === 'session' && item.sessionId === sessionId)),
-          activeWorkspaceTab: asWorkspaceTabId(workspace.id)
+          tabStrip: state.tabStrip.filter(
+            (item) =>
+              !(item.kind === "session" && item.sessionId === sessionId),
+          ),
+          activeWorkspaceTab: asWorkspaceTabId(workspace.id),
         });
         return true;
       },
       detachSessionFromWorkspace: (workspaceId, sessionId) => {
         const state = get();
-        const workspace = state.workspaces.find((item) => item.id === workspaceId);
+        const workspace = state.workspaces.find(
+          (item) => item.id === workspaceId,
+        );
         if (!workspace) {
           return;
         }
 
-        const workspaceIndex = state.tabStrip.findIndex((item) => item.kind === 'workspace' && item.workspaceId === workspaceId);
-        const reducedLayout = removeSessionFromWorkspaceLayout(workspace.layout, sessionId);
+        const workspaceIndex = state.tabStrip.findIndex(
+          (item) =>
+            item.kind === "workspace" && item.workspaceId === workspaceId,
+        );
+        const reducedLayout = removeSessionFromWorkspaceLayout(
+          workspace.layout,
+          sessionId,
+        );
         if (!reducedLayout) {
           return;
         }
 
-        const insertIndex = workspaceIndex < 0 ? state.tabStrip.length : workspaceIndex + 1;
+        const insertIndex =
+          workspaceIndex < 0 ? state.tabStrip.length : workspaceIndex + 1;
 
-        if (reducedLayout.kind === 'leaf') {
-          const nextTabStrip = state.tabStrip.filter((item) => !(item.kind === 'workspace' && item.workspaceId === workspaceId));
-          nextTabStrip.splice(workspaceIndex >= 0 ? workspaceIndex : nextTabStrip.length, 0, { kind: 'session', sessionId: reducedLayout.sessionId });
+        if (reducedLayout.kind === "leaf") {
+          const nextTabStrip = state.tabStrip.filter(
+            (item) =>
+              !(item.kind === "workspace" && item.workspaceId === workspaceId),
+          );
+          nextTabStrip.splice(
+            workspaceIndex >= 0 ? workspaceIndex : nextTabStrip.length,
+            0,
+            { kind: "session", sessionId: reducedLayout.sessionId },
+          );
           nextTabStrip.splice(
             workspaceIndex >= 0 ? workspaceIndex + 1 : nextTabStrip.length,
             0,
-            { kind: 'session', sessionId }
+            { kind: "session", sessionId },
           );
 
           set({
-            workspaces: state.workspaces.filter((item) => item.id !== workspaceId),
+            workspaces: state.workspaces.filter(
+              (item) => item.id !== workspaceId,
+            ),
             tabStrip: nextTabStrip,
-            activeWorkspaceTab: asSessionTabId(sessionId)
+            activeWorkspaceTab: asSessionTabId(sessionId),
           });
           return;
         }
 
         const nextTabStrip = [...state.tabStrip];
-        nextTabStrip.splice(insertIndex, 0, { kind: 'session', sessionId });
+        nextTabStrip.splice(insertIndex, 0, { kind: "session", sessionId });
         set({
           workspaces: state.workspaces.map((item) =>
             item.id === workspaceId
@@ -2472,50 +3241,71 @@ export function createAppStore(api: DesktopApi) {
                   ...item,
                   layout: reducedLayout,
                   activeSessionId:
-                    item.activeSessionId === sessionId ? findFirstWorkspaceSessionId(reducedLayout) : item.activeSessionId
+                    item.activeSessionId === sessionId
+                      ? findFirstWorkspaceSessionId(reducedLayout)
+                      : item.activeSessionId,
                 }
-              : item
+              : item,
           ),
           tabStrip: nextTabStrip,
-          activeWorkspaceTab: asSessionTabId(sessionId)
+          activeWorkspaceTab: asSessionTabId(sessionId),
         });
       },
       reorderDynamicTab: (source, target, placement) => {
-        if (source.kind === 'session' && target.kind === 'session' && source.sessionId === target.sessionId) {
+        if (
+          source.kind === "session" &&
+          target.kind === "session" &&
+          source.sessionId === target.sessionId
+        ) {
           return;
         }
-        if (source.kind === 'workspace' && target.kind === 'workspace' && source.workspaceId === target.workspaceId) {
+        if (
+          source.kind === "workspace" &&
+          target.kind === "workspace" &&
+          source.workspaceId === target.workspaceId
+        ) {
           return;
         }
 
         set((state) => {
           const sourceIndex = state.tabStrip.findIndex((item) =>
-            source.kind === 'session'
-              ? item.kind === 'session' && item.sessionId === source.sessionId
-              : item.kind === 'workspace' && item.workspaceId === source.workspaceId
+            source.kind === "session"
+              ? item.kind === "session" && item.sessionId === source.sessionId
+              : item.kind === "workspace" &&
+                item.workspaceId === source.workspaceId,
           );
           const targetIndex = state.tabStrip.findIndex((item) =>
-            target.kind === 'session'
-              ? item.kind === 'session' && item.sessionId === target.sessionId
-              : item.kind === 'workspace' && item.workspaceId === target.workspaceId
+            target.kind === "session"
+              ? item.kind === "session" && item.sessionId === target.sessionId
+              : item.kind === "workspace" &&
+                item.workspaceId === target.workspaceId,
           );
-          if (sourceIndex < 0 || targetIndex < 0 || sourceIndex === targetIndex) {
+          if (
+            sourceIndex < 0 ||
+            targetIndex < 0 ||
+            sourceIndex === targetIndex
+          ) {
             return state;
           }
 
           const nextTabStrip = [...state.tabStrip];
           const [moved] = nextTabStrip.splice(sourceIndex, 1);
           const nextTargetIndex = nextTabStrip.findIndex((item) =>
-            target.kind === 'session'
-              ? item.kind === 'session' && item.sessionId === target.sessionId
-              : item.kind === 'workspace' && item.workspaceId === target.workspaceId
+            target.kind === "session"
+              ? item.kind === "session" && item.sessionId === target.sessionId
+              : item.kind === "workspace" &&
+                item.workspaceId === target.workspaceId,
           );
 
           if (nextTargetIndex < 0) {
             return state;
           }
 
-          nextTabStrip.splice(placement === 'after' ? nextTargetIndex + 1 : nextTargetIndex, 0, moved);
+          nextTabStrip.splice(
+            placement === "after" ? nextTargetIndex + 1 : nextTargetIndex,
+            0,
+            moved,
+          );
           return { tabStrip: nextTabStrip };
         });
       },
@@ -2525,11 +3315,11 @@ export function createAppStore(api: DesktopApi) {
             workspace.id === workspaceId
               ? {
                   ...workspace,
-                  activeSessionId: sessionId
+                  activeSessionId: sessionId,
                 }
-              : workspace
+              : workspace,
           ),
-          activeWorkspaceTab: asWorkspaceTabId(workspaceId)
+          activeWorkspaceTab: asWorkspaceTabId(workspaceId),
         }));
       },
       resizeWorkspaceSplit: (workspaceId, splitId, ratio) => {
@@ -2538,10 +3328,14 @@ export function createAppStore(api: DesktopApi) {
             workspace.id === workspaceId
               ? {
                   ...workspace,
-                  layout: updateWorkspaceSplitRatio(workspace.layout, splitId, ratio)
+                  layout: updateWorkspaceSplitRatio(
+                    workspace.layout,
+                    splitId,
+                    ratio,
+                  ),
                 }
-              : workspace
-          )
+              : workspace,
+          ),
         }));
       },
       updateSettings: async (input) => {
@@ -2552,17 +3346,24 @@ export function createAppStore(api: DesktopApi) {
         }
       },
       savePortForward: async (ruleId, draft) => {
-        const next = ruleId ? await api.portForwards.update(ruleId, draft) : await api.portForwards.create(draft);
+        const next = ruleId
+          ? await api.portForwards.update(ruleId, draft)
+          : await api.portForwards.create(draft);
         set((state) => ({
-          homeSection: 'portForwarding',
-          portForwards: sortPortForwards([...state.portForwards.filter((rule) => rule.id !== next.id), next])
+          homeSection: "portForwarding",
+          portForwards: sortPortForwards([
+            ...state.portForwards.filter((rule) => rule.id !== next.id),
+            next,
+          ]),
         }));
       },
       removePortForward: async (ruleId) => {
         await api.portForwards.remove(ruleId);
         set((state) => ({
           portForwards: state.portForwards.filter((rule) => rule.id !== ruleId),
-          portForwardRuntimes: state.portForwardRuntimes.filter((runtime) => runtime.ruleId !== ruleId)
+          portForwardRuntimes: state.portForwardRuntimes.filter(
+            (runtime) => runtime.ruleId !== ruleId,
+          ),
         }));
         await syncOperationalData(set);
       },
@@ -2571,44 +3372,51 @@ export function createAppStore(api: DesktopApi) {
         if (!rule) {
           return;
         }
-        if (rule.transport === 'ssh') {
+        if (rule.transport === "ssh") {
           const trusted = await ensureTrustedHost(set, {
             hostId: rule.hostId,
             action: {
-              kind: 'portForward',
+              kind: "portForward",
               ruleId,
-              hostId: rule.hostId
-            }
+              hostId: rule.hostId,
+            },
           });
           if (!trusted) {
             return;
           }
         }
-        await runTrustedAction(get, null, { kind: 'portForward', ruleId, hostId: rule.hostId }, set);
+        await runTrustedAction(
+          get,
+          null,
+          { kind: "portForward", ruleId, hostId: rule.hostId },
+          set,
+        );
       },
       stopPortForward: async (ruleId) => {
         await api.portForwards.stop(ruleId);
         const rule = get().portForwards.find((item) => item.id === ruleId);
         set((state) => ({
           portForwardRuntimes: upsertForwardRuntime(state.portForwardRuntimes, {
-            ...(state.portForwardRuntimes.find((runtime) => runtime.ruleId === ruleId) ?? {
+            ...(state.portForwardRuntimes.find(
+              (runtime) => runtime.ruleId === ruleId,
+            ) ?? {
               ruleId,
-              hostId: '',
-              transport: rule?.transport ?? 'ssh',
-              mode: 'local',
-              bindAddress: '127.0.0.1',
-              bindPort: 0
+              hostId: "",
+              transport: rule?.transport ?? "ssh",
+              mode: "local",
+              bindAddress: "127.0.0.1",
+              bindPort: 0,
             }),
-            status: 'stopped',
+            status: "stopped",
             updatedAt: new Date().toISOString(),
-            message: undefined
-          })
+            message: undefined,
+          }),
         }));
       },
       removeKnownHost: async (id) => {
         await api.knownHosts.remove(id);
         set((state) => ({
-          knownHosts: state.knownHosts.filter((record) => record.id !== id)
+          knownHosts: state.knownHosts.filter((record) => record.id !== id),
         }));
         await syncOperationalData(set);
       },
@@ -2628,7 +3436,7 @@ export function createAppStore(api: DesktopApi) {
         await api.keychain.cloneForHost({
           hostId,
           sourceSecretRef,
-          secrets
+          secrets,
         });
         await syncOperationalData(set);
       },
@@ -2637,21 +3445,26 @@ export function createAppStore(api: DesktopApi) {
         if (!pending) {
           return;
         }
-        if (mode === 'replace') {
+        if (mode === "replace") {
           await api.knownHosts.replace(toTrustInput(pending.probe));
         } else {
           await api.knownHosts.trust(toTrustInput(pending.probe));
         }
         set({ pendingHostKeyPrompt: null });
         await syncOperationalData(set);
-        await runTrustedAction(get, pending.sessionId ?? null, pending.action, set);
+        await runTrustedAction(
+          get,
+          pending.sessionId ?? null,
+          pending.action,
+          set,
+        );
       },
       dismissPendingHostKeyPrompt: () => {
         const pending = get().pendingHostKeyPrompt;
         if (pending?.sessionId) {
           const message = `${pending.probe.hostLabel} 호스트 키 확인이 취소되었습니다.`;
           markSessionError(set, pending.sessionId, message, {
-            progress: resolveErrorProgress(message)
+            progress: resolveErrorProgress(message),
           });
           set({ pendingHostKeyPrompt: null });
           return;
@@ -2662,9 +3475,9 @@ export function createAppStore(api: DesktopApi) {
         const pending = get().pendingCredentialRetry;
         if (pending?.sessionId) {
           const host = get().hosts.find((item) => item.id === pending.hostId);
-          const message = `${host?.label ?? '세션'} 인증 입력이 취소되었습니다.`;
+          const message = `${host?.label ?? "세션"} 인증 입력이 취소되었습니다.`;
           markSessionError(set, pending.sessionId, message, {
-            progress: resolveErrorProgress(message)
+            progress: resolveErrorProgress(message),
           });
           set({ pendingCredentialRetry: null });
           return;
@@ -2679,7 +3492,7 @@ export function createAppStore(api: DesktopApi) {
         await api.ssh.respondKeyboardInteractive({
           sessionId: pending.sessionId,
           challengeId,
-          responses
+          responses,
         });
       },
       reopenInteractiveAuthUrl: async () => {
@@ -2692,20 +3505,23 @@ export function createAppStore(api: DesktopApi) {
       clearPendingInteractiveAuth: () => set({ pendingInteractiveAuth: null }),
       updatePendingConnectionSize: (sessionId, cols, rows) => {
         set((state) => ({
-          pendingConnectionAttempts: state.pendingConnectionAttempts.map((attempt) =>
-            attempt.sessionId === sessionId
-              ? {
-                  ...attempt,
-                  latestCols: cols,
-                  latestRows: rows
-                }
-              : attempt
-          )
+          pendingConnectionAttempts: state.pendingConnectionAttempts.map(
+            (attempt) =>
+              attempt.sessionId === sessionId
+                ? {
+                    ...attempt,
+                    latestCols: cols,
+                    latestRows: rows,
+                  }
+                : attempt,
+          ),
         }));
       },
       markSessionOutput: (sessionId) => {
         set((state) => {
-          const tabIndex = state.tabs.findIndex((tab) => tab.sessionId === sessionId);
+          const tabIndex = state.tabs.findIndex(
+            (tab) => tab.sessionId === sessionId,
+          );
           if (tabIndex < 0) {
             return state;
           }
@@ -2715,8 +3531,14 @@ export function createAppStore(api: DesktopApi) {
             return state;
           }
 
-          const nextConnectionProgress = currentTab.status === 'connected' ? null : currentTab.connectionProgress;
-          if (currentTab.hasReceivedOutput === true && nextConnectionProgress === currentTab.connectionProgress) {
+          const nextConnectionProgress =
+            currentTab.status === "connected"
+              ? null
+              : currentTab.connectionProgress;
+          if (
+            currentTab.hasReceivedOutput === true &&
+            nextConnectionProgress === currentTab.connectionProgress
+          ) {
             return state;
           }
 
@@ -2724,11 +3546,11 @@ export function createAppStore(api: DesktopApi) {
           nextTabs[tabIndex] = {
             ...currentTab,
             hasReceivedOutput: true,
-            connectionProgress: nextConnectionProgress
+            connectionProgress: nextConnectionProgress,
           };
 
           return {
-            tabs: nextTabs
+            tabs: nextTabs,
           };
         });
       },
@@ -2739,7 +3561,7 @@ export function createAppStore(api: DesktopApi) {
         }
 
         set({ pendingCredentialRetry: null });
-        if (pending.source === 'ssh') {
+        if (pending.source === "ssh") {
           if (pending.sessionId) {
             await get().retrySessionConnection(pending.sessionId, secrets);
           } else {
@@ -2760,16 +3582,26 @@ export function createAppStore(api: DesktopApi) {
         const trusted = await ensureTrustedHost(set, {
           hostId: pending.hostId,
           action: {
-            kind: 'sftp',
+            kind: "sftp",
             paneId: pending.paneId,
             hostId: pending.hostId,
-            secrets
-          }
+            secrets,
+          },
         });
         if (!trusted) {
           return;
         }
-        await runTrustedAction(get, null, { kind: 'sftp', paneId: pending.paneId, hostId: pending.hostId, secrets }, set);
+        await runTrustedAction(
+          get,
+          null,
+          {
+            kind: "sftp",
+            paneId: pending.paneId,
+            hostId: pending.hostId,
+            secrets,
+          },
+          set,
+        );
       },
       handleCoreEvent: (event) => {
         const sessionId = event.sessionId;
@@ -2781,39 +3613,56 @@ export function createAppStore(api: DesktopApi) {
           return;
         }
 
-        if (event.type === 'keyboardInteractiveChallenge') {
+        if (event.type === "keyboardInteractiveChallenge") {
           const payload = event.payload as Record<string, unknown>;
           const challenge: KeyboardInteractiveChallenge = {
             sessionId,
-            challengeId: String(payload.challengeId ?? ''),
+            challengeId: String(payload.challengeId ?? ""),
             attempt: Number(payload.attempt ?? 1),
-            name: typeof payload.name === 'string' ? payload.name : null,
-            instruction: String(payload.instruction ?? ''),
+            name: typeof payload.name === "string" ? payload.name : null,
+            instruction: String(payload.instruction ?? ""),
             prompts: Array.isArray(payload.prompts)
               ? payload.prompts.map((prompt) => {
                   const candidate = prompt as Record<string, unknown>;
                   return {
-                    label: String(candidate.label ?? ''),
-                    echo: Boolean(candidate.echo)
+                    label: String(candidate.label ?? ""),
+                    echo: Boolean(candidate.echo),
                   } satisfies KeyboardInteractivePrompt;
                 })
-              : []
+              : [],
           };
-          const currentTab = get().tabs.find((tab) => tab.sessionId === sessionId);
+          const currentTab = get().tabs.find(
+            (tab) => tab.sessionId === sessionId,
+          );
           const currentHost =
-            currentTab?.source === 'host' && currentTab.hostId
+            currentTab?.source === "host" && currentTab.hostId
               ? get().hosts.find((host) => host.id === currentTab.hostId)
               : undefined;
-          const isWarpgateChallenge = shouldTreatAsWarpgate(currentHost, challenge);
+          const isWarpgateChallenge = shouldTreatAsWarpgate(
+            currentHost,
+            challenge,
+          );
           const approvalUrl = isWarpgateChallenge
-            ? parseWarpgateApprovalUrl(challenge.instruction, challenge.name, ...challenge.prompts.map((prompt) => prompt.label))
+            ? parseWarpgateApprovalUrl(
+                challenge.instruction,
+                challenge.name,
+                ...challenge.prompts.map((prompt) => prompt.label),
+              )
             : null;
           const authCode = isWarpgateChallenge
-            ? parseWarpgateAuthCode(challenge.instruction, challenge.name, ...challenge.prompts.map((prompt) => prompt.label))
+            ? parseWarpgateAuthCode(
+                challenge.instruction,
+                challenge.name,
+                ...challenge.prompts.map((prompt) => prompt.label),
+              )
             : null;
-          const shouldUseWarpgateUi = isWarpgateChallenge && Boolean(approvalUrl || authCode);
+          const shouldUseWarpgateUi =
+            isWarpgateChallenge && Boolean(approvalUrl || authCode);
 
-          if (approvalUrl && !openedInteractiveBrowserChallenges.has(challenge.challengeId)) {
+          if (
+            approvalUrl &&
+            !openedInteractiveBrowserChallenges.has(challenge.challengeId)
+          ) {
             openedInteractiveBrowserChallenges.add(challenge.challengeId);
             void api.shell.openExternal(approvalUrl).catch(() => undefined);
           }
@@ -2821,12 +3670,19 @@ export function createAppStore(api: DesktopApi) {
           const autoResponses: string[] = [];
           let canAutoRespond = challenge.prompts.length > 0;
           for (const prompt of challenge.prompts) {
-            if (shouldUseWarpgateUi && authCode && isWarpgateCodePrompt(prompt.label, challenge.instruction)) {
+            if (
+              shouldUseWarpgateUi &&
+              authCode &&
+              isWarpgateCodePrompt(prompt.label, challenge.instruction)
+            ) {
               autoResponses.push(authCode);
               continue;
             }
-            if (shouldUseWarpgateUi && isWarpgateCompletionPrompt(prompt.label, challenge.instruction)) {
-              autoResponses.push('');
+            if (
+              shouldUseWarpgateUi &&
+              isWarpgateCompletionPrompt(prompt.label, challenge.instruction)
+            ) {
+              autoResponses.push("");
               continue;
             }
             canAutoRespond = false;
@@ -2834,15 +3690,17 @@ export function createAppStore(api: DesktopApi) {
           }
 
           set((state) => {
-            const currentTab = state.tabs.find((tab) => tab.sessionId === sessionId);
+            const currentTab = state.tabs.find(
+              (tab) => tab.sessionId === sessionId,
+            );
             const progress = createConnectionProgress(
-              'waiting-interactive-auth',
+              "waiting-interactive-auth",
               shouldUseWarpgateUi
-                ? `${currentHost?.label ?? '세션'} Warpgate 승인을 기다리는 중입니다.`
-                : `${currentHost?.label ?? '세션'} 추가 인증 응답이 필요합니다.`,
+                ? `${currentHost?.label ?? "세션"} Warpgate 승인을 기다리는 중입니다.`
+                : `${currentHost?.label ?? "세션"} 추가 인증 응답이 필요합니다.`,
               {
-                blockingKind: 'panel'
-              }
+                blockingKind: "panel",
+              },
             );
 
             return {
@@ -2851,11 +3709,11 @@ export function createAppStore(api: DesktopApi) {
                     tab.sessionId === sessionId
                       ? {
                           ...tab,
-                          status: 'connecting',
+                          status: "connecting",
                           connectionProgress: progress,
-                          lastEventAt: new Date().toISOString()
+                          lastEventAt: new Date().toISOString(),
                         }
-                      : tab
+                      : tab,
                   )
                 : state.tabs,
               pendingInteractiveAuth: {
@@ -2864,39 +3722,51 @@ export function createAppStore(api: DesktopApi) {
                 name: challenge.name ?? null,
                 instruction: challenge.instruction,
                 prompts: challenge.prompts,
-                provider: shouldUseWarpgateUi ? 'warpgate' : 'generic',
+                provider: shouldUseWarpgateUi ? "warpgate" : "generic",
                 approvalUrl,
                 authCode,
-                autoSubmitted: canAutoRespond && autoResponses.length === challenge.prompts.length && challenge.prompts.length > 0
+                autoSubmitted:
+                  canAutoRespond &&
+                  autoResponses.length === challenge.prompts.length &&
+                  challenge.prompts.length > 0,
               },
-              ...activateSessionContextInState(state, sessionId)
+              ...activateSessionContextInState(state, sessionId),
             };
           });
 
-          if (canAutoRespond && autoResponses.length === challenge.prompts.length && challenge.prompts.length > 0) {
+          if (
+            canAutoRespond &&
+            autoResponses.length === challenge.prompts.length &&
+            challenge.prompts.length > 0
+          ) {
             void api.ssh
               .respondKeyboardInteractive({
                 sessionId,
                 challengeId: challenge.challengeId,
-                responses: autoResponses
+                responses: autoResponses,
               })
               .catch(() => undefined);
           }
           return;
         }
 
-        if (event.type === 'keyboardInteractiveResolved') {
+        if (event.type === "keyboardInteractiveResolved") {
           set((state) => {
-            const currentTab = state.tabs.find((tab) => tab.sessionId === sessionId);
+            const currentTab = state.tabs.find(
+              (tab) => tab.sessionId === sessionId,
+            );
             const currentHost =
-              currentTab?.source === 'host' && currentTab.hostId
+              currentTab?.source === "host" && currentTab.hostId
                 ? state.hosts.find((host) => host.id === currentTab.hostId)
                 : undefined;
 
-            if (!state.pendingInteractiveAuth || state.pendingInteractiveAuth.sessionId !== sessionId) {
+            if (
+              !state.pendingInteractiveAuth ||
+              state.pendingInteractiveAuth.sessionId !== sessionId
+            ) {
               return state;
             }
-            if (state.pendingInteractiveAuth.provider === 'warpgate') {
+            if (state.pendingInteractiveAuth.provider === "warpgate") {
               return state;
             }
             return {
@@ -2906,40 +3776,50 @@ export function createAppStore(api: DesktopApi) {
                     tab.sessionId === sessionId
                       ? {
                           ...tab,
-                          connectionProgress: currentHost ? resolveConnectingProgress(currentHost) : tab.connectionProgress,
-                          lastEventAt: new Date().toISOString()
+                          connectionProgress: currentHost
+                            ? resolveConnectingProgress(currentHost)
+                            : tab.connectionProgress,
+                          lastEventAt: new Date().toISOString(),
                         }
-                      : tab
+                      : tab,
                   )
-                : state.tabs
+                : state.tabs,
             };
           });
           return;
         }
 
         set((state) => {
-          if (event.type === 'closed') {
+          if (event.type === "closed") {
             return removeSessionFromState(state, sessionId);
           }
 
-          const currentTab = state.tabs.find((tab) => tab.sessionId === sessionId);
+          const currentTab = state.tabs.find(
+            (tab) => tab.sessionId === sessionId,
+          );
           if (!currentTab) {
             return state;
           }
           const currentHost =
-            currentTab.source === 'host' && currentTab.hostId
+            currentTab.source === "host" && currentTab.hostId
               ? state.hosts.find((host) => host.id === currentTab.hostId)
               : undefined;
-          const errorMessage = String(event.payload.message ?? 'SSH error');
-          const retryKind = event.type === 'error' ? resolveCredentialRetryKind(currentHost, errorMessage) : null;
+          const errorMessage = String(event.payload.message ?? "SSH error");
+          const retryKind =
+            event.type === "error"
+              ? resolveCredentialRetryKind(currentHost, errorMessage)
+              : null;
           const nextProgress =
-            event.type === 'connected'
-              ? currentTab.source === 'local'
+            event.type === "connected"
+              ? currentTab.source === "local"
                 ? resolveLocalWaitingShellProgress()
                 : currentHost
                   ? resolveWaitingShellProgress(currentHost)
-                  : createConnectionProgress('waiting-shell', '원격 셸이 첫 출력을 보내는 중입니다.')
-              : event.type === 'error'
+                  : createConnectionProgress(
+                      "waiting-shell",
+                      "원격 셸이 첫 출력을 보내는 중입니다.",
+                    )
+              : event.type === "error"
                 ? retryKind && currentHost
                   ? resolveCredentialRetryProgress(currentHost, retryKind)
                   : resolveErrorProgress(errorMessage)
@@ -2951,26 +3831,27 @@ export function createAppStore(api: DesktopApi) {
             }
 
             let nextStatus: TabStatus = tab.status;
-            if (event.type === 'connected') {
-              nextStatus = 'connected';
+            if (event.type === "connected") {
+              nextStatus = "connected";
             }
-            if (event.type === 'error') {
-              nextStatus = 'error';
+            if (event.type === "error") {
+              nextStatus = "error";
             }
             return {
               ...tab,
               status: nextStatus,
-              errorMessage: event.type === 'error' ? errorMessage : undefined,
+              errorMessage: event.type === "error" ? errorMessage : undefined,
               connectionProgress: nextProgress,
-              hasReceivedOutput: event.type === 'connected' ? false : tab.hasReceivedOutput,
-              lastEventAt: new Date().toISOString()
+              hasReceivedOutput:
+                event.type === "connected" ? false : tab.hasReceivedOutput,
+              lastEventAt: new Date().toISOString(),
             };
           });
 
           return {
             tabs,
             pendingInteractiveAuth:
-              event.type === 'connected' || event.type === 'error'
+              event.type === "connected" || event.type === "error"
                 ? state.pendingInteractiveAuth?.sessionId === sessionId
                   ? null
                   : state.pendingInteractiveAuth
@@ -2980,60 +3861,71 @@ export function createAppStore(api: DesktopApi) {
                 ? {
                     sessionId,
                     hostId: currentHost.id,
-                    source: 'ssh',
+                    source: "ssh",
                     credentialKind: retryKind,
-                    message: errorMessage
+                    message: errorMessage,
                   }
-                : event.type === 'connected' &&
-                    state.pendingCredentialRetry?.source === 'ssh' &&
-                    (
-                      state.pendingCredentialRetry.sessionId
-                        ? state.pendingCredentialRetry.sessionId === sessionId
-                        : state.pendingCredentialRetry.hostId === currentHost?.id
-                    )
+                : event.type === "connected" &&
+                    state.pendingCredentialRetry?.source === "ssh" &&
+                    (state.pendingCredentialRetry.sessionId
+                      ? state.pendingCredentialRetry.sessionId === sessionId
+                      : state.pendingCredentialRetry.hostId === currentHost?.id)
                   ? null
-                  : state.pendingCredentialRetry
+                  : state.pendingCredentialRetry,
           };
         });
 
-        if (event.type === 'connected' && pendingRetryBeforeUpdate?.source === 'ssh') {
-          const currentTab = get().tabs.find((tab) => tab.sessionId === sessionId);
+        if (
+          event.type === "connected" &&
+          pendingRetryBeforeUpdate?.source === "ssh"
+        ) {
+          const currentTab = get().tabs.find(
+            (tab) => tab.sessionId === sessionId,
+          );
           const currentHost =
-            currentTab?.source === 'host' && currentTab.hostId
-              ? get().hosts.find((host) => host.id === currentTab.hostId) ?? null
+            currentTab?.source === "host" && currentTab.hostId
+              ? (get().hosts.find((host) => host.id === currentTab.hostId) ??
+                null)
               : null;
-          if (currentHost && currentHost.id === pendingRetryBeforeUpdate.hostId) {
+          if (
+            currentHost &&
+            currentHost.id === pendingRetryBeforeUpdate.hostId
+          ) {
             void refreshHostAndKeychainState(set);
           }
         }
       },
       handleSessionShareEvent: (event) => {
         set((state) => ({
-          tabs: setSessionShareState(state.tabs, event.sessionId, event.state)
+          tabs: setSessionShareState(state.tabs, event.sessionId, event.state),
         }));
       },
       handleTransferEvent: (event) => {
         set((state) => ({
           sftp: {
             ...state.sftp,
-            transfers: upsertTransferJob(state.sftp.transfers, event.job)
-          }
+            transfers: upsertTransferJob(state.sftp.transfers, event.job),
+          },
         }));
 
         void api.logs.list().then((activityLogs) => {
           set({ activityLogs: sortLogs(activityLogs) });
         });
 
-        if (event.job.status === 'completed' && event.job.request) {
+        if (event.job.status === "completed" && event.job.request) {
           const request = event.job.request;
           const state = get();
-          for (const paneId of ['left', 'right'] as const) {
+          for (const paneId of ["left", "right"] as const) {
             const pane = getPane(state, paneId);
             const paneRef =
-              pane.sourceKind === 'local'
-                ? { kind: 'local' as const, path: pane.currentPath }
+              pane.sourceKind === "local"
+                ? { kind: "local" as const, path: pane.currentPath }
                 : pane.endpoint
-                  ? { kind: 'remote' as const, endpointId: pane.endpoint.id, path: pane.currentPath }
+                  ? {
+                      kind: "remote" as const,
+                      endpointId: pane.endpoint.id,
+                      path: pane.currentPath,
+                    }
                   : null;
             if (!paneRef) {
               continue;
@@ -3041,7 +3933,9 @@ export function createAppStore(api: DesktopApi) {
             if (
               paneRef.kind === request.target.kind &&
               paneRef.path === request.target.path &&
-              (paneRef.kind === 'local' || (request.target.kind === 'remote' && paneRef.endpointId === request.target.endpointId))
+              (paneRef.kind === "local" ||
+                (request.target.kind === "remote" &&
+                  paneRef.endpointId === request.target.endpointId))
             ) {
               void get().refreshSftpPane(paneId);
             }
@@ -3050,7 +3944,10 @@ export function createAppStore(api: DesktopApi) {
       },
       handlePortForwardEvent: (event) => {
         set((state) => ({
-          portForwardRuntimes: upsertForwardRuntime(state.portForwardRuntimes, event.runtime)
+          portForwardRuntimes: upsertForwardRuntime(
+            state.portForwardRuntimes,
+            event.runtime,
+          ),
         }));
         void api.logs.list().then((activityLogs) => {
           set({ activityLogs: sortLogs(activityLogs) });
@@ -3069,74 +3966,129 @@ export function createAppStore(api: DesktopApi) {
           ...pane,
           sourceKind,
           endpoint: null,
+          connectingHostId: null,
           hostGroupPath: null,
-          currentPath: sourceKind === 'local' ? pane.lastLocalPath || get().sftp.localHomePath : '',
-          history: sourceKind === 'local' ? [pane.lastLocalPath || get().sftp.localHomePath] : [],
-          historyIndex: sourceKind === 'local' ? 0 : -1,
+          currentPath:
+            sourceKind === "local"
+              ? pane.lastLocalPath || get().sftp.localHomePath
+              : "",
+          history:
+            sourceKind === "local"
+              ? [pane.lastLocalPath || get().sftp.localHomePath]
+              : [],
+          historyIndex: sourceKind === "local" ? 0 : -1,
           entries: [],
           selectedPaths: [],
           selectionAnchorPath: null,
           errorMessage: undefined,
           warningMessages: [],
           selectedHostId: null,
-          hostSearchQuery: '',
-          isLoading: false
+          hostSearchQuery: "",
+          isLoading: false,
         };
 
         set((state) => ({
-          sftp: updatePaneState(state, paneId, nextBasePane)
+          sftp: updatePaneState(state, paneId, nextBasePane),
         }));
 
-        if (sourceKind === 'local') {
-          await loadPaneListing(set, get, paneId, nextBasePane.currentPath, { pushToHistory: false });
+        if (sourceKind === "local") {
+          await loadPaneListing(set, get, paneId, nextBasePane.currentPath, {
+            pushToHistory: false,
+          });
         }
       },
       setSftpPaneFilter: (paneId, query) =>
         set((state) => ({
           sftp: updatePaneState(state, paneId, {
             ...getPane(state, paneId),
-            filterQuery: query
-          })
+            filterQuery: query,
+          }),
         })),
       setSftpHostSearchQuery: (paneId, query) =>
         set((state) => ({
           sftp: updatePaneState(state, paneId, {
             ...getPane(state, paneId),
-            hostSearchQuery: query
-          })
+            hostSearchQuery: query,
+          }),
         })),
       navigateSftpHostGroup: (paneId, path) =>
         set((state) => ({
           sftp: updatePaneState(state, paneId, {
             ...getPane(state, paneId),
             hostGroupPath: normalizeGroupPath(path),
-            selectedHostId: null
-          })
+            selectedHostId: null,
+            connectingHostId: null,
+          }),
         })),
       selectSftpHost: (paneId, hostId) =>
         set((state) => ({
           sftp: updatePaneState(state, paneId, {
             ...getPane(state, paneId),
-            selectedHostId: hostId
-          })
+            selectedHostId: hostId,
+          }),
         })),
       connectSftpHost: async (paneId, hostId) => {
         const host = get().hosts.find((item) => item.id === hostId);
         if (!host || !isSshHostRecord(host)) {
           return;
         }
-        const trusted = await ensureTrustedHost(set, {
-          hostId,
-          action: {
-            kind: 'sftp',
-            paneId,
-            hostId
+        set((state) => ({
+          activeWorkspaceTab: "sftp",
+          sftp: updatePaneState(state, paneId, {
+            ...getPane(state, paneId),
+            sourceKind: "host",
+            endpoint: null,
+            connectingHostId: hostId,
+            selectedHostId: hostId,
+            isLoading: true,
+            errorMessage: undefined,
+            warningMessages: [],
+          }),
+        }));
+        try {
+          const trusted = await ensureTrustedHost(set, {
+            hostId,
+            action: {
+              kind: "sftp",
+              paneId,
+              hostId,
+            },
+          });
+          if (!trusted) {
+            set((state) => ({
+              sftp: updatePaneState(state, paneId, {
+                ...getPane(state, paneId),
+                connectingHostId: null,
+                selectedHostId: hostId,
+                isLoading: false,
+                errorMessage: undefined,
+              }),
+            }));
+            return;
           }
-        });
-        if (!trusted) {
-          return;
+          await runTrustedAction(
+            get,
+            null,
+            { kind: "sftp", paneId, hostId },
+            set,
+          );
+        } catch (error) {
+          set((state) => ({
+            sftp: updatePaneState(state, paneId, {
+              ...getPane(state, paneId),
+              sourceKind: "host",
+              endpoint: null,
+              connectingHostId: null,
+              selectedHostId: hostId,
+              isLoading: false,
+              errorMessage:
+                error instanceof Error
+                  ? error.message
+                  : "호스트 키를 확인하지 못했습니다.",
+              warningMessages: [],
+            }),
+          }));
         }
-        await runTrustedAction(get, null, { kind: 'sftp', paneId, hostId }, set);
       },
       openSftpEntry: async (paneId, entryPath) => {
         const pane = getPane(get(), paneId);
@@ -3144,14 +4096,18 @@ export function createAppStore(api: DesktopApi) {
         if (!entry || !entry.isDirectory) {
           return;
         }
-        await loadPaneListing(set, get, paneId, entry.path, { pushToHistory: true });
+        await loadPaneListing(set, get, paneId, entry.path, {
+          pushToHistory: true,
+        });
       },
       refreshSftpPane: async (paneId) => {
         const pane = getPane(get(), paneId);
-        if (pane.sourceKind === 'host' && !pane.endpoint) {
+        if (pane.sourceKind === "host" && !pane.endpoint) {
           return;
         }
-        await loadPaneListing(set, get, paneId, pane.currentPath, { pushToHistory: false });
+        await loadPaneListing(set, get, paneId, pane.currentPath, {
+          pushToHistory: false,
+        });
       },
       navigateSftpBack: async (paneId) => {
         const pane = getPane(get(), paneId);
@@ -3162,10 +4118,12 @@ export function createAppStore(api: DesktopApi) {
         set((state) => ({
           sftp: updatePaneState(state, paneId, {
             ...getPane(state, paneId),
-            historyIndex: getPane(state, paneId).historyIndex - 1
-          })
+            historyIndex: getPane(state, paneId).historyIndex - 1,
+          }),
         }));
-        await loadPaneListing(set, get, paneId, nextPath, { pushToHistory: false });
+        await loadPaneListing(set, get, paneId, nextPath, {
+          pushToHistory: false,
+        });
       },
       navigateSftpForward: async (paneId) => {
         const pane = getPane(get(), paneId);
@@ -3176,21 +4134,30 @@ export function createAppStore(api: DesktopApi) {
         set((state) => ({
           sftp: updatePaneState(state, paneId, {
             ...getPane(state, paneId),
-            historyIndex: getPane(state, paneId).historyIndex + 1
-          })
+            historyIndex: getPane(state, paneId).historyIndex + 1,
+          }),
         }));
-        await loadPaneListing(set, get, paneId, nextPath, { pushToHistory: false });
+        await loadPaneListing(set, get, paneId, nextPath, {
+          pushToHistory: false,
+        });
       },
       navigateSftpParent: async (paneId) => {
         const pane = getPane(get(), paneId);
         if (!pane.currentPath) {
           return;
         }
-        const nextPath = pane.sourceKind === 'local' ? await api.files.getParentPath(pane.currentPath) : parentPath(pane.currentPath);
-        await loadPaneListing(set, get, paneId, nextPath, { pushToHistory: true });
+        const nextPath =
+          pane.sourceKind === "local"
+            ? await api.files.getParentPath(pane.currentPath)
+            : parentPath(pane.currentPath);
+        await loadPaneListing(set, get, paneId, nextPath, {
+          pushToHistory: true,
+        });
       },
       navigateSftpBreadcrumb: async (paneId, nextPath) => {
-        await loadPaneListing(set, get, paneId, nextPath, { pushToHistory: true });
+        await loadPaneListing(set, get, paneId, nextPath, {
+          pushToHistory: true,
+        });
       },
       selectSftpEntry: (paneId, input) =>
         set((state) => {
@@ -3198,8 +4165,8 @@ export function createAppStore(api: DesktopApi) {
           return {
             sftp: updatePaneState(state, paneId, {
               ...pane,
-              ...resolveNextSftpSelection(pane, input)
-            })
+              ...resolveNextSftpSelection(pane, input),
+            }),
           };
         }),
       createSftpDirectory: async (paneId, name) => {
@@ -3207,13 +4174,13 @@ export function createAppStore(api: DesktopApi) {
         if (!name.trim()) {
           return;
         }
-        if (pane.sourceKind === 'local') {
+        if (pane.sourceKind === "local") {
           await api.files.mkdir(pane.currentPath, name.trim());
         } else if (pane.endpoint) {
           await api.sftp.mkdir({
             endpointId: pane.endpoint.id,
             path: pane.currentPath,
-            name: name.trim()
+            name: name.trim(),
           });
         }
         await get().refreshSftpPane(paneId);
@@ -3221,16 +4188,20 @@ export function createAppStore(api: DesktopApi) {
       renameSftpSelection: async (paneId, nextName) => {
         const pane = getPane(get(), paneId);
         const targetPath = pane.selectedPaths[0];
-        if (!targetPath || pane.selectedPaths.length !== 1 || !nextName.trim()) {
+        if (
+          !targetPath ||
+          pane.selectedPaths.length !== 1 ||
+          !nextName.trim()
+        ) {
           return;
         }
-        if (pane.sourceKind === 'local') {
+        if (pane.sourceKind === "local") {
           await api.files.rename(targetPath, nextName.trim());
         } else if (pane.endpoint) {
           await api.sftp.rename({
             endpointId: pane.endpoint.id,
             path: targetPath,
-            nextName: nextName.trim()
+            nextName: nextName.trim(),
           });
         }
         await get().refreshSftpPane(paneId);
@@ -3257,12 +4228,12 @@ export function createAppStore(api: DesktopApi) {
         if (pane.selectedPaths.length === 0) {
           return;
         }
-        if (pane.sourceKind === 'local') {
+        if (pane.sourceKind === "local") {
           await api.files.delete(pane.selectedPaths);
         } else if (pane.endpoint) {
           await api.sftp.delete({
             endpointId: pane.endpoint.id,
-            paths: pane.selectedPaths
+            paths: pane.selectedPaths,
           });
         }
         await get().refreshSftpPane(paneId);
@@ -3270,10 +4241,16 @@ export function createAppStore(api: DesktopApi) {
       downloadSftpSelection: async (paneId) => {
         const state = get();
         const sourcePane = getPane(state, paneId);
-        if (sourcePane.sourceKind !== "host" || !sourcePane.endpoint || sourcePane.selectedPaths.length !== 1) {
+        if (
+          sourcePane.sourceKind !== "host" ||
+          !sourcePane.endpoint ||
+          sourcePane.selectedPaths.length !== 1
+        ) {
           return;
         }
-        const selectedItem = sourcePane.entries.find((entry) => entry.path === sourcePane.selectedPaths[0]);
+        const selectedItem = sourcePane.entries.find(
+          (entry) => entry.path === sourcePane.selectedPaths[0],
+        );
         if (!selectedItem || selectedItem.isDirectory) {
           return;
         }
@@ -3291,7 +4268,12 @@ export function createAppStore(api: DesktopApi) {
           items: [selectedItem],
         });
       },
-      prepareSftpTransfer: async (sourcePaneId, targetPaneId, targetPath, draggedPath = null) => {
+      prepareSftpTransfer: async (
+        sourcePaneId,
+        targetPaneId,
+        targetPath,
+        draggedPath = null,
+      ) => {
         const state = get();
         const sourcePane = getPane(state, sourcePaneId);
         const targetPane = getPane(state, targetPaneId);
@@ -3303,18 +4285,25 @@ export function createAppStore(api: DesktopApi) {
           items,
         });
       },
-      prepareSftpExternalTransfer: async (targetPaneId, targetPath, droppedPaths) => {
+      prepareSftpExternalTransfer: async (
+        targetPaneId,
+        targetPath,
+        droppedPaths,
+      ) => {
         const targetPane = getPane(get(), targetPaneId);
         if (targetPane.sourceKind !== "host" || !targetPane.endpoint) {
           return;
         }
-        const { items, warnings } = await resolveLocalTransferItemsFromPaths(droppedPaths);
+        const { items, warnings } =
+          await resolveLocalTransferItemsFromPaths(droppedPaths);
         if (warnings.length > 0) {
           setSftpPaneWarnings(set, targetPaneId, warnings);
         }
         if (items.length === 0) {
           if (warnings.length === 0) {
-            setSftpPaneWarnings(set, targetPaneId, ["드롭한 항목 경로를 읽지 못했습니다."]);
+            setSftpPaneWarnings(set, targetPaneId, [
+              "드롭한 항목 경로를 읽지 못했습니다.",
+            ]);
           }
           return;
         }
@@ -3338,7 +4327,10 @@ export function createAppStore(api: DesktopApi) {
         const state = get();
         const sourcePane = getPane(state, sourcePaneId);
         const targetPane = getPane(state, targetPaneId);
-        if (!isBrowsableSftpPane(sourcePane) || !isBrowsableSftpPane(targetPane)) {
+        if (
+          !isBrowsableSftpPane(sourcePane) ||
+          !isBrowsableSftpPane(targetPane)
+        ) {
           return;
         }
         const items = resolveTransferItemsFromPane(sourcePane);
@@ -3356,23 +4348,23 @@ export function createAppStore(api: DesktopApi) {
         }
         const job = await api.sftp.startTransfer({
           ...pending.input,
-          conflictResolution: resolution
+          conflictResolution: resolution,
         });
         set((state) => ({
-          activeWorkspaceTab: 'sftp',
+          activeWorkspaceTab: "sftp",
           sftp: {
             ...state.sftp,
             pendingConflictDialog: null,
-            transfers: upsertTransferJob(state.sftp.transfers, job)
-          }
+            transfers: upsertTransferJob(state.sftp.transfers, job),
+          },
         }));
       },
       dismissSftpConflict: () =>
         set((state) => ({
           sftp: {
             ...state.sftp,
-            pendingConflictDialog: null
-          }
+            pendingConflictDialog: null,
+          },
         })),
       cancelTransfer: async (jobId) => {
         await api.sftp.cancelTransfer(jobId);
@@ -3386,18 +4378,18 @@ export function createAppStore(api: DesktopApi) {
         set((state) => ({
           sftp: {
             ...state.sftp,
-            transfers: upsertTransferJob(state.sftp.transfers, nextJob)
-          }
+            transfers: upsertTransferJob(state.sftp.transfers, nextJob),
+          },
         }));
       },
       dismissTransfer: (jobId) => {
         set((state) => ({
           sftp: {
             ...state.sftp,
-            transfers: state.sftp.transfers.filter((job) => job.id !== jobId)
-          }
+            transfers: state.sftp.transfers.filter((job) => job.id !== jobId),
+          },
         }));
-      }
+      },
     };
   });
 

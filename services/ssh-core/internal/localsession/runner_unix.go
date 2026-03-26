@@ -51,6 +51,7 @@ func resolveLocalRuntime() (localCommandRuntime, error) {
 
 	workingDirectory := resolveUserHomeDirectory()
 	return localCommandRuntime{
+		shellKind:        "shell",
 		executablePath:   executablePath,
 		args:             nil,
 		env:              os.Environ(),
@@ -155,4 +156,8 @@ func (r *unixPTYRunner) Wait() (sessionExit, error) {
 	}
 
 	return sessionExit{}, err
+}
+
+func (r *unixPTYRunner) ShellKind() string {
+	return "shell"
 }

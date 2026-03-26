@@ -39,6 +39,7 @@ func TestWindowsConPTYRunnerRoutesOutputInputAndResize(t *testing.T) {
 		Cols: 120,
 		Rows: 32,
 	}, localCommandRuntime{
+		shellKind:        "fixture",
 		executablePath:   fixturePath,
 		env:              os.Environ(),
 		workingDirectory: t.TempDir(),
@@ -98,44 +99,128 @@ func TestWindowsConPTYRunnerRoutesOutputInputAndResize(t *testing.T) {
 	<-copyDone
 }
 
-func TestResolveWindowsShellExecutableWithLookupPrefersComspecThenFallbacks(t *testing.T) {
-	resolved, err := resolveWindowsShellExecutableWithLookup([]string{`C:\custom\cmd.exe`, "cmd.exe"}, func(candidate string) bool {
-		return candidate == `C:\custom\cmd.exe`
+func TestResolveWindowsShellRuntimeWithLookupPrefersPwshThenPowerShellThenCmd(t *testing.T) {
+	resolved, err := resolveWindowsShellRuntimeWithLookup([]windowsShellCandidate{
+		{
+			kind:           windowsShellKindPwsh,
+			executablePath: `C:\Program Files\PowerShell\7\pwsh.exe`,
+			args:           []string{"-NoLogo", "-NoProfile"},
+		},
+		{
+			kind:           windowsShellKindPowerShell,
+			executablePath: `C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe`,
+			args:           []string{"-NoLogo", "-NoProfile"},
+		},
+		{
+			kind:           windowsShellKindCmd,
+			executablePath: `C:\Windows\System32\cmd.exe`,
+			args:           []string{"/d", "/k", "prompt $P$G"},
+		},
+	}, func(candidate string) bool {
+		return candidate == `C:\Program Files\PowerShell\7\pwsh.exe`
 	})
 	if err != nil {
-		t.Fatalf("expected shell from COMSPEC, got error: %v", err)
+		t.Fatalf("expected pwsh shell, got error: %v", err)
 	}
-	if resolved != `C:\custom\cmd.exe` {
-		t.Fatalf("resolved shell = %q", resolved)
+	if resolved.kind != windowsShellKindPwsh {
+		t.Fatalf("resolved shell kind = %q", resolved.kind)
+	}
+	if resolved.executablePath != `C:\Program Files\PowerShell\7\pwsh.exe` {
+		t.Fatalf("resolved shell path = %q", resolved.executablePath)
 	}
 
-	resolved, err = resolveWindowsShellExecutableWithLookup([]string{`C:\missing\cmd.exe`, "cmd.exe"}, func(candidate string) bool {
-		return candidate == "cmd.exe"
+	resolved, err = resolveWindowsShellRuntimeWithLookup([]windowsShellCandidate{
+		{
+			kind:           windowsShellKindPwsh,
+			executablePath: `C:\missing\pwsh.exe`,
+			args:           []string{"-NoLogo", "-NoProfile"},
+		},
+		{
+			kind:           windowsShellKindPowerShell,
+			executablePath: `C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe`,
+			args:           []string{"-NoLogo", "-NoProfile"},
+		},
+		{
+			kind:           windowsShellKindCmd,
+			executablePath: `C:\Windows\System32\cmd.exe`,
+			args:           []string{"/d", "/k", "prompt $P$G"},
+		},
+	}, func(candidate string) bool {
+		return candidate == `C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe`
 	})
 	if err != nil {
-		t.Fatalf("expected fallback shell, got error: %v", err)
+		t.Fatalf("expected PowerShell fallback, got error: %v", err)
 	}
-	if resolved != "cmd.exe" {
-		t.Fatalf("resolved shell = %q", resolved)
+	if resolved.kind != windowsShellKindPowerShell {
+		t.Fatalf("resolved shell kind = %q", resolved.kind)
 	}
-}
 
-func TestResolveWindowsShellExecutableWithLookupIgnoresNonCmdComSpec(t *testing.T) {
-	resolved, err := resolveWindowsShellExecutableWithLookup([]string{`C:\Program Files\PowerShell\7\pwsh.exe`, `C:\Windows\System32\cmd.exe`}, func(candidate string) bool {
+	resolved, err = resolveWindowsShellRuntimeWithLookup([]windowsShellCandidate{
+		{
+			kind:           windowsShellKindPwsh,
+			executablePath: `C:\missing\pwsh.exe`,
+			args:           []string{"-NoLogo", "-NoProfile"},
+		},
+		{
+			kind:           windowsShellKindPowerShell,
+			executablePath: `C:\missing\powershell.exe`,
+			args:           []string{"-NoLogo", "-NoProfile"},
+		},
+		{
+			kind:           windowsShellKindCmd,
+			executablePath: `C:\Windows\System32\cmd.exe`,
+			args:           []string{"/d", "/k", "prompt $P$G"},
+		},
+	}, func(candidate string) bool {
 		return candidate == `C:\Windows\System32\cmd.exe`
 	})
 	if err != nil {
 		t.Fatalf("expected cmd fallback, got error: %v", err)
 	}
-	if resolved != `C:\Windows\System32\cmd.exe` {
-		t.Fatalf("resolved shell = %q", resolved)
+	if resolved.kind != windowsShellKindCmd {
+		t.Fatalf("resolved shell kind = %q", resolved.kind)
+	}
+	if resolved.executablePath != `C:\Windows\System32\cmd.exe` {
+		t.Fatalf("resolved shell path = %q", resolved.executablePath)
+	}
+}
+
+func TestResolveWindowsShellRuntimeWithLookupReportsAllSupportedShellFamilies(t *testing.T) {
+	_, err := resolveWindowsShellRuntimeWithLookup([]windowsShellCandidate{
+		{
+			kind:           windowsShellKindPwsh,
+			executablePath: `C:\missing\pwsh.exe`,
+			args:           []string{"-NoLogo", "-NoProfile"},
+		},
+		{
+			kind:           windowsShellKindPowerShell,
+			executablePath: `C:\missing\powershell.exe`,
+			args:           []string{"-NoLogo", "-NoProfile"},
+		},
+		{
+			kind:           windowsShellKindCmd,
+			executablePath: `C:\missing\cmd.exe`,
+			args:           []string{"/d", "/k", "prompt $P$G"},
+		},
+	}, func(string) bool {
+		return false
+	})
+	if err == nil {
+		t.Fatal("expected shell resolution error")
+	}
+	if !strings.Contains(err.Error(), "pwsh.exe") || !strings.Contains(err.Error(), "powershell.exe") || !strings.Contains(err.Error(), "cmd.exe") {
+		t.Fatalf("error message = %q", err)
 	}
 }
 
 func TestBuildWindowsLocalShellEnvSeedsCommandProcessorVariables(t *testing.T) {
 	env := buildWindowsLocalShellEnv([]string{
 		`PATH=C:\Users\heodoyeong\bin;C:\Tools`,
-	}, `C:\Windows\System32\cmd.exe`)
+	}, windowsShellRuntime{
+		kind:           windowsShellKindCmd,
+		executablePath: `C:\Windows\System32\cmd.exe`,
+		args:           []string{"/d", "/k", "prompt $P$G"},
+	})
 
 	got := map[string]string{}
 	for _, entry := range env {
@@ -154,6 +239,118 @@ func TestBuildWindowsLocalShellEnvSeedsCommandProcessorVariables(t *testing.T) {
 	if got["windir"] != `C:\Windows` {
 		t.Fatalf("windir = %q", got["windir"])
 	}
+}
+
+func TestBuildWindowsLocalShellEnvKeepsCmdComspecForPowerShell(t *testing.T) {
+	env := buildWindowsLocalShellEnv([]string{
+		`PATH=C:\Users\heodoyeong\bin;C:\Tools`,
+		`SystemRoot=C:\Windows`,
+		`ComSpec=C:\Windows\System32\cmd.exe`,
+	}, windowsShellRuntime{
+		kind:           windowsShellKindPowerShell,
+		executablePath: `C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe`,
+		args:           []string{"-NoLogo", "-NoProfile"},
+	})
+
+	got := map[string]string{}
+	for _, entry := range env {
+		parts := strings.SplitN(entry, "=", 2)
+		if len(parts) == 2 {
+			got[parts[0]] = parts[1]
+		}
+	}
+
+	if got["COMSPEC"] != `C:\Windows\System32\cmd.exe` {
+		t.Fatalf("COMSPEC = %q", got["COMSPEC"])
+	}
+	if got["SystemRoot"] != `C:\Windows` {
+		t.Fatalf("SystemRoot = %q", got["SystemRoot"])
+	}
+}
+
+func TestWindowsConPTYRunnerSupportsInteractivePowerShell(t *testing.T) {
+	wrapperPath := buildLocalConPTYWrapperBinary(t)
+
+	shellRuntime, err := resolveWindowsShellRuntimeWithLookup([]windowsShellCandidate{
+		{
+			kind:           windowsShellKindPowerShell,
+			executablePath: `C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe`,
+			args:           []string{"-NoLogo", "-NoProfile"},
+		},
+		{
+			kind:           windowsShellKindPowerShell,
+			executablePath: "powershell.exe",
+			args:           []string{"-NoLogo", "-NoProfile"},
+		},
+	}, isWindowsShellUsable)
+	if err != nil {
+		t.Fatalf("resolveWindowsShellRuntimeWithLookup failed: %v", err)
+	}
+
+	runner, err := startPlatformLocalRunner(protocol.LocalConnectPayload{
+		Cols: 120,
+		Rows: 32,
+	}, localCommandRuntime{
+		shellKind:        shellRuntime.kind,
+		executablePath:   shellRuntime.executablePath,
+		args:             shellRuntime.args,
+		env:              buildWindowsLocalShellEnv(os.Environ(), shellRuntime),
+		wrapperPath:      wrapperPath,
+		workingDirectory: t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("startPlatformLocalRunner failed: %v", err)
+	}
+	defer func() {
+		_ = runner.Kill()
+		_ = runner.Close()
+	}()
+
+	output := &capturedOutput{}
+	copyDone := make(chan struct{})
+	waitResult := make(chan sessionExit, 1)
+	waitErr := make(chan error, 1)
+	go func() {
+		defer close(copyDone)
+		for _, reader := range runner.Streams() {
+			copyReaderOutput(output, reader)
+		}
+	}()
+	go func() {
+		exit, err := runner.Wait()
+		if err != nil {
+			waitErr <- err
+			return
+		}
+		waitResult <- exit
+	}()
+
+	if err := runner.Write([]byte("echo READY_FROM_TEST\r\n")); err != nil {
+		t.Fatalf("write failed: %v", err)
+	}
+	waitForOutputContains(t, output, "READY_FROM_TEST", waitResult, waitErr)
+
+	if err := runner.Kill(); err != nil {
+		t.Fatalf("kill failed: %v", err)
+	}
+	_ = runner.Close()
+	<-copyDone
+}
+
+func buildLocalConPTYWrapperBinary(t *testing.T) string {
+	t.Helper()
+
+	tempDir := t.TempDir()
+	wrapperPath := filepath.Join(tempDir, "aws-conpty-wrapper.exe")
+	wrapperCommand := exec.Command("go", "build", "-o", wrapperPath, "../../cmd/aws-conpty-wrapper")
+	wrapperCommand.Dir = "."
+	wrapperCommand.Env = append(os.Environ(), "CGO_ENABLED=0")
+	result, err := wrapperCommand.CombinedOutput()
+	if err != nil {
+		t.Fatalf("failed to build local conpty wrapper: %v\n%s", err, result)
+	}
+
+	return wrapperPath
 }
 
 func buildConPTYFixtureBinary(t *testing.T) string {

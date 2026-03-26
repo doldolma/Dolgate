@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -86,14 +87,41 @@ func ExecutableCandidates(command string, pathValue string, goos string) []strin
 		candidates = append(candidates, candidate)
 	}
 
-	for _, entry := range filepath.SplitList(pathValue) {
-		appendUnique(filepath.Join(entry, command))
+	for _, entry := range splitPathListForGOOS(pathValue, goos) {
+		appendUnique(joinPathForGOOS(entry, command, goos))
 	}
 	for _, candidate := range fallbackCandidates(command, goos) {
 		appendUnique(candidate)
 	}
 
 	return candidates
+}
+
+func splitPathListForGOOS(pathValue string, goos string) []string {
+	separator := ":"
+	if goos == "windows" {
+		separator = ";"
+	} else if strings.Contains(pathValue, ";") && !strings.Contains(pathValue, ":") {
+		separator = ";"
+	}
+
+	parts := strings.Split(pathValue, separator)
+	entries := make([]string, 0, len(parts))
+	for _, entry := range parts {
+		trimmed := strings.TrimSpace(entry)
+		if trimmed == "" {
+			continue
+		}
+		entries = append(entries, trimmed)
+	}
+	return entries
+}
+
+func joinPathForGOOS(base string, leaf string, goos string) string {
+	if goos == "windows" {
+		return filepath.Join(base, leaf)
+	}
+	return path.Join(base, leaf)
 }
 
 func fallbackCandidates(command string, goos string) []string {

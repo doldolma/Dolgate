@@ -68,7 +68,11 @@ describe('LocalFileService', () => {
       mode: expect.any(Number)
     });
     const stats = await fs.stat(path.join(tempDir, 'created', 'after.txt'));
-    expect(stats.mode & 0o777).toBe(0o640);
+    if (process.platform === 'win32') {
+      expect(stats.mode & 0o222).toBeGreaterThan(0);
+    } else {
+      expect(stats.mode & 0o777).toBe(0o640);
+    }
 
     await service.delete([path.join(tempDir, 'created', 'after.txt'), path.join(tempDir, 'created')]);
 

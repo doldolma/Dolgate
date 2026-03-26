@@ -879,6 +879,7 @@ export function App() {
             hosts={hosts}
             groups={groups}
             sftp={sftp}
+            settings={settings}
             onActivatePaneSource={setSftpPaneSource}
             onPaneFilterChange={setSftpPaneFilter}
             onHostSearchChange={setSftpHostSearchQuery}
@@ -905,6 +906,7 @@ export function App() {
             onCancelTransfer={cancelTransfer}
             onRetryTransfer={retryTransfer}
             onDismissTransfer={dismissTransfer}
+            onUpdateSettings={updateSettings}
           />
         </section>
 

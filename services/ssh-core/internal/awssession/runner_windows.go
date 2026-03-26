@@ -8,6 +8,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"time"
 	"unicode/utf16"
 	"unsafe"
 
@@ -23,6 +24,11 @@ type windowsConPTYRunner struct {
 	pseudoConsole windows.Handle
 	inputWriter   *os.File
 	outputReader  *os.File
+	controlMu     sync.RWMutex
+	controlHandle windows.Handle
+	controlWriter *os.File
+	controlErr    error
+	controlReady  chan struct{}
 	closeOnce     sync.Once
 }
 
@@ -63,6 +69,7 @@ func startPlatformAWSRunner(payload protocol.AWSConnectPayload, runtime awsComma
 	defer attributeList.Delete()
 
 	cleanupOnError := true
+	var controlPipeHandle windows.Handle
 	defer func() {
 		if !cleanupOnError {
 			return
@@ -72,6 +79,7 @@ func startPlatformAWSRunner(payload protocol.AWSConnectPayload, runtime awsComma
 		}
 		closeHandles(inputPipe...)
 		closeHandles(outputPipe...)
+		closeHandles(controlPipeHandle)
 	}()
 
 	if err := windows.CreatePseudoConsole(
@@ -97,9 +105,23 @@ func startPlatformAWSRunner(payload protocol.AWSConnectPayload, runtime awsComma
 		ProcThreadAttributeList: attributeList.List(),
 	}
 
+	controlPipePath := ""
+	if runtime.wrapperPath != "" {
+		controlPipePath, controlPipeHandle, err = createWindowsControlPipe()
+		if err != nil {
+			return nil, err
+		}
+	}
+
 	commandLine := windows.ComposeCommandLine(append([]string{runtime.executablePath}, runtime.args...))
 	if runtime.wrapperPath != "" {
-		commandLine = windows.ComposeCommandLine(append([]string{runtime.wrapperPath, runtime.executablePath}, runtime.args...))
+		wrapperArgs := []string{runtime.wrapperPath}
+		if controlPipePath != "" {
+			wrapperArgs = append(wrapperArgs, "--control-pipe", controlPipePath)
+		}
+		wrapperArgs = append(wrapperArgs, runtime.executablePath)
+		wrapperArgs = append(wrapperArgs, runtime.args...)
+		commandLine = windows.ComposeCommandLine(wrapperArgs)
 	}
 	commandLine16, err := windows.UTF16PtrFromString(commandLine)
 	if err != nil {
@@ -141,16 +163,53 @@ func startPlatformAWSRunner(payload protocol.AWSConnectPayload, runtime awsComma
 	inputPipe[0], inputPipe[1], outputPipe[0], outputPipe[1] = 0, 0, 0, 0
 	cleanupOnError = false
 
-	return &windowsConPTYRunner{
+	runner := &windowsConPTYRunner{
 		process:       processInfo.Process,
 		pseudoConsole: pseudoConsole,
 		inputWriter:   inputWriter,
 		outputReader:  outputReader,
-	}, nil
+		controlHandle: controlPipeHandle,
+		controlReady:  make(chan struct{}),
+	}
+	if controlPipeHandle != 0 {
+		go runner.waitForControlPipeConnection(controlPipeHandle)
+	} else {
+		close(runner.controlReady)
+	}
+
+	return runner, nil
 }
 
 func (r *windowsConPTYRunner) Write(data []byte) error {
 	_, err := r.inputWriter.Write(data)
+	return err
+}
+
+func (r *windowsConPTYRunner) SendControlSignal(signal string) error {
+	normalized, err := normalizeControlSignal(signal)
+	if err != nil {
+		return err
+	}
+
+	select {
+	case <-r.controlReady:
+	case <-time.After(3 * time.Second):
+		return fmt.Errorf("aws control pipe did not become ready in time")
+	}
+
+	r.controlMu.RLock()
+	controlWriter := r.controlWriter
+	controlErr := r.controlErr
+	r.controlMu.RUnlock()
+
+	if controlErr != nil {
+		return controlErr
+	}
+	if controlWriter == nil {
+		return fmt.Errorf("aws control pipe is unavailable")
+	}
+
+	_, err = controlWriter.Write([]byte(normalized + "\n"))
 	return err
 }
 
@@ -184,6 +243,19 @@ func (r *windowsConPTYRunner) Close() error {
 				firstErr = err
 			}
 		}
+		r.controlMu.Lock()
+		if r.controlWriter != nil {
+			if err := r.controlWriter.Close(); err != nil && firstErr == nil {
+				firstErr = err
+			}
+			r.controlWriter = nil
+		} else if r.controlHandle != 0 {
+			if err := windows.CloseHandle(r.controlHandle); err != nil && firstErr == nil {
+				firstErr = err
+			}
+		}
+		r.controlHandle = 0
+		r.controlMu.Unlock()
 		if r.pseudoConsole != 0 {
 			windows.ClosePseudoConsole(r.pseudoConsole)
 			r.pseudoConsole = 0
@@ -233,6 +305,53 @@ func closeHandles(handles ...windows.Handle) {
 			_ = windows.CloseHandle(handle)
 		}
 	}
+}
+
+func createWindowsControlPipe() (string, windows.Handle, error) {
+	pipePath := fmt.Sprintf(`\\.\pipe\dolssh-aws-control-%d-%d`, os.Getpid(), time.Now().UnixNano())
+	pipePath16, err := windows.UTF16PtrFromString(pipePath)
+	if err != nil {
+		return "", 0, fmt.Errorf("control pipe path encoding failed: %w", err)
+	}
+
+	pipeHandle, err := windows.CreateNamedPipe(
+		pipePath16,
+		windows.PIPE_ACCESS_OUTBOUND,
+		windows.PIPE_TYPE_BYTE|windows.PIPE_READMODE_BYTE|windows.PIPE_WAIT,
+		1,
+		256,
+		256,
+		0,
+		nil,
+	)
+	if err != nil {
+		return "", 0, fmt.Errorf("create control pipe failed: %w", err)
+	}
+
+	return pipePath, pipeHandle, nil
+}
+
+func (r *windowsConPTYRunner) waitForControlPipeConnection(pipeHandle windows.Handle) {
+	defer close(r.controlReady)
+
+	if err := windows.ConnectNamedPipe(pipeHandle, nil); err != nil && err != windows.ERROR_PIPE_CONNECTED {
+		r.controlMu.Lock()
+		r.controlErr = fmt.Errorf("connect control pipe failed: %w", err)
+		r.controlHandle = 0
+		r.controlMu.Unlock()
+		_ = windows.CloseHandle(pipeHandle)
+		return
+	}
+
+	r.controlMu.Lock()
+	if r.controlHandle != pipeHandle {
+		r.controlMu.Unlock()
+		_ = windows.CloseHandle(pipeHandle)
+		return
+	}
+	r.controlWriter = os.NewFile(uintptr(pipeHandle), "aws-ssm-control")
+	r.controlHandle = 0
+	r.controlMu.Unlock()
 }
 
 func buildWindowsEnvironmentBlock(env []string) ([]uint16, error) {

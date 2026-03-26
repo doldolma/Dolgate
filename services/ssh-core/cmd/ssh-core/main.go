@@ -228,6 +228,15 @@ func dispatch(
 			},
 		})
 		return nil
+	case protocol.CommandControlSignal:
+		var payload protocol.ControlSignalPayload
+		if err := json.Unmarshal(request.Payload, &payload); err != nil {
+			return err
+		}
+		if awsManager.HasSession(request.SessionID) {
+			return awsManager.SendControlSignal(request.SessionID, payload.Signal)
+		}
+		return nil
 	case protocol.CommandResize:
 		var payload protocol.ResizePayload
 		if err := json.Unmarshal(request.Payload, &payload); err != nil {

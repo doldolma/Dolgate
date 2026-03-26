@@ -13,15 +13,18 @@ import (
 )
 
 const (
-	maxShareReplayEntries = 1024
-	maxShareReplayBytes   = 1024 * 1024
-	maxViewerInputBytes   = 64 * 1024
+	maxShareReplayEntries    = 1024
+	maxShareReplayBytes      = 1024 * 1024
+	maxViewerInputBytes      = 64 * 1024
+	sessionShareTransportSSH = "ssh"
+	sessionShareTransportAWS = "aws-ssm"
 )
 
 type createSessionShareRequest struct {
 	SessionID          string                 `json:"sessionId"`
 	Title              string                 `json:"title"`
 	HostLabel          string                 `json:"hostLabel"`
+	Transport          string                 `json:"transport"`
 	Cols               int                    `json:"cols"`
 	Rows               int                    `json:"rows"`
 	Snapshot           string                 `json:"snapshot"`
@@ -51,6 +54,7 @@ type ownerHelloMessage struct {
 	Type               string                 `json:"type"`
 	Title              string                 `json:"title"`
 	HostLabel          string                 `json:"hostLabel"`
+	Transport          string                 `json:"transport"`
 	Cols               int                    `json:"cols"`
 	Rows               int                    `json:"rows"`
 	Snapshot           string                 `json:"snapshot"`
@@ -118,6 +122,20 @@ type ownerViewerInputMessage struct {
 	Data     string `json:"data"`
 }
 
+type viewerControlSignalMessage struct {
+	Type   string `json:"type"`
+	Signal string `json:"signal"`
+}
+
+func validateViewerControlSignalMessage(message viewerControlSignalMessage) bool {
+	return message.Type == "control-signal" && isValidSessionShareControlSignal(message.Signal)
+}
+
+type ownerViewerControlSignalMessage struct {
+	Type   string `json:"type"`
+	Signal string `json:"signal"`
+}
+
 type ownerViewerCountMessage struct {
 	Type        string `json:"type"`
 	ViewerCount int    `json:"viewerCount"`
@@ -137,6 +155,7 @@ type viewerInitMessage struct {
 	Type               string                 `json:"type"`
 	Title              string                 `json:"title"`
 	HostLabel          string                 `json:"hostLabel"`
+	Transport          string                 `json:"transport"`
 	Cols               int                    `json:"cols"`
 	Rows               int                    `json:"rows"`
 	InputEnabled       bool                   `json:"inputEnabled"`
@@ -217,6 +236,7 @@ type sessionShare struct {
 	ownerToken   string
 	title        string
 	hostLabel    string
+	transport    string
 	cols         int
 	rows         int
 	snapshot     string
@@ -261,6 +281,7 @@ func (hub *SessionShareHub) Create(ownerUserID string, input createSessionShareR
 		ownerToken:   ownerToken,
 		title:        input.Title,
 		hostLabel:    input.HostLabel,
+		transport:    normalizeSessionShareTransport(input.Transport),
 		cols:         input.Cols,
 		rows:         input.Rows,
 		snapshot:     input.Snapshot,
@@ -427,6 +448,7 @@ func (hub *SessionShareHub) HandleViewerWebSocket(writer http.ResponseWriter, re
 		Type:               "init",
 		Title:              share.title,
 		HostLabel:          share.hostLabel,
+		Transport:          share.transport,
 		Cols:               share.cols,
 		Rows:               share.rows,
 		InputEnabled:       share.inputEnabled,
@@ -544,12 +566,11 @@ func (hub *SessionShareHub) handleOwnerPayload(shareID string, payload []byte) e
 }
 
 func (hub *SessionShareHub) handleViewerPayload(shareID string, payload []byte) error {
-	var message viewerInputMessage
-	if err := json.Unmarshal(payload, &message); err != nil {
-		return err
+	var envelope struct {
+		Type string `json:"type"`
 	}
-	if !validateViewerInputMessage(message) {
-		return nil
+	if err := json.Unmarshal(payload, &envelope); err != nil {
+		return err
 	}
 
 	hub.mu.Lock()
@@ -565,11 +586,35 @@ func (hub *SessionShareHub) handleViewerPayload(shareID string, payload []byte) 
 		return nil
 	}
 
-	return owner.WriteJSON(ownerViewerInputMessage{
-		Type:     "viewer-input",
-		Encoding: message.Encoding,
-		Data:     message.Data,
-	})
+	switch envelope.Type {
+	case "input":
+		var message viewerInputMessage
+		if err := json.Unmarshal(payload, &message); err != nil {
+			return err
+		}
+		if !validateViewerInputMessage(message) {
+			return nil
+		}
+		return owner.WriteJSON(ownerViewerInputMessage{
+			Type:     "viewer-input",
+			Encoding: message.Encoding,
+			Data:     message.Data,
+		})
+	case "control-signal":
+		var message viewerControlSignalMessage
+		if err := json.Unmarshal(payload, &message); err != nil {
+			return err
+		}
+		if !validateViewerControlSignalMessage(message) {
+			return nil
+		}
+		return owner.WriteJSON(ownerViewerControlSignalMessage{
+			Type:   "control-signal",
+			Signal: message.Signal,
+		})
+	default:
+		return nil
+	}
 }
 
 func (hub *SessionShareHub) updateHello(shareID string, message ownerHelloMessage) error {
@@ -581,6 +626,7 @@ func (hub *SessionShareHub) updateHello(shareID string, message ownerHelloMessag
 	}
 	share.title = message.Title
 	share.hostLabel = message.HostLabel
+	share.transport = normalizeSessionShareTransport(message.Transport)
 	share.cols = message.Cols
 	share.rows = message.Rows
 	share.snapshot = message.Snapshot
@@ -596,6 +642,7 @@ func (hub *SessionShareHub) updateHello(shareID string, message ownerHelloMessag
 		Type:               "init",
 		Title:              share.title,
 		HostLabel:          share.hostLabel,
+		Transport:          share.transport,
 		Cols:               share.cols,
 		Rows:               share.rows,
 		InputEnabled:       share.inputEnabled,
@@ -617,6 +664,31 @@ func (hub *SessionShareHub) updateHello(shareID string, message ownerHelloMessag
 		}
 	}
 	return nil
+}
+
+func normalizeSessionShareTransport(transport string) string {
+	if transport == sessionShareTransportAWS {
+		return sessionShareTransportAWS
+	}
+	return sessionShareTransportSSH
+}
+
+func isValidSessionShareTransport(transport string) bool {
+	switch transport {
+	case "", sessionShareTransportSSH, sessionShareTransportAWS:
+		return true
+	default:
+		return false
+	}
+}
+
+func isValidSessionShareControlSignal(signal string) bool {
+	switch signal {
+	case "interrupt", "suspend", "quit":
+		return true
+	default:
+		return false
+	}
 }
 
 func (hub *SessionShareHub) appendOutput(shareID, data string) error {

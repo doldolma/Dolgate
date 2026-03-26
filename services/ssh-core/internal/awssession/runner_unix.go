@@ -60,6 +60,30 @@ func (r *unixPTYRunner) Write(data []byte) error {
 	return err
 }
 
+func (r *unixPTYRunner) SendControlSignal(signal string) error {
+	normalized, err := normalizeControlSignal(signal)
+	if err != nil {
+		return err
+	}
+	if r.command.Process == nil {
+		return nil
+	}
+
+	var unixSignal syscall.Signal
+	switch normalized {
+	case "interrupt":
+		unixSignal = syscall.SIGINT
+	case "suspend":
+		unixSignal = syscall.SIGTSTP
+	case "quit":
+		unixSignal = syscall.SIGQUIT
+	default:
+		return fmt.Errorf("unsupported control signal: %s", normalized)
+	}
+
+	return ignoreProcessDone(syscall.Kill(-r.command.Process.Pid, unixSignal))
+}
+
 func (r *unixPTYRunner) Resize(cols, rows int) error {
 	cols, rows = normalizedSize(cols, rows)
 	return pty.Setsize(r.ptyFile, &pty.Winsize{

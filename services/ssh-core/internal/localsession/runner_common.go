@@ -21,6 +21,7 @@ type sessionRunner interface {
 	Close() error
 	Streams() []io.Reader
 	Wait() (sessionExit, error)
+	ShellKind() string
 }
 
 type sessionExit struct {
@@ -29,9 +30,11 @@ type sessionExit struct {
 }
 
 type localCommandRuntime struct {
+	shellKind        string
 	executablePath   string
 	args             []string
 	env              []string
+	wrapperPath      string
 	workingDirectory string
 }
 

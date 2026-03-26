@@ -16,6 +16,7 @@ import type {
   PortForwardRuntimeEvent,
   PortForwardRuntimeRecord,
   KeyboardInteractiveRespondInput,
+  ControlSignalPayload,
   ResolvedAwsConnectPayload,
   ResolvedCoreConnectPayload,
   ResolvedHostKeyProbePayload,
@@ -29,6 +30,7 @@ import type {
   SftpListInput,
   SftpMkdirInput,
   SftpRenameInput,
+  SessionShareControlSignal,
   TerminalTab,
   TransferJob,
   TransferJobEvent,
@@ -69,6 +71,10 @@ const packagedUnixCorePathEntries = [
 ];
 
 type PathDelimiter = ":" | ";";
+
+function getPathDelimiterForPlatform(platform: NodeJS.Platform): PathDelimiter {
+  return platform === "win32" ? path.win32.delimiter : path.posix.delimiter;
+}
 
 function splitPathEntries(
   rawPath: string | undefined,
@@ -154,17 +160,50 @@ function buildPackagedWindowsCorePathEntries(
   const win32 = path.win32;
   const windowsRoot = systemRoot.trim() || "C:\\Windows";
   const cmdExecutablePath = win32.join(windowsRoot, "System32", "cmd.exe");
+  const powerShell7PathEntries = buildWindowsPowerShell7PathEntries(env, win32);
 
   return {
     pathEntries: [
       win32.join(windowsRoot, "System32"),
       windowsRoot,
       win32.join(windowsRoot, "System32", "Wbem"),
+      ...powerShell7PathEntries,
       win32.join(windowsRoot, "System32", "WindowsPowerShell", "v1.0"),
     ],
     cmdExecutablePath,
     windowsRoot,
   };
+}
+
+function buildWindowsPowerShell7PathEntries(
+  env: NodeJS.ProcessEnv,
+  win32: typeof path.win32,
+): string[] {
+  const roots = [
+    lookupEnvValue(env, "ProgramFiles", { caseInsensitive: true }),
+    lookupEnvValue(env, "ProgramW6432", { caseInsensitive: true }),
+    lookupEnvValue(env, "ProgramFiles(x86)", { caseInsensitive: true }),
+    "C:\\Program Files",
+    "C:\\Program Files (x86)",
+  ];
+  const entries: string[] = [];
+  const seen = new Set<string>();
+
+  for (const root of roots) {
+    const normalizedRoot = root?.trim();
+    if (!normalizedRoot) {
+      continue;
+    }
+    const candidate = win32.join(normalizedRoot, "PowerShell", "7");
+    const seenKey = candidate.toLowerCase();
+    if (seen.has(seenKey)) {
+      continue;
+    }
+    seen.add(seenKey);
+    entries.push(candidate);
+  }
+
+  return entries;
 }
 
 function assignEnvValue(
@@ -207,7 +246,7 @@ export function buildCoreChildEnv(
   if (platform === "win32") {
     const { pathEntries, cmdExecutablePath, windowsRoot } =
       buildPackagedWindowsCorePathEntries(env);
-    const delimiter = path.win32.delimiter;
+    const delimiter = getPathDelimiterForPlatform(platform);
     const currentPathValue = lookupEnvValue(env, "PATH", { caseInsensitive: true });
     assignEnvValue(
       env,
@@ -250,7 +289,9 @@ export function buildCoreChildEnv(
     return env;
   }
 
-  env.PATH = mergeUniquePathEntries(packagedUnixCorePathEntries, env.PATH);
+  env.PATH = mergeUniquePathEntries(packagedUnixCorePathEntries, env.PATH, {
+    delimiter: getPathDelimiterForPlatform(platform),
+  });
   return env;
 }
 
@@ -1122,6 +1163,25 @@ export class CoreManager {
     );
   }
 
+  sendControlSignal(sessionId: string, signal: SessionShareControlSignal): void {
+    const tab = this.tabs.get(sessionId);
+    if (!tab || tab.status !== "connected") {
+      return;
+    }
+    if (this.sessionTransportById.get(sessionId) !== "aws-ssm") {
+      return;
+    }
+
+    this.sendControl<ControlSignalPayload>({
+      id: randomUUID(),
+      type: "controlSignal",
+      sessionId,
+      payload: {
+        signal,
+      },
+    });
+  }
+
   resize(sessionId: string, cols: number, rows: number): void {
     const tab = this.tabs.get(sessionId);
     if (!tab) {
@@ -1285,6 +1345,10 @@ export class CoreManager {
       const transport = this.sessionTransportById.get(event.sessionId) ?? "ssh";
       const isAwsSession = transport === "aws-ssm";
       const isLocalSession = transport === "local-shell";
+      const resolvedLocalShellKind =
+        isLocalSession && typeof event.payload.shellKind === "string"
+          ? event.payload.shellKind
+          : null;
       if (!existing && event.type === "closed") {
         this.sessionTransportById.delete(event.sessionId);
       }
@@ -1341,6 +1405,7 @@ export class CoreManager {
               hostId: existing.hostId,
               title: existing.title,
               transport,
+              shellKind: resolvedLocalShellKind,
             },
           });
         }

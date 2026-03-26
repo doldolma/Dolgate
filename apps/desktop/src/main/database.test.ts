@@ -1,7 +1,8 @@
 import os from 'node:os';
 import path from 'node:path';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { DEFAULT_SFTP_BROWSER_COLUMN_WIDTHS } from '@shared';
 
 type DatabaseModule = typeof import('./database');
 
@@ -25,6 +26,26 @@ async function loadRepositories(): Promise<{
     HostRepository: databaseModule.HostRepository,
     GroupRepository: databaseModule.GroupRepository,
     PortForwardRepository: databaseModule.PortForwardRepository,
+    SettingsRepository: databaseModule.SettingsRepository
+  };
+}
+
+async function loadRepositoriesWithStateFile(stateFile: unknown): Promise<{
+  tempDir: string;
+  SettingsRepository: DatabaseModule['SettingsRepository'];
+}> {
+  const tempDir = mkdtempSync(path.join(os.tmpdir(), 'dolssh-desktop-db-'));
+  process.env.DOLSSH_USER_DATA_DIR = tempDir;
+  mkdirSync(path.join(tempDir, 'storage'), { recursive: true });
+  writeFileSync(path.join(tempDir, 'storage', 'state.json'), JSON.stringify(stateFile), 'utf8');
+  vi.resetModules();
+
+  const stateStorageModule = await import('./state-storage');
+  stateStorageModule.resetDesktopStateStorageForTests();
+  const databaseModule = await import('./database');
+
+  return {
+    tempDir,
     SettingsRepository: databaseModule.SettingsRepository
   };
 }
@@ -260,6 +281,73 @@ describe('SettingsRepository', () => {
     });
 
     expect(settings.get().globalTerminalThemeId).toBe('system');
+  });
+
+  it('persists shared SFTP browser column widths and clamps them to minimums', async () => {
+    const { SettingsRepository } = await loadRepositories();
+    const settings = new SettingsRepository({
+      getConfig: () => ({
+        sync: {
+          serverUrl: 'https://bundled.example.com',
+          desktopClientId: 'dolssh-desktop',
+          redirectUri: 'dolssh://auth/callback'
+        }
+      })
+    } as never);
+
+    const updated = settings.update({
+      sftpBrowserColumnWidths: {
+        name: 420,
+        dateModified: 120,
+        size: 70,
+        kind: 140
+      }
+    });
+
+    expect(updated.sftpBrowserColumnWidths).toEqual({
+      name: 420,
+      dateModified: 140,
+      size: 72,
+      kind: 140
+    });
+    expect(settings.get().sftpBrowserColumnWidths).toEqual({
+      name: 420,
+      dateModified: 140,
+      size: 72,
+      kind: 140
+    });
+  });
+
+  it('restores missing or invalid SFTP browser widths from the stored state file', async () => {
+    const { SettingsRepository } = await loadRepositoriesWithStateFile({
+      schemaVersion: 1,
+      settings: {
+        theme: 'system',
+        sftpBrowserColumnWidths: {
+          name: 512,
+          dateModified: 'bad',
+          size: null,
+          kind: 48
+        },
+        serverUrlOverride: null,
+        updatedAt: '2026-03-26T00:00:00.000Z'
+      }
+    });
+    const settings = new SettingsRepository({
+      getConfig: () => ({
+        sync: {
+          serverUrl: 'https://bundled.example.com',
+          desktopClientId: 'dolssh-desktop',
+          redirectUri: 'dolssh://auth/callback'
+        }
+      })
+    } as never);
+
+    expect(settings.get().sftpBrowserColumnWidths).toEqual({
+      ...DEFAULT_SFTP_BROWSER_COLUMN_WIDTHS,
+      name: 512,
+      kind: 72
+    });
   });
 });
 

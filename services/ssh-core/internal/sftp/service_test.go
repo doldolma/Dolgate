@@ -11,6 +11,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sync"
 	"testing"
 	"time"
@@ -91,7 +92,14 @@ func TestServiceBrowseAndManagePaths(t *testing.T) {
 	}
 	listedAfterChmod := waitForEvent(t, events, protocol.EventSFTPListed)
 	listingAfterChmod := listedAfterChmod.Payload.(protocol.SFTPListedPayload)
-	if len(listingAfterChmod.Entries) != 1 || listingAfterChmod.Entries[0].Permissions != "drwxr-xr-x" {
+	if len(listingAfterChmod.Entries) != 1 {
+		t.Fatalf("unexpected listing after chmod: %#v", listingAfterChmod.Entries)
+	}
+	if runtime.GOOS == "windows" {
+		if listingAfterChmod.Entries[0].Name != "notes" || !listingAfterChmod.Entries[0].IsDirectory {
+			t.Fatalf("unexpected listing after chmod: %#v", listingAfterChmod.Entries)
+		}
+	} else if listingAfterChmod.Entries[0].Permissions != "drwxr-xr-x" {
 		t.Fatalf("unexpected listing after chmod: %#v", listingAfterChmod.Entries)
 	}
 

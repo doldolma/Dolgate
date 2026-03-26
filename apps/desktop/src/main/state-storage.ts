@@ -21,11 +21,13 @@ import type {
   HostRecord,
   KnownHostRecord,
   PortForwardRuleRecord,
+  SftpBrowserColumnWidths,
   SshPortForwardRuleRecord,
   SecretMetadataRecord,
   TerminalFontFamilyId,
   TerminalThemeId
 } from '@shared';
+import { DEFAULT_SFTP_BROWSER_COLUMN_WIDTHS, normalizeSftpBrowserColumnWidths } from '@shared';
 import type { SyncKind } from '@shared';
 
 const STORAGE_DIRNAME = 'storage';
@@ -51,6 +53,7 @@ export interface DesktopStateFile {
   schemaVersion: number;
   settings: {
     theme: AppTheme;
+    sftpBrowserColumnWidths: SftpBrowserColumnWidths;
     serverUrlOverride: string | null;
     updatedAt: string;
   };
@@ -289,6 +292,7 @@ function createDefaultStateFile(): DesktopStateFile {
     schemaVersion: DESKTOP_STATE_SCHEMA_VERSION,
     settings: {
       theme: 'system',
+      sftpBrowserColumnWidths: { ...DEFAULT_SFTP_BROWSER_COLUMN_WIDTHS },
       serverUrlOverride: null,
       updatedAt: timestamp
     },
@@ -464,6 +468,9 @@ function normalizeStateFile(value: unknown): DesktopStateFile {
     schemaVersion: DESKTOP_STATE_SCHEMA_VERSION,
     settings: {
       theme: settings.theme === 'light' || settings.theme === 'dark' ? settings.theme : 'system',
+      sftpBrowserColumnWidths: normalizeSftpBrowserColumnWidths(
+        isObject(settings.sftpBrowserColumnWidths) ? settings.sftpBrowserColumnWidths : null
+      ),
       serverUrlOverride: typeof settings.serverUrlOverride === 'string' && settings.serverUrlOverride.trim() ? settings.serverUrlOverride.trim() : null,
       updatedAt: typeof settings.updatedAt === 'string' ? settings.updatedAt : fallback.settings.updatedAt
     },

@@ -8,6 +8,7 @@ import {
   isWarpgateSshHostDraft,
   isSshHostDraft,
   isSshHostRecord,
+  normalizeSftpBrowserColumnWidths,
   normalizeServerUrl,
   normalizeGroupPath,
   stripRemovedGroupSegment
@@ -32,6 +33,7 @@ import type {
   PortForwardRuleRecord,
   SecretMetadataRecord,
   SecretSource,
+  SftpBrowserColumnWidths,
   SshHostDraft,
   SshHostRecord,
   SyncKind,
@@ -571,6 +573,7 @@ export class SettingsRepository {
       terminalMinimumContrastRatio: state.terminal.minimumContrastRatio,
       terminalAltIsMeta: state.terminal.altIsMeta,
       terminalWebglEnabled: state.terminal.webglEnabled,
+      sftpBrowserColumnWidths: { ...state.settings.sftpBrowserColumnWidths },
       serverUrl: serverUrlOverride || this.getDefaultServerUrl(),
       serverUrlOverride,
       dismissedUpdateVersion: state.updater.dismissedVersion,
@@ -606,8 +609,17 @@ export class SettingsRepository {
   update(input: Partial<AppSettings>): AppSettings {
     const current = this.get();
     stateStorage.updateState((state) => {
+      const hasSftpBrowserColumnWidthsInput = Object.prototype.hasOwnProperty.call(input, 'sftpBrowserColumnWidths');
+
       if (input.theme === 'light' || input.theme === 'dark' || input.theme === 'system') {
         state.settings.theme = input.theme;
+        state.settings.updatedAt = nowIso();
+      }
+
+      if (hasSftpBrowserColumnWidthsInput) {
+        state.settings.sftpBrowserColumnWidths = normalizeSftpBrowserColumnWidths(
+          input.sftpBrowserColumnWidths as Partial<Record<keyof SftpBrowserColumnWidths, unknown>> | null | undefined
+        );
         state.settings.updatedAt = nowIso();
       }
 
@@ -677,6 +689,7 @@ export class SettingsRepository {
       if (
         !Object.prototype.hasOwnProperty.call(input, 'dismissedUpdateVersion') &&
         !Object.prototype.hasOwnProperty.call(input, 'serverUrlOverride') &&
+        !hasSftpBrowserColumnWidthsInput &&
         input.theme == null &&
         input.globalTerminalThemeId == null &&
         input.terminalFontFamily == null &&
@@ -689,6 +702,7 @@ export class SettingsRepository {
         input.terminalWebglEnabled == null
       ) {
         state.settings.theme = current.theme as AppTheme;
+        state.settings.sftpBrowserColumnWidths = { ...current.sftpBrowserColumnWidths };
         state.settings.serverUrlOverride = current.serverUrlOverride ?? null;
         state.terminal.globalThemeId = current.globalTerminalThemeId ?? DEFAULT_GLOBAL_TERMINAL_THEME_ID;
         state.terminal.fontFamily = current.terminalFontFamily ?? DEFAULT_TERMINAL_FONT_FAMILY;
