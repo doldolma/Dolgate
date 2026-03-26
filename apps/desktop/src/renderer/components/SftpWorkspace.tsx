@@ -34,6 +34,7 @@ import type {
   SftpSourceKind,
   SftpState,
 } from "../store/createAppStore";
+import { DialogBackdrop } from "./DialogBackdrop";
 
 interface SftpWorkspaceProps {
   hosts: HostRecord[];
@@ -97,6 +98,7 @@ type ActionDialogState =
       placeholder: string;
       submitLabel: string;
       value: string;
+      isSubmitting: boolean;
     }
   | {
       paneId: SftpPaneId;
@@ -105,6 +107,7 @@ type ActionDialogState =
       placeholder: string;
       submitLabel: string;
       value: string;
+      isSubmitting: boolean;
     };
 
 type PermissionSection = "owner" | "group" | "other";
@@ -121,6 +124,7 @@ interface PermissionDialogState {
   path: string;
   name: string;
   matrix: PermissionMatrixState;
+  isSubmitting: boolean;
 }
 
 interface ContextMenuState {
@@ -1333,7 +1337,10 @@ function ConflictDialog({
   }
 
   return (
-    <div className="sftp-modal-backdrop" role="presentation">
+    <DialogBackdrop
+      className="sftp-modal-backdrop"
+      dismissOnBackdrop={false}
+    >
       <div className="sftp-modal">
         <div className="section-kicker">Conflict</div>
         <h3>같은 이름의 파일이 이미 존재합니다</h3>
@@ -1369,7 +1376,7 @@ function ConflictDialog({
           </button>
         </div>
       </div>
-    </div>
+    </DialogBackdrop>
   );
 }
 
@@ -1389,7 +1396,11 @@ function ActionDialog({
   }
 
   return (
-    <div className="sftp-modal-backdrop" role="presentation">
+    <DialogBackdrop
+      className="sftp-modal-backdrop"
+      onDismiss={onClose}
+      dismissDisabled={dialog.isSubmitting}
+    >
       <div className="sftp-modal">
         <div className="section-kicker">
           {dialog.mode === "mkdir" ? "New Folder" : "Rename"}
@@ -1400,22 +1411,23 @@ function ActionDialog({
           onChange={(event) => onChange(event.target.value)}
           placeholder={dialog.placeholder}
           autoFocus
+          disabled={dialog.isSubmitting}
         />
         <div className="sftp-modal__actions">
-          <button type="button" className="secondary-button" onClick={onClose}>
+          <button type="button" className="secondary-button" onClick={onClose} disabled={dialog.isSubmitting}>
             취소
           </button>
           <button
             type="button"
             className="primary-button"
             onClick={() => void onSubmit()}
-            disabled={!dialog.value.trim()}
+            disabled={!dialog.value.trim() || dialog.isSubmitting}
           >
             {dialog.submitLabel}
           </button>
         </div>
       </div>
-    </div>
+    </DialogBackdrop>
   );
 }
 
@@ -1447,7 +1459,11 @@ function PermissionDialog({
   ];
 
   return (
-    <div className="sftp-modal-backdrop" role="presentation">
+    <DialogBackdrop
+      className="sftp-modal-backdrop"
+      onDismiss={onClose}
+      dismissDisabled={dialog.isSubmitting}
+    >
       <div className="sftp-modal">
         <div className="section-kicker">Permissions</div>
         <h3>{dialog.name} 권한 수정</h3>
@@ -1468,6 +1484,7 @@ function PermissionDialog({
                     type="checkbox"
                     checked={dialog.matrix[row.section][column.key]}
                     onChange={() => onToggle(row.section, column.key)}
+                    disabled={dialog.isSubmitting}
                   />
                 </label>
               ))}
@@ -1478,19 +1495,20 @@ function PermissionDialog({
           Mode {formatPermissionMode(mode)}
         </div>
         <div className="sftp-modal__actions">
-          <button type="button" className="secondary-button" onClick={onClose}>
+          <button type="button" className="secondary-button" onClick={onClose} disabled={dialog.isSubmitting}>
             취소
           </button>
           <button
             type="button"
             className="primary-button"
             onClick={() => void onSubmit()}
+            disabled={dialog.isSubmitting}
           >
             적용
           </button>
         </div>
       </div>
-    </div>
+    </DialogBackdrop>
   );
 }
 
@@ -1512,7 +1530,11 @@ function DeleteDialog({
     : `선택한 ${dialog.itemCount}개 항목을 삭제할까요?`;
 
   return (
-    <div className="sftp-modal-backdrop" role="presentation">
+    <DialogBackdrop
+      className="sftp-modal-backdrop"
+      onDismiss={onClose}
+      dismissDisabled={dialog.isSubmitting}
+    >
       <div
         className="sftp-modal"
         role="dialog"
@@ -1548,7 +1570,7 @@ function DeleteDialog({
           </button>
         </div>
       </div>
-    </div>
+    </DialogBackdrop>
   );
 }
 
@@ -1792,6 +1814,7 @@ export function SftpWorkspace({
                       placeholder: "예: uploads",
                       submitLabel: "생성",
                       value: "",
+                      isSubmitting: false,
                     });
                   }}
                   onOpenRenameDialog={() => {
@@ -1808,6 +1831,7 @@ export function SftpWorkspace({
                       placeholder: "새 이름",
                       submitLabel: "변경",
                       value: selected.name,
+                      isSubmitting: false,
                     });
                   }}
                   onOpenPermissionsDialog={() => {
@@ -1822,6 +1846,7 @@ export function SftpWorkspace({
                       path: selected.path,
                       name: selected.name,
                       matrix: permissionMatrixFromString(selected.permissions),
+                      isSubmitting: false,
                     });
                   }}
                   onDeleteSelection={async () => {
@@ -1933,24 +1958,36 @@ export function SftpWorkspace({
           );
         }}
         onClose={() => {
-          setActionDialog(null);
+          setActionDialog((current) =>
+            current?.isSubmitting ? current : null,
+          );
         }}
         onSubmit={async () => {
-          if (!actionDialog?.value.trim()) {
+          if (!actionDialog?.value.trim() || actionDialog.isSubmitting) {
             return;
           }
-          if (actionDialog.mode === "mkdir") {
-            await onCreateDirectory(
-              actionDialog.paneId,
-              actionDialog.value.trim(),
+          setActionDialog((current) =>
+            current ? { ...current, isSubmitting: true } : current,
+          );
+          try {
+            if (actionDialog.mode === "mkdir") {
+              await onCreateDirectory(
+                actionDialog.paneId,
+                actionDialog.value.trim(),
+              );
+            } else {
+              await onRenameSelection(
+                actionDialog.paneId,
+                actionDialog.value.trim(),
+              );
+            }
+            setActionDialog(null);
+          } catch (error) {
+            setActionDialog((current) =>
+              current ? { ...current, isSubmitting: false } : current,
             );
-          } else {
-            await onRenameSelection(
-              actionDialog.paneId,
-              actionDialog.value.trim(),
-            );
+            throw error;
           }
-          setActionDialog(null);
         }}
       />
 
@@ -1973,17 +2010,29 @@ export function SftpWorkspace({
           );
         }}
         onClose={() => {
-          setPermissionDialog(null);
+          setPermissionDialog((current) =>
+            current?.isSubmitting ? current : null,
+          );
         }}
         onSubmit={async () => {
-          if (!permissionDialog) {
+          if (!permissionDialog || permissionDialog.isSubmitting) {
             return;
           }
-          await onChangeSelectionPermissions(
-            permissionDialog.paneId,
-            permissionMatrixToMode(permissionDialog.matrix),
+          setPermissionDialog((current) =>
+            current ? { ...current, isSubmitting: true } : current,
           );
-          setPermissionDialog(null);
+          try {
+            await onChangeSelectionPermissions(
+              permissionDialog.paneId,
+              permissionMatrixToMode(permissionDialog.matrix),
+            );
+            setPermissionDialog(null);
+          } catch (error) {
+            setPermissionDialog((current) =>
+              current ? { ...current, isSubmitting: false } : current,
+            );
+            throw error;
+          }
         }}
       />
 

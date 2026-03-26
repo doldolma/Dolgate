@@ -8,6 +8,7 @@ import {
   isSshPortForwardRuleRecord
 } from '@shared';
 import type { HostRecord, PortForwardDraft, PortForwardRuleRecord, PortForwardRuntimeRecord } from '@shared';
+import { DialogBackdrop } from './DialogBackdrop';
 
 type ForwardTab = 'ssh' | 'aws-ssm';
 
@@ -94,6 +95,10 @@ function createButtonLabel(tab: ForwardTab) {
   return tab === 'ssh' ? 'New SSH Forward' : 'New AWS SSM Forward';
 }
 
+function emptyStateTitle(tab: ForwardTab) {
+  return tab === 'ssh' ? '아직 저장한 SSH 포워딩 규칙이 없습니다.' : '아직 저장한 AWS SSM 포워딩 규칙이 없습니다.';
+}
+
 function emptyStateDescription(tab: ForwardTab) {
   return tab === 'ssh'
     ? 'New SSH Forward를 눌러 첫 번째 SSH 포워딩 규칙을 만들어 보세요.'
@@ -119,6 +124,7 @@ export function PortForwardingPanel({ hosts, rules, runtimes, onSave, onRemove, 
   const awsHosts = useMemo(() => getAvailablePortForwardHosts(hosts, 'aws-ssm').filter(isAwsEc2HostRecord), [hosts]);
   const [draft, setDraft] = useState<PortForwardDraft>(() => emptySshDraft(sshHosts[0]?.id));
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const runtimeMap = useMemo(() => new Map(runtimes.map((runtime) => [runtime.ruleId, runtime])), [runtimes]);
@@ -128,6 +134,7 @@ export function PortForwardingPanel({ hosts, rules, runtimes, onSave, onRemove, 
     setActiveTab(tab);
     setEditingRuleId(null);
     setDraft(tab === 'ssh' ? emptySshDraft(sshHosts[0]?.id) : emptyAwsDraft(awsHosts[0]?.id));
+    setIsSubmitting(false);
     setError(null);
     setIsModalOpen(true);
   }
@@ -136,52 +143,82 @@ export function PortForwardingPanel({ hosts, rules, runtimes, onSave, onRemove, 
     setEditingRuleId(rule.id);
     setActiveTab(rule.transport);
     setDraft(toDraft(rule));
+    setIsSubmitting(false);
     setError(null);
     setIsModalOpen(true);
   }
 
+  function closeModal() {
+    if (isSubmitting) {
+      return;
+    }
+    setIsModalOpen(false);
+  }
+
   async function handleSubmit() {
+    if (isSubmitting) {
+      return;
+    }
+
     if (!draft.label.trim()) {
-      setError('Label을 입력해 주세요.');
+      setError('이름을 입력해 주세요.');
       return;
     }
     if (!draft.hostId) {
-      setError('Host를 선택해 주세요.');
+      setError('호스트를 선택해 주세요.');
       return;
     }
     if (draft.bindPort <= 0) {
-      setError('Local port를 올바르게 입력해 주세요.');
+      setError('로컬 포트를 올바르게 입력해 주세요.');
       return;
     }
 
     if (isAwsSsmPortForwardDraft(draft)) {
       if (!draft.targetPort || draft.targetPort <= 0) {
-        setError('Target port를 올바르게 입력해 주세요.');
+        setError('대상 포트를 올바르게 입력해 주세요.');
         return;
       }
       if (draft.targetKind === 'remote-host' && !draft.remoteHost?.trim()) {
-        setError('Remote host를 입력해 주세요.');
+        setError('원격 호스트를 입력해 주세요.');
         return;
       }
-      await onSave(editingRuleId, {
-        ...draft,
-        bindAddress: '127.0.0.1',
-        remoteHost: draft.targetKind === 'remote-host' ? draft.remoteHost?.trim() ?? null : null
-      });
-      setIsModalOpen(false);
+
+      setIsSubmitting(true);
+      setError(null);
+      try {
+        await onSave(editingRuleId, {
+          ...draft,
+          bindAddress: '127.0.0.1',
+          remoteHost: draft.targetKind === 'remote-host' ? draft.remoteHost?.trim() ?? null : null
+        });
+        setIsModalOpen(false);
+      } catch (cause) {
+        setError(cause instanceof Error ? cause.message : '포워딩 규칙을 저장하지 못했습니다.');
+      } finally {
+        setIsSubmitting(false);
+      }
       return;
     }
 
     if (draft.mode !== 'dynamic' && (!draft.targetHost?.trim() || !draft.targetPort || draft.targetPort <= 0)) {
-      setError('Target host / port를 올바르게 입력해 주세요.');
+      setError('대상 호스트와 포트를 올바르게 입력해 주세요.');
       return;
     }
-    await onSave(editingRuleId, {
-      ...draft,
-      targetHost: draft.mode === 'dynamic' ? null : draft.targetHost?.trim() ?? null,
-      targetPort: draft.mode === 'dynamic' ? null : draft.targetPort ?? null
-    });
-    setIsModalOpen(false);
+
+    setIsSubmitting(true);
+    setError(null);
+    try {
+      await onSave(editingRuleId, {
+        ...draft,
+        targetHost: draft.mode === 'dynamic' ? null : draft.targetHost?.trim() ?? null,
+        targetPort: draft.mode === 'dynamic' ? null : draft.targetPort ?? null
+      });
+      setIsModalOpen(false);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : '포워딩 규칙을 저장하지 못했습니다.');
+    } finally {
+      setIsSubmitting(false);
+    }
   }
 
   return (
@@ -190,7 +227,7 @@ export function PortForwardingPanel({ hosts, rules, runtimes, onSave, onRemove, 
         <div>
           <div className="section-kicker">Forwarding</div>
           <h2>Port Forwarding</h2>
-          <p>SSH 포워딩과 AWS SSM 포워딩 규칙을 저장하고 필요할 때만 실행합니다.</p>
+          <p>SSH 포워딩과 AWS SSM 포워딩 규칙을 관리하고 필요할 때만 실행합니다.</p>
         </div>
         <button type="button" className="primary-button" onClick={() => openCreate(activeTab)}>
           {createButtonLabel(activeTab)}
@@ -221,7 +258,7 @@ export function PortForwardingPanel({ hosts, rules, runtimes, onSave, onRemove, 
       <div className="operations-list">
         {visibleRules.length === 0 ? (
           <div className="empty-callout">
-            <strong>{activeTab === 'ssh' ? '아직 저장된 SSH 포워딩 규칙이 없습니다.' : '아직 저장된 AWS SSM 포워딩 규칙이 없습니다.'}</strong>
+            <strong>{emptyStateTitle(activeTab)}</strong>
             <p>{emptyStateDescription(activeTab)}</p>
           </div>
         ) : (
@@ -302,27 +339,35 @@ export function PortForwardingPanel({ hosts, rules, runtimes, onSave, onRemove, 
       </div>
 
       {isModalOpen ? (
-        <div className="modal-backdrop" role="presentation">
+        <DialogBackdrop onDismiss={closeModal} dismissDisabled={isSubmitting}>
           <div className="modal-card" role="dialog" aria-modal="true" aria-labelledby="port-forward-title">
             <div className="modal-card__header">
               <div>
                 <div className="section-kicker">Forwarding</div>
                 <h3 id="port-forward-title">{editingRuleId ? `Edit ${tabTitle(activeTab)}` : createButtonLabel(activeTab)}</h3>
               </div>
-              <button type="button" className="icon-button" onClick={() => setIsModalOpen(false)}>
-                ×
+              <button type="button" className="icon-button" onClick={closeModal} disabled={isSubmitting}>
+                횞
               </button>
             </div>
 
             <div className="modal-card__body form-grid">
               <label className="form-field">
                 <span>Label</span>
-                <input value={draft.label} onChange={(event) => setDraft((current) => ({ ...current, label: event.target.value }))} />
+                <input
+                  value={draft.label}
+                  onChange={(event) => setDraft((current) => ({ ...current, label: event.target.value }))}
+                  disabled={isSubmitting}
+                />
               </label>
 
               <label className="form-field">
                 <span>{isAwsSsmPortForwardDraft(draft) ? 'AWS Host' : 'Host'}</span>
-                <select value={draft.hostId} onChange={(event) => setDraft((current) => ({ ...current, hostId: event.target.value }))}>
+                <select
+                  value={draft.hostId}
+                  onChange={(event) => setDraft((current) => ({ ...current, hostId: event.target.value }))}
+                  disabled={isSubmitting}
+                >
                   <option value="">Select host</option>
                   {(isAwsSsmPortForwardDraft(draft) ? awsHosts : sshHosts).map((host) => (
                     <option key={host.id} value={host.id}>
@@ -346,6 +391,7 @@ export function PortForwardingPanel({ hosts, rules, runtimes, onSave, onRemove, 
                           mode: event.target.value as typeof draft.mode
                         }))
                       }
+                      disabled={isSubmitting}
                     >
                       <option value="local">Local</option>
                       <option value="remote">Remote</option>
@@ -355,7 +401,11 @@ export function PortForwardingPanel({ hosts, rules, runtimes, onSave, onRemove, 
 
                   <label className="form-field">
                     <span>Bind address</span>
-                    <input value={draft.bindAddress} onChange={(event) => setDraft((current) => ({ ...current, bindAddress: event.target.value }))} />
+                    <input
+                      value={draft.bindAddress}
+                      onChange={(event) => setDraft((current) => ({ ...current, bindAddress: event.target.value }))}
+                      disabled={isSubmitting}
+                    />
                   </label>
                 </>
               ) : (
@@ -370,6 +420,7 @@ export function PortForwardingPanel({ hosts, rules, runtimes, onSave, onRemove, 
                           targetKind: event.target.value as typeof draft.targetKind
                         }))
                       }
+                      disabled={isSubmitting}
                     >
                       <option value="instance-port">Instance port</option>
                       <option value="remote-host">Remote host</option>
@@ -389,6 +440,7 @@ export function PortForwardingPanel({ hosts, rules, runtimes, onSave, onRemove, 
                   type="number"
                   value={draft.bindPort}
                   onChange={(event) => setDraft((current) => ({ ...current, bindPort: Number(event.target.value) }))}
+                  disabled={isSubmitting}
                 />
               </label>
 
@@ -399,6 +451,7 @@ export function PortForwardingPanel({ hosts, rules, runtimes, onSave, onRemove, 
                     <input
                       value={draft.targetHost ?? ''}
                       onChange={(event) => setDraft((current) => ({ ...current, targetHost: event.target.value }))}
+                      disabled={isSubmitting}
                     />
                   </label>
 
@@ -408,6 +461,7 @@ export function PortForwardingPanel({ hosts, rules, runtimes, onSave, onRemove, 
                       type="number"
                       value={draft.targetPort ?? ''}
                       onChange={(event) => setDraft((current) => ({ ...current, targetPort: Number(event.target.value) }))}
+                      disabled={isSubmitting}
                     />
                   </label>
                 </>
@@ -421,6 +475,7 @@ export function PortForwardingPanel({ hosts, rules, runtimes, onSave, onRemove, 
                       <input
                         value={draft.remoteHost ?? ''}
                         onChange={(event) => setDraft((current) => ({ ...current, remoteHost: event.target.value }))}
+                        disabled={isSubmitting}
                       />
                     </label>
                   ) : null}
@@ -431,6 +486,7 @@ export function PortForwardingPanel({ hosts, rules, runtimes, onSave, onRemove, 
                       type="number"
                       value={draft.targetPort}
                       onChange={(event) => setDraft((current) => ({ ...current, targetPort: Number(event.target.value) }))}
+                      disabled={isSubmitting}
                     />
                   </label>
                 </>
@@ -440,15 +496,15 @@ export function PortForwardingPanel({ hosts, rules, runtimes, onSave, onRemove, 
             </div>
 
             <div className="modal-card__footer">
-              <button type="button" className="secondary-button" onClick={() => setIsModalOpen(false)}>
+              <button type="button" className="secondary-button" onClick={closeModal} disabled={isSubmitting}>
                 취소
               </button>
-              <button type="button" className="primary-button" onClick={() => void handleSubmit()}>
+              <button type="button" className="primary-button" onClick={() => void handleSubmit()} disabled={isSubmitting}>
                 저장
               </button>
             </div>
           </div>
-        </div>
+        </DialogBackdrop>
       ) : null}
     </div>
   );

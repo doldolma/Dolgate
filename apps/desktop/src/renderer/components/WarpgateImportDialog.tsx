@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { HostDraft, WarpgateConnectionInfo, WarpgateTargetSummary } from '@shared';
+import { DialogBackdrop } from './DialogBackdrop';
 
 interface WarpgateImportDialogProps {
   open: boolean;
@@ -59,7 +60,10 @@ export function WarpgateImportDialog({ open, currentGroupPath, onClose, onImport
   const resolvedUsername = connectionInfo?.username?.trim() || fallbackUsername.trim();
 
   return (
-    <div className="modal-backdrop" role="presentation">
+    <DialogBackdrop
+      onDismiss={onClose}
+      dismissDisabled={Boolean(savingTargetId)}
+    >
       <div className="modal-card warpgate-import-dialog" role="dialog" aria-modal="true" aria-labelledby="warpgate-import-title">
         <div className="modal-card__header">
           <div>
@@ -221,6 +225,6 @@ export function WarpgateImportDialog({ open, currentGroupPath, onClose, onImport
           ) : null}
         </div>
       </div>
-    </div>
+    </DialogBackdrop>
   );
 }

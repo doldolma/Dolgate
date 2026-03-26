@@ -18,6 +18,7 @@ import { SettingsPanel } from './components/SettingsPanel';
 import { SftpWorkspace } from './components/SftpWorkspace';
 import { TerminalWorkspace } from './components/TerminalWorkspace';
 import { TermiusImportDialog } from './components/TermiusImportDialog';
+import { UpdateInstallConfirmDialog } from './components/UpdateInstallConfirmDialog';
 import { WarpgateImportDialog } from './components/WarpgateImportDialog';
 import { appStore } from './store/appStore';
 import type { DynamicTabStripItem, WorkspaceDropDirection, WorkspaceTab } from './store/createAppStore';
@@ -1012,7 +1013,16 @@ export function App() {
         }}
       />
 
-      {isUpdateInstallConfirmOpen ? (
+      <UpdateInstallConfirmDialog
+        open={isUpdateInstallConfirmOpen}
+        onClose={() => setIsUpdateInstallConfirmOpen(false)}
+        onConfirm={async () => {
+          setIsUpdateInstallConfirmOpen(false);
+          await runUpdaterAction(() => window.dolssh.updater.installAndRestart());
+        }}
+      />
+
+      {false ? (
         <div className="modal-backdrop">
           <div className="modal-card update-install-dialog" role="dialog" aria-modal="true" aria-labelledby="update-install-title">
             <div className="modal-card__header">

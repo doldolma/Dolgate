@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { LinkedHostSummary } from '@shared';
+import { DialogBackdrop } from './DialogBackdrop';
 
 export type SecretEditMode = 'update-shared' | 'clone-for-host';
 export type SecretCredentialKind = 'password' | 'passphrase';
@@ -58,7 +59,7 @@ export function SecretEditDialog({ request, onClose, onSubmit }: SecretEditDialo
   const canSubmit = value.trim().length > 0 && (mode === 'update-shared' || Boolean(targetHostId));
 
   return (
-    <div className="modal-backdrop" role="presentation">
+    <DialogBackdrop onDismiss={onClose} dismissDisabled={isSubmitting}>
       <div className="modal-card secret-edit-dialog" role="dialog" aria-modal="true" aria-labelledby="secret-edit-title">
         <div className="modal-card__header">
           <div>
@@ -155,6 +156,6 @@ export function SecretEditDialog({ request, onClose, onSubmit }: SecretEditDialo
           </button>
         </div>
       </div>
-    </div>
+    </DialogBackdrop>
   );
 }
