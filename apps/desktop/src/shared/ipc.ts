@@ -9,6 +9,10 @@ import type {
   AuthType,
   KeyboardInteractiveChallenge,
   ManagedSecretPayload,
+  OpenSshSnapshotFileInput,
+  OpenSshImportResult,
+  OpenSshImportSelectionInput,
+  OpenSshProbeResult,
   HostKeyProbeResult,
   KnownHostRecord,
   KnownHostTrustInput,
@@ -345,6 +349,16 @@ export interface DesktopApi {
     ) => Promise<TermiusImportResult>;
     discardSnapshot: (snapshotId: string) => Promise<void>;
   };
+  openssh: {
+    probeDefault: () => Promise<OpenSshProbeResult>;
+    addFileToSnapshot: (
+      input: OpenSshSnapshotFileInput,
+    ) => Promise<OpenSshProbeResult>;
+    importSelection: (
+      input: OpenSshImportSelectionInput,
+    ) => Promise<OpenSshImportResult>;
+    discardSnapshot: (snapshotId: string) => Promise<void>;
+  };
   ssh: {
     connect: (input: DesktopConnectInput) => Promise<{ sessionId: string }>;
     connectLocal: (
@@ -374,6 +388,7 @@ export interface DesktopApi {
   };
   shell: {
     pickPrivateKey: () => Promise<string | null>;
+    pickOpenSshConfig: () => Promise<string | null>;
     openExternal: (url: string) => Promise<void>;
   };
   window: {

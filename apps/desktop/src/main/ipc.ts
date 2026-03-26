@@ -1,6 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
+import path from "node:path";
 import {
+  app,
   BrowserWindow,
   dialog,
   ipcMain,
@@ -20,6 +22,9 @@ import type {
   AppSettings,
   DesktopConnectInput,
   DesktopLocalConnectInput,
+  OpenSshSnapshotFileInput,
+  OpenSshImportSelectionInput,
+  OpenSshImportWarning,
   DesktopSftpConnectInput,
   HostRecord,
   HostDraft,
@@ -63,6 +68,10 @@ import { LocalFileService } from "./file-service";
 import { SecretStore } from "./secret-store";
 import { SessionShareService } from "./session-share-service";
 import { isSyncAuthenticationError, SyncService } from "./sync-service";
+import {
+  OpenSshImportService,
+  resolveOpenSshIdentityImport,
+} from "./openssh-import-service";
 import {
   buildTermiusEntityKey,
   buildTermiusGroupAncestorPaths,
@@ -324,7 +333,16 @@ function buildSshDuplicateKey(
   return `${hostname}\u0000${port}\u0000${username}`;
 }
 
-async function persistImportedTermiusSecret(
+function buildKnownSshDuplicateKeys(hosts: HostRepository): Set<string> {
+  return new Set(
+    hosts
+      .list()
+      .filter(isSshHostRecord)
+      .map((host) => buildSshDuplicateKey(host.hostname, host.port, host.username)),
+  );
+}
+
+async function persistImportedSecret(
   secretStore: SecretStore,
   secretMetadata: SecretMetadataRepository,
   label: string,
@@ -353,6 +371,7 @@ export function registerIpcHandlers(
   authService: AuthService,
   syncService: SyncService,
   termiusImportService: TermiusImportService,
+  opensshImportService: OpenSshImportService,
   sessionShareService: SessionShareService,
 ): void {
   const localFiles = new LocalFileService();
@@ -717,10 +736,31 @@ export function registerIpcHandlers(
     return termiusImportService.probeLocal();
   });
 
+  ipcMain.handle(ipcChannels.openssh.probeDefault, async () => {
+    return opensshImportService.probeDefault(buildKnownSshDuplicateKeys(hosts));
+  });
+
+  ipcMain.handle(
+    ipcChannels.openssh.addFileToSnapshot,
+    async (_event, input: OpenSshSnapshotFileInput) => {
+      return opensshImportService.addFileToSnapshot(
+        input,
+        buildKnownSshDuplicateKeys(hosts),
+      );
+    },
+  );
+
   ipcMain.handle(
     ipcChannels.termius.discardSnapshot,
     async (_event, snapshotId: string) => {
       termiusImportService.discardSnapshot(snapshotId);
+    },
+  );
+
+  ipcMain.handle(
+    ipcChannels.openssh.discardSnapshot,
+    async (_event, snapshotId: string) => {
+      opensshImportService.discardSnapshot(snapshotId);
     },
   );
 
@@ -832,7 +872,7 @@ export function registerIpcHandlers(
           if (cachedSecretRef) {
             secretRef = cachedSecretRef;
           } else {
-            secretRef = await persistImportedTermiusSecret(
+            secretRef = await persistImportedSecret(
               secretStore,
               secretMetadata,
               credential.sharedSecretLabel,
@@ -909,6 +949,168 @@ export function registerIpcHandlers(
         skippedHostCount,
         warnings,
       };
+    },
+  );
+
+  ipcMain.handle(
+    ipcChannels.openssh.importSelection,
+    async (_event, input: OpenSshImportSelectionInput) => {
+      const snapshot = opensshImportService.getSnapshot(input.snapshotId);
+      if (!snapshot) {
+        throw new Error(
+          "OpenSSH 가져오기 상태를 찾을 수 없습니다. 다시 파일을 선택해 주세요.",
+        );
+      }
+
+      try {
+        const selectedHostKeys = new Set(input.selectedHostKeys);
+        const selectedHosts = [...snapshot.hostsByKey.values()].filter((host) =>
+          selectedHostKeys.has(host.key),
+        );
+        const targetGroupPath = normalizeGroupPath(input.groupPath);
+        const existingGroupPaths = new Set(
+          groups.list().map((group) => group.path),
+        );
+        const knownSshHosts = buildKnownSshDuplicateKeys(hosts);
+        const secretRefsByIdentityPath = new Map<string, string>();
+        const warnings: OpenSshImportWarning[] = [...snapshot.warnings];
+
+        let createdGroupCount = 0;
+        let createdHostCount = 0;
+        let createdSecretCount = 0;
+        let skippedHostCount = 0;
+
+        for (const candidatePath of buildTermiusGroupAncestorPaths(
+          targetGroupPath,
+        )) {
+          if (existingGroupPaths.has(candidatePath)) {
+            continue;
+          }
+          const group = groups.create(
+            randomUUID(),
+            getGroupLabel(candidatePath),
+            getParentGroupPath(candidatePath),
+          );
+          existingGroupPaths.add(group.path);
+          createdGroupCount += 1;
+        }
+
+        for (const host of selectedHosts) {
+          const duplicateKey = buildSshDuplicateKey(
+            host.hostname,
+            host.port,
+            host.username,
+          );
+          if (knownSshHosts.has(duplicateKey)) {
+            warnings.push({
+              code: "duplicate-host",
+              message: `${host.alias}: 같은 SSH 대상이 이미 있어 건너뛰었습니다.`,
+              filePath: host.sourceFilePath,
+              lineNumber: host.sourceLine,
+            });
+            skippedHostCount += 1;
+            continue;
+          }
+
+          let secretRef: string | null = null;
+          let privateKeyPath: string | null = null;
+
+          if (host.authType === "privateKey" && host.identityFilePath) {
+            const cachedSecretRef = secretRefsByIdentityPath.get(
+              host.identityFilePath,
+            );
+            if (cachedSecretRef) {
+              secretRef = cachedSecretRef;
+            } else {
+              const identityImport = await resolveOpenSshIdentityImport(
+                host.identityFilePath,
+              );
+              if (identityImport.kind === "managed-key") {
+                secretRef = await persistImportedSecret(
+                  secretStore,
+                  secretMetadata,
+                  `OpenSSH ${host.alias}`,
+                  {
+                    privateKeyPem: identityImport.privateKeyPem,
+                  },
+                );
+                if (secretRef) {
+                  secretRefsByIdentityPath.set(host.identityFilePath, secretRef);
+                  createdSecretCount += 1;
+                }
+              } else {
+                privateKeyPath = host.identityFilePath;
+                warnings.push(identityImport.warning);
+              }
+            }
+
+            if (!secretRef && !privateKeyPath) {
+              privateKeyPath = host.identityFilePath;
+            }
+          }
+
+          hosts.create(
+            randomUUID(),
+            {
+              kind: "ssh",
+              label: host.alias,
+              groupName: targetGroupPath,
+              tags: [],
+              terminalThemeId: null,
+              hostname: host.hostname,
+              port: host.port,
+              username: host.username,
+              authType: host.authType,
+              privateKeyPath,
+            },
+            secretRef,
+          );
+          knownSshHosts.add(duplicateKey);
+          createdHostCount += 1;
+        }
+
+        if (
+          createdGroupCount > 0 ||
+          createdHostCount > 0 ||
+          createdSecretCount > 0
+        ) {
+          activityLogs.append(
+            "info",
+            "audit",
+            "OpenSSH 소스에서 호스트를 가져왔습니다.",
+            {
+              sourceCount: snapshot.sources.length,
+              targetGroupPath,
+              createdGroupCount,
+              createdHostCount,
+              createdSecretCount,
+              skippedHostCount,
+            },
+          );
+          queueSync();
+        }
+
+        if (warnings.length > 0) {
+          activityLogs.append(
+            "warn",
+            "audit",
+            "OpenSSH 가져오기가 경고와 함께 완료되었습니다.",
+            {
+              sourceCount: snapshot.sources.length,
+              warningCount: warnings.length,
+            },
+          );
+        }
+
+        return {
+          createdHostCount,
+          createdSecretCount,
+          skippedHostCount,
+          warnings,
+        };
+      } finally {
+        opensshImportService.discardSnapshot(input.snapshotId);
+      }
     },
   );
 
@@ -1525,6 +1727,21 @@ export function registerIpcHandlers(
       properties: ["openFile"],
       filters: [
         { name: "Private keys", extensions: ["pem", "key", "ppk"] },
+        { name: "All files", extensions: ["*"] },
+      ],
+    });
+    if (result.canceled || result.filePaths.length === 0) {
+      return null;
+    }
+    return result.filePaths[0];
+  });
+
+  ipcMain.handle(ipcChannels.shell.pickOpenSshConfig, async () => {
+    const result = await dialog.showOpenDialog({
+      defaultPath: path.join(app.getPath("home"), ".ssh"),
+      properties: ["openFile"],
+      filters: [
+        { name: "OpenSSH config", extensions: ["config", "conf"] },
         { name: "All files", extensions: ["*"] },
       ],
     });

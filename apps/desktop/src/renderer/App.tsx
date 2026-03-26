@@ -11,6 +11,7 @@ import { KnownHostPromptDialog } from './components/KnownHostPromptDialog';
 import { LoginGate } from './components/LoginGate';
 import { LogsPanel } from './components/LogsPanel';
 import { DesktopWindowControls } from './components/DesktopWindowControls';
+import { OpenSshImportDialog } from './components/OpenSshImportDialog';
 import { PortForwardingPanel } from './components/PortForwardingPanel';
 import { SecretEditDialog, type SecretCredentialKind, type SecretEditDialogRequest } from './components/SecretEditDialog';
 import { SettingsPanel } from './components/SettingsPanel';
@@ -167,6 +168,7 @@ export function App() {
   const [hydratedSessionUserId, setHydratedSessionUserId] = useState<string | null>(null);
   const [selectedHostId, setSelectedHostId] = useState<string | null>(null);
   const [isAwsImportOpen, setIsAwsImportOpen] = useState(false);
+  const [isOpenSshImportOpen, setIsOpenSshImportOpen] = useState(false);
   const [isTermiusImportOpen, setIsTermiusImportOpen] = useState(false);
   const [isWarpgateImportOpen, setIsWarpgateImportOpen] = useState(false);
   const [hostBrowserError, setHostBrowserError] = useState<string | null>(null);
@@ -741,6 +743,12 @@ export function App() {
                   setSelectedHostId(null);
                   setIsAwsImportOpen(true);
                 }}
+                onOpenOpenSshImport={() => {
+                  setHostBrowserError(null);
+                  setHostBrowserStatus(null);
+                  setSelectedHostId(null);
+                  setIsOpenSshImportOpen(true);
+                }}
                 onOpenTermiusImport={() => {
                   setHostBrowserError(null);
                   setHostBrowserStatus(null);
@@ -859,6 +867,27 @@ export function App() {
               await refreshHostCatalog();
               setHostBrowserStatus(
                 `Termius에서 ${result.createdHostCount}개 호스트, ${result.createdGroupCount}개 그룹, ${result.createdSecretCount}개 secret을 가져왔습니다.${result.skippedHostCount > 0 ? ` 기존/불완전 호스트 ${result.skippedHostCount}개는 건너뛰었습니다.` : ''}`
+              );
+              setHostBrowserError(result.warnings[0]?.message ?? null);
+            }}
+          />
+
+          <OpenSshImportDialog
+            open={isOpenSshImportOpen}
+            currentGroupPath={currentGroupPath}
+            onClose={() => setIsOpenSshImportOpen(false)}
+            onImported={async (result) => {
+              await refreshHostCatalog();
+              setHostBrowserStatus(
+                `OpenSSH에서 호스트 ${result.createdHostCount}개를 가져왔습니다.${
+                  result.createdSecretCount > 0
+                    ? ` 인증 정보 ${result.createdSecretCount}개를 함께 가져왔습니다.`
+                    : ''
+                }${
+                  result.skippedHostCount > 0
+                    ? ` 건너뛴 호스트 ${result.skippedHostCount}개가 있습니다.`
+                    : ''
+                }`
               );
               setHostBrowserError(result.warnings[0]?.message ?? null);
             }}

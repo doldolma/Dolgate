@@ -289,6 +289,61 @@ export interface TermiusImportResult {
   warnings: TermiusImportWarning[];
 }
 
+export interface OpenSshImportWarning {
+  code?: string | null;
+  message: string;
+  filePath?: string | null;
+  lineNumber?: number | null;
+}
+
+export interface OpenSshHostPreview {
+  key: string;
+  alias: string;
+  hostname: string;
+  port: number;
+  username: string;
+  authType: 'password' | 'privateKey';
+  identityFilePath?: string | null;
+  sourceFilePath: string;
+  sourceLine: number;
+}
+
+export type OpenSshSourceOrigin = 'default-ssh-dir' | 'manual-file';
+
+export interface OpenSshSourceSummary {
+  id: string;
+  filePath: string;
+  origin: OpenSshSourceOrigin;
+  label: string;
+}
+
+export interface OpenSshProbeResult {
+  snapshotId: string;
+  sources: OpenSshSourceSummary[];
+  hosts: OpenSshHostPreview[];
+  warnings: OpenSshImportWarning[];
+  skippedExistingHostCount: number;
+  skippedDuplicateHostCount: number;
+}
+
+export interface OpenSshSnapshotFileInput {
+  snapshotId: string;
+  filePath: string;
+}
+
+export interface OpenSshImportSelectionInput {
+  snapshotId: string;
+  selectedHostKeys: string[];
+  groupPath?: string | null;
+}
+
+export interface OpenSshImportResult {
+  createdHostCount: number;
+  createdSecretCount: number;
+  skippedHostCount: number;
+  warnings: OpenSshImportWarning[];
+}
+
 export interface TerminalAppearanceSettings {
   globalTerminalThemeId: GlobalTerminalThemeId;
   terminalFontFamily: TerminalFontFamilyId;

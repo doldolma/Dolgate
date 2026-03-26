@@ -19,6 +19,7 @@ import { AwsService } from './aws-service';
 import { ipcChannels } from '../common/ipc-channels';
 import { CoreManager } from './core-manager';
 import { registerIpcHandlers } from './ipc';
+import { OpenSshImportService } from './openssh-import-service';
 import { SecretStore } from './secret-store';
 import { SessionShareService } from './session-share-service';
 import { SyncService } from './sync-service';
@@ -73,6 +74,7 @@ if (termiusHelperArgIndex >= 0) {
   const awsService = new AwsService();
   const warpgateService = new WarpgateService(secretStore);
   const termiusImportService = new TermiusImportService();
+  const opensshImportService = new OpenSshImportService();
   const appendActivityLog = (entry: { level: 'info' | 'warn' | 'error'; category: 'session' | 'audit'; message: string; metadata?: Record<string, unknown> | null }) => {
     activityLogRepository.append(entry.level, entry.category, entry.message, entry.metadata ?? null);
   };
@@ -287,6 +289,7 @@ if (termiusHelperArgIndex >= 0) {
       authService,
       syncService,
       termiusImportService,
+      opensshImportService,
       sessionShareService
     );
     await createWindow();

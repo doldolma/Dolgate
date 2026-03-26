@@ -40,6 +40,12 @@ export const ipcChannels = {
     importSelection: 'termius:import-selection',
     discardSnapshot: 'termius:discard-snapshot'
   },
+  openssh: {
+    probeDefault: 'openssh:probe-default',
+    addFileToSnapshot: 'openssh:add-file-to-snapshot',
+    importSelection: 'openssh:import-selection',
+    discardSnapshot: 'openssh:discard-snapshot'
+  },
   ssh: {
     connect: 'ssh:connect',
     connectLocal: 'ssh:connect-local',
@@ -60,6 +66,7 @@ export const ipcChannels = {
   },
   shell: {
     pickPrivateKey: 'shell:pick-private-key',
+    pickOpenSshConfig: 'shell:pick-openssh-config',
     openExternal: 'shell:open-external'
   },
   window: {

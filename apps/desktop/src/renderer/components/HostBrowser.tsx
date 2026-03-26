@@ -32,7 +32,12 @@ export function getHostBrowserCardClassName(isSelected: boolean, isTagsExpanded:
   return ['host-browser-card', isSelected ? 'active' : null, isTagsExpanded ? 'host-browser-card--expanded' : null].filter(Boolean).join(' ');
 }
 
-export const HOST_BROWSER_IMPORT_MENU_LABELS = ['Import from AWS', 'Import from Termius', 'Import from Warpgate'] as const;
+export const HOST_BROWSER_IMPORT_MENU_LABELS = [
+  'Import from AWS',
+  'Import OpenSSH',
+  'Import from Termius',
+  'Import from Warpgate'
+] as const;
 
 export function getHostBrowserEmptyCalloutMessage(hostCount: number, searchQuery: string): string {
   return hostCount === 0 ? 'New Host 또는 Import 메뉴를 눌러 첫 번째 연결 대상을 추가해보세요.' : searchQuery ? '검색어를 지우거나 다른 호스트명으로 다시 찾아보세요.' : 'New Host를 눌러 이 위치에 호스트를 추가하거나, 다른 그룹으로 이동해 장치를 확인해보세요.';
@@ -73,6 +78,7 @@ interface HostBrowserProps {
   onOpenLocalTerminal: () => void;
   onCreateHost: () => void;
   onOpenAwsImport: () => void;
+  onOpenOpenSshImport: () => void;
   onOpenTermiusImport: () => void;
   onOpenWarpgateImport: () => void;
   onCreateGroup: (name: string) => Promise<void>;
@@ -97,6 +103,7 @@ export function HostBrowser({
   onOpenLocalTerminal,
   onCreateHost,
   onOpenAwsImport,
+  onOpenOpenSshImport,
   onOpenTermiusImport,
   onOpenWarpgateImport,
   onCreateGroup,
@@ -322,9 +329,10 @@ export function HostBrowser({
             {isImportMenuOpen ? (
               <div className="split-button__menu" role="menu" aria-label="Import host menu">
                 {[
-                  { label: HOST_BROWSER_IMPORT_MENU_LABELS[0], onSelect: onOpenAwsImport },
-                  { label: HOST_BROWSER_IMPORT_MENU_LABELS[1], onSelect: onOpenTermiusImport },
-                  { label: HOST_BROWSER_IMPORT_MENU_LABELS[2], onSelect: onOpenWarpgateImport }
+                { label: HOST_BROWSER_IMPORT_MENU_LABELS[0], onSelect: onOpenAwsImport },
+                  { label: HOST_BROWSER_IMPORT_MENU_LABELS[1], onSelect: onOpenOpenSshImport },
+                  { label: HOST_BROWSER_IMPORT_MENU_LABELS[2], onSelect: onOpenTermiusImport },
+                  { label: HOST_BROWSER_IMPORT_MENU_LABELS[3], onSelect: onOpenWarpgateImport }
                 ].map((item) => (
                   <button
                     key={item.label}

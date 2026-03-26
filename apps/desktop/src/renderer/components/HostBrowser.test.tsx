@@ -121,7 +121,12 @@ describe('HostBrowser helpers', () => {
   });
 
   it('defines import actions for the split-button menu in the expected order', () => {
-    expect(HOST_BROWSER_IMPORT_MENU_LABELS).toEqual(['Import from AWS', 'Import from Termius', 'Import from Warpgate']);
+    expect(HOST_BROWSER_IMPORT_MENU_LABELS).toEqual([
+      'Import from AWS',
+      'Import OpenSSH',
+      'Import from Termius',
+      'Import from Warpgate'
+    ]);
   });
 
   it('updates the empty-state copy to reference the import menu', () => {
