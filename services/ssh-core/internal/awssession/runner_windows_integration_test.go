@@ -86,6 +86,15 @@ func TestWindowsConPTYRunnerRoutesOutputInputAndResize(t *testing.T) {
 	}
 	waitForOutputContains(t, output, "SIZE:140x50", waitResult, waitErr)
 
+	if err := runner.SendControlSignal("interrupt"); err != nil {
+		t.Fatalf("interrupt failed: %v", err)
+	}
+	waitForOutputContains(t, output, "^C", waitResult, waitErr)
+	if err := runner.Write([]byte("hello-after-signal\r\n")); err != nil {
+		t.Fatalf("post-signal write failed: %v", err)
+	}
+	waitForOutputContains(t, output, "ECHO:hello-after-signal", waitResult, waitErr)
+
 	if err := runner.Kill(); err != nil {
 		t.Fatalf("kill failed: %v", err)
 	}

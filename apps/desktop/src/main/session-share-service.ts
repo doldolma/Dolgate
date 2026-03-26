@@ -2,6 +2,7 @@ import { BrowserWindow } from "electron";
 import { Buffer } from "node:buffer";
 import type {
   CoreEvent,
+  SessionShareControlSignal,
   SessionShareEvent,
   SessionShareInputToggleInput,
   SessionShareOwnerMessage,
@@ -27,6 +28,11 @@ interface OwnerServerMessageViewerInput {
   data: string;
 }
 
+interface OwnerServerMessageControlSignal {
+  type: "control-signal";
+  signal: SessionShareControlSignal;
+}
+
 interface OwnerServerMessageViewerCount {
   type: "viewer-count";
   viewerCount: number;
@@ -44,6 +50,7 @@ interface OwnerServerMessageShareEnded {
 
 type OwnerServerMessage =
   | OwnerServerMessageViewerInput
+  | OwnerServerMessageControlSignal
   | OwnerServerMessageViewerCount
   | OwnerServerMessageInputEnabled
   | OwnerServerMessageShareEnded;
@@ -55,6 +62,7 @@ interface ActiveSessionShare {
   shareId: string;
   shareUrl: string;
   ownerToken: string;
+  transport: SessionShareStartInput["transport"];
   inputEnabled: boolean;
   viewerCount: number;
   latestSnapshot: string;
@@ -167,6 +175,7 @@ export class SessionShareService {
       shareId: "",
       shareUrl: "",
       ownerToken: "",
+      transport: input.transport,
       inputEnabled: false,
       viewerCount: 0,
       latestSnapshot: input.snapshot,
@@ -354,6 +363,7 @@ export class SessionShareService {
           sessionId: input.sessionId,
           title: input.title,
           hostLabel: input.title,
+          transport: input.transport,
           cols: input.cols,
           rows: input.rows,
           snapshot: input.snapshot,
@@ -436,6 +446,7 @@ export class SessionShareService {
         type: "hello",
         title: share.title,
         hostLabel: share.hostLabel,
+        transport: share.transport,
         cols: share.cols,
         rows: share.rows,
         snapshot: share.latestSnapshot,
@@ -535,6 +546,19 @@ export class SessionShareService {
       this.shares.delete(share.sessionId);
       share.closedByOwner = true;
       share.socket?.close();
+      return;
+    }
+
+    if (message.type === "control-signal") {
+      if (!share.inputEnabled || share.transport !== "aws-ssm") {
+        return;
+      }
+
+      try {
+        this.coreManager.sendControlSignal(share.sessionId, message.signal);
+      } catch {
+        // viewer control signals should never crash the relay loop
+      }
       return;
     }
 

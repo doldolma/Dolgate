@@ -13,12 +13,14 @@ function createServiceHarness() {
   const coreManager = {
     write: vi.fn(),
     writeBinary: vi.fn(),
+    sendControlSignal: vi.fn(),
   };
 
   const service = new SessionShareService(authService as never, coreManager as never);
 
   const share = {
     sessionId: "session-1",
+    transport: "aws-ssm",
     inputEnabled: true,
     viewerCount: 0,
     socket: null,
@@ -77,5 +79,32 @@ describe("SessionShareService viewer input relay", () => {
 
     expect(coreManager.writeBinary).not.toHaveBeenCalled();
     expect(coreManager.write).not.toHaveBeenCalled();
+  });
+
+  it("routes AWS control signals through sendControlSignal without writing bytes", () => {
+    const { service, coreManager, share } = createServiceHarness();
+
+    (service as any).handleOwnerServerMessage(share, {
+      type: "control-signal",
+      signal: "interrupt",
+    });
+
+    expect(coreManager.sendControlSignal).toHaveBeenCalledTimes(1);
+    expect(coreManager.sendControlSignal).toHaveBeenCalledWith("session-1", "interrupt");
+    expect(coreManager.writeBinary).not.toHaveBeenCalled();
+    expect(coreManager.write).not.toHaveBeenCalled();
+  });
+
+  it("ignores control signals when session share input is disabled", () => {
+    const { service, coreManager, share } = createServiceHarness();
+    share.inputEnabled = false;
+
+    (service as any).handleOwnerServerMessage(share, {
+      type: "control-signal",
+      signal: "interrupt",
+    });
+
+    expect(coreManager.sendControlSignal).not.toHaveBeenCalled();
+    expect(coreManager.writeBinary).not.toHaveBeenCalled();
   });
 });

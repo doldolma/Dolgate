@@ -85,6 +85,21 @@ func TestUnixPTYRunnerRoutesTTYOutputInputAndResize(t *testing.T) {
 	}
 	waitForUnixOutputContains(t, output, "SIZE:140x50", waitResult, waitErr)
 
+	if err := runner.SendControlSignal("interrupt"); err != nil {
+		t.Fatalf("interrupt failed: %v", err)
+	}
+	waitForUnixOutputContains(t, output, "SIGNAL:INT", waitResult, waitErr)
+
+	if err := runner.SendControlSignal("suspend"); err != nil {
+		t.Fatalf("suspend failed: %v", err)
+	}
+	waitForUnixOutputContains(t, output, "SIGNAL:TSTP", waitResult, waitErr)
+
+	if err := runner.SendControlSignal("quit"); err != nil {
+		t.Fatalf("quit failed: %v", err)
+	}
+	waitForUnixOutputContains(t, output, "SIGNAL:QUIT", waitResult, waitErr)
+
 	if err := runner.Kill(); err != nil {
 		t.Fatalf("kill failed: %v", err)
 	}

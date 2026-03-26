@@ -6,7 +6,9 @@ import (
 	"bufio"
 	"fmt"
 	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 
 	"golang.org/x/sys/unix"
 )
@@ -14,6 +16,7 @@ import (
 func main() {
 	fmt.Printf("TTY:%t\r\n", isTTY())
 	printTTYSize()
+	installSignalMarkers()
 
 	scanner := bufio.NewScanner(os.Stdin)
 	for scanner.Scan() {
@@ -42,4 +45,21 @@ func printTTYSize() {
 	}
 
 	fmt.Printf("SIZE:%dx%d\r\n", int(size.Col), int(size.Row))
+}
+
+func installSignalMarkers() {
+	signals := make(chan os.Signal, 8)
+	signal.Notify(signals, syscall.SIGINT, syscall.SIGTSTP, syscall.SIGQUIT)
+	go func() {
+		for received := range signals {
+			switch received {
+			case syscall.SIGINT:
+				fmt.Printf("SIGNAL:INT\r\n")
+			case syscall.SIGTSTP:
+				fmt.Printf("SIGNAL:TSTP\r\n")
+			case syscall.SIGQUIT:
+				fmt.Printf("SIGNAL:QUIT\r\n")
+			}
+		}
+	}()
 }

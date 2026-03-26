@@ -272,6 +272,54 @@ test.describe("desktop smoke", () => {
     }
   });
 
+  test("opens a working local terminal from the TERMINAL button on Windows", async () => {
+    test.skip(process.platform !== "win32", "Windows-only local terminal smoke");
+
+    const userDataDir = await mkdtemp(
+      path.join(os.tmpdir(), "dolssh-smoke-local-"),
+    );
+    await writeDesktopState(userDataDir);
+
+    const app = await launchDesktop({
+      DOLSSH_USER_DATA_DIR: userDataDir,
+      DOLSSH_E2E_AUTH_SESSION_JSON: createFakeAuthSessionJson(),
+      DOLSSH_E2E_DISABLE_SYNC: "1",
+      DOLSSH_E2E_CAPTURE_TERMINAL: "1",
+    });
+
+    try {
+      const page = await app.firstWindow();
+      const terminalButton = page.getByRole("button", { name: "TERMINAL" });
+
+      await expect(terminalButton).toBeVisible();
+      await terminalButton.click();
+      await expect(
+        page.locator(".terminal-session.active .terminal-canvas"),
+      ).toBeVisible();
+
+      await page.locator(".terminal-session.active .terminal-canvas").click();
+      await page.keyboard.type("echo READY_FROM_LOCAL_SMOKE");
+      await page.keyboard.press("Enter");
+
+      await page.waitForFunction(
+        () => {
+          const e2e = window.__dolsshE2E;
+          if (!e2e || typeof e2e.getTerminalOutputs !== "function") {
+            return false;
+          }
+
+          return Object.values(e2e.getTerminalOutputs()).some((output) =>
+            output.includes("READY_FROM_LOCAL_SMOKE"),
+          );
+        },
+        { timeout: 15_000 },
+      );
+    } finally {
+      await app.close();
+      await rm(userDataDir, { recursive: true, force: true });
+    }
+  });
+
   test("renders process-backed fake AWS SSM output inside the app terminal on Windows", async () => {
     test.skip(process.platform !== "win32", "Windows-only ConPTY smoke");
 

@@ -431,7 +431,7 @@ func NewRouter(store store.Store, authService *auth.Service, config RouterConfig
 			ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
-		if request.SessionID == "" || request.Title == "" || request.Cols <= 0 || request.Rows <= 0 {
+		if request.SessionID == "" || request.Title == "" || request.Cols <= 0 || request.Rows <= 0 || !isValidSessionShareTransport(request.Transport) {
 			ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid session share payload"})
 			return
 		}

@@ -6,6 +6,7 @@ import (
 	"bufio"
 	"fmt"
 	"os"
+	"os/signal"
 	"strings"
 
 	"golang.org/x/sys/windows"
@@ -14,6 +15,7 @@ import (
 func main() {
 	fmt.Print("FAKE AWS SSM READY\r\n")
 	printTerminalSize()
+	installSignalMarkers()
 
 	input, closeInput := openConsoleInput()
 	defer closeInput()
@@ -41,6 +43,16 @@ func printTerminalSize() {
 	}
 
 	fmt.Printf("SIZE:%dx%d\r\n", int(info.Size.X), int(info.Size.Y))
+}
+
+func installSignalMarkers() {
+	signals := make(chan os.Signal, 4)
+	signal.Notify(signals, os.Interrupt)
+	go func() {
+		for range signals {
+			fmt.Print("SIGNAL:INT\r\n")
+		}
+	}()
 }
 
 func openConsoleInput() (*os.File, func()) {

@@ -355,7 +355,12 @@ function TerminalSessionView({
   const runtimeRef = useRef<TerminalRuntime | null>(null);
   const resizeSchedulerRef = useRef<ReturnType<typeof createTerminalResizeScheduler> | null>(null);
   const tabs = useAppStore((state) => state.tabs);
+  const hosts = useAppStore((state) => state.hosts);
   const currentTab = tabs.find((tab) => tab.sessionId === sessionId);
+  const currentHost =
+    currentTab?.source === 'host' && currentTab.hostId
+      ? hosts.find((record) => record.id === currentTab.hostId)
+      : undefined;
   const respondInteractiveAuth = useAppStore((state) => state.respondInteractiveAuth);
   const reopenInteractiveAuthUrl = useAppStore((state) => state.reopenInteractiveAuthUrl);
   const clearPendingInteractiveAuth = useAppStore((state) => state.clearPendingInteractiveAuth);
@@ -821,13 +826,14 @@ function TerminalSessionView({
 
   async function handleStartShare() {
     const payload = captureShareSnapshot();
-    if (!payload || !canShareSession) {
+    if (!payload || !canShareSession || !currentHost) {
       return;
     }
 
     await onStartSessionShare?.({
       sessionId,
       title,
+      transport: currentHost.kind === 'aws-ec2' ? 'aws-ssm' : 'ssh',
       ...payload
     });
     setSharePopoverOpen(true);

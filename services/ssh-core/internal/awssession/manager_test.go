@@ -10,14 +10,15 @@ import (
 )
 
 type stubRunner struct {
-	outputReader *io.PipeReader
-	outputWriter *io.PipeWriter
-	writes       [][]byte
-	resizes      [][2]int
-	killed       bool
-	waitResult   sessionExit
-	waitErr      error
-	waitCh       chan struct{}
+	outputReader   *io.PipeReader
+	outputWriter   *io.PipeWriter
+	writes         [][]byte
+	controlSignals []string
+	resizes        [][2]int
+	killed         bool
+	waitResult     sessionExit
+	waitErr        error
+	waitCh         chan struct{}
 }
 
 func newStubRunner() *stubRunner {
@@ -33,6 +34,15 @@ func (r *stubRunner) Write(data []byte) error {
 	chunk := make([]byte, len(data))
 	copy(chunk, data)
 	r.writes = append(r.writes, chunk)
+	return nil
+}
+
+func (r *stubRunner) SendControlSignal(signal string) error {
+	normalized, err := normalizeControlSignal(signal)
+	if err != nil {
+		return err
+	}
+	r.controlSignals = append(r.controlSignals, normalized)
 	return nil
 }
 
@@ -187,6 +197,9 @@ func TestManagerRoutesWriteResizeAndOutputThroughRunner(t *testing.T) {
 	if err := manager.WriteBytes("session-2", []byte("ls -al\r")); err != nil {
 		t.Fatalf("write failed: %v", err)
 	}
+	if err := manager.SendControlSignal("session-2", "interrupt"); err != nil {
+		t.Fatalf("control signal failed: %v", err)
+	}
 	if err := manager.Resize("session-2", 200, 60); err != nil {
 		t.Fatalf("resize failed: %v", err)
 	}
@@ -198,6 +211,9 @@ func TestManagerRoutesWriteResizeAndOutputThroughRunner(t *testing.T) {
 
 	if len(runner.writes) != 1 || !bytes.Equal(runner.writes[0], []byte("ls -al\r")) {
 		t.Fatalf("writes = %#v", runner.writes)
+	}
+	if len(runner.controlSignals) != 1 || runner.controlSignals[0] != "interrupt" {
+		t.Fatalf("controlSignals = %#v", runner.controlSignals)
 	}
 	if len(runner.resizes) != 1 || runner.resizes[0] != [2]int{200, 60} {
 		t.Fatalf("resizes = %#v", runner.resizes)

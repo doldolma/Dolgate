@@ -1,6 +1,6 @@
 :root {
   color-scheme: light dark;
-  font-family: 'IBM Plex Sans', 'Segoe UI', sans-serif;
+  font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
   --chrome-bg: #233b68;
   --chrome-border: rgba(255, 255, 255, 0.08);
   --app-bg: #eef3f7;
@@ -31,7 +31,7 @@
   --share-danger-border: #f0caca;
 }
 
-:root[data-theme='dark'] {
+:root[data-theme="dark"] {
   --chrome-bg: #15294d;
   --chrome-border: rgba(255, 255, 255, 0.06);
   --app-bg: #0e1726;
@@ -85,7 +85,7 @@ input,
 select,
 textarea,
 a,
-[role='button'] {
+[role="button"] {
   font: inherit;
   -webkit-app-region: no-drag;
 }
@@ -118,8 +118,16 @@ input::placeholder {
   min-height: 0;
   overflow: hidden;
   background:
-    radial-gradient(circle at top left, rgba(91, 105, 136, 0.16), transparent 22%),
-    linear-gradient(180deg, color-mix(in srgb, var(--app-bg) 96%, white 4%), var(--app-bg));
+    radial-gradient(
+      circle at top left,
+      rgba(91, 105, 136, 0.16),
+      transparent 22%
+    ),
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--app-bg) 96%, white 4%),
+      var(--app-bg)
+    );
 }
 
 .app-frame--login {
@@ -151,8 +159,11 @@ input::placeholder {
   width: min(32rem, 100%);
   padding: 2.5rem 2.35rem 2.3rem;
   border-radius: 30px;
-  background:
-    linear-gradient(180deg, color-mix(in srgb, var(--surface-elevated) 97%, white 3%), color-mix(in srgb, var(--surface-elevated) 94%, #0a0f17 6%));
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--surface-elevated) 97%, white 3%),
+    color-mix(in srgb, var(--surface-elevated) 94%, #0a0f17 6%)
+  );
   border: 1px solid color-mix(in srgb, var(--border) 82%, white 18%);
   box-shadow:
     0 24px 62px rgba(3, 8, 20, 0.34),
@@ -245,8 +256,11 @@ input::placeholder {
   padding: 0 1.25rem;
   border-radius: 26px;
   border: 1.5px solid rgba(152, 165, 188, 0.72);
-  background:
-    linear-gradient(180deg, rgba(29, 42, 60, 0.96), rgba(23, 35, 52, 0.98));
+  background: linear-gradient(
+    180deg,
+    rgba(29, 42, 60, 0.96),
+    rgba(23, 35, 52, 0.98)
+  );
   color: #f6f8fc;
   font-size: 1.05rem;
   font-weight: 700;
@@ -307,7 +321,7 @@ input::placeholder {
   -webkit-app-region: drag;
 }
 
-:root[data-platform='darwin'] .app-titlebar {
+:root[data-platform="darwin"] .app-titlebar {
   padding-left: 5.4rem;
 }
 
@@ -319,7 +333,9 @@ input::placeholder {
   overflow-x: auto;
   padding-bottom: 0.1rem;
   border-radius: 18px;
-  transition: background-color 140ms ease, box-shadow 140ms ease;
+  transition:
+    background-color 140ms ease,
+    box-shadow 140ms ease;
 }
 
 .titlebar-tabs.detach-hover {
@@ -411,7 +427,7 @@ input::placeholder {
 .window-control__icon--close::after,
 .window-control__icon--restore::before,
 .window-control__icon--restore::after {
-  content: '';
+  content: "";
   position: absolute;
   display: block;
 }
@@ -634,7 +650,7 @@ input::placeholder {
 
 .workspace-tab-shell--drop-before::before,
 .workspace-tab-shell--drop-after::after {
-  content: '';
+  content: "";
   position: absolute;
   top: 0.28rem;
   bottom: 0.28rem;
@@ -658,7 +674,9 @@ input::placeholder {
   width: 1.2rem;
   flex: 0 0 1.2rem;
   border-radius: 999px;
-  transition: background-color 140ms ease, box-shadow 140ms ease;
+  transition:
+    background-color 140ms ease,
+    box-shadow 140ms ease;
 }
 
 .titlebar-tabs__tail-drop.active {
@@ -731,7 +749,9 @@ input::placeholder {
   position: absolute;
   inset: 0;
   min-height: 0;
-  transition: opacity 180ms ease, transform 180ms ease;
+  transition:
+    opacity 180ms ease,
+    transform 180ms ease;
 }
 
 .home-shell {
@@ -880,7 +900,7 @@ input::placeholder {
 }
 
 .split-button__toggle::before {
-  content: '';
+  content: "";
   position: absolute;
   left: 0;
   top: 0.72rem;
@@ -911,7 +931,7 @@ input::placeholder {
   height: 100%;
 }
 
-.split-button__toggle[aria-expanded='true'] .split-button__chevron {
+.split-button__toggle[aria-expanded="true"] .split-button__chevron {
   transform: rotate(180deg);
 }
 
@@ -979,7 +999,11 @@ input::placeholder {
 }
 
 .host-browser__breadcrumb.active {
-  background: color-mix(in srgb, var(--accent-strong) 12%, var(--surface-strong));
+  background: color-mix(
+    in srgb,
+    var(--accent-strong) 12%,
+    var(--surface-strong)
+  );
   color: var(--accent-strong);
   border-color: color-mix(in srgb, var(--accent-strong) 34%, var(--border) 66%);
 }
@@ -1094,12 +1118,16 @@ input::placeholder {
 .group-card.active,
 .group-card--interactive:hover {
   border-color: color-mix(in srgb, var(--accent-strong) 34%, var(--border) 66%);
-  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent-strong) 18%, transparent 82%), var(--shadow);
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--accent-strong) 18%, transparent 82%),
+    var(--shadow);
 }
 
 .group-card.drop-target {
   border-color: color-mix(in srgb, var(--accent-strong) 46%, var(--border) 54%);
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent-strong) 28%, transparent 72%), var(--shadow);
+  box-shadow:
+    0 0 0 2px color-mix(in srgb, var(--accent-strong) 28%, transparent 72%),
+    var(--shadow);
   background: color-mix(in srgb, var(--surface) 84%, var(--accent-strong) 16%);
 }
 
@@ -1159,7 +1187,9 @@ input::placeholder {
 
 .host-browser-card.active {
   border-color: color-mix(in srgb, var(--accent-strong) 40%, var(--border) 60%);
-  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent-strong) 25%, transparent 75%), var(--shadow);
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--accent-strong) 25%, transparent 75%),
+    var(--shadow);
 }
 
 .host-browser-card__icon {
@@ -1168,7 +1198,11 @@ input::placeholder {
   width: 2.45rem;
   height: 2.45rem;
   border-radius: 14px;
-  background: linear-gradient(180deg, color-mix(in srgb, var(--accent-strong) 88%, white 12%), color-mix(in srgb, var(--chrome-bg) 90%, black 10%));
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--accent-strong) 88%, white 12%),
+    color-mix(in srgb, var(--chrome-bg) 90%, black 10%)
+  );
   color: #fff;
   font-weight: 700;
   font-size: 0.9rem;
@@ -1286,8 +1320,13 @@ input::placeholder {
   gap: 0.35rem;
   padding: 0.36rem 0.62rem;
   border-radius: 999px;
-  background: color-mix(in srgb, var(--accent-strong) 12%, var(--surface-strong));
-  border: 1px solid color-mix(in srgb, var(--accent-strong) 24%, var(--border) 76%);
+  background: color-mix(
+    in srgb,
+    var(--accent-strong) 12%,
+    var(--surface-strong)
+  );
+  border: 1px solid
+    color-mix(in srgb, var(--accent-strong) 24%, var(--border) 76%);
   color: var(--text);
 }
 
@@ -1335,7 +1374,8 @@ input::placeholder {
 
 .empty-callout {
   grid-column: 1 / -1;
-  border: 1px dashed color-mix(in srgb, var(--accent-strong) 32%, var(--border) 68%);
+  border: 1px dashed
+    color-mix(in srgb, var(--accent-strong) 32%, var(--border) 68%);
   border-radius: 22px;
   padding: 1.2rem;
   background: color-mix(in srgb, var(--surface-muted) 92%, transparent 8%);
@@ -1430,7 +1470,9 @@ input::placeholder {
   overflow: hidden;
   opacity: 0;
   transform: translateX(18px);
-  transition: opacity 180ms ease, transform 180ms ease;
+  transition:
+    opacity 180ms ease,
+    transform 180ms ease;
 }
 
 .host-drawer.open {
@@ -1517,13 +1559,13 @@ input::placeholder {
 .host-form__submit {
   border-radius: 16px;
   padding: 0.95rem 1.1rem;
-  border: 1px solid color-mix(in srgb, var(--accent-strong) 22%, var(--border) 78%);
-  background:
-    linear-gradient(
-      180deg,
-      color-mix(in srgb, var(--surface-elevated) 88%, white 12%),
-      color-mix(in srgb, var(--surface) 90%, var(--accent-strong) 10%)
-    );
+  border: 1px solid
+    color-mix(in srgb, var(--accent-strong) 22%, var(--border) 78%);
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--surface-elevated) 88%, white 12%),
+    color-mix(in srgb, var(--surface) 90%, var(--accent-strong) 10%)
+  );
   color: var(--text);
   font-weight: 650;
   box-shadow:
@@ -1538,12 +1580,11 @@ input::placeholder {
 
 .host-form__submit:hover {
   border-color: color-mix(in srgb, var(--accent-strong) 34%, var(--border) 66%);
-  background:
-    linear-gradient(
-      180deg,
-      color-mix(in srgb, var(--surface-elevated) 82%, white 18%),
-      color-mix(in srgb, var(--surface) 84%, var(--accent-strong) 16%)
-    );
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--surface-elevated) 82%, white 18%),
+    color-mix(in srgb, var(--surface) 84%, var(--accent-strong) 16%)
+  );
   box-shadow:
     0 12px 22px rgba(8, 15, 28, 0.1),
     inset 0 1px 0 rgba(255, 255, 255, 0.1);
@@ -1698,7 +1739,8 @@ input::placeholder {
 
 .theme-option.active {
   border-color: color-mix(in srgb, var(--accent-strong) 48%, var(--border) 52%);
-  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent-strong) 24%, transparent 76%);
+  box-shadow: 0 0 0 1px
+    color-mix(in srgb, var(--accent-strong) 24%, transparent 76%);
 }
 
 .theme-option span {
@@ -1778,7 +1820,11 @@ input::placeholder {
   overflow: hidden;
   border-radius: 10px;
   background:
-    radial-gradient(circle at top left, color-mix(in srgb, var(--accent-strong) 10%, transparent 90%), transparent 32%),
+    radial-gradient(
+      circle at top left,
+      color-mix(in srgb, var(--accent-strong) 10%, transparent 90%),
+      transparent 32%
+    ),
     color-mix(in srgb, var(--surface) 94%, transparent 6%);
   border: 1px solid var(--border);
   box-shadow: var(--shadow);
@@ -1954,7 +2000,10 @@ input::placeholder {
   color: var(--share-text-soft);
   font-size: 0.8rem;
   font-weight: 600;
-  transition: background-color 140ms ease, color 140ms ease, box-shadow 140ms ease;
+  transition:
+    background-color 140ms ease,
+    color 140ms ease,
+    box-shadow 140ms ease;
 }
 
 .terminal-share-popover__mode-button:hover:not(:disabled) {
@@ -2035,7 +2084,11 @@ input::placeholder {
 }
 
 .terminal-pane-header.active {
-  background: color-mix(in srgb, var(--accent-strong) 12%, var(--surface-muted) 88%);
+  background: color-mix(
+    in srgb,
+    var(--accent-strong) 12%,
+    var(--surface-muted) 88%
+  );
 }
 
 .terminal-pane-header__title {
@@ -2084,8 +2137,13 @@ input::placeholder {
   margin: 0.55rem 0.55rem 0;
   padding: 0.9rem 1rem;
   border-radius: 16px;
-  background: color-mix(in srgb, var(--surface-raised) 84%, var(--accent-strong) 16%);
-  border: 1px solid color-mix(in srgb, var(--accent-strong) 22%, var(--border) 78%);
+  background: color-mix(
+    in srgb,
+    var(--surface-raised) 84%,
+    var(--accent-strong) 16%
+  );
+  border: 1px solid
+    color-mix(in srgb, var(--accent-strong) 22%, var(--border) 78%);
   color: var(--text);
   display: grid;
   gap: 0.7rem;
@@ -2147,7 +2205,8 @@ input::placeholder {
   border-radius: 8px;
   background: color-mix(in srgb, var(--surface-raised) 94%, transparent 6%);
   border: 1px solid color-mix(in srgb, var(--border) 90%, transparent 10%);
-  box-shadow: 0 16px 34px color-mix(in srgb, var(--shadow-color) 16%, transparent 84%);
+  box-shadow: 0 16px 34px
+    color-mix(in srgb, var(--shadow-color) 16%, transparent 84%);
 }
 
 .terminal-connection-overlay {
@@ -2268,8 +2327,10 @@ input::placeholder {
   position: absolute;
   border-radius: 24px;
   background: color-mix(in srgb, var(--accent-strong) 18%, transparent 82%);
-  border: 1px solid color-mix(in srgb, var(--accent-strong) 46%, transparent 54%);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent-strong) 14%, transparent 86%);
+  border: 1px solid
+    color-mix(in srgb, var(--accent-strong) 46%, transparent 54%);
+  box-shadow: inset 0 0 0 1px
+    color-mix(in srgb, var(--accent-strong) 14%, transparent 86%);
   pointer-events: none;
   z-index: 4;
 }
@@ -2292,7 +2353,7 @@ input::placeholder {
 }
 
 .workspace-split-handle::before {
-  content: '';
+  content: "";
   position: absolute;
   inset: 0;
   border-radius: 999px;
@@ -2498,7 +2559,8 @@ input::placeholder {
   border-radius: 16px;
   background: color-mix(in srgb, var(--success-bg) 68%, transparent 32%);
   color: var(--success-text);
-  border: 1px solid color-mix(in srgb, var(--success-text) 20%, var(--border) 80%);
+  border: 1px solid
+    color-mix(in srgb, var(--success-text) 20%, var(--border) 80%);
 }
 
 .sftp-table-shell {
@@ -2517,11 +2579,12 @@ input::placeholder {
 
 .sftp-table-shell.drop-target {
   border-color: color-mix(in srgb, var(--accent-strong) 62%, var(--border) 38%);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent-strong) 38%, transparent 62%);
+  box-shadow: inset 0 0 0 1px
+    color-mix(in srgb, var(--accent-strong) 38%, transparent 62%);
 }
 
 .sftp-table {
-  width: 100%;
+  table-layout: fixed;
   border-collapse: collapse;
 }
 
@@ -2529,7 +2592,11 @@ input::placeholder {
 .sftp-table td {
   padding: 0.8rem 0.9rem;
   text-align: left;
-  border-bottom: 1px solid color-mix(in srgb, var(--border) 90%, transparent 10%);
+  border-bottom: 1px solid
+    color-mix(in srgb, var(--border) 90%, transparent 10%);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .sftp-table th {
@@ -2540,6 +2607,48 @@ input::placeholder {
   font-size: 0.85rem;
   font-weight: 600;
   z-index: 1;
+}
+
+.sftp-table__header-cell {
+  position: relative;
+  display: flex;
+  align-items: center;
+  min-height: 1.4rem;
+}
+
+.sftp-table__header-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sftp-column-resize-handle {
+  position: absolute;
+  top: -0.8rem;
+  right: -0.95rem;
+  bottom: -0.8rem;
+  width: 14px;
+  cursor: col-resize;
+  touch-action: none;
+  z-index: 2;
+}
+
+.sftp-column-resize-handle::after {
+  content: "";
+  position: absolute;
+  top: 0.85rem;
+  bottom: 0.85rem;
+  left: 50%;
+  width: 1px;
+  transform: translateX(-50%);
+  background: color-mix(in srgb, var(--accent-strong) 42%, var(--border) 58%);
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+
+.sftp-table th:hover .sftp-column-resize-handle::after,
+.sftp-column-resize-handle.active::after {
+  opacity: 1;
 }
 
 .sftp-table tbody tr {
@@ -2555,6 +2664,13 @@ input::placeholder {
   display: flex;
   align-items: center;
   gap: 0.6rem;
+  min-width: 0;
+}
+
+.sftp-entry-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .sftp-entry-icon {
@@ -2581,6 +2697,99 @@ input::placeholder {
 
 .sftp-host-picker .search-panel {
   flex: 0 0 auto;
+}
+
+.sftp-host-picker {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+}
+
+.sftp-host-picker__results {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  flex-direction: column;
+  gap: 0.85rem;
+  overflow-y: auto;
+  padding-right: 0.1rem;
+}
+
+.sftp-host-picker .group-card.disabled,
+.sftp-host-picker .host-browser-card.connecting {
+  cursor: wait;
+}
+
+.sftp-host-picker .group-card.disabled {
+  opacity: 0.64;
+}
+
+.sftp-host-picker .host-browser-card.connecting {
+  border-color: color-mix(in srgb, var(--accent-strong) 30%, var(--border) 70%);
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--accent-strong) 14%, transparent 86%),
+    var(--shadow);
+}
+
+.sftp-host-picker .host-browser-card__status {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.sftp-host-picker__overlay {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  border-radius: 20px;
+  background: rgba(12, 20, 32, 0.18);
+  z-index: 3;
+}
+
+.sftp-host-picker__overlay-card {
+  display: grid;
+  justify-items: center;
+  gap: 0.45rem;
+  width: min(320px, calc(100% - 2rem));
+  padding: 1rem 1.1rem;
+  text-align: center;
+  border-radius: 22px;
+  background: color-mix(in srgb, var(--surface-strong) 96%, transparent 4%);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow);
+}
+
+.sftp-host-picker__overlay-card strong {
+  line-height: 1.4;
+}
+
+.sftp-host-picker__overlay-card span {
+  color: var(--text-soft);
+  font-size: 0.9rem;
+  line-height: 1.5;
+}
+
+.sftp-host-picker__spinner {
+  width: 1.25rem;
+  height: 1.25rem;
+  border-radius: 999px;
+  border: 2px solid
+    color-mix(in srgb, var(--accent-strong) 18%, var(--border) 82%);
+  border-top-color: var(--accent-strong);
+  animation: sftp-spinner 0.8s linear infinite;
+}
+
+@keyframes sftp-spinner {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+body.sftp-column-resizing,
+body.sftp-column-resizing * {
+  user-select: none;
+  cursor: col-resize !important;
 }
 
 .sftp-transfer-bar {
@@ -2650,8 +2859,8 @@ input::placeholder {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   grid-template-areas:
-    'bytes action'
-    'speed action';
+    "bytes action"
+    "speed action";
   gap: 0.35rem 0.85rem;
   align-items: center;
 }
@@ -2688,7 +2897,11 @@ input::placeholder {
 .transfer-card__progress > div {
   height: 100%;
   border-radius: 999px;
-  background: linear-gradient(90deg, var(--accent-strong), color-mix(in srgb, var(--accent-strong) 60%, white 40%));
+  background: linear-gradient(
+    90deg,
+    var(--accent-strong),
+    color-mix(in srgb, var(--accent-strong) 60%, white 40%)
+  );
 }
 
 .sftp-modal-backdrop {
@@ -2711,6 +2924,25 @@ input::placeholder {
 
 .sftp-modal input {
   margin-top: 0.9rem;
+}
+
+.sftp-modal__copy,
+.sftp-modal__warning,
+.sftp-modal__error {
+  margin: 0.9rem 0 0;
+  line-height: 1.6;
+}
+
+.sftp-modal__warning {
+  padding: 0.8rem 0.9rem;
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--danger-bg) 72%, transparent 28%);
+  border: 1px solid
+    color-mix(in srgb, var(--danger-text) 22%, var(--border) 78%);
+}
+
+.sftp-modal__error {
+  color: var(--danger-text);
 }
 
 .sftp-permissions-grid {
@@ -2742,7 +2974,11 @@ input::placeholder {
   bottom: 1rem;
   padding: 0.45rem 0.7rem;
   border-radius: 999px;
-  background: color-mix(in srgb, var(--accent-strong) 12%, var(--surface-strong));
+  background: color-mix(
+    in srgb,
+    var(--accent-strong) 12%,
+    var(--surface-strong)
+  );
   color: var(--accent-strong);
   font-size: 0.82rem;
   font-weight: 600;
@@ -3264,7 +3500,7 @@ input::placeholder {
 }
 
 @media (max-width: 1040px) {
-:root[data-platform='darwin'] .app-titlebar {
+  :root[data-platform="darwin"] .app-titlebar {
     padding-left: 4.8rem;
   }
 
@@ -3298,7 +3534,7 @@ input::placeholder {
     padding-inline: 1rem 0.8rem;
   }
 
-  :root[data-platform='darwin'] .app-titlebar {
+  :root[data-platform="darwin"] .app-titlebar {
     padding-inline: 4.8rem 0.8rem;
   }
 

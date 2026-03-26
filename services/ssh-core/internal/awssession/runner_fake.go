@@ -37,6 +37,11 @@ func (r *fakeRunner) Write(data []byte) error {
 	return err
 }
 
+func (r *fakeRunner) SendControlSignal(signal string) error {
+	_, err := normalizeControlSignal(signal)
+	return err
+}
+
 func (r *fakeRunner) Resize(cols, rows int) error {
 	_, _ = normalizedSize(cols, rows)
 	return nil

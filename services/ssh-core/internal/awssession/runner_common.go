@@ -17,6 +17,7 @@ const (
 
 type sessionRunner interface {
 	Write(data []byte) error
+	SendControlSignal(signal string) error
 	Resize(cols, rows int) error
 	Kill() error
 	Close() error
@@ -69,6 +70,15 @@ func buildAWSArgs(payload protocol.AWSConnectPayload) []string {
 		payload.ProfileName,
 		"--region",
 		payload.Region,
+	}
+}
+
+func normalizeControlSignal(signal string) (string, error) {
+	switch signal {
+	case "interrupt", "suspend", "quit":
+		return signal, nil
+	default:
+		return "", fmt.Errorf("unsupported control signal: %s", signal)
 	}
 }
 

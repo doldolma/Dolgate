@@ -25,6 +25,7 @@ import type {
   HostDraft,
   HostRecord,
   SecretMetadataRecord,
+  SessionShareControlSignal,
   SessionShareEvent,
   SessionShareInputToggleInput,
   SessionShareSnapshotInput,
@@ -53,6 +54,7 @@ export type CoreCommandType =
   | "connect"
   | "awsConnect"
   | "localConnect"
+  | "controlSignal"
   | "resize"
   | "disconnect"
   | "probeHostKey"
@@ -146,6 +148,10 @@ export interface KeyboardInteractiveRespondInput {
   sessionId: string;
   challengeId: string;
   responses: string[];
+}
+
+export interface ControlSignalPayload {
+  signal: SessionShareControlSignal;
 }
 
 export interface ResolvedSftpConnectPayload {

@@ -101,6 +101,19 @@
     );
   }
 
+  function sendControlSignal(signal) {
+    if (!signal || socket.readyState !== WebSocket.OPEN || term.options.disableStdin) {
+      return;
+    }
+
+    socket.send(
+      JSON.stringify({
+        type: "control-signal",
+        signal,
+      })
+    );
+  }
+
   function sendUtf8Text(text) {
     if (!text) {
       return;
@@ -172,6 +185,7 @@
 
   let latestAppearance = normalizeTerminalAppearance(null);
   let latestViewportPx = null;
+  let currentTransport = "ssh";
   let scaleFrameHandle = 0;
   let searchOpen = false;
   let searchAddon = null;
@@ -249,6 +263,24 @@
 
   function canUseSearch() {
     return Boolean(searchAddon && searchOverlayNode && searchInputNode);
+  }
+
+  function resolveAwsShareControlSignal(event) {
+    if (currentTransport !== "aws-ssm" || !event.ctrlKey || event.metaKey || event.altKey) {
+      return null;
+    }
+
+    if (event.code === "KeyC" || (typeof event.key === "string" && event.key.toLowerCase() === "c")) {
+      return "interrupt";
+    }
+    if (event.code === "KeyZ" || (typeof event.key === "string" && event.key.toLowerCase() === "z")) {
+      return "suspend";
+    }
+    if (event.code === "Backslash" || event.key === "\\") {
+      return "quit";
+    }
+
+    return null;
   }
 
   function focusSearchInput() {
@@ -358,6 +390,17 @@
 
   term.open(terminalNode);
   initializeAddons();
+  term.attachCustomKeyEventHandler((event) => {
+    const signal = resolveAwsShareControlSignal(event);
+    if (!signal) {
+      return true;
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+    sendControlSignal(signal);
+    return false;
+  });
   term.focus();
   setStatus("Connecting");
 
@@ -457,6 +500,7 @@
     const payload = JSON.parse(String(event.data));
 
     if (payload.type === "init") {
+      currentTransport = payload.transport === "aws-ssm" ? "aws-ssm" : "ssh";
       titleNode.textContent = payload.title || payload.hostLabel || "Shared Session";
       applyViewerLayoutMetadata(payload);
       term.resize(payload.cols || 80, payload.rows || 24);

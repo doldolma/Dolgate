@@ -55,3 +55,45 @@ func TestValidateViewerInputMessage(t *testing.T) {
 		}
 	})
 }
+
+func TestValidateViewerControlSignalMessage(t *testing.T) {
+	t.Run("accepts supported control signals", func(t *testing.T) {
+		message := viewerControlSignalMessage{
+			Type:   "control-signal",
+			Signal: "interrupt",
+		}
+
+		if !validateViewerControlSignalMessage(message) {
+			t.Fatal("expected control signal to be accepted")
+		}
+	})
+
+	t.Run("rejects unsupported control signals", func(t *testing.T) {
+		message := viewerControlSignalMessage{
+			Type:   "control-signal",
+			Signal: "break",
+		}
+
+		if validateViewerControlSignalMessage(message) {
+			t.Fatal("expected unsupported control signal to be rejected")
+		}
+	})
+}
+
+func TestSessionShareTransportValidation(t *testing.T) {
+	if !isValidSessionShareTransport("") {
+		t.Fatal("empty transport should default to ssh")
+	}
+	if !isValidSessionShareTransport("ssh") {
+		t.Fatal("ssh transport should be valid")
+	}
+	if !isValidSessionShareTransport("aws-ssm") {
+		t.Fatal("aws-ssm transport should be valid")
+	}
+	if normalizeSessionShareTransport("aws-ssm") != "aws-ssm" {
+		t.Fatal("aws-ssm transport should be preserved")
+	}
+	if normalizeSessionShareTransport("invalid") != "ssh" {
+		t.Fatal("unknown transport should fall back to ssh")
+	}
+}

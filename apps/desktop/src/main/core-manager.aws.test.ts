@@ -154,6 +154,8 @@ describe("CoreManager AWS SSM sessions", () => {
       {
         PATH: "C:\\Users\\heodoyeong\\bin;C:\\Tools",
         SystemRoot: "C:\\Windows",
+        ProgramFiles: "C:\\Program Files",
+        "ProgramFiles(x86)": "C:\\Program Files (x86)",
       },
       {
         platform: "win32",
@@ -165,6 +167,8 @@ describe("CoreManager AWS SSM sessions", () => {
       "C:\\Windows\\System32",
       "C:\\Windows",
       "C:\\Windows\\System32\\Wbem",
+      "C:\\Program Files\\PowerShell\\7",
+      "C:\\Program Files (x86)\\PowerShell\\7",
       "C:\\Windows\\System32\\WindowsPowerShell\\v1.0",
       "C:\\Users\\heodoyeong\\bin",
       "C:\\Tools",
@@ -353,6 +357,40 @@ describe("CoreManager AWS SSM sessions", () => {
 
     manager.resize(sessionId, 200, 60);
     expect(fakeProcess.writes).toHaveLength(2);
+  });
+
+  it("sends controlSignal frames only for connected AWS sessions", async () => {
+    const fakeProcess = createFakeChildProcess();
+    spawnMock.mockReturnValue(fakeProcess.child);
+
+    const manager = new CoreManager();
+    const { sessionId } = await manager.connectAwsSession({
+      profileName: "default",
+      region: "ap-northeast-2",
+      instanceId: "i-control",
+      cols: 120,
+      rows: 32,
+      title: "Control Host",
+      hostId: "host-4",
+    });
+
+    manager.sendControlSignal(sessionId, "interrupt");
+    expect(fakeProcess.writes).toHaveLength(1);
+
+    fakeProcess.emitControl({
+      type: "connected",
+      sessionId,
+      payload: {
+        status: "connected",
+      },
+    });
+
+    manager.sendControlSignal(sessionId, "interrupt");
+
+    expect(fakeProcess.writes).toHaveLength(2);
+    const request = decodeControlFrame(fakeProcess.writes[1]);
+    expect(request.type).toBe("controlSignal");
+    expect(request.payload).toMatchObject({ signal: "interrupt" });
   });
 
   it("uses dedicated SSM port forward commands for AWS forwarding runtimes", async () => {

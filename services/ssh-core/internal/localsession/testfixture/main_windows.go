@@ -12,11 +12,13 @@ import (
 )
 
 func main() {
-	fmt.Print("FAKE LOCAL SHELL READY\r\n")
-	printTerminalSize()
-
 	input, closeInput := openConsoleInput()
 	defer closeInput()
+	output, closeOutput := openConsoleOutput()
+	defer closeOutput()
+
+	writeLine(output, "FAKE LOCAL SHELL READY")
+	printTerminalSize(output)
 
 	scanner := bufio.NewScanner(input)
 	for scanner.Scan() {
@@ -25,22 +27,22 @@ func main() {
 		case "":
 			continue
 		case "__REPORT_SIZE__":
-			printTerminalSize()
+			printTerminalSize(output)
 		default:
-			fmt.Printf("ECHO:%s\r\n", line)
+			writeLine(output, "ECHO:"+line)
 		}
 	}
 }
 
-func printTerminalSize() {
+func printTerminalSize(output *os.File) {
 	info := windows.ConsoleScreenBufferInfo{}
-	err := windows.GetConsoleScreenBufferInfo(windows.Handle(os.Stdout.Fd()), &info)
+	err := windows.GetConsoleScreenBufferInfo(windows.Handle(output.Fd()), &info)
 	if err != nil {
-		fmt.Printf("SIZE:%dx%d\r\n", 300, 100)
+		writeLine(output, fmt.Sprintf("SIZE:%dx%d", 300, 100))
 		return
 	}
 
-	fmt.Printf("SIZE:%dx%d\r\n", int(info.Size.X), int(info.Size.Y))
+	writeLine(output, fmt.Sprintf("SIZE:%dx%d", int(info.Size.X), int(info.Size.Y)))
 }
 
 func openConsoleInput() (*os.File, func()) {
@@ -61,4 +63,28 @@ func openConsoleInput() (*os.File, func()) {
 	return file, func() {
 		_ = file.Close()
 	}
+}
+
+func openConsoleOutput() (*os.File, func()) {
+	handle, err := windows.CreateFile(
+		windows.StringToUTF16Ptr("CONOUT$"),
+		windows.GENERIC_READ|windows.GENERIC_WRITE,
+		windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE,
+		nil,
+		windows.OPEN_EXISTING,
+		0,
+		0,
+	)
+	if err != nil {
+		return os.Stdout, func() {}
+	}
+
+	file := os.NewFile(uintptr(handle), "CONOUT$")
+	return file, func() {
+		_ = file.Close()
+	}
+}
+
+func writeLine(output *os.File, line string) {
+	_, _ = fmt.Fprintf(output, "%s\r\n", line)
 }

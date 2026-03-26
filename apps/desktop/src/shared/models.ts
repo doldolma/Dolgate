@@ -32,6 +32,7 @@ export type UpdateStatus = 'idle' | 'checking' | 'available' | 'downloading' | '
 export type SftpPaneId = 'left' | 'right';
 export type SftpEndpointKind = 'local' | 'remote';
 export type FileEntryKind = 'folder' | 'file' | 'symlink' | 'unknown';
+export type SftpBrowserColumnKey = 'name' | 'dateModified' | 'size' | 'kind';
 export type ConflictResolution = 'overwrite' | 'skip' | 'keepBoth';
 export type PortForwardMode = 'local' | 'remote' | 'dynamic';
 export type PortForwardTransport = 'ssh' | 'aws-ssm';
@@ -301,8 +302,50 @@ export interface TerminalAppearanceSettings {
 }
 
 // AppSettings는 사용자의 로컬 환경 설정을 표현한다.
+export interface SftpBrowserColumnWidths {
+  name: number;
+  dateModified: number;
+  size: number;
+  kind: number;
+}
+
+export const DEFAULT_SFTP_BROWSER_COLUMN_WIDTHS: SftpBrowserColumnWidths = {
+  name: 360,
+  dateModified: 168,
+  size: 96,
+  kind: 96
+};
+
+export const MIN_SFTP_BROWSER_COLUMN_WIDTHS: SftpBrowserColumnWidths = {
+  name: 180,
+  dateModified: 140,
+  size: 72,
+  kind: 72
+};
+
+const SFTP_BROWSER_COLUMN_KEYS: SftpBrowserColumnKey[] = ['name', 'dateModified', 'size', 'kind'];
+
+export function normalizeSftpBrowserColumnWidths(
+  value: Partial<Record<SftpBrowserColumnKey, unknown>> | null | undefined
+): SftpBrowserColumnWidths {
+  const source = value ?? {};
+  return SFTP_BROWSER_COLUMN_KEYS.reduce<SftpBrowserColumnWidths>(
+    (result, key) => {
+      const nextValue = source[key];
+      if (typeof nextValue !== 'number' || !Number.isFinite(nextValue)) {
+        result[key] = DEFAULT_SFTP_BROWSER_COLUMN_WIDTHS[key];
+        return result;
+      }
+      result[key] = Math.max(MIN_SFTP_BROWSER_COLUMN_WIDTHS[key], Math.round(nextValue));
+      return result;
+    },
+    { ...DEFAULT_SFTP_BROWSER_COLUMN_WIDTHS }
+  );
+}
+
 export interface AppSettings extends TerminalAppearanceSettings {
   theme: AppTheme;
+  sftpBrowserColumnWidths: SftpBrowserColumnWidths;
   serverUrl: string;
   serverUrlOverride?: string | null;
   dismissedUpdateVersion?: string | null;
@@ -724,6 +767,7 @@ export interface SessionShareState {
 export interface SessionShareStartInput {
   sessionId: string;
   title: string;
+  transport: PortForwardTransport;
   snapshot: string;
   cols: number;
   rows: number;
@@ -751,11 +795,14 @@ export interface SessionShareEvent {
   state: SessionShareState;
 }
 
+export type SessionShareControlSignal = 'interrupt' | 'suspend' | 'quit';
+
 export type SessionShareOwnerMessage =
   | {
       type: 'hello';
       title: string;
       hostLabel: string;
+      transport: PortForwardTransport;
       cols: number;
       rows: number;
       snapshot: string;
@@ -795,6 +842,7 @@ export type SessionShareViewerMessage =
       type: 'init';
       title: string;
       hostLabel: string;
+      transport: PortForwardTransport;
       cols: number;
       rows: number;
       inputEnabled: boolean;

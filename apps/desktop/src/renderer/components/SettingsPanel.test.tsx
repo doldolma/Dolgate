@@ -1,5 +1,6 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
+import { DEFAULT_SFTP_BROWSER_COLUMN_WIDTHS } from '@shared';
 import type { AppSettings } from '@shared';
 import { SettingsPanel } from './SettingsPanel';
 
@@ -14,6 +15,7 @@ const settings: AppSettings = {
   terminalMinimumContrastRatio: 1,
   terminalAltIsMeta: false,
   terminalWebglEnabled: true,
+  sftpBrowserColumnWidths: { ...DEFAULT_SFTP_BROWSER_COLUMN_WIDTHS },
   serverUrl: 'https://ssh.doldolma.com',
   serverUrlOverride: null,
   dismissedUpdateVersion: null,

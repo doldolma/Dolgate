@@ -20,6 +20,7 @@ const (
 	CommandAWSConnect                 CommandType = "awsConnect"
 	CommandLocalConnect               CommandType = "localConnect"
 	CommandKeyboardInteractiveRespond CommandType = "keyboardInteractiveRespond"
+	CommandControlSignal              CommandType = "controlSignal"
 	CommandResize                     CommandType = "resize"
 	CommandDisconnect                 CommandType = "disconnect"
 	CommandProbeHostKey               CommandType = "probeHostKey"
@@ -173,6 +174,10 @@ type KeyboardInteractiveRespondPayload struct {
 	Responses   []string `json:"responses"`
 }
 
+type ControlSignalPayload struct {
+	Signal string `json:"signal"`
+}
+
 // ResizePayload는 xterm 크기와 원격 PTY 크기를 맞추기 위한 요청이다.
 type ResizePayload struct {
 	Cols int `json:"cols"`
@@ -252,8 +257,9 @@ type SSMPortForwardStartPayload struct {
 
 // StatusPayload는 프로세스/세션 상태를 짧은 문자열로 표현한다.
 type StatusPayload struct {
-	Status  string `json:"status"`
-	Message string `json:"message,omitempty"`
+	Status    string `json:"status"`
+	Message   string `json:"message,omitempty"`
+	ShellKind string `json:"shellKind,omitempty"`
 }
 
 // ErrorPayload는 사람이 바로 읽을 수 있는 진단 메시지를 담는다.

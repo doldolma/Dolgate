@@ -20,13 +20,37 @@ import (
 
 const minimumConPTYBuild = 17763
 
+const (
+	localConPTYWrapperBinaryName = "aws-conpty-wrapper.exe"
+	localConPTYWrapperPathEnv    = "DOLSSH_LOCAL_CONPTY_WRAPPER_PATH"
+)
+
 type windowsConPTYRunner struct {
+	shellKind     string
 	process       windows.Handle
 	pseudoConsole windows.Handle
 	inputWriter   *os.File
 	outputReader  *os.File
 	closeOnce     sync.Once
 }
+
+type windowsShellRuntime struct {
+	kind           string
+	executablePath string
+	args           []string
+}
+
+type windowsShellCandidate struct {
+	kind           string
+	executablePath string
+	args           []string
+}
+
+const (
+	windowsShellKindPwsh       = "pwsh"
+	windowsShellKindPowerShell = "powershell"
+	windowsShellKindCmd        = "cmd"
+)
 
 func startPlatformLocalRunner(payload protocol.LocalConnectPayload, runtime localCommandRuntime) (sessionRunner, error) {
 	if err := ensureConPTYSupport(); err != nil {
@@ -100,6 +124,11 @@ func startPlatformLocalRunner(payload protocol.LocalConnectPayload, runtime loca
 	}
 
 	commandLine := windows.ComposeCommandLine(append([]string{runtime.executablePath}, runtime.args...))
+	if runtime.wrapperPath != "" {
+		wrapperArgs := []string{runtime.wrapperPath, runtime.executablePath}
+		wrapperArgs = append(wrapperArgs, runtime.args...)
+		commandLine = windows.ComposeCommandLine(wrapperArgs)
+	}
 	commandLine16, err := windows.UTF16PtrFromString(commandLine)
 	if err != nil {
 		return nil, fmt.Errorf("command line encoding failed: %w", err)
@@ -146,6 +175,7 @@ func startPlatformLocalRunner(payload protocol.LocalConnectPayload, runtime loca
 	cleanupOnError = false
 
 	return &windowsConPTYRunner{
+		shellKind:     runtime.shellKind,
 		process:       processInfo.Process,
 		pseudoConsole: pseudoConsole,
 		inputWriter:   inputWriter,
@@ -154,44 +184,44 @@ func startPlatformLocalRunner(payload protocol.LocalConnectPayload, runtime loca
 }
 
 func resolveLocalRuntime() (localCommandRuntime, error) {
-	executablePath, err := resolveWindowsShellExecutable()
+	shellRuntime, err := resolveWindowsShellRuntime()
+	if err != nil {
+		return localCommandRuntime{}, err
+	}
+	wrapperPath, err := resolveLocalConPTYWrapperPath()
 	if err != nil {
 		return localCommandRuntime{}, err
 	}
 
 	return localCommandRuntime{
-		executablePath:   executablePath,
-		args:             []string{"/d", "/k", "prompt $P$G"},
-		env:              buildWindowsLocalShellEnv(os.Environ(), executablePath),
+		shellKind:        shellRuntime.kind,
+		executablePath:   shellRuntime.executablePath,
+		args:             append([]string(nil), shellRuntime.args...),
+		env:              buildWindowsLocalShellEnv(os.Environ(), shellRuntime),
+		wrapperPath:      wrapperPath,
 		workingDirectory: resolveUserHomeDirectory(),
 	}, nil
 }
 
-func resolveWindowsShellExecutable() (string, error) {
-	return resolveWindowsShellExecutableWithLookup(
-		[]string{
-			os.Getenv("COMSPEC"),
-			os.Getenv("ComSpec"),
-			resolveWindowsCommandProcessorCandidate(os.Getenv("SystemRoot")),
-			resolveWindowsCommandProcessorCandidate(os.Getenv("windir")),
-			`C:\Windows\System32\cmd.exe`,
-			"cmd.exe",
-		},
-		isWindowsShellUsable,
-	)
+func resolveWindowsShellRuntime() (windowsShellRuntime, error) {
+	return resolveWindowsShellRuntimeWithLookup(buildWindowsShellCandidates(), isWindowsShellUsable)
 }
 
-func resolveWindowsShellExecutableWithLookup(candidates []string, canUse func(string) bool) (string, error) {
+func resolveWindowsShellRuntimeWithLookup(candidates []windowsShellCandidate, canUse func(string) bool) (windowsShellRuntime, error) {
 	for _, candidate := range candidates {
-		normalized := strings.TrimSpace(candidate)
-		if normalized == "" || !isWindowsCommandProcessorCandidate(normalized) {
+		normalized := strings.TrimSpace(candidate.executablePath)
+		if normalized == "" || !isWindowsShellCandidateForKind(candidate.kind, normalized) {
 			continue
 		}
 		if canUse(normalized) {
-			return normalized, nil
+			return windowsShellRuntime{
+				kind:           candidate.kind,
+				executablePath: normalized,
+				args:           append([]string(nil), candidate.args...),
+			}, nil
 		}
 	}
-	return "", fmt.Errorf("could not resolve a usable local Windows cmd shell")
+	return windowsShellRuntime{}, fmt.Errorf("could not resolve a usable local Windows shell (tried pwsh.exe, powershell.exe, cmd.exe)")
 }
 
 func isWindowsShellUsable(candidate string) bool {
@@ -206,9 +236,141 @@ func isWindowsShellUsable(candidate string) bool {
 	return err == nil
 }
 
+func buildWindowsShellCandidates() []windowsShellCandidate {
+	candidates := make([]windowsShellCandidate, 0, 10)
+	for _, candidate := range buildWindowsPowerShell7Candidates() {
+		candidates = append(candidates, windowsShellCandidate{
+			kind:           windowsShellKindPwsh,
+			executablePath: candidate,
+			args:           []string{"-NoLogo", "-NoProfile"},
+		})
+	}
+	candidates = append(candidates,
+		windowsShellCandidate{
+			kind:           windowsShellKindPwsh,
+			executablePath: "pwsh.exe",
+			args:           []string{"-NoLogo", "-NoProfile"},
+		},
+		windowsShellCandidate{
+			kind:           windowsShellKindPwsh,
+			executablePath: "pwsh",
+			args:           []string{"-NoLogo", "-NoProfile"},
+		},
+		windowsShellCandidate{
+			kind:           windowsShellKindPowerShell,
+			executablePath: resolveWindowsPowerShellCandidate(os.Getenv("SystemRoot")),
+			args:           []string{"-NoLogo", "-NoProfile"},
+		},
+		windowsShellCandidate{
+			kind:           windowsShellKindPowerShell,
+			executablePath: resolveWindowsPowerShellCandidate(os.Getenv("windir")),
+			args:           []string{"-NoLogo", "-NoProfile"},
+		},
+		windowsShellCandidate{
+			kind:           windowsShellKindPowerShell,
+			executablePath: `C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe`,
+			args:           []string{"-NoLogo", "-NoProfile"},
+		},
+		windowsShellCandidate{
+			kind:           windowsShellKindPowerShell,
+			executablePath: "powershell.exe",
+			args:           []string{"-NoLogo", "-NoProfile"},
+		},
+		windowsShellCandidate{
+			kind:           windowsShellKindPowerShell,
+			executablePath: "powershell",
+			args:           []string{"-NoLogo", "-NoProfile"},
+		},
+		windowsShellCandidate{
+			kind:           windowsShellKindCmd,
+			executablePath: os.Getenv("COMSPEC"),
+			args:           []string{"/d", "/k", "prompt $P$G"},
+		},
+		windowsShellCandidate{
+			kind:           windowsShellKindCmd,
+			executablePath: os.Getenv("ComSpec"),
+			args:           []string{"/d", "/k", "prompt $P$G"},
+		},
+		windowsShellCandidate{
+			kind:           windowsShellKindCmd,
+			executablePath: resolveWindowsCommandProcessorCandidate(os.Getenv("SystemRoot")),
+			args:           []string{"/d", "/k", "prompt $P$G"},
+		},
+		windowsShellCandidate{
+			kind:           windowsShellKindCmd,
+			executablePath: resolveWindowsCommandProcessorCandidate(os.Getenv("windir")),
+			args:           []string{"/d", "/k", "prompt $P$G"},
+		},
+		windowsShellCandidate{
+			kind:           windowsShellKindCmd,
+			executablePath: `C:\Windows\System32\cmd.exe`,
+			args:           []string{"/d", "/k", "prompt $P$G"},
+		},
+		windowsShellCandidate{
+			kind:           windowsShellKindCmd,
+			executablePath: "cmd.exe",
+			args:           []string{"/d", "/k", "prompt $P$G"},
+		},
+		windowsShellCandidate{
+			kind:           windowsShellKindCmd,
+			executablePath: "cmd",
+			args:           []string{"/d", "/k", "prompt $P$G"},
+		},
+	)
+	return candidates
+}
+
+func buildWindowsPowerShell7Candidates() []string {
+	roots := []string{
+		os.Getenv("ProgramFiles"),
+		os.Getenv("ProgramW6432"),
+		os.Getenv("ProgramFiles(x86)"),
+		`C:\Program Files`,
+		`C:\Program Files (x86)`,
+	}
+	candidates := make([]string, 0, len(roots))
+	seen := make(map[string]struct{}, len(roots))
+	for _, root := range roots {
+		normalizedRoot := strings.TrimSpace(root)
+		if normalizedRoot == "" {
+			continue
+		}
+		candidate := filepath.Join(normalizedRoot, "PowerShell", "7", "pwsh.exe")
+		seenKey := strings.ToLower(candidate)
+		if _, ok := seen[seenKey]; ok {
+			continue
+		}
+		seen[seenKey] = struct{}{}
+		candidates = append(candidates, candidate)
+	}
+	return candidates
+}
+
+func isWindowsShellCandidateForKind(kind string, candidate string) bool {
+	base := strings.ToLower(filepath.Base(candidate))
+	switch kind {
+	case windowsShellKindPwsh:
+		return base == "pwsh" || base == "pwsh.exe"
+	case windowsShellKindPowerShell:
+		return base == "powershell" || base == "powershell.exe"
+	case windowsShellKindCmd:
+		return isWindowsCommandProcessorCandidate(candidate)
+	default:
+		return false
+	}
+}
+
 func isWindowsCommandProcessorCandidate(candidate string) bool {
 	base := strings.ToLower(filepath.Base(candidate))
 	return base == "cmd" || base == "cmd.exe"
+}
+
+func resolveWindowsPowerShellCandidate(root string) string {
+	normalizedRoot := strings.TrimSpace(root)
+	if normalizedRoot == "" {
+		return ""
+	}
+	return filepath.Join(normalizedRoot, "System32", "WindowsPowerShell", "v1.0", "powershell.exe")
 }
 
 func resolveWindowsCommandProcessorCandidate(root string) string {
@@ -219,10 +381,20 @@ func resolveWindowsCommandProcessorCandidate(root string) string {
 	return filepath.Join(normalizedRoot, "System32", "cmd.exe")
 }
 
-func buildWindowsLocalShellEnv(base []string, executablePath string) []string {
+func buildWindowsLocalShellEnv(base []string, shell windowsShellRuntime) []string {
 	env := make([]string, 0, len(base)+4)
 	seen := make(map[string]int, len(base)+4)
-	windowsRoot := inferWindowsRootFromExecutable(executablePath)
+	windowsRoot :=
+		lookupWindowsEnvValue(base, "SystemRoot")
+	if windowsRoot == "" {
+		windowsRoot = lookupWindowsEnvValue(base, "windir")
+	}
+	if windowsRoot == "" {
+		windowsRoot = inferWindowsRootFromExecutable(shell.executablePath)
+	}
+	if windowsRoot == "" {
+		windowsRoot = `C:\Windows`
+	}
 
 	appendOrReplace := func(key, value string) {
 		if strings.TrimSpace(value) == "" {
@@ -246,12 +418,30 @@ func buildWindowsLocalShellEnv(base []string, executablePath string) []string {
 		appendOrReplace(parts[0], parts[1])
 	}
 
-	appendOrReplace("COMSPEC", executablePath)
+	comspec := lookupWindowsEnvValue(base, "COMSPEC")
+	if comspec == "" {
+		comspec = resolveWindowsCommandProcessorCandidate(windowsRoot)
+	}
+	appendOrReplace("COMSPEC", comspec)
 	if windowsRoot != "" {
 		appendOrReplace("SystemRoot", windowsRoot)
 		appendOrReplace("windir", windowsRoot)
 	}
 	return env
+}
+
+func lookupWindowsEnvValue(env []string, key string) string {
+	target := strings.ToLower(key)
+	for _, entry := range env {
+		parts := strings.SplitN(entry, "=", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		if strings.ToLower(parts[0]) == target {
+			return strings.TrimSpace(parts[1])
+		}
+	}
+	return ""
 }
 
 func inferWindowsRootFromExecutable(executablePath string) string {
@@ -260,15 +450,14 @@ func inferWindowsRootFromExecutable(executablePath string) string {
 		return ""
 	}
 	cleaned := filepath.Clean(normalizedPath)
-	if !isWindowsCommandProcessorCandidate(cleaned) {
-		return ""
+	currentDir := filepath.Dir(cleaned)
+	for currentDir != "" && currentDir != filepath.Dir(currentDir) {
+		if strings.EqualFold(filepath.Base(currentDir), "System32") {
+			return filepath.Dir(currentDir)
+		}
+		currentDir = filepath.Dir(currentDir)
 	}
-
-	system32Dir := filepath.Dir(cleaned)
-	if !strings.EqualFold(filepath.Base(system32Dir), "System32") {
-		return ""
-	}
-	return filepath.Dir(system32Dir)
+	return ""
 }
 
 func resolveUserHomeDirectory() string {
@@ -277,6 +466,27 @@ func resolveUserHomeDirectory() string {
 		return ""
 	}
 	return home
+}
+
+func resolveLocalConPTYWrapperPath() (string, error) {
+	if override := strings.TrimSpace(os.Getenv(localConPTYWrapperPathEnv)); override != "" {
+		if isWindowsShellUsable(override) && strings.EqualFold(filepath.Ext(override), ".exe") {
+			return override, nil
+		}
+		return "", fmt.Errorf("local conpty wrapper not found: %s", override)
+	}
+
+	currentExecutable, err := os.Executable()
+	if err != nil {
+		return "", fmt.Errorf("resolve ssh-core executable path: %w", err)
+	}
+
+	candidate := filepath.Join(filepath.Dir(currentExecutable), localConPTYWrapperBinaryName)
+	if isWindowsShellUsable(candidate) && strings.EqualFold(filepath.Ext(candidate), ".exe") {
+		return candidate, nil
+	}
+
+	return "", fmt.Errorf("local conpty wrapper not found next to ssh-core: %s", candidate)
 }
 
 func (r *windowsConPTYRunner) Write(data []byte) error {
@@ -347,6 +557,10 @@ func (r *windowsConPTYRunner) Wait() (sessionExit, error) {
 	}
 
 	return sessionExit{ExitCode: int(exitCode)}, nil
+}
+
+func (r *windowsConPTYRunner) ShellKind() string {
+	return r.shellKind
 }
 
 func ensureConPTYSupport() error {
