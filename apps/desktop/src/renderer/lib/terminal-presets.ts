@@ -1,4 +1,4 @@
-import type { TerminalFontFamilyId, TerminalThemeId, TerminalThemePreset } from '@shared';
+import type { GlobalTerminalThemeId, TerminalFontFamilyId, TerminalThemeId, TerminalThemePreset } from '@shared';
 
 export interface TerminalThemeDefinition extends TerminalThemePreset {
   description: string;
@@ -427,6 +427,24 @@ export const terminalThemePresets: TerminalThemeDefinition[] = [
 
 export function getTerminalThemePreset(themeId: TerminalThemeId | null | undefined): TerminalThemeDefinition {
   return terminalThemePresets.find((preset) => preset.id === themeId) ?? terminalThemePresets[0];
+}
+
+export function resolveGlobalTerminalThemeId(
+  globalThemeId: GlobalTerminalThemeId | null | undefined,
+  prefersDark: boolean
+): TerminalThemeId {
+  if (globalThemeId === 'system') {
+    return prefersDark ? 'dolssh-dark' : 'dolssh-light';
+  }
+  return globalThemeId ?? 'dolssh-dark';
+}
+
+export function resolveTerminalThemeIdForSession(
+  hostThemeId: TerminalThemeId | null | undefined,
+  globalThemeId: GlobalTerminalThemeId | null | undefined,
+  prefersDark: boolean
+): TerminalThemeId {
+  return hostThemeId ?? resolveGlobalTerminalThemeId(globalThemeId, prefersDark);
 }
 
 export function getTerminalFontOption(fontId: TerminalFontFamilyId | null | undefined): TerminalFontOption {

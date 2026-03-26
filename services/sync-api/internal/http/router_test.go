@@ -344,6 +344,12 @@ func TestSessionShareCreateAndViewerPage(t *testing.T) {
 	if !strings.Contains(viewerRecorder.Body.String(), `/share/assets/viewer.js?v=`) {
 		t.Fatalf("expected viewer page html to contain versioned viewer asset url: %s", viewerRecorder.Body.String())
 	}
+	if !strings.Contains(viewerRecorder.Body.String(), `/share/assets/vendor/xterm-addon-search.js?v=`) {
+		t.Fatalf("expected viewer page html to contain versioned search addon asset url: %s", viewerRecorder.Body.String())
+	}
+	if !strings.Contains(viewerRecorder.Body.String(), `id="viewer-search-input"`) {
+		t.Fatalf("expected viewer page html to contain search overlay markup: %s", viewerRecorder.Body.String())
+	}
 
 	invalidViewerRequest := httptest.NewRequest(http.MethodGet, "/share/"+createResponse.ShareID+"/invalid-token", nil)
 	invalidViewerRecorder := httptest.NewRecorder()

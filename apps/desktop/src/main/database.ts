@@ -20,6 +20,7 @@ import type {
   AppTheme,
   AwsEc2HostDraft,
   AwsEc2HostRecord,
+  GlobalTerminalThemeId,
   GroupRecord,
   GroupRemoveMode,
   GroupRemoveResult,
@@ -305,7 +306,7 @@ function withLinkedHostCount(record: SecretMetadataRecord, hosts: HostRecord[]):
   };
 }
 
-const DEFAULT_GLOBAL_TERMINAL_THEME_ID: TerminalThemeId = 'dolssh-dark';
+const DEFAULT_GLOBAL_TERMINAL_THEME_ID: GlobalTerminalThemeId = 'dolssh-dark';
 const DEFAULT_TERMINAL_FONT_FAMILY: TerminalFontFamilyId =
   process.platform === 'win32' ? 'consolas' : process.platform === 'linux' ? 'jetbrains-mono' : 'sf-mono';
 const DEFAULT_TERMINAL_FONT_SIZE = 13;

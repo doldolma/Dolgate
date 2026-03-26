@@ -913,6 +913,7 @@ export function App() {
             tabs={tabs}
             hosts={hosts}
             settings={settings}
+            prefersDark={prefersDark}
             activeSessionId={activeSessionId}
             activeWorkspace={activeWorkspace}
             draggedSession={draggedSession}

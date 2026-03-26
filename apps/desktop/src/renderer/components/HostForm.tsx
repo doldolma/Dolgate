@@ -139,6 +139,10 @@ function serializeHostFormSubmission(submission: HostFormSubmission): string {
   });
 }
 
+function buildHostHydrationKey(host: HostRecord): string {
+  return `${host.id}:${host.updatedAt}`;
+}
+
 function renderTerminalThemeField(
   value: TerminalThemeId | null | undefined,
   onChange: (value: TerminalThemeId | null) => void
@@ -176,6 +180,7 @@ export function HostForm({
   const formRef = useRef<HTMLFormElement | null>(null);
   const saveTimerRef = useRef<number | null>(null);
   const lastHydratedHostIdRef = useRef<string | null>(null);
+  const lastHydratedHostKeyRef = useRef<string | null>(null);
   const isTagInputComposingRef = useRef(false);
   const skipNextTagBlurCommitRef = useRef(false);
   const [draft, setDraft] = useState<HostDraft>(createDraft(defaultGroupPath));
@@ -233,10 +238,14 @@ export function HostForm({
       setSaveInFlight(false);
       setLastSavedSubmissionKey(null);
       lastHydratedHostIdRef.current = null;
+      lastHydratedHostKeyRef.current = null;
       return;
     }
 
-    const shouldRehydrate = lastHydratedHostIdRef.current !== host.id || (!isEditDirty && !saveInFlight);
+    const nextHydrationKey = buildHostHydrationKey(host);
+    const isNewHost = lastHydratedHostIdRef.current !== host.id;
+    const hasHostRevisionChanged = lastHydratedHostKeyRef.current !== nextHydrationKey;
+    const shouldRehydrate = isNewHost || (hasHostRevisionChanged && !isEditDirty && !saveInFlight);
     if (!shouldRehydrate) {
       return;
     }
@@ -319,6 +328,7 @@ export function HostForm({
     setSaveInFlight(false);
     setLastSavedSubmissionKey(nextSubmissionKey);
     lastHydratedHostIdRef.current = host.id;
+    lastHydratedHostKeyRef.current = nextHydrationKey;
   }, [defaultGroupPath, host, isEditDirty, saveInFlight]);
 
   useEffect(() => {

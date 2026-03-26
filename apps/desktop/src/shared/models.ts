@@ -17,6 +17,7 @@ export type TerminalThemeId =
   | 'hacker-green'
   | 'hacker-blue'
   | 'hacker-red';
+export type GlobalTerminalThemeId = TerminalThemeId | 'system';
 export type TerminalFontFamilyId =
   | 'sf-mono'
   | 'menlo'
@@ -288,7 +289,7 @@ export interface TermiusImportResult {
 }
 
 export interface TerminalAppearanceSettings {
-  globalTerminalThemeId: TerminalThemeId;
+  globalTerminalThemeId: GlobalTerminalThemeId;
   terminalFontFamily: TerminalFontFamilyId;
   terminalFontSize: number;
   terminalScrollbackLines: number;
@@ -310,7 +311,7 @@ export interface AppSettings extends TerminalAppearanceSettings {
 
 export interface TerminalPreferencesRecord {
   id: 'global-terminal';
-  globalTerminalThemeId: TerminalThemeId;
+  globalTerminalThemeId: GlobalTerminalThemeId;
   updatedAt: string;
 }
 

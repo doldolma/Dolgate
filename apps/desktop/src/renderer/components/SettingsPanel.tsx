@@ -1,10 +1,10 @@
 import type {
   AppSettings,
   AppTheme,
+  GlobalTerminalThemeId,
   KnownHostRecord,
   SecretMetadataRecord,
   TerminalFontFamilyId,
-  TerminalThemeId
 } from '@shared';
 import type { SettingsSection } from '../store/createAppStore';
 import { terminalFontOptions, terminalThemePresets } from '../lib/terminal-presets';
@@ -69,7 +69,7 @@ export function SettingsPanel({
       ? terminalFontOptions
       : terminalFontOptions.filter((option) => !macOnlyTerminalFonts.has(option.id));
 
-  async function handleChangeTerminalTheme(globalTerminalThemeId: TerminalThemeId) {
+  async function handleChangeTerminalTheme(globalTerminalThemeId: GlobalTerminalThemeId) {
     await onUpdateSettings({ globalTerminalThemeId });
   }
 
@@ -260,6 +260,33 @@ export function SettingsPanel({
               </div>
             </div>
             <div className="theme-options">
+              <button
+                type="button"
+                aria-label="Terminal Theme: System"
+                className={`theme-option terminal-theme-option ${settings.globalTerminalThemeId === 'system' ? 'active' : ''}`}
+                onClick={async () => handleChangeTerminalTheme('system')}
+              >
+                <div
+                  className="terminal-theme-option__preview"
+                  style={{
+                    background: 'linear-gradient(135deg, #f5f7fb 0%, #f5f7fb 50%, #0b1220 50%, #0b1220 100%)',
+                    color: '#243041'
+                  }}
+                >
+                  <span className="terminal-theme-option__window">
+                    <i />
+                    <i />
+                    <i />
+                  </span>
+                  <span className="terminal-theme-option__lines">
+                    <span style={{ background: '#2468ff' }} />
+                    <span style={{ background: 'rgba(36, 48, 65, 0.25)' }} />
+                    <span style={{ background: 'rgba(217, 228, 238, 0.25)' }} />
+                    <span style={{ background: '#8ed1c2' }} />
+                  </span>
+                </div>
+                <strong>System</strong>
+              </button>
               {terminalThemePresets.map((option) => (
                 <button
                   key={option.id}

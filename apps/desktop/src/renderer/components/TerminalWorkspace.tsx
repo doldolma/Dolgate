@@ -4,7 +4,12 @@ import type { Terminal } from 'xterm';
 import type { PendingInteractiveAuth, WorkspaceDropDirection, WorkspaceLayoutNode, WorkspaceTab } from '../store/createAppStore';
 import { createTerminalRuntime, type TerminalRuntime } from '../lib/terminal-runtime';
 import { useAppStore } from '../store/appStore';
-import { getTerminalFontOption, getTerminalThemePreset, type TerminalThemeDefinition } from '../lib/terminal-presets';
+import {
+  getTerminalFontOption,
+  getTerminalThemePreset,
+  resolveTerminalThemeIdForSession,
+  type TerminalThemeDefinition
+} from '../lib/terminal-presets';
 import { createTerminalResizeScheduler } from './terminal-resize';
 
 interface DraggedSessionPayload {
@@ -192,6 +197,7 @@ interface TerminalWorkspaceProps {
   tabs: TerminalTab[];
   hosts: HostRecord[];
   settings: AppSettings;
+  prefersDark: boolean;
   activeSessionId: string | null;
   activeWorkspace: WorkspaceTab | null;
   draggedSession: DraggedSessionPayload | null;
@@ -1204,11 +1210,13 @@ function TerminalSessionView({
 function resolveTerminalAppearanceForSession(
   settings: AppSettings,
   hosts: HostRecord[],
-  tab: TerminalTab
+  tab: TerminalTab,
+  prefersDark: boolean
 ): TerminalSessionViewProps['appearance'] {
   const host =
     tab.source === 'host' && tab.hostId ? hosts.find((record) => record.id === tab.hostId) : undefined;
-  const themePreset = getTerminalThemePreset(host?.terminalThemeId ?? settings.globalTerminalThemeId);
+  const resolvedThemeId = resolveTerminalThemeIdForSession(host?.terminalThemeId, settings.globalTerminalThemeId, prefersDark);
+  const themePreset = getTerminalThemePreset(resolvedThemeId);
   const fontOption = getTerminalFontOption(settings.terminalFontFamily);
   return {
     theme: themePreset.theme,
@@ -1226,6 +1234,7 @@ export function TerminalWorkspace({
   tabs,
   hosts,
   settings,
+  prefersDark,
   activeSessionId,
   activeWorkspace,
   draggedSession,
@@ -1270,11 +1279,12 @@ export function TerminalWorkspace({
   const appearanceBySessionId = useMemo(() => {
     const next = new Map<string, TerminalSessionViewProps['appearance']>();
     for (const tab of tabs) {
-      next.set(tab.sessionId, resolveTerminalAppearanceForSession(settings, hosts, tab));
+      next.set(tab.sessionId, resolveTerminalAppearanceForSession(settings, hosts, tab, prefersDark));
     }
     return next;
   }, [
     hosts,
+    prefersDark,
     settings.globalTerminalThemeId,
     settings.terminalFontFamily,
     settings.terminalFontSize,
@@ -1454,7 +1464,9 @@ export function TerminalWorkspace({
               visible={visible}
               active={activeWorkspace ? activeWorkspace.activeSessionId === tab.sessionId : activeSessionId === tab.sessionId}
               layoutKey={placement ? `${placement.rect.x}:${placement.rect.y}:${placement.rect.width}:${placement.rect.height}` : 'hidden'}
-              appearance={appearanceBySessionId.get(tab.sessionId) ?? resolveTerminalAppearanceForSession(settings, hosts, tab)}
+              appearance={
+                appearanceBySessionId.get(tab.sessionId) ?? resolveTerminalAppearanceForSession(settings, hosts, tab, prefersDark)
+              }
               terminalWebglEnabled={settings.terminalWebglEnabled}
               style={activeWorkspace ? undefined : rectStyle}
               showHeader={Boolean(activeWorkspace && placement)}

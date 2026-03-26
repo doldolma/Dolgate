@@ -16,6 +16,17 @@
       <div class="viewer-header__status" id="viewer-status">Connecting</div>
     </header>
     <main class="viewer-shell">
+      <div id="viewer-search-overlay" class="viewer-search-overlay" hidden>
+        <input
+          id="viewer-search-input"
+          aria-label="Search terminal output"
+          type="text"
+          placeholder="Search terminal output"
+        />
+        <button id="viewer-search-prev" type="button" class="viewer-search-overlay__button">Prev</button>
+        <button id="viewer-search-next" type="button" class="viewer-search-overlay__button">Next</button>
+        <button id="viewer-search-close" type="button" class="viewer-search-overlay__button">Close</button>
+      </div>
       <div id="viewer-terminal-viewport" class="viewer-terminal-viewport">
         <div id="viewer-terminal-stage" class="viewer-terminal-stage">
           <div id="viewer-terminal" class="viewer-terminal"></div>
@@ -23,6 +34,9 @@
       </div>
     </main>
     <script src="/share/assets/vendor/xterm.js?v={{ .AssetVersion }}"></script>
+    <script src="/share/assets/vendor/xterm-addon-unicode11.js?v={{ .AssetVersion }}"></script>
+    <script src="/share/assets/vendor/xterm-addon-web-links.js?v={{ .AssetVersion }}"></script>
+    <script src="/share/assets/vendor/xterm-addon-search.js?v={{ .AssetVersion }}"></script>
     <script src="/share/assets/viewer.js?v={{ .AssetVersion }}"></script>
   </body>
 </html>

@@ -16,6 +16,7 @@ import type {
   ActivityLogRecord,
   AwsSsmPortForwardRuleRecord,
   AppTheme,
+  GlobalTerminalThemeId,
   GroupRecord,
   HostRecord,
   KnownHostRecord,
@@ -54,7 +55,7 @@ export interface DesktopStateFile {
     updatedAt: string;
   };
   terminal: {
-    globalThemeId: TerminalThemeId;
+    globalThemeId: GlobalTerminalThemeId;
     globalThemeUpdatedAt: string;
     fontFamily: TerminalFontFamilyId;
     fontSize: number;
@@ -135,6 +136,10 @@ function isTerminalThemeId(value: unknown): value is TerminalThemeId {
     value === 'hacker-blue' ||
     value === 'hacker-red'
   );
+}
+
+function isGlobalTerminalThemeId(value: unknown): value is GlobalTerminalThemeId {
+  return value === 'system' || isTerminalThemeId(value);
 }
 
 function isTerminalFontFamilyId(value: unknown): value is TerminalFontFamilyId {
@@ -463,7 +468,7 @@ function normalizeStateFile(value: unknown): DesktopStateFile {
       updatedAt: typeof settings.updatedAt === 'string' ? settings.updatedAt : fallback.settings.updatedAt
     },
     terminal: {
-      globalThemeId: isTerminalThemeId(terminal.globalThemeId) ? terminal.globalThemeId : fallback.terminal.globalThemeId,
+      globalThemeId: isGlobalTerminalThemeId(terminal.globalThemeId) ? terminal.globalThemeId : fallback.terminal.globalThemeId,
       globalThemeUpdatedAt:
         typeof terminal.globalThemeUpdatedAt === 'string' ? terminal.globalThemeUpdatedAt : fallback.terminal.globalThemeUpdatedAt,
       fontFamily: normalizedTerminalFontFamily,

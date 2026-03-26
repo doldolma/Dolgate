@@ -229,6 +229,38 @@ describe('SettingsRepository', () => {
     expect(reset.terminalAltIsMeta).toBe(false);
     expect(reset.terminalWebglEnabled).toBe(true);
   });
+
+  it('stores and syncs the global terminal system theme mode', async () => {
+    const { SettingsRepository } = await loadRepositories();
+    const settings = new SettingsRepository({
+      getConfig: () => ({
+        sync: {
+          serverUrl: 'https://bundled.example.com',
+          desktopClientId: 'dolssh-desktop',
+          redirectUri: 'dolssh://auth/callback'
+        }
+      })
+    } as never);
+
+    const updated = settings.update({
+      globalTerminalThemeId: 'system'
+    });
+
+    expect(updated.globalTerminalThemeId).toBe('system');
+    expect(settings.getSyncedTerminalPreferences()).toEqual({
+      id: 'global-terminal',
+      globalTerminalThemeId: 'system',
+      updatedAt: expect.any(String)
+    });
+
+    settings.replaceSyncedTerminalPreferences({
+      id: 'global-terminal',
+      globalTerminalThemeId: 'system',
+      updatedAt: '2026-03-26T00:00:00.000Z'
+    });
+
+    expect(settings.get().globalTerminalThemeId).toBe('system');
+  });
 });
 
 describe('PortForwardRepository', () => {
