@@ -267,6 +267,12 @@ export interface AppState {
     direction: WorkspaceDropDirection,
     targetSessionId?: string,
   ) => boolean;
+  moveWorkspaceSession: (
+    workspaceId: string,
+    sessionId: string,
+    direction: WorkspaceDropDirection,
+    targetSessionId: string,
+  ) => boolean;
   detachSessionFromWorkspace: (workspaceId: string, sessionId: string) => void;
   reorderDynamicTab: (
     source: DynamicTabStripItem,
@@ -699,6 +705,45 @@ function removeSessionFromWorkspaceLayout(
     ...node,
     first: nextFirst,
     second: nextSecond,
+  };
+}
+
+function moveSessionWithinWorkspaceLayout(
+  node: WorkspaceLayoutNode,
+  sessionId: string,
+  targetSessionId: string,
+  direction: WorkspaceDropDirection,
+): { layout: WorkspaceLayoutNode; moved: boolean } {
+  if (sessionId === targetSessionId) {
+    return { layout: node, moved: false };
+  }
+
+  const sessionIds = listWorkspaceSessionIds(node);
+  if (
+    !sessionIds.includes(sessionId) ||
+    !sessionIds.includes(targetSessionId)
+  ) {
+    return { layout: node, moved: false };
+  }
+
+  const reducedLayout = removeSessionFromWorkspaceLayout(node, sessionId);
+  if (!reducedLayout) {
+    return { layout: node, moved: false };
+  }
+
+  const nextLayout = insertSessionIntoWorkspaceLayout(
+    reducedLayout,
+    targetSessionId,
+    sessionId,
+    direction,
+  );
+  if (!nextLayout.inserted) {
+    return { layout: node, moved: false };
+  }
+
+  return {
+    layout: nextLayout.layout,
+    moved: true,
   };
 }
 
@@ -3179,6 +3224,44 @@ export function createAppStore(api: DesktopApi) {
               !(item.kind === "session" && item.sessionId === sessionId),
           ),
           activeWorkspaceTab: asWorkspaceTabId(workspace.id),
+        });
+        return true;
+      },
+      moveWorkspaceSession: (
+        workspaceId,
+        sessionId,
+        direction,
+        targetSessionId,
+      ) => {
+        const state = get();
+        const workspace = state.workspaces.find(
+          (item) => item.id === workspaceId,
+        );
+        if (!workspace) {
+          return false;
+        }
+
+        const nextLayout = moveSessionWithinWorkspaceLayout(
+          workspace.layout,
+          sessionId,
+          targetSessionId,
+          direction,
+        );
+        if (!nextLayout.moved) {
+          return false;
+        }
+
+        set({
+          workspaces: state.workspaces.map((item) =>
+            item.id === workspaceId
+              ? {
+                  ...item,
+                  layout: nextLayout.layout,
+                  activeSessionId: sessionId,
+                }
+              : item,
+          ),
+          activeWorkspaceTab: asWorkspaceTabId(workspaceId),
         });
         return true;
       },

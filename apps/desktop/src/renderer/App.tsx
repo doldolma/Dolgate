@@ -228,6 +228,7 @@ export function App() {
   const disconnectTab = useAppStore((state) => state.disconnectTab);
   const closeWorkspace = useAppStore((state) => state.closeWorkspace);
   const splitSessionIntoWorkspace = useAppStore((state) => state.splitSessionIntoWorkspace);
+  const moveWorkspaceSession = useAppStore((state) => state.moveWorkspaceSession);
   const detachSessionFromWorkspace = useAppStore((state) => state.detachSessionFromWorkspace);
   const reorderDynamicTab = useAppStore((state) => state.reorderDynamicTab);
   const focusWorkspaceSession = useAppStore((state) => state.focusWorkspaceSession);
@@ -441,6 +442,8 @@ export function App() {
     activeWorkspaceTab.startsWith('workspace:')
       ? workspaces.find((workspace) => workspace.id === activeWorkspaceTab.slice('workspace:'.length)) ?? null
       : null;
+  const sessionViewActivationKey =
+    activeWorkspaceTab === 'home' || activeWorkspaceTab === 'sftp' ? null : activeWorkspaceTab;
   const isSessionViewActive = !isHomeActive && !isSftpActive;
   const editingHostId = hostDrawer.mode === 'edit' ? hostDrawer.hostId : null;
   const currentHost = findHost(hosts, editingHostId);
@@ -948,6 +951,7 @@ export function App() {
             prefersDark={prefersDark}
             activeSessionId={activeSessionId}
             activeWorkspace={activeWorkspace}
+            viewActivationKey={sessionViewActivationKey}
             draggedSession={draggedSession}
             canDropDraggedSession={canDropDraggedSession}
             onCloseSession={disconnectTab}
@@ -968,6 +972,9 @@ export function App() {
             }}
             onSplitSessionDrop={(sessionId, direction, targetSessionId) =>
               splitSessionIntoWorkspace(sessionId, direction, targetSessionId)
+            }
+            onMoveWorkspaceSession={(workspaceId, sessionId, direction, targetSessionId) =>
+              moveWorkspaceSession(workspaceId, sessionId, direction, targetSessionId)
             }
             onFocusWorkspaceSession={focusWorkspaceSession}
             onResizeWorkspaceSplit={resizeWorkspaceSplit}

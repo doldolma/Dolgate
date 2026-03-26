@@ -48,6 +48,7 @@ interface TerminalSessionViewProps {
   title: string;
   visible: boolean;
   active: boolean;
+  viewActivationKey: string | null;
   layoutKey: string;
   appearance: {
     theme: TerminalThemeDefinition['theme'];
@@ -200,6 +201,7 @@ interface TerminalWorkspaceProps {
   prefersDark: boolean;
   activeSessionId: string | null;
   activeWorkspace: WorkspaceTab | null;
+  viewActivationKey: string | null;
   draggedSession: DraggedSessionPayload | null;
   canDropDraggedSession: boolean;
   onCloseSession: (sessionId: string) => Promise<void>;
@@ -211,6 +213,12 @@ interface TerminalWorkspaceProps {
   onStartPaneDrag: (workspaceId: string, sessionId: string) => void;
   onEndSessionDrag: () => void;
   onSplitSessionDrop: (sessionId: string, direction: WorkspaceDropDirection, targetSessionId?: string) => boolean;
+  onMoveWorkspaceSession: (
+    workspaceId: string,
+    sessionId: string,
+    direction: WorkspaceDropDirection,
+    targetSessionId: string
+  ) => boolean;
   onFocusWorkspaceSession: (workspaceId: string, sessionId: string) => void;
   onResizeWorkspaceSplit: (workspaceId: string, splitId: string, ratio: number) => void;
 }
@@ -333,6 +341,7 @@ function TerminalSessionView({
   title,
   visible,
   active,
+  viewActivationKey,
   layoutKey,
   appearance,
   terminalWebglEnabled,
@@ -379,6 +388,7 @@ function TerminalSessionView({
   const liveSessionStatusRef = useRef<TerminalTab['status'] | null>(currentTab?.status ?? null);
   const liveSessionShareStatusRef = useRef(currentTab?.sessionShare?.status ?? 'inactive');
   const liveAppearanceRef = useRef(appearance);
+  const liveOnFocusRef = useRef(onFocus);
   const liveUpdateSessionShareSnapshotRef = useRef(onUpdateSessionShareSnapshot);
   const shareSnapshotDirtyRef = useRef(false);
   const pendingShareSnapshotKindRef = useRef<SessionShareSnapshotInput['kind'] | null>(null);
@@ -406,6 +416,10 @@ function TerminalSessionView({
   useEffect(() => {
     liveAppearanceRef.current = appearance;
   }, [appearance]);
+
+  useEffect(() => {
+    liveOnFocusRef.current = onFocus;
+  }, [onFocus]);
 
   useEffect(() => {
     liveUpdateSessionShareSnapshotRef.current = onUpdateSessionShareSnapshot;
@@ -643,7 +657,7 @@ function TerminalSessionView({
     });
 
     const handlePointerActivate = () => {
-      onFocus?.();
+      liveOnFocusRef.current?.();
       resizeSchedulerRef.current?.request();
       requestAnimationFrame(() => {
         refreshViewport();
@@ -760,7 +774,7 @@ function TerminalSessionView({
         requestShareSnapshot('refresh');
       }
     });
-  }, [currentTab?.sessionShare?.status, layoutKey, visible]);
+  }, [currentTab?.sessionShare?.status, layoutKey, viewActivationKey, visible]);
 
   useEffect(() => {
     const previousStatus = previousSessionStatusRef.current;
@@ -786,7 +800,7 @@ function TerminalSessionView({
         refreshViewport();
       });
     }
-  }, [active, visible]);
+  }, [active, viewActivationKey, visible]);
 
   useEffect(() => {
     if (currentTab?.sessionShare?.status !== 'active') {
@@ -886,7 +900,7 @@ function TerminalSessionView({
         }
       }}
       onMouseDown={() => {
-        onFocus?.();
+        liveOnFocusRef.current?.();
       }}
     >
       {canShareSession ? (
@@ -1243,6 +1257,7 @@ export function TerminalWorkspace({
   prefersDark,
   activeSessionId,
   activeWorkspace,
+  viewActivationKey,
   draggedSession,
   canDropDraggedSession,
   onCloseSession,
@@ -1254,6 +1269,7 @@ export function TerminalWorkspace({
   onStartPaneDrag,
   onEndSessionDrag,
   onSplitSessionDrop,
+  onMoveWorkspaceSession,
   onFocusWorkspaceSession,
   onResizeWorkspaceSplit
 }: TerminalWorkspaceProps) {
@@ -1307,6 +1323,11 @@ export function TerminalWorkspace({
       setDropPreview(null);
     }
   }, [canDropDraggedSession, draggedSession]);
+
+  useEffect(() => {
+    setDropPreview(null);
+    setResizingHandle(null);
+  }, [viewActivationKey]);
 
   useEffect(() => {
     if (!resizingHandle) {
@@ -1391,11 +1412,16 @@ export function TerminalWorkspace({
     });
   };
 
+  const canRearrangeActiveWorkspace =
+    draggedSession?.source === 'workspace-pane' &&
+    Boolean(activeWorkspace) &&
+    draggedSession.workspaceId === activeWorkspace?.id;
+
   return (
     <div
       ref={workspaceRef}
       className={`terminal-workspace ${activeWorkspace ? 'terminal-workspace--split' : 'terminal-workspace--standalone'} ${
-        draggedSession?.source === 'standalone-tab' && canDropDraggedSession ? 'drag-accepting' : ''
+        (draggedSession?.source === 'standalone-tab' && canDropDraggedSession) || canRearrangeActiveWorkspace ? 'drag-accepting' : ''
       }`}
       onDragLeave={(event) => {
         const nextTarget = event.relatedTarget;
@@ -1433,15 +1459,19 @@ export function TerminalWorkspace({
             onDragOver={
               isWorkspacePane
                 ? (event) => {
-                    if (draggedSession?.source !== 'standalone-tab' || !canDropDraggedSession) {
+                    if (!placement) {
+                      return;
+                    }
+                    if (draggedSession?.source === 'workspace-pane') {
+                      if (!canRearrangeActiveWorkspace || draggedSession.sessionId === tab.sessionId) {
+                        return;
+                      }
+                    } else if (draggedSession?.source !== 'standalone-tab' || !canDropDraggedSession) {
                       return;
                     }
                     event.preventDefault();
                     const bounds = event.currentTarget.getBoundingClientRect();
                     const direction = resolveDropDirection(event.clientX, event.clientY, bounds);
-                    if (!placement) {
-                      return;
-                    }
                     setDropPreview({
                       direction,
                       targetSessionId: tab.sessionId,
@@ -1453,11 +1483,24 @@ export function TerminalWorkspace({
             onDrop={
               isWorkspacePane
                 ? (event) => {
-                    if (draggedSession?.source !== 'standalone-tab' || !dropPreview) {
+                    if (!dropPreview || !activeWorkspace) {
+                      return;
+                    }
+                    if (
+                      draggedSession?.source === 'workspace-pane' &&
+                      (!canRearrangeActiveWorkspace || draggedSession.sessionId === tab.sessionId)
+                    ) {
+                      return;
+                    }
+                    if (draggedSession?.source !== 'workspace-pane' && draggedSession?.source !== 'standalone-tab') {
                       return;
                     }
                     event.preventDefault();
-                    onSplitSessionDrop(draggedSession.sessionId, dropPreview.direction, tab.sessionId);
+                    if (draggedSession.source === 'workspace-pane') {
+                      onMoveWorkspaceSession(activeWorkspace.id, draggedSession.sessionId, dropPreview.direction, tab.sessionId);
+                    } else {
+                      onSplitSessionDrop(draggedSession.sessionId, dropPreview.direction, tab.sessionId);
+                    }
                     setDropPreview(null);
                     onEndSessionDrag();
                   }
@@ -1469,6 +1512,7 @@ export function TerminalWorkspace({
               title={tab.title}
               visible={visible}
               active={activeWorkspace ? activeWorkspace.activeSessionId === tab.sessionId : activeSessionId === tab.sessionId}
+              viewActivationKey={viewActivationKey}
               layoutKey={placement ? `${placement.rect.x}:${placement.rect.y}:${placement.rect.width}:${placement.rect.height}` : 'hidden'}
               appearance={
                 appearanceBySessionId.get(tab.sessionId) ?? resolveTerminalAppearanceForSession(settings, hosts, tab, prefersDark)

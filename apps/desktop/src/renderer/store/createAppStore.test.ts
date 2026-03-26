@@ -1226,6 +1226,119 @@ describe("createAppStore", () => {
     ]);
   });
 
+  it("moves a workspace pane around another pane in all supported directions", async () => {
+    const expectations = [
+      {
+        direction: "left" as const,
+        axis: "horizontal" as const,
+        firstSessionId: "session-1",
+        secondSessionId: "session-2",
+      },
+      {
+        direction: "right" as const,
+        axis: "horizontal" as const,
+        firstSessionId: "session-2",
+        secondSessionId: "session-1",
+      },
+      {
+        direction: "top" as const,
+        axis: "vertical" as const,
+        firstSessionId: "session-1",
+        secondSessionId: "session-2",
+      },
+      {
+        direction: "bottom" as const,
+        axis: "vertical" as const,
+        firstSessionId: "session-2",
+        secondSessionId: "session-1",
+      },
+    ];
+
+    for (const expectation of expectations) {
+      const store = createAppStore(createMockApi());
+      await store.getState().bootstrap();
+      await store.getState().connectHost("host-1", 120, 32);
+      await store.getState().connectHost("host-1", 120, 32);
+
+      const created = store
+        .getState()
+        .splitSessionIntoWorkspace("session-1", "right");
+      expect(created).toBe(true);
+
+      const workspace = store.getState().workspaces[0];
+      expect(workspace).toBeTruthy();
+
+      const moved = store
+        .getState()
+        .moveWorkspaceSession(
+          workspace!.id,
+          "session-1",
+          expectation.direction,
+          "session-2",
+        );
+
+      expect(moved).toBe(true);
+
+      const nextWorkspace = store.getState().workspaces[0];
+      expect(nextWorkspace?.activeSessionId).toBe("session-1");
+      expect(store.getState().activeWorkspaceTab).toBe(
+        `workspace:${workspace!.id}`,
+      );
+      expect(store.getState().tabStrip).toEqual([
+        { kind: "workspace", workspaceId: workspace!.id },
+      ]);
+      expect(nextWorkspace?.layout).toMatchObject({
+        kind: "split",
+        axis: expectation.axis,
+        first: {
+          kind: "leaf",
+          sessionId: expectation.firstSessionId,
+        },
+        second: {
+          kind: "leaf",
+          sessionId: expectation.secondSessionId,
+        },
+      });
+    }
+  });
+
+  it("returns false without changing layout for invalid workspace pane moves", async () => {
+    const store = createAppStore(createMockApi());
+
+    await store.getState().bootstrap();
+    await store.getState().connectHost("host-1", 120, 32);
+    await store.getState().connectHost("host-1", 120, 32);
+
+    store.getState().splitSessionIntoWorkspace("session-1", "right");
+    const workspace = store.getState().workspaces[0];
+    expect(workspace).toBeTruthy();
+
+    const initialLayout = JSON.stringify(workspace!.layout);
+    const initialTabStrip = store.getState().tabStrip;
+
+    expect(
+      store
+        .getState()
+        .moveWorkspaceSession(workspace!.id, "session-1", "left", "session-1"),
+    ).toBe(false);
+    expect(
+      store
+        .getState()
+        .moveWorkspaceSession("missing-workspace", "session-1", "left", "session-2"),
+    ).toBe(false);
+    expect(
+      store
+        .getState()
+        .moveWorkspaceSession(workspace!.id, "session-1", "left", "missing-session"),
+    ).toBe(false);
+
+    expect(JSON.stringify(store.getState().workspaces[0]?.layout)).toBe(
+      initialLayout,
+    );
+    expect(store.getState().workspaces[0]?.activeSessionId).toBe("session-1");
+    expect(store.getState().tabStrip).toBe(initialTabStrip);
+  });
+
   it("detaches a workspace pane back into standalone tabs and collapses single-pane workspaces", async () => {
     const store = createAppStore(createMockApi());
 
