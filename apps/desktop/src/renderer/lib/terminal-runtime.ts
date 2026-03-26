@@ -1,6 +1,6 @@
-import { FitAddon } from '@xterm/addon-fit';
-import { SearchAddon } from '@xterm/addon-search';
-import { Unicode11Addon } from '@xterm/addon-unicode11';
+import { FitAddon } from 'xterm-addon-fit/lib/xterm-addon-fit.js';
+import { SearchAddon } from 'xterm-addon-search/lib/xterm-addon-search.js';
+import { Unicode11Addon } from 'xterm-addon-unicode11/lib/xterm-addon-unicode11.js';
 import {
   Terminal,
   type IBufferRange,
@@ -10,7 +10,7 @@ import {
   type ITerminalAddon,
   type ITerminalOptions,
   type ITheme
-} from '@xterm/xterm';
+} from 'xterm';
 
 const WRITE_FLUSH_THRESHOLD_BYTES = 64 * 1024;
 const URL_PATTERN = /https?:\/\/[^\s<>"']+/g;
@@ -78,9 +78,9 @@ let webglAddonModulePromise: Promise<WebglAddonModuleLike> | null = null;
 
 function loadDefaultWebglAddonModule(): Promise<WebglAddonModuleLike> {
   if (!webglAddonModulePromise) {
-    webglAddonModulePromise = import('@xterm/addon-webgl');
+    webglAddonModulePromise = import('xterm-addon-webgl/lib/xterm-addon-webgl.js') as Promise<WebglAddonModuleLike>;
   }
-  return webglAddonModulePromise;
+  return webglAddonModulePromise as Promise<WebglAddonModuleLike>;
 }
 
 function scheduleDefaultAnimationFrame(callback: FrameRequestCallback): number {

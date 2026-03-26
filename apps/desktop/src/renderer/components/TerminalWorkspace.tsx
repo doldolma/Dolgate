@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { AppSettings, HostRecord, SessionShareSnapshotInput, SessionShareStartInput, TerminalTab } from '@shared';
-import type { Terminal } from '@xterm/xterm';
+import type { Terminal } from 'xterm';
 import type { PendingInteractiveAuth, WorkspaceDropDirection, WorkspaceLayoutNode, WorkspaceTab } from '../store/createAppStore';
 import { createTerminalRuntime, type TerminalRuntime } from '../lib/terminal-runtime';
 import { useAppStore } from '../store/appStore';
