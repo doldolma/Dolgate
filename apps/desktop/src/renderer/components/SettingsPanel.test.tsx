@@ -85,6 +85,14 @@ function renderSettingsPanel(overrides: Partial<Parameters<typeof SettingsPanel>
 }
 
 describe('SettingsPanel', () => {
+  it('offers a System terminal theme option that updates the global theme mode', () => {
+    const { onUpdateSettings } = renderSettingsPanel();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Terminal Theme: System' }));
+
+    expect(onUpdateSettings).toHaveBeenCalledWith({ globalTerminalThemeId: 'system' });
+  });
+
   it('renders and updates the WebGL renderer toggle', () => {
     const { onUpdateSettings } = renderSettingsPanel();
 

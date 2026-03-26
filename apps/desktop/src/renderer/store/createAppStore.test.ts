@@ -781,6 +781,18 @@ describe('createAppStore', () => {
     expect(store.getState().settings.theme).toBe('dark');
   });
 
+  it('syncs the global terminal system theme mode through the desktop api', async () => {
+    const api = createMockApi();
+    const store = createAppStore(api);
+
+    await store.getState().bootstrap();
+    await store.getState().updateSettings({ globalTerminalThemeId: 'system' });
+
+    expect(api.settings.update).toHaveBeenCalledWith({ globalTerminalThemeId: 'system' });
+    expect(api.sync.pushDirty).toHaveBeenCalledTimes(1);
+    expect(store.getState().settings.globalTerminalThemeId).toBe('system');
+  });
+
   it('starts AWS SSO login and retries the session connect once when the profile is expired', async () => {
     const api = createMockApi();
     api.hosts.list = vi.fn().mockResolvedValue([

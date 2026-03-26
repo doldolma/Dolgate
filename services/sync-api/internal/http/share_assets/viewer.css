@@ -41,9 +41,64 @@ body {
 }
 
 .viewer-shell {
+  position: relative;
   min-height: 0;
   padding: 0.5rem;
   display: flex;
+}
+
+.viewer-search-overlay {
+  position: absolute;
+  top: 1rem;
+  right: 1rem;
+  z-index: 4;
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  max-width: calc(100% - 2rem);
+  padding: 0.55rem;
+  border-radius: 8px;
+  border: 1px solid #293756;
+  background: #111a2c;
+  box-shadow: 0 16px 34px rgba(0, 0, 0, 0.28);
+}
+
+.viewer-search-overlay[hidden] {
+  display: none;
+}
+
+.viewer-search-overlay input {
+  min-width: 14rem;
+  width: min(28rem, 48vw);
+  padding: 0.55rem 0.7rem;
+  border-radius: 6px;
+  border: 1px solid #2b3b5f;
+  background: #0c1220;
+  color: #eef3ff;
+  outline: none;
+}
+
+.viewer-search-overlay input::placeholder {
+  color: #8ea2cd;
+}
+
+.viewer-search-overlay input:focus {
+  border-color: #7d98ff;
+  box-shadow: 0 0 0 1px #7d98ff;
+}
+
+.viewer-search-overlay__button {
+  border: 1px solid #2b3b5f;
+  background: #18233d;
+  color: #eef3ff;
+  border-radius: 6px;
+  padding: 0.52rem 0.72rem;
+  font: inherit;
+  cursor: pointer;
+}
+
+.viewer-search-overlay__button:hover {
+  background: #202f4f;
 }
 
 .viewer-terminal-viewport {
@@ -74,4 +129,17 @@ body {
 .viewer-terminal .xterm {
   height: 100%;
   padding: 0;
+}
+
+@media (max-width: 720px) {
+  .viewer-search-overlay {
+    left: 1rem;
+    right: 1rem;
+    flex-wrap: wrap;
+  }
+
+  .viewer-search-overlay input {
+    width: 100%;
+    min-width: 0;
+  }
 }

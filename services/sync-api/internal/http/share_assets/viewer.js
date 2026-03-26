@@ -7,15 +7,30 @@
   const viewportNode = document.getElementById("viewer-terminal-viewport");
   const stageNode = document.getElementById("viewer-terminal-stage");
   const terminalNode = document.getElementById("viewer-terminal");
+  const searchOverlayNode = document.getElementById("viewer-search-overlay");
+  const searchInputNode = document.getElementById("viewer-search-input");
+  const searchPrevButtonNode = document.getElementById("viewer-search-prev");
+  const searchNextButtonNode = document.getElementById("viewer-search-next");
+  const searchCloseButtonNode = document.getElementById("viewer-search-close");
   const textEncoder = new TextEncoder();
   const DEFAULT_FALLBACK_SCALE = 0.85;
-  const VIEWPORT_SAFE_GUTTER_PX = 6;
+  const VIEWPORT_SAFE_GUTTER_PX = 24;
+  const VIEWPORT_SAFE_SCALE_FACTOR = 0.98;
+  const SEARCH_DECORATIONS = {
+    matchBackground: "#243451",
+    matchBorder: "#42567f",
+    matchOverviewRuler: "#42567f",
+    activeMatchBackground: "#4663de",
+    activeMatchBorder: "#9fb3ff",
+    activeMatchColorOverviewRuler: "#9fb3ff",
+  };
 
   if (!shareId || !viewerToken || !window.Terminal || !viewportNode || !stageNode || !terminalNode) {
     return;
   }
 
   const term = new window.Terminal({
+    allowProposedApi: true,
     cursorBlink: false,
     convertEol: false,
     fontFamily:
@@ -94,91 +109,29 @@
     sendBinaryMessage(encodeBytesBase64(textEncoder.encode(text)));
   }
 
-  function mapKeyDownToTerminalInput(event) {
-    if (event.isComposing || isComposing || event.key === "Process" || event.key === "Dead") {
-      return null;
+  function sendBinaryInput(data) {
+    if (!data) {
+      return;
     }
 
-    if (event.ctrlKey && !event.altKey && !event.metaKey) {
-      const key = event.key;
-      if (key.length === 1) {
-        const upperKey = key.toUpperCase();
-        if (upperKey >= "A" && upperKey <= "Z") {
-          return String.fromCharCode(upperKey.charCodeAt(0) - 64);
-        }
-      }
+    sendBinaryMessage(
+      encodeBytesBase64(
+        Uint8Array.from(data, (char) => char.charCodeAt(0))
+      )
+    );
+  }
 
-      switch (key) {
-        case " ":
-        case "@":
-        case "2":
-          return "\u0000";
-        case "[":
-          return "\u001b";
-        case "\\":
-          return "\u001c";
-        case "]":
-          return "\u001d";
-        case "^":
-        case "6":
-          return "\u001e";
-        case "_":
-        case "/":
-          return "\u001f";
-        case "?":
-        case "7":
-          return "\u007f";
-        case "Backspace":
-          return "\u0008";
-        default:
-          return null;
-      }
+  function safeWarn(message, error) {
+    if (error) {
+      console.warn(message, error);
+      return;
     }
 
-    if (event.metaKey) {
-      return null;
-    }
+    console.warn(message);
+  }
 
-    switch (event.key) {
-      case "Enter":
-        return "\r";
-      case "Backspace":
-        return "\u007f";
-      case "Tab":
-        return event.shiftKey ? "\u001b[Z" : "\t";
-      case "Escape":
-        return "\u001b";
-      case "ArrowUp":
-        return "\u001b[A";
-      case "ArrowDown":
-        return "\u001b[B";
-      case "ArrowRight":
-        return "\u001b[C";
-      case "ArrowLeft":
-        return "\u001b[D";
-      case "Home":
-        return "\u001b[H";
-      case "End":
-        return "\u001b[F";
-      case "Delete":
-        return "\u001b[3~";
-      case "PageUp":
-        return "\u001b[5~";
-      case "PageDown":
-        return "\u001b[6~";
-      default:
-        break;
-    }
-
-    if (event.altKey && event.key.length === 1) {
-      return `\u001b${event.key}`;
-    }
-
-    if (!event.ctrlKey && !event.altKey && event.key.length === 1) {
-      return event.key;
-    }
-
-    return null;
+  function shouldOpenTerminalSearch(event) {
+    return (event.ctrlKey || event.metaKey) && typeof event.key === "string" && event.key.toLowerCase() === "f";
   }
 
   function normalizeTerminalAppearance(input) {
@@ -220,6 +173,8 @@
   let latestAppearance = normalizeTerminalAppearance(null);
   let latestViewportPx = null;
   let scaleFrameHandle = 0;
+  let searchOpen = false;
+  let searchAddon = null;
 
   function scheduleScaleSync() {
     if (scaleFrameHandle) {
@@ -272,7 +227,7 @@
     const safeHeight = Math.max(0, availableHeight - VIEWPORT_SAFE_GUTTER_PX);
     const widthScale = safeWidth / baseViewport.width;
     const heightScale = safeHeight / baseViewport.height;
-    const scale = Math.min(widthScale, heightScale, 1);
+    const scale = Math.min(widthScale, heightScale, 1) * VIEWPORT_SAFE_SCALE_FACTOR;
     stageNode.style.transform = `scale(${Number.isFinite(scale) && scale > 0 ? scale : DEFAULT_FALLBACK_SCALE})`;
   }
 
@@ -292,7 +247,117 @@
     scheduleScaleSync();
   }
 
+  function canUseSearch() {
+    return Boolean(searchAddon && searchOverlayNode && searchInputNode);
+  }
+
+  function focusSearchInput() {
+    if (!searchInputNode) {
+      return;
+    }
+
+    requestAnimationFrame(() => {
+      searchInputNode.focus();
+      searchInputNode.select();
+    });
+  }
+
+  function setSearchOpen(open) {
+    searchOpen = open;
+    if (!searchOverlayNode) {
+      return;
+    }
+
+    searchOverlayNode.hidden = !open;
+    if (open) {
+      focusSearchInput();
+    }
+  }
+
+  function clearSearch() {
+    if (!searchAddon) {
+      return;
+    }
+
+    searchAddon.clearDecorations();
+  }
+
+  function blurSearch() {
+    if (!searchAddon || typeof searchAddon.clearActiveDecoration !== "function") {
+      return;
+    }
+
+    searchAddon.clearActiveDecoration();
+  }
+
+  function runSearch(direction) {
+    if (!searchAddon || !searchInputNode) {
+      return false;
+    }
+
+    const query = searchInputNode.value.trim();
+    if (!query) {
+      clearSearch();
+      return false;
+    }
+
+    if (direction === "previous") {
+      return searchAddon.findPrevious(query, { decorations: SEARCH_DECORATIONS });
+    }
+
+    return searchAddon.findNext(query, {
+      incremental: true,
+      decorations: SEARCH_DECORATIONS,
+    });
+  }
+
+  function closeSearchOverlay() {
+    if (!searchInputNode) {
+      return;
+    }
+
+    searchInputNode.value = "";
+    setSearchOpen(false);
+    clearSearch();
+    blurSearch();
+    term.focus();
+  }
+
+  function initializeAddons() {
+    try {
+      if (window.Unicode11Addon?.Unicode11Addon) {
+        term.loadAddon(new window.Unicode11Addon.Unicode11Addon());
+        term.unicode.activeVersion = "11";
+      }
+    } catch (error) {
+      safeWarn("Unicode11 addon unavailable, continuing with default unicode width handling.", error);
+    }
+
+    try {
+      if (window.WebLinksAddon?.WebLinksAddon) {
+        term.loadAddon(
+          new window.WebLinksAddon.WebLinksAddon((_event, uri) => {
+            window.open(uri, "_blank", "noopener,noreferrer");
+          })
+        );
+      }
+    } catch (error) {
+      safeWarn("WebLinks addon unavailable, continuing without clickable links.", error);
+    }
+
+    try {
+      if (window.SearchAddon?.SearchAddon) {
+        searchAddon = new window.SearchAddon.SearchAddon({ highlightLimit: 500 });
+        term.loadAddon(searchAddon);
+      }
+    } catch (error) {
+      searchAddon = null;
+      safeWarn("Search addon unavailable, continuing without in-terminal search support.", error);
+    }
+  }
+
   term.open(terminalNode);
+  initializeAddons();
   term.focus();
   setStatus("Connecting");
 
@@ -301,54 +366,86 @@
     `${protocol}//${window.location.host}/share/${encodeURIComponent(shareId)}/${encodeURIComponent(viewerToken)}/ws`
   );
 
-  let isComposing = false;
-
   terminalNode.addEventListener("mousedown", () => {
     term.focus();
   });
 
-  if (term.textarea) {
-    term.textarea.addEventListener("keydown", (event) => {
-      if (term.options.disableStdin) {
+  searchOverlayNode?.addEventListener("mousedown", (event) => {
+    event.stopPropagation();
+  });
+
+  searchInputNode?.addEventListener("blur", () => {
+    blurSearch();
+  });
+
+  searchInputNode?.addEventListener("input", (event) => {
+    const nextQuery = event.target.value;
+    if (!nextQuery.trim()) {
+      clearSearch();
+      return;
+    }
+
+    runSearch("next");
+  });
+
+  searchInputNode?.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      if (event.shiftKey) {
+        runSearch("previous");
         return;
       }
 
-      const payload = mapKeyDownToTerminalInput(event);
-      if (payload == null) {
-        return;
-      }
+      runSearch("next");
+      return;
+    }
 
+    if (event.key === "Escape") {
       event.preventDefault();
-      event.stopImmediatePropagation();
-      sendUtf8Text(payload);
-      term.textarea.value = "";
-    }, true);
+      closeSearchOverlay();
+    }
+  });
 
-    term.textarea.addEventListener("compositionstart", (event) => {
-      isComposing = true;
-      event.stopImmediatePropagation();
-    }, true);
+  searchPrevButtonNode?.addEventListener("click", () => {
+    runSearch("previous");
+  });
 
-    term.textarea.addEventListener("compositionend", (event) => {
-      isComposing = false;
+  searchNextButtonNode?.addEventListener("click", () => {
+    runSearch("next");
+  });
+
+  searchCloseButtonNode?.addEventListener("click", () => {
+    closeSearchOverlay();
+  });
+
+  function handleWindowKeyDown(event) {
+    if (shouldOpenTerminalSearch(event) && canUseSearch()) {
       event.preventDefault();
-      event.stopImmediatePropagation();
-      if (event.data) {
-        sendUtf8Text(event.data);
-      }
-      term.textarea.value = "";
-    }, true);
+      event.stopPropagation();
+      setSearchOpen(true);
+      return;
+    }
 
-    term.textarea.addEventListener("paste", (event) => {
+    if (!searchOpen) {
+      return;
+    }
+
+    if (event.key === "Escape") {
       event.preventDefault();
-      event.stopImmediatePropagation();
-      const pastedText = event.clipboardData?.getData("text/plain");
-      if (pastedText) {
-        sendUtf8Text(pastedText);
-      }
-      term.textarea.value = "";
-    }, true);
+      event.stopPropagation();
+      closeSearchOverlay();
+    }
   }
+
+  window.addEventListener("keydown", handleWindowKeyDown, true);
+
+  term.onData((data) => {
+    sendUtf8Text(data);
+  });
+
+  term.onBinary((data) => {
+    sendBinaryInput(data);
+  });
 
   const viewportResizeObserver = new ResizeObserver(() => {
     scheduleScaleSync();
@@ -426,5 +523,6 @@
     setStatus("Ended");
     viewportResizeObserver.disconnect();
     window.removeEventListener("resize", scheduleScaleSync);
+    window.removeEventListener("keydown", handleWindowKeyDown, true);
   });
 })();

@@ -52,6 +52,7 @@ describe('HostForm', () => {
       }),
       undefined
     );
+    expect((screen.getByLabelText('Label') as HTMLInputElement).value).toBe('Prod API');
     expect(screen.getByText('Saved')).toBeInTheDocument();
   });
 
@@ -143,6 +144,25 @@ describe('HostForm', () => {
     );
 
     expect((screen.getByLabelText('Label') as HTMLInputElement).value).toBe('Dirty local label');
+  });
+
+  it('rehydrates the form when the same host id receives a newer revision while clean', async () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    const { rerender } = render(<HostForm host={createHost()} keychainEntries={keychainEntries} groupOptions={groupOptions} onSubmit={onSubmit} />);
+
+    rerender(
+      <HostForm
+        host={createHost({
+          label: 'Server-side label',
+          updatedAt: '2026-03-25T00:01:00.000Z'
+        })}
+        keychainEntries={keychainEntries}
+        groupOptions={groupOptions}
+        onSubmit={onSubmit}
+      />
+    );
+
+    await waitFor(() => expect((screen.getByLabelText('Label') as HTMLInputElement).value).toBe('Server-side label'));
   });
 
   it('does not append a duplicate tag when enter is followed by blur', async () => {
