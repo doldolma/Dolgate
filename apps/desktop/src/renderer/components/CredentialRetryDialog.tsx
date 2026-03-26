@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { HostSecretInput } from '@shared';
+import { DialogBackdrop } from './DialogBackdrop';
 
 export interface CredentialRetryDialogRequest {
   hostId: string;
@@ -33,7 +34,7 @@ export function CredentialRetryDialog({ request, onClose, onSubmit }: Credential
   const isPassword = request.credentialKind === 'password';
 
   return (
-    <div className="modal-backdrop">
+    <DialogBackdrop dismissOnBackdrop={false}>
       <div className="modal-card credential-retry-dialog" role="dialog" aria-modal="true" aria-labelledby="credential-retry-title">
         <div className="modal-card__header">
           <div>
@@ -84,6 +85,6 @@ export function CredentialRetryDialog({ request, onClose, onSubmit }: Credential
           </button>
         </div>
       </div>
-    </div>
+    </DialogBackdrop>
   );
 }

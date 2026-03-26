@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { AwsEc2InstanceSummary, AwsProfileStatus, AwsProfileSummary, HostDraft } from '@shared';
+import { DialogBackdrop } from './DialogBackdrop';
 
 interface AwsImportDialogProps {
   open: boolean;
@@ -52,6 +53,7 @@ export function AwsImportDialog({ open, currentGroupPath, onClose, onImport }: A
   const [isLoadingRegions, setIsLoadingRegions] = useState(false);
   const [isLoadingInstances, setIsLoadingInstances] = useState(false);
   const [isLoggingIn, setIsLoggingIn] = useState(false);
+  const [savingInstanceId, setSavingInstanceId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -65,6 +67,7 @@ export function AwsImportDialog({ open, currentGroupPath, onClose, onImport }: A
     setRegions([]);
     setSelectedRegion('');
     setInstances([]);
+    setSavingInstanceId(null);
     setError(null);
     setIsLoadingProfiles(true);
 
@@ -219,7 +222,10 @@ export function AwsImportDialog({ open, currentGroupPath, onClose, onImport }: A
   }
 
   return (
-    <div className="modal-backdrop" role="presentation">
+    <DialogBackdrop
+      onDismiss={onClose}
+      dismissDisabled={Boolean(savingInstanceId)}
+    >
       <div className="modal-card aws-import-dialog" role="dialog" aria-modal="true" aria-labelledby="aws-import-title">
         <div className="modal-card__header">
           <div>
@@ -358,24 +364,30 @@ export function AwsImportDialog({ open, currentGroupPath, onClose, onImport }: A
                       <button
                         type="button"
                         className="primary-button"
+                        disabled={Boolean(savingInstanceId)}
                         onClick={async () => {
-                          await onImport({
-                            kind: 'aws-ec2',
-                            label: instance.name || instance.instanceId,
-                            groupName: currentGroupPath ?? '',
-                            terminalThemeId: null,
-                            awsProfileName: selectedProfile,
-                            awsRegion: selectedRegion,
-                            awsInstanceId: instance.instanceId,
-                            awsInstanceName: instance.name || null,
-                            awsPlatform: instance.platform || null,
-                            awsPrivateIp: instance.privateIp || null,
-                            awsState: instance.state || null
-                          });
-                          onClose();
+                          setSavingInstanceId(instance.instanceId);
+                          try {
+                            await onImport({
+                              kind: 'aws-ec2',
+                              label: instance.name || instance.instanceId,
+                              groupName: currentGroupPath ?? '',
+                              terminalThemeId: null,
+                              awsProfileName: selectedProfile,
+                              awsRegion: selectedRegion,
+                              awsInstanceId: instance.instanceId,
+                              awsInstanceName: instance.name || null,
+                              awsPlatform: instance.platform || null,
+                              awsPrivateIp: instance.privateIp || null,
+                              awsState: instance.state || null
+                            });
+                            onClose();
+                          } finally {
+                            setSavingInstanceId(null);
+                          }
                         }}
                       >
-                        Add host
+                        {savingInstanceId === instance.instanceId ? 'Adding...' : 'Add host'}
                       </button>
                     </div>
                   </article>
@@ -386,6 +398,6 @@ export function AwsImportDialog({ open, currentGroupPath, onClose, onImport }: A
           ) : null}
         </div>
       </div>
-    </div>
+    </DialogBackdrop>
   );
 }

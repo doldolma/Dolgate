@@ -6,6 +6,7 @@ import type {
   OpenSshProbeResult,
   OpenSshSourceSummary,
 } from '@shared';
+import { DialogBackdrop } from './DialogBackdrop';
 
 interface OpenSshImportDialogProps {
   open: boolean;
@@ -150,7 +151,10 @@ export function OpenSshImportDialog({
   }
 
   return (
-    <div className="modal-backdrop" role="presentation">
+    <DialogBackdrop
+      onDismiss={onClose}
+      dismissDisabled={isAddingFile || isImporting}
+    >
       <div
         className="modal-card openssh-import-dialog"
         role="dialog"
@@ -375,6 +379,6 @@ export function OpenSshImportDialog({
           </button>
         </div>
       </div>
-    </div>
+    </DialogBackdrop>
   );
 }

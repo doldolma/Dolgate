@@ -1,4 +1,5 @@
 import type { PendingHostKeyPrompt } from '../store/createAppStore';
+import { DialogBackdrop } from './DialogBackdrop';
 
 interface KnownHostPromptDialogProps {
   pending: PendingHostKeyPrompt | null;
@@ -15,7 +16,7 @@ export function KnownHostPromptDialog({ pending, onAccept, onCancel, onOpenSecur
   const isMismatch = pending.probe.status === 'mismatch';
 
   return (
-    <div className="modal-backdrop" role="presentation">
+    <DialogBackdrop dismissOnBackdrop={false}>
       <div className="modal-card known-host-dialog" role="dialog" aria-modal="true" aria-labelledby="known-host-title">
         <div className="modal-card__header">
           <div>
@@ -75,6 +76,6 @@ export function KnownHostPromptDialog({ pending, onAccept, onCancel, onOpenSecur
           </button>
         </div>
       </div>
-    </div>
+    </DialogBackdrop>
   );
 }

@@ -1,6 +1,7 @@
-import { describe, expect, it } from 'vitest';
-import type { HostRecord, PortForwardDraft, PortForwardRuleRecord } from '@shared';
-import { filterPortForwardRules, getAvailablePortForwardHosts, shouldShowAwsRemoteHostField } from './PortForwardingPanel';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { describe, expect, it, vi } from 'vitest';
+import type { HostRecord, PortForwardDraft, PortForwardRuleRecord, PortForwardRuntimeRecord } from '@shared';
+import { PortForwardingPanel, filterPortForwardRules, getAvailablePortForwardHosts, shouldShowAwsRemoteHostField } from './PortForwardingPanel';
 
 const hosts: HostRecord[] = [
   {
@@ -67,6 +68,42 @@ const rules: PortForwardRuleRecord[] = [
   }
 ];
 
+const runtimes: PortForwardRuntimeRecord[] = [];
+
+function createDeferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((nextResolve) => {
+    resolve = nextResolve;
+  });
+  return { promise, resolve };
+}
+
+function renderPanel(options?: { onSave?: (ruleId: string | null, draft: PortForwardDraft) => Promise<void> }) {
+  const onSave = options?.onSave ?? vi.fn().mockResolvedValue(undefined);
+  const onRemove = vi.fn().mockResolvedValue(undefined);
+  const onStart = vi.fn().mockResolvedValue(undefined);
+  const onStop = vi.fn().mockResolvedValue(undefined);
+  const view = render(
+    <PortForwardingPanel
+      hosts={hosts}
+      rules={rules}
+      runtimes={runtimes}
+      onSave={onSave}
+      onRemove={onRemove}
+      onStart={onStart}
+      onStop={onStop}
+    />
+  );
+
+  return {
+    ...view,
+    onSave,
+    onRemove,
+    onStart,
+    onStop
+  };
+}
+
 describe('PortForwardingPanel helpers', () => {
   it('filters rules by transport tab', () => {
     expect(filterPortForwardRules(rules, 'ssh').map((rule) => rule.label)).toEqual(['SSH Rule']);
@@ -102,5 +139,45 @@ describe('PortForwardingPanel helpers', () => {
 
     expect(shouldShowAwsRemoteHostField(sshDraft)).toBe(false);
     expect(shouldShowAwsRemoteHostField(awsDraft)).toBe(true);
+  });
+});
+
+describe('PortForwardingPanel dialog', () => {
+  it('closes when the backdrop is clicked while idle', async () => {
+    const { container } = renderPanel();
+
+    fireEvent.click(screen.getByRole('button', { name: 'New SSH Forward' }));
+
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+
+    fireEvent.click(container.querySelector('.modal-backdrop') as HTMLElement);
+
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    });
+  });
+
+  it('ignores backdrop clicks while a save is pending', async () => {
+    const deferred = createDeferred<void>();
+    const onSave = vi.fn().mockReturnValue(deferred.promise);
+    const { container } = renderPanel({ onSave });
+
+    fireEvent.click(screen.getByRole('button', { name: 'New SSH Forward' }));
+    fireEvent.change(screen.getByLabelText('Label'), { target: { value: 'My SSH Rule' } });
+    fireEvent.click(container.querySelector('.modal-card__footer .primary-button') as HTMLButtonElement);
+
+    await waitFor(() => {
+      expect(onSave).toHaveBeenCalledTimes(1);
+    });
+
+    fireEvent.click(container.querySelector('.modal-backdrop') as HTMLElement);
+
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+
+    deferred.resolve(undefined);
+
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    });
   });
 });

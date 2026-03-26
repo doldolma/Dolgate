@@ -7,6 +7,7 @@ import type {
   TermiusImportWarning,
   TermiusProbeResult
 } from '@shared';
+import { DialogBackdrop } from './DialogBackdrop';
 
 interface TermiusImportDialogProps {
   open: boolean;
@@ -146,7 +147,7 @@ export function TermiusImportDialog({ open, onClose, onImported }: TermiusImport
   }
 
   return (
-    <div className="modal-backdrop" role="presentation">
+    <DialogBackdrop onDismiss={onClose} dismissDisabled={isImporting}>
       <div className="modal-card termius-import-dialog" role="dialog" aria-modal="true" aria-labelledby="termius-import-title">
         <div className="modal-card__header">
           <div>
@@ -332,6 +333,6 @@ export function TermiusImportDialog({ open, onClose, onImported }: TermiusImport
           </button>
         </div>
       </div>
-    </div>
+    </DialogBackdrop>
   );
 }

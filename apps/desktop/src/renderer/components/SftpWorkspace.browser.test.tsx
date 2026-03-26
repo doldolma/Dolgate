@@ -372,6 +372,26 @@ describe("SftpWorkspace column resizing", () => {
     confirmSpy.mockRestore();
   });
 
+  it("treats delete dialog backdrop clicks as cancel", () => {
+    const sftp = createSftpState();
+    sftp.leftPane.selectedPaths = ["/left/left-alpha.txt"];
+    sftp.rightPane = createHostPickerPane();
+    const onDeleteSelection = vi.fn().mockResolvedValue(undefined);
+
+    const { container } = renderWorkspace({
+      sftp,
+      onDeleteSelection,
+    });
+
+    fireEvent.click(screen.getByLabelText("Delete selected items"));
+    fireEvent.click(
+      container.querySelector(".sftp-modal-backdrop") as HTMLElement,
+    );
+
+    expect(onDeleteSelection).not.toHaveBeenCalled();
+    expect(screen.queryByLabelText("SFTP delete confirmation")).toBeNull();
+  });
+
   it("shows folder warnings and keeps the delete dialog open on failure", async () => {
     const onDeleteSelection = vi
       .fn()
@@ -406,5 +426,25 @@ describe("SftpWorkspace column resizing", () => {
 
     await screen.findByText("Delete failed");
     expect(screen.getByLabelText("SFTP delete confirmation")).toBeTruthy();
+  });
+
+  it("does not dismiss the conflict dialog on backdrop clicks", () => {
+    const sftp = createSftpState();
+    sftp.pendingConflictDialog = {
+      input: {} as never,
+      names: ["dup.txt"],
+    };
+    const onDismissConflict = vi.fn();
+    const { container } = renderWorkspace({
+      sftp,
+      onDismissConflict,
+    });
+
+    fireEvent.click(
+      container.querySelector(".sftp-modal-backdrop") as HTMLElement,
+    );
+
+    expect(onDismissConflict).not.toHaveBeenCalled();
+    expect(screen.getByText("dup.txt")).toBeTruthy();
   });
 });

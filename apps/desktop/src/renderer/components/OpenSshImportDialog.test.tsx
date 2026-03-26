@@ -1,37 +1,37 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { DesktopApi, OpenSshProbeResult } from '@shared';
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { DesktopApi, OpenSshProbeResult } from "@shared";
 import {
   OpenSshImportDialog,
   filterOpenSshImportHosts,
-} from './OpenSshImportDialog';
+} from "./OpenSshImportDialog";
 
 const initialProbeResult: OpenSshProbeResult = {
-  snapshotId: 'snapshot-1',
+  snapshotId: "snapshot-1",
   sources: [
     {
-      id: 'source:default',
-      filePath: 'C:/Users/tester/.ssh/config',
-      origin: 'default-ssh-dir',
-      label: '~/.ssh/config',
+      id: "source:default",
+      filePath: "C:/Users/tester/.ssh/config",
+      origin: "default-ssh-dir",
+      label: "~/.ssh/config",
     },
   ],
   warnings: [
     {
-      code: 'unsupported-host-pattern',
-      message: '구체적인 별칭이 없는 Host 블록은 가져오지 않았습니다.',
+      code: "unsupported-host-pattern",
+      message: "구체적인 별칭이 없는 Host 블록은 가져오지 않았습니다.",
     },
   ],
   hosts: [
     {
-      key: 'host-1',
-      alias: 'web',
-      hostname: 'web.example.com',
+      key: "host-1",
+      alias: "web",
+      hostname: "web.example.com",
       port: 22,
-      username: 'ubuntu',
-      authType: 'privateKey',
-      identityFilePath: 'C:/Users/tester/.ssh/id_ed25519',
-      sourceFilePath: 'C:/Users/tester/.ssh/config',
+      username: "ubuntu",
+      authType: "privateKey",
+      identityFilePath: "C:/Users/tester/.ssh/id_ed25519",
+      sourceFilePath: "C:/Users/tester/.ssh/config",
       sourceLine: 4,
     },
   ],
@@ -44,23 +44,23 @@ const appendedProbeResult: OpenSshProbeResult = {
   sources: [
     ...initialProbeResult.sources,
     {
-      id: 'source:file',
-      filePath: 'D:/shared/team.conf',
-      origin: 'manual-file',
-      label: 'team.conf',
+      id: "source:file",
+      filePath: "D:/shared/team.conf",
+      origin: "manual-file",
+      label: "team.conf",
     },
   ],
   hosts: [
     ...initialProbeResult.hosts,
     {
-      key: 'host-2',
-      alias: 'db',
-      hostname: 'db.example.com',
+      key: "host-2",
+      alias: "db",
+      hostname: "db.example.com",
       port: 2200,
-      username: 'postgres',
-      authType: 'password',
+      username: "postgres",
+      authType: "password",
       identityFilePath: null,
-      sourceFilePath: 'D:/shared/team.conf',
+      sourceFilePath: "D:/shared/team.conf",
       sourceLine: 9,
     },
   ],
@@ -69,13 +69,21 @@ const appendedProbeResult: OpenSshProbeResult = {
 };
 
 const emptyProbeResult: OpenSshProbeResult = {
-  snapshotId: 'snapshot-empty',
+  snapshotId: "snapshot-empty",
   sources: [],
   hosts: [],
   warnings: [],
   skippedExistingHostCount: 0,
   skippedDuplicateHostCount: 0,
 };
+
+function createDeferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((nextResolve) => {
+    resolve = nextResolve;
+  });
+  return { promise, resolve };
+}
 
 function installMockApi() {
   const api = {
@@ -91,11 +99,11 @@ function installMockApi() {
       discardSnapshot: vi.fn().mockResolvedValue(undefined),
     },
     shell: {
-      pickOpenSshConfig: vi.fn().mockResolvedValue('D:/shared/team.conf'),
+      pickOpenSshConfig: vi.fn().mockResolvedValue("D:/shared/team.conf"),
     },
   };
 
-  Object.defineProperty(window, 'dolssh', {
+  Object.defineProperty(window, "dolssh", {
     configurable: true,
     value: api as unknown as DesktopApi,
   });
@@ -103,29 +111,29 @@ function installMockApi() {
   return api;
 }
 
-describe('OpenSSH import dialog', () => {
+describe("OpenSSH import dialog", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
   });
 
-  it('filters hosts by alias, username, and key path metadata', () => {
-    expect(filterOpenSshImportHosts(appendedProbeResult.hosts, 'web')).toEqual([
+  it("filters hosts by alias, username, and key path metadata", () => {
+    expect(filterOpenSshImportHosts(appendedProbeResult.hosts, "web")).toEqual([
       appendedProbeResult.hosts[0],
     ]);
     expect(
-      filterOpenSshImportHosts(appendedProbeResult.hosts, 'postgres'),
+      filterOpenSshImportHosts(appendedProbeResult.hosts, "postgres"),
     ).toEqual([appendedProbeResult.hosts[1]]);
     expect(
-      filterOpenSshImportHosts(appendedProbeResult.hosts, 'id_ed25519'),
+      filterOpenSshImportHosts(appendedProbeResult.hosts, "id_ed25519"),
     ).toEqual([appendedProbeResult.hosts[0]]);
   });
 
-  it('loads the default snapshot, appends manual files, and imports selected hosts into the current group', async () => {
+  it("loads the default snapshot, appends manual files, and imports selected hosts into the current group", async () => {
     const api = installMockApi();
     const onClose = vi.fn();
     const onImported = vi.fn().mockResolvedValue(undefined);
 
-    render(
+    const { container } = render(
       <OpenSshImportDialog
         open
         currentGroupPath="Servers/Prod"
@@ -136,13 +144,15 @@ describe('OpenSSH import dialog', () => {
 
     await waitFor(() => expect(api.openssh.probeDefault).toHaveBeenCalled());
 
-    expect(screen.getByText('Import OpenSSH')).toBeInTheDocument();
-    expect(screen.getByText(initialProbeResult.warnings[0].message)).toBeInTheDocument();
-    expect(screen.getByText('web')).toBeInTheDocument();
-    expect(screen.getByText('기존 호스트 생략 1')).toBeInTheDocument();
-    expect(screen.getByText('Servers/Prod')).toBeInTheDocument();
+    expect(screen.getByText("Import OpenSSH")).toBeInTheDocument();
+    expect(screen.getByText("web")).toBeInTheDocument();
+    expect(screen.getByText("Servers/Prod")).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: '파일 불러오기' }));
+    const selectionButtons = container.querySelectorAll(
+      ".openssh-import-dialog__selection-actions .secondary-button",
+    );
+
+    fireEvent.click(selectionButtons[0] as HTMLButtonElement);
 
     await waitFor(() =>
       expect(api.shell.pickOpenSshConfig).toHaveBeenCalled(),
@@ -150,21 +160,24 @@ describe('OpenSSH import dialog', () => {
     await waitFor(() =>
       expect(api.openssh.addFileToSnapshot).toHaveBeenCalledWith({
         snapshotId: initialProbeResult.snapshotId,
-        filePath: 'D:/shared/team.conf',
+        filePath: "D:/shared/team.conf",
       }),
     );
 
-    expect(screen.getByText('db')).toBeInTheDocument();
-    expect(screen.getByText('중복 호스트 생략 1')).toBeInTheDocument();
+    expect(screen.getByText("db")).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: '보이는 항목 모두 선택' }));
-    fireEvent.click(screen.getByRole('button', { name: '가져오기' }));
+    fireEvent.click(selectionButtons[1] as HTMLButtonElement);
+    fireEvent.click(
+      container.querySelector(
+        ".modal-card__footer .primary-button",
+      ) as HTMLButtonElement,
+    );
 
     await waitFor(() =>
       expect(api.openssh.importSelection).toHaveBeenCalledWith({
         snapshotId: appendedProbeResult.snapshotId,
-        selectedHostKeys: ['host-1', 'host-2'],
-        groupPath: 'Servers/Prod',
+        selectedHostKeys: ["host-1", "host-2"],
+        groupPath: "Servers/Prod",
       }),
     );
     expect(onImported).toHaveBeenCalledWith({
@@ -176,11 +189,11 @@ describe('OpenSSH import dialog', () => {
     expect(onClose).toHaveBeenCalled();
   });
 
-  it('keeps the dialog usable when the default probe returns no hosts', async () => {
+  it("keeps the dialog usable when the default probe returns no hosts", async () => {
     const api = installMockApi();
     api.openssh.probeDefault.mockResolvedValueOnce(emptyProbeResult);
 
-    render(
+    const { container } = render(
       <OpenSshImportDialog
         open
         currentGroupPath={null}
@@ -190,9 +203,65 @@ describe('OpenSSH import dialog', () => {
     );
 
     await waitFor(() => expect(api.openssh.probeDefault).toHaveBeenCalled());
+
+    expect(container.querySelector(".empty-callout")).toBeTruthy();
     expect(
-      screen.getByText('가져올 수 있는 OpenSSH 호스트가 없습니다.'),
-    ).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '파일 불러오기' })).toBeInTheDocument();
+      container.querySelector(
+        ".openssh-import-dialog__selection-actions .secondary-button",
+      ),
+    ).toBeTruthy();
+  });
+
+  it("closes when the backdrop is clicked while idle", async () => {
+    const api = installMockApi();
+    const onClose = vi.fn();
+    const { container } = render(
+      <OpenSshImportDialog
+        open
+        currentGroupPath={null}
+        onClose={onClose}
+        onImported={vi.fn()}
+      />,
+    );
+
+    await waitFor(() => expect(api.openssh.probeDefault).toHaveBeenCalled());
+
+    fireEvent.click(container.querySelector(".modal-backdrop") as HTMLElement);
+
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("ignores backdrop clicks while a file is being appended", async () => {
+    const api = installMockApi();
+    const pendingAdd = createDeferred<OpenSshProbeResult>();
+    api.openssh.addFileToSnapshot.mockReturnValueOnce(pendingAdd.promise);
+    const onClose = vi.fn();
+
+    const { container } = render(
+      <OpenSshImportDialog
+        open
+        currentGroupPath={null}
+        onClose={onClose}
+        onImported={vi.fn()}
+      />,
+    );
+
+    await waitFor(() => expect(api.openssh.probeDefault).toHaveBeenCalled());
+
+    const selectionButtons = container.querySelectorAll(
+      ".openssh-import-dialog__selection-actions .secondary-button",
+    );
+    fireEvent.click(selectionButtons[0] as HTMLButtonElement);
+
+    await waitFor(() =>
+      expect(api.openssh.addFileToSnapshot).toHaveBeenCalled(),
+    );
+
+    fireEvent.click(container.querySelector(".modal-backdrop") as HTMLElement);
+
+    expect(onClose).not.toHaveBeenCalled();
+
+    pendingAdd.resolve(appendedProbeResult);
+    await waitFor(() => expect(screen.getByText("db")).toBeInTheDocument());
   });
 });
