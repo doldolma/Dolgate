@@ -346,8 +346,14 @@ export function PortForwardingPanel({ hosts, rules, runtimes, onSave, onRemove, 
                 <div className="section-kicker">Forwarding</div>
                 <h3 id="port-forward-title">{editingRuleId ? `Edit ${tabTitle(activeTab)}` : createButtonLabel(activeTab)}</h3>
               </div>
-              <button type="button" className="icon-button" onClick={closeModal} disabled={isSubmitting}>
-                횞
+              <button
+                type="button"
+                className="icon-button"
+                onClick={closeModal}
+                disabled={isSubmitting}
+                aria-label="Close port forwarding dialog"
+              >
+                &times;
               </button>
             </div>
 

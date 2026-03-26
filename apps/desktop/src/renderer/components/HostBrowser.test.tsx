@@ -1,4 +1,5 @@
-import { describe, expect, it } from 'vitest';
+import { fireEvent, render, screen } from '@testing-library/react';
+import { describe, expect, it, vi } from 'vitest';
 import {
   buildVisibleGroups,
   collectGroupPaths,
@@ -10,7 +11,7 @@ import {
   normalizeGroupPath
 } from '@shared';
 import type { GroupRecord, HostRecord } from '@shared';
-import { getHostBrowserCardClassName, getHostBrowserEmptyCalloutMessage, HOST_BROWSER_IMPORT_MENU_LABELS } from './HostBrowser';
+import { HostBrowser, getHostBrowserCardClassName, getHostBrowserEmptyCalloutMessage, HOST_BROWSER_IMPORT_MENU_LABELS } from './HostBrowser';
 
 const groups: GroupRecord[] = [
   {
@@ -65,6 +66,33 @@ const hosts: HostRecord[] = [
     updatedAt: '2025-01-01T00:00:00.000Z'
   }
 ];
+
+function renderBrowser() {
+  return render(
+    <HostBrowser
+      hosts={hosts}
+      groups={groups}
+      currentGroupPath={null}
+      searchQuery=""
+      selectedHostId={null}
+      onSearchChange={vi.fn()}
+      onOpenLocalTerminal={vi.fn()}
+      onCreateHost={vi.fn()}
+      onOpenAwsImport={vi.fn()}
+      onOpenOpenSshImport={vi.fn()}
+      onOpenTermiusImport={vi.fn()}
+      onOpenWarpgateImport={vi.fn()}
+      onCreateGroup={vi.fn().mockResolvedValue(undefined)}
+      onRemoveGroup={vi.fn().mockResolvedValue(undefined)}
+      onNavigateGroup={vi.fn()}
+      onSelectHost={vi.fn()}
+      onEditHost={vi.fn()}
+      onMoveHostToGroup={vi.fn().mockResolvedValue(undefined)}
+      onRemoveHost={vi.fn().mockResolvedValue(undefined)}
+      onConnectHost={vi.fn().mockResolvedValue(undefined)}
+    />
+  );
+}
 
 describe('HostBrowser helpers', () => {
   it('normalizes group paths and checks membership within the current tree', () => {
@@ -133,5 +161,19 @@ describe('HostBrowser helpers', () => {
     expect(getHostBrowserEmptyCalloutMessage(0, '')).toBe('New Host 또는 Import 메뉴를 눌러 첫 번째 연결 대상을 추가해보세요.');
     expect(getHostBrowserEmptyCalloutMessage(2, 'nas')).toBe('검색어를 지우거나 다른 호스트명으로 다시 찾아보세요.');
     expect(getHostBrowserEmptyCalloutMessage(2, '')).toBe('New Host를 눌러 이 위치에 호스트를 추가하거나, 다른 그룹으로 이동해 장치를 확인해보세요.');
+  });
+});
+
+describe('HostBrowser dialogs', () => {
+  it('closes the create-group dialog when the backdrop is clicked', () => {
+    const { container } = renderBrowser();
+
+    fireEvent.click(screen.getByRole('button', { name: 'New Group' }));
+
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+
+    fireEvent.click(container.querySelector('.home-modal-backdrop') as HTMLElement);
+
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
 });
