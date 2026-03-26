@@ -1,3 +1,4 @@
+import { useEffect, useRef } from 'react';
 import type { HostRecord, SecretMetadataRecord } from '@shared';
 import { HostForm } from './HostForm';
 
@@ -30,8 +31,32 @@ export function HostDrawer({
   onEditExistingSecret,
   onOpenSecrets
 }: HostDrawerProps) {
+  const drawerRef = useRef<HTMLElement | null>(null);
+
+  useEffect(() => {
+    if (!open || mode !== 'edit') {
+      return;
+    }
+
+    function handlePointerDown(event: MouseEvent) {
+      const target = event.target;
+      if (!(target instanceof Node)) {
+        return;
+      }
+      if (drawerRef.current?.contains(target)) {
+        return;
+      }
+      onClose();
+    }
+
+    document.addEventListener('mousedown', handlePointerDown);
+    return () => {
+      document.removeEventListener('mousedown', handlePointerDown);
+    };
+  }, [mode, onClose, open]);
+
   return (
-    <aside className={`host-drawer ${open ? 'open' : ''}`} aria-hidden={!open}>
+    <aside ref={drawerRef} className={`host-drawer ${open ? 'open' : ''}`} aria-hidden={!open}>
       <div className="host-drawer__header">
         <div>
           <div className="eyebrow">{mode === 'create' ? 'Create' : 'Edit'}</div>

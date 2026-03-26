@@ -14,6 +14,7 @@ import {
   normalizeGroupPath
 } from '@shared';
 import type { GroupRecord, GroupRemoveMode, HostRecord } from '@shared';
+import { DialogBackdrop } from './DialogBackdrop';
 
 export {
   buildVisibleGroups,
@@ -257,6 +258,12 @@ export function HostBrowser({
       window.removeEventListener('resize', handleResize);
     };
   }, [isImportMenuOpen]);
+
+  function closeGroupModal() {
+    setIsGroupModalOpen(false);
+    setNewGroupName('');
+    setGroupError(null);
+  }
 
   return (
     <div className="host-browser">
@@ -599,7 +606,7 @@ export function HostBrowser({
       ) : null}
 
       {isGroupModalOpen ? (
-        <div className="home-modal-backdrop" role="presentation">
+        <DialogBackdrop className="home-modal-backdrop" onDismiss={closeGroupModal}>
           <div className="home-modal" role="dialog" aria-modal="true" aria-labelledby="new-group-title">
             <div className="section-kicker">Create</div>
             <h3 id="new-group-title">New Group</h3>
@@ -617,11 +624,7 @@ export function HostBrowser({
               <button
                 type="button"
                 className="secondary-button"
-                onClick={() => {
-                  setIsGroupModalOpen(false);
-                  setNewGroupName('');
-                  setGroupError(null);
-                }}
+                onClick={closeGroupModal}
               >
                 Cancel
               </button>
@@ -631,9 +634,7 @@ export function HostBrowser({
                 onClick={async () => {
                   try {
                     await onCreateGroup(newGroupName);
-                    setIsGroupModalOpen(false);
-                    setNewGroupName('');
-                    setGroupError(null);
+                    closeGroupModal();
                   } catch (error) {
                     setGroupError(error instanceof Error ? error.message : '그룹을 만들지 못했습니다.');
                   }
@@ -643,7 +644,7 @@ export function HostBrowser({
               </button>
             </div>
           </div>
-        </div>
+        </DialogBackdrop>
       ) : null}
 
       {groupDeleteTarget ? (

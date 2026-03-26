@@ -143,6 +143,16 @@ describe('PortForwardingPanel helpers', () => {
 });
 
 describe('PortForwardingPanel dialog', () => {
+  it('exposes an accessible close button for the dialog', () => {
+    renderPanel();
+
+    fireEvent.click(screen.getByRole('button', { name: 'New SSH Forward' }));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Close port forwarding dialog' }));
+
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+
   it('closes when the backdrop is clicked while idle', async () => {
     const { container } = renderPanel();
 

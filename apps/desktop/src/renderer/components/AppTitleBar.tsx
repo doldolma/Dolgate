@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { DesktopWindowState, TerminalTab, UpdateState } from '@shared';
 import type { DynamicTabStripItem, WorkspaceTab, WorkspaceTabId } from '../store/createAppStore';
 import { DesktopWindowControls, type DesktopPlatform } from './DesktopWindowControls';
@@ -169,6 +169,7 @@ export function AppTitleBar({
   const [tabDropPreview, setTabDropPreview] = useState<{ targetKey: string; placement: 'before' | 'after' } | null>(null);
   const [isTabDragging, setIsTabDragging] = useState(false);
   const draggedTabRef = useRef<DynamicTabStripItem | null>(null);
+  const updateMenuRef = useRef<HTMLDivElement | null>(null);
 
   const dynamicItems = useMemo<TitlebarDynamicItem[]>(
     () =>
@@ -227,6 +228,28 @@ export function AppTitleBar({
     const rect = event.currentTarget.getBoundingClientRect();
     return event.clientX <= rect.left + rect.width / 2 ? 'before' : 'after';
   }
+
+  useEffect(() => {
+    if (!isUpdateOpen) {
+      return;
+    }
+
+    function handlePointerDown(event: MouseEvent) {
+      const target = event.target;
+      if (!(target instanceof Node)) {
+        return;
+      }
+      if (updateMenuRef.current?.contains(target)) {
+        return;
+      }
+      setIsUpdateOpen(false);
+    }
+
+    document.addEventListener('mousedown', handlePointerDown);
+    return () => {
+      document.removeEventListener('mousedown', handlePointerDown);
+    };
+  }, [isUpdateOpen]);
 
   return (
     <header className="app-titlebar">
@@ -470,7 +493,7 @@ export function AppTitleBar({
       </div>
       <div className="titlebar-spacer" />
       <div className="titlebar-actions">
-        <div className="update-menu">
+        <div className="update-menu" ref={updateMenuRef}>
           <button
             type="button"
             className={`titlebar-action ${isUpdateOpen ? 'active' : ''}`}
