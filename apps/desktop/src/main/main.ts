@@ -264,11 +264,15 @@ if (termiusHelperArgIndex >= 0) {
     }
   });
 
-  authService.setOnSessionInvalidated(async () => {
+  authService.setOnSessionInvalidated(async (context) => {
     // 인증 세션이 사라지면 SSH/SFTP/포워딩 런타임도 함께 정리해서 로그인 게이트 뒤에 연결이 남지 않게 한다.
     await sessionShareService.shutdown();
     await coreManager.shutdown();
-    await syncService.purgeSyncedCache();
+    if (context.purgeSyncedCache) {
+      await syncService.purgeSyncedCache();
+      return;
+    }
+    syncService.pause(null);
   });
 
   app.whenReady().then(async () => {

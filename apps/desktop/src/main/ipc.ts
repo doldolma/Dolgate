@@ -465,6 +465,9 @@ export function registerIpcHandlers(
   ipcMain.handle(ipcChannels.auth.bootstrap, async () =>
     authService.bootstrap(),
   );
+  ipcMain.handle(ipcChannels.auth.retryOnline, async () =>
+    authService.retryOnline(),
+  );
   ipcMain.handle(ipcChannels.auth.beginBrowserLogin, async () => {
     await authService.beginBrowserLogin();
   });

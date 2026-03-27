@@ -2,6 +2,7 @@ export const ipcChannels = {
   auth: {
     getState: 'auth:get-state',
     bootstrap: 'auth:bootstrap',
+    retryOnline: 'auth:retry-online',
     beginBrowserLogin: 'auth:begin-browser-login',
     logout: 'auth:logout',
     event: 'auth:event'

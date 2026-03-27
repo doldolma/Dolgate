@@ -42,8 +42,8 @@ export type KnownHostTrustStatus = 'trusted' | 'untrusted' | 'mismatch';
 export type ActivityLogLevel = 'info' | 'warn' | 'error';
 export type ActivityLogCategory = 'session' | 'audit';
 export type SecretSource = 'local_keychain' | 'server_managed';
-export type AuthStatus = 'loading' | 'unauthenticated' | 'authenticating' | 'authenticated' | 'error';
-export type SyncBootstrapStatus = 'idle' | 'syncing' | 'ready' | 'error';
+export type AuthStatus = 'loading' | 'unauthenticated' | 'authenticating' | 'authenticated' | 'offline-authenticated' | 'error';
+export type SyncBootstrapStatus = 'idle' | 'syncing' | 'ready' | 'paused' | 'error';
 export type TermiusProbeStatus = 'ready' | 'unsupported' | 'not-installed' | 'no-data' | 'error';
 
 interface HostBaseRecord {
@@ -482,6 +482,11 @@ export interface TerminalPreferencesRecord {
 export interface AuthState {
   status: AuthStatus;
   session?: AuthSession | null;
+  offline?: {
+    expiresAt: string;
+    lastOnlineAt: string;
+    reason: string;
+  } | null;
   errorMessage?: string | null;
 }
 

@@ -1,8 +1,56 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { mkdtempSync, rmSync } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { createCipheriv } from 'node:crypto';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { SyncAuthenticationError, SyncService, isSyncAuthenticationError } from '../../main/sync-service';
+import { getDesktopStateStorage, resetDesktopStateStorageForTests } from '../../main/state-storage';
+
+let tempDir = '';
+
+function encodeEncryptedPayload(plaintext: string, keyBase64: string): string {
+  const key = Buffer.from(keyBase64, 'base64');
+  const iv = Buffer.alloc(12, 1);
+  const cipher = createCipheriv('aes-256-gcm', key, iv);
+  const ciphertext = Buffer.concat([cipher.update(plaintext, 'utf8'), cipher.final()]);
+  const tag = cipher.getAuthTag();
+  return JSON.stringify({
+    v: 1,
+    iv: iv.toString('base64'),
+    tag: tag.toString('base64'),
+    ciphertext: ciphertext.toString('base64')
+  });
+}
+
+function createRemoteSnapshotWithPreferences(keyBase64: string) {
+  return {
+    groups: [],
+    hosts: [],
+    secrets: [],
+    knownHosts: [],
+    portForwards: [],
+    preferences: [
+      {
+        id: 'global-terminal',
+        encrypted_payload: encodeEncryptedPayload(
+          JSON.stringify({
+            id: 'global-terminal',
+            globalTerminalThemeId: 'dolssh-dark',
+            updatedAt: '2026-03-22T00:00:00.000Z'
+          }),
+          keyBase64
+        ),
+        updated_at: '2026-03-22T00:00:00.000Z'
+      }
+    ]
+  };
+}
 
 function createSyncService() {
   const authService = {
+    getState: vi.fn().mockReturnValue({
+      status: 'authenticated'
+    }),
     getAccessToken: vi.fn().mockReturnValue('access-token'),
     getServerUrl: vi.fn().mockReturnValue('https://ssh.doldolma.com'),
     getVaultKeyBase64: vi.fn().mockReturnValue(Buffer.alloc(32, 1).toString('base64')),
@@ -98,8 +146,21 @@ function createSyncService() {
   };
 }
 
+beforeEach(() => {
+  tempDir = mkdtempSync(path.join(os.tmpdir(), 'dolssh-sync-service-'));
+  process.env.DOLSSH_USER_DATA_DIR = tempDir;
+  resetDesktopStateStorageForTests();
+});
+
 afterEach(() => {
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
+  resetDesktopStateStorageForTests();
+  delete process.env.DOLSSH_USER_DATA_DIR;
+  if (tempDir) {
+    rmSync(tempDir, { recursive: true, force: true });
+    tempDir = '';
+  }
 });
 
 describe('SyncService', () => {
@@ -171,6 +232,17 @@ describe('SyncService', () => {
             }
           })
         )
+        .mockResolvedValueOnce(
+          new Response(
+            JSON.stringify(createRemoteSnapshotWithPreferences(authService.getVaultKeyBase64())),
+            {
+              status: 200,
+              headers: {
+                'content-type': 'application/json'
+              }
+            }
+          )
+        )
     );
 
     const state = await service.bootstrap();
@@ -205,5 +277,73 @@ describe('SyncService', () => {
 
     expect(thrown).toBeInstanceOf(SyncAuthenticationError);
     expect(isSyncAuthenticationError(thrown)).toBe(true);
+  });
+
+  it('pauses remote sync while offline-authenticated and preserves pending work', async () => {
+    const { service, authService, outbox } = createSyncService();
+    authService.getState.mockReturnValue({
+      status: 'offline-authenticated'
+    });
+    outbox.list.mockReturnValue([{ kind: 'hosts', recordId: 'host-1', deletedAt: '2026-03-22T00:00:00.000Z' }]);
+
+    const state = await service.pushDirty();
+
+    expect(state.status).toBe('paused');
+    expect(state.pendingPush).toBe(true);
+  });
+
+  it('marks pending push for offline local upserts even without deletion tombstones', async () => {
+    const { service, authService } = createSyncService();
+    authService.getState.mockReturnValue({
+      status: 'offline-authenticated'
+    });
+
+    const state = await service.pushDirty();
+
+    expect(state.status).toBe('paused');
+    expect(state.pendingPush).toBe(true);
+    expect(getDesktopStateStorage().getState().sync.pendingPush).toBe(true);
+  });
+
+  it('pushes pending local data before fetching the remote snapshot after restart', async () => {
+    const { service } = createSyncService();
+    getDesktopStateStorage().updateSyncState({
+      pendingPush: true,
+      lastSuccessfulSyncAt: '2026-03-22T00:00:00.000Z',
+      errorMessage: null
+    });
+
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(null, {
+          status: 202,
+          headers: {
+            'content-type': 'application/json'
+          }
+        })
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify(createRemoteSnapshotWithPreferences(Buffer.alloc(32, 1).toString('base64'))),
+          {
+            status: 200,
+            headers: {
+              'content-type': 'application/json'
+            }
+          }
+        )
+      );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const state = await service.bootstrap();
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({
+      method: 'POST'
+    });
+    expect(fetchMock.mock.calls[1]?.[1]?.method).toBeUndefined();
+    expect(state.status).toBe('ready');
+    expect(state.pendingPush).toBe(false);
   });
 });

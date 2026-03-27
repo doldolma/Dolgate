@@ -85,6 +85,12 @@ function createDefaultWindowState(): DesktopWindowState {
   };
 }
 
+function isWorkspaceAccessibleAuthState(
+  authState: Pick<AuthState, 'status' | 'session'>
+): authState is AuthState & { session: NonNullable<AuthState['session']> } {
+  return (authState.status === 'authenticated' || authState.status === 'offline-authenticated') && Boolean(authState.session);
+}
+
 function buildXshellImportStatusMessage(result: {
   createdGroupCount: number;
   createdHostCount: number;
@@ -96,6 +102,26 @@ function buildXshellImportStatusMessage(result: {
   }${
     result.skippedHostCount > 0 ? ` 호스트 ${result.skippedHostCount}개는 건너뛰었습니다.` : ''
   }`;
+}
+
+interface OfflineModeBannerProps {
+  expiryLabel: string | null;
+  isRetrying: boolean;
+  onRetry: () => void;
+}
+
+function OfflineModeBanner({ expiryLabel, isRetrying, onRetry }: OfflineModeBannerProps) {
+  return (
+    <div className="terminal-warning-banner app-offline-banner" role="status">
+      <span className="app-offline-banner__message">
+        인터넷 연결이 없어 오프라인 모드로 실행 중입니다.
+        {expiryLabel ? ` ${expiryLabel}까지 사용할 수 있습니다.` : ''}
+      </span>
+      <button type="button" className="secondary-button app-offline-banner__action" onClick={onRetry} disabled={isRetrying}>
+        {isRetrying ? '다시 연결 중...' : '다시 연결'}
+      </button>
+    </div>
+  );
 }
 
 interface DraggedSessionPayload {
@@ -176,10 +202,12 @@ export function App() {
   const [authState, setAuthState] = useState<AuthState>({
     status: 'loading',
     session: null,
+    offline: null,
     errorMessage: null
   });
   const [isSyncBootstrapping, setIsSyncBootstrapping] = useState(false);
-  const [syncBootstrapError, setSyncBootstrapError] = useState<string | null>(null);
+  const [workspaceBootstrapError, setWorkspaceBootstrapError] = useState<string | null>(null);
+  const [isRetryingOnline, setIsRetryingOnline] = useState(false);
   const [hydratedSessionUserId, setHydratedSessionUserId] = useState<string | null>(null);
   const [selectedHostId, setSelectedHostId] = useState<string | null>(null);
   const [isAwsImportOpen, setIsAwsImportOpen] = useState(false);
@@ -197,6 +225,7 @@ export function App() {
   const [secretEditRequest, setSecretEditRequest] = useState<SecretEditDialogRequest | null>(null);
   const authBootstrapStartedRef = useRef(false);
   const activeHydrationUserIdRef = useRef<string | null>(null);
+  const hydratedOnlineSessionUserIdRef = useRef<string | null>(null);
   const hosts = useAppStore((state) => state.hosts);
   const groups = useAppStore((state) => state.groups);
   const tabs = useAppStore((state) => state.tabs);
@@ -298,30 +327,47 @@ export function App() {
   const [prefersDark, setPrefersDark] = useState(() => window.matchMedia('(prefers-color-scheme: dark)').matches);
   const desktopPlatform = useMemo(() => detectDesktopPlatform(), []);
 
-  async function hydrateAuthenticatedWorkspace(nextState: AuthState): Promise<void> {
-    if (nextState.status !== 'authenticated' || !nextState.session) {
+  async function hydrateSessionWorkspace(nextState: AuthState): Promise<void> {
+    if (!isWorkspaceAccessibleAuthState(nextState)) {
       return;
     }
     const userId = nextState.session.user.id;
-    if (hydratedSessionUserId === userId || activeHydrationUserIdRef.current === userId) {
+    const needsLocalBootstrap = hydratedSessionUserId !== userId;
+    const needsOnlineSync = nextState.status === 'authenticated' && hydratedOnlineSessionUserIdRef.current !== userId;
+    if ((!needsLocalBootstrap && !needsOnlineSync) || activeHydrationUserIdRef.current === userId) {
       return;
     }
 
     activeHydrationUserIdRef.current = userId;
     setIsSyncBootstrapping(true);
-    setSyncBootstrapError(null);
+    setWorkspaceBootstrapError(null);
     try {
-      await window.dolssh.sync.bootstrap();
-      await bootstrap();
-      setHydratedSessionUserId(userId);
+      if (needsLocalBootstrap) {
+        await bootstrap();
+        setHydratedSessionUserId(userId);
+      }
+      if (needsOnlineSync) {
+        try {
+          await window.dolssh.sync.bootstrap();
+          hydratedOnlineSessionUserIdRef.current = userId;
+        } catch {
+          const latestAuthState = await window.dolssh.auth.getState();
+          if (!isWorkspaceAccessibleAuthState(latestAuthState)) {
+            setHydratedSessionUserId(null);
+            hydratedOnlineSessionUserIdRef.current = null;
+            return;
+          }
+        }
+      }
     } catch (error) {
       const latestAuthState = await window.dolssh.auth.getState();
       setHydratedSessionUserId(null);
-      if (latestAuthState.status !== 'authenticated') {
-        setSyncBootstrapError(null);
+      hydratedOnlineSessionUserIdRef.current = null;
+      if (!isWorkspaceAccessibleAuthState(latestAuthState)) {
+        setWorkspaceBootstrapError(null);
         return;
       }
-      setSyncBootstrapError(error instanceof Error ? error.message : '초기 동기화에 실패했습니다.');
+      setWorkspaceBootstrapError(error instanceof Error ? error.message : '초기 워크스페이스를 불러오지 못했습니다.');
     } finally {
       activeHydrationUserIdRef.current = null;
       setIsSyncBootstrapping(false);
@@ -339,13 +385,14 @@ export function App() {
         : () => undefined;
     const offAuth = window.dolssh.auth.onEvent((state) => {
       setAuthState(state);
-      if (state.status === 'authenticated') {
-        void hydrateAuthenticatedWorkspace(state);
+      if (isWorkspaceAccessibleAuthState(state)) {
+        void hydrateSessionWorkspace(state);
         return;
       }
       if (state.status === 'unauthenticated' || state.status === 'error') {
         setHydratedSessionUserId(null);
-        setSyncBootstrapError(null);
+        hydratedOnlineSessionUserIdRef.current = null;
+        setWorkspaceBootstrapError(null);
         activeHydrationUserIdRef.current = null;
       }
     });
@@ -397,8 +444,8 @@ export function App() {
 
     void window.dolssh.auth.bootstrap().then((state) => {
       setAuthState(state);
-      if (state.status === 'authenticated') {
-        void hydrateAuthenticatedWorkspace(state);
+      if (isWorkspaceAccessibleAuthState(state)) {
+        void hydrateSessionWorkspace(state);
       }
     });
   }, [bootstrap, hydratedSessionUserId]);
@@ -486,8 +533,18 @@ export function App() {
   const hasActivePortForwards = portForwardRuntimes.some((runtime) => runtime.status === 'starting' || runtime.status === 'running');
   const hasBlockingUpdateInstall = tabs.length > 0 || hasActiveTransfers || hasActivePortForwards;
 
-  const isAuthReady = authState.status === 'authenticated' && hydratedSessionUserId === authState.session?.user.id && !isSyncBootstrapping;
-  const needsSyncRetry = authState.status === 'authenticated' && !isSyncBootstrapping && Boolean(syncBootstrapError);
+  const isAuthReady = isWorkspaceAccessibleAuthState(authState) && hydratedSessionUserId === authState.session.user.id && !isSyncBootstrapping;
+  const needsWorkspaceRetry =
+    isWorkspaceAccessibleAuthState(authState) &&
+    hydratedSessionUserId !== authState.session.user.id &&
+    !isSyncBootstrapping &&
+    Boolean(workspaceBootstrapError);
+  const offlineLeaseExpiryLabel = useMemo(() => {
+    if (!authState.offline?.expiresAt) {
+      return null;
+    }
+    return new Date(authState.offline.expiresAt).toLocaleString('ko-KR');
+  }, [authState.offline?.expiresAt]);
   const adjacentDropCandidate =
     draggedSession?.source === 'standalone-tab'
       ? resolveAdjacentTabCandidate(tabStrip, workspaces, draggedSession.sessionId)
@@ -566,10 +623,10 @@ export function App() {
         </div>
         <LoginGate
           authState={
-            needsSyncRetry
+            needsWorkspaceRetry
               ? {
                   ...authState,
-                  errorMessage: syncBootstrapError
+                  errorMessage: workspaceBootstrapError
                 }
               : authState
           }
@@ -582,12 +639,12 @@ export function App() {
           }}
           onSaveServerUrl={saveLoginServerUrl}
           onResetServerUrl={resetLoginServerUrl}
-          actionLabel={needsSyncRetry ? '동기화 다시 시도' : undefined}
+          actionLabel={needsWorkspaceRetry ? '다시 시도' : undefined}
           onAction={
-            needsSyncRetry
+            needsWorkspaceRetry
               ? async () => {
-                  if (authState.status === 'authenticated') {
-                    await hydrateAuthenticatedWorkspace(authState);
+                  if (isWorkspaceAccessibleAuthState(authState)) {
+                    await hydrateSessionWorkspace(authState);
                   }
                 }
               : undefined
@@ -688,6 +745,19 @@ export function App() {
     await removeKeychainSecret(secretRef);
   }
 
+  async function handleRetryOnline(): Promise<void> {
+    setIsRetryingOnline(true);
+    try {
+      const nextState = await window.dolssh.auth.retryOnline();
+      setAuthState(nextState);
+      if (isWorkspaceAccessibleAuthState(nextState)) {
+        await hydrateSessionWorkspace(nextState);
+      }
+    } finally {
+      setIsRetryingOnline(false);
+    }
+  }
+
   return (
     <div className={`app-frame ${isHomeActive ? 'home-active' : 'session-active'}`}>
       <AppTitleBar
@@ -746,6 +816,15 @@ export function App() {
           <HomeNavigation activeSection={homeSection} onSelectSection={openHomeSection} />
 
           <main className="home-main">
+            {authState.status === 'offline-authenticated' && authState.offline ? (
+              <OfflineModeBanner
+                expiryLabel={offlineLeaseExpiryLabel}
+                isRetrying={isRetryingOnline}
+                onRetry={() => {
+                  void handleRetryOnline();
+                }}
+              />
+            ) : null}
             {homeSection === 'hosts' ? (
               <HostBrowser
                 desktopPlatform={desktopPlatform}
@@ -959,80 +1038,102 @@ export function App() {
         </section>
 
         <section className={`sftp-shell ${isSftpActive ? 'active' : 'hidden'}`}>
-          <SftpWorkspace
-            hosts={hosts}
-            groups={groups}
-            sftp={sftp}
-            settings={settings}
-            onActivatePaneSource={setSftpPaneSource}
-            onPaneFilterChange={setSftpPaneFilter}
-            onHostSearchChange={setSftpHostSearchQuery}
-            onNavigateHostGroup={navigateSftpHostGroup}
-            onSelectHost={selectSftpHost}
-            onConnectHost={connectSftpHost}
-            onOpenEntry={openSftpEntry}
-            onRefreshPane={refreshSftpPane}
-            onNavigateBack={navigateSftpBack}
-            onNavigateForward={navigateSftpForward}
-            onNavigateParent={navigateSftpParent}
-            onNavigateBreadcrumb={navigateSftpBreadcrumb}
-            onSelectEntry={selectSftpEntry}
-            onCreateDirectory={createSftpDirectory}
-            onRenameSelection={renameSftpSelection}
-            onChangeSelectionPermissions={changeSftpSelectionPermissions}
-            onDeleteSelection={deleteSftpSelection}
-            onDownloadSelection={downloadSftpSelection}
-            onPrepareTransfer={prepareSftpTransfer}
-            onPrepareExternalTransfer={prepareSftpExternalTransfer}
-            onTransferSelectionToPane={transferSftpSelectionToPane}
-            onResolveConflict={resolveSftpConflict}
-            onDismissConflict={dismissSftpConflict}
-            onCancelTransfer={cancelTransfer}
-            onRetryTransfer={retryTransfer}
-            onDismissTransfer={dismissTransfer}
-            onUpdateSettings={updateSettings}
-          />
+          {authState.status === 'offline-authenticated' && authState.offline ? (
+            <OfflineModeBanner
+              expiryLabel={offlineLeaseExpiryLabel}
+              isRetrying={isRetryingOnline}
+              onRetry={() => {
+                void handleRetryOnline();
+              }}
+            />
+          ) : null}
+          <div className="sftp-shell__content">
+            <SftpWorkspace
+              hosts={hosts}
+              groups={groups}
+              sftp={sftp}
+              settings={settings}
+              onActivatePaneSource={setSftpPaneSource}
+              onPaneFilterChange={setSftpPaneFilter}
+              onHostSearchChange={setSftpHostSearchQuery}
+              onNavigateHostGroup={navigateSftpHostGroup}
+              onSelectHost={selectSftpHost}
+              onConnectHost={connectSftpHost}
+              onOpenEntry={openSftpEntry}
+              onRefreshPane={refreshSftpPane}
+              onNavigateBack={navigateSftpBack}
+              onNavigateForward={navigateSftpForward}
+              onNavigateParent={navigateSftpParent}
+              onNavigateBreadcrumb={navigateSftpBreadcrumb}
+              onSelectEntry={selectSftpEntry}
+              onCreateDirectory={createSftpDirectory}
+              onRenameSelection={renameSftpSelection}
+              onChangeSelectionPermissions={changeSftpSelectionPermissions}
+              onDeleteSelection={deleteSftpSelection}
+              onDownloadSelection={downloadSftpSelection}
+              onPrepareTransfer={prepareSftpTransfer}
+              onPrepareExternalTransfer={prepareSftpExternalTransfer}
+              onTransferSelectionToPane={transferSftpSelectionToPane}
+              onResolveConflict={resolveSftpConflict}
+              onDismissConflict={dismissSftpConflict}
+              onCancelTransfer={cancelTransfer}
+              onRetryTransfer={retryTransfer}
+              onDismissTransfer={dismissTransfer}
+              onUpdateSettings={updateSettings}
+            />
+          </div>
         </section>
 
         <section className={`session-shell ${isSessionViewActive ? 'active' : 'hidden'}`}>
-          <TerminalWorkspace
-            tabs={tabs}
-            hosts={hosts}
-            settings={settings}
-            prefersDark={prefersDark}
-            activeSessionId={activeSessionId}
-            activeWorkspace={activeWorkspace}
-            viewActivationKey={sessionViewActivationKey}
-            draggedSession={draggedSession}
-            canDropDraggedSession={canDropDraggedSession}
-            onCloseSession={disconnectTab}
-            onRetryConnection={retrySessionConnection}
-            onStartSessionShare={startSessionShare}
-            onUpdateSessionShareSnapshot={updateSessionShareSnapshot}
-            onSetSessionShareInputEnabled={setSessionShareInputEnabled}
-            onStopSessionShare={stopSessionShare}
-            onOpenSessionShareChatWindow={async (sessionId) => {
-              await window.dolssh.sessionShares.openOwnerChatWindow(sessionId);
-            }}
-            onStartPaneDrag={(workspaceId, sessionId) => {
-              setDraggedSession({
-                sessionId,
-                source: 'workspace-pane',
-                workspaceId
-              });
-            }}
-            onEndSessionDrag={() => {
-              setDraggedSession(null);
-            }}
-            onSplitSessionDrop={(sessionId, direction, targetSessionId) =>
-              splitSessionIntoWorkspace(sessionId, direction, targetSessionId)
-            }
-            onMoveWorkspaceSession={(workspaceId, sessionId, direction, targetSessionId) =>
-              moveWorkspaceSession(workspaceId, sessionId, direction, targetSessionId)
-            }
-            onFocusWorkspaceSession={focusWorkspaceSession}
-            onResizeWorkspaceSplit={resizeWorkspaceSplit}
-          />
+          {authState.status === 'offline-authenticated' && authState.offline ? (
+            <OfflineModeBanner
+              expiryLabel={offlineLeaseExpiryLabel}
+              isRetrying={isRetryingOnline}
+              onRetry={() => {
+                void handleRetryOnline();
+              }}
+            />
+          ) : null}
+          <div className="session-shell__content">
+            <TerminalWorkspace
+              tabs={tabs}
+              hosts={hosts}
+              settings={settings}
+              prefersDark={prefersDark}
+              activeSessionId={activeSessionId}
+              activeWorkspace={activeWorkspace}
+              viewActivationKey={sessionViewActivationKey}
+              draggedSession={draggedSession}
+              canDropDraggedSession={canDropDraggedSession}
+              onCloseSession={disconnectTab}
+              onRetryConnection={retrySessionConnection}
+              onStartSessionShare={startSessionShare}
+              onUpdateSessionShareSnapshot={updateSessionShareSnapshot}
+              onSetSessionShareInputEnabled={setSessionShareInputEnabled}
+              onStopSessionShare={stopSessionShare}
+              onOpenSessionShareChatWindow={async (sessionId) => {
+                await window.dolssh.sessionShares.openOwnerChatWindow(sessionId);
+              }}
+              onStartPaneDrag={(workspaceId, sessionId) => {
+                setDraggedSession({
+                  sessionId,
+                  source: 'workspace-pane',
+                  workspaceId
+                });
+              }}
+              onEndSessionDrag={() => {
+                setDraggedSession(null);
+              }}
+              onSplitSessionDrop={(sessionId, direction, targetSessionId) =>
+                splitSessionIntoWorkspace(sessionId, direction, targetSessionId)
+              }
+              onMoveWorkspaceSession={(workspaceId, sessionId, direction, targetSessionId) =>
+                moveWorkspaceSession(workspaceId, sessionId, direction, targetSessionId)
+              }
+              onFocusWorkspaceSession={focusWorkspaceSession}
+              onResizeWorkspaceSplit={resizeWorkspaceSplit}
+            />
+          </div>
         </section>
       </div>
 

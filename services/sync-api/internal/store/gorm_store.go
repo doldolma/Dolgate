@@ -42,10 +42,12 @@ func (authIdentityRow) TableName() string {
 }
 
 type refreshTokenRow struct {
-	UserID     string    `gorm:"column:user_id;not null;index;type:varchar(191)"`
-	TokenHash  string    `gorm:"column:token_hash;primaryKey;type:varchar(191)"`
-	ExpiresAt  time.Time `gorm:"column:expires_at;not null"`
-	LastUsedAt time.Time `gorm:"column:last_used_at;not null"`
+	UserID       string     `gorm:"column:user_id;not null;index;type:varchar(191)"`
+	TokenHash    string     `gorm:"column:token_hash;primaryKey;type:varchar(191)"`
+	ExpiresAt    time.Time  `gorm:"column:expires_at;not null"`
+	LastUsedAt   time.Time  `gorm:"column:last_used_at;not null"`
+	GraceUntil   *time.Time `gorm:"column:grace_until"`
+	SupersededAt *time.Time `gorm:"column:superseded_at"`
 }
 
 func (refreshTokenRow) TableName() string {
@@ -249,18 +251,22 @@ func (s *GormStore) SaveAuthIdentity(ctx context.Context, identity AuthIdentity)
 
 func (s *GormStore) SaveRefreshToken(ctx context.Context, token RefreshToken) error {
 	row := refreshTokenRow{
-		UserID:     token.UserID,
-		TokenHash:  token.TokenHash,
-		ExpiresAt:  token.ExpiresAt.UTC(),
-		LastUsedAt: token.LastUsedAt.UTC(),
+		UserID:       token.UserID,
+		TokenHash:    token.TokenHash,
+		ExpiresAt:    token.ExpiresAt.UTC(),
+		LastUsedAt:   token.LastUsedAt.UTC(),
+		GraceUntil:   utcTimePointer(token.GraceUntil),
+		SupersededAt: utcTimePointer(token.SupersededAt),
 	}
 	return s.db.WithContext(ctx).
 		Clauses(clause.OnConflict{
 			Columns: []clause.Column{{Name: "token_hash"}},
 			DoUpdates: clause.Assignments(map[string]any{
-				"user_id":      row.UserID,
-				"expires_at":   row.ExpiresAt,
-				"last_used_at": row.LastUsedAt,
+				"user_id":       row.UserID,
+				"expires_at":    row.ExpiresAt,
+				"last_used_at":  row.LastUsedAt,
+				"grace_until":   row.GraceUntil,
+				"superseded_at": row.SupersededAt,
 			}),
 		}).
 		Create(&row).Error
@@ -272,15 +278,25 @@ func (s *GormStore) GetRefreshToken(ctx context.Context, tokenHash string) (Refr
 		return RefreshToken{}, err
 	}
 	return RefreshToken{
-		UserID:     row.UserID,
-		TokenHash:  row.TokenHash,
-		ExpiresAt:  row.ExpiresAt,
-		LastUsedAt: row.LastUsedAt,
+		UserID:       row.UserID,
+		TokenHash:    row.TokenHash,
+		ExpiresAt:    row.ExpiresAt,
+		LastUsedAt:   row.LastUsedAt,
+		GraceUntil:   utcTimePointer(row.GraceUntil),
+		SupersededAt: utcTimePointer(row.SupersededAt),
 	}, nil
 }
 
 func (s *GormStore) DeleteRefreshToken(ctx context.Context, tokenHash string) error {
 	return s.db.WithContext(ctx).Where("token_hash = ?", tokenHash).Delete(&refreshTokenRow{}).Error
+}
+
+func utcTimePointer(value *time.Time) *time.Time {
+	if value == nil {
+		return nil
+	}
+	normalized := value.UTC()
+	return &normalized
 }
 
 func (s *GormStore) SaveExchangeCode(ctx context.Context, code ExchangeCode) error {

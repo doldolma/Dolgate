@@ -31,6 +31,10 @@ function decodeSecret(record: StoredEncryptedValue): string | null {
 export class SecretStore {
   private readonly storage = getDesktopStateStorage();
 
+  isEncryptionAvailable(): boolean {
+    return safeStorage.isEncryptionAvailable();
+  }
+
   async save(account: string, secret: string): Promise<string> {
     this.storage.writeSecureValue(account, encodeSecret(secret));
     return account;

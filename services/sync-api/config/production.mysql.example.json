@@ -10,6 +10,9 @@
     "jwtSecret": "CHANGE_ME_TO_A_LONG_RANDOM_SECRET",
     "accessTokenTtlMinutes": 15,
     "refreshTokenIdleDays": 14,
+    "offlineLeaseTtlHours": 72,
+    "refreshRotationHandoffSeconds": 120,
+    "offlineLeaseSigningPrivateKeyPem": "",
     "local": {
       "enabled": true,
       "signupEnabled": true

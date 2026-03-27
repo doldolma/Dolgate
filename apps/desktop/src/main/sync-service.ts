@@ -148,7 +148,7 @@ async function loadManagedSecret(secretStore: SecretStore, secretRef: string): P
 
 export class SyncService {
   private readonly stateStorage = getDesktopStateStorage();
-  private state: SyncStatus = defaultSyncStatus();
+  private state: SyncStatus;
   private pushTimer: NodeJS.Timeout | null = null;
   private pushPromise: Promise<SyncStatus> | null = null;
 
@@ -162,9 +162,25 @@ export class SyncService {
     private readonly settings: SettingsRepository,
     private readonly secretStore: SecretStore,
     private readonly outbox: SyncOutboxRepository
-  ) {}
+  ) {
+    this.state = this.loadPersistedState();
+  }
 
   getState(): SyncStatus {
+    return this.state;
+  }
+
+  pause(errorMessage?: string | null): SyncStatus {
+    if (this.pushTimer) {
+      clearTimeout(this.pushTimer);
+      this.pushTimer = null;
+    }
+
+    this.patchState({
+      status: 'paused',
+      pendingPush: this.hasPendingLocalChanges(),
+      errorMessage: errorMessage ?? null
+    });
     return this.state;
   }
 
@@ -179,22 +195,35 @@ export class SyncService {
       return this.state;
     }
 
+    if (this.authService.getState().status === 'offline-authenticated') {
+      return this.pause('오프라인 모드에서는 동기화를 일시 중지합니다.');
+    }
+
+    const hadPendingLocalChanges = this.hasPendingLocalChanges();
     this.patchState({
       status: 'syncing',
+      pendingPush: hadPendingLocalChanges,
       errorMessage: null
     });
 
     try {
-      const remote = await this.fetchRemoteSnapshot();
+      if (hadPendingLocalChanges) {
+        const local = await this.buildEncryptedSnapshot(true);
+        if (totalRecordCount(local) > 0) {
+          await this.pushSnapshot(local);
+        }
+      }
+
+      let remote = await this.fetchRemoteSnapshot();
       if (totalRecordCount(remote) === 0) {
         const local = await this.buildEncryptedSnapshot(true);
         if (totalRecordCount(local) > 0) {
           await this.pushSnapshot(local);
-          await this.promoteLocalSecretsToServerManaged();
+          remote = await this.fetchRemoteSnapshot();
         }
-      } else {
-        await this.applyRemoteSnapshot(remote);
       }
+
+      await this.applyRemoteSnapshot(remote);
       this.outbox.clearAll();
       this.patchState({
         status: 'ready',
@@ -223,6 +252,12 @@ export class SyncService {
         errorMessage: null
       });
       return this.state;
+    }
+
+    this.markPendingPush();
+
+    if (this.authService.getState().status === 'offline-authenticated') {
+      return this.pause('오프라인 모드에서는 변경 내용을 로컬에 보관하고 나중에 동기화합니다.');
     }
 
     if (this.pushPromise) {
@@ -286,6 +321,10 @@ export class SyncService {
     this.portForwards.replaceAll([]);
     this.settings.clearSyncedTerminalPreferences();
     this.outbox.clearAll();
+    this.stateStorage.updateSyncDataOwner({
+      userId: null,
+      serverUrl: null
+    });
     this.patchState(defaultSyncStatus());
   }
 
@@ -466,20 +505,6 @@ export class SyncService {
     this.secretMetadata.replaceAll(nextSecretMetadata, 'server_managed');
   }
 
-  private async promoteLocalSecretsToServerManaged(): Promise<void> {
-    const entries = this.secretMetadata.list();
-    for (const entry of entries) {
-      this.secretMetadata.upsert({
-        secretRef: entry.secretRef,
-        label: entry.label,
-        hasPassword: entry.hasPassword,
-        hasPassphrase: entry.hasPassphrase,
-        hasManagedPrivateKey: entry.hasManagedPrivateKey,
-        source: 'server_managed'
-      });
-    }
-  }
-
   private scheduleRetry(): void {
     if (this.pushTimer) {
       clearTimeout(this.pushTimer);
@@ -487,6 +512,36 @@ export class SyncService {
     this.pushTimer = setTimeout(() => {
       void this.pushDirty();
     }, RETRY_DELAY_MS);
+  }
+
+  private loadPersistedState(): SyncStatus {
+    const syncState = this.stateStorage.getState().sync;
+    return {
+      status: 'idle',
+      lastSuccessfulSyncAt: syncState.lastSuccessfulSyncAt,
+      pendingPush: syncState.pendingPush,
+      errorMessage: syncState.errorMessage
+    };
+  }
+
+  private hasPendingLocalChanges(): boolean {
+    return this.state.pendingPush || this.stateStorage.getState().sync.pendingPush || this.outbox.list().length > 0;
+  }
+
+  private markPendingPush(): void {
+    if (this.hasPendingLocalChanges()) {
+      if (!this.state.pendingPush) {
+        this.patchState({
+          pendingPush: true
+        });
+      }
+      return;
+    }
+
+    this.patchState({
+      pendingPush: true,
+      errorMessage: null
+    });
   }
 
   private patchState(patch: Partial<SyncStatus>): void {

@@ -37,7 +37,10 @@ func createTestRouterWithConfig(t *testing.T, config httpserver.RouterConfig) *g
 			t.Fatalf("close sqlite: %v", err)
 		}
 	})
-	authService := auth.NewService(sqliteStore, "test-secret", 15*time.Minute, time.Hour)
+	authService, err := auth.NewService(sqliteStore, "test-secret", 15*time.Minute, time.Hour, 72*time.Hour, 2*time.Minute, "")
+	if err != nil {
+		t.Fatalf("new auth service: %v", err)
+	}
 	router, err := httpserver.NewRouter(sqliteStore, authService, config)
 	if err != nil {
 		t.Fatalf("new router: %v", err)
@@ -95,12 +98,18 @@ func TestAuthRefreshAndSyncFlow(t *testing.T) {
 		VaultBootstrap struct {
 			KeyBase64 string `json:"keyBase64"`
 		} `json:"vaultBootstrap"`
+		OfflineLease struct {
+			Token string `json:"token"`
+		} `json:"offlineLease"`
 	}
 	if err := json.Unmarshal(signupRecorder.Body.Bytes(), &signupResponse); err != nil {
 		t.Fatalf("decode signup response: %v", err)
 	}
 	if signupResponse.VaultBootstrap.KeyBase64 == "" {
 		t.Fatalf("expected vault bootstrap key")
+	}
+	if signupResponse.OfflineLease.Token == "" {
+		t.Fatalf("expected offline lease in signup response")
 	}
 
 	payload := syncmodel.Payload{
@@ -186,8 +195,8 @@ func TestAuthRefreshAndSyncFlow(t *testing.T) {
 	oldRefreshRequest.Header.Set("Content-Type", "application/json")
 	oldRefreshRecorder := httptest.NewRecorder()
 	router.ServeHTTP(oldRefreshRecorder, oldRefreshRequest)
-	if oldRefreshRecorder.Code != http.StatusUnauthorized {
-		t.Fatalf("expected old refresh token to fail, got %d", oldRefreshRecorder.Code)
+	if oldRefreshRecorder.Code != http.StatusOK {
+		t.Fatalf("expected old refresh token to succeed during handoff, got %d", oldRefreshRecorder.Code)
 	}
 }
 
