@@ -1495,19 +1495,6 @@ function resolveCredentialRetryKind(
     : null;
 }
 
-function shouldLoadAwsHostSshMetadata(
-  host: Extract<HostRecord, { kind: "aws-ec2" }>,
-): boolean {
-  return (
-    !host.awsSshUsername?.trim() ||
-    !Number.isInteger(host.awsSshPort) ||
-    (host.awsSshPort ?? 0) < 1 ||
-    (host.awsSshPort ?? 0) > 65535 ||
-    host.awsSshMetadataStatus === "loading" ||
-    host.awsSshMetadataStatus === "idle"
-  );
-}
-
 function shouldPromptAwsSftpConfigRetry(
   host: HostRecord | undefined,
   message: string,
@@ -1974,49 +1961,6 @@ export function createAppStore(api: DesktopApi) {
           "AWS SSO 로그인 후에도 인증이 확인되지 않았습니다.",
       );
     }
-  };
-
-  const loadAwsHostSshMetadataIntoState = async (
-    set: (
-      next:
-        | AppState
-        | Partial<AppState>
-        | ((state: AppState) => AppState | Partial<AppState>),
-    ) => void,
-    get: () => AppState,
-    hostId: string,
-  ): Promise<Extract<HostRecord, { kind: "aws-ec2" }>> => {
-    const currentHost = get().hosts.find((item) => item.id === hostId);
-    if (!currentHost || !isAwsEc2HostRecord(currentHost)) {
-      throw new Error("AWS host를 찾지 못했습니다.");
-    }
-
-    set((state) => ({
-      hosts: sortHosts(
-        state.hosts.map((host) =>
-          host.id === hostId && isAwsEc2HostRecord(host)
-            ? {
-                ...host,
-                awsSshMetadataStatus: "loading",
-                awsSshMetadataError: null,
-              }
-            : host,
-        ),
-      ),
-    }));
-
-    const nextHost = await api.aws.loadHostSshMetadata(hostId);
-    set((state) => ({
-      hosts: sortHosts([
-        ...state.hosts.filter((host) => host.id !== nextHost.id),
-        nextHost,
-      ]),
-    }));
-
-    if (!isAwsEc2HostRecord(nextHost)) {
-      throw new Error("AWS host 메타데이터를 갱신하지 못했습니다.");
-    }
-    return nextHost;
   };
 
   const updateSessionProgress = (
@@ -4813,10 +4757,6 @@ export function createAppStore(api: DesktopApi) {
           return;
         }
         const awsHost = isAwsEc2HostRecord(host) ? host : null;
-        const shouldLoadMetadata = awsHost
-          ? !/windows/i.test(awsHost.awsPlatform ?? "") &&
-            shouldLoadAwsHostSshMetadata(awsHost)
-          : false;
         if (awsHost) {
           const disabledReason = getAwsEc2HostSftpDisabledReason(awsHost);
           if (disabledReason) {
@@ -4839,18 +4779,12 @@ export function createAppStore(api: DesktopApi) {
           }
         }
         const endpointId = globalThis.crypto.randomUUID();
-        const awsConnectionStage: SftpConnectionProgressEvent["stage"] =
-          shouldLoadMetadata
-            ? "loading-instance-metadata"
-            : "checking-profile";
         const initialConnectionProgress = awsHost
           ? {
               endpointId,
               hostId: awsHost.id,
-              stage: awsConnectionStage,
-              message: shouldLoadMetadata
-                ? "SSH 설정을 자동으로 확인하는 중입니다."
-                : `${awsHost.awsProfileName} 프로필 인증 상태를 확인하는 중입니다.`,
+              stage: "checking-profile" as const,
+              message: `${awsHost.awsProfileName} 프로필 인증 상태를 확인하는 중입니다.`,
             }
           : null;
         set((state) => ({
@@ -4870,47 +4804,6 @@ export function createAppStore(api: DesktopApi) {
           }),
         }));
         try {
-          let resolvedAwsHost = awsHost;
-          if (resolvedAwsHost && shouldLoadMetadata) {
-            const reloadedAwsHost = await loadAwsHostSshMetadataIntoState(
-              set,
-              get,
-              resolvedAwsHost.id,
-            );
-            resolvedAwsHost = reloadedAwsHost;
-            if (!(reloadedAwsHost.awsSshUsername ?? "").trim()) {
-              set((state) => ({
-                pendingAwsSftpConfigRetry: {
-                  hostId: reloadedAwsHost.id,
-                  paneId,
-                  message:
-                    reloadedAwsHost.awsSshMetadataError ||
-                    "자동으로 SSH 사용자명을 확인하지 못했습니다. 사용자명을 직접 입력해 주세요.",
-                  suggestedUsername: "",
-                  suggestedPort: getAwsEc2HostSshPort(reloadedAwsHost),
-                },
-                sftp: updatePaneState(state, paneId, {
-                  ...getPane(state, paneId),
-                  connectingHostId: null,
-                  connectingEndpointId: null,
-                  connectionProgress: null,
-                  isLoading: false,
-                  errorMessage: undefined,
-                }),
-              }));
-              return;
-            }
-          }
-          if (resolvedAwsHost) {
-            await ensureAwsHostAuthentication(resolvedAwsHost, (message) => {
-              setSftpPaneConnectionProgress(set, paneId, {
-                endpointId,
-                hostId: resolvedAwsHost.id,
-                stage: "checking-profile",
-                message,
-              });
-            });
-          }
           const trusted = await ensureTrustedHost(set, {
             hostId,
             endpointId,
@@ -4923,14 +4816,14 @@ export function createAppStore(api: DesktopApi) {
           });
           if (!trusted) {
             set((state) => ({
-            sftp: updatePaneState(state, paneId, {
-              ...getPane(state, paneId),
-              connectingHostId: null,
-              connectingEndpointId: null,
-              connectionProgress: null,
-              selectedHostId: hostId,
-              isLoading: false,
-              errorMessage: undefined,
+              sftp: updatePaneState(state, paneId, {
+                ...getPane(state, paneId),
+                connectingHostId: null,
+                connectingEndpointId: null,
+                connectionProgress: null,
+                selectedHostId: hostId,
+                isLoading: false,
+                errorMessage: undefined,
               }),
             }));
             return;

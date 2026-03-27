@@ -14,6 +14,7 @@ function createStatus(overrides: Partial<AwsProfileStatus> = {}): AwsProfileStat
     available: true,
     isSsoProfile: false,
     isAuthenticated: false,
+    configuredRegion: null,
     accountId: null,
     arn: null,
     errorMessage: null,
@@ -31,6 +32,7 @@ function installMockApi(overrides?: {
       getProfileStatus: vi.fn().mockResolvedValue(
         createStatus({
           isAuthenticated: true,
+          configuredRegion: 'ap-northeast-2',
         }),
       ),
       login: vi.fn().mockResolvedValue(undefined),
@@ -185,6 +187,82 @@ describe('AwsImportDialog', () => {
         }),
       ),
     );
+  });
+
+  it('auto-selects the configured region and loads instances immediately', async () => {
+    const api = installMockApi();
+    api.aws.getProfileStatus.mockResolvedValue(
+      createStatus({
+        isAuthenticated: true,
+        configuredRegion: 'ap-northeast-2',
+      }),
+    );
+
+    render(
+      <AwsImportDialog
+        open
+        currentGroupPath="Servers"
+        onClose={vi.fn()}
+        onImport={vi.fn().mockResolvedValue(undefined)}
+      />,
+    );
+
+    await waitFor(() => expect(api.aws.listEc2Instances).toHaveBeenCalledWith('default', 'ap-northeast-2'));
+    expect(screen.getByText('web-1')).toBeInTheDocument();
+  });
+
+  it('loads only regions when no configured region exists and waits for manual selection', async () => {
+    const api = installMockApi();
+    api.aws.getProfileStatus.mockResolvedValue(
+      createStatus({
+        isAuthenticated: true,
+        configuredRegion: null,
+      }),
+    );
+
+    render(
+      <AwsImportDialog
+        open
+        currentGroupPath="Servers"
+        onClose={vi.fn()}
+        onImport={vi.fn().mockResolvedValue(undefined)}
+      />,
+    );
+
+    await waitFor(() => expect(api.aws.listRegions).toHaveBeenCalledWith('default'));
+    await waitFor(() => expect(screen.getByTestId('aws-import-region-hint')).toBeInTheDocument());
+    expect(api.aws.listEc2Instances).not.toHaveBeenCalled();
+
+    fireEvent.change(screen.getByLabelText('Region'), {
+      target: { value: 'ap-northeast-2' },
+    });
+
+    await waitFor(() => expect(api.aws.listEc2Instances).toHaveBeenCalledWith('default', 'ap-northeast-2'));
+  });
+
+  it('does not auto-select a configured region when it is missing from the loaded region list', async () => {
+    const api = installMockApi();
+    api.aws.getProfileStatus.mockResolvedValue(
+      createStatus({
+        isAuthenticated: true,
+        configuredRegion: 'us-east-1',
+      }),
+    );
+    api.aws.listRegions.mockResolvedValue(['ap-northeast-2']);
+    api.aws.listEc2Instances.mockClear();
+
+    render(
+      <AwsImportDialog
+        open
+        currentGroupPath="Servers"
+        onClose={vi.fn()}
+        onImport={vi.fn().mockResolvedValue(undefined)}
+      />,
+    );
+
+    await waitFor(() => expect(screen.getByTestId('aws-import-region-hint')).toBeInTheDocument());
+    expect(screen.getByLabelText('Region')).toHaveValue('ap-northeast-2');
+    expect(api.aws.listEc2Instances).not.toHaveBeenCalled();
   });
 
   it('allows registering an AWS host even when inspection fails and fields stay blank', async () => {

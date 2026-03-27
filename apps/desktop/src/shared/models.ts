@@ -49,6 +49,7 @@ export type AwsSshMetadataStatus = 'idle' | 'loading' | 'ready' | 'error';
 export type SftpConnectionStage =
   | 'loading-instance-metadata'
   | 'checking-profile'
+  | 'browser-login'
   | 'checking-ssm'
   | 'probing-host-key'
   | 'generating-key'
@@ -622,6 +623,7 @@ export interface AwsProfileStatus {
   available: boolean;
   isSsoProfile: boolean;
   isAuthenticated: boolean;
+  configuredRegion?: string | null;
   accountId?: string | null;
   arn?: string | null;
   errorMessage?: string | null;

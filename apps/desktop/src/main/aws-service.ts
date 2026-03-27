@@ -502,6 +502,7 @@ export class AwsService {
         available: true,
         isSsoProfile: false,
         isAuthenticated: true,
+        configuredRegion: "ap-northeast-2",
         accountId: "000000000000",
         arn: "arn:aws:iam::000000000000:user/dolssh-smoke",
         missingTools: [],
@@ -510,9 +511,10 @@ export class AwsService {
 
     await this.ensureAwsCliAvailable();
 
-    const [ssoStartUrl, ssoSession, pluginAvailable] = await Promise.all([
+    const [ssoStartUrl, ssoSession, configuredRegion, pluginAvailable] = await Promise.all([
       this.readConfigValue(profileName, "sso_start_url"),
       this.readConfigValue(profileName, "sso_session"),
+      this.readConfigValue(profileName, "region"),
       resolveExecutable("session-manager-plugin")
         .then(() => true)
         .catch(() => false),
@@ -537,6 +539,7 @@ export class AwsService {
         available: true,
         isSsoProfile,
         isAuthenticated: true,
+        configuredRegion: configuredRegion || null,
         accountId: payload.Account ?? null,
         arn: payload.Arn ?? null,
         missingTools: pluginAvailable ? [] : ["session-manager-plugin"],
@@ -548,6 +551,7 @@ export class AwsService {
       available: true,
       isSsoProfile,
       isAuthenticated: false,
+      configuredRegion: configuredRegion || null,
       errorMessage: isSsoProfile
         ? "브라우저 로그인이 필요합니다."
         : "이 프로필은 AWS CLI 자격 증명이 필요합니다.",

@@ -303,6 +303,7 @@ function toAwsHostDraft(
 type AwsSftpProgressStage =
   | "loading-instance-metadata"
   | "checking-profile"
+  | "browser-login"
   | "checking-ssm"
   | "probing-host-key"
   | "generating-key"
@@ -316,6 +317,8 @@ function getSftpStageLabel(stage: AwsSftpProgressStage): string {
       return "SSH 설정 확인";
     case "checking-profile":
       return "프로필 확인";
+    case "browser-login":
+      return "AWS 로그인";
     case "checking-ssm":
       return "SSM 확인";
     case "probing-host-key":
@@ -340,6 +343,15 @@ function formatSftpStageError(
   const message =
     error instanceof Error ? error.message : "알 수 없는 오류가 발생했습니다.";
   return new Error(`[${getSftpStageLabel(stage)}] ${message}`);
+}
+
+const AWS_SFTP_PREFLIGHT_CACHE_TTL_MS = 2 * 60_000;
+
+interface AwsSftpPreflightCacheEntry {
+  endpointId: string;
+  hostId: string;
+  hydratedHost: Extract<HostRecord, { kind: "aws-ec2" }>;
+  createdAt: number;
 }
 
 async function hydrateAwsHostForSftp(
@@ -476,16 +488,21 @@ async function buildHostKeyProbeResult(
   hosts: HostRepository,
   knownHosts: KnownHostRepository,
   coreManager: CoreManager,
-  awsService: AwsService,
   awsSsmTunnelService: AwsSsmTunnelService,
-  onPersistAwsHost: () => void,
-  emitSftpConnectionProgress: (
-    event: {
-      endpointId: string;
-      hostId: string;
-      stage: AwsSftpProgressStage;
-      message: string;
-    },
+  emitSftpConnectionProgress: (event: {
+    endpointId: string;
+    hostId: string;
+    stage: AwsSftpProgressStage;
+    message: string;
+  }) => void,
+  resolveAwsSftpPreflight: (input: {
+    endpointId: string;
+    host: Extract<HostRecord, { kind: "aws-ec2" }>;
+    allowBrowserLogin: boolean;
+  }) => Promise<Extract<HostRecord, { kind: "aws-ec2" }>>,
+  storeAwsSftpPreflight: (
+    endpointId: string,
+    hydratedHost: Extract<HostRecord, { kind: "aws-ec2" }>,
   ) => void,
   input: KnownHostProbeInput,
 ): Promise<HostKeyProbeResult> {
@@ -497,86 +514,39 @@ async function buildHostKeyProbeResult(
   if (isAwsEc2HostRecord(host)) {
     const endpointId = input.endpointId?.trim() || "";
     const emitStage = (
-      stage:
-        | "loading-instance-metadata"
-        | "checking-profile"
-        | "checking-ssm"
-        | "probing-host-key"
-        | "opening-tunnel",
+      stage: "opening-tunnel" | "probing-host-key",
       message: string,
+      hostId: string,
     ) => {
       if (!endpointId) {
         return;
       }
       emitSftpConnectionProgress({
         endpointId,
-        hostId: host.id,
+        hostId,
         stage,
         message,
       });
     };
-
     let currentStage:
-      | "loading-instance-metadata"
       | "checking-profile"
+      | "browser-login"
       | "checking-ssm"
-      | "probing-host-key"
-      | "opening-tunnel" = "checking-profile";
-
-    emitStage(
-      "checking-profile",
-      `${host.awsProfileName} 프로필 인증 상태를 확인하는 중입니다.`,
-    );
+      | "loading-instance-metadata"
+      | "opening-tunnel"
+      | "probing-host-key" = "checking-profile";
     try {
-      const status = await awsService.getProfileStatus(host.awsProfileName);
-      if (!status.isAuthenticated) {
-        throw new Error(
-          status.errorMessage ||
-            `${host.awsProfileName} 프로필에 AWS CLI 인증이 필요합니다.`,
-        );
-      }
-
-      currentStage = "checking-ssm";
-      emitStage(
-        "checking-ssm",
-        `${host.label} 인스턴트의 SSM 연결 상태를 확인하는 중입니다.`,
-      );
-      await awsService.ensureSessionManagerPluginAvailable();
-      const refreshedHost = await hydrateAwsHostForSftp(
-        hosts,
-        awsService,
+      const hydratedHost = await resolveAwsSftpPreflight({
+        endpointId,
         host,
-        onPersistAwsHost,
-      );
-      const isManaged = await awsService.isManagedInstance(
-        refreshedHost.awsProfileName,
-        refreshedHost.awsRegion,
-        refreshedHost.awsInstanceId,
-      );
-      if (!isManaged) {
-        throw new Error("이 인스턴스는 현재 SSM managed instance가 아닙니다.");
-      }
-
-      currentStage = "loading-instance-metadata";
-      emitStage(
-        "loading-instance-metadata",
-        "SSH 설정을 자동으로 확인하는 중입니다.",
-      );
-      const hydratedHost = await loadAwsHostSshMetadataRecord(
-        hosts,
-        awsService,
-        refreshedHost,
-        onPersistAwsHost,
-      );
-      const disabledReason = getAwsEc2HostSftpDisabledReason(hydratedHost);
-      if (disabledReason) {
-        throw new Error(disabledReason);
-      }
+        allowBrowserLogin: true,
+      });
 
       currentStage = "opening-tunnel";
       emitStage(
         "opening-tunnel",
         "SSH 호스트 키 확인을 위한 내부 터널을 여는 중입니다.",
+        hydratedHost.id,
       );
       const bindPort = await reserveLoopbackPort();
       const tunnel = await awsSsmTunnelService.start({
@@ -591,7 +561,11 @@ async function buildHostKeyProbeResult(
 
       try {
         currentStage = "probing-host-key";
-        emitStage("probing-host-key", "SSH 호스트 키를 확인하는 중입니다.");
+        emitStage(
+          "probing-host-key",
+          "SSH 호스트 키를 확인하는 중입니다.",
+          hydratedHost.id,
+        );
         const probed = await coreManager.probeHostKey({
           host: tunnel.bindAddress,
           port: tunnel.bindPort,
@@ -613,6 +587,9 @@ async function buildHostKeyProbeResult(
         if (status === "trusted") {
           knownHosts.touch(knownHost, knownHostPort);
         }
+        if (endpointId) {
+          storeAwsSftpPreflight(endpointId, hydratedHost);
+        }
 
         return {
           hostId: hydratedHost.id,
@@ -632,6 +609,9 @@ async function buildHostKeyProbeResult(
           .catch(() => undefined);
       }
     } catch (error) {
+      if (error instanceof Error && /^\[/.test(error.message)) {
+        throw error;
+      }
       throw formatSftpStageError(currentStage, error);
     }
   }
@@ -821,6 +801,10 @@ export function registerIpcHandlers(
     }
   >();
   const awsSftpTunnelRuntimeByEndpoint = new Map<string, string>();
+  const awsSftpPreflightByEndpointId = new Map<
+    string,
+    AwsSftpPreflightCacheEntry
+  >();
 
   const emitSftpConnectionProgress = (event: {
     endpointId: string;
@@ -842,6 +826,57 @@ export function registerIpcHandlers(
     }
     awsSftpTunnelRuntimeByEndpoint.delete(endpointId);
     await awsSsmTunnelService.stop(runtimeId).catch(() => undefined);
+  };
+
+  const pruneAwsSftpPreflightCache = () => {
+    const now = Date.now();
+    for (const [endpointId, entry] of awsSftpPreflightByEndpointId.entries()) {
+      if (now - entry.createdAt > AWS_SFTP_PREFLIGHT_CACHE_TTL_MS) {
+        awsSftpPreflightByEndpointId.delete(endpointId);
+      }
+    }
+  };
+
+  const storeAwsSftpPreflight = (
+    endpointId: string,
+    hydratedHost: Extract<HostRecord, { kind: "aws-ec2" }>,
+  ) => {
+    const normalizedEndpointId = endpointId.trim();
+    if (!normalizedEndpointId) {
+      return;
+    }
+    pruneAwsSftpPreflightCache();
+    awsSftpPreflightByEndpointId.set(normalizedEndpointId, {
+      endpointId: normalizedEndpointId,
+      hostId: hydratedHost.id,
+      hydratedHost,
+      createdAt: Date.now(),
+    });
+  };
+
+  const clearAwsSftpPreflight = (endpointId: string) => {
+    const normalizedEndpointId = endpointId.trim();
+    if (!normalizedEndpointId) {
+      return;
+    }
+    awsSftpPreflightByEndpointId.delete(normalizedEndpointId);
+  };
+
+  const consumeAwsSftpPreflight = (
+    endpointId: string,
+    hostId: string,
+  ): Extract<HostRecord, { kind: "aws-ec2" }> | null => {
+    const normalizedEndpointId = endpointId.trim();
+    if (!normalizedEndpointId) {
+      return null;
+    }
+    pruneAwsSftpPreflightCache();
+    const cached = awsSftpPreflightByEndpointId.get(normalizedEndpointId);
+    if (!cached || cached.hostId !== hostId) {
+      return null;
+    }
+    awsSftpPreflightByEndpointId.delete(normalizedEndpointId);
+    return cached.hydratedHost;
   };
 
   async function persistHostSpecificSecret(
@@ -877,74 +912,110 @@ export function registerIpcHandlers(
     return secretRef;
   }
 
-  async function resolveAwsSftpConnectHost(
-    host: Extract<HostRecord, { kind: "aws-ec2" }>,
-    endpointId: string,
-  ): Promise<Extract<HostRecord, { kind: "aws-ec2" }>> {
-    emitSftpConnectionProgress({
-      endpointId,
-      hostId: host.id,
-      stage: "checking-profile",
-      message: `${host.awsProfileName} 프로필 인증 상태를 확인하는 중입니다.`,
-    });
-    const status = await awsService.getProfileStatus(host.awsProfileName);
-    if (!status.isAuthenticated) {
-      throw formatSftpStageError(
-        "checking-profile",
-        new Error(
-          status.errorMessage ||
-            `${host.awsProfileName} 프로필에 AWS CLI 인증이 필요합니다.`,
-        ),
-      );
-    }
+  async function resolveAwsSftpPreflight(input: {
+    endpointId: string;
+    host: Extract<HostRecord, { kind: "aws-ec2" }>;
+    allowBrowserLogin: boolean;
+  }): Promise<Extract<HostRecord, { kind: "aws-ec2" }>> {
+    const { endpointId, host, allowBrowserLogin } = input;
+    let currentStage: AwsSftpProgressStage = "checking-profile";
 
-    emitSftpConnectionProgress({
-      endpointId,
-      hostId: host.id,
-      stage: "checking-ssm",
-      message: `${host.label} 인스턴트의 SSM 연결 상태를 확인하는 중입니다.`,
-    });
-    await awsService.ensureSessionManagerPluginAvailable();
-    const refreshedHost = await hydrateAwsHostForSftp(
-      hosts,
-      awsService,
-      host,
-      queueSync,
-    );
-    const isManaged = await awsService.isManagedInstance(
-      refreshedHost.awsProfileName,
-      refreshedHost.awsRegion,
-      refreshedHost.awsInstanceId,
-    );
-    if (!isManaged) {
-      throw formatSftpStageError(
-        "checking-ssm",
-        new Error("이 인스턴스는 현재 SSM managed instance가 아닙니다."),
+    try {
+      emitSftpConnectionProgress({
+        endpointId,
+        hostId: host.id,
+        stage: "checking-profile",
+        message: `${host.awsProfileName} 프로필 인증 상태를 확인하는 중입니다.`,
+      });
+      let status = await awsService.getProfileStatus(host.awsProfileName);
+      if (!status.isAuthenticated) {
+        if (!status.isSsoProfile || !allowBrowserLogin) {
+          throw new Error(
+            status.errorMessage ||
+              `${host.awsProfileName} 프로필에 AWS CLI 인증이 필요합니다.`,
+          );
+        }
+
+        currentStage = "browser-login";
+        emitSftpConnectionProgress({
+          endpointId,
+          hostId: host.id,
+          stage: "browser-login",
+          message: `브라우저에서 ${host.awsProfileName} AWS 로그인을 진행하는 중입니다.`,
+        });
+        await awsService.login(host.awsProfileName);
+
+        currentStage = "checking-profile";
+        emitSftpConnectionProgress({
+          endpointId,
+          hostId: host.id,
+          stage: "checking-profile",
+          message: `${host.awsProfileName} 프로필 로그인 결과를 확인하는 중입니다.`,
+        });
+        status = await awsService.getProfileStatus(host.awsProfileName);
+        if (!status.isAuthenticated) {
+          throw new Error(
+            status.errorMessage ||
+              "AWS SSO 로그인 후에도 인증이 확인되지 않았습니다.",
+          );
+        }
+      }
+
+      currentStage = "checking-ssm";
+      emitSftpConnectionProgress({
+        endpointId,
+        hostId: host.id,
+        stage: "checking-ssm",
+        message: `${host.label} 인스턴스의 SSM 연결 상태를 확인하는 중입니다.`,
+      });
+      await awsService.ensureSessionManagerPluginAvailable();
+      const refreshedHost = await hydrateAwsHostForSftp(
+        hosts,
+        awsService,
+        host,
+        queueSync,
       );
+      const isManaged = await awsService.isManagedInstance(
+        refreshedHost.awsProfileName,
+        refreshedHost.awsRegion,
+        refreshedHost.awsInstanceId,
+      );
+      if (!isManaged) {
+        throw new Error("이 인스턴스는 현재 SSM managed instance가 아닙니다.");
+      }
+
+      currentStage = "loading-instance-metadata";
+      emitSftpConnectionProgress({
+        endpointId,
+        hostId: refreshedHost.id,
+        stage: "loading-instance-metadata",
+        message: "SSH 설정을 자동으로 확인하는 중입니다.",
+      });
+      const hydratedHost = await loadAwsHostSshMetadataRecord(
+        hosts,
+        awsService,
+        refreshedHost,
+        queueSync,
+      );
+      const disabledReason = getAwsEc2HostSftpDisabledReason(hydratedHost);
+      if (disabledReason) {
+        throw new Error(disabledReason);
+      }
+
+      return hydratedHost;
+    } catch (error) {
+      if (error instanceof Error && /^\[/.test(error.message)) {
+        throw error;
+      }
+      throw formatSftpStageError(currentStage, error);
     }
-    emitSftpConnectionProgress({
-      endpointId,
-      hostId: refreshedHost.id,
-      stage: "loading-instance-metadata",
-      message: "SSH 설정을 자동으로 확인하는 중입니다.",
-    });
-    const hydratedHost = await loadAwsHostSshMetadataRecord(
-      hosts,
-      awsService,
-      refreshedHost,
-      queueSync,
-    );
-    const disabledReason = getAwsEc2HostSftpDisabledReason(hydratedHost);
-    if (disabledReason) {
-      throw formatSftpStageError("checking-ssm", new Error(disabledReason));
-    }
-    return hydratedHost;
   }
 
   coreManager.setTerminalEventHandler(async (event) => {
     sessionShareService.handleTerminalEvent(event);
     if (event.endpointId) {
       if (event.type === "sftpDisconnected" || event.type === "sftpError") {
+        clearAwsSftpPreflight(event.endpointId);
         await stopAwsSftpTunnelForEndpoint(event.endpointId);
       }
       return;
@@ -2063,7 +2134,13 @@ export function registerIpcHandlers(
 
       if (isAwsEc2HostRecord(host)) {
         const endpointId = input.endpointId;
-        const hydratedHost = await resolveAwsSftpConnectHost(host, endpointId);
+        const hydratedHost =
+          consumeAwsSftpPreflight(endpointId, host.id) ??
+          (await resolveAwsSftpPreflight({
+            endpointId,
+            host,
+            allowBrowserLogin: true,
+          }));
         const sshPort = getAwsEc2HostSshPort(hydratedHost);
         const trustedHostKeyBase64 = requireTrustedHostKey(knownHosts, {
           hostname: buildAwsSsmKnownHostIdentity({
@@ -2158,6 +2235,7 @@ export function registerIpcHandlers(
           awsSftpTunnelRuntimeByEndpoint.set(endpoint.id, tunnel.runtimeId);
           return endpoint;
         } catch (error) {
+          clearAwsSftpPreflight(endpointId);
           if (tunnelRuntimeId) {
             await awsSsmTunnelService.stop(tunnelRuntimeId).catch(() => undefined);
           }
@@ -2462,10 +2540,10 @@ export function registerIpcHandlers(
         hosts,
         knownHosts,
         coreManager,
-        awsService,
         awsSsmTunnelService,
-        queueSync,
         emitSftpConnectionProgress,
+        resolveAwsSftpPreflight,
+        storeAwsSftpPreflight,
         input,
       );
     },

@@ -267,7 +267,16 @@ export function AwsImportDialog({ open, currentGroupPath, onClose, onImport }: A
           return;
         }
         setRegions(nextRegions);
-        setSelectedRegion((current) => (current && nextRegions.includes(current) ? current : nextRegions[0] ?? ''));
+        setSelectedRegion((current) => {
+          if (current && nextRegions.includes(current)) {
+            return current;
+          }
+          const configuredRegion = profileStatus?.configuredRegion?.trim() ?? '';
+          if (configuredRegion && nextRegions.includes(configuredRegion)) {
+            return configuredRegion;
+          }
+          return '';
+        });
       })
       .catch((loadError) => {
         if (cancelled) {
@@ -595,6 +604,10 @@ export function AwsImportDialog({ open, currentGroupPath, onClose, onImport }: A
                 ))
               )}
               </div>
+            </div>
+          ) : profileStatus?.isAuthenticated && regions.length > 0 ? (
+            <div className="empty-callout" data-testid="aws-import-region-hint">
+              <strong>리전을 선택하면 EC2 인스턴스를 불러옵니다.</strong>
             </div>
           ) : null}
         </div>

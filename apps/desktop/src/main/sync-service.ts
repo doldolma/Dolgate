@@ -19,7 +19,8 @@ import {
   PortForwardRepository,
   SecretMetadataRepository,
   SettingsRepository,
-  SyncOutboxRepository
+  SyncOutboxRepository,
+  type SyncDeletionRecord
 } from './database';
 import { SecretStore } from './secret-store';
 import { AuthService } from './auth-service';
@@ -151,6 +152,7 @@ export class SyncService {
   private state: SyncStatus;
   private pushTimer: NodeJS.Timeout | null = null;
   private pushPromise: Promise<SyncStatus> | null = null;
+  private queuedPushAfterCurrent = false;
 
   constructor(
     private readonly authService: AuthService,
@@ -254,6 +256,11 @@ export class SyncService {
       return this.state;
     }
 
+    if (this.pushTimer) {
+      clearTimeout(this.pushTimer);
+      this.pushTimer = null;
+    }
+
     this.markPendingPush();
 
     if (this.authService.getState().status === 'offline-authenticated') {
@@ -261,19 +268,26 @@ export class SyncService {
     }
 
     if (this.pushPromise) {
+      this.queuedPushAfterCurrent = true;
       return this.pushPromise;
     }
 
     this.pushPromise = (async () => {
       try {
-        this.patchState({
-          status: this.state.status === 'idle' ? 'syncing' : this.state.status,
-          pendingPush: true,
-          errorMessage: null
-        });
-        const payload = await this.buildEncryptedSnapshot(true);
-        await this.pushSnapshot(payload);
-        this.outbox.clearAll();
+        let shouldContinuePush = false;
+        do {
+          this.queuedPushAfterCurrent = false;
+          this.patchState({
+            status: this.state.status === 'idle' ? 'syncing' : this.state.status,
+            pendingPush: true,
+            errorMessage: null
+          });
+          const snapshot = await this.buildEncryptedSnapshotResult(true);
+          await this.pushSnapshot(snapshot.payload);
+          this.outbox.clearMany(snapshot.includedDeletions);
+          shouldContinuePush = this.queuedPushAfterCurrent || this.outbox.list().length > 0;
+        } while (shouldContinuePush);
+
         this.patchState({
           status: 'ready',
           pendingPush: false,
@@ -289,6 +303,7 @@ export class SyncService {
         this.scheduleRetry();
       } finally {
         this.pushPromise = null;
+        this.queuedPushAfterCurrent = false;
       }
       return this.state;
     })();
@@ -377,6 +392,13 @@ export class SyncService {
   }
 
   private async buildEncryptedSnapshot(includeDeletions: boolean): Promise<SyncPayloadV2> {
+    const snapshot = await this.buildEncryptedSnapshotResult(includeDeletions);
+    return snapshot.payload;
+  }
+
+  private async buildEncryptedSnapshotResult(
+    includeDeletions: boolean
+  ): Promise<{ payload: SyncPayloadV2; includedDeletions: SyncDeletionRecord[] }> {
     const vaultKeyBase64 = this.authService.getVaultKeyBase64();
     const groups = this.groups.list().map((record) => this.toSyncRecord(record.id, record.updatedAt, record, vaultKeyBase64));
     const hosts = this.hosts.list().map((record) => this.toSyncRecord(record.id, record.updatedAt, record, vaultKeyBase64));
@@ -398,17 +420,20 @@ export class SyncService {
 
     if (!includeDeletions) {
       return {
-        groups,
-        hosts,
-        secrets,
-        knownHosts,
-        portForwards,
-        preferences
+        payload: {
+          groups,
+          hosts,
+          secrets,
+          knownHosts,
+          portForwards,
+          preferences
+        },
+        includedDeletions: []
       };
     }
 
-    const outbox = this.outbox.list();
-    for (const tombstone of outbox) {
+    const includedDeletions = this.outbox.list();
+    for (const tombstone of includedDeletions) {
       const record: SyncRecord = {
         id: tombstone.recordId,
         encrypted_payload: '',
@@ -438,12 +463,15 @@ export class SyncService {
     }
 
     return {
-      groups,
-      hosts,
-      secrets,
-      knownHosts,
-      portForwards,
-      preferences
+      payload: {
+        groups,
+        hosts,
+        secrets,
+        knownHosts,
+        portForwards,
+        preferences
+      },
+      includedDeletions
     };
   }
 

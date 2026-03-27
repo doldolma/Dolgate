@@ -45,6 +45,69 @@ describe('AwsService.isManagedInstance', () => {
   });
 });
 
+describe('AwsService.getProfileStatus', () => {
+  it('includes the configured region when the profile is authenticated', async () => {
+    const service = new AwsService() as unknown as {
+      ensureAwsCliAvailable: () => Promise<void>;
+      readConfigValue: ReturnType<typeof vi.fn>;
+      runResolvedCommand: ReturnType<typeof vi.fn>;
+      getProfileStatus: (profileName: string) => Promise<{
+        configuredRegion?: string | null;
+        isAuthenticated: boolean;
+      }>;
+    };
+
+    service.ensureAwsCliAvailable = vi.fn().mockResolvedValue(undefined);
+    service.readConfigValue = vi
+      .fn()
+      .mockResolvedValueOnce('')
+      .mockResolvedValueOnce('')
+      .mockResolvedValueOnce('ap-northeast-2');
+    service.runResolvedCommand = vi.fn().mockResolvedValue({
+      stdout: JSON.stringify({
+        Account: '123456789012',
+        Arn: 'arn:aws:iam::123456789012:user/test',
+      }),
+      stderr: '',
+      exitCode: 0,
+    });
+
+    await expect(service.getProfileStatus('default')).resolves.toMatchObject({
+      isAuthenticated: true,
+      configuredRegion: 'ap-northeast-2',
+    });
+  });
+
+  it('returns null configuredRegion when the profile has no default region', async () => {
+    const service = new AwsService() as unknown as {
+      ensureAwsCliAvailable: () => Promise<void>;
+      readConfigValue: ReturnType<typeof vi.fn>;
+      runResolvedCommand: ReturnType<typeof vi.fn>;
+      getProfileStatus: (profileName: string) => Promise<{
+        configuredRegion?: string | null;
+        isAuthenticated: boolean;
+      }>;
+    };
+
+    service.ensureAwsCliAvailable = vi.fn().mockResolvedValue(undefined);
+    service.readConfigValue = vi
+      .fn()
+      .mockResolvedValueOnce('')
+      .mockResolvedValueOnce('')
+      .mockResolvedValueOnce('');
+    service.runResolvedCommand = vi.fn().mockResolvedValue({
+      stdout: '',
+      stderr: 'credential missing',
+      exitCode: 255,
+    });
+
+    await expect(service.getProfileStatus('default')).resolves.toMatchObject({
+      isAuthenticated: false,
+      configuredRegion: null,
+    });
+  });
+});
+
 describe('AwsService EC2 helpers', () => {
   it('includes availability zone when listing EC2 instances', async () => {
     const service = new AwsService() as unknown as {

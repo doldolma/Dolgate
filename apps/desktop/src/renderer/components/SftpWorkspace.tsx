@@ -408,6 +408,8 @@ function formatSftpConnectionStageLabel(
       return "SSH 설정 확인";
     case "checking-profile":
       return "AWS 프로필 확인";
+    case "browser-login":
+      return "AWS 로그인";
     case "checking-ssm":
       return "SSM 상태 확인";
     case "probing-host-key":

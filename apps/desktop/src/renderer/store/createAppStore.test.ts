@@ -1547,16 +1547,6 @@ describe("createAppStore", () => {
         updatedAt: "2025-01-01T00:00:00.000Z",
       },
     ]);
-    api.aws.getProfileStatus = vi.fn().mockResolvedValue({
-      profileName: "default",
-      available: true,
-      isSsoProfile: false,
-      isAuthenticated: true,
-      accountId: "123456789012",
-      arn: "arn:aws:iam::123456789012:user/test",
-      errorMessage: null,
-      missingTools: [],
-    });
     api.knownHosts.probeHost = vi.fn().mockResolvedValue({
       hostId: "aws-host-1",
       hostLabel: "AWS Prod",
@@ -1585,9 +1575,11 @@ describe("createAppStore", () => {
     expect(store.getState().sftp.rightPane.endpoint?.id).toBe(
       connectInput?.endpointId,
     );
+    expect(api.aws.getProfileStatus).not.toHaveBeenCalled();
+    expect(api.aws.loadHostSshMetadata).not.toHaveBeenCalled();
   });
 
-  it("auto-loads AWS SSH metadata before connecting SFTP when username is missing", async () => {
+  it("does not preload AWS SSH metadata before connecting SFTP when username is missing", async () => {
     const api = createMockApi();
     api.hosts.list = vi.fn().mockResolvedValue([
       {
@@ -1613,16 +1605,6 @@ describe("createAppStore", () => {
         updatedAt: "2025-01-01T00:00:00.000Z",
       },
     ]);
-    api.aws.getProfileStatus = vi.fn().mockResolvedValue({
-      profileName: "default",
-      available: true,
-      isSsoProfile: false,
-      isAuthenticated: true,
-      accountId: "123456789012",
-      arn: "arn:aws:iam::123456789012:user/test",
-      errorMessage: null,
-      missingTools: [],
-    });
     api.knownHosts.probeHost = vi.fn().mockResolvedValue({
       hostId: "aws-host-legacy",
       hostLabel: "AWS Legacy",
@@ -1642,7 +1624,8 @@ describe("createAppStore", () => {
 
     await store.getState().connectSftpHost("right", "aws-host-legacy");
 
-    expect(api.aws.loadHostSshMetadata).toHaveBeenCalledWith("aws-host-legacy");
+    expect(api.aws.getProfileStatus).not.toHaveBeenCalled();
+    expect(api.aws.loadHostSshMetadata).not.toHaveBeenCalled();
     expect(api.knownHosts.probeHost).toHaveBeenCalled();
     expect(api.sftp.connect).toHaveBeenCalled();
   });
@@ -1668,15 +1651,15 @@ describe("createAppStore", () => {
     store.getState().handleSftpConnectionProgressEvent({
       endpointId: "endpoint-aws",
       hostId: "aws-host-1",
-      stage: "sending-public-key",
-      message: "EC2 Instance Connect로 공개 키를 전송하는 중입니다.",
+      stage: "browser-login",
+      message: "브라우저에서 default AWS 로그인을 진행하는 중입니다.",
     });
 
     expect(store.getState().sftp.rightPane.connectionProgress).toEqual({
       endpointId: "endpoint-aws",
       hostId: "aws-host-1",
-      stage: "sending-public-key",
-      message: "EC2 Instance Connect로 공개 키를 전송하는 중입니다.",
+      stage: "browser-login",
+      message: "브라우저에서 default AWS 로그인을 진행하는 중입니다.",
     });
   });
 
