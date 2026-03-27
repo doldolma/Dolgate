@@ -20,6 +20,7 @@ import { TerminalWorkspace } from './components/TerminalWorkspace';
 import { TermiusImportDialog } from './components/TermiusImportDialog';
 import { UpdateInstallConfirmDialog } from './components/UpdateInstallConfirmDialog';
 import { WarpgateImportDialog } from './components/WarpgateImportDialog';
+import { XshellImportDialog } from './components/XshellImportDialog';
 import { appStore } from './store/appStore';
 import type { DynamicTabStripItem, WorkspaceDropDirection, WorkspaceTab } from './store/createAppStore';
 import { useAppStore } from './store/appStore';
@@ -170,6 +171,7 @@ export function App() {
   const [selectedHostId, setSelectedHostId] = useState<string | null>(null);
   const [isAwsImportOpen, setIsAwsImportOpen] = useState(false);
   const [isOpenSshImportOpen, setIsOpenSshImportOpen] = useState(false);
+  const [isXshellImportOpen, setIsXshellImportOpen] = useState(false);
   const [isTermiusImportOpen, setIsTermiusImportOpen] = useState(false);
   const [isWarpgateImportOpen, setIsWarpgateImportOpen] = useState(false);
   const [hostBrowserError, setHostBrowserError] = useState<string | null>(null);
@@ -767,6 +769,12 @@ export function App() {
                   setSelectedHostId(null);
                   setIsOpenSshImportOpen(true);
                 }}
+                onOpenXshellImport={() => {
+                  setHostBrowserError(null);
+                  setHostBrowserStatus(null);
+                  setSelectedHostId(null);
+                  setIsXshellImportOpen(true);
+                }}
                 onOpenTermiusImport={() => {
                   setHostBrowserError(null);
                   setHostBrowserStatus(null);
@@ -905,6 +913,20 @@ export function App() {
                   result.skippedHostCount > 0
                     ? ` 건너뛴 호스트 ${result.skippedHostCount}개가 있습니다.`
                     : ''
+                }`
+              );
+              setHostBrowserError(result.warnings[0]?.message ?? null);
+            }}
+          />
+
+          <XshellImportDialog
+            open={isXshellImportOpen}
+            onClose={() => setIsXshellImportOpen(false)}
+            onImported={async (result) => {
+              await refreshHostCatalog();
+              setHostBrowserStatus(
+                `Xshell에서 호스트 ${result.createdHostCount}개와 그룹 ${result.createdGroupCount}개를 가져왔습니다.${
+                  result.skippedHostCount > 0 ? ` 건너뛴 호스트 ${result.skippedHostCount}개가 있습니다.` : ''
                 }`
               );
               setHostBrowserError(result.warnings[0]?.message ?? null);

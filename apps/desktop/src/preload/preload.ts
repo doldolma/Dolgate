@@ -237,6 +237,15 @@ const api: DesktopApi = {
     discardSnapshot: (snapshotId: string) =>
       ipcRenderer.invoke(ipcChannels.openssh.discardSnapshot, snapshotId),
   },
+  xshell: {
+    probeDefault: () => ipcRenderer.invoke(ipcChannels.xshell.probeDefault),
+    addFolderToSnapshot: (input) =>
+      ipcRenderer.invoke(ipcChannels.xshell.addFolderToSnapshot, input),
+    importSelection: (input) =>
+      ipcRenderer.invoke(ipcChannels.xshell.importSelection, input),
+    discardSnapshot: (snapshotId: string) =>
+      ipcRenderer.invoke(ipcChannels.xshell.discardSnapshot, snapshotId),
+  },
   ssh: {
     connect: (input: DesktopConnectInput) =>
       ipcRenderer.invoke(ipcChannels.ssh.connect, input),
@@ -315,6 +324,8 @@ const api: DesktopApi = {
     pickPrivateKey: () => ipcRenderer.invoke(ipcChannels.shell.pickPrivateKey),
     pickOpenSshConfig: () =>
       ipcRenderer.invoke(ipcChannels.shell.pickOpenSshConfig),
+    pickXshellSessionFolder: () =>
+      ipcRenderer.invoke(ipcChannels.shell.pickXshellSessionFolder),
     openExternal: (url: string) =>
       ipcRenderer.invoke(ipcChannels.shell.openExternal, url),
   },

@@ -46,6 +46,12 @@ export const ipcChannels = {
     importSelection: 'openssh:import-selection',
     discardSnapshot: 'openssh:discard-snapshot'
   },
+  xshell: {
+    probeDefault: 'xshell:probe-default',
+    addFolderToSnapshot: 'xshell:add-folder-to-snapshot',
+    importSelection: 'xshell:import-selection',
+    discardSnapshot: 'xshell:discard-snapshot'
+  },
   ssh: {
     connect: 'ssh:connect',
     connectLocal: 'ssh:connect-local',
@@ -70,6 +76,7 @@ export const ipcChannels = {
   shell: {
     pickPrivateKey: 'shell:pick-private-key',
     pickOpenSshConfig: 'shell:pick-openssh-config',
+    pickXshellSessionFolder: 'shell:pick-xshell-session-folder',
     openExternal: 'shell:open-external'
   },
   window: {

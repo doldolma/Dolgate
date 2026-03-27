@@ -220,6 +220,7 @@ function createMockApi(): DesktopApi {
     shell: {
       pickPrivateKey: vi.fn(),
       pickOpenSshConfig: vi.fn(),
+      pickXshellSessionFolder: vi.fn(),
       openExternal: vi.fn().mockResolvedValue(undefined),
     },
     window: {
@@ -424,6 +425,34 @@ function createMockApi(): DesktopApi {
         skippedDuplicateHostCount: 0,
       }),
       importSelection: vi.fn().mockResolvedValue({
+        createdHostCount: 0,
+        createdSecretCount: 0,
+        skippedHostCount: 0,
+        warnings: [],
+      }),
+      discardSnapshot: vi.fn().mockResolvedValue(undefined),
+    },
+    xshell: {
+      probeDefault: vi.fn().mockResolvedValue({
+        snapshotId: "snapshot-1",
+        sources: [],
+        groups: [],
+        hosts: [],
+        warnings: [],
+        skippedExistingHostCount: 0,
+        skippedDuplicateHostCount: 0,
+      }),
+      addFolderToSnapshot: vi.fn().mockResolvedValue({
+        snapshotId: "snapshot-1",
+        sources: [],
+        groups: [],
+        hosts: [],
+        warnings: [],
+        skippedExistingHostCount: 0,
+        skippedDuplicateHostCount: 0,
+      }),
+      importSelection: vi.fn().mockResolvedValue({
+        createdGroupCount: 0,
         createdHostCount: 0,
         createdSecretCount: 0,
         skippedHostCount: 0,

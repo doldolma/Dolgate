@@ -26,6 +26,7 @@ import { SyncService } from './sync-service';
 import { TermiusImportService } from './termius-import-service';
 import { UpdateService } from './update-service';
 import { WarpgateService } from './warpgate-service';
+import { XshellImportService } from './xshell-import-service';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const require = createRequire(import.meta.url);
@@ -75,6 +76,7 @@ if (termiusHelperArgIndex >= 0) {
   const warpgateService = new WarpgateService(secretStore);
   const termiusImportService = new TermiusImportService();
   const opensshImportService = new OpenSshImportService();
+  const xshellImportService = new XshellImportService(() => app.getPath('documents'));
   const appendActivityLog = (entry: { level: 'info' | 'warn' | 'error'; category: 'session' | 'audit'; message: string; metadata?: Record<string, unknown> | null }) => {
     activityLogRepository.append(entry.level, entry.category, entry.message, entry.metadata ?? null);
   };
@@ -290,6 +292,7 @@ if (termiusHelperArgIndex >= 0) {
       syncService,
       termiusImportService,
       opensshImportService,
+      xshellImportService,
       sessionShareService
     );
     await createWindow();

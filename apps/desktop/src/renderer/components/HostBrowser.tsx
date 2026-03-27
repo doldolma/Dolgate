@@ -36,6 +36,7 @@ export function getHostBrowserCardClassName(isSelected: boolean, isTagsExpanded:
 export const HOST_BROWSER_IMPORT_MENU_LABELS = [
   'Import from AWS',
   'Import OpenSSH',
+  'Import from Xshell',
   'Import from Termius',
   'Import from Warpgate'
 ] as const;
@@ -80,6 +81,7 @@ interface HostBrowserProps {
   onCreateHost: () => void;
   onOpenAwsImport: () => void;
   onOpenOpenSshImport: () => void;
+  onOpenXshellImport: () => void;
   onOpenTermiusImport: () => void;
   onOpenWarpgateImport: () => void;
   onCreateGroup: (name: string) => Promise<void>;
@@ -105,6 +107,7 @@ export function HostBrowser({
   onCreateHost,
   onOpenAwsImport,
   onOpenOpenSshImport,
+  onOpenXshellImport,
   onOpenTermiusImport,
   onOpenWarpgateImport,
   onCreateGroup,
@@ -338,8 +341,9 @@ export function HostBrowser({
                 {[
                 { label: HOST_BROWSER_IMPORT_MENU_LABELS[0], onSelect: onOpenAwsImport },
                   { label: HOST_BROWSER_IMPORT_MENU_LABELS[1], onSelect: onOpenOpenSshImport },
-                  { label: HOST_BROWSER_IMPORT_MENU_LABELS[2], onSelect: onOpenTermiusImport },
-                  { label: HOST_BROWSER_IMPORT_MENU_LABELS[3], onSelect: onOpenWarpgateImport }
+                  { label: HOST_BROWSER_IMPORT_MENU_LABELS[2], onSelect: onOpenXshellImport },
+                  { label: HOST_BROWSER_IMPORT_MENU_LABELS[3], onSelect: onOpenTermiusImport },
+                  { label: HOST_BROWSER_IMPORT_MENU_LABELS[4], onSelect: onOpenWarpgateImport }
                 ].map((item) => (
                   <button
                     key={item.label}

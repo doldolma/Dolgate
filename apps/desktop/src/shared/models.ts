@@ -344,6 +344,71 @@ export interface OpenSshImportResult {
   warnings: OpenSshImportWarning[];
 }
 
+export interface XshellImportWarning {
+  code?: string | null;
+  message: string;
+  filePath?: string | null;
+}
+
+export type XshellSourceOrigin = 'default-session-dir' | 'manual-folder';
+
+export interface XshellSourceSummary {
+  id: string;
+  folderPath: string;
+  origin: XshellSourceOrigin;
+  label: string;
+}
+
+export interface XshellImportGroupPreview {
+  path: string;
+  name: string;
+  parentPath?: string | null;
+  hostCount: number;
+}
+
+export interface XshellImportHostPreview {
+  key: string;
+  label: string;
+  hostname: string;
+  port: number;
+  username: string;
+  authType: 'password' | 'privateKey';
+  groupPath?: string | null;
+  privateKeyPath?: string | null;
+  sourceFilePath: string;
+  hasPasswordHint: boolean;
+  hasAuthProfile: boolean;
+}
+
+export interface XshellProbeResult {
+  snapshotId: string;
+  sources: XshellSourceSummary[];
+  groups: XshellImportGroupPreview[];
+  hosts: XshellImportHostPreview[];
+  warnings: XshellImportWarning[];
+  skippedExistingHostCount: number;
+  skippedDuplicateHostCount: number;
+}
+
+export interface XshellSnapshotFolderInput {
+  snapshotId: string;
+  folderPath: string;
+}
+
+export interface XshellImportSelectionInput {
+  snapshotId: string;
+  selectedGroupPaths: string[];
+  selectedHostKeys: string[];
+}
+
+export interface XshellImportResult {
+  createdGroupCount: number;
+  createdHostCount: number;
+  createdSecretCount: number;
+  skippedHostCount: number;
+  warnings: XshellImportWarning[];
+}
+
 export interface TerminalAppearanceSettings {
   globalTerminalThemeId: GlobalTerminalThemeId;
   terminalFontFamily: TerminalFontFamilyId;

@@ -13,6 +13,10 @@ import type {
   OpenSshImportResult,
   OpenSshImportSelectionInput,
   OpenSshProbeResult,
+  XshellSnapshotFolderInput,
+  XshellImportResult,
+  XshellImportSelectionInput,
+  XshellProbeResult,
   HostKeyProbeResult,
   KnownHostRecord,
   KnownHostTrustInput,
@@ -361,6 +365,16 @@ export interface DesktopApi {
     ) => Promise<OpenSshImportResult>;
     discardSnapshot: (snapshotId: string) => Promise<void>;
   };
+  xshell: {
+    probeDefault: () => Promise<XshellProbeResult>;
+    addFolderToSnapshot: (
+      input: XshellSnapshotFolderInput,
+    ) => Promise<XshellProbeResult>;
+    importSelection: (
+      input: XshellImportSelectionInput,
+    ) => Promise<XshellImportResult>;
+    discardSnapshot: (snapshotId: string) => Promise<void>;
+  };
   ssh: {
     connect: (input: DesktopConnectInput) => Promise<{ sessionId: string }>;
     connectLocal: (
@@ -396,6 +410,7 @@ export interface DesktopApi {
   shell: {
     pickPrivateKey: () => Promise<string | null>;
     pickOpenSshConfig: () => Promise<string | null>;
+    pickXshellSessionFolder: () => Promise<string | null>;
     openExternal: (url: string) => Promise<void>;
   };
   window: {

@@ -25,6 +25,9 @@ import type {
   OpenSshSnapshotFileInput,
   OpenSshImportSelectionInput,
   OpenSshImportWarning,
+  XshellSnapshotFolderInput,
+  XshellImportSelectionInput,
+  XshellImportWarning,
   DesktopSftpConnectInput,
   HostRecord,
   HostDraft,
@@ -84,6 +87,11 @@ import {
 } from "./termius-import-service";
 import { UpdateService } from "./update-service";
 import { WarpgateService } from "./warpgate-service";
+import {
+  collectSelectedXshellGroupPaths,
+  collectSelectedXshellHosts,
+  XshellImportService,
+} from "./xshell-import-service";
 
 async function persistSecret(
   secretStore: SecretStore,
@@ -372,6 +380,7 @@ export function registerIpcHandlers(
   syncService: SyncService,
   termiusImportService: TermiusImportService,
   opensshImportService: OpenSshImportService,
+  xshellImportService: XshellImportService,
   sessionShareService: SessionShareService,
 ): void {
   const localFiles = new LocalFileService();
@@ -754,6 +763,10 @@ export function registerIpcHandlers(
     return opensshImportService.probeDefault(buildKnownSshDuplicateKeys(hosts));
   });
 
+  ipcMain.handle(ipcChannels.xshell.probeDefault, async () => {
+    return xshellImportService.probeDefault(buildKnownSshDuplicateKeys(hosts));
+  });
+
   ipcMain.handle(
     ipcChannels.openssh.addFileToSnapshot,
     async (_event, input: OpenSshSnapshotFileInput) => {
@@ -765,9 +778,26 @@ export function registerIpcHandlers(
   );
 
   ipcMain.handle(
+    ipcChannels.xshell.addFolderToSnapshot,
+    async (_event, input: XshellSnapshotFolderInput) => {
+      return xshellImportService.addFolderToSnapshot(
+        input,
+        buildKnownSshDuplicateKeys(hosts),
+      );
+    },
+  );
+
+  ipcMain.handle(
     ipcChannels.termius.discardSnapshot,
     async (_event, snapshotId: string) => {
       termiusImportService.discardSnapshot(snapshotId);
+    },
+  );
+
+  ipcMain.handle(
+    ipcChannels.xshell.discardSnapshot,
+    async (_event, snapshotId: string) => {
+      xshellImportService.discardSnapshot(snapshotId);
     },
   );
 
@@ -1124,6 +1154,136 @@ export function registerIpcHandlers(
         };
       } finally {
         opensshImportService.discardSnapshot(input.snapshotId);
+      }
+    },
+  );
+
+  ipcMain.handle(
+    ipcChannels.xshell.importSelection,
+    async (_event, input: XshellImportSelectionInput) => {
+      const snapshot = xshellImportService.getSnapshot(input.snapshotId);
+      if (!snapshot) {
+        throw new Error(
+          "Xshell 가져오기 상태를 찾지 못했습니다. 대화상자를 다시 열어주세요.",
+        );
+      }
+
+      try {
+        const selectedHosts = collectSelectedXshellHosts(snapshot, input);
+        const selectedGroupPaths = collectSelectedXshellGroupPaths(
+          snapshot,
+          input,
+        );
+        const existingGroupPaths = new Set(
+          groups.list().map((group) => group.path),
+        );
+        const knownSshHosts = buildKnownSshDuplicateKeys(hosts);
+        const warnings: XshellImportWarning[] = [...snapshot.warnings];
+        let createdGroupCount = 0;
+        let createdHostCount = 0;
+        let skippedHostCount = 0;
+
+        for (const groupPath of selectedGroupPaths) {
+          for (const candidatePath of buildTermiusGroupAncestorPaths(groupPath)) {
+            if (existingGroupPaths.has(candidatePath)) {
+              continue;
+            }
+            const group = groups.create(
+              randomUUID(),
+              getGroupLabel(candidatePath),
+              getParentGroupPath(candidatePath),
+            );
+            existingGroupPaths.add(group.path);
+            createdGroupCount += 1;
+          }
+        }
+
+        for (const host of selectedHosts) {
+          const duplicateKey = buildSshDuplicateKey(
+            host.hostname,
+            host.port,
+            host.username,
+          );
+          if (knownSshHosts.has(duplicateKey)) {
+            warnings.push({
+              code: "duplicate-host",
+              message: `${host.label}: 동일한 SSH 대상이 이미 있어 건너뛰었습니다.`,
+              filePath: host.sourceFilePath,
+            });
+            skippedHostCount += 1;
+            continue;
+          }
+
+          const groupPath = normalizeGroupPath(host.groupPath);
+          for (const candidatePath of buildTermiusGroupAncestorPaths(groupPath)) {
+            if (existingGroupPaths.has(candidatePath)) {
+              continue;
+            }
+            groups.create(
+              randomUUID(),
+              getGroupLabel(candidatePath),
+              getParentGroupPath(candidatePath),
+            );
+            existingGroupPaths.add(candidatePath);
+            createdGroupCount += 1;
+          }
+
+          hosts.create(
+            randomUUID(),
+            {
+              kind: "ssh",
+              label: host.label,
+              groupName: groupPath,
+              tags: [],
+              terminalThemeId: null,
+              hostname: host.hostname,
+              port: host.port,
+              username: host.username,
+              authType: host.authType,
+              privateKeyPath: host.privateKeyPath,
+            },
+            null,
+          );
+          knownSshHosts.add(duplicateKey);
+          createdHostCount += 1;
+        }
+
+        if (createdGroupCount > 0 || createdHostCount > 0) {
+          activityLogs.append(
+            "info",
+            "audit",
+            "Xshell 세션에서 호스트를 가져왔습니다.",
+            {
+              sourceCount: snapshot.sources.length,
+              createdGroupCount,
+              createdHostCount,
+              skippedHostCount,
+            },
+          );
+          queueSync();
+        }
+
+        if (warnings.length > 0) {
+          activityLogs.append(
+            "warn",
+            "audit",
+            "Xshell 가져오기가 경고와 함께 완료되었습니다.",
+            {
+              sourceCount: snapshot.sources.length,
+              warningCount: warnings.length,
+            },
+          );
+        }
+
+        return {
+          createdGroupCount,
+          createdHostCount,
+          createdSecretCount: 0,
+          skippedHostCount,
+          warnings,
+        };
+      } finally {
+        xshellImportService.discardSnapshot(input.snapshotId);
       }
     },
   );
@@ -1758,6 +1918,17 @@ export function registerIpcHandlers(
         { name: "OpenSSH config", extensions: ["config", "conf"] },
         { name: "All files", extensions: ["*"] },
       ],
+    });
+    if (result.canceled || result.filePaths.length === 0) {
+      return null;
+    }
+    return result.filePaths[0];
+  });
+
+  ipcMain.handle(ipcChannels.shell.pickXshellSessionFolder, async () => {
+    const result = await dialog.showOpenDialog({
+      defaultPath: await xshellImportService.getPickerDefaultPath(),
+      properties: ["openDirectory"],
     });
     if (result.canceled || result.filePaths.length === 0) {
       return null;

@@ -3283,6 +3283,14 @@ body.sftp-column-resizing * {
   overflow: hidden;
 }
 
+.xshell-import-dialog {
+  width: min(960px, calc(100vw - 2rem));
+  max-height: calc(100vh - 2rem);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
 .openssh-import-dialog {
   width: min(880px, calc(100vw - 2rem));
   max-height: calc(100vh - 2rem);
@@ -3330,6 +3338,13 @@ body.sftp-column-resizing * {
   min-height: 0;
 }
 
+.xshell-import-dialog .modal-card__body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.95rem;
+  min-height: 0;
+}
+
 .openssh-import-dialog .modal-card__body {
   display: flex;
   flex-direction: column;
@@ -3345,12 +3360,16 @@ body.sftp-column-resizing * {
 }
 
 .termius-import-dialog__controls,
+.xshell-import-dialog__controls,
 .openssh-import-dialog__controls,
 .termius-import-dialog__selection-actions,
+.xshell-import-dialog__selection-actions,
 .openssh-import-dialog__selection-actions,
 .termius-import-dialog__summary,
+.xshell-import-dialog__summary,
 .openssh-import-dialog__summary,
 .termius-import-dialog__badges,
+.xshell-import-dialog__badges,
 .openssh-import-dialog__badges {
   display: flex;
   align-items: center;
@@ -3362,6 +3381,10 @@ body.sftp-column-resizing * {
   align-items: flex-end;
 }
 
+.xshell-import-dialog__controls {
+  align-items: flex-end;
+}
+
 .openssh-import-dialog__controls {
   align-items: flex-end;
 }
@@ -3370,11 +3393,20 @@ body.sftp-column-resizing * {
   flex: 1;
 }
 
+.xshell-import-dialog__controls .form-field {
+  flex: 1;
+}
+
 .openssh-import-dialog__controls .form-field {
   flex: 1;
 }
 
 .termius-import-dialog__summary {
+  color: var(--text-soft);
+  font-size: 0.84rem;
+}
+
+.xshell-import-dialog__summary {
   color: var(--text-soft);
   font-size: 0.84rem;
 }
@@ -3390,7 +3422,19 @@ body.sftp-column-resizing * {
   gap: 0.45rem;
 }
 
+.xshell-import-dialog__warnings {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
 .openssh-import-dialog__warnings {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+.xshell-import-dialog__sources {
   display: flex;
   flex-direction: column;
   gap: 0.45rem;
@@ -3409,7 +3453,21 @@ body.sftp-column-resizing * {
   min-height: 0;
 }
 
+.xshell-import-dialog__list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+  min-height: 0;
+}
+
 .termius-import-dialog__section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+  min-height: 0;
+}
+
+.xshell-import-dialog__section {
   display: flex;
   flex-direction: column;
   gap: 0.7rem;
@@ -3423,6 +3481,10 @@ body.sftp-column-resizing * {
   min-height: 0;
 }
 
+.xshell-import-dialog__empty {
+  margin: 0;
+}
+
 .openssh-import-dialog__empty {
   margin: 0;
 }
@@ -3431,11 +3493,27 @@ body.sftp-column-resizing * {
   margin: 0;
 }
 
+.xshell-import-dialog__section h4 {
+  margin: 0;
+}
+
 .openssh-import-dialog__section h4 {
   margin: 0;
 }
 
 .termius-import-dialog__items {
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.45rem;
+  border-radius: 18px;
+  border: 1px solid var(--border);
+  background: var(--dialog-surface-muted);
+}
+
+.xshell-import-dialog__items {
   min-height: 0;
   overflow-y: auto;
   display: flex;
@@ -3470,6 +3548,17 @@ body.sftp-column-resizing * {
   background: var(--dialog-surface);
 }
 
+.xshell-import-dialog__item {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 0.75rem;
+  padding: 0.75rem 0.8rem;
+  border-radius: 14px;
+  border: 1px solid var(--border);
+  background: var(--dialog-surface);
+}
+
 .openssh-import-dialog__item {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
@@ -3485,11 +3574,19 @@ body.sftp-column-resizing * {
   margin-top: 0.15rem;
 }
 
+.xshell-import-dialog__item input {
+  margin-top: 0.15rem;
+}
+
 .openssh-import-dialog__item input {
   margin-top: 0.15rem;
 }
 
 .termius-import-dialog__item-body {
+  min-width: 0;
+}
+
+.xshell-import-dialog__item-body {
   min-width: 0;
 }
 
@@ -3500,6 +3597,9 @@ body.sftp-column-resizing * {
 .termius-import-dialog__item-body strong,
 .termius-import-dialog__item-body span,
 .termius-import-dialog__item-body small,
+.xshell-import-dialog__item-body strong,
+.xshell-import-dialog__item-body span,
+.xshell-import-dialog__item-body small,
 .openssh-import-dialog__item-body strong,
 .openssh-import-dialog__item-body span,
 .openssh-import-dialog__item-body small {
@@ -3514,12 +3614,18 @@ body.sftp-column-resizing * {
   margin-bottom: 0.12rem;
 }
 
+.xshell-import-dialog__item-body strong {
+  margin-bottom: 0.12rem;
+}
+
 .openssh-import-dialog__item-body strong {
   margin-bottom: 0.12rem;
 }
 
 .termius-import-dialog__item-body span,
 .termius-import-dialog__item-body small,
+.xshell-import-dialog__item-body span,
+.xshell-import-dialog__item-body small,
 .openssh-import-dialog__item-body span,
 .openssh-import-dialog__item-body small {
   color: var(--text-soft);

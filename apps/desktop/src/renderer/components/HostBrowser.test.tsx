@@ -80,6 +80,7 @@ function renderBrowser() {
       onCreateHost={vi.fn()}
       onOpenAwsImport={vi.fn()}
       onOpenOpenSshImport={vi.fn()}
+      onOpenXshellImport={vi.fn()}
       onOpenTermiusImport={vi.fn()}
       onOpenWarpgateImport={vi.fn()}
       onCreateGroup={vi.fn().mockResolvedValue(undefined)}
@@ -152,6 +153,7 @@ describe('HostBrowser helpers', () => {
     expect(HOST_BROWSER_IMPORT_MENU_LABELS).toEqual([
       'Import from AWS',
       'Import OpenSSH',
+      'Import from Xshell',
       'Import from Termius',
       'Import from Warpgate'
     ]);
