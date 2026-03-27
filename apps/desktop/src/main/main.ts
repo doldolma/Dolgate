@@ -16,6 +16,7 @@ import {
 import { DesktopConfigService } from './app-config';
 import { AuthService } from './auth-service';
 import { AwsService } from './aws-service';
+import { AwsSsmTunnelService } from './aws-ssm-tunnel-service';
 import { ipcChannels } from '../common/ipc-channels';
 import { CoreManager } from './core-manager';
 import { registerIpcHandlers } from './ipc';
@@ -73,6 +74,7 @@ if (termiusHelperArgIndex >= 0) {
   const syncOutboxRepository = new SyncOutboxRepository();
   const secretStore = new SecretStore();
   const awsService = new AwsService();
+  const awsSsmTunnelService = new AwsSsmTunnelService();
   const warpgateService = new WarpgateService(secretStore);
   const termiusImportService = new TermiusImportService();
   const opensshImportService = new OpenSshImportService();
@@ -268,6 +270,7 @@ if (termiusHelperArgIndex >= 0) {
   authService.setOnSessionInvalidated(async (context) => {
     // 인증 세션이 사라지면 SSH/SFTP/포워딩 런타임도 함께 정리해서 로그인 게이트 뒤에 연결이 남지 않게 한다.
     await sessionShareService.shutdown();
+    await awsSsmTunnelService.shutdown();
     await coreManager.shutdown();
     if (context.purgeSyncedCache) {
       await syncService.purgeSyncedCache();
@@ -290,6 +293,7 @@ if (termiusHelperArgIndex >= 0) {
       syncOutboxRepository,
       secretStore,
       awsService,
+      awsSsmTunnelService,
       warpgateService,
       coreManager,
       updateService,
@@ -324,12 +328,14 @@ if (termiusHelperArgIndex >= 0) {
     event.preventDefault();
     isQuitting = true;
     void sessionShareService.shutdown().finally(() => {
-      void coreManager.shutdown().finally(() => {
-      if (updateService.consumePendingInstall()) {
-        updateService.quitAndInstall();
-        return;
-      }
-      app.quit();
+      void awsSsmTunnelService.shutdown().finally(() => {
+        void coreManager.shutdown().finally(() => {
+          if (updateService.consumePendingInstall()) {
+            updateService.quitAndInstall();
+            return;
+          }
+          app.quit();
+        });
       });
     });
   });

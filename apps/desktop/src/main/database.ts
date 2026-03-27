@@ -19,6 +19,7 @@ import type {
   ActivityLogRecord,
   AppSettings,
   AppTheme,
+  AwsSshMetadataStatus,
   AwsEc2HostDraft,
   AwsEc2HostRecord,
   GlobalTerminalThemeId,
@@ -123,13 +124,32 @@ function normalizeTerminalThemeId(terminalThemeId?: TerminalThemeId | null): Ter
   return terminalThemeId ?? null;
 }
 
+function normalizeAwsSshMetadataStatus(
+  status?: AwsSshMetadataStatus | null,
+  fallback?: { awsSshUsername?: string | null; awsSshPort?: number | null }
+): AwsSshMetadataStatus {
+  if (status === 'loading' || status === 'ready' || status === 'error' || status === 'idle') {
+    return status;
+  }
+  return fallback?.awsSshUsername?.trim() || fallback?.awsSshPort ? 'ready' : 'idle';
+}
+
+function normalizeAwsSshMetadataError(error?: string | null): string | null {
+  const trimmed = error?.trim();
+  return trimmed ? trimmed : null;
+}
+
 function normalizeIncomingHostRecord(record: HostRecord): HostRecord {
   if (record.kind === 'aws-ec2') {
     return {
       ...record,
       groupName: normalizeGroupPath(record.groupName),
       tags: normalizeTags(record.tags),
-      terminalThemeId: normalizeTerminalThemeId(record.terminalThemeId)
+      terminalThemeId: normalizeTerminalThemeId(record.terminalThemeId),
+      awsSshUsername: record.awsSshUsername ?? null,
+      awsSshPort: record.awsSshPort ?? null,
+      awsSshMetadataStatus: normalizeAwsSshMetadataStatus(record.awsSshMetadataStatus, record),
+      awsSshMetadataError: normalizeAwsSshMetadataError(record.awsSshMetadataError)
     };
   }
 
@@ -191,6 +211,13 @@ function normalizeIncomingHostRecord(record: HostRecord): HostRecord {
       awsPlatform: legacyRecord.awsPlatform ?? null,
       awsPrivateIp: legacyRecord.awsPrivateIp ?? null,
       awsState: legacyRecord.awsState ?? null,
+      awsSshUsername: legacyRecord.awsSshUsername ?? null,
+      awsSshPort: legacyRecord.awsSshPort ?? null,
+      awsSshMetadataStatus: normalizeAwsSshMetadataStatus(
+        legacyRecord.awsSshMetadataStatus as AwsSshMetadataStatus | null | undefined,
+        legacyRecord
+      ),
+      awsSshMetadataError: normalizeAwsSshMetadataError(legacyRecord.awsSshMetadataError as string | null | undefined),
       createdAt: legacyRecord.createdAt,
       updatedAt: legacyRecord.updatedAt
     };
@@ -252,10 +279,15 @@ function toAwsHostRecord(id: string, draft: AwsEc2HostDraft, timestamp: string, 
     awsProfileName: draft.awsProfileName,
     awsRegion: draft.awsRegion,
     awsInstanceId: draft.awsInstanceId,
+    awsAvailabilityZone: draft.awsAvailabilityZone ?? null,
     awsInstanceName: draft.awsInstanceName ?? null,
     awsPlatform: draft.awsPlatform ?? null,
     awsPrivateIp: draft.awsPrivateIp ?? null,
     awsState: draft.awsState ?? null,
+    awsSshUsername: draft.awsSshUsername ?? null,
+    awsSshPort: draft.awsSshPort ?? null,
+    awsSshMetadataStatus: normalizeAwsSshMetadataStatus(draft.awsSshMetadataStatus, draft),
+    awsSshMetadataError: normalizeAwsSshMetadataError(draft.awsSshMetadataError),
     groupName: normalizeGroupPath(draft.groupName),
     tags: normalizeTags(draft.tags),
     terminalThemeId: normalizeTerminalThemeId(draft.terminalThemeId),

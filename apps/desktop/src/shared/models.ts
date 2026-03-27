@@ -45,6 +45,18 @@ export type SecretSource = 'local_keychain' | 'server_managed';
 export type AuthStatus = 'loading' | 'unauthenticated' | 'authenticating' | 'authenticated' | 'offline-authenticated' | 'error';
 export type SyncBootstrapStatus = 'idle' | 'syncing' | 'ready' | 'paused' | 'error';
 export type TermiusProbeStatus = 'ready' | 'unsupported' | 'not-installed' | 'no-data' | 'error';
+export type AwsSshMetadataStatus = 'idle' | 'loading' | 'ready' | 'error';
+export type SftpConnectionStage =
+  | 'loading-instance-metadata'
+  | 'checking-profile'
+  | 'checking-ssm'
+  | 'probing-host-key'
+  | 'generating-key'
+  | 'sending-public-key'
+  | 'opening-tunnel'
+  | 'connecting-sftp';
+
+export const AWS_SFTP_DEFAULT_PORT = 22;
 
 interface HostBaseRecord {
   id: string;
@@ -90,10 +102,15 @@ export interface AwsEc2HostRecord extends HostBaseRecord {
   awsProfileName: string;
   awsRegion: string;
   awsInstanceId: string;
+  awsAvailabilityZone?: string | null;
   awsInstanceName?: string | null;
   awsPlatform?: string | null;
   awsPrivateIp?: string | null;
   awsState?: string | null;
+  awsSshUsername?: string | null;
+  awsSshPort?: number | null;
+  awsSshMetadataStatus?: AwsSshMetadataStatus | null;
+  awsSshMetadataError?: string | null;
 }
 
 export interface AwsEc2HostDraft extends HostBaseDraft {
@@ -101,10 +118,15 @@ export interface AwsEc2HostDraft extends HostBaseDraft {
   awsProfileName: string;
   awsRegion: string;
   awsInstanceId: string;
+  awsAvailabilityZone?: string | null;
   awsInstanceName?: string | null;
   awsPlatform?: string | null;
   awsPrivateIp?: string | null;
   awsState?: string | null;
+  awsSshUsername?: string | null;
+  awsSshPort?: number | null;
+  awsSshMetadataStatus?: AwsSshMetadataStatus | null;
+  awsSshMetadataError?: string | null;
 }
 
 export interface WarpgateSshHostRecord extends HostBaseRecord {
@@ -164,8 +186,10 @@ export function getHostSearchText(host: HostRecord): string[] {
       host.awsInstanceName ?? '',
       host.awsInstanceId,
       host.awsRegion,
+      host.awsAvailabilityZone ?? '',
       host.awsProfileName,
       host.awsPrivateIp ?? '',
+      host.awsSshUsername ?? '',
       host.groupName ?? '',
       ...(host.tags ?? [])
     ];
@@ -208,6 +232,56 @@ export function getHostBadgeLabel(host: HostRecord): string {
 
 export function getHostSecretRef(host: HostRecord): string | null {
   return host.kind === 'ssh' ? (host.secretRef ?? null) : null;
+}
+
+function normalizeAwsPlatform(value?: string | null): string {
+  return (value ?? '').trim().toLowerCase();
+}
+
+export function isAwsEc2WindowsPlatform(value?: string | null): boolean {
+  const normalized = normalizeAwsPlatform(value);
+  return normalized.includes('windows');
+}
+
+export function getAwsEc2HostSftpDisabledReason(input: {
+  awsPlatform?: string | null;
+  awsSshUsername?: string | null;
+}): string | null {
+  if (isAwsEc2WindowsPlatform(input.awsPlatform)) {
+    return 'Windows 인스턴스는 아직 지원하지 않습니다.';
+  }
+  return null;
+}
+
+export function getAwsEc2HostSshMetadataStatusLabel(status?: AwsSshMetadataStatus | null): string | null {
+  switch (status) {
+    case 'loading':
+      return 'SSH 설정 확인 중';
+    case 'ready':
+      return 'SSH 설정 자동 확인됨';
+    case 'error':
+      return 'SSH 설정 확인 실패';
+    default:
+      return null;
+  }
+}
+
+export function getAwsEc2HostSshPort(input: {
+  awsSshPort?: number | null;
+}): number {
+  const value = input.awsSshPort;
+  if (!Number.isInteger(value) || !value || value < 1 || value > 65535) {
+    return AWS_SFTP_DEFAULT_PORT;
+  }
+  return value;
+}
+
+export function buildAwsSsmKnownHostIdentity(input: {
+  profileName: string;
+  region: string;
+  instanceId: string;
+}): string {
+  return `aws-ssm:${input.profileName}:${input.region}:${input.instanceId}`;
 }
 
 // GroupRecord는 홈 화면의 그룹 브라우징이 쓰는 계층형 그룹 메타데이터다.
@@ -557,9 +631,25 @@ export interface AwsProfileStatus {
 export interface AwsEc2InstanceSummary {
   instanceId: string;
   name: string;
+  availabilityZone?: string | null;
   platform?: string | null;
   privateIp?: string | null;
   state?: string | null;
+}
+
+export interface AwsHostSshInspectionInput {
+  profileName: string;
+  region: string;
+  instanceId: string;
+  availabilityZone?: string | null;
+}
+
+export interface AwsHostSshInspectionResult {
+  sshPort: number | null;
+  recommendedUsername: string | null;
+  usernameCandidates: string[];
+  status: 'ready' | 'error';
+  errorMessage: string | null;
 }
 
 export interface WarpgateTargetSummary {
@@ -717,6 +807,7 @@ export interface HostKeyProbeResult {
   hostLabel: string;
   host: string;
   port: number;
+  targetDescription?: string | null;
   algorithm: string;
   publicKeyBase64: string;
   fingerprintSha256: string;
@@ -843,6 +934,13 @@ export interface TransferJob {
 
 export interface TransferJobEvent {
   job: TransferJob;
+}
+
+export interface SftpConnectionProgressEvent {
+  endpointId: string;
+  hostId: string;
+  stage: SftpConnectionStage;
+  message: string;
 }
 
 export type TransferEndpointRef =

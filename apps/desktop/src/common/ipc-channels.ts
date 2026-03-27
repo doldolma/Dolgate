@@ -29,7 +29,9 @@ export const ipcChannels = {
     getProfileStatus: 'aws:get-profile-status',
     login: 'aws:login',
     listRegions: 'aws:list-regions',
-    listEc2Instances: 'aws:list-ec2-instances'
+    listEc2Instances: 'aws:list-ec2-instances',
+    inspectHostSshMetadata: 'aws:inspect-host-ssh-metadata',
+    loadHostSshMetadata: 'aws:load-host-ssh-metadata'
   },
   warpgate: {
     testConnection: 'warpgate:test-connection',
@@ -153,6 +155,7 @@ export const ipcChannels = {
     delete: 'sftp:delete',
     startTransfer: 'sftp:start-transfer',
     cancelTransfer: 'sftp:cancel-transfer',
+    connectionProgress: 'sftp:connection-progress',
     transferEvent: 'sftp:transfer-event'
   }
 } as const;

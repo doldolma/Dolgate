@@ -8,9 +8,12 @@ import { createPortal } from "react-dom";
 import {
   buildVisibleGroups,
   filterHostsInGroupTree,
+  getAwsEc2HostSftpDisabledReason,
+  getAwsEc2HostSshMetadataStatusLabel,
   getHostBadgeLabel,
   getHostSearchText,
   getHostSubtitle,
+  isAwsEc2HostRecord,
   isSshHostRecord,
   isWarpgateSshHostRecord,
   MIN_SFTP_BROWSER_COLUMN_WIDTHS,
@@ -24,6 +27,7 @@ import type {
   HostRecord,
   SftpBrowserColumnKey,
   SftpBrowserColumnWidths,
+  SftpConnectionProgressEvent,
   SftpPaneId,
   TransferJob,
 } from "@shared";
@@ -53,6 +57,7 @@ interface SftpWorkspaceProps {
   onNavigateHostGroup: (paneId: SftpPaneId, path: string | null) => void;
   onSelectHost: (paneId: SftpPaneId, hostId: string) => void;
   onConnectHost: (paneId: SftpPaneId, hostId: string) => Promise<void>;
+  onOpenHostSettings?: (hostId: string) => void;
   onOpenEntry: (paneId: SftpPaneId, entryPath: string) => Promise<void>;
   onRefreshPane: (paneId: SftpPaneId) => Promise<void>;
   onNavigateBack: (paneId: SftpPaneId) => Promise<void>;
@@ -101,7 +106,7 @@ interface SftpWorkspaceProps {
 
 type SftpConnectableHostRecord = Extract<
   HostRecord,
-  { kind: "ssh" | "warpgate-ssh" }
+  { kind: "ssh" | "warpgate-ssh" | "aws-ec2" }
 >;
 
 type ActionDialogState =
@@ -200,6 +205,15 @@ export function visibleHostPickerHosts(
     );
   }
   return scopedHosts;
+}
+
+export function getSftpHostPickerDisabledReason(
+  host: SftpConnectableHostRecord,
+): string | null {
+  if (isAwsEc2HostRecord(host)) {
+    return getAwsEc2HostSftpDisabledReason(host);
+  }
+  return null;
 }
 
 function fallbackEntryLabel(path: string): string {
@@ -384,6 +398,31 @@ function formatDate(value: string): string {
     hour: "numeric",
     minute: "2-digit",
   }).format(date);
+}
+
+function formatSftpConnectionStageLabel(
+  stage?: SftpConnectionProgressEvent["stage"],
+): string {
+  switch (stage) {
+    case "loading-instance-metadata":
+      return "SSH 설정 확인";
+    case "checking-profile":
+      return "AWS 프로필 확인";
+    case "checking-ssm":
+      return "SSM 상태 확인";
+    case "probing-host-key":
+      return "호스트 키 확인";
+    case "generating-key":
+      return "임시 키 생성";
+    case "sending-public-key":
+      return "공개 키 전송";
+    case "opening-tunnel":
+      return "내부 터널 연결";
+    case "connecting-sftp":
+      return "SFTP 연결";
+    default:
+      return "연결 준비";
+  }
 }
 
 function buildTransferDirection(job: TransferJob): string {
@@ -984,6 +1023,7 @@ interface HostPickerProps {
   onNavigateHostGroup: (path: string | null) => void;
   onSelectHost: (hostId: string) => void;
   onConnectHost: (hostId: string) => Promise<void>;
+  onOpenHostSettings?: (hostId: string) => void;
   onRespondInteractiveAuth: (
     challengeId: string,
     responses: string[],
@@ -1002,6 +1042,7 @@ function HostPicker({
   onNavigateHostGroup,
   onSelectHost,
   onConnectHost,
+  onOpenHostSettings,
   onRespondInteractiveAuth,
   onReopenInteractiveAuthUrl,
   onClearInteractiveAuth,
@@ -1181,13 +1222,21 @@ function HostPicker({
             </div>
           ) : (
             visibleHosts.map((host) => {
+              const awsHost = isAwsEc2HostRecord(host) ? host : null;
               const badgeLabel = getHostBadgeLabel(host);
+              const disabledReason = getSftpHostPickerDisabledReason(host);
+              const canOpenHostSettings = awsHost
+                ? !awsHost.awsSshUsername?.trim() || awsHost.awsSshMetadataStatus === "error"
+                : false;
+              const awsMetadataStatusLabel = awsHost
+                ? getAwsEc2HostSshMetadataStatusLabel(awsHost.awsSshMetadataStatus)
+                : null;
               const isSelected = pane.selectedHostId === host.id;
               const isBusy = isConnecting && isSelected;
               return (
                 <article
                   key={host.id}
-                  className={`host-browser-card ${isSelected ? "active" : ""} ${isBusy ? "connecting" : ""}`}
+                  className={`host-browser-card ${isSelected ? "active" : ""} ${isBusy ? "connecting" : ""} ${disabledReason ? "disabled" : ""}`}
                   aria-busy={isBusy}
                   onClick={() => {
                     if (isConnecting) {
@@ -1196,7 +1245,7 @@ function HostPicker({
                     onSelectHost(host.id);
                   }}
                   onDoubleClick={() => {
-                    if (isConnecting) {
+                    if (isConnecting || disabledReason) {
                       return;
                     }
                     void onConnectHost(host.id);
@@ -1211,6 +1260,20 @@ function HostPicker({
                     <strong>{host.label}</strong>
                     <span>{getHostSubtitle(host)}</span>
                     <small>{host.groupName || "Ungrouped"}</small>
+                    {awsMetadataStatusLabel ? (
+                      <small className="host-browser-card__hint">
+                        {awsMetadataStatusLabel}
+                        {awsHost?.awsSshMetadataStatus === "error" &&
+                        awsHost.awsSshMetadataError
+                          ? ` · ${awsHost.awsSshMetadataError}`
+                          : ""}
+                      </small>
+                    ) : null}
+                    {disabledReason ? (
+                      <small className="host-browser-card__hint">
+                        {disabledReason}
+                      </small>
+                    ) : null}
                   </div>
                   {isBusy ? (
                     <div className="host-browser-card__status">
@@ -1220,6 +1283,19 @@ function HostPicker({
                       >
                         연결 중
                       </span>
+                    </div>
+                  ) : canOpenHostSettings && onOpenHostSettings ? (
+                    <div className="host-browser-card__status">
+                      <button
+                        type="button"
+                        className="secondary-button sftp-inline-button"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          onOpenHostSettings(host.id);
+                        }}
+                      >
+                        설정 열기
+                      </button>
                     </div>
                   ) : null}
                 </article>
@@ -1365,7 +1441,15 @@ function HostPicker({
                 ? `${selectedHost.label} 연결 중...`
                 : "SFTP 연결 중..."}
             </strong>
-            <span>원격 파일 목록을 준비하고 있습니다.</span>
+            <span className="sftp-host-picker__overlay-stage">
+              {formatSftpConnectionStageLabel(
+                pane.connectionProgress?.stage,
+              )}
+            </span>
+            <span>
+              {pane.connectionProgress?.message ??
+                "원격 파일 목록을 준비하고 있습니다."}
+            </span>
           </div>
         </div>
       ) : null}
@@ -1739,6 +1823,7 @@ export function SftpWorkspace({
   onNavigateHostGroup,
   onSelectHost,
   onConnectHost,
+  onOpenHostSettings,
   onOpenEntry,
   onRefreshPane,
   onNavigateBack,
@@ -1784,7 +1869,9 @@ export function SftpWorkspace({
     () =>
       hosts.filter(
         (host): host is SftpConnectableHostRecord =>
-          isSshHostRecord(host) || isWarpgateSshHostRecord(host),
+          isSshHostRecord(host) ||
+          isWarpgateSshHostRecord(host) ||
+          isAwsEc2HostRecord(host),
       ),
     [hosts],
   );
@@ -1953,6 +2040,7 @@ export function SftpWorkspace({
                   }
                   onSelectHost={(hostId) => onSelectHost(pane.id, hostId)}
                   onConnectHost={(hostId) => onConnectHost(pane.id, hostId)}
+                  onOpenHostSettings={onOpenHostSettings}
                   onRespondInteractiveAuth={onRespondInteractiveAuth}
                   onReopenInteractiveAuthUrl={onReopenInteractiveAuthUrl}
                   onClearInteractiveAuth={onClearInteractiveAuth}

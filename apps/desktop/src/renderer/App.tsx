@@ -3,6 +3,7 @@ import { buildGroupOptions, getHostSecretRef, isSshHostRecord } from '@shared';
 import type { AppTheme, AuthState, DesktopWindowState, HostRecord, LinkedHostSummary, UpdateState } from '@shared';
 import { AppTitleBar } from './components/AppTitleBar';
 import { AwsImportDialog } from './components/AwsImportDialog';
+import { AwsSftpConfigRetryDialog } from './components/AwsSftpConfigRetryDialog';
 import { CredentialRetryDialog } from './components/CredentialRetryDialog';
 import { HomeNavigation } from './components/HomeNavigation';
 import { HostBrowser } from './components/HostBrowser';
@@ -245,6 +246,7 @@ export function App() {
   const settings = useAppStore((state) => state.settings);
   const pendingHostKeyPrompt = useAppStore((state) => state.pendingHostKeyPrompt);
   const pendingCredentialRetry = useAppStore((state) => state.pendingCredentialRetry);
+  const pendingAwsSftpConfigRetry = useAppStore((state) => state.pendingAwsSftpConfigRetry);
   const bootstrap = useAppStore((state) => state.bootstrap);
   const refreshHostCatalog = useAppStore((state) => state.refreshHostCatalog);
   const setSearchQuery = useAppStore((state) => state.setSearchQuery);
@@ -294,11 +296,16 @@ export function App() {
   const dismissPendingHostKeyPrompt = useAppStore((state) => state.dismissPendingHostKeyPrompt);
   const dismissPendingCredentialRetry = useAppStore((state) => state.dismissPendingCredentialRetry);
   const submitCredentialRetry = useAppStore((state) => state.submitCredentialRetry);
+  const dismissPendingAwsSftpConfigRetry = useAppStore((state) => state.dismissPendingAwsSftpConfigRetry);
+  const submitAwsSftpConfigRetry = useAppStore((state) => state.submitAwsSftpConfigRetry);
   const pendingInteractiveAuth = useAppStore((state) => state.pendingInteractiveAuth);
   const respondInteractiveAuth = useAppStore((state) => state.respondInteractiveAuth);
   const reopenInteractiveAuthUrl = useAppStore((state) => state.reopenInteractiveAuthUrl);
   const clearPendingInteractiveAuth = useAppStore((state) => state.clearPendingInteractiveAuth);
   const handleCoreEvent = useAppStore((state) => state.handleCoreEvent);
+  const handleSftpConnectionProgressEvent = useAppStore(
+    (state) => state.handleSftpConnectionProgressEvent,
+  );
   const handleTransferEvent = useAppStore((state) => state.handleTransferEvent);
   const handlePortForwardEvent = useAppStore((state) => state.handlePortForwardEvent);
   const handleSessionShareEvent = useAppStore((state) => state.handleSessionShareEvent);
@@ -383,6 +390,12 @@ export function App() {
 
   useEffect(() => {
     const offCore = window.dolssh.ssh.onEvent(handleCoreEvent);
+    const offSftpProgress =
+      typeof window.dolssh.sftp.onConnectionProgress === "function"
+        ? window.dolssh.sftp.onConnectionProgress(
+            handleSftpConnectionProgressEvent,
+          )
+        : () => undefined;
     const offTransfer = window.dolssh.sftp.onTransferEvent(handleTransferEvent);
     const offForward = window.dolssh.portForwards.onEvent(handlePortForwardEvent);
     const offSessionShare = window.dolssh.sessionShares.onEvent(handleSessionShareEvent);
@@ -406,6 +419,7 @@ export function App() {
 
     return () => {
       offCore();
+      offSftpProgress();
       offTransfer();
       offForward();
       offSessionShare();
@@ -415,6 +429,7 @@ export function App() {
   }, [
     bootstrap,
     handleCoreEvent,
+    handleSftpConnectionProgressEvent,
     handlePortForwardEvent,
     handleSessionShareChatEvent,
     handleSessionShareEvent,
@@ -1089,6 +1104,7 @@ export function App() {
               onNavigateHostGroup={navigateSftpHostGroup}
               onSelectHost={selectSftpHost}
               onConnectHost={connectSftpHost}
+              onOpenHostSettings={openEditHostDrawer}
               onOpenEntry={openSftpEntry}
               onRefreshPane={refreshSftpPane}
               onNavigateBack={navigateSftpBack}
@@ -1192,6 +1208,21 @@ export function App() {
         }
         onClose={dismissPendingCredentialRetry}
         onSubmit={submitCredentialRetry}
+      />
+
+      <AwsSftpConfigRetryDialog
+        request={
+          pendingAwsSftpConfigRetry
+            ? {
+                hostLabel: findHost(hosts, pendingAwsSftpConfigRetry.hostId)?.label ?? 'AWS Host',
+                message: pendingAwsSftpConfigRetry.message,
+                suggestedUsername: pendingAwsSftpConfigRetry.suggestedUsername,
+                suggestedPort: pendingAwsSftpConfigRetry.suggestedPort
+              }
+            : null
+        }
+        onClose={dismissPendingAwsSftpConfigRetry}
+        onSubmit={submitAwsSftpConfigRetry}
       />
 
       <SecretEditDialog

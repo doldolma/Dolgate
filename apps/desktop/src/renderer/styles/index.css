@@ -1531,6 +1531,25 @@ input::placeholder {
   font-weight: 600;
 }
 
+.host-form__aws-status {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  padding: 0.85rem 0.95rem;
+  border-radius: 14px;
+  border: 1px solid color-mix(in srgb, var(--accent-strong) 18%, var(--border) 82%);
+  background: color-mix(in srgb, var(--surface-elevated) 76%, var(--surface) 24%);
+}
+
+.host-form__aws-status strong {
+  font-size: 0.9rem;
+}
+
+.host-form__aws-status span {
+  color: var(--text-soft);
+  line-height: 1.5;
+}
+
 .row.two-col {
   display: grid;
   grid-template-columns: 120px minmax(0, 1fr);
@@ -2969,6 +2988,11 @@ input::placeholder {
   cursor: wait;
 }
 
+.sftp-host-picker .host-browser-card.disabled {
+  opacity: 0.72;
+  cursor: not-allowed;
+}
+
 .sftp-host-picker .group-card.disabled {
   opacity: 0.64;
 }
@@ -2984,6 +3008,10 @@ input::placeholder {
   display: flex;
   align-items: center;
   justify-content: flex-end;
+}
+
+.host-browser-card__hint {
+  color: var(--text-muted);
 }
 
 .sftp-host-picker__overlay {
@@ -3011,6 +3039,11 @@ input::placeholder {
 
 .sftp-host-picker__overlay-card strong {
   line-height: 1.4;
+}
+
+.sftp-host-picker__overlay-stage {
+  color: var(--text);
+  font-weight: 600;
 }
 
 .sftp-host-picker__overlay-card span {
@@ -3524,6 +3557,44 @@ body.sftp-column-resizing * {
   padding-right: 0.1rem;
 }
 
+.aws-import-dialog__inspection {
+  display: flex;
+  flex-direction: column;
+  gap: 0.95rem;
+  min-height: 0;
+  margin-top: 0.95rem;
+}
+
+.aws-import-dialog__inspection-summary {
+  margin: 0;
+}
+
+.aws-import-dialog__inspection-callout {
+  margin: 0;
+}
+
+.aws-import-dialog__inspection-fields {
+  gap: 0.85rem;
+}
+
+.aws-import-dialog__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+}
+
+.aws-import-dialog__chip {
+  padding-inline: 0.95rem;
+}
+
+.aws-import-dialog__footer-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.75rem;
+  margin-left: auto;
+}
+
 .termius-import-dialog__controls,
 .xshell-import-dialog__controls,
 .openssh-import-dialog__controls,
@@ -3890,6 +3961,15 @@ body.sftp-column-resizing * {
   display: flex;
   flex-direction: column;
   gap: 0.45rem;
+}
+
+.text-button {
+  align-self: flex-start;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--accent-strong);
+  font-weight: 600;
 }
 
 .credential-retry-dialog__error {

@@ -1,6 +1,6 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
-import type { SecretMetadataRecord, SshHostRecord } from '@shared';
+import type { AwsEc2HostRecord, SecretMetadataRecord, SshHostRecord } from '@shared';
 import { HostForm } from './HostForm';
 
 const groupOptions = [{ value: null, label: 'Ungrouped' }];
@@ -17,6 +17,34 @@ function createHost(overrides: Partial<SshHostRecord> = {}): SshHostRecord {
     authType: 'password',
     privateKeyPath: null,
     secretRef: null,
+    groupName: null,
+    tags: [],
+    terminalThemeId: null,
+    createdAt: '2026-03-25T00:00:00.000Z',
+    updatedAt: '2026-03-25T00:00:00.000Z',
+    ...overrides
+  };
+}
+
+function createAwsHost(
+  overrides: Partial<AwsEc2HostRecord> = {},
+): AwsEc2HostRecord {
+  return {
+    id: 'aws-host-1',
+    kind: 'aws-ec2',
+    label: 'AWS Prod',
+    awsProfileName: 'default',
+    awsRegion: 'ap-northeast-2',
+    awsInstanceId: 'i-abc',
+    awsAvailabilityZone: 'ap-northeast-2a',
+    awsInstanceName: 'web-1',
+    awsPlatform: 'Linux/UNIX',
+    awsPrivateIp: '10.0.0.10',
+    awsState: 'running',
+    awsSshUsername: 'ubuntu',
+    awsSshPort: 22,
+    awsSshMetadataStatus: 'ready',
+    awsSshMetadataError: null,
     groupName: null,
     tags: [],
     terminalThemeId: null,
@@ -176,5 +204,41 @@ describe('HostForm', () => {
     fireEvent.blur(tagInput);
 
     expect(screen.getAllByText('개발')).toHaveLength(1);
+  });
+
+  it('renders AWS SSH metadata fields and auto-saves edited username and port', async () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+
+    render(
+      <HostForm
+        host={createAwsHost()}
+        keychainEntries={keychainEntries}
+        groupOptions={groupOptions}
+        onSubmit={onSubmit}
+      />
+    );
+
+    expect((screen.getByLabelText('Availability Zone') as HTMLInputElement).value).toBe('ap-northeast-2a');
+    expect(screen.getByText('SSH 설정 자동 확인됨')).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText('SSH Username'), {
+      target: { value: 'ec2-user' }
+    });
+    fireEvent.change(screen.getByLabelText('SSH Port'), {
+      target: { value: '2222' }
+    });
+
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1), {
+      timeout: 1200
+    });
+
+    expect(onSubmit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: 'aws-ec2',
+        awsSshUsername: 'ec2-user',
+        awsSshPort: 2222
+      }),
+      undefined
+    );
   });
 });

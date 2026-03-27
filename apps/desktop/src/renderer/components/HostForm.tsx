@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { isAwsEc2HostRecord, isSshHostDraft, isSshHostRecord, isWarpgateSshHostRecord } from '@shared';
+import { getAwsEc2HostSshMetadataStatusLabel, isAwsEc2HostRecord, isSshHostDraft, isSshHostRecord, isWarpgateSshHostRecord } from '@shared';
 import type { HostDraft, HostRecord, SecretMetadataRecord, TerminalThemeId } from '@shared';
 import { terminalThemePresets } from '../lib/terminal-presets';
 
@@ -78,6 +78,10 @@ interface HostFormSubmission {
 function isHostDraftValid(draft: HostDraft): boolean {
   if (!draft.label.trim()) {
     return false;
+  }
+
+  if (draft.kind === 'aws-ec2') {
+    return true;
   }
 
   if (draft.kind === 'ssh') {
@@ -266,10 +270,15 @@ export function HostForm({
         awsProfileName: host.awsProfileName,
         awsRegion: host.awsRegion,
         awsInstanceId: host.awsInstanceId,
+        awsAvailabilityZone: host.awsAvailabilityZone ?? null,
         awsInstanceName: host.awsInstanceName ?? null,
         awsPlatform: host.awsPlatform ?? null,
         awsPrivateIp: host.awsPrivateIp ?? null,
-        awsState: host.awsState ?? null
+        awsState: host.awsState ?? null,
+        awsSshUsername: host.awsSshUsername ?? null,
+        awsSshPort: host.awsSshPort ?? 22,
+        awsSshMetadataStatus: host.awsSshMetadataStatus ?? null,
+        awsSshMetadataError: host.awsSshMetadataError ?? null
       };
       nextCredentialMode = 'none';
     } else if (isWarpgateSshHostRecord(host)) {
@@ -631,6 +640,10 @@ export function HostForm({
             <input value={draft.awsRegion} readOnly />
           </label>
           <label>
+            Availability Zone
+            <input value={draft.awsAvailabilityZone ?? ''} readOnly />
+          </label>
+          <label>
             Instance ID
             <input value={draft.awsInstanceId} readOnly />
           </label>
@@ -650,6 +663,54 @@ export function HostForm({
             State
             <input value={draft.awsState ?? ''} readOnly />
           </label>
+          <div className="host-form__aws-status">
+            <strong>{getAwsEc2HostSshMetadataStatusLabel(draft.awsSshMetadataStatus) ?? 'SSH 설정 대기 중'}</strong>
+            <span>
+              {draft.awsSshMetadataError
+                ? draft.awsSshMetadataError
+                : draft.awsSshMetadataStatus === 'loading'
+                  ? '추가 정보 로드가 끝나면 SSH 사용자와 포트를 자동으로 채웁니다.'
+                  : '필요하면 아래 값만 수동으로 수정하면 됩니다.'}
+            </span>
+          </div>
+          <div className="row two-col">
+            <label>
+              SSH Port
+              <input
+                type="number"
+                min={1}
+                max={65535}
+                value={draft.awsSshPort ?? 22}
+                onChange={(event) =>
+                  setDraft((current) =>
+                    current.kind === 'aws-ec2'
+                      ? {
+                          ...current,
+                          awsSshPort: Number(event.target.value) || 22
+                        }
+                      : current
+                  )
+                }
+              />
+            </label>
+            <label>
+              SSH Username
+              <input
+                value={draft.awsSshUsername ?? ''}
+                onChange={(event) =>
+                  setDraft((current) =>
+                    current.kind === 'aws-ec2'
+                      ? {
+                          ...current,
+                          awsSshUsername: event.target.value
+                        }
+                      : current
+                  )
+                }
+                placeholder="ubuntu"
+              />
+            </label>
+          </div>
         </>
       ) : draft.kind === 'warpgate-ssh' ? (
         <>

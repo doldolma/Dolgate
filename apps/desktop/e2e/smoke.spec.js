@@ -60,10 +60,13 @@ async function writeDesktopState(userDataDir) {
               awsProfileName: "default",
               awsRegion: "ap-northeast-2",
               awsInstanceId: "i-smoke-test",
+              awsAvailabilityZone: "ap-northeast-2a",
               awsInstanceName: "smoke",
               awsPlatform: "linux",
               awsPrivateIp: "10.0.0.10",
               awsState: "running",
+              awsSshUsername: "ubuntu",
+              awsSshPort: 22,
               groupName: "Production",
               tags: ["smoke"],
               terminalThemeId: null,
@@ -264,7 +267,12 @@ test.describe("desktop smoke", () => {
       await expect(
         homeNavigation.getByRole("button", { name: "▣ Hosts" }),
       ).toBeVisible();
-      await expect(page.getByText("Smoke AWS")).toBeVisible();
+      await expect(
+        page
+          .locator(".host-browser-card")
+          .filter({ hasText: "Smoke AWS" })
+          .first(),
+      ).toBeVisible();
 
       await homeNavigation
         .getByRole("button", { name: "⇄ Port Forwarding" })
