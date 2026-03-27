@@ -23,6 +23,7 @@ import type {
   SessionShareSnapshotInput,
   SessionShareStartInput,
   SftpChmodInput,
+  SftpConnectionProgressEvent,
   SftpDeleteInput,
   SftpListInput,
   SftpMkdirInput,
@@ -38,6 +39,9 @@ const streamListeners = new Map<string, Set<(chunk: Uint8Array) => void>>();
 const sessionBacklog = new Map<string, Uint8Array[]>();
 const backlogBytes = new Map<string, number>();
 const transferListeners = new Set<(event: TransferJobEvent) => void>();
+const sftpConnectionProgressListeners = new Set<
+  (event: SftpConnectionProgressEvent) => void
+>();
 const portForwardListeners = new Set<
   (event: PortForwardRuntimeEvent) => void
 >();
@@ -102,6 +106,15 @@ ipcRenderer.on(
     }
     for (const listener of listeners) {
       listener(payload.chunk);
+    }
+  },
+);
+
+ipcRenderer.on(
+  ipcChannels.sftp.connectionProgress,
+  (_event, payload: SftpConnectionProgressEvent) => {
+    for (const listener of sftpConnectionProgressListeners) {
+      listener(payload);
     }
   },
 );
@@ -220,6 +233,10 @@ const api: DesktopApi = {
       ipcRenderer.invoke(ipcChannels.aws.listRegions, profileName),
     listEc2Instances: (profileName: string, region: string) =>
       ipcRenderer.invoke(ipcChannels.aws.listEc2Instances, profileName, region),
+    inspectHostSshMetadata: (input) =>
+      ipcRenderer.invoke(ipcChannels.aws.inspectHostSshMetadata, input),
+    loadHostSshMetadata: (hostId: string) =>
+      ipcRenderer.invoke(ipcChannels.aws.loadHostSshMetadata, hostId),
   },
   warpgate: {
     testConnection: (baseUrl: string, token: string) =>
@@ -467,6 +484,14 @@ const api: DesktopApi = {
       ipcRenderer.invoke(ipcChannels.sftp.startTransfer, input),
     cancelTransfer: (jobId: string) =>
       ipcRenderer.invoke(ipcChannels.sftp.cancelTransfer, jobId),
+    onConnectionProgress: (
+      listener: (event: SftpConnectionProgressEvent) => void,
+    ) => {
+      sftpConnectionProgressListeners.add(listener);
+      return () => {
+        sftpConnectionProgressListeners.delete(listener);
+      };
+    },
     onTransferEvent: (listener: (event: TransferJobEvent) => void) => {
       transferListeners.add(listener);
       return () => {

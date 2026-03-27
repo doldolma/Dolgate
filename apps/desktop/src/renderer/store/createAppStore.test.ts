@@ -157,6 +157,35 @@ function createMockApi(): DesktopApi {
       login: vi.fn().mockResolvedValue(undefined),
       listRegions: vi.fn().mockResolvedValue([]),
       listEc2Instances: vi.fn().mockResolvedValue([]),
+      inspectHostSshMetadata: vi.fn().mockResolvedValue({
+        sshPort: 22,
+        recommendedUsername: "ubuntu",
+        usernameCandidates: ["ubuntu"],
+        status: "ready",
+        errorMessage: null,
+      }),
+      loadHostSshMetadata: vi.fn().mockImplementation(async (hostId: string) => ({
+        id: hostId,
+        kind: "aws-ec2",
+        label: "AWS Linux",
+        awsProfileName: "default",
+        awsRegion: "ap-northeast-2",
+        awsInstanceId: "i-aws",
+        awsAvailabilityZone: "ap-northeast-2a",
+        awsInstanceName: "aws-linux",
+        awsPlatform: "Linux/UNIX",
+        awsPrivateIp: "10.0.0.20",
+        awsState: "running",
+        awsSshUsername: "ubuntu",
+        awsSshPort: 22,
+        awsSshMetadataStatus: "ready",
+        awsSshMetadataError: null,
+        groupName: "Servers",
+        tags: [],
+        terminalThemeId: null,
+        createdAt: "2025-01-01T00:00:00.000Z",
+        updatedAt: "2025-01-01T00:00:00.000Z",
+      })),
     },
     warpgate: {
       testConnection: vi.fn().mockResolvedValue({
@@ -527,6 +556,7 @@ function createMockApi(): DesktopApi {
         updatedAt: "2025-01-01T00:00:00.000Z",
       }),
       cancelTransfer: vi.fn().mockResolvedValue(undefined),
+      onConnectionProgress: vi.fn(() => () => undefined),
       onTransferEvent: vi.fn(),
     },
   };
@@ -1439,6 +1469,215 @@ describe("createAppStore", () => {
       "Timed out waiting for SSH core response: probeHostKey",
     );
     expect(api.sftp.connect).not.toHaveBeenCalled();
+  });
+
+  it("does not auto-load AWS SSH metadata immediately after saving a host", async () => {
+    const api = createMockApi();
+    api.hosts.create = vi.fn().mockResolvedValue({
+      id: "aws-new",
+      kind: "aws-ec2",
+      label: "AWS New",
+      awsProfileName: "default",
+      awsRegion: "ap-northeast-2",
+      awsInstanceId: "i-new",
+      awsAvailabilityZone: "ap-northeast-2a",
+      awsInstanceName: "new-host",
+      awsPlatform: "Linux/UNIX",
+      awsPrivateIp: "10.0.0.25",
+      awsState: "running",
+      awsSshUsername: null,
+      awsSshPort: null,
+      awsSshMetadataStatus: "idle",
+      awsSshMetadataError: null,
+      groupName: "Servers",
+      tags: [],
+      terminalThemeId: null,
+      createdAt: "2025-01-02T00:00:00.000Z",
+      updatedAt: "2025-01-02T00:00:00.000Z",
+    });
+
+    const store = createAppStore(api);
+    await store.getState().bootstrap();
+
+    await store.getState().saveHost(null, {
+      kind: "aws-ec2",
+      label: "AWS New",
+      groupName: "Servers",
+      terminalThemeId: null,
+      awsProfileName: "default",
+      awsRegion: "ap-northeast-2",
+      awsInstanceId: "i-new",
+      awsAvailabilityZone: "ap-northeast-2a",
+      awsInstanceName: "new-host",
+      awsPlatform: "Linux/UNIX",
+      awsPrivateIp: "10.0.0.25",
+      awsState: "running",
+      awsSshUsername: null,
+      awsSshPort: null,
+      awsSshMetadataStatus: "idle",
+      awsSshMetadataError: null,
+    });
+
+    expect(api.aws.loadHostSshMetadata).not.toHaveBeenCalled();
+  });
+
+  it("connects AWS Linux hosts through the shared SFTP flow and tags probe requests with the endpoint id", async () => {
+    const api = createMockApi();
+    api.hosts.list = vi.fn().mockResolvedValue([
+      {
+        id: "aws-host-1",
+        kind: "aws-ec2",
+        label: "AWS Prod",
+        awsProfileName: "default",
+        awsRegion: "ap-northeast-2",
+        awsInstanceId: "i-aws-prod",
+        awsAvailabilityZone: "ap-northeast-2a",
+        awsInstanceName: "prod-web",
+        awsPlatform: "Linux/UNIX",
+        awsPrivateIp: "10.0.0.10",
+        awsState: "running",
+        awsSshUsername: "ubuntu",
+        awsSshPort: 22,
+        awsSshMetadataStatus: "ready",
+        awsSshMetadataError: null,
+        groupName: "Servers",
+        tags: ["prod"],
+        terminalThemeId: null,
+        createdAt: "2025-01-01T00:00:00.000Z",
+        updatedAt: "2025-01-01T00:00:00.000Z",
+      },
+    ]);
+    api.aws.getProfileStatus = vi.fn().mockResolvedValue({
+      profileName: "default",
+      available: true,
+      isSsoProfile: false,
+      isAuthenticated: true,
+      accountId: "123456789012",
+      arn: "arn:aws:iam::123456789012:user/test",
+      errorMessage: null,
+      missingTools: [],
+    });
+    api.knownHosts.probeHost = vi.fn().mockResolvedValue({
+      hostId: "aws-host-1",
+      hostLabel: "AWS Prod",
+      host: "aws-ssm:default:ap-northeast-2:i-aws-prod",
+      port: 22,
+      algorithm: "ssh-ed25519",
+      publicKeyBase64: "AAAATEST",
+      fingerprintSha256: "SHA256:test",
+      status: "trusted",
+      existing: null,
+      targetDescription: "AWS SSM · i-aws-prod",
+    });
+
+    const store = createAppStore(api);
+    await store.getState().bootstrap();
+    store.getState().activateSftp();
+
+    await store.getState().connectSftpHost("right", "aws-host-1");
+
+    const probeInput = vi.mocked(api.knownHosts.probeHost).mock.calls[0]?.[0];
+    const connectInput = vi.mocked(api.sftp.connect).mock.calls[0]?.[0];
+    expect(probeInput?.hostId).toBe("aws-host-1");
+    expect(probeInput?.endpointId).toBeTruthy();
+    expect(connectInput?.hostId).toBe("aws-host-1");
+    expect(connectInput?.endpointId).toBe(probeInput?.endpointId);
+    expect(store.getState().sftp.rightPane.endpoint?.id).toBe(
+      connectInput?.endpointId,
+    );
+  });
+
+  it("auto-loads AWS SSH metadata before connecting SFTP when username is missing", async () => {
+    const api = createMockApi();
+    api.hosts.list = vi.fn().mockResolvedValue([
+      {
+        id: "aws-host-legacy",
+        kind: "aws-ec2",
+        label: "AWS Legacy",
+        awsProfileName: "default",
+        awsRegion: "ap-northeast-2",
+        awsInstanceId: "i-legacy",
+        awsAvailabilityZone: "ap-northeast-2a",
+        awsInstanceName: "legacy-web",
+        awsPlatform: "Linux/UNIX",
+        awsPrivateIp: "10.0.0.11",
+        awsState: "running",
+        awsSshUsername: null,
+        awsSshPort: null,
+        awsSshMetadataStatus: "idle",
+        awsSshMetadataError: null,
+        groupName: "Servers",
+        tags: ["prod"],
+        terminalThemeId: null,
+        createdAt: "2025-01-01T00:00:00.000Z",
+        updatedAt: "2025-01-01T00:00:00.000Z",
+      },
+    ]);
+    api.aws.getProfileStatus = vi.fn().mockResolvedValue({
+      profileName: "default",
+      available: true,
+      isSsoProfile: false,
+      isAuthenticated: true,
+      accountId: "123456789012",
+      arn: "arn:aws:iam::123456789012:user/test",
+      errorMessage: null,
+      missingTools: [],
+    });
+    api.knownHosts.probeHost = vi.fn().mockResolvedValue({
+      hostId: "aws-host-legacy",
+      hostLabel: "AWS Legacy",
+      host: "aws-ssm:default:ap-northeast-2:i-legacy",
+      port: 22,
+      algorithm: "ssh-ed25519",
+      publicKeyBase64: "AAAATEST",
+      fingerprintSha256: "SHA256:test",
+      status: "trusted",
+      existing: null,
+      targetDescription: "AWS SSM · i-legacy",
+    });
+
+    const store = createAppStore(api);
+    await store.getState().bootstrap();
+    store.getState().activateSftp();
+
+    await store.getState().connectSftpHost("right", "aws-host-legacy");
+
+    expect(api.aws.loadHostSshMetadata).toHaveBeenCalledWith("aws-host-legacy");
+    expect(api.knownHosts.probeHost).toHaveBeenCalled();
+    expect(api.sftp.connect).toHaveBeenCalled();
+  });
+
+  it("updates the SFTP pane progress from endpoint-scoped AWS progress events", async () => {
+    const store = createAppStore(createMockApi());
+    await store.getState().bootstrap();
+    store.getState().activateSftp();
+
+    store.setState((state) => ({
+      sftp: {
+        ...state.sftp,
+        rightPane: {
+          ...state.sftp.rightPane,
+          sourceKind: "host",
+          connectingHostId: "aws-host-1",
+          connectingEndpointId: "endpoint-aws",
+          isLoading: true,
+        },
+      },
+    }));
+
+    store.getState().handleSftpConnectionProgressEvent({
+      endpointId: "endpoint-aws",
+      hostId: "aws-host-1",
+      stage: "sending-public-key",
+      message: "EC2 Instance Connect로 공개 키를 전송하는 중입니다.",
+    });
+
+    expect(store.getState().sftp.rightPane.connectionProgress).toEqual({
+      endpointId: "endpoint-aws",
+      hostId: "aws-host-1",
+      stage: "sending-public-key",
+      message: "EC2 Instance Connect로 공개 키를 전송하는 중입니다.",
+    });
   });
 
   it("uses a caller-assigned endpoint id when connecting a Warpgate SFTP host", async () => {

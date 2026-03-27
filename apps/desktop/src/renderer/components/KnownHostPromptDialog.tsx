@@ -33,7 +33,10 @@ export function KnownHostPromptDialog({ pending, onAccept, onCancel, onOpenSecur
             <div className="known-host-dialog__summary-field">
               <span className="field-label">Host:</span>
               <strong>
-                {pending.probe.hostLabel} ({pending.probe.host}:{pending.probe.port})
+                {pending.probe.hostLabel} (
+                {pending.probe.targetDescription ??
+                  `${pending.probe.host}:${pending.probe.port}`}
+                )
               </strong>
             </div>
             <div className="known-host-dialog__summary-field">

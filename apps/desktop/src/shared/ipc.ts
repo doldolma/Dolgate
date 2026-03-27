@@ -3,6 +3,8 @@ import type {
   AppSettings,
   AwsSsmPortForwardTargetKind,
   AwsEc2InstanceSummary,
+  AwsHostSshInspectionInput,
+  AwsHostSshInspectionResult,
   AwsProfileStatus,
   AwsProfileSummary,
   AuthState,
@@ -41,6 +43,7 @@ import type {
   SessionShareSnapshotInput,
   SessionShareStartInput,
   SessionShareState,
+  SftpConnectionProgressEvent,
   SftpEndpointSummary,
   SyncStatus,
   TerminalTab,
@@ -242,6 +245,7 @@ export interface SftpChmodInput {
 
 export interface KnownHostProbeInput {
   hostId: string;
+  endpointId?: string | null;
 }
 
 // 모든 stdio 요청은 동일한 envelope 구조를 사용한다.
@@ -337,6 +341,10 @@ export interface DesktopApi {
       profileName: string,
       region: string,
     ) => Promise<AwsEc2InstanceSummary[]>;
+    inspectHostSshMetadata: (
+      input: AwsHostSshInspectionInput,
+    ) => Promise<AwsHostSshInspectionResult>;
+    loadHostSshMetadata: (hostId: string) => Promise<HostRecord>;
   };
   warpgate: {
     testConnection: (
@@ -487,6 +495,9 @@ export interface DesktopApi {
     delete: (input: SftpDeleteInput) => Promise<void>;
     startTransfer: (input: TransferStartInput) => Promise<TransferJob>;
     cancelTransfer: (jobId: string) => Promise<void>;
+    onConnectionProgress: (
+      listener: (event: SftpConnectionProgressEvent) => void,
+    ) => () => void;
     onTransferEvent: (
       listener: (event: TransferJobEvent) => void,
     ) => () => void;

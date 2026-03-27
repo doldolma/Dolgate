@@ -135,6 +135,7 @@ function createMockStoreState(overrides: Record<string, unknown> = {}) {
     },
     pendingHostKeyPrompt: null,
     pendingCredentialRetry: null,
+    pendingAwsSftpConfigRetry: null,
     pendingInteractiveAuth: null,
     sftp: {
       localHomePath: '/',
@@ -192,6 +193,8 @@ function createMockStoreState(overrides: Record<string, unknown> = {}) {
     dismissPendingHostKeyPrompt: fn(),
     dismissPendingCredentialRetry: fn(),
     submitCredentialRetry: fn(),
+    dismissPendingAwsSftpConfigRetry: fn(),
+    submitAwsSftpConfigRetry: fn(),
     respondInteractiveAuth: fn(),
     reopenInteractiveAuthUrl: fn(),
     clearPendingInteractiveAuth: fn(),

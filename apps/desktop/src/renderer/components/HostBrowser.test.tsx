@@ -56,6 +56,28 @@ const hosts: HostRecord[] = [
     updatedAt: '2025-01-01T00:00:00.000Z'
   },
   {
+    id: 'aws-1',
+    kind: 'aws-ec2',
+    label: 'AWS App',
+    awsProfileName: 'default',
+    awsRegion: 'ap-northeast-2',
+    awsInstanceId: 'i-aws',
+    awsAvailabilityZone: 'ap-northeast-2a',
+    awsInstanceName: 'aws-app',
+    awsPlatform: 'Linux/UNIX',
+    awsPrivateIp: '10.0.0.10',
+    awsState: 'running',
+    awsSshUsername: null,
+    awsSshPort: null,
+    awsSshMetadataStatus: 'loading',
+    awsSshMetadataError: null,
+    groupName: 'Servers',
+    tags: ['app'],
+    terminalThemeId: null,
+    createdAt: '2025-01-01T00:00:00.000Z',
+    updatedAt: '2025-01-01T00:00:00.000Z'
+  },
+  {
     id: 'host-2',
     kind: 'ssh',
     label: 'DB',
@@ -142,7 +164,7 @@ describe('HostBrowser helpers', () => {
       {
         path: 'Servers',
         name: 'Servers',
-        hostCount: 2
+        hostCount: 3
       }
     ]);
 
@@ -157,8 +179,8 @@ describe('HostBrowser helpers', () => {
 
   it('identifies only direct host children for the current group', () => {
     expect(isDirectHostChild(hosts[0].groupName ?? null, 'Servers')).toBe(true);
-    expect(isDirectHostChild(hosts[1].groupName ?? null, 'Servers')).toBe(false);
-    expect(isDirectHostChild(hosts[1].groupName ?? null, 'Servers/Nested')).toBe(true);
+    expect(isDirectHostChild(hosts[2].groupName ?? null, 'Servers')).toBe(false);
+    expect(isDirectHostChild(hosts[2].groupName ?? null, 'Servers/Nested')).toBe(true);
   });
 
   it('chooses the right delete dialog variant based on descendant counts', () => {
@@ -168,7 +190,7 @@ describe('HostBrowser helpers', () => {
   });
 
   it('shows subtree hosts when a parent group is selected', () => {
-    expect(filterHostsInGroupTree(hosts, 'Servers').map((host) => host.label)).toEqual(['App', 'DB']);
+    expect(filterHostsInGroupTree(hosts, 'Servers').map((host) => host.label)).toEqual(['App', 'AWS App', 'DB']);
   });
 
   it('keeps tags hidden until the toggle is pressed', () => {
@@ -212,6 +234,12 @@ describe('HostBrowser helpers', () => {
     expect(getHostBrowserEmptyCalloutMessage(0, '')).toBe('New Host 또는 Import 메뉴를 눌러 첫 번째 연결 대상을 추가해보세요.');
     expect(getHostBrowserEmptyCalloutMessage(2, 'nas')).toBe('검색어를 지우거나 다른 호스트명으로 다시 찾아보세요.');
     expect(getHostBrowserEmptyCalloutMessage(2, '')).toBe('New Host를 눌러 이 위치에 호스트를 추가하거나, 다른 그룹으로 이동해 장치를 확인해보세요.');
+  });
+
+  it('shows AWS SSH metadata status on AWS host cards', () => {
+    renderBrowser();
+
+    expect(screen.getByText('SSH 설정 확인 중')).toBeInTheDocument();
   });
 });
 

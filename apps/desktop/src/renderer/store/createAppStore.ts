@@ -1,6 +1,9 @@
 import { createStore } from "zustand/vanilla";
 import {
+  AWS_SFTP_DEFAULT_PORT,
   DEFAULT_SFTP_BROWSER_COLUMN_WIDTHS,
+  getAwsEc2HostSftpDisabledReason,
+  getAwsEc2HostSshPort,
   getParentGroupPath,
   isAwsEc2HostRecord,
   isGroupWithinPath,
@@ -35,6 +38,7 @@ import type {
   SessionShareSnapshotInput,
   SessionShareStartInput,
   SessionShareState,
+  SftpConnectionProgressEvent,
   SftpEndpointSummary,
   SftpPaneId,
   SecretMetadataRecord,
@@ -103,6 +107,7 @@ export interface SftpPaneState {
   endpoint: SftpEndpointSummary | null;
   connectingHostId?: string | null;
   connectingEndpointId?: string | null;
+  connectionProgress?: SftpConnectionProgressEvent | null;
   hostGroupPath: string | null;
   currentPath: string;
   lastLocalPath: string;
@@ -163,6 +168,14 @@ export interface PendingCredentialRetry {
   credentialKind: "password" | "passphrase";
   message: string;
   paneId?: SftpPaneId;
+}
+
+export interface PendingAwsSftpConfigRetry {
+  hostId: string;
+  paneId: SftpPaneId;
+  message: string;
+  suggestedUsername: string;
+  suggestedPort: number;
 }
 
 interface PendingInteractiveAuthBase {
@@ -236,6 +249,7 @@ export interface AppState {
   sftp: SftpState;
   pendingHostKeyPrompt: PendingHostKeyPrompt | null;
   pendingCredentialRetry: PendingCredentialRetry | null;
+  pendingAwsSftpConfigRetry: PendingAwsSftpConfigRetry | null;
   pendingInteractiveAuth: PendingInteractiveAuth | null;
   pendingConnectionAttempts: PendingConnectionAttempt[];
   setSearchQuery: (value: string) => void;
@@ -334,6 +348,11 @@ export interface AppState {
   dismissPendingHostKeyPrompt: () => void;
   dismissPendingCredentialRetry: () => void;
   submitCredentialRetry: (secrets: HostSecretInput) => Promise<void>;
+  dismissPendingAwsSftpConfigRetry: () => void;
+  submitAwsSftpConfigRetry: (input: {
+    username: string;
+    port: number;
+  }) => Promise<void>;
   respondInteractiveAuth: (
     challengeId: string,
     responses: string[],
@@ -355,6 +374,9 @@ export interface AppState {
   ) => void;
   handleTransferEvent: (event: TransferJobEvent) => void;
   handlePortForwardEvent: (event: PortForwardRuntimeEvent) => void;
+  handleSftpConnectionProgressEvent: (
+    event: SftpConnectionProgressEvent,
+  ) => void;
   setSftpPaneSource: (
     paneId: SftpPaneId,
     sourceKind: SftpSourceKind,
@@ -499,6 +521,7 @@ function createEmptyPane(id: SftpPaneId): SftpPaneState {
     endpoint: null,
     connectingHostId: null,
     connectingEndpointId: null,
+    connectionProgress: null,
     hostGroupPath: null,
     currentPath: "",
     lastLocalPath: "",
@@ -553,6 +576,7 @@ function buildSftpHostPickerPane(pane: SftpPaneState): SftpPaneState {
     endpoint: null,
     connectingHostId: null,
     connectingEndpointId: null,
+    connectionProgress: null,
     currentPath: "",
     history: [],
     historyIndex: -1,
@@ -597,10 +621,15 @@ function toHostDraft(record: HostRecord, label: string): HostDraft {
       awsProfileName: record.awsProfileName,
       awsRegion: record.awsRegion,
       awsInstanceId: record.awsInstanceId,
+      awsAvailabilityZone: record.awsAvailabilityZone ?? null,
       awsInstanceName: record.awsInstanceName ?? null,
       awsPlatform: record.awsPlatform ?? null,
       awsPrivateIp: record.awsPrivateIp ?? null,
       awsState: record.awsState ?? null,
+      awsSshUsername: record.awsSshUsername ?? null,
+      awsSshPort: record.awsSshPort ?? null,
+      awsSshMetadataStatus: record.awsSshMetadataStatus ?? null,
+      awsSshMetadataError: record.awsSshMetadataError ?? null,
     };
   }
 
@@ -1466,6 +1495,34 @@ function resolveCredentialRetryKind(
     : null;
 }
 
+function shouldLoadAwsHostSshMetadata(
+  host: Extract<HostRecord, { kind: "aws-ec2" }>,
+): boolean {
+  return (
+    !host.awsSshUsername?.trim() ||
+    !Number.isInteger(host.awsSshPort) ||
+    (host.awsSshPort ?? 0) < 1 ||
+    (host.awsSshPort ?? 0) > 65535 ||
+    host.awsSshMetadataStatus === "loading" ||
+    host.awsSshMetadataStatus === "idle"
+  );
+}
+
+function shouldPromptAwsSftpConfigRetry(
+  host: HostRecord | undefined,
+  message: string,
+): boolean {
+  if (!host || !isAwsEc2HostRecord(host)) {
+    return false;
+  }
+  if (!(host.awsSshUsername ?? "").trim()) {
+    return true;
+  }
+  return /instanceosuser|os user|ssh username|authentication failed|unable to authenticate|ssh handshake failed|permission denied|connection refused|timed out/i.test(
+    message,
+  );
+}
+
 function resolveHostKeyCheckProgress(
   host: HostRecord,
 ): TerminalConnectionProgress {
@@ -1874,14 +1931,15 @@ export function createAppStore(api: DesktopApi) {
 
   const ensureAwsHostAuthentication = async (
     host: Extract<HostRecord, { kind: "aws-ec2" }>,
-    onStageChange: (progress: TerminalConnectionProgress) => void,
+    reportProgress: (
+      message: string,
+      options?: {
+        blockingKind?: TerminalConnectionProgress["blockingKind"];
+        stage?: TerminalConnectionProgress["stage"];
+      },
+    ) => void,
   ) => {
-    onStageChange(
-      createConnectionProgress(
-        "checking-profile",
-        `${host.awsProfileName} 프로필 인증 상태를 확인하는 중입니다.`,
-      ),
-    );
+    reportProgress(`${host.awsProfileName} 프로필 인증 상태를 확인하는 중입니다.`);
     const status = await api.aws.getProfileStatus(host.awsProfileName);
     if (status.isAuthenticated) {
       return;
@@ -1894,15 +1952,10 @@ export function createAppStore(api: DesktopApi) {
       );
     }
 
-    onStageChange(
-      createConnectionProgress(
-        "browser-login",
-        `브라우저에서 ${host.awsProfileName} AWS 로그인을 진행하는 중입니다.`,
-        {
-          blockingKind: "browser",
-        },
-      ),
-    );
+    reportProgress(`브라우저에서 ${host.awsProfileName} AWS 로그인을 진행하는 중입니다.`, {
+      blockingKind: "browser",
+      stage: "browser-login",
+    });
     try {
       await api.aws.login(host.awsProfileName);
     } catch (error) {
@@ -1913,12 +1966,7 @@ export function createAppStore(api: DesktopApi) {
       );
     }
 
-    onStageChange(
-      createConnectionProgress(
-        "checking-profile",
-        `${host.awsProfileName} 프로필 로그인 결과를 확인하는 중입니다.`,
-      ),
-    );
+    reportProgress(`${host.awsProfileName} 프로필 로그인 결과를 확인하는 중입니다.`);
     const refreshedStatus = await api.aws.getProfileStatus(host.awsProfileName);
     if (!refreshedStatus.isAuthenticated) {
       throw new Error(
@@ -1926,6 +1974,49 @@ export function createAppStore(api: DesktopApi) {
           "AWS SSO 로그인 후에도 인증이 확인되지 않았습니다.",
       );
     }
+  };
+
+  const loadAwsHostSshMetadataIntoState = async (
+    set: (
+      next:
+        | AppState
+        | Partial<AppState>
+        | ((state: AppState) => AppState | Partial<AppState>),
+    ) => void,
+    get: () => AppState,
+    hostId: string,
+  ): Promise<Extract<HostRecord, { kind: "aws-ec2" }>> => {
+    const currentHost = get().hosts.find((item) => item.id === hostId);
+    if (!currentHost || !isAwsEc2HostRecord(currentHost)) {
+      throw new Error("AWS host를 찾지 못했습니다.");
+    }
+
+    set((state) => ({
+      hosts: sortHosts(
+        state.hosts.map((host) =>
+          host.id === hostId && isAwsEc2HostRecord(host)
+            ? {
+                ...host,
+                awsSshMetadataStatus: "loading",
+                awsSshMetadataError: null,
+              }
+            : host,
+        ),
+      ),
+    }));
+
+    const nextHost = await api.aws.loadHostSshMetadata(hostId);
+    set((state) => ({
+      hosts: sortHosts([
+        ...state.hosts.filter((host) => host.id !== nextHost.id),
+        nextHost,
+      ]),
+    }));
+
+    if (!isAwsEc2HostRecord(nextHost)) {
+      throw new Error("AWS host 메타데이터를 갱신하지 못했습니다.");
+    }
+    return nextHost;
   };
 
   const updateSessionProgress = (
@@ -2327,8 +2418,14 @@ export function createAppStore(api: DesktopApi) {
 
     try {
       if (isAwsEc2HostRecord(host)) {
-        await ensureAwsHostAuthentication(host, (progress) => {
-          updateSessionProgress(set, sessionId, progress);
+        await ensureAwsHostAuthentication(host, (message, options) => {
+          updateSessionProgress(
+            set,
+            sessionId,
+            createConnectionProgress(options?.stage ?? "checking-profile", message, {
+              blockingKind: options?.blockingKind ?? "none",
+            }),
+          );
         });
         updateSessionProgress(
           set,
@@ -2519,6 +2616,7 @@ export function createAppStore(api: DesktopApi) {
           isLoading: false,
           connectingHostId: null,
           connectingEndpointId: null,
+          connectionProgress: null,
           errorMessage: undefined,
           warningMessages: listing.warnings ?? [],
           ...historyPatch,
@@ -2542,6 +2640,7 @@ export function createAppStore(api: DesktopApi) {
           isLoading: false,
           connectingHostId: null,
           connectingEndpointId: null,
+          connectionProgress: null,
           errorMessage:
             error instanceof Error
               ? error.message
@@ -2566,6 +2665,24 @@ export function createAppStore(api: DesktopApi) {
       sftp: updatePaneState(state, paneId, {
         ...getPane(state, paneId),
         warningMessages: warnings,
+      }),
+    }));
+  };
+
+  const setSftpPaneConnectionProgress = (
+    set: (
+      next:
+        | AppState
+        | Partial<AppState>
+        | ((state: AppState) => AppState | Partial<AppState>),
+    ) => void,
+    paneId: SftpPaneId,
+    progress: SftpConnectionProgressEvent | null,
+  ) => {
+    set((state) => ({
+      sftp: updatePaneState(state, paneId, {
+        ...getPane(state, paneId),
+        connectionProgress: progress,
       }),
     }));
   };
@@ -2760,6 +2877,7 @@ export function createAppStore(api: DesktopApi) {
             endpoint,
             connectingHostId: action.hostId,
             connectingEndpointId: action.endpointId,
+            connectionProgress: getPane(state, action.paneId).connectionProgress,
             currentPath: endpoint.path,
             history: [endpoint.path],
             historyIndex: 0,
@@ -2780,6 +2898,10 @@ export function createAppStore(api: DesktopApi) {
         const message =
           error instanceof Error ? error.message : "SFTP 연결에 실패했습니다.";
         const credentialKind = resolveCredentialRetryKind(host, message);
+        const shouldPromptAwsConfig = shouldPromptAwsSftpConfigRetry(
+          host,
+          message,
+        );
         if (credentialKind) {
           set({
             pendingCredentialRetry: {
@@ -2790,6 +2912,16 @@ export function createAppStore(api: DesktopApi) {
               message,
             },
           });
+        } else if (host && shouldPromptAwsConfig && isAwsEc2HostRecord(host)) {
+          set({
+            pendingAwsSftpConfigRetry: {
+              hostId: action.hostId,
+              paneId: action.paneId,
+              message,
+              suggestedUsername: host.awsSshUsername?.trim() ?? "",
+              suggestedPort: getAwsEc2HostSshPort(host),
+            },
+          });
         }
         set((state) => ({
           sftp: updatePaneState(state, action.paneId, {
@@ -2798,9 +2930,11 @@ export function createAppStore(api: DesktopApi) {
             endpoint: null,
             connectingHostId: null,
             connectingEndpointId: null,
+            connectionProgress: null,
             entries: [],
             isLoading: false,
-            errorMessage: credentialKind ? undefined : message,
+            errorMessage:
+              credentialKind || shouldPromptAwsConfig ? undefined : message,
             warningMessages: [],
           }),
         }));
@@ -2832,10 +2966,14 @@ export function createAppStore(api: DesktopApi) {
     input: {
       hostId: string;
       sessionId?: string | null;
+      endpointId?: string | null;
       action: PendingHostKeyPrompt["action"];
     },
   ): Promise<boolean> => {
-    const probe = await api.knownHosts.probeHost({ hostId: input.hostId });
+    const probe = await api.knownHosts.probeHost({
+      hostId: input.hostId,
+      endpointId: input.endpointId ?? null,
+    });
     if (probe.status === "trusted") {
       return true;
     }
@@ -2874,6 +3012,7 @@ export function createAppStore(api: DesktopApi) {
       sftp: defaultSftpState,
       pendingHostKeyPrompt: null,
       pendingCredentialRetry: null,
+      pendingAwsSftpConfigRetry: null,
       pendingInteractiveAuth: null,
       pendingConnectionAttempts: [],
       setSearchQuery: (value) => set({ searchQuery: value }),
@@ -2998,6 +3137,7 @@ export function createAppStore(api: DesktopApi) {
           isReady: true,
           pendingHostKeyPrompt: null,
           pendingCredentialRetry: null,
+          pendingAwsSftpConfigRetry: null,
           pendingInteractiveAuth: null,
           pendingConnectionAttempts: [],
           sftp: {
@@ -3110,18 +3250,8 @@ export function createAppStore(api: DesktopApi) {
           hostId,
           isAwsEc2HostRecord(current)
             ? {
-                kind: "aws-ec2",
-                label: current.label,
+                ...toHostDraft(current, current.label),
                 groupName: groupPath,
-                tags: current.tags ?? [],
-                terminalThemeId: current.terminalThemeId ?? null,
-                awsProfileName: current.awsProfileName,
-                awsRegion: current.awsRegion,
-                awsInstanceId: current.awsInstanceId,
-                awsInstanceName: current.awsInstanceName ?? null,
-                awsPlatform: current.awsPlatform ?? null,
-                awsPrivateIp: current.awsPrivateIp ?? null,
-                awsState: current.awsState ?? null,
               }
             : isWarpgateSshHostRecord(current)
               ? {
@@ -3910,6 +4040,8 @@ export function createAppStore(api: DesktopApi) {
         }
         set({ pendingCredentialRetry: null });
       },
+      dismissPendingAwsSftpConfigRetry: () =>
+        set({ pendingAwsSftpConfigRetry: null }),
       respondInteractiveAuth: async (challengeId, responses) => {
         const pending = get().pendingInteractiveAuth;
         if (!pending || pending.challengeId !== challengeId) {
@@ -4041,6 +4173,41 @@ export function createAppStore(api: DesktopApi) {
           set,
         );
       },
+      submitAwsSftpConfigRetry: async ({ username, port }) => {
+        const pending = get().pendingAwsSftpConfigRetry;
+        if (!pending) {
+          return;
+        }
+
+        const currentHost = get().hosts.find((item) => item.id === pending.hostId);
+        if (!currentHost || !isAwsEc2HostRecord(currentHost)) {
+          set({ pendingAwsSftpConfigRetry: null });
+          return;
+        }
+
+        const baseDraft = toHostDraft(
+          currentHost,
+          currentHost.label,
+        ) as Extract<HostDraft, { kind: "aws-ec2" }>;
+        const nextDraft: Extract<HostDraft, { kind: "aws-ec2" }> = {
+          ...baseDraft,
+          awsSshUsername: username.trim(),
+          awsSshPort: port,
+          awsSshMetadataStatus: "ready",
+          awsSshMetadataError: null,
+        };
+        const nextHost = await api.hosts.update(currentHost.id, {
+          ...nextDraft,
+        });
+        set((state) => ({
+          pendingAwsSftpConfigRetry: null,
+          hosts: sortHosts([
+            ...state.hosts.filter((host) => host.id !== nextHost.id),
+            nextHost,
+          ]),
+        }));
+        await get().connectSftpHost(pending.paneId, pending.hostId);
+      },
       handleCoreEvent: (event) => {
         const sessionId = event.sessionId;
         const endpointId = event.endpointId;
@@ -4150,13 +4317,32 @@ export function createAppStore(api: DesktopApi) {
             event.type === "sftpDisconnected" ||
             event.type === "sftpError"
           ) {
-            set((state) => ({
-              pendingInteractiveAuth:
-                isPendingSftpInteractiveAuth(state.pendingInteractiveAuth) &&
-                state.pendingInteractiveAuth.endpointId === endpointId
-                  ? null
-                  : state.pendingInteractiveAuth,
-            }));
+            set((state) => {
+              const paneId = resolveSftpPaneIdByEndpoint(state, endpointId);
+              if (!paneId) {
+                return {
+                  pendingInteractiveAuth:
+                    isPendingSftpInteractiveAuth(state.pendingInteractiveAuth) &&
+                    state.pendingInteractiveAuth.endpointId === endpointId
+                      ? null
+                      : state.pendingInteractiveAuth,
+                };
+              }
+              return {
+                pendingInteractiveAuth:
+                  isPendingSftpInteractiveAuth(state.pendingInteractiveAuth) &&
+                  state.pendingInteractiveAuth.endpointId === endpointId
+                    ? null
+                    : state.pendingInteractiveAuth,
+                sftp: updatePaneState(state, paneId, {
+                  ...getPane(state, paneId),
+                  connectionProgress:
+                    event.type === "sftpError" || event.type === "sftpDisconnected"
+                      ? null
+                      : getPane(state, paneId).connectionProgress,
+                }),
+              };
+            });
             return;
           }
 
@@ -4500,6 +4686,27 @@ export function createAppStore(api: DesktopApi) {
           set({ activityLogs: sortLogs(activityLogs) });
         });
       },
+      handleSftpConnectionProgressEvent: (event) => {
+        set((state) => {
+          const paneId = resolveSftpPaneIdByEndpoint(state, event.endpointId);
+          if (!paneId) {
+            return state;
+          }
+          const pane = getPane(state, paneId);
+          if (
+            pane.connectingEndpointId !== event.endpointId &&
+            pane.endpoint?.id !== event.endpointId
+          ) {
+            return state;
+          }
+          return {
+            sftp: updatePaneState(state, paneId, {
+              ...pane,
+              connectionProgress: event,
+            }),
+          };
+        });
+      },
       setSftpPaneSource: async (paneId, sourceKind) => {
         const pane = getPane(get(), paneId);
         if (pane.sourceKind === sourceKind) {
@@ -4515,6 +4722,7 @@ export function createAppStore(api: DesktopApi) {
           endpoint: null,
           connectingHostId: null,
           connectingEndpointId: null,
+          connectionProgress: null,
           hostGroupPath: null,
           currentPath:
             sourceKind === "local"
@@ -4589,6 +4797,7 @@ export function createAppStore(api: DesktopApi) {
             selectedHostId: null,
             connectingHostId: null,
             connectingEndpointId: null,
+            connectionProgress: null,
           }),
         })),
       selectSftpHost: (paneId, hostId) =>
@@ -4600,18 +4809,60 @@ export function createAppStore(api: DesktopApi) {
         })),
       connectSftpHost: async (paneId, hostId) => {
         const host = get().hosts.find((item) => item.id === hostId);
-        if (!host || isAwsEc2HostRecord(host)) {
+        if (!host) {
           return;
         }
+        const awsHost = isAwsEc2HostRecord(host) ? host : null;
+        const shouldLoadMetadata = awsHost
+          ? !/windows/i.test(awsHost.awsPlatform ?? "") &&
+            shouldLoadAwsHostSshMetadata(awsHost)
+          : false;
+        if (awsHost) {
+          const disabledReason = getAwsEc2HostSftpDisabledReason(awsHost);
+          if (disabledReason) {
+            set((state) => ({
+              activeWorkspaceTab: "sftp",
+              sftp: updatePaneState(state, paneId, {
+                ...getPane(state, paneId),
+                sourceKind: "host",
+                endpoint: null,
+                connectingHostId: null,
+                connectingEndpointId: null,
+                connectionProgress: null,
+                selectedHostId: hostId,
+                isLoading: false,
+                errorMessage: disabledReason,
+                warningMessages: [],
+              }),
+            }));
+            return;
+          }
+        }
         const endpointId = globalThis.crypto.randomUUID();
+        const awsConnectionStage: SftpConnectionProgressEvent["stage"] =
+          shouldLoadMetadata
+            ? "loading-instance-metadata"
+            : "checking-profile";
+        const initialConnectionProgress = awsHost
+          ? {
+              endpointId,
+              hostId: awsHost.id,
+              stage: awsConnectionStage,
+              message: shouldLoadMetadata
+                ? "SSH 설정을 자동으로 확인하는 중입니다."
+                : `${awsHost.awsProfileName} 프로필 인증 상태를 확인하는 중입니다.`,
+            }
+          : null;
         set((state) => ({
           activeWorkspaceTab: "sftp",
+          pendingAwsSftpConfigRetry: null,
           sftp: updatePaneState(state, paneId, {
             ...getPane(state, paneId),
             sourceKind: "host",
             endpoint: null,
             connectingHostId: hostId,
             connectingEndpointId: endpointId,
+            connectionProgress: initialConnectionProgress,
             selectedHostId: hostId,
             isLoading: true,
             errorMessage: undefined,
@@ -4619,8 +4870,50 @@ export function createAppStore(api: DesktopApi) {
           }),
         }));
         try {
+          let resolvedAwsHost = awsHost;
+          if (resolvedAwsHost && shouldLoadMetadata) {
+            const reloadedAwsHost = await loadAwsHostSshMetadataIntoState(
+              set,
+              get,
+              resolvedAwsHost.id,
+            );
+            resolvedAwsHost = reloadedAwsHost;
+            if (!(reloadedAwsHost.awsSshUsername ?? "").trim()) {
+              set((state) => ({
+                pendingAwsSftpConfigRetry: {
+                  hostId: reloadedAwsHost.id,
+                  paneId,
+                  message:
+                    reloadedAwsHost.awsSshMetadataError ||
+                    "자동으로 SSH 사용자명을 확인하지 못했습니다. 사용자명을 직접 입력해 주세요.",
+                  suggestedUsername: "",
+                  suggestedPort: getAwsEc2HostSshPort(reloadedAwsHost),
+                },
+                sftp: updatePaneState(state, paneId, {
+                  ...getPane(state, paneId),
+                  connectingHostId: null,
+                  connectingEndpointId: null,
+                  connectionProgress: null,
+                  isLoading: false,
+                  errorMessage: undefined,
+                }),
+              }));
+              return;
+            }
+          }
+          if (resolvedAwsHost) {
+            await ensureAwsHostAuthentication(resolvedAwsHost, (message) => {
+              setSftpPaneConnectionProgress(set, paneId, {
+                endpointId,
+                hostId: resolvedAwsHost.id,
+                stage: "checking-profile",
+                message,
+              });
+            });
+          }
           const trusted = await ensureTrustedHost(set, {
             hostId,
+            endpointId,
             action: {
               kind: "sftp",
               paneId,
@@ -4630,13 +4923,14 @@ export function createAppStore(api: DesktopApi) {
           });
           if (!trusted) {
             set((state) => ({
-              sftp: updatePaneState(state, paneId, {
-                ...getPane(state, paneId),
-                connectingHostId: null,
-                connectingEndpointId: null,
-                selectedHostId: hostId,
-                isLoading: false,
-                errorMessage: undefined,
+            sftp: updatePaneState(state, paneId, {
+              ...getPane(state, paneId),
+              connectingHostId: null,
+              connectingEndpointId: null,
+              connectionProgress: null,
+              selectedHostId: hostId,
+              isLoading: false,
+              errorMessage: undefined,
               }),
             }));
             return;
@@ -4648,6 +4942,23 @@ export function createAppStore(api: DesktopApi) {
             set,
           );
         } catch (error) {
+          const message =
+            error instanceof Error
+              ? error.message
+              : "호스트 키를 확인하지 못했습니다.";
+          if (shouldPromptAwsSftpConfigRetry(host, message)) {
+            set({
+              pendingAwsSftpConfigRetry: {
+                hostId,
+                paneId,
+                message,
+                suggestedUsername: awsHost?.awsSshUsername?.trim() ?? "",
+                suggestedPort: awsHost
+                  ? getAwsEc2HostSshPort(awsHost)
+                  : AWS_SFTP_DEFAULT_PORT,
+              },
+            });
+          }
           set((state) => ({
             sftp: updatePaneState(state, paneId, {
               ...getPane(state, paneId),
@@ -4655,12 +4966,11 @@ export function createAppStore(api: DesktopApi) {
               endpoint: null,
               connectingHostId: null,
               connectingEndpointId: null,
+              connectionProgress: null,
               selectedHostId: hostId,
               isLoading: false,
               errorMessage:
-                error instanceof Error
-                  ? error.message
-                  : "호스트 키를 확인하지 못했습니다.",
+                shouldPromptAwsSftpConfigRetry(host, message) ? undefined : message,
               warningMessages: [],
             }),
           }));

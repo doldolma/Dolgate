@@ -106,6 +106,34 @@ const connectableHosts: HostRecord[] = [
   },
 ];
 
+function createAwsHost(
+  overrides: Partial<Extract<HostRecord, { kind: "aws-ec2" }>> = {},
+): Extract<HostRecord, { kind: "aws-ec2" }> {
+  return {
+    id: "aws-1",
+    kind: "aws-ec2",
+    label: "AWS Linux",
+    awsProfileName: "default",
+    awsRegion: "ap-northeast-2",
+    awsInstanceId: "i-abc",
+    awsAvailabilityZone: "ap-northeast-2a",
+    awsInstanceName: "web-1",
+    awsPlatform: "Linux/UNIX",
+    awsPrivateIp: "10.0.0.10",
+    awsState: "running",
+    awsSshUsername: "ubuntu",
+    awsSshPort: 22,
+    awsSshMetadataStatus: "ready",
+    awsSshMetadataError: null,
+    groupName: "Production",
+    tags: ["prod"],
+    terminalThemeId: null,
+    createdAt: "2026-03-26T00:00:00.000Z",
+    updatedAt: "2026-03-26T00:00:00.000Z",
+    ...overrides,
+  };
+}
+
 function createPane(id: "left" | "right", entry: FileEntry): SftpPaneState {
   const currentPath = id === "left" ? "/left" : "/right";
   return {
@@ -356,6 +384,77 @@ describe("SftpWorkspace column resizing", () => {
     expect(screen.getByText(/example\.user/)).toBeTruthy();
   });
 
+  it("shows AWS Linux hosts in the SFTP host picker and allows connecting them", async () => {
+    const sftp = createSftpState();
+    sftp.rightPane = createHostPickerPane();
+    const onConnectHost = vi.fn().mockResolvedValue(undefined);
+
+    renderWorkspace({
+      hosts: [...connectableHosts, createAwsHost()],
+      groups: hostGroups,
+      sftp,
+      onConnectHost,
+    });
+
+    const awsCard = screen.getByText("AWS Linux").closest(".host-browser-card");
+    expect(awsCard).toBeTruthy();
+
+    fireEvent.doubleClick(awsCard as HTMLElement);
+
+    await waitFor(() =>
+      expect(onConnectHost).toHaveBeenCalledWith("right", "aws-1"),
+    );
+  });
+
+  it("shows a disabled reason for unsupported AWS Windows hosts", () => {
+    const sftp = createSftpState();
+    sftp.rightPane = createHostPickerPane();
+
+    renderWorkspace({
+      hosts: [
+        ...connectableHosts,
+        createAwsHost({
+          id: "aws-win",
+          label: "AWS Windows",
+          awsPlatform: "Windows",
+        }),
+      ],
+      groups: hostGroups,
+      sftp,
+    });
+
+    const awsCard = screen.getByText("AWS Windows").closest(".host-browser-card");
+    expect(awsCard).toBeTruthy();
+    expect(awsCard?.className).toContain("disabled");
+    expect(
+      screen.getByText("Windows 인스턴스는 아직 지원하지 않습니다."),
+    ).toBeTruthy();
+  });
+
+  it("offers a settings shortcut when an AWS host is missing SSH username", async () => {
+    const sftp = createSftpState();
+    sftp.rightPane = createHostPickerPane();
+    const onOpenHostSettings = vi.fn();
+
+    renderWorkspace({
+      hosts: [
+        ...connectableHosts,
+        createAwsHost({
+          id: "aws-missing-user",
+          label: "AWS Missing User",
+          awsSshUsername: null,
+        }),
+      ],
+      groups: hostGroups,
+      sftp,
+      onOpenHostSettings,
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "설정 열기" }));
+
+    expect(onOpenHostSettings).toHaveBeenCalledWith("aws-missing-user");
+  });
+
   it("shows a disconnect button for connected host panes and returns control through the callback", async () => {
     const sftp = createSftpState();
     sftp.rightPane = createHostPickerPane({
@@ -409,6 +508,33 @@ describe("SftpWorkspace column resizing", () => {
     expect(screen.getByText("Prod SSH 연결 중...")).toBeTruthy();
     expect(
       container.querySelector(".host-browser-card.connecting"),
+    ).toBeTruthy();
+  });
+
+  it("renders AWS SFTP progress details inside the connecting overlay", () => {
+    const sftp = createSftpState();
+    sftp.rightPane = createHostPickerPane({
+      connectingHostId: "aws-1",
+      connectingEndpointId: "endpoint-aws",
+      selectedHostId: "aws-1",
+      isLoading: true,
+      connectionProgress: {
+        endpointId: "endpoint-aws",
+        hostId: "aws-1",
+        stage: "sending-public-key",
+        message: "EC2 Instance Connect로 공개 키를 전송하는 중입니다.",
+      },
+    });
+
+    renderWorkspace({
+      hosts: [...connectableHosts, createAwsHost()],
+      groups: hostGroups,
+      sftp,
+    });
+
+    expect(screen.getByText("공개 키 전송")).toBeTruthy();
+    expect(
+      screen.getByText("EC2 Instance Connect로 공개 키를 전송하는 중입니다."),
     ).toBeTruthy();
   });
 

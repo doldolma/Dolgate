@@ -59,6 +59,79 @@ afterEach(() => {
   vi.resetModules();
 });
 
+describe('HostRepository', () => {
+  it('persists AWS SFTP metadata on create and update', async () => {
+    const { HostRepository } = await loadRepositories();
+    const hosts = new HostRepository();
+
+    const created = hosts.create('aws-host-1', {
+      kind: 'aws-ec2',
+      label: 'AWS Prod',
+      groupName: 'Production',
+      tags: ['prod'],
+      terminalThemeId: null,
+      awsProfileName: 'default',
+      awsRegion: 'ap-northeast-2',
+      awsInstanceId: 'i-abc',
+      awsAvailabilityZone: 'ap-northeast-2a',
+      awsInstanceName: 'web-1',
+      awsPlatform: 'Linux/UNIX',
+      awsPrivateIp: '10.0.0.10',
+      awsState: 'running',
+      awsSshUsername: 'ubuntu',
+      awsSshPort: 2222,
+      awsSshMetadataStatus: 'ready',
+      awsSshMetadataError: null
+    });
+
+    expect(created).toMatchObject({
+      kind: 'aws-ec2',
+      awsAvailabilityZone: 'ap-northeast-2a',
+      awsSshUsername: 'ubuntu',
+      awsSshPort: 2222,
+      awsSshMetadataStatus: 'ready',
+      awsSshMetadataError: null
+    });
+
+    const updated = hosts.update('aws-host-1', {
+      kind: 'aws-ec2',
+      label: 'AWS Prod',
+      groupName: 'Production',
+      tags: ['prod'],
+      terminalThemeId: null,
+      awsProfileName: 'default',
+      awsRegion: 'ap-northeast-2',
+      awsInstanceId: 'i-abc',
+      awsAvailabilityZone: 'ap-northeast-2c',
+      awsInstanceName: 'web-1',
+      awsPlatform: 'Linux/UNIX',
+      awsPrivateIp: '10.0.0.10',
+      awsState: 'running',
+      awsSshUsername: 'ec2-user',
+      awsSshPort: 22,
+      awsSshMetadataStatus: 'ready',
+      awsSshMetadataError: null
+    });
+
+    expect(updated).toMatchObject({
+      kind: 'aws-ec2',
+      awsAvailabilityZone: 'ap-northeast-2c',
+      awsSshUsername: 'ec2-user',
+      awsSshPort: 22,
+      awsSshMetadataStatus: 'ready',
+      awsSshMetadataError: null
+    });
+    expect(hosts.getById('aws-host-1')).toMatchObject({
+      kind: 'aws-ec2',
+      awsAvailabilityZone: 'ap-northeast-2c',
+      awsSshUsername: 'ec2-user',
+      awsSshPort: 22,
+      awsSshMetadataStatus: 'ready',
+      awsSshMetadataError: null
+    });
+  });
+});
+
 describe('GroupRepository.remove', () => {
   it('reparents descendant groups and hosts while preserving existing target paths', async () => {
     const { HostRepository, GroupRepository } = await loadRepositories();
