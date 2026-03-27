@@ -3483,8 +3483,17 @@ body.sftp-column-resizing * {
 }
 
 .warpgate-import-dialog .modal-card__body {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
   min-height: 0;
   overflow: auto;
+}
+
+.warpgate-import-dialog__actions {
+  display: flex;
+  justify-content: flex-end;
+  padding-top: 0.1rem;
 }
 
 .termius-import-dialog .modal-card__body {

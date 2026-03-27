@@ -665,7 +665,7 @@ export function XshellImportDialog({ open, onClose, onImported }: XshellImportDi
           {probe ? renderSourceList(probe.sources) : null}
           {probe ? renderWarningList(probe.warnings) : null}
           {probe && hasSavedPasswordHosts ? (
-            <div className="form-note">저장된 비밀번호는 자동 가져오기를 시도합니다. 실패하면 호스트만 추가됩니다.</div>
+            <div className="form-note">암호화된 비밀번호는 복호화를 시도합니다. 실패하면 호스트만 추가됩니다.</div>
           ) : null}
 
           {probe ? (

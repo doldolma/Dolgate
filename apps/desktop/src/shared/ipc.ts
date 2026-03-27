@@ -54,6 +54,7 @@ import type {
   UpdateEvent,
   UpdateState,
   WarpgateConnectionInfo,
+  WarpgateImportEvent,
   WarpgateTargetSummary,
 } from "./models";
 import type { SyncPayloadV2 } from "./api";
@@ -350,6 +351,9 @@ export interface DesktopApi {
       baseUrl: string,
       token: string,
     ) => Promise<WarpgateTargetSummary[]>;
+    startBrowserImport: (baseUrl: string) => Promise<{ attemptId: string }>;
+    cancelBrowserImport: (attemptId: string) => Promise<void>;
+    onImportEvent: (listener: (event: WarpgateImportEvent) => void) => () => void;
   };
   termius: {
     probeLocal: () => Promise<TermiusProbeResult>;

@@ -34,7 +34,10 @@ export const ipcChannels = {
   warpgate: {
     testConnection: 'warpgate:test-connection',
     getConnectionInfo: 'warpgate:get-connection-info',
-    listSshTargets: 'warpgate:list-ssh-targets'
+    listSshTargets: 'warpgate:list-ssh-targets',
+    startBrowserImport: 'warpgate:start-browser-import',
+    cancelBrowserImport: 'warpgate:cancel-browser-import',
+    event: 'warpgate:event'
   },
   termius: {
     probeLocal: 'termius:probe-local',

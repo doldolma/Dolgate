@@ -776,6 +776,23 @@ export function registerIpcHandlers(
     },
   );
 
+  ipcMain.handle(
+    ipcChannels.warpgate.startBrowserImport,
+    async (event, baseUrl: string) => {
+      return warpgateService.startBrowserImport(
+        baseUrl,
+        BrowserWindow.fromWebContents(event.sender),
+      );
+    },
+  );
+
+  ipcMain.handle(
+    ipcChannels.warpgate.cancelBrowserImport,
+    async (_event, attemptId: string) => {
+      await warpgateService.cancelBrowserImport(attemptId);
+    },
+  );
+
   ipcMain.handle(ipcChannels.termius.probeLocal, async () => {
     return termiusImportService.probeLocal();
   });

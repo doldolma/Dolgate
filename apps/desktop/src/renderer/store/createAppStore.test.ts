@@ -172,6 +172,9 @@ function createMockApi(): DesktopApi {
         username: "example.user",
       }),
       listSshTargets: vi.fn().mockResolvedValue([]),
+      startBrowserImport: vi.fn().mockResolvedValue({ attemptId: "attempt-1" }),
+      cancelBrowserImport: vi.fn().mockResolvedValue(undefined),
+      onImportEvent: vi.fn(() => () => undefined),
     },
     groups: {
       list: vi.fn().mockResolvedValue([
