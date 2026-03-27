@@ -3411,6 +3411,12 @@ body.sftp-column-resizing * {
   font-size: 0.84rem;
 }
 
+.xshell-import-dialog__notes {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
 .openssh-import-dialog__summary {
   color: var(--text-soft);
   font-size: 0.84rem;
@@ -3472,6 +3478,78 @@ body.sftp-column-resizing * {
   flex-direction: column;
   gap: 0.7rem;
   min-height: 0;
+}
+
+.xshell-import-dialog__tree {
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.45rem;
+  border-radius: 18px;
+  border: 1px solid var(--border);
+  background: var(--dialog-surface-muted);
+}
+
+.xshell-import-dialog__tree-node {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+.xshell-import-dialog__tree-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 0.75rem;
+  padding: 0.75rem 0.8rem;
+  border-radius: 14px;
+  border: 1px solid var(--border);
+  background: var(--dialog-surface);
+}
+
+.xshell-import-dialog__tree-row--group {
+  background: color-mix(in srgb, var(--dialog-surface) 80%, var(--accent-surface) 20%);
+}
+
+.xshell-import-dialog__tree-toggle {
+  width: 1.8rem;
+  min-width: 1.8rem;
+  height: 1.8rem;
+  align-self: center;
+  transition: transform 160ms ease;
+}
+
+.xshell-import-dialog__tree-toggle.is-expanded {
+  transform: rotate(90deg);
+}
+
+.xshell-import-dialog__tree-spacer {
+  width: 1.8rem;
+  min-width: 1.8rem;
+}
+
+.xshell-import-dialog__tree-label {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
+  gap: 0.75rem;
+  min-width: 0;
+}
+
+.xshell-import-dialog__tree-label input {
+  margin-top: 0.15rem;
+}
+
+.xshell-import-dialog__tree-children {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+.xshell-import-dialog__tree-empty {
+  margin: 0;
 }
 
 .openssh-import-dialog__section {

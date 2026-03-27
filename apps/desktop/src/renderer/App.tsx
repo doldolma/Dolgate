@@ -85,6 +85,19 @@ function createDefaultWindowState(): DesktopWindowState {
   };
 }
 
+function buildXshellImportStatusMessage(result: {
+  createdGroupCount: number;
+  createdHostCount: number;
+  createdSecretCount: number;
+  skippedHostCount: number;
+}): string {
+  return `Xshell에서 호스트 ${result.createdHostCount}개와 그룹 ${result.createdGroupCount}개를 가져왔습니다.${
+    result.createdSecretCount > 0 ? ` 저장된 비밀번호 ${result.createdSecretCount}개를 함께 가져왔습니다.` : ''
+  }${
+    result.skippedHostCount > 0 ? ` 호스트 ${result.skippedHostCount}개는 건너뛰었습니다.` : ''
+  }`;
+}
+
 interface DraggedSessionPayload {
   sessionId: string;
   source: 'standalone-tab' | 'workspace-pane';
@@ -735,6 +748,7 @@ export function App() {
           <main className="home-main">
             {homeSection === 'hosts' ? (
               <HostBrowser
+                desktopPlatform={desktopPlatform}
                 hosts={hosts}
                 groups={groups}
                 currentGroupPath={currentGroupPath}
@@ -924,6 +938,7 @@ export function App() {
             onClose={() => setIsXshellImportOpen(false)}
             onImported={async (result) => {
               await refreshHostCatalog();
+              queueMicrotask(() => setHostBrowserStatus(buildXshellImportStatusMessage(result)));
               setHostBrowserStatus(
                 `Xshell에서 호스트 ${result.createdHostCount}개와 그룹 ${result.createdGroupCount}개를 가져왔습니다.${
                   result.skippedHostCount > 0 ? ` 건너뛴 호스트 ${result.skippedHostCount}개가 있습니다.` : ''

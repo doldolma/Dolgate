@@ -3,6 +3,7 @@ import { constants as fsConstants } from 'node:fs';
 import { access, readdir, readFile, realpath } from 'node:fs/promises';
 import path from 'node:path';
 import {
+  isGroupWithinPath,
   normalizeGroupPath,
   type XshellImportGroupPreview,
   type XshellImportHostPreview,
@@ -29,6 +30,10 @@ export interface XshellSnapshotHost {
   duplicateKey: string;
   hasPasswordHint: boolean;
   hasAuthProfile: boolean;
+  encryptedPassword: string | null;
+  authMethodList: string | null;
+  sessionFileVersion: string | null;
+  masterPasswordEnabled: boolean;
 }
 
 export interface XshellSnapshot {
@@ -218,6 +223,41 @@ function decodeSessionFile(raw: Buffer): string {
   return raw.toString('utf8')
 }
 
+function resolveXshellUserDataRoot(sessionRootPath: string): string | null {
+  let currentPath = sessionRootPath
+
+  while (true) {
+    if (
+      path.basename(currentPath).toLowerCase() === 'sessions' &&
+      path.basename(path.dirname(currentPath)).toLowerCase() === 'xshell'
+    ) {
+      return path.dirname(path.dirname(currentPath))
+    }
+
+    const parentPath = path.dirname(currentPath)
+    if (parentPath === currentPath) {
+      return null
+    }
+    currentPath = parentPath
+  }
+}
+
+async function readMasterPasswordState(sessionRootPath: string): Promise<boolean> {
+  const userDataRoot = resolveXshellUserDataRoot(sessionRootPath)
+  if (!userDataRoot) {
+    return false
+  }
+
+  const masterPasswordFilePath = path.join(userDataRoot, 'Common', 'MasterPassword.mpw')
+  try {
+    const raw = await readFile(masterPasswordFilePath)
+    const sections = parseIniSections(decodeSessionFile(raw))
+    return readIniValue(sections, 'MasterPassword', 'EnblMasterPasswd') === '1'
+  } catch {
+    return false
+  }
+}
+
 function expandWindowsEnvVars(value: string): string {
   return value.replace(/%([^%]+)%/g, (_match, name) => process.env[name] ?? `%${name}%`);
 }
@@ -252,13 +292,15 @@ async function resolveKeyPath(userKey: string, sessionFilePath: string, sessionR
 
 async function parseSessionFile(
   sessionFilePath: string,
-  sessionRootPath: string
+  sessionRootPath: string,
+  masterPasswordEnabled: boolean
 ): Promise<{ host: XshellSnapshotHost | null; warnings: XshellImportWarning[] }> {
   const warnings: XshellImportWarning[] = []
   const sourceFilePath = await realpath(sessionFilePath)
   const raw = await readFile(sourceFilePath)
   const sections = parseIniSections(decodeSessionFile(raw))
   const label = path.basename(sourceFilePath, path.extname(sourceFilePath))
+  const sessionFileVersion = readIniValue(sections, 'SessionInfo', 'Version') || null
   const protocol = readIniValue(sections, 'CONNECTION', 'Protocol').toUpperCase() || 'SSH'
 
   if (!SUPPORTED_PROTOCOLS.has(protocol)) {
@@ -314,11 +356,12 @@ async function parseSessionFile(
   }
 
   const groupPath = normalizeSessionFolderPath(sessionRootPath, path.dirname(sourceFilePath))
-  const password = readIniValue(sections, 'CONNECTION:AUTHENTICATION', 'Password')
+  const encryptedPassword = readIniValue(sections, 'CONNECTION:AUTHENTICATION', 'Password')
   const useAuthProfile = readIniValue(sections, 'CONNECTION:AUTHENTICATION', 'UseAuthProfile') === '1'
+  const authMethodList = readIniValue(sections, 'CONNECTION:AUTHENTICATION', 'AuthMethodList') || null
   const authProfile = readIniValue(sections, 'CONNECTION:AUTHENTICATION', 'AuthProfile')
   const userKey = readIniValue(sections, 'CONNECTION:AUTHENTICATION', 'UserKey')
-  const hasPasswordHint = Boolean(password)
+  const hasPasswordHint = Boolean(encryptedPassword)
   const hasAuthProfile = useAuthProfile || Boolean(authProfile)
   const authType = userKey ? 'privateKey' : 'password'
   let privateKeyPath: string | null = null
@@ -336,11 +379,11 @@ async function parseSessionFile(
     }
   }
 
-  if (hasPasswordHint) {
+  if (hasPasswordHint && masterPasswordEnabled) {
     warnings.push(
       toWarning(
         `${label}: 저장된 Xshell 비밀번호는 현재 버전에서 가져오지 않습니다.`,
-        'password-not-imported',
+        'master-password-enabled',
         sourceFilePath
       )
     )
@@ -369,7 +412,143 @@ async function parseSessionFile(
       sourceFilePath,
       duplicateKey: buildSshDuplicateKey(hostname, port, username),
       hasPasswordHint,
-      hasAuthProfile
+      hasAuthProfile,
+      encryptedPassword: encryptedPassword || null,
+      authMethodList,
+      sessionFileVersion,
+      masterPasswordEnabled
+    },
+    warnings
+  }
+}
+
+async function parseSessionFileForImport(
+  sessionFilePath: string,
+  sessionRootPath: string,
+  masterPasswordEnabled: boolean
+): Promise<{ host: XshellSnapshotHost | null; warnings: XshellImportWarning[] }> {
+  const warnings: XshellImportWarning[] = []
+  const sourceFilePath = await realpath(sessionFilePath)
+  const raw = await readFile(sourceFilePath)
+  const sections = parseIniSections(decodeSessionFile(raw))
+  const label = path.basename(sourceFilePath, path.extname(sourceFilePath))
+  const sessionFileVersion = readIniValue(sections, 'SessionInfo', 'Version') || null
+  const protocol = readIniValue(sections, 'CONNECTION', 'Protocol').toUpperCase() || 'SSH'
+
+  if (!SUPPORTED_PROTOCOLS.has(protocol)) {
+    warnings.push(
+      toWarning(
+        `${label}: ${protocol} 프로토콜은 가져오기를 지원하지 않아 건너뛰었습니다.`,
+        'unsupported-protocol',
+        sourceFilePath
+      )
+    )
+    return { host: null, warnings }
+  }
+
+  const hostname = readIniValue(sections, 'CONNECTION', 'Host')
+  if (!hostname) {
+    warnings.push(
+      toWarning(
+        `${label}: Host 값이 없어 세션을 건너뛰었습니다.`,
+        'missing-host',
+        sourceFilePath
+      )
+    )
+    return { host: null, warnings }
+  }
+
+  const username = readIniValue(sections, 'CONNECTION:AUTHENTICATION', 'UserName')
+  if (!username) {
+    warnings.push(
+      toWarning(
+        `${label}: UserName 값이 없어 세션을 건너뛰었습니다.`,
+        'missing-username',
+        sourceFilePath
+      )
+    )
+    return { host: null, warnings }
+  }
+
+  const portValue = readIniValue(sections, 'CONNECTION', 'Port')
+  let port = 22
+  if (portValue) {
+    const parsedPort = Number.parseInt(portValue, 10)
+    if (Number.isFinite(parsedPort) && parsedPort > 0) {
+      port = parsedPort
+    } else {
+      warnings.push(
+        toWarning(
+          `${label}: Port 값 "${portValue}"가 잘못되어 22번 포트를 사용합니다.`,
+          'invalid-port',
+          sourceFilePath
+        )
+      )
+    }
+  }
+
+  const groupPath = normalizeSessionFolderPath(sessionRootPath, path.dirname(sourceFilePath))
+  const encryptedPassword = readIniValue(sections, 'CONNECTION:AUTHENTICATION', 'Password')
+  const useAuthProfile = readIniValue(sections, 'CONNECTION:AUTHENTICATION', 'UseAuthProfile') === '1'
+  const authMethodList = readIniValue(sections, 'CONNECTION:AUTHENTICATION', 'AuthMethodList') || null
+  const authProfile = readIniValue(sections, 'CONNECTION:AUTHENTICATION', 'AuthProfile')
+  const userKey = readIniValue(sections, 'CONNECTION:AUTHENTICATION', 'UserKey')
+  const hasPasswordHint = Boolean(encryptedPassword)
+  const hasAuthProfile = useAuthProfile || Boolean(authProfile)
+  const authType = userKey ? 'privateKey' : 'password'
+  let privateKeyPath: string | null = null
+
+  if (userKey) {
+    privateKeyPath = await resolveKeyPath(userKey, sourceFilePath, sessionRootPath)
+    if (!privateKeyPath) {
+      warnings.push(
+        toWarning(
+          `${label}: UserKey "${userKey}" 경로를 찾지 못해 키 경로 없이 가져옵니다.`,
+          'unresolved-user-key',
+          sourceFilePath
+        )
+      )
+    }
+  }
+
+  if (hasPasswordHint && masterPasswordEnabled) {
+    warnings.push(
+      toWarning(
+        `${label}: Xshell 마스터 비밀번호가 활성화되어 있어 저장된 비밀번호는 자동으로 가져오지 않습니다.`,
+        'master-password-enabled',
+        sourceFilePath
+      )
+    )
+  }
+
+  if (hasAuthProfile) {
+    warnings.push(
+      toWarning(
+        `${label}: Xshell 인증 프로필은 현재 버전에서 가져오지 않습니다.`,
+        'auth-profile-not-imported',
+        sourceFilePath
+      )
+    )
+  }
+
+  return {
+    host: {
+      key: buildHostKey(sourceFilePath),
+      label,
+      hostname,
+      port,
+      username,
+      authType,
+      groupPath,
+      privateKeyPath,
+      sourceFilePath,
+      duplicateKey: buildSshDuplicateKey(hostname, port, username),
+      hasPasswordHint,
+      hasAuthProfile,
+      encryptedPassword: encryptedPassword || null,
+      authMethodList,
+      sessionFileVersion,
+      masterPasswordEnabled
     },
     warnings
   }
@@ -380,6 +559,7 @@ async function buildParsedSource(
   origin: XshellSourceOrigin
 ): Promise<ParsedXshellSource> {
   const resolvedFolderPath = await realpath(path.resolve(folderPath))
+  const masterPasswordEnabled = await readMasterPasswordState(resolvedFolderPath)
   const source: XshellSourceSummary = {
     id: `${origin}:${resolvedFolderPath}`,
     folderPath: resolvedFolderPath,
@@ -390,19 +570,17 @@ async function buildParsedSource(
   const hosts: XshellSnapshotHost[] = []
   const warnings: XshellImportWarning[] = []
 
-  async function walk(currentPath: string): Promise<boolean> {
+  async function walk(currentPath: string): Promise<void> {
     const entries = (await readdir(currentPath, { withFileTypes: true })).sort((left, right) => left.name.localeCompare(right.name))
-    let hasImportableSession = false
 
     for (const entry of entries) {
       const absolutePath = path.join(currentPath, entry.name)
       if (entry.isDirectory()) {
-        const childHasImportableSession = await walk(absolutePath)
         const groupPath = normalizeSessionFolderPath(resolvedFolderPath, absolutePath)
-        if (childHasImportableSession && groupPath) {
+        if (groupPath) {
           groupPaths.add(groupPath)
         }
-        hasImportableSession = hasImportableSession || childHasImportableSession
+        await walk(absolutePath)
         continue
       }
 
@@ -410,7 +588,7 @@ async function buildParsedSource(
         continue
       }
 
-      const parsed = await parseSessionFile(absolutePath, resolvedFolderPath)
+      const parsed = await parseSessionFileForImport(absolutePath, resolvedFolderPath, masterPasswordEnabled)
       warnings.push(...parsed.warnings)
       if (!parsed.host) {
         continue
@@ -420,10 +598,7 @@ async function buildParsedSource(
         groupPaths.add(candidatePath)
       }
       hosts.push(parsed.host)
-      hasImportableSession = true
     }
-
-    return hasImportableSession
   }
 
   await walk(resolvedFolderPath)
@@ -560,6 +735,15 @@ export function collectSelectedXshellGroupPaths(snapshot: XshellSnapshot, input:
   const explicitSelections = new Set(
     input.selectedGroupPaths.map((value) => normalizeGroupPath(value)).filter((value): value is string => Boolean(value))
   )
+
+  for (const selectedGroupPath of [...explicitSelections]) {
+    for (const candidatePath of snapshot.groupPaths) {
+      const normalizedCandidate = normalizeGroupPath(candidatePath)
+      if (normalizedCandidate && isGroupWithinPath(normalizedCandidate, selectedGroupPath)) {
+        explicitSelections.add(normalizedCandidate)
+      }
+    }
+  }
 
   for (const host of collectSelectedXshellHosts(snapshot, input)) {
     for (const candidatePath of buildXshellGroupAncestorPaths(host.groupPath)) {

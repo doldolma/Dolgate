@@ -17,6 +17,7 @@ async function writeSessionFile(
   baseDir: string,
   relativePath: string,
   values: {
+    version?: string;
     protocol?: string;
     host?: string;
     port?: string | number;
@@ -34,7 +35,7 @@ async function writeSessionFile(
   await mkdir(path.dirname(filePath), { recursive: true });
   const content = [
     '[SessionInfo]',
-    'Version=8.1',
+    `Version=${values.version ?? '8.1'}`,
     '[CONNECTION]',
     `Protocol=${values.protocol ?? 'SSH'}`,
     `Host=${values.host ?? ''}`,
@@ -55,9 +56,20 @@ async function writeSessionFile(
     return;
   }
 
+  await writeFile(filePath, content, 'utf8');
+}
+
+async function writeMasterPasswordFile(documentsDir: string, version: string, enabled: boolean) {
+  const filePath = path.join(documentsDir, 'NetSarang Computer', version, 'Common', 'MasterPassword.mpw');
+  await mkdir(path.dirname(filePath), { recursive: true });
   await writeFile(
     filePath,
-    content,
+    [
+      '[MasterPassword]',
+      `EnblMasterPasswd=${enabled ? '1' : '0'}`,
+      'HashMasterPasswd=',
+      ''
+    ].join('\n'),
     'utf8'
   );
 }
@@ -91,28 +103,33 @@ describe('Xshell import service', () => {
     }
   });
 
-  it('probes the highest Xshell version, builds group previews, ignores non-xsh files, and skips existing duplicates', async () => {
+  it('probes the highest Xshell version, keeps empty groups, ignores non-xsh files, and skips existing duplicates', async () => {
     const documentsDir = await createTempDir('dolssh-xshell-default-');
     try {
       const sessionsV7 = path.join(documentsDir, 'NetSarang Computer', '7', 'Xshell', 'Sessions');
       const sessionsV8 = path.join(documentsDir, 'NetSarang Computer', '8', 'Xshell', 'Sessions');
+      const keyPath = path.join(documentsDir, 'keys', 'app.pem');
+
       await mkdir(path.join(sessionsV7, 'Legacy'), { recursive: true });
       await mkdir(path.join(sessionsV8, 'Servers', 'Nested'), { recursive: true });
+      await mkdir(path.join(sessionsV8, 'Servers', 'Empty'), { recursive: true });
+      await mkdir(path.dirname(keyPath), { recursive: true });
       await writeFile(path.join(sessionsV8, 'default.xshf'), '[CONNECTION]\nProtocol=SSH\n', 'utf8');
       await writeFile(path.join(sessionsV8, 'folder.cnf'), '[State]\nExpanded=1\n', 'utf8');
-      await writeFile(path.join(sessionsV8, 'keys', 'app.pem'), '', 'utf8').catch(async () => {
-        await mkdir(path.join(sessionsV8, 'keys'), { recursive: true });
-        await writeFile(path.join(sessionsV8, 'keys', 'app.pem'), 'PRIVATE KEY', 'utf8');
-      });
+      await writeFile(keyPath, 'PRIVATE KEY', 'utf8');
 
       await writeSessionFile(sessionsV7, 'Legacy/old.xsh', {
         host: 'old.example.com',
         username: 'legacy'
       });
+      await writeSessionFile(sessionsV8, 'root-host.xsh', {
+        host: 'root.example.com',
+        username: 'root'
+      });
       await writeSessionFile(sessionsV8, 'Servers/app.xsh', {
         host: 'app.example.com',
         username: 'ubuntu',
-        userKey: '..\\keys\\app.pem'
+        userKey: keyPath
       });
       await writeSessionFile(sessionsV8, 'Servers/Nested/db.xsh', {
         host: 'db.example.com',
@@ -144,6 +161,12 @@ describe('Xshell import service', () => {
           hostCount: 1
         },
         {
+          path: 'Servers/Empty',
+          name: 'Empty',
+          parentPath: 'Servers',
+          hostCount: 0
+        },
+        {
           path: 'Servers/Nested',
           name: 'Nested',
           parentPath: 'Servers',
@@ -152,18 +175,57 @@ describe('Xshell import service', () => {
       ]);
       expect(result.hosts).toEqual([
         expect.objectContaining({
+          label: 'root-host',
+          hostname: 'root.example.com',
+          username: 'root',
+          groupPath: null
+        }),
+        expect.objectContaining({
           label: 'app',
           hostname: 'app.example.com',
           username: 'ubuntu',
           authType: 'privateKey',
-          privateKeyPath: path.join(sessionsV8, 'keys', 'app.pem')
+          privateKeyPath: keyPath
         })
       ]);
       expect(result.skippedExistingHostCount).toBe(1);
       expect(result.skippedDuplicateHostCount).toBe(0);
-      expect(result.warnings.some((warning) => warning.code === 'password-not-imported')).toBe(true);
+      expect(result.warnings.some((warning) => warning.code === 'password-not-imported')).toBe(false);
       expect(result.warnings.some((warning) => warning.code === 'auth-profile-not-imported')).toBe(true);
       expect(result.warnings.some((warning) => warning.code === 'unsupported-protocol')).toBe(true);
+    } finally {
+      await rm(documentsDir, { recursive: true, force: true });
+    }
+  });
+
+  it('warns when a source uses Xshell master password and keeps the saved password metadata', async () => {
+    const documentsDir = await createTempDir('dolssh-xshell-master-password-');
+    try {
+      const sessionsDir = path.join(documentsDir, 'NetSarang Computer', '8', 'Xshell', 'Sessions');
+      await writeMasterPasswordFile(documentsDir, '8', true);
+      await writeSessionFile(sessionsDir, 'Servers/app.xsh', {
+        host: 'app.example.com',
+        username: 'ubuntu',
+        password: 'encrypted-value'
+      });
+
+      const service = new XshellImportService(documentsDirectory(documentsDir));
+      const result = await service.probeDefault(new Set());
+
+      expect(result.hosts).toEqual([
+        expect.objectContaining({
+          label: 'app',
+          authType: 'password',
+          hasPasswordHint: true
+        })
+      ]);
+      expect(result.warnings).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            code: 'master-password-enabled'
+          })
+        ])
+      );
     } finally {
       await rm(documentsDir, { recursive: true, force: true });
     }
@@ -201,11 +263,12 @@ describe('Xshell import service', () => {
     }
   });
 
-  it('appends manual folders to an existing snapshot and records duplicate hosts', async () => {
+  it('appends manual folders to an existing snapshot and records duplicate hosts while preserving empty groups', async () => {
     const documentsDir = await createTempDir('dolssh-xshell-append-');
     try {
       const sessionsDir = path.join(documentsDir, 'NetSarang Computer', '8', 'Xshell', 'Sessions');
       const manualDir = path.join(documentsDir, 'manual-sessions');
+      await mkdir(path.join(manualDir, 'Lab', 'Empty'), { recursive: true });
       await writeSessionFile(sessionsDir, 'Servers/web.xsh', {
         host: 'web.example.com',
         username: 'ubuntu'
@@ -238,8 +301,8 @@ describe('Xshell import service', () => {
           expect.objectContaining({ origin: 'manual-folder', folderPath: manualDir })
         ])
       );
-      expect(appended.groups.map((group) => group.path)).toEqual(['Lab', 'Servers']);
-      expect(appended.hosts.map((host) => host.label).sort()).toEqual(['db', 'web']);
+      expect(appended.groups.map((group) => group.path)).toEqual(['Lab', 'Lab/Empty', 'Servers']);
+      expect(appended.hosts.map((host) => host.label)).toEqual(['db', 'web']);
       expect(appended.skippedDuplicateHostCount).toBe(0);
       expect(appendedAgain.sources).toHaveLength(2);
       expect(appendedAgain.skippedDuplicateHostCount).toBe(1);
@@ -248,10 +311,15 @@ describe('Xshell import service', () => {
     }
   });
 
-  it('collects selected hosts from explicit checks and selected group subtrees', async () => {
+  it('collects selected hosts from explicit checks and selected group subtrees, including empty descendants', async () => {
     const documentsDir = await createTempDir('dolssh-xshell-select-');
     try {
       const sessionsDir = path.join(documentsDir, 'NetSarang Computer', '8', 'Xshell', 'Sessions');
+      await mkdir(path.join(sessionsDir, 'Servers', 'Empty'), { recursive: true });
+      await writeSessionFile(sessionsDir, 'root-host.xsh', {
+        host: 'root.example.com',
+        username: 'root'
+      });
       await writeSessionFile(sessionsDir, 'Servers/app.xsh', {
         host: 'app.example.com',
         username: 'ubuntu'
@@ -264,9 +332,9 @@ describe('Xshell import service', () => {
       const service = new XshellImportService(documentsDirectory(documentsDir));
       const result = await service.probeDefault(new Set());
       const snapshot = getSnapshot(service, result.snapshotId);
-      const nestedHost = result.hosts.find((host) => host.label === 'db');
-      if (!nestedHost) {
-        throw new Error('Nested host was not found');
+      const rootHost = result.hosts.find((host) => host.label === 'root-host');
+      if (!rootHost) {
+        throw new Error('Root host was not found');
       }
 
       expect(
@@ -280,10 +348,18 @@ describe('Xshell import service', () => {
       expect(
         collectSelectedXshellGroupPaths(snapshot, {
           snapshotId: result.snapshotId,
-          selectedGroupPaths: [],
-          selectedHostKeys: [nestedHost.key]
+          selectedGroupPaths: ['Servers'],
+          selectedHostKeys: []
         })
-      ).toEqual(['Servers', 'Servers/Nested']);
+      ).toEqual(['Servers', 'Servers/Empty', 'Servers/Nested']);
+
+      expect(
+        collectSelectedXshellGroupPaths(snapshot, {
+          snapshotId: result.snapshotId,
+          selectedGroupPaths: [],
+          selectedHostKeys: [rootHost.key]
+        })
+      ).toEqual([]);
     } finally {
       await rm(documentsDir, { recursive: true, force: true });
     }
