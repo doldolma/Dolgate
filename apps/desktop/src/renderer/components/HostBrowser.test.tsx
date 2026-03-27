@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import {
   buildVisibleGroups,
@@ -79,6 +79,11 @@ interface RenderBrowserOptions {
   hosts?: HostRecord[];
   currentGroupPath?: string | null;
   searchQuery?: string;
+  onClearHostSelection?: ReturnType<typeof vi.fn>;
+  onSelectHost?: ReturnType<typeof vi.fn>;
+  onDuplicateHosts?: ReturnType<typeof vi.fn>;
+  onRemoveGroup?: ReturnType<typeof vi.fn>;
+  onRemoveHost?: ReturnType<typeof vi.fn>;
 }
 
 function renderBrowser({
@@ -86,7 +91,12 @@ function renderBrowser({
   groups: groupsOverride = groups,
   hosts: hostsOverride = hosts,
   currentGroupPath = null,
-  searchQuery = ''
+  searchQuery = '',
+  onClearHostSelection = vi.fn(),
+  onSelectHost = vi.fn(),
+  onDuplicateHosts = vi.fn().mockResolvedValue(undefined),
+  onRemoveGroup = vi.fn().mockResolvedValue(undefined),
+  onRemoveHost = vi.fn().mockResolvedValue(undefined)
 }: RenderBrowserOptions = {}) {
   return render(
     <HostBrowser
@@ -105,12 +115,14 @@ function renderBrowser({
       onOpenTermiusImport={vi.fn()}
       onOpenWarpgateImport={vi.fn()}
       onCreateGroup={vi.fn().mockResolvedValue(undefined)}
-      onRemoveGroup={vi.fn().mockResolvedValue(undefined)}
+      onRemoveGroup={onRemoveGroup}
       onNavigateGroup={vi.fn()}
-      onSelectHost={vi.fn()}
+      onClearHostSelection={onClearHostSelection}
+      onSelectHost={onSelectHost}
       onEditHost={vi.fn()}
+      onDuplicateHosts={onDuplicateHosts}
       onMoveHostToGroup={vi.fn().mockResolvedValue(undefined)}
-      onRemoveHost={vi.fn().mockResolvedValue(undefined)}
+      onRemoveHost={onRemoveHost}
       onConnectHost={vi.fn().mockResolvedValue(undefined)}
     />
   );
@@ -246,5 +258,97 @@ describe('HostBrowser dialogs', () => {
 
     expect(screen.queryByRole('heading', { name: 'Groups' })).not.toBeInTheDocument();
     expect(container.querySelector('.group-grid')).toBeNull();
+  });
+
+  it('supports additive host selection and copies all selected hosts from the context menu', async () => {
+    const onSelectHost = vi.fn();
+    const onDuplicateHosts = vi.fn().mockResolvedValue(undefined);
+    renderBrowser({ onSelectHost, onDuplicateHosts });
+
+    const appCard = screen.getByText('App').closest('article') as HTMLElement;
+    const dbCard = screen.getByText('DB').closest('article') as HTMLElement;
+
+    fireEvent.click(appCard);
+    fireEvent.click(dbCard, { ctrlKey: true });
+
+    expect(onSelectHost).toHaveBeenCalledTimes(1);
+    expect(appCard.className).toContain('active');
+    expect(dbCard.className).toContain('active');
+
+    fireEvent.contextMenu(appCard);
+    fireEvent.click(screen.getByRole('button', { name: '복사 (2개)' }));
+
+    expect(onDuplicateHosts).toHaveBeenCalledWith(['host-1', 'host-2']);
+  });
+
+  it('supports shift range selection for hosts without changing the active drawer selection', () => {
+    const onSelectHost = vi.fn();
+    renderBrowser({ onSelectHost });
+
+    const appCard = screen.getByText('App').closest('article') as HTMLElement;
+    const dbCard = screen.getByText('DB').closest('article') as HTMLElement;
+
+    fireEvent.click(appCard);
+    fireEvent.click(dbCard, { shiftKey: true });
+
+    expect(onSelectHost).toHaveBeenCalledTimes(1);
+    expect(appCard.className).toContain('active');
+    expect(dbCard.className).toContain('active');
+  });
+
+  it('keeps mixed host and group selections but scopes the context menu to the clicked type', () => {
+    renderBrowser({
+      groups: [
+        ...groups,
+        {
+          id: 'group-3',
+          name: 'Clients',
+          path: 'Clients',
+          parentPath: null,
+          createdAt: '2025-01-01T00:00:00.000Z',
+          updatedAt: '2025-01-01T00:00:00.000Z'
+        }
+      ]
+    });
+
+    const appCard = screen.getByText('App').closest('article') as HTMLElement;
+    const serversCard = screen
+      .getAllByText('Servers')
+      .find((node) => node.tagName === 'STRONG')
+      ?.closest('article') as HTMLElement;
+
+    fireEvent.click(appCard, { ctrlKey: true });
+    fireEvent.click(serversCard, { ctrlKey: true });
+
+    expect(appCard.className).toContain('active');
+    expect(serversCard.className).toContain('active');
+
+    fireEvent.contextMenu(serversCard);
+
+    expect(screen.queryByRole('button', { name: /복사/ })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /삭제/ })).toBeInTheDocument();
+  });
+
+  it('shows an in-app delete dialog for selected hosts instead of calling window.confirm', async () => {
+    const onRemoveHost = vi.fn().mockResolvedValue(undefined);
+    const confirmSpy = vi.spyOn(window, 'confirm');
+    renderBrowser({ onRemoveHost });
+
+    const appCard = screen.getByText('App').closest('article') as HTMLElement;
+    const dbCard = screen.getByText('DB').closest('article') as HTMLElement;
+
+    fireEvent.click(appCard);
+    fireEvent.click(dbCard, { ctrlKey: true });
+    fireEvent.contextMenu(appCard);
+    fireEvent.click(screen.getByRole('button', { name: /삭제/ }));
+
+    expect(confirmSpy).not.toHaveBeenCalled();
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: '삭제' }));
+
+    await waitFor(() => {
+      expect(onRemoveHost).toHaveBeenCalledTimes(2);
+    });
   });
 });

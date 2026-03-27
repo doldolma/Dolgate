@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import type { DesktopApi } from "@shared";
+import type { DesktopApi, HostDraft, HostRecord } from "@shared";
 import { createAppStore, upsertTransferJob } from "./createAppStore";
 
 function createDeferred<T>() {
@@ -758,6 +758,154 @@ describe("createAppStore", () => {
     expect(store.getState().groups).toEqual([]);
     expect(store.getState().hosts).toEqual([]);
     expect(store.getState().currentGroupPath).toBeNull();
+  });
+
+  it("duplicates hosts with copy suffixes and reuses existing auth references", async () => {
+    const api = createMockApi();
+    api.hosts.list = vi.fn().mockResolvedValue([
+      {
+        id: "host-1",
+        kind: "ssh",
+        label: "Prod",
+        hostname: "prod.example.com",
+        port: 22,
+        username: "ubuntu",
+        authType: "privateKey",
+        privateKeyPath: "C:/keys/prod",
+        secretRef: "host:shared",
+        groupName: "Servers",
+        terminalThemeId: null,
+        createdAt: "2025-01-01T00:00:00.000Z",
+        updatedAt: "2025-01-01T00:00:00.000Z",
+      },
+      {
+        id: "host-2",
+        kind: "ssh",
+        label: "Prod Copy",
+        hostname: "prod-copy.example.com",
+        port: 22,
+        username: "ubuntu",
+        authType: "privateKey",
+        privateKeyPath: "C:/keys/prod",
+        secretRef: "host:shared",
+        groupName: "Servers",
+        terminalThemeId: null,
+        createdAt: "2025-01-01T00:00:00.000Z",
+        updatedAt: "2025-01-01T00:00:00.000Z",
+      },
+      {
+        id: "host-3",
+        kind: "aws-ec2",
+        label: "Bastion",
+        groupName: null,
+        tags: ["ops"],
+        terminalThemeId: null,
+        awsProfileName: "default",
+        awsRegion: "ap-northeast-2",
+        awsInstanceId: "i-1234",
+        awsInstanceName: "bastion",
+        awsPlatform: "linux",
+        awsPrivateIp: "10.0.0.10",
+        awsState: "running",
+        createdAt: "2025-01-01T00:00:00.000Z",
+        updatedAt: "2025-01-01T00:00:00.000Z",
+      },
+      {
+        id: "host-4",
+        kind: "warpgate-ssh",
+        label: "Gateway",
+        groupName: null,
+        tags: [],
+        terminalThemeId: null,
+        warpgateBaseUrl: "https://warpgate.example.com",
+        warpgateSshHost: "warpgate.example.com",
+        warpgateSshPort: 2222,
+        warpgateTargetId: "target-1",
+        warpgateTargetName: "db-admin",
+        warpgateUsername: "alice",
+        createdAt: "2025-01-01T00:00:00.000Z",
+        updatedAt: "2025-01-01T00:00:00.000Z",
+      },
+    ]);
+    vi.mocked(api.hosts.create).mockImplementation(async (draft: HostDraft) => {
+      const createdAt = "2025-01-05T00:00:00.000Z";
+      const recordBase = {
+        id: `copy-${vi.mocked(api.hosts.create).mock.calls.length}`,
+        label: draft.label,
+        groupName: draft.groupName ?? null,
+        tags: draft.tags ?? [],
+        terminalThemeId: draft.terminalThemeId ?? null,
+        createdAt,
+        updatedAt: createdAt,
+      };
+
+      if (draft.kind === "aws-ec2") {
+        return {
+          ...recordBase,
+          kind: "aws-ec2",
+          awsProfileName: draft.awsProfileName,
+          awsRegion: draft.awsRegion,
+          awsInstanceId: draft.awsInstanceId,
+          awsInstanceName: draft.awsInstanceName ?? null,
+          awsPlatform: draft.awsPlatform ?? null,
+          awsPrivateIp: draft.awsPrivateIp ?? null,
+          awsState: draft.awsState ?? null,
+        } satisfies HostRecord;
+      }
+      if (draft.kind === "warpgate-ssh") {
+        return {
+          ...recordBase,
+          kind: "warpgate-ssh",
+          warpgateBaseUrl: draft.warpgateBaseUrl,
+          warpgateSshHost: draft.warpgateSshHost,
+          warpgateSshPort: draft.warpgateSshPort,
+          warpgateTargetId: draft.warpgateTargetId,
+          warpgateTargetName: draft.warpgateTargetName,
+          warpgateUsername: draft.warpgateUsername,
+        } satisfies HostRecord;
+      }
+      return {
+        ...recordBase,
+        kind: "ssh",
+        hostname: draft.hostname,
+        port: draft.port,
+        username: draft.username,
+        authType: draft.authType,
+        privateKeyPath: draft.privateKeyPath ?? null,
+        secretRef: draft.secretRef ?? null,
+      } satisfies HostRecord;
+    });
+
+    const store = createAppStore(api);
+    await store.getState().bootstrap();
+    await store.getState().duplicateHosts(["host-1", "host-3", "host-4"]);
+
+    expect(api.hosts.create).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        kind: "ssh",
+        label: "Prod Copy 2",
+        secretRef: "host:shared",
+        privateKeyPath: "C:/keys/prod",
+      }),
+    );
+    expect(api.hosts.create).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        kind: "aws-ec2",
+        label: "Bastion Copy",
+        awsInstanceId: "i-1234",
+      }),
+    );
+    expect(api.hosts.create).toHaveBeenNthCalledWith(
+      3,
+      expect.objectContaining({
+        kind: "warpgate-ssh",
+        label: "Gateway Copy",
+        warpgateTargetId: "target-1",
+        warpgateUsername: "alice",
+      }),
+    );
   });
 
   it("opens a new session tab and moves to focus mode on connect", async () => {

@@ -53,27 +53,60 @@ export function getHostBrowserEmptyCalloutMessage(hostCount: number, searchQuery
 }
 
 interface GroupDeleteTarget {
-  path: string;
-  name: string;
+  paths: string[];
+  groupCount: number;
+  title: string;
   hostCount: number;
   childGroupCount: number;
 }
 
+interface HostDeleteTarget {
+  hostIds: string[];
+  title: string;
+  hostCount: number;
+}
+
 interface HostContextMenuState {
   kind: 'host';
-  hostId: string;
+  hostIds: string[];
   x: number;
   y: number;
 }
 
 interface GroupContextMenuState {
   kind: 'group';
-  group: GroupDeleteTarget;
+  groupPaths: string[];
   x: number;
   y: number;
 }
 
 type ContextMenuState = HostContextMenuState | GroupContextMenuState;
+
+function isAdditiveSelectionEvent(event: Pick<MouseEvent, 'ctrlKey' | 'metaKey'> | Pick<KeyboardEvent, 'ctrlKey' | 'metaKey'>): boolean {
+  return event.ctrlKey || event.metaKey;
+}
+
+function getSelectionRange<T extends string>(items: T[], anchor: T | null, target: T): T[] {
+  const targetIndex = items.indexOf(target);
+  if (targetIndex < 0) {
+    return [target];
+  }
+
+  const anchorIndex = anchor ? items.indexOf(anchor) : -1;
+  if (anchorIndex < 0) {
+    return [target];
+  }
+
+  const start = Math.min(anchorIndex, targetIndex);
+  const end = Math.max(anchorIndex, targetIndex);
+  return items.slice(start, end + 1);
+}
+
+function normalizeGroupSelectionForDelete(groupPaths: string[]): string[] {
+  return [...groupPaths]
+    .filter((path) => !groupPaths.some((candidate) => candidate !== path && isGroupWithinPath(path, candidate)))
+    .sort((left, right) => left.split('/').length - right.split('/').length || left.localeCompare(right));
+}
 
 interface HostBrowserProps {
   desktopPlatform: DesktopPlatform;
@@ -95,8 +128,10 @@ interface HostBrowserProps {
   onCreateGroup: (name: string) => Promise<void>;
   onRemoveGroup: (path: string, mode: GroupRemoveMode) => Promise<void>;
   onNavigateGroup: (path: string | null) => void;
+  onClearHostSelection: () => void;
   onSelectHost: (hostId: string) => void;
   onEditHost: (hostId: string) => void;
+  onDuplicateHosts: (hostIds: string[]) => Promise<void>;
   onMoveHostToGroup: (hostId: string, groupPath: string | null) => Promise<void>;
   onRemoveHost: (hostId: string) => Promise<void>;
   onConnectHost: (hostId: string) => Promise<void>;
@@ -122,8 +157,10 @@ export function HostBrowser({
   onCreateGroup,
   onRemoveGroup,
   onNavigateGroup,
+  onClearHostSelection,
   onSelectHost,
   onEditHost,
+  onDuplicateHosts,
   onMoveHostToGroup,
   onRemoveHost,
   onConnectHost
@@ -131,10 +168,16 @@ export function HostBrowser({
   const [isGroupModalOpen, setIsGroupModalOpen] = useState(false);
   const [newGroupName, setNewGroupName] = useState('');
   const [groupError, setGroupError] = useState<string | null>(null);
-  const [selectedGroupPath, setSelectedGroupPath] = useState<string | null>(null);
+  const [selectedHostIds, setSelectedHostIds] = useState<string[]>([]);
+  const [selectedGroupPaths, setSelectedGroupPaths] = useState<string[]>([]);
+  const [hostSelectionAnchor, setHostSelectionAnchor] = useState<string | null>(null);
+  const [groupSelectionAnchor, setGroupSelectionAnchor] = useState<string | null>(null);
   const [groupDeleteTarget, setGroupDeleteTarget] = useState<GroupDeleteTarget | null>(null);
   const [groupDeleteError, setGroupDeleteError] = useState<string | null>(null);
   const [isRemovingGroup, setIsRemovingGroup] = useState(false);
+  const [hostDeleteTarget, setHostDeleteTarget] = useState<HostDeleteTarget | null>(null);
+  const [hostDeleteError, setHostDeleteError] = useState<string | null>(null);
+  const [isRemovingHost, setIsRemovingHost] = useState(false);
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const [dragTargetGroupPath, setDragTargetGroupPath] = useState<string | null>(null);
   const [expandedHostTags, setExpandedHostTags] = useState<string[]>([]);
@@ -151,10 +194,6 @@ export function HostBrowser({
       ],
     [desktopPlatform, onOpenAwsImport, onOpenOpenSshImport, onOpenTermiusImport, onOpenWarpgateImport, onOpenXshellImport]
   );
-
-  useEffect(() => {
-    setSelectedGroupPath(null);
-  }, [currentGroupPath]);
 
   useEffect(() => {
     if (!contextMenu) {
@@ -209,6 +248,8 @@ export function HostBrowser({
 
   const allGroupPaths = useMemo(() => collectGroupPaths(groups, hosts), [groups, hosts]);
   const visibleGroups = useMemo(() => buildVisibleGroups(groups, hosts, currentGroupPath), [currentGroupPath, groups, hosts]);
+  const visibleHostIds = useMemo(() => visibleHosts.map((host) => host.id), [visibleHosts]);
+  const visibleGroupPaths = useMemo(() => visibleGroups.map((group) => group.path), [visibleGroups]);
   const showGroupEmptyState = currentGroupPath === null && visibleGroups.length === 0;
   const showGroupSection = visibleGroups.length > 0 || showGroupEmptyState;
   const breadcrumbs = useMemo(() => {
@@ -230,23 +271,25 @@ export function HostBrowser({
       }
     : null;
 
-  function buildGroupDeleteTarget(path: string, name: string): GroupDeleteTarget {
-    return {
-      path,
-      name,
-      hostCount: hosts.filter((host) => isGroupWithinPath(normalizeGroupPath(host.groupName), path)).length,
-      childGroupCount: allGroupPaths.filter((candidatePath) => candidatePath !== path && candidatePath.startsWith(`${path}/`)).length
-    };
-  }
+  useEffect(() => {
+    setSelectedHostIds((current) => current.filter((hostId) => visibleHostIds.includes(hostId)));
+  }, [visibleHostIds]);
 
   useEffect(() => {
-    if (!selectedGroupPath) {
-      return;
+    setSelectedGroupPaths((current) => current.filter((groupPath) => visibleGroupPaths.includes(groupPath)));
+  }, [visibleGroupPaths]);
+
+  useEffect(() => {
+    if (hostSelectionAnchor && !visibleHostIds.includes(hostSelectionAnchor)) {
+      setHostSelectionAnchor(null);
     }
-    if (!visibleGroups.some((group) => group.path === selectedGroupPath)) {
-      setSelectedGroupPath(null);
+  }, [hostSelectionAnchor, visibleHostIds]);
+
+  useEffect(() => {
+    if (groupSelectionAnchor && !visibleGroupPaths.includes(groupSelectionAnchor)) {
+      setGroupSelectionAnchor(null);
     }
-  }, [selectedGroupPath, visibleGroups]);
+  }, [groupSelectionAnchor, visibleGroupPaths]);
 
   useEffect(() => {
     setExpandedHostTags((current) => current.filter((hostId) => hosts.some((host) => host.id === hostId && (host.tags?.length ?? 0) > 0)));
@@ -284,14 +327,156 @@ export function HostBrowser({
     };
   }, [isImportMenuOpen]);
 
+  function clearSelections() {
+    setSelectedHostIds([]);
+    setSelectedGroupPaths([]);
+    setHostSelectionAnchor(null);
+    setGroupSelectionAnchor(null);
+    setContextMenu(null);
+    onClearHostSelection();
+  }
+
+  function buildGroupDeleteTarget(groupPaths: string[]): GroupDeleteTarget {
+    const normalizedPaths = normalizeGroupSelectionForDelete(groupPaths);
+    const normalizedPathSet = new Set(normalizedPaths);
+    const hostCount = hosts.filter((host) =>
+      normalizedPaths.some((path) => isGroupWithinPath(normalizeGroupPath(host.groupName), path))
+    ).length;
+    const childGroupCount = allGroupPaths.filter(
+      (candidatePath) =>
+        !normalizedPathSet.has(candidatePath) &&
+        normalizedPaths.some((path) => candidatePath.startsWith(`${path}/`))
+    ).length;
+
+    return {
+      paths: normalizedPaths,
+      groupCount: normalizedPaths.length,
+      title:
+        normalizedPaths.length === 1
+          ? groups.find((group) => group.path === normalizedPaths[0])?.name ?? normalizedPaths[0]
+          : `${normalizedPaths.length} groups`,
+      hostCount,
+      childGroupCount
+    };
+  }
+
+  function buildHostDeleteTarget(hostIds: string[]): HostDeleteTarget {
+    const orderedHostIds = getOrderedSelectedHostIds(hostIds);
+    const targetHosts = orderedHostIds
+      .map((hostId) => hosts.find((host) => host.id === hostId))
+      .filter((host): host is HostRecord => Boolean(host));
+
+    return {
+      hostIds: targetHosts.map((host) => host.id),
+      hostCount: targetHosts.length,
+      title:
+        targetHosts.length === 1
+          ? targetHosts[0].label
+          : `선택한 ${targetHosts.length}개 호스트`
+    };
+  }
+
+  function selectHostRange(hostId: string) {
+    setSelectedHostIds(getSelectionRange(visibleHostIds, hostSelectionAnchor, hostId));
+    setHostSelectionAnchor(hostId);
+  }
+
+  function toggleHostSelection(hostId: string) {
+    setSelectedHostIds((current) => {
+      const next = current.includes(hostId) ? current.filter((entry) => entry !== hostId) : [...current, hostId];
+      if (next.length === 0) {
+        onClearHostSelection();
+      }
+      return next;
+    });
+    setHostSelectionAnchor(hostId);
+  }
+
+  function selectSingleHost(hostId: string) {
+    setSelectedHostIds([hostId]);
+    setSelectedGroupPaths([]);
+    setHostSelectionAnchor(hostId);
+    setGroupSelectionAnchor(null);
+    onSelectHost(hostId);
+  }
+
+  function handleHostSelection(hostId: string, event: Pick<MouseEvent, 'shiftKey' | 'ctrlKey' | 'metaKey'>) {
+    setContextMenu(null);
+    if (event.shiftKey) {
+      selectHostRange(hostId);
+      return;
+    }
+    if (isAdditiveSelectionEvent(event)) {
+      toggleHostSelection(hostId);
+      return;
+    }
+    selectSingleHost(hostId);
+  }
+
+  function selectGroupRange(groupPath: string) {
+    setSelectedGroupPaths(getSelectionRange(visibleGroupPaths, groupSelectionAnchor, groupPath));
+    setGroupSelectionAnchor(groupPath);
+  }
+
+  function toggleGroupSelection(groupPath: string) {
+    setSelectedGroupPaths((current) =>
+      current.includes(groupPath) ? current.filter((entry) => entry !== groupPath) : [...current, groupPath]
+    );
+    setGroupSelectionAnchor(groupPath);
+  }
+
+  function selectSingleGroup(groupPath: string) {
+    setSelectedGroupPaths([groupPath]);
+    setSelectedHostIds([]);
+    setGroupSelectionAnchor(groupPath);
+    setHostSelectionAnchor(null);
+    onClearHostSelection();
+  }
+
+  function handleGroupSelection(groupPath: string, event: Pick<MouseEvent, 'shiftKey' | 'ctrlKey' | 'metaKey'>) {
+    setContextMenu(null);
+    if (event.shiftKey) {
+      selectGroupRange(groupPath);
+      return;
+    }
+    if (isAdditiveSelectionEvent(event)) {
+      toggleGroupSelection(groupPath);
+      return;
+    }
+    selectSingleGroup(groupPath);
+  }
+
+  function getOrderedSelectedHostIds(hostIds: string[]): string[] {
+    const selectedHostIdSet = new Set(hostIds);
+    return visibleHostIds.filter((hostId) => selectedHostIdSet.has(hostId));
+  }
+
+  function handleBrowserBackgroundClick(event: React.MouseEvent<HTMLDivElement>) {
+    const target = event.target as HTMLElement;
+    if (
+      target.closest('.host-browser-card') ||
+      target.closest('.group-card') ||
+      target.closest('.context-menu') ||
+      target.closest('button') ||
+      target.closest('input') ||
+      target.closest('.home-modal')
+    ) {
+      return;
+    }
+    clearSelections();
+  }
+
   function closeGroupModal() {
     setIsGroupModalOpen(false);
     setNewGroupName('');
     setGroupError(null);
   }
 
+  const selectedHostIdSet = new Set(selectedHostIds);
+  const selectedGroupPathSet = new Set(selectedGroupPaths);
+
   return (
-    <div className="host-browser">
+    <div className="host-browser" onClickCapture={handleBrowserBackgroundClick}>
       <div className="home-toolbar">
         <div className="search-panel">
           <input
@@ -418,15 +603,24 @@ export function HostBrowser({
             visibleGroups.map((group) => (
               <article
                 key={group.path}
-                className={`group-card group-card--interactive ${selectedGroupPath === group.path ? 'active' : ''} ${dragTargetGroupPath === group.path ? 'drop-target' : ''}`}
-                onClick={() => setSelectedGroupPath(group.path)}
+                className={`group-card group-card--interactive ${selectedGroupPathSet.has(group.path) ? 'active' : ''} ${dragTargetGroupPath === group.path ? 'drop-target' : ''}`}
+                onClick={(event) => {
+                  handleGroupSelection(group.path, event);
+                }}
                 onDoubleClick={() => onNavigateGroup(group.path)}
                 onContextMenu={(event) => {
                   event.preventDefault();
-                  setSelectedGroupPath(group.path);
+                  const nextGroupPaths = selectedGroupPathSet.has(group.path) ? selectedGroupPaths : [group.path];
+                  if (!selectedGroupPathSet.has(group.path)) {
+                    setSelectedGroupPaths([group.path]);
+                    setSelectedHostIds([]);
+                    setGroupSelectionAnchor(group.path);
+                    setHostSelectionAnchor(null);
+                    onClearHostSelection();
+                  }
                   setContextMenu({
                     kind: 'group',
-                    group: buildGroupDeleteTarget(group.path, group.name),
+                    groupPaths: normalizeGroupSelectionForDelete(nextGroupPaths),
                     x: event.clientX,
                     y: event.clientY
                   });
@@ -457,7 +651,7 @@ export function HostBrowser({
                 onKeyDown={(event) => {
                   if (event.key === ' ') {
                     event.preventDefault();
-                    setSelectedGroupPath(group.path);
+                    selectSingleGroup(group.path);
                   }
                   if (event.key === 'Enter') {
                     event.preventDefault();
@@ -496,14 +690,17 @@ export function HostBrowser({
               return (
                 <article
                   key={host.id}
-                  className={getHostBrowserCardClassName(selectedHostId === host.id, isTagsExpanded)}
+                  className={getHostBrowserCardClassName(
+                    selectedHostIdSet.has(host.id) ||
+                      (selectedHostIds.length === 0 && selectedGroupPaths.length === 0 && selectedHostId === host.id),
+                    isTagsExpanded
+                  )}
                   draggable
-                  onClick={() => {
-                    setContextMenu(null);
-                    onSelectHost(host.id);
+                  onClick={(event) => {
+                    handleHostSelection(host.id, event);
                   }}
                   onDragStart={(event) => {
-                    onSelectHost(host.id);
+                    selectSingleHost(host.id);
                     event.dataTransfer.effectAllowed = 'move';
                     event.dataTransfer.setData('application/x-dolssh-host-id', host.id);
                     event.dataTransfer.setData('text/plain', host.label);
@@ -516,10 +713,17 @@ export function HostBrowser({
                   }}
                   onContextMenu={(event) => {
                     event.preventDefault();
-                    onSelectHost(host.id);
+                    const nextHostIds = selectedHostIdSet.has(host.id) ? getOrderedSelectedHostIds(selectedHostIds) : [host.id];
+                    if (!selectedHostIdSet.has(host.id)) {
+                      setSelectedHostIds([host.id]);
+                      setSelectedGroupPaths([]);
+                      setHostSelectionAnchor(host.id);
+                      setGroupSelectionAnchor(null);
+                      onSelectHost(host.id);
+                    }
                     setContextMenu({
                       kind: 'host',
-                      hostId: host.id,
+                      hostIds: nextHostIds,
                       x: event.clientX,
                       y: event.clientY
                     });
@@ -550,6 +754,7 @@ export function HostBrowser({
                       aria-label={`${host.label} 수정`}
                       onClick={(event) => {
                         event.stopPropagation();
+                        selectSingleHost(host.id);
                         onEditHost(host.id);
                       }}
                     >
@@ -591,30 +796,39 @@ export function HostBrowser({
         createPortal(
           <div className="context-menu" style={contextMenuStyle ?? undefined} role="menu">
             {contextMenu.kind === 'host' ? (
-              <button
+              <>
+                <button
+                  type="button"
+                  className="context-menu__item"
+                  onClick={async () => {
+                    setContextMenu(null);
+                    await onDuplicateHosts(getOrderedSelectedHostIds(contextMenu.hostIds));
+                  }}
+                >
+                  {contextMenu.hostIds.length === 1 ? '복사' : `복사 (${contextMenu.hostIds.length}개)`}
+                </button>
+                <button
                 type="button"
                 className="context-menu__item context-menu__item--danger"
                 onClick={async () => {
-                  const targetHost = hosts.find((host) => host.id === contextMenu.hostId);
+                  const orderedHostIds = getOrderedSelectedHostIds(contextMenu.hostIds);
                   setContextMenu(null);
-                  if (!targetHost) {
+                  if (orderedHostIds.length === 0) {
                     return;
                   }
-                  const confirmed = window.confirm(`"${targetHost.label}" 호스트를 삭제할까요? 연결된 secret 항목은 유지됩니다.`);
-                  if (!confirmed) {
-                    return;
-                  }
-                  await onRemoveHost(targetHost.id);
+                  setHostDeleteTarget(buildHostDeleteTarget(orderedHostIds));
+                  setHostDeleteError(null);
                 }}
               >
                 삭제
-              </button>
+                </button>
+              </>
             ) : (
               <button
                 type="button"
                 className="context-menu__item context-menu__item--danger"
                 onClick={() => {
-                  setGroupDeleteTarget(contextMenu.group);
+                  setGroupDeleteTarget(buildGroupDeleteTarget(contextMenu.groupPaths));
                   setGroupDeleteError(null);
                   setContextMenu(null);
                 }}
@@ -669,11 +883,74 @@ export function HostBrowser({
         </DialogBackdrop>
       ) : null}
 
+      {hostDeleteTarget ? (
+        <DialogBackdrop
+          className="home-modal-backdrop"
+          onDismiss={() => {
+            if (isRemovingHost) {
+              return;
+            }
+            setHostDeleteTarget(null);
+            setHostDeleteError(null);
+          }}
+        >
+          <div className="home-modal" role="dialog" aria-modal="true" aria-labelledby="delete-host-title">
+            <div className="section-kicker">Delete</div>
+            <h3 id="delete-host-title">
+              {hostDeleteTarget.hostCount === 1
+                ? `${hostDeleteTarget.title} 호스트를 삭제할까요?`
+                : `선택한 ${hostDeleteTarget.hostCount}개 호스트를 삭제할까요?`}
+            </h3>
+            <p className="home-modal__copy">연결된 secret 항목은 유지됩니다.</p>
+            {hostDeleteError ? <p className="home-modal__error">{hostDeleteError}</p> : null}
+            <div className="home-modal__actions">
+              <button
+                type="button"
+                className="secondary-button"
+                onClick={() => {
+                  setHostDeleteTarget(null);
+                  setHostDeleteError(null);
+                }}
+                disabled={isRemovingHost}
+              >
+                취소
+              </button>
+              <button
+                type="button"
+                className="secondary-button danger"
+                disabled={isRemovingHost}
+                onClick={async () => {
+                  try {
+                    setIsRemovingHost(true);
+                    for (const hostId of hostDeleteTarget.hostIds) {
+                      await onRemoveHost(hostId);
+                    }
+                    clearSelections();
+                    setHostDeleteTarget(null);
+                    setHostDeleteError(null);
+                  } catch (error) {
+                    setHostDeleteError(error instanceof Error ? error.message : '호스트를 삭제하지 못했습니다.');
+                  } finally {
+                    setIsRemovingHost(false);
+                  }
+                }}
+              >
+                삭제
+              </button>
+            </div>
+          </div>
+        </DialogBackdrop>
+      ) : null}
+
       {groupDeleteTarget ? (
         <div className="home-modal-backdrop" role="presentation">
           <div className="home-modal" role="dialog" aria-modal="true" aria-labelledby="delete-group-title">
             <div className="section-kicker">Delete</div>
-            <h3 id="delete-group-title">{groupDeleteTarget.name} 그룹을 삭제할까요?</h3>
+            <h3 id="delete-group-title">
+              {groupDeleteTarget.groupCount === 1
+                ? `${groupDeleteTarget.title} 그룹을 삭제할까요?`
+                : `선택한 ${groupDeleteTarget.groupCount}개 그룹을 삭제할까요?`}
+            </h3>
             {getGroupDeleteDialogVariant(groupDeleteTarget.childGroupCount, groupDeleteTarget.hostCount) === 'with-descendants' ? (
               <p className="home-modal__copy">
                 하위 그룹 {groupDeleteTarget.childGroupCount}개와 호스트 {groupDeleteTarget.hostCount}개가 함께 영향을 받습니다.
@@ -702,8 +979,10 @@ export function HostBrowser({
                   onClick={async () => {
                     try {
                       setIsRemovingGroup(true);
-                      await onRemoveGroup(groupDeleteTarget.path, 'reparent-descendants');
-                      setSelectedGroupPath((current) => (current === groupDeleteTarget.path ? null : current));
+                      for (const path of groupDeleteTarget.paths) {
+                        await onRemoveGroup(path, 'reparent-descendants');
+                      }
+                      setSelectedGroupPaths((current) => current.filter((path) => !groupDeleteTarget.paths.includes(path)));
                       setGroupDeleteTarget(null);
                       setGroupDeleteError(null);
                     } catch (error) {
@@ -724,12 +1003,20 @@ export function HostBrowser({
                     try {
                       setIsRemovingGroup(true);
                       await onRemoveGroup(
-                        groupDeleteTarget.path,
+                        groupDeleteTarget.paths[0],
                         getGroupDeleteDialogVariant(groupDeleteTarget.childGroupCount, groupDeleteTarget.hostCount) === 'with-descendants'
                           ? 'delete-subtree'
                           : 'reparent-descendants'
                       );
-                    setSelectedGroupPath((current) => (current === groupDeleteTarget.path ? null : current));
+                      for (const path of groupDeleteTarget.paths.slice(1)) {
+                        await onRemoveGroup(
+                          path,
+                          getGroupDeleteDialogVariant(groupDeleteTarget.childGroupCount, groupDeleteTarget.hostCount) === 'with-descendants'
+                            ? 'delete-subtree'
+                            : 'reparent-descendants'
+                        );
+                      }
+                    setSelectedGroupPaths((current) => current.filter((path) => !groupDeleteTarget.paths.includes(path)));
                     setGroupDeleteTarget(null);
                     setGroupDeleteError(null);
                   } catch (error) {

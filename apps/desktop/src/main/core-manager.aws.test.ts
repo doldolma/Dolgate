@@ -2,7 +2,7 @@ import { EventEmitter } from "node:events";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { CoreEvent, CoreRequest } from "@shared";
 import { ipcChannels } from "../common/ipc-channels";
-import { encodeControlFrame } from "./core-framing";
+import { CoreFrameParser, encodeControlFrame } from "./core-framing";
 
 const { spawnMock } = vi.hoisted(() => ({
   spawnMock: vi.fn(),
@@ -60,6 +60,12 @@ function decodeControlFrame(
   return JSON.parse(
     buffer.subarray(9, 9 + metadataLength).toString("utf8"),
   ) as CoreRequest<Record<string, unknown>>;
+}
+
+function decodeSingleFrame(buffer: Buffer) {
+  const frames = new CoreFrameParser().push(buffer);
+  expect(frames).toHaveLength(1);
+  return frames[0]!;
 }
 
 function createFakeChildProcess() {
@@ -391,6 +397,188 @@ describe("CoreManager AWS SSM sessions", () => {
     const request = decodeControlFrame(fakeProcess.writes[1]);
     expect(request.type).toBe("controlSignal");
     expect(request.payload).toMatchObject({ signal: "interrupt" });
+  });
+
+  it.each([
+    ["interrupt", "\u0003"],
+    ["suspend", "\u001a"],
+    ["quit", "\u001c"],
+  ] as const)(
+    "reroutes connected AWS text control byte %s through controlSignal",
+    async (signal, input) => {
+      const fakeProcess = createFakeChildProcess();
+      spawnMock.mockReturnValue(fakeProcess.child);
+
+      const manager = new CoreManager();
+      const { sessionId } = await manager.connectAwsSession({
+        profileName: "default",
+        region: "ap-northeast-2",
+        instanceId: "i-control-text",
+        cols: 120,
+        rows: 32,
+        title: "Control Host",
+        hostId: "host-5",
+      });
+
+      fakeProcess.emitControl({
+        type: "connected",
+        sessionId,
+        payload: {
+          status: "connected",
+        },
+      });
+
+      manager.write(sessionId, input);
+
+      expect(fakeProcess.writes).toHaveLength(2);
+      const frame = decodeSingleFrame(fakeProcess.writes[1]);
+      expect(frame.kind).toBe("control");
+      if (frame.kind !== "control") {
+        return;
+      }
+      expect(frame.metadata.type).toBe("controlSignal");
+      expect(frame.metadata.payload).toMatchObject({ signal });
+    },
+  );
+
+  it.each([
+    ["interrupt", 0x03],
+    ["suspend", 0x1a],
+    ["quit", 0x1c],
+  ] as const)(
+    "reroutes connected AWS binary control byte %s through controlSignal",
+    async (signal, byte) => {
+      const fakeProcess = createFakeChildProcess();
+      spawnMock.mockReturnValue(fakeProcess.child);
+
+      const manager = new CoreManager();
+      const { sessionId } = await manager.connectAwsSession({
+        profileName: "default",
+        region: "ap-northeast-2",
+        instanceId: "i-control-binary",
+        cols: 120,
+        rows: 32,
+        title: "Control Host",
+        hostId: "host-6",
+      });
+
+      fakeProcess.emitControl({
+        type: "connected",
+        sessionId,
+        payload: {
+          status: "connected",
+        },
+      });
+
+      manager.writeBinary(sessionId, Uint8Array.of(byte));
+
+      expect(fakeProcess.writes).toHaveLength(2);
+      const frame = decodeSingleFrame(fakeProcess.writes[1]);
+      expect(frame.kind).toBe("control");
+      if (frame.kind !== "control") {
+        return;
+      }
+      expect(frame.metadata.type).toBe("controlSignal");
+      expect(frame.metadata.payload).toMatchObject({ signal });
+    },
+  );
+
+  it("keeps single-byte control input as raw write frames for SSH and local sessions", async () => {
+    const fakeProcess = createFakeChildProcess();
+    spawnMock.mockReturnValue(fakeProcess.child);
+
+    const manager = new CoreManager();
+    const { sessionId: sshSessionId } = await manager.connect({
+      host: "ssh.internal",
+      port: 22,
+      username: "ubuntu",
+      authType: "password",
+      password: "secret",
+      trustedHostKeyBase64: "trusted",
+      cols: 120,
+      rows: 32,
+      title: "SSH Host",
+      hostId: "ssh-host-1",
+    });
+    const { sessionId: localSessionId } = await manager.connectLocalSession({
+      cols: 120,
+      rows: 32,
+      title: "Local",
+    });
+
+    fakeProcess.emitControl({
+      type: "connected",
+      sessionId: sshSessionId,
+      payload: {
+        status: "connected",
+      },
+    });
+    fakeProcess.emitControl({
+      type: "connected",
+      sessionId: localSessionId,
+      payload: {
+        status: "connected",
+      },
+    });
+
+    manager.write(sshSessionId, "\u0003");
+    manager.writeBinary(sshSessionId, Uint8Array.of(0x03));
+    manager.write(localSessionId, "\u0003");
+    manager.writeBinary(localSessionId, Uint8Array.of(0x03));
+
+    expect(fakeProcess.writes).toHaveLength(6);
+    for (const frameBuffer of fakeProcess.writes.slice(2)) {
+      const frame = decodeSingleFrame(frameBuffer);
+      expect(frame.kind).toBe("stream");
+      if (frame.kind !== "stream") {
+        return;
+      }
+      expect(frame.metadata.type).toBe("write");
+      expect([...frame.payload]).toEqual([0x03]);
+    }
+  });
+
+  it("keeps multi-byte AWS payloads as raw write frames", async () => {
+    const fakeProcess = createFakeChildProcess();
+    spawnMock.mockReturnValue(fakeProcess.child);
+
+    const manager = new CoreManager();
+    const { sessionId } = await manager.connectAwsSession({
+      profileName: "default",
+      region: "ap-northeast-2",
+      instanceId: "i-control-multi",
+      cols: 120,
+      rows: 32,
+      title: "Control Host",
+      hostId: "host-7",
+    });
+
+    fakeProcess.emitControl({
+      type: "connected",
+      sessionId,
+      payload: {
+        status: "connected",
+      },
+    });
+
+    manager.write(sessionId, "\u0003\u0003");
+    manager.writeBinary(sessionId, Uint8Array.of(0x03, 0x03));
+
+    expect(fakeProcess.writes).toHaveLength(3);
+
+    const textFrame = decodeSingleFrame(fakeProcess.writes[1]);
+    expect(textFrame.kind).toBe("stream");
+    if (textFrame.kind === "stream") {
+      expect(textFrame.metadata.type).toBe("write");
+      expect([...textFrame.payload]).toEqual([0x03, 0x03]);
+    }
+
+    const binaryFrame = decodeSingleFrame(fakeProcess.writes[2]);
+    expect(binaryFrame.kind).toBe("stream");
+    if (binaryFrame.kind === "stream") {
+      expect(binaryFrame.metadata.type).toBe("write");
+      expect([...binaryFrame.payload]).toEqual([0x03, 0x03]);
+    }
   });
 
   it("uses dedicated SSM port forward commands for AWS forwarding runtimes", async () => {

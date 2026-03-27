@@ -61,6 +61,15 @@ interface PortForwardDefinition {
 
 type SessionTransport = "ssh" | "aws-ssm" | "local-shell";
 
+const AWS_SSM_CONTROL_SIGNAL_BY_BYTE: ReadonlyMap<
+  number,
+  SessionShareControlSignal
+> = new Map<number, SessionShareControlSignal>([
+  [0x03, "interrupt"],
+  [0x1a, "suspend"],
+  [0x1c, "quit"],
+]);
+
 const packagedUnixCorePathEntries = [
   "/opt/homebrew/bin",
   "/usr/local/bin",
@@ -112,6 +121,15 @@ function mergeUniquePathEntries(
   preferredEntries.forEach(appendUnique);
   splitPathEntries(rawPath, delimiter).forEach(appendUnique);
   return entries.join(delimiter);
+}
+
+function resolveAwsSsmControlSignal(
+  payload: Uint8Array,
+): SessionShareControlSignal | null {
+  if (payload.length !== 1) {
+    return null;
+  }
+  return AWS_SSM_CONTROL_SIGNAL_BY_BYTE.get(payload[0]) ?? null;
 }
 
 function lookupEnvValue(
@@ -1143,6 +1161,15 @@ export class CoreManager {
     if (!tab || tab.status !== "connected") {
       return;
     }
+    if (this.sessionTransportById.get(sessionId) === "aws-ssm") {
+      const controlSignal = resolveAwsSsmControlSignal(
+        Buffer.from(data, "utf8"),
+      );
+      if (controlSignal) {
+        this.sendControlSignal(sessionId, controlSignal);
+        return;
+      }
+    }
     this.sendStream(
       {
         type: "write",
@@ -1157,6 +1184,13 @@ export class CoreManager {
     // 마우스 보고 등 raw 입력도 연결 완료 이후에만 전달한다.
     if (!tab || tab.status !== "connected") {
       return;
+    }
+    if (this.sessionTransportById.get(sessionId) === "aws-ssm") {
+      const controlSignal = resolveAwsSsmControlSignal(data);
+      if (controlSignal) {
+        this.sendControlSignal(sessionId, controlSignal);
+        return;
+      }
     }
     this.sendStream(
       {

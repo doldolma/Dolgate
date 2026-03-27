@@ -261,6 +261,7 @@ export interface AppState {
     draft: HostDraft,
     secrets?: HostSecretInput,
   ) => Promise<void>;
+  duplicateHosts: (hostIds: string[]) => Promise<void>;
   moveHostToGroup: (hostId: string, groupPath: string | null) => Promise<void>;
   removeHost: (hostId: string) => Promise<void>;
   openLocalTerminal: (cols: number, rows: number) => Promise<void>;
@@ -583,6 +584,85 @@ function sortHosts(hosts: HostRecord[]): HostRecord[] {
     }
     return a.label.localeCompare(b.label);
   });
+}
+
+function toHostDraft(record: HostRecord, label: string): HostDraft {
+  if (isAwsEc2HostRecord(record)) {
+    return {
+      kind: "aws-ec2",
+      label,
+      groupName: record.groupName ?? null,
+      tags: record.tags ?? [],
+      terminalThemeId: record.terminalThemeId ?? null,
+      awsProfileName: record.awsProfileName,
+      awsRegion: record.awsRegion,
+      awsInstanceId: record.awsInstanceId,
+      awsInstanceName: record.awsInstanceName ?? null,
+      awsPlatform: record.awsPlatform ?? null,
+      awsPrivateIp: record.awsPrivateIp ?? null,
+      awsState: record.awsState ?? null,
+    };
+  }
+
+  if (isWarpgateSshHostRecord(record)) {
+    return {
+      kind: "warpgate-ssh",
+      label,
+      groupName: record.groupName ?? null,
+      tags: record.tags ?? [],
+      terminalThemeId: record.terminalThemeId ?? null,
+      warpgateBaseUrl: record.warpgateBaseUrl,
+      warpgateSshHost: record.warpgateSshHost,
+      warpgateSshPort: record.warpgateSshPort,
+      warpgateTargetId: record.warpgateTargetId,
+      warpgateTargetName: record.warpgateTargetName,
+      warpgateUsername: record.warpgateUsername,
+    };
+  }
+
+  return {
+    kind: "ssh",
+    label,
+    hostname: record.hostname,
+    port: record.port,
+    username: record.username,
+    authType: record.authType,
+    privateKeyPath: record.privateKeyPath ?? null,
+    secretRef: record.secretRef ?? null,
+    groupName: record.groupName ?? null,
+    tags: record.tags ?? [],
+    terminalThemeId: record.terminalThemeId ?? null,
+  };
+}
+
+function getDuplicateHostBaseLabel(label: string): string {
+  const match = label.match(/^(.*?)(?: Copy(?: (\d+))?)?$/);
+  const base = match?.[1]?.trim();
+  return base && base.length > 0 ? base : label;
+}
+
+function buildDuplicateHostLabel(
+  record: HostRecord,
+  hosts: HostRecord[],
+): string {
+  const baseLabel = getDuplicateHostBaseLabel(record.label);
+  const groupPath = normalizeGroupPath(record.groupName);
+  const labelsInGroup = new Set(
+    hosts
+      .filter((host) => normalizeGroupPath(host.groupName) === groupPath)
+      .map((host) => host.label),
+  );
+
+  const firstCopyLabel = `${baseLabel} Copy`;
+  if (!labelsInGroup.has(firstCopyLabel)) {
+    return firstCopyLabel;
+  }
+
+  let suffix = 2;
+  while (labelsInGroup.has(`${baseLabel} Copy ${suffix}`)) {
+    suffix += 1;
+  }
+  return `${baseLabel} Copy ${suffix}`;
 }
 
 function normalizeTagValue(tag: string): string {
@@ -2986,6 +3066,38 @@ export function createAppStore(api: DesktopApi) {
           hostDrawer: { mode: "edit", hostId: next.id },
         });
         await refreshHostAndKeychainState(set);
+        await syncOperationalData(set);
+      },
+      duplicateHosts: async (hostIds) => {
+        if (hostIds.length === 0) {
+          return;
+        }
+
+        let workingHosts = get().hosts;
+        let didCreate = false;
+        for (const hostId of hostIds) {
+          const current = workingHosts.find((host) => host.id === hostId);
+          if (!current) {
+            continue;
+          }
+
+          const next = await api.hosts.create(
+            toHostDraft(current, buildDuplicateHostLabel(current, workingHosts)),
+          );
+          workingHosts = sortHosts([
+            ...workingHosts.filter((host) => host.id !== next.id),
+            next,
+          ]);
+          didCreate = true;
+        }
+
+        if (!didCreate) {
+          return;
+        }
+
+        set({
+          hosts: workingHosts,
+        });
         await syncOperationalData(set);
       },
       moveHostToGroup: async (hostId, groupPath) => {

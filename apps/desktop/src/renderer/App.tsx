@@ -260,6 +260,7 @@ export function App() {
   const createGroup = useAppStore((state) => state.createGroup);
   const removeGroup = useAppStore((state) => state.removeGroup);
   const saveHost = useAppStore((state) => state.saveHost);
+  const duplicateHosts = useAppStore((state) => state.duplicateHosts);
   const moveHostToGroup = useAppStore((state) => state.moveHostToGroup);
   const removeHost = useAppStore((state) => state.removeHost);
   const openLocalTerminal = useAppStore((state) => state.openLocalTerminal);
@@ -894,8 +895,25 @@ export function App() {
                   setSelectedHostId(null);
                   navigateGroup(path);
                 }}
+                onClearHostSelection={() => {
+                  setSelectedHostId(null);
+                }}
                 onSelectHost={handleSelectHost}
                 onEditHost={handleEditHost}
+                onDuplicateHosts={async (hostIds) => {
+                  setHostBrowserError(null);
+                  setHostBrowserStatus(null);
+                  try {
+                    await duplicateHosts(hostIds);
+                    setHostBrowserStatus(
+                      hostIds.length === 1
+                        ? 'Copied 1 host.'
+                        : `Copied ${hostIds.length} hosts.`
+                    );
+                  } catch (error) {
+                    setHostBrowserError(error instanceof Error ? error.message : 'Failed to copy the selected hosts.');
+                  }
+                }}
                 onMoveHostToGroup={moveHostToGroup}
                 onRemoveHost={removeHost}
                 onConnectHost={async (hostId) => {
