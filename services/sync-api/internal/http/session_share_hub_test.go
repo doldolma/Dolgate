@@ -2,6 +2,7 @@ package http
 
 import (
 	"encoding/base64"
+	"encoding/json"
 	"strings"
 	"testing"
 )
@@ -95,5 +96,140 @@ func TestSessionShareTransportValidation(t *testing.T) {
 	}
 	if normalizeSessionShareTransport("invalid") != "ssh" {
 		t.Fatal("unknown transport should fall back to ssh")
+	}
+}
+
+func TestNormalizeSessionShareChatNickname(t *testing.T) {
+	if nickname, ok := normalizeSessionShareChatNickname("  맑은 여우  "); !ok || nickname != "맑은 여우" {
+		t.Fatalf("expected trimmed nickname, got %q / %v", nickname, ok)
+	}
+	if _, ok := normalizeSessionShareChatNickname(""); ok {
+		t.Fatal("empty nickname should be rejected")
+	}
+	if _, ok := normalizeSessionShareChatNickname("한줄\n둘"); ok {
+		t.Fatal("multiline nickname should be rejected")
+	}
+	if _, ok := normalizeSessionShareChatNickname(strings.Repeat("가", maxShareChatNicknameRunes+1)); ok {
+		t.Fatal("oversized nickname should be rejected")
+	}
+}
+
+func TestNormalizeSessionShareChatText(t *testing.T) {
+	if text, ok := normalizeSessionShareChatText("  안녕하세요  "); !ok || text != "안녕하세요" {
+		t.Fatalf("expected trimmed chat text, got %q / %v", text, ok)
+	}
+	if _, ok := normalizeSessionShareChatText(""); ok {
+		t.Fatal("empty chat text should be rejected")
+	}
+	if text, ok := normalizeSessionShareChatText("한줄\n둘"); !ok || text != "한줄\n둘" {
+		t.Fatalf("expected multiline chat text to be preserved, got %q / %v", text, ok)
+	}
+	if _, ok := normalizeSessionShareChatText(strings.Repeat("가", maxShareChatTextRunes+1)); ok {
+		t.Fatal("oversized chat text should be rejected")
+	}
+}
+
+func TestViewerChatMessageUpdatesHistoryAndIgnoresInputGate(t *testing.T) {
+	hub := NewSessionShareHub()
+	response := hub.Create("user-1", createSessionShareRequest{
+		SessionID: "session-1",
+		Title:     "Shared Session",
+		Cols:      80,
+		Rows:      24,
+	}, "https://viewer.example.com")
+
+	viewer := &shareConn{}
+	hub.shares[response.ShareID].inputEnabled = false
+	hub.shares[response.ShareID].viewers[viewer] = &sessionShareViewerState{}
+
+	profilePayload, _ := json.Marshal(viewerChatProfileMessage{
+		Type:     "chat-profile",
+		Nickname: "맑은 여우",
+	})
+	if err := hub.handleViewerPayload(response.ShareID, viewer, profilePayload); err != nil {
+		t.Fatalf("profile update failed: %v", err)
+	}
+
+	sendPayload, _ := json.Marshal(viewerChatSendMessage{
+		Type: "chat-send",
+		Text: "안녕하세요",
+	})
+	if err := hub.handleViewerPayload(response.ShareID, viewer, sendPayload); err != nil {
+		t.Fatalf("chat send failed: %v", err)
+	}
+
+	share := hub.shares[response.ShareID]
+	if len(share.chatLog) != 1 {
+		t.Fatalf("expected 1 chat message, got %d", len(share.chatLog))
+	}
+	if share.chatLog[0].Nickname != "맑은 여우" || share.chatLog[0].Text != "안녕하세요" {
+		t.Fatalf("unexpected chat payload: %#v", share.chatLog[0])
+	}
+}
+
+func TestViewerChatHistoryCapsAtLatestEntriesAndUsesLatestNickname(t *testing.T) {
+	hub := NewSessionShareHub()
+	response := hub.Create("user-1", createSessionShareRequest{
+		SessionID: "session-1",
+		Title:     "Shared Session",
+		Cols:      80,
+		Rows:      24,
+	}, "https://viewer.example.com")
+
+	viewer := &shareConn{}
+	hub.shares[response.ShareID].viewers[viewer] = &sessionShareViewerState{}
+
+	for _, nickname := range []string{"첫 닉네임", "새 닉네임"} {
+		payload, _ := json.Marshal(viewerChatProfileMessage{
+			Type:     "chat-profile",
+			Nickname: nickname,
+		})
+		if err := hub.handleViewerPayload(response.ShareID, viewer, payload); err != nil {
+			t.Fatalf("profile update failed: %v", err)
+		}
+	}
+
+	for index := 0; index < maxShareChatEntries+5; index += 1 {
+		payload, _ := json.Marshal(viewerChatSendMessage{
+			Type: "chat-send",
+			Text: "메시지",
+		})
+		if err := hub.handleViewerPayload(response.ShareID, viewer, payload); err != nil {
+			t.Fatalf("chat send failed at %d: %v", index, err)
+		}
+	}
+
+	share := hub.shares[response.ShareID]
+	if len(share.chatLog) != maxShareChatEntries {
+		t.Fatalf("expected chat history cap %d, got %d", maxShareChatEntries, len(share.chatLog))
+	}
+	if share.chatLog[len(share.chatLog)-1].Nickname != "새 닉네임" {
+		t.Fatalf("expected latest nickname on future messages, got %#v", share.chatLog[len(share.chatLog)-1])
+	}
+}
+
+func TestDeleteByShareIDRemovesChatState(t *testing.T) {
+	hub := NewSessionShareHub()
+	response := hub.Create("user-1", createSessionShareRequest{
+		SessionID: "session-1",
+		Title:     "Shared Session",
+		Cols:      80,
+		Rows:      24,
+	}, "https://viewer.example.com")
+
+	viewer := &shareConn{}
+	hub.shares[response.ShareID].viewers[viewer] = &sessionShareViewerState{nickname: "맑은 여우"}
+	hub.shares[response.ShareID].chatLog = []sessionShareChatMessage{{
+		ID:       "chat-1",
+		Nickname: "맑은 여우",
+		Text:     "안녕하세요",
+		SentAt:   "2026-03-27T00:00:00Z",
+	}}
+
+	if err := hub.DeleteByShareID(response.ShareID, "세션 공유가 종료되었습니다."); err != nil {
+		t.Fatalf("delete by share id failed: %v", err)
+	}
+	if _, ok := hub.shares[response.ShareID]; ok {
+		t.Fatal("expected share to be removed entirely")
 	}
 }

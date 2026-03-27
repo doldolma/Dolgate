@@ -15,7 +15,7 @@
       </div>
       <div class="viewer-header__status" id="viewer-status">Connecting</div>
     </header>
-    <main class="viewer-shell">
+    <main id="viewer-shell" class="viewer-shell" data-chat-collapsed="true">
       <div id="viewer-search-overlay" class="viewer-search-overlay" hidden>
         <input
           id="viewer-search-input"
@@ -27,11 +27,66 @@
         <button id="viewer-search-next" type="button" class="viewer-search-overlay__button">Next</button>
         <button id="viewer-search-close" type="button" class="viewer-search-overlay__button">Close</button>
       </div>
+      <button
+        id="viewer-chat-open"
+        type="button"
+        class="viewer-chat-open"
+        aria-expanded="false"
+        aria-controls="viewer-chat-panel"
+      >
+        채팅 열기
+      </button>
       <div id="viewer-terminal-viewport" class="viewer-terminal-viewport">
         <div id="viewer-terminal-stage" class="viewer-terminal-stage">
           <div id="viewer-terminal" class="viewer-terminal"></div>
         </div>
       </div>
+      <aside id="viewer-chat-panel" class="viewer-chat-panel" aria-label="Session chat" data-collapsed="true">
+        <div class="viewer-chat-panel__header">
+          <div class="viewer-chat-panel__title-wrap">
+            <strong>채팅</strong>
+            <span id="viewer-chat-status">연결 중</span>
+          </div>
+          <button
+            id="viewer-chat-toggle"
+            type="button"
+            class="viewer-chat-toggle"
+            aria-expanded="false"
+            aria-controls="viewer-chat-body"
+          >
+            채팅 열기
+          </button>
+        </div>
+        <div id="viewer-chat-body" class="viewer-chat-panel__body" hidden>
+          <div id="viewer-chat-messages" class="viewer-chat-messages" aria-live="polite"></div>
+          <form id="viewer-chat-form" class="viewer-chat-form">
+            <div class="viewer-chat-form__row">
+              <label class="viewer-chat-form__field">
+                <span>닉네임</span>
+                <input
+                  id="viewer-chat-nickname"
+                  type="text"
+                  maxlength="24"
+                  autocomplete="nickname"
+                  placeholder="닉네임"
+                />
+              </label>
+            </div>
+            <div class="viewer-chat-form__row viewer-chat-form__row--composer">
+              <label class="viewer-chat-form__field viewer-chat-form__field--message">
+                <span>메시지</span>
+                <textarea
+                  id="viewer-chat-input"
+                  maxlength="300"
+                  rows="2"
+                  placeholder="메시지를 입력하세요"
+                ></textarea>
+              </label>
+              <button id="viewer-chat-submit" type="submit" class="viewer-chat-form__submit">전송</button>
+            </div>
+          </form>
+        </div>
+      </aside>
     </main>
     <script src="/share/assets/vendor/xterm.js?v={{ .AssetVersion }}"></script>
     <script src="/share/assets/vendor/xterm-addon-unicode11.js?v={{ .AssetVersion }}"></script>

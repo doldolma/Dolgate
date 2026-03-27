@@ -201,7 +201,21 @@ function createMockApi(): DesktopApi {
         errorMessage: null,
       })),
       stop: vi.fn().mockResolvedValue(undefined),
+      openOwnerChatWindow: vi.fn().mockResolvedValue(undefined),
+      getOwnerChatSnapshot: vi.fn().mockResolvedValue({
+        sessionId: "session-1",
+        title: "Host Session",
+        state: {
+          status: "active",
+          shareUrl: "https://sync.example.com/share/share-1/token-1",
+          inputEnabled: false,
+          viewerCount: 0,
+          errorMessage: null,
+        },
+        messages: [],
+      }),
       onEvent: vi.fn().mockReturnValue(() => undefined),
+      onChatEvent: vi.fn().mockReturnValue(() => undefined),
     },
     shell: {
       pickPrivateKey: vi.fn(),
@@ -1358,5 +1372,101 @@ describe("createAppStore", () => {
       { kind: "session", sessionId: "session-1" },
     ]);
     expect(store.getState().activeWorkspaceTab).toBe("session:session-1");
+  });
+
+  it("queues owner session-share chat notifications for active shares and clears them when the share stops", async () => {
+    const store = createAppStore(createMockApi());
+
+    await store.getState().bootstrap();
+    await store.getState().connectHost("host-1", 120, 32);
+
+    store.getState().handleSessionShareEvent({
+      sessionId: "session-1",
+      state: {
+        status: "active",
+        shareUrl: "https://sync.example.com/share/share-1/token-1",
+        inputEnabled: false,
+        viewerCount: 2,
+        errorMessage: null,
+      },
+    });
+    store.getState().handleSessionShareChatEvent({
+      sessionId: "session-1",
+      message: {
+        id: "chat-1",
+        nickname: "맑은 여우",
+        text: "안녕하세요",
+        sentAt: "2026-03-27T00:00:00.000Z",
+      },
+    });
+
+    expect(store.getState().sessionShareChatNotifications["session-1"]).toEqual([
+      {
+        id: "chat-1",
+        nickname: "맑은 여우",
+        text: "안녕하세요",
+        sentAt: "2026-03-27T00:00:00.000Z",
+      },
+    ]);
+
+    store.getState().handleSessionShareEvent({
+      sessionId: "session-1",
+      state: {
+        status: "inactive",
+        shareUrl: null,
+        inputEnabled: false,
+        viewerCount: 0,
+        errorMessage: null,
+      },
+    });
+
+    expect(store.getState().sessionShareChatNotifications["session-1"]).toBeUndefined();
+  });
+
+  it("dismisses individual owner session-share chat notifications", async () => {
+    const store = createAppStore(createMockApi());
+
+    await store.getState().bootstrap();
+    await store.getState().connectHost("host-1", 120, 32);
+
+    store.getState().handleSessionShareEvent({
+      sessionId: "session-1",
+      state: {
+        status: "active",
+        shareUrl: "https://sync.example.com/share/share-1/token-1",
+        inputEnabled: false,
+        viewerCount: 1,
+        errorMessage: null,
+      },
+    });
+    store.getState().handleSessionShareChatEvent({
+      sessionId: "session-1",
+      message: {
+        id: "chat-1",
+        nickname: "맑은 여우",
+        text: "첫 번째",
+        sentAt: "2026-03-27T00:00:00.000Z",
+      },
+    });
+    store.getState().handleSessionShareChatEvent({
+      sessionId: "session-1",
+      message: {
+        id: "chat-2",
+        nickname: "반짝이는 해달",
+        text: "두 번째",
+        sentAt: "2026-03-27T00:01:00.000Z",
+      },
+    });
+
+    store.getState().dismissSessionShareChatNotification("session-1", "chat-1");
+
+    expect(store.getState().sessionShareChatNotifications["session-1"]).toEqual([
+      {
+        id: "chat-2",
+        nickname: "반짝이는 해달",
+        text: "두 번째",
+        sentAt: "2026-03-27T00:01:00.000Z",
+      },
+    ]);
   });
 });

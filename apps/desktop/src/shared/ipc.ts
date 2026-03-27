@@ -29,9 +29,11 @@ import type {
   HostDraft,
   HostRecord,
   SecretMetadataRecord,
+  SessionShareChatEvent,
   SessionShareControlSignal,
   SessionShareEvent,
   SessionShareInputToggleInput,
+  SessionShareOwnerChatSnapshot,
   SessionShareSnapshotInput,
   SessionShareStartInput,
   SessionShareState,
@@ -384,7 +386,12 @@ export interface DesktopApi {
       input: SessionShareInputToggleInput,
     ) => Promise<SessionShareState>;
     stop: (sessionId: string) => Promise<void>;
+    openOwnerChatWindow: (sessionId: string) => Promise<void>;
+    getOwnerChatSnapshot: (
+      sessionId: string,
+    ) => Promise<SessionShareOwnerChatSnapshot>;
     onEvent: (listener: (event: SessionShareEvent) => void) => () => void;
+    onChatEvent: (listener: (event: SessionShareChatEvent) => void) => () => void;
   };
   shell: {
     pickPrivateKey: () => Promise<string | null>;

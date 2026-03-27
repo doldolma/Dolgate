@@ -1,20 +1,27 @@
 import { BrowserWindow } from "electron";
 import { Buffer } from "node:buffer";
-import type {
-  CoreEvent,
-  SessionShareControlSignal,
-  SessionShareEvent,
-  SessionShareInputToggleInput,
-  SessionShareOwnerMessage,
-  SessionShareSnapshotInput,
-  SessionShareStartInput,
-  SessionShareState,
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import {
+  SESSION_SHARE_CHAT_HISTORY_LIMIT,
+  type CoreEvent,
+  type SessionShareChatEvent,
+  type SessionShareOwnerChatSnapshot,
+  type SessionShareControlSignal,
+  type SessionShareEvent,
+  type SessionShareInputToggleInput,
+  type SessionShareChatMessage,
+  type SessionShareOwnerMessage,
+  type SessionShareSnapshotInput,
+  type SessionShareStartInput,
+  type SessionShareState,
 } from "@shared";
 import { ipcChannels } from "../common/ipc-channels";
 import { AuthService } from "./auth-service";
 import { CoreManager } from "./core-manager";
 
 const MAX_PENDING_OWNER_MESSAGES = 512;
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 interface CreateShareResponse {
   shareId: string;
@@ -43,6 +50,11 @@ interface OwnerServerMessageInputEnabled {
   inputEnabled: boolean;
 }
 
+interface OwnerServerMessageChatMessage {
+  type: "chat-message";
+  message: SessionShareChatMessage;
+}
+
 interface OwnerServerMessageShareEnded {
   type: "share-ended";
   message?: string;
@@ -53,6 +65,7 @@ type OwnerServerMessage =
   | OwnerServerMessageControlSignal
   | OwnerServerMessageViewerCount
   | OwnerServerMessageInputEnabled
+  | OwnerServerMessageChatMessage
   | OwnerServerMessageShareEnded;
 
 interface ActiveSessionShare {
@@ -74,6 +87,7 @@ interface ActiveSessionShare {
   ownerSocketOpen: boolean;
   closedByOwner: boolean;
   pendingMessages: string[];
+  ownerChatMessages: SessionShareChatMessage[];
   state: SessionShareState;
 }
 
@@ -136,9 +150,22 @@ function createInactiveShareState(): SessionShareState {
   };
 }
 
+function appendOwnerChatMessage(
+  messages: SessionShareChatMessage[],
+  message: SessionShareChatMessage,
+): SessionShareChatMessage[] {
+  const nextMessages = [...messages.filter((entry) => entry.id !== message.id), message];
+  if (nextMessages.length <= SESSION_SHARE_CHAT_HISTORY_LIMIT) {
+    return nextMessages;
+  }
+
+  return nextMessages.slice(-SESSION_SHARE_CHAT_HISTORY_LIMIT);
+}
+
 export class SessionShareService {
   private readonly windows = new Set<BrowserWindow>();
   private readonly shares = new Map<string, ActiveSessionShare>();
+  private readonly ownerChatWindows = new Map<string, BrowserWindow>();
 
   constructor(
     private readonly authService: AuthService,
@@ -187,6 +214,7 @@ export class SessionShareService {
       ownerSocketOpen: false,
       closedByOwner: false,
       pendingMessages: [],
+      ownerChatMessages: [],
       state: {
         status: "starting",
         shareUrl: null,
@@ -226,6 +254,89 @@ export class SessionShareService {
       this.broadcastState(input.sessionId, provisional.state);
       return provisional.state;
     }
+  }
+
+  async openOwnerChatWindow(
+    sessionId: string,
+    sourceWindow: BrowserWindow,
+  ): Promise<void> {
+    const share = this.shares.get(sessionId);
+    if (!share || share.state.status !== "active") {
+      return;
+    }
+
+    const existingWindow = this.ownerChatWindows.get(sessionId);
+    if (existingWindow && !existingWindow.isDestroyed()) {
+      if (existingWindow.isMinimized()) {
+        existingWindow.restore();
+      }
+      existingWindow.show();
+      existingWindow.focus();
+      return;
+    }
+
+    const chatWindow = new BrowserWindow({
+      width: 400,
+      height: 560,
+      minWidth: 320,
+      minHeight: 420,
+      show: false,
+      autoHideMenuBar: true,
+      backgroundColor: "#eef3f7",
+      title: this.buildOwnerChatWindowTitle(share.title),
+      webPreferences: {
+        preload: path.join(__dirname, "preload.js"),
+        contextIsolation: true,
+        nodeIntegration: false,
+      },
+    });
+
+    this.ownerChatWindows.set(sessionId, chatWindow);
+    this.registerWindow(chatWindow);
+    chatWindow.on("closed", () => {
+      if (this.ownerChatWindows.get(sessionId) === chatWindow) {
+        this.ownerChatWindows.delete(sessionId);
+      }
+    });
+    chatWindow.once("ready-to-show", () => {
+      chatWindow.show();
+      chatWindow.focus();
+    });
+
+    try {
+      const targetUrl = this.buildOwnerChatWindowURL(sourceWindow, sessionId);
+      await chatWindow.loadURL(targetUrl);
+    } catch (error) {
+      this.ownerChatWindows.delete(sessionId);
+      if (!chatWindow.isDestroyed()) {
+        chatWindow.close();
+      }
+      throw error;
+    }
+
+    if (!chatWindow.isVisible()) {
+      chatWindow.show();
+    }
+    chatWindow.focus();
+  }
+
+  getOwnerChatSnapshot(sessionId: string): SessionShareOwnerChatSnapshot {
+    const share = this.shares.get(sessionId);
+    if (!share) {
+      return {
+        sessionId,
+        title: "",
+        state: createInactiveShareState(),
+        messages: [],
+      };
+    }
+
+    return {
+      sessionId,
+      title: share.title,
+      state: { ...share.state },
+      messages: [...share.ownerChatMessages],
+    };
   }
 
   async updateSnapshot(input: SessionShareSnapshotInput): Promise<void> {
@@ -549,6 +660,15 @@ export class SessionShareService {
       return;
     }
 
+    if (message.type === "chat-message") {
+      share.ownerChatMessages = appendOwnerChatMessage(
+        share.ownerChatMessages,
+        message.message,
+      );
+      this.broadcastChatEvent(share.sessionId, message.message);
+      return;
+    }
+
     if (message.type === "control-signal") {
       if (!share.inputEnabled || share.transport !== "aws-ssm") {
         return;
@@ -624,5 +744,59 @@ export class SessionShareService {
         window.webContents.send(ipcChannels.sessionShares.event, event);
       }
     }
+
+    if (state.status !== "active") {
+      const share = this.shares.get(sessionId);
+      if (share) {
+        share.ownerChatMessages = [];
+      }
+      this.closeOwnerChatWindow(sessionId);
+    }
+  }
+
+  private broadcastChatEvent(
+    sessionId: string,
+    message: SessionShareChatMessage,
+  ): void {
+    const event: SessionShareChatEvent = {
+      sessionId,
+      message,
+    };
+    for (const window of this.windows) {
+      if (!window.isDestroyed()) {
+        window.webContents.send(ipcChannels.sessionShares.chatEvent, event);
+      }
+    }
+  }
+
+  private closeOwnerChatWindow(sessionId: string): void {
+    const chatWindow = this.ownerChatWindows.get(sessionId);
+    if (!chatWindow || chatWindow.isDestroyed()) {
+      this.ownerChatWindows.delete(sessionId);
+      return;
+    }
+
+    this.ownerChatWindows.delete(sessionId);
+    chatWindow.close();
+  }
+
+  private buildOwnerChatWindowTitle(title: string): string {
+    const normalized = title.trim();
+    return normalized ? `채팅 기록 · ${normalized}` : "채팅 기록";
+  }
+
+  private buildOwnerChatWindowURL(
+    sourceWindow: BrowserWindow,
+    sessionId: string,
+  ): string {
+    const sourceUrl = sourceWindow.webContents.getURL();
+    if (!sourceUrl) {
+      throw new Error("채팅 기록 창을 열 기준 URL을 찾지 못했습니다.");
+    }
+
+    const targetUrl = new URL(sourceUrl);
+    targetUrl.searchParams.set("window", "session-share-chat");
+    targetUrl.searchParams.set("sessionId", sessionId);
+    return targetUrl.toString();
   }
 }

@@ -1,29 +1,113 @@
-import { describe, expect, it, vi } from "vitest";
+import { Buffer } from "node:buffer";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("electron", () => ({
-  BrowserWindow: class {},
+const { browserWindowInstances } = vi.hoisted(() => ({
+  browserWindowInstances: [] as any[],
 }));
 
+vi.mock("electron", () => {
+  class MockBrowserWindow {
+    static fromWebContents = vi.fn();
+
+    readonly options: Record<string, unknown>;
+    readonly loadURL = vi.fn(async (url: string) => {
+      this.loadedURL = url;
+    });
+    readonly focus = vi.fn();
+    readonly show = vi.fn(() => {
+      this.visible = true;
+    });
+    readonly close = vi.fn(() => {
+      this.destroyed = true;
+      this.emit("closed");
+    });
+    readonly restore = vi.fn(() => {
+      this.minimized = false;
+    });
+    readonly isDestroyed = vi.fn(() => this.destroyed);
+    readonly isMinimized = vi.fn(() => this.minimized);
+    readonly isVisible = vi.fn(() => this.visible);
+    readonly webContents = {
+      send: vi.fn(),
+      getURL: vi.fn(() => this.loadedURL),
+    };
+
+    loadedURL = "https://app.example.com/";
+    minimized = false;
+    visible = false;
+    destroyed = false;
+    private readonly listeners = new Map<string, Array<(...args: any[]) => void>>();
+
+    constructor(options: Record<string, unknown>) {
+      this.options = options;
+      browserWindowInstances.push(this);
+    }
+
+    on(eventName: string, listener: (...args: any[]) => void) {
+      const listeners = this.listeners.get(eventName) ?? [];
+      listeners.push(listener);
+      this.listeners.set(eventName, listeners);
+      return this;
+    }
+
+    once(eventName: string, listener: (...args: any[]) => void) {
+      const wrapped = (...args: any[]) => {
+        this.removeListener(eventName, wrapped);
+        listener(...args);
+      };
+      return this.on(eventName, wrapped);
+    }
+
+    removeListener(eventName: string, listener: (...args: any[]) => void) {
+      const listeners = this.listeners.get(eventName) ?? [];
+      this.listeners.set(
+        eventName,
+        listeners.filter((candidate) => candidate !== listener),
+      );
+      return this;
+    }
+
+    emit(eventName: string, ...args: any[]) {
+      const listeners = this.listeners.get(eventName) ?? [];
+      for (const listener of listeners) {
+        listener(...args);
+      }
+      return listeners.length > 0;
+    }
+  }
+
+  return {
+    BrowserWindow: MockBrowserWindow,
+  };
+});
+
+import {
+  SESSION_SHARE_CHAT_HISTORY_LIMIT,
+  type SessionShareChatMessage,
+} from "@shared";
 import { SessionShareService } from "./session-share-service";
 
-function createServiceHarness() {
-  const authService = {
-    getServerUrl: vi.fn(() => "https://sync.example.com"),
-  };
-  const coreManager = {
-    write: vi.fn(),
-    writeBinary: vi.fn(),
-    sendControlSignal: vi.fn(),
-  };
-
-  const service = new SessionShareService(authService as never, coreManager as never);
-
-  const share = {
+function createShare(): any {
+  return {
     sessionId: "session-1",
-    transport: "aws-ssm",
+    title: "Host Session",
+    hostLabel: "Host Session",
+    shareId: "",
+    shareUrl: "https://sync.example.com/share/share-1/token-1",
+    ownerToken: "owner-token-1",
+    transport: "aws-ssm" as const,
     inputEnabled: true,
     viewerCount: 0,
+    latestSnapshot: "",
+    cols: 80,
+    rows: 24,
+    terminalAppearance: null,
+    viewportPx: null,
     socket: null,
+    ownerSocketOpen: false,
+    closedByOwner: false,
+    pendingMessages: [],
+    ownerChatMessages: [] as SessionShareChatMessage[],
     state: {
       status: "active",
       shareUrl: "https://sync.example.com/share/share-1/token-1",
@@ -32,11 +116,38 @@ function createServiceHarness() {
       errorMessage: null,
     },
   };
+}
 
-  return { service, coreManager, share };
+function createServiceHarness() {
+  const authService = {
+    getServerUrl: vi.fn(() => "https://sync.example.com"),
+    getAccessToken: vi.fn(() => "access-token"),
+    refreshSession: vi.fn().mockResolvedValue({
+      status: "authenticated",
+    }),
+  };
+  const coreManager = {
+    write: vi.fn(),
+    writeBinary: vi.fn(),
+    sendControlSignal: vi.fn(),
+  };
+
+  const service = new SessionShareService(
+    authService as never,
+    coreManager as never,
+  );
+  const share = createShare();
+  (service as any).shares.set(share.sessionId, share);
+
+  return { service, authService, coreManager, share };
 }
 
 describe("SessionShareService viewer input relay", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    browserWindowInstances.length = 0;
+  });
+
   it("relays binary viewer input through writeBinary", () => {
     const { service, coreManager, share } = createServiceHarness();
 
@@ -90,7 +201,10 @@ describe("SessionShareService viewer input relay", () => {
     });
 
     expect(coreManager.sendControlSignal).toHaveBeenCalledTimes(1);
-    expect(coreManager.sendControlSignal).toHaveBeenCalledWith("session-1", "interrupt");
+    expect(coreManager.sendControlSignal).toHaveBeenCalledWith(
+      "session-1",
+      "interrupt",
+    );
     expect(coreManager.writeBinary).not.toHaveBeenCalled();
     expect(coreManager.write).not.toHaveBeenCalled();
   });
@@ -106,5 +220,161 @@ describe("SessionShareService viewer input relay", () => {
 
     expect(coreManager.sendControlSignal).not.toHaveBeenCalled();
     expect(coreManager.writeBinary).not.toHaveBeenCalled();
+  });
+
+  it("broadcasts owner chat messages to renderer windows and stores them in history", () => {
+    const { service, share } = createServiceHarness();
+    const send = vi.fn();
+    (service as any).windows.add({
+      isDestroyed: () => false,
+      webContents: { send },
+    });
+
+    (service as any).handleOwnerServerMessage(share, {
+      type: "chat-message",
+      message: {
+        id: "chat-1",
+        nickname: "맑은 여우",
+        text: "안녕하세요",
+        sentAt: "2026-03-27T00:00:00.000Z",
+      },
+    });
+
+    expect(send).toHaveBeenCalledWith("session-shares:chat-event", {
+      sessionId: "session-1",
+      message: {
+        id: "chat-1",
+        nickname: "맑은 여우",
+        text: "안녕하세요",
+        sentAt: "2026-03-27T00:00:00.000Z",
+      },
+    });
+    expect(service.getOwnerChatSnapshot("session-1").messages).toEqual([
+      {
+        id: "chat-1",
+        nickname: "맑은 여우",
+        text: "안녕하세요",
+        sentAt: "2026-03-27T00:00:00.000Z",
+      },
+    ]);
+  });
+
+  it("caps owner chat history to the latest 50 messages", () => {
+    const { service, share } = createServiceHarness();
+
+    for (let index = 0; index < SESSION_SHARE_CHAT_HISTORY_LIMIT + 5; index += 1) {
+      (service as any).handleOwnerServerMessage(share, {
+        type: "chat-message",
+        message: {
+          id: `chat-${index + 1}`,
+          nickname: "맑은 여우",
+          text: `메시지 ${index + 1}`,
+          sentAt: `2026-03-27T00:${String(index).padStart(2, "0")}:00.000Z`,
+        },
+      });
+    }
+
+    const snapshot = service.getOwnerChatSnapshot("session-1");
+    expect(snapshot.messages).toHaveLength(SESSION_SHARE_CHAT_HISTORY_LIMIT);
+    expect(snapshot.messages[0]?.id).toBe("chat-6");
+    expect(snapshot.messages.at(-1)?.id).toBe("chat-55");
+  });
+
+  it("reuses the same owner chat window for the same session", async () => {
+    const { service } = createServiceHarness();
+    const sourceWindow = {
+      webContents: {
+        getURL: () => "https://app.example.com/index.html",
+      },
+    };
+
+    await service.openOwnerChatWindow("session-1", sourceWindow as never);
+
+    expect(browserWindowInstances).toHaveLength(1);
+    expect(browserWindowInstances[0]?.loadURL).toHaveBeenCalledWith(
+      "https://app.example.com/index.html?window=session-share-chat&sessionId=session-1",
+    );
+
+    browserWindowInstances[0]!.minimized = true;
+    await service.openOwnerChatWindow("session-1", sourceWindow as never);
+
+    expect(browserWindowInstances).toHaveLength(1);
+    expect(browserWindowInstances[0]?.restore).toHaveBeenCalledTimes(1);
+    expect(browserWindowInstances[0]?.focus).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not open an owner chat window for inactive shares", async () => {
+    const { service, share } = createServiceHarness();
+    share.state.status = "inactive";
+
+    await service.openOwnerChatWindow("session-1", {
+      webContents: {
+        getURL: () => "https://app.example.com/index.html",
+      },
+    } as never);
+
+    expect(browserWindowInstances).toHaveLength(0);
+  });
+
+  it("clears owner history and closes the detached window when the share stops", async () => {
+    const { service, share } = createServiceHarness();
+    share.ownerChatMessages = [
+      {
+        id: "chat-1",
+        nickname: "맑은 다람쥐",
+        text: "안녕하세요",
+        sentAt: "2026-03-27T00:00:00.000Z",
+      },
+    ];
+
+    await service.openOwnerChatWindow("session-1", {
+      webContents: {
+        getURL: () => "https://app.example.com/index.html",
+      },
+    } as never);
+
+    const chatWindow = browserWindowInstances[0]!;
+    await service.stop("session-1");
+
+    expect(chatWindow.close).toHaveBeenCalledTimes(1);
+    expect(service.getOwnerChatSnapshot("session-1")).toEqual({
+      sessionId: "session-1",
+      title: "",
+      state: {
+        status: "inactive",
+        shareUrl: null,
+        inputEnabled: false,
+        viewerCount: 0,
+        errorMessage: null,
+      },
+      messages: [],
+    });
+  });
+
+  it("clears owner history and closes the detached window when the server ends the share", async () => {
+    const { service, share } = createServiceHarness();
+    share.ownerChatMessages = [
+      {
+        id: "chat-1",
+        nickname: "맑은 다람쥐",
+        text: "안녕하세요",
+        sentAt: "2026-03-27T00:00:00.000Z",
+      },
+    ];
+
+    await service.openOwnerChatWindow("session-1", {
+      webContents: {
+        getURL: () => "https://app.example.com/index.html",
+      },
+    } as never);
+
+    const chatWindow = browserWindowInstances[0]!;
+    (service as any).handleOwnerServerMessage(share, {
+      type: "share-ended",
+      message: "세션 공유가 종료되었습니다.",
+    });
+
+    expect(chatWindow.close).toHaveBeenCalledTimes(1);
+    expect(service.getOwnerChatSnapshot("session-1").messages).toEqual([]);
   });
 });

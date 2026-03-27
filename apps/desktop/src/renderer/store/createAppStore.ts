@@ -29,6 +29,8 @@ import type {
   PortForwardRuleRecord,
   PortForwardRuntimeEvent,
   PortForwardRuntimeRecord,
+  SessionShareChatEvent,
+  SessionShareChatMessage,
   SessionShareEvent,
   SessionShareSnapshotInput,
   SessionShareStartInput,
@@ -194,6 +196,7 @@ export interface AppState {
   hosts: HostRecord[];
   groups: GroupRecord[];
   tabs: TerminalTab[];
+  sessionShareChatNotifications: Record<string, SessionShareChatMessage[]>;
   workspaces: WorkspaceTab[];
   tabStrip: DynamicTabStripItem[];
   portForwards: PortForwardRuleRecord[];
@@ -323,6 +326,11 @@ export interface AppState {
   markSessionOutput: (sessionId: string) => void;
   handleCoreEvent: (event: CoreEvent<Record<string, unknown>>) => void;
   handleSessionShareEvent: (event: SessionShareEvent) => void;
+  handleSessionShareChatEvent: (event: SessionShareChatEvent) => void;
+  dismissSessionShareChatNotification: (
+    sessionId: string,
+    messageId: string,
+  ) => void;
   handleTransferEvent: (event: TransferJobEvent) => void;
   handlePortForwardEvent: (event: PortForwardRuntimeEvent) => void;
   setSftpPaneSource: (
@@ -852,6 +860,55 @@ function setSessionShareState(
   );
 }
 
+function clearSessionShareChatNotifications(
+  notifications: Record<string, SessionShareChatMessage[]>,
+  sessionId: string,
+): Record<string, SessionShareChatMessage[]> {
+  if (!(sessionId in notifications)) {
+    return notifications;
+  }
+
+  const next = { ...notifications };
+  delete next[sessionId];
+  return next;
+}
+
+function appendSessionShareChatNotification(
+  notifications: Record<string, SessionShareChatMessage[]>,
+  sessionId: string,
+  message: SessionShareChatMessage,
+): Record<string, SessionShareChatMessage[]> {
+  return {
+    ...notifications,
+    [sessionId]: [...(notifications[sessionId] ?? []), message],
+  };
+}
+
+function dismissSessionShareChatNotification(
+  notifications: Record<string, SessionShareChatMessage[]>,
+  sessionId: string,
+  messageId: string,
+): Record<string, SessionShareChatMessage[]> {
+  const current = notifications[sessionId];
+  if (!current) {
+    return notifications;
+  }
+
+  const nextMessages = current.filter((message) => message.id !== messageId);
+  if (nextMessages.length === current.length) {
+    return notifications;
+  }
+
+  if (nextMessages.length === 0) {
+    return clearSessionShareChatNotifications(notifications, sessionId);
+  }
+
+  return {
+    ...notifications,
+    [sessionId]: nextMessages,
+  };
+}
+
 function createPendingSessionTab(input: {
   sessionId: string;
   source: "host" | "local";
@@ -1077,6 +1134,10 @@ function removeSessionFromState(
 
   return {
     tabs,
+    sessionShareChatNotifications: clearSessionShareChatNotifications(
+      state.sessionShareChatNotifications,
+      sessionId,
+    ),
     workspaces: nextWorkspaces,
     tabStrip: nextTabStrip,
     activeWorkspaceTab: nextActive,
@@ -2565,6 +2626,7 @@ export function createAppStore(api: DesktopApi) {
       hosts: [],
       groups: [],
       tabs: [],
+      sessionShareChatNotifications: {},
       workspaces: [],
       tabStrip: [],
       portForwards: [],
@@ -3008,6 +3070,10 @@ export function createAppStore(api: DesktopApi) {
             viewerCount: tab.sessionShare?.viewerCount ?? 0,
             errorMessage: null,
           }),
+          sessionShareChatNotifications: clearSessionShareChatNotifications(
+            state.sessionShareChatNotifications,
+            sessionId,
+          ),
         }));
 
         const nextState = await api.sessionShares.start(input);
@@ -3043,6 +3109,10 @@ export function createAppStore(api: DesktopApi) {
             state.tabs,
             sessionId,
             createInactiveSessionShareState(),
+          ),
+          sessionShareChatNotifications: clearSessionShareChatNotifications(
+            state.sessionShareChatNotifications,
+            sessionId,
           ),
         }));
       },
@@ -3981,6 +4051,40 @@ export function createAppStore(api: DesktopApi) {
       handleSessionShareEvent: (event) => {
         set((state) => ({
           tabs: setSessionShareState(state.tabs, event.sessionId, event.state),
+          sessionShareChatNotifications:
+            event.state.status === "active"
+              ? state.sessionShareChatNotifications
+              : clearSessionShareChatNotifications(
+                  state.sessionShareChatNotifications,
+                  event.sessionId,
+                ),
+        }));
+      },
+      handleSessionShareChatEvent: (event) => {
+        set((state) => {
+          const currentTab = state.tabs.find(
+            (tab) => tab.sessionId === event.sessionId,
+          );
+          if (!currentTab || currentTab.sessionShare?.status !== "active") {
+            return state;
+          }
+
+          return {
+            sessionShareChatNotifications: appendSessionShareChatNotification(
+              state.sessionShareChatNotifications,
+              event.sessionId,
+              event.message,
+            ),
+          };
+        });
+      },
+      dismissSessionShareChatNotification: (sessionId, messageId) => {
+        set((state) => ({
+          sessionShareChatNotifications: dismissSessionShareChatNotification(
+            state.sessionShareChatNotifications,
+            sessionId,
+            messageId,
+          ),
         }));
       },
       handleTransferEvent: (event) => {

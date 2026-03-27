@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { AppSettings, HostRecord, SessionShareSnapshotInput, SessionShareStartInput, TerminalTab } from '@shared';
+import type { AppSettings, HostRecord, SessionShareChatMessage, SessionShareSnapshotInput, SessionShareStartInput, TerminalTab } from '@shared';
 import type { Terminal } from 'xterm';
 import type { PendingInteractiveAuth, WorkspaceDropDirection, WorkspaceLayoutNode, WorkspaceTab } from '../store/createAppStore';
 import { createTerminalRuntime, type TerminalRuntime } from '../lib/terminal-runtime';
@@ -72,6 +72,7 @@ interface TerminalSessionViewProps {
   onUpdateSessionShareSnapshot?: (input: SessionShareSnapshotInput) => Promise<void>;
   onSetSessionShareInputEnabled?: (sessionId: string, inputEnabled: boolean) => Promise<void>;
   onStopSessionShare?: (sessionId: string) => Promise<void>;
+  onOpenSessionShareChatWindow?: (sessionId: string) => Promise<void>;
   onStartDrag?: () => void;
   onEndDrag?: () => void;
 }
@@ -136,6 +137,32 @@ export function mergeSessionShareSnapshotKinds(
   }
 
   return 'refresh';
+}
+
+export const SESSION_SHARE_CHAT_TOAST_LIMIT = 3;
+export const SESSION_SHARE_CHAT_TOAST_TTL_MS = 8000;
+const EMPTY_SESSION_SHARE_CHAT_NOTIFICATIONS: SessionShareChatMessage[] = [];
+
+export function getVisibleSessionShareChatNotifications(
+  notifications: SessionShareChatMessage[]
+): SessionShareChatMessage[] {
+  if (notifications.length <= SESSION_SHARE_CHAT_TOAST_LIMIT) {
+    return notifications;
+  }
+
+  return notifications.slice(-SESSION_SHARE_CHAT_TOAST_LIMIT);
+}
+
+function formatSessionShareChatTimestamp(sentAt: string): string {
+  const timestamp = new Date(sentAt);
+  if (Number.isNaN(timestamp.getTime())) {
+    return '';
+  }
+
+  return timestamp.toLocaleTimeString('ko-KR', {
+    hour: '2-digit',
+    minute: '2-digit'
+  });
 }
 
 function isPendingConnectionSessionId(sessionId: string): boolean {
@@ -210,6 +237,7 @@ interface TerminalWorkspaceProps {
   onUpdateSessionShareSnapshot: (input: SessionShareSnapshotInput) => Promise<void>;
   onSetSessionShareInputEnabled: (sessionId: string, inputEnabled: boolean) => Promise<void>;
   onStopSessionShare: (sessionId: string) => Promise<void>;
+  onOpenSessionShareChatWindow?: (sessionId: string) => Promise<void>;
   onStartPaneDrag: (workspaceId: string, sessionId: string) => void;
   onEndSessionDrag: () => void;
   onSplitSessionDrop: (sessionId: string, direction: WorkspaceDropDirection, targetSessionId?: string) => boolean;
@@ -356,6 +384,7 @@ function TerminalSessionView({
   onUpdateSessionShareSnapshot,
   onSetSessionShareInputEnabled,
   onStopSessionShare,
+  onOpenSessionShareChatWindow,
   onStartDrag,
   onEndDrag
 }: TerminalSessionViewProps) {
@@ -375,6 +404,12 @@ function TerminalSessionView({
   const clearPendingInteractiveAuth = useAppStore((state) => state.clearPendingInteractiveAuth);
   const updatePendingConnectionSize = useAppStore((state) => state.updatePendingConnectionSize);
   const markSessionOutput = useAppStore((state) => state.markSessionOutput);
+  const sessionShareChatNotifications = useAppStore(
+    (state) =>
+      state.sessionShareChatNotifications?.[sessionId] ??
+      EMPTY_SESSION_SHARE_CHAT_NOTIFICATIONS
+  );
+  const dismissSessionShareChatNotification = useAppStore((state) => state.dismissSessionShareChatNotification);
   const [promptResponses, setPromptResponses] = useState<string[]>([]);
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -393,6 +428,7 @@ function TerminalSessionView({
   const shareSnapshotDirtyRef = useRef(false);
   const pendingShareSnapshotKindRef = useRef<SessionShareSnapshotInput['kind'] | null>(null);
   const shareSnapshotInFlightRef = useRef(false);
+  const chatNotificationTimeoutsRef = useRef<Map<string, number>>(new Map());
 
   useEffect(() => {
     if (!interactiveAuth || interactiveAuth.sessionId !== sessionId) {
@@ -431,7 +467,38 @@ function TerminalSessionView({
     shareSnapshotDirtyRef.current = false;
     pendingShareSnapshotKindRef.current = null;
     shareSnapshotInFlightRef.current = false;
+
+    for (const timeoutId of chatNotificationTimeoutsRef.current.values()) {
+      window.clearTimeout(timeoutId);
+    }
+    chatNotificationTimeoutsRef.current.clear();
   }, [sessionId]);
+
+  useEffect(() => {
+    const activeNotificationIds = new Set(
+      sessionShareChatNotifications.map((notification) => notification.id)
+    );
+
+    for (const notification of sessionShareChatNotifications) {
+      if (chatNotificationTimeoutsRef.current.has(notification.id)) {
+        continue;
+      }
+
+      const timeoutId = window.setTimeout(() => {
+        chatNotificationTimeoutsRef.current.delete(notification.id);
+        dismissSessionShareChatNotification(sessionId, notification.id);
+      }, SESSION_SHARE_CHAT_TOAST_TTL_MS);
+      chatNotificationTimeoutsRef.current.set(notification.id, timeoutId);
+    }
+
+    for (const [notificationId, timeoutId] of chatNotificationTimeoutsRef.current.entries()) {
+      if (activeNotificationIds.has(notificationId)) {
+        continue;
+      }
+      window.clearTimeout(timeoutId);
+      chatNotificationTimeoutsRef.current.delete(notificationId);
+    }
+  }, [dismissSessionShareChatNotification, sessionId, sessionShareChatNotifications]);
 
   useEffect(() => {
     if (currentTab?.sessionShare?.status === 'active') {
@@ -837,6 +904,7 @@ function TerminalSessionView({
   const shareState = currentTab?.sessionShare ?? null;
   const canShareSession = currentTab?.source === 'host';
   const canStartShare = canShareSession && currentTab?.status === 'connected' && shareState?.status !== 'starting';
+  const visibleSessionShareChatNotifications = getVisibleSessionShareChatNotifications(sessionShareChatNotifications);
 
   async function handleStartShare() {
     const payload = captureShareSnapshot();
@@ -903,6 +971,19 @@ function TerminalSessionView({
         liveOnFocusRef.current?.();
       }}
     >
+      {canShareSession && visibleSessionShareChatNotifications.length > 0 ? (
+        <div className="terminal-share-chat-toast-region" aria-live="polite">
+          {visibleSessionShareChatNotifications.map((notification) => (
+            <div key={notification.id} className="terminal-share-chat-toast">
+              <div className="terminal-share-chat-toast__meta">
+                <strong>{notification.nickname}</strong>
+                <span>{formatSessionShareChatTimestamp(notification.sentAt)}</span>
+              </div>
+              <p>{notification.text}</p>
+            </div>
+          ))}
+        </div>
+      ) : null}
       {canShareSession ? (
         <div
           ref={sharePopoverRef}
@@ -942,7 +1023,25 @@ function TerminalSessionView({
                   <strong>{shareState.status === 'starting' ? '공유를 준비하는 중입니다.' : '공유 링크가 준비되었습니다.'}</strong>
                   {shareState.errorMessage ? <p className="terminal-share-popover__error">{shareState.errorMessage}</p> : null}
                   {shareState.shareUrl ? (
-                    <div className="terminal-share-popover__url">{shareState.shareUrl}</div>
+                    <button
+                      type="button"
+                      className="terminal-share-popover__url"
+                      onClick={() => {
+                        void handleCopyShareUrl();
+                      }}
+                      aria-label="공유 링크 복사"
+                      title="클릭하여 링크 복사"
+                    >
+                      <span className="terminal-share-popover__url-text">{shareState.shareUrl}</span>
+                      <span className="terminal-share-popover__url-icon" aria-hidden="true">
+                        <svg viewBox="0 0 16 16" focusable="false">
+                          <path
+                            d="M5.75 2.5a1.75 1.75 0 0 0-1.75 1.75v5.5A1.75 1.75 0 0 0 5.75 11.5h5.5A1.75 1.75 0 0 0 13 9.75v-5.5A1.75 1.75 0 0 0 11.25 2.5h-5.5Zm-3 4.25a.75.75 0 0 1 .75.75v4.25c0 .69.56 1.25 1.25 1.25H9a.75.75 0 0 1 0 1.5H4.75A2.75 2.75 0 0 1 2 11.75V7.5a.75.75 0 0 1 .75-.75Z"
+                            fill="currentColor"
+                          />
+                        </svg>
+                      </span>
+                    </button>
                   ) : (
                     <p>공유 링크를 생성하는 중입니다.</p>
                   )}
@@ -979,11 +1078,11 @@ function TerminalSessionView({
                       type="button"
                       className="secondary-button"
                       onClick={() => {
-                        void handleCopyShareUrl();
+                        void onOpenSessionShareChatWindow?.(sessionId);
                       }}
-                      disabled={!shareState.shareUrl}
+                      disabled={shareState.status !== 'active' || !onOpenSessionShareChatWindow}
                     >
-                      링크 복사
+                      채팅 기록
                     </button>
                     <button
                       type="button"
@@ -1266,6 +1365,7 @@ export function TerminalWorkspace({
   onUpdateSessionShareSnapshot,
   onSetSessionShareInputEnabled,
   onStopSessionShare,
+  onOpenSessionShareChatWindow,
   onStartPaneDrag,
   onEndSessionDrag,
   onSplitSessionDrop,
@@ -1525,6 +1625,7 @@ export function TerminalWorkspace({
               onUpdateSessionShareSnapshot={onUpdateSessionShareSnapshot}
               onSetSessionShareInputEnabled={onSetSessionShareInputEnabled}
               onStopSessionShare={onStopSessionShare}
+              onOpenSessionShareChatWindow={onOpenSessionShareChatWindow}
               onFocus={
                 activeWorkspace
                   ? () => {

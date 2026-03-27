@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strings"
 	"sync"
+	"time"
 	"unicode/utf8"
 
 	"github.com/google/uuid"
@@ -13,11 +15,14 @@ import (
 )
 
 const (
-	maxShareReplayEntries    = 1024
-	maxShareReplayBytes      = 1024 * 1024
-	maxViewerInputBytes      = 64 * 1024
-	sessionShareTransportSSH = "ssh"
-	sessionShareTransportAWS = "aws-ssm"
+	maxShareReplayEntries     = 1024
+	maxShareReplayBytes       = 1024 * 1024
+	maxShareChatEntries       = 50
+	maxShareChatNicknameRunes = 24
+	maxShareChatTextRunes     = 300
+	maxViewerInputBytes       = 64 * 1024
+	sessionShareTransportSSH  = "ssh"
+	sessionShareTransportAWS  = "aws-ssm"
 )
 
 type createSessionShareRequest struct {
@@ -90,6 +95,18 @@ type ownerInputEnabledMessage struct {
 	InputEnabled bool   `json:"inputEnabled"`
 }
 
+type sessionShareChatMessage struct {
+	ID       string `json:"id"`
+	Nickname string `json:"nickname"`
+	Text     string `json:"text"`
+	SentAt   string `json:"sentAt"`
+}
+
+type ownerChatMessage struct {
+	Type    string                  `json:"type"`
+	Message sessionShareChatMessage `json:"message"`
+}
+
 type ownerSessionEndedMessage struct {
 	Type string `json:"type"`
 }
@@ -129,6 +146,40 @@ type viewerControlSignalMessage struct {
 
 func validateViewerControlSignalMessage(message viewerControlSignalMessage) bool {
 	return message.Type == "control-signal" && isValidSessionShareControlSignal(message.Signal)
+}
+
+type viewerChatProfileMessage struct {
+	Type     string `json:"type"`
+	Nickname string `json:"nickname"`
+}
+
+type viewerChatSendMessage struct {
+	Type string `json:"type"`
+	Text string `json:"text"`
+}
+
+func normalizeSessionShareChatNickname(input string) (string, bool) {
+	trimmed := strings.TrimSpace(input)
+	if trimmed == "" || strings.ContainsAny(trimmed, "\r\n") {
+		return "", false
+	}
+	if !utf8.ValidString(trimmed) || utf8.RuneCountInString(trimmed) > maxShareChatNicknameRunes {
+		return "", false
+	}
+	return trimmed, true
+}
+
+func normalizeSessionShareChatText(input string) (string, bool) {
+	normalized := strings.ReplaceAll(input, "\r\n", "\n")
+	normalized = strings.ReplaceAll(normalized, "\r", "\n")
+	trimmed := strings.TrimSpace(normalized)
+	if trimmed == "" {
+		return "", false
+	}
+	if !utf8.ValidString(trimmed) || utf8.RuneCountInString(trimmed) > maxShareChatTextRunes {
+		return "", false
+	}
+	return trimmed, true
 }
 
 type ownerViewerControlSignalMessage struct {
@@ -183,6 +234,16 @@ type viewerReplayMessage struct {
 	Entries []string `json:"entries"`
 }
 
+type viewerChatHistoryMessage struct {
+	Type     string                    `json:"type"`
+	Messages []sessionShareChatMessage `json:"messages"`
+}
+
+type viewerChatMessage struct {
+	Type    string                  `json:"type"`
+	Message sessionShareChatMessage `json:"message"`
+}
+
 type viewerOutputMessage struct {
 	Type string `json:"type"`
 	Data string `json:"data"`
@@ -219,13 +280,23 @@ type shareConn struct {
 func (c *shareConn) WriteJSON(payload any) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if c.conn == nil {
+		return nil
+	}
 	return c.conn.WriteJSON(payload)
 }
 
 func (c *shareConn) Close() error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if c.conn == nil {
+		return nil
+	}
 	return c.conn.Close()
+}
+
+type sessionShareViewerState struct {
+	nickname string
 }
 
 type sessionShare struct {
@@ -245,8 +316,9 @@ type sessionShare struct {
 	inputEnabled bool
 	replayLog    []string
 	replayBytes  int
+	chatLog      []sessionShareChatMessage
 	owner        *shareConn
-	viewers      map[*shareConn]struct{}
+	viewers      map[*shareConn]*sessionShareViewerState
 }
 
 type SessionShareHub struct {
@@ -288,7 +360,7 @@ func (hub *SessionShareHub) Create(ownerUserID string, input createSessionShareR
 		appearance:   input.TerminalAppearance,
 		viewportPx:   input.ViewportPx,
 		inputEnabled: false,
-		viewers:      make(map[*shareConn]struct{}),
+		viewers:      make(map[*shareConn]*sessionShareViewerState),
 	}
 
 	return createSessionShareResponse{
@@ -443,7 +515,7 @@ func (hub *SessionShareHub) HandleViewerWebSocket(writer http.ResponseWriter, re
 		_ = viewer.Close()
 		return errors.New("session share not found")
 	}
-	share.viewers[viewer] = struct{}{}
+	share.viewers[viewer] = &sessionShareViewerState{}
 	initMessage := viewerInitMessage{
 		Type:               "init",
 		Title:              share.title,
@@ -458,6 +530,7 @@ func (hub *SessionShareHub) HandleViewerWebSocket(writer http.ResponseWriter, re
 	}
 	snapshot := share.snapshot
 	replay := append([]string(nil), share.replayLog...)
+	chatHistory := append([]sessionShareChatMessage(nil), share.chatLog...)
 	owner := share.owner
 	hub.mu.Unlock()
 
@@ -476,6 +549,12 @@ func (hub *SessionShareHub) HandleViewerWebSocket(writer http.ResponseWriter, re
 			Entries: replay,
 		})
 	}
+	if len(chatHistory) > 0 {
+		_ = viewer.WriteJSON(viewerChatHistoryMessage{
+			Type:     "chat-history",
+			Messages: chatHistory,
+		})
+	}
 	hub.broadcastViewerCount(shareID)
 	if owner != nil {
 		_ = owner.WriteJSON(ownerViewerCountMessage{
@@ -489,7 +568,7 @@ func (hub *SessionShareHub) HandleViewerWebSocket(writer http.ResponseWriter, re
 		if err != nil {
 			break
 		}
-		if err := hub.handleViewerPayload(shareID, payload); err != nil {
+		if err := hub.handleViewerPayload(shareID, viewer, payload); err != nil {
 			break
 		}
 	}
@@ -565,7 +644,7 @@ func (hub *SessionShareHub) handleOwnerPayload(shareID string, payload []byte) e
 	}
 }
 
-func (hub *SessionShareHub) handleViewerPayload(shareID string, payload []byte) error {
+func (hub *SessionShareHub) handleViewerPayload(shareID string, viewer *shareConn, payload []byte) error {
 	var envelope struct {
 		Type string `json:"type"`
 	}
@@ -573,26 +652,45 @@ func (hub *SessionShareHub) handleViewerPayload(shareID string, payload []byte) 
 		return err
 	}
 
-	hub.mu.Lock()
-	share, ok := hub.shares[shareID]
-	if !ok {
-		hub.mu.Unlock()
-		return errors.New("session share not found")
-	}
-	owner := share.owner
-	inputEnabled := share.inputEnabled
-	hub.mu.Unlock()
-	if !inputEnabled || owner == nil {
-		return nil
-	}
-
 	switch envelope.Type {
+	case "chat-profile":
+		var message viewerChatProfileMessage
+		if err := json.Unmarshal(payload, &message); err != nil {
+			return err
+		}
+		nickname, ok := normalizeSessionShareChatNickname(message.Nickname)
+		if !ok {
+			return nil
+		}
+		return hub.updateViewerChatProfile(shareID, viewer, nickname)
+	case "chat-send":
+		var message viewerChatSendMessage
+		if err := json.Unmarshal(payload, &message); err != nil {
+			return err
+		}
+		text, ok := normalizeSessionShareChatText(message.Text)
+		if !ok {
+			return nil
+		}
+		return hub.broadcastViewerChatMessage(shareID, viewer, text)
 	case "input":
 		var message viewerInputMessage
 		if err := json.Unmarshal(payload, &message); err != nil {
 			return err
 		}
 		if !validateViewerInputMessage(message) {
+			return nil
+		}
+		hub.mu.Lock()
+		share, ok := hub.shares[shareID]
+		if !ok {
+			hub.mu.Unlock()
+			return errors.New("session share not found")
+		}
+		owner := share.owner
+		inputEnabled := share.inputEnabled
+		hub.mu.Unlock()
+		if !inputEnabled || owner == nil {
 			return nil
 		}
 		return owner.WriteJSON(ownerViewerInputMessage{
@@ -608,6 +706,18 @@ func (hub *SessionShareHub) handleViewerPayload(shareID string, payload []byte) 
 		if !validateViewerControlSignalMessage(message) {
 			return nil
 		}
+		hub.mu.Lock()
+		share, ok := hub.shares[shareID]
+		if !ok {
+			hub.mu.Unlock()
+			return errors.New("session share not found")
+		}
+		owner := share.owner
+		inputEnabled := share.inputEnabled
+		hub.mu.Unlock()
+		if !inputEnabled || owner == nil {
+			return nil
+		}
 		return owner.WriteJSON(ownerViewerControlSignalMessage{
 			Type:   "control-signal",
 			Signal: message.Signal,
@@ -615,6 +725,73 @@ func (hub *SessionShareHub) handleViewerPayload(shareID string, payload []byte) 
 	default:
 		return nil
 	}
+}
+
+func (hub *SessionShareHub) updateViewerChatProfile(shareID string, viewer *shareConn, nickname string) error {
+	hub.mu.Lock()
+	defer hub.mu.Unlock()
+
+	share, ok := hub.shares[shareID]
+	if !ok {
+		return errors.New("session share not found")
+	}
+	viewerState, ok := share.viewers[viewer]
+	if !ok {
+		return errors.New("session share viewer not found")
+	}
+	viewerState.nickname = nickname
+	return nil
+}
+
+func (hub *SessionShareHub) broadcastViewerChatMessage(shareID string, viewer *shareConn, text string) error {
+	hub.mu.Lock()
+	share, ok := hub.shares[shareID]
+	if !ok {
+		hub.mu.Unlock()
+		return errors.New("session share not found")
+	}
+	viewerState, ok := share.viewers[viewer]
+	if !ok {
+		hub.mu.Unlock()
+		return errors.New("session share viewer not found")
+	}
+	if viewerState.nickname == "" {
+		hub.mu.Unlock()
+		return nil
+	}
+
+	message := sessionShareChatMessage{
+		ID:       uuid.NewString(),
+		Nickname: viewerState.nickname,
+		Text:     text,
+		SentAt:   time.Now().UTC().Format(time.RFC3339),
+	}
+	share.chatLog = append(share.chatLog, message)
+	for len(share.chatLog) > maxShareChatEntries {
+		share.chatLog = share.chatLog[1:]
+	}
+
+	viewers := make([]*shareConn, 0, len(share.viewers))
+	for viewerConn := range share.viewers {
+		viewers = append(viewers, viewerConn)
+	}
+	owner := share.owner
+	hub.mu.Unlock()
+
+	payload := viewerChatMessage{
+		Type:    "chat-message",
+		Message: message,
+	}
+	for _, viewerConn := range viewers {
+		_ = viewerConn.WriteJSON(payload)
+	}
+	if owner != nil {
+		_ = owner.WriteJSON(ownerChatMessage{
+			Type:    "chat-message",
+			Message: message,
+		})
+	}
+	return nil
 }
 
 func (hub *SessionShareHub) updateHello(shareID string, message ownerHelloMessage) error {
