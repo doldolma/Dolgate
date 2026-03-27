@@ -116,9 +116,52 @@ function createSyncService() {
     replaceSyncedTerminalPreferences: vi.fn(),
     clearSyncedTerminalPreferences: vi.fn()
   };
+  const outboxRecords: Array<{ kind: 'groups' | 'hosts' | 'secrets' | 'knownHosts' | 'portForwards' | 'preferences'; recordId: string; deletedAt: string }> = [];
   const outbox = {
-    clearAll: vi.fn(),
-    list: vi.fn().mockReturnValue([])
+    clearAll: vi.fn(() => {
+      outboxRecords.splice(0, outboxRecords.length);
+    }),
+    clearMany: vi.fn(
+      (records: Array<{ kind: 'groups' | 'hosts' | 'secrets' | 'knownHosts' | 'portForwards' | 'preferences'; recordId: string; deletedAt?: string }>) => {
+        const exactKeys = new Set(
+          records
+            .filter((record) => typeof record.deletedAt === 'string')
+            .map((record) => `${record.kind}:${record.recordId}:${record.deletedAt}`)
+        );
+        const fallbackKeys = new Set(
+          records
+            .filter((record) => typeof record.deletedAt !== 'string')
+            .map((record) => `${record.kind}:${record.recordId}`)
+        );
+        const remaining = outboxRecords.filter((entry) => {
+          if (exactKeys.has(`${entry.kind}:${entry.recordId}:${entry.deletedAt}`)) {
+            return false;
+          }
+          if (fallbackKeys.has(`${entry.kind}:${entry.recordId}`)) {
+            return false;
+          }
+          return true;
+        });
+        outboxRecords.splice(0, outboxRecords.length, ...remaining);
+      }
+    ),
+    list: vi.fn(() => [...outboxRecords]),
+    upsertDeletion: vi.fn(
+      (
+        kind: 'groups' | 'hosts' | 'secrets' | 'knownHosts' | 'portForwards' | 'preferences',
+        recordId: string,
+        deletedAt: string
+      ) => {
+        const currentIndex = outboxRecords.findIndex((entry) => entry.kind === kind && entry.recordId === recordId);
+        const nextRecord = { kind, recordId, deletedAt };
+        if (currentIndex >= 0) {
+          outboxRecords[currentIndex] = nextRecord;
+          return;
+        }
+        outboxRecords.push(nextRecord);
+      }
+    ),
+    records: outboxRecords
   };
   const service = new SyncService(
     authService as never,
@@ -345,5 +388,89 @@ describe('SyncService', () => {
     expect(fetchMock.mock.calls[1]?.[1]?.method).toBeUndefined();
     expect(state.status).toBe('ready');
     expect(state.pendingPush).toBe(false);
+  });
+
+  it('keeps tombstones added during an in-flight push and sends them in a follow-up push', async () => {
+    const { service, outbox } = createSyncService();
+    outbox.records.push({ kind: 'hosts', recordId: 'host-1', deletedAt: '2026-03-22T00:00:00.000Z' });
+
+    let resolveFirstPush: ((value: Response) => void) | null = null;
+    const fetchMock = vi
+      .fn()
+      .mockImplementationOnce(
+        () =>
+          new Promise<Response>((resolve) => {
+            resolveFirstPush = resolve;
+          })
+      )
+      .mockResolvedValueOnce(
+        new Response(null, {
+          status: 202,
+          headers: {
+            'content-type': 'application/json'
+          }
+        })
+      );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const firstPushPromise = service.pushDirty();
+
+    await vi.waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+
+    outbox.records.push({ kind: 'hosts', recordId: 'host-2', deletedAt: '2026-03-22T00:00:01.000Z' });
+    outbox.records.push({ kind: 'hosts', recordId: 'host-3', deletedAt: '2026-03-22T00:00:02.000Z' });
+
+    const secondPushPromise = service.pushDirty();
+
+    await expect(Promise.race([secondPushPromise, Promise.resolve('still-pending')])).resolves.toBe('still-pending');
+    expect(resolveFirstPush).not.toBeNull();
+    if (!resolveFirstPush) {
+      throw new Error('Expected first push resolver to be available');
+    }
+    const releaseFirstPush: (value: Response) => void = resolveFirstPush;
+    releaseFirstPush(
+      new Response(null, {
+        status: 202,
+        headers: {
+          'content-type': 'application/json'
+        }
+      })
+    );
+
+    const state = await firstPushPromise;
+
+    expect(state.status).toBe('ready');
+    expect(state.pendingPush).toBe(false);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(outbox.clearMany).toHaveBeenCalledTimes(2);
+    expect(outbox.clearMany).toHaveBeenNthCalledWith(1, [
+      { kind: 'hosts', recordId: 'host-1', deletedAt: '2026-03-22T00:00:00.000Z' }
+    ]);
+    expect(outbox.clearMany).toHaveBeenNthCalledWith(2, [
+      { kind: 'hosts', recordId: 'host-2', deletedAt: '2026-03-22T00:00:01.000Z' },
+      { kind: 'hosts', recordId: 'host-3', deletedAt: '2026-03-22T00:00:02.000Z' }
+    ]);
+    expect(outbox.records).toEqual([]);
+
+    const firstPayload = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)) as { hosts: Array<{ id: string; deleted_at?: string }> };
+    const secondPayload = JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body)) as { hosts: Array<{ id: string; deleted_at?: string }> };
+
+    expect(firstPayload.hosts.filter((record) => record.deleted_at).map((record) => record.id)).toEqual(['host-1']);
+    expect(secondPayload.hosts.filter((record) => record.deleted_at).map((record) => record.id)).toEqual(['host-2', 'host-3']);
+  });
+
+  it('does not clear tombstones when the push fails', async () => {
+    const { service, outbox } = createSyncService();
+    outbox.records.push({ kind: 'hosts', recordId: 'host-1', deletedAt: '2026-03-22T00:00:00.000Z' });
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('sync failed')));
+
+    const state = await service.pushDirty();
+
+    expect(state.status).toBe('error');
+    expect(state.pendingPush).toBe(true);
+    expect(outbox.clearMany).not.toHaveBeenCalled();
+    expect(outbox.records).toEqual([{ kind: 'hosts', recordId: 'host-1', deletedAt: '2026-03-22T00:00:00.000Z' }]);
   });
 });

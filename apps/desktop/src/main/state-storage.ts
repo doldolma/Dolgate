@@ -378,10 +378,25 @@ function normalizeHostRecord(value: unknown): HostRecord | null {
       awsProfileName: value.awsProfileName,
       awsRegion: value.awsRegion,
       awsInstanceId: value.awsInstanceId,
+      awsAvailabilityZone: typeof value.awsAvailabilityZone === 'string' ? value.awsAvailabilityZone : null,
       awsInstanceName: typeof value.awsInstanceName === 'string' ? value.awsInstanceName : null,
       awsPlatform: typeof value.awsPlatform === 'string' ? value.awsPlatform : null,
       awsPrivateIp: typeof value.awsPrivateIp === 'string' ? value.awsPrivateIp : null,
       awsState: typeof value.awsState === 'string' ? value.awsState : null,
+      awsSshUsername: typeof value.awsSshUsername === 'string' ? value.awsSshUsername : null,
+      awsSshPort:
+        typeof value.awsSshPort === 'number' && Number.isFinite(value.awsSshPort)
+          ? Math.round(value.awsSshPort)
+          : null,
+      awsSshMetadataStatus:
+        value.awsSshMetadataStatus === 'idle' ||
+        value.awsSshMetadataStatus === 'loading' ||
+        value.awsSshMetadataStatus === 'ready' ||
+        value.awsSshMetadataStatus === 'error'
+          ? value.awsSshMetadataStatus
+          : null,
+      awsSshMetadataError:
+        typeof value.awsSshMetadataError === 'string' ? value.awsSshMetadataError : null,
       createdAt: typeof value.createdAt === 'string' ? value.createdAt : nowIso(),
       updatedAt: typeof value.updatedAt === 'string' ? value.updatedAt : nowIso()
     };

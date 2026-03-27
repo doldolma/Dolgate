@@ -32,6 +32,7 @@ async function loadRepositories(): Promise<{
 
 async function loadRepositoriesWithStateFile(stateFile: unknown): Promise<{
   tempDir: string;
+  HostRepository: DatabaseModule['HostRepository'];
   SettingsRepository: DatabaseModule['SettingsRepository'];
 }> {
   const tempDir = mkdtempSync(path.join(os.tmpdir(), 'dolssh-desktop-db-'));
@@ -46,6 +47,7 @@ async function loadRepositoriesWithStateFile(stateFile: unknown): Promise<{
 
   return {
     tempDir,
+    HostRepository: databaseModule.HostRepository,
     SettingsRepository: databaseModule.SettingsRepository
   };
 }
@@ -126,6 +128,92 @@ describe('HostRepository', () => {
       awsAvailabilityZone: 'ap-northeast-2c',
       awsSshUsername: 'ec2-user',
       awsSshPort: 22,
+      awsSshMetadataStatus: 'ready',
+      awsSshMetadataError: null
+    });
+  });
+
+  it('keeps persisted AWS SFTP metadata after reloading state storage', async () => {
+    const { HostRepository } = await loadRepositoriesWithStateFile({
+      schemaVersion: 1,
+      settings: {
+        theme: 'system',
+        sftpBrowserColumnWidths: DEFAULT_SFTP_BROWSER_COLUMN_WIDTHS,
+        serverUrlOverride: null,
+        updatedAt: '2025-01-01T00:00:00.000Z'
+      },
+      terminal: {
+        globalThemeId: 'dolssh-dark',
+        globalThemeUpdatedAt: '2025-01-01T00:00:00.000Z',
+        fontFamily: 'jetbrains-mono',
+        fontSize: 13,
+        scrollbackLines: 5000,
+        lineHeight: 1,
+        letterSpacing: 0,
+        minimumContrastRatio: 1,
+        altIsMeta: false,
+        webglEnabled: true,
+        localUpdatedAt: '2025-01-01T00:00:00.000Z'
+      },
+      updater: {
+        dismissedVersion: null,
+        updatedAt: '2025-01-01T00:00:00.000Z'
+      },
+      auth: {
+        status: 'authenticated',
+        updatedAt: '2025-01-01T00:00:00.000Z'
+      },
+      sync: {
+        lastSuccessfulSyncAt: null,
+        pendingPush: false,
+        errorMessage: null,
+        ownerUserId: null,
+        ownerServerUrl: null,
+        updatedAt: '2025-01-01T00:00:00.000Z'
+      },
+      data: {
+        groups: [],
+        hosts: [
+          {
+            id: 'aws-host-restore',
+            kind: 'aws-ec2',
+            label: 'AWS Restore',
+            groupName: 'Production',
+            tags: ['prod'],
+            terminalThemeId: null,
+            awsProfileName: 'default',
+            awsRegion: 'ap-northeast-2',
+            awsInstanceId: 'i-restore',
+            awsAvailabilityZone: 'ap-northeast-2a',
+            awsInstanceName: 'restore-web',
+            awsPlatform: 'Linux/UNIX',
+            awsPrivateIp: '10.0.0.88',
+            awsState: 'running',
+            awsSshUsername: 'ubuntu',
+            awsSshPort: 2222,
+            awsSshMetadataStatus: 'ready',
+            awsSshMetadataError: null,
+            createdAt: '2025-01-01T00:00:00.000Z',
+            updatedAt: '2025-01-01T00:00:00.000Z'
+          }
+        ],
+        knownHosts: [],
+        portForwards: [],
+        secretMetadata: [],
+        syncOutbox: []
+      },
+      secure: {
+        refreshToken: null,
+        managedSecretsByRef: {}
+      }
+    });
+
+    const hosts = new HostRepository();
+    expect(hosts.getById('aws-host-restore')).toMatchObject({
+      kind: 'aws-ec2',
+      awsAvailabilityZone: 'ap-northeast-2a',
+      awsSshUsername: 'ubuntu',
+      awsSshPort: 2222,
       awsSshMetadataStatus: 'ready',
       awsSshMetadataError: null
     });

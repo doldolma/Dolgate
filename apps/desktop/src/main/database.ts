@@ -1032,10 +1032,27 @@ export class SyncOutboxRepository {
     });
   }
 
-  clearMany(records: Array<{ kind: SyncKind; recordId: string }>): void {
-    const keys = new Set(records.map((record) => `${record.kind}:${record.recordId}`));
+  clearMany(records: Array<{ kind: SyncKind; recordId: string; deletedAt?: string }>): void {
+    const exactKeys = new Set(
+      records
+        .filter((record) => typeof record.deletedAt === 'string')
+        .map((record) => `${record.kind}:${record.recordId}:${record.deletedAt}`)
+    );
+    const fallbackKeys = new Set(
+      records
+        .filter((record) => typeof record.deletedAt !== 'string')
+        .map((record) => `${record.kind}:${record.recordId}`)
+    );
     stateStorage.updateState((state) => {
-      state.data.syncOutbox = state.data.syncOutbox.filter((entry) => !keys.has(`${entry.kind}:${entry.recordId}`));
+      state.data.syncOutbox = state.data.syncOutbox.filter((entry) => {
+        if (exactKeys.has(`${entry.kind}:${entry.recordId}:${entry.deletedAt}`)) {
+          return false;
+        }
+        if (fallbackKeys.has(`${entry.kind}:${entry.recordId}`)) {
+          return false;
+        }
+        return true;
+      });
     });
   }
 
