@@ -17,6 +17,7 @@ import type {
   KnownHostTrustInput,
   PortForwardDraft,
   PortForwardRuntimeEvent,
+  SessionShareChatEvent,
   SessionShareEvent,
   SessionShareInputToggleInput,
   SessionShareSnapshotInput,
@@ -43,6 +44,9 @@ const updateListeners = new Set<(event: UpdateEvent) => void>();
 const authListeners = new Set<(state: AuthState) => void>();
 const windowStateListeners = new Set<(state: DesktopWindowState) => void>();
 const sessionShareListeners = new Set<(event: SessionShareEvent) => void>();
+const sessionShareChatListeners = new Set<
+  (event: SessionShareChatEvent) => void
+>();
 const e2eTerminalCaptureEnabled =
   process.env.DOLSSH_E2E_CAPTURE_TERMINAL === "1";
 const e2eTerminalDecoder = new TextDecoder();
@@ -143,6 +147,15 @@ ipcRenderer.on(
   ipcChannels.sessionShares.event,
   (_event, payload: SessionShareEvent) => {
     for (const listener of sessionShareListeners) {
+      listener(payload);
+    }
+  },
+);
+
+ipcRenderer.on(
+  ipcChannels.sessionShares.chatEvent,
+  (_event, payload: SessionShareChatEvent) => {
+    for (const listener of sessionShareChatListeners) {
       listener(payload);
     }
   },
@@ -281,10 +294,20 @@ const api: DesktopApi = {
       ipcRenderer.invoke(ipcChannels.sessionShares.setInputEnabled, input),
     stop: (sessionId: string) =>
       ipcRenderer.invoke(ipcChannels.sessionShares.stop, sessionId),
+    openOwnerChatWindow: (sessionId: string) =>
+      ipcRenderer.invoke(ipcChannels.sessionShares.openOwnerChatWindow, sessionId),
+    getOwnerChatSnapshot: (sessionId: string) =>
+      ipcRenderer.invoke(ipcChannels.sessionShares.getOwnerChatSnapshot, sessionId),
     onEvent: (listener: (event: SessionShareEvent) => void) => {
       sessionShareListeners.add(listener);
       return () => {
         sessionShareListeners.delete(listener);
+      };
+    },
+    onChatEvent: (listener: (event: SessionShareChatEvent) => void) => {
+      sessionShareChatListeners.add(listener);
+      return () => {
+        sessionShareChatListeners.delete(listener);
       };
     },
   },

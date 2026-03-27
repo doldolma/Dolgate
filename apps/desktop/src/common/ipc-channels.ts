@@ -62,7 +62,10 @@ export const ipcChannels = {
     updateSnapshot: 'session-shares:update-snapshot',
     setInputEnabled: 'session-shares:set-input-enabled',
     stop: 'session-shares:stop',
-    event: 'session-shares:event'
+    openOwnerChatWindow: 'session-shares:open-owner-chat-window',
+    getOwnerChatSnapshot: 'session-shares:get-owner-chat-snapshot',
+    event: 'session-shares:event',
+    chatEvent: 'session-shares:chat-event'
   },
   shell: {
     pickPrivateKey: 'shell:pick-private-key',

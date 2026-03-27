@@ -279,6 +279,7 @@ export function App() {
   const cancelTransfer = useAppStore((state) => state.cancelTransfer);
   const retryTransfer = useAppStore((state) => state.retryTransfer);
   const dismissTransfer = useAppStore((state) => state.dismissTransfer);
+  const handleSessionShareChatEvent = useAppStore((state) => state.handleSessionShareChatEvent);
   const [prefersDark, setPrefersDark] = useState(() => window.matchMedia('(prefers-color-scheme: dark)').matches);
   const desktopPlatform = useMemo(() => detectDesktopPlatform(), []);
 
@@ -317,6 +318,10 @@ export function App() {
     const offTransfer = window.dolssh.sftp.onTransferEvent(handleTransferEvent);
     const offForward = window.dolssh.portForwards.onEvent(handlePortForwardEvent);
     const offSessionShare = window.dolssh.sessionShares.onEvent(handleSessionShareEvent);
+    const offSessionShareChat =
+      typeof window.dolssh.sessionShares.onChatEvent === 'function'
+        ? window.dolssh.sessionShares.onChatEvent(handleSessionShareChatEvent)
+        : () => undefined;
     const offAuth = window.dolssh.auth.onEvent((state) => {
       setAuthState(state);
       if (state.status === 'authenticated') {
@@ -335,9 +340,18 @@ export function App() {
       offTransfer();
       offForward();
       offSessionShare();
+      offSessionShareChat();
       offAuth();
     };
-  }, [bootstrap, handleCoreEvent, handlePortForwardEvent, handleSessionShareEvent, handleTransferEvent, hydratedSessionUserId]);
+  }, [
+    bootstrap,
+    handleCoreEvent,
+    handlePortForwardEvent,
+    handleSessionShareChatEvent,
+    handleSessionShareEvent,
+    handleTransferEvent,
+    hydratedSessionUserId
+  ]);
 
   useEffect(() => {
     let isMounted = true;
@@ -960,6 +974,9 @@ export function App() {
             onUpdateSessionShareSnapshot={updateSessionShareSnapshot}
             onSetSessionShareInputEnabled={setSessionShareInputEnabled}
             onStopSessionShare={stopSessionShare}
+            onOpenSessionShareChatWindow={async (sessionId) => {
+              await window.dolssh.sessionShares.openOwnerChatWindow(sessionId);
+            }}
             onStartPaneDrag={(workspaceId, sessionId) => {
               setDraggedSession({
                 sessionId,

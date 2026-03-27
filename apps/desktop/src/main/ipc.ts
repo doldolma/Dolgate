@@ -516,6 +516,20 @@ export function registerIpcHandlers(
       await sessionShareService.stop(sessionId);
     },
   );
+  ipcMain.handle(
+    ipcChannels.sessionShares.openOwnerChatWindow,
+    async (event, sessionId: string) => {
+      await sessionShareService.openOwnerChatWindow(
+        sessionId,
+        resolveWindowFromSender(event.sender),
+      );
+    },
+  );
+  ipcMain.handle(
+    ipcChannels.sessionShares.getOwnerChatSnapshot,
+    async (_event, sessionId: string) =>
+      sessionShareService.getOwnerChatSnapshot(sessionId),
+  );
 
   // renderer는 preload를 통해서만 이 handler들에 접근한다.
   ipcMain.handle(ipcChannels.hosts.list, async () => hosts.list());

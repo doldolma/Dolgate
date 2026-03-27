@@ -4,6 +4,7 @@
   const viewerToken = body.dataset.viewerToken;
   const titleNode = document.getElementById("viewer-title");
   const statusNode = document.getElementById("viewer-status");
+  const shellNode = document.getElementById("viewer-shell");
   const viewportNode = document.getElementById("viewer-terminal-viewport");
   const stageNode = document.getElementById("viewer-terminal-stage");
   const terminalNode = document.getElementById("viewer-terminal");
@@ -12,10 +13,44 @@
   const searchPrevButtonNode = document.getElementById("viewer-search-prev");
   const searchNextButtonNode = document.getElementById("viewer-search-next");
   const searchCloseButtonNode = document.getElementById("viewer-search-close");
+  const chatOpenNode = document.getElementById("viewer-chat-open");
+  const chatPanelNode = document.getElementById("viewer-chat-panel");
+  const chatBodyNode = document.getElementById("viewer-chat-body");
+  const chatStatusNode = document.getElementById("viewer-chat-status");
+  const chatToggleNode = document.getElementById("viewer-chat-toggle");
+  const chatMessagesNode = document.getElementById("viewer-chat-messages");
+  const chatFormNode = document.getElementById("viewer-chat-form");
+  const chatNicknameNode = document.getElementById("viewer-chat-nickname");
+  const chatInputNode = document.getElementById("viewer-chat-input");
+  const chatSubmitNode = document.getElementById("viewer-chat-submit");
   const textEncoder = new TextEncoder();
   const DEFAULT_FALLBACK_SCALE = 0.85;
   const VIEWPORT_SAFE_GUTTER_PX = 24;
   const VIEWPORT_SAFE_SCALE_FACTOR = 0.98;
+  const CHAT_NICKNAME_STORAGE_KEY = "dolssh.sessionShare.chatNickname";
+  const CHAT_EMPTY_MESSAGE = "아직 채팅이 없습니다. 첫 메시지를 보내보세요.";
+  const CHAT_COLLAPSED_LABEL = "채팅 열기";
+  const CHAT_EXPANDED_LABEL = "채팅 접기";
+  const KOREAN_CHAT_ADJECTIVES = [
+    "맑은",
+    "반짝이는",
+    "든든한",
+    "재빠른",
+    "부드러운",
+    "고요한",
+    "용감한",
+    "기분좋은",
+  ];
+  const KOREAN_CHAT_NOUNS = [
+    "여우",
+    "고래",
+    "다람쥐",
+    "호랑이",
+    "참새",
+    "고양이",
+    "해달",
+    "별빛",
+  ];
   const SEARCH_DECORATIONS = {
     matchBackground: "#243451",
     matchBorder: "#42567f",
@@ -25,7 +60,25 @@
     activeMatchColorOverviewRuler: "#9fb3ff",
   };
 
-  if (!shareId || !viewerToken || !window.Terminal || !viewportNode || !stageNode || !terminalNode) {
+  if (
+    !shareId ||
+    !viewerToken ||
+    !window.Terminal ||
+    !shellNode ||
+    !viewportNode ||
+    !stageNode ||
+    !terminalNode ||
+    !chatOpenNode ||
+    !chatPanelNode ||
+    !chatBodyNode ||
+    !chatStatusNode ||
+    !chatToggleNode ||
+    !chatMessagesNode ||
+    !chatFormNode ||
+    !chatNicknameNode ||
+    !chatInputNode ||
+    !chatSubmitNode
+  ) {
     return;
   }
 
@@ -63,6 +116,38 @@
 
   function setStatus(text) {
     statusNode.textContent = text;
+  }
+
+  function setChatStatus(text) {
+    chatStatusNode.textContent = text;
+  }
+
+  function setChatEnabled(enabled) {
+    chatNicknameNode.disabled = !enabled;
+    chatInputNode.disabled = !enabled;
+    chatSubmitNode.disabled = !enabled;
+  }
+
+  function setChatCollapsed(collapsed) {
+    chatCollapsed = Boolean(collapsed);
+    shellNode.dataset.chatCollapsed = chatCollapsed ? "true" : "false";
+    chatPanelNode.dataset.collapsed = chatCollapsed ? "true" : "false";
+    chatPanelNode.hidden = chatCollapsed;
+    chatBodyNode.hidden = chatCollapsed;
+    chatOpenNode.hidden = !chatCollapsed;
+    chatOpenNode.textContent = CHAT_COLLAPSED_LABEL;
+    chatOpenNode.setAttribute("aria-expanded", chatCollapsed ? "false" : "true");
+    chatToggleNode.textContent = CHAT_EXPANDED_LABEL;
+    chatToggleNode.setAttribute("aria-expanded", chatCollapsed ? "false" : "true");
+
+    if (!chatCollapsed) {
+      requestAnimationFrame(() => {
+        chatMessagesNode.scrollTop = chatMessagesNode.scrollHeight;
+        if (!chatInputNode.disabled) {
+          chatInputNode.focus();
+        }
+      });
+    }
   }
 
   function setInputEnabled(inputEnabled) {
@@ -114,6 +199,52 @@
     );
   }
 
+  function sendChatProfile(nickname) {
+    if (!nickname || socket.readyState !== WebSocket.OPEN) {
+      return false;
+    }
+
+    socket.send(
+      JSON.stringify({
+        type: "chat-profile",
+        nickname,
+      })
+    );
+    syncedChatNickname = nickname;
+    return true;
+  }
+
+  function syncChatNicknameFromInput() {
+    const normalized = normalizeChatNickname(chatNicknameNode.value);
+    if (!normalized) {
+      if (syncedChatNickname) {
+        chatNicknameNode.value = syncedChatNickname;
+      }
+      return "";
+    }
+
+    chatNicknameNode.value = normalized;
+    storeChatNickname(normalized);
+    if (normalized !== syncedChatNickname) {
+      sendChatProfile(normalized);
+    }
+    return normalized;
+  }
+
+  function sendChatText(text) {
+    if (!text || socket.readyState !== WebSocket.OPEN) {
+      return false;
+    }
+
+    socket.send(
+      JSON.stringify({
+        type: "chat-send",
+        text,
+      })
+    );
+    return true;
+  }
+
   function sendUtf8Text(text) {
     if (!text) {
       return;
@@ -141,6 +272,122 @@
     }
 
     console.warn(message);
+  }
+
+  function normalizeChatNickname(value) {
+    const trimmed = String(value || "").trim();
+    if (!trimmed || /[\r\n]/.test(trimmed) || trimmed.length > 24) {
+      return "";
+    }
+    return trimmed;
+  }
+
+  function normalizeChatText(value) {
+    const normalized = String(value || "").replace(/\r\n?/g, "\n");
+    const trimmed = normalized.trim();
+    if (!trimmed || trimmed.length > 300) {
+      return "";
+    }
+    return trimmed;
+  }
+
+  function randomKoreanNickname() {
+    const adjective =
+      KOREAN_CHAT_ADJECTIVES[Math.floor(Math.random() * KOREAN_CHAT_ADJECTIVES.length)] || "맑은";
+    const noun = KOREAN_CHAT_NOUNS[Math.floor(Math.random() * KOREAN_CHAT_NOUNS.length)] || "여우";
+    return `${adjective} ${noun}`;
+  }
+
+  function loadStoredChatNickname() {
+    try {
+      return window.localStorage.getItem(CHAT_NICKNAME_STORAGE_KEY) || "";
+    } catch {
+      return "";
+    }
+  }
+
+  function storeChatNickname(nickname) {
+    try {
+      window.localStorage.setItem(CHAT_NICKNAME_STORAGE_KEY, nickname);
+    } catch {
+      // ignore storage failures
+    }
+  }
+
+  function resolveInitialChatNickname() {
+    const stored = normalizeChatNickname(loadStoredChatNickname());
+    if (stored) {
+      return stored;
+    }
+    const generated = randomKoreanNickname();
+    storeChatNickname(generated);
+    return generated;
+  }
+
+  function formatChatTimestamp(sentAt) {
+    const date = new Date(sentAt);
+    if (Number.isNaN(date.getTime())) {
+      return "";
+    }
+    return date.toLocaleTimeString("ko-KR", {
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  }
+
+  function renderChatMessages() {
+    chatMessagesNode.replaceChildren();
+
+    if (chatMessages.length === 0) {
+      const emptyNode = document.createElement("div");
+      emptyNode.className = "viewer-chat-empty";
+      emptyNode.textContent = CHAT_EMPTY_MESSAGE;
+      chatMessagesNode.appendChild(emptyNode);
+      return;
+    }
+
+    for (const message of chatMessages) {
+      const item = document.createElement("article");
+      item.className = "viewer-chat-message";
+
+      const meta = document.createElement("div");
+      meta.className = "viewer-chat-message__meta";
+
+      const nickname = document.createElement("strong");
+      nickname.textContent = message.nickname || "알 수 없음";
+      meta.appendChild(nickname);
+
+      const timestamp = document.createElement("time");
+      timestamp.dateTime = message.sentAt || "";
+      timestamp.textContent = formatChatTimestamp(message.sentAt);
+      meta.appendChild(timestamp);
+
+      const text = document.createElement("p");
+      text.textContent = message.text || "";
+
+      item.append(meta, text);
+      chatMessagesNode.appendChild(item);
+    }
+
+    chatMessagesNode.scrollTop = chatMessagesNode.scrollHeight;
+  }
+
+  function clearChatMessages() {
+    chatMessages.length = 0;
+    renderChatMessages();
+  }
+
+  function appendChatMessage(message) {
+    if (!message || typeof message !== "object") {
+      return;
+    }
+    chatMessages.push({
+      id: String(message.id || ""),
+      nickname: String(message.nickname || ""),
+      text: String(message.text || ""),
+      sentAt: String(message.sentAt || ""),
+    });
+    renderChatMessages();
   }
 
   function shouldOpenTerminalSearch(event) {
@@ -189,6 +436,10 @@
   let scaleFrameHandle = 0;
   let searchOpen = false;
   let searchAddon = null;
+  let chatCollapsed = true;
+  let chatInputComposing = false;
+  const chatMessages = [];
+  let syncedChatNickname = "";
 
   function scheduleScaleSync() {
     if (scaleFrameHandle) {
@@ -390,6 +641,11 @@
 
   term.open(terminalNode);
   initializeAddons();
+  chatNicknameNode.value = resolveInitialChatNickname();
+  renderChatMessages();
+  setChatStatus("연결 중");
+  setChatEnabled(false);
+  setChatCollapsed(true);
   term.attachCustomKeyEventHandler((event) => {
     const signal = resolveAwsShareControlSignal(event);
     if (!signal) {
@@ -461,6 +717,61 @@
     closeSearchOverlay();
   });
 
+  chatNicknameNode.addEventListener("blur", () => {
+    syncChatNicknameFromInput();
+  });
+
+  chatToggleNode.addEventListener("click", () => {
+    setChatCollapsed(!chatCollapsed);
+  });
+
+  chatOpenNode.addEventListener("click", () => {
+    setChatCollapsed(false);
+  });
+
+  chatInputNode.addEventListener("compositionstart", () => {
+    chatInputComposing = true;
+  });
+
+  chatInputNode.addEventListener("compositionend", () => {
+    chatInputComposing = false;
+  });
+
+  chatInputNode.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter" || event.shiftKey) {
+      return;
+    }
+
+    if (chatInputComposing || event.isComposing || event.keyCode === 229) {
+      return;
+    }
+
+    event.preventDefault();
+    if (typeof chatFormNode.requestSubmit === "function") {
+      chatFormNode.requestSubmit();
+      return;
+    }
+
+    chatFormNode.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+  });
+
+  chatFormNode.addEventListener("submit", (event) => {
+    event.preventDefault();
+    if (chatInputComposing) {
+      return;
+    }
+    const nickname = syncChatNicknameFromInput();
+    const text = normalizeChatText(chatInputNode.value);
+    if (!nickname || !text) {
+      chatInputNode.value = text;
+      return;
+    }
+    if (sendChatText(text)) {
+      chatInputNode.value = "";
+      chatInputNode.focus();
+    }
+  });
+
   function handleWindowKeyDown(event) {
     if (shouldOpenTerminalSearch(event) && canUseSearch()) {
       event.preventDefault();
@@ -495,6 +806,12 @@
   });
   viewportResizeObserver.observe(viewportNode);
   window.addEventListener("resize", scheduleScaleSync);
+
+  socket.addEventListener("open", () => {
+    setChatEnabled(true);
+    setChatStatus("대화 가능");
+    syncChatNicknameFromInput();
+  });
 
   socket.addEventListener("message", (event) => {
     const payload = JSON.parse(String(event.data));
@@ -534,6 +851,19 @@
       return;
     }
 
+    if (payload.type === "chat-history") {
+      clearChatMessages();
+      for (const message of payload.messages || []) {
+        appendChatMessage(message);
+      }
+      return;
+    }
+
+    if (payload.type === "chat-message") {
+      appendChatMessage(payload.message);
+      return;
+    }
+
     if (payload.type === "resize") {
       applyViewerLayoutMetadata(payload);
       term.resize(payload.cols || term.cols, payload.rows || term.rows);
@@ -554,6 +884,9 @@
 
     if (payload.type === "share-ended") {
       term.options.disableStdin = true;
+      clearChatMessages();
+      setChatEnabled(false);
+      setChatStatus("종료됨");
       setStatus("Ended");
       if (payload.message) {
         term.writeln("");
@@ -564,6 +897,9 @@
 
   socket.addEventListener("close", () => {
     term.options.disableStdin = true;
+    clearChatMessages();
+    setChatEnabled(false);
+    setChatStatus("종료됨");
     setStatus("Ended");
     viewportResizeObserver.disconnect();
     window.removeEventListener("resize", scheduleScaleSync);

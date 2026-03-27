@@ -850,6 +850,27 @@ export interface SessionShareEvent {
   state: SessionShareState;
 }
 
+export interface SessionShareChatMessage {
+  id: string;
+  nickname: string;
+  text: string;
+  sentAt: string;
+}
+
+export const SESSION_SHARE_CHAT_HISTORY_LIMIT = 50;
+
+export interface SessionShareChatEvent {
+  sessionId: string;
+  message: SessionShareChatMessage;
+}
+
+export interface SessionShareOwnerChatSnapshot {
+  sessionId: string;
+  title: string;
+  state: SessionShareState;
+  messages: SessionShareChatMessage[];
+}
+
 export type SessionShareControlSignal = 'interrupt' | 'suspend' | 'quit';
 
 export type SessionShareOwnerMessage =
@@ -889,6 +910,10 @@ export type SessionShareOwnerMessage =
       inputEnabled: boolean;
     }
   | {
+      type: 'chat-message';
+      message: SessionShareChatMessage;
+    }
+  | {
       type: 'session-ended';
     };
 
@@ -926,6 +951,14 @@ export type SessionShareViewerMessage =
       data: string;
     }
   | {
+      type: 'chat-history';
+      messages: SessionShareChatMessage[];
+    }
+  | {
+      type: 'chat-message';
+      message: SessionShareChatMessage;
+    }
+  | {
       type: 'resize';
       cols: number;
       rows: number;
@@ -943,6 +976,25 @@ export type SessionShareViewerMessage =
   | {
       type: 'share-ended';
       message: string;
+    };
+
+export type SessionShareViewerClientMessage =
+  | {
+      type: 'input';
+      encoding: 'utf8' | 'binary';
+      data: string;
+    }
+  | {
+      type: 'control-signal';
+      signal: SessionShareControlSignal;
+    }
+  | {
+      type: 'chat-profile';
+      nickname: string;
+    }
+  | {
+      type: 'chat-send';
+      text: string;
     };
 
 export interface TerminalConnectionProgress {

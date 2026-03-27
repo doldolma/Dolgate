@@ -2,7 +2,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSettings, TerminalTab } from '@shared';
 import type { WorkspaceTab } from '../store/createAppStore';
-import { TerminalWorkspace } from './TerminalWorkspace';
+import { SESSION_SHARE_CHAT_TOAST_TTL_MS, TerminalWorkspace } from './TerminalWorkspace';
 
 const mocks = vi.hoisted(() => ({
   storeState: {} as any,
@@ -178,6 +178,8 @@ function createMockStoreState() {
   return {
     tabs,
     hosts: [],
+    sessionShareChatNotifications: {},
+    dismissSessionShareChatNotification: vi.fn(),
     pendingInteractiveAuth: null,
     respondInteractiveAuth: vi.fn(),
     reopenInteractiveAuthUrl: vi.fn(),
@@ -260,6 +262,12 @@ describe('TerminalWorkspace workspace switching', () => {
           writeBinary: vi.fn(),
           resize: vi.fn().mockResolvedValue(undefined)
         }
+      }
+    });
+    Object.defineProperty(window.navigator, 'clipboard', {
+      configurable: true,
+      value: {
+        writeText: vi.fn().mockResolvedValue(undefined)
       }
     });
   });
@@ -474,5 +482,330 @@ describe('TerminalWorkspace workspace switching', () => {
 
     expect(container.querySelector('.workspace-drop-preview')).toBeFalsy();
     expect(onMoveWorkspaceSession).not.toHaveBeenCalled();
+  });
+
+  it('shows the latest three owner chat toasts and auto-dismisses them', async () => {
+    vi.useFakeTimers();
+    try {
+      const dismissSessionShareChatNotification = vi.fn();
+      const hostTabs: TerminalTab[] = [
+        {
+          id: 'tab-host',
+          sessionId: 'session-1',
+          source: 'host',
+          hostId: 'host-1',
+          title: 'Host Session',
+          status: 'connected',
+          sessionShare: {
+            status: 'active',
+            shareUrl: 'https://sync.example.com/share/share-1/token-1',
+            inputEnabled: false,
+            viewerCount: 4,
+            errorMessage: null
+          },
+          hasReceivedOutput: true,
+          lastEventAt: '2025-01-01T00:00:00.000Z'
+        }
+      ];
+
+      mocks.storeState = {
+        ...createMockStoreState(),
+        tabs: hostTabs,
+        hosts: [
+          {
+            id: 'host-1',
+            kind: 'ssh',
+            label: 'Prod',
+            hostname: 'prod.example.com',
+            port: 22,
+            username: 'ubuntu',
+            authType: 'password',
+            privateKeyPath: null,
+            secretRef: 'host:host-1',
+            groupName: 'Servers',
+            terminalThemeId: null,
+            createdAt: '2025-01-01T00:00:00.000Z',
+            updatedAt: '2025-01-01T00:00:00.000Z'
+          }
+        ],
+        sessionShareChatNotifications: {
+          'session-1': [
+            { id: 'chat-1', nickname: '하나', text: '첫 번째', sentAt: '2026-03-27T00:00:00.000Z' },
+            { id: 'chat-2', nickname: '둘', text: '두 번째', sentAt: '2026-03-27T00:01:00.000Z' },
+            { id: 'chat-3', nickname: '셋', text: '세 번째', sentAt: '2026-03-27T00:02:00.000Z' },
+            { id: 'chat-4', nickname: '넷', text: '네 번째', sentAt: '2026-03-27T00:03:00.000Z' }
+          ]
+        },
+        dismissSessionShareChatNotification
+      };
+
+      const { container } = render(
+        <TerminalWorkspace
+          tabs={hostTabs}
+          hosts={mocks.storeState.hosts}
+          settings={settings}
+          prefersDark={false}
+          activeSessionId="session-1"
+          activeWorkspace={null}
+          viewActivationKey="session:session-1"
+          draggedSession={null}
+          canDropDraggedSession={false}
+          onCloseSession={vi.fn().mockResolvedValue(undefined)}
+          onRetryConnection={vi.fn().mockResolvedValue(undefined)}
+          onStartSessionShare={vi.fn().mockResolvedValue(undefined)}
+          onUpdateSessionShareSnapshot={vi.fn().mockResolvedValue(undefined)}
+          onSetSessionShareInputEnabled={vi.fn().mockResolvedValue(undefined)}
+          onStopSessionShare={vi.fn().mockResolvedValue(undefined)}
+          onStartPaneDrag={vi.fn()}
+          onEndSessionDrag={vi.fn()}
+          onSplitSessionDrop={vi.fn(() => false)}
+          onMoveWorkspaceSession={vi.fn(() => false)}
+          onFocusWorkspaceSession={vi.fn()}
+          onResizeWorkspaceSplit={vi.fn()}
+        />
+      );
+
+      expect(container.querySelectorAll('.terminal-share-chat-toast')).toHaveLength(3);
+      expect(screen.queryByText('첫 번째')).toBeNull();
+      expect(screen.getByText('두 번째')).toBeTruthy();
+      expect(screen.getByText('세 번째')).toBeTruthy();
+      expect(screen.getByText('네 번째')).toBeTruthy();
+
+      vi.advanceTimersByTime(SESSION_SHARE_CHAT_TOAST_TTL_MS);
+
+      expect(dismissSessionShareChatNotification).toHaveBeenCalledWith('session-1', 'chat-1');
+      expect(dismissSessionShareChatNotification).toHaveBeenCalledWith('session-1', 'chat-2');
+      expect(dismissSessionShareChatNotification).toHaveBeenCalledWith('session-1', 'chat-3');
+      expect(dismissSessionShareChatNotification).toHaveBeenCalledWith('session-1', 'chat-4');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('opens the detached owner chat window from the share popover', async () => {
+    const onOpenSessionShareChatWindow = vi.fn().mockResolvedValue(undefined);
+    const hostTabs: TerminalTab[] = [
+      {
+        id: 'tab-host',
+        sessionId: 'session-1',
+        source: 'host',
+        hostId: 'host-1',
+        title: 'Host Session',
+        status: 'connected',
+        sessionShare: {
+          status: 'active',
+          shareUrl: 'https://sync.example.com/share/share-1/token-1',
+          inputEnabled: false,
+          viewerCount: 2,
+          errorMessage: null
+        },
+        hasReceivedOutput: true,
+        lastEventAt: '2025-01-01T00:00:00.000Z'
+      }
+    ];
+
+    mocks.storeState = {
+      ...createMockStoreState(),
+      tabs: hostTabs,
+      hosts: [
+        {
+          id: 'host-1',
+          kind: 'ssh',
+          label: 'Prod',
+          hostname: 'prod.example.com',
+          port: 22,
+          username: 'ubuntu',
+          authType: 'password',
+          privateKeyPath: null,
+          secretRef: 'host:host-1',
+          groupName: 'Servers',
+          terminalThemeId: null,
+          createdAt: '2025-01-01T00:00:00.000Z',
+          updatedAt: '2025-01-01T00:00:00.000Z'
+        }
+      ]
+    };
+
+    render(
+      <TerminalWorkspace
+        tabs={hostTabs}
+        hosts={mocks.storeState.hosts}
+        settings={settings}
+        prefersDark={false}
+        activeSessionId="session-1"
+        activeWorkspace={null}
+        viewActivationKey="session:session-1"
+        draggedSession={null}
+        canDropDraggedSession={false}
+        onCloseSession={vi.fn().mockResolvedValue(undefined)}
+        onRetryConnection={vi.fn().mockResolvedValue(undefined)}
+        onStartSessionShare={vi.fn().mockResolvedValue(undefined)}
+        onUpdateSessionShareSnapshot={vi.fn().mockResolvedValue(undefined)}
+        onSetSessionShareInputEnabled={vi.fn().mockResolvedValue(undefined)}
+        onStopSessionShare={vi.fn().mockResolvedValue(undefined)}
+        onOpenSessionShareChatWindow={onOpenSessionShareChatWindow}
+        onStartPaneDrag={vi.fn()}
+        onEndSessionDrag={vi.fn()}
+        onSplitSessionDrop={vi.fn(() => false)}
+        onMoveWorkspaceSession={vi.fn(() => false)}
+        onFocusWorkspaceSession={vi.fn()}
+        onResizeWorkspaceSplit={vi.fn()}
+      />
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Share' }));
+    fireEvent.click(await screen.findByRole('button', { name: '채팅 기록' }));
+
+    expect(onOpenSessionShareChatWindow).toHaveBeenCalledWith('session-1');
+  });
+
+  it('copies the share url from the link card and removes the separate copy button', async () => {
+    const hostTabs: TerminalTab[] = [
+      {
+        id: 'tab-host',
+        sessionId: 'session-1',
+        source: 'host',
+        hostId: 'host-1',
+        title: 'Host Session',
+        status: 'connected',
+        sessionShare: {
+          status: 'active',
+          shareUrl: 'https://sync.example.com/share/share-1/token-1',
+          inputEnabled: false,
+          viewerCount: 2,
+          errorMessage: null
+        },
+        hasReceivedOutput: true,
+        lastEventAt: '2025-01-01T00:00:00.000Z'
+      }
+    ];
+
+    mocks.storeState = {
+      ...createMockStoreState(),
+      tabs: hostTabs,
+      hosts: [
+        {
+          id: 'host-1',
+          kind: 'ssh',
+          label: 'Prod',
+          hostname: 'prod.example.com',
+          port: 22,
+          username: 'ubuntu',
+          authType: 'password',
+          privateKeyPath: null,
+          secretRef: 'host:host-1',
+          groupName: 'Servers',
+          terminalThemeId: null,
+          createdAt: '2025-01-01T00:00:00.000Z',
+          updatedAt: '2025-01-01T00:00:00.000Z'
+        }
+      ]
+    };
+
+    render(
+      <TerminalWorkspace
+        tabs={hostTabs}
+        hosts={mocks.storeState.hosts}
+        settings={settings}
+        prefersDark={false}
+        activeSessionId="session-1"
+        activeWorkspace={null}
+        viewActivationKey="session:session-1"
+        draggedSession={null}
+        canDropDraggedSession={false}
+        onCloseSession={vi.fn().mockResolvedValue(undefined)}
+        onRetryConnection={vi.fn().mockResolvedValue(undefined)}
+        onStartSessionShare={vi.fn().mockResolvedValue(undefined)}
+        onUpdateSessionShareSnapshot={vi.fn().mockResolvedValue(undefined)}
+        onSetSessionShareInputEnabled={vi.fn().mockResolvedValue(undefined)}
+        onStopSessionShare={vi.fn().mockResolvedValue(undefined)}
+        onOpenSessionShareChatWindow={vi.fn().mockResolvedValue(undefined)}
+        onStartPaneDrag={vi.fn()}
+        onEndSessionDrag={vi.fn()}
+        onSplitSessionDrop={vi.fn(() => false)}
+        onMoveWorkspaceSession={vi.fn(() => false)}
+        onFocusWorkspaceSession={vi.fn()}
+        onResizeWorkspaceSplit={vi.fn()}
+      />
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Share' }));
+    fireEvent.click(await screen.findByRole('button', { name: '공유 링크 복사' }));
+
+    expect(window.navigator.clipboard.writeText).toHaveBeenCalledWith('https://sync.example.com/share/share-1/token-1');
+    expect(screen.queryByRole('button', { name: '링크 복사' })).toBeNull();
+    expect(await screen.findByText('링크를 복사했습니다.')).toBeTruthy();
+  });
+
+  it('renders host sessions safely even when legacy store state has no chat notification map', async () => {
+    const hostTabs: TerminalTab[] = [
+      {
+        id: 'tab-host',
+        sessionId: 'session-1',
+        source: 'host',
+        hostId: 'host-1',
+        title: 'Host Session',
+        status: 'connected',
+        sessionShare: null,
+        hasReceivedOutput: true,
+        lastEventAt: '2025-01-01T00:00:00.000Z'
+      }
+    ];
+
+    mocks.storeState = {
+      tabs: hostTabs,
+      hosts: [
+        {
+          id: 'host-1',
+          kind: 'ssh',
+          label: 'Prod',
+          hostname: 'prod.example.com',
+          port: 22,
+          username: 'ubuntu',
+          authType: 'password',
+          privateKeyPath: null,
+          secretRef: 'host:host-1',
+          groupName: 'Servers',
+          terminalThemeId: null,
+          createdAt: '2025-01-01T00:00:00.000Z',
+          updatedAt: '2025-01-01T00:00:00.000Z'
+        }
+      ],
+      dismissSessionShareChatNotification: vi.fn(),
+      pendingInteractiveAuth: null,
+      respondInteractiveAuth: vi.fn(),
+      reopenInteractiveAuthUrl: vi.fn(),
+      clearPendingInteractiveAuth: vi.fn(),
+      updatePendingConnectionSize: vi.fn(),
+      markSessionOutput: vi.fn()
+    };
+
+    expect(() =>
+      render(
+        <TerminalWorkspace
+          tabs={hostTabs}
+          hosts={mocks.storeState.hosts}
+          settings={settings}
+          prefersDark={false}
+          activeSessionId="session-1"
+          activeWorkspace={null}
+          viewActivationKey="session:session-1"
+          draggedSession={null}
+          canDropDraggedSession={false}
+          onCloseSession={vi.fn().mockResolvedValue(undefined)}
+          onRetryConnection={vi.fn().mockResolvedValue(undefined)}
+          onStartSessionShare={vi.fn().mockResolvedValue(undefined)}
+          onUpdateSessionShareSnapshot={vi.fn().mockResolvedValue(undefined)}
+          onSetSessionShareInputEnabled={vi.fn().mockResolvedValue(undefined)}
+          onStopSessionShare={vi.fn().mockResolvedValue(undefined)}
+          onStartPaneDrag={vi.fn()}
+          onEndSessionDrag={vi.fn()}
+          onSplitSessionDrop={vi.fn(() => false)}
+          onMoveWorkspaceSession={vi.fn(() => false)}
+          onFocusWorkspaceSession={vi.fn()}
+          onResizeWorkspaceSplit={vi.fn()}
+        />
+      )
+    ).not.toThrow();
   });
 });

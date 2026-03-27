@@ -3,5 +3,15 @@ import ReactDOM from 'react-dom/client';
 import 'xterm/css/xterm.css';
 import './styles/index.css';
 import { App } from './App';
+import { SessionShareChatWindow } from './components/SessionShareChatWindow';
+import { resolveRendererWindowMode } from './window-mode';
 
-ReactDOM.createRoot(document.getElementById('root')!).render(<App />);
+const rendererWindowMode = resolveRendererWindowMode(window.location.search);
+
+ReactDOM.createRoot(document.getElementById('root')!).render(
+  rendererWindowMode.kind === 'session-share-chat' ? (
+    <SessionShareChatWindow sessionId={rendererWindowMode.sessionId} />
+  ) : (
+    <App />
+  ),
+);
