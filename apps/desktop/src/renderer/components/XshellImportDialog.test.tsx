@@ -3,9 +3,10 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { DesktopApi, XshellProbeResult } from '@shared';
 import {
   XshellImportDialog,
-  countEffectiveSelectedXshellHosts,
-  filterXshellImportGroups,
-  filterXshellImportHosts
+  buildXshellImportTree,
+  collectEffectiveSelectedXshellGroupPaths,
+  collectVisibleXshellSelectionTargets,
+  countEffectiveSelectedXshellHosts
 } from './XshellImportDialog';
 
 const initialProbeResult: XshellProbeResult = {
@@ -26,6 +27,12 @@ const initialProbeResult: XshellProbeResult = {
       hostCount: 2
     },
     {
+      path: 'Servers/Empty',
+      name: 'Empty',
+      parentPath: 'Servers',
+      hostCount: 0
+    },
+    {
       path: 'Servers/Nested',
       name: 'Nested',
       parentPath: 'Servers',
@@ -33,6 +40,19 @@ const initialProbeResult: XshellProbeResult = {
     }
   ],
   hosts: [
+    {
+      key: 'host-root',
+      label: 'root-host',
+      hostname: 'root.example.com',
+      port: 22,
+      username: 'root',
+      authType: 'password',
+      groupPath: null,
+      privateKeyPath: null,
+      sourceFilePath: 'C:/Users/tester/Documents/NetSarang Computer/8/Xshell/Sessions/root-host.xsh',
+      hasPasswordHint: false,
+      hasAuthProfile: false
+    },
     {
       key: 'host-1',
       label: 'web',
@@ -62,8 +82,8 @@ const initialProbeResult: XshellProbeResult = {
   ],
   warnings: [
     {
-      code: 'password-not-imported',
-      message: 'db: 저장된 Xshell 비밀번호는 현재 버전에서 가져오지 않습니다.'
+      code: 'auth-profile-not-imported',
+      message: 'db: Xshell 인증 프로필은 현재 버전에서 가져오지 않습니다.'
     }
   ],
   skippedExistingHostCount: 1,
@@ -124,9 +144,9 @@ function installMockApi() {
       probeDefault: vi.fn().mockResolvedValue(initialProbeResult),
       addFolderToSnapshot: vi.fn().mockResolvedValue(appendedProbeResult),
       importSelection: vi.fn().mockResolvedValue({
-        createdGroupCount: 3,
+        createdGroupCount: 4,
         createdHostCount: 3,
-        createdSecretCount: 0,
+        createdSecretCount: 1,
         skippedHostCount: 0,
         warnings: []
       }),
@@ -150,15 +170,43 @@ describe('Xshell import dialog helpers', () => {
     vi.restoreAllMocks();
   });
 
-  it('filters groups and hosts by search metadata', () => {
-    expect(filterXshellImportGroups(initialProbeResult.groups, 'nested')).toEqual([initialProbeResult.groups[1]]);
-    expect(filterXshellImportHosts(initialProbeResult.hosts, 'web.pem')).toEqual([initialProbeResult.hosts[0]]);
-    expect(filterXshellImportHosts(initialProbeResult.hosts, 'postgres')).toEqual([initialProbeResult.hosts[1]]);
+  it('builds a filtered tree that keeps ancestor groups for matching hosts', () => {
+    const tree = buildXshellImportTree(initialProbeResult.groups, initialProbeResult.hosts, 'postgres');
+
+    expect(tree).toHaveLength(1);
+    expect(tree[0]).toMatchObject({
+      kind: 'group',
+      path: 'Servers'
+    });
+    if (tree[0]?.kind !== 'group') {
+      throw new Error('Expected a group node');
+    }
+
+    expect(tree[0].children).toHaveLength(1);
+    expect(tree[0].children[0]).toMatchObject({
+      kind: 'group',
+      path: 'Servers/Nested'
+    });
   });
 
-  it('counts hosts selected by explicit hosts and selected group subtrees', () => {
+  it('counts effective hosts and created groups from explicit selections', () => {
     expect(countEffectiveSelectedXshellHosts(initialProbeResult.hosts, ['Servers'], [])).toBe(2);
-    expect(countEffectiveSelectedXshellHosts(initialProbeResult.hosts, [], ['host-2'])).toBe(1);
+    expect(countEffectiveSelectedXshellHosts(initialProbeResult.hosts, [], ['host-root'])).toBe(1);
+    expect(collectEffectiveSelectedXshellGroupPaths(initialProbeResult.groups, initialProbeResult.hosts, ['Servers'], [])).toEqual([
+      'Servers',
+      'Servers/Empty',
+      'Servers/Nested'
+    ]);
+    expect(collectEffectiveSelectedXshellGroupPaths(initialProbeResult.groups, initialProbeResult.hosts, [], ['host-root'])).toEqual([]);
+  });
+
+  it('selects only matching hosts when visible tree comes from a host search', () => {
+    const tree = buildXshellImportTree(initialProbeResult.groups, initialProbeResult.hosts, 'postgres');
+
+    expect(collectVisibleXshellSelectionTargets(tree)).toEqual({
+      groupPaths: [],
+      hostKeys: ['host-2']
+    });
   });
 });
 
@@ -167,19 +215,20 @@ describe('Xshell import dialog', () => {
     vi.restoreAllMocks();
   });
 
-  it('loads the default snapshot, appends folders, and imports selected groups and hosts', async () => {
+  it('loads the default snapshot, appends folders, and imports root hosts plus selected groups', async () => {
     const api = installMockApi();
     const onClose = vi.fn();
     const onImported = vi.fn().mockResolvedValue(undefined);
-    const { container } = render(<XshellImportDialog open onClose={onClose} onImported={onImported} />);
+    render(<XshellImportDialog open onClose={onClose} onImported={onImported} />);
 
     await waitFor(() => expect(api.xshell.probeDefault).toHaveBeenCalled());
 
     expect(screen.getByText('Xshell 가져오기')).toBeInTheDocument();
-    expect(screen.getByText('web')).toBeInTheDocument();
+    expect(screen.getByText('저장된 비밀번호는 자동 가져오기를 시도합니다. 실패하면 호스트만 추가됩니다.')).toBeInTheDocument();
+    expect(screen.getByText('root-host')).toBeInTheDocument();
+    expect(screen.getByText('루트 세션')).toBeInTheDocument();
 
-    const selectionButtons = container.querySelectorAll('.xshell-import-dialog__selection-actions .secondary-button');
-    fireEvent.click(selectionButtons[0] as HTMLButtonElement);
+    fireEvent.click(screen.getByRole('button', { name: '세션 폴더 선택' }));
 
     await waitFor(() => expect(api.shell.pickXshellSessionFolder).toHaveBeenCalled());
     await waitFor(() =>
@@ -189,37 +238,64 @@ describe('Xshell import dialog', () => {
       })
     );
 
-    expect(screen.getByText('lab')).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByText('lab')).toBeInTheDocument());
 
-    fireEvent.click(selectionButtons[1] as HTMLButtonElement);
-    fireEvent.click(container.querySelector('.modal-card__footer .primary-button') as HTMLButtonElement);
+    fireEvent.click(screen.getByLabelText('root-host 호스트 선택'));
+    fireEvent.click(screen.getByLabelText('Servers 그룹 선택'));
+
+    const nestedHostCheckbox = screen.getByLabelText('db 호스트 선택') as HTMLInputElement;
+    expect(nestedHostCheckbox.checked).toBe(true);
+    expect(nestedHostCheckbox.disabled).toBe(true);
+
+    fireEvent.click(screen.getByRole('button', { name: '가져오기' }));
 
     await waitFor(() =>
       expect(api.xshell.importSelection).toHaveBeenCalledWith({
         snapshotId: appendedProbeResult.snapshotId,
-        selectedGroupPaths: ['Servers', 'Servers/Nested', 'Lab'],
-        selectedHostKeys: ['host-1', 'host-2', 'host-3']
+        selectedGroupPaths: ['Servers'],
+        selectedHostKeys: ['host-root']
       })
     );
     expect(onImported).toHaveBeenCalledWith({
-      createdGroupCount: 3,
+      createdGroupCount: 4,
       createdHostCount: 3,
-      createdSecretCount: 0,
+      createdSecretCount: 1,
       skippedHostCount: 0,
       warnings: []
     });
     expect(onClose).toHaveBeenCalled();
   });
 
+  it('imports an empty group without adding hosts', async () => {
+    const api = installMockApi();
+    render(<XshellImportDialog open onClose={vi.fn()} onImported={vi.fn()} />);
+
+    await waitFor(() => expect(api.xshell.probeDefault).toHaveBeenCalled());
+
+    fireEvent.change(screen.getByPlaceholderText('그룹, 호스트, 사용자명, 경로 검색'), {
+      target: { value: 'Empty' }
+    });
+    fireEvent.click(screen.getByRole('button', { name: '보이는 항목 선택' }));
+    fireEvent.click(screen.getByRole('button', { name: '가져오기' }));
+
+    await waitFor(() =>
+      expect(api.xshell.importSelection).toHaveBeenCalledWith({
+        snapshotId: initialProbeResult.snapshotId,
+        selectedGroupPaths: ['Servers/Empty'],
+        selectedHostKeys: []
+      })
+    );
+  });
+
   it('stays usable when no sessions are found', async () => {
     const api = installMockApi();
     api.xshell.probeDefault.mockResolvedValueOnce(emptyProbeResult);
 
-    const { container } = render(<XshellImportDialog open onClose={vi.fn()} onImported={vi.fn()} />);
+    render(<XshellImportDialog open onClose={vi.fn()} onImported={vi.fn()} />);
 
     await waitFor(() => expect(api.xshell.probeDefault).toHaveBeenCalled());
 
-    expect(container.querySelector('.xshell-import-dialog__selection-actions .secondary-button')).toBeTruthy();
-    expect(container.querySelector('.xshell-import-dialog__empty')).toBeTruthy();
+    expect(screen.getByRole('button', { name: '세션 폴더 선택' })).toBeEnabled();
+    expect(screen.getByText('현재 조건과 일치하는 Xshell 그룹이나 호스트가 없습니다.')).toBeInTheDocument();
   });
 });

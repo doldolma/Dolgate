@@ -1,5 +1,14 @@
 import { useEffect, useMemo, useState } from 'react';
-import { isGroupWithinPath, type XshellImportGroupPreview, type XshellImportHostPreview, type XshellImportResult, type XshellImportWarning, type XshellProbeResult, type XshellSourceSummary } from '@shared';
+import {
+  isGroupWithinPath,
+  normalizeGroupPath,
+  type XshellImportGroupPreview,
+  type XshellImportHostPreview,
+  type XshellImportResult,
+  type XshellImportWarning,
+  type XshellProbeResult,
+  type XshellSourceSummary
+} from '@shared';
 import { DialogBackdrop } from './DialogBackdrop';
 
 interface XshellImportDialogProps {
@@ -8,31 +17,326 @@ interface XshellImportDialogProps {
   onImported: (result: XshellImportResult) => Promise<void> | void;
 }
 
+interface XshellSelectionState {
+  selectedGroupPaths: string[];
+  selectedHostKeys: string[];
+}
+
+interface VisibleSelectionTargets {
+  groupPaths: string[];
+  hostKeys: string[];
+}
+
+interface XshellTreeGroupNode {
+  kind: 'group';
+  id: string;
+  path: string;
+  name: string;
+  parentPath: string | null;
+  hostCount: number;
+  matchesSelf: boolean;
+  children: XshellTreeNode[];
+  groupPathsInSubtree: string[];
+  hostKeysInSubtree: string[];
+}
+
+interface XshellTreeHostNode {
+  kind: 'host';
+  id: string;
+  host: XshellImportHostPreview;
+  matchesSelf: boolean;
+}
+
+type XshellTreeNode = XshellTreeGroupNode | XshellTreeHostNode;
+
 function normalizeQuery(value: string): string {
   return value.trim().toLocaleLowerCase();
 }
 
-export function filterXshellImportGroups(groups: XshellImportGroupPreview[], query: string): XshellImportGroupPreview[] {
-  const normalizedQuery = normalizeQuery(query);
-  if (!normalizedQuery) {
-    return groups;
+function buildAncestorGroupPaths(groupPath: string | null | undefined): string[] {
+  const normalized = normalizeGroupPath(groupPath);
+  if (!normalized) {
+    return [];
   }
 
-  return groups.filter((group) => [group.name, group.path].some((value) => value.toLocaleLowerCase().includes(normalizedQuery)));
+  const segments = normalized.split('/');
+  const paths: string[] = [];
+  for (let index = 0; index < segments.length; index += 1) {
+    paths.push(segments.slice(0, index + 1).join('/'));
+  }
+  return paths;
 }
 
-export function filterXshellImportHosts(hosts: XshellImportHostPreview[], query: string): XshellImportHostPreview[] {
-  const normalizedQuery = normalizeQuery(query);
+function matchesGroupQuery(group: Pick<XshellImportGroupPreview, 'name' | 'path'>, normalizedQuery: string): boolean {
   if (!normalizedQuery) {
-    return hosts;
+    return true;
   }
 
-  return hosts.filter((host) =>
-    [host.label, host.hostname, host.username, host.groupPath ?? '', host.privateKeyPath ?? '', host.sourceFilePath]
-      .join(' ')
-      .toLocaleLowerCase()
-      .includes(normalizedQuery)
-  );
+  return [group.name, group.path].some((value) => value.toLocaleLowerCase().includes(normalizedQuery));
+}
+
+function matchesHostQuery(host: XshellImportHostPreview, normalizedQuery: string): boolean {
+  if (!normalizedQuery) {
+    return true;
+  }
+
+  return [host.label, host.hostname, host.username, host.groupPath ?? '', host.privateKeyPath ?? '', host.sourceFilePath]
+    .join(' ')
+    .toLocaleLowerCase()
+    .includes(normalizedQuery);
+}
+
+function compareGroups(left: XshellImportGroupPreview, right: XshellImportGroupPreview): number {
+  const nameCompare = left.name.localeCompare(right.name);
+  if (nameCompare !== 0) {
+    return nameCompare;
+  }
+  return left.path.localeCompare(right.path);
+}
+
+function compareHosts(left: XshellImportHostPreview, right: XshellImportHostPreview): number {
+  const labelCompare = left.label.localeCompare(right.label);
+  if (labelCompare !== 0) {
+    return labelCompare;
+  }
+  return left.hostname.localeCompare(right.hostname);
+}
+
+function buildVisibleGroupNode(
+  group: XshellImportGroupPreview,
+  childGroupPathsByParent: Map<string | null, string[]>,
+  groupsByPath: Map<string, XshellImportGroupPreview>,
+  hostsByGroupPath: Map<string | null, XshellImportHostPreview[]>,
+  normalizedQuery: string,
+  forceVisible: boolean
+): XshellTreeGroupNode | null {
+  const matchesSelf = matchesGroupQuery(group, normalizedQuery);
+  const showWholeSubtree = forceVisible || matchesSelf;
+  const childNodes: XshellTreeNode[] = [];
+
+  for (const childGroupPath of childGroupPathsByParent.get(group.path) ?? []) {
+    const childGroup = groupsByPath.get(childGroupPath);
+    if (!childGroup) {
+      continue;
+    }
+
+    const childNode = buildVisibleGroupNode(
+      childGroup,
+      childGroupPathsByParent,
+      groupsByPath,
+      hostsByGroupPath,
+      normalizedQuery,
+      showWholeSubtree
+    );
+    if (childNode) {
+      childNodes.push(childNode);
+    }
+  }
+
+  for (const host of hostsByGroupPath.get(group.path) ?? []) {
+    const hostMatchesSelf = matchesHostQuery(host, normalizedQuery);
+    if (!showWholeSubtree && !hostMatchesSelf) {
+      continue;
+    }
+
+    childNodes.push({
+      kind: 'host',
+      id: `host:${host.key}`,
+      host,
+      matchesSelf: hostMatchesSelf
+    });
+  }
+
+  if (!showWholeSubtree && childNodes.length === 0) {
+    return null;
+  }
+
+  const groupPathsInSubtree = [group.path];
+  const hostKeysInSubtree: string[] = [];
+  for (const childNode of childNodes) {
+    if (childNode.kind === 'group') {
+      groupPathsInSubtree.push(...childNode.groupPathsInSubtree);
+      hostKeysInSubtree.push(...childNode.hostKeysInSubtree);
+      continue;
+    }
+    hostKeysInSubtree.push(childNode.host.key);
+  }
+
+  return {
+    kind: 'group',
+    id: `group:${group.path}`,
+    path: group.path,
+    name: group.name,
+    parentPath: group.parentPath ?? null,
+    hostCount: group.hostCount,
+    matchesSelf,
+    children: childNodes,
+    groupPathsInSubtree,
+    hostKeysInSubtree
+  };
+}
+
+export function buildXshellImportTree(
+  groups: XshellImportGroupPreview[],
+  hosts: XshellImportHostPreview[],
+  query: string
+): XshellTreeNode[] {
+  const normalizedQuery = normalizeQuery(query);
+  const groupsByPath = new Map<string, XshellImportGroupPreview>();
+
+  for (const group of groups) {
+    const normalizedPath = normalizeGroupPath(group.path);
+    if (!normalizedPath) {
+      continue;
+    }
+
+    groupsByPath.set(normalizedPath, {
+      ...group,
+      path: normalizedPath,
+      parentPath: normalizeGroupPath(group.parentPath)
+    });
+  }
+
+  for (const host of hosts) {
+    for (const candidatePath of buildAncestorGroupPaths(host.groupPath)) {
+      if (!groupsByPath.has(candidatePath)) {
+        groupsByPath.set(candidatePath, {
+          path: candidatePath,
+          name: candidatePath.split('/').at(-1) ?? candidatePath,
+          parentPath: candidatePath.includes('/') ? candidatePath.split('/').slice(0, -1).join('/') : null,
+          hostCount: 0
+        });
+      }
+    }
+  }
+
+  const childGroupPathsByParent = new Map<string | null, string[]>();
+  for (const group of [...groupsByPath.values()].sort(compareGroups)) {
+    const parentPath = normalizeGroupPath(group.parentPath);
+    childGroupPathsByParent.set(parentPath, [...(childGroupPathsByParent.get(parentPath) ?? []), group.path]);
+  }
+
+  const hostsByGroupPath = new Map<string | null, XshellImportHostPreview[]>();
+  for (const host of [...hosts].sort(compareHosts)) {
+    const groupPath = normalizeGroupPath(host.groupPath);
+    hostsByGroupPath.set(groupPath, [...(hostsByGroupPath.get(groupPath) ?? []), host]);
+  }
+
+  const treeNodes: XshellTreeNode[] = [];
+
+  for (const rootGroupPath of childGroupPathsByParent.get(null) ?? []) {
+    const group = groupsByPath.get(rootGroupPath);
+    if (!group) {
+      continue;
+    }
+
+    const node = buildVisibleGroupNode(group, childGroupPathsByParent, groupsByPath, hostsByGroupPath, normalizedQuery, false);
+    if (node) {
+      treeNodes.push(node);
+    }
+  }
+
+  for (const host of hostsByGroupPath.get(null) ?? []) {
+    const matchesSelf = matchesHostQuery(host, normalizedQuery);
+    if (!matchesSelf) {
+      continue;
+    }
+
+    treeNodes.push({
+      kind: 'host',
+      id: `host:${host.key}`,
+      host,
+      matchesSelf
+    });
+  }
+
+  return treeNodes;
+}
+
+export function collectVisibleXshellSelectionTargets(nodes: XshellTreeNode[]): VisibleSelectionTargets {
+  const groupPaths = new Set<string>();
+  const hostKeys = new Set<string>();
+
+  const visit = (node: XshellTreeNode) => {
+    if (node.kind === 'group') {
+      if (node.matchesSelf) {
+        groupPaths.add(node.path);
+        return;
+      }
+
+      for (const child of node.children) {
+        visit(child);
+      }
+      return;
+    }
+
+    hostKeys.add(node.host.key);
+  };
+
+  for (const node of nodes) {
+    visit(node);
+  }
+
+  return {
+    groupPaths: [...groupPaths].sort((left, right) => left.localeCompare(right)),
+    hostKeys: [...hostKeys].sort((left, right) => left.localeCompare(right))
+  };
+}
+
+function normalizeXshellSelectionState(
+  selection: XshellSelectionState,
+  hosts: XshellImportHostPreview[]
+): XshellSelectionState {
+  const groupPathCandidates = [...new Set(selection.selectedGroupPaths.map((groupPath) => normalizeGroupPath(groupPath)).filter(Boolean))].sort(
+    (left, right) => {
+      const normalizedLeft = left as string;
+      const normalizedRight = right as string;
+      const depthCompare = normalizedLeft.split('/').length - normalizedRight.split('/').length;
+      if (depthCompare !== 0) {
+        return depthCompare;
+      }
+      return normalizedLeft.localeCompare(normalizedRight);
+    }
+  ) as string[];
+
+  const normalizedGroupPaths: string[] = [];
+  for (const groupPath of groupPathCandidates) {
+    if (normalizedGroupPaths.some((candidate) => isGroupWithinPath(groupPath, candidate))) {
+      continue;
+    }
+    normalizedGroupPaths.push(groupPath);
+  }
+
+  normalizedGroupPaths.sort((left, right) => {
+    const depthCompare = left.split('/').length - right.split('/').length;
+    if (depthCompare !== 0) {
+      return depthCompare;
+    }
+    return left.localeCompare(right);
+  });
+
+  const hostByKey = new Map(hosts.map((host) => [host.key, host]));
+  const normalizedHostKeys: string[] = [];
+  for (const hostKey of selection.selectedHostKeys) {
+    if (normalizedHostKeys.includes(hostKey)) {
+      continue;
+    }
+
+    const host = hostByKey.get(hostKey);
+    if (!host) {
+      continue;
+    }
+    if (normalizedGroupPaths.some((groupPath) => isGroupWithinPath(host.groupPath ?? null, groupPath))) {
+      continue;
+    }
+
+    normalizedHostKeys.push(hostKey);
+  }
+
+  return {
+    selectedGroupPaths: normalizedGroupPaths,
+    selectedHostKeys: normalizedHostKeys
+  };
 }
 
 export function countEffectiveSelectedXshellHosts(
@@ -49,6 +353,48 @@ export function countEffectiveSelectedXshellHosts(
     }
     return [...selectedGroups].some((groupPath) => isGroupWithinPath(host.groupPath ?? null, groupPath));
   }).length;
+}
+
+export function collectEffectiveSelectedXshellGroupPaths(
+  groups: XshellImportGroupPreview[],
+  hosts: XshellImportHostPreview[],
+  selectedGroupPaths: string[],
+  selectedHostKeys: string[]
+): string[] {
+  const resolvedPaths = new Set(
+    selectedGroupPaths.map((groupPath) => normalizeGroupPath(groupPath)).filter((value): value is string => Boolean(value))
+  );
+
+  const normalizedGroupPreviews = groups
+    .map((group) => normalizeGroupPath(group.path))
+    .filter((value): value is string => Boolean(value));
+
+  for (const selectedGroupPath of [...resolvedPaths]) {
+    for (const candidateGroupPath of normalizedGroupPreviews) {
+      if (isGroupWithinPath(candidateGroupPath, selectedGroupPath)) {
+        resolvedPaths.add(candidateGroupPath);
+      }
+    }
+  }
+
+  const selectedHosts = new Set(selectedHostKeys);
+  for (const host of hosts) {
+    if (!selectedHosts.has(host.key) && ![...resolvedPaths].some((groupPath) => isGroupWithinPath(host.groupPath ?? null, groupPath))) {
+      continue;
+    }
+
+    for (const ancestorGroupPath of buildAncestorGroupPaths(host.groupPath)) {
+      resolvedPaths.add(ancestorGroupPath);
+    }
+  }
+
+  return [...resolvedPaths].sort((left, right) => {
+    const depthCompare = left.split('/').length - right.split('/').length;
+    if (depthCompare !== 0) {
+      return depthCompare;
+    }
+    return left.localeCompare(right);
+  });
 }
 
 function renderWarningList(warnings: XshellImportWarning[]) {
@@ -76,12 +422,136 @@ function renderSourceList(sources: XshellSourceSummary[]) {
     <div className="xshell-import-dialog__sources">
       {sources.map((source) => (
         <div key={source.id} className="form-note">
-          <strong>{source.origin === 'default-session-dir' ? '기본 경로' : '추가 폴더'}</strong>{' '}
-          <code>{source.folderPath}</code>
+          <strong>{source.origin === 'default-session-dir' ? '기본 경로' : '추가 폴더'}</strong> <code>{source.folderPath}</code>
         </div>
       ))}
     </div>
   );
+}
+
+interface XshellTreeRendererProps {
+  nodes: XshellTreeNode[];
+  expandedGroupPaths: Set<string>;
+  searchQuery: string;
+  selection: XshellSelectionState;
+  onToggleExpanded: (groupPath: string) => void;
+  onToggleGroup: (node: XshellTreeGroupNode, checked: boolean) => void;
+  onToggleHost: (host: XshellImportHostPreview, checked: boolean) => void;
+}
+
+function XshellTreeRenderer({
+  nodes,
+  expandedGroupPaths,
+  searchQuery,
+  selection,
+  onToggleExpanded,
+  onToggleGroup,
+  onToggleHost
+}: XshellTreeRendererProps) {
+  const selectedGroupPaths = useMemo(() => new Set(selection.selectedGroupPaths), [selection.selectedGroupPaths]);
+  const selectedHostKeys = useMemo(() => new Set(selection.selectedHostKeys), [selection.selectedHostKeys]);
+
+  const renderNode = (node: XshellTreeNode, depth: number, ancestorSelected: boolean) => {
+    if (node.kind === 'host') {
+      const inheritedSelection = ancestorSelected;
+      const checked = inheritedSelection || selectedHostKeys.has(node.host.key);
+      const disabled = inheritedSelection;
+
+      return (
+        <div key={node.id} className="xshell-import-dialog__tree-node">
+          <div className="xshell-import-dialog__tree-row xshell-import-dialog__tree-row--host" style={{ paddingLeft: `${depth * 1.1}rem` }}>
+            <span className="xshell-import-dialog__tree-spacer" aria-hidden="true" />
+            <label className="xshell-import-dialog__tree-label">
+              <input
+                type="checkbox"
+                checked={checked}
+                disabled={disabled}
+                onChange={(event) => onToggleHost(node.host, event.target.checked)}
+                aria-label={`${node.host.label} 호스트 선택`}
+              />
+              <div className="xshell-import-dialog__item-body">
+                <strong>{node.host.label}</strong>
+                <span>
+                  {node.host.username}@{node.host.hostname}:{node.host.port}
+                </span>
+                <small>{node.host.groupPath ? node.host.groupPath : '루트 세션'}</small>
+                <small>{node.host.sourceFilePath}</small>
+                {node.host.privateKeyPath ? <small>{node.host.privateKeyPath}</small> : null}
+              </div>
+            </label>
+            <div className="xshell-import-dialog__badges">
+              <small className="status-pill">{node.host.authType === 'privateKey' ? '개인 키' : '비밀번호'}</small>
+              {node.host.hasPasswordHint ? <small className="status-pill">저장된 비밀번호</small> : null}
+              {node.host.hasAuthProfile ? <small className="status-pill">인증 프로필</small> : null}
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    const explicitlySelected = selectedGroupPaths.has(node.path);
+    const inheritedSelection = ancestorSelected;
+    const checked = inheritedSelection || explicitlySelected;
+    const disabled = inheritedSelection;
+    const hasAnySelectedDescendant =
+      !checked &&
+      (node.children.some((child) => {
+        if (child.kind === 'group') {
+          return selectedGroupPaths.has(child.path) || child.hostKeysInSubtree.some((hostKey) => selectedHostKeys.has(hostKey));
+        }
+
+        return selectedHostKeys.has(child.host.key);
+      }) ||
+        node.hostKeysInSubtree.some((hostKey) => selectedHostKeys.has(hostKey)));
+    const isExpanded = Boolean(searchQuery) || expandedGroupPaths.has(node.path);
+
+    return (
+      <div key={node.id} className="xshell-import-dialog__tree-node">
+        <div className="xshell-import-dialog__tree-row xshell-import-dialog__tree-row--group" style={{ paddingLeft: `${depth * 1.1}rem` }}>
+          <button
+            type="button"
+            className={`icon-button xshell-import-dialog__tree-toggle${isExpanded ? ' is-expanded' : ''}`}
+            onClick={() => onToggleExpanded(node.path)}
+            aria-label={`${node.name} 그룹 ${isExpanded ? '접기' : '펼치기'}`}
+          >
+            &gt;
+          </button>
+          <label className="xshell-import-dialog__tree-label">
+            <input
+              type="checkbox"
+              checked={checked}
+              disabled={disabled}
+              ref={(element) => {
+                if (element) {
+                  element.indeterminate = hasAnySelectedDescendant;
+                }
+              }}
+              onChange={(event) => onToggleGroup(node, event.target.checked)}
+              aria-label={`${node.name} 그룹 선택`}
+            />
+            <div className="xshell-import-dialog__item-body">
+              <strong>{node.name}</strong>
+              <span>{node.path}</span>
+              <small>{node.hostCount > 0 ? `하위 호스트 ${node.hostCount}개` : '빈 그룹'}</small>
+            </div>
+          </label>
+        </div>
+        {isExpanded ? (
+          <div className="xshell-import-dialog__tree-children">
+            {node.children.length > 0 ? (
+              node.children.map((child) => renderNode(child, depth + 1, checked))
+            ) : (
+              <div className="form-note xshell-import-dialog__tree-empty" style={{ marginLeft: `${(depth + 1) * 1.1}rem` }}>
+                이 그룹에는 가져올 호스트가 없습니다.
+              </div>
+            )}
+          </div>
+        ) : null}
+      </div>
+    );
+  };
+
+  return <>{nodes.map((node) => renderNode(node, 0, false))}</>;
 }
 
 export function XshellImportDialog({ open, onClose, onImported }: XshellImportDialogProps) {
@@ -90,8 +560,11 @@ export function XshellImportDialog({ open, onClose, onImported }: XshellImportDi
   const [isAddingFolder, setIsAddingFolder] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
-  const [selectedGroupPaths, setSelectedGroupPaths] = useState<string[]>([]);
-  const [selectedHostKeys, setSelectedHostKeys] = useState<string[]>([]);
+  const [expandedGroupPaths, setExpandedGroupPaths] = useState<string[]>([]);
+  const [selection, setSelection] = useState<XshellSelectionState>({
+    selectedGroupPaths: [],
+    selectedHostKeys: []
+  });
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -102,8 +575,11 @@ export function XshellImportDialog({ open, onClose, onImported }: XshellImportDi
     let cancelled = false;
     setProbe(null);
     setSearchQuery('');
-    setSelectedGroupPaths([]);
-    setSelectedHostKeys([]);
+    setExpandedGroupPaths([]);
+    setSelection({
+      selectedGroupPaths: [],
+      selectedHostKeys: []
+    });
     setError(null);
     setIsLoading(true);
 
@@ -141,13 +617,29 @@ export function XshellImportDialog({ open, onClose, onImported }: XshellImportDi
     void window.dolssh.xshell.discardSnapshot(probe.snapshotId);
   }, [open, probe?.snapshotId]);
 
-  const visibleGroups = useMemo(() => filterXshellImportGroups(probe?.groups ?? [], searchQuery), [probe?.groups, searchQuery]);
-  const visibleHosts = useMemo(() => filterXshellImportHosts(probe?.hosts ?? [], searchQuery), [probe?.hosts, searchQuery]);
+  useEffect(() => {
+    setExpandedGroupPaths((probe?.groups ?? []).map((group) => group.path));
+  }, [probe?.groups]);
+
+  const treeNodes = useMemo(() => buildXshellImportTree(probe?.groups ?? [], probe?.hosts ?? [], searchQuery), [probe?.groups, probe?.hosts, searchQuery]);
+  const visibleSelectionTargets = useMemo(() => collectVisibleXshellSelectionTargets(treeNodes), [treeNodes]);
   const effectiveSelectedHostCount = useMemo(
-    () => countEffectiveSelectedXshellHosts(probe?.hosts ?? [], selectedGroupPaths, selectedHostKeys),
-    [probe?.hosts, selectedGroupPaths, selectedHostKeys]
+    () => countEffectiveSelectedXshellHosts(probe?.hosts ?? [], selection.selectedGroupPaths, selection.selectedHostKeys),
+    [probe?.hosts, selection.selectedGroupPaths, selection.selectedHostKeys]
   );
-  const canImport = Boolean(probe?.snapshotId) && (selectedGroupPaths.length > 0 || selectedHostKeys.length > 0) && !isImporting;
+  const effectiveSelectedGroupCount = useMemo(
+    () =>
+      collectEffectiveSelectedXshellGroupPaths(
+        probe?.groups ?? [],
+        probe?.hosts ?? [],
+        selection.selectedGroupPaths,
+        selection.selectedHostKeys
+      ).length,
+    [probe?.groups, probe?.hosts, selection.selectedGroupPaths, selection.selectedHostKeys]
+  );
+  const hasSavedPasswordHosts = useMemo(() => (probe?.hosts ?? []).some((host) => host.hasPasswordHint), [probe?.hosts]);
+  const selectedItemCount = selection.selectedGroupPaths.length + selection.selectedHostKeys.length;
+  const canImport = Boolean(probe?.snapshotId) && selectedItemCount > 0 && !isImporting;
 
   if (!open) {
     return null;
@@ -167,11 +659,14 @@ export function XshellImportDialog({ open, onClose, onImported }: XshellImportDi
         </div>
 
         <div className="modal-card__body">
-          {isLoading ? <div className="aws-import-dialog__loading">로컬 Xshell 세션을 불러오는 중입니다.</div> : null}
+          {isLoading ? <div className="aws-import-dialog__loading">로컬 Xshell 세션을 읽는 중입니다.</div> : null}
           {error ? <div className="terminal-error-banner">{error}</div> : null}
 
           {probe ? renderSourceList(probe.sources) : null}
           {probe ? renderWarningList(probe.warnings) : null}
+          {probe && hasSavedPasswordHosts ? (
+            <div className="form-note">저장된 비밀번호는 자동 가져오기를 시도합니다. 실패하면 호스트만 추가됩니다.</div>
+          ) : null}
 
           {probe ? (
             <>
@@ -181,7 +676,7 @@ export function XshellImportDialog({ open, onClose, onImported }: XshellImportDi
                   <input
                     value={searchQuery}
                     onChange={(event) => setSearchQuery(event.target.value)}
-                    placeholder="그룹, 호스트, 사용자명, 키 경로 검색"
+                    placeholder="그룹, 호스트, 사용자명, 경로 검색"
                     disabled={isLoading || isAddingFolder}
                   />
                 </label>
@@ -218,113 +713,127 @@ export function XshellImportDialog({ open, onClose, onImported }: XshellImportDi
                     type="button"
                     className="secondary-button"
                     onClick={() => {
-                      setSelectedGroupPaths((current) => Array.from(new Set([...current, ...visibleGroups.map((group) => group.path)])));
-                      setSelectedHostKeys((current) => Array.from(new Set([...current, ...visibleHosts.map((host) => host.key)])));
+                      setSelection((current) =>
+                        normalizeXshellSelectionState(
+                          {
+                            selectedGroupPaths: [...current.selectedGroupPaths, ...visibleSelectionTargets.groupPaths],
+                            selectedHostKeys: [...current.selectedHostKeys, ...visibleSelectionTargets.hostKeys]
+                          },
+                          probe.hosts
+                        )
+                      );
                     }}
-                    disabled={visibleGroups.length === 0 && visibleHosts.length === 0}
+                    disabled={visibleSelectionTargets.groupPaths.length === 0 && visibleSelectionTargets.hostKeys.length === 0}
                   >
-                    보이는 항목 모두 선택
+                    보이는 항목 선택
                   </button>
                   <button
                     type="button"
                     className="secondary-button"
                     onClick={() => {
-                      setSelectedGroupPaths([]);
-                      setSelectedHostKeys([]);
+                      setSelection((current) =>
+                        normalizeXshellSelectionState(
+                          {
+                            selectedGroupPaths: current.selectedGroupPaths.filter(
+                              (groupPath) => !visibleSelectionTargets.groupPaths.includes(groupPath)
+                            ),
+                            selectedHostKeys: current.selectedHostKeys.filter(
+                              (hostKey) => !visibleSelectionTargets.hostKeys.includes(hostKey)
+                            )
+                          },
+                          probe.hosts
+                        )
+                      );
                     }}
-                    disabled={selectedGroupPaths.length === 0 && selectedHostKeys.length === 0}
+                    disabled={selectedItemCount === 0}
                   >
-                    선택 해제
+                    보이는 항목 해제
+                  </button>
+                  <button
+                    type="button"
+                    className="secondary-button"
+                    onClick={() =>
+                      setSelection({
+                        selectedGroupPaths: [],
+                        selectedHostKeys: []
+                      })
+                    }
+                    disabled={selectedItemCount === 0}
+                  >
+                    전체 선택 해제
                   </button>
                 </div>
               </div>
 
               <div className="xshell-import-dialog__summary">
                 <span>소스 {probe.sources.length}</span>
-                <span>그룹 {probe.groups.length}</span>
-                <span>호스트 {probe.hosts.length}</span>
-                <span>선택한 그룹 {selectedGroupPaths.length}</span>
-                <span>선택한 호스트 {selectedHostKeys.length}</span>
-                <span>실제 가져올 호스트 {effectiveSelectedHostCount}</span>
+                <span>트리 항목 {probe.groups.length + probe.hosts.length}</span>
+                <span>선택 항목 {selectedItemCount}</span>
+                <span>가져올 호스트 {effectiveSelectedHostCount}</span>
+                <span>생성될 그룹 {effectiveSelectedGroupCount}</span>
                 {probe.skippedExistingHostCount > 0 ? <span>기존 중복 제외 {probe.skippedExistingHostCount}</span> : null}
                 {probe.skippedDuplicateHostCount > 0 ? <span>세션 중복 제외 {probe.skippedDuplicateHostCount}</span> : null}
               </div>
 
-              <div className="xshell-import-dialog__list">
-                <section className="xshell-import-dialog__section">
-                  <h4>그룹</h4>
-                  {visibleGroups.length === 0 ? (
-                    <div className="form-note">검색 결과와 일치하는 그룹이 없습니다.</div>
-                  ) : (
-                    <div className="xshell-import-dialog__items">
-                      {visibleGroups.map((group) => {
-                        const checked = selectedGroupPaths.includes(group.path);
-                        return (
-                          <label key={group.path} className="xshell-import-dialog__item">
-                            <input
-                              type="checkbox"
-                              checked={checked}
-                              onChange={(event) => {
-                                setSelectedGroupPaths((current) =>
-                                  event.target.checked ? Array.from(new Set([...current, group.path])) : current.filter((value) => value !== group.path)
-                                );
-                              }}
-                            />
-                            <div className="xshell-import-dialog__item-body">
-                              <strong>{group.name}</strong>
-                              <span>{group.path}</span>
-                            </div>
-                            <small>호스트 {group.hostCount}개</small>
-                          </label>
-                        );
-                      })}
-                    </div>
-                  )}
-                </section>
-
-                <section className="xshell-import-dialog__section">
-                  <h4>호스트</h4>
-                  {visibleHosts.length === 0 ? (
-                    <div className="empty-callout xshell-import-dialog__empty">
-                      <strong>현재 조건과 일치하는 Xshell 호스트가 없습니다.</strong>
-                      <p>다른 세션 폴더를 선택하거나 검색어를 변경해보세요.</p>
-                    </div>
-                  ) : (
-                    <div className="xshell-import-dialog__items">
-                      {visibleHosts.map((host) => {
-                        const checked = selectedHostKeys.includes(host.key);
-                        return (
-                          <label key={host.key} className="xshell-import-dialog__item">
-                            <input
-                              type="checkbox"
-                              checked={checked}
-                              onChange={(event) => {
-                                setSelectedHostKeys((current) =>
-                                  event.target.checked ? Array.from(new Set([...current, host.key])) : current.filter((value) => value !== host.key)
-                                );
-                              }}
-                            />
-                            <div className="xshell-import-dialog__item-body">
-                              <strong>{host.label}</strong>
-                              <span>
-                                {host.username}@{host.hostname}:{host.port}
-                              </span>
-                              {host.groupPath ? <small>{host.groupPath}</small> : <small>루트</small>}
-                              <small>{host.sourceFilePath}</small>
-                              {host.privateKeyPath ? <small>{host.privateKeyPath}</small> : null}
-                            </div>
-                            <div className="xshell-import-dialog__badges">
-                              <small className="status-pill">{host.authType === 'privateKey' ? '개인키' : '비밀번호'}</small>
-                              {host.hasPasswordHint ? <small className="status-pill">저장된 비밀번호</small> : null}
-                              {host.hasAuthProfile ? <small className="status-pill">인증 프로필</small> : null}
-                            </div>
-                          </label>
-                        );
-                      })}
-                    </div>
-                  )}
-                </section>
+              <div className="xshell-import-dialog__notes">
+                <div className="form-note">호스트를 선택하면 필요한 상위 그룹은 자동 생성됩니다.</div>
+                <div className="form-note">그룹을 선택하면 하위 그룹과 호스트를 모두 가져옵니다. 빈 그룹도 가져올 수 있습니다.</div>
               </div>
+
+              <section className="xshell-import-dialog__section">
+                <h4>가져올 항목</h4>
+                {treeNodes.length === 0 ? (
+                  <div className="empty-callout xshell-import-dialog__empty">
+                    <strong>현재 조건과 일치하는 Xshell 그룹이나 호스트가 없습니다.</strong>
+                    <p>다른 세션 폴더를 선택하거나 검색어를 바꿔보세요.</p>
+                  </div>
+                ) : (
+                  <div className="xshell-import-dialog__tree" role="tree" aria-label="Xshell 가져오기 항목">
+                    <XshellTreeRenderer
+                      nodes={treeNodes}
+                      expandedGroupPaths={new Set(expandedGroupPaths)}
+                      searchQuery={searchQuery}
+                      selection={selection}
+                      onToggleExpanded={(groupPath) => {
+                        setExpandedGroupPaths((current) =>
+                          current.includes(groupPath)
+                            ? current.filter((value) => value !== groupPath)
+                            : [...current, groupPath]
+                        );
+                      }}
+                      onToggleGroup={(node, checked) => {
+                        setSelection((current) =>
+                          normalizeXshellSelectionState(
+                            checked
+                              ? {
+                                  selectedGroupPaths: [...current.selectedGroupPaths.filter((value) => !isGroupWithinPath(value, node.path)), node.path],
+                                  selectedHostKeys: current.selectedHostKeys.filter((hostKey) => !node.hostKeysInSubtree.includes(hostKey))
+                                }
+                              : {
+                                  selectedGroupPaths: current.selectedGroupPaths.filter((value) => value !== node.path),
+                                  selectedHostKeys: current.selectedHostKeys
+                                },
+                            probe.hosts
+                          )
+                        );
+                      }}
+                      onToggleHost={(host, checked) => {
+                        setSelection((current) =>
+                          normalizeXshellSelectionState(
+                            {
+                              selectedGroupPaths: current.selectedGroupPaths,
+                              selectedHostKeys: checked
+                                ? [...current.selectedHostKeys, host.key]
+                                : current.selectedHostKeys.filter((value) => value !== host.key)
+                            },
+                            probe.hosts
+                          )
+                        );
+                      }}
+                    />
+                  </div>
+                )}
+              </section>
             </>
           ) : null}
         </div>
@@ -346,8 +855,8 @@ export function XshellImportDialog({ open, onClose, onImported }: XshellImportDi
               try {
                 const result = await window.dolssh.xshell.importSelection({
                   snapshotId: probe.snapshotId,
-                  selectedGroupPaths,
-                  selectedHostKeys
+                  selectedGroupPaths: selection.selectedGroupPaths,
+                  selectedHostKeys: selection.selectedHostKeys
                 });
                 await onImported(result);
                 onClose();

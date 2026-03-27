@@ -11,7 +11,13 @@ import {
   normalizeGroupPath
 } from '@shared';
 import type { GroupRecord, HostRecord } from '@shared';
-import { HostBrowser, getHostBrowserCardClassName, getHostBrowserEmptyCalloutMessage, HOST_BROWSER_IMPORT_MENU_LABELS } from './HostBrowser';
+import {
+  HostBrowser,
+  getHostBrowserCardClassName,
+  getHostBrowserEmptyCalloutMessage,
+  getHostBrowserVisibleImportMenuLabels,
+  HOST_BROWSER_IMPORT_MENU_LABELS
+} from './HostBrowser';
 
 const groups: GroupRecord[] = [
   {
@@ -67,9 +73,10 @@ const hosts: HostRecord[] = [
   }
 ];
 
-function renderBrowser() {
+function renderBrowser(desktopPlatform: 'darwin' | 'win32' | 'linux' | 'unknown' = 'win32') {
   return render(
     <HostBrowser
+      desktopPlatform={desktopPlatform}
       hosts={hosts}
       groups={groups}
       currentGroupPath={null}
@@ -159,6 +166,22 @@ describe('HostBrowser helpers', () => {
     ]);
   });
 
+  it('hides the Xshell import action outside Windows', () => {
+    expect(getHostBrowserVisibleImportMenuLabels('win32')).toEqual([
+      'Import from AWS',
+      'Import OpenSSH',
+      'Import from Xshell',
+      'Import from Termius',
+      'Import from Warpgate'
+    ]);
+    expect(getHostBrowserVisibleImportMenuLabels('darwin')).toEqual([
+      'Import from AWS',
+      'Import OpenSSH',
+      'Import from Termius',
+      'Import from Warpgate'
+    ]);
+  });
+
   it('updates the empty-state copy to reference the import menu', () => {
     expect(getHostBrowserEmptyCalloutMessage(0, '')).toBe('New Host 또는 Import 메뉴를 눌러 첫 번째 연결 대상을 추가해보세요.');
     expect(getHostBrowserEmptyCalloutMessage(2, 'nas')).toBe('검색어를 지우거나 다른 호스트명으로 다시 찾아보세요.');
@@ -167,6 +190,20 @@ describe('HostBrowser helpers', () => {
 });
 
 describe('HostBrowser dialogs', () => {
+  it('shows the Xshell import menu item only on Windows', () => {
+    const firstRender = renderBrowser('darwin');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open import menu' }));
+    expect(screen.queryByRole('menuitem', { name: 'Import from Xshell' })).not.toBeInTheDocument();
+
+    firstRender.unmount();
+
+    renderBrowser('win32');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open import menu' }));
+    expect(screen.getByRole('menuitem', { name: 'Import from Xshell' })).toBeInTheDocument();
+  });
+
   it('closes the create-group dialog when the backdrop is clicked', () => {
     const { container } = renderBrowser();
 

@@ -92,6 +92,10 @@ import {
   collectSelectedXshellHosts,
   XshellImportService,
 } from "./xshell-import-service";
+import {
+  decryptXshellPassword,
+  resolveCurrentXshellPasswordSecurityContext,
+} from "./xshell-password-decryptor";
 
 async function persistSecret(
   secretStore: SecretStore,
@@ -1178,9 +1182,12 @@ export function registerIpcHandlers(
           groups.list().map((group) => group.path),
         );
         const knownSshHosts = buildKnownSshDuplicateKeys(hosts);
+        const passwordSecurityContext =
+          await resolveCurrentXshellPasswordSecurityContext();
         const warnings: XshellImportWarning[] = [...snapshot.warnings];
         let createdGroupCount = 0;
         let createdHostCount = 0;
+        let createdSecretCount = 0;
         let skippedHostCount = 0;
 
         for (const groupPath of selectedGroupPaths) {
@@ -1228,6 +1235,48 @@ export function registerIpcHandlers(
             createdGroupCount += 1;
           }
 
+          let secretRef: string | null = null;
+          if (
+            host.authType === "password" &&
+            host.encryptedPassword &&
+            !host.masterPasswordEnabled
+          ) {
+            const decryptedPassword = decryptXshellPassword({
+              encryptedPassword: host.encryptedPassword,
+              sessionFileVersion: host.sessionFileVersion,
+              masterPasswordEnabled: host.masterPasswordEnabled,
+              securityContext: passwordSecurityContext,
+            });
+
+            if (decryptedPassword.ok) {
+              secretRef = await persistImportedSecret(
+                secretStore,
+                secretMetadata,
+                `Xshell • ${host.label}`,
+                {
+                  password: decryptedPassword.password,
+                },
+              );
+              if (secretRef) {
+                createdSecretCount += 1;
+              }
+            } else {
+              const warningCode =
+                decryptedPassword.reason === "missing-security-context" ||
+                decryptedPassword.reason === "invalid-version"
+                  ? "password-import-unsupported"
+                  : "password-decrypt-failed";
+              warnings.push({
+                code: warningCode,
+                message:
+                  warningCode === "password-import-unsupported"
+                    ? `${host.label}: 이 Windows 사용자 환경에서는 저장된 Xshell 비밀번호를 자동으로 가져올 수 없습니다.`
+                    : `${host.label}: 저장된 Xshell 비밀번호를 복호화하지 못해 호스트만 가져왔습니다.`,
+                filePath: host.sourceFilePath,
+              });
+            }
+          }
+
           hosts.create(
             randomUUID(),
             {
@@ -1242,13 +1291,17 @@ export function registerIpcHandlers(
               authType: host.authType,
               privateKeyPath: host.privateKeyPath,
             },
-            null,
+            secretRef,
           );
           knownSshHosts.add(duplicateKey);
           createdHostCount += 1;
         }
 
-        if (createdGroupCount > 0 || createdHostCount > 0) {
+        if (
+          createdGroupCount > 0 ||
+          createdHostCount > 0 ||
+          createdSecretCount > 0
+        ) {
           activityLogs.append(
             "info",
             "audit",
@@ -1257,6 +1310,7 @@ export function registerIpcHandlers(
               sourceCount: snapshot.sources.length,
               createdGroupCount,
               createdHostCount,
+              createdSecretCount,
               skippedHostCount,
             },
           );
@@ -1278,7 +1332,7 @@ export function registerIpcHandlers(
         return {
           createdGroupCount,
           createdHostCount,
-          createdSecretCount: 0,
+          createdSecretCount,
           skippedHostCount,
           warnings,
         };

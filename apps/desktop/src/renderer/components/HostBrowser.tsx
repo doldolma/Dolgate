@@ -15,6 +15,7 @@ import {
 } from '@shared';
 import type { GroupRecord, GroupRemoveMode, HostRecord } from '@shared';
 import { DialogBackdrop } from './DialogBackdrop';
+import type { DesktopPlatform } from './DesktopWindowControls';
 
 export {
   buildVisibleGroups,
@@ -40,6 +41,12 @@ export const HOST_BROWSER_IMPORT_MENU_LABELS = [
   'Import from Termius',
   'Import from Warpgate'
 ] as const;
+
+export function getHostBrowserVisibleImportMenuLabels(desktopPlatform: DesktopPlatform): string[] {
+  return desktopPlatform === 'win32'
+    ? [...HOST_BROWSER_IMPORT_MENU_LABELS]
+    : HOST_BROWSER_IMPORT_MENU_LABELS.filter((label) => label !== 'Import from Xshell');
+}
 
 export function getHostBrowserEmptyCalloutMessage(hostCount: number, searchQuery: string): string {
   return hostCount === 0 ? 'New Host 또는 Import 메뉴를 눌러 첫 번째 연결 대상을 추가해보세요.' : searchQuery ? '검색어를 지우거나 다른 호스트명으로 다시 찾아보세요.' : 'New Host를 눌러 이 위치에 호스트를 추가하거나, 다른 그룹으로 이동해 장치를 확인해보세요.';
@@ -69,6 +76,7 @@ interface GroupContextMenuState {
 type ContextMenuState = HostContextMenuState | GroupContextMenuState;
 
 interface HostBrowserProps {
+  desktopPlatform: DesktopPlatform;
   hosts: HostRecord[];
   groups: GroupRecord[];
   currentGroupPath: string | null;
@@ -95,6 +103,7 @@ interface HostBrowserProps {
 }
 
 export function HostBrowser({
+  desktopPlatform,
   hosts,
   groups,
   currentGroupPath,
@@ -131,6 +140,17 @@ export function HostBrowser({
   const [expandedHostTags, setExpandedHostTags] = useState<string[]>([]);
   const [isImportMenuOpen, setIsImportMenuOpen] = useState(false);
   const importMenuRef = useRef<HTMLDivElement | null>(null);
+  const importMenuItems = useMemo(
+    () =>
+      [
+        { label: HOST_BROWSER_IMPORT_MENU_LABELS[0], onSelect: onOpenAwsImport },
+        { label: HOST_BROWSER_IMPORT_MENU_LABELS[1], onSelect: onOpenOpenSshImport },
+        ...(desktopPlatform === 'win32' ? [{ label: HOST_BROWSER_IMPORT_MENU_LABELS[2], onSelect: onOpenXshellImport }] : []),
+        { label: HOST_BROWSER_IMPORT_MENU_LABELS[3], onSelect: onOpenTermiusImport },
+        { label: HOST_BROWSER_IMPORT_MENU_LABELS[4], onSelect: onOpenWarpgateImport }
+      ],
+    [desktopPlatform, onOpenAwsImport, onOpenOpenSshImport, onOpenTermiusImport, onOpenWarpgateImport, onOpenXshellImport]
+  );
 
   useEffect(() => {
     setSelectedGroupPath(null);
@@ -338,13 +358,7 @@ export function HostBrowser({
             </button>
             {isImportMenuOpen ? (
               <div className="split-button__menu" role="menu" aria-label="Import host menu">
-                {[
-                { label: HOST_BROWSER_IMPORT_MENU_LABELS[0], onSelect: onOpenAwsImport },
-                  { label: HOST_BROWSER_IMPORT_MENU_LABELS[1], onSelect: onOpenOpenSshImport },
-                  { label: HOST_BROWSER_IMPORT_MENU_LABELS[2], onSelect: onOpenXshellImport },
-                  { label: HOST_BROWSER_IMPORT_MENU_LABELS[3], onSelect: onOpenTermiusImport },
-                  { label: HOST_BROWSER_IMPORT_MENU_LABELS[4], onSelect: onOpenWarpgateImport }
-                ].map((item) => (
+                {importMenuItems.map((item) => (
                   <button
                     key={item.label}
                     type="button"
