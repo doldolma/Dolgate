@@ -30,18 +30,25 @@ type transferHandle struct {
 	cancel context.CancelFunc
 }
 
+type pendingChallenge struct {
+	endpointID string
+	responses  chan []string
+}
+
 type Service struct {
-	mu        sync.RWMutex
-	endpoints map[string]*endpointHandle
-	transfers map[string]*transferHandle
-	emit      EventEmitter
+	mu                sync.RWMutex
+	endpoints         map[string]*endpointHandle
+	transfers         map[string]*transferHandle
+	pendingChallenges map[string]*pendingChallenge
+	emit              EventEmitter
 }
 
 func New(emit EventEmitter) *Service {
 	return &Service{
-		endpoints: make(map[string]*endpointHandle),
-		transfers: make(map[string]*transferHandle),
-		emit:      emit,
+		endpoints:         make(map[string]*endpointHandle),
+		transfers:         make(map[string]*transferHandle),
+		pendingChallenges: make(map[string]*pendingChallenge),
+		emit:              emit,
 	}
 }
 
@@ -58,6 +65,12 @@ func (s *Service) Shutdown() {
 		endpoints = append(endpoints, handle)
 	}
 	s.endpoints = make(map[string]*endpointHandle)
+
+	challenges := make([]*pendingChallenge, 0, len(s.pendingChallenges))
+	for _, challenge := range s.pendingChallenges {
+		challenges = append(challenges, challenge)
+	}
+	s.pendingChallenges = make(map[string]*pendingChallenge)
 	s.mu.Unlock()
 
 	for _, handle := range transfers {
@@ -66,9 +79,13 @@ func (s *Service) Shutdown() {
 	for _, handle := range endpoints {
 		handle.close()
 	}
+	for _, challenge := range challenges {
+		close(challenge.responses)
+	}
 }
 
 func (s *Service) Connect(endpointID, requestID string, payload protocol.SFTPConnectPayload) error {
+	attempt := 0
 	client, err := sshconn.DialClient(sshconn.Target{
 		Host:                 payload.Host,
 		Port:                 payload.Port,
@@ -79,7 +96,59 @@ func (s *Service) Connect(endpointID, requestID string, payload protocol.SFTPCon
 		PrivateKeyPath:       payload.PrivateKeyPath,
 		Passphrase:           payload.Passphrase,
 		TrustedHostKeyBase64: payload.TrustedHostKeyBase64,
-	}, sshconn.DefaultConfig, nil)
+	}, sshconn.DefaultConfig, func(challenge sshconn.InteractiveChallenge) ([]string, error) {
+		attempt += 1
+		challengeID := fmt.Sprintf("%s-%d", endpointID, attempt)
+		responseCh := make(chan []string, 1)
+
+		s.mu.Lock()
+		s.pendingChallenges[challengeID] = &pendingChallenge{
+			endpointID: endpointID,
+			responses:  responseCh,
+		}
+		s.mu.Unlock()
+		defer func() {
+			s.mu.Lock()
+			delete(s.pendingChallenges, challengeID)
+			s.mu.Unlock()
+		}()
+
+		prompts := make([]protocol.KeyboardInteractivePrompt, 0, len(challenge.Prompts))
+		for _, prompt := range challenge.Prompts {
+			prompts = append(prompts, protocol.KeyboardInteractivePrompt{
+				Label: prompt.Label,
+				Echo:  prompt.Echo,
+			})
+		}
+
+		s.emit(protocol.Event{
+			Type:       protocol.EventKeyboardInteractiveChallenge,
+			RequestID:  requestID,
+			EndpointID: endpointID,
+			Payload: protocol.KeyboardInteractiveChallengePayload{
+				ChallengeID: challengeID,
+				Attempt:     attempt,
+				Name:        challenge.Name,
+				Instruction: challenge.Instruction,
+				Prompts:     prompts,
+			},
+		})
+
+		responses, ok := <-responseCh
+		if !ok {
+			return nil, fmt.Errorf("keyboard-interactive challenge was cancelled")
+		}
+
+		s.emit(protocol.Event{
+			Type:       protocol.EventKeyboardInteractiveResolved,
+			RequestID:  requestID,
+			EndpointID: endpointID,
+			Payload: map[string]any{
+				"challengeId": challengeID,
+			},
+		})
+		return responses, nil
+	})
 	if err != nil {
 		return err
 	}
@@ -122,6 +191,9 @@ func (s *Service) Disconnect(endpointID, requestID string) error {
 	if ok {
 		handle.close()
 	}
+	for _, challenge := range s.removePendingChallengesForEndpoint(endpointID) {
+		close(challenge.responses)
+	}
 
 	s.emit(protocol.Event{
 		Type:       protocol.EventSFTPDisconnected,
@@ -133,6 +205,25 @@ func (s *Service) Disconnect(endpointID, requestID string) error {
 	})
 
 	return nil
+}
+
+func (s *Service) RespondKeyboardInteractive(endpointID, challengeID string, responses []string) error {
+	s.mu.Lock()
+	challenge, ok := s.pendingChallenges[challengeID]
+	s.mu.Unlock()
+	if !ok {
+		return fmt.Errorf("keyboard-interactive challenge %s not found for endpoint %s", challengeID, endpointID)
+	}
+	if challenge.endpointID != endpointID {
+		return fmt.Errorf("keyboard-interactive challenge %s does not belong to endpoint %s", challengeID, endpointID)
+	}
+
+	select {
+	case challenge.responses <- responses:
+		return nil
+	default:
+		return fmt.Errorf("keyboard-interactive challenge %s already has a pending response", challengeID)
+	}
 }
 
 func (s *Service) List(endpointID, requestID string, payload protocol.SFTPListPayload) error {
@@ -453,6 +544,21 @@ func (s *Service) removeEndpoint(endpointID string) (*endpointHandle, bool) {
 		delete(s.endpoints, endpointID)
 	}
 	return handle, ok
+}
+
+func (s *Service) removePendingChallengesForEndpoint(endpointID string) []*pendingChallenge {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	challenges := make([]*pendingChallenge, 0)
+	for challengeID, challenge := range s.pendingChallenges {
+		if challenge.endpointID != endpointID {
+			continue
+		}
+		challenges = append(challenges, challenge)
+		delete(s.pendingChallenges, challengeID)
+	}
+	return challenges
 }
 
 func (s *Service) removeTransfer(jobID string) {

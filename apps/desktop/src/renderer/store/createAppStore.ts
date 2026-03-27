@@ -84,6 +84,7 @@ export interface WorkspaceTab {
   title: string;
   layout: WorkspaceLayoutNode;
   activeSessionId: string;
+  broadcastEnabled: boolean;
 }
 
 export type DynamicTabStripItem =
@@ -101,6 +102,7 @@ export interface SftpPaneState {
   sourceKind: SftpSourceKind;
   endpoint: SftpEndpointSummary | null;
   connectingHostId?: string | null;
+  connectingEndpointId?: string | null;
   hostGroupPath: string | null;
   currentPath: string;
   lastLocalPath: string;
@@ -144,6 +146,7 @@ export interface PendingHostKeyPrompt {
         kind: "sftp";
         paneId: SftpPaneId;
         hostId: string;
+        endpointId: string;
         secrets?: HostSecretInput;
       }
     | {
@@ -162,7 +165,7 @@ export interface PendingCredentialRetry {
   paneId?: SftpPaneId;
 }
 
-export interface PendingInteractiveAuth {
+interface PendingInteractiveAuthBase {
   sessionId: string;
   challengeId: string;
   name?: string | null;
@@ -173,6 +176,23 @@ export interface PendingInteractiveAuth {
   authCode?: string | null;
   autoSubmitted: boolean;
 }
+
+export interface PendingSessionInteractiveAuth
+  extends PendingInteractiveAuthBase {
+  source: "ssh";
+}
+
+export interface PendingSftpInteractiveAuth
+  extends Omit<PendingInteractiveAuthBase, "sessionId"> {
+  source: "sftp";
+  endpointId: string;
+  paneId: SftpPaneId;
+  hostId: string;
+}
+
+export type PendingInteractiveAuth =
+  | PendingSessionInteractiveAuth
+  | PendingSftpInteractiveAuth;
 
 interface PendingConnectionAttempt {
   sessionId: string;
@@ -283,6 +303,7 @@ export interface AppState {
     placement: "before" | "after",
   ) => void;
   focusWorkspaceSession: (workspaceId: string, sessionId: string) => void;
+  toggleWorkspaceBroadcast: (workspaceId: string) => void;
   resizeWorkspaceSplit: (
     workspaceId: string,
     splitId: string,
@@ -337,6 +358,7 @@ export interface AppState {
     paneId: SftpPaneId,
     sourceKind: SftpSourceKind,
   ) => Promise<void>;
+  disconnectSftpPane: (paneId: SftpPaneId) => Promise<void>;
   setSftpPaneFilter: (paneId: SftpPaneId, query: string) => void;
   setSftpHostSearchQuery: (paneId: SftpPaneId, query: string) => void;
   navigateSftpHostGroup: (paneId: SftpPaneId, path: string | null) => void;
@@ -475,6 +497,7 @@ function createEmptyPane(id: SftpPaneId): SftpPaneState {
     sourceKind: id === "left" ? "local" : "host",
     endpoint: null,
     connectingHostId: null,
+    connectingEndpointId: null,
     hostGroupPath: null,
     currentPath: "",
     lastLocalPath: "",
@@ -487,6 +510,59 @@ function createEmptyPane(id: SftpPaneId): SftpPaneState {
     selectedHostId: null,
     hostSearchQuery: "",
     isLoading: false,
+    warningMessages: [],
+  };
+}
+
+function isPendingSessionInteractiveAuth(
+  pending: PendingInteractiveAuth | null,
+): pending is PendingSessionInteractiveAuth {
+  return pending?.source === "ssh";
+}
+
+function isPendingSftpInteractiveAuth(
+  pending: PendingInteractiveAuth | null,
+): pending is PendingSftpInteractiveAuth {
+  return pending?.source === "sftp";
+}
+
+function resolveSftpPaneIdByEndpoint(
+  state: Pick<AppState, "sftp">,
+  endpointId: string,
+): SftpPaneId | null {
+  if (
+    state.sftp.leftPane.endpoint?.id === endpointId ||
+    state.sftp.leftPane.connectingEndpointId === endpointId
+  ) {
+    return "left";
+  }
+  if (
+    state.sftp.rightPane.endpoint?.id === endpointId ||
+    state.sftp.rightPane.connectingEndpointId === endpointId
+  ) {
+    return "right";
+  }
+  return null;
+}
+
+function buildSftpHostPickerPane(pane: SftpPaneState): SftpPaneState {
+  return {
+    ...pane,
+    sourceKind: "host",
+    endpoint: null,
+    connectingHostId: null,
+    connectingEndpointId: null,
+    currentPath: "",
+    history: [],
+    historyIndex: -1,
+    entries: [],
+    selectedPaths: [],
+    selectionAnchorPath: null,
+    filterQuery: "",
+    selectedHostId:
+      pane.endpoint?.hostId ?? pane.connectingHostId ?? pane.selectedHostId,
+    isLoading: false,
+    errorMessage: undefined,
     warningMessages: [],
   };
 }
@@ -1035,7 +1111,8 @@ function replaceSessionReferencesInState(
           }
         : state.pendingCredentialRetry,
     pendingInteractiveAuth:
-      state.pendingInteractiveAuth?.sessionId === previousSessionId
+      isPendingSessionInteractiveAuth(state.pendingInteractiveAuth) &&
+      state.pendingInteractiveAuth.sessionId === previousSessionId
         ? {
             ...state.pendingInteractiveAuth,
             sessionId: nextSessionId,
@@ -1150,7 +1227,8 @@ function removeSessionFromState(
         ? null
         : state.pendingCredentialRetry,
     pendingInteractiveAuth:
-      state.pendingInteractiveAuth?.sessionId === sessionId
+      isPendingSessionInteractiveAuth(state.pendingInteractiveAuth) &&
+      state.pendingInteractiveAuth.sessionId === sessionId
         ? null
         : state.pendingInteractiveAuth,
     pendingConnectionAttempts: state.pendingConnectionAttempts.filter(
@@ -1454,6 +1532,70 @@ function shouldTreatAsWarpgate(
   return /warpgate|authorize|device authorization|device code|verification code/i.test(
     sourceText,
   );
+}
+
+function resolveInteractiveAuthUiState(
+  host: HostRecord | undefined,
+  challenge: KeyboardInteractiveChallenge,
+): {
+  provider: "generic" | "warpgate";
+  approvalUrl: string | null;
+  authCode: string | null;
+  autoResponses: string[];
+  autoSubmitted: boolean;
+} {
+  const isWarpgateChallenge = shouldTreatAsWarpgate(host, challenge);
+  const approvalUrl = isWarpgateChallenge
+    ? parseWarpgateApprovalUrl(
+        challenge.instruction,
+        challenge.name,
+        ...challenge.prompts.map((prompt) => prompt.label),
+      )
+    : null;
+  const authCode = isWarpgateChallenge
+    ? parseWarpgateAuthCode(
+        challenge.instruction,
+        challenge.name,
+        ...challenge.prompts.map((prompt) => prompt.label),
+      )
+    : null;
+  const provider =
+    isWarpgateChallenge && Boolean(approvalUrl || authCode)
+      ? "warpgate"
+      : "generic";
+
+  const autoResponses: string[] = [];
+  let canAutoRespond = challenge.prompts.length > 0;
+  for (const prompt of challenge.prompts) {
+    if (
+      provider === "warpgate" &&
+      authCode &&
+      isWarpgateCodePrompt(prompt.label, challenge.instruction)
+    ) {
+      autoResponses.push(authCode);
+      continue;
+    }
+    if (
+      provider === "warpgate" &&
+      isWarpgateCompletionPrompt(prompt.label, challenge.instruction)
+    ) {
+      autoResponses.push("");
+      continue;
+    }
+    canAutoRespond = false;
+    break;
+  }
+
+  return {
+    provider,
+    approvalUrl,
+    authCode,
+    autoResponses,
+    autoSubmitted:
+      canAutoRespond &&
+      autoResponses.length === challenge.prompts.length &&
+      challenge.prompts.length > 0,
+  };
 }
 
 export function upsertTransferJob(
@@ -2296,6 +2438,7 @@ export function createAppStore(api: DesktopApi) {
           filterQuery: nextFilterQuery,
           isLoading: false,
           connectingHostId: null,
+          connectingEndpointId: null,
           errorMessage: undefined,
           warningMessages: listing.warnings ?? [],
           ...historyPatch,
@@ -2318,6 +2461,7 @@ export function createAppStore(api: DesktopApi) {
           ...getPane(state, paneId),
           isLoading: false,
           connectingHostId: null,
+          connectingEndpointId: null,
           errorMessage:
             error instanceof Error
               ? error.message
@@ -2514,6 +2658,7 @@ export function createAppStore(api: DesktopApi) {
           sourceKind: "host",
           endpoint: null,
           connectingHostId: action.hostId,
+          connectingEndpointId: action.endpointId,
           entries: [],
           isLoading: true,
           errorMessage: undefined,
@@ -2525,6 +2670,7 @@ export function createAppStore(api: DesktopApi) {
       try {
         const endpoint = await api.sftp.connect({
           hostId: action.hostId,
+          endpointId: action.endpointId,
           secrets: action.secrets,
         });
         set((state) => ({
@@ -2533,6 +2679,7 @@ export function createAppStore(api: DesktopApi) {
             sourceKind: "host",
             endpoint,
             connectingHostId: action.hostId,
+            connectingEndpointId: action.endpointId,
             currentPath: endpoint.path,
             history: [endpoint.path],
             historyIndex: 0,
@@ -2570,6 +2717,7 @@ export function createAppStore(api: DesktopApi) {
             sourceKind: "host",
             endpoint: null,
             connectingHostId: null,
+            connectingEndpointId: null,
             entries: [],
             isLoading: false,
             errorMessage: credentialKind ? undefined : message,
@@ -3230,6 +3378,7 @@ export function createAppStore(api: DesktopApi) {
               direction,
             ),
             activeSessionId: sessionId,
+            broadcastEnabled: false,
           };
           const nextTabStrip = state.tabStrip.filter(
             (item) =>
@@ -3475,6 +3624,18 @@ export function createAppStore(api: DesktopApi) {
           activeWorkspaceTab: asWorkspaceTabId(workspaceId),
         }));
       },
+      toggleWorkspaceBroadcast: (workspaceId) => {
+        set((state) => ({
+          workspaces: state.workspaces.map((workspace) =>
+            workspace.id === workspaceId
+              ? {
+                  ...workspace,
+                  broadcastEnabled: !workspace.broadcastEnabled,
+                }
+              : workspace,
+          ),
+        }));
+      },
       resizeWorkspaceSplit: (workspaceId, splitId, ratio) => {
         set((state) => ({
           workspaces: state.workspaces.map((workspace) =>
@@ -3642,11 +3803,19 @@ export function createAppStore(api: DesktopApi) {
         if (!pending || pending.challengeId !== challengeId) {
           return;
         }
-        await api.ssh.respondKeyboardInteractive({
-          sessionId: pending.sessionId,
-          challengeId,
-          responses,
-        });
+        await api.ssh.respondKeyboardInteractive(
+          pending.source === "ssh"
+            ? {
+                sessionId: pending.sessionId,
+                challengeId,
+                responses,
+              }
+            : {
+                endpointId: pending.endpointId,
+                challengeId,
+                responses,
+              },
+        );
       },
       reopenInteractiveAuthUrl: async () => {
         const pending = get().pendingInteractiveAuth;
@@ -3732,12 +3901,15 @@ export function createAppStore(api: DesktopApi) {
           return;
         }
 
+        const endpointId = globalThis.crypto.randomUUID();
+
         const trusted = await ensureTrustedHost(set, {
           hostId: pending.hostId,
           action: {
             kind: "sftp",
             paneId: pending.paneId,
             hostId: pending.hostId,
+            endpointId,
             secrets,
           },
         });
@@ -3751,6 +3923,7 @@ export function createAppStore(api: DesktopApi) {
             kind: "sftp",
             paneId: pending.paneId,
             hostId: pending.hostId,
+            endpointId,
             secrets,
           },
           set,
@@ -3758,10 +3931,126 @@ export function createAppStore(api: DesktopApi) {
       },
       handleCoreEvent: (event) => {
         const sessionId = event.sessionId;
+        const endpointId = event.endpointId;
         const pendingRetryBeforeUpdate = get().pendingCredentialRetry;
         void api.logs.list().then((activityLogs) => {
           set({ activityLogs: sortLogs(activityLogs) });
         });
+
+        if (endpointId) {
+          if (event.type === "keyboardInteractiveChallenge") {
+            const payload = event.payload as Record<string, unknown>;
+            const challenge: KeyboardInteractiveChallenge = {
+              endpointId,
+              challengeId: String(payload.challengeId ?? ""),
+              attempt: Number(payload.attempt ?? 1),
+              name: typeof payload.name === "string" ? payload.name : null,
+              instruction: String(payload.instruction ?? ""),
+              prompts: Array.isArray(payload.prompts)
+                ? payload.prompts.map((prompt) => {
+                    const candidate = prompt as Record<string, unknown>;
+                    return {
+                      label: String(candidate.label ?? ""),
+                      echo: Boolean(candidate.echo),
+                    } satisfies KeyboardInteractivePrompt;
+                  })
+                : [],
+            };
+            const currentState = get();
+            const paneId = resolveSftpPaneIdByEndpoint(currentState, endpointId);
+            if (!paneId) {
+              return;
+            }
+            const pane = getPane(currentState, paneId);
+            const hostId =
+              pane.connectingHostId ?? pane.selectedHostId ?? pane.endpoint?.hostId ?? null;
+            const currentHost = hostId
+              ? currentState.hosts.find((host) => host.id === hostId)
+              : undefined;
+            const interactiveState = resolveInteractiveAuthUiState(
+              currentHost,
+              challenge,
+            );
+
+            if (
+              interactiveState.approvalUrl &&
+              !openedInteractiveBrowserChallenges.has(challenge.challengeId)
+            ) {
+              openedInteractiveBrowserChallenges.add(challenge.challengeId);
+              void api.shell
+                .openExternal(interactiveState.approvalUrl)
+                .catch(() => undefined);
+            }
+
+            set((state) => ({
+              activeWorkspaceTab: "sftp",
+              pendingInteractiveAuth:
+                hostId === null
+                  ? state.pendingInteractiveAuth
+                  : {
+                      source: "sftp",
+                      paneId,
+                      endpointId,
+                      hostId,
+                      challengeId: challenge.challengeId,
+                      name: challenge.name ?? null,
+                      instruction: challenge.instruction,
+                      prompts: challenge.prompts,
+                      provider: interactiveState.provider,
+                      approvalUrl: interactiveState.approvalUrl,
+                      authCode: interactiveState.authCode,
+                      autoSubmitted: interactiveState.autoSubmitted,
+                    },
+            }));
+
+            if (interactiveState.autoSubmitted) {
+              void api.ssh
+                .respondKeyboardInteractive({
+                  endpointId,
+                  challengeId: challenge.challengeId,
+                  responses: interactiveState.autoResponses,
+                })
+                .catch(() => undefined);
+            }
+            return;
+          }
+
+          if (event.type === "keyboardInteractiveResolved") {
+            set((state) => {
+              if (
+                !isPendingSftpInteractiveAuth(state.pendingInteractiveAuth) ||
+                state.pendingInteractiveAuth.endpointId !== endpointId
+              ) {
+                return state;
+              }
+              if (state.pendingInteractiveAuth.provider === "warpgate") {
+                return state;
+              }
+              return {
+                pendingInteractiveAuth: null,
+              };
+            });
+            return;
+          }
+
+          if (
+            event.type === "sftpConnected" ||
+            event.type === "sftpDisconnected" ||
+            event.type === "sftpError"
+          ) {
+            set((state) => ({
+              pendingInteractiveAuth:
+                isPendingSftpInteractiveAuth(state.pendingInteractiveAuth) &&
+                state.pendingInteractiveAuth.endpointId === endpointId
+                  ? null
+                  : state.pendingInteractiveAuth,
+            }));
+            return;
+          }
+
+          return;
+        }
+
         if (!sessionId) {
           return;
         }
@@ -3791,55 +4080,19 @@ export function createAppStore(api: DesktopApi) {
             currentTab?.source === "host" && currentTab.hostId
               ? get().hosts.find((host) => host.id === currentTab.hostId)
               : undefined;
-          const isWarpgateChallenge = shouldTreatAsWarpgate(
+          const interactiveState = resolveInteractiveAuthUiState(
             currentHost,
             challenge,
           );
-          const approvalUrl = isWarpgateChallenge
-            ? parseWarpgateApprovalUrl(
-                challenge.instruction,
-                challenge.name,
-                ...challenge.prompts.map((prompt) => prompt.label),
-              )
-            : null;
-          const authCode = isWarpgateChallenge
-            ? parseWarpgateAuthCode(
-                challenge.instruction,
-                challenge.name,
-                ...challenge.prompts.map((prompt) => prompt.label),
-              )
-            : null;
-          const shouldUseWarpgateUi =
-            isWarpgateChallenge && Boolean(approvalUrl || authCode);
 
           if (
-            approvalUrl &&
+            interactiveState.approvalUrl &&
             !openedInteractiveBrowserChallenges.has(challenge.challengeId)
           ) {
             openedInteractiveBrowserChallenges.add(challenge.challengeId);
-            void api.shell.openExternal(approvalUrl).catch(() => undefined);
-          }
-
-          const autoResponses: string[] = [];
-          let canAutoRespond = challenge.prompts.length > 0;
-          for (const prompt of challenge.prompts) {
-            if (
-              shouldUseWarpgateUi &&
-              authCode &&
-              isWarpgateCodePrompt(prompt.label, challenge.instruction)
-            ) {
-              autoResponses.push(authCode);
-              continue;
-            }
-            if (
-              shouldUseWarpgateUi &&
-              isWarpgateCompletionPrompt(prompt.label, challenge.instruction)
-            ) {
-              autoResponses.push("");
-              continue;
-            }
-            canAutoRespond = false;
-            break;
+            void api.shell
+              .openExternal(interactiveState.approvalUrl)
+              .catch(() => undefined);
           }
 
           set((state) => {
@@ -3848,7 +4101,7 @@ export function createAppStore(api: DesktopApi) {
             );
             const progress = createConnectionProgress(
               "waiting-interactive-auth",
-              shouldUseWarpgateUi
+              interactiveState.provider === "warpgate"
                 ? `${currentHost?.label ?? "세션"} Warpgate 승인을 기다리는 중입니다.`
                 : `${currentHost?.label ?? "세션"} 추가 인증 응답이 필요합니다.`,
               {
@@ -3870,33 +4123,27 @@ export function createAppStore(api: DesktopApi) {
                   )
                 : state.tabs,
               pendingInteractiveAuth: {
+                source: "ssh",
                 sessionId,
                 challengeId: challenge.challengeId,
                 name: challenge.name ?? null,
                 instruction: challenge.instruction,
                 prompts: challenge.prompts,
-                provider: shouldUseWarpgateUi ? "warpgate" : "generic",
-                approvalUrl,
-                authCode,
-                autoSubmitted:
-                  canAutoRespond &&
-                  autoResponses.length === challenge.prompts.length &&
-                  challenge.prompts.length > 0,
+                provider: interactiveState.provider,
+                approvalUrl: interactiveState.approvalUrl,
+                authCode: interactiveState.authCode,
+                autoSubmitted: interactiveState.autoSubmitted,
               },
               ...activateSessionContextInState(state, sessionId),
             };
           });
 
-          if (
-            canAutoRespond &&
-            autoResponses.length === challenge.prompts.length &&
-            challenge.prompts.length > 0
-          ) {
+          if (interactiveState.autoSubmitted) {
             void api.ssh
               .respondKeyboardInteractive({
                 sessionId,
                 challengeId: challenge.challengeId,
-                responses: autoResponses,
+                responses: interactiveState.autoResponses,
               })
               .catch(() => undefined);
           }
@@ -3914,7 +4161,7 @@ export function createAppStore(api: DesktopApi) {
                 : undefined;
 
             if (
-              !state.pendingInteractiveAuth ||
+              !isPendingSessionInteractiveAuth(state.pendingInteractiveAuth) ||
               state.pendingInteractiveAuth.sessionId !== sessionId
             ) {
               return state;
@@ -4005,7 +4252,8 @@ export function createAppStore(api: DesktopApi) {
             tabs,
             pendingInteractiveAuth:
               event.type === "connected" || event.type === "error"
-                ? state.pendingInteractiveAuth?.sessionId === sessionId
+                ? isPendingSessionInteractiveAuth(state.pendingInteractiveAuth) &&
+                  state.pendingInteractiveAuth.sessionId === sessionId
                   ? null
                   : state.pendingInteractiveAuth
                 : state.pendingInteractiveAuth,
@@ -4154,6 +4402,7 @@ export function createAppStore(api: DesktopApi) {
           sourceKind,
           endpoint: null,
           connectingHostId: null,
+          connectingEndpointId: null,
           hostGroupPath: null,
           currentPath:
             sourceKind === "local"
@@ -4175,6 +4424,11 @@ export function createAppStore(api: DesktopApi) {
         };
 
         set((state) => ({
+          pendingInteractiveAuth:
+            isPendingSftpInteractiveAuth(state.pendingInteractiveAuth) &&
+            state.pendingInteractiveAuth.paneId === paneId
+              ? null
+              : state.pendingInteractiveAuth,
           sftp: updatePaneState(state, paneId, nextBasePane),
         }));
 
@@ -4183,6 +4437,23 @@ export function createAppStore(api: DesktopApi) {
             pushToHistory: false,
           });
         }
+      },
+      disconnectSftpPane: async (paneId) => {
+        const pane = getPane(get(), paneId);
+        if (!pane.endpoint && !pane.connectingEndpointId) {
+          return;
+        }
+        if (pane.endpoint) {
+          await api.sftp.disconnect(pane.endpoint.id);
+        }
+        set((state) => ({
+          pendingInteractiveAuth:
+            isPendingSftpInteractiveAuth(state.pendingInteractiveAuth) &&
+            state.pendingInteractiveAuth.paneId === paneId
+              ? null
+              : state.pendingInteractiveAuth,
+          sftp: updatePaneState(state, paneId, buildSftpHostPickerPane(getPane(state, paneId))),
+        }));
       },
       setSftpPaneFilter: (paneId, query) =>
         set((state) => ({
@@ -4205,6 +4476,7 @@ export function createAppStore(api: DesktopApi) {
             hostGroupPath: normalizeGroupPath(path),
             selectedHostId: null,
             connectingHostId: null,
+            connectingEndpointId: null,
           }),
         })),
       selectSftpHost: (paneId, hostId) =>
@@ -4216,9 +4488,10 @@ export function createAppStore(api: DesktopApi) {
         })),
       connectSftpHost: async (paneId, hostId) => {
         const host = get().hosts.find((item) => item.id === hostId);
-        if (!host || !isSshHostRecord(host)) {
+        if (!host || isAwsEc2HostRecord(host)) {
           return;
         }
+        const endpointId = globalThis.crypto.randomUUID();
         set((state) => ({
           activeWorkspaceTab: "sftp",
           sftp: updatePaneState(state, paneId, {
@@ -4226,6 +4499,7 @@ export function createAppStore(api: DesktopApi) {
             sourceKind: "host",
             endpoint: null,
             connectingHostId: hostId,
+            connectingEndpointId: endpointId,
             selectedHostId: hostId,
             isLoading: true,
             errorMessage: undefined,
@@ -4239,6 +4513,7 @@ export function createAppStore(api: DesktopApi) {
               kind: "sftp",
               paneId,
               hostId,
+              endpointId,
             },
           });
           if (!trusted) {
@@ -4246,6 +4521,7 @@ export function createAppStore(api: DesktopApi) {
               sftp: updatePaneState(state, paneId, {
                 ...getPane(state, paneId),
                 connectingHostId: null,
+                connectingEndpointId: null,
                 selectedHostId: hostId,
                 isLoading: false,
                 errorMessage: undefined,
@@ -4256,7 +4532,7 @@ export function createAppStore(api: DesktopApi) {
           await runTrustedAction(
             get,
             null,
-            { kind: "sftp", paneId, hostId },
+            { kind: "sftp", paneId, hostId, endpointId },
             set,
           );
         } catch (error) {
@@ -4266,6 +4542,7 @@ export function createAppStore(api: DesktopApi) {
               sourceKind: "host",
               endpoint: null,
               connectingHostId: null,
+              connectingEndpointId: null,
               selectedHostId: hostId,
               isLoading: false,
               errorMessage:

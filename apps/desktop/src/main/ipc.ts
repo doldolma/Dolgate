@@ -284,6 +284,20 @@ function assertSshHost(
   }
 }
 
+function assertSftpCompatibleHost(
+  host: ReturnType<HostRepository["getById"]>,
+): asserts host is Extract<
+  NonNullable<ReturnType<HostRepository["getById"]>>,
+  { kind: "ssh" | "warpgate-ssh" }
+> {
+  if (!host) {
+    throw new Error("Host not found");
+  }
+  if (!isSshHostRecord(host) && !isWarpgateSshHostRecord(host)) {
+    throw new Error("이 기능은 SSH 계열 host에서만 사용할 수 있습니다.");
+  }
+}
+
 function assertAwsEc2Host(
   host: ReturnType<HostRepository["getById"]>,
 ): asserts host is Extract<
@@ -1500,7 +1514,24 @@ export function registerIpcHandlers(
     ipcChannels.sftp.connect,
     async (_event, input: DesktopSftpConnectInput) => {
       const host = hosts.getById(input.hostId);
-      assertSshHost(host);
+      assertSftpCompatibleHost(host);
+
+      if (isWarpgateSshHostRecord(host)) {
+        const trustedHostKeyBase64 = requireTrustedHostKey(knownHosts, {
+          hostname: host.warpgateSshHost,
+          port: host.warpgateSshPort,
+        });
+        return coreManager.sftpConnect({
+          endpointId: input.endpointId,
+          host: host.warpgateSshHost,
+          port: host.warpgateSshPort,
+          username: `${host.warpgateUsername}:${host.warpgateTargetName}`,
+          authType: "keyboardInteractive",
+          trustedHostKeyBase64,
+          hostId: host.id,
+          title: host.label,
+        });
+      }
 
       const trustedHostKeyBase64 = requireTrustedHostKey(knownHosts, host);
       const secrets = mergeSecrets(
@@ -1509,6 +1540,7 @@ export function registerIpcHandlers(
       );
 
       const endpoint = await coreManager.sftpConnect({
+        endpointId: input.endpointId,
         host: host.hostname,
         port: host.port,
         username: host.username,

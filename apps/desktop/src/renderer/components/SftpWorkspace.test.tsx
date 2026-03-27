@@ -75,6 +75,8 @@ const pane: SftpPaneState = {
   id: 'left',
   sourceKind: 'local',
   endpoint: null,
+  connectingHostId: null,
+  connectingEndpointId: null,
   hostGroupPath: null,
   currentPath: '/Users/tester/projects',
   lastLocalPath: '/Users/tester',
@@ -105,7 +107,8 @@ const pane: SftpPaneState = {
   filterQuery: 'read',
   selectedHostId: null,
   hostSearchQuery: '',
-  isLoading: false
+  isLoading: false,
+  warningMessages: []
 };
 
 function createPaneState(overrides: Partial<SftpPaneState> = {}): SftpPaneState {
@@ -113,6 +116,8 @@ function createPaneState(overrides: Partial<SftpPaneState> = {}): SftpPaneState 
     id: 'left',
     sourceKind: 'local',
     endpoint: null,
+    connectingHostId: null,
+    connectingEndpointId: null,
     hostGroupPath: null,
     currentPath: '/Users/tester/projects',
     lastLocalPath: '/Users/tester/projects',
@@ -144,6 +149,7 @@ function createPaneState(overrides: Partial<SftpPaneState> = {}): SftpPaneState 
     selectedHostId: null,
     hostSearchQuery: '',
     isLoading: false,
+    warningMessages: [],
     ...overrides
   };
 }

@@ -209,6 +209,8 @@ export function HostBrowser({
 
   const allGroupPaths = useMemo(() => collectGroupPaths(groups, hosts), [groups, hosts]);
   const visibleGroups = useMemo(() => buildVisibleGroups(groups, hosts, currentGroupPath), [currentGroupPath, groups, hosts]);
+  const showGroupEmptyState = currentGroupPath === null && visibleGroups.length === 0;
+  const showGroupSection = visibleGroups.length > 0 || showGroupEmptyState;
   const breadcrumbs = useMemo(() => {
     if (!currentGroupPath) {
       return [];
@@ -399,14 +401,15 @@ export function HostBrowser({
         </div>
       ) : null}
 
-      <div className="browser-section">
+      {showGroupSection ? (
+        <div className="browser-section">
         <div className="browser-section__header">
           <div>
             <h2>Groups</h2>
           </div>
         </div>
         <div className="group-grid">
-          {visibleGroups.length === 0 ? (
+          {showGroupEmptyState ? (
             <div className="empty-callout">
               <strong>{currentGroupPath ? '이 위치에는 아직 그룹이 없습니다.' : '아직 만든 그룹이 없습니다.'}</strong>
               <p>New Group을 눌러 현재 위치 아래에 첫 번째 그룹을 만들어보세요.</p>
@@ -471,7 +474,8 @@ export function HostBrowser({
             ))
           )}
         </div>
-      </div>
+        </div>
+      ) : null}
 
       <div className="browser-section">
         <div className="browser-section__header">

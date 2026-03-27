@@ -581,7 +581,8 @@ export interface KeyboardInteractivePrompt {
 }
 
 export interface KeyboardInteractiveChallenge {
-  sessionId: string;
+  sessionId?: string;
+  endpointId?: string;
   challengeId: string;
   attempt: number;
   name?: string | null;

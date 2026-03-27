@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { AppSettings, HostRecord, SessionShareChatMessage, SessionShareSnapshotInput, SessionShareStartInput, TerminalTab } from '@shared';
 import type { Terminal } from 'xterm';
-import type { PendingInteractiveAuth, WorkspaceDropDirection, WorkspaceLayoutNode, WorkspaceTab } from '../store/createAppStore';
+import type { PendingSessionInteractiveAuth, WorkspaceDropDirection, WorkspaceLayoutNode, WorkspaceTab } from '../store/createAppStore';
 import { createTerminalRuntime, type TerminalRuntime } from '../lib/terminal-runtime';
 import { useAppStore } from '../store/appStore';
 import {
@@ -64,7 +64,7 @@ interface TerminalSessionViewProps {
   style?: React.CSSProperties;
   showHeader?: boolean;
   draggingDisabled?: boolean;
-  interactiveAuth: PendingInteractiveAuth | null;
+  interactiveAuth: PendingSessionInteractiveAuth | null;
   onFocus?: () => void;
   onClose?: () => Promise<void>;
   onRetry?: () => Promise<void>;
@@ -73,6 +73,8 @@ interface TerminalSessionViewProps {
   onSetSessionShareInputEnabled?: (sessionId: string, inputEnabled: boolean) => Promise<void>;
   onStopSessionShare?: (sessionId: string) => Promise<void>;
   onOpenSessionShareChatWindow?: (sessionId: string) => Promise<void>;
+  onSendInput?: (sessionId: string, data: string) => void;
+  onSendBinaryInput?: (sessionId: string, data: Uint8Array) => void;
   onStartDrag?: () => void;
   onEndDrag?: () => void;
 }
@@ -248,6 +250,7 @@ interface TerminalWorkspaceProps {
     targetSessionId: string
   ) => boolean;
   onFocusWorkspaceSession: (workspaceId: string, sessionId: string) => void;
+  onToggleWorkspaceBroadcast: (workspaceId: string) => void;
   onResizeWorkspaceSplit: (workspaceId: string, splitId: string, ratio: number) => void;
 }
 
@@ -364,6 +367,18 @@ function collectWorkspacePlacements(
   );
 }
 
+function listWorkspaceSessionIds(node: WorkspaceLayoutNode): string[] {
+  if (node.kind === 'leaf') {
+    return [node.sessionId];
+  }
+
+  return [...listWorkspaceSessionIds(node.first), ...listWorkspaceSessionIds(node.second)];
+}
+
+function isConnectedHostSession(tab: TerminalTab | undefined): boolean {
+  return tab?.source === 'host' && tab.status === 'connected';
+}
+
 function TerminalSessionView({
   sessionId,
   title,
@@ -385,6 +400,8 @@ function TerminalSessionView({
   onSetSessionShareInputEnabled,
   onStopSessionShare,
   onOpenSessionShareChatWindow,
+  onSendInput,
+  onSendBinaryInput,
   onStartDrag,
   onEndDrag
 }: TerminalSessionViewProps) {
@@ -425,6 +442,8 @@ function TerminalSessionView({
   const liveAppearanceRef = useRef(appearance);
   const liveOnFocusRef = useRef(onFocus);
   const liveUpdateSessionShareSnapshotRef = useRef(onUpdateSessionShareSnapshot);
+  const liveOnSendInputRef = useRef(onSendInput);
+  const liveOnSendBinaryInputRef = useRef(onSendBinaryInput);
   const shareSnapshotDirtyRef = useRef(false);
   const pendingShareSnapshotKindRef = useRef<SessionShareSnapshotInput['kind'] | null>(null);
   const shareSnapshotInFlightRef = useRef(false);
@@ -460,6 +479,14 @@ function TerminalSessionView({
   useEffect(() => {
     liveUpdateSessionShareSnapshotRef.current = onUpdateSessionShareSnapshot;
   }, [onUpdateSessionShareSnapshot]);
+
+  useEffect(() => {
+    liveOnSendInputRef.current = onSendInput;
+  }, [onSendInput]);
+
+  useEffect(() => {
+    liveOnSendBinaryInputRef.current = onSendBinaryInput;
+  }, [onSendBinaryInput]);
 
   useEffect(() => {
     setSharePopoverOpen(false);
@@ -677,7 +704,7 @@ function TerminalSessionView({
           if (isPendingConnectionSessionId(currentSessionId) || currentStatus === 'pending' || currentStatus === 'error' || currentStatus === 'disconnecting') {
             return;
           }
-          void window.dolssh.ssh.write(currentSessionId, data);
+          liveOnSendInputRef.current?.(currentSessionId, data);
         },
         onBinary: (data) => {
           const currentSessionId = liveSessionIdRef.current;
@@ -686,7 +713,7 @@ function TerminalSessionView({
             return;
           }
           const bytes = Uint8Array.from(data, (char) => char.charCodeAt(0));
-          void window.dolssh.ssh.writeBinary(currentSessionId, bytes);
+          liveOnSendBinaryInputRef.current?.(currentSessionId, bytes);
         }
       });
       setTerminalInitError(null);
@@ -1371,6 +1398,7 @@ export function TerminalWorkspace({
   onSplitSessionDrop,
   onMoveWorkspaceSession,
   onFocusWorkspaceSession,
+  onToggleWorkspaceBroadcast,
   onResizeWorkspaceSplit
 }: TerminalWorkspaceProps) {
   const workspaceRef = useRef<HTMLDivElement | null>(null);
@@ -1417,6 +1445,70 @@ export function TerminalWorkspace({
     settings.terminalAltIsMeta,
     tabs
   ]);
+
+  const tabsBySessionId = useMemo(() => {
+    return new Map(tabs.map((tab) => [tab.sessionId, tab]));
+  }, [tabs]);
+
+  const activeWorkspaceSessionIds = useMemo(() => {
+    if (!activeWorkspace) {
+      return [];
+    }
+    return listWorkspaceSessionIds(activeWorkspace.layout);
+  }, [activeWorkspace]);
+
+  const connectedWorkspaceHostSessionIds = useMemo(() => {
+    return activeWorkspaceSessionIds.filter((sessionId) => isConnectedHostSession(tabsBySessionId.get(sessionId)));
+  }, [activeWorkspaceSessionIds, tabsBySessionId]);
+
+  const shouldShowBroadcastBar = Boolean(activeWorkspace && activeWorkspaceSessionIds.length >= 2);
+  const isWorkspaceBroadcastEnabled = Boolean(activeWorkspace?.broadcastEnabled);
+  const isBroadcastToggleDisabled = !isWorkspaceBroadcastEnabled && connectedWorkspaceHostSessionIds.length < 2;
+  const broadcastDescription = isWorkspaceBroadcastEnabled
+    ? '브로드캐스트가 켜져 있습니다. 현재 활성 원격 pane 입력이 다른 원격 pane에도 전송됩니다.'
+    : isBroadcastToggleDisabled
+      ? '연결된 원격 pane 2개 이상일 때 사용할 수 있습니다.'
+      : '현재 활성 원격 pane의 입력을 같은 workspace의 다른 원격 pane에도 보냅니다.';
+
+  const sendSessionInput = (sourceSessionId: string, data: string) => {
+    void Promise.resolve(window.dolssh.ssh.write(sourceSessionId, data)).catch(() => undefined);
+
+    if (!activeWorkspace || !activeWorkspace.broadcastEnabled || activeWorkspace.activeSessionId !== sourceSessionId) {
+      return;
+    }
+
+    const sourceTab = tabsBySessionId.get(sourceSessionId);
+    if (!isConnectedHostSession(sourceTab) || connectedWorkspaceHostSessionIds.length < 2) {
+      return;
+    }
+
+    for (const targetSessionId of connectedWorkspaceHostSessionIds) {
+      if (targetSessionId === sourceSessionId) {
+        continue;
+      }
+      void Promise.resolve(window.dolssh.ssh.write(targetSessionId, data)).catch(() => undefined);
+    }
+  };
+
+  const sendSessionBinaryInput = (sourceSessionId: string, data: Uint8Array) => {
+    void Promise.resolve(window.dolssh.ssh.writeBinary(sourceSessionId, data.slice())).catch(() => undefined);
+
+    if (!activeWorkspace || !activeWorkspace.broadcastEnabled || activeWorkspace.activeSessionId !== sourceSessionId) {
+      return;
+    }
+
+    const sourceTab = tabsBySessionId.get(sourceSessionId);
+    if (!isConnectedHostSession(sourceTab) || connectedWorkspaceHostSessionIds.length < 2) {
+      return;
+    }
+
+    for (const targetSessionId of connectedWorkspaceHostSessionIds) {
+      if (targetSessionId === sourceSessionId) {
+        continue;
+      }
+      void Promise.resolve(window.dolssh.ssh.writeBinary(targetSessionId, data.slice())).catch(() => undefined);
+    }
+  };
 
   useEffect(() => {
     if (draggedSession?.source !== 'standalone-tab' || !canDropDraggedSession) {
@@ -1545,6 +1637,26 @@ export function TerminalWorkspace({
           : undefined
       }
     >
+      {shouldShowBroadcastBar && activeWorkspace ? (
+        <div className="terminal-workspace__broadcast-bar">
+          <div className="terminal-workspace__broadcast-copy">
+            <strong>입력 브로드캐스트</strong>
+            <span>{broadcastDescription}</span>
+          </div>
+          <button
+            type="button"
+            className={`secondary-button terminal-workspace__broadcast-button ${isWorkspaceBroadcastEnabled ? 'active' : ''}`}
+            aria-pressed={isWorkspaceBroadcastEnabled}
+            disabled={isBroadcastToggleDisabled}
+            onClick={() => {
+              onToggleWorkspaceBroadcast(activeWorkspace.id);
+            }}
+          >
+            {isWorkspaceBroadcastEnabled ? '브로드캐스트 끄기' : '브로드캐스트 켜기'}
+          </button>
+        </div>
+      ) : null}
+
       {tabs.map((tab) => {
         const placement = placementBySessionId.get(tab.sessionId);
         const visible = visibleSessionIds.has(tab.sessionId);
@@ -1620,12 +1732,19 @@ export function TerminalWorkspace({
               terminalWebglEnabled={settings.terminalWebglEnabled}
               style={activeWorkspace ? undefined : rectStyle}
               showHeader={Boolean(activeWorkspace && placement)}
-              interactiveAuth={pendingInteractiveAuth?.sessionId === tab.sessionId ? pendingInteractiveAuth : null}
+              interactiveAuth={
+                pendingInteractiveAuth?.source === 'ssh' &&
+                pendingInteractiveAuth.sessionId === tab.sessionId
+                  ? pendingInteractiveAuth
+                  : null
+              }
               onStartSessionShare={onStartSessionShare}
               onUpdateSessionShareSnapshot={onUpdateSessionShareSnapshot}
               onSetSessionShareInputEnabled={onSetSessionShareInputEnabled}
               onStopSessionShare={onStopSessionShare}
               onOpenSessionShareChatWindow={onOpenSessionShareChatWindow}
+              onSendInput={sendSessionInput}
+              onSendBinaryInput={sendSessionBinaryInput}
               onFocus={
                 activeWorkspace
                   ? () => {

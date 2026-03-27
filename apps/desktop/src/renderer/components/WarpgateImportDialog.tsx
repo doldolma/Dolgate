@@ -115,7 +115,12 @@ export function WarpgateImportDialog({ open, currentGroupPath, onClose, onImport
               <span>Warpgate Username</span>
               <input
                 value={fallbackUsername}
-                onChange={(event) => setFallbackUsername(event.target.value)}
+                onChange={(event) => {
+                  setFallbackUsername(event.target.value);
+                  if (error === 'Warpgate 사용자명을 입력해 주세요.') {
+                    setError(null);
+                  }
+                }}
                 placeholder="example.user"
               />
             </label>
@@ -185,7 +190,7 @@ export function WarpgateImportDialog({ open, currentGroupPath, onClose, onImport
                       <button
                         type="button"
                         className="primary-button"
-                        disabled={!connectionInfo || !resolvedUsername || savingTargetId === target.id}
+                        disabled={!connectionInfo || savingTargetId === target.id}
                         onClick={async () => {
                           if (!connectionInfo || !resolvedUsername) {
                             setError('Warpgate 사용자명을 입력해 주세요.');

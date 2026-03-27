@@ -495,14 +495,14 @@ function createMockApi(): DesktopApi {
       discardSnapshot: vi.fn().mockResolvedValue(undefined),
     },
     sftp: {
-      connect: vi.fn().mockResolvedValue({
-        id: "endpoint-1",
+      connect: vi.fn().mockImplementation(async (input) => ({
+        id: input.endpointId,
         kind: "remote",
-        hostId: "host-1",
+        hostId: input.hostId,
         title: "Prod",
         path: "/home/ubuntu",
         connectedAt: "2025-01-01T00:00:00.000Z",
-      }),
+      })),
       disconnect: vi.fn().mockResolvedValue(undefined),
       list: vi.fn().mockResolvedValue({
         path: "/home/ubuntu",
@@ -1209,8 +1209,32 @@ describe("createAppStore", () => {
     await store.getState().connectSftpHost("right", "host-1");
 
     expect(store.getState().activeWorkspaceTab).toBe("sftp");
-    expect(store.getState().sftp.rightPane.endpoint?.id).toBe("endpoint-1");
+    const connectInput = vi.mocked(api.sftp.connect).mock.calls[0]?.[0];
+    expect(store.getState().sftp.rightPane.endpoint?.id).toBe(
+      connectInput?.endpointId,
+    );
     expect(store.getState().sftp.rightPane.currentPath).toBe("/home/ubuntu");
+  });
+
+  it("disconnects a connected SFTP pane back to the host picker", async () => {
+    const api = createMockApi();
+    const store = createAppStore(api);
+
+    await store.getState().bootstrap();
+    store.getState().activateSftp();
+    await store.getState().connectSftpHost("right", "host-1");
+
+    const endpointId = store.getState().sftp.rightPane.endpoint?.id;
+    expect(endpointId).toBeTruthy();
+
+    await store.getState().disconnectSftpPane("right");
+
+    expect(api.sftp.disconnect).toHaveBeenCalledWith(endpointId);
+    expect(store.getState().sftp.rightPane.sourceKind).toBe("host");
+    expect(store.getState().sftp.rightPane.endpoint).toBeNull();
+    expect(store.getState().sftp.rightPane.currentPath).toBe("");
+    expect(store.getState().sftp.rightPane.history).toEqual([]);
+    expect(store.getState().sftp.rightPane.selectedHostId).toBe("host-1");
   });
 
   it("keeps the host picker in a connecting state until the first remote listing finishes", async () => {
@@ -1225,8 +1249,14 @@ describe("createAppStore", () => {
     const connectPromise = store.getState().connectSftpHost("right", "host-1");
     await flushMicrotasks();
 
-    expect(store.getState().sftp.rightPane.endpoint?.id).toBe("endpoint-1");
+    const connectInput = vi.mocked(api.sftp.connect).mock.calls[0]?.[0];
+    expect(store.getState().sftp.rightPane.endpoint?.id).toBe(
+      connectInput?.endpointId,
+    );
     expect(store.getState().sftp.rightPane.connectingHostId).toBe("host-1");
+    expect(store.getState().sftp.rightPane.connectingEndpointId).toBe(
+      connectInput?.endpointId,
+    );
     expect(store.getState().sftp.rightPane.isLoading).toBe(true);
 
     list.resolve({
@@ -1258,6 +1288,134 @@ describe("createAppStore", () => {
       "Timed out waiting for SSH core response: probeHostKey",
     );
     expect(api.sftp.connect).not.toHaveBeenCalled();
+  });
+
+  it("uses a caller-assigned endpoint id when connecting a Warpgate SFTP host", async () => {
+    const api = createMockApi();
+    api.hosts.list = vi.fn().mockResolvedValue([
+      {
+        id: "warpgate-1",
+        kind: "warpgate-ssh",
+        label: "Warpgate Prod",
+        warpgateBaseUrl: "https://warpgate.example.com",
+        warpgateSshHost: "warpgate.example.com",
+        warpgateSshPort: 2222,
+        warpgateTargetId: "target-1",
+        warpgateTargetName: "prod-db",
+        warpgateUsername: "example.user",
+        groupName: "Servers",
+        tags: ["prod"],
+        terminalThemeId: null,
+        createdAt: "2025-01-01T00:00:00.000Z",
+        updatedAt: "2025-01-01T00:00:00.000Z",
+      },
+    ]);
+    api.knownHosts.probeHost = vi.fn().mockResolvedValue({
+      hostId: "warpgate-1",
+      hostLabel: "Warpgate Prod",
+      host: "warpgate.example.com",
+      port: 2222,
+      algorithm: "ssh-ed25519",
+      publicKeyBase64: "AAAATEST",
+      fingerprintSha256: "SHA256:test",
+      status: "trusted",
+      existing: null,
+    });
+
+    const store = createAppStore(api);
+    await store.getState().bootstrap();
+    store.getState().activateSftp();
+
+    await store.getState().connectSftpHost("right", "warpgate-1");
+
+    const connectInput = vi.mocked(api.sftp.connect).mock.calls[0]?.[0];
+    expect(connectInput?.hostId).toBe("warpgate-1");
+    expect(connectInput?.endpointId).toBeTruthy();
+    expect(store.getState().sftp.rightPane.endpoint?.id).toBe(
+      connectInput?.endpointId,
+    );
+  });
+
+  it("tracks endpoint-scoped interactive auth challenges for SFTP panes", async () => {
+    const api = createMockApi();
+    api.hosts.list = vi.fn().mockResolvedValue([
+      {
+        id: "warpgate-1",
+        kind: "warpgate-ssh",
+        label: "Warpgate Prod",
+        warpgateBaseUrl: "https://warpgate.example.com",
+        warpgateSshHost: "warpgate.example.com",
+        warpgateSshPort: 2222,
+        warpgateTargetId: "target-1",
+        warpgateTargetName: "prod-db",
+        warpgateUsername: "example.user",
+        groupName: "Servers",
+        tags: ["prod"],
+        terminalThemeId: null,
+        createdAt: "2025-01-01T00:00:00.000Z",
+        updatedAt: "2025-01-01T00:00:00.000Z",
+      },
+    ]);
+    api.knownHosts.probeHost = vi.fn().mockResolvedValue({
+      hostId: "warpgate-1",
+      hostLabel: "Warpgate Prod",
+      host: "warpgate.example.com",
+      port: 2222,
+      algorithm: "ssh-ed25519",
+      publicKeyBase64: "AAAATEST",
+      fingerprintSha256: "SHA256:test",
+      status: "trusted",
+      existing: null,
+    });
+    const store = createAppStore(api);
+
+    await store.getState().bootstrap();
+    store.getState().activateSftp();
+    await store.getState().connectSftpHost("right", "warpgate-1");
+
+    const endpointId = vi.mocked(api.sftp.connect).mock.calls[0]?.[0]?.endpointId;
+    expect(endpointId).toBeTruthy();
+
+    store.getState().handleCoreEvent({
+      type: "keyboardInteractiveChallenge",
+      endpointId: endpointId!,
+      payload: {
+        challengeId: "challenge-1",
+        attempt: 1,
+        name: "warpgate",
+        instruction: "Open https://warpgate.example.com/authorize and enter code ABCD-1234",
+        prompts: [
+          { label: "Verification code", echo: true },
+          { label: "Press Enter to continue", echo: true },
+        ],
+      },
+    });
+
+    expect(store.getState().pendingInteractiveAuth).toMatchObject({
+      source: "sftp",
+      paneId: "right",
+      endpointId,
+      challengeId: "challenge-1",
+      provider: "warpgate",
+    });
+    expect(api.shell.openExternal).toHaveBeenCalledWith(
+      "https://warpgate.example.com/authorize",
+    );
+    expect(api.ssh.respondKeyboardInteractive).toHaveBeenCalledWith({
+      endpointId,
+      challengeId: "challenge-1",
+      responses: ["ABCD-1234", ""],
+    });
+
+    store.getState().handleCoreEvent({
+      type: "sftpError",
+      endpointId: endpointId!,
+      payload: {
+        message: "approval expired",
+      },
+    });
+
+    expect(store.getState().pendingInteractiveAuth).toBeNull();
   });
 
   it("treats repeated markSessionOutput calls as a no-op after the first output arrives", async () => {
@@ -1301,6 +1459,37 @@ describe("createAppStore", () => {
     expect(store.getState().tabStrip).toEqual([
       { kind: "workspace", workspaceId: store.getState().workspaces[0]?.id },
     ]);
+  });
+
+  it("starts workspace broadcast disabled and keeps it through focus, move, and resize changes", async () => {
+    const store = createAppStore(createMockApi());
+
+    await store.getState().bootstrap();
+    await store.getState().connectHost("host-1", 120, 32);
+    await store.getState().connectHost("host-1", 120, 32);
+
+    const created = store.getState().splitSessionIntoWorkspace("session-1", "right");
+    expect(created).toBe(true);
+
+    const workspaceId = store.getState().workspaces[0]?.id;
+    expect(workspaceId).toBeTruthy();
+    expect(store.getState().workspaces[0]?.broadcastEnabled).toBe(false);
+
+    store.getState().toggleWorkspaceBroadcast(workspaceId!);
+    expect(store.getState().workspaces[0]?.broadcastEnabled).toBe(true);
+
+    const splitId =
+      store.getState().workspaces[0]?.layout.kind === "split"
+        ? store.getState().workspaces[0]?.layout.id
+        : null;
+
+    store.getState().focusWorkspaceSession(workspaceId!, "session-2");
+    store.getState().moveWorkspaceSession(workspaceId!, "session-1", "left", "session-2");
+    expect(splitId).toBeTruthy();
+    store.getState().resizeWorkspaceSplit(workspaceId!, splitId!, 0.6);
+
+    expect(store.getState().workspaces[0]?.activeSessionId).toBe("session-1");
+    expect(store.getState().workspaces[0]?.broadcastEnabled).toBe(true);
   });
 
   it("moves a workspace pane around another pane in all supported directions", async () => {
@@ -1435,6 +1624,25 @@ describe("createAppStore", () => {
       { kind: "session", sessionId: "session-1" },
     ]);
     expect(store.getState().activeWorkspaceTab).toBe("session:session-1");
+  });
+
+  it("removes workspace broadcast state when a workspace collapses back to standalone tabs", async () => {
+    const store = createAppStore(createMockApi());
+
+    await store.getState().bootstrap();
+    await store.getState().connectHost("host-1", 120, 32);
+    await store.getState().connectHost("host-1", 120, 32);
+
+    store.getState().splitSessionIntoWorkspace("session-1", "right");
+    const workspaceId = store.getState().workspaces[0]?.id;
+    expect(workspaceId).toBeTruthy();
+
+    store.getState().toggleWorkspaceBroadcast(workspaceId!);
+    expect(store.getState().workspaces[0]?.broadcastEnabled).toBe(true);
+
+    store.getState().detachSessionFromWorkspace(workspaceId!, "session-1");
+
+    expect(store.getState().workspaces).toHaveLength(0);
   });
 
   it("queues owner session-share chat notifications for active shares and clears them when the share stops", async () => {

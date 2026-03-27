@@ -1,13 +1,17 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { DEFAULT_SFTP_BROWSER_COLUMN_WIDTHS } from "@shared";
 import type {
   AppSettings,
   FileEntry,
   GroupRecord,
-  SshHostRecord,
+  HostRecord,
 } from "@shared";
-import type { SftpPaneState, SftpState } from "../store/createAppStore";
+import type {
+  PendingSftpInteractiveAuth,
+  SftpPaneState,
+  SftpState,
+} from "../store/createAppStore";
 import { SftpWorkspace } from "./SftpWorkspace";
 
 const baseSettings: AppSettings = {
@@ -51,7 +55,7 @@ const hostGroups: GroupRecord[] = [
   },
 ];
 
-const sshHosts: SshHostRecord[] = [
+const connectableHosts: HostRecord[] = [
   {
     id: "ssh-1",
     kind: "ssh",
@@ -84,6 +88,22 @@ const sshHosts: SshHostRecord[] = [
     createdAt: "2026-03-26T00:00:00.000Z",
     updatedAt: "2026-03-26T00:00:00.000Z",
   },
+  {
+    id: "warpgate-1",
+    kind: "warpgate-ssh",
+    label: "Warpgate Prod",
+    warpgateBaseUrl: "https://warpgate.example.com",
+    warpgateSshHost: "warpgate.example.com",
+    warpgateSshPort: 2222,
+    warpgateTargetId: "target-1",
+    warpgateTargetName: "prod-db",
+    warpgateUsername: "example.user",
+    groupName: "Production",
+    tags: ["prod"],
+    terminalThemeId: null,
+    createdAt: "2026-03-26T00:00:00.000Z",
+    updatedAt: "2026-03-26T00:00:00.000Z",
+  },
 ];
 
 function createPane(id: "left" | "right", entry: FileEntry): SftpPaneState {
@@ -92,6 +112,8 @@ function createPane(id: "left" | "right", entry: FileEntry): SftpPaneState {
     id,
     sourceKind: "local",
     endpoint: null,
+    connectingHostId: null,
+    connectingEndpointId: null,
     hostGroupPath: null,
     currentPath,
     lastLocalPath: currentPath,
@@ -116,6 +138,7 @@ function createHostPickerPane(
     sourceKind: "host",
     endpoint: null,
     connectingHostId: null,
+    connectingEndpointId: null,
     hostGroupPath: null,
     currentPath: "",
     lastLocalPath: "",
@@ -147,6 +170,7 @@ function renderWorkspace(
   overrides: Partial<Parameters<typeof SftpWorkspace>[0]> = {},
 ) {
   const onUpdateSettings = vi.fn().mockResolvedValue(undefined);
+  const onDisconnectPane = vi.fn().mockResolvedValue(undefined);
   const onSelectEntry = vi.fn();
   const onDeleteSelection = vi.fn().mockResolvedValue(undefined);
   const result = render(
@@ -155,7 +179,9 @@ function renderWorkspace(
       groups={[]}
       sftp={createSftpState()}
       settings={baseSettings}
+      interactiveAuth={null}
       onActivatePaneSource={vi.fn().mockResolvedValue(undefined)}
+      onDisconnectPane={onDisconnectPane}
       onPaneFilterChange={vi.fn()}
       onHostSearchChange={vi.fn()}
       onNavigateHostGroup={vi.fn()}
@@ -181,6 +207,9 @@ function renderWorkspace(
       onCancelTransfer={vi.fn().mockResolvedValue(undefined)}
       onRetryTransfer={vi.fn().mockResolvedValue(undefined)}
       onDismissTransfer={vi.fn()}
+      onRespondInteractiveAuth={vi.fn().mockResolvedValue(undefined)}
+      onReopenInteractiveAuthUrl={vi.fn().mockResolvedValue(undefined)}
+      onClearInteractiveAuth={vi.fn()}
       onUpdateSettings={onUpdateSettings}
       {...overrides}
     />,
@@ -188,10 +217,19 @@ function renderWorkspace(
 
   return {
     ...result,
+    onDisconnectPane,
     onUpdateSettings,
     onSelectEntry,
     onDeleteSelection,
   };
+}
+
+function openEntryContextMenu(entryName: string) {
+  fireEvent.contextMenu(screen.getByText(entryName), {
+    clientX: 120,
+    clientY: 160,
+  });
+  return screen.getByRole("menu");
 }
 
 function queryColumnWidths(
@@ -281,7 +319,7 @@ describe("SftpWorkspace column resizing", () => {
     sftp.rightPane = createHostPickerPane();
 
     renderWorkspace({
-      hosts: sshHosts,
+      hosts: connectableHosts,
       groups: hostGroups,
       sftp,
     });
@@ -294,24 +332,68 @@ describe("SftpWorkspace column resizing", () => {
     expect(results.contains(screen.getByLabelText("Search hosts"))).toBe(false);
   });
 
-  it("shows a connecting overlay and disables host picker controls while connecting", () => {
+  it("keeps rename, permissions, and delete actions out of the top toolbar", () => {
+    renderWorkspace();
+
+    expect(screen.queryByRole("button", { name: "이름 변경" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "권한" })).toBeNull();
+    expect(screen.queryByLabelText("Delete selected items")).toBeNull();
+    expect(screen.getAllByRole("button", { name: "새 폴더" })).toHaveLength(2);
+    expect(screen.getAllByRole("button", { name: "새로고침" })).toHaveLength(2);
+  });
+
+  it("shows Warpgate hosts in the SFTP host picker", () => {
+    const sftp = createSftpState();
+    sftp.rightPane = createHostPickerPane();
+
+    renderWorkspace({
+      hosts: connectableHosts,
+      groups: hostGroups,
+      sftp,
+    });
+
+    expect(screen.getByText("Warpgate Prod")).toBeTruthy();
+    expect(screen.getByText(/example\.user/)).toBeTruthy();
+  });
+
+  it("shows a disconnect button for connected host panes and returns control through the callback", async () => {
     const sftp = createSftpState();
     sftp.rightPane = createHostPickerPane({
+      sourceKind: "host",
       endpoint: {
         id: "endpoint-1",
         kind: "remote",
         hostId: "ssh-1",
-        title: "Prod SSH",
+        title: "synology",
         path: "/home/ubuntu",
         connectedAt: "2026-03-26T10:00:00.000Z",
       },
+      currentPath: "/home/ubuntu",
+      history: ["/home/ubuntu"],
+      historyIndex: 0,
+      entries: [createEntry("notes.txt", "/home/ubuntu")],
+      selectedHostId: "ssh-1",
+    });
+
+    const { onDisconnectPane } = renderWorkspace({ sftp });
+
+    expect(screen.getByText("synology")).toBeTruthy();
+    fireEvent.click(screen.getByLabelText("연결 종료"));
+
+    await waitFor(() => expect(onDisconnectPane).toHaveBeenCalledWith("right"));
+  });
+
+  it("shows a connecting overlay and disables host picker controls while connecting", () => {
+    const sftp = createSftpState();
+    sftp.rightPane = createHostPickerPane({
       connectingHostId: "ssh-1",
+      connectingEndpointId: "endpoint-1",
       selectedHostId: "ssh-1",
       isLoading: true,
     });
 
     const { container } = renderWorkspace({
-      hosts: sshHosts,
+      hosts: connectableHosts,
       groups: hostGroups,
       sftp,
     });
@@ -330,6 +412,54 @@ describe("SftpWorkspace column resizing", () => {
     ).toBeTruthy();
   });
 
+  it("renders endpoint-scoped Warpgate approval UI for SFTP panes", async () => {
+    const sftp = createSftpState();
+    sftp.rightPane = createHostPickerPane({
+      connectingHostId: "warpgate-1",
+      connectingEndpointId: "endpoint-warp",
+      selectedHostId: "warpgate-1",
+      isLoading: true,
+    });
+    const onReopenInteractiveAuthUrl = vi.fn().mockResolvedValue(undefined);
+    const onClearInteractiveAuth = vi.fn();
+
+    renderWorkspace({
+      hosts: connectableHosts,
+      groups: hostGroups,
+      sftp,
+      interactiveAuth: {
+        source: "sftp",
+        paneId: "right",
+        endpointId: "endpoint-warp",
+        hostId: "warpgate-1",
+        challengeId: "challenge-1",
+        name: "warpgate",
+        instruction:
+          "Open https://warpgate.example.com/authorize and approve this request.",
+        prompts: [],
+        provider: "warpgate",
+        approvalUrl: "https://warpgate.example.com/authorize",
+        authCode: "ABCD-1234",
+        autoSubmitted: true,
+      } satisfies PendingSftpInteractiveAuth,
+      onReopenInteractiveAuthUrl,
+      onClearInteractiveAuth,
+    });
+
+    expect(
+      screen.getByLabelText("SFTP interactive authentication required"),
+    ).toBeTruthy();
+    expect(screen.getByText("Warpgate 승인을 기다리는 중입니다.")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "브라우저 다시 열기" }));
+    await waitFor(() =>
+      expect(onReopenInteractiveAuthUrl).toHaveBeenCalledTimes(1),
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "닫기" }));
+    expect(onClearInteractiveAuth).toHaveBeenCalledTimes(1);
+  });
+
   it("shows host picker errors when connection setup fails before browsing", () => {
     const sftp = createSftpState();
     sftp.rightPane = createHostPickerPane({
@@ -337,7 +467,7 @@ describe("SftpWorkspace column resizing", () => {
     });
 
     renderWorkspace({
-      hosts: sshHosts,
+      hosts: connectableHosts,
       groups: hostGroups,
       sftp,
     });
@@ -359,7 +489,8 @@ describe("SftpWorkspace column resizing", () => {
       onDeleteSelection,
     });
 
-    fireEvent.click(screen.getByLabelText("Delete selected items"));
+    const contextMenu = openEntryContextMenu("left-alpha.txt");
+    fireEvent.click(within(contextMenu).getByRole("button", { name: "삭제" }));
 
     expect(confirmSpy).not.toHaveBeenCalled();
     expect(screen.getByLabelText("SFTP delete confirmation")).toBeTruthy();
@@ -383,7 +514,8 @@ describe("SftpWorkspace column resizing", () => {
       onDeleteSelection,
     });
 
-    fireEvent.click(screen.getByLabelText("Delete selected items"));
+    const contextMenu = openEntryContextMenu("left-alpha.txt");
+    fireEvent.click(within(contextMenu).getByRole("button", { name: "삭제" }));
     fireEvent.click(
       container.querySelector(".sftp-modal-backdrop") as HTMLElement,
     );
@@ -416,7 +548,8 @@ describe("SftpWorkspace column resizing", () => {
       onDeleteSelection,
     });
 
-    fireEvent.click(screen.getByLabelText("Delete selected items"));
+    const contextMenu = openEntryContextMenu("logs");
+    fireEvent.click(within(contextMenu).getByRole("button", { name: "삭제" }));
 
     expect(
       screen.getByText("폴더를 삭제하면 하위 항목도 함께 삭제됩니다."),

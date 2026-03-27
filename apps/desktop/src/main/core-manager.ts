@@ -929,10 +929,14 @@ export class CoreManager {
   }
 
   async sftpConnect(
-    payload: ResolvedSftpConnectPayload & { title: string; hostId: string },
+    payload: ResolvedSftpConnectPayload & {
+      endpointId: string;
+      title: string;
+      hostId: string;
+    },
   ): Promise<SftpEndpointSummary> {
     await this.start();
-    const endpointId = randomUUID();
+    const { endpointId, ...connectPayload } = payload;
     try {
       const requestId = randomUUID();
       const response = await this.requestResponse<{ path: string }>(
@@ -940,7 +944,7 @@ export class CoreManager {
           id: requestId,
           type: "sftpConnect",
           endpointId,
-          payload,
+          payload: connectPayload,
         },
         ["sftpConnected"],
       );
@@ -1257,11 +1261,20 @@ export class CoreManager {
   async respondKeyboardInteractive(
     input: KeyboardInteractiveRespondInput,
   ): Promise<void> {
+    const hasSessionId = typeof input.sessionId === "string" && input.sessionId.length > 0;
+    const hasEndpointId =
+      typeof input.endpointId === "string" && input.endpointId.length > 0;
+    if (hasSessionId === hasEndpointId) {
+      throw new Error(
+        "keyboard-interactive response requires exactly one sessionId or endpointId",
+      );
+    }
     await this.start();
     this.sendControl({
       id: randomUUID(),
       type: "keyboardInteractiveRespond",
-      sessionId: input.sessionId,
+      sessionId: hasSessionId ? input.sessionId : undefined,
+      endpointId: hasEndpointId ? input.endpointId : undefined,
       payload: {
         challengeId: input.challengeId,
         responses: input.responses,
@@ -1337,6 +1350,11 @@ export class CoreManager {
           metadata: { ruleId },
         });
       }
+      return;
+    }
+
+    if (event.endpointId) {
+      this.broadcastTerminalEvent(event);
       return;
     }
 

@@ -73,14 +73,28 @@ const hosts: HostRecord[] = [
   }
 ];
 
-function renderBrowser(desktopPlatform: 'darwin' | 'win32' | 'linux' | 'unknown' = 'win32') {
+interface RenderBrowserOptions {
+  desktopPlatform?: 'darwin' | 'win32' | 'linux' | 'unknown';
+  groups?: GroupRecord[];
+  hosts?: HostRecord[];
+  currentGroupPath?: string | null;
+  searchQuery?: string;
+}
+
+function renderBrowser({
+  desktopPlatform = 'win32',
+  groups: groupsOverride = groups,
+  hosts: hostsOverride = hosts,
+  currentGroupPath = null,
+  searchQuery = ''
+}: RenderBrowserOptions = {}) {
   return render(
     <HostBrowser
       desktopPlatform={desktopPlatform}
-      hosts={hosts}
-      groups={groups}
-      currentGroupPath={null}
-      searchQuery=""
+      hosts={hostsOverride}
+      groups={groupsOverride}
+      currentGroupPath={currentGroupPath}
+      searchQuery={searchQuery}
       selectedHostId={null}
       onSearchChange={vi.fn()}
       onOpenLocalTerminal={vi.fn()}
@@ -191,14 +205,14 @@ describe('HostBrowser helpers', () => {
 
 describe('HostBrowser dialogs', () => {
   it('shows the Xshell import menu item only on Windows', () => {
-    const firstRender = renderBrowser('darwin');
+    const firstRender = renderBrowser({ desktopPlatform: 'darwin' });
 
     fireEvent.click(screen.getByRole('button', { name: 'Open import menu' }));
     expect(screen.queryByRole('menuitem', { name: 'Import from Xshell' })).not.toBeInTheDocument();
 
     firstRender.unmount();
 
-    renderBrowser('win32');
+    renderBrowser({ desktopPlatform: 'win32' });
 
     fireEvent.click(screen.getByRole('button', { name: 'Open import menu' }));
     expect(screen.getByRole('menuitem', { name: 'Import from Xshell' })).toBeInTheDocument();
@@ -214,5 +228,23 @@ describe('HostBrowser dialogs', () => {
     fireEvent.click(container.querySelector('.home-modal-backdrop') as HTMLElement);
 
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+
+  it('shows the group empty state only at the root level', () => {
+    const { container } = renderBrowser({ groups: [], hosts: [] });
+
+    expect(screen.getByRole('heading', { name: 'Groups' })).toBeInTheDocument();
+    expect(container.querySelector('.group-grid .empty-callout')).toBeInTheDocument();
+  });
+
+  it('hides the groups section when a nested group has no child groups', () => {
+    const { container } = renderBrowser({
+      groups: [],
+      hosts: [],
+      currentGroupPath: 'Servers'
+    });
+
+    expect(screen.queryByRole('heading', { name: 'Groups' })).not.toBeInTheDocument();
+    expect(container.querySelector('.group-grid')).toBeNull();
   });
 });

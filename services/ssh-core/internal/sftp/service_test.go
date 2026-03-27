@@ -209,6 +209,54 @@ func TestServiceTransfersLocalAndRemoteFiles(t *testing.T) {
 	}
 }
 
+func TestServiceConnectsWithKeyboardInteractive(t *testing.T) {
+	server, cleanup := newKeyboardInteractiveSFTPTestServer(t)
+	defer cleanup()
+
+	events := make(chan protocol.Event, 32)
+	service := coresftp.New(func(event protocol.Event) {
+		events <- event
+	})
+	defer service.Shutdown()
+
+	connectDone := make(chan error, 1)
+	go func() {
+		connectDone <- service.Connect("endpoint-ki", "req-connect-ki", protocol.SFTPConnectPayload{
+			Host:                 "127.0.0.1",
+			Port:                 server.port(),
+			Username:             "tester",
+			AuthType:             "keyboardInteractive",
+			TrustedHostKeyBase64: server.hostKeyBase64,
+		})
+	}()
+
+	challengeEvent := waitForEvent(t, events, protocol.EventKeyboardInteractiveChallenge)
+	if challengeEvent.EndpointID != "endpoint-ki" {
+		t.Fatalf("unexpected challenge endpoint: %s", challengeEvent.EndpointID)
+	}
+	challenge := challengeEvent.Payload.(protocol.KeyboardInteractiveChallengePayload)
+	if len(challenge.Prompts) != 2 {
+		t.Fatalf("unexpected prompt count: %#v", challenge.Prompts)
+	}
+
+	if err := service.RespondKeyboardInteractive("endpoint-ki", challenge.ChallengeID, []string{"ABCD-1234", ""}); err != nil {
+		t.Fatalf("respond keyboard interactive failed: %v", err)
+	}
+
+	resolvedEvent := waitForEvent(t, events, protocol.EventKeyboardInteractiveResolved)
+	if resolvedEvent.EndpointID != "endpoint-ki" {
+		t.Fatalf("unexpected resolved endpoint: %s", resolvedEvent.EndpointID)
+	}
+	connectedEvent := waitForEvent(t, events, protocol.EventSFTPConnected)
+	if connectedEvent.EndpointID != "endpoint-ki" {
+		t.Fatalf("unexpected connected endpoint: %s", connectedEvent.EndpointID)
+	}
+
+	if err := <-connectDone; err != nil {
+		t.Fatalf("connect failed: %v", err)
+	}
+}
+
 func waitForEvent(t *testing.T, events <-chan protocol.Event, expected protocol.EventType) protocol.Event {
 	t.Helper()
 	timeout := time.After(5 * time.Second)
@@ -261,6 +309,71 @@ func newSFTPTestServer(t *testing.T) (*sftpTestServer, func()) {
 				return nil, nil
 			}
 			return nil, fmt.Errorf("invalid public key")
+		},
+	}
+	serverConfig.AddHostKey(hostSigner)
+
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+
+	server := &sftpTestServer{
+		addr:          listener.Addr().String(),
+		listener:      listener,
+		rootDir:       t.TempDir(),
+		hostKeyBase64: base64.StdEncoding.EncodeToString(hostSigner.PublicKey().Marshal()),
+	}
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for {
+			conn, err := listener.Accept()
+			if err != nil {
+				return
+			}
+			go handleSFTPConnection(conn, serverConfig, server.rootDir)
+		}
+	}()
+
+	return server, func() {
+		_ = listener.Close()
+		wg.Wait()
+	}
+}
+
+func newKeyboardInteractiveSFTPTestServer(t *testing.T) (*sftpTestServer, func()) {
+	t.Helper()
+
+	hostPrivateKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatalf("generate host key: %v", err)
+	}
+	hostSigner, err := ssh.NewSignerFromKey(hostPrivateKey)
+	if err != nil {
+		t.Fatalf("create host signer: %v", err)
+	}
+
+	serverConfig := &ssh.ServerConfig{
+		KeyboardInteractiveCallback: func(conn ssh.ConnMetadata, challenger ssh.KeyboardInteractiveChallenge) (*ssh.Permissions, error) {
+			if conn.User() != "tester" {
+				return nil, fmt.Errorf("invalid user")
+			}
+			responses, err := challenger(
+				conn.User(),
+				"Open https://warpgate.example.com/authorize and enter code ABCD-1234",
+				[]string{"Verification code", "Press Enter to continue"},
+				[]bool{true, true},
+			)
+			if err != nil {
+				return nil, err
+			}
+			if len(responses) != 2 || responses[0] != "ABCD-1234" || responses[1] != "" {
+				return nil, fmt.Errorf("unexpected keyboard-interactive responses: %#v", responses)
+			}
+			return nil, nil
 		},
 	}
 	serverConfig.AddHostKey(hostSigner)

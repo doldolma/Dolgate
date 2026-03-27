@@ -12,6 +12,7 @@ import {
   getHostSearchText,
   getHostSubtitle,
   isSshHostRecord,
+  isWarpgateSshHostRecord,
   MIN_SFTP_BROWSER_COLUMN_WIDTHS,
   normalizeSftpBrowserColumnWidths,
   normalizeGroupPath,
@@ -24,11 +25,11 @@ import type {
   SftpBrowserColumnKey,
   SftpBrowserColumnWidths,
   SftpPaneId,
-  SshHostRecord,
   TransferJob,
 } from "@shared";
 import type {
   PendingConflictDialog,
+  PendingSftpInteractiveAuth,
   SftpEntrySelectionInput,
   SftpPaneState,
   SftpSourceKind,
@@ -41,10 +42,12 @@ interface SftpWorkspaceProps {
   groups: GroupRecord[];
   sftp: SftpState;
   settings: AppSettings;
+  interactiveAuth: PendingSftpInteractiveAuth | null;
   onActivatePaneSource: (
     paneId: SftpPaneId,
     sourceKind: SftpSourceKind,
   ) => Promise<void>;
+  onDisconnectPane: (paneId: SftpPaneId) => Promise<void>;
   onPaneFilterChange: (paneId: SftpPaneId, query: string) => void;
   onHostSearchChange: (paneId: SftpPaneId, query: string) => void;
   onNavigateHostGroup: (paneId: SftpPaneId, path: string | null) => void;
@@ -87,8 +90,19 @@ interface SftpWorkspaceProps {
   onCancelTransfer: (jobId: string) => Promise<void>;
   onRetryTransfer: (jobId: string) => Promise<void>;
   onDismissTransfer: (jobId: string) => void;
+  onRespondInteractiveAuth: (
+    challengeId: string,
+    responses: string[],
+  ) => Promise<void>;
+  onReopenInteractiveAuthUrl: () => Promise<void>;
+  onClearInteractiveAuth: () => void;
   onUpdateSettings: (input: Partial<AppSettings>) => Promise<void>;
 }
+
+type SftpConnectableHostRecord = Extract<
+  HostRecord,
+  { kind: "ssh" | "warpgate-ssh" }
+>;
 
 type ActionDialogState =
   | {
@@ -144,9 +158,9 @@ interface DeleteDialogState {
 }
 
 export function groupHosts(
-  hosts: SshHostRecord[],
-): Array<[string, SshHostRecord[]]> {
-  const grouped = new Map<string, SshHostRecord[]>();
+  hosts: SftpConnectableHostRecord[],
+): Array<[string, SftpConnectableHostRecord[]]> {
+  const grouped = new Map<string, SftpConnectableHostRecord[]>();
   for (const host of hosts) {
     const key = host.groupName || "Ungrouped";
     const bucket = grouped.get(key) ?? [];
@@ -174,10 +188,10 @@ export function hostPickerBreadcrumbs(
 }
 
 export function visibleHostPickerHosts(
-  hosts: SshHostRecord[],
+  hosts: SftpConnectableHostRecord[],
   groupPath: string | null,
   query: string,
-): SshHostRecord[] {
+): SftpConnectableHostRecord[] {
   const scopedHosts = filterHostsInGroupTree(hosts, groupPath);
   const normalizedQuery = query.trim().toLowerCase();
   if (normalizedQuery) {
@@ -660,31 +674,6 @@ function PaneBrowser({
           <button
             type="button"
             className="secondary-button sftp-action-button"
-            onClick={onOpenRenameDialog}
-            disabled={pane.selectedPaths.length !== 1 || pane.isLoading}
-          >
-            이름 변경
-          </button>
-          <button
-            type="button"
-            className="secondary-button sftp-action-button"
-            onClick={onOpenPermissionsDialog}
-            disabled={pane.selectedPaths.length !== 1 || pane.isLoading}
-          >
-            권한
-          </button>
-          <button
-            type="button"
-            className="secondary-button sftp-action-button"
-            onClick={onDeleteSelection}
-            aria-label="Delete selected items"
-            disabled={pane.selectedPaths.length === 0 || pane.isLoading}
-          >
-            삭제
-          </button>
-          <button
-            type="button"
-            className="secondary-button sftp-action-button"
             onClick={() => void onRefresh()}
             disabled={pane.isLoading}
           >
@@ -988,23 +977,34 @@ function PaneBrowser({
 interface HostPickerProps {
   pane: SftpPaneState;
   groups: GroupRecord[];
-  hosts: SshHostRecord[];
+  hosts: SftpConnectableHostRecord[];
+  interactiveAuth: PendingSftpInteractiveAuth | null;
   onActivatePaneSource: (sourceKind: SftpSourceKind) => Promise<void>;
   onHostSearchChange: (query: string) => void;
   onNavigateHostGroup: (path: string | null) => void;
   onSelectHost: (hostId: string) => void;
   onConnectHost: (hostId: string) => Promise<void>;
+  onRespondInteractiveAuth: (
+    challengeId: string,
+    responses: string[],
+  ) => Promise<void>;
+  onReopenInteractiveAuthUrl: () => Promise<void>;
+  onClearInteractiveAuth: () => void;
 }
 
 function HostPicker({
   pane,
   groups,
   hosts,
+  interactiveAuth,
   onActivatePaneSource,
   onHostSearchChange,
   onNavigateHostGroup,
   onSelectHost,
   onConnectHost,
+  onRespondInteractiveAuth,
+  onReopenInteractiveAuthUrl,
+  onClearInteractiveAuth,
 }: HostPickerProps) {
   const scopedHosts = useMemo(
     () => filterHostsInGroupTree(hosts, pane.hostGroupPath),
@@ -1023,15 +1023,45 @@ function HostPicker({
     () => hostPickerBreadcrumbs(pane.hostGroupPath),
     [pane.hostGroupPath],
   );
+  const [promptResponses, setPromptResponses] = useState<string[]>([]);
+  const [dismissedInteractiveEndpointId, setDismissedInteractiveEndpointId] =
+    useState<string | null>(null);
   const isConnecting =
     pane.sourceKind === "host" &&
     Boolean(pane.connectingHostId) &&
     pane.isLoading;
+  const activeEndpointId =
+    pane.connectingEndpointId ?? pane.endpoint?.id ?? null;
+  const matchingInteractiveAuth =
+    interactiveAuth &&
+    interactiveAuth.paneId === pane.id &&
+    interactiveAuth.endpointId === activeEndpointId &&
+    interactiveAuth.endpointId !== dismissedInteractiveEndpointId
+      ? interactiveAuth
+      : null;
   const selectedHostId = pane.connectingHostId ?? pane.selectedHostId;
   const selectedHost = selectedHostId
     ? (hosts.find((host) => host.id === selectedHostId) ?? null)
     : null;
   const isEmpty = visibleGroups.length === 0 && visibleHosts.length === 0;
+  const shouldShowConnectingOverlay =
+    isConnecting &&
+    !matchingInteractiveAuth &&
+    pane.connectingEndpointId !== dismissedInteractiveEndpointId;
+
+  useEffect(() => {
+    setPromptResponses(matchingInteractiveAuth?.prompts.map(() => "") ?? []);
+  }, [matchingInteractiveAuth?.challengeId]);
+
+  useEffect(() => {
+    if (
+      !dismissedInteractiveEndpointId ||
+      (isConnecting && activeEndpointId === dismissedInteractiveEndpointId)
+    ) {
+      return;
+    }
+    setDismissedInteractiveEndpointId(null);
+  }, [activeEndpointId, dismissedInteractiveEndpointId, isConnecting]);
 
   return (
     <div
@@ -1136,14 +1166,14 @@ function HostPicker({
             <div className="empty-callout">
               <strong>
                 {hosts.length === 0
-                  ? "표시할 SSH 호스트가 없습니다."
+                  ? "표시할 host가 없습니다."
                   : pane.hostSearchQuery
                     ? "검색 결과가 없습니다."
-                    : "이 위치에는 아직 SSH 호스트가 없습니다."}
+                    : "이 위치에는 아직 host가 없습니다."}
               </strong>
               <p>
                 {hosts.length === 0
-                  ? "Home에서 SSH 호스트를 추가한 뒤 다시 확인해보세요."
+                  ? "Home에서 원격 host를 추가한 뒤 다시 확인해보세요."
                   : pane.hostSearchQuery
                     ? "검색어를 지우거나 다른 이름으로 다시 찾아보세요."
                     : "다른 그룹으로 이동하거나 Home에서 호스트 구성을 확인해보세요."}
@@ -1199,7 +1229,129 @@ function HostPicker({
         </div>
       </div>
 
-      {isConnecting ? (
+      {matchingInteractiveAuth ? (
+        <div
+          className="sftp-host-picker__overlay"
+          role="status"
+          aria-live="polite"
+          aria-label="SFTP interactive authentication required"
+        >
+          <div className="sftp-host-picker__overlay-card terminal-interactive-auth">
+            {matchingInteractiveAuth.provider === "warpgate" ? (
+              <>
+                <div className="terminal-interactive-auth__eyebrow">
+                  Warpgate Approval
+                </div>
+                <strong>Warpgate 승인을 기다리는 중입니다.</strong>
+                <p>
+                  브라우저에서 Warpgate 로그인 뒤 <code>Authorize</code>를
+                  눌러주세요. 가능한 입력은 자동으로 처리됩니다.
+                </p>
+                {matchingInteractiveAuth.authCode ? (
+                  <p className="terminal-interactive-auth__code">
+                    인증 코드 <code>{matchingInteractiveAuth.authCode}</code>는
+                    자동으로 입력됩니다.
+                  </p>
+                ) : null}
+                <div className="terminal-interactive-auth__actions">
+                  {matchingInteractiveAuth.approvalUrl ? (
+                    <button
+                      type="button"
+                      className="secondary-button"
+                      onClick={() => {
+                        void onReopenInteractiveAuthUrl();
+                      }}
+                    >
+                      브라우저 다시 열기
+                    </button>
+                  ) : null}
+                  {matchingInteractiveAuth.approvalUrl ? (
+                    <button
+                      type="button"
+                      className="secondary-button"
+                      onClick={async () => {
+                        await navigator.clipboard.writeText(
+                          matchingInteractiveAuth.approvalUrl ?? "",
+                        );
+                      }}
+                    >
+                      링크 복사
+                    </button>
+                  ) : null}
+                  <button
+                    type="button"
+                    className="secondary-button"
+                    onClick={() => {
+                      setDismissedInteractiveEndpointId(
+                        matchingInteractiveAuth.endpointId,
+                      );
+                      onClearInteractiveAuth();
+                    }}
+                  >
+                    닫기
+                  </button>
+                </div>
+                <pre className="terminal-interactive-auth__raw">
+                  {matchingInteractiveAuth.instruction}
+                </pre>
+              </>
+            ) : (
+              <form
+                className="terminal-interactive-auth__form"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  void onRespondInteractiveAuth(
+                    matchingInteractiveAuth.challengeId,
+                    promptResponses,
+                  );
+                }}
+              >
+                <div className="terminal-interactive-auth__eyebrow">
+                  Additional Authentication
+                </div>
+                <strong>추가 인증 입력이 필요합니다.</strong>
+                {matchingInteractiveAuth.instruction ? (
+                  <p>{matchingInteractiveAuth.instruction}</p>
+                ) : null}
+                {matchingInteractiveAuth.prompts.map((prompt, index) => (
+                  <label
+                    key={`${matchingInteractiveAuth.challengeId}:${index}`}
+                    className="terminal-interactive-auth__field"
+                  >
+                    <span>{prompt.label || `Prompt ${index + 1}`}</span>
+                    <input
+                      type={prompt.echo ? "text" : "password"}
+                      value={promptResponses[index] ?? ""}
+                      onChange={(inputEvent) => {
+                        const nextResponses = [...promptResponses];
+                        nextResponses[index] = inputEvent.target.value;
+                        setPromptResponses(nextResponses);
+                      }}
+                    />
+                  </label>
+                ))}
+                <div className="terminal-interactive-auth__actions">
+                  <button type="submit" className="primary-button">
+                    응답 보내기
+                  </button>
+                  <button
+                    type="button"
+                    className="secondary-button"
+                    onClick={() => {
+                      setDismissedInteractiveEndpointId(
+                        matchingInteractiveAuth.endpointId,
+                      );
+                      onClearInteractiveAuth();
+                    }}
+                  >
+                    닫기
+                  </button>
+                </div>
+              </form>
+            )}
+          </div>
+        </div>
+      ) : shouldShowConnectingOverlay ? (
         <div
           className="sftp-host-picker__overlay"
           role="status"
@@ -1579,7 +1731,9 @@ export function SftpWorkspace({
   groups,
   sftp,
   settings,
+  interactiveAuth,
   onActivatePaneSource,
+  onDisconnectPane,
   onPaneFilterChange,
   onHostSearchChange,
   onNavigateHostGroup,
@@ -1605,6 +1759,9 @@ export function SftpWorkspace({
   onCancelTransfer,
   onRetryTransfer,
   onDismissTransfer,
+  onRespondInteractiveAuth,
+  onReopenInteractiveAuthUrl,
+  onClearInteractiveAuth,
   onUpdateSettings,
 }: SftpWorkspaceProps) {
   const [actionDialog, setActionDialog] = useState<ActionDialogState | null>(
@@ -1623,17 +1780,11 @@ export function SftpWorkspace({
   );
   const columnWidthsRef = useRef(columnWidths);
   const panes = [sftp.leftPane, sftp.rightPane] as const;
-  const sshHosts = useMemo(
+  const connectableHosts = useMemo(
     () =>
       hosts.filter(
-        (host): host is SshHostRecord =>
-          isSshHostRecord(host) ||
-          ("hostname" in host &&
-            typeof host.hostname === "string" &&
-            "port" in host &&
-            typeof host.port === "number" &&
-            "username" in host &&
-            typeof host.username === "string"),
+        (host): host is SftpConnectableHostRecord =>
+          isSshHostRecord(host) || isWarpgateSshHostRecord(host),
       ),
     [hosts],
   );
@@ -1768,9 +1919,20 @@ export function SftpWorkspace({
           const section = (
             <section key={pane.id} className="sftp-pane">
               <header className="sftp-pane__header">
-                <div>
+                <div className="sftp-pane__header-main">
                   <h2>{getSftpPaneTitle(pane)}</h2>
                 </div>
+                {pane.sourceKind === "host" && pane.endpoint ? (
+                  <button
+                    type="button"
+                    className="icon-button sftp-pane__disconnect"
+                    aria-label="연결 종료"
+                    title="연결 종료"
+                    onClick={() => void onDisconnectPane(pane.id)}
+                  >
+                    X
+                  </button>
+                ) : null}
               </header>
 
               {pane.sourceKind === "host" &&
@@ -1778,7 +1940,10 @@ export function SftpWorkspace({
                 <HostPicker
                   pane={pane}
                   groups={groups}
-                  hosts={sshHosts}
+                  hosts={connectableHosts}
+                  interactiveAuth={
+                    interactiveAuth?.paneId === pane.id ? interactiveAuth : null
+                  }
                   onActivatePaneSource={connectActions.onActivatePaneSource}
                   onHostSearchChange={(query) =>
                     onHostSearchChange(pane.id, query)
@@ -1788,6 +1953,9 @@ export function SftpWorkspace({
                   }
                   onSelectHost={(hostId) => onSelectHost(pane.id, hostId)}
                   onConnectHost={(hostId) => onConnectHost(pane.id, hostId)}
+                  onRespondInteractiveAuth={onRespondInteractiveAuth}
+                  onReopenInteractiveAuthUrl={onReopenInteractiveAuthUrl}
+                  onClearInteractiveAuth={onClearInteractiveAuth}
                 />
               ) : (
                 <PaneBrowser

@@ -262,6 +262,9 @@ func dispatch(
 		if err := json.Unmarshal(request.Payload, &payload); err != nil {
 			return err
 		}
+		if request.EndpointID != "" {
+			return sftpService.RespondKeyboardInteractive(request.EndpointID, payload.ChallengeID, payload.Responses)
+		}
 		return manager.RespondKeyboardInteractive(request.SessionID, payload.ChallengeID, payload.Responses)
 	case protocol.CommandPortForwardStart:
 		var payload protocol.PortForwardStartPayload
@@ -284,7 +287,19 @@ func dispatch(
 		if err := json.Unmarshal(request.Payload, &payload); err != nil {
 			return err
 		}
-		return sftpService.Connect(request.EndpointID, request.ID, payload)
+		go func(endpointID, requestID string, connectPayload protocol.SFTPConnectPayload) {
+			if err := sftpService.Connect(endpointID, requestID, connectPayload); err != nil {
+				writer.emit(protocol.Event{
+					Type:       protocol.EventSFTPError,
+					RequestID:  requestID,
+					EndpointID: endpointID,
+					Payload: protocol.ErrorPayload{
+						Message: err.Error(),
+					},
+				})
+			}
+		}(request.EndpointID, request.ID, payload)
+		return nil
 	case protocol.CommandSFTPDisconnect:
 		return sftpService.Disconnect(request.EndpointID, request.ID)
 	case protocol.CommandSFTPList:
@@ -391,6 +406,8 @@ func isSFTPCommand(frame protocol.Frame) bool {
 		return false
 	}
 	switch request.Type {
+	case protocol.CommandKeyboardInteractiveRespond:
+		return request.EndpointID != ""
 	case protocol.CommandSFTPConnect,
 		protocol.CommandSFTPDisconnect,
 		protocol.CommandSFTPList,

@@ -122,6 +122,7 @@ export interface DesktopLocalConnectInput {
 
 export interface DesktopSftpConnectInput {
   hostId: string;
+  endpointId: string;
   secrets?: HostSecretInput;
 }
 
@@ -155,7 +156,8 @@ export interface ResolvedLocalConnectPayload {
 }
 
 export interface KeyboardInteractiveRespondInput {
-  sessionId: string;
+  sessionId?: string;
+  endpointId?: string;
   challengeId: string;
   responses: string[];
 }

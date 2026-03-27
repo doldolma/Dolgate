@@ -276,6 +276,7 @@ export function App() {
   const detachSessionFromWorkspace = useAppStore((state) => state.detachSessionFromWorkspace);
   const reorderDynamicTab = useAppStore((state) => state.reorderDynamicTab);
   const focusWorkspaceSession = useAppStore((state) => state.focusWorkspaceSession);
+  const toggleWorkspaceBroadcast = useAppStore((state) => state.toggleWorkspaceBroadcast);
   const resizeWorkspaceSplit = useAppStore((state) => state.resizeWorkspaceSplit);
   const activateSftp = useAppStore((state) => state.activateSftp);
   const updateSettings = useAppStore((state) => state.updateSettings);
@@ -292,12 +293,17 @@ export function App() {
   const dismissPendingHostKeyPrompt = useAppStore((state) => state.dismissPendingHostKeyPrompt);
   const dismissPendingCredentialRetry = useAppStore((state) => state.dismissPendingCredentialRetry);
   const submitCredentialRetry = useAppStore((state) => state.submitCredentialRetry);
+  const pendingInteractiveAuth = useAppStore((state) => state.pendingInteractiveAuth);
+  const respondInteractiveAuth = useAppStore((state) => state.respondInteractiveAuth);
+  const reopenInteractiveAuthUrl = useAppStore((state) => state.reopenInteractiveAuthUrl);
+  const clearPendingInteractiveAuth = useAppStore((state) => state.clearPendingInteractiveAuth);
   const handleCoreEvent = useAppStore((state) => state.handleCoreEvent);
   const handleTransferEvent = useAppStore((state) => state.handleTransferEvent);
   const handlePortForwardEvent = useAppStore((state) => state.handlePortForwardEvent);
   const handleSessionShareEvent = useAppStore((state) => state.handleSessionShareEvent);
   const sftp = useAppStore((state) => state.sftp);
   const setSftpPaneSource = useAppStore((state) => state.setSftpPaneSource);
+  const disconnectSftpPane = useAppStore((state) => state.disconnectSftpPane);
   const setSftpPaneFilter = useAppStore((state) => state.setSftpPaneFilter);
   const setSftpHostSearchQuery = useAppStore((state) => state.setSftpHostSearchQuery);
   const navigateSftpHostGroup = useAppStore((state) => state.navigateSftpHostGroup);
@@ -1053,7 +1059,13 @@ export function App() {
               groups={groups}
               sftp={sftp}
               settings={settings}
+              interactiveAuth={
+                pendingInteractiveAuth?.source === "sftp"
+                  ? pendingInteractiveAuth
+                  : null
+              }
               onActivatePaneSource={setSftpPaneSource}
+              onDisconnectPane={disconnectSftpPane}
               onPaneFilterChange={setSftpPaneFilter}
               onHostSearchChange={setSftpHostSearchQuery}
               onNavigateHostGroup={navigateSftpHostGroup}
@@ -1079,6 +1091,9 @@ export function App() {
               onCancelTransfer={cancelTransfer}
               onRetryTransfer={retryTransfer}
               onDismissTransfer={dismissTransfer}
+              onRespondInteractiveAuth={respondInteractiveAuth}
+              onReopenInteractiveAuthUrl={reopenInteractiveAuthUrl}
+              onClearInteractiveAuth={clearPendingInteractiveAuth}
               onUpdateSettings={updateSettings}
             />
           </div>
@@ -1131,6 +1146,7 @@ export function App() {
                 moveWorkspaceSession(workspaceId, sessionId, direction, targetSessionId)
               }
               onFocusWorkspaceSession={focusWorkspaceSession}
+              onToggleWorkspaceBroadcast={toggleWorkspaceBroadcast}
               onResizeWorkspaceSplit={resizeWorkspaceSplit}
             />
           </div>

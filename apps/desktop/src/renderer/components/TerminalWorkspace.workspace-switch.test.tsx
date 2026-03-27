@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { AppSettings, TerminalTab } from '@shared';
+import type { AppSettings, HostRecord, TerminalTab } from '@shared';
 import type { WorkspaceTab } from '../store/createAppStore';
 import { SESSION_SHARE_CHAT_TOAST_TTL_MS, TerminalWorkspace } from './TerminalWorkspace';
 
@@ -15,7 +15,8 @@ vi.mock('../store/appStore', () => ({
 }));
 
 vi.mock('../lib/terminal-runtime', () => ({
-  createTerminalRuntime: vi.fn(({ container }: { container: HTMLElement }) => {
+  createTerminalRuntime: vi.fn(
+    ({ container, onData, onBinary }: { container: HTMLElement; onData: (value: string) => void; onBinary: (value: string) => void }) => {
     const terminal = {
       rows: 24,
       cols: 80,
@@ -34,6 +35,8 @@ vi.mock('../lib/terminal-runtime', () => ({
       focus: vi.fn(() => {
         container.dispatchEvent(new FocusEvent('focusin', { bubbles: true }));
       }),
+      emitData: onData,
+      emitBinary: onBinary,
       findNext: vi.fn(() => false),
       findPrevious: vi.fn(() => false),
       clearSearch: vi.fn(),
@@ -103,6 +106,39 @@ const tabs: TerminalTab[] = [
   }
 ];
 
+const hostRecords: HostRecord[] = [
+  {
+    id: 'host-1',
+    kind: 'ssh',
+    label: 'Prod 1',
+    hostname: 'prod-1.example.com',
+    port: 22,
+    username: 'ubuntu',
+    authType: 'password',
+    privateKeyPath: null,
+    secretRef: 'host:host-1',
+    groupName: 'Servers',
+    terminalThemeId: null,
+    createdAt: '2025-01-01T00:00:00.000Z',
+    updatedAt: '2025-01-01T00:00:00.000Z'
+  },
+  {
+    id: 'host-2',
+    kind: 'ssh',
+    label: 'Prod 2',
+    hostname: 'prod-2.example.com',
+    port: 22,
+    username: 'ubuntu',
+    authType: 'password',
+    privateKeyPath: null,
+    secretRef: 'host:host-2',
+    groupName: 'Servers',
+    terminalThemeId: null,
+    createdAt: '2025-01-01T00:00:00.000Z',
+    updatedAt: '2025-01-01T00:00:00.000Z'
+  }
+];
+
 const workspaceA: WorkspaceTab = {
   id: 'workspace-a',
   title: 'Workspace A',
@@ -111,7 +147,8 @@ const workspaceA: WorkspaceTab = {
     kind: 'leaf',
     sessionId: 'session-1'
   },
-  activeSessionId: 'session-1'
+  activeSessionId: 'session-1',
+  broadcastEnabled: false
 };
 
 const workspaceB: WorkspaceTab = {
@@ -122,7 +159,8 @@ const workspaceB: WorkspaceTab = {
     kind: 'leaf',
     sessionId: 'session-2'
   },
-  activeSessionId: 'session-2'
+  activeSessionId: 'session-2',
+  broadcastEnabled: false
 };
 
 const sharedSessionWorkspaceA: WorkspaceTab = {
@@ -133,7 +171,8 @@ const sharedSessionWorkspaceA: WorkspaceTab = {
     kind: 'leaf',
     sessionId: 'session-1'
   },
-  activeSessionId: 'session-1'
+  activeSessionId: 'session-1',
+  broadcastEnabled: false
 };
 
 const sharedSessionWorkspaceB: WorkspaceTab = {
@@ -144,7 +183,8 @@ const sharedSessionWorkspaceB: WorkspaceTab = {
     kind: 'leaf',
     sessionId: 'session-1'
   },
-  activeSessionId: 'session-1'
+  activeSessionId: 'session-1',
+  broadcastEnabled: false
 };
 
 const splitWorkspace: WorkspaceTab = {
@@ -166,7 +206,8 @@ const splitWorkspace: WorkspaceTab = {
       sessionId: 'session-2'
     }
   },
-  activeSessionId: 'session-1'
+  activeSessionId: 'session-1',
+  broadcastEnabled: false
 };
 
 class MockResizeObserver {
@@ -213,16 +254,27 @@ function renderWorkspace(input: {
   activeWorkspace: WorkspaceTab | null;
   activeSessionId?: string | null;
   viewActivationKey: string | null;
+  tabs?: TerminalTab[];
+  hosts?: HostRecord[];
   draggedSession?: { sessionId: string; source: 'standalone-tab' | 'workspace-pane'; workspaceId?: string } | null;
   canDropDraggedSession?: boolean;
   onSplitSessionDrop?: (sessionId: string, direction: any, targetSessionId?: string) => boolean;
   onMoveWorkspaceSession?: (workspaceId: string, sessionId: string, direction: any, targetSessionId: string) => boolean;
   onFocusWorkspaceSession?: (workspaceId: string, sessionId: string) => void;
+  onToggleWorkspaceBroadcast?: (workspaceId: string) => void;
 }) {
+  const renderTabs = input.tabs ?? tabs;
+  const renderHosts = input.hosts ?? [];
+  mocks.storeState = {
+    ...createMockStoreState(),
+    ...mocks.storeState,
+    tabs: renderTabs,
+    hosts: renderHosts
+  };
   return render(
     <TerminalWorkspace
-      tabs={tabs}
-      hosts={[]}
+      tabs={renderTabs}
+      hosts={renderHosts}
       settings={settings}
       prefersDark={false}
       activeSessionId={input.activeSessionId ?? null}
@@ -241,6 +293,7 @@ function renderWorkspace(input: {
       onSplitSessionDrop={input.onSplitSessionDrop ?? vi.fn(() => false)}
       onMoveWorkspaceSession={input.onMoveWorkspaceSession ?? vi.fn(() => false)}
       onFocusWorkspaceSession={input.onFocusWorkspaceSession ?? vi.fn()}
+      onToggleWorkspaceBroadcast={input.onToggleWorkspaceBroadcast ?? vi.fn()}
       onResizeWorkspaceSplit={vi.fn()}
     />
   );
@@ -258,8 +311,8 @@ describe('TerminalWorkspace workspace switching', () => {
       value: {
         ssh: {
           onData: vi.fn(() => () => undefined),
-          write: vi.fn(),
-          writeBinary: vi.fn(),
+          write: vi.fn().mockResolvedValue(undefined),
+          writeBinary: vi.fn().mockResolvedValue(undefined),
           resize: vi.fn().mockResolvedValue(undefined)
         }
       }
@@ -308,6 +361,7 @@ describe('TerminalWorkspace workspace switching', () => {
         onSplitSessionDrop={vi.fn(() => false)}
         onMoveWorkspaceSession={vi.fn(() => false)}
         onFocusWorkspaceSession={onFocusWorkspaceSession}
+        onToggleWorkspaceBroadcast={vi.fn()}
         onResizeWorkspaceSplit={vi.fn()}
       />
     );
@@ -353,6 +407,7 @@ describe('TerminalWorkspace workspace switching', () => {
         onSplitSessionDrop={vi.fn(() => false)}
         onMoveWorkspaceSession={vi.fn(() => false)}
         onFocusWorkspaceSession={vi.fn()}
+        onToggleWorkspaceBroadcast={vi.fn()}
         onResizeWorkspaceSplit={vi.fn()}
       />
     );
@@ -484,6 +539,341 @@ describe('TerminalWorkspace workspace switching', () => {
     expect(onMoveWorkspaceSession).not.toHaveBeenCalled();
   });
 
+  it('does not render the broadcast bar for standalone sessions', () => {
+    renderWorkspace({
+      activeWorkspace: null,
+      activeSessionId: 'session-1',
+      viewActivationKey: 'session:session-1'
+    });
+
+    expect(screen.queryByText('입력 브로드캐스트')).toBeNull();
+    expect(screen.queryByRole('button', { name: '브로드캐스트 켜기' })).toBeNull();
+  });
+
+  it('shows the broadcast bar for split workspaces and disables it without two connected remote panes', () => {
+    renderWorkspace({
+      activeWorkspace: splitWorkspace,
+      viewActivationKey: 'workspace:workspace-split'
+    });
+
+    expect(screen.getByText('입력 브로드캐스트')).toBeTruthy();
+    expect(screen.getByText('연결된 원격 pane 2개 이상일 때 사용할 수 있습니다.')).toBeTruthy();
+    expect(screen.getByRole('button', { name: '브로드캐스트 켜기' })).toBeDisabled();
+  });
+
+  it('toggles broadcast button state and copy for split host workspaces', () => {
+    const hostTabs: TerminalTab[] = [
+      {
+        id: 'tab-1',
+        sessionId: 'session-1',
+        source: 'host',
+        hostId: 'host-1',
+        title: 'Session 1',
+        status: 'connected',
+        sessionShare: null,
+        hasReceivedOutput: true,
+        lastEventAt: '2025-01-01T00:00:00.000Z'
+      },
+      {
+        id: 'tab-2',
+        sessionId: 'session-2',
+        source: 'host',
+        hostId: 'host-2',
+        title: 'Session 2',
+        status: 'connected',
+        sessionShare: null,
+        hasReceivedOutput: true,
+        lastEventAt: '2025-01-01T00:00:00.000Z'
+      }
+    ];
+    const onToggleWorkspaceBroadcast = vi.fn();
+    const { rerender } = renderWorkspace({
+      activeWorkspace: splitWorkspace,
+      tabs: hostTabs,
+      hosts: hostRecords,
+      viewActivationKey: 'workspace:workspace-split',
+      onToggleWorkspaceBroadcast
+    });
+
+    const enableButton = screen.getByRole('button', { name: '브로드캐스트 켜기' });
+    expect(enableButton).toBeEnabled();
+    expect(screen.getByText('현재 활성 원격 pane의 입력을 같은 workspace의 다른 원격 pane에도 보냅니다.')).toBeTruthy();
+
+    fireEvent.click(enableButton);
+    expect(onToggleWorkspaceBroadcast).toHaveBeenCalledWith('workspace-split');
+
+    rerender(
+      <TerminalWorkspace
+        tabs={hostTabs}
+        hosts={hostRecords}
+        settings={settings}
+        prefersDark={false}
+        activeSessionId={null}
+        activeWorkspace={{ ...splitWorkspace, broadcastEnabled: true }}
+        viewActivationKey="workspace:workspace-split"
+        draggedSession={null}
+        canDropDraggedSession={false}
+        onCloseSession={vi.fn().mockResolvedValue(undefined)}
+        onRetryConnection={vi.fn().mockResolvedValue(undefined)}
+        onStartSessionShare={vi.fn().mockResolvedValue(undefined)}
+        onUpdateSessionShareSnapshot={vi.fn().mockResolvedValue(undefined)}
+        onSetSessionShareInputEnabled={vi.fn().mockResolvedValue(undefined)}
+        onStopSessionShare={vi.fn().mockResolvedValue(undefined)}
+        onStartPaneDrag={vi.fn()}
+        onEndSessionDrag={vi.fn()}
+        onSplitSessionDrop={vi.fn(() => false)}
+        onMoveWorkspaceSession={vi.fn(() => false)}
+        onFocusWorkspaceSession={vi.fn()}
+        onToggleWorkspaceBroadcast={onToggleWorkspaceBroadcast}
+        onResizeWorkspaceSplit={vi.fn()}
+      />
+    );
+
+    expect(screen.getByRole('button', { name: '브로드캐스트 끄기' })).toBeEnabled();
+    expect(
+      screen.getByText('브로드캐스트가 켜져 있습니다. 현재 활성 원격 pane 입력이 다른 원격 pane에도 전송됩니다.')
+    ).toBeTruthy();
+  });
+
+  it('fans out text input only when broadcast is enabled for the active connected host pane', async () => {
+    const hostTabs: TerminalTab[] = [
+      {
+        id: 'tab-1',
+        sessionId: 'session-1',
+        source: 'host',
+        hostId: 'host-1',
+        title: 'Session 1',
+        status: 'connected',
+        sessionShare: null,
+        hasReceivedOutput: true,
+        lastEventAt: '2025-01-01T00:00:00.000Z'
+      },
+      {
+        id: 'tab-2',
+        sessionId: 'session-2',
+        source: 'host',
+        hostId: 'host-2',
+        title: 'Session 2',
+        status: 'connected',
+        sessionShare: null,
+        hasReceivedOutput: true,
+        lastEventAt: '2025-01-01T00:00:00.000Z'
+      }
+    ];
+    const writeMock = window.dolssh.ssh.write as ReturnType<typeof vi.fn>;
+
+    const { rerender } = renderWorkspace({
+      activeWorkspace: splitWorkspace,
+      tabs: hostTabs,
+      hosts: hostRecords,
+      viewActivationKey: 'workspace:workspace-split'
+    });
+
+    await waitFor(() => {
+      expect(mocks.runtimeRecords).toHaveLength(2);
+    });
+
+    writeMock.mockClear();
+    mocks.runtimeRecords[0].emitData('ls\n');
+    expect(writeMock).toHaveBeenCalledTimes(1);
+    expect(writeMock).toHaveBeenCalledWith('session-1', 'ls\n');
+
+    writeMock.mockClear();
+    rerender(
+      <TerminalWorkspace
+        tabs={hostTabs}
+        hosts={hostRecords}
+        settings={settings}
+        prefersDark={false}
+        activeSessionId={null}
+        activeWorkspace={{ ...splitWorkspace, broadcastEnabled: true }}
+        viewActivationKey="workspace:workspace-split"
+        draggedSession={null}
+        canDropDraggedSession={false}
+        onCloseSession={vi.fn().mockResolvedValue(undefined)}
+        onRetryConnection={vi.fn().mockResolvedValue(undefined)}
+        onStartSessionShare={vi.fn().mockResolvedValue(undefined)}
+        onUpdateSessionShareSnapshot={vi.fn().mockResolvedValue(undefined)}
+        onSetSessionShareInputEnabled={vi.fn().mockResolvedValue(undefined)}
+        onStopSessionShare={vi.fn().mockResolvedValue(undefined)}
+        onStartPaneDrag={vi.fn()}
+        onEndSessionDrag={vi.fn()}
+        onSplitSessionDrop={vi.fn(() => false)}
+        onMoveWorkspaceSession={vi.fn(() => false)}
+        onFocusWorkspaceSession={vi.fn()}
+        onToggleWorkspaceBroadcast={vi.fn()}
+        onResizeWorkspaceSplit={vi.fn()}
+      />
+    );
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: '브로드캐스트 끄기' })).toBeTruthy();
+    });
+
+    writeMock.mockClear();
+    mocks.runtimeRecords[0].emitData('whoami\n');
+    expect(writeMock).toHaveBeenCalledTimes(2);
+    expect(writeMock).toHaveBeenNthCalledWith(1, 'session-1', 'whoami\n');
+    expect(writeMock).toHaveBeenNthCalledWith(2, 'session-2', 'whoami\n');
+  });
+
+  it('does not fan out input from local panes even when broadcast is enabled', async () => {
+    const localAndHostTabs: TerminalTab[] = [
+      {
+        id: 'tab-1',
+        sessionId: 'session-1',
+        source: 'local',
+        hostId: null,
+        title: 'Session 1',
+        status: 'connected',
+        sessionShare: null,
+        hasReceivedOutput: true,
+        lastEventAt: '2025-01-01T00:00:00.000Z'
+      },
+      {
+        id: 'tab-2',
+        sessionId: 'session-2',
+        source: 'host',
+        hostId: 'host-2',
+        title: 'Session 2',
+        status: 'connected',
+        sessionShare: null,
+        hasReceivedOutput: true,
+        lastEventAt: '2025-01-01T00:00:00.000Z'
+      }
+    ];
+    const localWorkspace: WorkspaceTab = {
+      id: 'workspace-local',
+      title: 'Workspace Local',
+      layout: {
+        id: 'split-local',
+        kind: 'split',
+        axis: 'horizontal',
+        ratio: 0.5,
+        first: {
+          id: 'leaf-local',
+          kind: 'leaf',
+          sessionId: 'session-1'
+        },
+        second: {
+          id: 'leaf-remote',
+          kind: 'leaf',
+          sessionId: 'session-2'
+        }
+      },
+      activeSessionId: 'session-1',
+      broadcastEnabled: true
+    };
+    const writeMock = window.dolssh.ssh.write as ReturnType<typeof vi.fn>;
+
+    renderWorkspace({
+      activeWorkspace: localWorkspace,
+      tabs: localAndHostTabs,
+      hosts: hostRecords,
+      viewActivationKey: 'workspace:workspace-local'
+    });
+
+    await waitFor(() => {
+      expect(mocks.runtimeRecords).toHaveLength(2);
+    });
+
+    writeMock.mockClear();
+    mocks.runtimeRecords[0].emitData('pwd\n');
+    expect(writeMock).toHaveBeenCalledTimes(1);
+    expect(writeMock).toHaveBeenCalledWith('session-1', 'pwd\n');
+  });
+
+  it('skips non-connected host targets for binary broadcast input', async () => {
+    const threePaneWorkspace: WorkspaceTab = {
+      id: 'workspace-broadcast',
+      title: 'Workspace Broadcast',
+      layout: {
+        id: 'split-root',
+        kind: 'split',
+        axis: 'horizontal',
+        ratio: 0.5,
+        first: {
+          id: 'leaf-source',
+          kind: 'leaf',
+          sessionId: 'session-1'
+        },
+        second: {
+          id: 'split-nested',
+          kind: 'split',
+          axis: 'vertical',
+          ratio: 0.5,
+          first: {
+            id: 'leaf-target',
+            kind: 'leaf',
+            sessionId: 'session-2'
+          },
+          second: {
+            id: 'leaf-skipped',
+            kind: 'leaf',
+            sessionId: 'session-3'
+          }
+        }
+      },
+      activeSessionId: 'session-1',
+      broadcastEnabled: true
+    };
+    const threePaneTabs: TerminalTab[] = [
+      {
+        id: 'tab-1',
+        sessionId: 'session-1',
+        source: 'host',
+        hostId: 'host-1',
+        title: 'Session 1',
+        status: 'connected',
+        sessionShare: null,
+        hasReceivedOutput: true,
+        lastEventAt: '2025-01-01T00:00:00.000Z'
+      },
+      {
+        id: 'tab-2',
+        sessionId: 'session-2',
+        source: 'host',
+        hostId: 'host-2',
+        title: 'Session 2',
+        status: 'connected',
+        sessionShare: null,
+        hasReceivedOutput: true,
+        lastEventAt: '2025-01-01T00:00:00.000Z'
+      },
+      {
+        id: 'tab-3',
+        sessionId: 'session-3',
+        source: 'host',
+        hostId: 'host-1',
+        title: 'Session 3',
+        status: 'error',
+        sessionShare: null,
+        hasReceivedOutput: true,
+        lastEventAt: '2025-01-01T00:00:00.000Z'
+      }
+    ];
+    const writeBinaryMock = window.dolssh.ssh.writeBinary as ReturnType<typeof vi.fn>;
+
+    renderWorkspace({
+      activeWorkspace: threePaneWorkspace,
+      tabs: threePaneTabs,
+      hosts: hostRecords,
+      viewActivationKey: 'workspace:workspace-broadcast'
+    });
+
+    await waitFor(() => {
+      expect(mocks.runtimeRecords).toHaveLength(3);
+    });
+
+    writeBinaryMock.mockClear();
+    mocks.runtimeRecords[0].emitBinary('AB');
+    expect(writeBinaryMock).toHaveBeenCalledTimes(2);
+    expect(writeBinaryMock.mock.calls[0]?.[0]).toBe('session-1');
+    expect(writeBinaryMock.mock.calls[1]?.[0]).toBe('session-2');
+    expect(Array.from(writeBinaryMock.mock.calls[0]?.[1] as Uint8Array)).toEqual([65, 66]);
+    expect(Array.from(writeBinaryMock.mock.calls[1]?.[1] as Uint8Array)).toEqual([65, 66]);
+  });
+
   it('shows the latest three owner chat toasts and auto-dismisses them', async () => {
     vi.useFakeTimers();
     try {
@@ -561,6 +951,7 @@ describe('TerminalWorkspace workspace switching', () => {
           onSplitSessionDrop={vi.fn(() => false)}
           onMoveWorkspaceSession={vi.fn(() => false)}
           onFocusWorkspaceSession={vi.fn()}
+          onToggleWorkspaceBroadcast={vi.fn()}
           onResizeWorkspaceSplit={vi.fn()}
         />
       );
@@ -649,6 +1040,7 @@ describe('TerminalWorkspace workspace switching', () => {
         onSplitSessionDrop={vi.fn(() => false)}
         onMoveWorkspaceSession={vi.fn(() => false)}
         onFocusWorkspaceSession={vi.fn()}
+        onToggleWorkspaceBroadcast={vi.fn()}
         onResizeWorkspaceSplit={vi.fn()}
       />
     );
@@ -725,6 +1117,7 @@ describe('TerminalWorkspace workspace switching', () => {
         onSplitSessionDrop={vi.fn(() => false)}
         onMoveWorkspaceSession={vi.fn(() => false)}
         onFocusWorkspaceSession={vi.fn()}
+        onToggleWorkspaceBroadcast={vi.fn()}
         onResizeWorkspaceSplit={vi.fn()}
       />
     );
@@ -803,6 +1196,7 @@ describe('TerminalWorkspace workspace switching', () => {
           onSplitSessionDrop={vi.fn(() => false)}
           onMoveWorkspaceSession={vi.fn(() => false)}
           onFocusWorkspaceSession={vi.fn()}
+          onToggleWorkspaceBroadcast={vi.fn()}
           onResizeWorkspaceSplit={vi.fn()}
         />
       )
