@@ -137,11 +137,14 @@ async function launchDesktop(env) {
   });
 }
 
-async function buildWindowsAwsFixture() {
+async function buildAwsFixture() {
   const fixtureRoot = await mkdtemp(
     path.join(os.tmpdir(), "dolssh-aws-fixture-"),
   );
-  const fixturePath = path.join(fixtureRoot, "fake-aws-session.exe");
+  const fixturePath = path.join(
+    fixtureRoot,
+    process.platform === "win32" ? "fake-aws-session.exe" : "fake-aws-session",
+  );
   const fixtureSourceDir = path.resolve(
     __dirname,
     "../../../services/ssh-core/internal/awssession/testfixture",
@@ -162,6 +165,45 @@ async function buildWindowsAwsFixture() {
     fixtureRoot,
     fixturePath,
   };
+}
+
+async function waitForCapturedTerminalOutput(page, expected, timeout = 15_000) {
+  await page.waitForFunction(
+    (needle) => {
+      const e2e = window.__dolsshE2E;
+      if (!e2e || typeof e2e.getTerminalOutputs !== "function") {
+        return false;
+      }
+
+      return Object.values(e2e.getTerminalOutputs()).some((output) =>
+        output.includes(needle),
+      );
+    },
+    expected,
+    { timeout },
+  );
+}
+
+async function getCapturedSessionId(page) {
+  const handle = await page.waitForFunction(
+    () => {
+      const e2e = window.__dolsshE2E;
+      if (!e2e || typeof e2e.getTerminalOutputs !== "function") {
+        return null;
+      }
+
+      return Object.keys(e2e.getTerminalOutputs())[0] ?? null;
+    },
+    { timeout: 15_000 },
+  );
+  const sessionId = await handle.jsonValue();
+  await handle.dispose();
+
+  if (typeof sessionId !== "string" || sessionId.length === 0) {
+    throw new Error("failed to capture active session id");
+  }
+
+  return sessionId;
 }
 
 async function getCapturedTerminalSizes(page) {
@@ -320,14 +362,12 @@ test.describe("desktop smoke", () => {
     }
   });
 
-  test("renders process-backed fake AWS SSM output inside the app terminal on Windows", async () => {
-    test.skip(process.platform !== "win32", "Windows-only ConPTY smoke");
-
+  test("renders process-backed fake AWS SSM output inside the app terminal", async () => {
     const userDataDir = await mkdtemp(
       path.join(os.tmpdir(), "dolssh-smoke-aws-"),
     );
     await writeDesktopState(userDataDir);
-    const fixture = await buildWindowsAwsFixture();
+    const fixture = await buildAwsFixture();
 
     const app = await launchDesktop({
       DOLSSH_USER_DATA_DIR: userDataDir,
@@ -355,19 +395,7 @@ test.describe("desktop smoke", () => {
 
       await expect(awsCard).toBeVisible();
       await awsCard.dblclick();
-      await page.waitForFunction(
-        () => {
-          const e2e = window.__dolsshE2E;
-          if (!e2e || typeof e2e.getTerminalOutputs !== "function") {
-            return false;
-          }
-
-          return Object.values(e2e.getTerminalOutputs()).some((output) =>
-            output.includes("FAKE AWS SSM READY"),
-          );
-        },
-        { timeout: 15_000 },
-      );
+      await waitForCapturedTerminalOutput(page, "TTY:");
       await page.waitForFunction(() => {
         const e2e = window.__dolsshE2E;
         if (!e2e || typeof e2e.getTerminalOutputs !== "function") {
@@ -386,19 +414,7 @@ test.describe("desktop smoke", () => {
       await page.locator(".terminal-session.active .terminal-canvas").click();
       await page.keyboard.type("hello-from-playwright");
       await page.keyboard.press("Enter");
-      await page.waitForFunction(
-        () => {
-          const e2e = window.__dolsshE2E;
-          if (!e2e || typeof e2e.getTerminalOutputs !== "function") {
-            return false;
-          }
-
-          return Object.values(e2e.getTerminalOutputs()).some((output) =>
-            output.includes("ECHO:hello-from-playwright"),
-          );
-        },
-        { timeout: 15_000 },
-      );
+      await waitForCapturedTerminalOutput(page, "ECHO:hello-from-playwright");
 
       await app.evaluate(({ BrowserWindow }) => {
         const [window] = BrowserWindow.getAllWindows();
@@ -449,6 +465,84 @@ test.describe("desktop smoke", () => {
         resizedSize.cols > initialSize.cols ||
           resizedSize.rows > initialSize.rows,
       ).toBe(true);
+    } finally {
+      await app.close();
+      await rm(userDataDir, { recursive: true, force: true });
+      await rm(fixture.fixtureRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("starts and stops a fake shared session and keeps owner chat flowing into the detached window", async () => {
+    const userDataDir = await mkdtemp(
+      path.join(os.tmpdir(), "dolssh-smoke-share-"),
+    );
+    await writeDesktopState(userDataDir);
+    const fixture = await buildAwsFixture();
+
+    const app = await launchDesktop({
+      DOLSSH_USER_DATA_DIR: userDataDir,
+      DOLSSH_E2E_AUTH_SESSION_JSON: createFakeAuthSessionJson(),
+      DOLSSH_E2E_DISABLE_SYNC: "1",
+      DOLSSH_E2E_FAKE_AWS_SESSION: "process",
+      DOLSSH_E2E_CAPTURE_TERMINAL: "1",
+      DOLSSH_E2E_FAKE_AWS_FIXTURE_PATH: fixture.fixturePath,
+      DOLSSH_E2E_FAKE_SESSION_SHARE: "1",
+    });
+
+    try {
+      const page = await app.firstWindow();
+      const awsCard = page
+        .locator(".host-browser-card")
+        .filter({ hasText: "Smoke AWS" })
+        .first();
+
+      await expect(awsCard).toBeVisible();
+      await awsCard.dblclick();
+      await waitForCapturedTerminalOutput(page, "TTY:");
+
+      const sessionId = await getCapturedSessionId(page);
+
+      await page.getByRole("button", { name: "Share" }).click();
+      await page.getByRole("button", { name: "공유 시작" }).click();
+
+      await expect(page.getByText("공유 링크가 준비되었습니다.")).toBeVisible();
+      await expect(page.locator(".terminal-share-popover__url-text")).toContainText(
+        `/share/e2e-share-${sessionId}/e2e-viewer-token-${sessionId}`,
+      );
+
+      const chatWindowPromise = app.waitForEvent("window");
+      await page.getByRole("button", { name: "채팅 기록" }).click();
+      const chatWindow = await chatWindowPromise;
+      await chatWindow.waitForLoadState("domcontentloaded");
+      await expect(chatWindow.getByText("아직 채팅이 없습니다.")).toBeVisible();
+
+      const message = {
+        id: "chat-smoke-1",
+        nickname: "맑은 다람쥐",
+        text: "안녕하세요\n반가워요",
+        sentAt: "2026-03-28T10:00:00.000Z",
+      };
+      await app.evaluate(
+        ({ BrowserWindow }, eventPayload) => {
+          for (const window of BrowserWindow.getAllWindows()) {
+            window.webContents.send("session-shares:chat-event", eventPayload);
+          }
+        },
+        {
+          sessionId,
+          message,
+        },
+      );
+
+      await expect(
+        page.locator(".terminal-share-chat-toast").filter({ hasText: "안녕하세요" }).first(),
+      ).toBeVisible();
+      await expect(chatWindow.getByText("안녕하세요")).toBeVisible();
+      await expect(chatWindow.getByText("반가워요")).toBeVisible();
+
+      await page.getByRole("button", { name: "공유 종료" }).click();
+
+      await expect.poll(() => chatWindow.isClosed()).toBe(true);
     } finally {
       await app.close();
       await rm(userDataDir, { recursive: true, force: true });

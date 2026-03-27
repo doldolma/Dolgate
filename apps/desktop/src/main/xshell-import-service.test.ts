@@ -1,6 +1,6 @@
 import os from 'node:os';
 import path from 'node:path';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
 import { describe, expect, it } from 'vitest';
 import {
   collectSelectedXshellGroupPaths,
@@ -10,7 +10,8 @@ import {
 } from './xshell-import-service';
 
 async function createTempDir(prefix: string): Promise<string> {
-  return mkdtemp(path.join(os.tmpdir(), prefix));
+  const created = await mkdtemp(path.join(os.tmpdir(), prefix));
+  return realpath(created);
 }
 
 async function writeSessionFile(

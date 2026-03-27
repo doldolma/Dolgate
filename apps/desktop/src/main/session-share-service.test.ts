@@ -1,5 +1,5 @@
 import { Buffer } from "node:buffer";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const { browserWindowInstances } = vi.hoisted(() => ({
   browserWindowInstances: [] as any[],
@@ -87,6 +87,13 @@ import {
 } from "@shared";
 import { SessionShareService } from "./session-share-service";
 
+const terminalAppearance = {
+  fontFamily: "sf-mono",
+  fontSize: 13,
+  lineHeight: 1,
+  letterSpacing: 0,
+};
+
 function createShare(): any {
   return {
     sessionId: "session-1",
@@ -143,9 +150,20 @@ function createServiceHarness() {
 }
 
 describe("SessionShareService viewer input relay", () => {
+  const originalFakeShareEnv = process.env.DOLSSH_E2E_FAKE_SESSION_SHARE;
+
   beforeEach(() => {
     vi.clearAllMocks();
     browserWindowInstances.length = 0;
+    delete process.env.DOLSSH_E2E_FAKE_SESSION_SHARE;
+  });
+
+  afterEach(() => {
+    if (originalFakeShareEnv == null) {
+      delete process.env.DOLSSH_E2E_FAKE_SESSION_SHARE;
+      return;
+    }
+    process.env.DOLSSH_E2E_FAKE_SESSION_SHARE = originalFakeShareEnv;
   });
 
   it("relays binary viewer input through writeBinary", () => {
@@ -314,6 +332,84 @@ describe("SessionShareService viewer input relay", () => {
     } as never);
 
     expect(browserWindowInstances).toHaveLength(0);
+  });
+
+  it("starts an active fake share in E2E mode without hitting the network", async () => {
+    process.env.DOLSSH_E2E_FAKE_SESSION_SHARE = "1";
+    const authService = {
+      getServerUrl: vi.fn(() => "https://sync.example.com"),
+      getAccessToken: vi.fn(() => "access-token"),
+      refreshSession: vi.fn(),
+    };
+    const coreManager = {
+      write: vi.fn(),
+      writeBinary: vi.fn(),
+      sendControlSignal: vi.fn(),
+    };
+    const service = new SessionShareService(
+      authService as never,
+      coreManager as never,
+    );
+
+    const state = await service.start({
+      sessionId: "session-1",
+      title: "Host Session",
+      transport: "ssh",
+      cols: 80,
+      rows: 24,
+      snapshot: "",
+      terminalAppearance,
+      viewportPx: null,
+    });
+
+    expect(state).toEqual({
+      status: "active",
+      shareUrl:
+        "https://sync.example.com/share/e2e-share-session-1/e2e-viewer-token-session-1",
+      inputEnabled: false,
+      viewerCount: 0,
+      errorMessage: null,
+    });
+    expect(service.getOwnerChatSnapshot("session-1").state).toEqual(state);
+  });
+
+  it("updates fake share input mode locally in E2E mode", async () => {
+    process.env.DOLSSH_E2E_FAKE_SESSION_SHARE = "1";
+    const authService = {
+      getServerUrl: vi.fn(() => "https://sync.example.com"),
+      getAccessToken: vi.fn(() => "access-token"),
+      refreshSession: vi.fn(),
+    };
+    const coreManager = {
+      write: vi.fn(),
+      writeBinary: vi.fn(),
+      sendControlSignal: vi.fn(),
+    };
+    const service = new SessionShareService(
+      authService as never,
+      coreManager as never,
+    );
+
+    await service.start({
+      sessionId: "session-1",
+      title: "Host Session",
+      transport: "ssh",
+      cols: 80,
+      rows: 24,
+      snapshot: "",
+      terminalAppearance,
+      viewportPx: null,
+    });
+
+    const state = await service.setInputEnabled({
+      sessionId: "session-1",
+      inputEnabled: true,
+    });
+
+    expect(state.inputEnabled).toBe(true);
+    expect(service.getOwnerChatSnapshot("session-1").state.inputEnabled).toBe(
+      true,
+    );
   });
 
   it("clears owner history and closes the detached window when the share stops", async () => {

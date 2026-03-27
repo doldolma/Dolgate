@@ -1891,4 +1891,92 @@ describe("createAppStore", () => {
       },
     ]);
   });
+
+  it("drops stale chat events after a share has already become inactive", async () => {
+    const store = createAppStore(createMockApi());
+
+    await store.getState().bootstrap();
+    await store.getState().connectHost("host-1", 120, 32);
+
+    store.getState().handleSessionShareEvent({
+      sessionId: "session-1",
+      state: {
+        status: "inactive",
+        shareUrl: null,
+        inputEnabled: false,
+        viewerCount: 0,
+        errorMessage: null,
+      },
+    });
+
+    store.getState().handleSessionShareChatEvent({
+      sessionId: "session-1",
+      message: {
+        id: "chat-stale",
+        nickname: "맑은 여우",
+        text: "늦게 도착한 메시지",
+        sentAt: "2026-03-27T00:00:00.000Z",
+      },
+    });
+
+    expect(store.getState().sessionShareChatNotifications["session-1"]).toBeUndefined();
+  });
+
+  it("does not queue chat notifications until the share reaches active state", async () => {
+    const store = createAppStore(createMockApi());
+
+    await store.getState().bootstrap();
+    await store.getState().connectHost("host-1", 120, 32);
+
+    store.getState().handleSessionShareEvent({
+      sessionId: "session-1",
+      state: {
+        status: "starting",
+        shareUrl: "https://sync.example.com/share/share-1/token-1",
+        inputEnabled: false,
+        viewerCount: 0,
+        errorMessage: null,
+      },
+    });
+    store.getState().handleSessionShareChatEvent({
+      sessionId: "session-1",
+      message: {
+        id: "chat-too-early",
+        nickname: "맑은 여우",
+        text: "아직 이르다",
+        sentAt: "2026-03-27T00:00:00.000Z",
+      },
+    });
+
+    expect(store.getState().sessionShareChatNotifications["session-1"]).toBeUndefined();
+
+    store.getState().handleSessionShareEvent({
+      sessionId: "session-1",
+      state: {
+        status: "active",
+        shareUrl: "https://sync.example.com/share/share-1/token-1",
+        inputEnabled: false,
+        viewerCount: 0,
+        errorMessage: null,
+      },
+    });
+    store.getState().handleSessionShareChatEvent({
+      sessionId: "session-1",
+      message: {
+        id: "chat-on-time",
+        nickname: "맑은 여우",
+        text: "이제는 보인다",
+        sentAt: "2026-03-27T00:01:00.000Z",
+      },
+    });
+
+    expect(store.getState().sessionShareChatNotifications["session-1"]).toEqual([
+      {
+        id: "chat-on-time",
+        nickname: "맑은 여우",
+        text: "이제는 보인다",
+        sentAt: "2026-03-27T00:01:00.000Z",
+      },
+    ]);
+  });
 });

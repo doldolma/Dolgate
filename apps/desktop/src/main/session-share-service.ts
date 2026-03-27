@@ -88,7 +88,12 @@ interface ActiveSessionShare {
   closedByOwner: boolean;
   pendingMessages: string[];
   ownerChatMessages: SessionShareChatMessage[];
+  isE2EFake: boolean;
   state: SessionShareState;
+}
+
+function isE2EFakeSessionShareEnabled(): boolean {
+  return process.env.DOLSSH_E2E_FAKE_SESSION_SHARE === "1";
 }
 
 function toApiErrorMessage(response: Response, fallback: string): Promise<string> {
@@ -215,6 +220,7 @@ export class SessionShareService {
       closedByOwner: false,
       pendingMessages: [],
       ownerChatMessages: [],
+      isE2EFake: false,
       state: {
         status: "starting",
         shareUrl: null,
@@ -227,6 +233,22 @@ export class SessionShareService {
     this.broadcastState(input.sessionId, provisional.state);
 
     try {
+      if (isE2EFakeSessionShareEnabled()) {
+        provisional.shareId = `e2e-share-${input.sessionId}`;
+        provisional.shareUrl = `${this.authService.getServerUrl().replace(/\/$/, "")}/share/${provisional.shareId}/e2e-viewer-token-${input.sessionId}`;
+        provisional.ownerToken = `e2e-owner-token-${input.sessionId}`;
+        provisional.isE2EFake = true;
+        provisional.state = {
+          status: "active",
+          shareUrl: provisional.shareUrl,
+          inputEnabled: false,
+          viewerCount: 0,
+          errorMessage: null,
+        };
+        this.broadcastState(input.sessionId, provisional.state);
+        return provisional.state;
+      }
+
       const created = await this.createShare(input);
       provisional.shareId = created.shareId;
       provisional.shareUrl = created.viewerUrl;
@@ -369,19 +391,21 @@ export class SessionShareService {
       return createInactiveShareState();
     }
 
-    await this.fetchWithAuthRetry(
-      new URL(`/api/session-shares/${share.shareId}/input`, this.authService.getServerUrl()),
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
+    if (!share.isE2EFake) {
+      await this.fetchWithAuthRetry(
+        new URL(`/api/session-shares/${share.shareId}/input`, this.authService.getServerUrl()),
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            inputEnabled: input.inputEnabled,
+          }),
         },
-        body: JSON.stringify({
-          inputEnabled: input.inputEnabled,
-        }),
-      },
-      "공유 입력 허용 상태를 저장하지 못했습니다.",
-    );
+        "공유 입력 허용 상태를 저장하지 못했습니다.",
+      );
+    }
 
     share.inputEnabled = input.inputEnabled;
     share.state = {
@@ -403,7 +427,7 @@ export class SessionShareService {
     share.closedByOwner = true;
     this.shares.delete(sessionId);
     try {
-      if (share.shareId) {
+      if (share.shareId && !share.isE2EFake) {
         await this.fetchWithAuthRetry(
           new URL(`/api/session-shares/${share.shareId}`, this.authService.getServerUrl()),
           {

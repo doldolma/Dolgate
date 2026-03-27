@@ -487,5 +487,15 @@ if (e2eTerminalCaptureEnabled) {
     getTerminalOutputs(): Record<string, string> {
       return Object.fromEntries(e2eTerminalOutputBySession.entries());
     },
+    emitSessionShareEvent(event: SessionShareEvent): void {
+      for (const listener of sessionShareListeners) {
+        listener(event);
+      }
+    },
+    emitSessionShareChatEvent(event: SessionShareChatEvent): void {
+      for (const listener of sessionShareChatListeners) {
+        listener(event);
+      }
+    },
   });
 }
