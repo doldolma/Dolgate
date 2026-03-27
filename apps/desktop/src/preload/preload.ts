@@ -30,6 +30,7 @@ import type {
   UpdateEvent,
   TransferJobEvent,
   TransferStartInput,
+  WarpgateImportEvent,
 } from "@shared";
 import { ipcChannels } from "../common/ipc-channels";
 
@@ -43,6 +44,7 @@ const portForwardListeners = new Set<
 const updateListeners = new Set<(event: UpdateEvent) => void>();
 const authListeners = new Set<(state: AuthState) => void>();
 const windowStateListeners = new Set<(state: DesktopWindowState) => void>();
+const warpgateImportListeners = new Set<(event: WarpgateImportEvent) => void>();
 const sessionShareListeners = new Set<(event: SessionShareEvent) => void>();
 const sessionShareChatListeners = new Set<
   (event: SessionShareChatEvent) => void
@@ -135,6 +137,15 @@ ipcRenderer.on(ipcChannels.auth.event, (_event, payload: AuthState) => {
 });
 
 ipcRenderer.on(
+  ipcChannels.warpgate.event,
+  (_event, payload: WarpgateImportEvent) => {
+    for (const listener of warpgateImportListeners) {
+      listener(payload);
+    }
+  },
+);
+
+ipcRenderer.on(
   ipcChannels.window.stateChanged,
   (_event, payload: DesktopWindowState) => {
     for (const listener of windowStateListeners) {
@@ -221,6 +232,16 @@ const api: DesktopApi = {
       ),
     listSshTargets: (baseUrl: string, token: string) =>
       ipcRenderer.invoke(ipcChannels.warpgate.listSshTargets, baseUrl, token),
+    startBrowserImport: (baseUrl: string) =>
+      ipcRenderer.invoke(ipcChannels.warpgate.startBrowserImport, baseUrl),
+    cancelBrowserImport: (attemptId: string) =>
+      ipcRenderer.invoke(ipcChannels.warpgate.cancelBrowserImport, attemptId),
+    onImportEvent: (listener: (event: WarpgateImportEvent) => void) => {
+      warpgateImportListeners.add(listener);
+      return () => {
+        warpgateImportListeners.delete(listener);
+      };
+    },
   },
   termius: {
     probeLocal: () => ipcRenderer.invoke(ipcChannels.termius.probeLocal),

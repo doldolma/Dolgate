@@ -224,7 +224,7 @@ describe('Xshell import dialog', () => {
     await waitFor(() => expect(api.xshell.probeDefault).toHaveBeenCalled());
 
     expect(screen.getByText('Xshell 가져오기')).toBeInTheDocument();
-    expect(screen.getByText('저장된 비밀번호는 자동 가져오기를 시도합니다. 실패하면 호스트만 추가됩니다.')).toBeInTheDocument();
+    expect(screen.getByText('암호화된 비밀번호는 복호화를 시도합니다. 실패하면 호스트만 추가됩니다.')).toBeInTheDocument();
     expect(screen.getByText('root-host')).toBeInTheDocument();
     expect(screen.getByText('루트 세션')).toBeInTheDocument();
 

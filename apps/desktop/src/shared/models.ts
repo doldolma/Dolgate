@@ -575,6 +575,22 @@ export interface WarpgateConnectionInfo {
   username?: string | null;
 }
 
+export type WarpgateImportStatus =
+  | 'opening-browser'
+  | 'waiting-for-login'
+  | 'loading-targets'
+  | 'completed'
+  | 'cancelled'
+  | 'error';
+
+export interface WarpgateImportEvent {
+  attemptId: string;
+  status: WarpgateImportStatus;
+  connectionInfo?: WarpgateConnectionInfo | null;
+  targets?: WarpgateTargetSummary[] | null;
+  errorMessage?: string | null;
+}
+
 export interface KeyboardInteractivePrompt {
   label: string;
   echo: boolean;

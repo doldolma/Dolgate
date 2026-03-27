@@ -205,6 +205,7 @@ if (termiusHelperArgIndex >= 0) {
 
     coreManager.registerWindow(window);
     authService.registerWindow(window);
+    warpgateService.registerWindow(window);
     sessionShareService.registerWindow(window);
     updateService.registerWindow(window);
 
