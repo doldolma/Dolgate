@@ -7,16 +7,21 @@ import type { AuthState } from '@shared';
 import { ipcChannels } from '../common/ipc-channels';
 import type { DesktopConfigService } from './app-config';
 import type { SettingsRepository } from './database';
+import { normalizeServerUrl, type OfflineSessionCache, isOfflineSessionCache, verifyOfflineLease } from './offline-auth';
 import { SecretStore } from './secret-store';
 import { getDesktopStateStorage } from './state-storage';
 
 const REFRESH_TOKEN_ACCOUNT = 'auth:refresh-token';
+const OFFLINE_SESSION_CACHE_ACCOUNT = 'auth:offline-session-cache';
 const LOOPBACK_CALLBACK_HOST = '127.0.0.1';
+const OFFLINE_RETRY_INITIAL_DELAY_MS = 30_000;
+const OFFLINE_RETRY_MAX_DELAY_MS = 15 * 60_000;
 
 function createDefaultAuthState(): AuthState {
   return {
     status: 'loading',
     session: null,
+    offline: null,
     errorMessage: null
   };
 }
@@ -25,8 +30,7 @@ function isAuthSession(value: unknown): value is AuthSession {
   if (!value || typeof value !== 'object') {
     return false;
   }
-  const candidate = value as Record<string, unknown>;
-  return typeof candidate.syncServerTime === 'string' && candidate.tokens != null && candidate.user != null && candidate.vaultBootstrap != null;
+  return normalizeAuthSession(value) !== null;
 }
 
 function toErrorMessage(error: unknown, fallback: string): string {
@@ -52,6 +56,100 @@ async function toApiErrorMessage(response: Response, fallback: string): Promise<
   return text || `${fallback} (${response.status})`;
 }
 
+type SessionRequestErrorKind = 'network' | 'auth' | 'server' | 'invalid-response';
+
+class SessionRequestError extends Error {
+  constructor(
+    message: string,
+    readonly kind: SessionRequestErrorKind,
+    readonly status?: number
+  ) {
+    super(message);
+    this.name = 'SessionRequestError';
+  }
+}
+
+type SessionInvalidationContext = {
+  reason: 'logout' | 'auth-invalid' | 'offline-expired' | 'account-changed';
+  purgeSyncedCache: boolean;
+};
+
+function createFallbackOfflineLease(): AuthSession['offlineLease'] {
+  return {
+    token: '',
+    issuedAt: '',
+    expiresAt: '',
+    verificationPublicKeyPem: ''
+  };
+}
+
+function normalizeAuthSession(value: unknown): AuthSession | null {
+  if (!value || typeof value !== 'object') {
+    return null;
+  }
+
+  const candidate = value as Record<string, unknown>;
+  const user = candidate.user as Record<string, unknown> | undefined;
+  const tokens = candidate.tokens as Record<string, unknown> | undefined;
+  const vaultBootstrap = candidate.vaultBootstrap as Record<string, unknown> | undefined;
+  const offlineLease = candidate.offlineLease as Record<string, unknown> | undefined;
+
+  if (
+    typeof candidate.syncServerTime !== 'string' ||
+    user == null ||
+    typeof user.id !== 'string' ||
+    typeof user.email !== 'string' ||
+    tokens == null ||
+    typeof tokens.accessToken !== 'string' ||
+    typeof tokens.refreshToken !== 'string' ||
+    typeof tokens.expiresInSeconds !== 'number' ||
+    vaultBootstrap == null ||
+    typeof vaultBootstrap.keyBase64 !== 'string'
+  ) {
+    return null;
+  }
+
+  const normalizedOfflineLease =
+    offlineLease != null &&
+    typeof offlineLease.token === 'string' &&
+    typeof offlineLease.issuedAt === 'string' &&
+    typeof offlineLease.expiresAt === 'string' &&
+    typeof offlineLease.verificationPublicKeyPem === 'string'
+      ? {
+          token: offlineLease.token,
+          issuedAt: offlineLease.issuedAt,
+          expiresAt: offlineLease.expiresAt,
+          verificationPublicKeyPem: offlineLease.verificationPublicKeyPem
+        }
+      : createFallbackOfflineLease();
+
+  return {
+    user: {
+      id: user.id,
+      email: user.email
+    },
+    tokens: {
+      accessToken: tokens.accessToken,
+      refreshToken: tokens.refreshToken,
+      expiresInSeconds: tokens.expiresInSeconds
+    },
+    vaultBootstrap: {
+      keyBase64: vaultBootstrap.keyBase64
+    },
+    offlineLease: normalizedOfflineLease,
+    syncServerTime: candidate.syncServerTime
+  };
+}
+
+function hasUsableOfflineLease(session: Pick<AuthSession, 'offlineLease'>): boolean {
+  return Boolean(
+    session.offlineLease.token &&
+      session.offlineLease.issuedAt &&
+      session.offlineLease.expiresAt &&
+      session.offlineLease.verificationPublicKeyPem
+  );
+}
+
 function readE2EAuthSessionFromEnv(): AuthSession | null {
   const raw = process.env.DOLSSH_E2E_AUTH_SESSION_JSON?.trim();
   if (!raw) {
@@ -59,11 +157,12 @@ function readE2EAuthSessionFromEnv(): AuthSession | null {
   }
 
   const parsed = JSON.parse(raw) as unknown;
-  if (!isAuthSession(parsed)) {
+  const session = normalizeAuthSession(parsed);
+  if (!session) {
     throw new Error('DOLSSH_E2E_AUTH_SESSION_JSON 값이 올바른 AuthSession 형식이 아닙니다.');
   }
 
-  return parsed;
+  return session;
 }
 
 interface ActivityLogInput {
@@ -79,10 +178,13 @@ export class AuthService {
   private readonly processedExchangeCodes = new Set<string>();
   private state: AuthState = createDefaultAuthState();
   private refreshTimer: NodeJS.Timeout | null = null;
+  private offlineRetryTimer: NodeJS.Timeout | null = null;
+  private offlineLeaseExpiryTimer: NodeJS.Timeout | null = null;
+  private offlineRetryDelayMs = OFFLINE_RETRY_INITIAL_DELAY_MS;
   private refreshPromise: Promise<AuthState> | null = null;
   private pendingBrowserLoginState: string | null = null;
   private exchangeInFlightCode: string | null = null;
-  private onSessionInvalidated: (() => Promise<void> | void) | null = null;
+  private onSessionInvalidated: ((context: SessionInvalidationContext) => Promise<void> | void) | null = null;
   private loopbackCallbackServer: Server | null = null;
 
   constructor(
@@ -115,12 +217,12 @@ export class AuthService {
     return this.state;
   }
 
-  setOnSessionInvalidated(callback: () => Promise<void> | void): void {
+  setOnSessionInvalidated(callback: (context: SessionInvalidationContext) => Promise<void> | void): void {
     this.onSessionInvalidated = callback;
   }
 
   async bootstrap(): Promise<AuthState> {
-    if (this.state.status === 'authenticated') {
+    if (this.state.status === 'authenticated' || this.state.status === 'offline-authenticated') {
       return this.state;
     }
 
@@ -130,6 +232,7 @@ export class AuthService {
       this.patchState({
         status: 'authenticated',
         session: e2eSession,
+        offline: null,
         errorMessage: null
       });
       return this.state;
@@ -156,6 +259,10 @@ export class AuthService {
     }
   }
 
+  async retryOnline(): Promise<AuthState> {
+    return this.refreshSession();
+  }
+
   private async restoreSessionFromRefreshToken(fallbackMessage: string): Promise<AuthState> {
     const refreshToken = await this.secretStore.load(REFRESH_TOKEN_ACCOUNT);
     if (!refreshToken) {
@@ -163,22 +270,38 @@ export class AuthService {
       this.patchState({
         status: 'unauthenticated',
         session: null,
+        offline: null,
         errorMessage: null
       });
       return this.state;
     }
 
     try {
-      const session = await this.requestSession('/auth/refresh', {
+      const session = await this.requestSessionWithClassification('/auth/refresh', {
         refreshToken
       });
       await this.persistSession(session);
       return this.state;
     } catch (error) {
-      await this.clearSession({
-        status: 'unauthenticated',
-        errorMessage: toErrorMessage(error, fallbackMessage)
-      });
+      if (this.isTransientSessionError(error)) {
+        const restoredOffline = await this.restoreOfflineSession(toErrorMessage(error, fallbackMessage));
+        if (restoredOffline) {
+          return restoredOffline;
+        }
+      }
+
+      await this.clearSession(
+        {
+          status: 'unauthenticated',
+          errorMessage: toErrorMessage(error, fallbackMessage)
+        },
+        {
+          reason: 'auth-invalid',
+          purgeSyncedCache: false,
+          removeRefreshToken: true,
+          removeOfflineCache: true
+        }
+      );
       return this.state;
     }
   }
@@ -223,7 +346,7 @@ export class AuthService {
     this.exchangeInFlightCode = code;
 
     try {
-      const session = await this.requestSession('/auth/exchange', {
+      const session = await this.requestSessionWithClassification('/auth/exchange', {
         code
       });
       this.processedExchangeCodes.add(code);
@@ -257,7 +380,7 @@ export class AuthService {
         })
       }).catch(() => undefined);
     }
-    if (this.state.status === 'authenticated' && this.state.session) {
+    if ((this.state.status === 'authenticated' || this.state.status === 'offline-authenticated') && this.state.session) {
       this.log({
         level: 'info',
         category: 'audit',
@@ -268,10 +391,18 @@ export class AuthService {
         }
       });
     }
-    await this.clearSession({
-      status: 'unauthenticated',
-      errorMessage: null
-    });
+    await this.clearSession(
+      {
+        status: 'unauthenticated',
+        errorMessage: null
+      },
+      {
+        reason: 'logout',
+        purgeSyncedCache: true,
+        removeRefreshToken: true,
+        removeOfflineCache: true
+      }
+    );
   }
 
   async forceUnauthenticated(errorMessage?: string): Promise<void> {
@@ -285,13 +416,24 @@ export class AuthService {
         }
       });
     }
-    await this.clearSession({
-      status: 'unauthenticated',
-      errorMessage: errorMessage ?? null
-    });
+    await this.clearSession(
+      {
+        status: 'unauthenticated',
+        errorMessage: errorMessage ?? null
+      },
+      {
+        reason: 'auth-invalid',
+        purgeSyncedCache: false,
+        removeRefreshToken: true,
+        removeOfflineCache: true
+      }
+    );
   }
 
   getAccessToken(): string {
+    if (this.state.status === 'offline-authenticated') {
+      throw new Error('오프라인 모드에서는 서버 연결이 필요한 기능을 사용할 수 없습니다.');
+    }
     if (this.state.status !== 'authenticated' || !this.state.session?.tokens.accessToken) {
       throw new Error('로그인이 필요합니다.');
     }
@@ -299,20 +441,28 @@ export class AuthService {
   }
 
   getVaultKeyBase64(): string {
-    if (this.state.status !== 'authenticated' || !this.state.session?.vaultBootstrap.keyBase64) {
+    if (
+      (this.state.status !== 'authenticated' && this.state.status !== 'offline-authenticated') ||
+      !this.state.session?.vaultBootstrap.keyBase64
+    ) {
       throw new Error('세션 vault key가 없습니다.');
     }
     return this.state.session.vaultBootstrap.keyBase64;
   }
 
   private async requestSession(pathname: string, payload: Record<string, unknown>): Promise<AuthSession> {
-    const response = await fetch(new URL(pathname, this.getServerUrl()), {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify(payload)
-    });
+    let response: Response;
+    try {
+      response = await fetch(new URL(pathname, this.getServerUrl()), {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(payload)
+      });
+    } catch (error) {
+      throw new SessionRequestError(toErrorMessage(error, '서버에 연결하지 못했습니다.'), 'network');
+    }
 
     if (!response.ok) {
       throw new Error(await toApiErrorMessage(response, '인증 요청에 실패했습니다.'));
@@ -325,14 +475,67 @@ export class AuthService {
     return json;
   }
 
+  private async requestSessionWithClassification(pathname: string, payload: Record<string, unknown>): Promise<AuthSession> {
+    let response: Response;
+    try {
+      response = await fetch(new URL(pathname, this.getServerUrl()), {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(payload)
+      });
+    } catch (error) {
+      throw new SessionRequestError(toErrorMessage(error, '서버에 연결하지 못했습니다.'), 'network');
+    }
+
+    if (!response.ok) {
+      const message = await toApiErrorMessage(response, '인증 요청에 실패했습니다.');
+      if (response.status === 401 || response.status === 403) {
+        throw new SessionRequestError(message, 'auth', response.status);
+      }
+      if (response.status >= 500) {
+        throw new SessionRequestError(message, 'server', response.status);
+      }
+      throw new SessionRequestError(message, 'invalid-response', response.status);
+    }
+
+    const json = (await response.json()) as unknown;
+    const session = normalizeAuthSession(json);
+    if (!session) {
+      throw new SessionRequestError('인증 응답 형식이 올바르지 않습니다.', 'invalid-response');
+    }
+    return session;
+  }
+
   private async persistSession(session: AuthSession): Promise<void> {
+    const normalizedServerUrl = normalizeServerUrl(this.getServerUrl());
+    const owner = this.stateStorage.getSyncDataOwner();
+    const ownerChanged =
+      Boolean(owner.userId || owner.serverUrl) &&
+      (owner.userId !== session.user.id || owner.serverUrl !== normalizedServerUrl);
+
+    if (ownerChanged) {
+      await this.notifySessionInvalidated({
+        reason: 'account-changed',
+        purgeSyncedCache: true
+      });
+    }
+
     await this.secretStore.save(REFRESH_TOKEN_ACCOUNT, session.tokens.refreshToken);
+    await this.persistOfflineSessionCache(session);
     this.stateStorage.updateAuthStatus('authenticated');
+    this.stateStorage.updateSyncDataOwner({
+      userId: session.user.id,
+      serverUrl: normalizedServerUrl
+    });
     this.patchState({
       status: 'authenticated',
       session,
+      offline: null,
       errorMessage: null
     });
+    this.offlineRetryDelayMs = OFFLINE_RETRY_INITIAL_DELAY_MS;
     this.scheduleRefresh(session.tokens.expiresInSeconds);
   }
 
@@ -340,31 +543,212 @@ export class AuthService {
     if (this.refreshTimer) {
       clearTimeout(this.refreshTimer);
     }
+    this.clearOfflineTimers();
     const delay = Math.max(15_000, (expiresInSeconds - 60) * 1000);
     this.refreshTimer = setTimeout(() => {
       void this.refreshSession();
     }, delay);
   }
 
-  private async clearSession(nextState: Pick<AuthState, 'status' | 'errorMessage'>): Promise<void> {
-    if (this.refreshTimer) {
-      clearTimeout(this.refreshTimer);
-      this.refreshTimer = null;
+  private async clearSession(
+    nextState: Pick<AuthState, 'status' | 'errorMessage'>,
+    options: {
+      reason: SessionInvalidationContext['reason'];
+      purgeSyncedCache: boolean;
+      removeRefreshToken: boolean;
+      removeOfflineCache: boolean;
     }
+  ): Promise<void> {
+    this.clearRefreshTimer();
+    this.clearOfflineTimers();
     await this.closeLoopbackCallbackServer();
-    await this.secretStore.remove(REFRESH_TOKEN_ACCOUNT).catch(() => undefined);
+    if (options.removeRefreshToken) {
+      await this.secretStore.remove(REFRESH_TOKEN_ACCOUNT).catch(() => undefined);
+    }
+    if (options.removeOfflineCache) {
+      await this.secretStore.remove(OFFLINE_SESSION_CACHE_ACCOUNT).catch(() => undefined);
+    }
     this.exchangeInFlightCode = null;
     this.pendingBrowserLoginState = null;
     this.state = {
       status: nextState.status,
       session: null,
+      offline: null,
       errorMessage: nextState.errorMessage ?? null
     };
-    this.stateStorage.updateAuthStatus('unauthenticated');
-    if (this.onSessionInvalidated) {
-      await this.onSessionInvalidated();
-    }
+    this.stateStorage.updateAuthStatus(nextState.status === 'offline-authenticated' ? 'offline-authenticated' : 'unauthenticated');
+    await this.notifySessionInvalidated({
+      reason: options.reason,
+      purgeSyncedCache: options.purgeSyncedCache
+    });
     this.broadcast(this.state);
+  }
+
+  private isTransientSessionError(error: unknown): boolean {
+    return error instanceof SessionRequestError && (error.kind === 'network' || error.kind === 'server');
+  }
+
+  private async restoreOfflineSession(reasonMessage: string): Promise<AuthState | null> {
+    const cache = await this.loadOfflineSessionCache();
+    if (!cache) {
+      return null;
+    }
+
+    const verification = verifyOfflineLease(cache, this.getServerUrl());
+    if (!verification.ok) {
+      await this.clearSession(
+        {
+          status: 'unauthenticated',
+          errorMessage: '오프라인 사용 가능 시간이 만료되어 다시 로그인이 필요합니다.'
+        },
+        {
+          reason: 'offline-expired',
+          purgeSyncedCache: false,
+          removeRefreshToken: true,
+          removeOfflineCache: true
+        }
+      );
+      return this.state;
+    }
+
+    const offlineSession: AuthSession = {
+      user: cache.user,
+      tokens: {
+        accessToken: '',
+        refreshToken: '',
+        expiresInSeconds: 0
+      },
+      vaultBootstrap: cache.vaultBootstrap,
+      offlineLease: cache.offlineLease,
+      syncServerTime: cache.lastOnlineAt
+    };
+
+    this.clearRefreshTimer();
+    this.clearOfflineTimers();
+    this.stateStorage.updateAuthStatus('offline-authenticated');
+    this.patchState({
+      status: 'offline-authenticated',
+      session: offlineSession,
+      offline: {
+        expiresAt: verification.expiresAt,
+        lastOnlineAt: cache.lastOnlineAt,
+        reason: reasonMessage
+      },
+      errorMessage: null
+    });
+    this.scheduleOfflineLeaseExpiry(verification.expiresAt);
+    this.scheduleOfflineRetry();
+    return this.state;
+  }
+
+  private async persistOfflineSessionCache(session: AuthSession): Promise<void> {
+    if (!this.secretStore.isEncryptionAvailable() || !hasUsableOfflineLease(session)) {
+      await this.secretStore.remove(OFFLINE_SESSION_CACHE_ACCOUNT).catch(() => undefined);
+      return;
+    }
+
+    const cache: OfflineSessionCache = {
+      serverUrl: normalizeServerUrl(this.getServerUrl()),
+      user: session.user,
+      vaultBootstrap: session.vaultBootstrap,
+      offlineLease: session.offlineLease,
+      lastOnlineAt: new Date().toISOString()
+    };
+    await this.secretStore.save(OFFLINE_SESSION_CACHE_ACCOUNT, JSON.stringify(cache));
+  }
+
+  private async loadOfflineSessionCache(): Promise<OfflineSessionCache | null> {
+    if (!this.secretStore.isEncryptionAvailable()) {
+      return null;
+    }
+
+    const raw = await this.secretStore.load(OFFLINE_SESSION_CACHE_ACCOUNT);
+    if (!raw) {
+      return null;
+    }
+
+    try {
+      const parsed = JSON.parse(raw) as unknown;
+      if (!isOfflineSessionCache(parsed)) {
+        return null;
+      }
+      if (parsed.serverUrl !== normalizeServerUrl(this.getServerUrl())) {
+        return null;
+      }
+      return parsed;
+    } catch {
+      return null;
+    }
+  }
+
+  private clearRefreshTimer(): void {
+    if (!this.refreshTimer) {
+      return;
+    }
+    clearTimeout(this.refreshTimer);
+    this.refreshTimer = null;
+  }
+
+  private clearOfflineTimers(): void {
+    if (this.offlineRetryTimer) {
+      clearTimeout(this.offlineRetryTimer);
+      this.offlineRetryTimer = null;
+    }
+    if (this.offlineLeaseExpiryTimer) {
+      clearTimeout(this.offlineLeaseExpiryTimer);
+      this.offlineLeaseExpiryTimer = null;
+    }
+  }
+
+  private scheduleOfflineRetry(): void {
+    if (this.state.status !== 'offline-authenticated') {
+      return;
+    }
+
+    if (this.offlineRetryTimer) {
+      clearTimeout(this.offlineRetryTimer);
+    }
+
+    const delay = this.offlineRetryDelayMs;
+    this.offlineRetryTimer = setTimeout(() => {
+      void this.retryOnline()
+        .catch(() => undefined)
+        .finally(() => {
+          if (this.state.status === 'offline-authenticated') {
+            this.offlineRetryDelayMs = Math.min(this.offlineRetryDelayMs * 2, OFFLINE_RETRY_MAX_DELAY_MS);
+            this.scheduleOfflineRetry();
+          }
+        });
+    }, delay);
+  }
+
+  private scheduleOfflineLeaseExpiry(expiresAt: string): void {
+    if (this.offlineLeaseExpiryTimer) {
+      clearTimeout(this.offlineLeaseExpiryTimer);
+    }
+
+    const delay = Math.max(0, new Date(expiresAt).getTime() - Date.now());
+    this.offlineLeaseExpiryTimer = setTimeout(() => {
+      void this.clearSession(
+        {
+          status: 'unauthenticated',
+          errorMessage: '오프라인 사용 가능 시간이 만료되어 다시 로그인이 필요합니다.'
+        },
+        {
+          reason: 'offline-expired',
+          purgeSyncedCache: false,
+          removeRefreshToken: true,
+          removeOfflineCache: true
+        }
+      );
+    }, delay);
+  }
+
+  private async notifySessionInvalidated(context: SessionInvalidationContext): Promise<void> {
+    if (!this.onSessionInvalidated) {
+      return;
+    }
+    await this.onSessionInvalidated(context);
   }
 
   private patchState(patch: Partial<AuthState>): void {

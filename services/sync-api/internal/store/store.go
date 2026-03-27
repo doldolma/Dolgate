@@ -22,10 +22,12 @@ type AuthIdentity struct {
 }
 
 type RefreshToken struct {
-	UserID     string
-	TokenHash  string
-	ExpiresAt  time.Time
-	LastUsedAt time.Time
+	UserID       string
+	TokenHash    string
+	ExpiresAt    time.Time
+	LastUsedAt   time.Time
+	GraceUntil   *time.Time
+	SupersededAt *time.Time
 }
 
 type ExchangeCode struct {

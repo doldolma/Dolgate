@@ -10,6 +10,9 @@
     "jwtSecret": "change-me-in-production",
     "accessTokenTtlMinutes": 15,
     "refreshTokenIdleDays": 14,
+    "offlineLeaseTtlHours": 72,
+    "refreshRotationHandoffSeconds": 120,
+    "offlineLeaseSigningPrivateKeyPem": "",
     "local": {
       "enabled": true,
       "signupEnabled": true

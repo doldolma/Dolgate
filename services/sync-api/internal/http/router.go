@@ -164,7 +164,7 @@ func NewRouter(store store.Store, authService *auth.Service, config RouterConfig
 			return
 		}
 
-		user, _, err := authService.Login(ctx.Request.Context(), form.Email, form.Password)
+		user, _, err := authService.Login(ctx.Request.Context(), form.Email, form.Password, resolveRequestOrigin(ctx))
 		if err != nil {
 			renderLoginPage(ctx, loginPageData{
 				Title:              "Sign in to dolssh",
@@ -242,7 +242,7 @@ func NewRouter(store store.Store, authService *auth.Service, config RouterConfig
 			return
 		}
 
-		user, _, err := authService.Signup(ctx.Request.Context(), form.Email, form.Password)
+		user, _, err := authService.Signup(ctx.Request.Context(), form.Email, form.Password, resolveRequestOrigin(ctx))
 		if err != nil {
 			renderLoginPage(ctx, loginPageData{
 				Title:              "Create your dolssh account",
@@ -355,7 +355,7 @@ func NewRouter(store store.Store, authService *auth.Service, config RouterConfig
 			return
 		}
 
-		_, session, err := authService.Signup(ctx.Request.Context(), request.Email, request.Password)
+		_, session, err := authService.Signup(ctx.Request.Context(), request.Email, request.Password, resolveRequestOrigin(ctx))
 		if err != nil {
 			ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
@@ -370,7 +370,7 @@ func NewRouter(store store.Store, authService *auth.Service, config RouterConfig
 			return
 		}
 
-		_, session, err := authService.Login(ctx.Request.Context(), request.Email, request.Password)
+		_, session, err := authService.Login(ctx.Request.Context(), request.Email, request.Password, resolveRequestOrigin(ctx))
 		if err != nil {
 			status := http.StatusUnauthorized
 			if !errors.Is(err, auth.ErrInvalidCredentials) {
@@ -388,7 +388,7 @@ func NewRouter(store store.Store, authService *auth.Service, config RouterConfig
 			ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
-		session, err := authService.ExchangeCode(ctx.Request.Context(), request.Code)
+		session, err := authService.ExchangeCode(ctx.Request.Context(), request.Code, resolveRequestOrigin(ctx))
 		if err != nil {
 			ctx.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
 			return
@@ -402,7 +402,7 @@ func NewRouter(store store.Store, authService *auth.Service, config RouterConfig
 			ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
-		session, err := authService.Refresh(ctx.Request.Context(), request.RefreshToken)
+		session, err := authService.Refresh(ctx.Request.Context(), request.RefreshToken, resolveRequestOrigin(ctx))
 		if err != nil {
 			ctx.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
 			return
@@ -711,6 +711,21 @@ func completeDesktopLogin(ctx *gin.Context, redirectURI string, code string, sta
 		return
 	}
 	renderDesktopCallbackBridgePage(ctx, callbackURL)
+}
+
+func resolveRequestOrigin(ctx *gin.Context) string {
+	scheme := "http"
+	if forwarded := strings.TrimSpace(ctx.GetHeader("X-Forwarded-Proto")); forwarded != "" {
+		scheme = forwarded
+	} else if ctx.Request.TLS != nil {
+		scheme = "https"
+	}
+
+	host := strings.TrimSpace(ctx.Request.Host)
+	if host == "" {
+		host = "localhost"
+	}
+	return scheme + "://" + host
 }
 
 func authMiddleware(authService *auth.Service) gin.HandlerFunc {

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strconv"
 )
 
 type AppConfig struct {
@@ -22,11 +23,14 @@ type DatabaseConfig struct {
 }
 
 type AuthConfig struct {
-	JWTSecret             string          `json:"jwtSecret"`
-	AccessTokenTTLMinutes int             `json:"accessTokenTtlMinutes"`
-	RefreshTokenIdleDays  int             `json:"refreshTokenIdleDays"`
-	Local                 LocalAuthConfig `json:"local"`
-	OIDC                  OIDCConfig      `json:"oidc"`
+	JWTSecret                        string          `json:"jwtSecret"`
+	AccessTokenTTLMinutes            int             `json:"accessTokenTtlMinutes"`
+	RefreshTokenIdleDays             int             `json:"refreshTokenIdleDays"`
+	OfflineLeaseTTLHours             int             `json:"offlineLeaseTtlHours"`
+	RefreshRotationHandoffSeconds    int             `json:"refreshRotationHandoffSeconds"`
+	OfflineLeaseSigningPrivateKeyPEM string          `json:"offlineLeaseSigningPrivateKeyPem"`
+	Local                            LocalAuthConfig `json:"local"`
+	OIDC                             OIDCConfig      `json:"oidc"`
 }
 
 type LocalAuthConfig struct {
@@ -54,9 +58,11 @@ func defaultConfig() AppConfig {
 			URL:    "file:dolssh_sync.db?_pragma=busy_timeout(5000)",
 		},
 		Auth: AuthConfig{
-			JWTSecret:             "dev-dolssh-secret",
-			AccessTokenTTLMinutes: 15,
-			RefreshTokenIdleDays:  14,
+			JWTSecret:                     "dev-dolssh-secret",
+			AccessTokenTTLMinutes:         15,
+			RefreshTokenIdleDays:          14,
+			OfflineLeaseTTLHours:          72,
+			RefreshRotationHandoffSeconds: 120,
 			Local: LocalAuthConfig{
 				Enabled:       true,
 				SignupEnabled: true,
@@ -115,6 +121,11 @@ func applyEnvOverrides(cfg *AppConfig) {
 	cfg.Database.URL = getenv("DATABASE_URL", cfg.Database.URL)
 	cfg.Server.Port = getenv("PORT", cfg.Server.Port)
 	cfg.Auth.JWTSecret = getenv("JWT_SECRET", cfg.Auth.JWTSecret)
+	cfg.Auth.OfflineLeaseSigningPrivateKeyPEM = getenv("OFFLINE_LEASE_SIGNING_PRIVATE_KEY_PEM", cfg.Auth.OfflineLeaseSigningPrivateKeyPEM)
+	cfg.Auth.AccessTokenTTLMinutes = getenvInt("ACCESS_TOKEN_TTL_MINUTES", cfg.Auth.AccessTokenTTLMinutes)
+	cfg.Auth.RefreshTokenIdleDays = getenvInt("REFRESH_TOKEN_IDLE_DAYS", cfg.Auth.RefreshTokenIdleDays)
+	cfg.Auth.OfflineLeaseTTLHours = getenvInt("OFFLINE_LEASE_TTL_HOURS", cfg.Auth.OfflineLeaseTTLHours)
+	cfg.Auth.RefreshRotationHandoffSeconds = getenvInt("REFRESH_ROTATION_HANDOFF_SECONDS", cfg.Auth.RefreshRotationHandoffSeconds)
 	cfg.Auth.Local.Enabled = getenv("LOCAL_AUTH_ENABLED", boolToString(cfg.Auth.Local.Enabled)) != "false"
 	cfg.Auth.Local.SignupEnabled = getenv("LOCAL_SIGNUP_ENABLED", boolToString(cfg.Auth.Local.SignupEnabled)) != "false"
 	cfg.Auth.OIDC.Enabled = getenv("OIDC_ENABLED", boolToString(cfg.Auth.OIDC.Enabled)) == "true"
@@ -138,4 +149,16 @@ func boolToString(value bool) string {
 		return "true"
 	}
 	return "false"
+}
+
+func getenvInt(key string, fallback int) int {
+	value := os.Getenv(key)
+	if value == "" {
+		return fallback
+	}
+	parsed, err := strconv.Atoi(value)
+	if err != nil {
+		return fallback
+	}
+	return parsed
 }

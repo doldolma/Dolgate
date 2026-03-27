@@ -28,12 +28,18 @@ func main() {
 		}
 	}()
 
-	authService := auth.NewService(
+	authService, err := auth.NewService(
 		dbStore,
 		cfg.Auth.JWTSecret,
 		time.Duration(cfg.Auth.AccessTokenTTLMinutes)*time.Minute,
 		time.Duration(cfg.Auth.RefreshTokenIdleDays)*24*time.Hour,
+		time.Duration(cfg.Auth.OfflineLeaseTTLHours)*time.Hour,
+		time.Duration(cfg.Auth.RefreshRotationHandoffSeconds)*time.Second,
+		cfg.Auth.OfflineLeaseSigningPrivateKeyPEM,
 	)
+	if err != nil {
+		log.Fatalf("create auth service: %v", err)
+	}
 	router, err := httpserver.NewRouter(dbStore, authService, httpserver.RouterConfig{
 		LocalAuthEnabled:   cfg.Auth.Local.Enabled,
 		LocalSignupEnabled: cfg.Auth.Local.SignupEnabled,

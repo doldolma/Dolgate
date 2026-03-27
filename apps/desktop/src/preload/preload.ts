@@ -166,6 +166,7 @@ const api: DesktopApi = {
   auth: {
     getState: () => ipcRenderer.invoke(ipcChannels.auth.getState),
     bootstrap: () => ipcRenderer.invoke(ipcChannels.auth.bootstrap),
+    retryOnline: () => ipcRenderer.invoke(ipcChannels.auth.retryOnline),
     beginBrowserLogin: () =>
       ipcRenderer.invoke(ipcChannels.auth.beginBrowserLogin),
     logout: () => ipcRenderer.invoke(ipcChannels.auth.logout),

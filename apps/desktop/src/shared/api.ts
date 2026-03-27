@@ -17,11 +17,19 @@ export interface VaultBootstrap {
   keyBase64: string;
 }
 
+export interface OfflineLease {
+  token: string;
+  issuedAt: string;
+  expiresAt: string;
+  verificationPublicKeyPem: string;
+}
+
 // 로그인/교환/refresh 성공 시 desktop이 한 번에 받아야 하는 세션 정보다.
 export interface AuthSession {
   user: SessionUser;
   tokens: AuthTokenPair;
   vaultBootstrap: VaultBootstrap;
+  offlineLease: OfflineLease;
   syncServerTime: string;
 }
 

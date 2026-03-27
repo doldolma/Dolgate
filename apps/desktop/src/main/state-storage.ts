@@ -75,13 +75,15 @@ export interface DesktopStateFile {
     updatedAt: string;
   };
   auth: {
-    status: 'unknown' | 'authenticated' | 'unauthenticated';
+    status: 'unknown' | 'authenticated' | 'offline-authenticated' | 'unauthenticated';
     updatedAt: string;
   };
   sync: {
     lastSuccessfulSyncAt: string | null;
     pendingPush: boolean;
     errorMessage: string | null;
+    ownerUserId: string | null;
+    ownerServerUrl: string | null;
     updatedAt: string;
   };
   data: {
@@ -321,6 +323,8 @@ function createDefaultStateFile(): DesktopStateFile {
       lastSuccessfulSyncAt: null,
       pendingPush: false,
       errorMessage: null,
+      ownerUserId: null,
+      ownerServerUrl: null,
       updatedAt: timestamp
     },
     data: {
@@ -493,13 +497,18 @@ function normalizeStateFile(value: unknown): DesktopStateFile {
       updatedAt: typeof updater.updatedAt === 'string' ? updater.updatedAt : fallback.updater.updatedAt
     },
     auth: {
-      status: auth.status === 'authenticated' || auth.status === 'unauthenticated' ? auth.status : 'unknown',
+      status:
+        auth.status === 'authenticated' || auth.status === 'offline-authenticated' || auth.status === 'unauthenticated'
+          ? auth.status
+          : 'unknown',
       updatedAt: typeof auth.updatedAt === 'string' ? auth.updatedAt : fallback.auth.updatedAt
     },
     sync: {
       lastSuccessfulSyncAt: typeof sync.lastSuccessfulSyncAt === 'string' ? sync.lastSuccessfulSyncAt : null,
       pendingPush: typeof sync.pendingPush === 'boolean' ? sync.pendingPush : false,
       errorMessage: typeof sync.errorMessage === 'string' ? sync.errorMessage : null,
+      ownerUserId: typeof sync.ownerUserId === 'string' ? sync.ownerUserId : null,
+      ownerServerUrl: typeof sync.ownerServerUrl === 'string' ? sync.ownerServerUrl : null,
       updatedAt: typeof sync.updatedAt === 'string' ? sync.updatedAt : fallback.sync.updatedAt
     },
     data: {
@@ -638,6 +647,22 @@ class DesktopStateStorage {
         Object.prototype.hasOwnProperty.call(snapshot, 'lastSuccessfulSyncAt') ? snapshot.lastSuccessfulSyncAt ?? null : draft.sync.lastSuccessfulSyncAt;
       draft.sync.pendingPush = snapshot.pendingPush;
       draft.sync.errorMessage = snapshot.errorMessage ?? null;
+      draft.sync.updatedAt = nowIso();
+    });
+  }
+
+  getSyncDataOwner(): { userId: string | null; serverUrl: string | null } {
+    this.ensureLoaded();
+    return {
+      userId: this.state.sync.ownerUserId,
+      serverUrl: this.state.sync.ownerServerUrl
+    };
+  }
+
+  updateSyncDataOwner(owner: { userId: string | null; serverUrl: string | null }): void {
+    this.updateState((draft) => {
+      draft.sync.ownerUserId = owner.userId;
+      draft.sync.ownerServerUrl = owner.serverUrl;
       draft.sync.updatedAt = nowIso();
     });
   }

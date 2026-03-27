@@ -3,9 +3,13 @@ package auth
 import (
 	"context"
 	"crypto/rand"
+	"crypto/rsa"
 	"crypto/sha256"
+	"crypto/x509"
 	"encoding/hex"
+	"encoding/pem"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -29,6 +33,13 @@ type VaultBootstrap struct {
 	KeyBase64 string `json:"keyBase64"`
 }
 
+type OfflineLease struct {
+	Token                    string `json:"token"`
+	IssuedAt                 string `json:"issuedAt"`
+	ExpiresAt                string `json:"expiresAt"`
+	VerificationPublicKeyPEM string `json:"verificationPublicKeyPem"`
+}
+
 type SessionBootstrap struct {
 	User struct {
 		ID    string `json:"id"`
@@ -36,14 +47,19 @@ type SessionBootstrap struct {
 	} `json:"user"`
 	Tokens         TokenPair      `json:"tokens"`
 	VaultBootstrap VaultBootstrap `json:"vaultBootstrap"`
+	OfflineLease   OfflineLease   `json:"offlineLease"`
 	SyncServerTime string         `json:"syncServerTime"`
 }
 
 type Service struct {
-	store               store.Store
-	jwtSecret           []byte
-	accessTokenTTL      time.Duration
-	refreshTokenIdleTTL time.Duration
+	store                    store.Store
+	jwtSecret                []byte
+	accessTokenTTL           time.Duration
+	refreshTokenIdleTTL      time.Duration
+	offlineLeaseTTL          time.Duration
+	refreshHandoffTTL        time.Duration
+	offlineLeaseKey          *rsa.PrivateKey
+	offlineLeasePublicKeyPEM string
 }
 
 // Claims는 access token에 실어 보낼 사용자 식별 정보다.
@@ -61,16 +77,37 @@ type BrowserLoginState struct {
 	jwt.RegisteredClaims
 }
 
-func NewService(store store.Store, jwtSecret string, accessTokenTTL time.Duration, refreshTokenIdleTTL time.Duration) *Service {
-	return &Service{
-		store:               store,
-		jwtSecret:           []byte(jwtSecret),
-		accessTokenTTL:      accessTokenTTL,
-		refreshTokenIdleTTL: refreshTokenIdleTTL,
-	}
+type OfflineLeaseClaims struct {
+	jwt.RegisteredClaims
 }
 
-func (s *Service) Signup(ctx context.Context, email string, password string) (store.User, SessionBootstrap, error) {
+func NewService(
+	store store.Store,
+	jwtSecret string,
+	accessTokenTTL time.Duration,
+	refreshTokenIdleTTL time.Duration,
+	offlineLeaseTTL time.Duration,
+	refreshHandoffTTL time.Duration,
+	offlineLeaseSigningPrivateKeyPEM string,
+) (*Service, error) {
+	offlineLeaseKey, offlineLeasePublicKeyPEM, err := resolveOfflineLeaseKeypair(offlineLeaseSigningPrivateKeyPEM)
+	if err != nil {
+		return nil, err
+	}
+
+	return &Service{
+		store:                    store,
+		jwtSecret:                []byte(jwtSecret),
+		accessTokenTTL:           accessTokenTTL,
+		refreshTokenIdleTTL:      refreshTokenIdleTTL,
+		offlineLeaseTTL:          offlineLeaseTTL,
+		refreshHandoffTTL:        refreshHandoffTTL,
+		offlineLeaseKey:          offlineLeaseKey,
+		offlineLeasePublicKeyPEM: offlineLeasePublicKeyPEM,
+	}, nil
+}
+
+func (s *Service) Signup(ctx context.Context, email string, password string, issuer string) (store.User, SessionBootstrap, error) {
 	passwordHash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	if err != nil {
 		return store.User{}, SessionBootstrap{}, err
@@ -79,11 +116,11 @@ func (s *Service) Signup(ctx context.Context, email string, password string) (st
 	if err != nil {
 		return store.User{}, SessionBootstrap{}, err
 	}
-	session, err := s.issueSession(ctx, user)
+	session, err := s.issueSession(ctx, user, issuer)
 	return user, session, err
 }
 
-func (s *Service) Login(ctx context.Context, email string, password string) (store.User, SessionBootstrap, error) {
+func (s *Service) Login(ctx context.Context, email string, password string, issuer string) (store.User, SessionBootstrap, error) {
 	user, err := s.store.GetUserByEmail(ctx, email)
 	if err != nil {
 		return store.User{}, SessionBootstrap{}, ErrInvalidCredentials
@@ -94,19 +131,34 @@ func (s *Service) Login(ctx context.Context, email string, password string) (sto
 	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(password)); err != nil {
 		return store.User{}, SessionBootstrap{}, ErrInvalidCredentials
 	}
-	session, err := s.issueSession(ctx, user)
+	session, err := s.issueSession(ctx, user, issuer)
 	return user, session, err
 }
 
-func (s *Service) Refresh(ctx context.Context, refreshToken string) (SessionBootstrap, error) {
+func (s *Service) Refresh(ctx context.Context, refreshToken string, issuer string) (SessionBootstrap, error) {
 	tokenHash := hashToken(refreshToken)
 	record, err := s.store.GetRefreshToken(ctx, tokenHash)
 	if err != nil {
 		return SessionBootstrap{}, ErrInvalidCredentials
 	}
-	if time.Now().After(record.ExpiresAt) {
+	now := time.Now()
+	if now.After(record.ExpiresAt) {
 		_ = s.store.DeleteRefreshToken(ctx, tokenHash)
 		return SessionBootstrap{}, ErrExpiredRefreshToken
+	}
+	if record.SupersededAt != nil {
+		if record.GraceUntil == nil || now.After(*record.GraceUntil) {
+			_ = s.store.DeleteRefreshToken(ctx, tokenHash)
+			return SessionBootstrap{}, ErrInvalidCredentials
+		}
+	} else if s.refreshHandoffTTL > 0 {
+		graceUntil := now.Add(s.refreshHandoffTTL)
+		record.LastUsedAt = now
+		record.SupersededAt = &now
+		record.GraceUntil = &graceUntil
+		if err := s.store.SaveRefreshToken(ctx, record); err != nil {
+			return SessionBootstrap{}, err
+		}
 	}
 
 	user, err := s.store.GetUserByID(ctx, record.UserID)
@@ -115,10 +167,12 @@ func (s *Service) Refresh(ctx context.Context, refreshToken string) (SessionBoot
 	}
 
 	// refresh 성공 시 토큰을 회전시켜 idle 14일 정책을 밀어준다.
-	if err := s.store.DeleteRefreshToken(ctx, tokenHash); err != nil {
-		return SessionBootstrap{}, err
+	if record.SupersededAt == nil && s.refreshHandoffTTL <= 0 {
+		if err := s.store.DeleteRefreshToken(ctx, tokenHash); err != nil {
+			return SessionBootstrap{}, err
+		}
 	}
-	return s.issueSession(ctx, user)
+	return s.issueSession(ctx, user, issuer)
 }
 
 func (s *Service) Logout(ctx context.Context, refreshToken string) error {
@@ -143,7 +197,7 @@ func (s *Service) IssueExchangeCode(ctx context.Context, user store.User) (strin
 	return code, nil
 }
 
-func (s *Service) ExchangeCode(ctx context.Context, code string) (SessionBootstrap, error) {
+func (s *Service) ExchangeCode(ctx context.Context, code string, issuer string) (SessionBootstrap, error) {
 	record, err := s.store.ConsumeExchangeCode(ctx, hashToken(code))
 	if err != nil {
 		return SessionBootstrap{}, ErrInvalidExchangeCode
@@ -155,7 +209,7 @@ func (s *Service) ExchangeCode(ctx context.Context, code string) (SessionBootstr
 	if err != nil {
 		return SessionBootstrap{}, ErrInvalidExchangeCode
 	}
-	return s.issueSession(ctx, user)
+	return s.issueSession(ctx, user, issuer)
 }
 
 func (s *Service) ResolveOIDCUser(ctx context.Context, provider string, subject string, email string, emailVerified bool) (store.User, error) {
@@ -228,12 +282,16 @@ func (s *Service) ParseAccessToken(token string) (*Claims, error) {
 	return claims, nil
 }
 
-func (s *Service) issueSession(ctx context.Context, user store.User) (SessionBootstrap, error) {
-	tokens, err := s.issueTokens(ctx, user)
+func (s *Service) issueSession(ctx context.Context, user store.User, issuer string) (SessionBootstrap, error) {
+	tokens, refreshExpiresAt, err := s.issueTokens(ctx, user)
 	if err != nil {
 		return SessionBootstrap{}, err
 	}
 	vaultKey, err := s.store.GetOrCreateUserVaultKey(ctx, user.ID)
+	if err != nil {
+		return SessionBootstrap{}, err
+	}
+	offlineLease, err := s.issueOfflineLease(user, issuer, refreshExpiresAt)
 	if err != nil {
 		return SessionBootstrap{}, err
 	}
@@ -243,11 +301,12 @@ func (s *Service) issueSession(ctx context.Context, user store.User) (SessionBoo
 	session.User.Email = user.Email
 	session.Tokens = tokens
 	session.VaultBootstrap = VaultBootstrap{KeyBase64: vaultKey.KeyBase64}
+	session.OfflineLease = offlineLease
 	session.SyncServerTime = time.Now().UTC().Format(time.RFC3339)
 	return session, nil
 }
 
-func (s *Service) issueTokens(ctx context.Context, user store.User) (TokenPair, error) {
+func (s *Service) issueTokens(ctx context.Context, user store.User) (TokenPair, time.Time, error) {
 	claims := Claims{
 		UserID: user.ID,
 		Email:  user.Email,
@@ -260,29 +319,115 @@ func (s *Service) issueTokens(ctx context.Context, user store.User) (TokenPair, 
 
 	signedToken, err := jwt.NewWithClaims(jwt.SigningMethodHS256, claims).SignedString(s.jwtSecret)
 	if err != nil {
-		return TokenPair{}, err
+		return TokenPair{}, time.Time{}, err
 	}
 
 	refreshToken, err := randomToken()
 	if err != nil {
-		return TokenPair{}, err
+		return TokenPair{}, time.Time{}, err
 	}
 
 	now := time.Now()
+	refreshExpiresAt := now.Add(s.refreshTokenIdleTTL)
 	if err := s.store.SaveRefreshToken(ctx, store.RefreshToken{
-		UserID:     user.ID,
-		TokenHash:  hashToken(refreshToken),
-		ExpiresAt:  now.Add(s.refreshTokenIdleTTL),
-		LastUsedAt: now,
+		UserID:       user.ID,
+		TokenHash:    hashToken(refreshToken),
+		ExpiresAt:    refreshExpiresAt,
+		LastUsedAt:   now,
+		GraceUntil:   nil,
+		SupersededAt: nil,
 	}); err != nil {
-		return TokenPair{}, err
+		return TokenPair{}, time.Time{}, err
 	}
 
 	return TokenPair{
 		AccessToken:      signedToken,
 		RefreshToken:     refreshToken,
 		ExpiresInSeconds: int(s.accessTokenTTL.Seconds()),
+	}, refreshExpiresAt, nil
+}
+
+func (s *Service) issueOfflineLease(user store.User, issuer string, refreshExpiresAt time.Time) (OfflineLease, error) {
+	now := time.Now().UTC()
+	leaseExpiresAt := now.Add(s.offlineLeaseTTL)
+	if refreshExpiresAt.UTC().Before(leaseExpiresAt) {
+		leaseExpiresAt = refreshExpiresAt.UTC()
+	}
+
+	claims := OfflineLeaseClaims{
+		RegisteredClaims: jwt.RegisteredClaims{
+			Issuer:    issuer,
+			Subject:   user.ID,
+			Audience:  jwt.ClaimStrings{"dolssh-desktop"},
+			IssuedAt:  jwt.NewNumericDate(now),
+			ExpiresAt: jwt.NewNumericDate(leaseExpiresAt),
+		},
+	}
+
+	token, err := jwt.NewWithClaims(jwt.SigningMethodRS256, claims).SignedString(s.offlineLeaseKey)
+	if err != nil {
+		return OfflineLease{}, err
+	}
+
+	return OfflineLease{
+		Token:                    token,
+		IssuedAt:                 now.Format(time.RFC3339),
+		ExpiresAt:                leaseExpiresAt.Format(time.RFC3339),
+		VerificationPublicKeyPEM: s.offlineLeasePublicKeyPEM,
 	}, nil
+}
+
+func resolveOfflineLeaseKeypair(privateKeyPEM string) (*rsa.PrivateKey, string, error) {
+	if privateKeyPEM == "" {
+		privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
+		if err != nil {
+			return nil, "", err
+		}
+		publicKeyPEM, err := encodePublicKeyPEM(&privateKey.PublicKey)
+		if err != nil {
+			return nil, "", err
+		}
+		return privateKey, publicKeyPEM, nil
+	}
+
+	block, _ := pem.Decode([]byte(privateKeyPEM))
+	if block == nil {
+		return nil, "", errors.New("invalid offline lease private key pem")
+	}
+
+	parsed, err := x509.ParsePKCS8PrivateKey(block.Bytes)
+	if err == nil {
+		privateKey, ok := parsed.(*rsa.PrivateKey)
+		if !ok {
+			return nil, "", errors.New("offline lease private key must be rsa")
+		}
+		publicKeyPEM, err := encodePublicKeyPEM(&privateKey.PublicKey)
+		if err != nil {
+			return nil, "", err
+		}
+		return privateKey, publicKeyPEM, nil
+	}
+
+	privateKey, pkcs1Err := x509.ParsePKCS1PrivateKey(block.Bytes)
+	if pkcs1Err != nil {
+		return nil, "", fmt.Errorf("parse offline lease private key: %w", err)
+	}
+	publicKeyPEM, err := encodePublicKeyPEM(&privateKey.PublicKey)
+	if err != nil {
+		return nil, "", err
+	}
+	return privateKey, publicKeyPEM, nil
+}
+
+func encodePublicKeyPEM(publicKey *rsa.PublicKey) (string, error) {
+	encoded, err := x509.MarshalPKIXPublicKey(publicKey)
+	if err != nil {
+		return "", err
+	}
+	return string(pem.EncodeToMemory(&pem.Block{
+		Type:  "PUBLIC KEY",
+		Bytes: encoded,
+	})), nil
 }
 
 func randomToken() (string, error) {

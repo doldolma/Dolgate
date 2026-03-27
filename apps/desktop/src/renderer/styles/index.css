@@ -844,6 +844,10 @@ input::placeholder {
   padding: 1rem 1.15rem 1.2rem;
 }
 
+.home-main > .app-offline-banner {
+  margin-bottom: 1rem;
+}
+
 .host-browser,
 .settings-panel {
   display: flex;
@@ -1805,7 +1809,15 @@ input::placeholder {
 }
 
 .session-shell {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
   padding: 1.15rem;
+}
+
+.session-shell__content {
+  flex: 1;
+  min-height: 0;
 }
 
 .terminal-workspace,
@@ -2458,7 +2470,15 @@ input::placeholder {
 }
 
 .sftp-shell {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
   padding: 1rem 1.15rem 1.2rem;
+}
+
+.sftp-shell__content {
+  flex: 1;
+  min-height: 0;
 }
 
 .sftp-workspace {
@@ -2652,12 +2672,31 @@ input::placeholder {
 }
 
 .terminal-warning-banner {
-  padding: 0.8rem 0.9rem;
+  padding: 0.58rem 0.9rem;
   border-radius: 16px;
   background: color-mix(in srgb, var(--success-bg) 68%, transparent 32%);
   color: var(--success-text);
   border: 1px solid
     color-mix(in srgb, var(--success-text) 20%, var(--border) 80%);
+}
+
+.app-offline-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.9rem;
+  flex-wrap: wrap;
+}
+
+.app-offline-banner__message {
+  flex: 1 1 18rem;
+  min-width: 0;
+  line-height: 1.55;
+}
+
+.app-offline-banner__action {
+  flex: 0 0 auto;
+  margin-left: auto;
 }
 
 .sftp-table-shell {

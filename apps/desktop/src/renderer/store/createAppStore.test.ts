@@ -34,6 +34,12 @@ function createMockApi(): DesktopApi {
           vaultBootstrap: {
             keyBase64: "ZmFrZS12YXVsdC1rZXk=",
           },
+          offlineLease: {
+            token: "offline-token",
+            issuedAt: "2025-01-01T00:00:00.000Z",
+            expiresAt: "2025-01-04T00:00:00.000Z",
+            verificationPublicKeyPem: "-----BEGIN PUBLIC KEY-----\nfake\n-----END PUBLIC KEY-----",
+          },
           syncServerTime: "2025-01-01T00:00:00.000Z",
         },
         errorMessage: null,
@@ -49,6 +55,34 @@ function createMockApi(): DesktopApi {
           },
           vaultBootstrap: {
             keyBase64: "ZmFrZS12YXVsdC1rZXk=",
+          },
+          offlineLease: {
+            token: "offline-token",
+            issuedAt: "2025-01-01T00:00:00.000Z",
+            expiresAt: "2025-01-04T00:00:00.000Z",
+            verificationPublicKeyPem: "-----BEGIN PUBLIC KEY-----\nfake\n-----END PUBLIC KEY-----",
+          },
+          syncServerTime: "2025-01-01T00:00:00.000Z",
+        },
+        errorMessage: null,
+      }),
+      retryOnline: vi.fn().mockResolvedValue({
+        status: "authenticated",
+        session: {
+          user: { id: "user-1", email: "user@example.com" },
+          tokens: {
+            accessToken: "access",
+            refreshToken: "refresh",
+            expiresInSeconds: 900,
+          },
+          vaultBootstrap: {
+            keyBase64: "ZmFrZS12YXVsdC1rZXk=",
+          },
+          offlineLease: {
+            token: "offline-token",
+            issuedAt: "2025-01-01T00:00:00.000Z",
+            expiresAt: "2025-01-04T00:00:00.000Z",
+            verificationPublicKeyPem: "-----BEGIN PUBLIC KEY-----\nfake\n-----END PUBLIC KEY-----",
           },
           syncServerTime: "2025-01-01T00:00:00.000Z",
         },
