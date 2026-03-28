@@ -184,8 +184,8 @@ Windows 설치 동작:
 자동 업로드 명령:
 
 ```bash
-npm run release:mac
-npm run release:win
+npm run release:publish:mac
+npm run release:publish:win
 npm run release:all
 ```
 
@@ -194,8 +194,14 @@ npm run release:all
 1. GitHub Device Flow로 브라우저 로그인을 시작합니다.
 2. 사용자가 브라우저에서 `https://github.com/login/device`에 코드 입력 후 승인을 완료합니다.
 3. `ssh-core`와 앱 아티팩트를 빌드합니다.
-4. `doldolma/dolgate` GitHub Release를 현재 버전 기준으로 생성하거나 갱신합니다.
-5. 기존과 같은 이름의 asset은 교체하고, 새 아티팩트와 업데이트 메타데이터를 업로드합니다.
+4. 현재 버전의 `v<version>` git 태그를 만들고 원격에 push합니다.
+5. `doldolma/dolgate` GitHub Release를 현재 버전 기준으로 생성하거나 갱신합니다.
+6. 기존과 같은 이름의 asset은 교체하고, 새 아티팩트와 업데이트 메타데이터를 업로드합니다.
+
+`sync-api` 컨테이너 배포도 이 릴리즈 태그를 기준으로 연결됩니다.
+
+- `v1.1.8` 같은 태그가 push되면 GHCR에 `ghcr.io/doldolma/dolgate-sync-api:1.1.8`, `:1.1`, `:latest`가 함께 생성됩니다.
+- `main` 브랜치 push만으로는 `sync-api` 운영 이미지를 새로 빌드하지 않습니다.
 
 ## AWS / Warpgate 운영 전제
 
@@ -256,6 +262,18 @@ curl http://127.0.0.1:8080/healthz
 ```bash
 cd services/sync-api/deploy
 cp docker-compose.mysql.example.yml docker-compose.yml
+docker compose up -d
+```
+
+### 이미지 태그 선택
+
+- 예제 compose는 가장 단순한 self-host 흐름을 위해 `latest`를 사용합니다.
+- 운영에서는 명시 버전 태그 pinning을 권장합니다.
+  - 예: `ghcr.io/doldolma/dolgate-sync-api:1.1.8`
+- `latest`를 계속 쓴다면 업데이트 시 아래 순서로 반영합니다.
+
+```bash
+docker compose pull
 docker compose up -d
 ```
 
