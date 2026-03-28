@@ -50,7 +50,6 @@
 ## Warpgate Import
 
 - Warpgate import는 내부 브라우저 인증 창으로 로그인합니다.
-- 로그인 대기 중에는 import 다이얼로그에서 바로 중단할 수 있습니다.
 - 중단 후에도 import 다이얼로그는 그대로 남아 URL 수정이나 재시도가 가능합니다.
 - 로그인 성공 후 target 목록을 가져와 Host로 추가합니다.
 
@@ -60,10 +59,3 @@
 - 온라인 복구가 실패해도 offline lease가 유효하면 `offline-authenticated` 상태로 홈 화면을 엽니다.
 - offline 상태에서는 기존 로컬 캐시와 설정을 사용할 수 있고, 백그라운드에서 재동기화를 재시도합니다.
 - 로그인은 외부 브라우저를 열어 처리하며, 데스크톱은 loopback callback 또는 `dolgate://auth/callback` 식별자를 통해 세션을 교환합니다.
-
-## 문서 안내
-
-- 제품 개요: [README](../README.md)
-- 런타임 구조: [architecture](./architecture.md)
-- 빌드/배포/운영 전제: [build-and-deploy](./build-and-deploy.md)
-- `ssh-core` framed protocol: [ipc-protocol](./ipc-protocol.md)

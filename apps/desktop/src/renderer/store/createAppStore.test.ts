@@ -5,7 +5,7 @@ import type {
   HostDraft,
   HostRecord,
 } from "@shared";
-import { isSshHostRecord } from "@shared";
+import { DEFAULT_SFTP_BROWSER_COLUMN_WIDTHS, isSshHostRecord } from "@shared";
 import type { HostContainersTabState } from "./createAppStore";
 import { createAppStore, upsertTransferJob } from "./createAppStore";
 
@@ -766,6 +766,184 @@ describe("createAppStore", () => {
     expect(store.getState().sftp.rightPane.sourceKind).toBe("host");
     expect(store.getState().portForwards).toHaveLength(0);
     expect(store.getState().knownHosts).toHaveLength(0);
+  });
+
+  it("refreshes synced workspace data without resetting tabs or sftp state", async () => {
+    const api = createMockApi();
+    vi.mocked(api.hosts.list)
+      .mockResolvedValueOnce([
+        {
+          id: "host-1",
+          kind: "ssh",
+          label: "Prod",
+          hostname: "prod.example.com",
+          port: 22,
+          username: "ubuntu",
+          authType: "password",
+          privateKeyPath: null,
+          secretRef: "host:host-1",
+          groupName: "Servers",
+          terminalThemeId: null,
+          createdAt: "2025-01-01T00:00:00.000Z",
+          updatedAt: "2025-01-01T00:00:00.000Z",
+        },
+      ])
+      .mockResolvedValueOnce([
+        {
+          id: "host-2",
+          kind: "ssh",
+          label: "Next",
+          hostname: "next.example.com",
+          port: 2202,
+          username: "dol",
+          authType: "password",
+          privateKeyPath: null,
+          secretRef: "host:host-2",
+          groupName: "Synced",
+          terminalThemeId: null,
+          createdAt: "2025-01-02T00:00:00.000Z",
+          updatedAt: "2025-01-02T00:00:00.000Z",
+        },
+      ]);
+    vi.mocked(api.groups.list)
+      .mockResolvedValueOnce([
+        {
+          id: "group-1",
+          name: "Servers",
+          path: "Servers",
+          parentPath: null,
+          createdAt: "2025-01-01T00:00:00.000Z",
+          updatedAt: "2025-01-01T00:00:00.000Z",
+        },
+      ])
+      .mockResolvedValueOnce([
+        {
+          id: "group-2",
+          name: "Synced",
+          path: "Synced",
+          parentPath: null,
+          createdAt: "2025-01-02T00:00:00.000Z",
+          updatedAt: "2025-01-02T00:00:00.000Z",
+        },
+      ]);
+    vi.mocked(api.portForwards.list)
+      .mockResolvedValueOnce({
+        rules: [],
+        runtimes: [],
+      })
+      .mockResolvedValueOnce({
+        rules: [
+          {
+            id: "forward-2",
+            label: "Synced forward",
+            transport: "ssh",
+            mode: "local",
+            hostId: "host-2",
+            bindAddress: "127.0.0.1",
+            bindPort: 8080,
+            targetHost: "127.0.0.1",
+            targetPort: 80,
+            createdAt: "2025-01-02T00:00:00.000Z",
+            updatedAt: "2025-01-02T00:00:00.000Z",
+          },
+        ],
+        runtimes: [],
+      });
+    vi.mocked(api.knownHosts.list)
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        {
+          id: "known-2",
+          host: "next.example.com",
+          port: 2202,
+          algorithm: "ssh-ed25519",
+          publicKeyBase64: "AAAATESTNEXT",
+          fingerprintSha256: "SHA256:next",
+          createdAt: "2025-01-02T00:00:00.000Z",
+          lastSeenAt: "2025-01-02T00:00:00.000Z",
+          updatedAt: "2025-01-02T00:00:00.000Z",
+        },
+      ]);
+    vi.mocked(api.keychain.list)
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        {
+          secretRef: "secret:host-2",
+          label: "Next Secret",
+          hasPassword: true,
+          hasPassphrase: false,
+          hasManagedPrivateKey: false,
+          source: "server_managed",
+          linkedHostCount: 1,
+          updatedAt: "2025-01-02T00:00:00.000Z",
+        },
+      ]);
+    vi.mocked(api.settings.get)
+      .mockResolvedValueOnce({
+        theme: "system",
+        globalTerminalThemeId: "dolssh-dark",
+        terminalFontFamily: "sf-mono",
+        terminalFontSize: 13,
+        terminalScrollbackLines: 5000,
+        terminalLineHeight: 1,
+        terminalLetterSpacing: 0,
+        terminalMinimumContrastRatio: 1,
+        terminalAltIsMeta: false,
+        terminalWebglEnabled: true,
+        sftpBrowserColumnWidths: DEFAULT_SFTP_BROWSER_COLUMN_WIDTHS,
+        serverUrl: "https://ssh.doldolma.com",
+        serverUrlOverride: null,
+        dismissedUpdateVersion: null,
+        sessionReplayRetentionCount: 100,
+        updatedAt: "2025-01-01T00:00:00.000Z",
+      })
+      .mockResolvedValueOnce({
+        theme: "dark",
+        globalTerminalThemeId: "dolssh-dark",
+        terminalFontFamily: "sf-mono",
+        terminalFontSize: 13,
+        terminalScrollbackLines: 5000,
+        terminalLineHeight: 1,
+        terminalLetterSpacing: 0,
+        terminalMinimumContrastRatio: 1,
+        terminalAltIsMeta: false,
+        terminalWebglEnabled: true,
+        sftpBrowserColumnWidths: DEFAULT_SFTP_BROWSER_COLUMN_WIDTHS,
+        serverUrl: "https://ssh.doldolma.com",
+        serverUrlOverride: null,
+        dismissedUpdateVersion: null,
+        sessionReplayRetentionCount: 100,
+        updatedAt: "2025-01-02T00:00:00.000Z",
+      });
+
+    const store = createAppStore(api);
+
+    await store.getState().bootstrap();
+    store.setState({
+      activeWorkspaceTab: "session:session-1",
+      sftp: {
+        ...store.getState().sftp,
+        leftPane: {
+          ...store.getState().sftp.leftPane,
+          currentPath: "/Users/tester/Documents",
+        },
+      },
+    });
+
+    await store.getState().refreshSyncedWorkspaceData();
+
+    expect(store.getState().hosts.map((host) => host.id)).toEqual(["host-2"]);
+    expect(store.getState().groups.map((group) => group.id)).toEqual(["group-2"]);
+    expect(store.getState().portForwards.map((rule) => rule.id)).toEqual(["forward-2"]);
+    expect(store.getState().knownHosts.map((record) => record.id)).toEqual(["known-2"]);
+    expect(store.getState().keychainEntries.map((entry) => entry.secretRef)).toEqual([
+      "secret:host-2",
+    ]);
+    expect(store.getState().settings.theme).toBe("dark");
+    expect(store.getState().activeWorkspaceTab).toBe("session:session-1");
+    expect(store.getState().sftp.leftPane.currentPath).toBe(
+      "/Users/tester/Documents",
+    );
   });
 
   it("opens create and edit drawers from home", async () => {

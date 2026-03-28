@@ -397,6 +397,7 @@ export interface AppState {
   bootstrap: () => Promise<void>;
   refreshHostCatalog: () => Promise<void>;
   refreshOperationalData: () => Promise<void>;
+  refreshSyncedWorkspaceData: () => Promise<void>;
   createGroup: (name: string) => Promise<void>;
   removeGroup: (path: string, mode: GroupRemoveMode) => Promise<void>;
   saveHost: (
@@ -2921,6 +2922,35 @@ export function createAppStore(api: DesktopApi) {
     });
   };
 
+  const syncSyncedWorkspaceData = async (
+    set: (
+      next:
+        | AppState
+        | Partial<AppState>
+        | ((state: AppState) => AppState | Partial<AppState>),
+    ) => void,
+  ) => {
+    const [hosts, groups, snapshot, knownHosts, keychainEntries, settings] =
+      await Promise.all([
+        api.hosts.list(),
+        api.groups.list(),
+        api.portForwards.list(),
+        api.knownHosts.list(),
+        api.keychain.list(),
+        api.settings.get(),
+      ]);
+
+    set({
+      hosts: sortHosts(hosts),
+      groups: sortGroups(groups),
+      portForwards: sortPortForwards(snapshot.rules),
+      portForwardRuntimes: snapshot.runtimes,
+      knownHosts: sortKnownHosts(knownHosts),
+      keychainEntries: sortKeychainEntries(keychainEntries),
+      settings,
+    });
+  };
+
   const refreshHostAndKeychainState = async (
     set: (
       next:
@@ -4224,6 +4254,9 @@ export function createAppStore(api: DesktopApi) {
           groups: sortGroups(nextGroups),
           keychainEntries: sortKeychainEntries(nextKeychainEntries),
         });
+      },
+      refreshSyncedWorkspaceData: async () => {
+        await syncSyncedWorkspaceData(set);
       },
       createGroup: async (name) => {
         const next = await api.groups.create(name, get().currentGroupPath);

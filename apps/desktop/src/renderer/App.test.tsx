@@ -152,10 +152,11 @@ function createMockStoreState(overrides: Record<string, unknown> = {}) {
       leftPane: null,
       rightPane: null,
       transfers: [],
-      pendingConflictDialog: null,
+    pendingConflictDialog: null,
     },
     bootstrap: fn(),
     refreshHostCatalog: fn(),
+    refreshSyncedWorkspaceData: fn(),
     setSearchQuery: fn(),
     activateHome: fn(),
     activateSession: fn(),
@@ -411,7 +412,97 @@ describe('App integration', () => {
     await waitFor(() => {
       expect(mocks.storeState.bootstrap).toHaveBeenCalledTimes(1);
       expect(api.sync.bootstrap).toHaveBeenCalledTimes(1);
+      expect(mocks.storeState.refreshSyncedWorkspaceData).toHaveBeenCalledTimes(1);
       expect(screen.getByTestId('terminal-workspace')).toBeInTheDocument();
+    });
+  });
+
+  it('rehydrates synced workspace data after logging back in from the login gate', async () => {
+    const api = createDolsshApi({
+      authBootstrapState: {
+        status: 'unauthenticated',
+        session: null,
+        offline: null,
+        errorMessage: null,
+      },
+      authGetStateState: {
+        status: 'authenticated',
+        session: { user: { id: 'user-1', email: 'user@example.com' } },
+        offline: null,
+        errorMessage: null,
+      },
+    });
+    Object.defineProperty(window, 'dolssh', {
+      configurable: true,
+      writable: true,
+      value: api,
+    });
+
+    render(<App />);
+    await screen.findByTestId('login-gate');
+
+    await act(async () => {
+      api.__listeners.auth?.({
+        status: 'authenticated',
+        session: { user: { id: 'user-1', email: 'user@example.com' } },
+        offline: null,
+        errorMessage: null,
+      });
+    });
+
+    await waitFor(() => {
+      expect(mocks.storeState.bootstrap).toHaveBeenCalledTimes(1);
+      expect(api.sync.bootstrap).toHaveBeenCalledTimes(1);
+      expect(mocks.storeState.refreshSyncedWorkspaceData).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it('refreshes synced workspace data without re-running local bootstrap when offline auth returns online', async () => {
+    const api = createDolsshApi({
+      authBootstrapState: {
+        status: 'offline-authenticated',
+        session: { user: { id: 'user-1', email: 'user@example.com' } },
+        offline: {
+          token: 'offline-token',
+          issuedAt: '2026-03-28T00:00:00.000Z',
+          expiresAt: '2026-03-30T00:00:00.000Z',
+          verificationPublicKeyPem: 'pubkey',
+        },
+        errorMessage: null,
+      },
+      authGetStateState: {
+        status: 'authenticated',
+        session: { user: { id: 'user-1', email: 'user@example.com' } },
+        offline: null,
+        errorMessage: null,
+      },
+    });
+    Object.defineProperty(window, 'dolssh', {
+      configurable: true,
+      writable: true,
+      value: api,
+    });
+
+    render(<App />);
+
+    await waitFor(() => {
+      expect(mocks.storeState.bootstrap).toHaveBeenCalledTimes(1);
+      expect(api.sync.bootstrap).toHaveBeenCalledTimes(0);
+    });
+
+    await act(async () => {
+      api.__listeners.auth?.({
+        status: 'authenticated',
+        session: { user: { id: 'user-1', email: 'user@example.com' } },
+        offline: null,
+        errorMessage: null,
+      });
+    });
+
+    await waitFor(() => {
+      expect(mocks.storeState.bootstrap).toHaveBeenCalledTimes(1);
+      expect(api.sync.bootstrap).toHaveBeenCalledTimes(1);
+      expect(mocks.storeState.refreshSyncedWorkspaceData).toHaveBeenCalledTimes(1);
     });
   });
 

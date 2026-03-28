@@ -258,6 +258,7 @@ export function App() {
   const pendingAwsSftpConfigRetry = useAppStore((state) => state.pendingAwsSftpConfigRetry);
   const bootstrap = useAppStore((state) => state.bootstrap);
   const refreshHostCatalog = useAppStore((state) => state.refreshHostCatalog);
+  const refreshSyncedWorkspaceData = useAppStore((state) => state.refreshSyncedWorkspaceData);
   const setSearchQuery = useAppStore((state) => state.setSearchQuery);
   const activateHome = useAppStore((state) => state.activateHome);
   const activateSession = useAppStore((state) => state.activateSession);
@@ -395,6 +396,7 @@ export function App() {
       if (needsOnlineSync) {
         try {
           await window.dolssh.sync.bootstrap();
+          await refreshSyncedWorkspaceData();
           hydratedOnlineSessionUserIdRef.current = userId;
         } catch {
           const latestAuthState = await window.dolssh.auth.getState();
@@ -467,6 +469,7 @@ export function App() {
     };
   }, [
     bootstrap,
+    refreshSyncedWorkspaceData,
     handleCoreEvent,
     handleContainerConnectionProgressEvent,
     handleSftpConnectionProgressEvent,

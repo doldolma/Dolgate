@@ -40,7 +40,26 @@ module.exports = {
   },
   dmg: {
     sign: false,
-    icon: path.resolve(__dirname, 'build/icons/dolssh.icns')
+    icon: path.resolve(__dirname, 'build/icons/dolssh.icns'),
+    background: path.resolve(__dirname, 'build/dmg-background.png'),
+    iconSize: 144,
+    window: {
+      width: 960,
+      height: 600
+    },
+    contents: [
+      {
+        x: 190,
+        y: 285,
+        type: 'file'
+      },
+      {
+        x: 770,
+        y: 285,
+        type: 'link',
+        path: '/Applications'
+      }
+    ]
   },
   win: {
     icon: path.resolve(__dirname, 'build/icons/dolssh.ico'),
