@@ -25,6 +25,11 @@ import {
 import { SecretStore } from './secret-store';
 import { AuthService } from './auth-service';
 import { getDesktopStateStorage } from './state-storage';
+import {
+  AUTH_INVALID_ERROR_MESSAGE,
+  extractApiErrorMessage,
+  normalizeAuthInvalidErrorMessage,
+} from './auth-error-message';
 
 const RETRY_DELAY_MS = 30_000;
 
@@ -104,19 +109,15 @@ async function toApiErrorMessage(response: Response, fallback: string): Promise<
     return `${fallback} 서버가 API 응답 대신 HTML 페이지를 반환했습니다. 배포 주소 또는 리버스 프록시 설정을 확인해 주세요. (${response.status})`;
   }
 
-  try {
-    const parsed = JSON.parse(text) as { error?: unknown; message?: unknown };
-    if (typeof parsed.error === 'string' && parsed.error.trim()) {
-      return parsed.error;
-    }
-    if (typeof parsed.message === 'string' && parsed.message.trim()) {
-      return parsed.message;
-    }
-  } catch {
-    // JSON이 아니면 그대로 아래 fallback 경로를 탄다.
-  }
+  const extracted = extractApiErrorMessage(text);
+  const normalizedAuthMessage = extracted
+    ? normalizeAuthInvalidErrorMessage({
+        status: response.status,
+        message: extracted,
+      })
+    : null;
 
-  return text || `${fallback} (${response.status})`;
+  return normalizedAuthMessage || extracted || `${fallback} (${response.status})`;
 }
 
 function isLikelyAuthError(response: Response, message: string): boolean {
@@ -365,7 +366,7 @@ export class SyncService {
 
     const refreshed = await this.authService.refreshSession();
     if (refreshed.status !== 'authenticated') {
-      throw new SyncAuthenticationError(firstFailureMessage || '세션이 만료되었습니다. 다시 로그인해 주세요.');
+      throw new SyncAuthenticationError(firstFailureMessage || AUTH_INVALID_ERROR_MESSAGE);
     }
 
     response = await fetch(url, this.withAccessToken(init, this.authService.getAccessToken()));

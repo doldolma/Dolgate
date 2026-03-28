@@ -12,6 +12,7 @@ async function loadRepositories(): Promise<{
   GroupRepository: DatabaseModule['GroupRepository'];
   PortForwardRepository: DatabaseModule['PortForwardRepository'];
   SettingsRepository: DatabaseModule['SettingsRepository'];
+  ActivityLogRepository: DatabaseModule['ActivityLogRepository'];
 }> {
   const tempDir = mkdtempSync(path.join(os.tmpdir(), 'dolgate-desktop-db-'));
   process.env.DOLSSH_USER_DATA_DIR = tempDir;
@@ -26,7 +27,8 @@ async function loadRepositories(): Promise<{
     HostRepository: databaseModule.HostRepository,
     GroupRepository: databaseModule.GroupRepository,
     PortForwardRepository: databaseModule.PortForwardRepository,
-    SettingsRepository: databaseModule.SettingsRepository
+    SettingsRepository: databaseModule.SettingsRepository,
+    ActivityLogRepository: databaseModule.ActivityLogRepository
   };
 }
 
@@ -34,6 +36,7 @@ async function loadRepositoriesWithStateFile(stateFile: unknown): Promise<{
   tempDir: string;
   HostRepository: DatabaseModule['HostRepository'];
   SettingsRepository: DatabaseModule['SettingsRepository'];
+  ActivityLogRepository: DatabaseModule['ActivityLogRepository'];
 }> {
   const tempDir = mkdtempSync(path.join(os.tmpdir(), 'dolgate-desktop-db-'));
   process.env.DOLSSH_USER_DATA_DIR = tempDir;
@@ -48,7 +51,8 @@ async function loadRepositoriesWithStateFile(stateFile: unknown): Promise<{
   return {
     tempDir,
     HostRepository: databaseModule.HostRepository,
-    SettingsRepository: databaseModule.SettingsRepository
+    SettingsRepository: databaseModule.SettingsRepository,
+    ActivityLogRepository: databaseModule.ActivityLogRepository
   };
 }
 
@@ -139,6 +143,7 @@ describe('HostRepository', () => {
       settings: {
         theme: 'system',
         sftpBrowserColumnWidths: DEFAULT_SFTP_BROWSER_COLUMN_WIDTHS,
+        sessionReplayRetentionCount: 100,
         serverUrlOverride: null,
         updatedAt: '2025-01-01T00:00:00.000Z'
       },
@@ -410,6 +415,16 @@ describe('SettingsRepository', () => {
     expect(reset.terminalMinimumContrastRatio).toBe(1);
     expect(reset.terminalAltIsMeta).toBe(false);
     expect(reset.terminalWebglEnabled).toBe(true);
+
+    const clampedLow = settings.update({
+      sessionReplayRetentionCount: 2,
+    });
+    expect(clampedLow.sessionReplayRetentionCount).toBe(10);
+
+    const clampedHigh = settings.update({
+      sessionReplayRetentionCount: 5000,
+    });
+    expect(clampedHigh.sessionReplayRetentionCount).toBe(1000);
   });
 
   it('stores and syncs the global terminal system theme mode', async () => {
@@ -490,6 +505,7 @@ describe('SettingsRepository', () => {
           size: null,
           kind: 48
         },
+        sessionReplayRetentionCount: 100,
         serverUrlOverride: null,
         updatedAt: '2026-03-26T00:00:00.000Z'
       }
@@ -535,6 +551,83 @@ describe('PortForwardRepository', () => {
       targetKind: 'remote-host',
       targetPort: 5432,
       remoteHost: 'db.internal'
+    });
+  });
+});
+
+describe('ActivityLogRepository', () => {
+  it('upserts session lifecycle logs by id and restores them after reload', async () => {
+    const { ActivityLogRepository } = await loadRepositories();
+    const logs = new ActivityLogRepository();
+
+    logs.upsert({
+      id: 'session:session-1',
+      level: 'info',
+      category: 'session',
+      kind: 'session-lifecycle',
+      message: 'SSH 세션',
+      metadata: {
+        sessionId: 'session-1',
+        hostId: 'host-1',
+        hostLabel: 'nas',
+        title: 'NAS',
+        connectionKind: 'ssh',
+        connectedAt: '2026-03-29T00:00:00.000Z',
+        status: 'connected'
+      },
+      createdAt: '2026-03-29T00:00:00.000Z',
+      updatedAt: '2026-03-29T00:00:00.000Z'
+    });
+
+    logs.upsert({
+      id: 'session:session-1',
+      level: 'error',
+      category: 'session',
+      kind: 'session-lifecycle',
+      message: 'SSH 세션',
+      metadata: {
+        sessionId: 'session-1',
+        hostId: 'host-1',
+        hostLabel: 'nas',
+        title: 'NAS',
+        connectionKind: 'ssh',
+        connectedAt: '2026-03-29T00:00:00.000Z',
+        disconnectedAt: '2026-03-29T00:05:00.000Z',
+        durationMs: 300000,
+        status: 'error',
+        disconnectReason: 'socket closed'
+      },
+      createdAt: '2026-03-29T00:00:00.000Z',
+      updatedAt: '2026-03-29T00:05:00.000Z'
+    });
+
+    expect(logs.list()).toHaveLength(1);
+    expect(logs.list()[0]).toMatchObject({
+      id: 'session:session-1',
+      kind: 'session-lifecycle',
+      level: 'error',
+      updatedAt: '2026-03-29T00:05:00.000Z',
+      metadata: {
+        hostLabel: 'nas',
+        status: 'error',
+        durationMs: 300000
+      }
+    });
+
+    vi.resetModules();
+    const stateStorageModule = await import('./state-storage');
+    stateStorageModule.resetDesktopStateStorageForTests();
+    const databaseModule = await import('./database');
+    const reloadedLogs = new databaseModule.ActivityLogRepository();
+
+    expect(reloadedLogs.list()).toHaveLength(1);
+    expect(reloadedLogs.list()[0]).toMatchObject({
+      id: 'session:session-1',
+      kind: 'session-lifecycle',
+      metadata: {
+        hostLabel: 'nas',
+        disconnectReason: 'socket closed'
+      }
     });
   });
 });

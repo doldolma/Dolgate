@@ -22,4 +22,13 @@ describe('resolveRendererWindowMode', () => {
       kind: 'main',
     });
   });
+
+  it('returns the session replay mode when a recording id is present', () => {
+    expect(
+      resolveRendererWindowMode('?window=session-replay&recordingId=recording-1'),
+    ).toEqual({
+      kind: 'session-replay',
+      recordingId: 'recording-1',
+    });
+  });
 });

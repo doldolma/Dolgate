@@ -429,6 +429,7 @@ function createMockApi(): DesktopApi {
         serverUrl: "https://ssh.doldolma.com",
         serverUrlOverride: null,
         dismissedUpdateVersion: null,
+        sessionReplayRetentionCount: 100,
         updatedAt: "2025-01-01T00:00:00.000Z",
       }),
       update: vi.fn().mockImplementation(async (input) => ({
@@ -453,8 +454,13 @@ function createMockApi(): DesktopApi {
             ? input.serverUrlOverride.trim()
             : null,
         dismissedUpdateVersion: input.dismissedUpdateVersion ?? null,
+        sessionReplayRetentionCount: input.sessionReplayRetentionCount ?? 100,
         updatedAt: "2025-01-02T00:00:00.000Z",
       })),
+    },
+    sessionReplays: {
+      open: vi.fn().mockResolvedValue(undefined),
+      get: vi.fn().mockRejectedValue(new Error("not implemented in test")),
     },
     portForwards: {
       list: vi.fn().mockResolvedValue({

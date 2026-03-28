@@ -76,6 +76,7 @@ const settings: AppSettings = {
     size: 96,
     kind: 96
   },
+  sessionReplayRetentionCount: 100,
   serverUrl: 'https://example.test',
   serverUrlOverride: null,
   updatedAt: '2025-01-01T00:00:00.000Z'

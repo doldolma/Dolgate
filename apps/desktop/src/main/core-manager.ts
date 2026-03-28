@@ -4,6 +4,7 @@ import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { existsSync } from "node:fs";
 import path from "node:path";
 import type {
+  ActivityLogRecord,
   HostKeyProbeResult,
   HostContainerDetails,
   HostContainerListResult,
@@ -31,6 +32,8 @@ import type {
   ResolvedPortForwardStartPayload,
   ResolvedSsmPortForwardStartPayload,
   ResolvedSftpConnectPayload,
+  SessionConnectionKind,
+  SessionLifecycleLogMetadata,
   SftpChmodInput,
   SftpDeleteInput,
   SftpEndpointSummary,
@@ -57,6 +60,20 @@ interface ActivityLogInput {
   metadata?: Record<string, unknown> | null;
 }
 
+interface RemoteSessionLifecycleState {
+  hostId: string;
+  hostLabel: string;
+  title: string;
+  connectionDetails: string | null;
+  connectionKind: SessionConnectionKind;
+  connectedAt: string | null;
+  disconnectedAt: string | null;
+  disconnectReason: string | null;
+  status: "connected" | "closed" | "error" | null;
+  recordingId: string | null;
+  hasReplay: boolean;
+}
+
 interface PortForwardDefinition {
   ruleId: string;
   hostId: string;
@@ -74,7 +91,7 @@ interface ContainersEndpointRuntime {
   unsupportedReason: string | null;
 }
 
-type SessionTransport = "ssh" | "aws-ssm" | "local-shell";
+type SessionTransport = "ssh" | "aws-ssm" | "warpgate" | "local-shell";
 
 const AWS_SSM_CONTROL_SIGNAL_BY_BYTE: ReadonlyMap<
   number,
@@ -521,7 +538,10 @@ function toTransferJobEvent(
 }
 
 export class CoreManager {
-  constructor(private readonly appendLog?: (entry: ActivityLogInput) => void) {}
+  constructor(
+    private readonly appendLog?: (entry: ActivityLogInput) => void,
+    private readonly upsertLogRecord?: (record: ActivityLogRecord) => void,
+  ) {}
 
   // Go SSH 코어는 앱 전체에서 하나만 띄우고, 여러 SSH/SFTP 작업을 그 안에서 관리한다.
   private process: ChildProcessWithoutNullStreams | null = null;
@@ -556,6 +576,10 @@ export class CoreManager {
     { cols: number; rows: number }
   >();
   private readonly sessionTransportById = new Map<string, SessionTransport>();
+  private readonly remoteSessionLifecycleById = new Map<
+    string,
+    RemoteSessionLifecycleState
+  >();
   private onTerminalEvent?: (
     event: CoreEvent<Record<string, unknown>>,
   ) => void | Promise<void>;
@@ -608,6 +632,60 @@ export class CoreManager {
     return Array.from(this.portForwardRuntimes.values()).sort((a, b) =>
       a.ruleId.localeCompare(b.ruleId),
     );
+  }
+
+  getRemoteSessionLifecycleState(
+    sessionId: string,
+  ): RemoteSessionLifecycleState | null {
+    const lifecycle = this.remoteSessionLifecycleById.get(sessionId);
+    return lifecycle ? { ...lifecycle } : null;
+  }
+
+  attachRemoteSessionRecording(sessionId: string, recordingId: string): void {
+    const lifecycle = this.remoteSessionLifecycleById.get(sessionId);
+    if (!lifecycle) {
+      return;
+    }
+    lifecycle.recordingId = recordingId;
+    lifecycle.hasReplay = true;
+    this.remoteSessionLifecycleById.set(sessionId, lifecycle);
+
+    if (!lifecycle.connectedAt) {
+      return;
+    }
+
+    const metadata: SessionLifecycleLogMetadata = {
+      sessionId,
+      hostId: lifecycle.hostId,
+      hostLabel: lifecycle.hostLabel,
+      title: lifecycle.title,
+      connectionDetails: lifecycle.connectionDetails,
+      connectionKind: lifecycle.connectionKind,
+      connectedAt: lifecycle.connectedAt,
+      disconnectedAt: lifecycle.disconnectedAt,
+      durationMs: lifecycle.connectedAt && lifecycle.disconnectedAt
+        ? Math.max(
+            0,
+            new Date(lifecycle.disconnectedAt).getTime() -
+              new Date(lifecycle.connectedAt).getTime(),
+          )
+        : null,
+      status: lifecycle.status ?? "connected",
+      disconnectReason: lifecycle.disconnectReason,
+      recordingId: lifecycle.recordingId,
+      hasReplay: lifecycle.hasReplay,
+    };
+
+    this.upsertLog({
+      id: this.getRemoteSessionLifecycleLogId(sessionId),
+      level: metadata.status === "error" ? "error" : "info",
+      category: "session",
+      kind: "session-lifecycle",
+      message: `${this.getConnectionKindLabel(lifecycle.connectionKind)} 세션`,
+      metadata: metadata as unknown as Record<string, unknown>,
+      createdAt: lifecycle.connectedAt,
+      updatedAt: new Date().toISOString(),
+    });
   }
 
   setPortForwardRuntime(
@@ -738,12 +816,35 @@ export class CoreManager {
   }
 
   async connect(
-    payload: ResolvedCoreConnectPayload & { title: string; hostId: string },
+    payload: ResolvedCoreConnectPayload & {
+      title: string;
+      hostId: string;
+      hostLabel: string;
+      transport?: "ssh" | "warpgate" | "aws-ssm";
+    },
   ): Promise<{ sessionId: string }> {
     await this.start();
     // 세션 ID는 Electron 쪽에서 먼저 발급해서 탭과 SSH 세션을 동일한 식별자로 묶는다.
     const sessionId = randomUUID();
-    this.sessionTransportById.set(sessionId, "ssh");
+    this.sessionTransportById.set(sessionId, payload.transport ?? "ssh");
+    this.remoteSessionLifecycleById.set(sessionId, {
+      hostId: payload.hostId,
+      hostLabel: payload.hostLabel,
+      title: payload.title,
+      connectionDetails: `${payload.host} · ${payload.port} · ${payload.username}`,
+      connectionKind:
+        payload.transport === "warpgate"
+          ? "warpgate"
+          : payload.transport === "aws-ssm"
+            ? "aws-ssm"
+            : "ssh",
+      connectedAt: null,
+      disconnectedAt: null,
+      disconnectReason: null,
+      status: null,
+      recordingId: null,
+      hasReplay: false,
+    });
     this.tabs.set(sessionId, {
       id: sessionId,
       title: payload.title,
@@ -1124,10 +1225,24 @@ export class CoreManager {
     rows: number;
     title: string;
     hostId: string;
+    hostLabel: string;
   }): Promise<{ sessionId: string }> {
     await this.start();
     const sessionId = randomUUID();
     this.sessionTransportById.set(sessionId, "aws-ssm");
+    this.remoteSessionLifecycleById.set(sessionId, {
+      hostId: payload.hostId,
+      hostLabel: payload.hostLabel,
+      title: payload.title,
+      connectionDetails: `${payload.profileName} · ${payload.region} · ${payload.instanceId}`,
+      connectionKind: "aws-ssm",
+      connectedAt: null,
+      disconnectedAt: null,
+      disconnectReason: null,
+      status: null,
+      recordingId: null,
+      hasReplay: false,
+    });
     const tab: TerminalTab = {
       id: sessionId,
       title: payload.title,
@@ -1832,13 +1947,16 @@ export class CoreManager {
       const existing = this.tabs.get(event.sessionId);
       const transport = this.sessionTransportById.get(event.sessionId) ?? "ssh";
       const isAwsSession = transport === "aws-ssm";
+      const isWarpgateSession = transport === "warpgate";
       const isLocalSession = transport === "local-shell";
+      const remoteLifecycle = this.remoteSessionLifecycleById.get(event.sessionId);
       const resolvedLocalShellKind =
         isLocalSession && typeof event.payload.shellKind === "string"
           ? event.payload.shellKind
           : null;
       if (!existing && event.type === "closed") {
         this.sessionTransportById.delete(event.sessionId);
+        this.remoteSessionLifecycleById.delete(event.sessionId);
       }
       if (existing) {
         if (event.type === "closed") {
@@ -1846,19 +1964,32 @@ export class CoreManager {
           this.tabs.delete(event.sessionId);
           this.desiredResizeBySession.delete(event.sessionId);
           this.sentResizeBySession.delete(event.sessionId);
-          this.log({
-            level: "info",
-            category: "session",
-            message: isLocalSession
-              ? "로컬 터미널 세션이 종료되었습니다."
-              : isAwsSession
-                ? "AWS SSM 세션이 종료되었습니다."
-                : "SSH 세션이 종료되었습니다.",
-            metadata: {
-              sessionId: event.sessionId,
-              message: event.payload.message ?? null,
-            },
-          });
+          if (isLocalSession || !remoteLifecycle) {
+            this.log({
+              level: "info",
+              category: "session",
+              message: isLocalSession
+                ? "로컬 터미널 세션이 종료되었습니다."
+                : isAwsSession
+                  ? "AWS SSM 세션이 종료되었습니다."
+                  : isWarpgateSession
+                    ? "Warpgate 세션이 종료되었습니다."
+                    : "SSH 세션이 종료되었습니다.",
+              metadata: {
+                sessionId: event.sessionId,
+                message: event.payload.message ?? null,
+              },
+            });
+          } else if (!remoteLifecycle.disconnectedAt) {
+            this.finalizeRemoteSessionLifecycle(
+              event.sessionId,
+              "closed",
+              typeof event.payload.message === "string"
+                ? event.payload.message
+                : null,
+            );
+          }
+          this.remoteSessionLifecycleById.delete(event.sessionId);
           this.broadcastTerminalEvent(event);
           return;
         }
@@ -1880,38 +2011,71 @@ export class CoreManager {
         });
         if (event.type === "connected") {
           this.flushResizeIfReady(event.sessionId);
-          this.log({
-            level: "info",
-            category: "session",
-            message: isLocalSession
-              ? "로컬 터미널 세션이 연결되었습니다."
-              : isAwsSession
-                ? "AWS SSM 세션이 연결되었습니다."
-                : "SSH 세션이 연결되었습니다.",
-            metadata: {
-              sessionId: event.sessionId,
-              hostId: existing.hostId,
-              title: existing.title,
-              transport,
-              shellKind: resolvedLocalShellKind,
-            },
-          });
+          if (isLocalSession || !remoteLifecycle) {
+            this.log({
+              level: "info",
+              category: "session",
+              message: isLocalSession
+                ? "로컬 터미널 세션이 연결되었습니다."
+                : isAwsSession
+                  ? "AWS SSM 세션이 연결되었습니다."
+                  : isWarpgateSession
+                    ? "Warpgate 세션이 연결되었습니다."
+                    : "SSH 세션이 연결되었습니다.",
+              metadata: {
+                sessionId: event.sessionId,
+                hostId: existing.hostId,
+                title: existing.title,
+                transport,
+                shellKind: resolvedLocalShellKind,
+              },
+            });
+          } else {
+            this.markRemoteSessionConnected(event.sessionId);
+          }
         }
         if (event.type === "error") {
-          this.log({
-            level: "error",
-            category: "session",
-            message: isLocalSession
-              ? "로컬 터미널 세션 오류가 발생했습니다."
-              : isAwsSession
-                ? "AWS SSM 세션 오류가 발생했습니다."
-                : "SSH 세션 오류가 발생했습니다.",
-            metadata: {
-              sessionId: event.sessionId,
-              message: event.payload.message ?? null,
-              transport,
-            },
-          });
+          if (isLocalSession || !remoteLifecycle) {
+            this.log({
+              level: "error",
+              category: "session",
+              message: isLocalSession
+                ? "로컬 터미널 세션 오류가 발생했습니다."
+                : isAwsSession
+                  ? "AWS SSM 세션 오류가 발생했습니다."
+                  : isWarpgateSession
+                    ? "Warpgate 세션 오류가 발생했습니다."
+                    : "SSH 세션 오류가 발생했습니다.",
+              metadata: {
+                sessionId: event.sessionId,
+                message: event.payload.message ?? null,
+                transport,
+              },
+            });
+          } else if (remoteLifecycle.connectedAt) {
+            this.finalizeRemoteSessionLifecycle(
+              event.sessionId,
+              "error",
+              typeof event.payload.message === "string"
+                ? event.payload.message
+                : null,
+            );
+          } else {
+            this.log({
+              level: "error",
+              category: "session",
+              message: `${this.getConnectionKindLabel(remoteLifecycle.connectionKind)} 세션 오류가 발생했습니다.`,
+              metadata: {
+                sessionId: event.sessionId,
+                hostId: remoteLifecycle.hostId,
+                hostLabel: remoteLifecycle.hostLabel,
+                title: remoteLifecycle.title,
+                connectionKind: remoteLifecycle.connectionKind,
+                message: event.payload.message ?? null,
+              },
+            });
+            this.remoteSessionLifecycleById.delete(event.sessionId);
+          }
         }
       }
       this.broadcastTerminalEvent(event);
@@ -2015,6 +2179,7 @@ export class CoreManager {
     this.desiredResizeBySession.clear();
     this.sentResizeBySession.clear();
     this.sessionTransportById.clear();
+    this.remoteSessionLifecycleById.clear();
   }
 
   private buildForwardRuntime(
@@ -2123,5 +2288,112 @@ export class CoreManager {
 
   private log(entry: ActivityLogInput): void {
     this.appendLog?.(entry);
+  }
+
+  private upsertLog(record: ActivityLogRecord): void {
+    this.upsertLogRecord?.(record);
+  }
+
+  private getRemoteSessionLifecycleLogId(sessionId: string): string {
+    return `session:${sessionId}`;
+  }
+
+  private getConnectionKindLabel(kind: SessionConnectionKind): string {
+    if (kind === "aws-ssm") {
+      return "AWS SSM";
+    }
+    if (kind === "warpgate") {
+      return "Warpgate";
+    }
+    return "SSH";
+  }
+
+  private markRemoteSessionConnected(sessionId: string): void {
+    const lifecycle = this.remoteSessionLifecycleById.get(sessionId);
+    if (!lifecycle || lifecycle.connectedAt) {
+      return;
+    }
+    const connectedAt = new Date().toISOString();
+    lifecycle.connectedAt = connectedAt;
+    lifecycle.status = "connected";
+    lifecycle.disconnectedAt = null;
+    lifecycle.disconnectReason = null;
+    this.remoteSessionLifecycleById.set(sessionId, lifecycle);
+
+    const metadata: SessionLifecycleLogMetadata = {
+      sessionId,
+      hostId: lifecycle.hostId,
+      hostLabel: lifecycle.hostLabel,
+      title: lifecycle.title,
+      connectionDetails: lifecycle.connectionDetails,
+      connectionKind: lifecycle.connectionKind,
+      connectedAt,
+      disconnectedAt: null,
+      durationMs: null,
+      status: "connected",
+      disconnectReason: null,
+      recordingId: lifecycle.recordingId,
+      hasReplay: lifecycle.hasReplay,
+    };
+    this.upsertLog({
+      id: this.getRemoteSessionLifecycleLogId(sessionId),
+      level: "info",
+      category: "session",
+      kind: "session-lifecycle",
+      message: `${this.getConnectionKindLabel(lifecycle.connectionKind)} 세션`,
+      metadata: metadata as unknown as Record<string, unknown>,
+      createdAt: connectedAt,
+      updatedAt: connectedAt,
+    });
+  }
+
+  private finalizeRemoteSessionLifecycle(
+    sessionId: string,
+    status: "closed" | "error",
+    disconnectReason: string | null,
+  ): void {
+    const lifecycle = this.remoteSessionLifecycleById.get(sessionId);
+    if (!lifecycle || !lifecycle.connectedAt) {
+      return;
+    }
+    if (lifecycle.disconnectedAt) {
+      return;
+    }
+    const disconnectedAt = new Date().toISOString();
+    const durationMs = Math.max(
+      0,
+      new Date(disconnectedAt).getTime() -
+        new Date(lifecycle.connectedAt).getTime(),
+    );
+    lifecycle.disconnectedAt = disconnectedAt;
+    lifecycle.disconnectReason = disconnectReason;
+    lifecycle.status = status;
+    this.remoteSessionLifecycleById.set(sessionId, lifecycle);
+
+    const metadata: SessionLifecycleLogMetadata = {
+      sessionId,
+      hostId: lifecycle.hostId,
+      hostLabel: lifecycle.hostLabel,
+      title: lifecycle.title,
+      connectionDetails: lifecycle.connectionDetails,
+      connectionKind: lifecycle.connectionKind,
+      connectedAt: lifecycle.connectedAt,
+      disconnectedAt,
+      durationMs,
+      status,
+      disconnectReason,
+      recordingId: lifecycle.recordingId,
+      hasReplay: lifecycle.hasReplay,
+    };
+    this.upsertLog({
+      id: this.getRemoteSessionLifecycleLogId(sessionId),
+      level: status === "error" ? "error" : "info",
+      category: "session",
+      kind: "session-lifecycle",
+      message: `${this.getConnectionKindLabel(lifecycle.connectionKind)} 세션`,
+      metadata: metadata as unknown as Record<string, unknown>,
+      createdAt: lifecycle.connectedAt,
+      updatedAt: disconnectedAt,
+    });
   }
 }

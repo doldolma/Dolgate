@@ -128,6 +128,10 @@ export const ipcChannels = {
     list: 'logs:list',
     clear: 'logs:clear'
   },
+  sessionReplays: {
+    open: 'session-replays:open',
+    get: 'session-replays:get'
+  },
   keychain: {
     list: 'keychain:list',
     load: 'keychain:load',

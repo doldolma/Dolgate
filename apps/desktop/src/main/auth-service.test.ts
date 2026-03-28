@@ -219,6 +219,58 @@ describe("AuthService offline bootstrap", () => {
     );
   });
 
+  it("normalizes refresh auth failures from JSON payloads into a Korean guidance message", async () => {
+    const serverUrl = "https://ssh.doldolma.com";
+    const { service, secretStore } = await createService(serverUrl);
+    const session = createSession(serverUrl);
+
+    await secretStore.save("auth:refresh-token", session.tokens.refreshToken);
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            code: "unsupported_client",
+            msg: "허용되지 않은 접근입니다.",
+            detail: null,
+          }),
+          {
+            status: 401,
+            headers: {
+              "content-type": "application/json",
+            },
+          },
+        ),
+      ),
+    );
+
+    const state = await service.bootstrap();
+
+    expect(state.status).toBe("unauthenticated");
+    expect(state.errorMessage).toBe(
+      "세션이 만료되었거나 로그인 정보가 유효하지 않습니다. 다시 로그인해 주세요.",
+    );
+  });
+
+  it("keeps network refresh failures using the existing error message", async () => {
+    const serverUrl = "https://ssh.doldolma.com";
+    const { service, secretStore } = await createService(serverUrl);
+    const session = createSession(serverUrl);
+
+    await secretStore.save("auth:refresh-token", session.tokens.refreshToken);
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockRejectedValue(new Error("network down")),
+    );
+
+    const state = await service.bootstrap();
+
+    expect(state.status).toBe("unauthenticated");
+    expect(state.errorMessage).toBe("network down");
+  });
+
   it("rejects stale offline cache when the configured server URL changed", async () => {
     const { service, secretStore } = await createService(
       "https://new.example.com",

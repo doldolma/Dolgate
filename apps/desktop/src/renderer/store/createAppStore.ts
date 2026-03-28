@@ -655,6 +655,7 @@ const defaultSettings: AppSettings = {
   terminalAltIsMeta: false,
   terminalWebglEnabled: true,
   sftpBrowserColumnWidths: { ...DEFAULT_SFTP_BROWSER_COLUMN_WIDTHS },
+  sessionReplayRetentionCount: 100,
   serverUrl: "https://ssh.doldolma.com",
   serverUrlOverride: null,
   dismissedUpdateVersion: null,

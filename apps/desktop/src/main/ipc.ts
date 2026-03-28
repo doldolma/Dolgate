@@ -80,6 +80,7 @@ import { resolveContainerTunnelTarget } from "./container-port-forward-target";
 import { LocalFileService } from "./file-service";
 import { SecretStore } from "./secret-store";
 import { SessionShareService } from "./session-share-service";
+import { SessionReplayService } from "./session-replay-service";
 import { isSyncAuthenticationError, SyncService } from "./sync-service";
 import {
   OpenSshImportService,
@@ -819,6 +820,7 @@ export function registerIpcHandlers(
   opensshImportService: OpenSshImportService,
   xshellImportService: XshellImportService,
   sessionShareService: SessionShareService,
+  sessionReplayService: SessionReplayService,
 ): void {
   const localFiles = new LocalFileService();
   const queueSync = () => {
@@ -1263,6 +1265,7 @@ export function registerIpcHandlers(
 
   coreManager.setTerminalEventHandler(async (event) => {
     sessionShareService.handleTerminalEvent(event);
+    sessionReplayService.handleTerminalEvent(event);
     if (event.endpointId) {
       if (event.type === "sftpDisconnected" || event.type === "sftpError") {
         clearAwsSftpPreflight(event.endpointId);
@@ -1330,6 +1333,7 @@ export function registerIpcHandlers(
   });
   coreManager.setTerminalStreamHandler((sessionId, chunk) => {
     sessionShareService.handleTerminalStream(sessionId, chunk);
+    sessionReplayService.handleTerminalStream(sessionId, chunk);
   });
 
   ipcMain.handle(ipcChannels.auth.getState, async () => authService.getState());
@@ -2277,15 +2281,22 @@ export function registerIpcHandlers(
       }
 
       if (isAwsEc2HostRecord(host)) {
-        return coreManager.connectAwsSession({
+        const connection = await coreManager.connectAwsSession({
           profileName: host.awsProfileName,
           region: host.awsRegion,
           instanceId: host.awsInstanceId,
           cols: input.cols,
           rows: input.rows,
           hostId: host.id,
+          hostLabel: host.label,
           title: input.title?.trim() || host.label,
         });
+        sessionReplayService.noteSessionConfigured(
+          connection.sessionId,
+          input.cols,
+          input.rows,
+        );
+        return connection;
       }
 
       if (isWarpgateSshHostRecord(host)) {
@@ -2304,8 +2315,15 @@ export function registerIpcHandlers(
           rows: input.rows,
           command: input.command?.trim() || undefined,
           hostId: host.id,
+          hostLabel: host.label,
           title,
+          transport: "warpgate",
         });
+        sessionReplayService.noteSessionConfigured(
+          connection.sessionId,
+          input.cols,
+          input.rows,
+        );
         return connection;
       }
 
@@ -2329,8 +2347,15 @@ export function registerIpcHandlers(
         rows: input.rows,
         command: input.command?.trim() || undefined,
         hostId: host.id,
+        hostLabel: host.label,
         title,
+        transport: "ssh",
       });
+      sessionReplayService.noteSessionConfigured(
+        connection.sessionId,
+        input.cols,
+        input.rows,
+      );
 
       if (input.secrets && hasSecretValue(input.secrets)) {
         pendingSessionSecrets.set(connection.sessionId, {
@@ -2372,6 +2397,7 @@ export function registerIpcHandlers(
   ipcMain.handle(
     ipcChannels.ssh.resize,
     async (_event, sessionId: string, cols: number, rows: number) => {
+      sessionReplayService.handleTerminalResize(sessionId, cols, rows);
       coreManager.resize(sessionId, cols, rows);
     },
   );
@@ -2667,7 +2693,9 @@ export function registerIpcHandlers(
             rows: 32,
             command,
             hostId: hydratedHost.id,
+            hostLabel: hydratedHost.label,
             title,
+            transport: "aws-ssm",
           });
           awsContainerShellTunnelRuntimeBySessionId.set(
             connection.sessionId,
@@ -2697,7 +2725,9 @@ export function registerIpcHandlers(
           rows: 32,
           command,
           hostId: host.id,
+          hostLabel: host.label,
           title,
+          transport: "warpgate",
         });
       }
 
@@ -2717,7 +2747,9 @@ export function registerIpcHandlers(
         rows: 32,
         command,
         hostId: host.id,
+        hostLabel: host.label,
         title,
+        transport: "ssh",
       });
     },
   );
@@ -3378,6 +3410,22 @@ export function registerIpcHandlers(
     activityLogs.clear();
   });
 
+  ipcMain.handle(
+    ipcChannels.sessionReplays.open,
+    async (event, recordingId: string) => {
+      await sessionReplayService.openReplayWindow(
+        recordingId,
+        resolveWindowFromSender(event.sender),
+      );
+    },
+  );
+
+  ipcMain.handle(
+    ipcChannels.sessionReplays.get,
+    async (_event, recordingId: string) =>
+      sessionReplayService.get(recordingId),
+  );
+
   ipcMain.handle(ipcChannels.keychain.list, async () => secretMetadata.list());
 
   ipcMain.handle(
@@ -3571,7 +3619,18 @@ export function registerIpcHandlers(
 
   ipcMain.handle(
     ipcChannels.settings.update,
-    async (_event, input: Partial<AppSettings>) => settings.update(input),
+    async (_event, input: Partial<AppSettings>) => {
+      const nextSettings = settings.update(input);
+      if (
+        Object.prototype.hasOwnProperty.call(
+          input,
+          "sessionReplayRetentionCount",
+        )
+      ) {
+        sessionReplayService.prune();
+      }
+      return nextSettings;
+    },
   );
 
   ipcMain.handle(ipcChannels.files.getHomeDirectory, async () =>

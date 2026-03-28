@@ -15,6 +15,10 @@ import {
 } from "./offline-auth";
 import { SecretStore, SecureStorageUnavailableError } from "./secret-store";
 import { getDesktopStateStorage } from "./state-storage";
+import {
+  extractApiErrorMessage,
+  normalizeAuthInvalidErrorMessage,
+} from "./auth-error-message";
 
 const REFRESH_TOKEN_ACCOUNT = "auth:refresh-token";
 const OFFLINE_SESSION_CACHE_ACCOUNT = "auth:offline-session-cache";
@@ -61,7 +65,8 @@ async function toApiErrorMessage(
     return `${fallback} 서버가 API 응답 대신 HTML 페이지를 반환했습니다. 배포 주소 또는 리버스 프록시 설정을 확인해 주세요. (${response.status})`;
   }
 
-  return text || `${fallback} (${response.status})`;
+  const extracted = extractApiErrorMessage(text);
+  return extracted || `${fallback} (${response.status})`;
 }
 
 type SessionRequestErrorKind =
@@ -317,9 +322,16 @@ export class AuthService {
       await this.persistSession(session);
       return this.state;
     } catch (error) {
+      const normalizedAuthErrorMessage =
+        error instanceof SessionRequestError
+          ? normalizeAuthInvalidErrorMessage({
+              status: error.status,
+              message: error.message,
+            })
+          : null;
       if (this.isTransientSessionError(error)) {
         const restoredOffline = await this.restoreOfflineSession(
-          toErrorMessage(error, fallbackMessage),
+          normalizedAuthErrorMessage ?? toErrorMessage(error, fallbackMessage),
         );
         if (restoredOffline) {
           return restoredOffline;
@@ -329,7 +341,8 @@ export class AuthService {
       await this.clearSession(
         {
           status: "unauthenticated",
-          errorMessage: toErrorMessage(error, fallbackMessage),
+          errorMessage:
+            normalizedAuthErrorMessage ?? toErrorMessage(error, fallbackMessage),
         },
         {
           reason: "auth-invalid",
@@ -569,14 +582,22 @@ export class AuthService {
         response,
         "인증 요청에 실패했습니다.",
       );
+      const normalizedAuthMessage = normalizeAuthInvalidErrorMessage({
+        status: response.status,
+        message,
+      });
       if (response.status === 401 || response.status === 403) {
-        throw new SessionRequestError(message, "auth", response.status);
+        throw new SessionRequestError(
+          normalizedAuthMessage ?? message,
+          "auth",
+          response.status,
+        );
       }
       if (response.status >= 500) {
         throw new SessionRequestError(message, "server", response.status);
       }
       throw new SessionRequestError(
-        message,
+        normalizedAuthMessage ?? message,
         "invalid-response",
         response.status,
       );

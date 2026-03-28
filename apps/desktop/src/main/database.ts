@@ -1,5 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import {
+  DEFAULT_SESSION_REPLAY_RETENTION_COUNT,
+  MAX_SESSION_REPLAY_RETENTION_COUNT,
+  MIN_SESSION_REPLAY_RETENTION_COUNT,
   getGroupLabel,
   getServerUrlValidationMessage,
   getParentGroupPath,
@@ -137,6 +140,13 @@ function normalizeAwsSshMetadataStatus(
 function normalizeAwsSshMetadataError(error?: string | null): string | null {
   const trimmed = error?.trim();
   return trimmed ? trimmed : null;
+}
+
+function clampSessionReplayRetentionCount(value: number): number {
+  return Math.min(
+    MAX_SESSION_REPLAY_RETENTION_COUNT,
+    Math.max(MIN_SESSION_REPLAY_RETENTION_COUNT, Math.round(value)),
+  );
 }
 
 function normalizeIncomingHostRecord(record: HostRecord): HostRecord {
@@ -606,6 +616,9 @@ export class SettingsRepository {
       terminalAltIsMeta: state.terminal.altIsMeta,
       terminalWebglEnabled: state.terminal.webglEnabled,
       sftpBrowserColumnWidths: { ...state.settings.sftpBrowserColumnWidths },
+      sessionReplayRetentionCount:
+        state.settings.sessionReplayRetentionCount ??
+        DEFAULT_SESSION_REPLAY_RETENTION_COUNT,
       serverUrl: serverUrlOverride || this.getDefaultServerUrl(),
       serverUrlOverride,
       dismissedUpdateVersion: state.updater.dismissedVersion,
@@ -651,6 +664,16 @@ export class SettingsRepository {
       if (hasSftpBrowserColumnWidthsInput) {
         state.settings.sftpBrowserColumnWidths = normalizeSftpBrowserColumnWidths(
           input.sftpBrowserColumnWidths as Partial<Record<keyof SftpBrowserColumnWidths, unknown>> | null | undefined
+        );
+        state.settings.updatedAt = nowIso();
+      }
+
+      if (
+        typeof input.sessionReplayRetentionCount === 'number' &&
+        Number.isFinite(input.sessionReplayRetentionCount)
+      ) {
+        state.settings.sessionReplayRetentionCount = clampSessionReplayRetentionCount(
+          input.sessionReplayRetentionCount,
         );
         state.settings.updatedAt = nowIso();
       }
@@ -722,6 +745,7 @@ export class SettingsRepository {
         !Object.prototype.hasOwnProperty.call(input, 'dismissedUpdateVersion') &&
         !Object.prototype.hasOwnProperty.call(input, 'serverUrlOverride') &&
         !hasSftpBrowserColumnWidthsInput &&
+        input.sessionReplayRetentionCount == null &&
         input.theme == null &&
         input.globalTerminalThemeId == null &&
         input.terminalFontFamily == null &&
@@ -735,6 +759,9 @@ export class SettingsRepository {
       ) {
         state.settings.theme = current.theme as AppTheme;
         state.settings.sftpBrowserColumnWidths = { ...current.sftpBrowserColumnWidths };
+        state.settings.sessionReplayRetentionCount =
+          current.sessionReplayRetentionCount ??
+          DEFAULT_SESSION_REPLAY_RETENTION_COUNT;
         state.settings.serverUrlOverride = current.serverUrlOverride ?? null;
         state.terminal.globalThemeId = current.globalTerminalThemeId ?? DEFAULT_GLOBAL_TERMINAL_THEME_ID;
         state.terminal.fontFamily = current.terminalFontFamily ?? DEFAULT_TERMINAL_FONT_FAMILY;
@@ -932,15 +959,22 @@ export class ActivityLogRepository {
   }
 
   append(level: ActivityLogLevel, category: ActivityLogCategory, message: string, metadata?: Record<string, unknown> | null): ActivityLogRecord {
+    const timestamp = nowIso();
     const record: ActivityLogRecord = {
       id: randomUUID(),
       level,
       category,
+      kind: 'generic',
       message,
       metadata: metadata ?? null,
-      createdAt: nowIso()
+      createdAt: timestamp,
+      updatedAt: timestamp
     };
     return stateStorage.appendActivityLog(record);
+  }
+
+  upsert(record: ActivityLogRecord): ActivityLogRecord {
+    return stateStorage.upsertActivityLog(record);
   }
 
   clear(): void {

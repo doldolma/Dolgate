@@ -1,6 +1,11 @@
 import { EventEmitter } from "node:events";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { CoreEvent, CoreRequest } from "@shared";
+import type {
+  ActivityLogRecord,
+  CoreEvent,
+  CoreRequest,
+  SessionLifecycleLogMetadata,
+} from "@shared";
 import { encodeControlFrame } from "./core-framing";
 
 const { spawnMock } = vi.hoisted(() => ({
@@ -543,5 +548,101 @@ describe("CoreManager local shell sessions", () => {
     ).rejects.toThrow(
       "Invalid containersSearchLogs response: lines must be string[]",
     );
+  });
+
+  it("records Warpgate remote sessions as a single lifecycle row", async () => {
+    const logs: ActivityLogRecord[] = [];
+    const fakeProcess = createFakeChildProcess();
+    spawnMock.mockReturnValue(fakeProcess.child);
+
+    const manager = new CoreManager(undefined, (record) => {
+      const currentIndex = logs.findIndex((entry) => entry.id === record.id);
+      if (currentIndex >= 0) {
+        logs[currentIndex] = record;
+        return;
+      }
+      logs.push(record);
+    });
+
+    const { sessionId } = await manager.connect({
+      host: "warp.example.com",
+      port: 2222,
+      username: "alice",
+      authType: "password",
+      password: "secret",
+      trustedHostKeyBase64: "trusted",
+      cols: 120,
+      rows: 32,
+      title: "Warpgate Host",
+      hostId: "warp-host-1",
+      hostLabel: "Warpgate NAS",
+      transport: "warpgate",
+    });
+
+    fakeProcess.emitControl({
+      type: "connected",
+      sessionId,
+      payload: { status: "connected" },
+    });
+    fakeProcess.emitControl({
+      type: "closed",
+      sessionId,
+      payload: { message: "closed" },
+    });
+
+    expect(logs).toHaveLength(1);
+    const lifecycle = logs[0];
+    const metadata = lifecycle.metadata as unknown as SessionLifecycleLogMetadata;
+    expect(lifecycle.kind).toBe("session-lifecycle");
+    expect(metadata.hostLabel).toBe("Warpgate NAS");
+    expect(metadata.connectionDetails).toBe("warp.example.com · 2222 · alice");
+    expect(metadata.connectionKind).toBe("warpgate");
+    expect(metadata.status).toBe("closed");
+    expect(metadata.durationMs).toBeTypeOf("number");
+  });
+
+  it("updates an existing remote lifecycle row when a replay recording is attached", async () => {
+    const logs: ActivityLogRecord[] = [];
+    const fakeProcess = createFakeChildProcess();
+    spawnMock.mockReturnValue(fakeProcess.child);
+
+    const manager = new CoreManager(undefined, (record) => {
+      const currentIndex = logs.findIndex((entry) => entry.id === record.id);
+      if (currentIndex >= 0) {
+        logs[currentIndex] = record;
+        return;
+      }
+      logs.push(record);
+    });
+
+    const { sessionId } = await manager.connect({
+      host: "nas.example.com",
+      port: 22,
+      username: "ubuntu",
+      authType: "password",
+      password: "secret",
+      trustedHostKeyBase64: "trusted",
+      cols: 120,
+      rows: 32,
+      title: "NAS",
+      hostId: "host-1",
+      hostLabel: "nas",
+      transport: "ssh",
+    });
+
+    fakeProcess.emitControl({
+      type: "connected",
+      sessionId,
+      payload: { status: "connected" },
+    });
+
+    manager.attachRemoteSessionRecording(sessionId, "recording-1");
+
+    expect(logs).toHaveLength(1);
+    expect(logs[0]?.kind).toBe("session-lifecycle");
+    expect(logs[0]?.metadata).toMatchObject({
+      recordingId: "recording-1",
+      hasReplay: true,
+    });
   });
 });
