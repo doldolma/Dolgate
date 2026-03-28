@@ -1016,7 +1016,15 @@ export function App() {
               />
             ) : null}
 
-            {homeSection === 'logs' ? <LogsPanel logs={activityLogs} onClear={clearLogs} /> : null}
+            {homeSection === 'logs' ? (
+              <LogsPanel
+                logs={activityLogs}
+                onClear={clearLogs}
+                onOpenReplay={async (recordingId) => {
+                  await window.dolssh.sessionReplays.open(recordingId);
+                }}
+              />
+            ) : null}
 
             {homeSection === 'settings' ? (
               <SettingsPanel

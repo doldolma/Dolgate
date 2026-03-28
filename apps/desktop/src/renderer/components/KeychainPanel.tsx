@@ -29,7 +29,6 @@ export function KeychainPanel({ entries, onRemoveSecret, onEditSecret }: Keychai
               <div className="operations-card__main">
                 <div className="operations-card__title-row">
                   <strong>{entry.label}</strong>
-                  <span className="status-pill status-pill--running">{entry.source}</span>
                 </div>
                 <div className="operations-card__meta">
                   <span>{entry.linkedHostCount}개 호스트에서 사용 중</span>

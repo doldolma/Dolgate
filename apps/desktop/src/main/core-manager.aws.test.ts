@@ -1,6 +1,11 @@
 import { EventEmitter } from "node:events";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { CoreEvent, CoreRequest } from "@shared";
+import type {
+  ActivityLogRecord,
+  CoreEvent,
+  CoreRequest,
+  SessionLifecycleLogMetadata,
+} from "@shared";
 import { ipcChannels } from "../common/ipc-channels";
 import { CoreFrameParser, encodeControlFrame } from "./core-framing";
 
@@ -29,13 +34,6 @@ vi.mock("node:child_process", () => ({
 }));
 
 import { buildCoreChildEnv, CoreManager } from "./core-manager";
-
-interface ActivityLogEntry {
-  level: "info" | "warn" | "error";
-  category: "session" | "audit";
-  message: string;
-  metadata?: Record<string, unknown> | null;
-}
 
 function createFakeWindow() {
   const sent: Array<{ channel: string; payload: unknown }> = [];
@@ -185,12 +183,17 @@ describe("CoreManager AWS SSM sessions", () => {
   });
 
   it("sends awsConnect to ssh-core and routes terminal writes through framed IO", async () => {
-    const logs: ActivityLogEntry[] = [];
+    const logs: ActivityLogRecord[] = [];
     const fakeProcess = createFakeChildProcess();
     spawnMock.mockReturnValue(fakeProcess.child);
 
-    const manager = new CoreManager((entry) => {
-      logs.push(entry);
+    const manager = new CoreManager(undefined, (record) => {
+      const currentIndex = logs.findIndex((entry) => entry.id === record.id);
+      if (currentIndex >= 0) {
+        logs[currentIndex] = record;
+        return;
+      }
+      logs.push(record);
     });
     const fakeWindow = createFakeWindow();
     const events: CoreEvent<Record<string, unknown>>[] = [];
@@ -207,6 +210,7 @@ describe("CoreManager AWS SSM sessions", () => {
       rows: 48,
       title: "AWS Host",
       hostId: "host-1",
+      hostLabel: "AWS Host Label",
     });
 
     const connectRequest = decodeControlFrame(fakeProcess.writes[0]);
@@ -244,18 +248,30 @@ describe("CoreManager AWS SSM sessions", () => {
         (event) => event.type === "connected" && event.sessionId === sessionId,
       ),
     ).toBe(true);
-    expect(
-      logs.some((entry) => entry.message === "AWS SSM 세션이 연결되었습니다."),
-    ).toBe(true);
+    expect(logs).toHaveLength(1);
+    const lifecycle = logs[0];
+    const metadata = lifecycle.metadata as unknown as SessionLifecycleLogMetadata;
+    expect(lifecycle.kind).toBe("session-lifecycle");
+    expect(metadata.hostLabel).toBe("AWS Host Label");
+    expect(metadata.connectionDetails).toBe(
+      "default · ap-northeast-2 · i-1234567890",
+    );
+    expect(metadata.connectionKind).toBe("aws-ssm");
+    expect(metadata.status).toBe("connected");
   });
 
   it("keeps AWS-specific logs and terminal events when ssh-core emits error and closed", async () => {
-    const logs: ActivityLogEntry[] = [];
+    const logs: ActivityLogRecord[] = [];
     const fakeProcess = createFakeChildProcess();
     spawnMock.mockReturnValue(fakeProcess.child);
 
-    const manager = new CoreManager((entry) => {
-      logs.push(entry);
+    const manager = new CoreManager(undefined, (record) => {
+      const currentIndex = logs.findIndex((entry) => entry.id === record.id);
+      if (currentIndex >= 0) {
+        logs[currentIndex] = record;
+        return;
+      }
+      logs.push(record);
     });
     const fakeWindow = createFakeWindow();
     const events: CoreEvent<Record<string, unknown>>[] = [];
@@ -272,6 +288,7 @@ describe("CoreManager AWS SSM sessions", () => {
       rows: 32,
       title: "Broken Host",
       hostId: "host-2",
+      hostLabel: "Broken Host Label",
     });
 
     fakeProcess.emitControl({
@@ -311,14 +328,17 @@ describe("CoreManager AWS SSM sessions", () => {
         (event) => event.type === "closed" && event.sessionId === sessionId,
       ),
     ).toBe(true);
-    expect(
-      logs.some(
-        (entry) => entry.message === "AWS SSM 세션 오류가 발생했습니다.",
-      ),
-    ).toBe(true);
-    expect(
-      logs.some((entry) => entry.message === "AWS SSM 세션이 종료되었습니다."),
-    ).toBe(true);
+    expect(logs).toHaveLength(1);
+    const lifecycle = logs[0];
+    const metadata = lifecycle.metadata as unknown as SessionLifecycleLogMetadata;
+    expect(lifecycle.kind).toBe("session-lifecycle");
+    expect(lifecycle.level).toBe("error");
+    expect(metadata.hostLabel).toBe("Broken Host Label");
+    expect(metadata.connectionDetails).toBe("default · us-east-1 · i-abcd");
+    expect(metadata.connectionKind).toBe("aws-ssm");
+    expect(metadata.status).toBe("error");
+    expect(metadata.disconnectReason).toBe("session-manager-plugin failed");
+    expect(metadata.durationMs).toBeTypeOf("number");
     expect(manager.listTabs()).toEqual([]);
 
     const dataEvent = fakeWindow.sent.find(
@@ -340,6 +360,7 @@ describe("CoreManager AWS SSM sessions", () => {
       rows: 32,
       title: "Resize Host",
       hostId: "host-3",
+      hostLabel: "Resize Host Label",
     });
 
     manager.resize(sessionId, 180, 52);
@@ -378,6 +399,7 @@ describe("CoreManager AWS SSM sessions", () => {
       rows: 32,
       title: "Control Host",
       hostId: "host-4",
+      hostLabel: "Control Host Label",
     });
 
     manager.sendControlSignal(sessionId, "interrupt");
@@ -418,6 +440,7 @@ describe("CoreManager AWS SSM sessions", () => {
         rows: 32,
         title: "Control Host",
         hostId: "host-5",
+        hostLabel: "Control Host Label",
       });
 
       fakeProcess.emitControl({
@@ -460,6 +483,7 @@ describe("CoreManager AWS SSM sessions", () => {
         rows: 32,
         title: "Control Host",
         hostId: "host-6",
+        hostLabel: "Control Host Label",
       });
 
       fakeProcess.emitControl({
@@ -499,6 +523,8 @@ describe("CoreManager AWS SSM sessions", () => {
       rows: 32,
       title: "SSH Host",
       hostId: "ssh-host-1",
+      hostLabel: "SSH Host Label",
+      transport: "ssh",
     });
     const { sessionId: localSessionId } = await manager.connectLocalSession({
       cols: 120,
@@ -551,6 +577,7 @@ describe("CoreManager AWS SSM sessions", () => {
       rows: 32,
       title: "Control Host",
       hostId: "host-7",
+      hostLabel: "Control Host Label",
     });
 
     fakeProcess.emitControl({

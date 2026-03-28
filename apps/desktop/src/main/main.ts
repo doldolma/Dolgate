@@ -23,6 +23,7 @@ import { registerIpcHandlers } from './ipc';
 import { OpenSshImportService } from './openssh-import-service';
 import { SecretStore } from './secret-store';
 import { SessionShareService } from './session-share-service';
+import { SessionReplayService } from './session-replay-service';
 import { SyncService } from './sync-service';
 import { TermiusImportService } from './termius-import-service';
 import { UpdateService } from './update-service';
@@ -82,10 +83,13 @@ if (termiusHelperArgIndex >= 0) {
   const appendActivityLog = (entry: { level: 'info' | 'warn' | 'error'; category: 'session' | 'audit'; message: string; metadata?: Record<string, unknown> | null }) => {
     activityLogRepository.append(entry.level, entry.category, entry.message, entry.metadata ?? null);
   };
+  const upsertActivityLog = (record: import('@shared').ActivityLogRecord) => {
+    activityLogRepository.upsert(record);
+  };
   const authService = new AuthService(secretStore, desktopConfigService, settingsRepository, appendActivityLog);
   const coreManager = new CoreManager((entry) => {
     appendActivityLog(entry);
-  });
+  }, upsertActivityLog);
   const syncService = new SyncService(
     authService,
     hostRepository,
@@ -98,6 +102,7 @@ if (termiusHelperArgIndex >= 0) {
     syncOutboxRepository
   );
   const sessionShareService = new SessionShareService(authService, coreManager);
+  const sessionReplayService = new SessionReplayService(settingsRepository, coreManager);
   const updateService = new UpdateService(settingsRepository);
   let isQuitting = false;
   let pendingAuthCallbackUrl: string | null = null;
@@ -302,7 +307,8 @@ if (termiusHelperArgIndex >= 0) {
       termiusImportService,
       opensshImportService,
       xshellImportService,
-      sessionShareService
+      sessionShareService,
+      sessionReplayService
     );
     await createWindow();
     if (pendingAuthCallbackUrl) {

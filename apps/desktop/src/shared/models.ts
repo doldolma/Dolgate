@@ -43,11 +43,14 @@ export type PortForwardStatus = 'stopped' | 'starting' | 'running' | 'error';
 export type KnownHostTrustStatus = 'trusted' | 'untrusted' | 'mismatch';
 export type ActivityLogLevel = 'info' | 'warn' | 'error';
 export type ActivityLogCategory = 'session' | 'audit';
+export type ActivityLogKind = 'generic' | 'session-lifecycle';
 export type SecretSource = 'local_keychain' | 'server_managed';
 export type AuthStatus = 'loading' | 'unauthenticated' | 'authenticating' | 'authenticated' | 'offline-authenticated' | 'error';
 export type SyncBootstrapStatus = 'idle' | 'syncing' | 'ready' | 'paused' | 'error';
 export type TermiusProbeStatus = 'ready' | 'unsupported' | 'not-installed' | 'no-data' | 'error';
 export type AwsSshMetadataStatus = 'idle' | 'loading' | 'ready' | 'error';
+export type SessionConnectionKind = 'ssh' | 'aws-ssm' | 'warpgate';
+export type SessionLifecycleStatus = 'connected' | 'closed' | 'error';
 export type SftpConnectionStage =
   | 'loading-instance-metadata'
   | 'checking-profile'
@@ -63,6 +66,9 @@ export type ConnectionProgressStage =
   | 'connecting-containers';
 
 export const AWS_SFTP_DEFAULT_PORT = 22;
+export const DEFAULT_SESSION_REPLAY_RETENTION_COUNT = 100;
+export const MIN_SESSION_REPLAY_RETENTION_COUNT = 10;
+export const MAX_SESSION_REPLAY_RETENTION_COUNT = 1000;
 
 interface HostBaseRecord {
   id: string;
@@ -546,6 +552,7 @@ export function normalizeSftpBrowserColumnWidths(
 export interface AppSettings extends TerminalAppearanceSettings {
   theme: AppTheme;
   sftpBrowserColumnWidths: SftpBrowserColumnWidths;
+  sessionReplayRetentionCount: number;
   serverUrl: string;
   serverUrlOverride?: string | null;
   dismissedUpdateVersion?: string | null;
@@ -869,13 +876,64 @@ export interface KnownHostTrustInput {
 }
 
 // ActivityLogRecord는 앱 활동 로그 화면이 그대로 렌더링하는 구조다.
+export interface SessionLifecycleLogMetadata {
+  sessionId: string;
+  hostId: string;
+  hostLabel: string;
+  title: string;
+  connectionDetails?: string | null;
+  connectionKind: SessionConnectionKind;
+  connectedAt: string;
+  disconnectedAt?: string | null;
+  durationMs?: number | null;
+  status: SessionLifecycleStatus;
+  disconnectReason?: string | null;
+  recordingId?: string | null;
+  hasReplay?: boolean | null;
+}
+
+export interface SessionReplayOutputEntry {
+  type: 'output';
+  atMs: number;
+  dataBase64: string;
+}
+
+export interface SessionReplayResizeEntry {
+  type: 'resize';
+  atMs: number;
+  cols: number;
+  rows: number;
+}
+
+export type SessionReplayEntry =
+  | SessionReplayOutputEntry
+  | SessionReplayResizeEntry;
+
+export interface SessionReplayRecording {
+  recordingId: string;
+  sessionId: string;
+  hostId: string;
+  hostLabel: string;
+  title: string;
+  connectionDetails?: string | null;
+  connectionKind: SessionConnectionKind;
+  connectedAt: string;
+  disconnectedAt: string;
+  durationMs: number;
+  initialCols: number;
+  initialRows: number;
+  entries: SessionReplayEntry[];
+}
+
 export interface ActivityLogRecord {
   id: string;
   level: ActivityLogLevel;
   category: ActivityLogCategory;
+  kind?: ActivityLogKind;
   message: string;
   metadata: Record<string, unknown> | null;
   createdAt: string;
+  updatedAt?: string;
 }
 
 // SecretMetadataRecord는 원문 secret 없이 저장 위치와 존재 여부만 표현한다.

@@ -138,6 +138,7 @@ function createMockStoreState(overrides: Record<string, unknown> = {}) {
         size: 96,
         kind: 96,
       },
+      sessionReplayRetentionCount: 100,
       serverUrl: 'https://example.test',
       serverUrlOverride: null,
       updatedAt: '2026-03-28T00:00:00.000Z',

@@ -28,7 +28,13 @@ import type {
   TerminalFontFamilyId,
   TerminalThemeId
 } from '@shared';
-import { DEFAULT_SFTP_BROWSER_COLUMN_WIDTHS, normalizeSftpBrowserColumnWidths } from '@shared';
+import {
+  DEFAULT_SESSION_REPLAY_RETENTION_COUNT,
+  DEFAULT_SFTP_BROWSER_COLUMN_WIDTHS,
+  MAX_SESSION_REPLAY_RETENTION_COUNT,
+  MIN_SESSION_REPLAY_RETENTION_COUNT,
+  normalizeSftpBrowserColumnWidths
+} from '@shared';
 import type { SyncKind } from '@shared';
 
 const STORAGE_DIRNAME = 'storage';
@@ -55,6 +61,7 @@ export interface DesktopStateFile {
   settings: {
     theme: AppTheme;
     sftpBrowserColumnWidths: SftpBrowserColumnWidths;
+    sessionReplayRetentionCount: number;
     serverUrlOverride: string | null;
     updatedAt: string;
   };
@@ -231,6 +238,16 @@ function normalizeTerminalWebglEnabled(value: unknown): boolean {
   return typeof value === 'boolean' ? value : resolveDefaultTerminalWebglEnabled();
 }
 
+function normalizeSessionReplayRetentionCount(value: unknown): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    return DEFAULT_SESSION_REPLAY_RETENTION_COUNT;
+  }
+  return Math.min(
+    MAX_SESSION_REPLAY_RETENTION_COUNT,
+    Math.max(MIN_SESSION_REPLAY_RETENTION_COUNT, Math.round(value)),
+  );
+}
+
 function normalizePortForwardRule(value: unknown): PortForwardRuleRecord | null {
   if (
     !isObject(value) ||
@@ -326,6 +343,7 @@ function createDefaultStateFile(): DesktopStateFile {
     settings: {
       theme: 'system',
       sftpBrowserColumnWidths: { ...DEFAULT_SFTP_BROWSER_COLUMN_WIDTHS },
+      sessionReplayRetentionCount: DEFAULT_SESSION_REPLAY_RETENTION_COUNT,
       serverUrlOverride: null,
       updatedAt: timestamp
     },
@@ -521,6 +539,7 @@ function normalizeStateFile(value: unknown): DesktopStateFile {
       sftpBrowserColumnWidths: normalizeSftpBrowserColumnWidths(
         isObject(settings.sftpBrowserColumnWidths) ? settings.sftpBrowserColumnWidths : null
       ),
+      sessionReplayRetentionCount: normalizeSessionReplayRetentionCount(settings.sessionReplayRetentionCount),
       serverUrlOverride: typeof settings.serverUrlOverride === 'string' && settings.serverUrlOverride.trim() ? settings.serverUrlOverride.trim() : null,
       updatedAt: typeof settings.updatedAt === 'string' ? settings.updatedAt : fallback.settings.updatedAt
     },
@@ -594,15 +613,22 @@ function normalizeActivityLogRecord(value: unknown): ActivityLogRecord | null {
       : 'audit';
 
   const level = value.level === 'warn' || value.level === 'error' ? value.level : 'info';
+  const kind =
+    value.kind === 'session-lifecycle' || value.kind === 'generic'
+      ? value.kind
+      : 'generic';
   const metadata = isObject(value.metadata) ? value.metadata : null;
+  const updatedAt = typeof value.updatedAt === 'string' ? value.updatedAt : undefined;
 
   return {
     id: value.id,
     level,
     category,
+    kind,
     message: value.message,
     metadata,
-    createdAt: value.createdAt
+    createdAt: value.createdAt,
+    updatedAt
   };
 }
 
@@ -637,6 +663,22 @@ class DesktopStateStorage {
       this.rewriteLogsFile();
     }
     return record;
+  }
+
+  upsertActivityLog(record: ActivityLogRecord): ActivityLogRecord {
+    this.ensureLoaded();
+    const currentIndex = this.activityLogs.findIndex((entry) => entry.id === record.id);
+    if (currentIndex >= 0) {
+      this.activityLogs[currentIndex] = { ...record };
+    } else {
+      this.activityLogs.unshift(record);
+    }
+    this.activityLogs.sort(compareIsoDesc);
+    if (this.activityLogs.length > MAX_ACTIVITY_LOGS) {
+      this.activityLogs = this.activityLogs.slice(0, MAX_ACTIVITY_LOGS);
+    }
+    this.rewriteLogsFile();
+    return deepClone(record);
   }
 
   clearActivityLogs(): void {

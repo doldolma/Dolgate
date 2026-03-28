@@ -320,6 +320,9 @@ describe('SyncService', () => {
 
     expect(thrown).toBeInstanceOf(SyncAuthenticationError);
     expect(isSyncAuthenticationError(thrown)).toBe(true);
+    expect((thrown as Error).message).toBe(
+      '세션이 만료되었거나 로그인 정보가 유효하지 않습니다. 다시 로그인해 주세요.'
+    );
   });
 
   it('pauses remote sync while offline-authenticated and preserves pending work', async () => {

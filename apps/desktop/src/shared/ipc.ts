@@ -28,6 +28,7 @@ import type {
   PortForwardRuleRecord,
   PortForwardRuntimeEvent,
   PortForwardRuntimeRecord,
+  SessionReplayRecording,
   DirectoryListing,
   GroupRecord,
   GroupRemoveMode,
@@ -542,6 +543,10 @@ export interface DesktopApi {
   logs: {
     list: () => Promise<ActivityLogRecord[]>;
     clear: () => Promise<void>;
+  };
+  sessionReplays: {
+    open: (recordingId: string) => Promise<void>;
+    get: (recordingId: string) => Promise<SessionReplayRecording>;
   };
   keychain: {
     list: () => Promise<SecretMetadataRecord[]>;

@@ -16,6 +16,7 @@ const settings: AppSettings = {
   terminalAltIsMeta: false,
   terminalWebglEnabled: true,
   sftpBrowserColumnWidths: { ...DEFAULT_SFTP_BROWSER_COLUMN_WIDTHS },
+  sessionReplayRetentionCount: 100,
   serverUrl: 'https://ssh.doldolma.com',
   serverUrlOverride: null,
   dismissedUpdateVersion: null,
@@ -114,12 +115,14 @@ describe('SettingsPanel', () => {
     fireEvent.change(screen.getByLabelText('Line Height'), { target: { value: '1.2' } });
     fireEvent.change(screen.getByLabelText('Letter Spacing'), { target: { value: '1' } });
     fireEvent.change(screen.getByLabelText('Minimum Contrast'), { target: { value: '3' } });
+    fireEvent.change(screen.getByLabelText('Session Replay Retention'), { target: { value: '250' } });
     fireEvent.click(screen.getByLabelText('Use Option/Alt as Meta'));
 
     expect(onUpdateSettings).toHaveBeenCalledWith({ terminalScrollbackLines: 6400 });
     expect(onUpdateSettings).toHaveBeenCalledWith({ terminalLineHeight: 1.2 });
     expect(onUpdateSettings).toHaveBeenCalledWith({ terminalLetterSpacing: 1 });
     expect(onUpdateSettings).toHaveBeenCalledWith({ terminalMinimumContrastRatio: 3 });
+    expect(onUpdateSettings).toHaveBeenCalledWith({ sessionReplayRetentionCount: 250 });
     expect(onUpdateSettings).toHaveBeenCalledWith({ terminalAltIsMeta: true });
   });
 
@@ -158,6 +161,7 @@ describe('SettingsPanel', () => {
     const { onEditSecret, onRemoveSecret } = renderSettingsPanel({ activeSection: 'secrets' });
 
     expect(screen.getByRole('heading', { name: 'Secrets' })).toBeInTheDocument();
+    expect(screen.queryByText('local_keychain')).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Edit password' }));
     fireEvent.click(screen.getByRole('button', { name: 'Delete secret' }));
 

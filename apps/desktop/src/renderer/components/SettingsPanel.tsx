@@ -6,6 +6,10 @@ import type {
   SecretMetadataRecord,
   TerminalFontFamilyId,
 } from '@shared';
+import {
+  MAX_SESSION_REPLAY_RETENTION_COUNT,
+  MIN_SESSION_REPLAY_RETENTION_COUNT,
+} from '@shared';
 import type { SettingsSection } from '../store/createAppStore';
 import { terminalFontOptions, terminalThemePresets } from '../lib/terminal-presets';
 import { KeychainPanel } from './KeychainPanel';
@@ -103,6 +107,12 @@ export function SettingsPanel({
 
   async function handleChangeTerminalAltIsMeta(terminalAltIsMeta: boolean) {
     await onUpdateSettings({ terminalAltIsMeta });
+  }
+
+  async function handleChangeSessionReplayRetentionCount(
+    sessionReplayRetentionCount: number,
+  ) {
+    await onUpdateSettings({ sessionReplayRetentionCount });
   }
 
   return (
@@ -234,6 +244,24 @@ export function SettingsPanel({
                   onChange={async (event) => handleChangeTerminalMinimumContrastRatio(Number(event.target.value))}
                 />
                 <p>가독성이 낮은 색 조합을 자동으로 보정합니다.</p>
+              </label>
+
+              <label className="terminal-setting-field">
+                <span>Session Replay Retention</span>
+                <input
+                  aria-label="Session Replay Retention"
+                  type="number"
+                  min={MIN_SESSION_REPLAY_RETENTION_COUNT}
+                  max={MAX_SESSION_REPLAY_RETENTION_COUNT}
+                  step={10}
+                  value={settings.sessionReplayRetentionCount}
+                  onChange={async (event) =>
+                    handleChangeSessionReplayRetentionCount(
+                      Number(event.target.value),
+                    )
+                  }
+                />
+                <p>로컬에 보관할 종료된 세션 replay 개수입니다.</p>
               </label>
 
               {desktopPlatform === 'darwin' ? (

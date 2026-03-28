@@ -453,6 +453,12 @@ const api: DesktopApi = {
     list: () => ipcRenderer.invoke(ipcChannels.logs.list),
     clear: () => ipcRenderer.invoke(ipcChannels.logs.clear),
   },
+  sessionReplays: {
+    open: (recordingId: string) =>
+      ipcRenderer.invoke(ipcChannels.sessionReplays.open, recordingId),
+    get: (recordingId: string) =>
+      ipcRenderer.invoke(ipcChannels.sessionReplays.get, recordingId),
+  },
   keychain: {
     list: () => ipcRenderer.invoke(ipcChannels.keychain.list),
     load: (secretRef: string) =>
