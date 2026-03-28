@@ -62,6 +62,131 @@ function runCommand(command, args, options = {}) {
   });
 }
 
+function runCommandCapture(command, args, options = {}) {
+  return new Promise((resolve, reject) => {
+    const spawnOptions = {
+      cwd: options.cwd,
+      env: options.env ?? process.env,
+      stdio: ['ignore', 'pipe', 'pipe']
+    };
+
+    const child =
+      process.platform === 'win32'
+        ? spawn(process.env.ComSpec || 'cmd.exe', ['/d', '/s', '/c', [command, ...args].map(quoteWindowsCommandArg).join(' ')], spawnOptions)
+        : spawn(command, args, spawnOptions);
+
+    let stdout = '';
+    let stderr = '';
+
+    child.stdout?.on('data', (chunk) => {
+      stdout += String(chunk);
+    });
+
+    child.stderr?.on('data', (chunk) => {
+      stderr += String(chunk);
+    });
+
+    child.on('error', reject);
+    child.on('exit', (code) => {
+      if (code === 0) {
+        resolve({ stdout, stderr });
+        return;
+      }
+
+      const details = stderr.trim() || stdout.trim();
+      reject(
+        new Error(
+          `${command} ${args.join(' ')} 명령이 종료 코드 ${code}로 실패했습니다.${details ? `\n${details}` : ''}`
+        )
+      );
+    });
+  });
+}
+
+async function getHeadSha() {
+  const result = await runCommandCapture('git', ['rev-parse', 'HEAD'], {
+    cwd: desktopRoot
+  });
+  return result.stdout.trim();
+}
+
+async function getLocalTagTargetSha(tagName) {
+  const result = await runCommandCapture('git', ['rev-list', '-n', '1', tagName], {
+    cwd: desktopRoot
+  }).catch(() => null);
+  return result?.stdout.trim() || null;
+}
+
+async function getRemoteTagTargetSha(tagName) {
+  const result = await runCommandCapture(
+    'git',
+    ['ls-remote', '--tags', 'origin', `refs/tags/${tagName}`, `refs/tags/${tagName}^{}`],
+    {
+      cwd: desktopRoot
+    }
+  ).catch(() => null);
+
+  const output = result?.stdout.trim();
+  if (!output) {
+    return null;
+  }
+
+  const lines = output
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean);
+  const dereferenced = lines.find((line) => line.endsWith(`refs/tags/${tagName}^{}`));
+  const direct = lines.find((line) => line.endsWith(`refs/tags/${tagName}`));
+  const selected = dereferenced || direct;
+
+  return selected ? selected.split(/\s+/u)[0] : null;
+}
+
+async function ensureCleanReleaseState() {
+  const result = await runCommandCapture('git', ['status', '--porcelain'], {
+    cwd: desktopRoot
+  });
+
+  if (result.stdout.trim()) {
+    throw new Error('릴리즈 전에 작업 트리가 깨끗해야 합니다. 변경 사항을 커밋하거나 정리한 뒤 다시 시도해 주세요.');
+  }
+}
+
+async function ensureReleaseTag(version) {
+  const tagName = `v${version}`;
+  const headSha = await getHeadSha();
+  const localTagSha = await getLocalTagTargetSha(tagName);
+  const remoteTagSha = await getRemoteTagTargetSha(tagName);
+
+  if (localTagSha && localTagSha !== headSha) {
+    throw new Error(
+      `로컬 태그 ${tagName} 가 현재 HEAD가 아닌 ${localTagSha.slice(0, 7)} 을(를) 가리키고 있습니다. 릴리즈를 중단합니다.`
+    );
+  }
+
+  if (remoteTagSha && remoteTagSha !== headSha) {
+    throw new Error(
+      `원격 태그 ${tagName} 가 현재 HEAD가 아닌 ${remoteTagSha.slice(0, 7)} 을(를) 가리키고 있습니다. 릴리즈를 중단합니다.`
+    );
+  }
+
+  if (!localTagSha && !remoteTagSha) {
+    console.log(`릴리즈 태그 생성: ${tagName}`);
+    await runCommand('git', ['tag', '-a', tagName, '-m', tagName], {
+      cwd: desktopRoot
+    });
+  }
+
+  if (!remoteTagSha) {
+    console.log(`릴리즈 태그 푸시: ${tagName}`);
+    await runCommand('git', ['push', 'origin', tagName], {
+      cwd: desktopRoot
+    });
+  }
+
+  return tagName;
+}
+
 async function githubRequest(config, accessToken, pathname, options = {}) {
   const headers = {
     Accept: 'application/vnd.github+json',
@@ -231,6 +356,7 @@ async function buildArtifacts(target) {
 
 async function publishTarget(config, accessToken, target) {
   await buildArtifacts(target);
+  await ensureReleaseTag(desktopPackage.version);
   const files = await collectArtifacts();
   const release = await ensureRelease(config, accessToken, desktopPackage.version);
 
@@ -248,6 +374,8 @@ async function main() {
   console.log(
     `GitHub 인증 확인: ${auth.login ? `@${auth.login}` : '확인된 사용자'} / scope=${auth.scope || config.scope}`
   );
+
+  await ensureCleanReleaseState();
 
   for (const item of getTargets(target)) {
     await publishTarget(config, auth.accessToken, item);

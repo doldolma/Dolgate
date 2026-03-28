@@ -2,14 +2,11 @@ name: Publish sync-api container
 
 on:
   push:
-    branches:
-      - main
     tags:
       - "v*"
     paths:
       - "services/sync-api/**"
       - ".github/workflows/sync-api-container.yml"
-  workflow_dispatch:
 
 permissions:
   contents: read
@@ -41,10 +38,9 @@ jobs:
         with:
           images: ghcr.io/doldolma/dolgate-sync-api
           tags: |
-            type=raw,value=latest,enable={{is_default_branch}}
+            type=raw,value=latest
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
-            type=sha,prefix=sha-
 
       - name: Build and push multi-arch image
         uses: docker/build-push-action@v6
