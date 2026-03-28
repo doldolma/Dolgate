@@ -15,10 +15,14 @@ const mocks = vi.hoisted(() => ({
   }>,
   rafCallbacks: [] as FrameRequestCallback[],
   currentNow: 0,
+  throwOnCreateRuntime: false,
 }));
 
 vi.mock("../lib/terminal-runtime", () => ({
   createTerminalRuntime: vi.fn(() => {
+    if (mocks.throwOnCreateRuntime) {
+      throw new Error("runtime boom");
+    }
     const runtime = {
       terminal: {
         options: {},
@@ -52,6 +56,7 @@ describe("SessionReplayWindow", () => {
     mocks.runtimeRecords.length = 0;
     mocks.rafCallbacks.length = 0;
     mocks.currentNow = 0;
+    mocks.throwOnCreateRuntime = false;
     vi.restoreAllMocks();
     vi.stubGlobal(
       "requestAnimationFrame",
@@ -145,7 +150,9 @@ describe("SessionReplayWindow", () => {
       expect(screen.getByText("doldolma.com · 22 · doyoung")).toBeInTheDocument(),
     );
     await waitFor(() => expect(mocks.runtimeRecords).toHaveLength(1));
-    expect(screen.getByRole("button", { name: "Pause" })).toBeInTheDocument();
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Pause" })).toBeInTheDocument(),
+    );
 
     const runtime = mocks.runtimeRecords[0]!;
     runtime.terminal.reset.mockClear();
@@ -206,7 +213,9 @@ describe("SessionReplayWindow", () => {
     const runtime = mocks.runtimeRecords[0]!;
     runtime.write.mockClear();
 
-    expect(screen.getByRole("button", { name: "Pause" })).toBeInTheDocument();
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Pause" })).toBeInTheDocument(),
+    );
     await waitFor(() => expect(mocks.rafCallbacks).toHaveLength(1));
 
     fireEvent.change(screen.getByLabelText("Replay speed"), {
@@ -223,6 +232,132 @@ describe("SessionReplayWindow", () => {
     expect(
       screen.getByLabelText("Replay scrubber"),
     ).toHaveValue("800");
+  });
+
+  it("initializes replay even when terminal settings resolve after the recording", async () => {
+    type ReplaySettingsPayload = {
+      theme: "system" | "light" | "dark";
+      globalTerminalThemeId: string;
+      terminalFontFamily: string;
+      terminalFontSize: number;
+      terminalScrollbackLines: number;
+      terminalLineHeight: number;
+      terminalLetterSpacing: number;
+      terminalMinimumContrastRatio: number;
+      terminalAltIsMeta: boolean;
+    };
+    let resolveSettings!: (value: ReplaySettingsPayload) => void;
+    const delayedSettings = new Promise<ReplaySettingsPayload>((resolve) => {
+      resolveSettings = resolve;
+    });
+    window.dolssh.settings.get = vi.fn().mockReturnValue(delayedSettings);
+
+    render(<SessionReplayWindow recordingId="recording-1" />);
+
+    await waitFor(() =>
+      expect(window.dolssh.sessionReplays.get).toHaveBeenCalledWith("recording-1"),
+    );
+    expect(mocks.runtimeRecords).toHaveLength(0);
+
+    resolveSettings({
+      theme: "system",
+      globalTerminalThemeId: "dolssh-dark",
+      terminalFontFamily: "sf-mono",
+      terminalFontSize: 13,
+      terminalScrollbackLines: 5000,
+      terminalLineHeight: 1,
+      terminalLetterSpacing: 0,
+      terminalMinimumContrastRatio: 1,
+      terminalAltIsMeta: false,
+    });
+
+    await waitFor(() => expect(mocks.runtimeRecords).toHaveLength(1));
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Pause" })).toBeInTheDocument(),
+    );
+    await waitFor(() => expect(mocks.rafCallbacks.length).toBeGreaterThan(0));
+
+    const runtime = mocks.runtimeRecords[0]!;
+    runtime.write.mockClear();
+
+    await act(async () => {
+      mocks.currentNow = 150;
+      const callback = mocks.rafCallbacks.shift();
+      callback?.(150);
+    });
+
+    expect(runtime.write).toHaveBeenCalledTimes(1);
+    expect(
+      new TextDecoder().decode(runtime.write.mock.calls[0]?.[0] as Uint8Array),
+    ).toBe("hello\n");
+  });
+
+  it("initializes replay when recording resolves after terminal settings", async () => {
+    let resolveRecording!: (value: Awaited<ReturnType<typeof window.dolssh.sessionReplays.get>>) => void;
+    const delayedRecording = new Promise<
+      Awaited<ReturnType<typeof window.dolssh.sessionReplays.get>>
+    >((resolve) => {
+      resolveRecording = resolve;
+    });
+    window.dolssh.sessionReplays.get = vi.fn().mockReturnValue(delayedRecording);
+
+    render(<SessionReplayWindow recordingId="recording-1" />);
+
+    await waitFor(() => expect(window.dolssh.settings.get).toHaveBeenCalled());
+    expect(mocks.runtimeRecords).toHaveLength(0);
+
+    resolveRecording({
+      recordingId: "recording-1",
+      sessionId: "session-1",
+      hostId: "host-1",
+      hostLabel: "nas",
+      title: "NAS",
+      connectionDetails: "doldolma.com · 22 · doyoung",
+      connectionKind: "ssh",
+      connectedAt: "2026-03-29T00:00:00.000Z",
+      disconnectedAt: "2026-03-29T00:00:02.000Z",
+      durationMs: 2000,
+      initialCols: 80,
+      initialRows: 24,
+      entries: [
+        {
+          type: "output",
+          atMs: 100,
+          dataBase64: btoa("hello\n"),
+        },
+      ],
+    });
+
+    await waitFor(() => expect(mocks.runtimeRecords).toHaveLength(1));
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Pause" })).toBeInTheDocument(),
+    );
+
+    const runtime = mocks.runtimeRecords[0]!;
+    runtime.write.mockClear();
+
+    await act(async () => {
+      mocks.currentNow = 150;
+      const callback = mocks.rafCallbacks.shift();
+      callback?.(150);
+    });
+
+    expect(runtime.write).toHaveBeenCalledTimes(1);
+    expect(
+      new TextDecoder().decode(runtime.write.mock.calls[0]?.[0] as Uint8Array),
+    ).toBe("hello\n");
+  });
+
+  it("surfaces a runtime initialization error instead of leaving the replay blank", async () => {
+    mocks.throwOnCreateRuntime = true;
+
+    render(<SessionReplayWindow recordingId="recording-1" />);
+
+    await waitFor(() =>
+      expect(
+        screen.getByText(/세션 replay 터미널을 초기화하지 못했습니다\./),
+      ).toBeInTheDocument(),
+    );
   });
 
   it("toggles playback with the space key when focus is not in a form control", async () => {
@@ -261,6 +396,9 @@ describe("SessionReplayWindow", () => {
     render(<SessionReplayWindow recordingId="recording-1" />);
 
     await waitFor(() => expect(mocks.runtimeRecords).toHaveLength(1));
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Pause" })).toBeInTheDocument(),
+    );
     const runtime = mocks.runtimeRecords[0]!;
     const replayTerminal = document.querySelector(
       ".session-replay-window__terminal",

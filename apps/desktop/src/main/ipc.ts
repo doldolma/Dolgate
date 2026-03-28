@@ -695,6 +695,19 @@ function assertSshHost(
   }
 }
 
+function requireConfiguredSshUsername(
+  host: Extract<
+    NonNullable<ReturnType<HostRepository["getById"]>>,
+    { kind: "ssh" }
+  >,
+): string {
+  const username = host.username.trim();
+  if (!username) {
+    throw new Error("사용자명이 필요합니다.");
+  }
+  return username;
+}
+
 function assertSftpCompatibleHost(
   host: ReturnType<HostRepository["getById"]>,
 ): asserts host is Extract<
@@ -736,7 +749,7 @@ function describeHostLabel(host: HostDraft | HostRecord): string {
   if (host.kind === "warpgate-ssh") {
     return host.label || `${host.warpgateUsername}:${host.warpgateTargetName}`;
   }
-  return host.label || `${host.username}@${host.hostname}`;
+  return host.label || (host.username.trim() ? `${host.username}@${host.hostname}` : host.hostname);
 }
 
 function describeHostTarget(
@@ -1241,12 +1254,13 @@ export function registerIpcHandlers(
     }
 
     const trustedHostKeyBase64 = requireTrustedHostKey(knownHosts, host);
+    const username = requireConfiguredSshUsername(host);
     const secrets = await loadSecrets(secretStore, host.secretRef);
     const result = await coreManager.containersConnect({
       endpointId,
       host: host.hostname,
       port: host.port,
-      username: host.username,
+      username,
       authType: host.authType,
       password: secrets.password,
       privateKeyPem: secrets.privateKeyPem,
@@ -1801,16 +1815,23 @@ export function registerIpcHandlers(
           `${label}|${host.address ?? ""}|${host.groupPath ?? ""}`,
         );
 
-        if (!hostname || !port || !username) {
+        if (!hostname || !port) {
           warnings.push({
             code: "missing-required-fields",
-            message: `${label}: address, port, username 중 일부가 없어 건너뛰었습니다.`,
+            message: `${label}: address 또는 port가 없어 건너뛰었습니다.`,
           });
           skippedHostCount += 1;
           continue;
         }
 
-        const duplicateKey = buildSshDuplicateKey(hostname, port, username);
+        if (!username) {
+          warnings.push({
+            code: "missing-username",
+            message: `${label}: 사용자명이 없어 가져왔지만, 첫 연결 전에 입력이 필요합니다.`,
+          });
+        }
+
+        const duplicateKey = buildSshDuplicateKey(hostname, port, username ?? "");
         if (knownSshHosts.has(duplicateKey)) {
           warnings.push({
             code: "duplicate-host",
@@ -1871,7 +1892,7 @@ export function registerIpcHandlers(
             terminalThemeId: null,
             hostname,
             port,
-            username,
+            username: username ?? "",
             authType: credential.authType,
             privateKeyPath: null,
           },
@@ -2328,6 +2349,7 @@ export function registerIpcHandlers(
       }
 
       const trustedHostKeyBase64 = requireTrustedHostKey(knownHosts, host);
+      const username = requireConfiguredSshUsername(host);
       const secrets = mergeSecrets(
         await loadSecrets(secretStore, host.secretRef),
         input.secrets ?? {},
@@ -2336,7 +2358,7 @@ export function registerIpcHandlers(
       const connection = await coreManager.connect({
         host: host.hostname,
         port: host.port,
-        username: host.username,
+        username,
         authType: host.authType,
         password: secrets.password,
         privateKeyPem: secrets.privateKeyPem,
@@ -2732,11 +2754,12 @@ export function registerIpcHandlers(
       }
 
       const trustedHostKeyBase64 = requireTrustedHostKey(knownHosts, host);
+      const username = requireConfiguredSshUsername(host);
       const secrets = await loadSecrets(secretStore, host.secretRef);
       return coreManager.connect({
         host: host.hostname,
         port: host.port,
-        username: host.username,
+        username,
         authType: host.authType,
         password: secrets.password,
         privateKeyPem: secrets.privateKeyPem,
@@ -2894,6 +2917,7 @@ export function registerIpcHandlers(
       }
 
       const trustedHostKeyBase64 = requireTrustedHostKey(knownHosts, host);
+      const username = requireConfiguredSshUsername(host);
       const secrets = mergeSecrets(
         await loadSecrets(secretStore, host.secretRef),
         input.secrets ?? {},
@@ -2903,7 +2927,7 @@ export function registerIpcHandlers(
         endpointId: input.endpointId,
         host: host.hostname,
         port: host.port,
-        username: host.username,
+        username,
         authType: host.authType,
         password: secrets.password,
         privateKeyPem: secrets.privateKeyPem,
@@ -3185,12 +3209,13 @@ export function registerIpcHandlers(
           }
 
           publishRuntime("starting", "Starting container tunnel");
+          const username = requireConfiguredSshUsername(host);
           return coreManager.startPortForward({
             ruleId: rule.id,
             hostId: host.id,
             host: host.hostname,
             port: host.port,
-            username: host.username,
+            username,
             authType: host.authType,
             trustedHostKeyBase64: "",
             mode: "local",
@@ -3305,6 +3330,7 @@ export function registerIpcHandlers(
 
       assertSshHost(host);
       const trustedHostKeyBase64 = requireTrustedHostKey(knownHosts, host);
+      const username = requireConfiguredSshUsername(host);
       const secrets = await loadSecrets(secretStore, host.secretRef);
 
       return coreManager.startPortForward({
@@ -3312,7 +3338,7 @@ export function registerIpcHandlers(
         hostId: host.id,
         host: host.hostname,
         port: host.port,
-        username: host.username,
+        username,
         authType: host.authType,
         password: secrets.password,
         privateKeyPem: secrets.privateKeyPem,

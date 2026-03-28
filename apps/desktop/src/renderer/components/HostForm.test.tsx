@@ -98,6 +98,45 @@ describe('HostForm', () => {
     expect(onSubmit).not.toHaveBeenCalled();
   });
 
+  it('allows creating an SSH host without a username', async () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+
+    render(
+      <HostForm
+        host={null}
+        keychainEntries={keychainEntries}
+        groupOptions={groupOptions}
+        onSubmit={onSubmit}
+      />,
+    );
+
+    fireEvent.change(screen.getByLabelText('Label'), {
+      target: { value: 'New host' },
+    });
+    fireEvent.change(screen.getByLabelText('Hostname'), {
+      target: { value: 'new.example.com' },
+    });
+    fireEvent.change(screen.getByLabelText('Username'), {
+      target: { value: '' },
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Create Host' }));
+
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    expect(onSubmit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: 'ssh',
+        label: 'New host',
+        hostname: 'new.example.com',
+        username: '',
+      }),
+      expect.objectContaining({
+        password: undefined,
+        passphrase: undefined,
+      }),
+    );
+  });
+
   it('flushes pending changes before connecting in edit mode', async () => {
     const onSubmit = vi.fn().mockResolvedValue(undefined);
     const onConnect = vi.fn().mockResolvedValue(undefined);

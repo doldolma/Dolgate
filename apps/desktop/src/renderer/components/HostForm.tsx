@@ -85,7 +85,7 @@ function isHostDraftValid(draft: HostDraft): boolean {
   }
 
   if (draft.kind === 'ssh') {
-    return Boolean(draft.hostname.trim()) && Boolean(draft.username.trim()) && Number.isInteger(draft.port) && draft.port >= 1 && draft.port <= 65535;
+    return Boolean(draft.hostname.trim()) && Number.isInteger(draft.port) && draft.port >= 1 && draft.port <= 65535;
   }
 
   if (draft.kind === 'warpgate-ssh') {
@@ -780,7 +780,6 @@ export function HostForm({
                 value={sshDraft.username}
                 onChange={(event) => setDraft({ ...sshDraft, username: event.target.value })}
                 placeholder="ubuntu"
-                required
               />
             </label>
           </div>

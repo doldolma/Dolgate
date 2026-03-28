@@ -330,12 +330,11 @@ async function parseSessionFile(
   if (!username) {
     warnings.push(
       toWarning(
-        `${label}: UserName 값이 없어 세션을 건너뛰었습니다.`,
+        `${label}: UserName 값이 없어 가져왔지만, 첫 연결 전에 사용자명 입력이 필요합니다.`,
         'missing-username',
         sourceFilePath
       )
     )
-    return { host: null, warnings }
   }
 
   const portValue = readIniValue(sections, 'CONNECTION', 'Port')
@@ -405,7 +404,7 @@ async function parseSessionFile(
       label,
       hostname,
       port,
-      username,
+      username: username ?? '',
       authType,
       groupPath,
       privateKeyPath,
@@ -462,12 +461,11 @@ async function parseSessionFileForImport(
   if (!username) {
     warnings.push(
       toWarning(
-        `${label}: UserName 값이 없어 세션을 건너뛰었습니다.`,
+        `${label}: UserName 값이 없어 가져왔지만, 첫 연결 전에 사용자명 입력이 필요합니다.`,
         'missing-username',
         sourceFilePath
       )
     )
-    return { host: null, warnings }
   }
 
   const portValue = readIniValue(sections, 'CONNECTION', 'Port')
@@ -537,7 +535,7 @@ async function parseSessionFileForImport(
       label,
       hostname,
       port,
-      username,
+      username: username ?? '',
       authType,
       groupPath,
       privateKeyPath,

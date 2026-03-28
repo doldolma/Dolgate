@@ -179,7 +179,7 @@ export class SessionReplayService {
 
   async openReplayWindow(
     recordingId: string,
-    sourceWindow: BrowserWindow,
+    _sourceWindow: BrowserWindow,
   ): Promise<void> {
     const existingWindow = this.replayWindows.get(recordingId);
     if (existingWindow && !existingWindow.isDestroyed()) {
@@ -220,8 +220,7 @@ export class SessionReplayService {
     });
 
     try {
-      const targetUrl = this.buildReplayWindowUrl(sourceWindow, recordingId);
-      await replayWindow.loadURL(targetUrl);
+      await this.loadReplayWindow(replayWindow, recordingId);
     } catch (error) {
       this.replayWindows.delete(recordingId);
       if (!replayWindow.isDestroyed()) {
@@ -404,18 +403,26 @@ export class SessionReplayService {
     return normalized ? `세션 Replay · ${normalized}` : "세션 Replay";
   }
 
-  private buildReplayWindowUrl(
-    sourceWindow: BrowserWindow,
+  private async loadReplayWindow(
+    replayWindow: BrowserWindow,
     recordingId: string,
-  ): string {
-    const sourceUrl = sourceWindow.webContents.getURL();
-    if (!sourceUrl) {
-      throw new Error("Replay 창을 열 기준 URL을 찾지 못했습니다.");
+  ): Promise<void> {
+    if (MAIN_WINDOW_VITE_DEV_SERVER_URL) {
+      const targetUrl = new URL(MAIN_WINDOW_VITE_DEV_SERVER_URL);
+      targetUrl.searchParams.set("window", "session-replay");
+      targetUrl.searchParams.set("recordingId", recordingId);
+      await replayWindow.loadURL(targetUrl.toString());
+      return;
     }
 
-    const targetUrl = new URL(sourceUrl);
-    targetUrl.searchParams.set("window", "session-replay");
-    targetUrl.searchParams.set("recordingId", recordingId);
-    return targetUrl.toString();
+    await replayWindow.loadFile(
+      path.join(__dirname, `../renderer/${MAIN_WINDOW_VITE_NAME}/index.html`),
+      {
+        query: {
+          window: "session-replay",
+          recordingId,
+        },
+      },
+    );
   }
 }

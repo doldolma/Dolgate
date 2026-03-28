@@ -897,6 +897,7 @@ input::placeholder {
 
 .host-browser {
   position: relative;
+  --home-browser-card-min-width: 280px;
 }
 
 .home-toolbar {
@@ -1131,9 +1132,8 @@ input::placeholder {
 
 .group-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(280px, 340px));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, var(--home-browser-card-min-width)), 1fr));
   gap: 0.85rem;
-  justify-content: start;
   align-content: start;
 }
 
@@ -1207,9 +1207,8 @@ input::placeholder {
 
 .host-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(280px, 340px));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, var(--home-browser-card-min-width)), 1fr));
   gap: 0.85rem;
-  justify-content: start;
   align-content: start;
 }
 
@@ -5739,8 +5738,6 @@ body.sftp-column-resizing * {
     grid-template-columns: 200px minmax(0, 1fr) 340px;
   }
 
-  .group-grid,
-  .host-grid,
   .theme-options,
   .terminal-settings-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -5748,6 +5745,13 @@ body.sftp-column-resizing * {
 
   .sftp-workspace__panes {
     grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 720px) {
+  .group-grid,
+  .host-grid {
+    grid-template-columns: minmax(0, 1fr);
   }
 }
 

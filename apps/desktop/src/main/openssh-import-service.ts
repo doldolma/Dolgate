@@ -444,13 +444,12 @@ function finalizeHostBlock(
   if (!username) {
     warnings.push(
       toWarning(
-        `"${hostBlock.alias}" 항목은 User가 없어 가져오지 않았습니다.`,
+        `"${hostBlock.alias}" 항목은 User가 없어 가져왔지만, 첫 연결 전에 사용자명 입력이 필요합니다.`,
         'missing-user',
         hostBlock.sourceFilePath,
         hostBlock.sourceLine,
       ),
     );
-    return;
   }
 
   const hostname = hostBlock.hostname?.trim() || hostBlock.alias;
@@ -467,12 +466,12 @@ function finalizeHostBlock(
     alias: hostBlock.alias,
     hostname,
     port,
-    username,
+    username: username ?? '',
     authType,
     identityFilePath: hostBlock.identityFilePath,
     sourceFilePath: hostBlock.sourceFilePath,
     sourceLine: hostBlock.sourceLine,
-    duplicateKey: buildSshDuplicateKey(hostname, port, username),
+    duplicateKey: buildSshDuplicateKey(hostname, port, username ?? ''),
   });
 }
 

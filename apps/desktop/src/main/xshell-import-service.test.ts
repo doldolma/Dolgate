@@ -264,6 +264,46 @@ describe('Xshell import service', () => {
     }
   });
 
+  it('imports hosts even when UserName is missing and warns that username is needed later', async () => {
+    const documentsDir = await createTempDir('dolssh-xshell-missing-user-');
+    try {
+      const sessionsDir = path.join(
+        documentsDir,
+        'NetSarang Computer',
+        '8',
+        'Xshell',
+        'Sessions',
+      );
+      await writeSessionFile(sessionsDir, 'Servers/app.xsh', {
+        host: 'app.example.com',
+        username: '',
+      });
+
+      const service = new XshellImportService(documentsDirectory(documentsDir));
+      const result = await service.probeDefault(new Set());
+
+      expect(result.hosts).toEqual([
+        expect.objectContaining({
+          label: 'app',
+          hostname: 'app.example.com',
+          username: '',
+        }),
+      ]);
+      expect(result.warnings).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            code: 'missing-username',
+            message: expect.stringContaining(
+              '가져왔지만, 첫 연결 전에 사용자명 입력이 필요합니다.',
+            ),
+          }),
+        ]),
+      );
+    } finally {
+      await rm(documentsDir, { recursive: true, force: true });
+    }
+  });
+
   it('appends manual folders to an existing snapshot and records duplicate hosts while preserving empty groups', async () => {
     const documentsDir = await createTempDir('dolssh-xshell-append-');
     try {

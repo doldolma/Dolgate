@@ -229,7 +229,9 @@ export function getHostSubtitle(host: HostRecord): string {
     const target = host.warpgateTargetName || host.warpgateTargetId;
     return ['Warpgate', host.warpgateUsername, target].filter(Boolean).join(' • ');
   }
-  return `${host.username}@${host.hostname}:${host.port}`;
+  return host.username.trim()
+    ? `${host.username}@${host.hostname}:${host.port}`
+    : `${host.hostname}:${host.port} • 사용자명 미설정`;
 }
 
 export function getHostBadgeLabel(host: HostRecord): string {

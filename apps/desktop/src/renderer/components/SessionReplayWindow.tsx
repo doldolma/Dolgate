@@ -14,6 +14,16 @@ import {
 const MIN_REPLAY_ZOOM_PERCENT = 60;
 const MAX_REPLAY_ZOOM_PERCENT = 180;
 const REPLAY_ZOOM_STEP_PERCENT = 10;
+const FALLBACK_TERMINAL_SETTINGS = {
+  fontFamily: getTerminalFontOption("sf-mono").stack,
+  fontSize: 13,
+  scrollbackLines: 5000,
+  lineHeight: 1,
+  letterSpacing: 0,
+  minimumContrastRatio: 1,
+  terminalThemeId: "dolssh-dark" as TerminalThemeId,
+  altIsMeta: false,
+};
 
 function detectDesktopPlatform(): "darwin" | "win32" | "linux" | "unknown" {
   const userAgent = navigator.userAgent.toLowerCase();
@@ -115,16 +125,19 @@ export function SessionReplayWindow({
   const [isPlaying, setIsPlaying] = useState(false);
   const [playbackSpeed, setPlaybackSpeed] = useState(1);
   const [zoomPercent, setZoomPercent] = useState(100);
+  const [runtime, setRuntime] = useState<TerminalRuntime | null>(null);
+  const [terminalContainer, setTerminalContainer] = useState<HTMLDivElement | null>(null);
   const [terminalViewport, setTerminalViewport] = useState<{
     cols: number;
     rows: number;
   } | null>(null);
-  const containerRef = useRef<HTMLDivElement | null>(null);
+  const [runtimeErrorMessage, setRuntimeErrorMessage] = useState<string | null>(null);
   const runtimeRef = useRef<TerminalRuntime | null>(null);
   const isPlayingRef = useRef(false);
   const appliedIndexRef = useRef(-1);
   const appliedPositionRef = useRef(0);
   const positionMsRef = useRef(0);
+  const initializedRecordingIdRef = useRef<string | null>(null);
   const appliedViewportRef = useRef<{
     cols: number;
     rows: number;
@@ -150,6 +163,9 @@ export function SessionReplayWindow({
       fontSize: Math.max(8, Math.round(terminalSettings.fontSize * zoomScale * 10) / 10),
     };
   }, [terminalSettings, zoomScale]);
+  const terminalRef = useCallback((node: HTMLDivElement | null) => {
+    setTerminalContainer(node);
+  }, []);
   const terminalSurfaceStyle = useMemo<CSSProperties | undefined>(() => {
     if (!terminalViewport || !effectiveTerminalSettings) {
       return undefined;
@@ -211,7 +227,12 @@ export function SessionReplayWindow({
           altIsMeta: settings.terminalAltIsMeta,
         });
       })
-      .catch(() => undefined);
+      .catch(() => {
+        if (disposed) {
+          return;
+        }
+        setTerminalSettings(FALLBACK_TERMINAL_SETTINGS);
+      });
     return () => {
       disposed = true;
     };
@@ -227,6 +248,7 @@ export function SessionReplayWindow({
         }
         setRecording(nextRecording);
         setErrorMessage(null);
+        setRuntimeErrorMessage(null);
       })
       .catch((error: unknown) => {
         if (disposed) {
@@ -249,32 +271,46 @@ export function SessionReplayWindow({
   }, [recordingId]);
 
   useEffect(() => {
-    if (!containerRef.current || runtimeRef.current || !effectiveTerminalSettings) {
+    if (!recording || !terminalContainer || runtimeRef.current || !effectiveTerminalSettings) {
       return;
     }
-    const themePreset = getTerminalThemePreset(effectiveTerminalSettings.terminalThemeId);
-    const runtime = createTerminalRuntime({
-      container: containerRef.current,
-      appearance: {
-        theme: themePreset.theme,
-        fontFamily: effectiveTerminalSettings.fontFamily,
-        fontSize: effectiveTerminalSettings.fontSize,
-        scrollbackLines: effectiveTerminalSettings.scrollbackLines,
-        lineHeight: effectiveTerminalSettings.lineHeight,
-        letterSpacing: effectiveTerminalSettings.letterSpacing,
-        minimumContrastRatio: effectiveTerminalSettings.minimumContrastRatio,
-        macOptionIsMeta: effectiveTerminalSettings.altIsMeta,
-      },
-      onData: () => undefined,
-      onBinary: () => undefined,
-    });
-    runtimeRef.current = runtime;
-    runtime.terminal.options.disableStdin = true;
-    return () => {
-      runtime.dispose();
+    try {
+      const themePreset = getTerminalThemePreset(effectiveTerminalSettings.terminalThemeId);
+      const nextRuntime = createTerminalRuntime({
+        container: terminalContainer,
+        appearance: {
+          theme: themePreset.theme,
+          fontFamily: effectiveTerminalSettings.fontFamily,
+          fontSize: effectiveTerminalSettings.fontSize,
+          scrollbackLines: effectiveTerminalSettings.scrollbackLines,
+          lineHeight: effectiveTerminalSettings.lineHeight,
+          letterSpacing: effectiveTerminalSettings.letterSpacing,
+          minimumContrastRatio: effectiveTerminalSettings.minimumContrastRatio,
+          macOptionIsMeta: effectiveTerminalSettings.altIsMeta,
+        },
+        onData: () => undefined,
+        onBinary: () => undefined,
+      });
+      runtimeRef.current = nextRuntime;
+      setRuntime(nextRuntime);
+      setRuntimeErrorMessage(null);
+      nextRuntime.terminal.options.disableStdin = true;
+      return () => {
+        nextRuntime.dispose();
+        runtimeRef.current = null;
+        setRuntime(null);
+      };
+    } catch (error) {
       runtimeRef.current = null;
-    };
-  }, [effectiveTerminalSettings]);
+      setRuntime(null);
+      setRuntimeErrorMessage(
+        error instanceof Error
+          ? `세션 replay 터미널을 초기화하지 못했습니다. ${error.message}`
+          : "세션 replay 터미널을 초기화하지 못했습니다.",
+      );
+      return undefined;
+    }
+  }, [effectiveTerminalSettings, recording, terminalContainer]);
 
   useEffect(() => {
     positionMsRef.current = positionMs;
@@ -285,11 +321,11 @@ export function SessionReplayWindow({
   }, [isPlaying]);
 
   useEffect(() => {
-    if (!runtimeRef.current || !effectiveTerminalSettings) {
+    if (!runtime || !effectiveTerminalSettings) {
       return;
     }
     const themePreset = getTerminalThemePreset(effectiveTerminalSettings.terminalThemeId);
-    runtimeRef.current.setAppearance({
+    runtime.setAppearance({
       theme: themePreset.theme,
       fontFamily: effectiveTerminalSettings.fontFamily,
       fontSize: effectiveTerminalSettings.fontSize,
@@ -299,7 +335,7 @@ export function SessionReplayWindow({
       minimumContrastRatio: effectiveTerminalSettings.minimumContrastRatio,
       macOptionIsMeta: effectiveTerminalSettings.altIsMeta,
     });
-  }, [effectiveTerminalSettings]);
+  }, [effectiveTerminalSettings, runtime]);
 
   const syncTerminalViewport = useCallback((cols: number, rows: number) => {
     const current = appliedViewportRef.current;
@@ -312,23 +348,23 @@ export function SessionReplayWindow({
   }, []);
 
   const resetTerminal = useCallback(() => {
-    if (!runtimeRef.current || !recording) {
+    if (!runtime || !recording) {
       return;
     }
-    runtimeRef.current.terminal.reset();
-    runtimeRef.current.terminal.resize(
+    runtime.terminal.reset();
+    runtime.terminal.resize(
       recording.initialCols,
       recording.initialRows,
     );
-    runtimeRef.current.terminal.clear();
+    runtime.terminal.clear();
     appliedIndexRef.current = -1;
     appliedPositionRef.current = 0;
     syncTerminalViewport(recording.initialCols, recording.initialRows);
-  }, [recording, syncTerminalViewport]);
+  }, [recording, runtime, syncTerminalViewport]);
 
   const applyUntil = useCallback(
     (targetMs: number) => {
-      if (!recording || !runtimeRef.current) {
+      if (!recording || !runtime) {
         return;
       }
 
@@ -348,10 +384,10 @@ export function SessionReplayWindow({
           break;
         }
         if (entry.type === "resize") {
-          runtimeRef.current.terminal.resize(entry.cols, entry.rows);
+          runtime.terminal.resize(entry.cols, entry.rows);
           latestViewport = { cols: entry.cols, rows: entry.rows };
         } else {
-          runtimeRef.current.write(decodeBase64Chunk(entry.dataBase64));
+          runtime.write(decodeBase64Chunk(entry.dataBase64));
         }
         appliedIndexRef.current = index;
       }
@@ -361,18 +397,22 @@ export function SessionReplayWindow({
         syncTerminalViewport(latestViewport.cols, latestViewport.rows);
       }
     },
-    [recording, resetTerminal, syncTerminalViewport],
+    [recording, resetTerminal, runtime, syncTerminalViewport],
   );
 
   useEffect(() => {
-    if (!recording || !runtimeRef.current) {
+    if (!recording || !runtime) {
+      return;
+    }
+    if (initializedRecordingIdRef.current === recording.recordingId) {
       return;
     }
     resetTerminal();
     applyUntil(0);
     setPositionMs(0);
     setIsPlaying(true);
-  }, [applyUntil, recording, resetTerminal]);
+    initializedRecordingIdRef.current = recording.recordingId;
+  }, [applyUntil, recording, resetTerminal, runtime]);
 
   useEffect(() => {
     if (!isPlaying || !recording) {
@@ -524,6 +564,12 @@ export function SessionReplayWindow({
         </div>
       ) : null}
 
+      {runtimeErrorMessage ? (
+        <div className="empty-callout">
+          <strong>{runtimeErrorMessage}</strong>
+        </div>
+      ) : null}
+
       {recording ? (
         <>
           <section className="session-replay-window__summary">
@@ -612,7 +658,7 @@ export function SessionReplayWindow({
           <div className="session-replay-window__terminal-shell">
             <div
               className="session-replay-window__terminal"
-              ref={containerRef}
+              ref={terminalRef}
               style={terminalSurfaceStyle}
             />
           </div>

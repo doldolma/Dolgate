@@ -6,6 +6,7 @@ import {
   getAwsEc2HostSshPort,
   getParentGroupPath,
   isAwsEc2HostRecord,
+  isSshHostDraft,
   isGroupWithinPath,
   isSshHostRecord,
   isWarpgateSshHostRecord,
@@ -272,6 +273,17 @@ export interface PendingAwsSftpConfigRetry {
   suggestedPort: number;
 }
 
+export interface PendingMissingUsernamePrompt {
+  hostId: string;
+  source: "ssh" | "sftp" | "containers" | "containerShell" | "portForward";
+  cols?: number;
+  rows?: number;
+  secrets?: HostSecretInput;
+  paneId?: SftpPaneId;
+  containerId?: string;
+  ruleId?: string;
+}
+
 interface PendingInteractiveAuthBase {
   sessionId: string;
   challengeId: string;
@@ -364,6 +376,7 @@ export interface AppState {
   pendingHostKeyPrompt: PendingHostKeyPrompt | null;
   pendingCredentialRetry: PendingCredentialRetry | null;
   pendingAwsSftpConfigRetry: PendingAwsSftpConfigRetry | null;
+  pendingMissingUsernamePrompt: PendingMissingUsernamePrompt | null;
   pendingInteractiveAuth: PendingInteractiveAuth | null;
   pendingConnectionAttempts: PendingConnectionAttempt[];
   setSearchQuery: (value: string) => void;
@@ -497,6 +510,8 @@ export interface AppState {
     username: string;
     port: number;
   }) => Promise<void>;
+  dismissPendingMissingUsernamePrompt: () => void;
+  submitMissingUsernamePrompt: (input: { username: string }) => Promise<void>;
   respondInteractiveAuth: (
     challengeId: string,
     responses: string[],
@@ -847,6 +862,14 @@ function toHostDraft(record: HostRecord, label: string): HostDraft {
     tags: record.tags ?? [],
     terminalThemeId: record.terminalThemeId ?? null,
   };
+}
+
+function findSshHostMissingUsername(
+  hosts: HostRecord[],
+  hostId: string,
+): Extract<HostRecord, { kind: "ssh" }> | null {
+  const host = hosts.find((item) => item.id === hostId);
+  return host && isSshHostRecord(host) && !host.username.trim() ? host : null;
 }
 
 function getDuplicateHostBaseLabel(label: string): string {
@@ -2823,6 +2846,24 @@ export function createAppStore(api: DesktopApi) {
     }
   };
 
+  const promptForMissingUsername = (
+    set: (
+      next:
+        | AppState
+        | Partial<AppState>
+        | ((state: AppState) => AppState | Partial<AppState>),
+    ) => void,
+    get: () => AppState,
+    prompt: PendingMissingUsernamePrompt,
+  ): boolean => {
+    const host = findSshHostMissingUsername(get().hosts, prompt.hostId);
+    if (!host) {
+      return false;
+    }
+    set({ pendingMissingUsernamePrompt: prompt });
+    return true;
+  };
+
   const startLocalTerminalFlow = async (
     set: (
       next:
@@ -4006,6 +4047,7 @@ export function createAppStore(api: DesktopApi) {
       pendingHostKeyPrompt: null,
       pendingCredentialRetry: null,
       pendingAwsSftpConfigRetry: null,
+      pendingMissingUsernamePrompt: null,
       pendingInteractiveAuth: null,
       pendingConnectionAttempts: [],
       setSearchQuery: (value) => set({ searchQuery: value }),
@@ -4147,6 +4189,7 @@ export function createAppStore(api: DesktopApi) {
           pendingHostKeyPrompt: null,
           pendingCredentialRetry: null,
           pendingAwsSftpConfigRetry: null,
+          pendingMissingUsernamePrompt: null,
           pendingInteractiveAuth: null,
           pendingConnectionAttempts: [],
           sftp: {
@@ -4304,6 +4347,10 @@ export function createAppStore(api: DesktopApi) {
         const currentDrawer = get().hostDrawer;
         set({
           hosts: get().hosts.filter((host) => host.id !== hostId),
+          pendingMissingUsernamePrompt:
+            get().pendingMissingUsernamePrompt?.hostId === hostId
+              ? null
+              : get().pendingMissingUsernamePrompt,
           hostDrawer:
             currentDrawer.mode === "edit" && currentDrawer.hostId === hostId
               ? { mode: "closed" }
@@ -4317,6 +4364,17 @@ export function createAppStore(api: DesktopApi) {
       connectHost: async (hostId, cols, rows, secrets) => {
         const host = get().hosts.find((item) => item.id === hostId);
         if (!host) {
+          return;
+        }
+        if (
+          promptForMissingUsername(set, get, {
+            hostId,
+            source: "ssh",
+            cols,
+            rows,
+            secrets,
+          })
+        ) {
           return;
         }
         const existingPendingAttempt = findPendingConnectionAttemptByHost(
@@ -4480,6 +4538,18 @@ export function createAppStore(api: DesktopApi) {
           ? get().hosts.find((item) => item.id === currentTab.hostId)
           : null;
         if (!host) {
+          return;
+        }
+        if (
+          isSshHostRecord(host) &&
+          promptForMissingUsername(set, get, {
+            hostId: host.id,
+            source: "ssh",
+            cols: currentAttempt?.latestCols ?? 120,
+            rows: currentAttempt?.latestRows ?? 32,
+            secrets,
+          })
+        ) {
           return;
         }
 
@@ -4680,6 +4750,14 @@ export function createAppStore(api: DesktopApi) {
       openHostContainersTab: async (hostId) => {
         const host = get().hosts.find((item) => item.id === hostId);
         if (!host) {
+          return;
+        }
+        if (
+          promptForMissingUsername(set, get, {
+            hostId,
+            source: "containers",
+          })
+        ) {
           return;
         }
         set((state) => {
@@ -4936,6 +5014,15 @@ export function createAppStore(api: DesktopApi) {
       openHostContainerShell: async (hostId, containerId) => {
         const host = get().hosts.find((item) => item.id === hostId);
         if (!host) {
+          return;
+        }
+        if (
+          promptForMissingUsername(set, get, {
+            hostId,
+            source: "containerShell",
+            containerId,
+          })
+        ) {
           return;
         }
         const initialProgress = isAwsEc2HostRecord(host)
@@ -5305,6 +5392,16 @@ export function createAppStore(api: DesktopApi) {
           return;
         }
         const host = get().hosts.find((item) => item.id === rule.hostId);
+        if (
+          host &&
+          promptForMissingUsername(set, get, {
+            hostId: rule.hostId,
+            source: "portForward",
+            ruleId,
+          })
+        ) {
+          return;
+        }
         const requiresTrustedHost =
           host?.kind === "ssh" || host?.kind === "warpgate-ssh";
         if (requiresTrustedHost) {
@@ -5419,6 +5516,8 @@ export function createAppStore(api: DesktopApi) {
         }
         set({ pendingCredentialRetry: null });
       },
+      dismissPendingMissingUsernamePrompt: () =>
+        set({ pendingMissingUsernamePrompt: null }),
       dismissPendingAwsSftpConfigRetry: () =>
         set({ pendingAwsSftpConfigRetry: null }),
       respondInteractiveAuth: async (challengeId, responses) => {
@@ -5586,6 +5685,71 @@ export function createAppStore(api: DesktopApi) {
           ]),
         }));
         await get().connectSftpHost(pending.paneId, pending.hostId);
+      },
+      submitMissingUsernamePrompt: async ({ username }) => {
+        const pending = get().pendingMissingUsernamePrompt;
+        if (!pending) {
+          return;
+        }
+
+        const trimmedUsername = username.trim();
+        if (!trimmedUsername) {
+          throw new Error("사용자명을 입력해 주세요.");
+        }
+
+        const currentHost = get().hosts.find((item) => item.id === pending.hostId);
+        if (!currentHost || !isSshHostRecord(currentHost)) {
+          set({ pendingMissingUsernamePrompt: null });
+          return;
+        }
+
+        const currentDraft = toHostDraft(currentHost, currentHost.label);
+        if (!isSshHostDraft(currentDraft)) {
+          set({ pendingMissingUsernamePrompt: null });
+          return;
+        }
+
+        const nextHost = await api.hosts.update(currentHost.id, {
+          ...currentDraft,
+          username: trimmedUsername,
+        });
+
+        set((state) => ({
+          pendingMissingUsernamePrompt: null,
+          hosts: sortHosts([
+            ...state.hosts.filter((host) => host.id !== nextHost.id),
+            nextHost,
+          ]),
+        }));
+
+        if (pending.source === "ssh") {
+          await get().connectHost(
+            pending.hostId,
+            pending.cols ?? 120,
+            pending.rows ?? 32,
+            pending.secrets,
+          );
+          return;
+        }
+
+        if (pending.source === "sftp" && pending.paneId) {
+          await get().connectSftpHost(pending.paneId, pending.hostId);
+          return;
+        }
+
+        if (pending.source === "containers") {
+          await get().openHostContainersTab(pending.hostId);
+          return;
+        }
+
+        if (pending.source === "containerShell" && pending.containerId) {
+          await get().openHostContainerShell(pending.hostId, pending.containerId);
+          return;
+        }
+
+        if (pending.source === "portForward" && pending.ruleId) {
+          await get().startPortForward(pending.ruleId);
+        }
       },
       handleCoreEvent: (event) => {
         const sessionId = event.sessionId;
@@ -6496,6 +6660,15 @@ export function createAppStore(api: DesktopApi) {
       connectSftpHost: async (paneId, hostId) => {
         const host = get().hosts.find((item) => item.id === hostId);
         if (!host) {
+          return;
+        }
+        if (
+          promptForMissingUsername(set, get, {
+            hostId,
+            source: "sftp",
+            paneId,
+          })
+        ) {
           return;
         }
         const awsHost = isAwsEc2HostRecord(host) ? host : null;
