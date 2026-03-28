@@ -6,6 +6,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const { browserWindowInstances } = vi.hoisted(() => ({
   browserWindowInstances: [] as Array<{
     loadedUrl: string | null;
+    loadedFile: string | null;
+    loadedFileQuery: Record<string, string> | null;
     show: ReturnType<typeof vi.fn>;
     focus: ReturnType<typeof vi.fn>;
     close: ReturnType<typeof vi.fn>;
@@ -15,9 +17,15 @@ const { browserWindowInstances } = vi.hoisted(() => ({
   }>,
 }));
 
+let packaged = false;
+vi.stubGlobal("MAIN_WINDOW_VITE_DEV_SERVER_URL", "http://localhost:5173/");
+vi.stubGlobal("MAIN_WINDOW_VITE_NAME", "main_window");
+
 vi.mock("electron", () => {
   class MockBrowserWindow {
     loadedUrl: string | null = null;
+    loadedFile: string | null = null;
+    loadedFileQuery: Record<string, string> | null = null;
     show = vi.fn();
     focus = vi.fn();
     close = vi.fn(() => {
@@ -67,10 +75,18 @@ vi.mock("electron", () => {
     async loadURL(url: string) {
       this.loadedUrl = url;
     }
+
+    async loadFile(file: string, options?: { query?: Record<string, string> }) {
+      this.loadedFile = file;
+      this.loadedFileQuery = options?.query ?? null;
+    }
   }
 
   return {
     app: {
+      get isPackaged() {
+        return packaged;
+      },
       getPath: () => "/tmp/dolssh-user-data",
     },
     BrowserWindow: MockBrowserWindow,
@@ -110,6 +126,9 @@ describe("SessionReplayService", () => {
   beforeEach(() => {
     tempDir = mkdtempSync(path.join(os.tmpdir(), "dolsh-session-replay-"));
     process.env.DOLSSH_USER_DATA_DIR = tempDir;
+    packaged = false;
+    vi.stubGlobal("MAIN_WINDOW_VITE_DEV_SERVER_URL", "http://localhost:5173/");
+    vi.stubGlobal("MAIN_WINDOW_VITE_NAME", "main_window");
     browserWindowInstances.length = 0;
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-03-29T00:00:00.000Z"));
@@ -241,7 +260,7 @@ describe("SessionReplayService", () => {
     expect(existsSync(path.join(replayDir, `${lastRecordingId}.events.jsonl`))).toBe(true);
   });
 
-  it("opens a replay window with the session replay route and recording id", async () => {
+  it("opens a replay window with the session replay route and recording id in dev", async () => {
     const lifecycleStates = new Map<string, ReturnType<typeof createLifecycleState>>([
       ["session-1", createLifecycleState()],
     ]);
@@ -285,5 +304,52 @@ describe("SessionReplayService", () => {
     expect(browserWindowInstances[0]?.loadedUrl).toContain(
       `recordingId=${recordingId}`,
     );
+  });
+
+  it("loads the bundled renderer file with query params in packaged mode", async () => {
+    packaged = true;
+    vi.stubGlobal("MAIN_WINDOW_VITE_DEV_SERVER_URL", undefined);
+
+    const lifecycleStates = new Map<string, ReturnType<typeof createLifecycleState>>([
+      ["session-1", createLifecycleState()],
+    ]);
+    const coreManager = {
+      getRemoteSessionLifecycleState: vi.fn((sessionId: string) =>
+        lifecycleStates.get(sessionId) ?? null,
+      ),
+      attachRemoteSessionRecording: vi.fn(),
+    };
+    const settingsRepository = {
+      get: vi.fn(() => ({ sessionReplayRetentionCount: 100 })),
+    };
+    const service = new SessionReplayService(
+      settingsRepository as never,
+      coreManager as never,
+    );
+
+    service.handleTerminalEvent({
+      type: "connected",
+      sessionId: "session-1",
+      payload: { status: "connected" },
+    } as never);
+    const recordingId = coreManager.attachRemoteSessionRecording.mock.calls[0]?.[1];
+    vi.setSystemTime(new Date("2026-03-29T00:00:02.000Z"));
+    service.handleTerminalEvent({
+      type: "closed",
+      sessionId: "session-1",
+      payload: { message: "closed" },
+    } as never);
+
+    await service.openReplayWindow(recordingId, {} as never);
+
+    expect(browserWindowInstances).toHaveLength(1);
+    expect(browserWindowInstances[0]?.loadedUrl).toBeNull();
+    expect(browserWindowInstances[0]?.loadedFile).toContain(
+      path.join("renderer", "main_window", "index.html"),
+    );
+    expect(browserWindowInstances[0]?.loadedFileQuery).toEqual({
+      window: "session-replay",
+      recordingId,
+    });
   });
 });

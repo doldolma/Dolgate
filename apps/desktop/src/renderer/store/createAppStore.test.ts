@@ -5,6 +5,7 @@ import type {
   HostDraft,
   HostRecord,
 } from "@shared";
+import { isSshHostRecord } from "@shared";
 import type { HostContainersTabState } from "./createAppStore";
 import { createAppStore, upsertTransferJob } from "./createAppStore";
 
@@ -1057,6 +1058,93 @@ describe("createAppStore", () => {
     expect(store.getState().hostDrawer).toEqual({ mode: "closed" });
   });
 
+  it("prompts for a missing SSH username before opening a session", async () => {
+    const api = createMockApi();
+    api.hosts.list = vi.fn().mockResolvedValue([
+      {
+        id: "host-1",
+        kind: "ssh",
+        label: "Prod",
+        hostname: "prod.example.com",
+        port: 22,
+        username: "",
+        authType: "password",
+        privateKeyPath: null,
+        secretRef: "host:host-1",
+        groupName: "Servers",
+        terminalThemeId: null,
+        createdAt: "2025-01-01T00:00:00.000Z",
+        updatedAt: "2025-01-01T00:00:00.000Z",
+      },
+    ]);
+    const store = createAppStore(api);
+
+    await store.getState().bootstrap();
+    await store.getState().connectHost("host-1", 120, 32);
+
+    expect(api.ssh.connect).not.toHaveBeenCalled();
+    expect(store.getState().pendingMissingUsernamePrompt).toMatchObject({
+      hostId: "host-1",
+      source: "ssh",
+      cols: 120,
+      rows: 32,
+    });
+    expect(store.getState().tabs).toHaveLength(0);
+  });
+
+  it("saves a prompted username and retries the SSH session connect", async () => {
+    const api = createMockApi();
+    const initialHost: HostRecord = {
+      id: "host-1",
+      kind: "ssh",
+      label: "Prod",
+      hostname: "prod.example.com",
+      port: 22,
+      username: "",
+      authType: "password",
+      privateKeyPath: null,
+      secretRef: "host:host-1",
+      groupName: "Servers",
+      terminalThemeId: null,
+      createdAt: "2025-01-01T00:00:00.000Z",
+      updatedAt: "2025-01-01T00:00:00.000Z",
+    };
+    api.hosts.list = vi.fn().mockResolvedValue([initialHost]);
+    api.hosts.update = vi.fn().mockImplementation(async (_id, draft) => ({
+      ...initialHost,
+      ...draft,
+      kind: "ssh",
+      id: initialHost.id,
+      createdAt: initialHost.createdAt,
+      updatedAt: "2025-01-02T00:00:00.000Z",
+    }));
+    const store = createAppStore(api);
+
+    await store.getState().bootstrap();
+    await store.getState().connectHost("host-1", 120, 32);
+    await store.getState().submitMissingUsernamePrompt({ username: "ubuntu" });
+
+    expect(api.hosts.update).toHaveBeenCalledWith(
+      "host-1",
+      expect.objectContaining({
+        kind: "ssh",
+        username: "ubuntu",
+      }),
+    );
+    expect(api.ssh.connect).toHaveBeenCalledTimes(1);
+    expect(store.getState().pendingMissingUsernamePrompt).toBeNull();
+    const updatedHost = store
+      .getState()
+      .hosts.find((host) => host.id === "host-1");
+    expect(isSshHostRecord(updatedHost as HostRecord)).toBe(true);
+    expect(
+      updatedHost && isSshHostRecord(updatedHost)
+        ? updatedHost.username
+        : null,
+    ).toBe("ubuntu");
+    expect(store.getState().tabs[0]?.sessionId).toBe("session-1");
+  });
+
   it("creates a pending tab immediately before the real session id is resolved", async () => {
     const api = createMockApi();
     const connect = createDeferred<{ sessionId: string }>();
@@ -1496,6 +1584,39 @@ describe("createAppStore", () => {
       connectInput?.endpointId,
     );
     expect(store.getState().sftp.rightPane.currentPath).toBe("/home/ubuntu");
+  });
+
+  it("prompts for a missing SSH username before starting an SFTP connection", async () => {
+    const api = createMockApi();
+    api.hosts.list = vi.fn().mockResolvedValue([
+      {
+        id: "host-1",
+        kind: "ssh",
+        label: "Prod",
+        hostname: "prod.example.com",
+        port: 22,
+        username: "",
+        authType: "password",
+        privateKeyPath: null,
+        secretRef: "host:host-1",
+        groupName: "Servers",
+        terminalThemeId: null,
+        createdAt: "2025-01-01T00:00:00.000Z",
+        updatedAt: "2025-01-01T00:00:00.000Z",
+      },
+    ]);
+    const store = createAppStore(api);
+
+    await store.getState().bootstrap();
+    store.getState().activateSftp();
+    await store.getState().connectSftpHost("right", "host-1");
+
+    expect(api.sftp.connect).not.toHaveBeenCalled();
+    expect(store.getState().pendingMissingUsernamePrompt).toMatchObject({
+      hostId: "host-1",
+      source: "sftp",
+      paneId: "right",
+    });
   });
 
   it("disconnects a connected SFTP pane back to the host picker", async () => {
@@ -2769,6 +2890,33 @@ describe("createAppStore", () => {
     });
     expect(api.shell.openExternal).not.toHaveBeenCalled();
     expect(api.ssh.respondKeyboardInteractive).not.toHaveBeenCalled();
+  });
+
+  it("surfaces keyboard-interactive challenges for regular SSH sessions", async () => {
+    const store = createAppStore(createMockApi());
+
+    await store.getState().bootstrap();
+    await store.getState().connectHost("host-1", 120, 32);
+
+    store.getState().handleCoreEvent({
+      type: "keyboardInteractiveChallenge",
+      sessionId: "session-1",
+      payload: {
+        challengeId: "challenge-ssh-1",
+        attempt: 1,
+        name: "otp",
+        instruction: "Enter the one-time code.",
+        prompts: [{ label: "Code", echo: true }],
+      },
+    });
+
+    expect(store.getState().pendingInteractiveAuth).toMatchObject({
+      source: "ssh",
+      sessionId: "session-1",
+      challengeId: "challenge-ssh-1",
+      provider: "generic",
+    });
+    expect(store.getState().activeWorkspaceTab).toBe("session:session-1");
   });
 
   it("creates and expands a workspace from adjacent tabs", async () => {

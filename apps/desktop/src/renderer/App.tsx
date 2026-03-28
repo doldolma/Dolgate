@@ -12,6 +12,7 @@ import { HostDrawer } from './components/HostDrawer';
 import { KnownHostPromptDialog } from './components/KnownHostPromptDialog';
 import { LoginGate } from './components/LoginGate';
 import { LogsPanel } from './components/LogsPanel';
+import { MissingUsernameDialog } from './components/MissingUsernameDialog';
 import { DesktopWindowControls } from './components/DesktopWindowControls';
 import { OpenSshImportDialog } from './components/OpenSshImportDialog';
 import { PortForwardingPanel } from './components/PortForwardingPanel';
@@ -323,6 +324,9 @@ export function App() {
   const submitCredentialRetry = useAppStore((state) => state.submitCredentialRetry);
   const dismissPendingAwsSftpConfigRetry = useAppStore((state) => state.dismissPendingAwsSftpConfigRetry);
   const submitAwsSftpConfigRetry = useAppStore((state) => state.submitAwsSftpConfigRetry);
+  const pendingMissingUsernamePrompt = useAppStore((state) => state.pendingMissingUsernamePrompt);
+  const dismissPendingMissingUsernamePrompt = useAppStore((state) => state.dismissPendingMissingUsernamePrompt);
+  const submitMissingUsernamePrompt = useAppStore((state) => state.submitMissingUsernamePrompt);
   const pendingInteractiveAuth = useAppStore((state) => state.pendingInteractiveAuth);
   const respondInteractiveAuth = useAppStore((state) => state.respondInteractiveAuth);
   const reopenInteractiveAuthUrl = useAppStore((state) => state.reopenInteractiveAuthUrl);
@@ -1445,6 +1449,21 @@ export function App() {
         }
         onClose={dismissPendingAwsSftpConfigRetry}
         onSubmit={submitAwsSftpConfigRetry}
+      />
+
+      <MissingUsernameDialog
+        request={
+          pendingMissingUsernamePrompt
+            ? {
+                hostLabel:
+                  findHost(hosts, pendingMissingUsernamePrompt.hostId)?.label ??
+                  "SSH Host",
+                source: pendingMissingUsernamePrompt.source,
+              }
+            : null
+        }
+        onClose={dismissPendingMissingUsernamePrompt}
+        onSubmit={submitMissingUsernamePrompt}
       />
 
       <SecretEditDialog

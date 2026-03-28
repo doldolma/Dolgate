@@ -187,6 +187,42 @@ describe('OpenSSH import service', () => {
     }
   });
 
+  it('imports hosts even when User is missing and warns that username is needed later', async () => {
+    const tempDir = await createTempDir('dolssh-openssh-missing-user-');
+    try {
+      await mkdir(path.join(tempDir, '.ssh'), { recursive: true });
+      await writeFile(
+        path.join(tempDir, '.ssh', 'config'),
+        ['Host app', '  HostName app.example.com', '  Port 2200'].join('\n'),
+        'utf8',
+      );
+
+      const service = new OpenSshImportService(tempDir);
+      const result = await service.probeDefault(new Set());
+
+      expect(result.hosts).toEqual([
+        expect.objectContaining({
+          alias: 'app',
+          hostname: 'app.example.com',
+          port: 2200,
+          username: '',
+        }),
+      ]);
+      expect(result.warnings).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            code: 'missing-user',
+            message: expect.stringContaining(
+              '가져왔지만, 첫 연결 전에 사용자명 입력이 필요합니다.',
+            ),
+          }),
+        ]),
+      );
+    } finally {
+      await rm(tempDir, { recursive: true, force: true });
+    }
+  });
+
   it('imports supported private key material and falls back to key paths for unsupported files', async () => {
     const tempDir = await createTempDir('dolssh-openssh-identity-');
     try {
