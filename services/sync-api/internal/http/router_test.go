@@ -219,7 +219,7 @@ func TestBrowserSignupAcceptsLoopbackRedirectURI(t *testing.T) {
 	form := url.Values{
 		"email":        {"loopback@example.com"},
 		"password":     {"supersecure"},
-		"client":       {"dolssh-desktop"},
+		"client":       {"dolgate-desktop"},
 		"redirect_uri": {"http://127.0.0.1:43123/auth/callback"},
 		"state":        {"state-123"},
 	}
@@ -257,31 +257,31 @@ func TestOIDCOnlyLoginRedirectsImmediately(t *testing.T) {
 			Enabled:      true,
 			DisplayName:  "SSO",
 			IssuerURL:    oidcServer.URL,
-			ClientID:     "dolssh-desktop",
+			ClientID:     "dolgate-desktop",
 			ClientSecret: "secret",
 			RedirectURL:  "http://127.0.0.1/callback",
 		},
 	})
 
-	request := httptest.NewRequest(http.MethodGet, "/login?client=dolssh-desktop&redirect_uri=dolssh://auth/callback&state=test-state", nil)
+	request := httptest.NewRequest(http.MethodGet, "/login?client=dolgate-desktop&redirect_uri=dolgate://auth/callback&state=test-state", nil)
 	recorder := httptest.NewRecorder()
 	router.ServeHTTP(recorder, request)
 
 	if recorder.Code != http.StatusFound {
 		t.Fatalf("expected redirect, got %d", recorder.Code)
 	}
-	if recorder.Header().Get("Location") != "/auth/oidc/start?client=dolssh-desktop&redirect_uri=dolssh://auth/callback&state=test-state" {
+	if recorder.Header().Get("Location") != "/auth/oidc/start?client=dolgate-desktop&redirect_uri=dolgate://auth/callback&state=test-state" {
 		t.Fatalf("unexpected login redirect location: %s", recorder.Header().Get("Location"))
 	}
 
-	signupRequest := httptest.NewRequest(http.MethodGet, "/signup?client=dolssh-desktop&redirect_uri=dolssh://auth/callback&state=test-state", nil)
+	signupRequest := httptest.NewRequest(http.MethodGet, "/signup?client=dolgate-desktop&redirect_uri=dolgate://auth/callback&state=test-state", nil)
 	signupRecorder := httptest.NewRecorder()
 	router.ServeHTTP(signupRecorder, signupRequest)
 
 	if signupRecorder.Code != http.StatusFound {
 		t.Fatalf("expected signup redirect, got %d", signupRecorder.Code)
 	}
-	if signupRecorder.Header().Get("Location") != "/auth/oidc/start?client=dolssh-desktop&redirect_uri=dolssh://auth/callback&state=test-state" {
+	if signupRecorder.Header().Get("Location") != "/auth/oidc/start?client=dolgate-desktop&redirect_uri=dolgate://auth/callback&state=test-state" {
 		t.Fatalf("unexpected signup redirect location: %s", signupRecorder.Header().Get("Location"))
 	}
 }

@@ -165,7 +165,7 @@ describe("WarpgateService browser import", () => {
     >;
     expect(authWindow).toBeTruthy();
     expect(authWindow.options.parent).toBe(parentWindow);
-    expect(authWindow.options.modal).toBe(true);
+    expect(authWindow.options.modal).toBe(false);
     expect(
       (authWindow.options.webPreferences as { partition: string }).partition,
     ).toBe(`warpgate-import:${attemptId}`);
@@ -259,6 +259,42 @@ describe("WarpgateService browser import", () => {
       status: "cancelled",
       errorMessage: "Warpgate 로그인 창이 닫혔습니다.",
     });
+    expect(authSession.clearStorageData).toHaveBeenCalledTimes(1);
+  });
+
+  it("broadcasts cancelled and cleans up when browser import is cancelled explicitly", async () => {
+    sessionPlans.push([new Response("", { status: 401 })]);
+
+    const service = new WarpgateService({} as never);
+    const rendererWindow = createRegisteredWindow();
+    service.registerWindow(rendererWindow as never);
+
+    const { attemptId } = await service.startBrowserImport(
+      "https://warpgate.example.com",
+      null,
+    );
+
+    const authWindow = browserWindowInstances[0] as InstanceType<
+      typeof FakeBrowserWindow
+    >;
+    const partition = (
+      authWindow.options.webPreferences as { partition: string }
+    ).partition;
+    const authSession = sessionByPartition.get(partition)!;
+
+    await Promise.resolve();
+    await service.cancelBrowserImport(attemptId);
+
+    const payloads = rendererWindow.webContents.send.mock.calls
+      .filter(([channel]) => channel === ipcChannels.warpgate.event)
+      .map(([, payload]) => payload);
+
+    expect(payloads.at(-1)).toEqual({
+      attemptId,
+      status: "cancelled",
+      errorMessage: "Warpgate 로그인이 취소되었습니다.",
+    });
+    expect(authWindow.close).toHaveBeenCalledTimes(1);
     expect(authSession.clearStorageData).toHaveBeenCalledTimes(1);
   });
 

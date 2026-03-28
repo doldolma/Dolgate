@@ -56,7 +56,7 @@ export const terminalFontOptions: TerminalFontOption[] = [
 export const terminalThemePresets: TerminalThemeDefinition[] = [
   {
     id: 'dolssh-dark',
-    title: 'Dolssh Dark',
+    title: 'Dolgate Dark',
     description: '기본 다크',
     preview: { background: '#0b1220', foreground: '#d9e4ee', accent: '#8ed1c2' },
     theme: {
@@ -85,7 +85,7 @@ export const terminalThemePresets: TerminalThemeDefinition[] = [
   },
   {
     id: 'dolssh-light',
-    title: 'Dolssh Light',
+    title: 'Dolgate Light',
     description: '기본 라이트',
     preview: { background: '#f5f7fb', foreground: '#243041', accent: '#2468ff' },
     theme: {

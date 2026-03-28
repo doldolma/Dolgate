@@ -36,7 +36,7 @@ function signOfflineLease(serverUrl: string, userId: string, expiresAt: Date): A
     JSON.stringify({
       iss: new URL(serverUrl).origin,
       sub: userId,
-      aud: ['dolssh-desktop'],
+      aud: ['dolgate-desktop'],
       iat: Math.floor(issuedAt.getTime() / 1000),
       exp: Math.floor(expiresAt.getTime() / 1000)
     })
@@ -86,8 +86,8 @@ async function createService(serverUrl = 'https://ssh.doldolma.com') {
   const configService = {
     getConfig: () => ({
       sync: {
-        desktopClientId: 'dolssh-desktop',
-        redirectUri: 'dolssh://auth/callback'
+        desktopClientId: 'dolgate-desktop',
+        redirectUri: 'dolgate://auth/callback'
       }
     })
   };

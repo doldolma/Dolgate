@@ -1,14 +1,14 @@
 const path = require('node:path');
 
 module.exports = {
-  appId: 'com.doldolma.dolssh',
-  productName: 'dolssh',
+  appId: 'com.doldolma.dolgate',
+  productName: 'Dolgate',
   electronVersion: '35.0.0',
   artifactName: '${productName}-${version}-${os}-${arch}.${ext}',
   protocols: [
     {
-      name: 'dolssh',
-      schemes: ['dolssh']
+      name: 'Dolgate',
+      schemes: ['dolgate']
     }
   ],
   directories: {
@@ -18,7 +18,7 @@ module.exports = {
     {
       provider: 'github',
       owner: 'doldolma',
-      repo: 'dolssh',
+      repo: 'dolgate',
       releaseType: 'release'
     }
   ],

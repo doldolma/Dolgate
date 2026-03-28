@@ -151,7 +151,7 @@ if (termiusHelperArgIndex >= 0) {
   }
 
   function findProtocolUrl(argv: string[]): string | null {
-    return argv.find((value) => value.startsWith('dolssh://')) ?? null;
+    return argv.find((value) => value.startsWith('dolgate://')) ?? null;
   }
 
   async function handleAuthCallbackUrl(rawUrl: string): Promise<void> {

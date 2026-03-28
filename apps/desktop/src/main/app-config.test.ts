@@ -51,7 +51,7 @@ describe('DesktopConfigService', () => {
       sync: {
         serverUrl: 'https://example-sync.test',
         desktopClientId: 'desktop-example',
-        redirectUri: 'dolssh://auth/callback'
+        redirectUri: 'dolgate://auth/callback'
       }
     });
   });
@@ -71,7 +71,7 @@ describe('DesktopConfigService', () => {
       path.join(mockedUserDataPath, 'desktop-config.json'),
       JSON.stringify({
         sync: {
-          redirectUri: 'dolssh://override/callback'
+          redirectUri: 'dolgate://override/callback'
         }
       })
     );
@@ -82,7 +82,7 @@ describe('DesktopConfigService', () => {
       sync: {
         serverUrl: 'https://bundled.example.com',
         desktopClientId: 'bundled-client',
-        redirectUri: 'dolssh://override/callback'
+        redirectUri: 'dolgate://override/callback'
       }
     });
     expect(service.getUserOverridePath()).toBe(path.join(mockedUserDataPath, 'desktop-config.json'));
@@ -106,8 +106,8 @@ describe('DesktopConfigService', () => {
     expect(service.getConfig()).toEqual({
       sync: {
         serverUrl: 'https://ssh.doldolma.com',
-        desktopClientId: 'dolssh-desktop',
-        redirectUri: 'dolssh://auth/callback'
+        desktopClientId: 'dolgate-desktop',
+        redirectUri: 'dolgate://auth/callback'
       }
     });
   });

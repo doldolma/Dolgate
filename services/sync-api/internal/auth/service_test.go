@@ -138,13 +138,13 @@ func TestSessionBootstrapIncludesOfflineLeaseBoundedByRefreshExpiry(t *testing.T
 	}
 	hasDesktopAudience := false
 	for _, audience := range claims.Audience {
-		if audience == "dolssh-desktop" {
+		if audience == "dolgate-desktop" {
 			hasDesktopAudience = true
 			break
 		}
 	}
 	if !hasDesktopAudience {
-		t.Fatalf("claims.Audience = %+v, want dolssh-desktop", claims.Audience)
+		t.Fatalf("claims.Audience = %+v, want dolgate-desktop", claims.Audience)
 	}
 
 	leaseExpiresAt, err := time.Parse(time.RFC3339, session.OfflineLease.ExpiresAt)
@@ -204,7 +204,7 @@ func TestExchangeCodeIsSingleUse(t *testing.T) {
 func TestBrowserLoginStateRoundTrip(t *testing.T) {
 	service, _ := newTestService(t)
 
-	token, err := service.NewBrowserLoginState("desktop", "dolssh://auth/callback", "state-123")
+	token, err := service.NewBrowserLoginState("desktop", "dolgate://auth/callback", "state-123")
 	if err != nil {
 		t.Fatalf("NewBrowserLoginState() error = %v", err)
 	}
@@ -213,7 +213,7 @@ func TestBrowserLoginStateRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ParseBrowserLoginState() error = %v", err)
 	}
-	if state.Client != "desktop" || state.RedirectURI != "dolssh://auth/callback" || state.State != "state-123" {
+	if state.Client != "desktop" || state.RedirectURI != "dolgate://auth/callback" || state.State != "state-123" {
 		t.Fatalf("state = %+v", state)
 	}
 }

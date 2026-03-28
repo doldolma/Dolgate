@@ -113,7 +113,7 @@ export function verifyOfflineLease(
         reason: 'offline lease 사용자 정보가 현재 세션과 다릅니다.'
       };
     }
-    if (!audience.includes('dolssh-desktop')) {
+    if (!audience.includes('dolgate-desktop')) {
       return {
         ok: false,
         reason: 'offline lease 대상이 이 데스크톱 앱이 아닙니다.'

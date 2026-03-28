@@ -776,10 +776,10 @@ export class AuthService {
       return;
     }
     if (process.defaultApp && process.argv.length >= 2) {
-      app.setAsDefaultProtocolClient('dolssh', process.execPath, [process.argv[1]!]);
+      app.setAsDefaultProtocolClient('dolgate', process.execPath, [process.argv[1]!]);
       return;
     }
-    app.setAsDefaultProtocolClient('dolssh');
+    app.setAsDefaultProtocolClient('dolgate');
   }
 
   private async prepareBrowserRedirectUri(): Promise<string> {
@@ -825,7 +825,7 @@ export class AuthService {
       response.writeHead(200, {
         'Content-Type': 'text/html; charset=utf-8'
       });
-      response.end(renderLoopbackCallbackPage('로그인이 완료되었습니다.', 'dolssh 앱으로 돌아갑니다. 이 탭은 닫아도 됩니다.'));
+      response.end(renderLoopbackCallbackPage('로그인이 완료되었습니다.', 'Dolgate 앱으로 돌아갑니다. 이 탭은 닫아도 됩니다.'));
     } catch (error) {
       const message = toErrorMessage(error, '브라우저 로그인 교환에 실패했습니다.');
       response.writeHead(500, {
@@ -885,7 +885,7 @@ function renderLoopbackCallbackPage(title: string, message: string): string {
   <body>
     <div class="wrap">
       <div class="card">
-        <div class="eyebrow">dolssh</div>
+        <div class="eyebrow">Dolgate</div>
         <h1>${escapeHtml(title)}</h1>
         <p>${escapeHtml(message)}</p>
       </div>

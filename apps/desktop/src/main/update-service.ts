@@ -9,7 +9,7 @@ import { SettingsRepository } from './database';
 const githubReleaseFeed = {
   provider: 'github',
   owner: 'doldolma',
-  repo: 'dolssh',
+  repo: 'dolgate',
   releaseType: 'release',
   vPrefixedTagName: true,
   private: false
@@ -97,10 +97,10 @@ function ensureRuntimeUpdateConfig(): void {
   const updateConfigYaml = [
     'provider: github',
     'owner: doldolma',
-    'repo: dolssh',
+    'repo: dolgate',
     'releaseType: release',
     'vPrefixedTagName: true',
-    'updaterCacheDirName: dolssh-updater'
+    'updaterCacheDirName: dolgate-updater'
   ].join('\n');
 
   mkdirSync(path.dirname(updateConfigPath), { recursive: true });

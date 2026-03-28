@@ -13,8 +13,8 @@ export interface DesktopAppConfig {
 const DEFAULT_CONFIG: DesktopAppConfig = {
   sync: {
     serverUrl: 'https://ssh.doldolma.com',
-    desktopClientId: 'dolssh-desktop',
-    redirectUri: 'dolssh://auth/callback'
+    desktopClientId: 'dolgate-desktop',
+    redirectUri: 'dolgate://auth/callback'
   }
 };
 

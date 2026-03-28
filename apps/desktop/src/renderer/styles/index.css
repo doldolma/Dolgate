@@ -3525,8 +3525,29 @@ body.sftp-column-resizing * {
 
 .warpgate-import-dialog__actions {
   display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
   justify-content: flex-end;
   padding-top: 0.1rem;
+}
+
+.warpgate-import-dialog__status-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  padding: 0.9rem 1rem;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--surface) 90%, transparent 10%);
+}
+
+.warpgate-import-dialog__status-card strong {
+  color: var(--text);
+}
+
+.warpgate-import-dialog__status-card span {
+  color: var(--text-soft);
+  line-height: 1.5;
 }
 
 .termius-import-dialog .modal-card__body {
