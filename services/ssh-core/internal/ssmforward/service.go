@@ -109,6 +109,7 @@ func (s *Service) Start(ruleID, requestID string, payload protocol.SSMPortForwar
 			Transport:   "aws-ssm",
 			Status:      "running",
 			Mode:        "local",
+			Method:      "ssm-remote-host",
 			BindAddress: resolvedBindAddress(payload.BindAddress),
 			BindPort:    payload.BindPort,
 		},

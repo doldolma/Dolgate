@@ -1,8 +1,11 @@
 package main
 
 import (
+	"fmt"
 	"log"
 	"os"
+	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -24,6 +27,10 @@ func main() {
 		log.Fatalf("load config: %v", err)
 	}
 	log.Printf("sync API config loaded from %s", configPath)
+
+	if err := prepareRuntimePaths(cfg); err != nil {
+		log.Fatalf("prepare runtime paths: %v", err)
+	}
 
 	dbStore, err := store.Open(cfg.Database.Driver, cfg.Database.URL)
 	if err != nil {
@@ -87,4 +94,66 @@ func main() {
 	if err := router.Run(":" + cfg.Server.Port); err != nil {
 		log.Fatal(err)
 	}
+}
+
+func prepareRuntimePaths(cfg appconfig.AppConfig) error {
+	if cfg.Database.Driver == "sqlite" {
+		if err := ensureSQLiteDirectory(cfg.Database.URL); err != nil {
+			return err
+		}
+	}
+
+	if strings.TrimSpace(cfg.Auth.SigningPrivateKeyPEM) == "" {
+		if err := ensureParentDirectory(cfg.Auth.SigningPrivateKeyPath, "auth signing key"); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func ensureSQLiteDirectory(dsn string) error {
+	path, ok := sqliteFilePath(dsn)
+	if !ok {
+		return nil
+	}
+	return ensureParentDirectory(path, "sqlite database")
+}
+
+func sqliteFilePath(dsn string) (string, bool) {
+	trimmed := strings.TrimSpace(dsn)
+	if trimmed == "" {
+		return "", false
+	}
+
+	if strings.HasPrefix(trimmed, "file:") {
+		trimmed = strings.TrimPrefix(trimmed, "file:")
+		if idx := strings.Index(trimmed, "?"); idx >= 0 {
+			trimmed = trimmed[:idx]
+		}
+	}
+
+	trimmed = strings.TrimSpace(trimmed)
+	if trimmed == "" || trimmed == ":memory:" || strings.HasPrefix(trimmed, ":memory:") {
+		return "", false
+	}
+
+	return trimmed, true
+}
+
+func ensureParentDirectory(path string, description string) error {
+	trimmed := strings.TrimSpace(path)
+	if trimmed == "" {
+		return nil
+	}
+
+	dir := filepath.Dir(trimmed)
+	if dir == "." || dir == "" {
+		return nil
+	}
+
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return fmt.Errorf("create %s directory %q: %w", description, dir, err)
+	}
+	return nil
 }

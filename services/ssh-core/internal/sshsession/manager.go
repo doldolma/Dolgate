@@ -190,7 +190,13 @@ func (m *Manager) Connect(sessionID, requestID string, payload protocol.ConnectP
 		return fmt.Errorf("pty request failed: %w", err)
 	}
 
-	if err := session.Shell(); err != nil {
+	if payload.Command != "" {
+		if err := session.Start(payload.Command); err != nil {
+			session.Close()
+			client.Close()
+			return fmt.Errorf("command start failed: %w", err)
+		}
+	} else if err := session.Shell(); err != nil {
 		session.Close()
 		client.Close()
 		return fmt.Errorf("shell start failed: %w", err)

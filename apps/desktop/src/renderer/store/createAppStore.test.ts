@@ -1,5 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
-import type { DesktopApi, HostDraft, HostRecord } from "@shared";
+import type {
+  DesktopApi,
+  HostContainerLogsSnapshot,
+  HostDraft,
+  HostRecord,
+} from "@shared";
+import type { HostContainersTabState } from "./createAppStore";
 import { createAppStore, upsertTransferJob } from "./createAppStore";
 
 function createDeferred<T>() {
@@ -15,6 +21,39 @@ function createDeferred<T>() {
 async function flushMicrotasks() {
   await Promise.resolve();
   await Promise.resolve();
+}
+
+function createContainerTab(
+  hostId: string,
+  options: Partial<HostContainersTabState> = {},
+): HostContainersTabState {
+  return {
+    hostId,
+    title: `${hostId} · Containers`,
+    runtime: null,
+    unsupportedReason: null,
+    connectionProgress: null,
+    items: [],
+    selectedContainerId: null,
+    activePanel: "overview",
+    isLoading: false,
+    details: null,
+    detailsLoading: false,
+    logs: null,
+    logsState: "idle",
+    logsLoading: false,
+    logsFollowEnabled: false,
+    logsTailWindow: 200,
+    logsSearchQuery: "",
+    logsSearchMode: null,
+    logsSearchLoading: false,
+    logsSearchResult: null,
+    metricsSamples: [],
+    metricsState: "idle",
+    metricsLoading: false,
+    pendingAction: null,
+    ...options,
+  };
 }
 
 function createMockApi(): DesktopApi {
@@ -249,6 +288,62 @@ function createMockApi(): DesktopApi {
       respondKeyboardInteractive: vi.fn().mockResolvedValue(undefined),
       onEvent: vi.fn(),
       onData: vi.fn(),
+    },
+    containers: {
+      list: vi.fn().mockResolvedValue({
+        hostId: "host-1",
+        runtime: "docker",
+        containers: [],
+      }),
+      inspect: vi.fn().mockResolvedValue({
+        id: "container-1",
+        name: "app",
+        runtime: "docker",
+        image: "nginx:latest",
+        status: "running",
+        createdAt: "2025-01-01T00:00:00.000Z",
+        command: "nginx -g daemon off;",
+        entrypoint: "/docker-entrypoint.sh",
+        mounts: [],
+        networks: [],
+        environment: [],
+        labels: [],
+      }),
+      logs: vi.fn().mockResolvedValue({
+        hostId: "host-1",
+        containerId: "container-1",
+        runtime: "docker",
+        lines: [],
+        cursor: null,
+      }),
+      start: vi.fn().mockResolvedValue(undefined),
+      stop: vi.fn().mockResolvedValue(undefined),
+      restart: vi.fn().mockResolvedValue(undefined),
+      remove: vi.fn().mockResolvedValue(undefined),
+      stats: vi.fn().mockResolvedValue({
+        runtime: "docker",
+        containerId: "container-1",
+        recordedAt: "2025-01-01T00:00:00.000Z",
+        cpuPercent: 10,
+        memoryUsedBytes: 1024,
+        memoryLimitBytes: 2048,
+        memoryPercent: 50,
+        networkRxBytes: 100,
+        networkTxBytes: 200,
+        blockReadBytes: 300,
+        blockWriteBytes: 400,
+      }),
+      searchLogs: vi.fn().mockResolvedValue({
+        hostId: "host-1",
+        containerId: "container-1",
+        runtime: "docker",
+        query: "error",
+        lines: [],
+        matchCount: 0,
+      }),
+      openShell: vi.fn().mockResolvedValue({ sessionId: "session-container-1" }),
+      release: vi.fn().mockResolvedValue(undefined),
+      onConnectionProgress: vi.fn().mockReturnValue(() => undefined),
     },
     sessionShares: {
       start: vi.fn().mockResolvedValue({
@@ -1663,6 +1758,756 @@ describe("createAppStore", () => {
     });
   });
 
+  it("updates the containers tab progress from host-scoped connection events", async () => {
+    const store = createAppStore(createMockApi());
+    await store.getState().bootstrap();
+    await store.getState().openHostContainersTab("host-1");
+
+    store.getState().handleContainerConnectionProgressEvent({
+      endpointId: "containers:host-1",
+      hostId: "host-1",
+      stage: "browser-login",
+      message: "브라우저에서 승인을 진행하는 중입니다.",
+    });
+
+    expect(
+      store
+        .getState()
+        .containerTabs.find((tab) => tab.hostId === "host-1")
+        ?.connectionProgress,
+    ).toEqual({
+      endpointId: "containers:host-1",
+      hostId: "host-1",
+      stage: "browser-login",
+      message: "브라우저에서 승인을 진행하는 중입니다.",
+    });
+  });
+
+  it("opens host containers inside the fixed containers section without touching the main tab strip", async () => {
+    const store = createAppStore(createMockApi());
+    await store.getState().bootstrap();
+
+    const beforeTabStrip = store.getState().tabStrip;
+
+    await store.getState().openHostContainersTab("host-1");
+
+    expect(store.getState().activeWorkspaceTab).toBe("containers");
+    expect(store.getState().activeContainerHostId).toBe("host-1");
+    expect(store.getState().tabStrip).toEqual(beforeTabStrip);
+    expect(
+      store.getState().containerTabs.find((tab) => tab.hostId === "host-1"),
+    ).toBeDefined();
+  });
+
+  it("releases the host containers endpoint and keeps focus inside the containers section when another host tab remains", async () => {
+    const api = createMockApi();
+    const store = createAppStore(api);
+
+    await store.getState().bootstrap();
+    await store.getState().openHostContainersTab("host-1");
+
+    store.setState({
+      pendingInteractiveAuth: {
+        source: "containers",
+        endpointId: "containers:host-1",
+        hostId: "host-1",
+        challengeId: "challenge-1",
+        name: "warpgate",
+        instruction: "승인을 기다리는 중입니다.",
+        prompts: [],
+        provider: "warpgate",
+        approvalUrl: "https://warpgate.example.com/authorize",
+        authCode: "ABCD-1234",
+        autoSubmitted: false,
+      },
+    });
+
+    store.setState((state) => ({
+      containerTabs: [
+        ...state.containerTabs,
+        createContainerTab("host-2", {
+          title: "Stage · Containers",
+        }),
+      ],
+    }));
+
+    expect(store.getState().activeWorkspaceTab).toBe("containers");
+    expect(store.getState().activeContainerHostId).toBe("host-1");
+
+    await store.getState().closeHostContainersTab("host-1");
+
+    expect(api.containers.release).toHaveBeenCalledWith("host-1");
+    expect(
+      store.getState().containerTabs.find((tab) => tab.hostId === "host-1"),
+    ).toBeUndefined();
+    expect(store.getState().pendingInteractiveAuth).toBeNull();
+    expect(store.getState().activeWorkspaceTab).toBe("containers");
+    expect(store.getState().activeContainerHostId).toBe("host-2");
+  });
+
+  it("leaves the fixed containers section active when the last host tab closes", async () => {
+    const api = createMockApi();
+    const store = createAppStore(api);
+
+    await store.getState().bootstrap();
+    await store.getState().openHostContainersTab("host-1");
+
+    await store.getState().closeHostContainersTab("host-1");
+
+    expect(api.containers.release).toHaveBeenCalledWith("host-1");
+    expect(store.getState().containerTabs).toEqual([]);
+    expect(store.getState().activeWorkspaceTab).toBe("containers");
+    expect(store.getState().activeContainerHostId).toBeNull();
+  });
+
+  it("reorders container subtabs independently from the dynamic tab strip", async () => {
+    const store = createAppStore(createMockApi());
+    await store.getState().bootstrap();
+    await store.getState().openHostContainersTab("host-1");
+
+    store.setState((state) => ({
+      containerTabs: [
+        ...state.containerTabs,
+        createContainerTab("host-2", {
+          title: "Stage · Containers",
+          runtime: "docker",
+        }),
+      ],
+    }));
+
+    const beforeTabStrip = store.getState().tabStrip;
+
+    store.getState().reorderContainerTab("host-2", "host-1", "before");
+
+    expect(store.getState().containerTabs.map((tab) => tab.hostId)).toEqual([
+      "host-2",
+      "host-1",
+    ]);
+    expect(store.getState().tabStrip).toEqual(beforeTabStrip);
+  });
+
+  it("disconnects a container shell session through the standard ssh disconnect flow", async () => {
+    const api = createMockApi();
+    const store = createAppStore(api);
+
+    await store.getState().bootstrap();
+    await store.getState().openHostContainerShell("host-1", "container-1");
+
+    expect(api.containers.openShell).toHaveBeenCalledWith(
+      "host-1",
+      "container-1",
+    );
+    expect(store.getState().tabs[0]?.sessionId).toBe("session-container-1");
+
+    await store.getState().disconnectTab("session-container-1");
+
+    expect(api.ssh.disconnect).toHaveBeenCalledWith("session-container-1");
+    expect(store.getState().tabs[0]?.status).toBe("disconnecting");
+  });
+
+  it("deduplicates overlapping container log lines while following", async () => {
+    const api = createMockApi();
+    api.containers.logs = vi
+      .fn()
+      .mockResolvedValueOnce({
+        hostId: "host-1",
+        containerId: "container-1",
+        runtime: "docker",
+        lines: [
+          "2025-01-01T00:00:00.000000000Z first",
+          "2025-01-01T00:00:01.000000000Z second",
+        ],
+        cursor: "2025-01-01T00:00:01.000000000Z",
+      })
+      .mockResolvedValueOnce({
+        hostId: "host-1",
+        containerId: "container-1",
+        runtime: "docker",
+        lines: [
+          "2025-01-01T00:00:01.000000000Z second",
+          "2025-01-01T00:00:02.000000000Z third",
+        ],
+        cursor: "2025-01-01T00:00:02.000000000Z",
+      });
+
+    const store = createAppStore(api);
+    await store.getState().bootstrap();
+    await store.getState().openHostContainersTab("host-1");
+
+    store.setState((state) => ({
+      containerTabs: state.containerTabs.map((tab) =>
+        tab.hostId === "host-1"
+          ? {
+              ...tab,
+              selectedContainerId: "container-1",
+              activePanel: "logs",
+              logsFollowEnabled: true,
+            }
+          : tab,
+      ),
+    }));
+
+    await store.getState().refreshHostContainerLogs("host-1");
+    await store.getState().refreshHostContainerLogs("host-1", {
+      followCursor: "2025-01-01T00:00:01.000000000Z",
+    });
+
+    expect(
+      store.getState().containerTabs.find((tab) => tab.hostId === "host-1")
+        ?.logs?.lines,
+    ).toEqual([
+      "2025-01-01T00:00:00.000000000Z first",
+      "2025-01-01T00:00:01.000000000Z second",
+      "2025-01-01T00:00:02.000000000Z third",
+    ]);
+  });
+
+  it("keeps existing log lines visible while a follow refresh is pending", async () => {
+    const deferred = createDeferred<HostContainerLogsSnapshot>();
+    const api = createMockApi();
+    api.containers.logs = vi.fn().mockReturnValueOnce(deferred.promise);
+
+    const store = createAppStore(api);
+    await store.getState().bootstrap();
+    await store.getState().openHostContainersTab("host-1");
+
+    store.setState((state) => ({
+      containerTabs: state.containerTabs.map((tab) =>
+        tab.hostId === "host-1"
+          ? {
+              ...tab,
+              selectedContainerId: "container-1",
+              activePanel: "logs",
+              logsState: "ready",
+              logsLoading: false,
+              logsFollowEnabled: true,
+              logs: {
+                hostId: "host-1",
+                containerId: "container-1",
+                runtime: "docker",
+                lines: ["2025-01-01T00:00:00.000000000Z first"],
+                cursor: "2025-01-01T00:00:00.000000000Z",
+              },
+            }
+          : tab,
+      ),
+    }));
+
+    const refreshPromise = store.getState().refreshHostContainerLogs("host-1", {
+      followCursor: "2025-01-01T00:00:00.000000000Z",
+    });
+
+    const inFlightTab = store
+      .getState()
+      .containerTabs.find((tab) => tab.hostId === "host-1");
+    expect(inFlightTab?.logsState).toBe("ready");
+    expect(inFlightTab?.logsLoading).toBe(true);
+    expect(inFlightTab?.logs?.lines).toEqual([
+      "2025-01-01T00:00:00.000000000Z first",
+    ]);
+
+    deferred.resolve({
+      hostId: "host-1",
+      containerId: "container-1",
+      runtime: "docker",
+      lines: [
+        "2025-01-01T00:00:00.000000000Z first",
+        "2025-01-01T00:00:01.000000000Z second",
+      ],
+      cursor: "2025-01-01T00:00:01.000000000Z",
+    });
+
+    await refreshPromise;
+
+    const nextTab = store
+      .getState()
+      .containerTabs.find((tab) => tab.hostId === "host-1");
+    expect(nextTab?.logsState).toBe("ready");
+    expect(nextTab?.logsLoading).toBe(false);
+    expect(nextTab?.logs?.lines).toEqual([
+      "2025-01-01T00:00:00.000000000Z first",
+      "2025-01-01T00:00:01.000000000Z second",
+    ]);
+  });
+
+  it("marks empty container log responses as empty instead of ready", async () => {
+    const store = createAppStore(createMockApi());
+    await store.getState().bootstrap();
+    await store.getState().openHostContainersTab("host-1");
+
+    store.setState((state) => ({
+      containerTabs: state.containerTabs.map((tab) =>
+        tab.hostId === "host-1"
+          ? {
+              ...tab,
+              selectedContainerId: "container-1",
+              activePanel: "logs",
+            }
+          : tab,
+      ),
+    }));
+
+    await store.getState().refreshHostContainerLogs("host-1");
+
+    expect(
+      store.getState().containerTabs.find((tab) => tab.hostId === "host-1")
+        ?.logsState,
+    ).toBe("empty");
+  });
+
+  it("marks malformed container log responses distinctly", async () => {
+    const api = createMockApi();
+    api.containers.logs = vi
+      .fn()
+      .mockRejectedValue(
+        new Error("Invalid containersLogs response: lines must be string[]"),
+      );
+
+    const store = createAppStore(api);
+    await store.getState().bootstrap();
+    await store.getState().openHostContainersTab("host-1");
+
+    store.setState((state) => ({
+      containerTabs: state.containerTabs.map((tab) =>
+        tab.hostId === "host-1"
+          ? {
+              ...tab,
+              selectedContainerId: "container-1",
+              activePanel: "logs",
+            }
+          : tab,
+      ),
+    }));
+
+    await store.getState().refreshHostContainerLogs("host-1");
+
+    const nextTab = store
+      .getState()
+      .containerTabs.find((tab) => tab.hostId === "host-1");
+    expect(nextTab?.logsState).toBe("malformed");
+    expect(nextTab?.logsError).toBe(
+      "컨테이너 로그 응답을 해석하지 못했습니다. 다시 불러오기를 시도해 주세요.",
+    );
+  });
+
+  it("loads older container logs by increasing the tail window", async () => {
+    const api = createMockApi();
+    const store = createAppStore(api);
+    await store.getState().bootstrap();
+    await store.getState().openHostContainersTab("host-1");
+
+    store.setState((state) => ({
+      containerTabs: state.containerTabs.map((tab) =>
+        tab.hostId === "host-1"
+          ? {
+              ...tab,
+              selectedContainerId: "container-1",
+              activePanel: "logs",
+            }
+          : tab,
+      ),
+    }));
+
+    await store.getState().loadMoreHostContainerLogs("host-1");
+
+    expect(api.containers.logs).toHaveBeenCalledWith({
+      hostId: "host-1",
+      containerId: "container-1",
+      tail: 1200,
+      followCursor: null,
+    });
+    expect(
+      store.getState().containerTabs.find((tab) => tab.hostId === "host-1")
+        ?.logsTailWindow,
+    ).toBe(1200);
+  });
+
+  it("stores remote container log search results and metrics samples", async () => {
+    const api = createMockApi();
+    const store = createAppStore(api);
+    await store.getState().bootstrap();
+    await store.getState().openHostContainersTab("host-1");
+
+    store.setState((state) => ({
+      containerTabs: state.containerTabs.map((tab) =>
+        tab.hostId === "host-1"
+          ? {
+              ...tab,
+              selectedContainerId: "container-1",
+              activePanel: "logs",
+              logsSearchQuery: "error",
+            }
+          : tab,
+      ),
+    }));
+
+    await store.getState().searchHostContainerLogs("host-1");
+    await store.getState().refreshHostContainerStats("host-1");
+
+    const nextTab = store
+      .getState()
+      .containerTabs.find((tab) => tab.hostId === "host-1");
+    expect(api.containers.searchLogs).toHaveBeenCalledWith({
+      hostId: "host-1",
+      containerId: "container-1",
+      tail: 200,
+      query: "error",
+    });
+    expect(nextTab?.logsSearchMode).toBe("remote");
+    expect(nextTab?.metricsState).toBe("ready");
+    expect(nextTab?.metricsSamples).toHaveLength(1);
+  });
+
+  it("tracks pending container actions and clears them after a successful refresh", async () => {
+    const api = createMockApi();
+    const pending = createDeferred<void>();
+    api.containers.list = vi
+      .fn()
+      .mockResolvedValueOnce({
+        hostId: "host-1",
+        runtime: "docker",
+        containers: [
+          {
+            id: "container-1",
+            name: "app",
+            runtime: "docker",
+            image: "nginx:latest",
+            status: "Exited (0) 3 hours ago",
+            createdAt: "2025-01-01T00:00:00.000Z",
+            ports: "",
+          },
+        ],
+      })
+      .mockResolvedValueOnce({
+        hostId: "host-1",
+        runtime: "docker",
+        containers: [
+          {
+            id: "container-1",
+            name: "app",
+            runtime: "docker",
+            image: "nginx:latest",
+            status: "Up 5 seconds",
+            createdAt: "2025-01-01T00:00:00.000Z",
+            ports: "",
+          },
+        ],
+      });
+    api.containers.start = vi.fn().mockReturnValue(pending.promise);
+
+    const store = createAppStore(api);
+    await store.getState().bootstrap();
+    await store.getState().openHostContainersTab("host-1");
+
+    const actionPromise = store.getState().runHostContainerAction("host-1", "start");
+    await flushMicrotasks();
+
+    expect(
+      store.getState().containerTabs.find((tab) => tab.hostId === "host-1")
+        ?.pendingAction,
+    ).toBe("start");
+
+    pending.resolve(undefined);
+    await actionPromise;
+
+    const nextTab = store
+      .getState()
+      .containerTabs.find((tab) => tab.hostId === "host-1");
+    expect(api.containers.start).toHaveBeenCalledWith("host-1", "container-1");
+    expect(api.containers.list).toHaveBeenCalledTimes(2);
+    expect(nextTab?.pendingAction).toBeNull();
+    expect(nextTab?.actionError).toBeUndefined();
+    expect(nextTab?.items[0]?.status).toBe("Up 5 seconds");
+  });
+
+  it("stores container action failures and clears pending state", async () => {
+    const api = createMockApi();
+    api.containers.list = vi.fn().mockResolvedValue({
+      hostId: "host-1",
+      runtime: "docker",
+      containers: [
+        {
+          id: "container-1",
+          name: "app",
+          runtime: "docker",
+          image: "nginx:latest",
+          status: "Up 5 seconds",
+          createdAt: "2025-01-01T00:00:00.000Z",
+          ports: "",
+        },
+      ],
+    });
+    api.containers.restart = vi
+      .fn()
+      .mockRejectedValue(new Error("restart failed"));
+
+    const store = createAppStore(api);
+    await store.getState().bootstrap();
+    await store.getState().openHostContainersTab("host-1");
+
+    await store.getState().runHostContainerAction("host-1", "restart");
+
+    const nextTab = store
+      .getState()
+      .containerTabs.find((tab) => tab.hostId === "host-1");
+    expect(nextTab?.pendingAction).toBeNull();
+    expect(nextTab?.actionError).toBe("restart failed");
+  });
+
+  it("clears the selected container when remove succeeds and the refreshed list is empty", async () => {
+    const api = createMockApi();
+    api.containers.list = vi
+      .fn()
+      .mockResolvedValueOnce({
+        hostId: "host-1",
+        runtime: "docker",
+        containers: [
+          {
+            id: "container-1",
+            name: "app",
+            runtime: "docker",
+            image: "nginx:latest",
+            status: "Exited (0) 3 hours ago",
+            createdAt: "2025-01-01T00:00:00.000Z",
+            ports: "",
+          },
+        ],
+      })
+      .mockResolvedValueOnce({
+        hostId: "host-1",
+        runtime: "docker",
+        containers: [],
+      });
+
+    const store = createAppStore(api);
+    await store.getState().bootstrap();
+    await store.getState().openHostContainersTab("host-1");
+
+    await store.getState().runHostContainerAction("host-1", "remove");
+
+    const nextTab = store
+      .getState()
+      .containerTabs.find((tab) => tab.hostId === "host-1");
+    expect(api.containers.remove).toHaveBeenCalledWith("host-1", "container-1");
+    expect(nextTab?.items).toEqual([]);
+    expect(nextTab?.selectedContainerId).toBeNull();
+    expect(nextTab?.details).toBeNull();
+  });
+
+  it("trims container metrics history to the most recent 720 samples", async () => {
+    const api = createMockApi();
+    api.containers.list = vi.fn().mockResolvedValue({
+      hostId: "host-1",
+      runtime: "docker",
+      containers: [
+        {
+          id: "container-1",
+          name: "app",
+          runtime: "docker",
+          image: "nginx:latest",
+          status: "Up 5 seconds",
+          createdAt: "2025-01-01T00:00:00.000Z",
+          ports: "",
+        },
+      ],
+    });
+
+    const store = createAppStore(api);
+    await store.getState().bootstrap();
+    await store.getState().openHostContainersTab("host-1");
+
+    const samples = Array.from({ length: 720 }, (_, index) => ({
+      hostId: "host-1",
+      containerId: "container-1",
+      runtime: "docker" as const,
+      recordedAt: new Date(2025, 0, 1, 0, 0, index).toISOString(),
+      cpuPercent: index,
+      memoryUsedBytes: index,
+      memoryLimitBytes: 1000,
+      memoryPercent: index,
+      networkRxBytes: index,
+      networkTxBytes: index,
+      blockReadBytes: index,
+      blockWriteBytes: index,
+    }));
+
+    store.setState((state) => ({
+      containerTabs: state.containerTabs.map((tab) =>
+        tab.hostId === "host-1"
+          ? {
+              ...tab,
+              metricsSamples: samples,
+              metricsState: "ready",
+            }
+          : tab,
+      ),
+    }));
+
+    api.containers.stats = vi.fn().mockResolvedValue({
+      hostId: "host-1",
+      containerId: "container-1",
+      runtime: "docker",
+      recordedAt: "2025-01-01T00:12:00.000Z",
+      cpuPercent: 999,
+      memoryUsedBytes: 999,
+      memoryLimitBytes: 1000,
+      memoryPercent: 99,
+      networkRxBytes: 999,
+      networkTxBytes: 999,
+      blockReadBytes: 999,
+      blockWriteBytes: 999,
+    });
+
+    await store.getState().refreshHostContainerStats("host-1");
+
+    const nextTab = store
+      .getState()
+      .containerTabs.find((tab) => tab.hostId === "host-1");
+    expect(nextTab?.metricsSamples).toHaveLength(720);
+    expect(nextTab?.metricsSamples[0]?.recordedAt).toBe(samples[1]?.recordedAt);
+    expect(nextTab?.metricsSamples.at(-1)?.recordedAt).toBe(
+      "2025-01-01T00:12:00.000Z",
+    );
+  });
+
+  it("does not fetch container metrics when nothing is selected", async () => {
+    const api = createMockApi();
+    const store = createAppStore(api);
+    await store.getState().bootstrap();
+    await store.getState().openHostContainersTab("host-1");
+
+    store.setState((state) => ({
+      containerTabs: state.containerTabs.map((tab) =>
+        tab.hostId === "host-1"
+          ? {
+              ...tab,
+              selectedContainerId: null,
+            }
+          : tab,
+      ),
+    }));
+
+    await store.getState().refreshHostContainerStats("host-1");
+
+    expect(api.containers.stats).not.toHaveBeenCalled();
+  });
+
+  it("switches log search back to local mode and clears remote search state", async () => {
+    const store = createAppStore(createMockApi());
+    await store.getState().bootstrap();
+    await store.getState().openHostContainersTab("host-1");
+
+    store.setState((state) => ({
+      containerTabs: state.containerTabs.map((tab) =>
+        tab.hostId === "host-1"
+          ? {
+              ...tab,
+              selectedContainerId: "container-1",
+              logsFollowEnabled: true,
+              logsSearchQuery: "old",
+              logsSearchMode: "remote",
+              logsSearchResult: {
+                hostId: "host-1",
+                containerId: "container-1",
+                runtime: "docker",
+                query: "old",
+                lines: ["old result"],
+                matchCount: 1,
+              },
+              logsSearchError: "stale",
+            }
+          : tab,
+      ),
+    }));
+
+    store.getState().setHostContainerLogsSearchQuery("host-1", "error");
+
+    const nextTab = store
+      .getState()
+      .containerTabs.find((tab) => tab.hostId === "host-1");
+    expect(nextTab?.logsSearchQuery).toBe("error");
+    expect(nextTab?.logsSearchMode).toBe("local");
+    expect(nextTab?.logsFollowEnabled).toBe(false);
+    expect(nextTab?.logsSearchResult).toBeNull();
+    expect(nextTab?.logsSearchError).toBeUndefined();
+  });
+
+  it("clears container log search query and results", async () => {
+    const store = createAppStore(createMockApi());
+    await store.getState().bootstrap();
+    await store.getState().openHostContainersTab("host-1");
+
+    store.setState((state) => ({
+      containerTabs: state.containerTabs.map((tab) =>
+        tab.hostId === "host-1"
+          ? {
+              ...tab,
+              logsSearchQuery: "error",
+              logsSearchMode: "remote",
+              logsSearchLoading: true,
+              logsSearchError: "failed",
+              logsSearchResult: {
+                hostId: "host-1",
+                containerId: "container-1",
+                runtime: "docker",
+                query: "error",
+                lines: ["error result"],
+                matchCount: 1,
+              },
+            }
+          : tab,
+      ),
+    }));
+
+    store.getState().clearHostContainerLogsSearch("host-1");
+
+    const nextTab = store
+      .getState()
+      .containerTabs.find((tab) => tab.hostId === "host-1");
+    expect(nextTab?.logsSearchQuery).toBe("");
+    expect(nextTab?.logsSearchMode).toBeNull();
+    expect(nextTab?.logsSearchLoading).toBe(false);
+    expect(nextTab?.logsSearchError).toBeUndefined();
+    expect(nextTab?.logsSearchResult).toBeNull();
+  });
+
+  it("keeps session splitting working even when containers are open in their own section", async () => {
+    const store = createAppStore(createMockApi());
+    await store.getState().bootstrap();
+    store.setState((state) => ({
+      tabs: [
+        ...state.tabs,
+        {
+          id: "tab-2",
+          sessionId: "session-2",
+          source: "local",
+          hostId: null,
+          title: "Session 2",
+          status: "connected",
+          sessionShare: null,
+          hasReceivedOutput: true,
+          lastEventAt: "2026-03-28T00:00:00.000Z",
+        },
+      ],
+      tabStrip: [
+        { kind: "session", sessionId: "session-1" },
+        { kind: "session", sessionId: "session-2" },
+      ],
+    }));
+    await store.getState().openHostContainersTab("host-1");
+
+    const created = store.getState().splitSessionIntoWorkspace("session-1", "right");
+
+    expect(created).toBe(true);
+    expect(store.getState().workspaces).toHaveLength(1);
+    expect(store.getState().tabStrip).toEqual([
+      { kind: "workspace", workspaceId: store.getState().workspaces[0]!.id },
+    ]);
+    expect(store.getState().activeWorkspaceTab).toBe(
+      `workspace:${store.getState().workspaces[0]!.id}`,
+    );
+  });
+
   it("uses a caller-assigned endpoint id when connecting a Warpgate SFTP host", async () => {
     const api = createMockApi();
     api.hosts.list = vi.fn().mockResolvedValue([
@@ -1791,6 +2636,83 @@ describe("createAppStore", () => {
     expect(store.getState().pendingInteractiveAuth).toBeNull();
   });
 
+  it("does not reopen the same Warpgate approval URL repeatedly for a saved port forward", async () => {
+    const api = createMockApi();
+    api.hosts.list = vi.fn().mockResolvedValue([
+      {
+        id: "warpgate-1",
+        kind: "warpgate-ssh",
+        label: "Warpgate Prod",
+        warpgateBaseUrl: "https://warpgate.example.com",
+        warpgateSshHost: "warpgate.example.com",
+        warpgateSshPort: 2222,
+        warpgateTargetId: "target-1",
+        warpgateTargetName: "prod-db",
+        warpgateUsername: "example.user",
+        groupName: "Servers",
+        tags: ["prod"],
+        terminalThemeId: null,
+        createdAt: "2025-01-01T00:00:00.000Z",
+        updatedAt: "2025-01-01T00:00:00.000Z",
+      },
+    ]);
+    api.portForwards.list = vi.fn().mockResolvedValue({
+      rules: [
+        {
+          id: "forward-warp-1",
+          transport: "container",
+          label: "Kafka UI",
+          hostId: "warpgate-1",
+          bindAddress: "127.0.0.1",
+          bindPort: 0,
+          containerId: "container-1",
+          containerName: "kafka-ui",
+          containerRuntime: "docker",
+          networkName: "bridge",
+          targetPort: 8080,
+          createdAt: "2025-01-01T00:00:00.000Z",
+          updatedAt: "2025-01-01T00:00:00.000Z",
+        },
+      ],
+      runtimes: [],
+    });
+    const store = createAppStore(api);
+
+    await store.getState().bootstrap();
+
+    const challengePayload = {
+      attempt: 1,
+      name: "warpgate",
+      instruction:
+        "Open https://warpgate.example.com/authorize and enter code ABCD-1234",
+      prompts: [
+        { label: "Verification code", echo: true },
+        { label: "Press Enter to continue", echo: true },
+      ],
+    };
+
+    store.getState().handleCoreEvent({
+      type: "keyboardInteractiveChallenge",
+      endpointId: "forward-warp-1",
+      payload: {
+        challengeId: "challenge-1",
+        ...challengePayload,
+      },
+    });
+
+    store.getState().handleCoreEvent({
+      type: "keyboardInteractiveChallenge",
+      endpointId: "forward-warp-1",
+      payload: {
+        challengeId: "challenge-2",
+        ...challengePayload,
+      },
+    });
+
+    expect(api.shell.openExternal).toHaveBeenCalledTimes(1);
+    expect(api.ssh.respondKeyboardInteractive).toHaveBeenCalledTimes(2);
+  });
+
   it("treats repeated markSessionOutput calls as a no-op after the first output arrives", async () => {
     const store = createAppStore(createMockApi());
 
@@ -1804,6 +2726,43 @@ describe("createAppStore", () => {
 
     expect(store.getState().tabs).toBe(tabsAfterFirstOutput);
     expect(store.getState().tabs[0]?.hasReceivedOutput).toBe(true);
+  });
+
+  it("does not switch to the containers section for discovery-only container auth challenges", async () => {
+    const api = createMockApi();
+    api.shell.openExternal = vi.fn().mockResolvedValue(undefined);
+    const store = createAppStore(api);
+
+    await store.getState().bootstrap();
+    store.getState().activateSftp();
+
+    store.getState().handleCoreEvent({
+      type: "keyboardInteractiveChallenge",
+      endpointId: "containers:host-1",
+      payload: {
+        challengeId: "challenge-container-1",
+        attempt: 1,
+        name: "warpgate",
+        instruction:
+          "Open https://warpgate.example.com/authorize and enter code WXYZ-9999",
+        prompts: [
+          { label: "Verification code", echo: true },
+          { label: "Press Enter to continue", echo: true },
+        ],
+      },
+    });
+
+    expect(store.getState().activeWorkspaceTab).toBe("sftp");
+    expect(store.getState().activeContainerHostId).toBeNull();
+    expect(store.getState().pendingInteractiveAuth).toMatchObject({
+      source: "containers",
+      endpointId: "containers:host-1",
+      hostId: "host-1",
+      challengeId: "challenge-container-1",
+      provider: "generic",
+    });
+    expect(api.shell.openExternal).not.toHaveBeenCalled();
+    expect(api.ssh.respondKeyboardInteractive).not.toHaveBeenCalled();
   });
 
   it("creates and expands a workspace from adjacent tabs", async () => {

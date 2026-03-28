@@ -7,8 +7,12 @@ import type {
   DesktopLocalConnectInput,
   DesktopSftpConnectInput,
   DesktopWindowState,
+  HostContainersSearchLogsInput,
+  HostContainersStatsInput,
+  HostContainersLogsInput,
   HostDraft,
   HostSecretInput,
+  ContainerConnectionProgressEvent,
   GroupRemoveMode,
   KeyboardInteractiveRespondInput,
   KeychainSecretCloneInput,
@@ -41,6 +45,9 @@ const backlogBytes = new Map<string, number>();
 const transferListeners = new Set<(event: TransferJobEvent) => void>();
 const sftpConnectionProgressListeners = new Set<
   (event: SftpConnectionProgressEvent) => void
+>();
+const containerConnectionProgressListeners = new Set<
+  (event: ContainerConnectionProgressEvent) => void
 >();
 const portForwardListeners = new Set<
   (event: PortForwardRuntimeEvent) => void
@@ -114,6 +121,15 @@ ipcRenderer.on(
   ipcChannels.sftp.connectionProgress,
   (_event, payload: SftpConnectionProgressEvent) => {
     for (const listener of sftpConnectionProgressListeners) {
+      listener(payload);
+    }
+  },
+);
+
+ipcRenderer.on(
+  ipcChannels.containers.connectionProgress,
+  (_event, payload: ContainerConnectionProgressEvent) => {
+    for (const listener of containerConnectionProgressListeners) {
       listener(payload);
     }
   },
@@ -464,6 +480,38 @@ const api: DesktopApi = {
       ipcRenderer.invoke(ipcChannels.files.chmod, path, mode),
     delete: (paths: string[]) =>
       ipcRenderer.invoke(ipcChannels.files.delete, paths),
+  },
+  containers: {
+    list: (hostId: string) =>
+      ipcRenderer.invoke(ipcChannels.containers.list, hostId),
+    inspect: (hostId: string, containerId: string) =>
+      ipcRenderer.invoke(ipcChannels.containers.inspect, hostId, containerId),
+    logs: (input: HostContainersLogsInput) =>
+      ipcRenderer.invoke(ipcChannels.containers.logs, input),
+    start: (hostId: string, containerId: string) =>
+      ipcRenderer.invoke(ipcChannels.containers.start, hostId, containerId),
+    stop: (hostId: string, containerId: string) =>
+      ipcRenderer.invoke(ipcChannels.containers.stop, hostId, containerId),
+    restart: (hostId: string, containerId: string) =>
+      ipcRenderer.invoke(ipcChannels.containers.restart, hostId, containerId),
+    remove: (hostId: string, containerId: string) =>
+      ipcRenderer.invoke(ipcChannels.containers.remove, hostId, containerId),
+    stats: (input: HostContainersStatsInput) =>
+      ipcRenderer.invoke(ipcChannels.containers.stats, input),
+    searchLogs: (input: HostContainersSearchLogsInput) =>
+      ipcRenderer.invoke(ipcChannels.containers.searchLogs, input),
+    openShell: (hostId: string, containerId: string) =>
+      ipcRenderer.invoke(ipcChannels.containers.openShell, hostId, containerId),
+    release: (hostId: string) =>
+      ipcRenderer.invoke(ipcChannels.containers.release, hostId),
+    onConnectionProgress: (
+      listener: (event: ContainerConnectionProgressEvent) => void,
+    ) => {
+      containerConnectionProgressListeners.add(listener);
+      return () => {
+        containerConnectionProgressListeners.delete(listener);
+      };
+    },
   },
   sftp: {
     connect: (input: DesktopSftpConnectInput) =>

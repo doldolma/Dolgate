@@ -16,12 +16,21 @@ import type {
   ActivityLogRecord,
   AppSettings,
   CoreEvent,
+  ContainerConnectionProgressEvent,
+  ConnectionProgressStage,
   DesktopApi,
   DirectoryListing,
   FileEntry,
   GroupRecord,
   GroupRemoveMode,
   HostDraft,
+  HostContainerDetails,
+  HostContainerLogSearchResult,
+  HostContainerListResult,
+  HostContainerLogsSnapshot,
+  HostContainerRuntime,
+  HostContainerStatsSample,
+  HostContainerSummary,
   HostKeyProbeResult,
   HostRecord,
   HostSecretInput,
@@ -55,6 +64,7 @@ export type SplitWorkspaceTabId = `workspace:${string}`;
 export type WorkspaceTabId =
   | "home"
   | "sftp"
+  | "containers"
   | SessionWorkspaceTabId
   | SplitWorkspaceTabId;
 export type HomeSection = "hosts" | "portForwarding" | "logs" | "settings";
@@ -99,7 +109,82 @@ export type DynamicTabStripItem =
   | {
       kind: "workspace";
       workspaceId: string;
-    };
+    }
+
+function mergeContainerLogLines(
+  existingLines: string[],
+  incomingLines: string[],
+): string[] {
+  if (existingLines.length === 0) {
+    return incomingLines;
+  }
+  if (incomingLines.length === 0) {
+    return existingLines;
+  }
+
+  const maxOverlap = Math.min(existingLines.length, incomingLines.length);
+  for (let overlap = maxOverlap; overlap > 0; overlap -= 1) {
+    let matches = true;
+    for (let index = 0; index < overlap; index += 1) {
+      if (
+        existingLines[existingLines.length - overlap + index] !==
+        incomingLines[index]
+      ) {
+        matches = false;
+        break;
+      }
+    }
+    if (matches) {
+      return [...existingLines, ...incomingLines.slice(overlap)];
+    }
+  }
+
+  return [...existingLines, ...incomingLines];
+}
+
+export type ContainersWorkspacePanel = "overview" | "logs" | "metrics";
+export type ContainerLogsLoadState =
+  | "idle"
+  | "loading"
+  | "ready"
+  | "empty"
+  | "error"
+  | "malformed";
+export type ContainerMetricsLoadState = "idle" | "loading" | "ready" | "error";
+export type ContainerLogsSearchMode = "local" | "remote" | null;
+
+export interface HostContainersTabState {
+  hostId: string;
+  title: string;
+  runtime: HostContainerRuntime | null;
+  unsupportedReason: string | null;
+  connectionProgress?: ContainerConnectionProgressEvent | null;
+  items: HostContainerSummary[];
+  selectedContainerId: string | null;
+  activePanel: ContainersWorkspacePanel;
+  isLoading: boolean;
+  errorMessage?: string;
+  details: HostContainerDetails | null;
+  detailsLoading: boolean;
+  detailsError?: string;
+  logs: HostContainerLogsSnapshot | null;
+  logsState: ContainerLogsLoadState;
+  logsLoading: boolean;
+  logsError?: string;
+  logsFollowEnabled: boolean;
+  logsTailWindow: number;
+  logsSearchQuery: string;
+  logsSearchMode: ContainerLogsSearchMode;
+  logsSearchLoading: boolean;
+  logsSearchError?: string;
+  logsSearchResult: HostContainerLogSearchResult | null;
+  metricsSamples: HostContainerStatsSample[];
+  metricsState: ContainerMetricsLoadState;
+  metricsLoading: boolean;
+  metricsError?: string;
+  pendingAction: "start" | "stop" | "restart" | "remove" | null;
+  actionError?: string;
+}
 
 export interface SftpPaneState {
   id: SftpPaneId;
@@ -158,6 +243,15 @@ export interface PendingHostKeyPrompt {
         kind: "portForward";
         ruleId: string;
         hostId: string;
+      }
+    | {
+        kind: "containers";
+        hostId: string;
+      }
+    | {
+        kind: "containerShell";
+        hostId: string;
+        containerId: string;
       };
 }
 
@@ -203,17 +297,35 @@ export interface PendingSftpInteractiveAuth
   hostId: string;
 }
 
+export interface PendingContainersInteractiveAuth
+  extends Omit<PendingInteractiveAuthBase, "sessionId"> {
+  source: "containers";
+  endpointId: string;
+  hostId: string;
+}
+
+export interface PendingPortForwardInteractiveAuth
+  extends Omit<PendingInteractiveAuthBase, "sessionId"> {
+  source: "portForward";
+  endpointId: string;
+  ruleId: string;
+  hostId: string;
+}
+
 export type PendingInteractiveAuth =
   | PendingSessionInteractiveAuth
-  | PendingSftpInteractiveAuth;
+  | PendingSftpInteractiveAuth
+  | PendingContainersInteractiveAuth
+  | PendingPortForwardInteractiveAuth;
 
 interface PendingConnectionAttempt {
   sessionId: string;
-  source: "host" | "local";
+  source: "host" | "local" | "container-shell";
   hostId: string | null;
   title: string;
   latestCols: number;
   latestRows: number;
+  containerId?: string;
 }
 
 export interface SftpState {
@@ -231,6 +343,8 @@ export interface AppState {
   tabs: TerminalTab[];
   sessionShareChatNotifications: Record<string, SessionShareChatMessage[]>;
   workspaces: WorkspaceTab[];
+  containerTabs: HostContainersTabState[];
+  activeContainerHostId: string | null;
   tabStrip: DynamicTabStripItem[];
   portForwards: PortForwardRuleRecord[];
   portForwardRuntimes: PortForwardRuntimeRecord[];
@@ -259,6 +373,8 @@ export interface AppState {
   activateSftp: () => void;
   activateSession: (sessionId: string) => void;
   activateWorkspace: (workspaceId: string) => void;
+  activateContainers: () => void;
+  focusHostContainersTab: (hostId: string) => void;
   openHomeSection: (section: HomeSection) => void;
   openSettingsSection: (section: SettingsSection) => void;
   openCreateHostDrawer: () => void;
@@ -300,6 +416,34 @@ export interface AppState {
   stopSessionShare: (sessionId: string) => Promise<void>;
   disconnectTab: (sessionId: string) => Promise<void>;
   closeWorkspace: (workspaceId: string) => Promise<void>;
+  openHostContainersTab: (hostId: string) => Promise<void>;
+  closeHostContainersTab: (hostId: string) => Promise<void>;
+  reorderContainerTab: (
+    sourceHostId: string,
+    targetHostId: string,
+    placement: "before" | "after",
+  ) => void;
+  refreshHostContainers: (hostId: string) => Promise<void>;
+  selectHostContainer: (hostId: string, containerId: string | null) => Promise<void>;
+  setHostContainersPanel: (
+    hostId: string,
+    panel: ContainersWorkspacePanel,
+  ) => void;
+  refreshHostContainerLogs: (
+    hostId: string,
+    options?: { tail?: number; followCursor?: string | null },
+  ) => Promise<void>;
+  loadMoreHostContainerLogs: (hostId: string) => Promise<void>;
+  setHostContainerLogsFollow: (hostId: string, enabled: boolean) => void;
+  setHostContainerLogsSearchQuery: (hostId: string, query: string) => void;
+  searchHostContainerLogs: (hostId: string) => Promise<void>;
+  clearHostContainerLogsSearch: (hostId: string) => void;
+  refreshHostContainerStats: (hostId: string) => Promise<void>;
+  runHostContainerAction: (
+    hostId: string,
+    action: "start" | "stop" | "restart" | "remove",
+  ) => Promise<void>;
+  openHostContainerShell: (hostId: string, containerId: string) => Promise<void>;
   splitSessionIntoWorkspace: (
     sessionId: string,
     direction: WorkspaceDropDirection,
@@ -376,6 +520,9 @@ export interface AppState {
   handlePortForwardEvent: (event: PortForwardRuntimeEvent) => void;
   handleSftpConnectionProgressEvent: (
     event: SftpConnectionProgressEvent,
+  ) => void;
+  handleContainerConnectionProgressEvent: (
+    event: ContainerConnectionProgressEvent,
   ) => void;
   setSftpPaneSource: (
     paneId: SftpPaneId,
@@ -550,6 +697,18 @@ function isPendingSftpInteractiveAuth(
   return pending?.source === "sftp";
 }
 
+function isPendingContainersInteractiveAuth(
+  pending: PendingInteractiveAuth | null,
+): pending is PendingContainersInteractiveAuth {
+  return pending?.source === "containers";
+}
+
+function isPendingPortForwardInteractiveAuth(
+  pending: PendingInteractiveAuth | null,
+): pending is PendingPortForwardInteractiveAuth {
+  return pending?.source === "portForward";
+}
+
 function resolveSftpPaneIdByEndpoint(
   state: Pick<AppState, "sftp">,
   endpointId: string,
@@ -567,6 +726,31 @@ function resolveSftpPaneIdByEndpoint(
     return "right";
   }
   return null;
+}
+
+function resolveContainersHostIdByEndpoint(
+  endpointId: string,
+): string | null {
+  if (!endpointId.startsWith("containers:")) {
+    return null;
+  }
+  const remainder = endpointId.slice("containers:".length);
+  const hostId = remainder.split(":")[0]?.trim();
+  return hostId || null;
+}
+
+function createContainerConnectionProgress(
+  hostId: string,
+  endpointId: string,
+  stage: ConnectionProgressStage,
+  message: string,
+): ContainerConnectionProgressEvent {
+  return {
+    hostId,
+    endpointId,
+    stage,
+    message,
+  };
 }
 
 function buildSftpHostPickerPane(pane: SftpPaneState): SftpPaneState {
@@ -762,6 +946,99 @@ function asSessionTabId(sessionId: string): SessionWorkspaceTabId {
 
 function asWorkspaceTabId(workspaceId: string): SplitWorkspaceTabId {
   return `workspace:${workspaceId}`;
+}
+
+function buildContainersEndpointId(hostId: string): string {
+  return `containers:${hostId}`;
+}
+
+function buildContainersTabTitle(host: HostRecord): string {
+  return `${host.label} · Containers`;
+}
+
+const DEFAULT_CONTAINER_LOGS_TAIL_WINDOW = 200;
+const CONTAINER_LOGS_TAIL_INCREMENT = 1000;
+const MAX_CONTAINER_LOGS_TAIL_WINDOW = 20000;
+const MAX_CONTAINER_METRICS_SAMPLES = 720;
+
+function classifyContainerLogsErrorMessage(
+  message: string,
+): ContainerLogsLoadState {
+  return message.startsWith("Invalid containersLogs response:")
+    ? "malformed"
+    : "error";
+}
+
+function trimContainerMetricsSamples(
+  samples: HostContainerStatsSample[],
+): HostContainerStatsSample[] {
+  if (samples.length <= MAX_CONTAINER_METRICS_SAMPLES) {
+    return samples;
+  }
+  return samples.slice(samples.length - MAX_CONTAINER_METRICS_SAMPLES);
+}
+
+function createEmptyContainersTabState(host: HostRecord): HostContainersTabState {
+  return {
+    hostId: host.id,
+    title: buildContainersTabTitle(host),
+    runtime: null,
+    unsupportedReason: null,
+    connectionProgress: null,
+    items: [],
+    selectedContainerId: null,
+    activePanel: "overview",
+    isLoading: false,
+    errorMessage: undefined,
+    details: null,
+    detailsLoading: false,
+    detailsError: undefined,
+    logs: null,
+    logsState: "idle",
+    logsLoading: false,
+    logsError: undefined,
+    logsFollowEnabled: false,
+    logsTailWindow: DEFAULT_CONTAINER_LOGS_TAIL_WINDOW,
+    logsSearchQuery: "",
+    logsSearchMode: null,
+    logsSearchLoading: false,
+    logsSearchError: undefined,
+    logsSearchResult: null,
+    metricsSamples: [],
+    metricsState: "idle",
+    metricsLoading: false,
+    metricsError: undefined,
+    pendingAction: null,
+    actionError: undefined,
+  };
+}
+
+function upsertContainersTab(
+  tabs: HostContainersTabState[],
+  tab: HostContainersTabState,
+): HostContainersTabState[] {
+  const existingIndex = tabs.findIndex((item) => item.hostId === tab.hostId);
+  if (existingIndex < 0) {
+    return [...tabs, tab];
+  }
+  return tabs.map((item, index) => (index === existingIndex ? tab : item));
+}
+
+function resolveNextContainerHostId(
+  tabs: HostContainersTabState[],
+  removedHostId: string,
+): string | null {
+  const removedIndex = tabs.findIndex((tab) => tab.hostId === removedHostId);
+  const remainingTabs = tabs.filter((tab) => tab.hostId !== removedHostId);
+  if (remainingTabs.length === 0) {
+    return null;
+  }
+  const nextTab =
+    remainingTabs[removedIndex] ??
+    remainingTabs[removedIndex - 1] ??
+    remainingTabs[0] ??
+    null;
+  return nextTab?.hostId ?? null;
 }
 
 function createWorkspaceLeaf(sessionId: string): WorkspaceLeafNode {
@@ -1395,9 +1672,13 @@ function resolveNextVisibleTab(
   if (!nextItem) {
     return "home";
   }
-  return nextItem.kind === "session"
-    ? asSessionTabId(nextItem.sessionId)
-    : asWorkspaceTabId(nextItem.workspaceId);
+  if (nextItem.kind === "session") {
+    return asSessionTabId(nextItem.sessionId);
+  }
+  if (nextItem.kind === "workspace") {
+    return asWorkspaceTabId(nextItem.workspaceId);
+  }
+  return "home";
 }
 
 function resolveAdjacentTarget(
@@ -1433,6 +1714,29 @@ function resolveAdjacentTarget(
   }
 
   return null;
+}
+
+function dynamicTabMatches(
+  left: DynamicTabStripItem,
+  right: DynamicTabStripItem,
+): boolean {
+  if (left.kind !== right.kind) {
+    return false;
+  }
+  if (left.kind === "session" && right.kind === "session") {
+    return left.sessionId === right.sessionId;
+  }
+  if (left.kind === "workspace" && right.kind === "workspace") {
+    return left.workspaceId === right.workspaceId;
+  }
+  return false;
+}
+
+function findContainersTab(
+  state: AppState,
+  hostId: string,
+): HostContainersTabState | null {
+  return state.containerTabs.find((tab) => tab.hostId === hostId) ?? null;
 }
 
 function parentPath(targetPath: string): string {
@@ -1720,6 +2024,26 @@ function resolveInteractiveAuthUiState(
       autoResponses.length === challenge.prompts.length &&
       challenge.prompts.length > 0,
   };
+}
+
+function buildInteractiveBrowserChallengeKey(input: {
+  sessionId?: string | null;
+  endpointId?: string | null;
+  challengeId: string;
+  approvalUrl?: string | null;
+}): string {
+  const scopeId = normalizeInteractiveText(input.sessionId ?? input.endpointId);
+  const approvalUrl = normalizeInteractiveText(input.approvalUrl);
+  if (scopeId && approvalUrl) {
+    return `${scopeId}::${approvalUrl}`;
+  }
+  if (scopeId) {
+    return `${scopeId}::${input.challengeId}`;
+  }
+  if (approvalUrl) {
+    return approvalUrl;
+  }
+  return input.challengeId;
 }
 
 export function upsertTransferJob(
@@ -2192,6 +2516,91 @@ export function createAppStore(api: DesktopApi) {
     return sessionId;
   };
 
+  const createPendingSessionTabForContainerShell = (
+    set: (
+      next:
+        | AppState
+        | Partial<AppState>
+        | ((state: AppState) => AppState | Partial<AppState>),
+    ) => void,
+    get: () => AppState,
+    host: HostRecord,
+    containerId: string,
+    cols: number,
+    rows: number,
+    progress: TerminalConnectionProgress,
+    existingSessionId?: string,
+  ): string => {
+    const sessionId = existingSessionId ?? createPendingSessionId();
+    const existingTab = existingSessionId
+      ? (get().tabs.find((tab) => tab.sessionId === existingSessionId) ?? null)
+      : null;
+    const existingContainer = findContainersTab(get(), host.id)?.items.find(
+      (item) => item.id === containerId,
+    );
+    const title =
+      existingTab?.title ??
+      buildSessionTitle(
+        `${host.label} · ${existingContainer?.name || containerId}`,
+        { source: "host", hostId: host.id },
+        get().tabs,
+      );
+    const tab = createPendingSessionTab({
+      sessionId,
+      source: "host",
+      hostId: host.id,
+      title,
+      progress,
+    });
+
+    set((state) => {
+      const nextAttempts = [
+        ...state.pendingConnectionAttempts.filter(
+          (attempt) => attempt.sessionId !== sessionId,
+        ),
+        {
+          sessionId,
+          source: "container-shell" as const,
+          hostId: host.id,
+          title,
+          latestCols: cols,
+          latestRows: rows,
+          containerId,
+        },
+      ];
+
+      if (existingTab) {
+        return {
+          tabs: state.tabs.map((item) =>
+            item.sessionId === sessionId ? tab : item,
+          ),
+          pendingConnectionAttempts: nextAttempts,
+          ...activateSessionContextInState(state, sessionId),
+        };
+      }
+
+      return {
+        tabs: [
+          ...state.tabs.filter((item) => item.sessionId !== sessionId),
+          tab,
+        ],
+        tabStrip: [
+          ...state.tabStrip.filter(
+            (item) =>
+              !(item.kind === "session" && item.sessionId === sessionId),
+          ),
+          { kind: "session", sessionId },
+        ],
+        activeWorkspaceTab: asSessionTabId(sessionId),
+        homeSection: "hosts",
+        hostDrawer: { mode: "closed" },
+        pendingConnectionAttempts: nextAttempts,
+      };
+    });
+
+    return sessionId;
+  };
+
   const startPendingSessionConnect = async (
     set: (
       next:
@@ -2486,6 +2895,624 @@ export function createAppStore(api: DesktopApi) {
       hosts: sortHosts(hosts),
       keychainEntries: sortKeychainEntries(keychainEntries),
     });
+  };
+
+  const loadContainerDetails = async (
+    set: (
+      next:
+        | AppState
+        | Partial<AppState>
+        | ((state: AppState) => AppState | Partial<AppState>),
+    ) => void,
+    get: () => AppState,
+    hostId: string,
+    containerId: string,
+  ) => {
+    set((state) => {
+      const currentTab = findContainersTab(state, hostId);
+      if (!currentTab) {
+        return state;
+      }
+      return {
+        containerTabs: upsertContainersTab(state.containerTabs, {
+          ...currentTab,
+          detailsLoading: true,
+          detailsError: undefined,
+        }),
+      };
+    });
+
+    try {
+      const details = await api.containers.inspect(hostId, containerId);
+      set((state) => {
+        const currentTab = findContainersTab(state, hostId);
+        if (!currentTab || currentTab.selectedContainerId !== containerId) {
+          return state;
+        }
+        return {
+          containerTabs: upsertContainersTab(state.containerTabs, {
+            ...currentTab,
+            details,
+            detailsLoading: false,
+            detailsError: undefined,
+          }),
+        };
+      });
+    } catch (error) {
+      set((state) => {
+        const currentTab = findContainersTab(state, hostId);
+        if (!currentTab || currentTab.selectedContainerId !== containerId) {
+          return state;
+        }
+        return {
+          containerTabs: upsertContainersTab(state.containerTabs, {
+            ...currentTab,
+            details: null,
+            detailsLoading: false,
+            detailsError:
+              error instanceof Error
+                ? error.message
+                : "컨테이너 상세 정보를 불러오지 못했습니다.",
+          }),
+        };
+      });
+    }
+  };
+
+  const loadContainersList = async (
+    set: (
+      next:
+        | AppState
+        | Partial<AppState>
+        | ((state: AppState) => AppState | Partial<AppState>),
+    ) => void,
+    get: () => AppState,
+    hostId: string,
+  ) => {
+    const host = get().hosts.find((item) => item.id === hostId);
+    if (!host) {
+      return;
+    }
+
+    set((state) => {
+      const currentTab = findContainersTab(state, hostId) ?? createEmptyContainersTabState(host);
+      return {
+        containerTabs: upsertContainersTab(state.containerTabs, {
+          ...currentTab,
+          title: buildContainersTabTitle(host),
+          isLoading: true,
+          connectionProgress:
+            currentTab.connectionProgress ??
+            createContainerConnectionProgress(
+              hostId,
+              buildContainersEndpointId(hostId),
+              "connecting-containers",
+              `${host.label} 컨테이너 연결 상태를 확인하는 중입니다.`,
+            ),
+          errorMessage: undefined,
+        }),
+      };
+    });
+
+    try {
+      const result = await api.containers.list(hostId);
+      const nextSelectedContainerId = (() => {
+        const currentSelectedId =
+          findContainersTab(get(), hostId)?.selectedContainerId ?? null;
+        if (
+          currentSelectedId &&
+          result.containers.some((item) => item.id === currentSelectedId)
+        ) {
+          return currentSelectedId;
+        }
+        return result.containers[0]?.id ?? null;
+      })();
+
+      set((state) => {
+        const currentTab = findContainersTab(state, hostId) ?? createEmptyContainersTabState(host);
+        return {
+          activeWorkspaceTab: "containers",
+          activeContainerHostId: hostId,
+          homeSection: "hosts",
+          hostDrawer: { mode: "closed" },
+          pendingInteractiveAuth:
+            isPendingContainersInteractiveAuth(state.pendingInteractiveAuth) &&
+            state.pendingInteractiveAuth.hostId === hostId
+              ? null
+              : state.pendingInteractiveAuth,
+          containerTabs: upsertContainersTab(state.containerTabs, {
+            ...currentTab,
+            title: buildContainersTabTitle(host),
+            runtime: result.runtime,
+            unsupportedReason: result.unsupportedReason ?? null,
+            connectionProgress: null,
+            items: result.containers,
+            selectedContainerId: nextSelectedContainerId,
+            isLoading: false,
+            errorMessage: undefined,
+            details:
+              currentTab.selectedContainerId === nextSelectedContainerId
+                ? currentTab.details
+                : null,
+            detailsError:
+              currentTab.selectedContainerId === nextSelectedContainerId
+                ? currentTab.detailsError
+                : undefined,
+            logs:
+              currentTab.selectedContainerId === nextSelectedContainerId
+                ? currentTab.logs
+                : null,
+            logsState:
+              currentTab.selectedContainerId === nextSelectedContainerId
+                ? currentTab.logsState
+                : "idle",
+            logsError:
+              currentTab.selectedContainerId === nextSelectedContainerId
+                ? currentTab.logsError
+                : undefined,
+            logsTailWindow:
+              currentTab.selectedContainerId === nextSelectedContainerId
+                ? currentTab.logsTailWindow
+                : DEFAULT_CONTAINER_LOGS_TAIL_WINDOW,
+            logsSearchQuery:
+              currentTab.selectedContainerId === nextSelectedContainerId
+                ? currentTab.logsSearchQuery
+                : "",
+            logsSearchMode:
+              currentTab.selectedContainerId === nextSelectedContainerId
+                ? currentTab.logsSearchMode
+                : null,
+            logsSearchLoading:
+              currentTab.selectedContainerId === nextSelectedContainerId
+                ? currentTab.logsSearchLoading
+                : false,
+            logsSearchError:
+              currentTab.selectedContainerId === nextSelectedContainerId
+                ? currentTab.logsSearchError
+                : undefined,
+            logsSearchResult:
+              currentTab.selectedContainerId === nextSelectedContainerId
+                ? currentTab.logsSearchResult
+                : null,
+            metricsSamples:
+              currentTab.selectedContainerId === nextSelectedContainerId
+                ? currentTab.metricsSamples
+                : [],
+            metricsState:
+              currentTab.selectedContainerId === nextSelectedContainerId
+                ? currentTab.metricsState
+                : "idle",
+            metricsLoading:
+              currentTab.selectedContainerId === nextSelectedContainerId
+                ? currentTab.metricsLoading
+                : false,
+            metricsError:
+              currentTab.selectedContainerId === nextSelectedContainerId
+                ? currentTab.metricsError
+                : undefined,
+            pendingAction: null,
+            actionError: undefined,
+          }),
+        };
+      });
+
+      if (nextSelectedContainerId && !result.unsupportedReason) {
+        await loadContainerDetails(set, get, hostId, nextSelectedContainerId);
+      }
+    } catch (error) {
+      set((state) => {
+        const currentTab = findContainersTab(state, hostId) ?? createEmptyContainersTabState(host);
+        return {
+          pendingInteractiveAuth:
+            isPendingContainersInteractiveAuth(state.pendingInteractiveAuth) &&
+            state.pendingInteractiveAuth.hostId === hostId
+              ? null
+              : state.pendingInteractiveAuth,
+          containerTabs: upsertContainersTab(state.containerTabs, {
+            ...currentTab,
+            title: buildContainersTabTitle(host),
+            connectionProgress: null,
+            isLoading: false,
+            errorMessage:
+              error instanceof Error
+                ? error.message
+                : "컨테이너 목록을 불러오지 못했습니다.",
+          }),
+        };
+      });
+    }
+  };
+
+  const loadContainerLogs = async (
+    set: (
+      next:
+        | AppState
+        | Partial<AppState>
+        | ((state: AppState) => AppState | Partial<AppState>),
+    ) => void,
+    get: () => AppState,
+    hostId: string,
+    options?: { tail?: number; followCursor?: string | null },
+  ) => {
+    const currentTab = findContainersTab(get(), hostId);
+    const containerId = currentTab?.selectedContainerId ?? null;
+    if (!currentTab || !containerId) {
+      return;
+    }
+
+    set((state) => {
+      const nextTab = findContainersTab(state, hostId);
+      if (!nextTab || nextTab.selectedContainerId !== containerId) {
+        return state;
+      }
+      const shouldPreserveVisibleLogs = Boolean(
+        options?.followCursor &&
+          nextTab.logs &&
+          nextTab.logs.lines.length > 0 &&
+          nextTab.logsState === "ready",
+      );
+      return {
+          containerTabs: upsertContainersTab(state.containerTabs, {
+            ...nextTab,
+            logsState: shouldPreserveVisibleLogs ? nextTab.logsState : "loading",
+            logsLoading: true,
+            logsError: undefined,
+            logsTailWindow: options?.tail ?? nextTab.logsTailWindow,
+            logsSearchLoading: false,
+            logsSearchError: undefined,
+            logsSearchMode:
+              nextTab.logsSearchMode === "local" ? "local" : null,
+            logsSearchResult: null,
+          }),
+      };
+    });
+
+    try {
+      const logs = await api.containers.logs({
+        hostId,
+        containerId,
+        tail: options?.tail ?? currentTab.logsTailWindow,
+        followCursor: options?.followCursor ?? null,
+      });
+      set((state) => {
+        const nextTab = findContainersTab(state, hostId);
+        if (!nextTab || nextTab.selectedContainerId !== containerId) {
+          return state;
+        }
+        const mergedLines =
+          options?.followCursor && nextTab.logs
+            ? mergeContainerLogLines(nextTab.logs.lines, logs.lines)
+            : logs.lines;
+        return {
+          containerTabs: upsertContainersTab(state.containerTabs, {
+            ...nextTab,
+            runtime: logs.runtime,
+            logs: {
+              ...logs,
+              lines: mergedLines,
+            },
+            logsState: mergedLines.length > 0 ? "ready" : "empty",
+            logsLoading: false,
+            logsError: undefined,
+            logsTailWindow: options?.tail ?? nextTab.logsTailWindow,
+          }),
+        };
+      });
+    } catch (error) {
+      set((state) => {
+        const nextTab = findContainersTab(state, hostId);
+        if (!nextTab || nextTab.selectedContainerId !== containerId) {
+          return state;
+        }
+        return {
+          containerTabs: upsertContainersTab(state.containerTabs, {
+            ...nextTab,
+            logsLoading: false,
+            logsState:
+              error instanceof Error
+                ? classifyContainerLogsErrorMessage(error.message)
+                : "error",
+            logsError:
+              error instanceof Error
+                ? classifyContainerLogsErrorMessage(error.message) ===
+                  "malformed"
+                  ? "컨테이너 로그 응답을 해석하지 못했습니다. 다시 불러오기를 시도해 주세요."
+                  : error.message
+                : "컨테이너 로그를 불러오지 못했습니다.",
+          }),
+        };
+      });
+    }
+  };
+
+  const loadContainerStats = async (
+    set: (
+      next:
+        | AppState
+        | Partial<AppState>
+        | ((state: AppState) => AppState | Partial<AppState>),
+    ) => void,
+    get: () => AppState,
+    hostId: string,
+  ) => {
+    const currentTab = findContainersTab(get(), hostId);
+    const containerId = currentTab?.selectedContainerId ?? null;
+    if (!currentTab || !containerId) {
+      return;
+    }
+
+    set((state) => {
+      const nextTab = findContainersTab(state, hostId);
+      if (!nextTab || nextTab.selectedContainerId !== containerId) {
+        return state;
+      }
+      return {
+        containerTabs: upsertContainersTab(state.containerTabs, {
+          ...nextTab,
+          metricsLoading: true,
+          metricsState:
+            nextTab.metricsSamples.length > 0 ? nextTab.metricsState : "loading",
+          metricsError: undefined,
+        }),
+      };
+    });
+
+    try {
+      const sample = await api.containers.stats({ hostId, containerId });
+      set((state) => {
+        const nextTab = findContainersTab(state, hostId);
+        if (!nextTab || nextTab.selectedContainerId !== containerId) {
+          return state;
+        }
+        return {
+          containerTabs: upsertContainersTab(state.containerTabs, {
+            ...nextTab,
+            runtime: sample.runtime,
+            metricsSamples: trimContainerMetricsSamples([
+              ...nextTab.metricsSamples,
+              sample,
+            ]),
+            metricsState: "ready",
+            metricsLoading: false,
+            metricsError: undefined,
+          }),
+        };
+      });
+    } catch (error) {
+      set((state) => {
+        const nextTab = findContainersTab(state, hostId);
+        if (!nextTab || nextTab.selectedContainerId !== containerId) {
+          return state;
+        }
+        return {
+          containerTabs: upsertContainersTab(state.containerTabs, {
+            ...nextTab,
+            metricsState: nextTab.metricsSamples.length > 0 ? "ready" : "error",
+            metricsLoading: false,
+            metricsError:
+              error instanceof Error
+                ? error.message
+                : "컨테이너 메트릭을 불러오지 못했습니다.",
+          }),
+        };
+      });
+    }
+  };
+
+  const searchContainerLogs = async (
+    set: (
+      next:
+        | AppState
+        | Partial<AppState>
+        | ((state: AppState) => AppState | Partial<AppState>),
+    ) => void,
+    get: () => AppState,
+    hostId: string,
+  ) => {
+    const currentTab = findContainersTab(get(), hostId);
+    const containerId = currentTab?.selectedContainerId ?? null;
+    const query = currentTab?.logsSearchQuery.trim() ?? "";
+    if (!currentTab || !containerId || !query) {
+      return;
+    }
+
+    set((state) => {
+      const nextTab = findContainersTab(state, hostId);
+      if (!nextTab || nextTab.selectedContainerId !== containerId) {
+        return state;
+      }
+      return {
+        containerTabs: upsertContainersTab(state.containerTabs, {
+          ...nextTab,
+          logsFollowEnabled: false,
+          logsSearchMode: "remote",
+          logsSearchLoading: true,
+          logsSearchError: undefined,
+        }),
+      };
+    });
+
+    try {
+      const result = await api.containers.searchLogs({
+        hostId,
+        containerId,
+        tail: currentTab.logsTailWindow,
+        query,
+      });
+      set((state) => {
+        const nextTab = findContainersTab(state, hostId);
+        if (!nextTab || nextTab.selectedContainerId !== containerId) {
+          return state;
+        }
+        return {
+          containerTabs: upsertContainersTab(state.containerTabs, {
+            ...nextTab,
+            logsSearchMode: "remote",
+            logsSearchLoading: false,
+            logsSearchError: undefined,
+            logsSearchResult: result,
+          }),
+        };
+      });
+    } catch (error) {
+      set((state) => {
+        const nextTab = findContainersTab(state, hostId);
+        if (!nextTab || nextTab.selectedContainerId !== containerId) {
+          return state;
+        }
+        return {
+          containerTabs: upsertContainersTab(state.containerTabs, {
+            ...nextTab,
+            logsSearchMode: "remote",
+            logsSearchLoading: false,
+            logsSearchError:
+              error instanceof Error
+                ? error.message
+                : "원격 로그 검색에 실패했습니다.",
+          }),
+        };
+      });
+    }
+  };
+
+  const runContainerAction = async (
+    set: (
+      next:
+        | AppState
+        | Partial<AppState>
+        | ((state: AppState) => AppState | Partial<AppState>),
+    ) => void,
+    get: () => AppState,
+    hostId: string,
+    action: "start" | "stop" | "restart" | "remove",
+  ) => {
+    const currentTab = findContainersTab(get(), hostId);
+    const containerId = currentTab?.selectedContainerId ?? null;
+    if (!currentTab || !containerId) {
+      return;
+    }
+
+    set((state) => {
+      const nextTab = findContainersTab(state, hostId);
+      if (!nextTab || nextTab.selectedContainerId !== containerId) {
+        return state;
+      }
+      return {
+        containerTabs: upsertContainersTab(state.containerTabs, {
+          ...nextTab,
+          pendingAction: action,
+          actionError: undefined,
+        }),
+      };
+    });
+
+    try {
+      if (action === "start") {
+        await api.containers.start(hostId, containerId);
+      } else if (action === "stop") {
+        await api.containers.stop(hostId, containerId);
+      } else if (action === "restart") {
+        await api.containers.restart(hostId, containerId);
+      } else {
+        await api.containers.remove(hostId, containerId);
+      }
+      await loadContainersList(set, get, hostId);
+      set((state) => {
+        const nextTab = findContainersTab(state, hostId);
+        if (!nextTab) {
+          return state;
+        }
+        return {
+          containerTabs: upsertContainersTab(state.containerTabs, {
+            ...nextTab,
+            pendingAction: null,
+            actionError: undefined,
+          }),
+        };
+      });
+    } catch (error) {
+      set((state) => {
+        const nextTab = findContainersTab(state, hostId);
+        if (!nextTab || nextTab.selectedContainerId !== containerId) {
+          return state;
+        }
+        return {
+          containerTabs: upsertContainersTab(state.containerTabs, {
+            ...nextTab,
+            pendingAction: null,
+            actionError:
+              error instanceof Error
+                ? error.message
+                : "컨테이너 작업을 실행하지 못했습니다.",
+          }),
+        };
+      });
+    }
+  };
+
+  const startPendingContainerShellConnect = async (
+    set: (
+      next:
+        | AppState
+        | Partial<AppState>
+        | ((state: AppState) => AppState | Partial<AppState>),
+    ) => void,
+    get: () => AppState,
+    sessionId: string,
+    hostId: string,
+    containerId: string,
+  ) => {
+    const host = get().hosts.find((item) => item.id === hostId);
+    if (!host) {
+      return;
+    }
+
+    updateSessionProgress(
+      set,
+      sessionId,
+      createConnectionProgress(
+        "retrying-session",
+        `${host.label} 컨테이너 셸을 여는 중입니다.`,
+      ),
+    );
+
+    try {
+      const connection = await api.containers.openShell(hostId, containerId);
+      const latestAttempt = findPendingConnectionAttempt(get(), sessionId);
+      if (!latestAttempt) {
+        await api.ssh.disconnect(connection.sessionId).catch(() => undefined);
+        return;
+      }
+
+      set((currentState) => ({
+        ...replaceSessionReferencesInState(
+          currentState,
+          sessionId,
+          connection.sessionId,
+          (tab) => ({
+            ...tab,
+            status: "connecting",
+            errorMessage: undefined,
+            connectionProgress: createConnectionProgress(
+              "connecting",
+              `${host.label} 컨테이너 셸에 연결하는 중입니다.`,
+            ),
+            hasReceivedOutput: false,
+            lastEventAt: new Date().toISOString(),
+          }),
+        ),
+        pendingConnectionAttempts:
+          currentState.pendingConnectionAttempts.filter(
+            (attempt) => attempt.sessionId !== sessionId,
+          ),
+      }));
+    } catch (error) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : "컨테이너 셸을 열지 못했습니다.";
+      markSessionError(set, sessionId, message);
+    }
   };
 
   const loadPaneListing = async (
@@ -2886,6 +3913,25 @@ export function createAppStore(api: DesktopApi) {
       return;
     }
 
+    if (action.kind === "containers") {
+      await loadContainersList(set, get, action.hostId);
+      return;
+    }
+
+    if (action.kind === "containerShell") {
+      if (!sessionId) {
+        return;
+      }
+      await startPendingContainerShellConnect(
+        set,
+        get,
+        sessionId,
+        action.hostId,
+        action.containerId,
+      );
+      return;
+    }
+
     try {
       const runtime = await api.portForwards.start(action.ruleId);
       set((state) => ({
@@ -2938,6 +3984,8 @@ export function createAppStore(api: DesktopApi) {
       tabs: [],
       sessionShareChatNotifications: {},
       workspaces: [],
+      containerTabs: [],
+      activeContainerHostId: null,
       tabStrip: [],
       portForwards: [],
       portForwardRuntimes: [],
@@ -2981,6 +4029,22 @@ export function createAppStore(api: DesktopApi) {
         set({ activeWorkspaceTab: asSessionTabId(sessionId) }),
       activateWorkspace: (workspaceId) =>
         set({ activeWorkspaceTab: asWorkspaceTabId(workspaceId) }),
+      activateContainers: () =>
+        set((state) => ({
+          activeWorkspaceTab: "containers",
+          activeContainerHostId:
+            state.activeContainerHostId ?? state.containerTabs[0]?.hostId ?? null,
+        })),
+      focusHostContainersTab: (hostId) =>
+        set((state) => {
+          if (!state.containerTabs.some((tab) => tab.hostId === hostId)) {
+            return state;
+          }
+          return {
+            activeWorkspaceTab: "containers",
+            activeContainerHostId: hostId,
+          };
+        }),
       openHomeSection: (section) =>
         set((state) => {
           const nextSection = normalizeHomeSectionInput(section);
@@ -3277,9 +4341,91 @@ export function createAppStore(api: DesktopApi) {
           return;
         }
 
+        const currentAttempt = findPendingConnectionAttempt(get(), sessionId);
+        if (
+          currentAttempt?.source === "container-shell" &&
+          currentAttempt.hostId &&
+          currentAttempt.containerId
+        ) {
+          const pendingSessionId = createPendingSessionId();
+          const latestCols = currentAttempt.latestCols ?? 120;
+          const latestRows = currentAttempt.latestRows ?? 32;
+          const host = get().hosts.find(
+            (item) => item.id === currentAttempt.hostId,
+          );
+          if (!host) {
+            return;
+          }
+
+          set((state) => ({
+            ...replaceSessionReferencesInState(
+              state,
+              sessionId,
+              pendingSessionId,
+              (tab) =>
+                createPendingSessionTab({
+                  sessionId: pendingSessionId,
+                  source: "host",
+                  hostId: currentAttempt.hostId,
+                  title: tab.title,
+                  progress: isAwsEc2HostRecord(host)
+                    ? createConnectionProgress(
+                        "checking-profile",
+                        `${host.awsProfileName} 프로필 인증 상태를 확인하는 중입니다.`,
+                      )
+                    : resolveHostKeyCheckProgress(host),
+                }),
+            ),
+            pendingConnectionAttempts: [
+              ...state.pendingConnectionAttempts.filter(
+                (attempt) => attempt.sessionId !== sessionId,
+              ),
+              {
+                sessionId: pendingSessionId,
+                source: "container-shell" as const,
+                hostId: currentAttempt.hostId,
+                title: currentTab.title,
+                latestCols,
+                latestRows,
+                containerId: currentAttempt.containerId,
+              },
+            ],
+          }));
+
+          if (!isPendingSessionId(sessionId)) {
+            await api.ssh.disconnect(sessionId).catch(() => undefined);
+          }
+
+          const trusted = await ensureTrustedHost(set, {
+            hostId: currentAttempt.hostId,
+            sessionId: pendingSessionId,
+            endpointId: buildContainersEndpointId(currentAttempt.hostId),
+            action: {
+              kind: "containerShell",
+              hostId: currentAttempt.hostId,
+              containerId: currentAttempt.containerId,
+            },
+          });
+          if (!trusted) {
+            updateSessionProgress(
+              set,
+              pendingSessionId,
+              resolveAwaitingHostTrustProgress(host),
+            );
+            return;
+          }
+          await startPendingContainerShellConnect(
+            set,
+            get,
+            pendingSessionId,
+            currentAttempt.hostId,
+            currentAttempt.containerId,
+          );
+          return;
+        }
+
         if (currentTab.source === "local") {
           const pendingSessionId = createPendingSessionId();
-          const currentAttempt = findPendingConnectionAttempt(get(), sessionId);
           const latestCols = currentAttempt?.latestCols ?? 120;
           const latestRows = currentAttempt?.latestRows ?? 32;
 
@@ -3337,7 +4483,6 @@ export function createAppStore(api: DesktopApi) {
         }
 
         const pendingSessionId = createPendingSessionId();
-        const currentAttempt = findPendingConnectionAttempt(get(), sessionId);
         const latestCols = currentAttempt?.latestCols ?? 120;
         const latestRows = currentAttempt?.latestRows ?? 32;
 
@@ -3531,6 +4676,308 @@ export function createAppStore(api: DesktopApi) {
           };
         });
       },
+      openHostContainersTab: async (hostId) => {
+        const host = get().hosts.find((item) => item.id === hostId);
+        if (!host) {
+          return;
+        }
+        set((state) => {
+          const existingTab = findContainersTab(state, hostId);
+          const nextTab = {
+            ...(existingTab ?? createEmptyContainersTabState(host)),
+            title: buildContainersTabTitle(host),
+            isLoading: true,
+            connectionProgress: createContainerConnectionProgress(
+              hostId,
+              buildContainersEndpointId(hostId),
+              "probing-host-key",
+              `${host.label} 호스트 키를 확인하는 중입니다.`,
+            ),
+            errorMessage: undefined,
+          };
+          return {
+            activeWorkspaceTab: "containers",
+            activeContainerHostId: hostId,
+            homeSection: "hosts",
+            hostDrawer: { mode: "closed" },
+            containerTabs: upsertContainersTab(state.containerTabs, nextTab),
+          };
+        });
+
+        const trusted = await ensureTrustedHost(set, {
+          hostId,
+          endpointId: buildContainersEndpointId(hostId),
+          action: {
+            kind: "containers",
+            hostId,
+          },
+        });
+        if (!trusted) {
+          set((state) => {
+            const currentTab = findContainersTab(state, hostId);
+            if (!currentTab) {
+              return state;
+            }
+            return {
+              containerTabs: upsertContainersTab(state.containerTabs, {
+                ...currentTab,
+                isLoading: false,
+                connectionProgress: null,
+              }),
+            };
+          });
+          return;
+        }
+
+        await loadContainersList(set, get, hostId);
+      },
+      closeHostContainersTab: async (hostId) => {
+        await api.containers.release(hostId).catch(() => undefined);
+        set((state) => {
+          const nextActiveContainerHostId =
+            state.activeContainerHostId === hostId
+              ? resolveNextContainerHostId(state.containerTabs, hostId)
+              : state.activeContainerHostId;
+          return {
+            containerTabs: state.containerTabs.filter(
+              (tab) => tab.hostId !== hostId,
+            ),
+            activeContainerHostId: nextActiveContainerHostId,
+            pendingInteractiveAuth:
+              isPendingContainersInteractiveAuth(state.pendingInteractiveAuth) &&
+              state.pendingInteractiveAuth.hostId === hostId
+                ? null
+                : state.pendingInteractiveAuth,
+          };
+        });
+      },
+      reorderContainerTab: (sourceHostId, targetHostId, placement) => {
+        if (sourceHostId === targetHostId) {
+          return;
+        }
+        set((state) => {
+          const sourceIndex = state.containerTabs.findIndex(
+            (tab) => tab.hostId === sourceHostId,
+          );
+          const targetIndex = state.containerTabs.findIndex(
+            (tab) => tab.hostId === targetHostId,
+          );
+          if (
+            sourceIndex < 0 ||
+            targetIndex < 0 ||
+            sourceIndex === targetIndex
+          ) {
+            return state;
+          }
+
+          const nextTabs = [...state.containerTabs];
+          const [moved] = nextTabs.splice(sourceIndex, 1);
+          const nextTargetIndex = nextTabs.findIndex(
+            (tab) => tab.hostId === targetHostId,
+          );
+          if (!moved || nextTargetIndex < 0) {
+            return state;
+          }
+
+          nextTabs.splice(
+            placement === "after" ? nextTargetIndex + 1 : nextTargetIndex,
+            0,
+            moved,
+          );
+          return { containerTabs: nextTabs };
+        });
+      },
+      refreshHostContainers: async (hostId) => {
+        await loadContainersList(set, get, hostId);
+      },
+      selectHostContainer: async (hostId, containerId) => {
+        const host = get().hosts.find((item) => item.id === hostId);
+        if (!host) {
+          return;
+        }
+        set((state) => {
+          const currentTab = findContainersTab(state, hostId) ?? createEmptyContainersTabState(host);
+          if (currentTab.selectedContainerId === containerId) {
+            return state;
+          }
+          return {
+            containerTabs: upsertContainersTab(state.containerTabs, {
+              ...currentTab,
+              selectedContainerId: containerId,
+              details: null,
+              detailsError: undefined,
+              logs: null,
+              logsState: "idle",
+              logsError: undefined,
+              logsTailWindow: DEFAULT_CONTAINER_LOGS_TAIL_WINDOW,
+              logsSearchQuery: "",
+              logsSearchMode: null,
+              logsSearchLoading: false,
+              logsSearchError: undefined,
+              logsSearchResult: null,
+              metricsSamples: [],
+              metricsState: "idle",
+              metricsLoading: false,
+              metricsError: undefined,
+              pendingAction: null,
+              actionError: undefined,
+            }),
+          };
+        });
+        if (!containerId) {
+          return;
+        }
+        await loadContainerDetails(set, get, hostId, containerId);
+        const nextTab = findContainersTab(get(), hostId);
+        if (nextTab?.activePanel === "logs") {
+          await loadContainerLogs(set, get, hostId);
+        }
+      },
+      setHostContainersPanel: (hostId, panel) =>
+        set((state) => {
+          const currentTab = findContainersTab(state, hostId);
+          if (!currentTab) {
+            return state;
+          }
+          return {
+            containerTabs: upsertContainersTab(state.containerTabs, {
+              ...currentTab,
+              activePanel: panel,
+            }),
+          };
+        }),
+      refreshHostContainerLogs: async (hostId, options) => {
+        await loadContainerLogs(set, get, hostId, options);
+      },
+      loadMoreHostContainerLogs: async (hostId) => {
+        const currentTab = findContainersTab(get(), hostId);
+        if (!currentTab) {
+          return;
+        }
+        const nextTail = Math.min(
+          MAX_CONTAINER_LOGS_TAIL_WINDOW,
+          currentTab.logsTailWindow + CONTAINER_LOGS_TAIL_INCREMENT,
+        );
+        if (nextTail === currentTab.logsTailWindow) {
+          return;
+        }
+        set((state) => {
+          const nextTab = findContainersTab(state, hostId);
+          if (!nextTab) {
+            return state;
+          }
+          return {
+            containerTabs: upsertContainersTab(state.containerTabs, {
+              ...nextTab,
+              logsFollowEnabled: false,
+            }),
+          };
+        });
+        await loadContainerLogs(set, get, hostId, { tail: nextTail });
+      },
+      setHostContainerLogsFollow: (hostId, enabled) =>
+        set((state) => {
+          const currentTab = findContainersTab(state, hostId);
+          if (!currentTab) {
+            return state;
+          }
+          return {
+            containerTabs: upsertContainersTab(state.containerTabs, {
+              ...currentTab,
+              logsFollowEnabled: enabled,
+            }),
+          };
+        }),
+      setHostContainerLogsSearchQuery: (hostId, query) =>
+        set((state) => {
+          const currentTab = findContainersTab(state, hostId);
+          if (!currentTab) {
+            return state;
+          }
+          const trimmed = query.trim();
+          return {
+            containerTabs: upsertContainersTab(state.containerTabs, {
+              ...currentTab,
+              logsSearchQuery: query,
+              logsSearchMode: trimmed ? "local" : null,
+              logsFollowEnabled: trimmed ? false : currentTab.logsFollowEnabled,
+              logsSearchError: trimmed ? undefined : currentTab.logsSearchError,
+              logsSearchResult: null,
+            }),
+          };
+        }),
+      searchHostContainerLogs: async (hostId) => {
+        await searchContainerLogs(set, get, hostId);
+      },
+      clearHostContainerLogsSearch: (hostId) =>
+        set((state) => {
+          const currentTab = findContainersTab(state, hostId);
+          if (!currentTab) {
+            return state;
+          }
+          return {
+            containerTabs: upsertContainersTab(state.containerTabs, {
+              ...currentTab,
+              logsSearchQuery: "",
+              logsSearchMode: null,
+              logsSearchLoading: false,
+              logsSearchError: undefined,
+              logsSearchResult: null,
+            }),
+          };
+        }),
+      refreshHostContainerStats: async (hostId) => {
+        await loadContainerStats(set, get, hostId);
+      },
+      runHostContainerAction: async (hostId, action) => {
+        await runContainerAction(set, get, hostId, action);
+      },
+      openHostContainerShell: async (hostId, containerId) => {
+        const host = get().hosts.find((item) => item.id === hostId);
+        if (!host) {
+          return;
+        }
+        const initialProgress = isAwsEc2HostRecord(host)
+          ? createConnectionProgress(
+              "checking-profile",
+              `${host.awsProfileName} 프로필 인증 상태를 확인하는 중입니다.`,
+            )
+          : resolveHostKeyCheckProgress(host);
+        const sessionId = createPendingSessionTabForContainerShell(
+          set,
+          get,
+          host,
+          containerId,
+          120,
+          32,
+          initialProgress,
+        );
+        const trusted = await ensureTrustedHost(set, {
+          hostId,
+          sessionId,
+          endpointId: buildContainersEndpointId(hostId),
+          action: {
+            kind: "containerShell",
+            hostId,
+            containerId,
+          },
+        });
+        if (!trusted) {
+          updateSessionProgress(
+            set,
+            sessionId,
+            resolveAwaitingHostTrustProgress(host),
+          );
+          return;
+        }
+        await startPendingContainerShellConnect(
+          set,
+          get,
+          sessionId,
+          hostId,
+          containerId,
+        );
+      },
       splitSessionIntoWorkspace: (sessionId, direction, targetSessionId) => {
         const state = get();
         const adjacent = resolveAdjacentTarget(
@@ -3586,6 +5033,10 @@ export function createAppStore(api: DesktopApi) {
             activeWorkspaceTab: asWorkspaceTabId(workspaceId),
           });
           return true;
+        }
+
+        if (adjacent.kind !== "workspace") {
+          return false;
         }
 
         const workspace = state.workspaces.find(
@@ -3740,33 +5191,16 @@ export function createAppStore(api: DesktopApi) {
         });
       },
       reorderDynamicTab: (source, target, placement) => {
-        if (
-          source.kind === "session" &&
-          target.kind === "session" &&
-          source.sessionId === target.sessionId
-        ) {
-          return;
-        }
-        if (
-          source.kind === "workspace" &&
-          target.kind === "workspace" &&
-          source.workspaceId === target.workspaceId
-        ) {
+        if (dynamicTabMatches(source, target)) {
           return;
         }
 
         set((state) => {
           const sourceIndex = state.tabStrip.findIndex((item) =>
-            source.kind === "session"
-              ? item.kind === "session" && item.sessionId === source.sessionId
-              : item.kind === "workspace" &&
-                item.workspaceId === source.workspaceId,
+            dynamicTabMatches(item, source),
           );
           const targetIndex = state.tabStrip.findIndex((item) =>
-            target.kind === "session"
-              ? item.kind === "session" && item.sessionId === target.sessionId
-              : item.kind === "workspace" &&
-                item.workspaceId === target.workspaceId,
+            dynamicTabMatches(item, target),
           );
           if (
             sourceIndex < 0 ||
@@ -3779,10 +5213,7 @@ export function createAppStore(api: DesktopApi) {
           const nextTabStrip = [...state.tabStrip];
           const [moved] = nextTabStrip.splice(sourceIndex, 1);
           const nextTargetIndex = nextTabStrip.findIndex((item) =>
-            target.kind === "session"
-              ? item.kind === "session" && item.sessionId === target.sessionId
-              : item.kind === "workspace" &&
-                item.workspaceId === target.workspaceId,
+            dynamicTabMatches(item, target),
           );
 
           if (nextTargetIndex < 0) {
@@ -3872,7 +5303,10 @@ export function createAppStore(api: DesktopApi) {
         if (!rule) {
           return;
         }
-        if (rule.transport === "ssh") {
+        const host = get().hosts.find((item) => item.id === rule.hostId);
+        const requiresTrustedHost =
+          host?.kind === "ssh" || host?.kind === "warpgate-ssh";
+        if (requiresTrustedHost) {
           const trusted = await ensureTrustedHost(set, {
             hostId: rule.hostId,
             action: {
@@ -4161,6 +5595,284 @@ export function createAppStore(api: DesktopApi) {
         });
 
         if (endpointId) {
+          const containerHostId = resolveContainersHostIdByEndpoint(endpointId);
+          if (containerHostId) {
+            if (event.type === "keyboardInteractiveChallenge") {
+              const payload = event.payload as Record<string, unknown>;
+              const challenge: KeyboardInteractiveChallenge = {
+                endpointId,
+                challengeId: String(payload.challengeId ?? ""),
+                attempt: Number(payload.attempt ?? 1),
+                name: typeof payload.name === "string" ? payload.name : null,
+                instruction: String(payload.instruction ?? ""),
+                prompts: Array.isArray(payload.prompts)
+                  ? payload.prompts.map((prompt) => {
+                      const candidate = prompt as Record<string, unknown>;
+                      return {
+                        label: String(candidate.label ?? ""),
+                        echo: Boolean(candidate.echo),
+                      } satisfies KeyboardInteractivePrompt;
+                    })
+                  : [],
+              };
+              const currentState = get();
+              const currentHost = currentState.hosts.find(
+                (host) => host.id === containerHostId,
+              );
+              const interactiveState = resolveInteractiveAuthUiState(
+                currentHost,
+                challenge,
+              );
+              const browserChallengeKey = buildInteractiveBrowserChallengeKey({
+                endpointId,
+                challengeId: challenge.challengeId,
+                approvalUrl: interactiveState.approvalUrl,
+              });
+
+              if (
+                interactiveState.approvalUrl &&
+                !openedInteractiveBrowserChallenges.has(browserChallengeKey)
+              ) {
+                openedInteractiveBrowserChallenges.add(browserChallengeKey);
+                void api.shell
+                  .openExternal(interactiveState.approvalUrl)
+                  .catch(() => undefined);
+              }
+
+              set((state) => {
+                const currentTab = findContainersTab(state, containerHostId);
+                return {
+                  activeWorkspaceTab: currentTab
+                    ? "containers"
+                    : state.activeWorkspaceTab,
+                  activeContainerHostId: currentTab
+                    ? containerHostId
+                    : state.activeContainerHostId,
+                  pendingInteractiveAuth:
+                    currentHost === undefined
+                      ? state.pendingInteractiveAuth
+                      : {
+                          source: "containers",
+                          endpointId,
+                          hostId: containerHostId,
+                          challengeId: challenge.challengeId,
+                          name: challenge.name ?? null,
+                          instruction: challenge.instruction,
+                          prompts: challenge.prompts,
+                          provider: interactiveState.provider,
+                          approvalUrl: interactiveState.approvalUrl,
+                          authCode: interactiveState.authCode,
+                          autoSubmitted: interactiveState.autoSubmitted,
+                        },
+                  containerTabs: currentTab
+                    ? upsertContainersTab(state.containerTabs, {
+                        ...currentTab,
+                        isLoading: true,
+                      })
+                    : state.containerTabs,
+                };
+              });
+
+              if (interactiveState.autoSubmitted) {
+                void api.ssh
+                  .respondKeyboardInteractive({
+                    endpointId,
+                    challengeId: challenge.challengeId,
+                    responses: interactiveState.autoResponses,
+                  })
+                  .catch(() => undefined);
+              }
+              return;
+            }
+
+            if (event.type === "keyboardInteractiveResolved") {
+              set((state) => {
+                if (
+                  !isPendingContainersInteractiveAuth(
+                    state.pendingInteractiveAuth,
+                  ) ||
+                  state.pendingInteractiveAuth.endpointId !== endpointId
+                ) {
+                  return state;
+                }
+                const currentTab = findContainersTab(state, containerHostId);
+                const currentHost = state.hosts.find(
+                  (host) => host.id === containerHostId,
+                );
+                if (state.pendingInteractiveAuth.provider === "warpgate") {
+                  return state;
+                }
+                return {
+                  pendingInteractiveAuth: null,
+                  containerTabs: currentTab
+                    ? upsertContainersTab(state.containerTabs, {
+                        ...currentTab,
+                        connectionProgress:
+                          currentHost === undefined
+                            ? currentTab.connectionProgress
+                            : createContainerConnectionProgress(
+                                containerHostId,
+                                endpointId,
+                                "connecting-containers",
+                                `${currentHost.label} 컨테이너 연결을 진행하는 중입니다.`,
+                              ),
+                      })
+                    : state.containerTabs,
+                };
+              });
+              return;
+            }
+
+            if (
+              event.type === "containersConnected" ||
+              event.type === "containersDisconnected" ||
+              event.type === "containersError"
+            ) {
+              set((state) => {
+                const currentTab = findContainersTab(state, containerHostId);
+                return {
+                  pendingInteractiveAuth:
+                    isPendingContainersInteractiveAuth(
+                      state.pendingInteractiveAuth,
+                    ) &&
+                    state.pendingInteractiveAuth.endpointId === endpointId
+                      ? null
+                      : state.pendingInteractiveAuth,
+                  containerTabs: currentTab
+                    ? upsertContainersTab(state.containerTabs, {
+                        ...currentTab,
+                        isLoading:
+                          event.type === "containersConnected"
+                            ? currentTab.isLoading
+                            : false,
+                        connectionProgress:
+                          event.type === "containersConnected"
+                            ? currentTab.connectionProgress
+                            : null,
+                      })
+                    : state.containerTabs,
+                };
+              });
+              return;
+            }
+          }
+
+          const portForwardRule = get().portForwards.find(
+            (rule) => rule.id === endpointId,
+          );
+          if (portForwardRule) {
+            if (event.type === "keyboardInteractiveChallenge") {
+              const payload = event.payload as Record<string, unknown>;
+              const challenge: KeyboardInteractiveChallenge = {
+                endpointId,
+                challengeId: String(payload.challengeId ?? ""),
+                attempt: Number(payload.attempt ?? 1),
+                name: typeof payload.name === "string" ? payload.name : null,
+                instruction: String(payload.instruction ?? ""),
+                prompts: Array.isArray(payload.prompts)
+                  ? payload.prompts.map((prompt) => {
+                      const candidate = prompt as Record<string, unknown>;
+                      return {
+                        label: String(candidate.label ?? ""),
+                        echo: Boolean(candidate.echo),
+                      } satisfies KeyboardInteractivePrompt;
+                    })
+                  : [],
+              };
+              const currentHost = get().hosts.find(
+                (host) => host.id === portForwardRule.hostId,
+              );
+              const interactiveState = resolveInteractiveAuthUiState(
+                currentHost,
+                challenge,
+              );
+              const browserChallengeKey = buildInteractiveBrowserChallengeKey({
+                endpointId,
+                challengeId: challenge.challengeId,
+                approvalUrl: interactiveState.approvalUrl,
+              });
+
+              if (
+                interactiveState.approvalUrl &&
+                !openedInteractiveBrowserChallenges.has(browserChallengeKey)
+              ) {
+                openedInteractiveBrowserChallenges.add(browserChallengeKey);
+                void api.shell
+                  .openExternal(interactiveState.approvalUrl)
+                  .catch(() => undefined);
+              }
+
+              set((state) => ({
+                homeSection: "portForwarding",
+                pendingInteractiveAuth:
+                  currentHost === undefined
+                    ? state.pendingInteractiveAuth
+                    : {
+                        source: "portForward",
+                        endpointId,
+                        ruleId: portForwardRule.id,
+                        hostId: portForwardRule.hostId,
+                        challengeId: challenge.challengeId,
+                        name: challenge.name ?? null,
+                        instruction: challenge.instruction,
+                        prompts: challenge.prompts,
+                        provider: interactiveState.provider,
+                        approvalUrl: interactiveState.approvalUrl,
+                        authCode: interactiveState.authCode,
+                        autoSubmitted: interactiveState.autoSubmitted,
+                      },
+              }));
+
+              if (interactiveState.autoSubmitted) {
+                void api.ssh
+                  .respondKeyboardInteractive({
+                    endpointId,
+                    challengeId: challenge.challengeId,
+                    responses: interactiveState.autoResponses,
+                  })
+                  .catch(() => undefined);
+              }
+              return;
+            }
+
+            if (event.type === "keyboardInteractiveResolved") {
+              set((state) => {
+                if (
+                  !isPendingPortForwardInteractiveAuth(
+                    state.pendingInteractiveAuth,
+                  ) ||
+                  state.pendingInteractiveAuth.endpointId !== endpointId
+                ) {
+                  return state;
+                }
+                if (state.pendingInteractiveAuth.provider === "warpgate") {
+                  return state;
+                }
+                return {
+                  pendingInteractiveAuth: null,
+                };
+              });
+              return;
+            }
+
+            if (
+              event.type === "portForwardStarted" ||
+              event.type === "portForwardStopped" ||
+              event.type === "portForwardError"
+            ) {
+              set((state) => ({
+                pendingInteractiveAuth:
+                  isPendingPortForwardInteractiveAuth(
+                    state.pendingInteractiveAuth,
+                  ) &&
+                  state.pendingInteractiveAuth.endpointId === endpointId
+                    ? null
+                    : state.pendingInteractiveAuth,
+              }));
+              return;
+            }
+          }
+
           if (event.type === "keyboardInteractiveChallenge") {
             const payload = event.payload as Record<string, unknown>;
             const challenge: KeyboardInteractiveChallenge = {
@@ -4194,12 +5906,17 @@ export function createAppStore(api: DesktopApi) {
               currentHost,
               challenge,
             );
+            const browserChallengeKey = buildInteractiveBrowserChallengeKey({
+              endpointId,
+              challengeId: challenge.challengeId,
+              approvalUrl: interactiveState.approvalUrl,
+            });
 
             if (
               interactiveState.approvalUrl &&
-              !openedInteractiveBrowserChallenges.has(challenge.challengeId)
+              !openedInteractiveBrowserChallenges.has(browserChallengeKey)
             ) {
-              openedInteractiveBrowserChallenges.add(challenge.challengeId);
+              openedInteractiveBrowserChallenges.add(browserChallengeKey);
               void api.shell
                 .openExternal(interactiveState.approvalUrl)
                 .catch(() => undefined);
@@ -4326,12 +6043,17 @@ export function createAppStore(api: DesktopApi) {
             currentHost,
             challenge,
           );
+          const browserChallengeKey = buildInteractiveBrowserChallengeKey({
+            sessionId,
+            challengeId: challenge.challengeId,
+            approvalUrl: interactiveState.approvalUrl,
+          });
 
           if (
             interactiveState.approvalUrl &&
-            !openedInteractiveBrowserChallenges.has(challenge.challengeId)
+            !openedInteractiveBrowserChallenges.has(browserChallengeKey)
           ) {
-            openedInteractiveBrowserChallenges.add(challenge.challengeId);
+            openedInteractiveBrowserChallenges.add(browserChallengeKey);
             void api.shell
               .openExternal(interactiveState.approvalUrl)
               .catch(() => undefined);
@@ -4647,6 +6369,25 @@ export function createAppStore(api: DesktopApi) {
             sftp: updatePaneState(state, paneId, {
               ...pane,
               connectionProgress: event,
+            }),
+          };
+        });
+      },
+      handleContainerConnectionProgressEvent: (event) => {
+        set((state) => {
+          const currentTab = findContainersTab(state, event.hostId);
+          if (!currentTab) {
+            return state;
+          }
+          const expectedEndpointId = buildContainersEndpointId(event.hostId);
+          if (event.endpointId !== expectedEndpointId) {
+            return state;
+          }
+          return {
+            containerTabs: upsertContainersTab(state.containerTabs, {
+              ...currentTab,
+              connectionProgress: event,
+              isLoading: true,
             }),
           };
         });

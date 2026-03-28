@@ -29,6 +29,7 @@ function renderTitleBar(updateState: UpdateState = createUpdateState()) {
       windowState={{ isMaximized: false }}
       onSelectHome={vi.fn()}
       onSelectSftp={vi.fn()}
+      onSelectContainers={vi.fn()}
       onSelectSession={vi.fn()}
       onSelectWorkspace={vi.fn()}
       onCloseSession={vi.fn().mockResolvedValue(undefined)}
@@ -61,5 +62,48 @@ describe('AppTitleBar update popover', () => {
     fireEvent.mouseDown(document.body);
 
     expect(document.querySelector('.update-popover')).not.toBeInTheDocument();
+  });
+
+  it('renders the fixed containers tab and routes select actions', async () => {
+    const onSelectContainers = vi.fn();
+
+    render(
+      <AppTitleBar
+        desktopPlatform="darwin"
+        tabs={[]}
+        workspaces={[]}
+        tabStrip={[]}
+        activeWorkspaceTab="containers"
+        draggedSession={null}
+        updateState={createUpdateState()}
+        windowState={{ isMaximized: false }}
+        onSelectHome={vi.fn()}
+        onSelectSftp={vi.fn()}
+        onSelectContainers={onSelectContainers}
+        onSelectSession={vi.fn()}
+        onSelectWorkspace={vi.fn()}
+        onCloseSession={vi.fn().mockResolvedValue(undefined)}
+        onCloseWorkspace={vi.fn().mockResolvedValue(undefined)}
+        onStartSessionDrag={vi.fn()}
+        onEndSessionDrag={vi.fn()}
+        onDetachSessionToStandalone={vi.fn()}
+        onReorderDynamicTab={vi.fn()}
+        onCheckForUpdates={vi.fn().mockResolvedValue(undefined)}
+        onDownloadUpdate={vi.fn().mockResolvedValue(undefined)}
+        onInstallUpdate={vi.fn().mockResolvedValue(undefined)}
+        onDismissUpdate={vi.fn().mockResolvedValue(undefined)}
+        onOpenReleasePage={vi.fn().mockResolvedValue(undefined)}
+        onMinimizeWindow={vi.fn().mockResolvedValue(undefined)}
+        onMaximizeWindow={vi.fn().mockResolvedValue(undefined)}
+        onRestoreWindow={vi.fn().mockResolvedValue(undefined)}
+        onCloseWindow={vi.fn().mockResolvedValue(undefined)}
+      />
+    );
+
+    const selectButton = screen.getByText('Containers').closest('button');
+    expect(selectButton).not.toBeNull();
+
+    fireEvent.click(selectButton!);
+    expect(onSelectContainers).toHaveBeenCalledTimes(1);
   });
 });

@@ -27,7 +27,6 @@ import type {
   HostRecord,
   SftpBrowserColumnKey,
   SftpBrowserColumnWidths,
-  SftpConnectionProgressEvent,
   SftpPaneId,
   TransferJob,
 } from "@shared";
@@ -39,6 +38,7 @@ import type {
   SftpSourceKind,
   SftpState,
 } from "../store/createAppStore";
+import { formatConnectionProgressStageLabel } from "../lib/connection-progress";
 import { DialogBackdrop } from "./DialogBackdrop";
 
 interface SftpWorkspaceProps {
@@ -398,33 +398,6 @@ function formatDate(value: string): string {
     hour: "numeric",
     minute: "2-digit",
   }).format(date);
-}
-
-function formatSftpConnectionStageLabel(
-  stage?: SftpConnectionProgressEvent["stage"],
-): string {
-  switch (stage) {
-    case "loading-instance-metadata":
-      return "SSH 설정 확인";
-    case "checking-profile":
-      return "AWS 프로필 확인";
-    case "browser-login":
-      return "AWS 로그인";
-    case "checking-ssm":
-      return "SSM 상태 확인";
-    case "probing-host-key":
-      return "호스트 키 확인";
-    case "generating-key":
-      return "임시 키 생성";
-    case "sending-public-key":
-      return "공개 키 전송";
-    case "opening-tunnel":
-      return "내부 터널 연결";
-    case "connecting-sftp":
-      return "SFTP 연결";
-    default:
-      return "연결 준비";
-  }
 }
 
 function buildTransferDirection(job: TransferJob): string {
@@ -1444,7 +1417,7 @@ function HostPicker({
                 : "SFTP 연결 중..."}
             </strong>
             <span className="sftp-host-picker__overlay-stage">
-              {formatSftpConnectionStageLabel(
+              {formatConnectionProgressStageLabel(
                 pane.connectionProgress?.stage,
               )}
             </span>

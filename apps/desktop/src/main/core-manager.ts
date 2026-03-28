@@ -5,6 +5,12 @@ import { existsSync } from "node:fs";
 import path from "node:path";
 import type {
   HostKeyProbeResult,
+  HostContainerDetails,
+  HostContainerListResult,
+  HostContainerLogSearchResult,
+  HostContainerLogsSnapshot,
+  HostContainerRuntime,
+  HostContainerStatsSample,
   CoreEvent,
   CoreEventType,
   CoreRequest,
@@ -18,6 +24,7 @@ import type {
   KeyboardInteractiveRespondInput,
   ControlSignalPayload,
   ResolvedAwsConnectPayload,
+  ResolvedContainersConnectPayload,
   ResolvedCoreConnectPayload,
   ResolvedHostKeyProbePayload,
   ResolvedLocalConnectPayload,
@@ -54,9 +61,17 @@ interface PortForwardDefinition {
   ruleId: string;
   hostId: string;
   transport: PortForwardTransport;
+  backendTransport: "ssh" | "aws-ssm";
   mode: PortForwardMode;
   bindAddress: string;
   bindPort: number;
+}
+
+interface ContainersEndpointRuntime {
+  hostId: string;
+  runtime: HostContainerRuntime | null;
+  runtimeCommand: string | null;
+  unsupportedReason: string | null;
 }
 
 type SessionTransport = "ssh" | "aws-ssm" | "local-shell";
@@ -168,9 +183,11 @@ function resolveExistingEnvKey(
   return null;
 }
 
-function buildPackagedWindowsCorePathEntries(
-  env: NodeJS.ProcessEnv,
-): { pathEntries: string[]; cmdExecutablePath: string | null; windowsRoot: string | null } {
+function buildPackagedWindowsCorePathEntries(env: NodeJS.ProcessEnv): {
+  pathEntries: string[];
+  cmdExecutablePath: string | null;
+  windowsRoot: string | null;
+} {
   const systemRoot =
     lookupEnvValue(env, "SystemRoot", { caseInsensitive: true }) ??
     lookupEnvValue(env, "windir", { caseInsensitive: true }) ??
@@ -233,7 +250,9 @@ function assignEnvValue(
   const existingKey =
     resolveExistingEnvKey(env, key, {
       caseInsensitive: options?.caseInsensitive,
-    }) ?? options?.fallbackKey ?? key;
+    }) ??
+    options?.fallbackKey ??
+    key;
   env[existingKey] = value;
 
   if (options?.caseInsensitive) {
@@ -265,7 +284,9 @@ export function buildCoreChildEnv(
     const { pathEntries, cmdExecutablePath, windowsRoot } =
       buildPackagedWindowsCorePathEntries(env);
     const delimiter = getPathDelimiterForPlatform(platform);
-    const currentPathValue = lookupEnvValue(env, "PATH", { caseInsensitive: true });
+    const currentPathValue = lookupEnvValue(env, "PATH", {
+      caseInsensitive: true,
+    });
     assignEnvValue(
       env,
       "PATH",
@@ -282,7 +303,8 @@ export function buildCoreChildEnv(
       assignEnvValue(
         env,
         "SystemRoot",
-        lookupEnvValue(env, "SystemRoot", { caseInsensitive: true }) ?? windowsRoot,
+        lookupEnvValue(env, "SystemRoot", { caseInsensitive: true }) ??
+          windowsRoot,
         {
           caseInsensitive: true,
           fallbackKey: "SystemRoot",
@@ -298,7 +320,10 @@ export function buildCoreChildEnv(
         },
       );
     }
-    if (!lookupEnvValue(env, "COMSPEC", { caseInsensitive: true }) && cmdExecutablePath) {
+    if (
+      !lookupEnvValue(env, "COMSPEC", { caseInsensitive: true }) &&
+      cmdExecutablePath
+    ) {
       assignEnvValue(env, "COMSPEC", cmdExecutablePath, {
         caseInsensitive: true,
         fallbackKey: "ComSpec",
@@ -505,6 +530,10 @@ export class CoreManager {
   private readonly windows = new Set<BrowserWindow>();
   private readonly tabs = new Map<string, TerminalTab>();
   private readonly sftpEndpoints = new Map<string, SftpEndpointSummary>();
+  private readonly containerEndpoints = new Map<
+    string,
+    ContainersEndpointRuntime
+  >();
   private readonly transferJobs = new Map<string, TransferJob>();
   private readonly portForwardDefinitions = new Map<
     string,
@@ -534,6 +563,9 @@ export class CoreManager {
     sessionId: string,
     chunk: Uint8Array,
   ) => void | Promise<void>;
+  private onPortForwardEvent?: (
+    event: PortForwardRuntimeEvent,
+  ) => void | Promise<void>;
   // 바이너리 frame은 청크 경계를 보장하지 않으므로 별도 parser가 필요하다.
   private readonly parser = new CoreFrameParser();
 
@@ -553,6 +585,14 @@ export class CoreManager {
     this.onTerminalStream = handler;
   }
 
+  setPortForwardEventHandler(
+    handler:
+      | ((event: PortForwardRuntimeEvent) => void | Promise<void>)
+      | undefined,
+  ): void {
+    this.onPortForwardEvent = handler;
+  }
+
   registerWindow(window: BrowserWindow): void {
     this.windows.add(window);
     window.on("closed", () => {
@@ -570,7 +610,9 @@ export class CoreManager {
     );
   }
 
-  setPortForwardRuntime(runtime: PortForwardRuntimeRecord): PortForwardRuntimeRecord {
+  setPortForwardRuntime(
+    runtime: PortForwardRuntimeRecord,
+  ): PortForwardRuntimeRecord {
     this.portForwardRuntimes.set(runtime.ruleId, runtime);
     this.broadcastPortForwardEvent({ runtime });
     return runtime;
@@ -720,6 +762,360 @@ export class CoreManager {
     return { sessionId };
   }
 
+  async containersConnect(
+    payload: ResolvedContainersConnectPayload & {
+      endpointId: string;
+      hostId: string;
+    },
+  ): Promise<{
+    runtime: HostContainerRuntime | null;
+    runtimeCommand: string | null;
+    unsupportedReason: string | null;
+  }> {
+    await this.start();
+    const { endpointId, hostId, ...connectPayload } = payload;
+    const response = await this.requestResponse<Record<string, unknown>>(
+      {
+        id: randomUUID(),
+        type: "containersConnect",
+        endpointId,
+        payload: connectPayload,
+      },
+      ["containersConnected"],
+      { timeoutMs: 120000 },
+    );
+    const runtime =
+      response.runtime === "docker" || response.runtime === "podman"
+        ? (response.runtime as HostContainerRuntime)
+        : null;
+    const unsupportedReason =
+      typeof response.unsupportedReason === "string"
+        ? response.unsupportedReason
+        : null;
+    const runtimeCommand =
+      typeof response.runtimeCommand === "string" &&
+      response.runtimeCommand.trim()
+        ? response.runtimeCommand
+        : null;
+    this.containerEndpoints.set(endpointId, {
+      hostId,
+      runtime,
+      runtimeCommand,
+      unsupportedReason,
+    });
+    return { runtime, runtimeCommand, unsupportedReason };
+  }
+
+  async containersDisconnect(endpointId: string): Promise<void> {
+    this.containerEndpoints.delete(endpointId);
+    if (!this.process) {
+      return;
+    }
+    await this.start();
+    await this.requestResponse(
+      {
+        id: randomUUID(),
+        type: "containersDisconnect",
+        endpointId,
+        payload: {},
+      },
+      ["containersDisconnected"],
+    );
+  }
+
+  async containersList(endpointId: string): Promise<HostContainerListResult> {
+    await this.start();
+    const response = await this.requestResponse<Record<string, unknown>>(
+      {
+        id: randomUUID(),
+        type: "containersList",
+        endpointId,
+        payload: {},
+      },
+      ["containersListed"],
+      { timeoutMs: 25000 },
+    );
+    const runtime =
+      response.runtime === "docker" || response.runtime === "podman"
+        ? (response.runtime as HostContainerRuntime)
+        : null;
+    const containers = Array.isArray(response.containers)
+      ? response.containers.map((item) => {
+          const candidate = item as Record<string, unknown>;
+          return {
+            id: String(candidate.id ?? ""),
+            name: String(candidate.name ?? ""),
+            runtime:
+              candidate.runtime === "docker" || candidate.runtime === "podman"
+                ? (candidate.runtime as HostContainerRuntime)
+                : "docker",
+            image: String(candidate.image ?? ""),
+            status: String(candidate.status ?? ""),
+            createdAt: String(candidate.createdAt ?? ""),
+            ports: String(candidate.ports ?? ""),
+          };
+        })
+      : [];
+    return {
+      hostId: this.containerEndpoints.get(endpointId)?.hostId ?? "",
+      runtime,
+      containers,
+    };
+  }
+
+  async containersInspect(
+    endpointId: string,
+    containerId: string,
+  ): Promise<HostContainerDetails> {
+    await this.start();
+    const response = await this.requestResponse<Record<string, unknown>>(
+      {
+        id: randomUUID(),
+        type: "containersInspect",
+        endpointId,
+        payload: { containerId },
+      },
+      ["containersInspected"],
+      { timeoutMs: 25000 },
+    );
+    return {
+      id: String(response.id ?? ""),
+      name: String(response.name ?? ""),
+      runtime:
+        response.runtime === "docker" || response.runtime === "podman"
+          ? (response.runtime as HostContainerRuntime)
+          : "docker",
+      image: String(response.image ?? ""),
+      status: String(response.status ?? ""),
+      createdAt: String(response.createdAt ?? ""),
+      command: String(response.command ?? ""),
+      entrypoint: String(response.entrypoint ?? ""),
+      mounts: Array.isArray(response.mounts)
+        ? response.mounts.map((mount) => {
+            const candidate = mount as Record<string, unknown>;
+            return {
+              type: String(candidate.type ?? ""),
+              source: String(candidate.source ?? ""),
+              destination: String(candidate.destination ?? ""),
+              mode: String(candidate.mode ?? ""),
+              readOnly: Boolean(candidate.readOnly),
+            };
+          })
+        : [],
+      networks: Array.isArray(response.networks)
+        ? response.networks.map((network) => {
+            const candidate = network as Record<string, unknown>;
+            return {
+              name: String(candidate.name ?? ""),
+              ipAddress: String(candidate.ipAddress ?? ""),
+              aliases: Array.isArray(candidate.aliases)
+                ? candidate.aliases.map((alias) => String(alias))
+                : [],
+            };
+          })
+        : [],
+      ports: Array.isArray(response.ports)
+        ? response.ports.map((port) => {
+            const candidate = port as Record<string, unknown>;
+            return {
+              containerPort: Number(candidate.containerPort ?? 0),
+              protocol: String(candidate.protocol ?? ""),
+              publishedBindings: Array.isArray(candidate.publishedBindings)
+                ? candidate.publishedBindings.map((binding) => {
+                    const bindingRecord = binding as Record<string, unknown>;
+                    const hostPort =
+                      typeof bindingRecord.hostPort === "number" &&
+                      Number.isFinite(bindingRecord.hostPort)
+                        ? bindingRecord.hostPort
+                        : null;
+                    return {
+                      hostIp:
+                        bindingRecord.hostIp == null
+                          ? null
+                          : String(bindingRecord.hostIp),
+                      hostPort,
+                    };
+                  })
+                : [],
+            };
+          })
+        : [],
+      environment: Array.isArray(response.environment)
+        ? response.environment.map((entry) => {
+            const candidate = entry as Record<string, unknown>;
+            return {
+              key: String(candidate.key ?? ""),
+              value: String(candidate.value ?? ""),
+            };
+          })
+        : [],
+      labels: Array.isArray(response.labels)
+        ? response.labels.map((entry) => {
+            const candidate = entry as Record<string, unknown>;
+            return {
+              key: String(candidate.key ?? ""),
+              value: String(candidate.value ?? ""),
+            };
+          })
+        : [],
+    };
+  }
+
+  async containersLogs(
+    endpointId: string,
+    containerId: string,
+    tail: number,
+    followCursor?: string | null,
+  ): Promise<HostContainerLogsSnapshot> {
+    await this.start();
+    const response = await this.requestResponse<Record<string, unknown>>(
+      {
+        id: randomUUID(),
+        type: "containersLogs",
+        endpointId,
+        payload: {
+          containerId,
+          tail,
+          followCursor: followCursor ?? null,
+        },
+      },
+      ["containersLogs"],
+      { timeoutMs: 25000 },
+    );
+    if (!Array.isArray(response.lines)) {
+      throw new Error("Invalid containersLogs response: lines must be string[]");
+    }
+    if (response.lines.some((line) => typeof line !== "string")) {
+      throw new Error("Invalid containersLogs response: lines must be string[]");
+    }
+    if (
+      response.cursor != null &&
+      typeof response.cursor !== "string"
+    ) {
+      throw new Error("Invalid containersLogs response: cursor must be string");
+    }
+    return {
+      hostId: this.containerEndpoints.get(endpointId)?.hostId ?? "",
+      runtime:
+        response.runtime === "docker" || response.runtime === "podman"
+          ? (response.runtime as HostContainerRuntime)
+          : "docker",
+      containerId: String(response.containerId ?? containerId),
+      lines: response.lines,
+      cursor:
+        typeof response.cursor === "string" && response.cursor.trim()
+          ? response.cursor
+          : null,
+    };
+  }
+
+  async containersStart(endpointId: string, containerId: string): Promise<void> {
+    await this.runContainerAction(endpointId, "containersStart", containerId);
+  }
+
+  async containersStop(endpointId: string, containerId: string): Promise<void> {
+    await this.runContainerAction(endpointId, "containersStop", containerId);
+  }
+
+  async containersRestart(endpointId: string, containerId: string): Promise<void> {
+    await this.runContainerAction(endpointId, "containersRestart", containerId);
+  }
+
+  async containersRemove(endpointId: string, containerId: string): Promise<void> {
+    await this.runContainerAction(endpointId, "containersRemove", containerId);
+  }
+
+  private async runContainerAction(
+    endpointId: string,
+    type: "containersStart" | "containersStop" | "containersRestart" | "containersRemove",
+    containerId: string,
+  ): Promise<void> {
+    await this.start();
+    await this.requestResponse<Record<string, unknown>>(
+      {
+        id: randomUUID(),
+        type,
+        endpointId,
+        payload: { containerId },
+      },
+      ["containersActionCompleted"],
+      { timeoutMs: 25000 },
+    );
+  }
+
+  async containersStats(
+    endpointId: string,
+    containerId: string,
+  ): Promise<HostContainerStatsSample> {
+    await this.start();
+    const response = await this.requestResponse<Record<string, unknown>>(
+      {
+        id: randomUUID(),
+        type: "containersStats",
+        endpointId,
+        payload: { containerId },
+      },
+      ["containersStats"],
+      { timeoutMs: 25000 },
+    );
+    return {
+      hostId: this.containerEndpoints.get(endpointId)?.hostId ?? "",
+      containerId: String(response.containerId ?? containerId),
+      runtime:
+        response.runtime === "docker" || response.runtime === "podman"
+          ? (response.runtime as HostContainerRuntime)
+          : "docker",
+      recordedAt: String(response.recordedAt ?? new Date().toISOString()),
+      cpuPercent: Number(response.cpuPercent ?? 0),
+      memoryUsedBytes: Number(response.memoryUsedBytes ?? 0),
+      memoryLimitBytes: Number(response.memoryLimitBytes ?? 0),
+      memoryPercent: Number(response.memoryPercent ?? 0),
+      networkRxBytes: Number(response.networkRxBytes ?? 0),
+      networkTxBytes: Number(response.networkTxBytes ?? 0),
+      blockReadBytes: Number(response.blockReadBytes ?? 0),
+      blockWriteBytes: Number(response.blockWriteBytes ?? 0),
+    };
+  }
+
+  async containersSearchLogs(
+    endpointId: string,
+    containerId: string,
+    tail: number,
+    query: string,
+  ): Promise<HostContainerLogSearchResult> {
+    await this.start();
+    const response = await this.requestResponse<Record<string, unknown>>(
+      {
+        id: randomUUID(),
+        type: "containersSearchLogs",
+        endpointId,
+        payload: { containerId, tail, query },
+      },
+      ["containersLogsSearched"],
+      { timeoutMs: 25000 },
+    );
+    if (!Array.isArray(response.lines) || response.lines.some((line) => typeof line !== "string")) {
+      throw new Error("Invalid containersSearchLogs response: lines must be string[]");
+    }
+    return {
+      hostId: this.containerEndpoints.get(endpointId)?.hostId ?? "",
+      containerId: String(response.containerId ?? containerId),
+      runtime:
+        response.runtime === "docker" || response.runtime === "podman"
+          ? (response.runtime as HostContainerRuntime)
+          : "docker",
+      query: String(response.query ?? query),
+      lines: response.lines,
+      matchCount: Number(response.matchCount ?? response.lines.length),
+    };
+  }
+
+  getContainersEndpointRuntime(
+    endpointId: string,
+  ): ContainersEndpointRuntime | null {
+    return this.containerEndpoints.get(endpointId) ?? null;
+  }
+
   async connectAwsSession(payload: {
     profileName: string;
     region: string;
@@ -819,14 +1215,16 @@ export class CoreManager {
     payload: ResolvedPortForwardStartPayload & {
       ruleId: string;
       hostId: string;
+      transport?: PortForwardTransport;
     },
   ): Promise<PortForwardRuntimeRecord> {
     await this.start();
     const baseRuntime: PortForwardRuntimeRecord = {
       ruleId: payload.ruleId,
       hostId: payload.hostId,
-      transport: "ssh",
+      transport: payload.transport ?? "ssh",
       mode: payload.mode,
+      method: "ssh-native",
       bindAddress: payload.bindAddress,
       bindPort: payload.bindPort,
       status: "starting",
@@ -835,46 +1233,54 @@ export class CoreManager {
     this.portForwardDefinitions.set(payload.ruleId, {
       ruleId: payload.ruleId,
       hostId: payload.hostId,
-      transport: "ssh",
+      transport: payload.transport ?? "ssh",
+      backendTransport: "ssh",
       mode: payload.mode,
       bindAddress: payload.bindAddress,
       bindPort: payload.bindPort,
     });
     this.portForwardRuntimes.set(payload.ruleId, baseRuntime);
     this.broadcastPortForwardEvent({ runtime: baseRuntime });
+    try {
+      const response = await this.requestResponse<Record<string, unknown>>(
+        {
+          id: randomUUID(),
+          type: "portForwardStart",
+          endpointId: payload.ruleId,
+          payload,
+        },
+        ["portForwardStarted"],
+      );
 
-    const response = await this.requestResponse<Record<string, unknown>>(
-      {
-        id: randomUUID(),
-        type: "portForwardStart",
-        endpointId: payload.ruleId,
-        payload,
-      },
-      ["portForwardStarted"],
-    );
-
-    const runtime = this.buildForwardRuntime(
-      payload.ruleId,
-      response,
-      "running",
-    );
-    this.portForwardRuntimes.set(payload.ruleId, runtime);
-    this.broadcastPortForwardEvent({ runtime });
-    return runtime;
+      const runtime = this.buildForwardRuntime(
+        payload.ruleId,
+        response,
+        "running",
+      );
+      this.portForwardRuntimes.set(payload.ruleId, runtime);
+      this.broadcastPortForwardEvent({ runtime });
+      return runtime;
+    } finally {
+      if (payload.sourceEndpointId) {
+        this.containerEndpoints.delete(payload.sourceEndpointId);
+      }
+    }
   }
 
   async startSsmPortForward(
     payload: ResolvedSsmPortForwardStartPayload & {
       ruleId: string;
       hostId: string;
+      transport?: PortForwardTransport;
     },
   ): Promise<PortForwardRuntimeRecord> {
     await this.start();
     const baseRuntime: PortForwardRuntimeRecord = {
       ruleId: payload.ruleId,
       hostId: payload.hostId,
-      transport: "aws-ssm",
+      transport: payload.transport ?? "aws-ssm",
       mode: "local",
+      method: "ssm-remote-host",
       bindAddress: payload.bindAddress,
       bindPort: payload.bindPort,
       status: "starting",
@@ -883,7 +1289,8 @@ export class CoreManager {
     this.portForwardDefinitions.set(payload.ruleId, {
       ruleId: payload.ruleId,
       hostId: payload.hostId,
-      transport: "aws-ssm",
+      transport: payload.transport ?? "aws-ssm",
+      backendTransport: "aws-ssm",
       mode: "local",
       bindAddress: payload.bindAddress,
       bindPort: payload.bindPort,
@@ -923,7 +1330,7 @@ export class CoreManager {
       {
         id: randomUUID(),
         type:
-          definition?.transport === "aws-ssm"
+          definition?.backendTransport === "aws-ssm"
             ? "ssmPortForwardStop"
             : "portForwardStop",
         endpointId: ruleId,
@@ -1201,7 +1608,10 @@ export class CoreManager {
     );
   }
 
-  sendControlSignal(sessionId: string, signal: SessionShareControlSignal): void {
+  sendControlSignal(
+    sessionId: string,
+    signal: SessionShareControlSignal,
+  ): void {
     const tab = this.tabs.get(sessionId);
     if (!tab || tab.status !== "connected") {
       return;
@@ -1251,7 +1661,10 @@ export class CoreManager {
     }
 
     const sentSize = this.sentResizeBySession.get(sessionId);
-    if (sentSize?.cols === desiredSize.cols && sentSize.rows === desiredSize.rows) {
+    if (
+      sentSize?.cols === desiredSize.cols &&
+      sentSize.rows === desiredSize.rows
+    ) {
       return;
     }
 
@@ -1295,7 +1708,8 @@ export class CoreManager {
   async respondKeyboardInteractive(
     input: KeyboardInteractiveRespondInput,
   ): Promise<void> {
-    const hasSessionId = typeof input.sessionId === "string" && input.sessionId.length > 0;
+    const hasSessionId =
+      typeof input.sessionId === "string" && input.sessionId.length > 0;
     const hasEndpointId =
       typeof input.endpointId === "string" && input.endpointId.length > 0;
     if (hasSessionId === hasEndpointId) {
@@ -1364,6 +1778,7 @@ export class CoreManager {
       }
       this.portForwardRuntimes.set(ruleId, runtime);
       this.broadcastPortForwardEvent({ runtime });
+      void this.onPortForwardEvent?.({ runtime });
       if (status === "running") {
         this.log({
           level: "info",
@@ -1388,6 +1803,27 @@ export class CoreManager {
     }
 
     if (event.endpointId) {
+      if (
+        event.type === "containersConnected" ||
+        event.type === "containersDisconnected" ||
+        event.type === "containersError"
+      ) {
+        if (
+          event.type === "containersDisconnected" ||
+          event.type === "containersError"
+        ) {
+          this.containerEndpoints.delete(event.endpointId);
+        }
+        this.broadcastTerminalEvent(event);
+        return;
+      }
+      if (
+        event.type === "containersListed" ||
+        event.type === "containersInspected" ||
+        event.type === "containersLogs"
+      ) {
+        return;
+      }
       this.broadcastTerminalEvent(event);
       return;
     }
@@ -1490,18 +1926,22 @@ export class CoreManager {
   private requestResponse<TPayload extends Record<string, unknown>>(
     request: CoreRequest<unknown>,
     expectedTypes: CoreEventType[],
+    options?: {
+      timeoutMs?: number;
+    },
   ): Promise<TPayload> {
     if (!this.process) {
       throw new Error("SSH core process is not running");
     }
 
     return new Promise<TPayload>((resolve, reject) => {
+      const timeoutMs = options?.timeoutMs ?? 8000;
       const timeout = setTimeout(() => {
         this.pendingResponses.delete(request.id);
         reject(
           new Error(`Timed out waiting for SSH core response: ${request.type}`),
         );
-      }, 8000);
+      }, timeoutMs);
 
       this.pendingResponses.set(request.id, {
         resolve: (payload) => resolve(payload as TPayload),
@@ -1528,7 +1968,8 @@ export class CoreManager {
     if (
       event.type === "error" ||
       event.type === "sftpError" ||
-      event.type === "portForwardError"
+      event.type === "portForwardError" ||
+      event.type === "containersError"
     ) {
       clearTimeout(pending.timeout);
       this.pendingResponses.delete(event.requestId);
@@ -1567,6 +2008,7 @@ export class CoreManager {
   private clearRuntimeState(): void {
     this.tabs.clear();
     this.sftpEndpoints.clear();
+    this.containerEndpoints.clear();
     this.transferJobs.clear();
     this.portForwardDefinitions.clear();
     this.portForwardRuntimes.clear();
@@ -1583,16 +2025,27 @@ export class CoreManager {
     const fallback = this.portForwardDefinitions.get(ruleId);
     const transport =
       payload.transport === "aws-ssm" || payload.transport === "ssh"
-        ? (payload.transport as PortForwardTransport)
+        ? (fallback?.transport ?? (payload.transport as PortForwardTransport))
         : (fallback?.transport ?? "ssh");
     return {
       ruleId,
       hostId: fallback?.hostId ?? "",
       transport,
       mode:
-        payload.mode === "remote" || payload.mode === "dynamic" || payload.mode === "local"
+        payload.mode === "remote" ||
+        payload.mode === "dynamic" ||
+        payload.mode === "local"
           ? (payload.mode as PortForwardMode)
           : (fallback?.mode ?? "local"),
+      method:
+        payload.method === "ssh-native" ||
+        payload.method === "ssh-session-proxy" ||
+        payload.method === "ssm-remote-host"
+          ? payload.method
+          : this.portForwardRuntimes.get(ruleId)?.method ??
+            (fallback?.backendTransport === "aws-ssm"
+              ? "ssm-remote-host"
+              : "ssh-native"),
       bindAddress: String(
         payload.bindAddress ?? fallback?.bindAddress ?? "127.0.0.1",
       ),

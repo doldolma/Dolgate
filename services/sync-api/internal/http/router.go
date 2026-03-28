@@ -761,15 +761,6 @@ func renderDesktopCallbackBridgePage(ctx *gin.Context, callbackURL string) {
 
 func completeDesktopLogin(ctx *gin.Context, redirectURI string, code string, state string) {
 	callbackURL := buildDesktopCallbackURL(redirectURI, code, state)
-	parsed, err := url.Parse(redirectURI)
-	if err != nil {
-		ctx.String(http.StatusBadRequest, err.Error())
-		return
-	}
-	if parsed.Scheme == "http" {
-		ctx.Redirect(http.StatusFound, callbackURL)
-		return
-	}
 	renderDesktopCallbackBridgePage(ctx, callbackURL)
 }
 

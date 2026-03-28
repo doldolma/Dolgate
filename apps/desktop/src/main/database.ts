@@ -806,6 +806,23 @@ export class PortForwardRepository {
 
   private toRecord(id: string, draft: PortForwardDraft, createdAt: string, updatedAt: string): PortForwardRuleRecord {
     const label = draft.label.trim();
+    if (draft.transport === 'container') {
+      return {
+        id,
+        label,
+        hostId: draft.hostId,
+        transport: 'container',
+        bindAddress: '127.0.0.1',
+        bindPort: Math.max(0, draft.bindPort),
+        containerId: draft.containerId.trim(),
+        containerName: draft.containerName.trim(),
+        containerRuntime: draft.containerRuntime,
+        networkName: draft.networkName.trim(),
+        targetPort: draft.targetPort,
+        createdAt,
+        updatedAt
+      };
+    }
     if (draft.transport === 'aws-ssm') {
       return {
         id,

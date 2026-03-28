@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   appStoreSetState: vi.fn(),
   loginGateProps: [] as any[],
   terminalWorkspaceProps: [] as any[],
+  containersWorkspaceProps: [] as any[],
 }));
 
 function stubComponent(testId: string) {
@@ -37,6 +38,12 @@ vi.mock('./components/KnownHostPromptDialog', () => ({
 vi.mock('./components/LogsPanel', () => ({ LogsPanel: stubComponent('logs-panel') }));
 vi.mock('./components/DesktopWindowControls', () => ({
   DesktopWindowControls: stubComponent('desktop-window-controls'),
+}));
+vi.mock('./components/ContainersWorkspace', () => ({
+  ContainersWorkspace: (props: any) => {
+    mocks.containersWorkspaceProps.push(props);
+    return <div data-testid="containers-workspace" />;
+  },
 }));
 vi.mock('./components/OpenSshImportDialog', () => ({
   OpenSshImportDialog: stubComponent('openssh-import-dialog'),
@@ -100,6 +107,8 @@ function createMockStoreState(overrides: Record<string, unknown> = {}) {
     ],
     sessionShareChatNotifications: {},
     workspaces: [],
+    containerTabs: [],
+    activeContainerHostId: null,
     tabStrip: [{ kind: 'session', sessionId: 'session-1' }],
     portForwards: [],
     portForwardRuntimes: [],
@@ -150,6 +159,8 @@ function createMockStoreState(overrides: Record<string, unknown> = {}) {
     activateHome: fn(),
     activateSession: fn(),
     activateWorkspace: fn(),
+    activateContainers: fn(),
+    focusHostContainersTab: fn(),
     openHomeSection: fn(),
     openSettingsSection: fn(),
     openCreateHostDrawer: fn(),
@@ -171,6 +182,15 @@ function createMockStoreState(overrides: Record<string, unknown> = {}) {
     stopSessionShare: fn(),
     disconnectTab: fn(),
     closeWorkspace: fn(),
+    openHostContainersTab: fn(),
+    closeHostContainersTab: fn(),
+    reorderContainerTab: fn(),
+    refreshHostContainers: fn(),
+    selectHostContainer: fn(),
+    setHostContainersPanel: fn(),
+    refreshHostContainerLogs: fn(),
+    setHostContainerLogsFollow: fn(),
+    openHostContainerShell: fn(),
     splitSessionIntoWorkspace: fn(),
     moveWorkspaceSession: fn(),
     detachSessionFromWorkspace: fn(),
@@ -199,6 +219,8 @@ function createMockStoreState(overrides: Record<string, unknown> = {}) {
     reopenInteractiveAuthUrl: fn(),
     clearPendingInteractiveAuth: fn(),
     handleCoreEvent: fn(),
+    handleContainerConnectionProgressEvent: fn(),
+    handleSftpConnectionProgressEvent: fn(),
     handleTransferEvent: fn(),
     handlePortForwardEvent: fn(),
     handleSessionShareEvent: fn(),
@@ -245,6 +267,7 @@ function createDolsshApi(options: {
   };
   const off = {
     core: vi.fn(),
+    containersProgress: vi.fn(),
     transfer: vi.fn(),
     forward: vi.fn(),
     sessionShare: vi.fn(),
@@ -260,7 +283,11 @@ function createDolsshApi(options: {
     ssh: {
       onEvent: vi.fn(() => off.core),
     },
+    containers: {
+      onConnectionProgress: vi.fn(() => off.containersProgress),
+    },
     sftp: {
+      onConnectionProgress: vi.fn(() => vi.fn()),
       onTransferEvent: vi.fn(() => off.transfer),
     },
     portForwards: {
@@ -344,6 +371,7 @@ describe('App integration', () => {
   beforeEach(() => {
     mocks.loginGateProps.length = 0;
     mocks.terminalWorkspaceProps.length = 0;
+    mocks.containersWorkspaceProps.length = 0;
     mocks.appStoreSetState.mockReset();
     mocks.storeState = createMockStoreState();
     Object.defineProperty(window, 'matchMedia', {
@@ -383,6 +411,69 @@ describe('App integration', () => {
       expect(mocks.storeState.bootstrap).toHaveBeenCalledTimes(1);
       expect(api.sync.bootstrap).toHaveBeenCalledTimes(1);
       expect(screen.getByTestId('terminal-workspace')).toBeInTheDocument();
+    });
+  });
+
+  it('renders the containers section when the fixed containers tab is active', async () => {
+    const api = createDolsshApi({
+      authBootstrapState: {
+        status: 'authenticated',
+        session: { user: { id: 'user-1', email: 'user@example.com' } },
+        offline: null,
+        errorMessage: null,
+      },
+    });
+    Object.defineProperty(window, 'dolssh', {
+      configurable: true,
+      writable: true,
+      value: api,
+    });
+    mocks.storeState = createMockStoreState({
+      hosts: [
+        {
+          id: 'host-1',
+          kind: 'ssh',
+          label: 'Prod',
+          hostname: 'prod.example.com',
+          port: 22,
+          username: 'ubuntu',
+          authType: 'password',
+          privateKeyPath: null,
+          secretRef: 'host:host-1',
+          groupName: 'Servers',
+          tags: [],
+          terminalThemeId: null,
+          createdAt: '2026-03-28T00:00:00.000Z',
+          updatedAt: '2026-03-28T00:00:00.000Z',
+        },
+      ],
+      containerTabs: [
+        {
+          hostId: 'host-1',
+          title: 'Prod · Containers',
+          runtime: 'docker',
+          unsupportedReason: null,
+          connectionProgress: null,
+          items: [],
+          selectedContainerId: null,
+          activePanel: 'overview',
+          isLoading: false,
+          details: null,
+          detailsLoading: false,
+          logs: null,
+          logsState: 'idle',
+          logsLoading: false,
+          logsFollowEnabled: false,
+        },
+      ],
+      activeContainerHostId: 'host-1',
+      activeWorkspaceTab: 'containers',
+    });
+
+    render(<App />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('containers-workspace')).toBeInTheDocument();
     });
   });
 
