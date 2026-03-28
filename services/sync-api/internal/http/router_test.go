@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -37,7 +38,15 @@ func createTestRouterWithConfig(t *testing.T, config httpserver.RouterConfig) *g
 			t.Fatalf("close sqlite: %v", err)
 		}
 	})
-	authService, err := auth.NewService(sqliteStore, "test-secret", 15*time.Minute, time.Hour, 72*time.Hour, 2*time.Minute, "")
+	authService, err := auth.NewService(
+		sqliteStore,
+		"",
+		filepath.Join(t.TempDir(), "auth-signing-private.pem"),
+		15*time.Minute,
+		time.Hour,
+		72*time.Hour,
+		2*time.Minute,
+	)
 	if err != nil {
 		t.Fatalf("new auth service: %v", err)
 	}
@@ -46,6 +55,19 @@ func createTestRouterWithConfig(t *testing.T, config httpserver.RouterConfig) *g
 		t.Fatalf("new router: %v", err)
 	}
 	return router
+}
+
+func assertCommonSecurityHeaders(t *testing.T, response *httptest.ResponseRecorder) {
+	t.Helper()
+	if response.Header().Get("X-Content-Type-Options") != "nosniff" {
+		t.Fatalf("expected nosniff header, got %q", response.Header().Get("X-Content-Type-Options"))
+	}
+	if response.Header().Get("Referrer-Policy") != "no-referrer" {
+		t.Fatalf("expected no-referrer header, got %q", response.Header().Get("Referrer-Policy"))
+	}
+	if response.Header().Get("X-Frame-Options") != "DENY" {
+		t.Fatalf("expected DENY X-Frame-Options, got %q", response.Header().Get("X-Frame-Options"))
+	}
 }
 
 func createOIDCTestServer(t *testing.T) *httptest.Server {
@@ -245,6 +267,49 @@ func TestBrowserSignupAcceptsLoopbackRedirectURI(t *testing.T) {
 	}
 }
 
+func TestLoginPageAppliesSecurityHeaders(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := createTestRouter(t)
+
+	request := httptest.NewRequest(http.MethodGet, "/login", nil)
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected login page, got %d", recorder.Code)
+	}
+	assertCommonSecurityHeaders(t, recorder)
+	if !strings.Contains(recorder.Header().Get("Content-Security-Policy"), "default-src 'none'") {
+		t.Fatalf("expected login page CSP header, got %q", recorder.Header().Get("Content-Security-Policy"))
+	}
+}
+
+func TestDesktopCallbackBridgeAppliesSecurityHeaders(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := createTestRouter(t)
+
+	form := url.Values{
+		"email":        {"bridge@example.com"},
+		"password":     {"supersecure"},
+		"client":       {"dolgate-desktop"},
+		"redirect_uri": {"dolgate://auth/callback"},
+		"state":        {"state-bridge"},
+	}
+
+	request := httptest.NewRequest(http.MethodPost, "/signup", strings.NewReader(form.Encode()))
+	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected bridge page, got %d: %s", recorder.Code, recorder.Body.String())
+	}
+	assertCommonSecurityHeaders(t, recorder)
+	if !strings.Contains(recorder.Header().Get("Content-Security-Policy"), "script-src 'self' 'unsafe-inline'") {
+		t.Fatalf("expected bridge CSP header, got %q", recorder.Header().Get("Content-Security-Policy"))
+	}
+}
+
 func TestOIDCOnlyLoginRedirectsImmediately(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	oidcServer := createOIDCTestServer(t)
@@ -347,6 +412,13 @@ func TestSessionShareCreateAndViewerPage(t *testing.T) {
 	if viewerRecorder.Code != http.StatusOK {
 		t.Fatalf("expected viewer page to load, got %d: %s", viewerRecorder.Code, viewerRecorder.Body.String())
 	}
+	assertCommonSecurityHeaders(t, viewerRecorder)
+	if viewerRecorder.Header().Get("Cache-Control") != "no-store" {
+		t.Fatalf("expected no-store cache control, got %q", viewerRecorder.Header().Get("Cache-Control"))
+	}
+	if !strings.Contains(viewerRecorder.Header().Get("Content-Security-Policy"), "connect-src 'self'") {
+		t.Fatalf("expected viewer CSP header, got %q", viewerRecorder.Header().Get("Content-Security-Policy"))
+	}
 	if !strings.Contains(viewerRecorder.Body.String(), `data-share-id="`) {
 		t.Fatalf("expected viewer page html to contain share metadata: %s", viewerRecorder.Body.String())
 	}
@@ -365,5 +437,92 @@ func TestSessionShareCreateAndViewerPage(t *testing.T) {
 	router.ServeHTTP(invalidViewerRecorder, invalidViewerRequest)
 	if invalidViewerRecorder.Code != http.StatusNotFound {
 		t.Fatalf("expected invalid viewer token to fail, got %d", invalidViewerRecorder.Code)
+	}
+}
+
+func TestAuthLoginRateLimit(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := createTestRouterWithConfig(t, httpserver.RouterConfig{
+		LocalAuthEnabled:   true,
+		LocalSignupEnabled: true,
+		RateLimit: httpserver.AuthRateLimitConfig{
+			Login: httpserver.RateLimitRuleConfig{
+				Limit:         1,
+				WindowSeconds: 300,
+			},
+		},
+	})
+
+	for attempt := 0; attempt < 2; attempt += 1 {
+		request := httptest.NewRequest(http.MethodPost, "/auth/login", bytes.NewBufferString(`{"email":"limit@example.com","password":"supersecure"}`))
+		request.Header.Set("Content-Type", "application/json")
+		recorder := httptest.NewRecorder()
+		router.ServeHTTP(recorder, request)
+
+		if attempt == 0 && recorder.Code != http.StatusUnauthorized {
+			t.Fatalf("expected first attempt to be unauthorized, got %d", recorder.Code)
+		}
+		if attempt == 1 && recorder.Code != http.StatusTooManyRequests {
+			t.Fatalf("expected second attempt to be rate limited, got %d: %s", recorder.Code, recorder.Body.String())
+		}
+	}
+}
+
+func TestTrustedProxiesAffectAuthRateLimitIdentity(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	withTrustedProxy := createTestRouterWithConfig(t, httpserver.RouterConfig{
+		LocalAuthEnabled:   true,
+		LocalSignupEnabled: true,
+		TrustedProxies:     []string{"127.0.0.1"},
+		RateLimit: httpserver.AuthRateLimitConfig{
+			Exchange: httpserver.RateLimitRuleConfig{
+				Limit:         1,
+				WindowSeconds: 300,
+			},
+		},
+	})
+
+	forwardedIPs := []string{"203.0.113.10", "203.0.113.11"}
+	for _, forwardedIP := range forwardedIPs {
+		request := httptest.NewRequest(http.MethodPost, "/auth/exchange", bytes.NewBufferString(`{"code":"bad-code"}`))
+		request.Header.Set("Content-Type", "application/json")
+		request.Header.Set("X-Forwarded-For", forwardedIP)
+		request.RemoteAddr = "127.0.0.1:43123"
+		recorder := httptest.NewRecorder()
+		withTrustedProxy.ServeHTTP(recorder, request)
+		if recorder.Code != http.StatusUnauthorized {
+			t.Fatalf("expected forwarded IP %s to be treated independently, got %d: %s", forwardedIP, recorder.Code, recorder.Body.String())
+		}
+	}
+
+	withoutTrustedProxy := createTestRouterWithConfig(t, httpserver.RouterConfig{
+		LocalAuthEnabled:   true,
+		LocalSignupEnabled: true,
+		RateLimit: httpserver.AuthRateLimitConfig{
+			Exchange: httpserver.RateLimitRuleConfig{
+				Limit:         1,
+				WindowSeconds: 300,
+			},
+		},
+	})
+
+	first := httptest.NewRequest(http.MethodPost, "/auth/exchange", bytes.NewBufferString(`{"code":"bad-code"}`))
+	first.Header.Set("Content-Type", "application/json")
+	first.Header.Set("X-Forwarded-For", "203.0.113.10")
+	first.RemoteAddr = "127.0.0.1:43123"
+	firstRecorder := httptest.NewRecorder()
+	withoutTrustedProxy.ServeHTTP(firstRecorder, first)
+	if firstRecorder.Code != http.StatusUnauthorized {
+		t.Fatalf("expected first untrusted proxy request to be unauthorized, got %d", firstRecorder.Code)
+	}
+
+	second := httptest.NewRequest(http.MethodPost, "/auth/exchange", bytes.NewBufferString(`{"code":"bad-code"}`))
+	second.Header.Set("Content-Type", "application/json")
+	second.Header.Set("X-Forwarded-For", "203.0.113.11")
+	second.RemoteAddr = "127.0.0.1:43123"
+	secondRecorder := httptest.NewRecorder()
+	withoutTrustedProxy.ServeHTTP(secondRecorder, second)
+	if secondRecorder.Code != http.StatusTooManyRequests {
+		t.Fatalf("expected second untrusted proxy request to be rate limited, got %d: %s", secondRecorder.Code, secondRecorder.Body.String())
 	}
 }

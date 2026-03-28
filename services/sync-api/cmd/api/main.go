@@ -30,12 +30,12 @@ func main() {
 
 	authService, err := auth.NewService(
 		dbStore,
-		cfg.Auth.JWTSecret,
+		cfg.Auth.SigningPrivateKeyPEM,
+		cfg.Auth.SigningPrivateKeyPath,
 		time.Duration(cfg.Auth.AccessTokenTTLMinutes)*time.Minute,
 		time.Duration(cfg.Auth.RefreshTokenIdleDays)*24*time.Hour,
 		time.Duration(cfg.Auth.OfflineLeaseTTLHours)*time.Hour,
 		time.Duration(cfg.Auth.RefreshRotationHandoffSeconds)*time.Second,
-		cfg.Auth.OfflineLeaseSigningPrivateKeyPEM,
 	)
 	if err != nil {
 		log.Fatalf("create auth service: %v", err)
@@ -43,6 +43,25 @@ func main() {
 	router, err := httpserver.NewRouter(dbStore, authService, httpserver.RouterConfig{
 		LocalAuthEnabled:   cfg.Auth.Local.Enabled,
 		LocalSignupEnabled: cfg.Auth.Local.SignupEnabled,
+		TrustedProxies:     cfg.Server.TrustedProxies,
+		RateLimit: httpserver.AuthRateLimitConfig{
+			Login: httpserver.RateLimitRuleConfig{
+				Limit:         cfg.Auth.RateLimit.Login.Limit,
+				WindowSeconds: cfg.Auth.RateLimit.Login.WindowSeconds,
+			},
+			Signup: httpserver.RateLimitRuleConfig{
+				Limit:         cfg.Auth.RateLimit.Signup.Limit,
+				WindowSeconds: cfg.Auth.RateLimit.Signup.WindowSeconds,
+			},
+			Refresh: httpserver.RateLimitRuleConfig{
+				Limit:         cfg.Auth.RateLimit.Refresh.Limit,
+				WindowSeconds: cfg.Auth.RateLimit.Refresh.WindowSeconds,
+			},
+			Exchange: httpserver.RateLimitRuleConfig{
+				Limit:         cfg.Auth.RateLimit.Exchange.Limit,
+				WindowSeconds: cfg.Auth.RateLimit.Exchange.WindowSeconds,
+			},
+		},
 		OIDC: httpserver.OIDCConfig{
 			Enabled:      cfg.Auth.OIDC.Enabled,
 			DisplayName:  cfg.Auth.OIDC.DisplayName,

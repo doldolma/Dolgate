@@ -2,9 +2,11 @@ package config
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 )
 
 type AppConfig struct {
@@ -14,7 +16,8 @@ type AppConfig struct {
 }
 
 type ServerConfig struct {
-	Port string `json:"port"`
+	Port           string   `json:"port"`
+	TrustedProxies []string `json:"trustedProxies"`
 }
 
 type DatabaseConfig struct {
@@ -23,14 +26,27 @@ type DatabaseConfig struct {
 }
 
 type AuthConfig struct {
-	JWTSecret                        string          `json:"jwtSecret"`
-	AccessTokenTTLMinutes            int             `json:"accessTokenTtlMinutes"`
-	RefreshTokenIdleDays             int             `json:"refreshTokenIdleDays"`
-	OfflineLeaseTTLHours             int             `json:"offlineLeaseTtlHours"`
-	RefreshRotationHandoffSeconds    int             `json:"refreshRotationHandoffSeconds"`
-	OfflineLeaseSigningPrivateKeyPEM string          `json:"offlineLeaseSigningPrivateKeyPem"`
-	Local                            LocalAuthConfig `json:"local"`
-	OIDC                             OIDCConfig      `json:"oidc"`
+	SigningPrivateKeyPEM          string              `json:"signingPrivateKeyPem"`
+	SigningPrivateKeyPath         string              `json:"signingPrivateKeyPath"`
+	AccessTokenTTLMinutes         int                 `json:"accessTokenTtlMinutes"`
+	RefreshTokenIdleDays          int                 `json:"refreshTokenIdleDays"`
+	OfflineLeaseTTLHours          int                 `json:"offlineLeaseTtlHours"`
+	RefreshRotationHandoffSeconds int                 `json:"refreshRotationHandoffSeconds"`
+	RateLimit                     AuthRateLimitConfig `json:"rateLimit"`
+	Local                         LocalAuthConfig     `json:"local"`
+	OIDC                          OIDCConfig          `json:"oidc"`
+}
+
+type AuthRateLimitConfig struct {
+	Login    AuthRateLimitRuleConfig `json:"login"`
+	Signup   AuthRateLimitRuleConfig `json:"signup"`
+	Refresh  AuthRateLimitRuleConfig `json:"refresh"`
+	Exchange AuthRateLimitRuleConfig `json:"exchange"`
+}
+
+type AuthRateLimitRuleConfig struct {
+	Limit         int `json:"limit"`
+	WindowSeconds int `json:"windowSeconds"`
 }
 
 type LocalAuthConfig struct {
@@ -51,18 +67,25 @@ type OIDCConfig struct {
 func defaultConfig() AppConfig {
 	return AppConfig{
 		Server: ServerConfig{
-			Port: "8080",
+			Port:           "8080",
+			TrustedProxies: nil,
 		},
 		Database: DatabaseConfig{
 			Driver: "sqlite",
-			URL:    "file:dolssh_sync.db?_pragma=busy_timeout(5000)",
+			URL:    "file:./data/dolgate_sync.db?_pragma=busy_timeout(5000)",
 		},
 		Auth: AuthConfig{
-			JWTSecret:                     "dev-dolssh-secret",
+			SigningPrivateKeyPath:         "./data/auth-signing-private.pem",
 			AccessTokenTTLMinutes:         15,
 			RefreshTokenIdleDays:          14,
 			OfflineLeaseTTLHours:          72,
 			RefreshRotationHandoffSeconds: 120,
+			RateLimit: AuthRateLimitConfig{
+				Login:    AuthRateLimitRuleConfig{Limit: 10, WindowSeconds: 300},
+				Signup:   AuthRateLimitRuleConfig{Limit: 5, WindowSeconds: 900},
+				Refresh:  AuthRateLimitRuleConfig{Limit: 30, WindowSeconds: 300},
+				Exchange: AuthRateLimitRuleConfig{Limit: 30, WindowSeconds: 300},
+			},
 			Local: LocalAuthConfig{
 				Enabled:       true,
 				SignupEnabled: true,
@@ -88,12 +111,18 @@ func Load() (AppConfig, string, error) {
 		return AppConfig{}, requestedConfigPath, err
 	}
 	if len(data) > 0 {
+		if err := rejectLegacyAuthConfig(data); err != nil {
+			return AppConfig{}, configPath, err
+		}
 		if err := json.Unmarshal(data, &cfg); err != nil {
 			return AppConfig{}, configPath, err
 		}
 	}
 
 	applyEnvOverrides(&cfg)
+	if err := validateConfig(cfg); err != nil {
+		return AppConfig{}, configPath, err
+	}
 	return cfg, configPath, nil
 }
 
@@ -120,8 +149,9 @@ func applyEnvOverrides(cfg *AppConfig) {
 	cfg.Database.Driver = getenv("DB_DRIVER", cfg.Database.Driver)
 	cfg.Database.URL = getenv("DATABASE_URL", cfg.Database.URL)
 	cfg.Server.Port = getenv("PORT", cfg.Server.Port)
-	cfg.Auth.JWTSecret = getenv("JWT_SECRET", cfg.Auth.JWTSecret)
-	cfg.Auth.OfflineLeaseSigningPrivateKeyPEM = getenv("OFFLINE_LEASE_SIGNING_PRIVATE_KEY_PEM", cfg.Auth.OfflineLeaseSigningPrivateKeyPEM)
+	cfg.Server.TrustedProxies = getenvCSV("TRUSTED_PROXIES", cfg.Server.TrustedProxies)
+	cfg.Auth.SigningPrivateKeyPEM = getenv("AUTH_SIGNING_PRIVATE_KEY_PEM", cfg.Auth.SigningPrivateKeyPEM)
+	cfg.Auth.SigningPrivateKeyPath = getenv("AUTH_SIGNING_PRIVATE_KEY_PATH", cfg.Auth.SigningPrivateKeyPath)
 	cfg.Auth.AccessTokenTTLMinutes = getenvInt("ACCESS_TOKEN_TTL_MINUTES", cfg.Auth.AccessTokenTTLMinutes)
 	cfg.Auth.RefreshTokenIdleDays = getenvInt("REFRESH_TOKEN_IDLE_DAYS", cfg.Auth.RefreshTokenIdleDays)
 	cfg.Auth.OfflineLeaseTTLHours = getenvInt("OFFLINE_LEASE_TTL_HOURS", cfg.Auth.OfflineLeaseTTLHours)
@@ -134,6 +164,42 @@ func applyEnvOverrides(cfg *AppConfig) {
 	cfg.Auth.OIDC.ClientID = getenv("OIDC_CLIENT_ID", cfg.Auth.OIDC.ClientID)
 	cfg.Auth.OIDC.ClientSecret = getenv("OIDC_CLIENT_SECRET", cfg.Auth.OIDC.ClientSecret)
 	cfg.Auth.OIDC.RedirectURL = getenv("OIDC_REDIRECT_URL", cfg.Auth.OIDC.RedirectURL)
+}
+
+func validateConfig(cfg AppConfig) error {
+	if strings.TrimSpace(os.Getenv("JWT_SECRET")) != "" {
+		return errors.New("JWT_SECRET is no longer supported; use AUTH_SIGNING_PRIVATE_KEY_PEM or AUTH_SIGNING_PRIVATE_KEY_PATH")
+	}
+	if strings.TrimSpace(os.Getenv("OFFLINE_LEASE_SIGNING_PRIVATE_KEY_PEM")) != "" {
+		return errors.New("OFFLINE_LEASE_SIGNING_PRIVATE_KEY_PEM is no longer supported; use AUTH_SIGNING_PRIVATE_KEY_PEM or AUTH_SIGNING_PRIVATE_KEY_PATH")
+	}
+	if strings.TrimSpace(cfg.Auth.SigningPrivateKeyPEM) == "" && strings.TrimSpace(cfg.Auth.SigningPrivateKeyPath) == "" {
+		return errors.New("auth.signingPrivateKeyPem or auth.signingPrivateKeyPath is required")
+	}
+	return nil
+}
+
+func rejectLegacyAuthConfig(data []byte) error {
+	var root map[string]json.RawMessage
+	if err := json.Unmarshal(data, &root); err != nil {
+		return nil
+	}
+	authRaw, ok := root["auth"]
+	if !ok {
+		return nil
+	}
+
+	var authSection map[string]json.RawMessage
+	if err := json.Unmarshal(authRaw, &authSection); err != nil {
+		return nil
+	}
+	if _, ok := authSection["jwtSecret"]; ok {
+		return errors.New("auth.jwtSecret is no longer supported; use auth.signingPrivateKeyPem or auth.signingPrivateKeyPath")
+	}
+	if _, ok := authSection["offlineLeaseSigningPrivateKeyPem"]; ok {
+		return errors.New("auth.offlineLeaseSigningPrivateKeyPem is no longer supported; use auth.signingPrivateKeyPem or auth.signingPrivateKeyPath")
+	}
+	return nil
 }
 
 func getenv(key string, fallback string) string {
@@ -161,4 +227,20 @@ func getenvInt(key string, fallback int) int {
 		return fallback
 	}
 	return parsed
+}
+
+func getenvCSV(key string, fallback []string) []string {
+	value := strings.TrimSpace(os.Getenv(key))
+	if value == "" {
+		return fallback
+	}
+	parts := strings.Split(value, ",")
+	result := make([]string, 0, len(parts))
+	for _, part := range parts {
+		trimmed := strings.TrimSpace(part)
+		if trimmed != "" {
+			result = append(result, trimmed)
+		}
+	}
+	return result
 }

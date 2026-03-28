@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -322,20 +323,43 @@ type sessionShare struct {
 }
 
 type SessionShareHub struct {
-	mu       sync.Mutex
-	shares   map[string]*sessionShare
-	upgrader websocket.Upgrader
+	mu             sync.Mutex
+	shares         map[string]*sessionShare
+	ownerUpgrader  websocket.Upgrader
+	viewerUpgrader websocket.Upgrader
 }
 
 func NewSessionShareHub() *SessionShareHub {
 	return &SessionShareHub{
 		shares: make(map[string]*sessionShare),
-		upgrader: websocket.Upgrader{
+		ownerUpgrader: websocket.Upgrader{
 			CheckOrigin: func(_ *http.Request) bool {
 				return true
 			},
 		},
+		viewerUpgrader: websocket.Upgrader{
+			CheckOrigin: isSessionShareOriginAllowed,
+		},
 	}
+}
+
+func isSessionShareOriginAllowed(request *http.Request) bool {
+	origin := strings.TrimSpace(request.Header.Get("Origin"))
+	if origin == "" {
+		return false
+	}
+
+	originURL, err := url.Parse(origin)
+	if err != nil || originURL.Scheme == "" || originURL.Host == "" {
+		return false
+	}
+
+	requestURL, err := url.Parse(requestBaseURL(request))
+	if err != nil || requestURL.Scheme == "" || requestURL.Host == "" {
+		return false
+	}
+
+	return strings.EqualFold(originURL.Scheme, requestURL.Scheme) && strings.EqualFold(originURL.Host, requestURL.Host)
 }
 
 func (hub *SessionShareHub) Create(ownerUserID string, input createSessionShareRequest, viewerBaseURL string) createSessionShareResponse {
@@ -457,7 +481,7 @@ func (hub *SessionShareHub) HasOwnerToken(shareID, ownerToken string) bool {
 }
 
 func (hub *SessionShareHub) HandleOwnerWebSocket(writer http.ResponseWriter, request *http.Request, shareID, ownerToken string) error {
-	conn, err := hub.upgrader.Upgrade(writer, request, nil)
+	conn, err := hub.ownerUpgrader.Upgrade(writer, request, nil)
 	if err != nil {
 		return err
 	}
@@ -501,7 +525,7 @@ func (hub *SessionShareHub) HandleOwnerWebSocket(writer http.ResponseWriter, req
 }
 
 func (hub *SessionShareHub) HandleViewerWebSocket(writer http.ResponseWriter, request *http.Request, shareID, viewerToken string) error {
-	conn, err := hub.upgrader.Upgrade(writer, request, nil)
+	conn, err := hub.viewerUpgrader.Upgrade(writer, request, nil)
 	if err != nil {
 		return err
 	}

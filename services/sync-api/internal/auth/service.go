@@ -10,6 +10,9 @@ import (
 	"encoding/pem"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -52,14 +55,13 @@ type SessionBootstrap struct {
 }
 
 type Service struct {
-	store                    store.Store
-	jwtSecret                []byte
-	accessTokenTTL           time.Duration
-	refreshTokenIdleTTL      time.Duration
-	offlineLeaseTTL          time.Duration
-	refreshHandoffTTL        time.Duration
-	offlineLeaseKey          *rsa.PrivateKey
-	offlineLeasePublicKeyPEM string
+	store               store.Store
+	signingKey          *rsa.PrivateKey
+	signingPublicKeyPEM string
+	accessTokenTTL      time.Duration
+	refreshTokenIdleTTL time.Duration
+	offlineLeaseTTL     time.Duration
+	refreshHandoffTTL   time.Duration
 }
 
 // Claims는 access token에 실어 보낼 사용자 식별 정보다.
@@ -83,27 +85,26 @@ type OfflineLeaseClaims struct {
 
 func NewService(
 	store store.Store,
-	jwtSecret string,
+	signingPrivateKeyPEM string,
+	signingPrivateKeyPath string,
 	accessTokenTTL time.Duration,
 	refreshTokenIdleTTL time.Duration,
 	offlineLeaseTTL time.Duration,
 	refreshHandoffTTL time.Duration,
-	offlineLeaseSigningPrivateKeyPEM string,
 ) (*Service, error) {
-	offlineLeaseKey, offlineLeasePublicKeyPEM, err := resolveOfflineLeaseKeypair(offlineLeaseSigningPrivateKeyPEM)
+	signingKey, signingPublicKeyPEM, err := resolveSigningKeypair(signingPrivateKeyPEM, signingPrivateKeyPath)
 	if err != nil {
 		return nil, err
 	}
 
 	return &Service{
-		store:                    store,
-		jwtSecret:                []byte(jwtSecret),
-		accessTokenTTL:           accessTokenTTL,
-		refreshTokenIdleTTL:      refreshTokenIdleTTL,
-		offlineLeaseTTL:          offlineLeaseTTL,
-		refreshHandoffTTL:        refreshHandoffTTL,
-		offlineLeaseKey:          offlineLeaseKey,
-		offlineLeasePublicKeyPEM: offlineLeasePublicKeyPEM,
+		store:               store,
+		signingKey:          signingKey,
+		signingPublicKeyPEM: signingPublicKeyPEM,
+		accessTokenTTL:      accessTokenTTL,
+		refreshTokenIdleTTL: refreshTokenIdleTTL,
+		offlineLeaseTTL:     offlineLeaseTTL,
+		refreshHandoffTTL:   refreshHandoffTTL,
 	}, nil
 }
 
@@ -251,12 +252,15 @@ func (s *Service) NewBrowserLoginState(client string, redirectURI string, state 
 			IssuedAt:  jwt.NewNumericDate(time.Now()),
 		},
 	}
-	return jwt.NewWithClaims(jwt.SigningMethodHS256, claims).SignedString(s.jwtSecret)
+	return jwt.NewWithClaims(jwt.SigningMethodRS256, claims).SignedString(s.signingKey)
 }
 
 func (s *Service) ParseBrowserLoginState(token string) (*BrowserLoginState, error) {
 	parsed, err := jwt.ParseWithClaims(token, &BrowserLoginState{}, func(token *jwt.Token) (any, error) {
-		return s.jwtSecret, nil
+		if token.Method.Alg() != jwt.SigningMethodRS256.Alg() {
+			return nil, fmt.Errorf("unexpected signing method: %s", token.Method.Alg())
+		}
+		return &s.signingKey.PublicKey, nil
 	})
 	if err != nil {
 		return nil, err
@@ -270,7 +274,10 @@ func (s *Service) ParseBrowserLoginState(token string) (*BrowserLoginState, erro
 
 func (s *Service) ParseAccessToken(token string) (*Claims, error) {
 	parsed, err := jwt.ParseWithClaims(token, &Claims{}, func(token *jwt.Token) (any, error) {
-		return s.jwtSecret, nil
+		if token.Method.Alg() != jwt.SigningMethodRS256.Alg() {
+			return nil, fmt.Errorf("unexpected signing method: %s", token.Method.Alg())
+		}
+		return &s.signingKey.PublicKey, nil
 	})
 	if err != nil {
 		return nil, err
@@ -317,7 +324,7 @@ func (s *Service) issueTokens(ctx context.Context, user store.User) (TokenPair, 
 		},
 	}
 
-	signedToken, err := jwt.NewWithClaims(jwt.SigningMethodHS256, claims).SignedString(s.jwtSecret)
+	signedToken, err := jwt.NewWithClaims(jwt.SigningMethodRS256, claims).SignedString(s.signingKey)
 	if err != nil {
 		return TokenPair{}, time.Time{}, err
 	}
@@ -364,7 +371,7 @@ func (s *Service) issueOfflineLease(user store.User, issuer string, refreshExpir
 		},
 	}
 
-	token, err := jwt.NewWithClaims(jwt.SigningMethodRS256, claims).SignedString(s.offlineLeaseKey)
+	token, err := jwt.NewWithClaims(jwt.SigningMethodRS256, claims).SignedString(s.signingKey)
 	if err != nil {
 		return OfflineLease{}, err
 	}
@@ -373,33 +380,61 @@ func (s *Service) issueOfflineLease(user store.User, issuer string, refreshExpir
 		Token:                    token,
 		IssuedAt:                 now.Format(time.RFC3339),
 		ExpiresAt:                leaseExpiresAt.Format(time.RFC3339),
-		VerificationPublicKeyPEM: s.offlineLeasePublicKeyPEM,
+		VerificationPublicKeyPEM: s.signingPublicKeyPEM,
 	}, nil
 }
 
-func resolveOfflineLeaseKeypair(privateKeyPEM string) (*rsa.PrivateKey, string, error) {
-	if privateKeyPEM == "" {
-		privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
-		if err != nil {
-			return nil, "", err
-		}
-		publicKeyPEM, err := encodePublicKeyPEM(&privateKey.PublicKey)
-		if err != nil {
-			return nil, "", err
-		}
-		return privateKey, publicKeyPEM, nil
+func resolveSigningKeypair(privateKeyPEM string, privateKeyPath string) (*rsa.PrivateKey, string, error) {
+	trimmedPEM := strings.TrimSpace(privateKeyPEM)
+	if trimmedPEM != "" {
+		return parseSigningKeypair(trimmedPEM)
 	}
 
+	trimmedPath := strings.TrimSpace(privateKeyPath)
+	if trimmedPath == "" {
+		return nil, "", errors.New("auth signing private key pem or path is required")
+	}
+
+	existing, err := os.ReadFile(trimmedPath)
+	if err == nil {
+		return parseSigningKeypair(string(existing))
+	}
+	if !os.IsNotExist(err) {
+		return nil, "", fmt.Errorf("read auth signing private key: %w", err)
+	}
+
+	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		return nil, "", err
+	}
+	privateKeyPEMEncoded, err := encodePrivateKeyPEM(privateKey)
+	if err != nil {
+		return nil, "", err
+	}
+	if err := os.MkdirAll(filepath.Dir(trimmedPath), 0o700); err != nil {
+		return nil, "", fmt.Errorf("create auth signing key directory: %w", err)
+	}
+	if err := os.WriteFile(trimmedPath, []byte(privateKeyPEMEncoded), 0o600); err != nil {
+		return nil, "", fmt.Errorf("write auth signing private key: %w", err)
+	}
+	publicKeyPEM, err := encodePublicKeyPEM(&privateKey.PublicKey)
+	if err != nil {
+		return nil, "", err
+	}
+	return privateKey, publicKeyPEM, nil
+}
+
+func parseSigningKeypair(privateKeyPEM string) (*rsa.PrivateKey, string, error) {
 	block, _ := pem.Decode([]byte(privateKeyPEM))
 	if block == nil {
-		return nil, "", errors.New("invalid offline lease private key pem")
+		return nil, "", errors.New("invalid auth signing private key pem")
 	}
 
 	parsed, err := x509.ParsePKCS8PrivateKey(block.Bytes)
 	if err == nil {
 		privateKey, ok := parsed.(*rsa.PrivateKey)
 		if !ok {
-			return nil, "", errors.New("offline lease private key must be rsa")
+			return nil, "", errors.New("auth signing private key must be rsa")
 		}
 		publicKeyPEM, err := encodePublicKeyPEM(&privateKey.PublicKey)
 		if err != nil {
@@ -410,13 +445,24 @@ func resolveOfflineLeaseKeypair(privateKeyPEM string) (*rsa.PrivateKey, string, 
 
 	privateKey, pkcs1Err := x509.ParsePKCS1PrivateKey(block.Bytes)
 	if pkcs1Err != nil {
-		return nil, "", fmt.Errorf("parse offline lease private key: %w", err)
+		return nil, "", fmt.Errorf("parse auth signing private key: %w", err)
 	}
 	publicKeyPEM, err := encodePublicKeyPEM(&privateKey.PublicKey)
 	if err != nil {
 		return nil, "", err
 	}
 	return privateKey, publicKeyPEM, nil
+}
+
+func encodePrivateKeyPEM(privateKey *rsa.PrivateKey) (string, error) {
+	encoded, err := x509.MarshalPKCS8PrivateKey(privateKey)
+	if err != nil {
+		return "", err
+	}
+	return string(pem.EncodeToMemory(&pem.Block{
+		Type:  "PRIVATE KEY",
+		Bytes: encoded,
+	})), nil
 }
 
 func encodePublicKeyPEM(publicKey *rsa.PublicKey) (string, error) {

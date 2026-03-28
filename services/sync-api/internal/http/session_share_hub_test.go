@@ -3,6 +3,7 @@ package http
 import (
 	"encoding/base64"
 	"encoding/json"
+	"net/http/httptest"
 	"strings"
 	"testing"
 )
@@ -231,5 +232,27 @@ func TestDeleteByShareIDRemovesChatState(t *testing.T) {
 	}
 	if _, ok := hub.shares[response.ShareID]; ok {
 		t.Fatal("expected share to be removed entirely")
+	}
+}
+
+func TestSessionShareOriginValidation(t *testing.T) {
+	allowedRequest := httptest.NewRequest("GET", "https://viewer.example.com/share/abc/token/ws", nil)
+	allowedRequest.Host = "viewer.example.com"
+	allowedRequest.Header.Set("Origin", "https://viewer.example.com")
+	if !isSessionShareOriginAllowed(allowedRequest) {
+		t.Fatal("expected same-origin websocket request to be allowed")
+	}
+
+	rejectedRequest := httptest.NewRequest("GET", "https://viewer.example.com/share/abc/token/ws", nil)
+	rejectedRequest.Host = "viewer.example.com"
+	rejectedRequest.Header.Set("Origin", "https://evil.example.com")
+	if isSessionShareOriginAllowed(rejectedRequest) {
+		t.Fatal("expected mismatched origin to be rejected")
+	}
+
+	missingOriginRequest := httptest.NewRequest("GET", "https://viewer.example.com/share/abc/token/ws", nil)
+	missingOriginRequest.Host = "viewer.example.com"
+	if isSessionShareOriginAllowed(missingOriginRequest) {
+		t.Fatal("expected missing origin to be rejected")
 	}
 }

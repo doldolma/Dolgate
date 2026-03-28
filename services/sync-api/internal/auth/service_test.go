@@ -3,6 +3,7 @@ package auth
 import (
 	"context"
 	"errors"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -15,7 +16,8 @@ import (
 func newTestService(t *testing.T) (*Service, store.Store) {
 	t.Helper()
 
-	backingStore, err := store.OpenSQLite(filepath.Join(t.TempDir(), "auth-test.db"))
+	tempDir := t.TempDir()
+	backingStore, err := store.OpenSQLite(filepath.Join(tempDir, "auth-test.db"))
 	if err != nil {
 		t.Fatalf("OpenSQLite() error = %v", err)
 	}
@@ -25,7 +27,15 @@ func newTestService(t *testing.T) (*Service, store.Store) {
 		}
 	})
 
-	service, err := NewService(backingStore, "test-secret", 15*time.Minute, 14*24*time.Hour, 72*time.Hour, 2*time.Minute, "")
+	service, err := NewService(
+		backingStore,
+		"",
+		filepath.Join(tempDir, "auth-signing-private.pem"),
+		15*time.Minute,
+		14*24*time.Hour,
+		72*time.Hour,
+		2*time.Minute,
+	)
 	if err != nil {
 		t.Fatalf("NewService() error = %v", err)
 	}
@@ -122,7 +132,7 @@ func TestSessionBootstrapIncludesOfflineLeaseBoundedByRefreshExpiry(t *testing.T
 
 	claims := &OfflineLeaseClaims{}
 	parsed, err := jwt.ParseWithClaims(session.OfflineLease.Token, claims, func(token *jwt.Token) (any, error) {
-		return &service.offlineLeaseKey.PublicKey, nil
+		return &service.signingKey.PublicKey, nil
 	})
 	if err != nil {
 		t.Fatalf("ParseWithClaims() error = %v", err)
@@ -215,5 +225,39 @@ func TestBrowserLoginStateRoundTrip(t *testing.T) {
 	}
 	if state.Client != "desktop" || state.RedirectURI != "dolgate://auth/callback" || state.State != "state-123" {
 		t.Fatalf("state = %+v", state)
+	}
+}
+
+func TestNewServiceGeneratesAndReusesSigningKeyFile(t *testing.T) {
+	tempDir := t.TempDir()
+	backingStore, err := store.OpenSQLite(filepath.Join(tempDir, "auth-test.db"))
+	if err != nil {
+		t.Fatalf("OpenSQLite() error = %v", err)
+	}
+	t.Cleanup(func() {
+		if err := backingStore.Close(); err != nil {
+			t.Fatalf("Close() error = %v", err)
+		}
+	})
+
+	keyPath := filepath.Join(tempDir, "auth-signing-private.pem")
+	firstService, err := NewService(backingStore, "", keyPath, 15*time.Minute, 14*24*time.Hour, 72*time.Hour, 2*time.Minute)
+	if err != nil {
+		t.Fatalf("first NewService() error = %v", err)
+	}
+	firstKeyBytes, err := os.ReadFile(keyPath)
+	if err != nil {
+		t.Fatalf("os.ReadFile() error = %v", err)
+	}
+	if len(firstKeyBytes) == 0 {
+		t.Fatal("expected generated key file to be non-empty")
+	}
+
+	secondService, err := NewService(backingStore, "", keyPath, 15*time.Minute, 14*24*time.Hour, 72*time.Hour, 2*time.Minute)
+	if err != nil {
+		t.Fatalf("second NewService() error = %v", err)
+	}
+	if firstService.signingPublicKeyPEM != secondService.signingPublicKeyPEM {
+		t.Fatalf("expected signing public key PEM reuse, got %q vs %q", firstService.signingPublicKeyPEM, secondService.signingPublicKeyPEM)
 	}
 }

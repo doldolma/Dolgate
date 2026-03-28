@@ -231,61 +231,66 @@ go build -o dist/sync-api ./cmd/api
 - Compose 예시: [services/sync-api/deploy/docker-compose.example.yml](/Users/heodoyeong/develop/dolsh/services/sync-api/deploy/docker-compose.example.yml)
 - MySQL 포함 Compose 예시: [services/sync-api/deploy/docker-compose.mysql.example.yml](/Users/heodoyeong/develop/dolsh/services/sync-api/deploy/docker-compose.mysql.example.yml)
 - Nginx reverse proxy 예시: [services/sync-api/deploy/nginx.sync-api.example.conf](/Users/heodoyeong/develop/dolsh/services/sync-api/deploy/nginx.sync-api.example.conf)
+- GHCR 배포 workflow: [/.github/workflows/sync-api-container.yml](/Users/heodoyeong/develop/dolsh/.github/workflows/sync-api-container.yml)
 
 ### 빠른 시작
 
-1. 운영 설정 파일 생성
+가장 단순한 self-host 경로는 공개 GHCR 이미지를 그대로 쓰는 것입니다.
 
-SQLite 기준:
-
-```bash
-cp services/sync-api/config/production.example.json services/sync-api/config/production.json
-mkdir -p services/sync-api/data
-```
-
-MySQL 기준:
-
-```bash
-cp services/sync-api/config/production.mysql.example.json services/sync-api/config/production.json
-mkdir -p services/sync-api/data/mysql
-```
-
-2. `production.json` 수정
-
-- `auth.jwtSecret`를 운영용 값으로 변경
-- OIDC를 쓸 경우 `auth.oidc.*` 채우기
-- MySQL을 쓸 경우 `database.driver=mysql`, `database.url=...`로 변경
-
-3. Compose 파일 준비 후 실행
-
-SQLite 기준:
+1. SQLite 단일 노드 기준 compose 실행
 
 ```bash
 cd services/sync-api/deploy
 cp docker-compose.example.yml docker-compose.yml
-docker compose up -d --build
+docker compose up -d
 ```
 
-MySQL 기준:
-
-```bash
-cd services/sync-api/deploy
-cp docker-compose.mysql.example.yml docker-compose.yml
-docker compose up -d --build
-```
-
-4. 상태 확인
+2. 상태 확인
 
 ```bash
 docker compose ps
 curl http://127.0.0.1:8080/healthz
 ```
 
+3. 필요하면 MySQL 예시로 전환
+
+```bash
+cd services/sync-api/deploy
+cp docker-compose.mysql.example.yml docker-compose.yml
+docker compose up -d
+```
+
+### compose 기본값
+
+- 기본 SQLite 예시는 `ghcr.io/doldolma/dolgate-sync-api:latest` 이미지를 바로 pull합니다.
+- SQLite 데이터베이스와 인증 서명 키는 같은 named volume `/app/data`에 저장됩니다.
+- 첫 부팅 시 `/app/data/auth-signing-private.pem`이 없으면 `sync-api`가 새 RSA private key를 생성해서 저장합니다.
+- 같은 volume을 유지한 채 재시작하면 기존 signing key를 재사용하므로 refresh token, browser login state, offline lease 검증이 계속 유지됩니다.
+- 반대로 volume을 잃으면 기존 세션과 토큰은 모두 무효화되고 재로그인이 필요합니다.
+- 기본 compose는 config file mount 없이 환경변수만으로 동작합니다.
+
+### 고급 설정
+
+- 기본 self-host 흐름은 자동 생성 키를 권장하지만, 멀티 인스턴스 운영이나 키 교체 정책이 필요한 환경이라면 서명 키를 명시 주입해야 합니다.
+- 지원 설정:
+  - `AUTH_SIGNING_PRIVATE_KEY_PEM`
+  - `AUTH_SIGNING_PRIVATE_KEY_PATH`
+- 운영자가 별도 PEM을 주입하면 자동 생성보다 그 값을 우선 사용합니다.
+- 예시 JSON 파일은 고급 설정용 참고 자료로 남겨 두며, 기본 compose 흐름에는 필수가 아닙니다.
+
 ### 운영 메모
 
 - `sync-api`는 pure Go SQLite 드라이버를 사용하므로 Docker 빌드는 `CGO_ENABLED=0` 기준입니다.
 - SQLite 이미지는 별도 C toolchain 없이 정적 바이너리로 빌드됩니다.
+- GitHub Actions는 `ghcr.io/doldolma/dolgate-sync-api`를 `linux/amd64`, `linux/arm64` multi-arch 이미지로 publish합니다.
+- self-host에서는 `latest`보다 버전 태그 pinning을 권장합니다.
 - MySQL DSN의 `mysql:3306`은 Docker Compose 내부 서비스명일 때만 동작합니다.
+- `auth.jwtSecret`과 `auth.offlineLeaseSigningPrivateKeyPem`은 더 이상 지원하지 않습니다.
+- 새 버전은 access token, browser login state, offline lease를 모두 같은 RS256 signing keypair로 서명합니다.
+- 운영 배포는 HTTPS reverse proxy 뒤에 두는 것을 전제로 합니다.
+- `server.trustedProxies`를 비워 두면 `X-Forwarded-For`를 신뢰하지 않습니다. reverse proxy를 쓴다면 실제 프록시 주소만 명시하세요.
+- 로컬 회원가입은 1차 보안 정책상 계속 열려 있지만, `/login`, `/signup`, `/auth/refresh`, `/auth/exchange`에는 메모리 기반 rate limit가 적용됩니다.
+- 브라우저 로그인 페이지와 session share viewer는 CSP, `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`를 기본으로 보냅니다.
 - reverse proxy 예시는 `services/sync-api/deploy/nginx.sync-api.example.conf`를 참고하세요.
 
 ## 수동 검증 체크리스트

@@ -21,6 +21,8 @@ import (
 type RouterConfig struct {
 	LocalAuthEnabled   bool
 	LocalSignupEnabled bool
+	TrustedProxies     []string
+	RateLimit          AuthRateLimitConfig
 	OIDC               OIDCConfig
 }
 
@@ -91,9 +93,13 @@ type loginPageData struct {
 
 func NewRouter(store store.Store, authService *auth.Service, config RouterConfig) (*gin.Engine, error) {
 	router := gin.New()
-	router.Use(gin.Logger(), gin.Recovery())
+	if err := router.SetTrustedProxies(config.TrustedProxies); err != nil {
+		return nil, err
+	}
+	router.Use(gin.Logger(), gin.Recovery(), securityHeadersMiddleware())
 	shareHub := NewSessionShareHub()
 	shareAssetHandler := http.StripPrefix("/share/assets/", http.FileServer(http.FS(mustShareAssetFS())))
+	authLimiters := newAuthRouteLimiters(config.RateLimit)
 
 	oidcRuntime, err := newOIDCRuntime(config.OIDC)
 	if err != nil {
@@ -130,6 +136,24 @@ func NewRouter(store store.Store, authService *auth.Service, config RouterConfig
 				Title:              "Sign in to Dolgate",
 				IsSignup:           false,
 				ErrorMessage:       err.Error(),
+				Email:              form.Email,
+				Client:             form.Client,
+				RedirectURI:        form.RedirectURI,
+				State:              form.State,
+				LocalAuthEnabled:   config.LocalAuthEnabled,
+				LocalSignupEnabled: config.LocalSignupEnabled,
+				OIDCEnabled:        oidcRuntime != nil,
+				OIDCDisplayName:    oidcButtonLabel(oidcRuntime),
+				ShowSignupLink:     config.LocalAuthEnabled && config.LocalSignupEnabled,
+			})
+			return
+		}
+		if !authLimiters.login.Allow(authAttemptKeys(ctx.ClientIP(), form.Email)...) {
+			ctx.Status(http.StatusTooManyRequests)
+			renderLoginPage(ctx, loginPageData{
+				Title:              "Sign in to Dolgate",
+				IsSignup:           false,
+				ErrorMessage:       tooManyAuthAttemptsMessage,
 				Email:              form.Email,
 				Client:             form.Client,
 				RedirectURI:        form.RedirectURI,
@@ -226,6 +250,23 @@ func NewRouter(store store.Store, authService *auth.Service, config RouterConfig
 				Title:              "Create your Dolgate account",
 				IsSignup:           true,
 				ErrorMessage:       err.Error(),
+				Email:              form.Email,
+				Client:             form.Client,
+				RedirectURI:        form.RedirectURI,
+				State:              form.State,
+				LocalAuthEnabled:   true,
+				LocalSignupEnabled: true,
+				OIDCEnabled:        oidcRuntime != nil,
+				OIDCDisplayName:    oidcButtonLabel(oidcRuntime),
+			})
+			return
+		}
+		if !authLimiters.signup.Allow(authAttemptKeys(ctx.ClientIP(), form.Email)...) {
+			ctx.Status(http.StatusTooManyRequests)
+			renderLoginPage(ctx, loginPageData{
+				Title:              "Create your Dolgate account",
+				IsSignup:           true,
+				ErrorMessage:       tooManyAuthAttemptsMessage,
 				Email:              form.Email,
 				Client:             form.Client,
 				RedirectURI:        form.RedirectURI,
@@ -354,6 +395,10 @@ func NewRouter(store store.Store, authService *auth.Service, config RouterConfig
 			ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
+		if !authLimiters.signup.Allow(authAttemptKeys(ctx.ClientIP(), request.Email)...) {
+			ctx.JSON(http.StatusTooManyRequests, gin.H{"error": tooManyAuthAttemptsMessage})
+			return
+		}
 
 		_, session, err := authService.Signup(ctx.Request.Context(), request.Email, request.Password, resolveRequestOrigin(ctx))
 		if err != nil {
@@ -367,6 +412,10 @@ func NewRouter(store store.Store, authService *auth.Service, config RouterConfig
 		var request authRequest
 		if err := ctx.ShouldBindJSON(&request); err != nil {
 			ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		if !authLimiters.login.Allow(authAttemptKeys(ctx.ClientIP(), request.Email)...) {
+			ctx.JSON(http.StatusTooManyRequests, gin.H{"error": tooManyAuthAttemptsMessage})
 			return
 		}
 
@@ -388,6 +437,10 @@ func NewRouter(store store.Store, authService *auth.Service, config RouterConfig
 			ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
+		if !authLimiters.exchange.Allow(authAttemptKeys(ctx.ClientIP(), "")...) {
+			ctx.JSON(http.StatusTooManyRequests, gin.H{"error": tooManyAuthAttemptsMessage})
+			return
+		}
 		session, err := authService.ExchangeCode(ctx.Request.Context(), request.Code, resolveRequestOrigin(ctx))
 		if err != nil {
 			ctx.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
@@ -400,6 +453,10 @@ func NewRouter(store store.Store, authService *auth.Service, config RouterConfig
 		var request refreshRequest
 		if err := ctx.ShouldBindJSON(&request); err != nil {
 			ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		if !authLimiters.refresh.Allow(authAttemptKeys(ctx.ClientIP(), "")...) {
+			ctx.JSON(http.StatusTooManyRequests, gin.H{"error": tooManyAuthAttemptsMessage})
 			return
 		}
 		session, err := authService.Refresh(ctx.Request.Context(), request.RefreshToken, resolveRequestOrigin(ctx))
@@ -490,6 +547,7 @@ func NewRouter(store store.Store, authService *auth.Service, config RouterConfig
 			return
 		}
 		applyShareResponseHeaders(ctx)
+		applyShareViewerResponseHeaders(ctx)
 		ctx.Header("Content-Type", "text/html; charset=utf-8")
 		_ = shareViewerTemplate.Execute(ctx.Writer, viewerPageData{
 			ShareID:      shareID,
@@ -683,6 +741,7 @@ func buildDesktopCallbackURL(redirectURI string, code string, state string) stri
 }
 
 func renderLoginPage(ctx *gin.Context, data loginPageData) {
+	applyAuthHTMLResponseHeaders(ctx)
 	ctx.Header("Content-Type", "text/html; charset=utf-8")
 	if data.Title == "" {
 		data.Title = "Sign in to Dolgate"
@@ -691,6 +750,7 @@ func renderLoginPage(ctx *gin.Context, data loginPageData) {
 }
 
 func renderDesktopCallbackBridgePage(ctx *gin.Context, callbackURL string) {
+	applyAuthHTMLResponseHeaders(ctx)
 	ctx.Header("Content-Type", "text/html; charset=utf-8")
 	_ = desktopCallbackBridgeTemplate.Execute(ctx.Writer, struct {
 		CallbackURL string
@@ -746,6 +806,35 @@ func authMiddleware(authService *auth.Service) gin.HandlerFunc {
 		ctx.Set("userId", claims.UserID)
 		ctx.Next()
 	}
+}
+
+const tooManyAuthAttemptsMessage = "너무 많은 인증 시도가 감지되었습니다. 잠시 후 다시 시도해 주세요."
+
+func securityHeadersMiddleware() gin.HandlerFunc {
+	return func(ctx *gin.Context) {
+		applyCommonSecurityHeaders(ctx)
+		ctx.Next()
+	}
+}
+
+func applyCommonSecurityHeaders(ctx *gin.Context) {
+	ctx.Header("X-Content-Type-Options", "nosniff")
+	ctx.Header("Referrer-Policy", "no-referrer")
+	ctx.Header("X-Frame-Options", "DENY")
+}
+
+func applyAuthHTMLResponseHeaders(ctx *gin.Context) {
+	ctx.Header(
+		"Content-Security-Policy",
+		"default-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; connect-src 'self'; font-src 'self' data:",
+	)
+}
+
+func applyShareViewerResponseHeaders(ctx *gin.Context) {
+	ctx.Header(
+		"Content-Security-Policy",
+		"default-src 'none'; base-uri 'none'; frame-ancestors 'none'; img-src 'self' data:; style-src 'self'; script-src 'self'; connect-src 'self'; font-src 'self' data:",
+	)
 }
 
 func applyShareResponseHeaders(ctx *gin.Context) {

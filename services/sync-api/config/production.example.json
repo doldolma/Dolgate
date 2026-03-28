@@ -1,18 +1,36 @@
 {
   "server": {
-    "port": "8080"
+    "port": "8080",
+    "trustedProxies": []
   },
   "database": {
     "driver": "sqlite",
-    "url": "file:/app/data/dolssh_sync.db?_pragma=busy_timeout(5000)"
+    "url": "file:/app/data/dolgate_sync.db?_pragma=busy_timeout(5000)"
   },
   "auth": {
-    "jwtSecret": "change-me-in-production",
+    "signingPrivateKeyPath": "/app/data/auth-signing-private.pem",
     "accessTokenTtlMinutes": 15,
     "refreshTokenIdleDays": 14,
     "offlineLeaseTtlHours": 72,
     "refreshRotationHandoffSeconds": 120,
-    "offlineLeaseSigningPrivateKeyPem": "",
+    "rateLimit": {
+      "login": {
+        "limit": 10,
+        "windowSeconds": 300
+      },
+      "signup": {
+        "limit": 5,
+        "windowSeconds": 900
+      },
+      "refresh": {
+        "limit": 30,
+        "windowSeconds": 300
+      },
+      "exchange": {
+        "limit": 30,
+        "windowSeconds": 300
+      }
+    },
     "local": {
       "enabled": true,
       "signupEnabled": true
