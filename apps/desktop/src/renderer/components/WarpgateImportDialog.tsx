@@ -41,13 +41,38 @@ function normalizeBaseUrl(value: string): URL | null {
 
 function getStatusMessage(status: WarpgateImportStatus | null): string | null {
   if (status === "opening-browser") {
-    return "인증 창을 여는 중";
+    return "Warpgate 로그인 창을 여는 중입니다.";
   }
   if (status === "waiting-for-login") {
-    return "Warpgate 로그인 완료를 기다리는 중";
+    return "Warpgate 로그인 창이 열려 있습니다.";
   }
   if (status === "loading-targets") {
-    return "SSH target 목록을 불러오는 중";
+    return "Warpgate 로그인은 완료되었습니다.";
+  }
+  if (status === "cancelled") {
+    return "Warpgate 로그인을 중단했습니다.";
+  }
+  return null;
+}
+
+function getStatusDetail(
+  status: WarpgateImportStatus | null,
+  noticeMessage: string | null,
+): string | null {
+  if (status === "opening-browser") {
+    return "잠시만 기다려 주세요.";
+  }
+  if (status === "waiting-for-login") {
+    return "로그인을 완료하거나 아래에서 중단할 수 있습니다.";
+  }
+  if (status === "loading-targets") {
+    return "SSH target 목록을 불러오는 중입니다.";
+  }
+  if (status === "cancelled") {
+    return (
+      noticeMessage ??
+      "주소를 확인한 뒤 다시 시도할 수 있습니다."
+    );
   }
   return null;
 }
@@ -63,10 +88,12 @@ export function WarpgateImportDialog({
   const [targets, setTargets] = useState<WarpgateTargetSummary[]>([]);
   const [savingTargetId, setSavingTargetId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [noticeMessage, setNoticeMessage] = useState<string | null>(null);
   const [status, setStatus] = useState<WarpgateImportStatus | null>(null);
   const [connectionInfo, setConnectionInfo] =
     useState<WarpgateConnectionInfo | null>(null);
   const [activeAttemptId, setActiveAttemptId] = useState<string | null>(null);
+  const [isCancelling, setIsCancelling] = useState(false);
   const activeAttemptIdRef = useRef<string | null>(null);
 
   useEffect(() => {
@@ -82,9 +109,11 @@ export function WarpgateImportDialog({
     setTargets([]);
     setSavingTargetId(null);
     setError(null);
+    setNoticeMessage(null);
     setStatus(null);
     setConnectionInfo(null);
     setActiveAttemptId(null);
+    setIsCancelling(false);
   }, [open]);
 
   useEffect(() => {
@@ -99,32 +128,43 @@ export function WarpgateImportDialog({
 
       if (event.status === "completed") {
         setActiveAttemptId(null);
+        setIsCancelling(false);
         setStatus(event.status);
         setConnectionInfo(event.connectionInfo ?? null);
         setTargets(event.targets ?? []);
         setError(null);
+        setNoticeMessage(null);
         return;
       }
 
       if (event.status === "error") {
         setActiveAttemptId(null);
+        setIsCancelling(false);
         setStatus(null);
         setTargets([]);
         setConnectionInfo(null);
+        setNoticeMessage(null);
         setError(event.errorMessage ?? "Warpgate target 목록을 불러오지 못했습니다.");
         return;
       }
 
       if (event.status === "cancelled") {
         setActiveAttemptId(null);
-        setStatus(null);
+        setIsCancelling(false);
+        setStatus(event.status);
         setTargets([]);
         setConnectionInfo(null);
-        setError(event.errorMessage ?? "Warpgate 로그인이 취소되었습니다.");
+        setError(null);
+        setNoticeMessage(
+          event.errorMessage?.includes("창이 닫혔습니다.")
+            ? event.errorMessage
+            : null,
+        );
         return;
       }
 
       setStatus(event.status);
+      setNoticeMessage(null);
       if (event.errorMessage != null) {
         setError(event.errorMessage);
       }
@@ -137,6 +177,8 @@ export function WarpgateImportDialog({
 
   const resolvedUsername =
     connectionInfo?.username?.trim() || fallbackUsername.trim();
+  const statusMessage = getStatusMessage(status);
+  const statusDetail = getStatusDetail(status, noticeMessage);
 
   const handleClose = async () => {
     const attemptId = activeAttemptIdRef.current;
@@ -147,6 +189,32 @@ export function WarpgateImportDialog({
       setActiveAttemptId(null);
     }
     onClose();
+  };
+
+  const handleCancelAttempt = async () => {
+    const attemptId = activeAttemptIdRef.current;
+    if (!attemptId || isCancelling || savingTargetId) {
+      return;
+    }
+
+    setIsCancelling(true);
+    try {
+      await window.dolssh.warpgate.cancelBrowserImport(attemptId);
+      setActiveAttemptId(null);
+      setStatus("cancelled");
+      setTargets([]);
+      setConnectionInfo(null);
+      setError(null);
+      setNoticeMessage(null);
+    } catch (cancelError) {
+      setError(
+        cancelError instanceof Error
+          ? cancelError.message
+          : "Warpgate 로그인을 중단하지 못했습니다.",
+      );
+    } finally {
+      setIsCancelling(false);
+    }
   };
 
   return (
@@ -222,13 +290,26 @@ export function WarpgateImportDialog({
             </label>
           ) : null}
 
-          {getStatusMessage(status) ? (
-            <div className="aws-import-dialog__loading">
-              {getStatusMessage(status)}입니다.
+          {statusMessage ? (
+            <div className="warpgate-import-dialog__status-card">
+              <strong>{statusMessage}</strong>
+              {statusDetail ? <span>{statusDetail}</span> : null}
             </div>
           ) : null}
 
           <div className="warpgate-import-dialog__actions">
+            {activeAttemptId ? (
+              <button
+                type="button"
+                className="secondary-button danger"
+                disabled={Boolean(savingTargetId) || isCancelling}
+                onClick={() => {
+                  void handleCancelAttempt();
+                }}
+              >
+                {isCancelling ? "중단 중..." : "중단"}
+              </button>
+            ) : null}
             <button
               type="button"
               className="primary-button"
@@ -240,6 +321,7 @@ export function WarpgateImportDialog({
               }
               onClick={async () => {
                 setError(null);
+                setNoticeMessage(null);
                 setTargets([]);
                 setConnectionInfo(null);
                 setFallbackUsername("");

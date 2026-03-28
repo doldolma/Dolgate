@@ -34,7 +34,7 @@ export function UpdateInstallConfirmDialog({
         <div className="modal-card__body">
           <p className="update-install-dialog__message">
             현재 열려 있는 SSH 세션, 진행 중인 전송, 생성된 포트 포워딩이 모두
-            종료됩니다. 계속하면 dolssh가 정리 후 다시 시작되며 새 버전이
+            종료됩니다. 계속하면 Dolgate가 정리 후 다시 시작되며 새 버전이
             적용됩니다.
           </p>
         </div>

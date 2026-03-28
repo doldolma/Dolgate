@@ -13,7 +13,7 @@ async function loadRepositories(): Promise<{
   PortForwardRepository: DatabaseModule['PortForwardRepository'];
   SettingsRepository: DatabaseModule['SettingsRepository'];
 }> {
-  const tempDir = mkdtempSync(path.join(os.tmpdir(), 'dolssh-desktop-db-'));
+  const tempDir = mkdtempSync(path.join(os.tmpdir(), 'dolgate-desktop-db-'));
   process.env.DOLSSH_USER_DATA_DIR = tempDir;
   vi.resetModules();
 
@@ -35,7 +35,7 @@ async function loadRepositoriesWithStateFile(stateFile: unknown): Promise<{
   HostRepository: DatabaseModule['HostRepository'];
   SettingsRepository: DatabaseModule['SettingsRepository'];
 }> {
-  const tempDir = mkdtempSync(path.join(os.tmpdir(), 'dolssh-desktop-db-'));
+  const tempDir = mkdtempSync(path.join(os.tmpdir(), 'dolgate-desktop-db-'));
   process.env.DOLSSH_USER_DATA_DIR = tempDir;
   mkdirSync(path.join(tempDir, 'storage'), { recursive: true });
   writeFileSync(path.join(tempDir, 'storage', 'state.json'), JSON.stringify(stateFile), 'utf8');
@@ -362,8 +362,8 @@ describe('SettingsRepository', () => {
       getConfig: () => ({
         sync: {
           serverUrl: 'https://bundled.example.com',
-          desktopClientId: 'dolssh-desktop',
-          redirectUri: 'dolssh://auth/callback'
+          desktopClientId: 'dolgate-desktop',
+          redirectUri: 'dolgate://auth/callback'
         }
       })
     } as never);
@@ -418,8 +418,8 @@ describe('SettingsRepository', () => {
       getConfig: () => ({
         sync: {
           serverUrl: 'https://bundled.example.com',
-          desktopClientId: 'dolssh-desktop',
-          redirectUri: 'dolssh://auth/callback'
+          desktopClientId: 'dolgate-desktop',
+          redirectUri: 'dolgate://auth/callback'
         }
       })
     } as never);
@@ -450,8 +450,8 @@ describe('SettingsRepository', () => {
       getConfig: () => ({
         sync: {
           serverUrl: 'https://bundled.example.com',
-          desktopClientId: 'dolssh-desktop',
-          redirectUri: 'dolssh://auth/callback'
+          desktopClientId: 'dolgate-desktop',
+          redirectUri: 'dolgate://auth/callback'
         }
       })
     } as never);
@@ -498,8 +498,8 @@ describe('SettingsRepository', () => {
       getConfig: () => ({
         sync: {
           serverUrl: 'https://bundled.example.com',
-          desktopClientId: 'dolssh-desktop',
-          redirectUri: 'dolssh://auth/callback'
+          desktopClientId: 'dolgate-desktop',
+          redirectUri: 'dolgate://auth/callback'
         }
       })
     } as never);

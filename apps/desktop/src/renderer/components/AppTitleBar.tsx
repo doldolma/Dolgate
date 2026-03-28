@@ -113,9 +113,9 @@ function formatPublishedAt(value?: string | null): string | null {
 function resolveReleaseUrl(updateState: UpdateState): string {
   const version = updateState.release?.version;
   if (!version) {
-    return 'https://github.com/doldolma/dolssh/releases';
+    return 'https://github.com/doldolma/dolgate/releases';
   }
-  return `https://github.com/doldolma/dolssh/releases/tag/v${version}`;
+  return `https://github.com/doldolma/dolgate/releases/tag/v${version}`;
 }
 
 function countWorkspacePanes(workspace: WorkspaceTab): number {
@@ -215,7 +215,7 @@ export function AppTitleBar({
   const titleText = showInstallAction
     ? '업데이트를 적용할 준비가 됐습니다'
     : showDownloadAction
-      ? '새 dolssh 버전을 사용할 수 있습니다'
+      ? '새 Dolgate 버전을 사용할 수 있습니다'
       : '앱 업데이트';
 
   const canDetachToTabs = draggedSession?.source === 'workspace-pane' && Boolean(draggedSession.workspaceId);

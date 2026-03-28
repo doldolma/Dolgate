@@ -10,8 +10,8 @@ function getGitHubOAuthConfig() {
     clientId: (process.env.DOLSSH_GITHUB_OAUTH_CLIENT_ID || DEFAULT_GITHUB_OAUTH_CLIENT_ID).trim(),
     scope: (process.env.DOLSSH_GITHUB_OAUTH_SCOPE || 'public_repo').trim(),
     owner: 'doldolma',
-    repo: 'dolssh',
-    userAgent: `dolssh-release-cli/${desktopPackage.version}`
+    repo: 'dolgate',
+    userAgent: `dolgate-release-cli/${desktopPackage.version}`
   };
 }
 

@@ -102,20 +102,64 @@ describe("Warpgate import dialog", () => {
     ).not.toBeInTheDocument();
 
     await startBrowserImport();
-    expect(screen.getByText("인증 창을 여는 중입니다.")).toBeInTheDocument();
+    expect(
+      screen.getByText("Warpgate 로그인 창을 여는 중입니다."),
+    ).toBeInTheDocument();
 
     emitImportEvent({ status: "waiting-for-login" });
     expect(
-      await screen.findByText("Warpgate 로그인 완료를 기다리는 중입니다."),
+      await screen.findByText("Warpgate 로그인 창이 열려 있습니다."),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText("로그인을 완료하거나 아래에서 중단할 수 있습니다."),
     ).toBeInTheDocument();
 
     emitImportEvent({ status: "loading-targets" });
     expect(
-      await screen.findByText("SSH target 목록을 불러오는 중입니다."),
+      await screen.findByText("Warpgate 로그인은 완료되었습니다."),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText("SSH target 목록을 불러오는 중입니다."),
     ).toBeInTheDocument();
 
     emitImportEvent({ status: "completed" });
     expect(await screen.findByText("prod-db")).toBeInTheDocument();
+  });
+
+  it("lets the user stop an active browser import without closing the dialog", async () => {
+    const { api, emitImportEvent } = installMockApi();
+    const onClose = vi.fn();
+
+    render(
+      <WarpgateImportDialog
+        open
+        currentGroupPath={null}
+        onClose={onClose}
+        onImport={vi.fn().mockResolvedValue(undefined)}
+      />,
+    );
+
+    await startBrowserImport();
+    emitImportEvent({ status: "waiting-for-login" });
+
+    fireEvent.click(await screen.findByRole("button", { name: "중단" }));
+
+    await waitFor(() =>
+      expect(api.warpgate.cancelBrowserImport).toHaveBeenCalledWith("attempt-1"),
+    );
+    expect(onClose).not.toHaveBeenCalled();
+
+    emitImportEvent({ status: "cancelled" });
+
+    expect(
+      await screen.findByText("Warpgate 로그인을 중단했습니다."),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText("주소를 확인한 뒤 다시 시도할 수 있습니다."),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "브라우저에서 로그인" }),
+    ).toBeEnabled();
   });
 
   it("shows a validation error when add host is clicked without a username", async () => {

@@ -92,7 +92,7 @@ export function LoginGate({
     <div className="login-gate">
       <div className="login-gate__card">
         <div className="login-gate__header">
-          <div className="login-gate__eyebrow">dolssh</div>
+          <div className="login-gate__eyebrow">Dolgate</div>
           <button
             type="button"
             className="login-gate__advanced-toggle"

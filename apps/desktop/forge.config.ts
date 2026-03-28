@@ -40,12 +40,12 @@ const config = {
   packagerConfig: {
     asar: true,
     prune: false,
-    executableName: 'dolssh',
-    name: 'dolssh',
+    executableName: 'dolgate',
+    name: 'dolgate',
     protocols: [
       {
-        name: 'dolssh',
-        schemes: ['dolssh']
+        name: 'Dolgate',
+        schemes: ['dolgate']
       }
     ],
     icon: resolveAppIcon(),

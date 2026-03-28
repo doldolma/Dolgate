@@ -110,7 +110,7 @@ func NewRouter(store store.Store, authService *auth.Service, config RouterConfig
 			return
 		}
 		renderLoginPage(ctx, loginPageData{
-			Title:              "Sign in to dolssh",
+			Title:              "Sign in to Dolgate",
 			IsSignup:           false,
 			Client:             ctx.Query("client"),
 			RedirectURI:        ctx.Query("redirect_uri"),
@@ -127,7 +127,7 @@ func NewRouter(store store.Store, authService *auth.Service, config RouterConfig
 		var form browserLoginForm
 		if err := ctx.ShouldBind(&form); err != nil {
 			renderLoginPage(ctx, loginPageData{
-				Title:              "Sign in to dolssh",
+				Title:              "Sign in to Dolgate",
 				IsSignup:           false,
 				ErrorMessage:       err.Error(),
 				Email:              form.Email,
@@ -144,7 +144,7 @@ func NewRouter(store store.Store, authService *auth.Service, config RouterConfig
 		}
 		if !config.LocalAuthEnabled {
 			renderLoginPage(ctx, loginPageData{
-				Title:              "Sign in to dolssh",
+				Title:              "Sign in to Dolgate",
 				IsSignup:           false,
 				ErrorMessage:       "이 서버에서는 비밀번호 로그인이 비활성화되어 있습니다.",
 				Email:              form.Email,
@@ -167,7 +167,7 @@ func NewRouter(store store.Store, authService *auth.Service, config RouterConfig
 		user, _, err := authService.Login(ctx.Request.Context(), form.Email, form.Password, resolveRequestOrigin(ctx))
 		if err != nil {
 			renderLoginPage(ctx, loginPageData{
-				Title:              "Sign in to dolssh",
+				Title:              "Sign in to Dolgate",
 				IsSignup:           false,
 				ErrorMessage:       "이메일 또는 비밀번호가 올바르지 않습니다.",
 				Email:              form.Email,
@@ -201,7 +201,7 @@ func NewRouter(store store.Store, authService *auth.Service, config RouterConfig
 			return
 		}
 		renderLoginPage(ctx, loginPageData{
-			Title:              "Create your dolssh account",
+			Title:              "Create your Dolgate account",
 			IsSignup:           true,
 			Client:             ctx.Query("client"),
 			RedirectURI:        ctx.Query("redirect_uri"),
@@ -223,7 +223,7 @@ func NewRouter(store store.Store, authService *auth.Service, config RouterConfig
 		var form browserSignupForm
 		if err := ctx.ShouldBind(&form); err != nil {
 			renderLoginPage(ctx, loginPageData{
-				Title:              "Create your dolssh account",
+				Title:              "Create your Dolgate account",
 				IsSignup:           true,
 				ErrorMessage:       err.Error(),
 				Email:              form.Email,
@@ -245,7 +245,7 @@ func NewRouter(store store.Store, authService *auth.Service, config RouterConfig
 		user, _, err := authService.Signup(ctx.Request.Context(), form.Email, form.Password, resolveRequestOrigin(ctx))
 		if err != nil {
 			renderLoginPage(ctx, loginPageData{
-				Title:              "Create your dolssh account",
+				Title:              "Create your Dolgate account",
 				IsSignup:           true,
 				ErrorMessage:       err.Error(),
 				Email:              form.Email,
@@ -652,7 +652,7 @@ func validateDesktopRedirectURI(raw string) error {
 		return err
 	}
 	switch parsed.Scheme {
-	case "dolssh":
+	case "dolgate":
 		if parsed.Host != "auth" || parsed.Path != "/callback" {
 			return errors.New("invalid redirect_uri")
 		}
@@ -685,7 +685,7 @@ func buildDesktopCallbackURL(redirectURI string, code string, state string) stri
 func renderLoginPage(ctx *gin.Context, data loginPageData) {
 	ctx.Header("Content-Type", "text/html; charset=utf-8")
 	if data.Title == "" {
-		data.Title = "Sign in to dolssh"
+		data.Title = "Sign in to Dolgate"
 	}
 	_ = loginPageTemplate.Execute(ctx.Writer, data)
 }
@@ -801,7 +801,7 @@ var loginPageTemplate = template.Must(template.New("login").Parse(`
   <body>
     <div class="wrap">
       <div class="card">
-        <div class="eyebrow">dolssh</div>
+        <div class="eyebrow">Dolgate</div>
         <h1>{{ .Title }}</h1>
         <p>브라우저에서 로그인한 뒤 앱으로 돌아갑니다.</p>
         {{ if .ErrorMessage }}
@@ -844,7 +844,7 @@ var desktopCallbackBridgeTemplate = template.Must(template.New("desktop-callback
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Open dolssh</title>
+    <title>Open Dolgate</title>
     <style>
       body { margin:0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background:#0f1726; color:#f5f7fb; }
       .wrap { min-height:100vh; display:flex; align-items:center; justify-content:center; padding:40px; }
@@ -860,10 +860,10 @@ var desktopCallbackBridgeTemplate = template.Must(template.New("desktop-callback
   <body>
     <div class="wrap">
       <div class="card">
-        <div class="eyebrow">dolssh</div>
+        <div class="eyebrow">Dolgate</div>
         <h1>앱으로 돌아가는 중</h1>
-        <p>로그인은 완료되었습니다. dolssh 앱이 자동으로 열리지 않으면 아래 버튼을 눌러 돌아가세요.</p>
-        <a id="open-app" class="button primary" href="{{ .CallbackURL }}">dolssh 열기 ↗</a>
+        <p>로그인은 완료되었습니다. Dolgate 앱이 자동으로 열리지 않으면 아래 버튼을 눌러 돌아가세요.</p>
+        <a id="open-app" class="button primary" href="{{ .CallbackURL }}">Dolgate 열기 ↗</a>
         <div class="hint">앱이 이미 열려 있다면 이 탭은 닫아도 됩니다.</div>
       </div>
     </div>

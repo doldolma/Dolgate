@@ -1,38 +1,55 @@
-# dolssh 빌드 및 배포 가이드
+# Dolgate 빌드 및 배포 가이드
+
+복잡한 사용자 흐름은 [feature-flows](./feature-flows.md) 문서를 함께 참고하세요.
 
 ## 한눈에 보기
 
-- 데스크톱 앱은 Electron이 뜰 때 `ssh-core`를 함께 실행합니다.
-- `ssh-core`는 Electron `main` 프로세스가 child process로 자동 실행합니다.
-- sync API는 데스크톱과 별개로 독립 배포합니다.
-- 로컬 개발에서는 `go run ./cmd/ssh-core`, 릴리즈 빌드에서는 번들된 `ssh-core` 바이너리를 사용합니다.
-- 자동 업데이트는 공개 GitHub Releases를 기준으로 동작하고, 릴리즈는 브라우저 로그인 후 자동 업로드까지 지원합니다.
+- 데스크톱 앱과 `sync-api`는 별개로 배포합니다.
+- `ssh-core`는 앱 시작 시 항상 뜨지 않고, SSH/SFTP/포트 포워딩이 필요할 때 lazily 시작합니다.
+- 데스크톱 로그인은 외부 식별자 `dolgate://auth/callback`을 가지지만, 실제 브라우저 교환은 loopback callback을 사용할 수 있습니다.
+- 자동 업데이트는 공개 GitHub Releases `doldolma/dolgate`를 기준으로 동작합니다.
+- AWS SFTP를 쓰려면 `aws-cli`, `session-manager-plugin`, Linux 인스턴스, SSM managed 상태, EIC 가능 조건이 필요합니다.
 
-## ssh-core는 언제 실행되나
+## 런타임 구성
 
-현재 구현에서는 Electron 앱 준비가 끝난 뒤 창을 만들 때 `ssh-core`를 바로 띄웁니다.
+### 데스크톱 앱
 
-흐름은 다음과 같습니다.
+- Electron `main`, `preload`, `renderer`로 구성됩니다.
+- 로컬 상태와 로그는 파일 기반 저장소에 유지합니다.
+- `ssh-core`와는 stdio framed protocol로 통신합니다.
+- auto update는 `electron-updater`가 GitHub Releases를 조회하는 구조입니다.
 
-1. Electron `app.whenReady()`
-2. `createWindow()`
-3. `coreManager.start()`
-4. `main` 프로세스가 Go `ssh-core` child process 실행
-5. renderer는 preload를 통해 이미 떠 있는 `ssh-core`와만 통신
+### ssh-core는 언제 실행되나
 
-관련 코드:
+현재 구현에서는 Electron 창이 뜬다고 곧바로 `ssh-core`를 띄우지 않습니다.
 
-- [`apps/desktop/src/main/main.ts`](../apps/desktop/src/main/main.ts)
-- [`apps/desktop/src/main/core-manager.ts`](../apps/desktop/src/main/core-manager.ts)
+다음과 같은 실제 작업이 필요할 때 child process를 lazily 시작합니다.
 
-즉, 사용자가 별도로 `ssh-core`를 켤 필요는 없습니다.
+- SSH 터미널 연결
+- SFTP endpoint 연결과 원격 파일 작업
+- 포트 포워딩 시작
+
+즉, 사용자가 별도로 `ssh-core`를 켤 필요는 없지만, 항상 메모리에 상주시켜 두는 구조도 아닙니다.
+
+### sync-api
+
+- 브라우저 로그인 페이지와 인증 API를 제공합니다.
+- 암호화된 동기화 payload 저장소 역할을 합니다.
+- session share viewer와 관련 WebSocket도 함께 제공합니다.
+
+## 인증과 리다이렉트
+
+- 데스크톱의 외부 식별자는 `dolgate://auth/callback`입니다.
+- 실제 브라우저 로그인 교환은 로컬 loopback callback `http://127.0.0.1:<port>/auth/callback`을 사용할 수 있습니다.
+- `sync-api`는 두 형태를 모두 검증하고, 성공 후 데스크톱 세션 교환 코드로 연결합니다.
+- 배포 문서나 OAuth 설정을 갱신할 때는 deep link만 보지 말고 loopback callback 허용도 함께 확인해야 합니다.
 
 ## 개발 모드와 릴리즈 모드 차이
 
 개발 모드:
 
 - `npm run dev`
-- `CoreManager`가 `go run ./cmd/ssh-core`를 실행
+- `CoreManager`가 `go run ./cmd/ssh-core`를 필요 시 실행
 - auto update 비활성
 
 릴리즈 모드:
@@ -109,16 +126,10 @@ npm run build --workspace @dolssh/desktop
 
 현재 이 명령이 하는 일:
 
-- Electron main/preload/renderer 번들을 빌드
+- Electron main/preload/renderer 번들 빌드
 - `sync:runtime-deps`로 hoisted 런타임 의존성을 `apps/desktop/node_modules` 아래에 다시 맞춤
 - Electron Forge로 앱 패키징
 - 로컬 머신 기준으로 실행 가능한 앱 번들 생성
-
-`sync:runtime-deps`를 남겨둔 이유:
-
-- 현재 desktop은 monorepo hoisting을 쓰고 있고,
-- Forge 패키징은 `apps/desktop/node_modules`를 기준으로 파일을 모으기 때문에,
-- 이 단계가 없으면 런타임 의존성이 패키지 앱에 누락될 수 있습니다.
 
 아직 하지 않는 일:
 
@@ -126,7 +137,7 @@ npm run build --workspace @dolssh/desktop
 - 코드 서명
 - notarization
 
-즉, 현재 `npm run build --workspace @dolssh/desktop`은 개발용 패키지 검증에 가깝고, 실제 배포는 아래 릴리즈 명령을 사용합니다.
+즉, `npm run build --workspace @dolssh/desktop`은 개발용 패키지 검증에 가깝고, 실제 배포는 아래 릴리즈 명령을 사용합니다.
 
 ## 릴리즈 빌드
 
@@ -162,18 +173,6 @@ Windows 설치 동작:
 - 설치 마법사는 `one-click` 모드로 동작합니다.
 - `all users` 설치는 지원하지 않습니다.
 
-### 두 플랫폼을 순서대로 시도
-
-```bash
-npm run release:dist:mac
-npm run release:dist:win
-```
-
-참고:
-
-- 데스크톱 로컬 저장소는 파일 기반이라 네이티브 DB/키체인 모듈 의존성이 없습니다.
-- 그래도 Windows 아티팩트는 실제 Windows 머신 또는 CI runner에서 한 번 검증하는 것을 권장합니다.
-
 ## GitHub Releases 업로드
 
 브라우저 로그인 기반 publish를 쓰려면 GitHub OAuth App을 한 번 설정해야 합니다.
@@ -182,72 +181,38 @@ npm run release:dist:win
 2. OAuth App 설정에서 `Device Flow`를 활성화합니다.
 3. [apps/desktop/scripts/github-oauth-config.cjs](/Users/heodoyeong/develop/dolsh/apps/desktop/scripts/github-oauth-config.cjs)의 `DEFAULT_GITHUB_OAUTH_CLIENT_ID` 값을 실제 client ID로 바꿉니다.
 
-참고:
-
-- access token은 이번 실행 동안만 메모리에 유지되고, 로컬 파일이나 encrypted store에 저장하지 않습니다.
-- 필요하면 로컬 개발용으로만 `DOLSSH_GITHUB_OAUTH_CLIENT_ID` 환경변수 override를 사용할 수 있지만, 기본 흐름은 브라우저 로그인만 사용하는 방식입니다.
-
-### 자동 업로드
-
-macOS만 업로드:
+자동 업로드 명령:
 
 ```bash
 npm run release:mac
-```
-
-Windows만 업로드:
-
-```bash
 npm run release:win
-```
-
-두 플랫폼 모두 업로드:
-
-```bash
 npm run release:all
 ```
 
-자동 업로드 명령은 다음을 수행합니다.
+업로드 흐름:
 
 1. GitHub Device Flow로 브라우저 로그인을 시작합니다.
 2. 사용자가 브라우저에서 `https://github.com/login/device`에 코드 입력 후 승인을 완료합니다.
 3. `ssh-core`와 앱 아티팩트를 빌드합니다.
-4. `doldolma/dolssh` GitHub Release를 현재 버전 기준으로 생성하거나 갱신합니다.
+4. `doldolma/dolgate` GitHub Release를 현재 버전 기준으로 생성하거나 갱신합니다.
 5. 기존과 같은 이름의 asset은 교체하고, 새 아티팩트와 업데이트 메타데이터를 업로드합니다.
 
-`npm run release:all`은 로그인 1회 후 `mac -> win` 순서로 이어서 수행합니다.
+## AWS / Warpgate 운영 전제
 
-### 수동 업로드를 유지하고 싶을 때
+### AWS Import / AWS SFTP
 
-1. `apps/desktop/package.json`의 버전을 올립니다.
-2. `npm run release:dist:mac`, `npm run release:dist:win`으로 아티팩트를 생성합니다.
-3. GitHub에서 `vX.Y.Z` 태그 기준 Release를 직접 만듭니다.
-4. 아래 파일을 릴리즈에 수동 업로드합니다.
-   - macOS: `.dmg`, `.zip`, `latest-mac.yml`
-   - Windows: `.exe`, `latest.yml`
-5. 설치된 앱에서 우측 상단 벨 아이콘으로 업데이트 확인/다운로드/재시작 적용을 검증합니다.
+- `aws-cli`가 설치되어 있어야 합니다.
+- AWS SFTP와 일부 inspection 경로에는 `session-manager-plugin`이 필요합니다.
+- AWS SFTP는 Linux 인스턴스만 지원합니다.
+- 인스턴스는 SSM managed 상태여야 하고, sshd/SFTP가 활성화되어 있어야 합니다.
+- EC2 Instance Connect 공개 키 주입이 가능해야 합니다.
 
-## ssh-core 단독 빌드
+### Warpgate Import
 
-개발/배포 파이프라인에서 별도로 확인하고 싶다면 다음처럼 빌드할 수 있습니다.
+- 내부 브라우저 인증 창에서 로그인 후 target 목록을 가져옵니다.
+- 로그인 대기 중에는 import 다이얼로그에서 중단하고 다시 시도할 수 있습니다.
 
-```bash
-cd services/ssh-core
-mkdir -p dist
-go build -o dist/ssh-core ./cmd/ssh-core
-```
-
-플랫폼별 크로스 빌드 예시:
-
-```bash
-cd services/ssh-core
-mkdir -p dist
-GOOS=darwin GOARCH=arm64 go build -o dist/ssh-core-darwin-arm64 ./cmd/ssh-core
-GOOS=linux GOARCH=amd64 go build -o dist/ssh-core-linux-amd64 ./cmd/ssh-core
-GOOS=windows GOARCH=amd64 go build -o dist/ssh-core-windows-amd64.exe ./cmd/ssh-core
-```
-
-## sync API 빌드
+## sync-api 빌드
 
 ```bash
 cd services/sync-api
@@ -255,7 +220,7 @@ mkdir -p dist
 go build -o dist/sync-api ./cmd/api
 ```
 
-## sync API Docker 배포
+## sync-api Docker 배포
 
 ### 포함된 파일
 
@@ -318,124 +283,16 @@ curl http://127.0.0.1:8080/healthz
 
 ### 운영 메모
 
-- 기본 compose 예시는 컨테이너 내부 `/app/config/production.json`을 읽도록 `DOLSSH_API_CONFIG_PATH`를 지정합니다.
-- SQLite를 계속 쓰면 DB 파일은 `services/sync-api/data/dolssh_sync.db`에 유지됩니다.
-- `database.url`의 `mysql:3306`은 Compose 내부 서비스명입니다. Docker 밖에서 `go run`이나 단독 바이너리로 실행하면 `127.0.0.1:3306` 또는 실제 DB 호스트명을 사용해야 합니다.
-- `lookup mysql on 127.0.0.11:53: no such host`가 뜨면, 현재 실행 환경에 `mysql` 서비스가 없다는 뜻입니다. 이 경우 MySQL 포함 compose를 쓰거나 DB 호스트를 실제 주소로 바꿔야 합니다.
-- `https://ssh.doldolma.com`으로 실제 서비스하려면 별도 reverse proxy가 필요합니다.
-- 리버스 프록시가 지금 backend 대신 Synology 기본 페이지를 반환하면 desktop 앱은 로그인/refresh/sync를 전부 실패합니다.
+- `sync-api`는 pure Go SQLite 드라이버를 사용하므로 Docker 빌드는 `CGO_ENABLED=0` 기준입니다.
+- SQLite 이미지는 별도 C toolchain 없이 정적 바이너리로 빌드됩니다.
+- MySQL DSN의 `mysql:3306`은 Docker Compose 내부 서비스명일 때만 동작합니다.
+- reverse proxy 예시는 `services/sync-api/deploy/nginx.sync-api.example.conf`를 참고하세요.
 
-## sync API 실행 환경 변수
+## 수동 검증 체크리스트
 
-SQLite 개발 기본값:
-
-```bash
-DB_DRIVER=sqlite
-PORT=8080
-DATABASE_URL=file:dolssh_sync.db?_pragma=busy_timeout(5000)
-JWT_SECRET=change-me-in-production
-LOCAL_AUTH_ENABLED=true
-LOCAL_SIGNUP_ENABLED=true
-OIDC_ENABLED=false
-```
-
-MySQL 전환 예시:
-
-```bash
-DB_DRIVER=mysql
-PORT=8080
-DATABASE_URL=user:password@tcp(127.0.0.1:3306)/dolssh?charset=utf8mb4&parseTime=True&loc=UTC
-JWT_SECRET=change-me-in-production
-LOCAL_AUTH_ENABLED=true
-LOCAL_SIGNUP_ENABLED=true
-OIDC_ENABLED=true
-OIDC_DISPLAY_NAME=SSO
-OIDC_ISSUER_URL=https://issuer.example.com
-OIDC_CLIENT_ID=your-client-id
-OIDC_CLIENT_SECRET=your-client-secret
-OIDC_REDIRECT_URL=https://ssh.doldolma.com/auth/oidc/callback
-```
-
-실행:
-
-```bash
-cd services/sync-api
-DB_DRIVER=sqlite \
-DATABASE_URL=file:dolssh_sync.db?_pragma=busy_timeout(5000) \
-JWT_SECRET=change-me-in-production \
-go run ./cmd/api
-```
-
-또는 빌드한 바이너리 실행:
-
-```bash
-cd services/sync-api
-DB_DRIVER=sqlite \
-DATABASE_URL=file:dolssh_sync.db?_pragma=busy_timeout(5000) \
-JWT_SECRET=change-me-in-production \
-./dist/sync-api
-```
-
-참고:
-
-- 저장소 초기화는 앱 시작 시 GORM `AutoMigrate`로 처리됩니다.
-- 운영에서는 SQLite보다 MySQL을 권장합니다.
-- 운영에서는 반드시 HTTPS 뒤에 두고, JWT secret은 강한 값으로 교체해야 합니다.
-- refresh token은 absolute max 없이 미사용 14일 만료 정책을 사용합니다.
-- desktop은 `https://ssh.doldolma.com/login` 브라우저 페이지를 열고 `dolssh://auth/callback` 딥링크로 복귀합니다.
-- hybrid 모드에서는 local 로그인 폼이 기본이고, OIDC가 켜져 있으면 SSO 버튼이 같은 페이지 하단에 추가됩니다.
-- Git에는 `services/sync-api/config/default.example.json`만 올리고, 실제 운영 값은 `services/sync-api/config/default.json` 또는 `DOLSSH_API_CONFIG_PATH`로 주입하는 것을 권장합니다.
-
-## 설정파일 정책
-
-- desktop:
-  - 예시 파일: `apps/desktop/config/development.example.json`, `apps/desktop/config/desktop.example.json`
-  - 실제 파일: `apps/desktop/config/development.json`, `apps/desktop/config/desktop.json`
-- sync API:
-  - 예시 파일: `services/sync-api/config/default.example.json`
-  - 실제 파일: `services/sync-api/config/default.json`
-- 실제 파일이 없으면 코드가 자동으로 `*.example.json`을 fallback으로 읽습니다.
-- 실제 secret이나 운영값이 들어간 `*.json` 파일은 Git에 올리지 않고 `.gitignore`로 제외합니다.
-
-## 데스크톱 자동 업데이트 전략
-
-- 업데이트 소스는 공개 GitHub Releases `doldolma/dolssh`
-- 앱은 시작 후 지연 체크와 수동 체크를 모두 지원
-- 자동 다운로드/자동 설치는 하지 않음
-- 사용자가 벨 아이콘 팝오버에서 `다운로드`를 눌러야 내려받기 시작
-- 다운로드 완료 후 `재시작 후 업데이트`를 눌러야 적용
-- 활성 SSH 세션, 진행 중인 전송, 포트 포워딩이 있으면 재시작 전 확인 모달을 띄움
-
-## 권장 배포 시나리오
-
-### 데스크톱 앱
-
-현재 기준 권장 순서:
-
-1. macOS universal 릴리즈 빌드
-2. `npm run release:mac`으로 GitHub Release 업로드
-3. 설치 앱에서 auto update 검증
-4. 동일 구조로 Windows x64 릴리즈 검증
-5. Apple notarization과 Windows code signing 자격을 실제 배포 환경에 맞게 정착
-
-### sync API
-
-권장 운영 흐름:
-
-1. MySQL 준비
-2. `services/sync-api` 바이너리 빌드
-3. 환경 변수 주입
-4. systemd, Docker, 혹은 프로세스 매니저로 실행
-5. Nginx/ALB/Cloudflare Tunnel 등 HTTPS reverse proxy 뒤에 배치
-
-## 릴리스 체크리스트
-
-- `npm test` 통과
-- `npm run typecheck --workspace @dolssh/desktop` 통과
-- `services/ssh-core` 테스트/빌드 통과
-- `services/sync-api` 테스트/빌드 통과
-- `JWT_SECRET` 운영값 적용
-- sync API를 HTTPS 뒤에 배치
-- 데스크톱 앱에 번들된 `ssh-core`가 타깃 플랫폼에서 실제 실행되는지 확인
-- GitHub Release 태그와 앱 버전이 일치하는지 확인
-- 설치 앱의 벨 아이콘에서 업데이트 감지/다운로드/재시작 적용을 검증
+- 외부 브라우저 로그인과 세션 교환이 정상 동작하는지
+- 네트워크 차단 상태에서 offline-authenticated 진입과 재동기화 복귀가 동작하는지
+- Session Share 생성, viewer 접속, viewer 채팅, owner `채팅 기록` 창이 정상 동작하는지
+- AWS import에서 리전 선택 규칙과 `SSH 정보 확인`이 올바르게 동작하는지
+- AWS SFTP progress, host key 확인, 재입력 fallback이 정상 동작하는지
+- Warpgate import의 로그인, 중단, 재시도가 정상 동작하는지

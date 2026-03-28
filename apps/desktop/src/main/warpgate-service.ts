@@ -273,7 +273,7 @@ export class WarpgateService {
     const normalized = normalizeBaseUrl(baseUrl);
     const attemptId = randomUUID();
     const partition = `${WARPGATE_IMPORT_PARTITION_PREFIX}${attemptId}`;
-    const modalParent =
+    const parentWindowRef =
       parentWindow && !parentWindow.isDestroyed() ? parentWindow : undefined;
     const authWindow = new BrowserWindow({
       width: 960,
@@ -284,8 +284,8 @@ export class WarpgateService {
       autoHideMenuBar: true,
       backgroundColor: "#0d141a",
       title: "Warpgate Login",
-      parent: modalParent,
-      modal: Boolean(modalParent),
+      parent: parentWindowRef,
+      modal: false,
       webPreferences: {
         partition,
         sandbox: true,

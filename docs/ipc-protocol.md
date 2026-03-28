@@ -1,5 +1,8 @@
 # SSH 코어 IPC 프로토콜
 
+이 문서는 Electron `main`과 Go `ssh-core` 사이의 framed stdio 프로토콜만 다룹니다.
+Electron IPC, preload API, session share WebSocket은 범위에 포함하지 않습니다.
+
 Electron `main` 프로세스는 stdio 위의 framed binary 프로토콜로 Go SSH 코어와 통신합니다.
 
 프레임 형식은 다음과 같습니다.
@@ -57,6 +60,7 @@ frame kind는 두 가지입니다.
 - `sftpMkdir`
 - `sftpRename`
 - `sftpDelete`
+- `sftpChmod`
 - `sftpTransferStart`
 - `sftpTransferCancel`
 
@@ -101,4 +105,4 @@ renderer는 비밀값 자체가 아니라 참조값만 들고 있고, Electron `
 - `endpointId`: 원격 SFTP 연결 식별자
 - `jobId`: 파일 전송 작업 식별자
 
-SFTP 브라우징은 control frame만으로 처리하고, 파일 전송 진행률은 `sftpTransfer*` 이벤트로 전달합니다. 현재 구현은 로컬 파일 경로를 payload로 넘기고 Go 코어가 직접 복사 작업을 수행하는 구조입니다.
+SFTP 브라우징은 control frame만으로 처리하고, 파일 전송 진행률은 `sftpTransfer*` 이벤트로 전달합니다. 로컬 파일 경로를 payload로 넘기면 Go 코어가 직접 복사 작업을 수행합니다.

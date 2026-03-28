@@ -358,7 +358,7 @@ func (s *Service) issueOfflineLease(user store.User, issuer string, refreshExpir
 		RegisteredClaims: jwt.RegisteredClaims{
 			Issuer:    issuer,
 			Subject:   user.ID,
-			Audience:  jwt.ClaimStrings{"dolssh-desktop"},
+			Audience:  jwt.ClaimStrings{"dolgate-desktop"},
 			IssuedAt:  jwt.NewNumericDate(now),
 			ExpiresAt: jwt.NewNumericDate(leaseExpiresAt),
 		},
