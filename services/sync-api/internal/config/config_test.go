@@ -7,36 +7,7 @@ import (
 	"testing"
 )
 
-func TestLoadFallsBackToExampleConfig(t *testing.T) {
-	tempDir := t.TempDir()
-	requestedPath := filepath.Join(tempDir, "default.json")
-	examplePath := filepath.Join(tempDir, "default.example.json")
-	if err := os.WriteFile(examplePath, []byte(`{"server":{"port":"9090"},"auth":{"signingPrivateKeyPath":"./example-key.pem"}}`), 0o600); err != nil {
-		t.Fatalf("os.WriteFile() error = %v", err)
-	}
-
-	t.Setenv("DOLSSH_API_CONFIG_PATH", requestedPath)
-
-	cfg, resolvedPath, err := Load()
-	if err != nil {
-		t.Fatalf("Load() error = %v", err)
-	}
-	if resolvedPath != examplePath {
-		t.Fatalf("resolvedPath = %q, want %q", resolvedPath, examplePath)
-	}
-	if cfg.Server.Port != "9090" || cfg.Auth.SigningPrivateKeyPath != "./example-key.pem" {
-		t.Fatalf("cfg = %+v", cfg)
-	}
-}
-
-func TestLoadAppliesEnvironmentOverrides(t *testing.T) {
-	tempDir := t.TempDir()
-	configPath := filepath.Join(tempDir, "default.json")
-	if err := os.WriteFile(configPath, []byte(`{"server":{"port":"8080"},"database":{"driver":"sqlite","url":"file:test.db"},"auth":{"signingPrivateKeyPath":"./from-file.pem","local":{"enabled":true,"signupEnabled":true},"oidc":{"enabled":false,"displayName":"SSO"}}}`), 0o600); err != nil {
-		t.Fatalf("os.WriteFile() error = %v", err)
-	}
-
-	t.Setenv("DOLSSH_API_CONFIG_PATH", configPath)
+func TestLoadUsesDefaultsAndEnvironmentWithoutConfigFile(t *testing.T) {
 	t.Setenv("PORT", "9191")
 	t.Setenv("DATABASE_URL", "file:override.db")
 	t.Setenv("AUTH_SIGNING_PRIVATE_KEY_PATH", "/secure/override.pem")
@@ -44,10 +15,14 @@ func TestLoadAppliesEnvironmentOverrides(t *testing.T) {
 	t.Setenv("LOCAL_AUTH_ENABLED", "false")
 	t.Setenv("OIDC_ENABLED", "true")
 	t.Setenv("OIDC_DISPLAY_NAME", "Workspace SSO")
+	t.Setenv("OIDC_SCOPES", "openid,profile,email")
 
-	cfg, _, err := Load()
+	cfg, source, err := Load()
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
+	}
+	if source != "defaults+env" {
+		t.Fatalf("source = %q, want defaults+env", source)
 	}
 	if cfg.Server.Port != "9191" || cfg.Database.URL != "file:override.db" || cfg.Auth.SigningPrivateKeyPath != "/secure/override.pem" {
 		t.Fatalf("cfg = %+v", cfg)
@@ -61,11 +36,35 @@ func TestLoadAppliesEnvironmentOverrides(t *testing.T) {
 	if !cfg.Auth.OIDC.Enabled || cfg.Auth.OIDC.DisplayName != "Workspace SSO" {
 		t.Fatalf("cfg.Auth.OIDC = %+v", cfg.Auth.OIDC)
 	}
+	if len(cfg.Auth.OIDC.Scopes) != 3 || cfg.Auth.OIDC.Scopes[0] != "openid" {
+		t.Fatalf("cfg.Auth.OIDC.Scopes = %#v", cfg.Auth.OIDC.Scopes)
+	}
+}
+
+func TestLoadReadsExplicitConfigPath(t *testing.T) {
+	tempDir := t.TempDir()
+	configPath := filepath.Join(tempDir, "sync-api.json")
+	if err := os.WriteFile(configPath, []byte(`{"server":{"port":"9090"},"auth":{"signingPrivateKeyPath":"./example-key.pem"}}`), 0o600); err != nil {
+		t.Fatalf("os.WriteFile() error = %v", err)
+	}
+
+	t.Setenv("DOLSSH_API_CONFIG_PATH", configPath)
+
+	cfg, resolvedPath, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if resolvedPath != configPath {
+		t.Fatalf("resolvedPath = %q, want %q", resolvedPath, configPath)
+	}
+	if cfg.Server.Port != "9090" || cfg.Auth.SigningPrivateKeyPath != "./example-key.pem" {
+		t.Fatalf("cfg = %+v", cfg)
+	}
 }
 
 func TestLoadReturnsJSONErrors(t *testing.T) {
 	tempDir := t.TempDir()
-	configPath := filepath.Join(tempDir, "default.json")
+	configPath := filepath.Join(tempDir, "sync-api.json")
 	if err := os.WriteFile(configPath, []byte(`{"server":`), 0o600); err != nil {
 		t.Fatalf("os.WriteFile() error = %v", err)
 	}
@@ -77,9 +76,19 @@ func TestLoadReturnsJSONErrors(t *testing.T) {
 	}
 }
 
+func TestLoadRejectsMissingExplicitConfigFile(t *testing.T) {
+	tempDir := t.TempDir()
+	configPath := filepath.Join(tempDir, "missing.json")
+	t.Setenv("DOLSSH_API_CONFIG_PATH", configPath)
+
+	if _, _, err := Load(); err == nil {
+		t.Fatal("Load() error = nil, want missing file error")
+	}
+}
+
 func TestLoadRejectsLegacyJWTSecretConfig(t *testing.T) {
 	tempDir := t.TempDir()
-	configPath := filepath.Join(tempDir, "production.json")
+	configPath := filepath.Join(tempDir, "sync-api.json")
 	if err := os.WriteFile(configPath, []byte(`{"auth":{"jwtSecret":"change-me-in-production"}}`), 0o600); err != nil {
 		t.Fatalf("os.WriteFile() error = %v", err)
 	}
@@ -94,7 +103,7 @@ func TestLoadRejectsLegacyJWTSecretConfig(t *testing.T) {
 
 func TestLoadRejectsLegacyOfflineLeaseKeyConfig(t *testing.T) {
 	tempDir := t.TempDir()
-	configPath := filepath.Join(tempDir, "production.json")
+	configPath := filepath.Join(tempDir, "sync-api.json")
 	if err := os.WriteFile(configPath, []byte(`{"auth":{"offlineLeaseSigningPrivateKeyPem":"legacy"}}`), 0o600); err != nil {
 		t.Fatalf("os.WriteFile() error = %v", err)
 	}
@@ -108,13 +117,6 @@ func TestLoadRejectsLegacyOfflineLeaseKeyConfig(t *testing.T) {
 }
 
 func TestLoadRejectsLegacyJWTSecretEnvironmentVariable(t *testing.T) {
-	tempDir := t.TempDir()
-	configPath := filepath.Join(tempDir, "default.json")
-	if err := os.WriteFile(configPath, []byte(`{"auth":{"signingPrivateKeyPath":"./auth-signing-private.pem"}}`), 0o600); err != nil {
-		t.Fatalf("os.WriteFile() error = %v", err)
-	}
-
-	t.Setenv("DOLSSH_API_CONFIG_PATH", configPath)
 	t.Setenv("JWT_SECRET", "legacy-secret")
 
 	_, _, err := Load()

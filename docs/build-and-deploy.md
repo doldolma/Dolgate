@@ -226,10 +226,9 @@ go build -o dist/sync-api ./cmd/api
 
 - Docker 이미지 정의: [services/sync-api/Dockerfile](/Users/heodoyeong/develop/dolsh/services/sync-api/Dockerfile)
 - Docker ignore: [services/sync-api/.dockerignore](/Users/heodoyeong/develop/dolsh/services/sync-api/.dockerignore)
-- 운영 설정 예시: [services/sync-api/config/production.example.json](/Users/heodoyeong/develop/dolsh/services/sync-api/config/production.example.json)
-- 운영 MySQL 설정 예시: [services/sync-api/config/production.mysql.example.json](/Users/heodoyeong/develop/dolsh/services/sync-api/config/production.mysql.example.json)
 - Compose 예시: [services/sync-api/deploy/docker-compose.example.yml](/Users/heodoyeong/develop/dolsh/services/sync-api/deploy/docker-compose.example.yml)
 - MySQL 포함 Compose 예시: [services/sync-api/deploy/docker-compose.mysql.example.yml](/Users/heodoyeong/develop/dolsh/services/sync-api/deploy/docker-compose.mysql.example.yml)
+- OIDC + MySQL Compose 예시: [services/sync-api/deploy/docker-compose.oidc-mysql.example.yml](/Users/heodoyeong/develop/dolsh/services/sync-api/deploy/docker-compose.oidc-mysql.example.yml)
 - Nginx reverse proxy 예시: [services/sync-api/deploy/nginx.sync-api.example.conf](/Users/heodoyeong/develop/dolsh/services/sync-api/deploy/nginx.sync-api.example.conf)
 - GHCR 배포 workflow: [/.github/workflows/sync-api-container.yml](/Users/heodoyeong/develop/dolsh/.github/workflows/sync-api-container.yml)
 
@@ -260,6 +259,14 @@ cp docker-compose.mysql.example.yml docker-compose.yml
 docker compose up -d
 ```
 
+4. Google OIDC + MySQL 기준으로 시작하려면
+
+```bash
+cd services/sync-api/deploy
+cp docker-compose.oidc-mysql.example.yml docker-compose.yml
+docker compose up -d
+```
+
 ### compose 기본값
 
 - 기본 SQLite 예시는 `ghcr.io/doldolma/dolgate-sync-api:latest` 이미지를 바로 pull합니다.
@@ -276,7 +283,7 @@ docker compose up -d
   - `AUTH_SIGNING_PRIVATE_KEY_PEM`
   - `AUTH_SIGNING_PRIVATE_KEY_PATH`
 - 운영자가 별도 PEM을 주입하면 자동 생성보다 그 값을 우선 사용합니다.
-- 예시 JSON 파일은 고급 설정용 참고 자료로 남겨 두며, 기본 compose 흐름에는 필수가 아닙니다.
+- `DOLSSH_API_CONFIG_PATH`로 외부 JSON 파일을 읽을 수는 있지만, 기본 배포 흐름은 config 파일 없이 env-only compose를 권장합니다.
 
 ### 운영 메모
 
@@ -287,6 +294,7 @@ docker compose up -d
 - MySQL DSN의 `mysql:3306`은 Docker Compose 내부 서비스명일 때만 동작합니다.
 - `auth.jwtSecret`과 `auth.offlineLeaseSigningPrivateKeyPem`은 더 이상 지원하지 않습니다.
 - 새 버전은 access token, browser login state, offline lease를 모두 같은 RS256 signing keypair로 서명합니다.
+- OIDC도 env-only로 설정 가능합니다. 필요하면 `OIDC_ENABLED`, `OIDC_ISSUER_URL`, `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET`, `OIDC_REDIRECT_URL`, `OIDC_SCOPES`를 compose에 넣으세요.
 - 운영 배포는 HTTPS reverse proxy 뒤에 두는 것을 전제로 합니다.
 - `server.trustedProxies`를 비워 두면 `X-Forwarded-For`를 신뢰하지 않습니다. reverse proxy를 쓴다면 실제 프록시 주소만 명시하세요.
 - 로컬 회원가입은 1차 보안 정책상 계속 열려 있지만, `/login`, `/signup`, `/auth/refresh`, `/auth/exchange`에는 메모리 기반 rate limit가 적용됩니다.

@@ -2,7 +2,10 @@ package main
 
 import (
 	"log"
+	"os"
 	"time"
+
+	"github.com/gin-gonic/gin"
 
 	"dolssh/services/sync-api/internal/auth"
 	appconfig "dolssh/services/sync-api/internal/config"
@@ -11,6 +14,10 @@ import (
 )
 
 func main() {
+	if os.Getenv("GIN_MODE") == "" {
+		gin.SetMode(gin.ReleaseMode)
+	}
+
 	// 운영 배포와 로컬 개발 모두에서 JSON 설정파일을 기본값으로 사용하고, 필요 시 환경 변수로 덮어쓸 수 있다.
 	cfg, configPath, err := appconfig.Load()
 	if err != nil {

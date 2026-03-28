@@ -1,0 +1,29 @@
+services:
+  sync-api:
+    image: ghcr.io/doldolma/dolgate-sync-api:latest
+    container_name: dolgate-sync-api
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      DB_DRIVER: mysql
+      DATABASE_URL: dolgate_user:CHANGE_ME_PASSWORD@tcp(172.17.0.1:3309)/dolgate?charset=utf8mb4&parseTime=True&loc=UTC
+
+      LOCAL_AUTH_ENABLED: "false"
+      LOCAL_SIGNUP_ENABLED: "false"
+
+      OIDC_ENABLED: "true"
+      OIDC_DISPLAY_NAME: "Google"
+      OIDC_ISSUER_URL: "https://accounts.google.com"
+      OIDC_CLIENT_ID: "CHANGE_ME_CLIENT_ID"
+      OIDC_CLIENT_SECRET: "CHANGE_ME_CLIENT_SECRET"
+      OIDC_REDIRECT_URL: "https://ssh.example.com/auth/oidc/callback"
+      OIDC_SCOPES: "openid,profile,email"
+
+      TRUSTED_PROXIES: "172.17.0.1"
+      TZ: Asia/Seoul
+    volumes:
+      - dolgate-sync-api-data:/app/data
+
+volumes:
+  dolgate-sync-api-data:

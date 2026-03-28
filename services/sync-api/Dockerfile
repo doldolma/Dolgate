@@ -21,7 +21,7 @@ RUN apk add --no-cache ca-certificates tzdata
 
 COPY --from=builder /out/sync-api /app/sync-api
 
-RUN mkdir -p /app/config /app/data
+RUN mkdir -p /app/data
 
 ENV TZ=Asia/Seoul
 

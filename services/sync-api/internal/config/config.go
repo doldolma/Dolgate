@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 )
@@ -102,47 +101,26 @@ func defaultConfig() AppConfig {
 func Load() (AppConfig, string, error) {
 	cfg := defaultConfig()
 	requestedConfigPath := os.Getenv("DOLSSH_API_CONFIG_PATH")
-	if requestedConfigPath == "" {
-		requestedConfigPath = filepath.Join(".", "config", "default.json")
-	}
-
-	data, configPath, err := readConfigFileWithExampleFallback(requestedConfigPath)
-	if err != nil {
-		return AppConfig{}, requestedConfigPath, err
-	}
-	if len(data) > 0 {
+	configSource := "defaults+env"
+	if strings.TrimSpace(requestedConfigPath) != "" {
+		data, err := os.ReadFile(requestedConfigPath)
+		if err != nil {
+			return AppConfig{}, requestedConfigPath, err
+		}
 		if err := rejectLegacyAuthConfig(data); err != nil {
-			return AppConfig{}, configPath, err
+			return AppConfig{}, requestedConfigPath, err
 		}
 		if err := json.Unmarshal(data, &cfg); err != nil {
-			return AppConfig{}, configPath, err
+			return AppConfig{}, requestedConfigPath, err
 		}
+		configSource = requestedConfigPath
 	}
 
 	applyEnvOverrides(&cfg)
 	if err := validateConfig(cfg); err != nil {
-		return AppConfig{}, configPath, err
+		return AppConfig{}, configSource, err
 	}
-	return cfg, configPath, nil
-}
-
-func readConfigFileWithExampleFallback(requestedPath string) ([]byte, string, error) {
-	candidates := []string{requestedPath}
-	if filepath.Ext(requestedPath) == ".json" {
-		candidates = append(candidates, requestedPath[:len(requestedPath)-len(".json")]+".example.json")
-	}
-
-	for _, candidate := range candidates {
-		data, err := os.ReadFile(candidate)
-		if err == nil {
-			return data, candidate, nil
-		}
-		if !os.IsNotExist(err) {
-			return nil, candidate, err
-		}
-	}
-
-	return nil, requestedPath, nil
+	return cfg, configSource, nil
 }
 
 func applyEnvOverrides(cfg *AppConfig) {
@@ -164,6 +142,7 @@ func applyEnvOverrides(cfg *AppConfig) {
 	cfg.Auth.OIDC.ClientID = getenv("OIDC_CLIENT_ID", cfg.Auth.OIDC.ClientID)
 	cfg.Auth.OIDC.ClientSecret = getenv("OIDC_CLIENT_SECRET", cfg.Auth.OIDC.ClientSecret)
 	cfg.Auth.OIDC.RedirectURL = getenv("OIDC_REDIRECT_URL", cfg.Auth.OIDC.RedirectURL)
+	cfg.Auth.OIDC.Scopes = getenvCSV("OIDC_SCOPES", cfg.Auth.OIDC.Scopes)
 }
 
 func validateConfig(cfg AppConfig) error {
