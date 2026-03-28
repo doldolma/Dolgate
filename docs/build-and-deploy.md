@@ -88,6 +88,9 @@ sync API만:
 npm run dev:api
 ```
 
+- 로컬 기본 SQLite 경로는 `services/sync-api/data/dolgate_sync.db`입니다.
+- `npm run dev:api`는 필요한 `services/sync-api/data/` 디렉터리를 자동으로 생성합니다.
+
 둘 다 함께:
 
 ```bash

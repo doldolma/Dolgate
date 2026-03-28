@@ -1,6 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { DesktopWindowState, TerminalTab, UpdateState } from '@shared';
-import type { DynamicTabStripItem, WorkspaceTab, WorkspaceTabId } from '../store/createAppStore';
+import type {
+  DynamicTabStripItem,
+  WorkspaceTab,
+  WorkspaceTabId
+} from '../store/createAppStore';
 import { DesktopWindowControls, type DesktopPlatform } from './DesktopWindowControls';
 
 interface DraggedSessionPayload {
@@ -20,6 +24,7 @@ interface AppTitleBarProps {
   windowState: DesktopWindowState;
   onSelectHome: () => void;
   onSelectSftp: () => void;
+  onSelectContainers: () => void;
   onSelectSession: (sessionId: string) => void;
   onSelectWorkspace: (workspaceId: string) => void;
   onCloseSession: (sessionId: string) => Promise<void>;
@@ -58,7 +63,10 @@ type TitlebarDynamicItem =
 const TAB_DRAG_MIME = 'application/x-dolssh-tab-item';
 
 function serializeDraggedTab(item: DynamicTabStripItem): string {
-  return item.kind === 'session' ? `session:${item.sessionId}` : `workspace:${item.workspaceId}`;
+  if (item.kind === 'session') {
+    return `session:${item.sessionId}`;
+  }
+  return `workspace:${item.workspaceId}`;
 }
 
 function parseDraggedTab(payload: string): DynamicTabStripItem | null {
@@ -146,6 +154,7 @@ export function AppTitleBar({
   windowState,
   onSelectHome,
   onSelectSftp,
+  onSelectContainers,
   onSelectSession,
   onSelectWorkspace,
   onCloseSession,
@@ -189,17 +198,20 @@ export function AppTitleBar({
             } satisfies TitlebarDynamicItem;
           }
 
-          const workspace = workspaces.find((candidate) => candidate.id === item.workspaceId);
-          if (!workspace) {
-            return null;
+          if (item.kind === 'workspace') {
+            const workspace = workspaces.find((candidate) => candidate.id === item.workspaceId);
+            if (!workspace) {
+              return null;
+            }
+            return {
+              kind: 'workspace',
+              workspaceId: workspace.id,
+              title: workspace.title,
+              paneCount: countWorkspacePanes(workspace),
+              active: activeWorkspaceTab === `workspace:${workspace.id}`
+            } satisfies TitlebarDynamicItem;
           }
-          return {
-            kind: 'workspace',
-            workspaceId: workspace.id,
-            title: workspace.title,
-            paneCount: countWorkspacePanes(workspace),
-            active: activeWorkspaceTab === `workspace:${workspace.id}`
-          } satisfies TitlebarDynamicItem;
+
         })
         .filter((item): item is TitlebarDynamicItem => item !== null),
     [activeWorkspaceTab, tabStrip, tabs, workspaces]
@@ -221,7 +233,10 @@ export function AppTitleBar({
   const canDetachToTabs = draggedSession?.source === 'workspace-pane' && Boolean(draggedSession.workspaceId);
 
   function getTabKey(item: DynamicTabStripItem): string {
-    return item.kind === 'session' ? `session:${item.sessionId}` : `workspace:${item.workspaceId}`;
+    if (item.kind === 'session') {
+      return `session:${item.sessionId}`;
+    }
+    return `workspace:${item.workspaceId}`;
   }
 
   function resolveTabDropPlacement(event: React.DragEvent<HTMLDivElement>): 'before' | 'after' {
@@ -285,6 +300,13 @@ export function AppTitleBar({
         </button>
         <button type="button" className={`workspace-tab sftp ${activeWorkspaceTab === 'sftp' ? 'active' : ''}`} onClick={onSelectSftp}>
           SFTP
+        </button>
+        <button
+          type="button"
+          className={`workspace-tab containers ${activeWorkspaceTab === 'containers' ? 'active' : ''}`}
+          onClick={onSelectContainers}
+        >
+          Containers
         </button>
         {dynamicItems.map((item) => {
           if (item.kind === 'session') {

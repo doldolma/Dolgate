@@ -136,6 +136,7 @@ interface HostBrowserProps {
   onMoveHostToGroup: (hostId: string, groupPath: string | null) => Promise<void>;
   onRemoveHost: (hostId: string) => Promise<void>;
   onConnectHost: (hostId: string) => Promise<void>;
+  onOpenHostContainers: (hostId: string) => Promise<void>;
 }
 
 export function HostBrowser({
@@ -164,7 +165,8 @@ export function HostBrowser({
   onDuplicateHosts,
   onMoveHostToGroup,
   onRemoveHost,
-  onConnectHost
+  onConnectHost,
+  onOpenHostContainers
 }: HostBrowserProps) {
   const [isGroupModalOpen, setIsGroupModalOpen] = useState(false);
   const [newGroupName, setNewGroupName] = useState('');
@@ -805,6 +807,22 @@ export function HostBrowser({
           <div className="context-menu" style={contextMenuStyle ?? undefined} role="menu">
             {contextMenu.kind === 'host' ? (
               <>
+                <button
+                  type="button"
+                  className="context-menu__item"
+                  disabled={contextMenu.hostIds.length !== 1}
+                  onClick={async () => {
+                    const orderedHostIds = getOrderedSelectedHostIds(contextMenu.hostIds);
+                    const targetHostId = orderedHostIds[0];
+                    setContextMenu(null);
+                    if (!targetHostId) {
+                      return;
+                    }
+                    await onOpenHostContainers(targetHostId);
+                  }}
+                >
+                  컨테이너
+                </button>
                 <button
                   type="button"
                   className="context-menu__item"

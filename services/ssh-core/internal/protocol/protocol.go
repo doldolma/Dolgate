@@ -37,6 +37,17 @@ const (
 	CommandSFTPDelete                 CommandType = "sftpDelete"
 	CommandSFTPTransferStart          CommandType = "sftpTransferStart"
 	CommandSFTPTransferCancel         CommandType = "sftpTransferCancel"
+	CommandContainersConnect          CommandType = "containersConnect"
+	CommandContainersDisconnect       CommandType = "containersDisconnect"
+	CommandContainersList             CommandType = "containersList"
+	CommandContainersInspect          CommandType = "containersInspect"
+	CommandContainersLogs             CommandType = "containersLogs"
+	CommandContainersStart            CommandType = "containersStart"
+	CommandContainersStop             CommandType = "containersStop"
+	CommandContainersRestart          CommandType = "containersRestart"
+	CommandContainersRemove           CommandType = "containersRemove"
+	CommandContainersStats            CommandType = "containersStats"
+	CommandContainersSearchLogs       CommandType = "containersSearchLogs"
 )
 
 const (
@@ -61,6 +72,15 @@ const (
 	EventSFTPTransferCompleted        EventType = "sftpTransferCompleted"
 	EventSFTPTransferFailed           EventType = "sftpTransferFailed"
 	EventSFTPTransferCancelled        EventType = "sftpTransferCancelled"
+	EventContainersConnected          EventType = "containersConnected"
+	EventContainersDisconnected       EventType = "containersDisconnected"
+	EventContainersListed             EventType = "containersListed"
+	EventContainersInspected          EventType = "containersInspected"
+	EventContainersLogs               EventType = "containersLogs"
+	EventContainersActionCompleted    EventType = "containersActionCompleted"
+	EventContainersStats              EventType = "containersStats"
+	EventContainersLogsSearched       EventType = "containersLogsSearched"
+	EventContainersError              EventType = "containersError"
 )
 
 const (
@@ -122,6 +142,7 @@ type ConnectPayload struct {
 	TrustedHostKeyBase64 string `json:"trustedHostKeyBase64"`
 	Cols                 int    `json:"cols"`
 	Rows                 int    `json:"rows"`
+	Command              string `json:"command,omitempty"`
 }
 
 type AWSConnectPayload struct {
@@ -140,6 +161,18 @@ type LocalConnectPayload struct {
 
 // SFTPConnectPayload는 원격 파일 브라우저 접속을 위한 인증 정보다.
 type SFTPConnectPayload struct {
+	Host                 string `json:"host"`
+	Port                 int    `json:"port"`
+	Username             string `json:"username"`
+	AuthType             string `json:"authType"`
+	Password             string `json:"password,omitempty"`
+	PrivateKeyPEM        string `json:"privateKeyPem,omitempty"`
+	PrivateKeyPath       string `json:"privateKeyPath,omitempty"`
+	Passphrase           string `json:"passphrase,omitempty"`
+	TrustedHostKeyBase64 string `json:"trustedHostKeyBase64"`
+}
+
+type ContainersConnectPayload struct {
 	Host                 string `json:"host"`
 	Port                 int    `json:"port"`
 	Username             string `json:"username"`
@@ -207,6 +240,30 @@ type SFTPDeletePayload struct {
 	Paths []string `json:"paths"`
 }
 
+type ContainersInspectPayload struct {
+	ContainerID string `json:"containerId"`
+}
+
+type ContainersLogsPayload struct {
+	ContainerID  string `json:"containerId"`
+	Tail         int    `json:"tail"`
+	FollowCursor string `json:"followCursor,omitempty"`
+}
+
+type ContainersActionPayload struct {
+	ContainerID string `json:"containerId"`
+}
+
+type ContainersStatsPayload struct {
+	ContainerID string `json:"containerId"`
+}
+
+type ContainersSearchLogsPayload struct {
+	ContainerID string `json:"containerId"`
+	Tail        int    `json:"tail"`
+	Query       string `json:"query"`
+}
+
 type TransferEndpointPayload struct {
 	Kind       string `json:"kind"`
 	EndpointID string `json:"endpointId,omitempty"`
@@ -242,6 +299,7 @@ type PortForwardStartPayload struct {
 	BindPort             int    `json:"bindPort"`
 	TargetHost           string `json:"targetHost,omitempty"`
 	TargetPort           int    `json:"targetPort,omitempty"`
+	SourceEndpointID     string `json:"sourceEndpointId,omitempty"`
 }
 
 type SSMPortForwardStartPayload struct {
@@ -276,6 +334,12 @@ type SFTPConnectedPayload struct {
 	Path string `json:"path"`
 }
 
+type ContainersConnectedPayload struct {
+	Runtime           string `json:"runtime,omitempty"`
+	RuntimeCommand    string `json:"runtimeCommand,omitempty"`
+	UnsupportedReason string `json:"unsupportedReason,omitempty"`
+}
+
 type HostKeyProbedPayload struct {
 	Algorithm         string `json:"algorithm"`
 	PublicKeyBase64   string `json:"publicKeyBase64"`
@@ -286,6 +350,7 @@ type PortForwardStartedPayload struct {
 	Transport   string `json:"transport,omitempty"`
 	Status      string `json:"status"`
 	Mode        string `json:"mode"`
+	Method      string `json:"method,omitempty"`
 	BindAddress string `json:"bindAddress"`
 	BindPort    int    `json:"bindPort"`
 	Message     string `json:"message,omitempty"`
@@ -308,6 +373,103 @@ type SFTPFileEntry struct {
 type SFTPListedPayload struct {
 	Path    string          `json:"path"`
 	Entries []SFTPFileEntry `json:"entries"`
+}
+
+type ContainerSummary struct {
+	ID        string `json:"id"`
+	Name      string `json:"name"`
+	Runtime   string `json:"runtime"`
+	Image     string `json:"image"`
+	Status    string `json:"status"`
+	CreatedAt string `json:"createdAt"`
+	Ports     string `json:"ports"`
+}
+
+type ContainersListedPayload struct {
+	Runtime    string             `json:"runtime,omitempty"`
+	Containers []ContainerSummary `json:"containers"`
+}
+
+type ContainerMountSummary struct {
+	Type        string `json:"type"`
+	Source      string `json:"source"`
+	Destination string `json:"destination"`
+	Mode        string `json:"mode,omitempty"`
+	ReadOnly    bool   `json:"readOnly"`
+}
+
+type ContainerNetworkSummary struct {
+	Name      string   `json:"name"`
+	IPAddress string   `json:"ipAddress,omitempty"`
+	Aliases   []string `json:"aliases"`
+}
+
+type ContainerPortBinding struct {
+	HostIP   string `json:"hostIp,omitempty"`
+	HostPort int    `json:"hostPort,omitempty"`
+}
+
+type ContainerPortSummary struct {
+	ContainerPort     int                    `json:"containerPort"`
+	Protocol          string                 `json:"protocol"`
+	PublishedBindings []ContainerPortBinding `json:"publishedBindings"`
+}
+
+type KeyValuePair struct {
+	Key   string `json:"key"`
+	Value string `json:"value"`
+}
+
+type ContainerDetailsPayload struct {
+	ID          string                    `json:"id"`
+	Name        string                    `json:"name"`
+	Runtime     string                    `json:"runtime"`
+	Image       string                    `json:"image"`
+	Status      string                    `json:"status"`
+	CreatedAt   string                    `json:"createdAt"`
+	Command     string                    `json:"command"`
+	Entrypoint  string                    `json:"entrypoint"`
+	Mounts      []ContainerMountSummary   `json:"mounts"`
+	Networks    []ContainerNetworkSummary `json:"networks"`
+	Ports       []ContainerPortSummary    `json:"ports"`
+	Environment []KeyValuePair            `json:"environment"`
+	Labels      []KeyValuePair            `json:"labels"`
+}
+
+type ContainersLogsResultPayload struct {
+	Runtime     string   `json:"runtime"`
+	ContainerID string   `json:"containerId"`
+	Lines       []string `json:"lines"`
+	Cursor      string   `json:"cursor,omitempty"`
+}
+
+type ContainersActionCompletedPayload struct {
+	Runtime     string `json:"runtime"`
+	Action      string `json:"action"`
+	ContainerID string `json:"containerId"`
+	Message     string `json:"message,omitempty"`
+}
+
+type ContainersStatsPayloadResult struct {
+	Runtime          string  `json:"runtime"`
+	ContainerID      string  `json:"containerId"`
+	RecordedAt       string  `json:"recordedAt"`
+	CPUPercent       float64 `json:"cpuPercent"`
+	MemoryUsedBytes  int64   `json:"memoryUsedBytes"`
+	MemoryLimitBytes int64   `json:"memoryLimitBytes"`
+	MemoryPercent    float64 `json:"memoryPercent"`
+	NetworkRxBytes   int64   `json:"networkRxBytes"`
+	NetworkTxBytes   int64   `json:"networkTxBytes"`
+	BlockReadBytes   int64   `json:"blockReadBytes"`
+	BlockWriteBytes  int64   `json:"blockWriteBytes"`
+}
+
+type ContainersSearchLogsResultPayload struct {
+	Runtime     string   `json:"runtime"`
+	ContainerID string   `json:"containerId"`
+	Query       string   `json:"query"`
+	Lines       []string `json:"lines"`
+	MatchCount  int      `json:"matchCount"`
 }
 
 type SFTPTransferProgressPayload struct {

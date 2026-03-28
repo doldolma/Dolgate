@@ -32,10 +32,12 @@ export type UpdateStatus = 'idle' | 'checking' | 'available' | 'downloading' | '
 export type SftpPaneId = 'left' | 'right';
 export type SftpEndpointKind = 'local' | 'remote';
 export type FileEntryKind = 'folder' | 'file' | 'symlink' | 'unknown';
+export type HostContainerRuntime = 'docker' | 'podman';
+export type HostContainerAction = 'start' | 'stop' | 'restart' | 'remove';
 export type SftpBrowserColumnKey = 'name' | 'dateModified' | 'size' | 'kind';
 export type ConflictResolution = 'overwrite' | 'skip' | 'keepBoth';
 export type PortForwardMode = 'local' | 'remote' | 'dynamic';
-export type PortForwardTransport = 'ssh' | 'aws-ssm';
+export type PortForwardTransport = 'ssh' | 'aws-ssm' | 'container';
 export type AwsSsmPortForwardTargetKind = 'instance-port' | 'remote-host';
 export type PortForwardStatus = 'stopped' | 'starting' | 'running' | 'error';
 export type KnownHostTrustStatus = 'trusted' | 'untrusted' | 'mismatch';
@@ -56,6 +58,9 @@ export type SftpConnectionStage =
   | 'sending-public-key'
   | 'opening-tunnel'
   | 'connecting-sftp';
+export type ConnectionProgressStage =
+  | SftpConnectionStage
+  | 'connecting-containers';
 
 export const AWS_SFTP_DEFAULT_PORT = 22;
 
@@ -723,8 +728,21 @@ export interface AwsSsmPortForwardRuleRecord extends PortForwardRuleBaseRecord {
   remoteHost?: string | null;
 }
 
+export interface ContainerPortForwardRuleRecord extends PortForwardRuleBaseRecord {
+  transport: 'container';
+  bindAddress: '127.0.0.1';
+  containerId: string;
+  containerName: string;
+  containerRuntime: HostContainerRuntime;
+  networkName: string;
+  targetPort: number;
+}
+
 // PortForwardRuleRecord는 사용자가 저장한 포워딩 규칙 자체를 표현한다.
-export type PortForwardRuleRecord = SshPortForwardRuleRecord | AwsSsmPortForwardRuleRecord;
+export type PortForwardRuleRecord =
+  | SshPortForwardRuleRecord
+  | AwsSsmPortForwardRuleRecord
+  | ContainerPortForwardRuleRecord;
 
 interface PortForwardDraftBase {
   label: string;
@@ -748,8 +766,21 @@ export interface AwsSsmPortForwardDraft extends PortForwardDraftBase {
   remoteHost?: string | null;
 }
 
+export interface ContainerPortForwardDraft extends PortForwardDraftBase {
+  transport: 'container';
+  bindAddress: '127.0.0.1';
+  containerId: string;
+  containerName: string;
+  containerRuntime: HostContainerRuntime;
+  networkName: string;
+  targetPort: number;
+}
+
 // PortForwardDraft는 생성/수정 폼에서 사용하는 입력 전용 모델이다.
-export type PortForwardDraft = SshPortForwardDraft | AwsSsmPortForwardDraft;
+export type PortForwardDraft =
+  | SshPortForwardDraft
+  | AwsSsmPortForwardDraft
+  | ContainerPortForwardDraft;
 
 // PortForwardRuntimeRecord는 현재 메모리에서 살아 있는 실행 상태 스냅샷이다.
 export interface PortForwardRuntimeRecord {
@@ -757,6 +788,7 @@ export interface PortForwardRuntimeRecord {
   hostId: string;
   transport: PortForwardTransport;
   mode?: PortForwardMode;
+  method?: 'ssh-native' | 'ssh-session-proxy' | 'ssm-remote-host';
   bindAddress: string;
   bindPort: number;
   status: PortForwardStatus;
@@ -782,12 +814,20 @@ export function isAwsSsmPortForwardRuleRecord(rule: PortForwardRuleRecord): rule
   return rule.transport === 'aws-ssm';
 }
 
+export function isContainerPortForwardRuleRecord(rule: PortForwardRuleRecord): rule is ContainerPortForwardRuleRecord {
+  return rule.transport === 'container';
+}
+
 export function isSshPortForwardDraft(rule: PortForwardDraft): rule is SshPortForwardDraft {
   return rule.transport === 'ssh';
 }
 
 export function isAwsSsmPortForwardDraft(rule: PortForwardDraft): rule is AwsSsmPortForwardDraft {
   return rule.transport === 'aws-ssm';
+}
+
+export function isContainerPortForwardDraft(rule: PortForwardDraft): rule is ContainerPortForwardDraft {
+  return rule.transport === 'container';
 }
 
 // KnownHostRecord는 신뢰된 호스트 키 한 건을 나타낸다.
@@ -943,6 +983,109 @@ export interface SftpConnectionProgressEvent {
   hostId: string;
   stage: SftpConnectionStage;
   message: string;
+}
+
+export interface ContainerConnectionProgressEvent {
+  endpointId: string;
+  hostId: string;
+  stage: ConnectionProgressStage;
+  message: string;
+}
+
+export interface HostContainerSummary {
+  id: string;
+  name: string;
+  runtime: HostContainerRuntime;
+  image: string;
+  status: string;
+  createdAt: string;
+  ports: string;
+}
+
+export interface HostContainerListResult {
+  hostId: string;
+  runtime: HostContainerRuntime | null;
+  unsupportedReason?: string | null;
+  containers: HostContainerSummary[];
+}
+
+export interface HostContainerMountSummary {
+  type: string;
+  source: string;
+  destination: string;
+  mode?: string | null;
+  readOnly: boolean;
+}
+
+export interface HostContainerNetworkSummary {
+  name: string;
+  ipAddress?: string | null;
+  aliases: string[];
+}
+
+export interface HostContainerPortBinding {
+  hostIp?: string | null;
+  hostPort?: number | null;
+}
+
+export interface HostContainerPortOption {
+  containerPort: number;
+  protocol: string;
+  publishedBindings: HostContainerPortBinding[];
+}
+
+export interface HostContainerDetails {
+  id: string;
+  name: string;
+  runtime: HostContainerRuntime;
+  image: string;
+  status: string;
+  createdAt: string;
+  command: string;
+  entrypoint: string;
+  mounts: HostContainerMountSummary[];
+  networks: HostContainerNetworkSummary[];
+  ports: HostContainerPortOption[];
+  environment: Array<{ key: string; value: string }>;
+  labels: Array<{ key: string; value: string }>;
+}
+
+export interface HostContainerLogsSnapshot {
+  hostId: string;
+  containerId: string;
+  runtime: HostContainerRuntime;
+  lines: string[];
+  cursor: string | null;
+}
+
+export interface HostContainerStatsSample {
+  hostId: string;
+  containerId: string;
+  runtime: HostContainerRuntime;
+  recordedAt: string;
+  cpuPercent: number;
+  memoryUsedBytes: number;
+  memoryLimitBytes: number;
+  memoryPercent: number;
+  networkRxBytes: number;
+  networkTxBytes: number;
+  blockReadBytes: number;
+  blockWriteBytes: number;
+}
+
+export interface HostContainerStatsSeries {
+  hostId: string;
+  containerId: string;
+  samples: HostContainerStatsSample[];
+}
+
+export interface HostContainerLogSearchResult {
+  hostId: string;
+  containerId: string;
+  runtime: HostContainerRuntime;
+  query: string;
+  lines: string[];
+  matchCount: number;
 }
 
 export type TransferEndpointRef =

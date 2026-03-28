@@ -33,7 +33,14 @@ import type {
   GroupRemoveMode,
   GroupRemoveResult,
   HostDraft,
+  HostContainerAction,
+  HostContainerDetails,
+  HostContainerListResult,
+  HostContainerLogsSnapshot,
+  HostContainerLogSearchResult,
+  HostContainerStatsSample,
   HostRecord,
+  ContainerConnectionProgressEvent,
   SecretMetadataRecord,
   SessionShareChatEvent,
   SessionShareControlSignal,
@@ -85,7 +92,18 @@ export type CoreCommandType =
   | "sftpChmod"
   | "sftpDelete"
   | "sftpTransferStart"
-  | "sftpTransferCancel";
+  | "sftpTransferCancel"
+  | "containersConnect"
+  | "containersDisconnect"
+  | "containersList"
+  | "containersInspect"
+  | "containersLogs"
+  | "containersStart"
+  | "containersStop"
+  | "containersRestart"
+  | "containersRemove"
+  | "containersStats"
+  | "containersSearchLogs";
 export type CoreEventType =
   | "status"
   | "connected"
@@ -106,7 +124,16 @@ export type CoreEventType =
   | "sftpTransferProgress"
   | "sftpTransferCompleted"
   | "sftpTransferFailed"
-  | "sftpTransferCancelled";
+  | "sftpTransferCancelled"
+  | "containersConnected"
+  | "containersDisconnected"
+  | "containersListed"
+  | "containersInspected"
+  | "containersLogs"
+  | "containersActionCompleted"
+  | "containersStats"
+  | "containersLogsSearched"
+  | "containersError";
 export type CoreStreamType = "write" | "data";
 
 // renderer는 hostId만 넘기고, 실제 비밀값 해석은 main 프로세스가 담당한다.
@@ -115,6 +142,7 @@ export interface DesktopConnectInput {
   cols: number;
   rows: number;
   title?: string;
+  command?: string;
   secrets?: HostSecretInput;
 }
 
@@ -143,6 +171,7 @@ export interface ResolvedCoreConnectPayload {
   trustedHostKeyBase64: string;
   cols: number;
   rows: number;
+  command?: string;
 }
 
 export interface ResolvedAwsConnectPayload {
@@ -182,6 +211,18 @@ export interface ResolvedSftpConnectPayload {
   trustedHostKeyBase64: string;
 }
 
+export interface ResolvedContainersConnectPayload {
+  host: string;
+  port: number;
+  username: string;
+  authType: AuthType;
+  password?: string;
+  privateKeyPem?: string;
+  privateKeyPath?: string;
+  passphrase?: string;
+  trustedHostKeyBase64: string;
+}
+
 export interface ResolvedHostKeyProbePayload {
   host: string;
   port: number;
@@ -202,6 +243,7 @@ export interface ResolvedPortForwardStartPayload {
   bindPort: number;
   targetHost?: string;
   targetPort?: number;
+  sourceEndpointId?: string;
 }
 
 export interface ResolvedSsmPortForwardStartPayload {
@@ -241,6 +283,31 @@ export interface SftpChmodInput {
   endpointId: string;
   path: string;
   mode: number;
+}
+
+export interface HostContainersLogsInput {
+  hostId: string;
+  containerId: string;
+  tail: number;
+  followCursor?: string | null;
+}
+
+export interface HostContainersActionInput {
+  hostId: string;
+  containerId: string;
+  action: HostContainerAction;
+}
+
+export interface HostContainersStatsInput {
+  hostId: string;
+  containerId: string;
+}
+
+export interface HostContainersSearchLogsInput {
+  hostId: string;
+  containerId: string;
+  tail: number;
+  query: string;
 }
 
 export interface KnownHostProbeInput {
@@ -484,6 +551,32 @@ export interface DesktopApi {
     remove: (secretRef: string) => Promise<void>;
     update: (input: KeychainSecretUpdateInput) => Promise<void>;
     cloneForHost: (input: KeychainSecretCloneInput) => Promise<void>;
+  };
+  containers: {
+    list: (hostId: string) => Promise<HostContainerListResult>;
+    inspect: (
+      hostId: string,
+      containerId: string,
+    ) => Promise<HostContainerDetails>;
+    logs: (
+      input: HostContainersLogsInput,
+    ) => Promise<HostContainerLogsSnapshot>;
+    openShell: (
+      hostId: string,
+      containerId: string,
+    ) => Promise<{ sessionId: string }>;
+    start: (hostId: string, containerId: string) => Promise<void>;
+    stop: (hostId: string, containerId: string) => Promise<void>;
+    restart: (hostId: string, containerId: string) => Promise<void>;
+    remove: (hostId: string, containerId: string) => Promise<void>;
+    stats: (input: HostContainersStatsInput) => Promise<HostContainerStatsSample>;
+    searchLogs: (
+      input: HostContainersSearchLogsInput,
+    ) => Promise<HostContainerLogSearchResult>;
+    release: (hostId: string) => Promise<void>;
+    onConnectionProgress: (
+      listener: (event: ContainerConnectionProgressEvent) => void,
+    ) => () => void;
   };
   sftp: {
     connect: (input: DesktopSftpConnectInput) => Promise<SftpEndpointSummary>;

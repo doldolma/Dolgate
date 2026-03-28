@@ -16,6 +16,7 @@ import type {
   ActivityLogRecord,
   AwsSsmPortForwardRuleRecord,
   AppTheme,
+  ContainerPortForwardRuleRecord,
   GlobalTerminalThemeId,
   GroupRecord,
   HostRecord,
@@ -243,6 +244,36 @@ function normalizePortForwardRule(value: unknown): PortForwardRuleRecord | null 
     typeof value.updatedAt !== 'string'
   ) {
     return null;
+  }
+
+  if (value.transport === 'container') {
+    if (
+      typeof value.containerId !== 'string' ||
+      typeof value.containerName !== 'string' ||
+      (value.containerRuntime !== 'docker' && value.containerRuntime !== 'podman') ||
+      typeof value.networkName !== 'string' ||
+      typeof value.targetPort !== 'number' ||
+      !Number.isFinite(value.targetPort)
+    ) {
+      return null;
+    }
+
+    const record: ContainerPortForwardRuleRecord = {
+      id: value.id,
+      label: value.label.trim(),
+      hostId: value.hostId,
+      transport: 'container',
+      bindAddress: '127.0.0.1',
+      bindPort: Math.max(0, Math.round(value.bindPort)),
+      containerId: value.containerId.trim(),
+      containerName: value.containerName.trim(),
+      containerRuntime: value.containerRuntime,
+      networkName: value.networkName.trim(),
+      targetPort: Math.round(value.targetPort),
+      createdAt: value.createdAt,
+      updatedAt: value.updatedAt
+    };
+    return record;
   }
 
   const transport = value.transport === 'aws-ssm' ? 'aws-ssm' : 'ssh';

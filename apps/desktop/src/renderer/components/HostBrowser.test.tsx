@@ -106,6 +106,7 @@ interface RenderBrowserOptions {
   onDuplicateHosts?: ReturnType<typeof vi.fn>;
   onRemoveGroup?: ReturnType<typeof vi.fn>;
   onRemoveHost?: ReturnType<typeof vi.fn>;
+  onOpenHostContainers?: ReturnType<typeof vi.fn>;
 }
 
 function renderBrowser({
@@ -118,7 +119,8 @@ function renderBrowser({
   onSelectHost = vi.fn(),
   onDuplicateHosts = vi.fn().mockResolvedValue(undefined),
   onRemoveGroup = vi.fn().mockResolvedValue(undefined),
-  onRemoveHost = vi.fn().mockResolvedValue(undefined)
+  onRemoveHost = vi.fn().mockResolvedValue(undefined),
+  onOpenHostContainers = vi.fn().mockResolvedValue(undefined)
 }: RenderBrowserOptions = {}) {
   return render(
     <HostBrowser
@@ -146,6 +148,7 @@ function renderBrowser({
       onMoveHostToGroup={vi.fn().mockResolvedValue(undefined)}
       onRemoveHost={onRemoveHost}
       onConnectHost={vi.fn().mockResolvedValue(undefined)}
+      onOpenHostContainers={onOpenHostContainers}
     />
   );
 }
@@ -240,6 +243,20 @@ describe('HostBrowser helpers', () => {
     renderBrowser();
 
     expect(screen.getByText('SSH 설정 확인 중')).toBeInTheDocument();
+  });
+
+  it('shows the containers action in the host context menu and opens the host-scoped page', async () => {
+    const onOpenHostContainers = vi.fn().mockResolvedValue(undefined);
+    renderBrowser({ onOpenHostContainers });
+
+    const appCard = screen.getByText('App').closest('article') as HTMLElement;
+
+    fireEvent.contextMenu(appCard);
+    fireEvent.click(screen.getByRole('button', { name: '컨테이너' }));
+
+    await waitFor(() => {
+      expect(onOpenHostContainers).toHaveBeenCalledWith('host-1');
+    });
   });
 });
 

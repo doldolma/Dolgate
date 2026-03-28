@@ -4,6 +4,7 @@ import type { AppTheme, AuthState, DesktopWindowState, HostRecord, LinkedHostSum
 import { AppTitleBar } from './components/AppTitleBar';
 import { AwsImportDialog } from './components/AwsImportDialog';
 import { AwsSftpConfigRetryDialog } from './components/AwsSftpConfigRetryDialog';
+import { ContainersWorkspace } from './components/ContainersWorkspace';
 import { CredentialRetryDialog } from './components/CredentialRetryDialog';
 import { HomeNavigation } from './components/HomeNavigation';
 import { HostBrowser } from './components/HostBrowser';
@@ -219,6 +220,11 @@ export function App() {
   const [hostBrowserError, setHostBrowserError] = useState<string | null>(null);
   const [hostBrowserStatus, setHostBrowserStatus] = useState<string | null>(null);
   const [draggedSession, setDraggedSession] = useState<DraggedSessionPayload | null>(null);
+  const [draggedContainerHostId, setDraggedContainerHostId] = useState<string | null>(null);
+  const [containerTabDropPreview, setContainerTabDropPreview] = useState<{
+    targetHostId: string;
+    placement: 'before' | 'after';
+  } | null>(null);
   const [updateState, setUpdateState] = useState<UpdateState>(createDefaultUpdateState);
   const [windowState, setWindowState] = useState<DesktopWindowState>(createDefaultWindowState);
   const [isLoginServerSettingsLoading, setIsLoginServerSettingsLoading] = useState(true);
@@ -232,6 +238,8 @@ export function App() {
   const tabs = useAppStore((state) => state.tabs);
   const workspaces = useAppStore((state) => state.workspaces);
   const tabStrip = useAppStore((state) => state.tabStrip);
+  const containerTabs = useAppStore((state) => state.containerTabs);
+  const activeContainerHostId = useAppStore((state) => state.activeContainerHostId);
   const portForwards = useAppStore((state) => state.portForwards);
   const portForwardRuntimes = useAppStore((state) => state.portForwardRuntimes);
   const knownHosts = useAppStore((state) => state.knownHosts);
@@ -253,6 +261,8 @@ export function App() {
   const activateHome = useAppStore((state) => state.activateHome);
   const activateSession = useAppStore((state) => state.activateSession);
   const activateWorkspace = useAppStore((state) => state.activateWorkspace);
+  const activateContainers = useAppStore((state) => state.activateContainers);
+  const focusHostContainersTab = useAppStore((state) => state.focusHostContainersTab);
   const openHomeSection = useAppStore((state) => state.openHomeSection);
   const openSettingsSection = useAppStore((state) => state.openSettingsSection);
   const openCreateHostDrawer = useAppStore((state) => state.openCreateHostDrawer);
@@ -282,6 +292,21 @@ export function App() {
   const toggleWorkspaceBroadcast = useAppStore((state) => state.toggleWorkspaceBroadcast);
   const resizeWorkspaceSplit = useAppStore((state) => state.resizeWorkspaceSplit);
   const activateSftp = useAppStore((state) => state.activateSftp);
+  const openHostContainersTab = useAppStore((state) => state.openHostContainersTab);
+  const closeHostContainersTab = useAppStore((state) => state.closeHostContainersTab);
+  const reorderContainerTab = useAppStore((state) => state.reorderContainerTab);
+  const refreshHostContainers = useAppStore((state) => state.refreshHostContainers);
+  const selectHostContainer = useAppStore((state) => state.selectHostContainer);
+  const setHostContainersPanel = useAppStore((state) => state.setHostContainersPanel);
+  const refreshHostContainerLogs = useAppStore((state) => state.refreshHostContainerLogs);
+  const loadMoreHostContainerLogs = useAppStore((state) => state.loadMoreHostContainerLogs);
+  const setHostContainerLogsFollow = useAppStore((state) => state.setHostContainerLogsFollow);
+  const setHostContainerLogsSearchQuery = useAppStore((state) => state.setHostContainerLogsSearchQuery);
+  const searchHostContainerLogs = useAppStore((state) => state.searchHostContainerLogs);
+  const clearHostContainerLogsSearch = useAppStore((state) => state.clearHostContainerLogsSearch);
+  const refreshHostContainerStats = useAppStore((state) => state.refreshHostContainerStats);
+  const runHostContainerAction = useAppStore((state) => state.runHostContainerAction);
+  const openHostContainerShell = useAppStore((state) => state.openHostContainerShell);
   const updateSettings = useAppStore((state) => state.updateSettings);
   const savePortForward = useAppStore((state) => state.savePortForward);
   const removePortForward = useAppStore((state) => state.removePortForward);
@@ -305,6 +330,9 @@ export function App() {
   const handleCoreEvent = useAppStore((state) => state.handleCoreEvent);
   const handleSftpConnectionProgressEvent = useAppStore(
     (state) => state.handleSftpConnectionProgressEvent,
+  );
+  const handleContainerConnectionProgressEvent = useAppStore(
+    (state) => state.handleContainerConnectionProgressEvent,
   );
   const handleTransferEvent = useAppStore((state) => state.handleTransferEvent);
   const handlePortForwardEvent = useAppStore((state) => state.handlePortForwardEvent);
@@ -396,6 +424,12 @@ export function App() {
             handleSftpConnectionProgressEvent,
           )
         : () => undefined;
+    const offContainersProgress =
+      typeof window.dolssh.containers.onConnectionProgress === "function"
+        ? window.dolssh.containers.onConnectionProgress(
+            handleContainerConnectionProgressEvent,
+          )
+        : () => undefined;
     const offTransfer = window.dolssh.sftp.onTransferEvent(handleTransferEvent);
     const offForward = window.dolssh.portForwards.onEvent(handlePortForwardEvent);
     const offSessionShare = window.dolssh.sessionShares.onEvent(handleSessionShareEvent);
@@ -420,6 +454,7 @@ export function App() {
     return () => {
       offCore();
       offSftpProgress();
+      offContainersProgress();
       offTransfer();
       offForward();
       offSessionShare();
@@ -429,6 +464,7 @@ export function App() {
   }, [
     bootstrap,
     handleCoreEvent,
+    handleContainerConnectionProgressEvent,
     handleSftpConnectionProgressEvent,
     handlePortForwardEvent,
     handleSessionShareChatEvent,
@@ -535,14 +571,23 @@ export function App() {
 
   const isHomeActive = activeWorkspaceTab === 'home';
   const isSftpActive = activeWorkspaceTab === 'sftp';
+  const activeContainersHostId =
+    activeWorkspaceTab === 'containers'
+      ? activeContainerHostId ?? containerTabs[0]?.hostId ?? null
+      : null;
   const activeSessionId = activeWorkspaceTab.startsWith('session:') ? activeWorkspaceTab.slice('session:'.length) : null;
   const activeWorkspace =
     activeWorkspaceTab.startsWith('workspace:')
       ? workspaces.find((workspace) => workspace.id === activeWorkspaceTab.slice('workspace:'.length)) ?? null
       : null;
+  const activeContainersTab = activeContainersHostId
+    ? containerTabs.find((tab) => tab.hostId === activeContainersHostId) ?? null
+    : null;
+  const activeContainerHost = findHost(hosts, activeContainersHostId);
   const sessionViewActivationKey =
-    activeWorkspaceTab === 'home' || activeWorkspaceTab === 'sftp' ? null : activeWorkspaceTab;
-  const isSessionViewActive = !isHomeActive && !isSftpActive;
+    activeWorkspaceTab === 'home' || activeWorkspaceTab === 'sftp' || activeWorkspaceTab === 'containers' ? null : activeWorkspaceTab;
+  const isContainersActive = activeWorkspaceTab === 'containers';
+  const isSessionViewActive = !isHomeActive && !isSftpActive && !isContainersActive;
   const editingHostId = hostDrawer.mode === 'edit' ? hostDrawer.hostId : null;
   const currentHost = findHost(hosts, editingHostId);
   const groupOptions = useMemo(
@@ -793,6 +838,7 @@ export function App() {
         windowState={windowState}
         onSelectHome={activateHome}
         onSelectSftp={activateSftp}
+        onSelectContainers={activateContainers}
         onSelectSession={activateSession}
         onSelectWorkspace={activateWorkspace}
         onCloseSession={disconnectTab}
@@ -940,6 +986,16 @@ export function App() {
                     setHostBrowserError(error instanceof Error ? error.message : '호스트 연결을 시작하지 못했습니다.');
                   }
                 }}
+                onOpenHostContainers={async (hostId) => {
+                  try {
+                    setHostBrowserError(null);
+                    setHostBrowserStatus(null);
+                    setSelectedHostId(hostId);
+                    await openHostContainersTab(hostId);
+                  } catch (error) {
+                    setHostBrowserError(error instanceof Error ? error.message : '컨테이너 페이지를 열지 못했습니다.');
+                  }
+                }}
               />
             ) : null}
 
@@ -948,10 +1004,15 @@ export function App() {
                 hosts={hosts}
                 rules={portForwards}
                 runtimes={portForwardRuntimes}
+                interactiveAuth={pendingInteractiveAuth?.source === 'portForward' ? pendingInteractiveAuth : null}
+                discoveryInteractiveAuth={pendingInteractiveAuth?.source === 'containers' ? pendingInteractiveAuth : null}
                 onSave={savePortForward}
                 onRemove={removePortForward}
                 onStart={startPortForward}
                 onStop={stopPortForward}
+                onRespondInteractiveAuth={respondInteractiveAuth}
+                onReopenInteractiveAuthUrl={reopenInteractiveAuthUrl}
+                onClearInteractiveAuth={clearPendingInteractiveAuth}
               />
             ) : null}
 
@@ -1130,6 +1191,159 @@ export function App() {
               onClearInteractiveAuth={clearPendingInteractiveAuth}
               onUpdateSettings={updateSettings}
             />
+          </div>
+        </section>
+
+        <section className={`containers-shell ${isContainersActive ? 'active' : 'hidden'}`}>
+          {authState.status === 'offline-authenticated' && authState.offline ? (
+            <OfflineModeBanner
+              expiryLabel={offlineLeaseExpiryLabel}
+              isRetrying={isRetryingOnline}
+              onRetry={() => {
+                void handleRetryOnline();
+              }}
+              />
+            ) : null}
+          <div className="containers-shell__tabs" role="tablist" aria-label="Containers hosts">
+            {containerTabs.length > 0 ? (
+              containerTabs.map((tab) => {
+                const host = findHost(hosts, tab.hostId);
+                const title = host?.label ?? tab.title.replace(/ · Containers$/, '');
+                const runtimeLabel =
+                  tab.runtime === 'docker'
+                    ? 'Docker'
+                    : tab.runtime === 'podman'
+                      ? 'Podman'
+                      : null;
+                const isActiveTab = activeContainersHostId === tab.hostId;
+                const preview =
+                  containerTabDropPreview?.targetHostId === tab.hostId
+                    ? containerTabDropPreview.placement
+                    : null;
+                return (
+                  <div
+                    key={tab.hostId}
+                    className={`containers-shell__tab-shell ${isActiveTab ? 'active' : ''} ${
+                      preview === 'before' ? 'containers-shell__tab-shell--drop-before' : ''
+                    } ${preview === 'after' ? 'containers-shell__tab-shell--drop-after' : ''}`}
+                    draggable
+                    onDragStart={(event) => {
+                      event.dataTransfer.effectAllowed = 'move';
+                      event.dataTransfer.setData('text/plain', tab.hostId);
+                      setDraggedContainerHostId(tab.hostId);
+                    }}
+                    onDragEnd={() => {
+                      setDraggedContainerHostId(null);
+                      setContainerTabDropPreview(null);
+                    }}
+                    onDragOver={(event) => {
+                      if (!draggedContainerHostId || draggedContainerHostId === tab.hostId) {
+                        return;
+                      }
+                      event.preventDefault();
+                      const bounds = event.currentTarget.getBoundingClientRect();
+                      setContainerTabDropPreview({
+                        targetHostId: tab.hostId,
+                        placement:
+                          event.clientX <= bounds.left + bounds.width / 2
+                            ? 'before'
+                            : 'after',
+                      });
+                    }}
+                    onDragLeave={(event) => {
+                      const nextTarget = event.relatedTarget;
+                      if (nextTarget instanceof Node && event.currentTarget.contains(nextTarget)) {
+                        return;
+                      }
+                      setContainerTabDropPreview((current) =>
+                        current?.targetHostId === tab.hostId ? null : current,
+                      );
+                    }}
+                    onDrop={(event) => {
+                      if (!draggedContainerHostId || draggedContainerHostId === tab.hostId) {
+                        return;
+                      }
+                      event.preventDefault();
+                      const bounds = event.currentTarget.getBoundingClientRect();
+                      reorderContainerTab(
+                        draggedContainerHostId,
+                        tab.hostId,
+                        event.clientX <= bounds.left + bounds.width / 2
+                          ? 'before'
+                          : 'after',
+                      );
+                      setDraggedContainerHostId(null);
+                      setContainerTabDropPreview(null);
+                    }}
+                  >
+                    <button
+                      type="button"
+                      role="tab"
+                      aria-selected={isActiveTab}
+                      className={`containers-shell__tab ${isActiveTab ? 'active' : ''}`}
+                      onClick={() => {
+                        focusHostContainersTab(tab.hostId);
+                      }}
+                    >
+                      <span className="containers-shell__tab-title">{title}</span>
+                      {runtimeLabel ? (
+                        <span className="containers-shell__tab-badge">{runtimeLabel}</span>
+                      ) : null}
+                    </button>
+                    <button
+                      type="button"
+                      className="containers-shell__tab-close"
+                      aria-label={`${title} 닫기`}
+                      onClick={async (event) => {
+                        event.stopPropagation();
+                        await closeHostContainersTab(tab.hostId);
+                      }}
+                    >
+                      ×
+                    </button>
+                  </div>
+                );
+              })
+            ) : (
+              <div className="containers-shell__tabs-empty">
+                열린 컨테이너 화면이 없습니다.
+              </div>
+            )}
+          </div>
+          <div className="containers-shell__content">
+            {activeContainerHost && activeContainersTab ? (
+              <ContainersWorkspace
+                host={activeContainerHost}
+                tab={activeContainersTab}
+                isActive={isContainersActive}
+                interactiveAuth={
+                  pendingInteractiveAuth?.source === "containers"
+                    ? pendingInteractiveAuth
+                    : null
+                }
+                onRefresh={refreshHostContainers}
+                onSelectContainer={selectHostContainer}
+                onSetPanel={setHostContainersPanel}
+                onRefreshLogs={refreshHostContainerLogs}
+                onLoadMoreLogs={loadMoreHostContainerLogs}
+                onSetLogsFollow={setHostContainerLogsFollow}
+                onSetLogsSearchQuery={setHostContainerLogsSearchQuery}
+                onSearchLogs={searchHostContainerLogs}
+                onClearLogsSearch={clearHostContainerLogsSearch}
+                onRefreshMetrics={refreshHostContainerStats}
+                onRunAction={runHostContainerAction}
+                onOpenShell={openHostContainerShell}
+                onRespondInteractiveAuth={respondInteractiveAuth}
+                onReopenInteractiveAuthUrl={reopenInteractiveAuthUrl}
+                onClearInteractiveAuth={clearPendingInteractiveAuth}
+              />
+            ) : (
+              <div className="empty-state-card containers-shell__empty-state">
+                <div className="eyebrow">Containers</div>
+                <h3>열린 컨테이너 화면이 없습니다.</h3>
+                <p>Host 카드에서 우클릭한 뒤 컨테이너를 열어 주세요.</p>
+              </div>
+            )}
           </div>
         </section>
 

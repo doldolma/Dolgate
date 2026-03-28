@@ -251,19 +251,19 @@ func TestBrowserSignupAcceptsLoopbackRedirectURI(t *testing.T) {
 	recorder := httptest.NewRecorder()
 	router.ServeHTTP(recorder, request)
 
-	if recorder.Code != http.StatusFound {
-		t.Fatalf("expected redirect, got %d: %s", recorder.Code, recorder.Body.String())
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected bridge page, got %d: %s", recorder.Code, recorder.Body.String())
 	}
 
-	location := recorder.Header().Get("Location")
-	if !strings.HasPrefix(location, "http://127.0.0.1:43123/auth/callback?") {
-		t.Fatalf("unexpected redirect location: %s", location)
+	body := recorder.Body.String()
+	if !strings.Contains(body, "http://127.0.0.1:43123/auth/callback?") {
+		t.Fatalf("expected loopback callback url in bridge page: %s", body)
 	}
-	if !strings.Contains(location, "code=") {
-		t.Fatalf("expected exchange code in redirect location: %s", location)
+	if !strings.Contains(body, "code=") {
+		t.Fatalf("expected exchange code in bridge page: %s", body)
 	}
-	if !strings.Contains(location, "state=state-123") {
-		t.Fatalf("expected state in redirect location: %s", location)
+	if !strings.Contains(body, "state=state-123") {
+		t.Fatalf("expected state in bridge page: %s", body)
 	}
 }
 

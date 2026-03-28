@@ -6,9 +6,11 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 	"sync"
 
 	"dolssh/services/ssh-core/internal/awssession"
+	containersvc "dolssh/services/ssh-core/internal/containers"
 	"dolssh/services/ssh-core/internal/forwarding"
 	"dolssh/services/ssh-core/internal/localsession"
 	"dolssh/services/ssh-core/internal/protocol"
@@ -46,9 +48,11 @@ func main() {
 	awsManager := awssession.NewManager(writer.emit, writer.emitStream)
 	localManager := localsession.NewManager(writer.emit, writer.emitStream)
 	sftpService := coresftp.New(writer.emit)
+	containersService := containersvc.New(writer.emit)
 	forwardingService := forwarding.New(writer.emit)
 	ssmForwardingService := ssmforward.New(writer.emit)
 	defer sftpService.Shutdown()
+	defer containersService.Shutdown()
 	defer forwardingService.Shutdown()
 	defer ssmForwardingService.Shutdown()
 
@@ -77,11 +81,13 @@ func main() {
 			return
 		}
 
-		if err := dispatchFrame(manager, awsManager, localManager, sftpService, forwardingService, ssmForwardingService, writer, frame); err != nil {
+		if err := dispatchFrame(manager, awsManager, localManager, sftpService, containersService, forwardingService, ssmForwardingService, writer, frame); err != nil {
 			// 명령 단위 오류는 requestId/sessionId를 포함해 상위 레이어가 추적하기 쉽게 한다.
 			eventType := protocol.EventError
 			if isSFTPCommand(frame) {
 				eventType = protocol.EventSFTPError
+			} else if isContainersCommand(frame) {
+				eventType = protocol.EventContainersError
 			} else if isPortForwardCommand(frame) {
 				eventType = protocol.EventPortForwardError
 			}
@@ -104,6 +110,7 @@ func dispatchFrame(
 	awsManager *awssession.Manager,
 	localManager *localsession.Manager,
 	sftpService *coresftp.Service,
+	containersService *containersvc.Service,
 	forwardingService *forwarding.Service,
 	ssmForwardingService *ssmforward.Service,
 	writer *eventWriter,
@@ -130,7 +137,7 @@ func dispatchFrame(
 	if err := protocol.DecodeControlFrame(frame, &request); err != nil {
 		return fmt.Errorf("invalid control frame: %w", err)
 	}
-	return dispatch(manager, awsManager, localManager, sftpService, forwardingService, ssmForwardingService, writer, request)
+	return dispatch(manager, awsManager, localManager, sftpService, containersService, forwardingService, ssmForwardingService, writer, request)
 }
 
 func dispatch(
@@ -138,6 +145,7 @@ func dispatch(
 	awsManager *awssession.Manager,
 	localManager *localsession.Manager,
 	sftpService *coresftp.Service,
+	containersService *containersvc.Service,
 	forwardingService *forwarding.Service,
 	ssmForwardingService *ssmforward.Service,
 	writer *eventWriter,
@@ -263,13 +271,101 @@ func dispatch(
 			return err
 		}
 		if request.EndpointID != "" {
+			if strings.HasPrefix(request.EndpointID, "containers:") {
+				return containersService.RespondKeyboardInteractive(request.EndpointID, payload.ChallengeID, payload.Responses)
+			}
+			if err := forwardingService.RespondKeyboardInteractive(request.EndpointID, payload.ChallengeID, payload.Responses); err == nil {
+				return nil
+			}
 			return sftpService.RespondKeyboardInteractive(request.EndpointID, payload.ChallengeID, payload.Responses)
 		}
 		return manager.RespondKeyboardInteractive(request.SessionID, payload.ChallengeID, payload.Responses)
+	case protocol.CommandContainersConnect:
+		var payload protocol.ContainersConnectPayload
+		if err := json.Unmarshal(request.Payload, &payload); err != nil {
+			return err
+		}
+		go func(endpointID, requestID string, connectPayload protocol.ContainersConnectPayload) {
+			if err := containersService.Connect(endpointID, requestID, connectPayload); err != nil {
+				writer.emit(protocol.Event{
+					Type:       protocol.EventContainersError,
+					RequestID:  requestID,
+					EndpointID: endpointID,
+					Payload: protocol.ErrorPayload{
+						Message: err.Error(),
+					},
+				})
+			}
+		}(request.EndpointID, request.ID, payload)
+		return nil
+	case protocol.CommandContainersDisconnect:
+		return containersService.Disconnect(request.EndpointID, request.ID)
+	case protocol.CommandContainersList:
+		return containersService.List(request.EndpointID, request.ID)
+	case protocol.CommandContainersInspect:
+		var payload protocol.ContainersInspectPayload
+		if err := json.Unmarshal(request.Payload, &payload); err != nil {
+			return err
+		}
+		return containersService.Inspect(request.EndpointID, request.ID, payload)
+	case protocol.CommandContainersLogs:
+		var payload protocol.ContainersLogsPayload
+		if err := json.Unmarshal(request.Payload, &payload); err != nil {
+			return err
+		}
+		return containersService.Logs(request.EndpointID, request.ID, payload)
+	case protocol.CommandContainersStart:
+		var payload protocol.ContainersActionPayload
+		if err := json.Unmarshal(request.Payload, &payload); err != nil {
+			return err
+		}
+		return containersService.Start(request.EndpointID, request.ID, payload)
+	case protocol.CommandContainersStop:
+		var payload protocol.ContainersActionPayload
+		if err := json.Unmarshal(request.Payload, &payload); err != nil {
+			return err
+		}
+		return containersService.Stop(request.EndpointID, request.ID, payload)
+	case protocol.CommandContainersRestart:
+		var payload protocol.ContainersActionPayload
+		if err := json.Unmarshal(request.Payload, &payload); err != nil {
+			return err
+		}
+		return containersService.Restart(request.EndpointID, request.ID, payload)
+	case protocol.CommandContainersRemove:
+		var payload protocol.ContainersActionPayload
+		if err := json.Unmarshal(request.Payload, &payload); err != nil {
+			return err
+		}
+		return containersService.Remove(request.EndpointID, request.ID, payload)
+	case protocol.CommandContainersStats:
+		var payload protocol.ContainersStatsPayload
+		if err := json.Unmarshal(request.Payload, &payload); err != nil {
+			return err
+		}
+		return containersService.Stats(request.EndpointID, request.ID, payload)
+	case protocol.CommandContainersSearchLogs:
+		var payload protocol.ContainersSearchLogsPayload
+		if err := json.Unmarshal(request.Payload, &payload); err != nil {
+			return err
+		}
+		return containersService.SearchLogs(request.EndpointID, request.ID, payload)
 	case protocol.CommandPortForwardStart:
 		var payload protocol.PortForwardStartPayload
 		if err := json.Unmarshal(request.Payload, &payload); err != nil {
 			return err
+		}
+		if payload.SourceEndpointID != "" {
+			client, err := containersService.TakeClient(payload.SourceEndpointID)
+			if err != nil {
+				return err
+			}
+			return forwardingService.StartWithClient(
+				request.EndpointID,
+				request.ID,
+				payload,
+				client,
+			)
 		}
 		return forwardingService.Start(request.EndpointID, request.ID, payload)
 	case protocol.CommandSSMPortForwardStart:
@@ -423,6 +519,34 @@ func isSFTPCommand(frame protocol.Frame) bool {
 	}
 }
 
+func isContainersCommand(frame protocol.Frame) bool {
+	if frame.Kind != protocol.FrameKindControl {
+		return false
+	}
+	var request protocol.Request
+	if err := protocol.DecodeControlFrame(frame, &request); err != nil {
+		return false
+	}
+	switch request.Type {
+	case protocol.CommandKeyboardInteractiveRespond:
+		return strings.HasPrefix(request.EndpointID, "containers:")
+	case protocol.CommandContainersConnect,
+		protocol.CommandContainersDisconnect,
+		protocol.CommandContainersList,
+		protocol.CommandContainersInspect,
+		protocol.CommandContainersLogs,
+		protocol.CommandContainersStart,
+		protocol.CommandContainersStop,
+		protocol.CommandContainersRestart,
+		protocol.CommandContainersRemove,
+		protocol.CommandContainersStats,
+		protocol.CommandContainersSearchLogs:
+		return true
+	default:
+		return false
+	}
+}
+
 func isPortForwardCommand(frame protocol.Frame) bool {
 	if frame.Kind != protocol.FrameKindControl {
 		return false
@@ -432,6 +556,8 @@ func isPortForwardCommand(frame protocol.Frame) bool {
 		return false
 	}
 	switch request.Type {
+	case protocol.CommandKeyboardInteractiveRespond:
+		return request.EndpointID != "" && !strings.HasPrefix(request.EndpointID, "containers:")
 	case protocol.CommandPortForwardStart, protocol.CommandSSMPortForwardStart, protocol.CommandPortForwardStop, protocol.CommandSSMPortForwardStop:
 		return true
 	default:

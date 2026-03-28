@@ -135,6 +135,20 @@ export const ipcChannels = {
     update: 'keychain:update',
     cloneForHost: 'keychain:clone-for-host'
   },
+  containers: {
+    list: 'containers:list',
+    inspect: 'containers:inspect',
+    logs: 'containers:logs',
+    start: 'containers:start',
+    stop: 'containers:stop',
+    restart: 'containers:restart',
+    remove: 'containers:remove',
+    stats: 'containers:stats',
+    searchLogs: 'containers:search-logs',
+    openShell: 'containers:open-shell',
+    release: 'containers:release',
+    connectionProgress: 'containers:connection-progress'
+  },
   files: {
     getHomeDirectory: 'files:get-home-directory',
     getDownloadsDirectory: 'files:get-downloads-directory',

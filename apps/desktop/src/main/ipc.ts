@@ -25,6 +25,7 @@ import type {
   AuthState,
   AppSettings,
   DesktopConnectInput,
+  HostContainerRuntime,
   DesktopLocalConnectInput,
   OpenSshSnapshotFileInput,
   OpenSshImportSelectionInput,
@@ -44,6 +45,9 @@ import type {
   ManagedSecretPayload,
   KnownHostProbeInput,
   KnownHostTrustInput,
+  HostContainersLogsInput,
+  HostContainersSearchLogsInput,
+  HostContainersStatsInput,
   PortForwardDraft,
   SessionShareInputToggleInput,
   SessionShareSnapshotInput,
@@ -72,6 +76,7 @@ import { AuthService } from "./auth-service";
 import { AwsSsmTunnelService } from "./aws-ssm-tunnel-service";
 import { AwsService } from "./aws-service";
 import { CoreManager } from "./core-manager";
+import { resolveContainerTunnelTarget } from "./container-port-forward-target";
 import { LocalFileService } from "./file-service";
 import { SecretStore } from "./secret-store";
 import { SessionShareService } from "./session-share-service";
@@ -216,7 +221,8 @@ async function resolveManagedPrivateKeyPem(
 
 function base64UrlToBuffer(value: string): Buffer {
   const normalized = value.replace(/-/g, "+").replace(/_/g, "/");
-  const padding = normalized.length % 4 === 0 ? "" : "=".repeat(4 - (normalized.length % 4));
+  const padding =
+    normalized.length % 4 === 0 ? "" : "=".repeat(4 - (normalized.length % 4));
   return Buffer.from(`${normalized}${padding}`, "base64");
 }
 
@@ -252,6 +258,20 @@ function createEphemeralAwsSftpKeyPair(): {
   };
 }
 
+function quotePosix(value: string): string {
+  return `'${value.replace(/'/g, `'\"'\"'`)}'`;
+}
+
+function buildContainerShellCommand(
+  runtimeCommand: string,
+  containerId: string,
+): string {
+  const quotedContainerId = quotePosix(containerId);
+  const quotedRuntimeCommand = quotePosix(runtimeCommand);
+  const shellCommand = `${quotedRuntimeCommand} exec -it ${quotedContainerId} /bin/sh || ${quotedRuntimeCommand} exec -it ${quotedContainerId} /bin/bash`;
+  return `sh -lc ${quotePosix(shellCommand)}`;
+}
+
 async function reserveLoopbackPort(): Promise<number> {
   return new Promise((resolve, reject) => {
     const server = createServer();
@@ -259,7 +279,9 @@ async function reserveLoopbackPort(): Promise<number> {
     server.listen(0, "127.0.0.1", () => {
       const address = server.address();
       if (!address || typeof address === "string") {
-        server.close(() => reject(new Error("로컬 포트를 예약하지 못했습니다.")));
+        server.close(() =>
+          reject(new Error("로컬 포트를 예약하지 못했습니다.")),
+        );
         return;
       }
       const port = address.port;
@@ -310,6 +332,17 @@ type AwsSftpProgressStage =
   | "sending-public-key"
   | "opening-tunnel"
   | "connecting-sftp";
+
+type AwsConnectionProgressEvent = {
+  endpointId: string;
+  hostId: string;
+  stage: AwsSftpProgressStage;
+  message: string;
+};
+
+type AwsConnectionProgressEmitter = (
+  event: AwsConnectionProgressEvent,
+) => void;
 
 function getSftpStageLabel(stage: AwsSftpProgressStage): string {
   switch (stage) {
@@ -383,7 +416,8 @@ async function hydrateAwsHostForSftp(
     toAwsHostDraft(host, {
       awsAvailabilityZone:
         summary.availabilityZone ?? host.awsAvailabilityZone ?? null,
-      awsInstanceName: summary.name || host.awsInstanceName || host.awsInstanceId,
+      awsInstanceName:
+        summary.name || host.awsInstanceName || host.awsInstanceId,
       awsPlatform: summary.platform ?? host.awsPlatform ?? null,
       awsPrivateIp: summary.privateIp ?? host.awsPrivateIp ?? null,
       awsState: summary.state ?? host.awsState ?? null,
@@ -489,16 +523,12 @@ async function buildHostKeyProbeResult(
   knownHosts: KnownHostRepository,
   coreManager: CoreManager,
   awsSsmTunnelService: AwsSsmTunnelService,
-  emitSftpConnectionProgress: (event: {
-    endpointId: string;
-    hostId: string;
-    stage: AwsSftpProgressStage;
-    message: string;
-  }) => void,
+  emitConnectionProgress: AwsConnectionProgressEmitter,
   resolveAwsSftpPreflight: (input: {
     endpointId: string;
     host: Extract<HostRecord, { kind: "aws-ec2" }>;
     allowBrowserLogin: boolean;
+    emitProgress?: AwsConnectionProgressEmitter;
   }) => Promise<Extract<HostRecord, { kind: "aws-ec2" }>>,
   storeAwsSftpPreflight: (
     endpointId: string,
@@ -521,7 +551,7 @@ async function buildHostKeyProbeResult(
       if (!endpointId) {
         return;
       }
-      emitSftpConnectionProgress({
+      emitConnectionProgress({
         endpointId,
         hostId,
         stage,
@@ -540,6 +570,7 @@ async function buildHostKeyProbeResult(
         endpointId,
         host,
         allowBrowserLogin: true,
+        emitProgress: emitConnectionProgress,
       });
 
       currentStage = "opening-tunnel";
@@ -577,12 +608,11 @@ async function buildHostKeyProbeResult(
         });
         const knownHostPort = getAwsEc2HostSshPort(hydratedHost);
         const existing = knownHosts.getByHostPort(knownHost, knownHostPort);
-        const status =
-          !existing
-            ? "untrusted"
-            : existing.publicKeyBase64 === probed.publicKeyBase64
-              ? "trusted"
-              : "mismatch";
+        const status = !existing
+          ? "untrusted"
+          : existing.publicKeyBase64 === probed.publicKeyBase64
+            ? "trusted"
+            : "mismatch";
 
         if (status === "trusted") {
           knownHosts.touch(knownHost, knownHostPort);
@@ -604,9 +634,7 @@ async function buildHostKeyProbeResult(
           existing,
         };
       } finally {
-        await awsSsmTunnelService
-          .stop(tunnel.runtimeId)
-          .catch(() => undefined);
+        await awsSsmTunnelService.stop(tunnel.runtimeId).catch(() => undefined);
       }
     } catch (error) {
       if (error instanceof Error && /^\[/.test(error.message)) {
@@ -680,7 +708,9 @@ function assertSftpCompatibleHost(
     !isWarpgateSshHostRecord(host) &&
     !isAwsEc2HostRecord(host)
   ) {
-    throw new Error("이 기능은 SSH, AWS, Warpgate host에서만 사용할 수 있습니다.");
+    throw new Error(
+      "이 기능은 SSH, AWS, Warpgate host에서만 사용할 수 있습니다.",
+    );
   }
 }
 
@@ -750,7 +780,9 @@ function buildKnownSshDuplicateKeys(hosts: HostRepository): Set<string> {
     hosts
       .list()
       .filter(isSshHostRecord)
-      .map((host) => buildSshDuplicateKey(host.hostname, host.port, host.username)),
+      .map((host) =>
+        buildSshDuplicateKey(host.hostname, host.port, host.username),
+      ),
   );
 }
 
@@ -801,20 +833,33 @@ export function registerIpcHandlers(
     }
   >();
   const awsSftpTunnelRuntimeByEndpoint = new Map<string, string>();
+  const awsContainersTunnelRuntimeByEndpoint = new Map<string, string>();
+  const awsContainerShellTunnelRuntimeBySessionId = new Map<string, string>();
   const awsSftpPreflightByEndpointId = new Map<
     string,
     AwsSftpPreflightCacheEntry
   >();
 
-  const emitSftpConnectionProgress = (event: {
+  const emitSftpConnectionProgress: AwsConnectionProgressEmitter = (event) => {
+    for (const window of BrowserWindow.getAllWindows()) {
+      if (!window.isDestroyed()) {
+        window.webContents.send(ipcChannels.sftp.connectionProgress, event);
+      }
+    }
+  };
+
+  const emitContainersConnectionProgress = (event: {
     endpointId: string;
     hostId: string;
-    stage: AwsSftpProgressStage;
+    stage: AwsSftpProgressStage | "connecting-containers";
     message: string;
   }) => {
     for (const window of BrowserWindow.getAllWindows()) {
       if (!window.isDestroyed()) {
-        window.webContents.send(ipcChannels.sftp.connectionProgress, event);
+        window.webContents.send(
+          ipcChannels.containers.connectionProgress,
+          event,
+        );
       }
     }
   };
@@ -825,6 +870,40 @@ export function registerIpcHandlers(
       return;
     }
     awsSftpTunnelRuntimeByEndpoint.delete(endpointId);
+    await awsSsmTunnelService.stop(runtimeId).catch(() => undefined);
+  };
+
+  const buildContainersEndpointId = (hostId: string) => `containers:${hostId}`;
+  const buildContainerPortForwardEndpointId = (hostId: string, ruleId: string) =>
+    `containers:${hostId}:forward:${ruleId}`;
+
+  const stopAwsContainersTunnelForEndpoint = async (endpointId: string) => {
+    const runtimeId = awsContainersTunnelRuntimeByEndpoint.get(endpointId);
+    if (!runtimeId) {
+      return;
+    }
+    awsContainersTunnelRuntimeByEndpoint.delete(endpointId);
+    await awsSsmTunnelService.stop(runtimeId).catch(() => undefined);
+  };
+
+  const moveAwsContainersTunnelRuntime = (
+    sourceKey: string,
+    nextKey: string,
+  ) => {
+    const runtimeId = awsContainersTunnelRuntimeByEndpoint.get(sourceKey);
+    if (!runtimeId) {
+      return;
+    }
+    awsContainersTunnelRuntimeByEndpoint.delete(sourceKey);
+    awsContainersTunnelRuntimeByEndpoint.set(nextKey, runtimeId);
+  };
+
+  const stopAwsContainerShellTunnelForSession = async (sessionId: string) => {
+    const runtimeId = awsContainerShellTunnelRuntimeBySessionId.get(sessionId);
+    if (!runtimeId) {
+      return;
+    }
+    awsContainerShellTunnelRuntimeBySessionId.delete(sessionId);
     await awsSsmTunnelService.stop(runtimeId).catch(() => undefined);
   };
 
@@ -916,12 +995,18 @@ export function registerIpcHandlers(
     endpointId: string;
     host: Extract<HostRecord, { kind: "aws-ec2" }>;
     allowBrowserLogin: boolean;
+    emitProgress?: AwsConnectionProgressEmitter;
   }): Promise<Extract<HostRecord, { kind: "aws-ec2" }>> {
-    const { endpointId, host, allowBrowserLogin } = input;
+    const {
+      endpointId,
+      host,
+      allowBrowserLogin,
+      emitProgress = emitSftpConnectionProgress,
+    } = input;
     let currentStage: AwsSftpProgressStage = "checking-profile";
 
     try {
-      emitSftpConnectionProgress({
+      emitProgress({
         endpointId,
         hostId: host.id,
         stage: "checking-profile",
@@ -937,7 +1022,7 @@ export function registerIpcHandlers(
         }
 
         currentStage = "browser-login";
-        emitSftpConnectionProgress({
+        emitProgress({
           endpointId,
           hostId: host.id,
           stage: "browser-login",
@@ -946,7 +1031,7 @@ export function registerIpcHandlers(
         await awsService.login(host.awsProfileName);
 
         currentStage = "checking-profile";
-        emitSftpConnectionProgress({
+        emitProgress({
           endpointId,
           hostId: host.id,
           stage: "checking-profile",
@@ -962,7 +1047,7 @@ export function registerIpcHandlers(
       }
 
       currentStage = "checking-ssm";
-      emitSftpConnectionProgress({
+      emitProgress({
         endpointId,
         hostId: host.id,
         stage: "checking-ssm",
@@ -985,7 +1070,7 @@ export function registerIpcHandlers(
       }
 
       currentStage = "loading-instance-metadata";
-      emitSftpConnectionProgress({
+      emitProgress({
         endpointId,
         hostId: refreshedHost.id,
         stage: "loading-instance-metadata",
@@ -1011,12 +1096,184 @@ export function registerIpcHandlers(
     }
   }
 
+  async function ensureContainersEndpoint(
+    host: Extract<HostRecord, { kind: "ssh" | "warpgate-ssh" | "aws-ec2" }>,
+    endpointId = buildContainersEndpointId(host.id),
+  ): Promise<{
+    endpointId: string;
+    runtime: HostContainerRuntime | null;
+    runtimeCommand: string | null;
+    unsupportedReason: string | null;
+  }> {
+    const existingRuntime =
+      coreManager.getContainersEndpointRuntime(endpointId);
+    if (existingRuntime) {
+      return {
+        endpointId,
+        runtime: existingRuntime.runtime,
+        runtimeCommand: existingRuntime.runtimeCommand,
+        unsupportedReason: existingRuntime.unsupportedReason,
+      };
+    }
+
+    emitContainersConnectionProgress({
+      endpointId,
+      hostId: host.id,
+      stage: "connecting-containers",
+      message: `${host.label} 컨테이너 런타임 연결을 준비하는 중입니다.`,
+    });
+
+    if (isAwsEc2HostRecord(host)) {
+      const hydratedHost =
+        consumeAwsSftpPreflight(endpointId, host.id) ??
+        (await resolveAwsSftpPreflight({
+          endpointId,
+          host,
+          allowBrowserLogin: true,
+          emitProgress: emitContainersConnectionProgress,
+        }));
+      const sshPort = getAwsEc2HostSshPort(hydratedHost);
+      const trustedHostKeyBase64 = requireTrustedHostKey(knownHosts, {
+        hostname: buildAwsSsmKnownHostIdentity({
+          profileName: hydratedHost.awsProfileName,
+          region: hydratedHost.awsRegion,
+          instanceId: hydratedHost.awsInstanceId,
+        }),
+        port: sshPort,
+      });
+      const sshUsername = hydratedHost.awsSshUsername?.trim();
+      const availabilityZone = hydratedHost.awsAvailabilityZone?.trim();
+      if (!sshUsername) {
+        throw new Error(
+          hydratedHost.awsSshMetadataError ||
+            "자동으로 SSH 사용자명을 확인하지 못했습니다.",
+        );
+      }
+      if (!availabilityZone) {
+        throw new Error("Availability Zone을 확인하지 못했습니다.");
+      }
+
+      const { privateKeyPem, publicKey } = createEphemeralAwsSftpKeyPair();
+      await awsService.sendSshPublicKey({
+        profileName: hydratedHost.awsProfileName,
+        region: hydratedHost.awsRegion,
+        instanceId: hydratedHost.awsInstanceId,
+        availabilityZone,
+        osUser: sshUsername,
+        publicKey,
+      });
+      const bindPort = await reserveLoopbackPort();
+      let runtimeId = "";
+      try {
+        const tunnel = await awsSsmTunnelService.start({
+          runtimeId: `aws-containers:${endpointId}`,
+          profileName: hydratedHost.awsProfileName,
+          region: hydratedHost.awsRegion,
+          instanceId: hydratedHost.awsInstanceId,
+          bindAddress: "127.0.0.1",
+          bindPort,
+          targetPort: sshPort,
+        });
+        runtimeId = tunnel.runtimeId;
+        emitContainersConnectionProgress({
+          endpointId,
+          hostId: hydratedHost.id,
+          stage: "opening-tunnel",
+          message: "컨테이너 런타임 확인을 위한 내부 터널을 여는 중입니다.",
+        });
+        const result = await coreManager.containersConnect({
+          endpointId,
+          host: tunnel.bindAddress,
+          port: tunnel.bindPort,
+          username: sshUsername,
+          authType: "privateKey",
+          privateKeyPem,
+          trustedHostKeyBase64,
+          hostId: hydratedHost.id,
+        });
+        if (result.runtime) {
+          awsContainersTunnelRuntimeByEndpoint.set(
+            endpointId,
+            tunnel.runtimeId,
+          );
+        } else {
+          await awsSsmTunnelService
+            .stop(tunnel.runtimeId)
+            .catch(() => undefined);
+        }
+        return {
+          endpointId,
+          runtime: result.runtime,
+          runtimeCommand: result.runtimeCommand,
+          unsupportedReason: result.unsupportedReason,
+        };
+      } catch (error) {
+        clearAwsSftpPreflight(endpointId);
+        if (runtimeId) {
+          await awsSsmTunnelService.stop(runtimeId).catch(() => undefined);
+        }
+        throw error;
+      }
+    }
+
+    if (isWarpgateSshHostRecord(host)) {
+      const trustedHostKeyBase64 = requireTrustedHostKey(knownHosts, {
+        hostname: host.warpgateSshHost,
+        port: host.warpgateSshPort,
+      });
+      const result = await coreManager.containersConnect({
+        endpointId,
+        host: host.warpgateSshHost,
+        port: host.warpgateSshPort,
+        username: `${host.warpgateUsername}:${host.warpgateTargetName}`,
+        authType: "keyboardInteractive",
+        trustedHostKeyBase64,
+        hostId: host.id,
+      });
+      return {
+        endpointId,
+        runtime: result.runtime,
+        runtimeCommand: result.runtimeCommand,
+        unsupportedReason: result.unsupportedReason,
+      };
+    }
+
+    const trustedHostKeyBase64 = requireTrustedHostKey(knownHosts, host);
+    const secrets = await loadSecrets(secretStore, host.secretRef);
+    const result = await coreManager.containersConnect({
+      endpointId,
+      host: host.hostname,
+      port: host.port,
+      username: host.username,
+      authType: host.authType,
+      password: secrets.password,
+      privateKeyPem: secrets.privateKeyPem,
+      privateKeyPath: host.privateKeyPath ?? undefined,
+      passphrase: secrets.passphrase,
+      trustedHostKeyBase64,
+      hostId: host.id,
+    });
+    return {
+      endpointId,
+      runtime: result.runtime,
+      runtimeCommand: result.runtimeCommand,
+      unsupportedReason: result.unsupportedReason,
+    };
+  }
+
   coreManager.setTerminalEventHandler(async (event) => {
     sessionShareService.handleTerminalEvent(event);
     if (event.endpointId) {
       if (event.type === "sftpDisconnected" || event.type === "sftpError") {
         clearAwsSftpPreflight(event.endpointId);
         await stopAwsSftpTunnelForEndpoint(event.endpointId);
+      }
+      if (
+        event.type === "containersDisconnected" ||
+        event.type === "containersError"
+      ) {
+        clearAwsSftpPreflight(event.endpointId);
+        await stopAwsContainersTunnelForEndpoint(event.endpointId);
       }
       return;
     }
@@ -1040,6 +1297,35 @@ export function registerIpcHandlers(
 
     if (event.type === "closed" || event.type === "error") {
       pendingSessionSecrets.delete(event.sessionId);
+      await stopAwsContainerShellTunnelForSession(event.sessionId);
+    }
+    if (
+      event.type === "status" &&
+      String(event.payload.status ?? "") === "stopped"
+    ) {
+      await Promise.all(
+        Array.from(awsSftpTunnelRuntimeByEndpoint.keys()).map((endpointId) =>
+          stopAwsSftpTunnelForEndpoint(endpointId),
+        ),
+      );
+      await Promise.all(
+        Array.from(awsContainersTunnelRuntimeByEndpoint.keys()).map(
+          (endpointId) => stopAwsContainersTunnelForEndpoint(endpointId),
+        ),
+      );
+      await Promise.all(
+        Array.from(awsContainerShellTunnelRuntimeBySessionId.keys()).map(
+          (sessionId) => stopAwsContainerShellTunnelForSession(sessionId),
+        ),
+      );
+    }
+  });
+  coreManager.setPortForwardEventHandler(async (event) => {
+    if (
+      event.runtime.status === "stopped" ||
+      event.runtime.status === "error"
+    ) {
+      await stopAwsContainersTunnelForEndpoint(event.runtime.ruleId);
     }
   });
   coreManager.setTerminalStreamHandler((sessionId, chunk) => {
@@ -1716,7 +2002,10 @@ export function registerIpcHandlers(
                   },
                 );
                 if (secretRef) {
-                  secretRefsByIdentityPath.set(host.identityFilePath, secretRef);
+                  secretRefsByIdentityPath.set(
+                    host.identityFilePath,
+                    secretRef,
+                  );
                   createdSecretCount += 1;
                 }
               } else {
@@ -1824,7 +2113,9 @@ export function registerIpcHandlers(
         let skippedHostCount = 0;
 
         for (const groupPath of selectedGroupPaths) {
-          for (const candidatePath of buildTermiusGroupAncestorPaths(groupPath)) {
+          for (const candidatePath of buildTermiusGroupAncestorPaths(
+            groupPath,
+          )) {
             if (existingGroupPaths.has(candidatePath)) {
               continue;
             }
@@ -1855,7 +2146,9 @@ export function registerIpcHandlers(
           }
 
           const groupPath = normalizeGroupPath(host.groupPath);
-          for (const candidatePath of buildTermiusGroupAncestorPaths(groupPath)) {
+          for (const candidatePath of buildTermiusGroupAncestorPaths(
+            groupPath,
+          )) {
             if (existingGroupPaths.has(candidatePath)) {
               continue;
             }
@@ -2009,6 +2302,7 @@ export function registerIpcHandlers(
           trustedHostKeyBase64,
           cols: input.cols,
           rows: input.rows,
+          command: input.command?.trim() || undefined,
           hostId: host.id,
           title,
         });
@@ -2033,6 +2327,7 @@ export function registerIpcHandlers(
         trustedHostKeyBase64,
         cols: input.cols,
         rows: input.rows,
+        command: input.command?.trim() || undefined,
         hostId: host.id,
         title,
       });
@@ -2125,6 +2420,307 @@ export function registerIpcHandlers(
   ipcMain.handle(ipcChannels.window.close, async (event) => {
     resolveWindowFromSender(event.sender).close();
   });
+
+  ipcMain.handle(
+    ipcChannels.containers.list,
+    async (_event, hostId: string) => {
+      const host = hosts.getById(hostId);
+      assertSftpCompatibleHost(host);
+      const runtimeInfo = await ensureContainersEndpoint(host);
+      if (runtimeInfo.unsupportedReason || !runtimeInfo.runtime) {
+        return {
+          runtime: null,
+          unsupportedReason: runtimeInfo.unsupportedReason,
+          containers: [],
+        };
+      }
+      const listing = await coreManager.containersList(runtimeInfo.endpointId);
+      return {
+        runtime: listing.runtime,
+        unsupportedReason: null,
+        containers: listing.containers,
+      };
+    },
+  );
+
+  ipcMain.handle(
+    ipcChannels.containers.inspect,
+    async (_event, hostId: string, containerId: string) => {
+      const host = hosts.getById(hostId);
+      assertSftpCompatibleHost(host);
+      const runtimeInfo = await ensureContainersEndpoint(host);
+      if (runtimeInfo.unsupportedReason || !runtimeInfo.runtime) {
+        throw new Error(
+          runtimeInfo.unsupportedReason ||
+            "이 host에서는 docker/podman을 사용할 수 없습니다.",
+        );
+      }
+      return coreManager.containersInspect(runtimeInfo.endpointId, containerId);
+    },
+  );
+
+  ipcMain.handle(
+    ipcChannels.containers.logs,
+    async (_event, input: HostContainersLogsInput) => {
+      const host = hosts.getById(input.hostId);
+      assertSftpCompatibleHost(host);
+      const runtimeInfo = await ensureContainersEndpoint(host);
+      if (runtimeInfo.unsupportedReason || !runtimeInfo.runtime) {
+        throw new Error(
+          runtimeInfo.unsupportedReason ||
+            "이 host에서는 docker/podman을 사용할 수 없습니다.",
+        );
+      }
+      return coreManager.containersLogs(
+        runtimeInfo.endpointId,
+        input.containerId,
+        input.tail,
+        input.followCursor ?? null,
+      );
+    },
+  );
+
+  ipcMain.handle(
+    ipcChannels.containers.start,
+    async (_event, hostId: string, containerId: string) => {
+      const host = hosts.getById(hostId);
+      assertSftpCompatibleHost(host);
+      const runtimeInfo = await ensureContainersEndpoint(host);
+      if (runtimeInfo.unsupportedReason || !runtimeInfo.runtime) {
+        throw new Error(
+          runtimeInfo.unsupportedReason ||
+            "이 host에서는 docker/podman을 사용할 수 없습니다.",
+        );
+      }
+      await coreManager.containersStart(runtimeInfo.endpointId, containerId);
+    },
+  );
+
+  ipcMain.handle(
+    ipcChannels.containers.stop,
+    async (_event, hostId: string, containerId: string) => {
+      const host = hosts.getById(hostId);
+      assertSftpCompatibleHost(host);
+      const runtimeInfo = await ensureContainersEndpoint(host);
+      if (runtimeInfo.unsupportedReason || !runtimeInfo.runtime) {
+        throw new Error(
+          runtimeInfo.unsupportedReason ||
+            "이 host에서는 docker/podman을 사용할 수 없습니다.",
+        );
+      }
+      await coreManager.containersStop(runtimeInfo.endpointId, containerId);
+    },
+  );
+
+  ipcMain.handle(
+    ipcChannels.containers.restart,
+    async (_event, hostId: string, containerId: string) => {
+      const host = hosts.getById(hostId);
+      assertSftpCompatibleHost(host);
+      const runtimeInfo = await ensureContainersEndpoint(host);
+      if (runtimeInfo.unsupportedReason || !runtimeInfo.runtime) {
+        throw new Error(
+          runtimeInfo.unsupportedReason ||
+            "이 host에서는 docker/podman을 사용할 수 없습니다.",
+        );
+      }
+      await coreManager.containersRestart(runtimeInfo.endpointId, containerId);
+    },
+  );
+
+  ipcMain.handle(
+    ipcChannels.containers.remove,
+    async (_event, hostId: string, containerId: string) => {
+      const host = hosts.getById(hostId);
+      assertSftpCompatibleHost(host);
+      const runtimeInfo = await ensureContainersEndpoint(host);
+      if (runtimeInfo.unsupportedReason || !runtimeInfo.runtime) {
+        throw new Error(
+          runtimeInfo.unsupportedReason ||
+            "이 host에서는 docker/podman을 사용할 수 없습니다.",
+        );
+      }
+      await coreManager.containersRemove(runtimeInfo.endpointId, containerId);
+    },
+  );
+
+  ipcMain.handle(
+    ipcChannels.containers.stats,
+    async (_event, input: HostContainersStatsInput) => {
+      const host = hosts.getById(input.hostId);
+      assertSftpCompatibleHost(host);
+      const runtimeInfo = await ensureContainersEndpoint(host);
+      if (runtimeInfo.unsupportedReason || !runtimeInfo.runtime) {
+        throw new Error(
+          runtimeInfo.unsupportedReason ||
+            "이 host에서는 docker/podman을 사용할 수 없습니다.",
+        );
+      }
+      return coreManager.containersStats(runtimeInfo.endpointId, input.containerId);
+    },
+  );
+
+  ipcMain.handle(
+    ipcChannels.containers.searchLogs,
+    async (_event, input: HostContainersSearchLogsInput) => {
+      const host = hosts.getById(input.hostId);
+      assertSftpCompatibleHost(host);
+      const runtimeInfo = await ensureContainersEndpoint(host);
+      if (runtimeInfo.unsupportedReason || !runtimeInfo.runtime) {
+        throw new Error(
+          runtimeInfo.unsupportedReason ||
+            "이 host에서는 docker/podman을 사용할 수 없습니다.",
+        );
+      }
+      return coreManager.containersSearchLogs(
+        runtimeInfo.endpointId,
+        input.containerId,
+        input.tail,
+        input.query,
+      );
+    },
+  );
+
+  ipcMain.handle(
+    ipcChannels.containers.release,
+    async (_event, hostId: string) => {
+      const endpointId = buildContainersEndpointId(hostId);
+      try {
+        await coreManager.containersDisconnect(endpointId);
+      } finally {
+        await stopAwsContainersTunnelForEndpoint(endpointId);
+      }
+    },
+  );
+
+  ipcMain.handle(
+    ipcChannels.containers.openShell,
+    async (_event, hostId: string, containerId: string) => {
+      const host = hosts.getById(hostId);
+      assertSftpCompatibleHost(host);
+      const runtimeInfo = await ensureContainersEndpoint(host);
+      if (!runtimeInfo.runtime || !runtimeInfo.runtimeCommand) {
+        throw new Error("컨테이너 런타임을 먼저 확인해 주세요.");
+      }
+      const title = `${host.label} · ${containerId}`;
+      const command = buildContainerShellCommand(
+        runtimeInfo.runtimeCommand,
+        containerId,
+      );
+
+      if (isAwsEc2HostRecord(host)) {
+        const hydratedHost =
+          consumeAwsSftpPreflight(runtimeInfo.endpointId, host.id) ??
+          (await resolveAwsSftpPreflight({
+            endpointId: runtimeInfo.endpointId,
+            host,
+            allowBrowserLogin: true,
+          }));
+        const sshPort = getAwsEc2HostSshPort(hydratedHost);
+        const trustedHostKeyBase64 = requireTrustedHostKey(knownHosts, {
+          hostname: buildAwsSsmKnownHostIdentity({
+            profileName: hydratedHost.awsProfileName,
+            region: hydratedHost.awsRegion,
+            instanceId: hydratedHost.awsInstanceId,
+          }),
+          port: sshPort,
+        });
+        const sshUsername = hydratedHost.awsSshUsername?.trim();
+        const availabilityZone = hydratedHost.awsAvailabilityZone?.trim();
+        if (!sshUsername) {
+          throw new Error(
+            hydratedHost.awsSshMetadataError ||
+              "자동으로 SSH 사용자명을 확인하지 못했습니다.",
+          );
+        }
+        if (!availabilityZone) {
+          throw new Error("Availability Zone을 확인하지 못했습니다.");
+        }
+        const { privateKeyPem, publicKey } = createEphemeralAwsSftpKeyPair();
+        await awsService.sendSshPublicKey({
+          profileName: hydratedHost.awsProfileName,
+          region: hydratedHost.awsRegion,
+          instanceId: hydratedHost.awsInstanceId,
+          availabilityZone,
+          osUser: sshUsername,
+          publicKey,
+        });
+        const bindPort = await reserveLoopbackPort();
+        const tunnel = await awsSsmTunnelService.start({
+          runtimeId: `aws-container-shell:${host.id}:${randomUUID()}`,
+          profileName: hydratedHost.awsProfileName,
+          region: hydratedHost.awsRegion,
+          instanceId: hydratedHost.awsInstanceId,
+          bindAddress: "127.0.0.1",
+          bindPort,
+          targetPort: sshPort,
+        });
+        try {
+          const connection = await coreManager.connect({
+            host: tunnel.bindAddress,
+            port: tunnel.bindPort,
+            username: sshUsername,
+            authType: "privateKey",
+            privateKeyPem,
+            trustedHostKeyBase64,
+            cols: 120,
+            rows: 32,
+            command,
+            hostId: hydratedHost.id,
+            title,
+          });
+          awsContainerShellTunnelRuntimeBySessionId.set(
+            connection.sessionId,
+            tunnel.runtimeId,
+          );
+          return connection;
+        } catch (error) {
+          await awsSsmTunnelService
+            .stop(tunnel.runtimeId)
+            .catch(() => undefined);
+          throw error;
+        }
+      }
+
+      if (isWarpgateSshHostRecord(host)) {
+        const trustedHostKeyBase64 = requireTrustedHostKey(knownHosts, {
+          hostname: host.warpgateSshHost,
+          port: host.warpgateSshPort,
+        });
+        return coreManager.connect({
+          host: host.warpgateSshHost,
+          port: host.warpgateSshPort,
+          username: `${host.warpgateUsername}:${host.warpgateTargetName}`,
+          authType: "keyboardInteractive",
+          trustedHostKeyBase64,
+          cols: 120,
+          rows: 32,
+          command,
+          hostId: host.id,
+          title,
+        });
+      }
+
+      const trustedHostKeyBase64 = requireTrustedHostKey(knownHosts, host);
+      const secrets = await loadSecrets(secretStore, host.secretRef);
+      return coreManager.connect({
+        host: host.hostname,
+        port: host.port,
+        username: host.username,
+        authType: host.authType,
+        password: secrets.password,
+        privateKeyPem: secrets.privateKeyPem,
+        privateKeyPath: host.privateKeyPath ?? undefined,
+        passphrase: secrets.passphrase,
+        trustedHostKeyBase64,
+        cols: 120,
+        rows: 32,
+        command,
+        hostId: host.id,
+        title,
+      });
+    },
+  );
 
   ipcMain.handle(
     ipcChannels.sftp.connect,
@@ -2237,7 +2833,9 @@ export function registerIpcHandlers(
         } catch (error) {
           clearAwsSftpPreflight(endpointId);
           if (tunnelRuntimeId) {
-            await awsSsmTunnelService.stop(tunnelRuntimeId).catch(() => undefined);
+            await awsSsmTunnelService
+              .stop(tunnelRuntimeId)
+              .catch(() => undefined);
           }
           if (error instanceof Error && /^\[/.test(error.message)) {
             throw error;
@@ -2359,6 +2957,8 @@ export function registerIpcHandlers(
       const host = hosts.getById(draft.hostId);
       if (draft.transport === "aws-ssm") {
         assertAwsEc2Host(host);
+      } else if (draft.transport === "container") {
+        assertSftpCompatibleHost(host);
       } else {
         assertSshHost(host);
       }
@@ -2368,7 +2968,12 @@ export function registerIpcHandlers(
         label: record.label,
         hostId: record.hostId,
         transport: record.transport,
-        mode: record.transport === "ssh" ? record.mode : record.targetKind,
+        mode:
+          record.transport === "ssh"
+            ? record.mode
+            : record.transport === "aws-ssm"
+              ? record.targetKind
+              : "container",
       });
       queueSync();
       return record;
@@ -2381,6 +2986,8 @@ export function registerIpcHandlers(
       const host = hosts.getById(draft.hostId);
       if (draft.transport === "aws-ssm") {
         assertAwsEc2Host(host);
+      } else if (draft.transport === "container") {
+        assertSftpCompatibleHost(host);
       } else {
         assertSshHost(host);
       }
@@ -2390,7 +2997,12 @@ export function registerIpcHandlers(
         label: record.label,
         hostId: record.hostId,
         transport: record.transport,
-        mode: record.transport === "ssh" ? record.mode : record.targetKind,
+        mode:
+          record.transport === "ssh"
+            ? record.mode
+            : record.transport === "aws-ssm"
+              ? record.targetKind
+              : "container",
       });
       queueSync();
       return record;
@@ -2414,7 +3026,12 @@ export function registerIpcHandlers(
             label: current.label,
             hostId: current.hostId,
             transport: current.transport,
-            mode: current.transport === "ssh" ? current.mode : current.targetKind,
+            mode:
+              current.transport === "ssh"
+                ? current.mode
+                : current.transport === "aws-ssm"
+                  ? current.targetKind
+                  : "container",
           },
         );
       }
@@ -2430,9 +3047,147 @@ export function registerIpcHandlers(
         throw new Error("Port forward rule not found");
       }
       const host = hosts.getById(rule.hostId);
+      if (rule.transport === "container") {
+        assertSftpCompatibleHost(host);
+        const endpointId = buildContainerPortForwardEndpointId(
+          host.id,
+          rule.id,
+        );
+        const publishRuntime = (
+          status: "starting" | "error",
+          message?: string,
+        ) =>
+          coreManager.setPortForwardRuntime({
+            ruleId: rule.id,
+            hostId: host.id,
+            transport: "container",
+            mode: "local",
+            bindAddress: "127.0.0.1",
+            bindPort: rule.bindPort,
+            status,
+            updatedAt: new Date().toISOString(),
+            message,
+            startedAt:
+              status === "starting"
+                ? coreManager
+                    .listPortForwardRuntimes()
+                    .find((runtime) => runtime.ruleId === rule.id)?.startedAt
+                : undefined,
+          });
+
+        const cleanupTemporaryEndpoint = async () => {
+          await coreManager
+            .containersDisconnect(endpointId)
+            .catch(() => undefined);
+          await stopAwsContainersTunnelForEndpoint(endpointId);
+        };
+
+        try {
+          publishRuntime("starting", "Checking container runtime");
+          const runtimeInfo = await ensureContainersEndpoint(host, endpointId);
+          if (!runtimeInfo.runtime) {
+            throw new Error(
+              runtimeInfo.unsupportedReason ||
+                "docker/podman 런타임을 확인하지 못했습니다.",
+            );
+          }
+
+          publishRuntime("starting", "Inspecting container");
+          const details = await coreManager.containersInspect(
+            runtimeInfo.endpointId,
+            rule.containerId,
+          );
+          const normalizedStatus = details.status.trim().toLowerCase();
+          if (normalizedStatus !== "running") {
+            throw new Error(
+              `${details.name} 컨테이너가 실행 중이 아닙니다. 현재 상태: ${details.status}`,
+            );
+          }
+          const target = resolveContainerTunnelTarget(
+            details,
+            rule.networkName,
+            rule.targetPort,
+          );
+          const targetHost = target.host;
+          const resolvedTargetPort = target.port;
+
+          if (host.kind === "aws-ec2") {
+            moveAwsContainersTunnelRuntime(endpointId, rule.id);
+            publishRuntime("starting", "Starting container tunnel");
+            return coreManager.startPortForward({
+              ruleId: rule.id,
+              hostId: host.id,
+              host: "",
+              port: 0,
+              username: "",
+              authType: "password",
+              trustedHostKeyBase64: "",
+              bindAddress: "127.0.0.1",
+              bindPort: rule.bindPort,
+              mode: "local",
+              targetHost,
+              targetPort: resolvedTargetPort,
+              transport: "container",
+              sourceEndpointId: endpointId,
+            });
+          }
+
+          if (host.kind === "warpgate-ssh") {
+            publishRuntime("starting", "Starting container tunnel");
+            return coreManager.startPortForward({
+              ruleId: rule.id,
+              hostId: host.id,
+              host: host.warpgateSshHost,
+              port: host.warpgateSshPort,
+              username: `${host.warpgateUsername}:${host.warpgateTargetName}`,
+              authType: "keyboardInteractive",
+              trustedHostKeyBase64: "",
+              mode: "local",
+              bindAddress: "127.0.0.1",
+              bindPort: rule.bindPort,
+              targetHost,
+              targetPort: resolvedTargetPort,
+              transport: "container",
+              sourceEndpointId: endpointId,
+            });
+          }
+
+          publishRuntime("starting", "Starting container tunnel");
+          return coreManager.startPortForward({
+            ruleId: rule.id,
+            hostId: host.id,
+            host: host.hostname,
+            port: host.port,
+            username: host.username,
+            authType: host.authType,
+            trustedHostKeyBase64: "",
+            mode: "local",
+            bindAddress: "127.0.0.1",
+            bindPort: rule.bindPort,
+            targetHost,
+            targetPort: resolvedTargetPort,
+            transport: "container",
+            sourceEndpointId: endpointId,
+          });
+        } catch (error) {
+          await stopAwsContainersTunnelForEndpoint(rule.id);
+          publishRuntime(
+            "error",
+            error instanceof Error
+              ? error.message
+              : "Container port forward를 시작하지 못했습니다.",
+          );
+          throw error;
+        } finally {
+          await cleanupTemporaryEndpoint();
+        }
+      }
       if (rule.transport === "aws-ssm") {
         assertAwsEc2Host(host);
-        const publishRuntime = (status: "starting" | "error", message?: string) =>
+        const publishRuntime = (
+          status: "starting" | "error",
+          message?: string,
+        ) =>
           coreManager.setPortForwardRuntime({
             ruleId: rule.id,
             hostId: host.id,
@@ -2453,17 +3208,27 @@ export function registerIpcHandlers(
 
         try {
           publishRuntime("starting", "Checking AWS profile");
-          let profileStatus = await awsService.getProfileStatus(host.awsProfileName);
+          let profileStatus = await awsService.getProfileStatus(
+            host.awsProfileName,
+          );
           if (!profileStatus.isAuthenticated) {
             if (!profileStatus.isSsoProfile) {
-              throw new Error(profileStatus.errorMessage || "이 프로필은 AWS CLI 자격 증명이 필요합니다.");
+              throw new Error(
+                profileStatus.errorMessage ||
+                  "이 프로필은 AWS CLI 자격 증명이 필요합니다.",
+              );
             }
             publishRuntime("starting", "Opening AWS SSO login");
             await awsService.login(host.awsProfileName);
             publishRuntime("starting", "Checking AWS profile");
-            profileStatus = await awsService.getProfileStatus(host.awsProfileName);
+            profileStatus = await awsService.getProfileStatus(
+              host.awsProfileName,
+            );
             if (!profileStatus.isAuthenticated) {
-              throw new Error(profileStatus.errorMessage || "AWS SSO 로그인 결과를 확인하지 못했습니다.");
+              throw new Error(
+                profileStatus.errorMessage ||
+                  "AWS SSO 로그인 결과를 확인하지 못했습니다.",
+              );
             }
           }
 
@@ -2474,7 +3239,9 @@ export function registerIpcHandlers(
             host.awsInstanceId,
           );
           if (!isManaged) {
-            throw new Error("SSM Agent 또는 managed instance 상태를 확인해 주세요.");
+            throw new Error(
+              "SSM Agent 또는 managed instance 상태를 확인해 주세요.",
+            );
           }
 
           publishRuntime("starting", "Starting SSM port forward");
@@ -2488,12 +3255,17 @@ export function registerIpcHandlers(
             bindPort: rule.bindPort,
             targetKind: rule.targetKind,
             targetPort: rule.targetPort,
-            remoteHost: rule.targetKind === "remote-host" ? rule.remoteHost ?? undefined : undefined,
+            remoteHost:
+              rule.targetKind === "remote-host"
+                ? (rule.remoteHost ?? undefined)
+                : undefined,
           });
         } catch (error) {
           publishRuntime(
             "error",
-            error instanceof Error ? error.message : "AWS SSM port forward를 시작하지 못했습니다.",
+            error instanceof Error
+              ? error.message
+              : "AWS SSM port forward를 시작하지 못했습니다.",
           );
           throw error;
         }
@@ -2536,12 +3308,16 @@ export function registerIpcHandlers(
   ipcMain.handle(
     ipcChannels.knownHosts.probeHost,
     async (_event, input: KnownHostProbeInput) => {
+      const emitProgress =
+        input.endpointId?.startsWith("containers:")
+          ? emitContainersConnectionProgress
+          : emitSftpConnectionProgress;
       return buildHostKeyProbeResult(
         hosts,
         knownHosts,
         coreManager,
         awsSsmTunnelService,
-        emitSftpConnectionProgress,
+        emitProgress,
         resolveAwsSftpPreflight,
         storeAwsSftpPreflight,
         input,
