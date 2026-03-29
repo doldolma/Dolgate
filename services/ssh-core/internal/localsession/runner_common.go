@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"slices"
+	"strings"
 
 	"dolssh/services/ssh-core/internal/protocol"
 )
@@ -39,11 +41,37 @@ type localCommandRuntime struct {
 }
 
 func defaultRunnerFactory(payload protocol.LocalConnectPayload) (sessionRunner, error) {
-	runtime, err := resolveLocalRuntime()
+	runtime, err := resolveLocalRuntime(payload)
 	if err != nil {
 		return nil, err
 	}
 	return startPlatformLocalRunner(payload, runtime)
+}
+
+func buildRuntimeEnv(base []string, overrides map[string]string) []string {
+	if len(overrides) == 0 {
+		return append([]string(nil), base...)
+	}
+	envMap := make(map[string]string, len(base)+len(overrides))
+	for _, entry := range base {
+		key, value, found := strings.Cut(entry, "=")
+		if !found {
+			continue
+		}
+		envMap[key] = value
+	}
+	for key, value := range overrides {
+		if key == "" {
+			continue
+		}
+		envMap[key] = value
+	}
+	nextEnv := make([]string, 0, len(envMap))
+	for key, value := range envMap {
+		nextEnv = append(nextEnv, fmt.Sprintf("%s=%s", key, value))
+	}
+	slices.Sort(nextEnv)
+	return nextEnv
 }
 
 func normalizedSize(cols, rows int) (int, int) {

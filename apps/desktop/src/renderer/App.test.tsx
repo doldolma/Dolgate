@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   loginGateProps: [] as any[],
   terminalWorkspaceProps: [] as any[],
   containersWorkspaceProps: [] as any[],
+  awsEcsWorkspaceProps: [] as any[],
 }));
 
 function stubComponent(testId: string) {
@@ -26,6 +27,12 @@ vi.mock('./store/appStore', () => ({
 
 vi.mock('./components/AppTitleBar', () => ({ AppTitleBar: stubComponent('app-title-bar') }));
 vi.mock('./components/AwsImportDialog', () => ({ AwsImportDialog: stubComponent('aws-import-dialog') }));
+vi.mock('./components/AwsEcsWorkspace', () => ({
+  AwsEcsWorkspace: (props: any) => {
+    mocks.awsEcsWorkspaceProps.push(props);
+    return <div data-testid="aws-ecs-workspace" />;
+  },
+}));
 vi.mock('./components/CredentialRetryDialog', () => ({
   CredentialRetryDialog: stubComponent('credential-retry-dialog'),
 }));
@@ -188,6 +195,8 @@ function createMockStoreState(overrides: Record<string, unknown> = {}) {
     closeHostContainersTab: fn(),
     reorderContainerTab: fn(),
     refreshHostContainers: fn(),
+    refreshEcsClusterUtilization: fn(),
+    openEcsExecShell: fn(),
     selectHostContainer: fn(),
     setHostContainersPanel: fn(),
     refreshHostContainerLogs: fn(),
@@ -374,6 +383,7 @@ describe('App integration', () => {
     mocks.loginGateProps.length = 0;
     mocks.terminalWorkspaceProps.length = 0;
     mocks.containersWorkspaceProps.length = 0;
+    mocks.awsEcsWorkspaceProps.length = 0;
     mocks.appStoreSetState.mockReset();
     mocks.storeState = createMockStoreState();
     Object.defineProperty(window, 'matchMedia', {
@@ -567,6 +577,100 @@ describe('App integration', () => {
     await waitFor(() => {
       expect(screen.getByTestId('containers-workspace')).toBeInTheDocument();
     });
+  });
+
+  it('renders the ECS workspace inside the fixed containers section for aws-ecs hosts', async () => {
+    const api = createDolsshApi({
+      authBootstrapState: {
+        status: 'authenticated',
+        session: { user: { id: 'user-1', email: 'user@example.com' } },
+        offline: null,
+        errorMessage: null,
+      },
+    });
+    Object.defineProperty(window, 'dolssh', {
+      configurable: true,
+      writable: true,
+      value: api,
+    });
+    mocks.storeState = createMockStoreState({
+      hosts: [
+        {
+          id: 'ecs-host-1',
+          kind: 'aws-ecs',
+          label: 'prod cluster',
+          awsProfileName: 'default',
+          awsRegion: 'ap-northeast-2',
+          awsEcsClusterArn: 'arn:aws:ecs:ap-northeast-2:123456789012:cluster/prod',
+          awsEcsClusterName: 'prod',
+          groupName: 'Servers',
+          tags: [],
+          terminalThemeId: null,
+          createdAt: '2026-03-28T00:00:00.000Z',
+          updatedAt: '2026-03-28T00:00:00.000Z',
+        },
+      ],
+      containerTabs: [
+        {
+          kind: 'ecs-cluster',
+          hostId: 'ecs-host-1',
+          title: 'prod cluster · ECS',
+          runtime: null,
+          unsupportedReason: null,
+          connectionProgress: null,
+          items: [],
+          selectedContainerId: null,
+          activePanel: 'overview',
+          isLoading: false,
+          details: null,
+          detailsLoading: false,
+          logs: null,
+          logsState: 'idle',
+          logsLoading: false,
+          logsFollowEnabled: false,
+          logsTailWindow: 200,
+          logsSearchQuery: '',
+          logsSearchMode: null,
+          logsSearchLoading: false,
+          logsSearchResult: null,
+          metricsSamples: [],
+          metricsState: 'idle',
+          metricsLoading: false,
+          pendingAction: null,
+          ecsSnapshot: {
+            profileName: 'default',
+            region: 'ap-northeast-2',
+            cluster: {
+              clusterArn: 'arn:aws:ecs:ap-northeast-2:123456789012:cluster/prod',
+              clusterName: 'prod',
+              status: 'ACTIVE',
+              activeServicesCount: 2,
+              runningTasksCount: 3,
+              pendingTasksCount: 1,
+            },
+            services: [],
+            loadedAt: '2026-03-28T00:00:00.000Z',
+          },
+          ecsMetricsWarning: null,
+          ecsMetricsLoadedAt: '2026-03-28T00:00:10.000Z',
+          ecsMetricsLoading: false,
+          ecsUtilizationHistoryByServiceName: {},
+        },
+      ],
+      activeContainerHostId: 'ecs-host-1',
+      activeWorkspaceTab: 'containers',
+    });
+
+    render(<App />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('aws-ecs-workspace')).toBeInTheDocument();
+    });
+    expect(mocks.awsEcsWorkspaceProps.at(-1)).toMatchObject({
+      isActive: true,
+    });
+    expect(typeof mocks.awsEcsWorkspaceProps.at(-1)?.onRefreshUtilization).toBe('function');
+    expect(typeof mocks.awsEcsWorkspaceProps.at(-1)?.onOpenEcsExecShell).toBe('function');
   });
 
   it('falls back safely when sessionShares.onChatEvent is missing', async () => {

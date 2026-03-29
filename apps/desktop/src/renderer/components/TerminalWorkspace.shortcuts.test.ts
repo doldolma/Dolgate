@@ -4,6 +4,7 @@ import {
   getVisibleSessionShareChatNotifications,
   mergeSessionShareSnapshotKinds,
   resolveTerminalRuntimeWebglEnabled,
+  shouldShowSessionOverlay,
   shouldOpenTerminalSearch
 } from './TerminalWorkspace';
 
@@ -128,5 +129,40 @@ describe('TerminalWorkspace search shortcut helper', () => {
       { id: 'chat-3', nickname: '셋', text: '3', sentAt: '2026-03-27T00:02:00.000Z' },
       { id: 'chat-4', nickname: '넷', text: '4', sentAt: '2026-03-27T00:03:00.000Z' }
     ]);
+  });
+
+  it('hides the first-output overlay for connected ECS exec sessions only', () => {
+    expect(
+      shouldShowSessionOverlay(
+        {
+          id: 'tab-1',
+          sessionId: 'session-1',
+          source: 'local',
+          hostId: null,
+          title: 'ECS Exec',
+          shellKind: 'aws-ecs-exec',
+          status: 'connected',
+          hasReceivedOutput: false,
+          lastEventAt: '2026-03-30T00:00:00.000Z'
+        },
+        null
+      )
+    ).toBe(false);
+
+    expect(
+      shouldShowSessionOverlay(
+        {
+          id: 'tab-2',
+          sessionId: 'session-2',
+          source: 'local',
+          hostId: null,
+          title: 'Local',
+          status: 'connected',
+          hasReceivedOutput: false,
+          lastEventAt: '2026-03-30T00:00:00.000Z'
+        },
+        null
+      )
+    ).toBe(true);
   });
 });

@@ -1,49 +1,38 @@
 # Dolgate
 
 Dolgate는 macOS와 Windows를 위한 크로스 플랫폼 SSH 클라이언트입니다.
-멀티 세션 터미널, SFTP 파일 브라우저, 포트 포워딩, 세션 공유, 브라우저 로그인 기반 동기화를 하나의 데스크톱 앱으로 제공합니다.
+멀티 세션 터미널, SFTP 파일 브라우저, 포트 포워딩, 세션 공유, 자체 호스팅 서버를 통한 동기화를 제공합니다.
 
 ## 핵심 기능
 
 - 다중 SSH 세션과 분할 Workspace
 - 듀얼 패널 SFTP 브라우저와 파일 전송
-- Host 하위 Docker / Podman 컨테이너 모니터링, 로그, 메트릭, 셸, 터널링
-- 세션 녹화
 - Local / Remote / Dynamic 포트 포워딩
+- 세션 녹화 및 재생
 - Session Share, 브라우저 viewer, 실시간 채팅
-- AWS EC2 import와 AWS SFTP, SSM 포트포워딩
-- Warpgate 브라우저 로그인 기반 import
+- AWS EC2 import와 AWS SFTP, SSM 포트포워딩, ECS Exec shell, ECS 터널링
+- Docker / Podman 컨테이너 모니터링, 로그, 메트릭, 셸, 터널링
+- OpenSSH, Xshell, Termius import
+- 자동 업데이트
 - 셀프호스팅 서버
 
 ## 빠른 시작
 
-### 요구 사항
+### 다운로드
 
-- Node.js 24+
-- npm 11+
-- Go 1.25+
+- 최신 macOS / Windows 빌드는 [GitHub Releases](https://github.com/doldolma/dolgate/releases)에서 받을 수 있습니다.
 
-### 설치
-
-```bash
-npm install
-(cd services/ssh-core && go mod tidy)
-(cd services/sync-api && go mod tidy)
-```
-
-### 실행
-
-데스크톱 앱만 실행:
+macOS 빌드는 Apple 공증이 포함되지 않았습니다.
+앱을 `Applications`로 옮긴 뒤 실행이 막히면 아래 명령으로 quarantine 속성을 제거한 후 다시 실행해 주세요.
 
 ```bash
-npm run dev:desktop
+xattr -dr com.apple.quarantine /Applications/dolgate.app
 ```
 
-로그인 + 동기화까지 포함한 전체 흐름:
+또한 위의 문제로 인해 현재는 **macOS에서 자동 업데이트를 지원하지 않습니다.**
+새 버전은 GitHub Releases에서 직접 다시 다운로드해 설치해야 합니다.
 
-```bash
-npm run dev
-```
+개발 환경 구성, 로컬 실행, 릴리즈 빌드는 [빌드 및 배포 문서](./docs/build-and-deploy.md)를 참고해 주세요.
 
 ## 중요한 사항
 
@@ -116,11 +105,37 @@ brew install --cask session-manager-plugin
 - `SendCommand`, `GetCommandInvocation`: SSH username/port 자동 확인
 - `ec2-instance-connect:SendSSHPublicKey`: AWS SFTP 및 SSH-over-SSM 계열 연결에서 임시 공개키 주입
 
+### AWS ECS Exec 권한 참고
+
+ECS Exec는 위의 일반 AWS/SSM 권한과 별도로 **ECS Exec용 권한**이 더 필요합니다.
+Dolgate 앱에서 ECS `쉘 접속`을 쓰려면 최소한 아래 권한을 함께 확인해 주세요.
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": [
+        "ecs:ExecuteCommand",
+        "ecs:DescribeTasks"
+      ],
+      "Resource": "*"
+    }
+  ]
+}
+```
+
+추가 참고:
+
+- ECS 서비스/태스크에 `enableExecuteCommand`가 켜져 있어야 합니다.
+- task role에도 Session Manager 관련 `ssmmessages:*Channel` 권한이 필요할 수 있습니다.
+- 컨테이너 이미지에 `/bin/sh`나 `bash` 같은 셸이 실제로 없으면, ECS Exec는 연결되더라도 interactive shell은 바로 종료될 수 있습니다.
+
 ### 그 외 알아두면 좋은 점
 
 - Session Replay는 **로컬에만 저장**되며 서버 동기화 대상이 아닙니다.
 - SSH / AWS / Warpgate host를 추가하면, 해당 호스트 아래의 **Docker 또는 Podman 컨테이너를 함께 모니터링**할 수 있습니다.
-- Containers 화면에서는 컨테이너 목록, 상태, 로그, 메트릭, 셸 진입, 포트 터널링 기능을 제공합니다.
 - Containers 기능과 container tunnel은 원격 호스트에 **Docker 또는 Podman**이 실제로 설치되어 있고, 로그인 셸에서 실행 가능해야 합니다.
 - 브라우저 로그인/동기화를 직접 운영하려면 아래의 `sync-api`를 self-host 하거나, 앱 로그인 화면의 `Login Server`를 원하는 서버로 바꿔야 합니다.
 

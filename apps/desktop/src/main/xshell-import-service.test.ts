@@ -159,7 +159,7 @@ describe('Xshell import service', () => {
           path: 'Servers',
           name: 'Servers',
           parentPath: null,
-          hostCount: 1
+          hostCount: 2
         },
         {
           path: 'Servers/Empty',
@@ -171,7 +171,7 @@ describe('Xshell import service', () => {
           path: 'Servers/Nested',
           name: 'Nested',
           parentPath: 'Servers',
-          hostCount: 0
+          hostCount: 1
         }
       ]);
       expect(result.hosts).toEqual([
@@ -187,9 +187,15 @@ describe('Xshell import service', () => {
           username: 'ubuntu',
           authType: 'privateKey',
           privateKeyPath: keyPath
+        }),
+        expect.objectContaining({
+          label: 'db',
+          hostname: 'db.example.com',
+          username: 'postgres',
+          groupPath: 'Servers/Nested'
         })
       ]);
-      expect(result.skippedExistingHostCount).toBe(1);
+      expect(result.skippedExistingHostCount).toBe(0);
       expect(result.skippedDuplicateHostCount).toBe(0);
       expect(result.warnings.some((warning) => warning.code === 'password-not-imported')).toBe(false);
       expect(result.warnings.some((warning) => warning.code === 'auth-profile-not-imported')).toBe(true);
@@ -304,7 +310,7 @@ describe('Xshell import service', () => {
     }
   });
 
-  it('appends manual folders to an existing snapshot and records duplicate hosts while preserving empty groups', async () => {
+  it('appends manual folders to an existing snapshot without duplicate skip counts while preserving empty groups', async () => {
     const documentsDir = await createTempDir('dolssh-xshell-append-');
     try {
       const sessionsDir = path.join(documentsDir, 'NetSarang Computer', '8', 'Xshell', 'Sessions');
@@ -346,7 +352,7 @@ describe('Xshell import service', () => {
       expect(appended.hosts.map((host) => host.label)).toEqual(['db', 'web']);
       expect(appended.skippedDuplicateHostCount).toBe(0);
       expect(appendedAgain.sources).toHaveLength(2);
-      expect(appendedAgain.skippedDuplicateHostCount).toBe(1);
+      expect(appendedAgain.skippedDuplicateHostCount).toBe(0);
     } finally {
       await rm(documentsDir, { recursive: true, force: true });
     }

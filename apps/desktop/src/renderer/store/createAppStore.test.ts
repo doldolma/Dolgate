@@ -24,11 +24,28 @@ async function flushMicrotasks() {
   await Promise.resolve();
 }
 
+function createEcsHost(): HostRecord {
+  return {
+    id: "ecs-host-1",
+    kind: "aws-ecs",
+    label: "gridwiz-ecs",
+    awsProfileName: "default",
+    awsRegion: "ap-northeast-2",
+    awsEcsClusterArn: "arn:aws:ecs:ap-northeast-2:123456789012:cluster/prod",
+    awsEcsClusterName: "prod",
+    groupName: "Servers",
+    terminalThemeId: null,
+    createdAt: "2025-01-01T00:00:00.000Z",
+    updatedAt: "2025-01-01T00:00:00.000Z",
+  };
+}
+
 function createContainerTab(
   hostId: string,
   options: Partial<HostContainersTabState> = {},
 ): HostContainersTabState {
   return {
+    kind: "host-containers",
     hostId,
     title: `${hostId} · Containers`,
     runtime: null,
@@ -53,6 +70,15 @@ function createContainerTab(
     metricsState: "idle",
     metricsLoading: false,
     pendingAction: null,
+    containerTunnelStatesByContainerId: {},
+    ecsSnapshot: null,
+    ecsMetricsWarning: null,
+    ecsMetricsLoadedAt: null,
+    ecsMetricsLoading: false,
+    ecsUtilizationHistoryByServiceName: {},
+    ecsSelectedServiceName: null,
+    ecsActivePanel: "overview",
+    ecsTunnelStatesByServiceName: {},
     ...options,
   };
 }
@@ -197,6 +223,7 @@ function createMockApi(): DesktopApi {
       login: vi.fn().mockResolvedValue(undefined),
       listRegions: vi.fn().mockResolvedValue([]),
       listEc2Instances: vi.fn().mockResolvedValue([]),
+      listEcsClusters: vi.fn().mockResolvedValue([]),
       inspectHostSshMetadata: vi.fn().mockResolvedValue({
         sshPort: 22,
         recommendedUsername: "ubuntu",
@@ -226,6 +253,141 @@ function createMockApi(): DesktopApi {
         createdAt: "2025-01-01T00:00:00.000Z",
         updatedAt: "2025-01-01T00:00:00.000Z",
       })),
+      loadEcsClusterSnapshot: vi.fn().mockResolvedValue({
+        profileName: "default",
+        region: "ap-northeast-2",
+        cluster: {
+          clusterArn: "arn:aws:ecs:ap-northeast-2:123456789012:cluster/prod",
+          clusterName: "prod",
+          status: "ACTIVE",
+          activeServicesCount: 2,
+          runningTasksCount: 3,
+          pendingTasksCount: 1,
+        },
+        services: [
+          {
+            serviceArn: "arn:aws:ecs:ap-northeast-2:123456789012:service/prod/api",
+            serviceName: "api",
+            status: "ACTIVE",
+            rolloutState: "COMPLETED",
+            desiredCount: 2,
+            runningCount: 2,
+            pendingCount: 0,
+            launchType: "FARGATE",
+            servicePorts: [],
+            exposureKinds: [],
+            cpuUtilizationPercent: null,
+            memoryUtilizationPercent: null,
+            capacityProviderSummary: null,
+            configuredCpu: "512",
+            configuredMemory: "1024",
+            taskDefinitionArn: "arn:aws:ecs:ap-northeast-2:123456789012:task-definition/api:7",
+            taskDefinitionRevision: 7,
+            latestEventMessage: "steady state",
+          },
+        ],
+        metricsWarning: null,
+        loadedAt: "2025-01-01T00:00:00.000Z",
+      }),
+      loadEcsClusterUtilization: vi.fn().mockResolvedValue({
+        loadedAt: "2025-01-01T00:00:10.000Z",
+        warning: null,
+        services: [
+          {
+            serviceName: "api",
+            cpuUtilizationPercent: 23.4,
+            memoryUtilizationPercent: 61.2,
+            cpuHistory: [
+              {
+                timestamp: "2025-01-01T00:00:00.000Z",
+                value: 22.1,
+              },
+              {
+                timestamp: "2025-01-01T00:01:00.000Z",
+                value: 23.4,
+              },
+            ],
+            memoryHistory: [
+              {
+                timestamp: "2025-01-01T00:00:00.000Z",
+                value: 59.8,
+              },
+              {
+                timestamp: "2025-01-01T00:01:00.000Z",
+                value: 61.2,
+              },
+            ],
+          },
+        ],
+      }),
+      loadEcsServiceActionContext: vi.fn().mockResolvedValue({
+        serviceName: "api",
+        serviceArn: "arn:aws:ecs:ap-northeast-2:123456789012:service/prod/api",
+        taskDefinitionArn:
+          "arn:aws:ecs:ap-northeast-2:123456789012:task-definition/api:7",
+        taskDefinitionRevision: 7,
+        containers: [
+          {
+            containerName: "api",
+            ports: [{ port: 8080, protocol: "tcp" }],
+            execEnabled: true,
+            logSupport: {
+              containerName: "api",
+              supported: true,
+              logGroupName: "/ecs/api",
+              logRegion: "ap-northeast-2",
+              logStreamPrefix: "ecs",
+            },
+          },
+        ],
+        runningTasks: [
+          {
+            taskArn: "arn:aws:ecs:ap-northeast-2:123456789012:task/prod/api-1",
+            taskId: "api-1",
+            lastStatus: "RUNNING",
+            enableExecuteCommand: true,
+            containers: [
+              {
+                containerName: "api",
+                lastStatus: "RUNNING",
+                runtimeId: "runtime-1",
+              },
+            ],
+          },
+        ],
+        deployments: [],
+        events: [],
+      }),
+      loadEcsServiceLogs: vi.fn().mockResolvedValue({
+        serviceName: "api",
+        entries: [],
+        taskOptions: [],
+        containerOptions: [],
+        followCursor: null,
+        loadedAt: "2025-01-01T00:00:00.000Z",
+        unsupportedReason: null,
+      }),
+      openEcsExecShell: vi
+        .fn()
+        .mockResolvedValue({ sessionId: "local-session-ecs-1" }),
+      startEcsServiceTunnel: vi.fn().mockResolvedValue({
+        ruleId: "ecs-service-tunnel:1",
+        hostId: "ecs-host-1",
+        transport: "ecs-task",
+        bindAddress: "127.0.0.1",
+        bindPort: 4200,
+        status: "running",
+        updatedAt: "2025-01-01T00:00:00.000Z",
+        startedAt: "2025-01-01T00:00:00.000Z",
+        mode: "local",
+        method: "ssm-remote-host",
+      }),
+      stopEcsServiceTunnel: vi.fn().mockResolvedValue(undefined),
+      listEcsTaskTunnelServices: vi.fn().mockResolvedValue([]),
+      loadEcsTaskTunnelService: vi.fn().mockResolvedValue({
+        serviceName: "api",
+        containers: [],
+      }),
     },
     warpgate: {
       testConnection: vi.fn().mockResolvedValue({
@@ -317,6 +479,19 @@ function createMockApi(): DesktopApi {
         lines: [],
         cursor: null,
       }),
+      startTunnel: vi.fn().mockResolvedValue({
+        ruleId: "container-service-tunnel:1",
+        hostId: "host-1",
+        transport: "container",
+        bindAddress: "127.0.0.1",
+        bindPort: 43110,
+        status: "running",
+        updatedAt: "2025-01-01T00:00:10.000Z",
+        startedAt: "2025-01-01T00:00:05.000Z",
+        mode: "local",
+        method: "ssh-native",
+      }),
+      stopTunnel: vi.fn().mockResolvedValue(undefined),
       start: vi.fn().mockResolvedValue(undefined),
       stop: vi.fn().mockResolvedValue(undefined),
       restart: vi.fn().mockResolvedValue(undefined),
@@ -1177,6 +1352,16 @@ describe("createAppStore", () => {
           warpgateUsername: draft.warpgateUsername,
         } satisfies HostRecord;
       }
+      if (draft.kind === "aws-ecs") {
+        return {
+          ...recordBase,
+          kind: "aws-ecs",
+          awsProfileName: draft.awsProfileName,
+          awsRegion: draft.awsRegion,
+          awsEcsClusterArn: draft.awsEcsClusterArn,
+          awsEcsClusterName: draft.awsEcsClusterName,
+        } satisfies HostRecord;
+      }
       return {
         ...recordBase,
         kind: "ssh",
@@ -1399,6 +1584,154 @@ describe("createAppStore", () => {
     expect(api.ssh.disconnect).toHaveBeenCalledWith("local-session-1");
     expect(api.ssh.connectLocal).toHaveBeenCalledTimes(2);
     expect(store.getState().tabs[0]?.source).toBe("local");
+  });
+
+  it("opens ECS exec shell using only /bin/sh", async () => {
+    const api = createMockApi();
+    api.aws.openEcsExecShell = vi
+      .fn()
+      .mockResolvedValueOnce({ sessionId: "ecs-shell-1" });
+    const store = createAppStore(api);
+
+    await store.getState().bootstrap();
+    store.setState((state) => ({
+      hosts: [...state.hosts, createEcsHost()],
+    }));
+    await store.getState().openEcsExecShell(
+      "ecs-host-1",
+      "api",
+      "arn:aws:ecs:ap-northeast-2:123456789012:task/prod/api-1",
+      "api",
+    );
+
+    expect(api.aws.openEcsExecShell).toHaveBeenCalledTimes(1);
+    expect(api.aws.openEcsExecShell).toHaveBeenCalledWith({
+      hostId: "ecs-host-1",
+      serviceName: "api",
+      taskArn: "arn:aws:ecs:ap-northeast-2:123456789012:task/prod/api-1",
+      containerName: "api",
+      cols: 120,
+      rows: 32,
+      command: "/bin/sh",
+    });
+  });
+
+  it("treats a connected ECS exec shell like a regular local session without fallback retries", async () => {
+    const api = createMockApi();
+    api.aws.openEcsExecShell = vi
+      .fn()
+      .mockResolvedValueOnce({ sessionId: "ecs-shell-1" });
+    const store = createAppStore(api);
+
+    await store.getState().bootstrap();
+    store.setState((state) => ({
+      hosts: [...state.hosts, createEcsHost()],
+    }));
+    await store.getState().openEcsExecShell(
+      "ecs-host-1",
+      "api",
+      "arn:aws:ecs:ap-northeast-2:123456789012:task/prod/api-1",
+      "api",
+    );
+
+    store.getState().handleCoreEvent({
+      type: "connected",
+      sessionId: "ecs-shell-1",
+      payload: { shellKind: "aws-ecs-exec" },
+    });
+
+    expect(store.getState().tabs[0]?.status).toBe("connected");
+    expect(store.getState().tabs[0]?.shellKind).toBe("aws-ecs-exec");
+
+    store.getState().handleCoreEvent({
+      type: "error",
+      sessionId: "ecs-shell-1",
+      payload: {
+        message: "Process exited with status 127",
+      },
+    });
+    store.getState().handleCoreEvent({
+      type: "closed",
+      sessionId: "ecs-shell-1",
+      payload: {},
+    });
+    await flushMicrotasks();
+
+    expect(api.aws.openEcsExecShell).toHaveBeenCalledTimes(1);
+    expect(store.getState().tabs).toHaveLength(0);
+  });
+
+  it("retries a failed ECS exec shell using /bin/sh again", async () => {
+    const api = createMockApi();
+    api.aws.openEcsExecShell = vi
+      .fn()
+      .mockResolvedValueOnce({ sessionId: "ecs-shell-1" })
+      .mockResolvedValueOnce({ sessionId: "ecs-shell-2" });
+    const store = createAppStore(api);
+
+    await store.getState().bootstrap();
+    store.setState((state) => ({
+      hosts: [...state.hosts, createEcsHost()],
+    }));
+    await store.getState().openEcsExecShell(
+      "ecs-host-1",
+      "api",
+      "arn:aws:ecs:ap-northeast-2:123456789012:task/prod/api-1",
+      "api",
+    );
+
+    store.getState().handleCoreEvent({
+      type: "error",
+      sessionId: "ecs-shell-1",
+      payload: {
+        message: "Process exited with status 127",
+      },
+    });
+
+    await store.getState().retrySessionConnection("ecs-shell-1");
+
+    expect(api.aws.openEcsExecShell).toHaveBeenNthCalledWith(2, {
+      hostId: "ecs-host-1",
+      serviceName: "api",
+      taskArn: "arn:aws:ecs:ap-northeast-2:123456789012:task/prod/api-1",
+      containerName: "api",
+      cols: 120,
+      rows: 32,
+      command: "/bin/sh",
+    });
+    expect(store.getState().tabs[0]?.sessionId).toBe("ecs-shell-2");
+  });
+
+  it("shows a clearer permission error when ECS exec is denied by IAM", async () => {
+    const api = createMockApi();
+    api.aws.openEcsExecShell = vi
+      .fn()
+      .mockRejectedValueOnce(
+        new Error(
+          "AccessDeniedException: User is not authorized to perform: ecs:ExecuteCommand on resource: *",
+        ),
+      );
+    const store = createAppStore(api);
+
+    await store.getState().bootstrap();
+    store.setState((state) => ({
+      hosts: [...state.hosts, createEcsHost()],
+    }));
+    await store.getState().openEcsExecShell(
+      "ecs-host-1",
+      "api",
+      "arn:aws:ecs:ap-northeast-2:123456789012:task/prod/api-1",
+      "api",
+    );
+
+    expect(store.getState().tabs).toHaveLength(1);
+    expect(store.getState().tabs[0]?.status).toBe("error");
+    expect(store.getState().tabs[0]?.errorMessage).toContain(
+      "ecs:ExecuteCommand",
+    );
+    expect(store.getState().tabs[0]?.errorMessage).toContain(
+      "권한이 없습니다",
+    );
   });
 
   it("creates a new titled session each time the same host is connected", async () => {
@@ -1675,6 +2008,7 @@ describe("createAppStore", () => {
       errorMessage: null,
       missingTools: [],
     });
+    await flushMicrotasks();
     await flushMicrotasks();
 
     expect(store.getState().tabs[0]?.connectionProgress?.stage).toBe(
@@ -2102,6 +2436,798 @@ describe("createAppStore", () => {
     expect(
       store.getState().containerTabs.find((tab) => tab.hostId === "host-1"),
     ).toBeDefined();
+  });
+
+  it("routes aws-ecs hosts into an ECS containers tab instead of starting a terminal session", async () => {
+    const api = createMockApi();
+    const store = createAppStore(api);
+    await store.getState().bootstrap();
+
+    store.setState((state) => ({
+      hosts: [
+        ...state.hosts,
+        {
+          id: "ecs-host-1",
+          kind: "aws-ecs",
+          label: "prod cluster",
+          awsProfileName: "default",
+          awsRegion: "ap-northeast-2",
+          awsEcsClusterArn: "arn:aws:ecs:ap-northeast-2:123456789012:cluster/prod",
+          awsEcsClusterName: "prod",
+          groupName: "Servers",
+          tags: [],
+          terminalThemeId: null,
+          createdAt: "2025-01-01T00:00:00.000Z",
+          updatedAt: "2025-01-01T00:00:00.000Z",
+        },
+      ],
+    }));
+
+    await store.getState().connectHost("ecs-host-1", 120, 32);
+
+    expect(api.ssh.connect).not.toHaveBeenCalled();
+    expect(store.getState().activeWorkspaceTab).toBe("containers");
+    expect(store.getState().activeContainerHostId).toBe("ecs-host-1");
+    expect(
+      store.getState().containerTabs.find((tab) => tab.hostId === "ecs-host-1"),
+    ).toMatchObject({
+      kind: "ecs-cluster",
+      ecsMetricsLoadedAt: "2025-01-01T00:00:10.000Z",
+    });
+    expect(api.aws.loadEcsClusterSnapshot).toHaveBeenCalledWith("ecs-host-1");
+    expect(api.aws.loadEcsClusterUtilization).toHaveBeenCalledWith("ecs-host-1");
+  });
+
+  it("starts AWS SSO login before loading an ECS cluster when the SSO profile is expired", async () => {
+    const api = createMockApi();
+    api.aws.getProfileStatus = vi
+      .fn()
+      .mockResolvedValueOnce({
+        profileName: "default",
+        available: true,
+        isSsoProfile: true,
+        isAuthenticated: false,
+        accountId: null,
+        arn: null,
+        errorMessage: "브라우저 로그인이 필요합니다.",
+        missingTools: [],
+      })
+      .mockResolvedValueOnce({
+        profileName: "default",
+        available: true,
+        isSsoProfile: true,
+        isAuthenticated: true,
+        accountId: "123456789012",
+        arn: "arn:aws:iam::123456789012:user/test",
+        errorMessage: null,
+        missingTools: [],
+      });
+    const store = createAppStore(api);
+    await store.getState().bootstrap();
+
+    store.setState((state) => ({
+      hosts: [...state.hosts, createEcsHost()],
+    }));
+
+    await store.getState().connectHost("ecs-host-1", 120, 32);
+
+    expect(api.aws.login).toHaveBeenCalledWith("default");
+    expect(api.aws.loadEcsClusterSnapshot).toHaveBeenCalledWith("ecs-host-1");
+    expect(
+      store.getState().containerTabs.find((tab) => tab.hostId === "ecs-host-1"),
+    ).toMatchObject({
+      kind: "ecs-cluster",
+      isLoading: false,
+      errorMessage: undefined,
+    });
+  });
+
+  it("recovers an ECS snapshot load once when the first request reports an expired SSO session", async () => {
+    const api = createMockApi();
+    api.aws.getProfileStatus = vi
+      .fn()
+      .mockResolvedValueOnce({
+        profileName: "default",
+        available: true,
+        isSsoProfile: true,
+        isAuthenticated: true,
+        accountId: "123456789012",
+        arn: "arn:aws:iam::123456789012:user/test",
+        errorMessage: null,
+        missingTools: [],
+      })
+      .mockResolvedValueOnce({
+        profileName: "default",
+        available: true,
+        isSsoProfile: true,
+        isAuthenticated: true,
+        accountId: "123456789012",
+        arn: "arn:aws:iam::123456789012:user/test",
+        errorMessage: null,
+        missingTools: [],
+      });
+    api.aws.loadEcsClusterSnapshot = vi
+      .fn()
+      .mockRejectedValueOnce(
+        new Error(
+          "Error invoking remote method 'aws:load-ecs-cluster-snapshot': Error: The SSO session associated with this profile has expired or is otherwise invalid. To refresh this SSO session run aws sso login with the corresponding profile.",
+        ),
+      )
+      .mockResolvedValueOnce({
+        profileName: "default",
+        region: "ap-northeast-2",
+        cluster: {
+          clusterArn:
+            "arn:aws:ecs:ap-northeast-2:123456789012:cluster/prod",
+          clusterName: "prod",
+          status: "ACTIVE",
+          activeServicesCount: 1,
+          runningTasksCount: 1,
+          pendingTasksCount: 0,
+        },
+        services: [],
+        metricsWarning: null,
+        loadedAt: "2025-01-01T00:00:00.000Z",
+      });
+    const store = createAppStore(api);
+    await store.getState().bootstrap();
+
+    store.setState((state) => ({
+      hosts: [...state.hosts, createEcsHost()],
+    }));
+
+    await store.getState().connectHost("ecs-host-1", 120, 32);
+
+    expect(api.aws.login).toHaveBeenCalledWith("default");
+    expect(api.aws.loadEcsClusterSnapshot).toHaveBeenCalledTimes(2);
+    expect(
+      store.getState().containerTabs.find((tab) => tab.hostId === "ecs-host-1"),
+    ).toMatchObject({
+      kind: "ecs-cluster",
+      isLoading: false,
+      errorMessage: undefined,
+    });
+  });
+
+  it("refreshes ECS utilization without replacing the existing cluster metadata", async () => {
+    const api = createMockApi();
+    const store = createAppStore(api);
+    await store.getState().bootstrap();
+
+    store.setState((state) => ({
+      hosts: [
+        ...state.hosts,
+        {
+          id: "ecs-host-1",
+          kind: "aws-ecs",
+          label: "prod cluster",
+          awsProfileName: "default",
+          awsRegion: "ap-northeast-2",
+          awsEcsClusterArn:
+            "arn:aws:ecs:ap-northeast-2:123456789012:cluster/prod",
+          awsEcsClusterName: "prod",
+          groupName: "Servers",
+          tags: [],
+          terminalThemeId: null,
+          createdAt: "2025-01-01T00:00:00.000Z",
+          updatedAt: "2025-01-01T00:00:00.000Z",
+        },
+      ],
+      containerTabs: [
+        createContainerTab("ecs-host-1", {
+          kind: "ecs-cluster",
+          title: "prod cluster · ECS",
+          ecsSnapshot: {
+            profileName: "default",
+            region: "ap-northeast-2",
+            cluster: {
+              clusterArn:
+                "arn:aws:ecs:ap-northeast-2:123456789012:cluster/prod",
+              clusterName: "prod",
+              status: "ACTIVE",
+              activeServicesCount: 1,
+              runningTasksCount: 1,
+              pendingTasksCount: 0,
+            },
+            services: [
+              {
+                serviceArn:
+                  "arn:aws:ecs:ap-northeast-2:123456789012:service/prod/api",
+                serviceName: "api",
+                status: "ACTIVE",
+                rolloutState: "COMPLETED",
+                desiredCount: 1,
+                runningCount: 1,
+                pendingCount: 0,
+                launchType: "FARGATE",
+                servicePorts: [],
+                exposureKinds: [],
+                cpuUtilizationPercent: null,
+                memoryUtilizationPercent: null,
+                taskDefinitionRevision: 7,
+                latestEventMessage: null,
+              },
+            ],
+            metricsWarning: null,
+            loadedAt: "2025-01-01T00:00:00.000Z",
+          },
+        }),
+      ],
+      activeContainerHostId: "ecs-host-1",
+      activeWorkspaceTab: "containers",
+    }));
+
+    await store.getState().refreshEcsClusterUtilization("ecs-host-1");
+
+    const nextTab = store
+      .getState()
+      .containerTabs.find((tab) => tab.hostId === "ecs-host-1");
+    expect(nextTab?.ecsSnapshot?.cluster.clusterName).toBe("prod");
+    expect(nextTab?.ecsSnapshot?.services[0]).toMatchObject({
+      serviceName: "api",
+      cpuUtilizationPercent: 23.4,
+      memoryUtilizationPercent: 61.2,
+    });
+    expect(nextTab?.ecsUtilizationHistoryByServiceName.api).toEqual({
+      cpuHistory: [
+        {
+          timestamp: "2025-01-01T00:00:00.000Z",
+          value: 22.1,
+        },
+        {
+          timestamp: "2025-01-01T00:01:00.000Z",
+          value: 23.4,
+        },
+      ],
+      memoryHistory: [
+        {
+          timestamp: "2025-01-01T00:00:00.000Z",
+          value: 59.8,
+        },
+        {
+          timestamp: "2025-01-01T00:01:00.000Z",
+          value: 61.2,
+        },
+      ],
+    });
+    expect(nextTab?.ecsMetricsLoadedAt).toBe("2025-01-01T00:00:10.000Z");
+    expect(nextTab?.isLoading).toBe(false);
+    expect(api.aws.loadEcsClusterSnapshot).not.toHaveBeenCalled();
+    expect(api.aws.loadEcsClusterUtilization).toHaveBeenCalledWith("ecs-host-1");
+  });
+
+  it("stops persisted ECS service tunnels when the ECS tab is closed", async () => {
+    const api = createMockApi();
+    const store = createAppStore(api);
+    await store.getState().bootstrap();
+
+    store.setState((state) => ({
+      hosts: [
+        ...state.hosts,
+        {
+          id: "ecs-host-1",
+          kind: "aws-ecs",
+          label: "prod cluster",
+          awsProfileName: "default",
+          awsRegion: "ap-northeast-2",
+          awsEcsClusterArn:
+            "arn:aws:ecs:ap-northeast-2:123456789012:cluster/prod",
+          awsEcsClusterName: "prod",
+          groupName: null,
+          tags: [],
+          terminalThemeId: null,
+          createdAt: "2025-01-01T00:00:00.000Z",
+          updatedAt: "2025-01-01T00:00:00.000Z",
+        },
+      ],
+      containerTabs: [
+        createContainerTab("ecs-host-1", {
+          kind: "ecs-cluster",
+          ecsTunnelStatesByServiceName: {
+            worker: {
+              serviceName: "worker",
+              taskArn: "arn:aws:ecs:ap-northeast-2:123456789012:task/prod/task-1",
+              containerName: "worker",
+              targetPort: "7001",
+              bindPort: "0",
+              autoLocalPort: true,
+              loading: false,
+              error: null,
+              runtime: {
+                ruleId: "ecs-service-tunnel:1",
+                hostId: "ecs-host-1",
+                transport: "ecs-task",
+                bindAddress: "127.0.0.1",
+                bindPort: 43110,
+                status: "running",
+                updatedAt: "2025-01-01T00:00:10.000Z",
+                startedAt: "2025-01-01T00:00:00.000Z",
+                mode: "local",
+                method: "ssm-remote-host",
+              },
+            },
+          },
+        }),
+      ],
+      activeContainerHostId: "ecs-host-1",
+      activeWorkspaceTab: "containers",
+    }));
+
+    await store.getState().closeHostContainersTab("ecs-host-1");
+
+    expect(api.aws.stopEcsServiceTunnel).toHaveBeenCalledWith(
+      "ecs-service-tunnel:1",
+    );
+    expect(
+      store.getState().containerTabs.find((tab) => tab.hostId === "ecs-host-1"),
+    ).toBeUndefined();
+  });
+
+  it("tracks ECS service tunnel runtimes in the global port forward runtime list", async () => {
+    const api = createMockApi();
+    const store = createAppStore(api);
+    await store.getState().bootstrap();
+
+    store.setState((state) => ({
+      hosts: [
+        ...state.hosts,
+        {
+          id: "ecs-host-1",
+          kind: "aws-ecs",
+          label: "prod cluster",
+          awsProfileName: "default",
+          awsRegion: "ap-northeast-2",
+          awsEcsClusterArn:
+            "arn:aws:ecs:ap-northeast-2:123456789012:cluster/prod",
+          awsEcsClusterName: "prod",
+          groupName: null,
+          tags: [],
+          terminalThemeId: null,
+          createdAt: "2025-01-01T00:00:00.000Z",
+          updatedAt: "2025-01-01T00:00:00.000Z",
+        },
+      ],
+      containerTabs: [
+        createContainerTab("ecs-host-1", {
+          kind: "ecs-cluster",
+          ecsTunnelStatesByServiceName: {
+            worker: {
+              serviceName: "worker",
+              taskArn: "arn:aws:ecs:ap-northeast-2:123456789012:task/prod/task-1",
+              containerName: "worker",
+              targetPort: "7001",
+              bindPort: "0",
+              autoLocalPort: true,
+              loading: true,
+              error: null,
+              runtime: {
+                ruleId: "ecs-service-tunnel:1",
+                hostId: "ecs-host-1",
+                transport: "ecs-task",
+                bindAddress: "127.0.0.1",
+                bindPort: 0,
+                status: "starting",
+                updatedAt: "2025-01-01T00:00:05.000Z",
+                startedAt: "2025-01-01T00:00:05.000Z",
+                mode: "local",
+                method: "ssm-remote-host",
+              },
+            },
+          },
+        }),
+      ],
+    }));
+
+    store.getState().handlePortForwardEvent({
+      runtime: {
+        ruleId: "ecs-service-tunnel:1",
+        hostId: "ecs-host-1",
+        transport: "ecs-task",
+        bindAddress: "127.0.0.1",
+        bindPort: 43110,
+        status: "running",
+        updatedAt: "2025-01-01T00:00:10.000Z",
+        startedAt: "2025-01-01T00:00:05.000Z",
+        mode: "local",
+        method: "ssm-remote-host",
+      },
+    });
+
+    expect(store.getState().portForwardRuntimes).toEqual([
+      expect.objectContaining({
+        ruleId: "ecs-service-tunnel:1",
+        hostId: "ecs-host-1",
+        transport: "ecs-task",
+        bindPort: 43110,
+        status: "running",
+      }),
+    ]);
+    expect(
+      (
+        store.getState().containerTabs.find(
+          (tab) => tab.hostId === "ecs-host-1",
+        ) as HostContainersTabState
+      ).ecsTunnelStatesByServiceName.worker.runtime,
+    ).toEqual(
+      expect.objectContaining({
+        ruleId: "ecs-service-tunnel:1",
+        bindPort: 43110,
+        status: "running",
+      }),
+    );
+  });
+
+  it("does not rewrite ECS tunnel tab state when the persisted tunnel payload is unchanged", async () => {
+    const api = createMockApi();
+    const store = createAppStore(api);
+    await store.getState().bootstrap();
+
+    const tunnelState = {
+      serviceName: "worker",
+      taskArn: "arn:aws:ecs:ap-northeast-2:123456789012:task/prod/task-1",
+      containerName: "worker",
+      targetPort: "7001",
+      bindPort: "0",
+      autoLocalPort: true,
+      loading: false,
+      error: null,
+      runtime: {
+        ruleId: "ecs-service-tunnel:1",
+        hostId: "ecs-host-1",
+        transport: "ecs-task" as const,
+        bindAddress: "127.0.0.1",
+        bindPort: 43110,
+        status: "running" as const,
+        updatedAt: "2025-01-01T00:00:10.000Z",
+        startedAt: "2025-01-01T00:00:00.000Z",
+        mode: "local" as const,
+        method: "ssm-remote-host" as const,
+      },
+    };
+
+    store.setState((state) => ({
+      hosts: [
+        ...state.hosts,
+        {
+          id: "ecs-host-1",
+          kind: "aws-ecs",
+          label: "prod cluster",
+          awsProfileName: "default",
+          awsRegion: "ap-northeast-2",
+          awsEcsClusterArn:
+            "arn:aws:ecs:ap-northeast-2:123456789012:cluster/prod",
+          awsEcsClusterName: "prod",
+          groupName: null,
+          tags: [],
+          terminalThemeId: null,
+          createdAt: "2025-01-01T00:00:00.000Z",
+          updatedAt: "2025-01-01T00:00:00.000Z",
+        },
+      ],
+      containerTabs: [
+        createContainerTab("ecs-host-1", {
+          kind: "ecs-cluster",
+          ecsTunnelStatesByServiceName: {
+            worker: tunnelState,
+          },
+        }),
+      ],
+    }));
+
+    const beforeTabs = store.getState().containerTabs;
+    store.getState().setEcsClusterTunnelState("ecs-host-1", "worker", tunnelState);
+
+    expect(store.getState().containerTabs).toBe(beforeTabs);
+  });
+
+  it("stops persisted container service tunnels when the host containers tab is closed", async () => {
+    const api = createMockApi();
+    const store = createAppStore(api);
+    await store.getState().bootstrap();
+
+    store.setState((state) => ({
+      containerTabs: [
+        ...state.containerTabs,
+        createContainerTab("host-1", {
+          kind: "host-containers",
+          containerTunnelStatesByContainerId: {
+            "container-1": {
+              containerId: "container-1",
+              containerName: "api",
+              networkName: "bridge",
+              targetPort: "8080",
+              bindPort: "0",
+              autoLocalPort: true,
+              loading: false,
+              error: null,
+              runtime: {
+                ruleId: "container-service-tunnel:1",
+                hostId: "host-1",
+                transport: "container",
+                bindAddress: "127.0.0.1",
+                bindPort: 43110,
+                status: "running",
+                updatedAt: "2025-01-01T00:00:10.000Z",
+                startedAt: "2025-01-01T00:00:00.000Z",
+                mode: "local",
+                method: "ssh-native",
+              },
+            },
+          },
+        }),
+      ],
+      activeContainerHostId: "host-1",
+      activeWorkspaceTab: "containers",
+    }));
+
+    await store.getState().closeHostContainersTab("host-1");
+
+    expect(api.containers.stopTunnel).toHaveBeenCalledWith(
+      "container-service-tunnel:1",
+    );
+    expect(api.containers.release).toHaveBeenCalledWith("host-1");
+  });
+
+  it("tracks container service tunnel runtimes in the global port forward runtime list", async () => {
+    const api = createMockApi();
+    const store = createAppStore(api);
+    await store.getState().bootstrap();
+
+    store.setState((state) => ({
+      containerTabs: [
+        ...state.containerTabs,
+        createContainerTab("host-1", {
+          kind: "host-containers",
+          containerTunnelStatesByContainerId: {
+            "container-1": {
+              containerId: "container-1",
+              containerName: "api",
+              networkName: "bridge",
+              targetPort: "8080",
+              bindPort: "0",
+              autoLocalPort: true,
+              loading: true,
+              error: null,
+              runtime: {
+                ruleId: "container-service-tunnel:1",
+                hostId: "host-1",
+                transport: "container",
+                bindAddress: "127.0.0.1",
+                bindPort: 0,
+                status: "starting",
+                updatedAt: "2025-01-01T00:00:05.000Z",
+                startedAt: "2025-01-01T00:00:05.000Z",
+                mode: "local",
+                method: "ssh-native",
+              },
+            },
+          },
+        }),
+      ],
+    }));
+
+    store.getState().handlePortForwardEvent({
+      runtime: {
+        ruleId: "container-service-tunnel:1",
+        hostId: "host-1",
+        transport: "container",
+        bindAddress: "127.0.0.1",
+        bindPort: 43110,
+        status: "running",
+        updatedAt: "2025-01-01T00:00:10.000Z",
+        startedAt: "2025-01-01T00:00:05.000Z",
+        mode: "local",
+        method: "ssh-native",
+      },
+    });
+
+    expect(store.getState().portForwardRuntimes).toEqual([
+      expect.objectContaining({
+        ruleId: "container-service-tunnel:1",
+        hostId: "host-1",
+        transport: "container",
+        bindPort: 43110,
+        status: "running",
+      }),
+    ]);
+    expect(
+      (
+        store.getState().containerTabs.find(
+          (tab) => tab.hostId === "host-1",
+        ) as HostContainersTabState
+      ).containerTunnelStatesByContainerId["container-1"]?.runtime,
+    ).toEqual(
+      expect.objectContaining({
+        ruleId: "container-service-tunnel:1",
+        bindPort: 43110,
+        status: "running",
+      }),
+    );
+  });
+
+  it("does not rewrite container tunnel tab state when the persisted tunnel payload is unchanged", async () => {
+    const api = createMockApi();
+    const store = createAppStore(api);
+    await store.getState().bootstrap();
+
+    const tunnelState = {
+      containerId: "container-1",
+      containerName: "api",
+      networkName: "bridge",
+      targetPort: "8080",
+      bindPort: "0",
+      autoLocalPort: true,
+      loading: false,
+      error: null,
+      runtime: {
+        ruleId: "container-service-tunnel:1",
+        hostId: "host-1",
+        transport: "container" as const,
+        bindAddress: "127.0.0.1",
+        bindPort: 43110,
+        status: "running" as const,
+        updatedAt: "2025-01-01T00:00:10.000Z",
+        startedAt: "2025-01-01T00:00:00.000Z",
+        mode: "local" as const,
+        method: "ssh-native" as const,
+      },
+    };
+
+    store.setState((state) => ({
+      containerTabs: [
+        ...state.containerTabs,
+        createContainerTab("host-1", {
+          kind: "host-containers",
+          containerTunnelStatesByContainerId: {
+            "container-1": tunnelState,
+          },
+        }),
+      ],
+    }));
+
+    const beforeTabs = store.getState().containerTabs;
+    store
+      .getState()
+      .setHostContainerTunnelState("host-1", "container-1", tunnelState);
+
+    expect(store.getState().containerTabs).toBe(beforeTabs);
+  });
+
+  it("merges ECS utilization history by timestamp and prunes points outside the 10 minute window", async () => {
+    const api = createMockApi();
+    api.aws.loadEcsClusterUtilization = vi.fn().mockResolvedValue({
+      loadedAt: "2025-01-01T00:10:00.000Z",
+      warning: null,
+      services: [
+        {
+          serviceName: "api",
+          cpuUtilizationPercent: 24.5,
+          memoryUtilizationPercent: 62.8,
+          cpuHistory: [
+            {
+              timestamp: "2025-01-01T00:09:00.000Z",
+              value: 24.5,
+            },
+          ],
+          memoryHistory: [
+            {
+              timestamp: "2025-01-01T00:09:00.000Z",
+              value: 62.8,
+            },
+          ],
+        },
+      ],
+    });
+
+    const store = createAppStore(api);
+    await store.getState().bootstrap();
+
+    store.setState((state) => ({
+      hosts: [
+        ...state.hosts,
+        {
+          id: "ecs-host-1",
+          kind: "aws-ecs",
+          label: "prod cluster",
+          awsProfileName: "default",
+          awsRegion: "ap-northeast-2",
+          awsEcsClusterArn:
+            "arn:aws:ecs:ap-northeast-2:123456789012:cluster/prod",
+          awsEcsClusterName: "prod",
+          groupName: "Servers",
+          tags: [],
+          terminalThemeId: null,
+          createdAt: "2025-01-01T00:00:00.000Z",
+          updatedAt: "2025-01-01T00:00:00.000Z",
+        },
+      ],
+      containerTabs: [
+        createContainerTab("ecs-host-1", {
+          kind: "ecs-cluster",
+          title: "prod cluster · ECS",
+          ecsSnapshot: {
+            profileName: "default",
+            region: "ap-northeast-2",
+            cluster: {
+              clusterArn:
+                "arn:aws:ecs:ap-northeast-2:123456789012:cluster/prod",
+              clusterName: "prod",
+              status: "ACTIVE",
+              activeServicesCount: 1,
+              runningTasksCount: 1,
+              pendingTasksCount: 0,
+            },
+            services: [
+              {
+                serviceArn:
+                  "arn:aws:ecs:ap-northeast-2:123456789012:service/prod/api",
+                serviceName: "api",
+                status: "ACTIVE",
+                rolloutState: "COMPLETED",
+                desiredCount: 1,
+                runningCount: 1,
+                pendingCount: 0,
+                launchType: "FARGATE",
+                servicePorts: [],
+                exposureKinds: [],
+                cpuUtilizationPercent: 23.4,
+                memoryUtilizationPercent: 61.2,
+                taskDefinitionRevision: 7,
+                latestEventMessage: null,
+              },
+            ],
+            metricsWarning: null,
+            loadedAt: "2025-01-01T00:00:00.000Z",
+          },
+          ecsUtilizationHistoryByServiceName: {
+            api: {
+              cpuHistory: [
+                {
+                  timestamp: "2024-12-31T23:59:00.000Z",
+                  value: 12,
+                },
+                {
+                  timestamp: "2025-01-01T00:09:00.000Z",
+                  value: 20,
+                },
+              ],
+              memoryHistory: [
+                {
+                  timestamp: "2024-12-31T23:59:00.000Z",
+                  value: 40,
+                },
+                {
+                  timestamp: "2025-01-01T00:09:00.000Z",
+                  value: 58,
+                },
+              ],
+            },
+          },
+        }),
+      ],
+      activeContainerHostId: "ecs-host-1",
+      activeWorkspaceTab: "containers",
+    }));
+
+    await store.getState().refreshEcsClusterUtilization("ecs-host-1");
+
+    const history =
+      store.getState().containerTabs.find((tab) => tab.hostId === "ecs-host-1")
+        ?.ecsUtilizationHistoryByServiceName.api;
+    expect(history).toEqual({
+      cpuHistory: [
+        {
+          timestamp: "2025-01-01T00:09:00.000Z",
+          value: 24.5,
+        },
+      ],
+      memoryHistory: [
+        {
+          timestamp: "2025-01-01T00:09:00.000Z",
+          value: 62.8,
+        },
+      ],
+    });
   });
 
   it("releases the host containers endpoint and keeps focus inside the containers section when another host tab remains", async () => {

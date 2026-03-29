@@ -1,12 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type {
   AwsEc2InstanceSummary,
+  AwsEcsClusterListItem,
   AwsHostSshInspectionResult,
   AwsProfileStatus,
   AwsProfileSummary,
   HostDraft,
 } from '@shared';
 import { DialogBackdrop } from './DialogBackdrop';
+
+type AwsImportMode = 'ec2' | 'ecs';
 
 interface AwsImportDialogProps {
   open: boolean;
@@ -64,12 +67,14 @@ function toAwsSshPortValue(value: string): number | null {
 }
 
 export function AwsImportDialog({ open, currentGroupPath, onClose, onImport }: AwsImportDialogProps) {
+  const [importMode, setImportMode] = useState<AwsImportMode>('ec2');
   const [profiles, setProfiles] = useState<AwsProfileSummary[]>([]);
   const [selectedProfile, setSelectedProfile] = useState('');
   const [profileStatus, setProfileStatus] = useState<AwsProfileStatus | null>(null);
   const [regions, setRegions] = useState<string[]>([]);
   const [selectedRegion, setSelectedRegion] = useState('');
   const [instances, setInstances] = useState<AwsEc2InstanceSummary[]>([]);
+  const [ecsClusters, setEcsClusters] = useState<AwsEcsClusterListItem[]>([]);
   const [isLoadingProfiles, setIsLoadingProfiles] = useState(false);
   const [isLoadingStatus, setIsLoadingStatus] = useState(false);
   const [isLoadingRegions, setIsLoadingRegions] = useState(false);
@@ -179,12 +184,14 @@ export function AwsImportDialog({ open, currentGroupPath, onClose, onImport }: A
       return;
     }
 
+    setImportMode('ec2');
     setProfiles([]);
     setSelectedProfile('');
     setProfileStatus(null);
     setRegions([]);
     setSelectedRegion('');
     setInstances([]);
+    setEcsClusters([]);
     setError(null);
     resetInspection();
     setIsLoadingProfiles(true);
@@ -211,6 +218,7 @@ export function AwsImportDialog({ open, currentGroupPath, onClose, onImport }: A
       setRegions([]);
       setSelectedRegion('');
       setInstances([]);
+      setEcsClusters([]);
       return;
     }
 
@@ -220,6 +228,7 @@ export function AwsImportDialog({ open, currentGroupPath, onClose, onImport }: A
     setRegions([]);
     setSelectedRegion('');
     setInstances([]);
+    setEcsClusters([]);
     setError(null);
 
     void window.dolssh.aws
@@ -253,6 +262,7 @@ export function AwsImportDialog({ open, currentGroupPath, onClose, onImport }: A
       setRegions([]);
       setSelectedRegion('');
       setInstances([]);
+      setEcsClusters([]);
       return;
     }
 
@@ -299,6 +309,7 @@ export function AwsImportDialog({ open, currentGroupPath, onClose, onImport }: A
     if (!open || !selectedProfile || !selectedRegion || !profileStatus?.isAuthenticated) {
       setIsLoadingInstances(false);
       setInstances([]);
+      setEcsClusters([]);
       return;
     }
 
@@ -306,19 +317,35 @@ export function AwsImportDialog({ open, currentGroupPath, onClose, onImport }: A
     setIsLoadingInstances(true);
     setError(null);
 
-    void window.dolssh.aws
-      .listEc2Instances(selectedProfile, selectedRegion)
+    const loadTargets =
+      importMode === 'ecs'
+        ? window.dolssh.aws.listEcsClusters(selectedProfile, selectedRegion)
+        : window.dolssh.aws.listEc2Instances(selectedProfile, selectedRegion);
+
+    void loadTargets
       .then((items) => {
         if (cancelled) {
           return;
         }
-        setInstances(items);
+        if (importMode === 'ecs') {
+          setEcsClusters(items as AwsEcsClusterListItem[]);
+          setInstances([]);
+          return;
+        }
+        setInstances(items as AwsEc2InstanceSummary[]);
+        setEcsClusters([]);
       })
       .catch((loadError) => {
         if (cancelled) {
           return;
         }
-        setError(loadError instanceof Error ? loadError.message : 'EC2 인스턴스 목록을 불러오지 못했습니다.');
+        setError(
+          loadError instanceof Error
+            ? loadError.message
+            : importMode === 'ecs'
+              ? 'ECS 클러스터 목록을 불러오지 못했습니다.'
+              : 'EC2 인스턴스 목록을 불러오지 못했습니다.',
+        );
       })
       .finally(() => {
         if (!cancelled) {
@@ -329,9 +356,12 @@ export function AwsImportDialog({ open, currentGroupPath, onClose, onImport }: A
     return () => {
       cancelled = true;
     };
-  }, [open, profileStatus?.isAuthenticated, selectedProfile, selectedRegion]);
+  }, [importMode, open, profileStatus?.isAuthenticated, selectedProfile, selectedRegion]);
 
   const missingTools = useMemo(() => profileStatus?.missingTools ?? [], [profileStatus?.missingTools]);
+  const shouldShowMissingToolsBanner =
+    missingTools.includes('aws-cli') ||
+    (importMode === 'ec2' && missingTools.includes('session-manager-plugin'));
   const loadingMessage = inspectionTarget
     ? null
     : isLoadingProfiles
@@ -343,7 +373,9 @@ export function AwsImportDialog({ open, currentGroupPath, onClose, onImport }: A
           : isLoadingRegions
             ? '리전 목록을 불러오는 중입니다.'
             : isLoadingInstances
-              ? 'EC2 인스턴스 목록을 불러오는 중입니다.'
+              ? importMode === 'ecs'
+                ? 'ECS 클러스터 목록을 불러오는 중입니다.'
+                : 'EC2 인스턴스 목록을 불러오는 중입니다.'
               : null;
   const inspectionCandidateChips = useMemo(
     () =>
@@ -374,6 +406,39 @@ export function AwsImportDialog({ open, currentGroupPath, onClose, onImport }: A
         </div>
 
         <div className="modal-card__body">
+          <div className="segmented-control aws-import-dialog__mode-toggle" role="tablist" aria-label="AWS import mode">
+            <button
+              type="button"
+              className={importMode === 'ec2' ? 'active' : ''}
+              aria-pressed={importMode === 'ec2'}
+              onClick={() => {
+                if (inspectionTarget || isRegistering) {
+                  return;
+                }
+                setImportMode('ec2');
+                resetInspection();
+              }}
+              disabled={Boolean(inspectionTarget) || isRegistering}
+            >
+              EC2
+            </button>
+            <button
+              type="button"
+              className={importMode === 'ecs' ? 'active' : ''}
+              aria-pressed={importMode === 'ecs'}
+              onClick={() => {
+                if (inspectionTarget || isRegistering) {
+                  return;
+                }
+                setImportMode('ecs');
+                resetInspection();
+              }}
+              disabled={Boolean(inspectionTarget) || isRegistering}
+            >
+              ECS
+            </button>
+          </div>
+
           <div className="form-grid">
             <label className="form-field">
               <span>Profile</span>
@@ -439,10 +504,12 @@ export function AwsImportDialog({ open, currentGroupPath, onClose, onImport }: A
             </div>
           ) : null}
 
-          {missingTools.length > 0 ? (
+          {shouldShowMissingToolsBanner ? (
             <div className="terminal-error-banner">
               {missingTools.includes('aws-cli') ? 'AWS CLI가 설치되어 있어야 합니다. ' : ''}
-              {missingTools.includes('session-manager-plugin') ? 'session-manager-plugin이 설치되어 있어야 SSM 연결을 시작할 수 있습니다.' : ''}
+              {importMode === 'ec2' && missingTools.includes('session-manager-plugin')
+                ? 'session-manager-plugin이 설치되어 있어야 SSM 연결을 시작할 수 있습니다.'
+                : ''}
             </div>
           ) : null}
 
@@ -563,6 +630,70 @@ export function AwsImportDialog({ open, currentGroupPath, onClose, onImport }: A
                 </div>
               ) : null}
             </div>
+          ) : profileStatus?.isAuthenticated && selectedRegion && importMode === 'ecs' ? (
+            <div className="aws-import-dialog__instance-list" data-testid="aws-import-ecs-cluster-list">
+              <div className="operations-list">
+                {ecsClusters.length === 0 && !isLoadingInstances ? (
+                  <div className="empty-callout">
+                    <strong>이 리전에 가져올 수 있는 ECS 클러스터가 없습니다.</strong>
+                  </div>
+                ) : (
+                  ecsClusters.map((cluster) => (
+                    <article key={cluster.clusterArn} className="operations-card">
+                      <div className="operations-card__main">
+                        <div className="operations-card__title-row">
+                          <strong>{cluster.clusterName}</strong>
+                          <span className="status-pill status-pill--running">
+                            {cluster.status || 'UNKNOWN'}
+                          </span>
+                        </div>
+                        <div className="operations-card__meta">
+                          <span>{selectedProfile}</span>
+                          <span>{selectedRegion}</span>
+                          <span>Services {cluster.activeServicesCount}</span>
+                          <span>Running {cluster.runningTasksCount}</span>
+                          <span>Pending {cluster.pendingTasksCount}</span>
+                        </div>
+                      </div>
+                      <div className="operations-card__actions">
+                        <button
+                          type="button"
+                          className="primary-button"
+                          disabled={isRegistering}
+                          onClick={async () => {
+                            setIsRegistering(true);
+                            setError(null);
+                            try {
+                              await onImport({
+                                kind: 'aws-ecs',
+                                label: cluster.clusterName,
+                                groupName: currentGroupPath ?? '',
+                                terminalThemeId: null,
+                                awsProfileName: selectedProfile,
+                                awsRegion: selectedRegion,
+                                awsEcsClusterArn: cluster.clusterArn,
+                                awsEcsClusterName: cluster.clusterName,
+                              });
+                              onClose();
+                            } catch (submitError) {
+                              setError(
+                                submitError instanceof Error
+                                  ? submitError.message
+                                  : 'ECS 클러스터를 가져오지 못했습니다.',
+                              );
+                            } finally {
+                              setIsRegistering(false);
+                            }
+                          }}
+                        >
+                          {isRegistering ? '추가 중...' : '클러스터 추가'}
+                        </button>
+                      </div>
+                    </article>
+                  ))
+                )}
+              </div>
+            </div>
           ) : profileStatus?.isAuthenticated && selectedRegion ? (
             <div className="aws-import-dialog__instance-list" data-testid="aws-import-instance-list">
               <div className="operations-list">
@@ -607,7 +738,11 @@ export function AwsImportDialog({ open, currentGroupPath, onClose, onImport }: A
             </div>
           ) : profileStatus?.isAuthenticated && regions.length > 0 ? (
             <div className="empty-callout" data-testid="aws-import-region-hint">
-              <strong>리전을 선택하면 EC2 인스턴스를 불러옵니다.</strong>
+              <strong>
+                {importMode === 'ecs'
+                  ? '리전을 선택하면 ECS 클러스터를 불러옵니다.'
+                  : '리전을 선택하면 EC2 인스턴스를 불러옵니다.'}
+              </strong>
             </div>
           ) : null}
         </div>

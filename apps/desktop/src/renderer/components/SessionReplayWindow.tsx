@@ -96,6 +96,21 @@ function decodeBase64Chunk(dataBase64: string): Uint8Array {
   return bytes;
 }
 
+function publishReplayE2EState(detail: Record<string, unknown> | null): void {
+  const maybeE2EWindow = window as Window & {
+    __dolsshE2E?: unknown;
+  };
+  if (!maybeE2EWindow.__dolsshE2E) {
+    return;
+  }
+
+  window.dispatchEvent(
+    new CustomEvent("dolssh:e2e-replay-state", {
+      detail,
+    }),
+  );
+}
+
 export function SessionReplayWindow({
   recordingId,
 }: {
@@ -458,6 +473,34 @@ export function SessionReplayWindow({
       ? `세션 Replay · ${recording.title}`
       : "세션 Replay";
   }, [recording]);
+
+  useEffect(() => {
+    publishReplayE2EState({
+      recordingId,
+      loading,
+      isPlaying,
+      positionMs,
+      durationMs: totalDurationMs,
+      zoomPercent,
+      errorMessage,
+      runtimeErrorMessage,
+      terminalText: runtime ? runtime.captureSnapshot() : "",
+    });
+
+    return () => {
+      publishReplayE2EState(null);
+    };
+  }, [
+    errorMessage,
+    isPlaying,
+    loading,
+    positionMs,
+    recordingId,
+    runtime,
+    runtimeErrorMessage,
+    totalDurationMs,
+    zoomPercent,
+  ]);
 
   const handleSeek = useCallback(
     (nextPosition: number) => {

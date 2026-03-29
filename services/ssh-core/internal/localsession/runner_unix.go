@@ -17,8 +17,9 @@ import (
 )
 
 type unixPTYRunner struct {
-	command *exec.Cmd
-	ptyFile *os.File
+	shellKind string
+	command   *exec.Cmd
+	ptyFile   *os.File
 }
 
 func startPlatformLocalRunner(payload protocol.LocalConnectPayload, runtime localCommandRuntime) (sessionRunner, error) {
@@ -38,12 +39,32 @@ func startPlatformLocalRunner(payload protocol.LocalConnectPayload, runtime loca
 	}
 
 	return &unixPTYRunner{
-		command: command,
-		ptyFile: ptyFile,
+		shellKind: runtime.shellKind,
+		command:   command,
+		ptyFile:   ptyFile,
 	}, nil
 }
 
-func resolveLocalRuntime() (localCommandRuntime, error) {
+func resolveLocalRuntime(payload protocol.LocalConnectPayload) (localCommandRuntime, error) {
+	if executablePath := strings.TrimSpace(payload.Executable); executablePath != "" {
+		args := append([]string(nil), payload.Args...)
+		workingDirectory := strings.TrimSpace(payload.WorkingDirectory)
+		if workingDirectory == "" {
+			workingDirectory = resolveUserHomeDirectory()
+		}
+		shellKind := strings.TrimSpace(payload.ShellKind)
+		if shellKind == "" {
+			shellKind = "shell"
+		}
+		return localCommandRuntime{
+			shellKind:        shellKind,
+			executablePath:   executablePath,
+			args:             args,
+			env:              buildRuntimeEnv(os.Environ(), payload.Env),
+			workingDirectory: workingDirectory,
+		}, nil
+	}
+
 	executablePath, err := resolveUnixShellExecutable()
 	if err != nil {
 		return localCommandRuntime{}, err
@@ -159,5 +180,5 @@ func (r *unixPTYRunner) Wait() (sessionExit, error) {
 }
 
 func (r *unixPTYRunner) ShellKind() string {
-	return "shell"
+	return r.shellKind
 }

@@ -7,6 +7,7 @@ import {
   getServerUrlValidationMessage,
   getParentGroupPath,
   isAwsEc2HostDraft,
+  isAwsEcsHostDraft,
   isGroupWithinPath,
   isWarpgateSshHostDraft,
   isSshHostDraft,
@@ -25,6 +26,8 @@ import type {
   AwsSshMetadataStatus,
   AwsEc2HostDraft,
   AwsEc2HostRecord,
+  AwsEcsHostDraft,
+  AwsEcsHostRecord,
   GlobalTerminalThemeId,
   GroupRecord,
   GroupRemoveMode,
@@ -99,6 +102,13 @@ function compareHosts(left: HostRecord, right: HostRecord): number {
       }
       return left.awsInstanceId.localeCompare(right.awsInstanceId);
     }
+    if (left.kind === 'aws-ecs' && right.kind === 'aws-ecs') {
+      const regionCompare = left.awsRegion.localeCompare(right.awsRegion);
+      if (regionCompare !== 0) {
+        return regionCompare;
+      }
+      return left.awsEcsClusterName.localeCompare(right.awsEcsClusterName);
+    }
     if (left.kind === 'warpgate-ssh' && right.kind === 'warpgate-ssh') {
       const hostCompare = left.warpgateSshHost.localeCompare(right.warpgateSshHost);
       if (hostCompare !== 0) {
@@ -160,6 +170,15 @@ function normalizeIncomingHostRecord(record: HostRecord): HostRecord {
       awsSshPort: record.awsSshPort ?? null,
       awsSshMetadataStatus: normalizeAwsSshMetadataStatus(record.awsSshMetadataStatus, record),
       awsSshMetadataError: normalizeAwsSshMetadataError(record.awsSshMetadataError)
+    };
+  }
+
+  if (record.kind === 'aws-ecs') {
+    return {
+      ...record,
+      groupName: normalizeGroupPath(record.groupName),
+      tags: normalizeTags(record.tags),
+      terminalThemeId: normalizeTerminalThemeId(record.terminalThemeId),
     };
   }
 
@@ -228,6 +247,28 @@ function normalizeIncomingHostRecord(record: HostRecord): HostRecord {
         legacyRecord
       ),
       awsSshMetadataError: normalizeAwsSshMetadataError(legacyRecord.awsSshMetadataError as string | null | undefined),
+      createdAt: legacyRecord.createdAt,
+      updatedAt: legacyRecord.updatedAt
+    };
+  }
+
+  if (
+    typeof legacyRecord.awsProfileName === 'string' &&
+    typeof legacyRecord.awsRegion === 'string' &&
+    typeof (legacyRecord as Partial<AwsEcsHostRecord>).awsEcsClusterArn === 'string' &&
+    typeof (legacyRecord as Partial<AwsEcsHostRecord>).awsEcsClusterName === 'string'
+  ) {
+    return {
+      id: legacyRecord.id,
+      kind: 'aws-ecs',
+      label: legacyRecord.label,
+      groupName: normalizeGroupPath(legacyRecord.groupName),
+      tags: normalizeTags(legacyRecord.tags),
+      terminalThemeId: normalizeTerminalThemeId(legacyRecord.terminalThemeId),
+      awsProfileName: legacyRecord.awsProfileName,
+      awsRegion: legacyRecord.awsRegion,
+      awsEcsClusterArn: (legacyRecord as Partial<AwsEcsHostRecord>).awsEcsClusterArn ?? '',
+      awsEcsClusterName: (legacyRecord as Partial<AwsEcsHostRecord>).awsEcsClusterName ?? '',
       createdAt: legacyRecord.createdAt,
       updatedAt: legacyRecord.updatedAt
     };
@@ -306,6 +347,28 @@ function toAwsHostRecord(id: string, draft: AwsEc2HostDraft, timestamp: string, 
   };
 }
 
+function toAwsEcsHostRecord(
+  id: string,
+  draft: AwsEcsHostDraft,
+  timestamp: string,
+  current?: AwsEcsHostRecord,
+): AwsEcsHostRecord {
+  return {
+    id,
+    kind: 'aws-ecs',
+    label: draft.label,
+    awsProfileName: draft.awsProfileName,
+    awsRegion: draft.awsRegion,
+    awsEcsClusterArn: draft.awsEcsClusterArn,
+    awsEcsClusterName: draft.awsEcsClusterName,
+    groupName: normalizeGroupPath(draft.groupName),
+    tags: normalizeTags(draft.tags),
+    terminalThemeId: normalizeTerminalThemeId(draft.terminalThemeId),
+    createdAt: current?.createdAt ?? timestamp,
+    updatedAt: timestamp,
+  };
+}
+
 function toWarpgateHostRecord(
   id: string,
   draft: WarpgateSshHostDraft,
@@ -336,6 +399,9 @@ function toHostRecord(id: string, draft: HostDraft, secretRef: string | null, ti
   }
   if (isAwsEc2HostDraft(draft)) {
     return toAwsHostRecord(id, draft, timestamp, current && current.kind === 'aws-ec2' ? current : undefined);
+  }
+  if (isAwsEcsHostDraft(draft)) {
+    return toAwsEcsHostRecord(id, draft, timestamp, current && current.kind === 'aws-ecs' ? current : undefined);
   }
   if (isWarpgateSshHostDraft(draft)) {
     return toWarpgateHostRecord(id, draft, timestamp, current && current.kind === 'warpgate-ssh' ? current : undefined);
@@ -845,6 +911,21 @@ export class PortForwardRepository {
         containerName: draft.containerName.trim(),
         containerRuntime: draft.containerRuntime,
         networkName: draft.networkName.trim(),
+        targetPort: draft.targetPort,
+        createdAt,
+        updatedAt
+      };
+    }
+    if (draft.transport === 'ecs-task') {
+      return {
+        id,
+        label,
+        hostId: draft.hostId,
+        transport: 'ecs-task',
+        bindAddress: '127.0.0.1',
+        bindPort: draft.bindPort,
+        serviceName: draft.serviceName.trim(),
+        containerName: draft.containerName.trim(),
         targetPort: draft.targetPort,
         createdAt,
         updatedAt

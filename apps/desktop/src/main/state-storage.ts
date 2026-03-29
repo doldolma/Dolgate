@@ -293,6 +293,26 @@ function normalizePortForwardRule(value: unknown): PortForwardRuleRecord | null 
     return record;
   }
 
+  if (value.transport === 'ecs-task') {
+    if (typeof value.targetPort !== 'number' || !Number.isFinite(value.targetPort)) {
+      return null;
+    }
+
+    return {
+      id: value.id,
+      label: value.label.trim(),
+      hostId: value.hostId,
+      transport: 'ecs-task',
+      bindAddress: '127.0.0.1',
+      bindPort: Math.round(value.bindPort),
+      serviceName: typeof value.serviceName === 'string' ? value.serviceName.trim() : '',
+      containerName: typeof value.containerName === 'string' ? value.containerName.trim() : '',
+      targetPort: Math.round(value.targetPort),
+      createdAt: value.createdAt,
+      updatedAt: value.updatedAt,
+    };
+  }
+
   const transport = value.transport === 'aws-ssm' ? 'aws-ssm' : 'ssh';
   if (transport === 'aws-ssm') {
     const targetKind = value.targetKind === 'remote-host' ? 'remote-host' : 'instance-port';
@@ -446,6 +466,31 @@ function normalizeHostRecord(value: unknown): HostRecord | null {
           : null,
       awsSshMetadataError:
         typeof value.awsSshMetadataError === 'string' ? value.awsSshMetadataError : null,
+      createdAt: typeof value.createdAt === 'string' ? value.createdAt : nowIso(),
+      updatedAt: typeof value.updatedAt === 'string' ? value.updatedAt : nowIso()
+    };
+  }
+
+  if (value.kind === 'aws-ecs') {
+    if (
+      typeof value.awsProfileName !== 'string' ||
+      typeof value.awsRegion !== 'string' ||
+      typeof value.awsEcsClusterArn !== 'string' ||
+      typeof value.awsEcsClusterName !== 'string'
+    ) {
+      return null;
+    }
+    return {
+      id: value.id,
+      kind: 'aws-ecs',
+      label: value.label,
+      groupName: typeof value.groupName === 'string' ? value.groupName : null,
+      tags,
+      terminalThemeId: isTerminalThemeId(value.terminalThemeId) ? value.terminalThemeId : null,
+      awsProfileName: value.awsProfileName,
+      awsRegion: value.awsRegion,
+      awsEcsClusterArn: value.awsEcsClusterArn,
+      awsEcsClusterName: value.awsEcsClusterName,
       createdAt: typeof value.createdAt === 'string' ? value.createdAt : nowIso(),
       updatedAt: typeof value.updatedAt === 'string' ? value.updatedAt : nowIso()
     };

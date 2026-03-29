@@ -1,7 +1,7 @@
 import type { AuthSession } from './api';
 
 export type AuthType = 'password' | 'privateKey' | 'keyboardInteractive';
-export type HostKind = 'ssh' | 'aws-ec2' | 'warpgate-ssh';
+export type HostKind = 'ssh' | 'aws-ec2' | 'aws-ecs' | 'warpgate-ssh';
 export type AppTheme = 'system' | 'light' | 'dark';
 export type TerminalThemeId =
   | 'dolssh-dark'
@@ -37,7 +37,7 @@ export type HostContainerAction = 'start' | 'stop' | 'restart' | 'remove';
 export type SftpBrowserColumnKey = 'name' | 'dateModified' | 'size' | 'kind';
 export type ConflictResolution = 'overwrite' | 'skip' | 'keepBoth';
 export type PortForwardMode = 'local' | 'remote' | 'dynamic';
-export type PortForwardTransport = 'ssh' | 'aws-ssm' | 'container';
+export type PortForwardTransport = 'ssh' | 'aws-ssm' | 'ecs-task' | 'container';
 export type AwsSsmPortForwardTargetKind = 'instance-port' | 'remote-host';
 export type PortForwardStatus = 'stopped' | 'starting' | 'running' | 'error';
 export type KnownHostTrustStatus = 'trusted' | 'untrusted' | 'mismatch';
@@ -49,7 +49,7 @@ export type AuthStatus = 'loading' | 'unauthenticated' | 'authenticating' | 'aut
 export type SyncBootstrapStatus = 'idle' | 'syncing' | 'ready' | 'paused' | 'error';
 export type TermiusProbeStatus = 'ready' | 'unsupported' | 'not-installed' | 'no-data' | 'error';
 export type AwsSshMetadataStatus = 'idle' | 'loading' | 'ready' | 'error';
-export type SessionConnectionKind = 'ssh' | 'aws-ssm' | 'warpgate';
+export type SessionConnectionKind = 'ssh' | 'aws-ssm' | 'warpgate' | 'aws-ecs-exec';
 export type SessionLifecycleStatus = 'connected' | 'closed' | 'error';
 export type SftpConnectionStage =
   | 'loading-instance-metadata'
@@ -141,6 +141,22 @@ export interface AwsEc2HostDraft extends HostBaseDraft {
   awsSshMetadataError?: string | null;
 }
 
+export interface AwsEcsHostRecord extends HostBaseRecord {
+  kind: 'aws-ecs';
+  awsProfileName: string;
+  awsRegion: string;
+  awsEcsClusterArn: string;
+  awsEcsClusterName: string;
+}
+
+export interface AwsEcsHostDraft extends HostBaseDraft {
+  kind: 'aws-ecs';
+  awsProfileName: string;
+  awsRegion: string;
+  awsEcsClusterArn: string;
+  awsEcsClusterName: string;
+}
+
 export interface WarpgateSshHostRecord extends HostBaseRecord {
   kind: 'warpgate-ssh';
   warpgateBaseUrl: string;
@@ -162,10 +178,18 @@ export interface WarpgateSshHostDraft extends HostBaseDraft {
 }
 
 // HostRecord는 로컬 스토리지와 sync payload가 공유하는 정규화된 호스트 모델이다.
-export type HostRecord = SshHostRecord | AwsEc2HostRecord | WarpgateSshHostRecord;
+export type HostRecord =
+  | SshHostRecord
+  | AwsEc2HostRecord
+  | AwsEcsHostRecord
+  | WarpgateSshHostRecord;
 
 // HostDraft는 생성/수정 폼에서 사용하는 입력 전용 모델이다.
-export type HostDraft = SshHostDraft | AwsEc2HostDraft | WarpgateSshHostDraft;
+export type HostDraft =
+  | SshHostDraft
+  | AwsEc2HostDraft
+  | AwsEcsHostDraft
+  | WarpgateSshHostDraft;
 
 export function isSshHostRecord(host: HostRecord): host is SshHostRecord {
   return host.kind === 'ssh';
@@ -173,6 +197,10 @@ export function isSshHostRecord(host: HostRecord): host is SshHostRecord {
 
 export function isAwsEc2HostRecord(host: HostRecord): host is AwsEc2HostRecord {
   return host.kind === 'aws-ec2';
+}
+
+export function isAwsEcsHostRecord(host: HostRecord): host is AwsEcsHostRecord {
+  return host.kind === 'aws-ecs';
 }
 
 export function isWarpgateSshHostRecord(host: HostRecord): host is WarpgateSshHostRecord {
@@ -185,6 +213,10 @@ export function isSshHostDraft(host: HostDraft): host is SshHostDraft {
 
 export function isAwsEc2HostDraft(host: HostDraft): host is AwsEc2HostDraft {
   return host.kind === 'aws-ec2';
+}
+
+export function isAwsEcsHostDraft(host: HostDraft): host is AwsEcsHostDraft {
+  return host.kind === 'aws-ecs';
 }
 
 export function isWarpgateSshHostDraft(host: HostDraft): host is WarpgateSshHostDraft {
@@ -217,6 +249,17 @@ export function getHostSearchText(host: HostRecord): string[] {
       ...(host.tags ?? [])
     ];
   }
+  if (host.kind === 'aws-ecs') {
+    return [
+      host.label,
+      host.awsEcsClusterName,
+      host.awsEcsClusterArn,
+      host.awsRegion,
+      host.awsProfileName,
+      host.groupName ?? '',
+      ...(host.tags ?? []),
+    ];
+  }
   return [host.label, host.hostname, host.username, host.groupName ?? '', ...(host.tags ?? [])];
 }
 
@@ -229,6 +272,11 @@ export function getHostSubtitle(host: HostRecord): string {
     const target = host.warpgateTargetName || host.warpgateTargetId;
     return ['Warpgate', host.warpgateUsername, target].filter(Boolean).join(' • ');
   }
+  if (host.kind === 'aws-ecs') {
+    return [host.awsProfileName, host.awsRegion, host.awsEcsClusterName]
+      .filter(Boolean)
+      .join(' • ');
+  }
   return host.username.trim()
     ? `${host.username}@${host.hostname}:${host.port}`
     : `${host.hostname}:${host.port} • 사용자명 미설정`;
@@ -240,6 +288,9 @@ export function getHostBadgeLabel(host: HostRecord): string {
   }
   if (host.kind === 'warpgate-ssh') {
     return 'WARP';
+  }
+  if (host.kind === 'aws-ecs') {
+    return 'ECS';
   }
   return host.authType === 'privateKey' ? 'K' : 'S';
 }
@@ -653,6 +704,181 @@ export interface AwsEc2InstanceSummary {
   state?: string | null;
 }
 
+export interface AwsEcsClusterSummary {
+  clusterArn: string;
+  clusterName: string;
+  status: string;
+  activeServicesCount: number;
+  runningTasksCount: number;
+  pendingTasksCount: number;
+}
+
+export interface AwsEcsClusterListItem {
+  clusterArn: string;
+  clusterName: string;
+  status: string;
+  activeServicesCount: number;
+  runningTasksCount: number;
+  pendingTasksCount: number;
+}
+
+export interface AwsEcsServicePortSummary {
+  port: number;
+  protocol: string;
+}
+
+export type AwsEcsServiceExposureKind = "alb" | "nlb" | "service-connect";
+
+export interface AwsMetricHistoryPoint {
+  timestamp: string;
+  value: number | null;
+}
+
+export interface AwsEcsServiceSummary {
+  serviceArn: string;
+  serviceName: string;
+  status: string;
+  rolloutState?: string | null;
+  rolloutStateReason?: string | null;
+  desiredCount: number;
+  runningCount: number;
+  pendingCount: number;
+  launchType?: string | null;
+  capacityProviderSummary?: string | null;
+  servicePorts: AwsEcsServicePortSummary[];
+  exposureKinds: AwsEcsServiceExposureKind[];
+  cpuUtilizationPercent?: number | null;
+  memoryUtilizationPercent?: number | null;
+  configuredCpu?: string | null;
+  configuredMemory?: string | null;
+  taskDefinitionArn?: string | null;
+  taskDefinitionRevision?: number | null;
+  latestEventMessage?: string | null;
+  deployments?: AwsEcsDeploymentSummary[];
+  events?: AwsEcsEventSummary[];
+}
+
+export interface AwsEcsDeploymentSummary {
+  id: string;
+  status: string;
+  rolloutState?: string | null;
+  rolloutStateReason?: string | null;
+  desiredCount?: number | null;
+  runningCount?: number | null;
+  pendingCount?: number | null;
+  taskDefinitionArn?: string | null;
+  taskDefinitionRevision?: number | null;
+  updatedAt?: string | null;
+}
+
+export interface AwsEcsEventSummary {
+  id: string;
+  message: string;
+  createdAt?: string | null;
+}
+
+export interface AwsEcsServiceUtilizationSummary {
+  serviceName: string;
+  cpuUtilizationPercent: number | null;
+  memoryUtilizationPercent: number | null;
+  cpuHistory: AwsMetricHistoryPoint[];
+  memoryHistory: AwsMetricHistoryPoint[];
+}
+
+export interface AwsEcsClusterSnapshot {
+  profileName: string;
+  region: string;
+  cluster: AwsEcsClusterSummary;
+  services: AwsEcsServiceSummary[];
+  metricsWarning?: string | null;
+  loadedAt: string;
+}
+
+export interface AwsEcsClusterUtilizationSnapshot {
+  loadedAt: string;
+  warning?: string | null;
+  services: AwsEcsServiceUtilizationSummary[];
+}
+
+export interface AwsEcsTaskTunnelServiceSummary {
+  serviceName: string;
+  status: string;
+  desiredCount: number;
+  runningCount: number;
+  pendingCount: number;
+}
+
+export interface AwsEcsTaskTunnelContainerSummary {
+  containerName: string;
+  ports: AwsEcsServicePortSummary[];
+}
+
+export interface AwsEcsTaskTunnelServiceDetails {
+  serviceName: string;
+  containers: AwsEcsTaskTunnelContainerSummary[];
+}
+
+export interface AwsEcsServiceTaskContainerSummary {
+  containerName: string;
+  lastStatus: string | null;
+  runtimeId?: string | null;
+}
+
+export interface AwsEcsServiceTaskSummary {
+  taskArn: string;
+  taskId: string;
+  lastStatus: string | null;
+  enableExecuteCommand: boolean;
+  containers: AwsEcsServiceTaskContainerSummary[];
+}
+
+export interface AwsEcsServiceLogSupport {
+  containerName: string;
+  supported: boolean;
+  reason?: string | null;
+  logGroupName?: string | null;
+  logRegion?: string | null;
+  logStreamPrefix?: string | null;
+}
+
+export interface AwsEcsServiceActionContainerSummary {
+  containerName: string;
+  ports: AwsEcsServicePortSummary[];
+  execEnabled: boolean;
+  logSupport: AwsEcsServiceLogSupport;
+}
+
+export interface AwsEcsServiceActionContext {
+  serviceName: string;
+  serviceArn: string;
+  taskDefinitionArn?: string | null;
+  taskDefinitionRevision?: number | null;
+  containers: AwsEcsServiceActionContainerSummary[];
+  runningTasks: AwsEcsServiceTaskSummary[];
+  deployments: AwsEcsDeploymentSummary[];
+  events: AwsEcsEventSummary[];
+}
+
+export interface AwsEcsServiceLogEntry {
+  id: string;
+  timestamp: string;
+  message: string;
+  ingestionTime?: string | null;
+  logStreamName?: string | null;
+  taskId?: string | null;
+  containerName?: string | null;
+}
+
+export interface AwsEcsServiceLogsSnapshot {
+  serviceName: string;
+  entries: AwsEcsServiceLogEntry[];
+  taskOptions: Array<{ taskArn: string; taskId: string }>;
+  containerOptions: string[];
+  followCursor?: string | null;
+  loadedAt: string;
+  unsupportedReason?: string | null;
+}
+
 export interface AwsHostSshInspectionInput {
   profileName: string;
   region: string;
@@ -737,6 +963,14 @@ export interface AwsSsmPortForwardRuleRecord extends PortForwardRuleBaseRecord {
   remoteHost?: string | null;
 }
 
+export interface EcsTaskPortForwardRuleRecord extends PortForwardRuleBaseRecord {
+  transport: 'ecs-task';
+  bindAddress: '127.0.0.1';
+  serviceName: string;
+  containerName: string;
+  targetPort: number;
+}
+
 export interface ContainerPortForwardRuleRecord extends PortForwardRuleBaseRecord {
   transport: 'container';
   bindAddress: '127.0.0.1';
@@ -751,6 +985,7 @@ export interface ContainerPortForwardRuleRecord extends PortForwardRuleBaseRecor
 export type PortForwardRuleRecord =
   | SshPortForwardRuleRecord
   | AwsSsmPortForwardRuleRecord
+  | EcsTaskPortForwardRuleRecord
   | ContainerPortForwardRuleRecord;
 
 interface PortForwardDraftBase {
@@ -775,6 +1010,14 @@ export interface AwsSsmPortForwardDraft extends PortForwardDraftBase {
   remoteHost?: string | null;
 }
 
+export interface EcsTaskPortForwardDraft extends PortForwardDraftBase {
+  transport: 'ecs-task';
+  bindAddress: '127.0.0.1';
+  serviceName: string;
+  containerName: string;
+  targetPort: number;
+}
+
 export interface ContainerPortForwardDraft extends PortForwardDraftBase {
   transport: 'container';
   bindAddress: '127.0.0.1';
@@ -789,6 +1032,7 @@ export interface ContainerPortForwardDraft extends PortForwardDraftBase {
 export type PortForwardDraft =
   | SshPortForwardDraft
   | AwsSsmPortForwardDraft
+  | EcsTaskPortForwardDraft
   | ContainerPortForwardDraft;
 
 // PortForwardRuntimeRecord는 현재 메모리에서 살아 있는 실행 상태 스냅샷이다.
@@ -823,6 +1067,10 @@ export function isAwsSsmPortForwardRuleRecord(rule: PortForwardRuleRecord): rule
   return rule.transport === 'aws-ssm';
 }
 
+export function isEcsTaskPortForwardRuleRecord(rule: PortForwardRuleRecord): rule is EcsTaskPortForwardRuleRecord {
+  return rule.transport === 'ecs-task';
+}
+
 export function isContainerPortForwardRuleRecord(rule: PortForwardRuleRecord): rule is ContainerPortForwardRuleRecord {
   return rule.transport === 'container';
 }
@@ -833,6 +1081,10 @@ export function isSshPortForwardDraft(rule: PortForwardDraft): rule is SshPortFo
 
 export function isAwsSsmPortForwardDraft(rule: PortForwardDraft): rule is AwsSsmPortForwardDraft {
   return rule.transport === 'aws-ssm';
+}
+
+export function isEcsTaskPortForwardDraft(rule: PortForwardDraft): rule is EcsTaskPortForwardDraft {
+  return rule.transport === 'ecs-task';
 }
 
 export function isContainerPortForwardDraft(rule: PortForwardDraft): rule is ContainerPortForwardDraft {
@@ -1400,6 +1652,7 @@ export interface TerminalTab {
   source: TerminalSessionSource;
   hostId: string | null;
   title: string;
+  shellKind?: string;
   status: 'pending' | 'connecting' | 'connected' | 'disconnecting' | 'closed' | 'error';
   errorMessage?: string;
   connectionProgress?: TerminalConnectionProgress | null;

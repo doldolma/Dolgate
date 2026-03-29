@@ -47,6 +47,16 @@ function installMockApi(overrides?: {
           state: 'running',
         },
       ]),
+      listEcsClusters: vi.fn().mockResolvedValue([
+        {
+          clusterArn: 'arn:aws:ecs:ap-northeast-2:123456789012:cluster/prod',
+          clusterName: 'prod',
+          status: 'ACTIVE',
+          activeServicesCount: 4,
+          runningTasksCount: 6,
+          pendingTasksCount: 1,
+        },
+      ]),
       inspectHostSshMetadata:
         overrides?.inspectHostSshMetadata ??
         vi.fn().mockResolvedValue({
@@ -238,6 +248,43 @@ describe('AwsImportDialog', () => {
     });
 
     await waitFor(() => expect(api.aws.listEc2Instances).toHaveBeenCalledWith('default', 'ap-northeast-2'));
+  });
+
+  it('switches to ECS mode, lists clusters, and imports the selected cluster as an aws-ecs host', async () => {
+    const api = installMockApi();
+    const onImport = vi.fn().mockResolvedValue(undefined);
+
+    render(
+      <AwsImportDialog
+        open
+        currentGroupPath="Servers"
+        onClose={vi.fn()}
+        onImport={onImport}
+      />,
+    );
+
+    await waitFor(() => expect(api.aws.listEc2Instances).toHaveBeenCalledWith('default', 'ap-northeast-2'));
+
+    fireEvent.click(screen.getByRole('button', { name: 'ECS' }));
+
+    await waitFor(() => expect(api.aws.listEcsClusters).toHaveBeenCalledWith('default', 'ap-northeast-2'));
+    expect(screen.getByText('prod')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: '클러스터 추가' }));
+
+    await waitFor(() =>
+      expect(onImport).toHaveBeenCalledWith(
+        expect.objectContaining({
+          kind: 'aws-ecs',
+          label: 'prod',
+          groupName: 'Servers',
+          awsProfileName: 'default',
+          awsRegion: 'ap-northeast-2',
+          awsEcsClusterArn: 'arn:aws:ecs:ap-northeast-2:123456789012:cluster/prod',
+          awsEcsClusterName: 'prod',
+        }),
+      ),
+    );
   });
 
   it('does not auto-select a configured region when it is missing from the loaded region list', async () => {

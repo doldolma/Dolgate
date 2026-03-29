@@ -1,5 +1,6 @@
+import type { ReactElement } from "react";
 import { fireEvent, render, screen, within, waitFor } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { HostRecord } from "@shared";
 import type { HostContainersTabState } from "../store/createAppStore";
 
@@ -70,6 +71,7 @@ vi.mock("uplot", () => ({
 }));
 
 import {
+  ContainerTunnelErrorBoundary,
   ContainersWorkspace,
   formatContainerLogTimestamp,
   getContainerStatusPresentation,
@@ -78,6 +80,22 @@ import {
   shortenContainerImage,
   stripAnsiControlSequences,
 } from "./ContainersWorkspace";
+
+const containersApi = {
+  startTunnel: vi.fn().mockResolvedValue({
+    ruleId: "container-service-tunnel:1",
+    hostId: "host-1",
+    transport: "container",
+    bindAddress: "127.0.0.1",
+    bindPort: 43110,
+    status: "running",
+    updatedAt: "2025-01-01T00:00:10.000Z",
+    startedAt: "2025-01-01T00:00:05.000Z",
+    mode: "local",
+    method: "ssh-native",
+  }),
+  stopTunnel: vi.fn().mockResolvedValue(undefined),
+};
 
 function createHost(): HostRecord {
   return {
@@ -100,6 +118,7 @@ function createHost(): HostRecord {
 
 function createTab(): HostContainersTabState {
   return {
+    kind: "host-containers",
     hostId: "host-1",
     title: "nas",
     runtime: "docker",
@@ -128,9 +147,21 @@ function createTab(): HostContainersTabState {
       createdAt: "2025-10-15T08:55:31.000Z",
       command: "docker-entrypoint.sh",
       entrypoint: "/usr/bin/emqx",
-      ports: [],
+      ports: [
+        {
+          containerPort: 1883,
+          protocol: "tcp",
+          publishedBindings: [],
+        },
+      ],
       mounts: [],
-      networks: [],
+      networks: [
+        {
+          name: "bridge",
+          ipAddress: "172.18.0.2",
+          aliases: ["emqx"],
+        },
+      ],
       environment: [],
       labels: [],
     },
@@ -148,6 +179,15 @@ function createTab(): HostContainersTabState {
     metricsState: "idle",
     metricsLoading: false,
     pendingAction: null,
+    containerTunnelStatesByContainerId: {},
+    ecsSnapshot: null,
+    ecsMetricsWarning: null,
+    ecsMetricsLoadedAt: null,
+    ecsMetricsLoading: false,
+    ecsUtilizationHistoryByServiceName: {},
+    ecsSelectedServiceName: null,
+    ecsActivePanel: "overview",
+    ecsTunnelStatesByServiceName: {},
   };
 }
 
@@ -162,6 +202,7 @@ function createProps(
     onRefresh: vi.fn().mockResolvedValue(undefined),
     onSelectContainer: vi.fn().mockResolvedValue(undefined),
     onSetPanel: vi.fn(),
+    onSetTunnelState: vi.fn(),
     onRefreshLogs: vi.fn().mockResolvedValue(undefined),
     onLoadMoreLogs: vi.fn().mockResolvedValue(undefined),
     onSetLogsFollow: vi.fn(),
@@ -177,10 +218,21 @@ function createProps(
   };
 }
 
+beforeEach(() => {
+  Object.defineProperty(window, "dolssh", {
+    configurable: true,
+    writable: true,
+    value: {
+      containers: containersApi,
+    },
+  });
+});
+
 afterEach(() => {
   vi.useRealTimers();
   uPlotMock.instances.length = 0;
   uPlotMock.ctor.mockClear();
+  vi.clearAllMocks();
 });
 
 describe("container list presentation helpers", () => {
@@ -915,5 +967,93 @@ describe("ContainersWorkspace", () => {
     await waitFor(() => {
       expect(onRefreshLogs).toHaveBeenCalledWith("host-1");
     });
+  });
+
+  it("shows the Tunnel tab and starts an ephemeral container tunnel", async () => {
+    const props = createProps({
+      ...createTab(),
+      activePanel: "tunnel",
+    });
+
+    render(<ContainersWorkspace {...props} host={createHost()} />);
+
+    expect(screen.getByRole("button", { name: "Tunnel" })).toHaveClass("active");
+    expect(screen.getByLabelText("Network")).toHaveValue("bridge");
+    expect(screen.getByLabelText("Port")).toHaveValue("1883");
+    expect(screen.getByRole("button", { name: "Start tunnel" })).toBeEnabled();
+
+    fireEvent.click(screen.getByRole("button", { name: "Start tunnel" }));
+
+    await waitFor(() => {
+      expect(containersApi.startTunnel).toHaveBeenCalledWith({
+        hostId: "host-1",
+        containerId: "container-1",
+        networkName: "bridge",
+        targetPort: 1883,
+        bindAddress: "127.0.0.1",
+        bindPort: 0,
+      });
+    });
+  });
+
+  it("restores the persisted ephemeral tunnel runtime for the selected container", () => {
+    const props = createProps({
+      ...createTab(),
+      activePanel: "tunnel",
+      containerTunnelStatesByContainerId: {
+        "container-1": {
+          containerId: "container-1",
+          containerName: "emqx",
+          networkName: "bridge",
+          targetPort: "1883",
+          bindPort: "0",
+          autoLocalPort: true,
+          loading: false,
+          error: null,
+          runtime: {
+            ruleId: "container-service-tunnel:1",
+            hostId: "host-1",
+            transport: "container",
+            bindAddress: "127.0.0.1",
+            bindPort: 43110,
+            status: "running",
+            updatedAt: "2025-01-01T00:00:10.000Z",
+            startedAt: "2025-01-01T00:00:05.000Z",
+            mode: "local",
+            method: "ssh-native",
+          },
+        },
+      },
+    });
+
+    render(
+      <ContainersWorkspace
+        {...props}
+        host={createHost()}
+      />,
+    );
+
+    expect(screen.getByText("터널 상태")).toBeInTheDocument();
+    expect(screen.getByText("127.0.0.1:43110")).toBeInTheDocument();
+    expect(screen.getByText("bridge:1883")).toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: "Stop" }).length).toBeGreaterThan(0);
+    expect(props.onSetTunnelState).not.toHaveBeenCalled();
+  });
+
+  it("isolates tunnel render errors behind an inline fallback", () => {
+    function ThrowingTunnelPanel(): ReactElement {
+      throw new Error("boom");
+    }
+
+    render(
+      <ContainerTunnelErrorBoundary resetKey="test">
+        <ThrowingTunnelPanel />
+      </ContainerTunnelErrorBoundary>,
+    );
+
+    expect(
+      screen.getByText("컨테이너 Tunnel을 표시하지 못했습니다."),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "다시 시도" })).toBeInTheDocument();
   });
 });

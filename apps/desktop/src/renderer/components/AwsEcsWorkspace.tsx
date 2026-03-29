@@ -1,0 +1,3055 @@
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+import { getHostBadgeLabel, getHostSubtitle } from "@shared";
+import type {
+  AwsEcsServiceActionContainerSummary,
+  AwsEcsServiceActionContext,
+  AwsEcsServiceExposureKind,
+  AwsEcsServiceLogEntry,
+  AwsEcsServiceLogsSnapshot,
+  AwsEcsServiceSummary,
+  AwsEcsServiceTaskSummary,
+  AwsMetricHistoryPoint,
+  HostRecord,
+  PortForwardRuntimeEvent,
+  PortForwardRuntimeRecord,
+} from "@shared";
+import type {
+  EcsTunnelTabState,
+  HostContainersTabState,
+} from "../store/createAppStore";
+import {
+  UPlotMetricChart,
+  type MetricChartSeriesDefinition,
+} from "./UPlotMetricChart";
+
+type EcsDetailPanel = "overview" | "logs" | "metrics" | "tunnel";
+type LogsRangeMode = "recent" | "absolute";
+type LogsRelativePresetKey =
+  | "30m"
+  | "1h"
+  | "6h"
+  | "1d"
+  | "3d"
+  | "1w"
+  | "custom";
+type LogsRelativeUnit =
+  | "second"
+  | "minute"
+  | "hour"
+  | "day"
+  | "week"
+  | "month"
+  | "year";
+
+interface AwsEcsWorkspaceProps {
+  host: HostRecord;
+  tab: HostContainersTabState;
+  isActive: boolean;
+  onRefresh: (hostId: string) => Promise<void>;
+  onRefreshUtilization: (hostId: string) => Promise<void>;
+  onSelectService?: (hostId: string, serviceName: string | null) => void;
+  onSetPanel?: (hostId: string, panel: EcsDetailPanel) => void;
+  onSetTunnelState?: (
+    hostId: string,
+    serviceName: string,
+    state: EcsTunnelTabState | null,
+  ) => void;
+  onOpenEcsExecShell: (
+    hostId: string,
+    serviceName: string,
+    taskArn: string,
+    containerName: string,
+  ) => Promise<void>;
+}
+
+interface ServiceActionContextState {
+  loading: boolean;
+  error: string | null;
+  data: AwsEcsServiceActionContext | null;
+}
+
+interface LogsPanelState {
+  serviceName: string | null;
+  loading: boolean;
+  error: string | null;
+  snapshot: AwsEcsServiceLogsSnapshot | null;
+  follow: boolean;
+  query: string;
+  taskArn: string | null;
+  containerName: string | null;
+}
+
+interface LogsAbsoluteRangeValue {
+  startDate: string;
+  startTime: string;
+  endDate: string;
+  endTime: string;
+}
+
+interface LogsRelativeRangeValue {
+  presetKey: LogsRelativePresetKey;
+  amount: string;
+  unit: LogsRelativeUnit;
+}
+
+interface TunnelPanelState {
+  serviceName: string | null;
+  loading: boolean;
+  error: string | null;
+  runtime: PortForwardRuntimeRecord | null;
+  taskArn: string | null;
+  containerName: string | null;
+  targetPort: string;
+  autoLocalPort: boolean;
+  bindPort: string;
+}
+
+interface ShellPickerState {
+  open: boolean;
+  serviceName: string | null;
+  loading: boolean;
+  error: string | null;
+  taskArn: string | null;
+  containerName: string | null;
+  submitting: boolean;
+}
+
+const RANGE_WEEKDAY_LABELS = ["일", "월", "화", "수", "목", "금", "토"];
+const RELATIVE_RANGE_PRESET_OPTIONS: Array<{
+  key: LogsRelativePresetKey;
+  label: string;
+  amount: number;
+  unit: LogsRelativeUnit;
+}> = [
+  { key: "30m", label: "30분 전부터", amount: 30, unit: "minute" },
+  { key: "1h", label: "1시간 전부터", amount: 1, unit: "hour" },
+  { key: "6h", label: "6시간 전부터", amount: 6, unit: "hour" },
+  { key: "1d", label: "1일 전부터", amount: 1, unit: "day" },
+  { key: "3d", label: "3일 전부터", amount: 3, unit: "day" },
+  { key: "1w", label: "1주 전부터", amount: 1, unit: "week" },
+];
+const RELATIVE_RANGE_UNIT_OPTIONS: Array<{
+  value: LogsRelativeUnit;
+  label: string;
+}> = [
+  { value: "second", label: "초" },
+  { value: "minute", label: "분" },
+  { value: "hour", label: "시간" },
+  { value: "day", label: "일" },
+  { value: "week", label: "주" },
+  { value: "month", label: "월" },
+  { value: "year", label: "년" },
+];
+
+function padRangeValue(value: number): string {
+  return String(value).padStart(2, "0");
+}
+
+function formatLocalDateInputValue(date: Date): string {
+  return `${date.getFullYear()}-${padRangeValue(date.getMonth() + 1)}-${padRangeValue(date.getDate())}`;
+}
+
+function formatLocalTimeInputValue(date: Date): string {
+  return `${padRangeValue(date.getHours())}:${padRangeValue(date.getMinutes())}:${padRangeValue(date.getSeconds())}`;
+}
+
+function parseLocalDateTime(
+  dateValue: string,
+  timeValue: string,
+): Date | null {
+  const dateMatch = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dateValue.trim());
+  if (!dateMatch) {
+    return null;
+  }
+  const timeMatch = /^(\d{2}):(\d{2})(?::(\d{2}))?$/.exec(timeValue.trim());
+  if (!timeMatch) {
+    return null;
+  }
+
+  const parsed = new Date(
+    Number(dateMatch[1]),
+    Number(dateMatch[2]) - 1,
+    Number(dateMatch[3]),
+    Number(timeMatch[1]),
+    Number(timeMatch[2]),
+    Number(timeMatch[3] ?? "0"),
+    0,
+  );
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+function createDefaultLogsAbsoluteRange(): LogsAbsoluteRangeValue {
+  const end = new Date();
+  const start = new Date(end.getTime() - 30 * 60 * 1000);
+  return {
+    startDate: formatLocalDateInputValue(start),
+    startTime: formatLocalTimeInputValue(start),
+    endDate: formatLocalDateInputValue(end),
+    endTime: formatLocalTimeInputValue(end),
+  };
+}
+
+function createDefaultLogsRelativeRange(): LogsRelativeRangeValue {
+  return {
+    presetKey: "30m",
+    amount: "30",
+    unit: "minute",
+  };
+}
+
+function subtractLogsRelativeRange(
+  end: Date,
+  amount: number,
+  unit: LogsRelativeUnit,
+): Date {
+  const start = new Date(end);
+  if (unit === "second") {
+    start.setSeconds(start.getSeconds() - amount);
+  } else if (unit === "minute") {
+    start.setMinutes(start.getMinutes() - amount);
+  } else if (unit === "hour") {
+    start.setHours(start.getHours() - amount);
+  } else if (unit === "day") {
+    start.setDate(start.getDate() - amount);
+  } else if (unit === "week") {
+    start.setDate(start.getDate() - amount * 7);
+  } else if (unit === "month") {
+    start.setMonth(start.getMonth() - amount);
+  } else if (unit === "year") {
+    start.setFullYear(start.getFullYear() - amount);
+  }
+  return start;
+}
+
+function normalizeLogsRelativeRange(
+  value: LogsRelativeRangeValue | null,
+  now = new Date(),
+): { startTime: string; endTime: string } | null {
+  if (!value) {
+    return null;
+  }
+  const preset = RELATIVE_RANGE_PRESET_OPTIONS.find(
+    (option) => option.key === value.presetKey,
+  );
+  const resolvedAmount =
+    value.presetKey === "custom"
+      ? Number(value.amount)
+      : preset?.amount ?? Number.NaN;
+  const resolvedUnit =
+    value.presetKey === "custom" ? value.unit : preset?.unit ?? value.unit;
+  if (!Number.isFinite(resolvedAmount) || resolvedAmount <= 0) {
+    return null;
+  }
+  const end = new Date(now);
+  const start = subtractLogsRelativeRange(end, resolvedAmount, resolvedUnit);
+  return {
+    startTime: start.toISOString(),
+    endTime: end.toISOString(),
+  };
+}
+
+function normalizeLogsAbsoluteRange(
+  value: LogsAbsoluteRangeValue | null,
+): { startTime: string; endTime: string } | null {
+  if (!value) {
+    return null;
+  }
+  const start = parseLocalDateTime(value.startDate, value.startTime);
+  const end = parseLocalDateTime(value.endDate, value.endTime);
+  if (!start || !end || end.getTime() < start.getTime()) {
+    return null;
+  }
+  return {
+    startTime: start.toISOString(),
+    endTime: end.toISOString(),
+  };
+}
+
+function formatLogsRangeLabel(
+  mode: LogsRangeMode,
+  absoluteValue: LogsAbsoluteRangeValue | null,
+  relativeValue: LogsRelativeRangeValue | null,
+): string {
+  if (mode === "absolute" && absoluteValue) {
+    return `${absoluteValue.startDate.replace(/-/g, "/")} ${absoluteValue.startTime.slice(0, 5)} - ${absoluteValue.endDate.replace(/-/g, "/")} ${absoluteValue.endTime.slice(0, 5)}`;
+  }
+  const preset = RELATIVE_RANGE_PRESET_OPTIONS.find(
+    (option) => option.key === relativeValue?.presetKey,
+  );
+  if (relativeValue?.presetKey === "custom") {
+    return `최근 ${relativeValue.amount || "0"}${RELATIVE_RANGE_UNIT_OPTIONS.find((option) => option.value === relativeValue.unit)?.label ?? ""}`;
+  }
+  return preset ? `최근 ${preset.label.replace(" 전부터", "")}` : "최근 30분";
+}
+
+function startOfRangeMonth(date: Date): Date {
+  return new Date(date.getFullYear(), date.getMonth(), 1);
+}
+
+function addRangeMonths(date: Date, months: number): Date {
+  return new Date(date.getFullYear(), date.getMonth() + months, 1);
+}
+
+function buildRangeCalendarDays(month: Date): Date[] {
+  const firstDay = startOfRangeMonth(month);
+  const gridStart = new Date(firstDay);
+  gridStart.setDate(firstDay.getDate() - firstDay.getDay());
+  return Array.from({ length: 42 }, (_, index) => {
+    const next = new Date(gridStart);
+    next.setDate(gridStart.getDate() + index);
+    return next;
+  });
+}
+
+function formatRangeMonthLabel(date: Date): string {
+  return `${date.getFullYear()}년 ${date.getMonth() + 1}월`;
+}
+
+function formatRangeDayValue(date: Date): string {
+  return formatLocalDateInputValue(date);
+}
+
+function formatLoadedAt(value: string): string {
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return value;
+  }
+  return parsed.toLocaleString("ko-KR");
+}
+
+function formatPercent(value: number | null | undefined): string {
+  if (typeof value !== "number" || Number.isNaN(value)) {
+    return "-";
+  }
+  const rounded = value >= 10 ? Math.round(value) : Math.round(value * 10) / 10;
+  return `${rounded}%`;
+}
+
+function formatChartPercent(value: number | null | undefined): string {
+  if (typeof value !== "number" || Number.isNaN(value)) {
+    return "-";
+  }
+  return `${value.toFixed(value >= 10 ? 1 : 2)}%`;
+}
+
+function buildPercentMetricSeries(
+  points: AwsMetricHistoryPoint[],
+  label: string,
+): {
+  timestamps: number[];
+  series: MetricChartSeriesDefinition[];
+} {
+  const normalizedPoints = points
+    .map((point) => ({
+      timestampMs: Date.parse(point.timestamp),
+      value: point.value,
+    }))
+    .filter(
+      (point): point is { timestampMs: number; value: number } =>
+        Number.isFinite(point.timestampMs) && typeof point.value === "number",
+    )
+    .sort((left, right) => left.timestampMs - right.timestampMs);
+
+  return {
+    timestamps: normalizedPoints.map((point) => point.timestampMs),
+    series: [
+      {
+        label,
+        values: normalizedPoints.map((point) => point.value),
+        tone: "primary",
+        format: "percent",
+      },
+    ],
+  };
+}
+
+function formatServicePorts(service: AwsEcsServiceSummary): string | null {
+  if (service.servicePorts.length === 0) {
+    return null;
+  }
+  const visiblePorts = service.servicePorts
+    .slice(0, 2)
+    .map((port) => `${port.port}/${port.protocol}`);
+  const hiddenCount = service.servicePorts.length - visiblePorts.length;
+  return hiddenCount > 0
+    ? `Ports ${visiblePorts.join(", ")} +${hiddenCount}`
+    : `Ports ${visiblePorts.join(", ")}`;
+}
+
+function getExposureBadgeLabels(
+  exposureKinds: AwsEcsServiceExposureKind[],
+): string[] {
+  const labels = new Set<string>();
+  for (const exposureKind of exposureKinds) {
+    if (exposureKind === "service-connect") {
+      labels.add("Svc Connect");
+    } else {
+      labels.add("ALB/NLB");
+    }
+  }
+  return [...labels];
+}
+
+function getServiceStatusTone(service: AwsEcsServiceSummary): string {
+  const status = service.status.trim().toUpperCase();
+  if (status === "ACTIVE") {
+    return "running";
+  }
+  if (status === "DRAINING" || status === "PROVISIONING") {
+    return "starting";
+  }
+  return "error";
+}
+
+function getRolloutTone(rolloutState: string | null | undefined): string {
+  const normalized = rolloutState?.trim().toUpperCase();
+  if (!normalized) {
+    return "starting";
+  }
+  if (normalized === "ACTIVE" || normalized === "COMPLETED") {
+    return "running";
+  }
+  if (normalized === "FAILED") {
+    return "error";
+  }
+  return "starting";
+}
+
+function isStatusIssue(service: AwsEcsServiceSummary): boolean {
+  return service.status.trim().toUpperCase() !== "ACTIVE";
+}
+
+function isRolloutIssue(service: AwsEcsServiceSummary): boolean {
+  const normalized = service.rolloutState?.trim().toUpperCase();
+  return Boolean(normalized && normalized !== "COMPLETED");
+}
+
+function hasPendingTasks(service: AwsEcsServiceSummary): boolean {
+  return service.pendingCount > 0;
+}
+
+function getServiceAttentionTone(
+  service: AwsEcsServiceSummary,
+): "neutral" | "warning" | "error" {
+  const rolloutTone = getRolloutTone(service.rolloutState);
+  if (isStatusIssue(service) || rolloutTone === "error") {
+    return "error";
+  }
+  if (isRolloutIssue(service) || hasPendingTasks(service)) {
+    return "warning";
+  }
+  return "neutral";
+}
+
+function compareServices(
+  left: AwsEcsServiceSummary,
+  right: AwsEcsServiceSummary,
+): number {
+  const leftRank =
+    Number(isStatusIssue(left)) * 4 +
+    Number(isRolloutIssue(left)) * 2 +
+    Number(hasPendingTasks(left));
+  const rightRank =
+    Number(isStatusIssue(right)) * 4 +
+    Number(isRolloutIssue(right)) * 2 +
+    Number(hasPendingTasks(right));
+
+  if (leftRank !== rightRank) {
+    return rightRank - leftRank;
+  }
+  return left.serviceName.localeCompare(right.serviceName);
+}
+
+function createEmptyLogsState(): LogsPanelState {
+  return {
+    serviceName: null,
+    loading: false,
+    error: null,
+    snapshot: null,
+    follow: true,
+    query: "",
+    taskArn: null,
+    containerName: null,
+  };
+}
+
+function createEmptyTunnelState(): TunnelPanelState {
+  return {
+    serviceName: null,
+    loading: false,
+    error: null,
+    runtime: null,
+    taskArn: null,
+    containerName: null,
+    targetPort: "",
+    autoLocalPort: true,
+    bindPort: "",
+  };
+}
+
+function createEmptyShellPickerState(): ShellPickerState {
+  return {
+    open: false,
+    serviceName: null,
+    loading: false,
+    error: null,
+    taskArn: null,
+    containerName: null,
+    submitting: false,
+  };
+}
+
+function mergeLogEntries(
+  existing: AwsEcsServiceLogEntry[],
+  incoming: AwsEcsServiceLogEntry[],
+): AwsEcsServiceLogEntry[] {
+  const byId = new Map<string, AwsEcsServiceLogEntry>();
+  for (const entry of existing) {
+    byId.set(entry.id, entry);
+  }
+  for (const entry of incoming) {
+    byId.set(entry.id, entry);
+  }
+  return [...byId.values()]
+    .sort(
+      (left, right) =>
+        Date.parse(left.timestamp) - Date.parse(right.timestamp) ||
+        left.id.localeCompare(right.id),
+    )
+    .slice(-8000);
+}
+
+function getTaskLabel(task: AwsEcsServiceTaskSummary): string {
+  return task.taskId || task.taskArn;
+}
+
+function getContainersForTask(
+  context: AwsEcsServiceActionContext | null,
+  taskArn: string | null,
+  options?: { requireExec?: boolean; requirePorts?: boolean },
+): AwsEcsServiceActionContainerSummary[] {
+  if (!context) {
+    return [];
+  }
+  const task = context.runningTasks.find((item) => item.taskArn === taskArn);
+  const visibleNames = new Set(
+    (task?.containers ?? []).map((container) => container.containerName),
+  );
+  return context.containers.filter((container) => {
+    if (visibleNames.size > 0 && !visibleNames.has(container.containerName)) {
+      return false;
+    }
+    if (options?.requireExec && !container.execEnabled) {
+      return false;
+    }
+    if (options?.requirePorts && container.ports.length === 0) {
+      return false;
+    }
+    return true;
+  });
+}
+
+function getDefaultTaskArn(context: AwsEcsServiceActionContext | null): string | null {
+  return context?.runningTasks[0]?.taskArn ?? null;
+}
+
+function getLogEntrySearchText(entry: AwsEcsServiceLogEntry): string {
+  return [
+    entry.timestamp,
+    entry.taskId,
+    entry.containerName,
+    entry.logStreamName,
+    entry.message,
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+}
+
+function buildTunnelStateFromContext(
+  serviceName: string,
+  context: AwsEcsServiceActionContext | null,
+  previous: TunnelPanelState,
+): TunnelPanelState {
+  if (!context) {
+    return {
+      ...previous,
+      serviceName,
+      error: null,
+      runtime:
+        previous.serviceName === serviceName ? previous.runtime : null,
+      taskArn: previous.serviceName === serviceName ? previous.taskArn : null,
+      containerName:
+        previous.serviceName === serviceName ? previous.containerName : null,
+      targetPort: previous.serviceName === serviceName ? previous.targetPort : "",
+      autoLocalPort: previous.serviceName === serviceName
+        ? previous.autoLocalPort
+        : true,
+      bindPort: previous.serviceName === serviceName ? previous.bindPort : "",
+    };
+  }
+
+  const nextTaskArn =
+    previous.serviceName === serviceName &&
+    previous.taskArn &&
+    context.runningTasks.some((task) => task.taskArn === previous.taskArn)
+      ? previous.taskArn
+      : getDefaultTaskArn(context);
+  const containerOptions = getContainersForTask(context, nextTaskArn, {
+    requirePorts: true,
+  });
+  const nextContainerName =
+    previous.serviceName === serviceName &&
+    previous.containerName &&
+    containerOptions.some(
+      (container) => container.containerName === previous.containerName,
+    )
+      ? previous.containerName
+      : containerOptions[0]?.containerName ?? null;
+  const nextPorts =
+    containerOptions.find(
+      (container) => container.containerName === nextContainerName,
+    )?.ports ?? [];
+  const nextTargetPort =
+    previous.serviceName === serviceName &&
+    previous.targetPort &&
+    nextPorts.some((port) => String(port.port) === previous.targetPort)
+      ? previous.targetPort
+      : nextPorts[0]
+        ? String(nextPorts[0].port)
+        : "";
+
+  return {
+    ...previous,
+    serviceName,
+    error: null,
+    runtime:
+      previous.serviceName === serviceName ? previous.runtime : null,
+    taskArn: nextTaskArn,
+    containerName: nextContainerName,
+    targetPort: nextTargetPort,
+    autoLocalPort:
+      previous.serviceName === serviceName ? previous.autoLocalPort : true,
+    bindPort: previous.serviceName === serviceName ? previous.bindPort : "",
+  };
+}
+
+function areTunnelStatesEqual(
+  left: TunnelPanelState,
+  right: TunnelPanelState,
+): boolean {
+  return (
+    left.serviceName === right.serviceName &&
+    left.loading === right.loading &&
+    left.error === right.error &&
+    left.runtime === right.runtime &&
+    left.taskArn === right.taskArn &&
+    left.containerName === right.containerName &&
+    left.targetPort === right.targetPort &&
+    left.autoLocalPort === right.autoLocalPort &&
+    left.bindPort === right.bindPort
+  );
+}
+
+function toPersistedTunnelState(
+  tunnelState: TunnelPanelState,
+): EcsTunnelTabState | null {
+  if (!tunnelState.serviceName) {
+    return null;
+  }
+  const shouldClear =
+    !tunnelState.runtime &&
+    !tunnelState.taskArn &&
+    !tunnelState.containerName &&
+    !tunnelState.targetPort &&
+    tunnelState.autoLocalPort &&
+    (tunnelState.bindPort === "" || tunnelState.bindPort === "0");
+  if (shouldClear) {
+    return null;
+  }
+  return {
+    serviceName: tunnelState.serviceName,
+    taskArn: tunnelState.taskArn,
+    containerName: tunnelState.containerName,
+    targetPort: tunnelState.targetPort,
+    bindPort: tunnelState.bindPort || "0",
+    autoLocalPort: tunnelState.autoLocalPort,
+    loading: false,
+    error: null,
+    runtime: tunnelState.runtime,
+  };
+}
+
+function buildShellPickerStateFromContext(
+  serviceName: string,
+  context: AwsEcsServiceActionContext | null,
+  previous: ShellPickerState,
+): ShellPickerState {
+  if (!context) {
+    return {
+      ...previous,
+      open: true,
+      serviceName,
+      loading: false,
+      error: "ECS Exec 컨텍스트를 불러오지 못했습니다.",
+      taskArn: null,
+      containerName: null,
+    };
+  }
+  const nextTaskArn =
+    previous.serviceName === serviceName &&
+    previous.taskArn &&
+    context.runningTasks.some((task) => task.taskArn === previous.taskArn)
+      ? previous.taskArn
+      : getDefaultTaskArn(context);
+  const containerOptions = getContainersForTask(context, nextTaskArn, {
+    requireExec: true,
+  });
+  const nextContainerName =
+    previous.serviceName === serviceName &&
+    previous.containerName &&
+    containerOptions.some(
+      (container) => container.containerName === previous.containerName,
+    )
+      ? previous.containerName
+      : containerOptions[0]?.containerName ?? null;
+
+  return {
+    ...previous,
+    open: true,
+    serviceName,
+    loading: false,
+    error:
+      context.runningTasks.length === 0
+        ? "이 서비스에 실행 중인 task가 없습니다."
+        : containerOptions.length === 0
+          ? "ECS Exec로 연결할 수 있는 컨테이너가 없습니다."
+          : null,
+    taskArn: nextTaskArn,
+    containerName: nextContainerName,
+  };
+}
+
+function LogsRangePickerDialog({
+  open,
+  mode,
+  absoluteValue,
+  relativeValue,
+  onClose,
+  onApply,
+}: {
+  open: boolean;
+  mode: LogsRangeMode;
+  absoluteValue: LogsAbsoluteRangeValue | null;
+  relativeValue: LogsRelativeRangeValue | null;
+  onClose: () => void;
+  onApply: (
+    nextMode: LogsRangeMode,
+    nextAbsoluteValue: LogsAbsoluteRangeValue | null,
+    nextRelativeValue: LogsRelativeRangeValue | null,
+  ) => void;
+}) {
+  const [draftMode, setDraftMode] = useState<LogsRangeMode>(mode);
+  const [draftAbsoluteValue, setDraftAbsoluteValue] = useState<LogsAbsoluteRangeValue>(
+    absoluteValue ?? createDefaultLogsAbsoluteRange(),
+  );
+  const [draftRelativeValue, setDraftRelativeValue] = useState<LogsRelativeRangeValue>(
+    relativeValue ?? createDefaultLogsRelativeRange(),
+  );
+  const [anchorMonth, setAnchorMonth] = useState<Date>(() => {
+    const baseDate =
+      parseLocalDateTime(
+        (absoluteValue ?? createDefaultLogsAbsoluteRange()).startDate,
+        "00:00:00",
+      ) ?? new Date();
+    return startOfRangeMonth(baseDate);
+  });
+  const [selectionCursor, setSelectionCursor] = useState<"start" | "end">(
+    "start",
+  );
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+    const nextAbsoluteValue = absoluteValue ?? createDefaultLogsAbsoluteRange();
+    setDraftMode(mode);
+    setDraftAbsoluteValue(nextAbsoluteValue);
+    setDraftRelativeValue(relativeValue ?? createDefaultLogsRelativeRange());
+    setAnchorMonth(
+      startOfRangeMonth(
+        parseLocalDateTime(nextAbsoluteValue.startDate, "00:00:00") ?? new Date(),
+      ),
+    );
+    setSelectionCursor("start");
+    setError(null);
+  }, [absoluteValue, mode, open, relativeValue]);
+
+  const normalizedDraftAbsolute = normalizeLogsAbsoluteRange(draftAbsoluteValue);
+  const startDateValue = draftAbsoluteValue.startDate;
+  const endDateValue = draftAbsoluteValue.endDate;
+
+  const handleSelectDay = useCallback((dateValue: string) => {
+    setDraftMode("absolute");
+    setError(null);
+    setDraftAbsoluteValue((previous) => {
+      if (selectionCursor === "start") {
+        return {
+          ...previous,
+          startDate: dateValue,
+          endDate: previous.endDate < dateValue ? dateValue : previous.endDate,
+        };
+      }
+      if (dateValue < previous.startDate) {
+        return {
+          ...previous,
+          startDate: dateValue,
+          endDate: previous.startDate,
+        };
+      }
+      return {
+        ...previous,
+        endDate: dateValue,
+      };
+    });
+    setSelectionCursor((previous) => (previous === "start" ? "end" : "start"));
+  }, [selectionCursor]);
+
+  if (!open) {
+    return null;
+  }
+
+  return (
+    <div
+      className="ecs-workspace__picker-backdrop"
+      role="presentation"
+      onClick={() => {
+        onClose();
+      }}
+    >
+      <div
+        className="modal-card ecs-workspace__picker ecs-workspace__range-picker"
+        role="dialog"
+        aria-modal="true"
+        aria-label="로그 범위 선택"
+        onClick={(event) => {
+          event.stopPropagation();
+        }}
+      >
+        <div className="ecs-workspace__picker-header ecs-workspace__range-picker-header">
+          <div className="segmented-control" role="tablist" aria-label="로그 범위 모드">
+            <button
+              type="button"
+              role="tab"
+              aria-selected={draftMode === "recent"}
+              className={draftMode === "recent" ? "active" : ""}
+              onClick={() => {
+                setDraftMode("recent");
+                setError(null);
+              }}
+            >
+              상대 범위
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={draftMode === "absolute"}
+              className={draftMode === "absolute" ? "active" : ""}
+              onClick={() => {
+                setDraftMode("absolute");
+                setError(null);
+              }}
+            >
+              절대 범위
+            </button>
+          </div>
+        </div>
+
+        {draftMode === "absolute" ? (
+          <>
+            <div className="ecs-workspace__range-calendar-shell">
+              <button
+                type="button"
+                className="secondary-button secondary-button--compact"
+                aria-label="이전 달"
+                onClick={() => {
+                  setAnchorMonth((previous) => addRangeMonths(previous, -1));
+                }}
+              >
+                {"<"}
+              </button>
+              <div className="ecs-workspace__range-calendars">
+                {[anchorMonth, addRangeMonths(anchorMonth, 1)].map((month) => {
+                  const monthKey = `${month.getFullYear()}-${month.getMonth()}`;
+                  const monthValue = month.getMonth();
+                  return (
+                    <section
+                      key={monthKey}
+                      className="ecs-workspace__range-month"
+                    >
+                      <header className="ecs-workspace__range-month-header">
+                        <strong>{formatRangeMonthLabel(month)}</strong>
+                      </header>
+                      <div className="ecs-workspace__range-weekdays">
+                        {RANGE_WEEKDAY_LABELS.map((label) => (
+                          <span key={`${monthKey}:${label}`}>{label}</span>
+                        ))}
+                      </div>
+                      <div className="ecs-workspace__range-grid">
+                        {buildRangeCalendarDays(month).map((day) => {
+                          const dayValue = formatRangeDayValue(day);
+                          const isCurrentMonth = day.getMonth() === monthValue;
+                          const isStart = dayValue === startDateValue;
+                          const isEnd = dayValue === endDateValue;
+                          const isInRange =
+                            dayValue >= startDateValue && dayValue <= endDateValue;
+                          return (
+                            <button
+                              key={`${monthKey}:${dayValue}`}
+                              type="button"
+                              className={[
+                                "ecs-workspace__range-day",
+                                !isCurrentMonth ? "is-muted" : "",
+                                isInRange ? "is-in-range" : "",
+                                isStart ? "is-start" : "",
+                                isEnd ? "is-end" : "",
+                              ]
+                                .filter(Boolean)
+                                .join(" ")}
+                              onClick={() => {
+                                handleSelectDay(dayValue);
+                              }}
+                            >
+                              {day.getDate()}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </section>
+                  );
+                })}
+              </div>
+              <button
+                type="button"
+                className="secondary-button secondary-button--compact"
+                aria-label="다음 달"
+                onClick={() => {
+                  setAnchorMonth((previous) => addRangeMonths(previous, 1));
+                }}
+              >
+                {">"}
+              </button>
+            </div>
+
+            <div className="ecs-workspace__range-form">
+              <label>
+                <span>시작 날짜</span>
+                <input
+                  type="date"
+                  value={draftAbsoluteValue.startDate}
+                  onChange={(event) => {
+                    setDraftAbsoluteValue((previous) => ({
+                      ...previous,
+                      startDate: event.target.value,
+                    }));
+                  }}
+                />
+              </label>
+              <label>
+                <span>시작 시간</span>
+                <input
+                  type="time"
+                  step="1"
+                  value={draftAbsoluteValue.startTime}
+                  onChange={(event) => {
+                    setDraftAbsoluteValue((previous) => ({
+                      ...previous,
+                      startTime: event.target.value,
+                    }));
+                  }}
+                />
+              </label>
+              <label>
+                <span>종료 날짜</span>
+                <input
+                  type="date"
+                  value={draftAbsoluteValue.endDate}
+                  onChange={(event) => {
+                    setDraftAbsoluteValue((previous) => ({
+                      ...previous,
+                      endDate: event.target.value,
+                    }));
+                  }}
+                />
+              </label>
+              <label>
+                <span>종료 시간</span>
+                <input
+                  type="time"
+                  step="1"
+                  value={draftAbsoluteValue.endTime}
+                  onChange={(event) => {
+                    setDraftAbsoluteValue((previous) => ({
+                      ...previous,
+                      endTime: event.target.value,
+                    }));
+                  }}
+                />
+              </label>
+            </div>
+            <p className="ecs-workspace__range-helper">
+              날짜는 로컬 시간대로 적용됩니다. 절대 범위를 적용하면 Follow는 자동으로 꺼집니다.
+            </p>
+          </>
+        ) : (
+          <div className="ecs-workspace__range-relative">
+            <div className="ecs-workspace__range-relative-options">
+              {RELATIVE_RANGE_PRESET_OPTIONS.map((option) => (
+                <label
+                  key={option.key}
+                  className="ecs-workspace__range-radio"
+                >
+                  <input
+                    type="radio"
+                    name="ecs-logs-relative-range"
+                    checked={draftRelativeValue.presetKey === option.key}
+                    onChange={() => {
+                      setDraftRelativeValue({
+                        presetKey: option.key,
+                        amount: String(option.amount),
+                        unit: option.unit,
+                      });
+                    }}
+                  />
+                  <span>{option.label}</span>
+                </label>
+              ))}
+              <label className="ecs-workspace__range-radio ecs-workspace__range-radio--custom">
+                <input
+                  type="radio"
+                  name="ecs-logs-relative-range"
+                  checked={draftRelativeValue.presetKey === "custom"}
+                  onChange={() => {
+                    setDraftRelativeValue((previous) => ({
+                      ...previous,
+                      presetKey: "custom",
+                    }));
+                  }}
+                />
+                <span>사용자 지정 범위</span>
+              </label>
+            </div>
+            <div className="ecs-workspace__range-relative-custom">
+              <label>
+                <span>기간</span>
+                <input
+                  type="number"
+                  min="1"
+                  value={draftRelativeValue.amount}
+                  disabled={draftRelativeValue.presetKey !== "custom"}
+                  onChange={(event) => {
+                    setDraftRelativeValue((previous) => ({
+                      ...previous,
+                      presetKey: "custom",
+                      amount: event.target.value,
+                    }));
+                  }}
+                />
+              </label>
+              <label>
+                <span>단위</span>
+                <select
+                  value={draftRelativeValue.unit}
+                  disabled={draftRelativeValue.presetKey !== "custom"}
+                  onChange={(event) => {
+                    setDraftRelativeValue((previous) => ({
+                      ...previous,
+                      presetKey: "custom",
+                      unit: event.target.value as LogsRelativeUnit,
+                    }));
+                  }}
+                >
+                  {RELATIVE_RANGE_UNIT_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+            <p className="ecs-workspace__range-helper">
+              상대 범위를 적용하면 현재 시점을 기준으로 범위를 계산해 다시 조회합니다.
+            </p>
+          </div>
+        )}
+
+        {error ? <div className="terminal-error-banner">{error}</div> : null}
+
+        <div className="ecs-workspace__picker-actions">
+          <button
+            type="button"
+            className="secondary-button"
+            onClick={() => {
+              onClose();
+            }}
+          >
+            취소
+          </button>
+          <button
+            type="button"
+            className="primary-button"
+            onClick={() => {
+              if (draftMode === "absolute" && !normalizedDraftAbsolute) {
+                setError("시작 시간과 종료 시간을 확인해 주세요.");
+                return;
+              }
+              if (
+                draftMode === "recent" &&
+                !normalizeLogsRelativeRange(draftRelativeValue)
+              ) {
+                setError("상대 범위 값을 확인해 주세요.");
+                return;
+              }
+              onApply(
+                draftMode,
+                draftMode === "absolute" ? draftAbsoluteValue : null,
+                draftMode === "recent" ? draftRelativeValue : null,
+              );
+            }}
+          >
+            적용
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function MetricsPanel({
+  service,
+  history,
+}: {
+  service: AwsEcsServiceSummary;
+  history: {
+    cpuHistory: AwsMetricHistoryPoint[];
+    memoryHistory: AwsMetricHistoryPoint[];
+  };
+}) {
+  const cpuChart = useMemo(
+    () => buildPercentMetricSeries(history.cpuHistory, "CPU"),
+    [history.cpuHistory],
+  );
+  const memoryChart = useMemo(
+    () => buildPercentMetricSeries(history.memoryHistory, "Memory"),
+    [history.memoryHistory],
+  );
+
+  return (
+    <div className="containers-workspace__metrics ecs-workspace__metrics-content">
+      <div className="containers-workspace__summary-grid">
+        <div className="containers-workspace__summary-card">
+          <span>CPU</span>
+          <strong>{formatChartPercent(service.cpuUtilizationPercent)}</strong>
+        </div>
+        <div className="containers-workspace__summary-card">
+          <span>Memory</span>
+          <strong>{formatChartPercent(service.memoryUtilizationPercent)}</strong>
+        </div>
+      </div>
+      <div className="containers-workspace__metrics-grid">
+        {cpuChart.timestamps.length > 0 ? (
+          <UPlotMetricChart
+            title="CPU"
+            currentLabel={formatChartPercent(service.cpuUtilizationPercent)}
+            timestamps={cpuChart.timestamps}
+            series={cpuChart.series}
+            yFormat="percent"
+            fixedRange={[0, 100]}
+          />
+        ) : (
+          <div className="containers-workspace__metric-chart-card">
+            <div className="containers-workspace__metric-chart-header">
+              <strong>CPU</strong>
+              <span>{formatChartPercent(service.cpuUtilizationPercent)}</span>
+            </div>
+            <div className="containers-workspace__empty-detail">
+              최근 10분 CPU 추세 데이터가 없습니다.
+            </div>
+          </div>
+        )}
+
+        {memoryChart.timestamps.length > 0 ? (
+          <UPlotMetricChart
+            title="Memory"
+            currentLabel={formatChartPercent(service.memoryUtilizationPercent)}
+            timestamps={memoryChart.timestamps}
+            series={memoryChart.series}
+            yFormat="percent"
+            fixedRange={[0, 100]}
+          />
+        ) : (
+          <div className="containers-workspace__metric-chart-card">
+            <div className="containers-workspace__metric-chart-header">
+              <strong>Memory</strong>
+              <span>{formatChartPercent(service.memoryUtilizationPercent)}</span>
+            </div>
+            <div className="containers-workspace__empty-detail">
+              최근 10분 Memory 추세 데이터가 없습니다.
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+export function AwsEcsWorkspace({
+  host,
+  tab,
+  isActive,
+  onRefresh,
+  onRefreshUtilization,
+  onSelectService,
+  onSetPanel,
+  onSetTunnelState,
+  onOpenEcsExecShell,
+}: AwsEcsWorkspaceProps) {
+  const snapshot = tab.ecsSnapshot;
+  const services = useMemo(
+    () => (snapshot ? [...snapshot.services].sort(compareServices) : []),
+    [snapshot],
+  );
+  const [serviceContexts, setServiceContexts] = useState<
+    Record<string, ServiceActionContextState>
+  >({});
+  const [logsState, setLogsState] = useState<LogsPanelState>(createEmptyLogsState);
+  const [logsRangeMode, setLogsRangeMode] = useState<LogsRangeMode>("recent");
+  const [logsRelativeRange, setLogsRelativeRange] =
+    useState<LogsRelativeRangeValue>(createDefaultLogsRelativeRange);
+  const [logsAbsoluteRange, setLogsAbsoluteRange] =
+    useState<LogsAbsoluteRangeValue | null>(null);
+  const [logsRangePickerOpen, setLogsRangePickerOpen] = useState(false);
+  const [localSelectedServiceName, setLocalSelectedServiceName] = useState<
+    string | null
+  >(tab.ecsSelectedServiceName);
+  const [localActivePanel, setLocalActivePanel] = useState<EcsDetailPanel>(
+    tab.ecsActivePanel,
+  );
+  const [tunnelState, setTunnelState] = useState<TunnelPanelState>(
+    createEmptyTunnelState,
+  );
+  const [shellPickerState, setShellPickerState] = useState<ShellPickerState>(
+    createEmptyShellPickerState,
+  );
+  const tunnelStatesRef = useRef<Record<string, TunnelPanelState>>({});
+  const serviceContextsRef = useRef<Record<string, ServiceActionContextState>>({});
+  const inFlightContextRequestsRef = useRef<
+    Partial<Record<string, Promise<AwsEcsServiceActionContext | null>>>
+  >({});
+  const selectedServiceName =
+    onSelectService ? tab.ecsSelectedServiceName : localSelectedServiceName;
+  const activePanel = onSetPanel ? tab.ecsActivePanel : localActivePanel;
+  const latestLogsRequestIdRef = useRef(0);
+  const logsOutputRef = useRef<HTMLDivElement | null>(null);
+  const logsBottomRef = useRef<HTMLDivElement | null>(null);
+  const previousPanelRef = useRef<EcsDetailPanel>(tab.ecsActivePanel);
+  const previousLogsTargetRef = useRef<string | null>(null);
+  const logsAutoLoadKeyRef = useRef<string | null>(null);
+  const hasInitializedLogsViewRef = useRef(false);
+  const suppressLogsScrollRef = useRef(false);
+  const releaseLogsScrollFrameRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    serviceContextsRef.current = serviceContexts;
+  }, [serviceContexts]);
+
+  useEffect(() => {
+    tunnelStatesRef.current = tab.ecsTunnelStatesByServiceName;
+    setServiceContexts({});
+    serviceContextsRef.current = {};
+    inFlightContextRequestsRef.current = {};
+    setLogsState(createEmptyLogsState());
+    setLogsRangeMode("recent");
+    setLogsRelativeRange(createDefaultLogsRelativeRange());
+    setLogsAbsoluteRange(null);
+    setLogsRangePickerOpen(false);
+    setLocalSelectedServiceName(tab.ecsSelectedServiceName);
+    setLocalActivePanel(tab.ecsActivePanel);
+    logsAutoLoadKeyRef.current = null;
+    previousLogsTargetRef.current = null;
+    hasInitializedLogsViewRef.current = false;
+    setTunnelState(createEmptyTunnelState());
+    setShellPickerState(createEmptyShellPickerState());
+  }, [host.id]);
+
+  useEffect(() => {
+    tunnelStatesRef.current = tab.ecsTunnelStatesByServiceName;
+  }, [tab.ecsTunnelStatesByServiceName]);
+
+  useEffect(() => {
+    if (typeof window.dolssh.portForwards?.onEvent !== "function") {
+      return;
+    }
+    return window.dolssh.portForwards.onEvent((event: PortForwardRuntimeEvent) => {
+      for (const [serviceName, state] of Object.entries(tunnelStatesRef.current)) {
+        if (state.runtime?.ruleId === event.runtime.ruleId) {
+          tunnelStatesRef.current[serviceName] = {
+            ...state,
+            loading: false,
+            runtime:
+              event.runtime.status === "stopped" ? null : event.runtime,
+            error:
+              event.runtime.status === "error"
+                ? event.runtime.message ?? state.error
+                : state.error,
+          };
+        }
+      }
+      setTunnelState((previous) =>
+        previous.runtime?.ruleId === event.runtime.ruleId
+          ? {
+              ...previous,
+              loading: false,
+              runtime:
+                event.runtime.status === "stopped" ? null : event.runtime,
+              error:
+                event.runtime.status === "error"
+                  ? event.runtime.message ?? previous.error
+                  : previous.error,
+            }
+          : previous,
+      );
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!services.length) {
+      if (onSelectService && tab.ecsSelectedServiceName !== null) {
+        onSelectService(host.id, null);
+      }
+      return;
+    }
+    if (
+      onSelectService &&
+      (
+        !tab.ecsSelectedServiceName ||
+        !services.some((service) => service.serviceName === tab.ecsSelectedServiceName)
+      )
+    ) {
+      onSelectService(host.id, services[0].serviceName);
+    }
+  }, [host.id, onSelectService, services, tab.ecsSelectedServiceName]);
+
+  useEffect(() => {
+    previousPanelRef.current = activePanel;
+  }, [activePanel]);
+
+  const selectedService = useMemo(
+    () =>
+      services.find((service) => service.serviceName === selectedServiceName) ??
+      services[0] ??
+      null,
+    [selectedServiceName, services],
+  );
+  const serviceContextState = selectedService
+    ? serviceContexts[selectedService.serviceName]
+    : undefined;
+  const selectedServiceHistory = selectedService
+    ? tab.ecsUtilizationHistoryByServiceName[selectedService.serviceName] ?? {
+        cpuHistory: [],
+        memoryHistory: [],
+      }
+    : { cpuHistory: [], memoryHistory: [] };
+  const logsRangeLabel = useMemo(
+    () => formatLogsRangeLabel(logsRangeMode, logsAbsoluteRange, logsRelativeRange),
+    [logsAbsoluteRange, logsRangeMode, logsRelativeRange],
+  );
+  const selectedContext =
+    selectedService ? serviceContextState?.data ?? null : null;
+
+  useEffect(() => {
+    if (!selectedService?.serviceName) {
+      const emptyState = createEmptyTunnelState();
+      setTunnelState((previous) =>
+        areTunnelStatesEqual(previous, emptyState) ? previous : emptyState,
+      );
+      return;
+    }
+    const persistedState =
+      tab.ecsTunnelStatesByServiceName[selectedService.serviceName] ?? null;
+    const nextState = persistedState
+      ? {
+          ...createEmptyTunnelState(),
+          ...persistedState,
+          loading: false,
+          error: null,
+        }
+      : {
+          ...createEmptyTunnelState(),
+          serviceName: selectedService.serviceName,
+        };
+    setTunnelState((previous) =>
+      areTunnelStatesEqual(previous, nextState) ? previous : nextState,
+    );
+  }, [selectedService?.serviceName, tab.ecsTunnelStatesByServiceName]);
+
+  useEffect(() => {
+    if (!tunnelState.serviceName) {
+      return;
+    }
+    const shouldClear =
+      !tunnelState.runtime &&
+      !tunnelState.loading &&
+      !tunnelState.error &&
+      !tunnelState.taskArn &&
+      !tunnelState.containerName &&
+      !tunnelState.targetPort &&
+      tunnelState.autoLocalPort &&
+      (tunnelState.bindPort === "" || tunnelState.bindPort === "0");
+
+    if (shouldClear) {
+      delete tunnelStatesRef.current[tunnelState.serviceName];
+      return;
+    }
+
+    tunnelStatesRef.current[tunnelState.serviceName] = tunnelState;
+  }, [tunnelState]);
+
+  useEffect(() => {
+    if (!onSetTunnelState || !tunnelState.serviceName) {
+      return;
+    }
+    const nextPersistedState = toPersistedTunnelState(tunnelState);
+    const persistedState =
+      tab.ecsTunnelStatesByServiceName[tunnelState.serviceName] ?? null;
+    const hasSamePersistedState =
+      (persistedState === null && nextPersistedState === null) ||
+      (persistedState !== null &&
+        nextPersistedState !== null &&
+        areTunnelStatesEqual(
+          { ...createEmptyTunnelState(), ...persistedState, loading: false, error: null },
+          { ...createEmptyTunnelState(), ...nextPersistedState, loading: false, error: null },
+        ));
+    if (hasSamePersistedState) {
+      return;
+    }
+    onSetTunnelState(
+      host.id,
+      tunnelState.serviceName,
+      nextPersistedState,
+    );
+  }, [host.id, onSetTunnelState, tab.ecsTunnelStatesByServiceName, tunnelState]);
+
+  const loadServiceContext = useCallback(
+    async (serviceName: string, force = false) => {
+      const current = serviceContextsRef.current[serviceName];
+      if (!force && current?.data) {
+        return current.data;
+      }
+      if (!force && current?.loading) {
+        return inFlightContextRequestsRef.current[serviceName] ?? null;
+      }
+      if (!force && inFlightContextRequestsRef.current[serviceName]) {
+        return inFlightContextRequestsRef.current[serviceName];
+      }
+      setServiceContexts((previous) => ({
+        ...previous,
+        [serviceName]: {
+          loading: true,
+          error: null,
+          data: previous[serviceName]?.data ?? null,
+        },
+      }));
+      const request = (async () => {
+        try {
+          const data = await window.dolssh.aws.loadEcsServiceActionContext(
+            host.id,
+            serviceName,
+          );
+          setServiceContexts((previous) => ({
+            ...previous,
+            [serviceName]: {
+              loading: false,
+              error: null,
+              data,
+            },
+          }));
+          return data;
+        } catch (error) {
+          const message =
+            error instanceof Error
+              ? error.message
+              : "서비스 액션 정보를 불러오지 못했습니다.";
+          setServiceContexts((previous) => ({
+            ...previous,
+            [serviceName]: {
+              loading: false,
+              error: message,
+              data: previous[serviceName]?.data ?? null,
+            },
+          }));
+          return null;
+        } finally {
+          delete inFlightContextRequestsRef.current[serviceName];
+        }
+      })();
+      inFlightContextRequestsRef.current[serviceName] = request;
+      return request;
+    },
+    [host.id],
+  );
+
+  const loadLogs = useCallback(
+    async (input: {
+      serviceName: string;
+      taskArn?: string | null;
+      containerName?: string | null;
+      followCursor?: string | null;
+      startTime?: string | null;
+      endTime?: string | null;
+      append?: boolean;
+      silent?: boolean;
+    }) => {
+      const requestId = latestLogsRequestIdRef.current + 1;
+      latestLogsRequestIdRef.current = requestId;
+      const requestedTaskArn = input.taskArn ?? null;
+      const requestedContainerName = input.containerName ?? null;
+      if (!input.silent) {
+        setLogsState((previous) => ({
+          ...previous,
+          serviceName: input.serviceName,
+          loading: true,
+          error: null,
+          taskArn: requestedTaskArn,
+          containerName: requestedContainerName,
+        }));
+      }
+      try {
+        const snapshot = await window.dolssh.aws.loadEcsServiceLogs({
+          hostId: host.id,
+          serviceName: input.serviceName,
+          taskArn: requestedTaskArn,
+          containerName: requestedContainerName,
+          followCursor: input.followCursor ?? null,
+          ...(input.startTime ? { startTime: input.startTime } : {}),
+          ...(input.endTime ? { endTime: input.endTime } : {}),
+          limit: 5000,
+        });
+        if (latestLogsRequestIdRef.current !== requestId) {
+          return;
+        }
+        setLogsState((previous) => ({
+          ...previous,
+          serviceName: input.serviceName,
+          loading: false,
+          error: null,
+          taskArn: requestedTaskArn,
+          containerName: requestedContainerName,
+          snapshot:
+            input.append &&
+            previous.serviceName === input.serviceName &&
+            previous.snapshot
+              ? {
+                  ...snapshot,
+                  entries: mergeLogEntries(previous.snapshot.entries, snapshot.entries),
+                }
+              : snapshot,
+        }));
+      } catch (error) {
+        if (latestLogsRequestIdRef.current !== requestId) {
+          return;
+        }
+        setLogsState((previous) => ({
+          ...previous,
+          serviceName: input.serviceName,
+          loading: false,
+          error:
+            error instanceof Error
+              ? error.message
+              : "ECS 서비스 로그를 불러오지 못했습니다.",
+          taskArn: requestedTaskArn,
+          containerName: requestedContainerName,
+        }));
+      }
+    },
+    [host.id],
+  );
+
+  const buildLogsRangeArgs = useCallback(
+    (followCursor?: string | null) => {
+      if (logsState.follow) {
+        return {
+          startTime: null,
+          endTime: null,
+          followCursor: followCursor ?? null,
+        };
+      }
+      if (logsRangeMode === "absolute") {
+        const normalizedRange = normalizeLogsAbsoluteRange(logsAbsoluteRange);
+        if (normalizedRange) {
+          return {
+            startTime: normalizedRange.startTime,
+            endTime: normalizedRange.endTime,
+            followCursor: null,
+          };
+        }
+      }
+      const normalizedRelativeRange = normalizeLogsRelativeRange(logsRelativeRange);
+      if (normalizedRelativeRange) {
+        return {
+          startTime: normalizedRelativeRange.startTime,
+          endTime: normalizedRelativeRange.endTime,
+          followCursor: null,
+        };
+      }
+      return {
+        startTime: null,
+        endTime: null,
+        followCursor: followCursor ?? null,
+      };
+    },
+    [logsAbsoluteRange, logsRangeMode, logsRelativeRange, logsState.follow],
+  );
+
+  useEffect(() => {
+    if (!isActive || !snapshot || tab.isLoading || tab.ecsMetricsLoading) {
+      return;
+    }
+    if (!tab.ecsMetricsLoadedAt) {
+      void onRefreshUtilization(host.id);
+    }
+    const interval = window.setInterval(() => {
+      void onRefreshUtilization(host.id);
+    }, 10_000);
+    return () => {
+      window.clearInterval(interval);
+    };
+  }, [
+    host.id,
+    isActive,
+    onRefreshUtilization,
+    snapshot,
+    tab.isLoading,
+    tab.ecsMetricsLoadedAt,
+    tab.ecsMetricsLoading,
+  ]);
+
+  useEffect(() => {
+    const selectedServiceId = selectedService?.serviceName ?? null;
+    if (!selectedServiceId || activePanel !== "logs") {
+      return;
+    }
+    const rangeArgs = buildLogsRangeArgs();
+    const autoLoadKey = [
+      selectedServiceId,
+      logsState.taskArn ?? "",
+      logsState.containerName ?? "",
+      rangeArgs.startTime ?? "",
+      rangeArgs.endTime ?? "",
+      rangeArgs.followCursor ?? "",
+    ].join("|");
+    const shouldReset = logsState.serviceName !== selectedServiceId;
+    const hasLoadedSnapshot =
+      logsState.serviceName === selectedServiceId && logsState.snapshot !== null;
+    if (!shouldReset && hasLoadedSnapshot) {
+      return;
+    }
+    if (logsState.loading || logsAutoLoadKeyRef.current === autoLoadKey) {
+      return;
+    }
+    logsAutoLoadKeyRef.current = autoLoadKey;
+    void loadLogs({
+      serviceName: selectedServiceId,
+      taskArn: shouldReset ? null : logsState.taskArn,
+      containerName: shouldReset ? null : logsState.containerName,
+      startTime: rangeArgs.startTime,
+      endTime: rangeArgs.endTime,
+      followCursor: rangeArgs.followCursor,
+    });
+  }, [
+    activePanel,
+    buildLogsRangeArgs,
+    loadLogs,
+    logsState.containerName,
+    logsState.loading,
+    logsState.serviceName,
+    logsState.snapshot,
+    logsState.taskArn,
+    selectedService?.serviceName,
+  ]);
+
+  useEffect(() => {
+    const selectedServiceId = selectedService?.serviceName ?? null;
+    if (!selectedServiceId || activePanel !== "tunnel") {
+      return;
+    }
+    const cachedState =
+      tunnelStatesRef.current[selectedServiceId] ?? {
+        ...createEmptyTunnelState(),
+        serviceName: selectedServiceId,
+      };
+    if (selectedContext) {
+      setTunnelState((previous) =>
+        buildTunnelStateFromContext(
+          selectedServiceId,
+          selectedContext,
+          previous.serviceName === selectedServiceId ? previous : cachedState,
+        ),
+      );
+      return;
+    }
+    setTunnelState((previous) => {
+      const baseState =
+        previous.serviceName === selectedServiceId ? previous : cachedState;
+      const next = buildTunnelStateFromContext(selectedServiceId, null, baseState);
+      return areTunnelStatesEqual(previous, next) ? previous : next;
+    });
+    if (serviceContextState?.loading || serviceContextState?.error) {
+      return;
+    }
+    if (serviceContextState) {
+      return;
+    }
+    void loadServiceContext(selectedServiceId);
+  }, [
+    activePanel,
+    loadServiceContext,
+    selectedContext,
+    selectedService?.serviceName,
+    serviceContextState?.loading,
+  ]);
+
+  useEffect(() => {
+    if (
+      !isActive ||
+      activePanel !== "logs" ||
+      !logsState.follow ||
+      logsRangeMode === "absolute" ||
+      !logsState.snapshot ||
+      !!logsState.error ||
+      !selectedService?.serviceName
+    ) {
+      return;
+    }
+    const selectedServiceId = selectedService.serviceName;
+    const interval = window.setInterval(() => {
+      void loadLogs({
+        serviceName: selectedServiceId,
+        taskArn: logsState.taskArn,
+        containerName: logsState.containerName,
+        followCursor: logsState.snapshot?.followCursor ?? null,
+        append: true,
+        silent: true,
+      });
+    }, 5_000);
+    return () => {
+      window.clearInterval(interval);
+    };
+  }, [
+    activePanel,
+    isActive,
+    loadLogs,
+    logsState.containerName,
+    logsState.follow,
+    logsRangeMode,
+    logsState.snapshot?.followCursor,
+    logsState.taskArn,
+    selectedService?.serviceName,
+  ]);
+
+  useEffect(() => {
+    return () => {
+      if (releaseLogsScrollFrameRef.current !== null) {
+        window.cancelAnimationFrame(releaseLogsScrollFrameRef.current);
+      }
+    };
+  }, []);
+
+  const filteredLogs = useMemo(() => {
+    const entries = logsState.snapshot?.entries ?? [];
+    const query = logsState.query.trim().toLowerCase();
+    if (!query) {
+      return entries;
+    }
+    return entries.filter((entry) => getLogEntrySearchText(entry).includes(query));
+  }, [logsState.query, logsState.snapshot?.entries]);
+  const trimmedLogsSearchQuery = logsState.query.trim();
+  const logMatchCount = filteredLogs.length;
+
+  useLayoutEffect(() => {
+    if (!isActive || activePanel !== "logs") {
+      return;
+    }
+    const currentLogsTargetKey = selectedService
+      ? [
+          selectedService.serviceName,
+          logsState.taskArn ?? "",
+          logsState.containerName ?? "",
+        ].join("|")
+      : null;
+    const enteredLogs =
+      previousPanelRef.current !== "logs" && activePanel === "logs";
+    const selectedLogsTargetChanged =
+      previousLogsTargetRef.current !== currentLogsTargetKey;
+    const isInitialLogsRender = !hasInitializedLogsViewRef.current;
+    const shouldAutoScroll =
+      isInitialLogsRender ||
+      enteredLogs ||
+      selectedLogsTargetChanged ||
+      logsState.follow;
+
+    hasInitializedLogsViewRef.current = true;
+    previousLogsTargetRef.current = currentLogsTargetKey;
+
+    if (!shouldAutoScroll) {
+      return;
+    }
+
+    const logNode = logsOutputRef.current;
+    if (!logNode) {
+      return;
+    }
+
+    suppressLogsScrollRef.current = true;
+    if (releaseLogsScrollFrameRef.current !== null) {
+      window.cancelAnimationFrame(releaseLogsScrollFrameRef.current);
+    }
+    logNode.scrollTop = logNode.scrollHeight;
+    if (typeof logsBottomRef.current?.scrollIntoView === "function") {
+      logsBottomRef.current.scrollIntoView({ block: "end" });
+    }
+    releaseLogsScrollFrameRef.current = window.requestAnimationFrame(() => {
+      suppressLogsScrollRef.current = false;
+      releaseLogsScrollFrameRef.current = null;
+    });
+  }, [
+    activePanel,
+    filteredLogs.length,
+    isActive,
+    logsState.containerName,
+    logsState.follow,
+    logsState.taskArn,
+    selectedService,
+  ]);
+
+  function handleLogsScroll() {
+    if (!logsState.follow || suppressLogsScrollRef.current) {
+      return;
+    }
+    const logNode = logsOutputRef.current;
+    if (!logNode) {
+      return;
+    }
+    const distanceFromBottom =
+      logNode.scrollHeight - logNode.scrollTop - logNode.clientHeight;
+    if (distanceFromBottom > 24) {
+      setLogsState((previous) => ({
+        ...previous,
+        follow: false,
+      }));
+    }
+  }
+
+  const handleSelectService = useCallback((serviceName: string) => {
+    if (onSelectService) {
+      onSelectService(host.id, serviceName);
+      return;
+    }
+    setLocalSelectedServiceName(serviceName);
+  }, [host.id, onSelectService]);
+
+  const handleToggleLogsFollow = useCallback(() => {
+    const nextFollow = !logsState.follow;
+    if (nextFollow) {
+      setLogsRangeMode("recent");
+      setLogsRelativeRange(createDefaultLogsRelativeRange());
+      setLogsAbsoluteRange(null);
+      setLogsState((previous) => ({
+        ...previous,
+        follow: true,
+      }));
+      if (selectedService) {
+        void loadLogs({
+          serviceName: selectedService.serviceName,
+          taskArn: logsState.taskArn,
+          containerName: logsState.containerName,
+        });
+      }
+      return;
+    }
+    setLogsState((previous) => ({
+      ...previous,
+      follow: nextFollow,
+    }));
+  }, [
+    loadLogs,
+    logsRangeMode,
+    logsState.containerName,
+    logsState.follow,
+    logsState.taskArn,
+    selectedService,
+  ]);
+
+  const handleApplyLogsRange = useCallback(
+    (
+      nextMode: LogsRangeMode,
+      nextAbsoluteValue: LogsAbsoluteRangeValue | null,
+      nextRelativeValue: LogsRelativeRangeValue | null,
+    ) => {
+      setLogsRangePickerOpen(false);
+      setLogsRangeMode(nextMode);
+      setLogsRelativeRange(
+        nextMode === "recent"
+          ? nextRelativeValue ?? createDefaultLogsRelativeRange()
+          : createDefaultLogsRelativeRange(),
+      );
+      setLogsAbsoluteRange(nextMode === "absolute" ? nextAbsoluteValue : null);
+      setLogsState((previous) => ({
+        ...previous,
+        follow: false,
+      }));
+      if (!selectedService) {
+        return;
+      }
+      const rangeArgs = nextMode === "absolute"
+        ? normalizeLogsAbsoluteRange(nextAbsoluteValue)
+        : normalizeLogsRelativeRange(
+            nextRelativeValue ?? createDefaultLogsRelativeRange(),
+          );
+      void loadLogs({
+        serviceName: selectedService.serviceName,
+        taskArn: logsState.taskArn,
+        containerName: logsState.containerName,
+        followCursor: null,
+        startTime: rangeArgs?.startTime ?? null,
+        endTime: rangeArgs?.endTime ?? null,
+      });
+    },
+    [loadLogs, logsState.containerName, logsState.taskArn, selectedService],
+  );
+
+  const handleOpenShell = useCallback(
+    async (serviceName: string) => {
+      handleSelectService(serviceName);
+      setShellPickerState({
+        open: true,
+        serviceName,
+        loading: true,
+        error: null,
+        taskArn: null,
+        containerName: null,
+        submitting: false,
+      });
+      const context = await loadServiceContext(serviceName);
+      setShellPickerState((previous) =>
+        buildShellPickerStateFromContext(serviceName, context, previous),
+      );
+    },
+    [handleSelectService, loadServiceContext],
+  );
+
+  const handleRetryTunnelContext = useCallback(async () => {
+    if (!selectedService) {
+      return;
+    }
+    const context = await loadServiceContext(selectedService.serviceName, true);
+    setTunnelState((previous) =>
+      buildTunnelStateFromContext(selectedService.serviceName, context, previous),
+    );
+  }, [loadServiceContext, selectedService]);
+
+  const handleStartTunnel = useCallback(async () => {
+    if (!selectedService || !tunnelState.taskArn || !tunnelState.containerName) {
+      return;
+    }
+    const targetPort = Number(tunnelState.targetPort);
+    const bindPort = tunnelState.autoLocalPort ? 0 : Number(tunnelState.bindPort);
+    if (!Number.isFinite(targetPort) || targetPort <= 0) {
+      setTunnelState((previous) => ({
+        ...previous,
+        error: "포트를 선택해 주세요.",
+      }));
+      return;
+    }
+    if (!tunnelState.autoLocalPort && (!Number.isFinite(bindPort) || bindPort <= 0)) {
+      setTunnelState((previous) => ({
+        ...previous,
+        error: "로컬 포트를 확인해 주세요.",
+      }));
+      return;
+    }
+
+    setTunnelState((previous) => ({
+      ...previous,
+      loading: true,
+      error: null,
+    }));
+    try {
+      const runtime = await window.dolssh.aws.startEcsServiceTunnel({
+        hostId: host.id,
+        serviceName: selectedService.serviceName,
+        taskArn: tunnelState.taskArn,
+        containerName: tunnelState.containerName,
+        targetPort,
+        bindAddress: "127.0.0.1",
+        bindPort,
+      });
+      setTunnelState((previous) => ({
+        ...previous,
+        loading: false,
+        runtime,
+        error: null,
+      }));
+    } catch (error) {
+      setTunnelState((previous) => ({
+        ...previous,
+        loading: false,
+        error:
+          error instanceof Error
+            ? error.message
+            : "ECS 터널을 시작하지 못했습니다.",
+      }));
+    }
+  }, [host.id, selectedService, tunnelState]);
+
+  const handleStopTunnel = useCallback(async () => {
+    if (!tunnelState.runtime?.ruleId) {
+      return;
+    }
+    const runtimeId = tunnelState.runtime.ruleId;
+    setTunnelState((previous) => ({
+      ...previous,
+      loading: true,
+      error: null,
+    }));
+    try {
+      await window.dolssh.aws.stopEcsServiceTunnel(runtimeId);
+      setTunnelState((previous) =>
+        previous.runtime?.ruleId === runtimeId
+          ? { ...previous, loading: false, runtime: null }
+          : previous,
+      );
+    } catch (error) {
+      setTunnelState((previous) => ({
+        ...previous,
+        loading: false,
+        error:
+          error instanceof Error
+            ? error.message
+            : "ECS 터널을 중지하지 못했습니다.",
+      }));
+    }
+  }, [tunnelState.runtime?.ruleId]);
+
+  const handleSubmitShell = useCallback(async () => {
+    if (
+      !shellPickerState.serviceName ||
+      !shellPickerState.taskArn ||
+      !shellPickerState.containerName
+    ) {
+      return;
+    }
+    setShellPickerState((previous) => ({
+      ...previous,
+      submitting: true,
+      error: null,
+    }));
+    try {
+      await onOpenEcsExecShell(
+        host.id,
+        shellPickerState.serviceName,
+        shellPickerState.taskArn,
+        shellPickerState.containerName,
+      );
+      setShellPickerState(createEmptyShellPickerState());
+    } catch (error) {
+      setShellPickerState((previous) => ({
+        ...previous,
+        submitting: false,
+        error:
+          error instanceof Error
+            ? error.message
+            : "ECS 셸 연결을 시작하지 못했습니다.",
+      }));
+    }
+  }, [
+    host.id,
+    onOpenEcsExecShell,
+    shellPickerState.containerName,
+    shellPickerState.serviceName,
+    shellPickerState.taskArn,
+  ]);
+
+  const tunnelTaskOptions = selectedContext?.runningTasks ?? [];
+  const tunnelContainerOptions = getContainersForTask(
+    selectedContext,
+    tunnelState.taskArn,
+    { requirePorts: true },
+  );
+  const tunnelPortOptions =
+    tunnelContainerOptions.find(
+      (container) => container.containerName === tunnelState.containerName,
+    )?.ports ?? [];
+  const isTunnelContextReady =
+    Boolean(selectedService) &&
+    Boolean(selectedContext) &&
+    tunnelState.serviceName === selectedService?.serviceName;
+  const isTunnelFormDisabled =
+    tunnelState.loading || Boolean(serviceContextState?.loading) || !isTunnelContextReady;
+  const canStartTunnel =
+    !isTunnelFormDisabled &&
+    Boolean(tunnelState.taskArn) &&
+    Boolean(tunnelState.containerName) &&
+    Boolean(tunnelState.targetPort);
+  const tunnelRuntimeLocalEndpoint = tunnelState.runtime
+    ? tunnelState.runtime.bindPort > 0
+      ? `${tunnelState.runtime.bindAddress}:${tunnelState.runtime.bindPort}`
+      : "자동 할당 중..."
+    : null;
+  const tunnelRuntimeRemoteEndpoint = tunnelState.runtime
+    ? `127.0.0.1:${tunnelState.targetPort || "-"}`
+    : null;
+  const shellTaskOptions = shellPickerState.serviceName
+    ? serviceContexts[shellPickerState.serviceName]?.data?.runningTasks ?? []
+    : [];
+  const shellContainerOptions = getContainersForTask(
+    shellPickerState.serviceName
+      ? serviceContexts[shellPickerState.serviceName]?.data ?? null
+      : null,
+    shellPickerState.taskArn,
+    { requireExec: true },
+  );
+
+  return (
+    <div className="containers-workspace ecs-workspace">
+      <div className="containers-workspace__header">
+        <div>
+          <div className="containers-workspace__host-meta">
+            <span>{getHostBadgeLabel(host)}</span>
+            <span>{getHostSubtitle(host)}</span>
+          </div>
+        </div>
+        <div className="containers-workspace__header-actions">
+          <button
+            type="button"
+            className="secondary-button secondary-button--compact"
+            disabled={tab.isLoading}
+            onClick={() => {
+              void onRefresh(host.id);
+            }}
+          >
+            {tab.isLoading ? "불러오는 중..." : "Refresh"}
+          </button>
+        </div>
+      </div>
+
+      {tab.errorMessage ? (
+        <div className="terminal-error-banner">{tab.errorMessage}</div>
+      ) : null}
+
+      {tab.ecsMetricsWarning ? (
+        <div className="ecs-workspace__warning">{tab.ecsMetricsWarning}</div>
+      ) : null}
+
+      {tab.isLoading && !snapshot ? (
+        <div className="empty-state-card containers-shell__empty-state">
+          <div className="eyebrow">ECS</div>
+          <h3>클러스터 정보를 불러오는 중입니다.</h3>
+          <p>AWS ECS 서비스 스냅샷과 현재 사용량 지표를 가져오고 있습니다.</p>
+        </div>
+      ) : null}
+
+      {snapshot ? (
+        <div className="ecs-workspace__body">
+          <div className="ecs-workspace__summary-grid">
+            <article className="operations-card ecs-workspace__summary-card">
+              <div className="operations-card__main">
+                <div className="operations-card__title-row">
+                  <strong>{snapshot.cluster.clusterName}</strong>
+                  <span
+                    className={`status-pill status-pill--${getRolloutTone(snapshot.cluster.status)}`}
+                  >
+                    {snapshot.cluster.status}
+                  </span>
+                </div>
+                <div className="operations-card__meta">
+                  <span>{snapshot.profileName}</span>
+                  <span>{snapshot.region}</span>
+                  <span>마지막 갱신 {formatLoadedAt(snapshot.loadedAt)}</span>
+                </div>
+              </div>
+            </article>
+
+            <article className="operations-card ecs-workspace__summary-card">
+              <div className="operations-card__main">
+                <div className="operations-card__title-row">
+                  <strong>Services</strong>
+                </div>
+                <div className="operations-card__meta ecs-workspace__summary-metrics">
+                  <span>Active {snapshot.cluster.activeServicesCount}</span>
+                  <span>Running {snapshot.cluster.runningTasksCount}</span>
+                  <span>Pending {snapshot.cluster.pendingTasksCount}</span>
+                </div>
+              </div>
+            </article>
+          </div>
+
+          <div className="containers-workspace__body ecs-workspace__split">
+            <aside className="containers-workspace__sidebar ecs-workspace__service-list-shell">
+              <div className="containers-workspace__sidebar-header">
+                <strong>Services</strong>
+                <span>{services.length}</span>
+              </div>
+
+              {services.length === 0 ? (
+                <div className="empty-callout">
+                  <strong>이 클러스터에는 표시할 서비스가 없습니다.</strong>
+                </div>
+              ) : (
+                <div className="ecs-workspace__service-list">
+                  {services.map((service) => {
+                    const tone = getServiceAttentionTone(service);
+                    const isSelected = service.serviceName === selectedService?.serviceName;
+                    return (
+                      <article
+                        key={service.serviceArn}
+                        className={`ecs-workspace__service-row ecs-workspace__service-row--${tone} ${isSelected ? "is-selected" : ""}`.trim()}
+                      >
+                        <button
+                          type="button"
+                          className="ecs-workspace__service-row-main"
+                          onClick={() => {
+                            handleSelectService(service.serviceName);
+                          }}
+                        >
+                          <strong className="ecs-workspace__service-row-name">
+                            {service.serviceName}
+                          </strong>
+                          <div className="ecs-workspace__service-row-badges">
+                            <span
+                              className={`status-pill status-pill--${getServiceStatusTone(service)}`}
+                            >
+                              {service.status}
+                            </span>
+                            {service.rolloutState ? (
+                              <span
+                                className={`status-pill status-pill--${getRolloutTone(service.rolloutState)}`}
+                              >
+                                {service.rolloutState}
+                              </span>
+                            ) : null}
+                          </div>
+                          <div className="ecs-workspace__service-row-metrics">
+                            <span>CPU {formatPercent(service.cpuUtilizationPercent)}</span>
+                            <span>
+                              Memory {formatPercent(service.memoryUtilizationPercent)}
+                            </span>
+                          </div>
+                        </button>
+                      </article>
+                    );
+                  })}
+                </div>
+              )}
+            </aside>
+
+            <section className="containers-workspace__detail ecs-workspace__detail-shell">
+              {selectedService ? (
+                <>
+                  <div className="containers-workspace__detail-header ecs-workspace__detail-header">
+                    <div className="ecs-workspace__detail-header-main">
+                      <div className="operations-card__title-row">
+                        <h3>{selectedService.serviceName}</h3>
+                        <span
+                          className={`status-pill status-pill--${getServiceStatusTone(selectedService)}`}
+                        >
+                          {selectedService.status}
+                        </span>
+                        {selectedService.rolloutState ? (
+                          <span
+                            className={`status-pill status-pill--${getRolloutTone(selectedService.rolloutState)}`}
+                          >
+                            {selectedService.rolloutState}
+                          </span>
+                        ) : null}
+                      </div>
+                      <div className="operations-card__meta">
+                        <span>{selectedService.capacityProviderSummary || selectedService.launchType || "Launch type unavailable"}</span>
+                        <span>
+                          Task def{" "}
+                          {selectedService.taskDefinitionRevision
+                            ? String(selectedService.taskDefinitionRevision)
+                            : selectedService.taskDefinitionArn || "-"}
+                        </span>
+                        {formatServicePorts(selectedService) ? (
+                          <span>{formatServicePorts(selectedService)}</span>
+                        ) : null}
+                        {getExposureBadgeLabels(selectedService.exposureKinds).map((label) => (
+                          <span
+                            key={`${selectedService.serviceArn}:${label}`}
+                            className="ecs-workspace__service-exposure-badge"
+                          >
+                            {label}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                    <div className="ecs-workspace__detail-actions">
+                      <button
+                        type="button"
+                        className="secondary-button secondary-button--compact"
+                        onClick={() => {
+                          void handleOpenShell(selectedService.serviceName);
+                        }}
+                      >
+                        쉘 접속
+                      </button>
+                      <div className="segmented-control" role="tablist">
+                        {(
+                          [
+                            ["overview", "Overview"],
+                            ["logs", "Logs"],
+                            ["metrics", "Metrics"],
+                            ["tunnel", "Tunnel"],
+                          ] as Array<[EcsDetailPanel, string]>
+                        ).map(([panel, label]) => (
+                          <button
+                            key={panel}
+                            type="button"
+                            role="tab"
+                            aria-selected={activePanel === panel}
+                            className={activePanel === panel ? "active" : ""}
+                            onClick={() => {
+                              if (onSetPanel) {
+                                onSetPanel(host.id, panel);
+                                return;
+                              }
+                              setLocalActivePanel(panel);
+                            }}
+                          >
+                            {label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="ecs-workspace__detail-panel">
+                    {activePanel === "overview" ? (
+                      <div className="ecs-workspace__overview">
+                        <div className="ecs-workspace__overview-grid">
+                          <section className="ecs-workspace__section">
+                            <div className="containers-workspace__section-header">
+                              <h3>서비스 요약</h3>
+                            </div>
+                            <dl className="ecs-workspace__facts-grid">
+                              <div>
+                                <dt>CPU</dt>
+                                <dd>{formatPercent(selectedService.cpuUtilizationPercent)}</dd>
+                              </div>
+                              <div>
+                                <dt>Memory</dt>
+                                <dd>{formatPercent(selectedService.memoryUtilizationPercent)}</dd>
+                              </div>
+                              <div>
+                                <dt>Tasks</dt>
+                                <dd>
+                                  {selectedService.runningCount} / {selectedService.desiredCount}
+                                </dd>
+                              </div>
+                              <div>
+                                <dt>Pending</dt>
+                                <dd>{selectedService.pendingCount}</dd>
+                              </div>
+                            </dl>
+                          </section>
+
+                          <section className="ecs-workspace__section">
+                            <div className="containers-workspace__section-header">
+                              <h3>배포 정보</h3>
+                            </div>
+                            <dl className="ecs-workspace__facts-grid ecs-workspace__facts-grid--meta">
+                              <div>
+                                <dt>Launch</dt>
+                                <dd>{selectedService.launchType || "-"}</dd>
+                              </div>
+                              <div>
+                                <dt>Capacity</dt>
+                                <dd>{selectedService.capacityProviderSummary || "-"}</dd>
+                              </div>
+                              <div>
+                                <dt>Ports</dt>
+                                <dd>{formatServicePorts(selectedService) || "-"}</dd>
+                              </div>
+                              <div>
+                                <dt>Task def</dt>
+                                <dd>
+                                  {selectedService.taskDefinitionRevision
+                                    ? `rev ${selectedService.taskDefinitionRevision}`
+                                    : "-"}
+                                </dd>
+                              </div>
+                            </dl>
+                          </section>
+                        </div>
+
+                        <section className="ecs-workspace__section">
+                          <div className="containers-workspace__section-header">
+                            <h3>Deployments</h3>
+                          </div>
+                          {selectedService.deployments?.length ? (
+                            <div className="ecs-workspace__timeline">
+                              {selectedService.deployments.map((deployment) => (
+                                <article
+                                  key={deployment.id}
+                                  className="ecs-workspace__timeline-item"
+                                >
+                                  <div className="operations-card__title-row">
+                                    <strong>{deployment.status}</strong>
+                                    {deployment.rolloutState ? (
+                                      <span
+                                        className={`status-pill status-pill--${getRolloutTone(deployment.rolloutState)}`}
+                                      >
+                                        {deployment.rolloutState}
+                                      </span>
+                                    ) : null}
+                                  </div>
+                                  <div className="operations-card__meta">
+                                    <span>
+                                      {deployment.runningCount ?? 0} /{" "}
+                                      {deployment.desiredCount ?? 0}
+                                    </span>
+                                    <span>Pending {deployment.pendingCount ?? 0}</span>
+                                    <span>
+                                      Task def{" "}
+                                      {deployment.taskDefinitionRevision
+                                        ? deployment.taskDefinitionRevision
+                                        : "-"}
+                                    </span>
+                                    {deployment.updatedAt ? (
+                                      <span>{formatLoadedAt(deployment.updatedAt)}</span>
+                                    ) : null}
+                                  </div>
+                                  {deployment.rolloutStateReason ? (
+                                    <p className="operations-card__message">
+                                      {deployment.rolloutStateReason}
+                                    </p>
+                                  ) : null}
+                                </article>
+                              ))}
+                            </div>
+                          ) : (
+                            <div className="containers-workspace__empty-detail">
+                              표시할 deployment 정보가 없습니다.
+                            </div>
+                          )}
+                        </section>
+
+                        <section className="ecs-workspace__section">
+                          <div className="containers-workspace__section-header">
+                            <h3>Recent events</h3>
+                          </div>
+                          {selectedService.events?.length ? (
+                            <div className="ecs-workspace__timeline">
+                              {selectedService.events.map((event) => (
+                                <article
+                                  key={event.id}
+                                  className="ecs-workspace__timeline-item"
+                                >
+                                  <div className="operations-card__meta">
+                                    {event.createdAt ? (
+                                      <span>{formatLoadedAt(event.createdAt)}</span>
+                                    ) : null}
+                                  </div>
+                                  <p className="operations-card__message">{event.message}</p>
+                                </article>
+                              ))}
+                            </div>
+                          ) : (
+                            <div className="containers-workspace__empty-detail">
+                              표시할 최근 이벤트가 없습니다.
+                            </div>
+                          )}
+                        </section>
+                      </div>
+                    ) : null}
+
+                    {activePanel === "logs" ? (
+                      <div className="containers-workspace__logs ecs-workspace__logs-panel">
+                        <div className="containers-workspace__logs-toolbar ecs-workspace__logs-toolbar">
+                          <button
+                            type="button"
+                            role="switch"
+                            aria-checked={logsState.follow}
+                            aria-label="Follow"
+                            className={`containers-workspace__follow-toggle ${logsState.follow ? "is-active" : ""}`}
+                            onClick={() => {
+                              handleToggleLogsFollow();
+                            }}
+                            disabled={logsState.loading}
+                          >
+                            <span
+                              className="containers-workspace__follow-toggle-track"
+                              aria-hidden="true"
+                            >
+                              <span className="containers-workspace__follow-toggle-thumb" />
+                            </span>
+                            <span className="containers-workspace__follow-toggle-label">
+                              Follow
+                            </span>
+                          </button>
+                          <button
+                            type="button"
+                            className={`secondary-button secondary-button--compact ecs-workspace__logs-range-trigger ${logsRangeMode === "absolute" ? "active" : ""}`.trim()}
+                            aria-label="로그 범위"
+                            onClick={() => {
+                              setLogsRangePickerOpen(true);
+                            }}
+                            disabled={logsState.loading}
+                          >
+                            {logsRangeLabel}
+                          </button>
+                          <label className="ecs-workspace__logs-filter-group">
+                            <span>Task</span>
+                            <select
+                              value={logsState.taskArn ?? ""}
+                              disabled={logsState.loading}
+                              onChange={(event) => {
+                                const nextTaskArn = event.target.value || null;
+                                const rangeArgs = buildLogsRangeArgs();
+                                void loadLogs({
+                                  serviceName: selectedService.serviceName,
+                                  taskArn: nextTaskArn,
+                                  containerName: logsState.containerName,
+                                  followCursor: rangeArgs.followCursor,
+                                  startTime: rangeArgs.startTime,
+                                  endTime: rangeArgs.endTime,
+                                });
+                              }}
+                            >
+                              <option value="">All tasks</option>
+                              {(logsState.snapshot?.taskOptions ?? []).map((task) => (
+                                <option key={task.taskArn} value={task.taskArn}>
+                                  {task.taskId}
+                                </option>
+                              ))}
+                            </select>
+                          </label>
+                          <label className="ecs-workspace__logs-filter-group">
+                            <span>Container</span>
+                            <select
+                              value={logsState.containerName ?? ""}
+                              disabled={logsState.loading}
+                              onChange={(event) => {
+                                const nextContainer = event.target.value || null;
+                                const rangeArgs = buildLogsRangeArgs();
+                                void loadLogs({
+                                  serviceName: selectedService.serviceName,
+                                  taskArn: logsState.taskArn,
+                                  containerName: nextContainer,
+                                  followCursor: rangeArgs.followCursor,
+                                  startTime: rangeArgs.startTime,
+                                  endTime: rangeArgs.endTime,
+                                });
+                              }}
+                            >
+                              <option value="">All containers</option>
+                              {(logsState.snapshot?.containerOptions ?? []).map((name) => (
+                                <option key={name} value={name}>
+                                  {name}
+                                </option>
+                              ))}
+                            </select>
+                          </label>
+                          <div className="containers-workspace__logs-search">
+                            <input
+                              type="search"
+                              aria-label="로그 검색"
+                              value={logsState.query}
+                              placeholder="로그 검색"
+                              onChange={(event) => {
+                                setLogsState((previous) => ({
+                                  ...previous,
+                                  query: event.target.value,
+                                }));
+                              }}
+                            />
+                          </div>
+                          <button
+                            type="button"
+                            className="secondary-button"
+                            disabled={logsState.loading}
+                            onClick={() => {
+                              const rangeArgs = buildLogsRangeArgs();
+                              void loadLogs({
+                                serviceName: selectedService.serviceName,
+                                taskArn: logsState.taskArn,
+                                containerName: logsState.containerName,
+                                followCursor: rangeArgs.followCursor,
+                                startTime: rangeArgs.startTime,
+                                endTime: rangeArgs.endTime,
+                              });
+                            }}
+                          >
+                            {logsState.loading ? "불러오는 중..." : "다시 불러오기"}
+                          </button>
+                        </div>
+
+                        {trimmedLogsSearchQuery ? (
+                          <div className="containers-workspace__logs-search-meta">
+                            현재 버퍼에서 {logMatchCount}건 일치
+                          </div>
+                        ) : null}
+
+                        {logsState.loading && !logsState.snapshot ? (
+                          <div className="empty-callout">
+                            <strong>서비스 로그를 불러오는 중입니다.</strong>
+                          </div>
+                        ) : null}
+
+                        {logsState.error ? (
+                          <div className="terminal-error-banner">{logsState.error}</div>
+                        ) : null}
+
+                        {logsState.snapshot?.unsupportedReason ? (
+                          <div className="empty-callout">
+                            <strong>{logsState.snapshot.unsupportedReason}</strong>
+                          </div>
+                        ) : null}
+
+                        {logsState.snapshot && !logsState.snapshot.unsupportedReason ? (
+                          <>
+                            <div className="operations-card__meta ecs-workspace__logs-meta">
+                              <span>마지막 갱신 {formatLoadedAt(logsState.snapshot.loadedAt)}</span>
+                              <span>{logsRangeLabel}</span>
+                              <span>{filteredLogs.length} lines</span>
+                            </div>
+                            <div
+                              ref={logsOutputRef}
+                              className="containers-workspace__logs-output"
+                              onScroll={handleLogsScroll}
+                            >
+                              {filteredLogs.length === 0 ? (
+                                <div className="containers-workspace__empty-detail">
+                                  {trimmedLogsSearchQuery
+                                    ? "검색 결과가 없습니다."
+                                    : logsRangeMode === "absolute"
+                                      ? "선택한 범위에 로그가 없습니다."
+                                      : "최근 30분 기준 로그가 없습니다."}
+                                </div>
+                              ) : (
+                                filteredLogs.map((entry) => (
+                                  <div
+                                    key={entry.id}
+                                    className="containers-workspace__log-row"
+                                  >
+                                    <span
+                                      className="containers-workspace__log-timestamp"
+                                      title={entry.timestamp}
+                                    >
+                                      {formatLoadedAt(entry.timestamp)}
+                                    </span>
+                                    <span className="containers-workspace__log-message">
+                                      {entry.containerName || entry.taskId ? (
+                                        <span className="ecs-workspace__log-context">
+                                          {[entry.containerName, entry.taskId]
+                                            .filter(Boolean)
+                                            .join(" · ")}{" "}
+                                        </span>
+                                      ) : null}
+                                      {entry.message}
+                                    </span>
+                                  </div>
+                                ))
+                              )}
+                              <div
+                                ref={logsBottomRef}
+                                className="containers-workspace__logs-end-anchor"
+                                aria-hidden="true"
+                              />
+                            </div>
+                          </>
+                        ) : null}
+                      </div>
+                    ) : null}
+
+                    {activePanel === "metrics" ? (
+                      <MetricsPanel
+                        service={selectedService}
+                        history={selectedServiceHistory}
+                      />
+                    ) : null}
+
+                    {activePanel === "tunnel" ? (
+                      <div className="ecs-workspace__tunnel-panel">
+                        {serviceContextState?.loading && !selectedContext ? (
+                          <div className="empty-callout">
+                            <strong>터널 대상을 준비하는 중입니다.</strong>
+                          </div>
+                        ) : null}
+
+                        {serviceContextState?.error ? (
+                          <div className="terminal-error-banner">
+                            <div>{serviceContextState.error}</div>
+                            <div className="ecs-workspace__inline-actions">
+                              <button
+                                type="button"
+                                className="secondary-button secondary-button--compact"
+                                onClick={() => {
+                                  void handleRetryTunnelContext();
+                                }}
+                              >
+                                다시 시도
+                              </button>
+                            </div>
+                          </div>
+                        ) : null}
+
+                        <div className="ecs-workspace__tunnel-form">
+                          <label>
+                            <span>Task</span>
+                            <select
+                              value={tunnelState.taskArn ?? ""}
+                              disabled={isTunnelFormDisabled}
+                              onChange={(event) => {
+                                const nextTaskArn = event.target.value || null;
+                                const nextContainers = getContainersForTask(
+                                  selectedContext,
+                                  nextTaskArn,
+                                  { requirePorts: true },
+                                );
+                                const nextContainerName =
+                                  nextContainers[0]?.containerName ?? null;
+                                const nextTargetPort =
+                                  nextContainers[0]?.ports[0]
+                                    ? String(nextContainers[0].ports[0].port)
+                                    : "";
+                                setTunnelState((previous) => ({
+                                  ...previous,
+                                  taskArn: nextTaskArn,
+                                  containerName: nextContainerName,
+                                  targetPort: nextTargetPort,
+                                }));
+                              }}
+                            >
+                              {tunnelTaskOptions.length === 0 ? (
+                                <option value="">실행 중인 task 없음</option>
+                              ) : null}
+                              {tunnelTaskOptions.map((task) => (
+                                <option key={task.taskArn} value={task.taskArn}>
+                                  {getTaskLabel(task)}
+                                </option>
+                              ))}
+                            </select>
+                          </label>
+                          <label>
+                            <span>Container</span>
+                            <select
+                              value={tunnelState.containerName ?? ""}
+                              disabled={isTunnelFormDisabled}
+                              onChange={(event) => {
+                                const nextContainerName = event.target.value || null;
+                                const nextTargetPort =
+                                  tunnelContainerOptions.find(
+                                    (container) =>
+                                      container.containerName === nextContainerName,
+                                  )?.ports[0]?.port ?? "";
+                                setTunnelState((previous) => ({
+                                  ...previous,
+                                  containerName: nextContainerName,
+                                  targetPort: nextTargetPort
+                                    ? String(nextTargetPort)
+                                    : "",
+                                }));
+                              }}
+                            >
+                              {tunnelContainerOptions.length === 0 ? (
+                                <option value="">선택 가능한 컨테이너 없음</option>
+                              ) : null}
+                              {tunnelContainerOptions.map((container) => (
+                                <option
+                                  key={container.containerName}
+                                  value={container.containerName}
+                                >
+                                  {container.containerName}
+                                </option>
+                              ))}
+                            </select>
+                          </label>
+                          <label>
+                            <span>Port</span>
+                            <select
+                              value={tunnelState.targetPort}
+                              disabled={
+                                isTunnelFormDisabled || tunnelPortOptions.length === 0
+                              }
+                              onChange={(event) => {
+                                setTunnelState((previous) => ({
+                                  ...previous,
+                                  targetPort: event.target.value,
+                                }));
+                              }}
+                            >
+                              {tunnelPortOptions.length === 0 ? (
+                                <option value="">포트 없음</option>
+                              ) : null}
+                              {tunnelPortOptions.map((port) => (
+                                <option
+                                  key={`${port.port}/${port.protocol}`}
+                                  value={String(port.port)}
+                                >
+                                  {port.port}/{port.protocol}
+                                </option>
+                              ))}
+                            </select>
+                          </label>
+                          <label>
+                            <span>Local port</span>
+                            <div className="port-forward-local-port ecs-workspace__tunnel-local-port">
+                              <button
+                                type="button"
+                                role="switch"
+                                aria-checked={tunnelState.autoLocalPort}
+                                aria-label="Auto (random)"
+                                className={`port-forward-toggle ${tunnelState.autoLocalPort ? "is-active" : ""}`}
+                                disabled={isTunnelFormDisabled}
+                                onClick={() => {
+                                  setTunnelState((previous) => ({
+                                    ...previous,
+                                    autoLocalPort: !previous.autoLocalPort,
+                                    bindPort: previous.autoLocalPort
+                                      ? previous.bindPort || "9000"
+                                      : "",
+                                  }));
+                                }}
+                              >
+                                <span className="port-forward-toggle__track" aria-hidden="true">
+                                  <span className="port-forward-toggle__thumb" />
+                                </span>
+                                <span className="port-forward-toggle__content">
+                                  <strong>Auto (random)</strong>
+                                  <span>사용 가능한 로컬 포트를 자동으로 할당합니다.</span>
+                                </span>
+                              </button>
+                              <input
+                                type="number"
+                                className="port-forward-local-port__input"
+                                value={tunnelState.bindPort}
+                                placeholder="0"
+                                disabled={
+                                  isTunnelFormDisabled || tunnelState.autoLocalPort
+                                }
+                                onChange={(event) => {
+                                  setTunnelState((previous) => ({
+                                    ...previous,
+                                    bindPort: event.target.value,
+                                  }));
+                                }}
+                              />
+                            </div>
+                          </label>
+                        </div>
+
+                        {tunnelState.runtime ? (
+                          <div className="ecs-workspace__tunnel-runtime-card">
+                            <div className="ecs-workspace__tunnel-runtime-header">
+                              <strong>터널 상태</strong>
+                              <span
+                                className={`status-pill status-pill--${tunnelState.runtime.status}`}
+                              >
+                                {tunnelState.runtime.status === "running"
+                                  ? "Running"
+                                  : tunnelState.runtime.status}
+                              </span>
+                            </div>
+                            <div className="ecs-workspace__tunnel-runtime-grid">
+                              <div>
+                                <span>Local</span>
+                                <strong>{tunnelRuntimeLocalEndpoint}</strong>
+                              </div>
+                              <div>
+                                <span>Remote</span>
+                                <strong>{tunnelRuntimeRemoteEndpoint}</strong>
+                              </div>
+                            </div>
+                          </div>
+                        ) : null}
+
+                        {tunnelState.error ? (
+                          <div className="terminal-error-banner">
+                            {tunnelState.error}
+                          </div>
+                        ) : null}
+
+                        <div className="ecs-workspace__detail-actions">
+                          {tunnelState.runtime ? (
+                            <button
+                              type="button"
+                              className="secondary-button"
+                              disabled={tunnelState.loading}
+                              onClick={() => {
+                                void handleStopTunnel();
+                              }}
+                            >
+                              {tunnelState.loading ? "정지 중..." : "Stop"}
+                            </button>
+                          ) : (
+                            <button
+                              type="button"
+                              className="primary-button"
+                              disabled={!canStartTunnel}
+                              onClick={() => {
+                                void handleStartTunnel();
+                              }}
+                            >
+                              {tunnelState.loading ? "시작 중..." : "Start tunnel"}
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    ) : null}
+                  </div>
+                </>
+              ) : (
+                <div className="empty-callout">
+                  <strong>선택된 서비스가 없습니다.</strong>
+                </div>
+              )}
+            </section>
+          </div>
+
+          <LogsRangePickerDialog
+            open={logsRangePickerOpen}
+            mode={logsRangeMode}
+            absoluteValue={logsAbsoluteRange}
+            relativeValue={logsRelativeRange}
+            onClose={() => {
+              setLogsRangePickerOpen(false);
+            }}
+            onApply={handleApplyLogsRange}
+          />
+
+          {shellPickerState.open ? (
+            <div className="ecs-workspace__picker-backdrop" role="presentation">
+              <div
+                className="modal-card ecs-workspace__picker"
+                role="dialog"
+                aria-modal="true"
+                aria-label="ECS shell picker"
+              >
+                <div className="ecs-workspace__picker-header">
+                  <div>
+                    <h3>쉘 접속</h3>
+                    <p>
+                      실행 중인 task와 컨테이너를 고른 뒤 ECS Exec 세션을 엽니다.
+                    </p>
+                  </div>
+                </div>
+
+                {shellPickerState.error ? (
+                  <div className="terminal-error-banner">
+                    {shellPickerState.error}
+                  </div>
+                ) : null}
+
+                <div className="ecs-workspace__picker-form">
+                  <label>
+                    <span>Task</span>
+                    <select
+                      value={shellPickerState.taskArn ?? ""}
+                      disabled={shellPickerState.loading}
+                      onChange={(event) => {
+                        const nextTaskArn = event.target.value || null;
+                        const nextContainers = getContainersForTask(
+                          shellPickerState.serviceName
+                            ? serviceContexts[shellPickerState.serviceName]?.data ?? null
+                            : null,
+                          nextTaskArn,
+                          { requireExec: true },
+                        );
+                        setShellPickerState((previous) => ({
+                          ...previous,
+                          taskArn: nextTaskArn,
+                          containerName: nextContainers[0]?.containerName ?? null,
+                        }));
+                      }}
+                    >
+                      {shellTaskOptions.length === 0 ? (
+                        <option value="">실행 중인 task 없음</option>
+                      ) : null}
+                      {shellTaskOptions.map((task) => (
+                        <option key={task.taskArn} value={task.taskArn}>
+                          {getTaskLabel(task)}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label>
+                    <span>Container</span>
+                    <select
+                      value={shellPickerState.containerName ?? ""}
+                      disabled={shellPickerState.loading}
+                      onChange={(event) => {
+                        setShellPickerState((previous) => ({
+                          ...previous,
+                          containerName: event.target.value || null,
+                        }));
+                      }}
+                    >
+                      {shellContainerOptions.length === 0 ? (
+                        <option value="">선택 가능한 컨테이너 없음</option>
+                      ) : null}
+                      {shellContainerOptions.map((container) => (
+                        <option
+                          key={container.containerName}
+                          value={container.containerName}
+                        >
+                          {container.containerName}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                </div>
+
+                <div className="ecs-workspace__picker-actions">
+                  <button
+                    type="button"
+                    className="secondary-button"
+                    onClick={() => {
+                      setShellPickerState(createEmptyShellPickerState());
+                    }}
+                  >
+                    취소
+                  </button>
+                  <button
+                    type="button"
+                    className="primary-button"
+                    disabled={
+                      shellPickerState.loading ||
+                      shellPickerState.submitting ||
+                      !shellPickerState.taskArn ||
+                      !shellPickerState.containerName
+                    }
+                    onClick={() => {
+                      void handleSubmitShell();
+                    }}
+                  >
+                    {shellPickerState.submitting ? "연결 중..." : "쉘 접속"}
+                  </button>
+                </div>
+              </div>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+    </div>
+  );
+}

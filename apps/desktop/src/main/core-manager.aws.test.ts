@@ -619,7 +619,8 @@ describe("CoreManager AWS SSM sessions", () => {
       hostId: "aws-host-1",
       profileName: "default",
       region: "ap-northeast-2",
-      instanceId: "i-ssm",
+      targetType: "instance",
+      targetId: "i-ssm",
       bindAddress: "127.0.0.1",
       bindPort: 15432,
       targetKind: "remote-host",
@@ -677,7 +678,8 @@ describe("CoreManager AWS SSM sessions", () => {
       hostId: "aws-host-1",
       profileName: "default",
       region: "ap-northeast-2",
-      instanceId: "i-ssm",
+      targetType: "instance",
+      targetId: "i-ssm",
       bindAddress: "127.0.0.1",
       bindPort: 0,
       targetKind: "remote-host",
@@ -728,5 +730,52 @@ describe("CoreManager AWS SSM sessions", () => {
     });
 
     await stopPromise;
+  });
+
+  it("preserves visible ecs-task transport while using AWS remote-host forwarding backend", async () => {
+    const fakeProcess = createFakeChildProcess();
+    spawnMock.mockReturnValue(fakeProcess.child);
+
+    const manager = new CoreManager();
+
+    const startPromise = manager.startSsmPortForward({
+      ruleId: "rule-ecs-task-1",
+      hostId: "ecs-host-1",
+      profileName: "default",
+      region: "ap-northeast-2",
+      targetType: "ecs-task",
+      targetId: "ecs:demo-cluster_task-123_runtime-456",
+      bindAddress: "127.0.0.1",
+      bindPort: 0,
+      targetKind: "remote-host",
+      targetPort: 8080,
+      remoteHost: "127.0.0.1",
+      transport: "ecs-task",
+    });
+
+    await Promise.resolve();
+
+    const startRequest = decodeControlFrame(fakeProcess.writes[0]);
+    expect(startRequest.type).toBe("ssmPortForwardStart");
+    expect(startRequest.endpointId).toBe("rule-ecs-task-1");
+
+    fakeProcess.emitControl({
+      type: "portForwardStarted",
+      requestId: startRequest.id,
+      endpointId: "rule-ecs-task-1",
+      payload: {
+        transport: "aws-ssm",
+        mode: "local",
+        method: "ssm-remote-host",
+        bindAddress: "127.0.0.1",
+        bindPort: 18080,
+        status: "running",
+      },
+    });
+
+    const runtime = await startPromise;
+    expect(runtime.transport).toBe("ecs-task");
+    expect(runtime.method).toBe("ssm-remote-host");
+    expect(runtime.bindPort).toBe(18080);
   });
 });

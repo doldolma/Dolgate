@@ -6,6 +6,7 @@ import {
   getAwsEc2HostSshPort,
   getParentGroupPath,
   isAwsEc2HostRecord,
+  isAwsEcsHostRecord,
   isSshHostDraft,
   isGroupWithinPath,
   isSshHostRecord,
@@ -16,6 +17,9 @@ import {
 import type {
   ActivityLogRecord,
   AppSettings,
+  AwsEcsClusterSnapshot,
+  AwsEcsClusterUtilizationSnapshot,
+  AwsMetricHistoryPoint,
   CoreEvent,
   ContainerConnectionProgressEvent,
   ConnectionProgressStage,
@@ -143,7 +147,27 @@ function mergeContainerLogLines(
   return [...existingLines, ...incomingLines];
 }
 
-export type ContainersWorkspacePanel = "overview" | "logs" | "metrics";
+function normalizeRemoteInvokeErrorMessage(message: string): string {
+  return message.replace(/^Error invoking remote method '[^']+':\s*/u, "").trim();
+}
+
+function normalizeErrorMessage(error: unknown, fallback: string): string {
+  return error instanceof Error
+    ? normalizeRemoteInvokeErrorMessage(error.message)
+    : fallback;
+}
+
+function isAwsSsoAuthenticationErrorMessage(message: string): boolean {
+  return /sso session associated with this profile has expired|sso token.+expired|aws sso login|브라우저 로그인이 필요합니다/iu.test(
+    message,
+  );
+}
+
+export type ContainersWorkspacePanel =
+  | "overview"
+  | "logs"
+  | "metrics"
+  | "tunnel";
 export type ContainerLogsLoadState =
   | "idle"
   | "loading"
@@ -153,8 +177,124 @@ export type ContainerLogsLoadState =
   | "malformed";
 export type ContainerMetricsLoadState = "idle" | "loading" | "ready" | "error";
 export type ContainerLogsSearchMode = "local" | "remote" | null;
+export type HostContainersTabKind = "host-containers" | "ecs-cluster";
+export type EcsDetailPanel = "overview" | "logs" | "metrics" | "tunnel";
+
+export interface EcsServiceUtilizationHistoryState {
+  cpuHistory: AwsMetricHistoryPoint[];
+  memoryHistory: AwsMetricHistoryPoint[];
+}
+
+export interface EcsTunnelTabState {
+  serviceName: string;
+  taskArn: string | null;
+  containerName: string | null;
+  targetPort: string;
+  bindPort: string;
+  autoLocalPort: boolean;
+  loading: boolean;
+  error: string | null;
+  runtime: PortForwardRuntimeRecord | null;
+}
+
+export interface ContainerTunnelTabState {
+  containerId: string;
+  containerName: string;
+  networkName: string;
+  targetPort: string;
+  bindPort: string;
+  autoLocalPort: boolean;
+  loading: boolean;
+  error: string | null;
+  runtime: PortForwardRuntimeRecord | null;
+}
+
+function arePortForwardRuntimeRecordsEqual(
+  left: PortForwardRuntimeRecord | null,
+  right: PortForwardRuntimeRecord | null,
+): boolean {
+  if (left === right) {
+    return true;
+  }
+  if (!left || !right) {
+    return false;
+  }
+  return (
+    left.ruleId === right.ruleId &&
+    left.hostId === right.hostId &&
+    left.transport === right.transport &&
+    left.bindAddress === right.bindAddress &&
+    left.bindPort === right.bindPort &&
+    left.status === right.status &&
+    left.updatedAt === right.updatedAt &&
+    left.startedAt === right.startedAt &&
+    left.mode === right.mode &&
+    left.method === right.method &&
+    left.message === right.message
+  );
+}
+
+function areEcsTunnelTabStatesEqual(
+  left: EcsTunnelTabState | null | undefined,
+  right: EcsTunnelTabState | null | undefined,
+): boolean {
+  if (left === right) {
+    return true;
+  }
+  if (!left || !right) {
+    return false;
+  }
+  return (
+    left.serviceName === right.serviceName &&
+    left.taskArn === right.taskArn &&
+    left.containerName === right.containerName &&
+    left.targetPort === right.targetPort &&
+    left.bindPort === right.bindPort &&
+    left.autoLocalPort === right.autoLocalPort &&
+    left.loading === right.loading &&
+    left.error === right.error &&
+    arePortForwardRuntimeRecordsEqual(left.runtime, right.runtime)
+  );
+}
+
+function areContainerTunnelTabStatesEqual(
+  left: ContainerTunnelTabState | null | undefined,
+  right: ContainerTunnelTabState | null | undefined,
+): boolean {
+  if (left === right) {
+    return true;
+  }
+  if (!left || !right) {
+    return false;
+  }
+  return (
+    left.containerId === right.containerId &&
+    left.containerName === right.containerName &&
+    left.networkName === right.networkName &&
+    left.targetPort === right.targetPort &&
+    left.bindPort === right.bindPort &&
+    left.autoLocalPort === right.autoLocalPort &&
+    left.loading === right.loading &&
+    left.error === right.error &&
+    arePortForwardRuntimeRecordsEqual(left.runtime, right.runtime)
+  );
+}
+
+function normalizeContainerTunnelTabStateForPersistence(
+  tunnelState: ContainerTunnelTabState | null | undefined,
+): ContainerTunnelTabState | null {
+  if (!tunnelState) {
+    return null;
+  }
+  return {
+    ...tunnelState,
+    loading: false,
+    error: null,
+  };
+}
 
 export interface HostContainersTabState {
+  kind: HostContainersTabKind;
   hostId: string;
   title: string;
   runtime: HostContainerRuntime | null;
@@ -185,6 +325,18 @@ export interface HostContainersTabState {
   metricsError?: string;
   pendingAction: "start" | "stop" | "restart" | "remove" | null;
   actionError?: string;
+  containerTunnelStatesByContainerId: Record<string, ContainerTunnelTabState>;
+  ecsSnapshot: AwsEcsClusterSnapshot | null;
+  ecsMetricsWarning?: string | null;
+  ecsMetricsLoadedAt?: string | null;
+  ecsMetricsLoading: boolean;
+  ecsUtilizationHistoryByServiceName: Record<
+    string,
+    EcsServiceUtilizationHistoryState
+  >;
+  ecsSelectedServiceName: string | null;
+  ecsActivePanel: EcsDetailPanel;
+  ecsTunnelStatesByServiceName: Record<string, EcsTunnelTabState>;
 }
 
 export interface SftpPaneState {
@@ -332,12 +484,15 @@ export type PendingInteractiveAuth =
 
 interface PendingConnectionAttempt {
   sessionId: string;
-  source: "host" | "local" | "container-shell";
+  source: "host" | "local" | "container-shell" | "ecs-shell";
   hostId: string | null;
   title: string;
   latestCols: number;
   latestRows: number;
   containerId?: string;
+  serviceName?: string;
+  taskArn?: string;
+  containerName?: string;
 }
 
 export interface SftpState {
@@ -438,10 +593,26 @@ export interface AppState {
     placement: "before" | "after",
   ) => void;
   refreshHostContainers: (hostId: string) => Promise<void>;
+  refreshEcsClusterUtilization: (hostId: string) => Promise<void>;
   selectHostContainer: (hostId: string, containerId: string | null) => Promise<void>;
   setHostContainersPanel: (
     hostId: string,
     panel: ContainersWorkspacePanel,
+  ) => void;
+  setHostContainerTunnelState: (
+    hostId: string,
+    containerId: string,
+    state: ContainerTunnelTabState | null,
+  ) => void;
+  setEcsClusterSelectedService: (
+    hostId: string,
+    serviceName: string | null,
+  ) => void;
+  setEcsClusterActivePanel: (hostId: string, panel: EcsDetailPanel) => void;
+  setEcsClusterTunnelState: (
+    hostId: string,
+    serviceName: string,
+    state: EcsTunnelTabState | null,
   ) => void;
   refreshHostContainerLogs: (
     hostId: string,
@@ -458,6 +629,12 @@ export interface AppState {
     action: "start" | "stop" | "restart" | "remove",
   ) => Promise<void>;
   openHostContainerShell: (hostId: string, containerId: string) => Promise<void>;
+  openEcsExecShell: (
+    hostId: string,
+    serviceName: string,
+    taskArn: string,
+    containerName: string,
+  ) => Promise<void>;
   splitSessionIntoWorkspace: (
     sessionId: string,
     direction: WorkspaceDropDirection,
@@ -524,7 +701,7 @@ export interface AppState {
     cols: number,
     rows: number,
   ) => void;
-  markSessionOutput: (sessionId: string) => void;
+  markSessionOutput: (sessionId: string, chunk?: Uint8Array) => void;
   handleCoreEvent: (event: CoreEvent<Record<string, unknown>>) => void;
   handleSessionShareEvent: (event: SessionShareEvent) => void;
   handleSessionShareChatEvent: (event: SessionShareChatEvent) => void;
@@ -850,6 +1027,20 @@ function toHostDraft(record: HostRecord, label: string): HostDraft {
     };
   }
 
+  if (isAwsEcsHostRecord(record)) {
+    return {
+      kind: "aws-ecs",
+      label,
+      groupName: record.groupName ?? null,
+      tags: record.tags ?? [],
+      terminalThemeId: record.terminalThemeId ?? null,
+      awsProfileName: record.awsProfileName,
+      awsRegion: record.awsRegion,
+      awsEcsClusterArn: record.awsEcsClusterArn,
+      awsEcsClusterName: record.awsEcsClusterName,
+    };
+  }
+
   return {
     kind: "ssh",
     label,
@@ -978,6 +1169,9 @@ function buildContainersEndpointId(hostId: string): string {
 }
 
 function buildContainersTabTitle(host: HostRecord): string {
+  if (isAwsEcsHostRecord(host)) {
+    return `${host.label} · ECS`;
+  }
   return `${host.label} · Containers`;
 }
 
@@ -985,6 +1179,7 @@ const DEFAULT_CONTAINER_LOGS_TAIL_WINDOW = 200;
 const CONTAINER_LOGS_TAIL_INCREMENT = 1000;
 const MAX_CONTAINER_LOGS_TAIL_WINDOW = 20000;
 const MAX_CONTAINER_METRICS_SAMPLES = 720;
+const ECS_UTILIZATION_HISTORY_WINDOW_MS = 10 * 60 * 1000;
 
 function classifyContainerLogsErrorMessage(
   message: string,
@@ -1005,6 +1200,7 @@ function trimContainerMetricsSamples(
 
 function createEmptyContainersTabState(host: HostRecord): HostContainersTabState {
   return {
+    kind: isAwsEcsHostRecord(host) ? "ecs-cluster" : "host-containers",
     hostId: host.id,
     title: buildContainersTabTitle(host),
     runtime: null,
@@ -1035,7 +1231,120 @@ function createEmptyContainersTabState(host: HostRecord): HostContainersTabState
     metricsError: undefined,
     pendingAction: null,
     actionError: undefined,
+    containerTunnelStatesByContainerId: {},
+    ecsSnapshot: null,
+    ecsMetricsWarning: null,
+    ecsMetricsLoadedAt: null,
+    ecsMetricsLoading: false,
+    ecsUtilizationHistoryByServiceName: {},
+    ecsSelectedServiceName: null,
+    ecsActivePanel: "overview",
+    ecsTunnelStatesByServiceName: {},
   };
+}
+
+function clearEcsServiceUtilization(snapshot: AwsEcsClusterSnapshot): AwsEcsClusterSnapshot {
+  return {
+    ...snapshot,
+    services: snapshot.services.map((service) => ({
+      ...service,
+      cpuUtilizationPercent: null,
+      memoryUtilizationPercent: null,
+    })),
+  };
+}
+
+function mergeEcsClusterUtilizationSnapshot(
+  snapshot: AwsEcsClusterSnapshot,
+  utilization: AwsEcsClusterUtilizationSnapshot,
+): AwsEcsClusterSnapshot {
+  const metricsByServiceName = new Map(
+    utilization.services.map((service) => [service.serviceName, service]),
+  );
+  return {
+    ...snapshot,
+    services: snapshot.services.map((service) => {
+      const nextMetrics = metricsByServiceName.get(service.serviceName);
+      return {
+        ...service,
+        cpuUtilizationPercent: nextMetrics?.cpuUtilizationPercent ?? null,
+        memoryUtilizationPercent: nextMetrics?.memoryUtilizationPercent ?? null,
+      };
+    }),
+  };
+}
+
+function createEcsUtilizationHistoryState(
+  utilization: AwsEcsClusterUtilizationSnapshot,
+): Record<string, EcsServiceUtilizationHistoryState> {
+  return Object.fromEntries(
+    utilization.services.map((service) => [
+      service.serviceName,
+      {
+        cpuHistory: service.cpuHistory,
+        memoryHistory: service.memoryHistory,
+      } satisfies EcsServiceUtilizationHistoryState,
+    ]),
+  );
+}
+
+function mergeMetricHistory(
+  existing: AwsMetricHistoryPoint[],
+  incoming: AwsMetricHistoryPoint[],
+  loadedAt: string,
+): AwsMetricHistoryPoint[] {
+  const loadedAtMs = Date.parse(loadedAt);
+  const cutoff = Number.isNaN(loadedAtMs)
+    ? Number.NEGATIVE_INFINITY
+    : loadedAtMs - ECS_UTILIZATION_HISTORY_WINDOW_MS;
+  const merged = new Map<string, AwsMetricHistoryPoint>();
+
+  for (const point of existing) {
+    const timestampMs = Date.parse(point.timestamp);
+    if (Number.isNaN(timestampMs) || timestampMs < cutoff) {
+      continue;
+    }
+    merged.set(point.timestamp, point);
+  }
+
+  for (const point of incoming) {
+    const timestampMs = Date.parse(point.timestamp);
+    if (Number.isNaN(timestampMs) || timestampMs < cutoff) {
+      continue;
+    }
+    merged.set(point.timestamp, point);
+  }
+
+  return [...merged.values()].sort(
+    (left, right) =>
+      Date.parse(left.timestamp) - Date.parse(right.timestamp),
+  );
+}
+
+function mergeEcsUtilizationHistoryState(
+  existing: Record<string, EcsServiceUtilizationHistoryState>,
+  utilization: AwsEcsClusterUtilizationSnapshot,
+): Record<string, EcsServiceUtilizationHistoryState> {
+  const nextEntries = utilization.services.map((service) => {
+    const current = existing[service.serviceName];
+    return [
+      service.serviceName,
+      {
+        cpuHistory: mergeMetricHistory(
+          current?.cpuHistory ?? [],
+          service.cpuHistory,
+          utilization.loadedAt,
+        ),
+        memoryHistory: mergeMetricHistory(
+          current?.memoryHistory ?? [],
+          service.memoryHistory,
+          utilization.loadedAt,
+        ),
+      } satisfies EcsServiceUtilizationHistoryState,
+    ] as const;
+  });
+
+  return Object.fromEntries(nextEntries);
 }
 
 function upsertContainersTab(
@@ -1401,6 +1710,7 @@ function createPendingSessionTab(input: {
   source: "host" | "local";
   hostId: string | null;
   title: string;
+  shellKind?: string;
   progress: TerminalConnectionProgress;
 }): TerminalTab {
   return {
@@ -1409,6 +1719,7 @@ function createPendingSessionTab(input: {
     source: input.source,
     hostId: input.hostId,
     title: input.title,
+    shellKind: input.shellKind,
     status: "pending",
     connectionProgress: input.progress,
     sessionShare: createInactiveSessionShareState(),
@@ -1438,6 +1749,48 @@ function findPendingConnectionAttemptByHost(
     ) ?? null
   );
 }
+
+function isPendingEcsShellAttempt(
+  attempt: PendingConnectionAttempt | null,
+): attempt is PendingConnectionAttempt & {
+  source: "ecs-shell";
+  hostId: string;
+  serviceName: string;
+  taskArn: string;
+  containerName: string;
+} {
+  return Boolean(
+    attempt &&
+      attempt.source === "ecs-shell" &&
+      typeof attempt.hostId === "string" &&
+      typeof attempt.serviceName === "string" &&
+      typeof attempt.taskArn === "string" &&
+      typeof attempt.containerName === "string",
+  );
+}
+
+function normalizeEcsExecShellPermissionMessage(
+  message?: string | null,
+): string | null {
+  const normalized = message?.trim();
+  if (!normalized) {
+    return null;
+  }
+  if (normalized.includes("cloudshell:ApproveCommand")) {
+    return "AWS Console에서 CloudShell로 ECS Exec를 테스트하려면 `cloudshell:ApproveCommand` 권한이 필요합니다. Dolgate 앱 자체에는 필수 권한이 아닙니다.";
+  }
+  if (normalized.includes("ecs:ExecuteCommand")) {
+    return `ECS Exec 권한이 없습니다. 사용자/역할에 \`ecs:ExecuteCommand\`와 보통 \`ecs:DescribeTasks\` 권한이 필요합니다. 원본 오류: ${normalized}`;
+  }
+  if (normalized.includes("ecs:DescribeTasks")) {
+    return `ECS task 조회 권한이 없습니다. 사용자/역할에 \`ecs:DescribeTasks\` 권한이 필요합니다. 원본 오류: ${normalized}`;
+  }
+  if (normalized.includes("ssm:StartSession")) {
+    return `Session Manager 권한이 없습니다. 사용자/역할에 \`ssm:StartSession\` 권한이 필요한지 확인해 주세요. 원본 오류: ${normalized}`;
+  }
+  return normalized;
+}
+
 
 function replaceSessionIdInLayout(
   node: WorkspaceLayoutNode,
@@ -2265,6 +2618,66 @@ function toTrustInput(probe: HostKeyProbeResult) {
 export function createAppStore(api: DesktopApi) {
   const openedInteractiveBrowserChallenges = new Set<string>();
 
+  const loginAwsSsoProfile = async (
+    profileName: string,
+    reportProgress: (
+      message: string,
+      options?: {
+        blockingKind?: TerminalConnectionProgress["blockingKind"];
+        stage?: TerminalConnectionProgress["stage"];
+      },
+    ) => void,
+  ) => {
+    reportProgress(`브라우저에서 ${profileName} AWS 로그인을 진행하는 중입니다.`, {
+      blockingKind: "browser",
+      stage: "browser-login",
+    });
+    try {
+      await api.aws.login(profileName);
+    } catch (error) {
+      throw new Error(
+        error instanceof Error
+          ? normalizeRemoteInvokeErrorMessage(error.message)
+          : "AWS SSO 로그인을 시작하지 못했습니다.",
+      );
+    }
+
+    reportProgress(`${profileName} 프로필 로그인 결과를 확인하는 중입니다.`);
+    const refreshedStatus = await api.aws.getProfileStatus(profileName);
+    if (!refreshedStatus.isAuthenticated) {
+      throw new Error(
+        refreshedStatus.errorMessage ||
+          "AWS SSO 로그인 후에도 인증이 확인되지 않았습니다.",
+      );
+    }
+    return refreshedStatus;
+  };
+
+  const ensureAwsSsoProfileAuthenticationIfNeeded = async (
+    profileName: string,
+    reportProgress?: (
+      message: string,
+      options?: {
+        blockingKind?: TerminalConnectionProgress["blockingKind"];
+        stage?: TerminalConnectionProgress["stage"];
+      },
+    ) => void,
+  ) => {
+    reportProgress?.(`${profileName} 프로필 인증 상태를 확인하는 중입니다.`);
+    const status = await api.aws.getProfileStatus(profileName);
+    if (status.isAuthenticated || !status.isSsoProfile) {
+      return status;
+    }
+
+    return loginAwsSsoProfile(
+      profileName,
+      reportProgress ??
+        (() => {
+          return;
+        }),
+    );
+  };
+
   const ensureAwsHostAuthentication = async (
     host: Extract<HostRecord, { kind: "aws-ec2" }>,
     reportProgress: (
@@ -2275,8 +2688,10 @@ export function createAppStore(api: DesktopApi) {
       },
     ) => void,
   ) => {
-    reportProgress(`${host.awsProfileName} 프로필 인증 상태를 확인하는 중입니다.`);
-    const status = await api.aws.getProfileStatus(host.awsProfileName);
+    const status = await ensureAwsSsoProfileAuthenticationIfNeeded(
+      host.awsProfileName,
+      reportProgress,
+    );
     if (status.isAuthenticated) {
       return;
     }
@@ -2285,29 +2700,6 @@ export function createAppStore(api: DesktopApi) {
       throw new Error(
         status.errorMessage ||
           `${host.awsProfileName} 프로필에 AWS CLI 자격 증명이 필요합니다.`,
-      );
-    }
-
-    reportProgress(`브라우저에서 ${host.awsProfileName} AWS 로그인을 진행하는 중입니다.`, {
-      blockingKind: "browser",
-      stage: "browser-login",
-    });
-    try {
-      await api.aws.login(host.awsProfileName);
-    } catch (error) {
-      throw new Error(
-        error instanceof Error
-          ? error.message
-          : "AWS SSO 로그인을 시작하지 못했습니다.",
-      );
-    }
-
-    reportProgress(`${host.awsProfileName} 프로필 로그인 결과를 확인하는 중입니다.`);
-    const refreshedStatus = await api.aws.getProfileStatus(host.awsProfileName);
-    if (!refreshedStatus.isAuthenticated) {
-      throw new Error(
-        refreshedStatus.errorMessage ||
-          "AWS SSO 로그인 후에도 인증이 확인되지 않았습니다.",
       );
     }
   };
@@ -2591,6 +2983,93 @@ export function createAppStore(api: DesktopApi) {
           latestCols: cols,
           latestRows: rows,
           containerId,
+        },
+      ];
+
+      if (existingTab) {
+        return {
+          tabs: state.tabs.map((item) =>
+            item.sessionId === sessionId ? tab : item,
+          ),
+          pendingConnectionAttempts: nextAttempts,
+          ...activateSessionContextInState(state, sessionId),
+        };
+      }
+
+      return {
+        tabs: [
+          ...state.tabs.filter((item) => item.sessionId !== sessionId),
+          tab,
+        ],
+        tabStrip: [
+          ...state.tabStrip.filter(
+            (item) =>
+              !(item.kind === "session" && item.sessionId === sessionId),
+          ),
+          { kind: "session", sessionId },
+        ],
+        activeWorkspaceTab: asSessionTabId(sessionId),
+        homeSection: "hosts",
+        hostDrawer: { mode: "closed" },
+        pendingConnectionAttempts: nextAttempts,
+      };
+    });
+
+    return sessionId;
+  };
+
+  const createPendingSessionTabForEcsShell = (
+    set: (
+      next:
+        | AppState
+        | Partial<AppState>
+        | ((state: AppState) => AppState | Partial<AppState>),
+    ) => void,
+    get: () => AppState,
+    input: {
+      hostId: string;
+      serviceName: string;
+      taskArn: string;
+      containerName: string;
+      cols: number;
+      rows: number;
+      progress: TerminalConnectionProgress;
+      existingSessionId?: string;
+    },
+  ): string => {
+    const sessionId = input.existingSessionId ?? createPendingSessionId();
+    const existingTab = input.existingSessionId
+      ? (get().tabs.find((tab) => tab.sessionId === input.existingSessionId) ??
+        null)
+      : null;
+    const host = get().hosts.find((item) => item.id === input.hostId);
+    const title =
+      existingTab?.title ??
+      `${host?.label ?? "ECS"} · ${input.serviceName} · ${input.containerName}`;
+    const tab = createPendingSessionTab({
+      sessionId,
+      source: "local",
+      hostId: null,
+      title,
+      shellKind: "aws-ecs-exec",
+      progress: input.progress,
+    });
+
+    set((state) => {
+      const nextAttempts = [
+        ...state.pendingConnectionAttempts.filter(
+          (attempt) => attempt.sessionId !== sessionId,
+        ),
+        {
+          sessionId,
+          source: "ecs-shell" as const,
+          hostId: input.hostId,
+          title,
+          latestCols: input.cols,
+          latestRows: input.rows,
+          serviceName: input.serviceName,
+          taskArn: input.taskArn,
+          containerName: input.containerName,
         },
       ];
 
@@ -3025,6 +3504,216 @@ export function createAppStore(api: DesktopApi) {
               error instanceof Error
                 ? error.message
                 : "컨테이너 상세 정보를 불러오지 못했습니다.",
+          }),
+        };
+      });
+    }
+  };
+
+  const loadEcsClusterUtilization = async (
+    set: (
+      next:
+        | AppState
+        | Partial<AppState>
+        | ((state: AppState) => AppState | Partial<AppState>),
+    ) => void,
+    get: () => AppState,
+    hostId: string,
+  ) => {
+    const host = get().hosts.find((item) => item.id === hostId);
+    if (!host || !isAwsEcsHostRecord(host)) {
+      return;
+    }
+
+    set((state) => {
+      const currentTab =
+        findContainersTab(state, hostId) ?? createEmptyContainersTabState(host);
+      return {
+        containerTabs: upsertContainersTab(state.containerTabs, {
+          ...currentTab,
+          kind: "ecs-cluster",
+          title: buildContainersTabTitle(host),
+          ecsMetricsLoading: true,
+        }),
+      };
+    });
+
+    try {
+      const utilization = await api.aws.loadEcsClusterUtilization(hostId);
+      set((state) => {
+        const currentTab =
+          findContainersTab(state, hostId) ?? createEmptyContainersTabState(host);
+        const nextSnapshot = currentTab.ecsSnapshot
+          ? mergeEcsClusterUtilizationSnapshot(currentTab.ecsSnapshot, utilization)
+          : currentTab.ecsSnapshot;
+        return {
+          containerTabs: upsertContainersTab(state.containerTabs, {
+            ...currentTab,
+            kind: "ecs-cluster",
+            title: buildContainersTabTitle(host),
+            ecsSnapshot: nextSnapshot,
+            ecsMetricsWarning: utilization.warning ?? null,
+            ecsMetricsLoadedAt: utilization.loadedAt,
+            ecsMetricsLoading: false,
+            ecsUtilizationHistoryByServiceName: mergeEcsUtilizationHistoryState(
+              currentTab.ecsUtilizationHistoryByServiceName,
+              utilization,
+            ),
+          }),
+        };
+      });
+    } catch (error) {
+      set((state) => {
+        const currentTab =
+          findContainersTab(state, hostId) ?? createEmptyContainersTabState(host);
+        const nextSnapshot = currentTab.ecsSnapshot
+          ? clearEcsServiceUtilization(currentTab.ecsSnapshot)
+          : currentTab.ecsSnapshot;
+        return {
+          containerTabs: upsertContainersTab(state.containerTabs, {
+            ...currentTab,
+            kind: "ecs-cluster",
+            title: buildContainersTabTitle(host),
+            ecsSnapshot: nextSnapshot,
+            ecsMetricsWarning: normalizeErrorMessage(
+              error,
+              "현재 사용량 지표를 읽지 못해 일부 서비스는 사용률이 표시되지 않을 수 있습니다.",
+            ),
+            ecsMetricsLoading: false,
+            ecsUtilizationHistoryByServiceName: {},
+          }),
+        };
+      });
+    }
+  };
+
+  const loadEcsClusterSnapshot = async (
+    set: (
+      next:
+        | AppState
+        | Partial<AppState>
+        | ((state: AppState) => AppState | Partial<AppState>),
+    ) => void,
+    get: () => AppState,
+    hostId: string,
+  ) => {
+    const host = get().hosts.find((item) => item.id === hostId);
+    if (!host || !isAwsEcsHostRecord(host)) {
+      return;
+    }
+
+    set((state) => {
+      const currentTab =
+        findContainersTab(state, hostId) ?? createEmptyContainersTabState(host);
+      return {
+        activeWorkspaceTab: "containers",
+        activeContainerHostId: hostId,
+        homeSection: "hosts",
+        hostDrawer: { mode: "closed" },
+        containerTabs: upsertContainersTab(state.containerTabs, {
+          ...currentTab,
+          kind: "ecs-cluster",
+          title: buildContainersTabTitle(host),
+          isLoading: true,
+          errorMessage: undefined,
+        }),
+      };
+    });
+
+    const reportAuthProgress = (
+      _message: string,
+      _options?: {
+        blockingKind?: TerminalConnectionProgress["blockingKind"];
+        stage?: TerminalConnectionProgress["stage"];
+      },
+    ) => {
+      set((state) => {
+        const currentTab =
+          findContainersTab(state, hostId) ?? createEmptyContainersTabState(host);
+        return {
+          containerTabs: upsertContainersTab(state.containerTabs, {
+            ...currentTab,
+            kind: "ecs-cluster",
+            title: buildContainersTabTitle(host),
+            isLoading: true,
+            errorMessage: undefined,
+          }),
+        };
+      });
+    };
+
+    try {
+      const profileStatus = await ensureAwsSsoProfileAuthenticationIfNeeded(
+        host.awsProfileName,
+        reportAuthProgress,
+      );
+      let snapshot: AwsEcsClusterSnapshot;
+      try {
+        snapshot = await api.aws.loadEcsClusterSnapshot(hostId);
+      } catch (error) {
+        const message = normalizeErrorMessage(
+          error,
+          "ECS 클러스터 정보를 불러오지 못했습니다.",
+        );
+        if (
+          profileStatus.isSsoProfile &&
+          isAwsSsoAuthenticationErrorMessage(message)
+        ) {
+          await loginAwsSsoProfile(host.awsProfileName, reportAuthProgress);
+          snapshot = await api.aws.loadEcsClusterSnapshot(hostId);
+        } else {
+          throw new Error(message);
+        }
+      }
+      set((state) => {
+        const currentTab =
+          findContainersTab(state, hostId) ?? createEmptyContainersTabState(host);
+        return {
+          activeWorkspaceTab: "containers",
+          activeContainerHostId: hostId,
+          homeSection: "hosts",
+          hostDrawer: { mode: "closed" },
+          containerTabs: upsertContainersTab(state.containerTabs, {
+            ...currentTab,
+            kind: "ecs-cluster",
+            title: buildContainersTabTitle(host),
+            isLoading: true,
+            errorMessage: undefined,
+            ecsSnapshot: snapshot,
+            ecsMetricsWarning: null,
+            ecsMetricsLoadedAt: null,
+            ecsUtilizationHistoryByServiceName: {},
+          }),
+        };
+      });
+      await loadEcsClusterUtilization(set, get, hostId);
+      set((state) => {
+        const currentTab =
+          findContainersTab(state, hostId) ?? createEmptyContainersTabState(host);
+        return {
+          containerTabs: upsertContainersTab(state.containerTabs, {
+            ...currentTab,
+            kind: "ecs-cluster",
+            title: buildContainersTabTitle(host),
+            isLoading: false,
+          }),
+        };
+      });
+    } catch (error) {
+      set((state) => {
+        const currentTab =
+          findContainersTab(state, hostId) ?? createEmptyContainersTabState(host);
+        return {
+          containerTabs: upsertContainersTab(state.containerTabs, {
+            ...currentTab,
+            kind: "ecs-cluster",
+            title: buildContainersTabTitle(host),
+            isLoading: false,
+            errorMessage: normalizeErrorMessage(
+              error,
+              "ECS 클러스터 정보를 불러오지 못했습니다.",
+            ),
+            ecsMetricsLoading: false,
           }),
         };
       });
@@ -3584,6 +4273,101 @@ export function createAppStore(api: DesktopApi) {
           ? error.message
           : "컨테이너 셸을 열지 못했습니다.";
       markSessionError(set, sessionId, message);
+    }
+  };
+
+  const startPendingEcsExecShellConnect = async (
+    set: (
+      next:
+        | AppState
+        | Partial<AppState>
+        | ((state: AppState) => AppState | Partial<AppState>),
+    ) => void,
+    get: () => AppState,
+    sessionId: string,
+  ) => {
+    const attempt = findPendingConnectionAttempt(get(), sessionId);
+    if (!isPendingEcsShellAttempt(attempt)) {
+      return;
+    }
+    const host = get().hosts.find((item) => item.id === attempt.hostId);
+    if (!host || !isAwsEcsHostRecord(host)) {
+      return;
+    }
+
+    updateSessionProgress(
+      set,
+      sessionId,
+      createConnectionProgress(
+        "retrying-session",
+        `${host.label} ECS 셸을 여는 중입니다.`,
+      ),
+    );
+
+    try {
+      const connection = await api.aws.openEcsExecShell({
+        hostId: attempt.hostId,
+        serviceName: attempt.serviceName,
+        taskArn: attempt.taskArn,
+        containerName: attempt.containerName,
+        cols: findPendingConnectionAttempt(get(), sessionId)?.latestCols ?? 120,
+        rows: findPendingConnectionAttempt(get(), sessionId)?.latestRows ?? 32,
+        command: "/bin/sh",
+      });
+      const latestAttempt = findPendingConnectionAttempt(get(), sessionId);
+      if (!isPendingEcsShellAttempt(latestAttempt)) {
+        await api.ssh.disconnect(connection.sessionId).catch(() => undefined);
+        return;
+      }
+
+      set((currentState) => ({
+        ...replaceSessionReferencesInState(
+          currentState,
+          sessionId,
+          connection.sessionId,
+          (tab) => ({
+            ...tab,
+            title: `${host.label} · ${latestAttempt.serviceName} · ${latestAttempt.containerName}`,
+            shellKind: "aws-ecs-exec",
+            status: "connecting",
+            errorMessage: undefined,
+            connectionProgress: createConnectionProgress(
+              "connecting",
+              `${host.label} ECS 셸에 연결하는 중입니다.`,
+            ),
+            hasReceivedOutput: false,
+            lastEventAt: new Date().toISOString(),
+          }),
+        ),
+        pendingConnectionAttempts: currentState.pendingConnectionAttempts.map(
+          (attemptItem) =>
+            attemptItem.sessionId === sessionId
+              ? {
+                  ...attemptItem,
+                  sessionId: connection.sessionId,
+                }
+              : attemptItem,
+        ),
+      }));
+    } catch (error) {
+      const message =
+        normalizeEcsExecShellPermissionMessage(
+          error instanceof Error ? error.message : "ECS 셸을 열지 못했습니다.",
+        ) ?? "ECS 셸을 열지 못했습니다.";
+      set((state) => ({
+        tabs: state.tabs.map((tab) =>
+          tab.sessionId === sessionId
+            ? {
+                ...tab,
+                shellKind: "aws-ecs-exec",
+                status: "error",
+                errorMessage: message,
+                connectionProgress: null,
+                lastEventAt: new Date().toISOString(),
+              }
+            : tab,
+        ),
+      }));
     }
   };
 
@@ -4331,41 +5115,10 @@ export function createAppStore(api: DesktopApi) {
           return;
         }
 
-        const next = await api.hosts.update(
-          hostId,
-          isAwsEc2HostRecord(current)
-            ? {
-                ...toHostDraft(current, current.label),
-                groupName: groupPath,
-              }
-            : isWarpgateSshHostRecord(current)
-              ? {
-                  kind: "warpgate-ssh",
-                  label: current.label,
-                  groupName: groupPath,
-                  tags: current.tags ?? [],
-                  terminalThemeId: current.terminalThemeId ?? null,
-                  warpgateBaseUrl: current.warpgateBaseUrl,
-                  warpgateSshHost: current.warpgateSshHost,
-                  warpgateSshPort: current.warpgateSshPort,
-                  warpgateTargetId: current.warpgateTargetId,
-                  warpgateTargetName: current.warpgateTargetName,
-                  warpgateUsername: current.warpgateUsername,
-                }
-              : {
-                  kind: "ssh",
-                  label: current.label,
-                  hostname: current.hostname,
-                  port: current.port,
-                  username: current.username,
-                  authType: current.authType,
-                  privateKeyPath: current.privateKeyPath ?? null,
-                  secretRef: current.secretRef ?? null,
-                  groupName: groupPath,
-                  tags: current.tags ?? [],
-                  terminalThemeId: current.terminalThemeId ?? null,
-                },
-        );
+        const next = await api.hosts.update(hostId, {
+          ...toHostDraft(current, current.label),
+          groupName: groupPath,
+        });
 
         set((state) => ({
           hosts: sortHosts([
@@ -4397,6 +5150,10 @@ export function createAppStore(api: DesktopApi) {
       connectHost: async (hostId, cols, rows, secrets) => {
         const host = get().hosts.find((item) => item.id === hostId);
         if (!host) {
+          return;
+        }
+        if (isAwsEcsHostRecord(host)) {
+          await get().openHostContainersTab(hostId);
           return;
         }
         if (
@@ -4434,6 +5191,55 @@ export function createAppStore(api: DesktopApi) {
         }
 
         const currentAttempt = findPendingConnectionAttempt(get(), sessionId);
+        if (isPendingEcsShellAttempt(currentAttempt)) {
+          const pendingSessionId = createPendingSessionId();
+          const latestCols = currentAttempt.latestCols ?? 120;
+          const latestRows = currentAttempt.latestRows ?? 32;
+          const host = get().hosts.find(
+            (item) => item.id === currentAttempt.hostId,
+          );
+          if (!host || !isAwsEcsHostRecord(host)) {
+            return;
+          }
+
+          set((state) => ({
+            ...replaceSessionReferencesInState(
+              state,
+              sessionId,
+              pendingSessionId,
+              (tab) =>
+                createPendingSessionTab({
+                  sessionId: pendingSessionId,
+                  source: "local",
+                  hostId: null,
+                  title: tab.title,
+                  progress: createConnectionProgress(
+                    "retrying-session",
+                    `${host.label} ECS 셸을 다시 여는 중입니다.`,
+                  ),
+                }),
+            ),
+            pendingConnectionAttempts: [
+              ...state.pendingConnectionAttempts.filter(
+                (attempt) => attempt.sessionId !== sessionId,
+              ),
+              {
+                ...currentAttempt,
+                sessionId: pendingSessionId,
+                latestCols,
+                latestRows,
+              },
+            ],
+          }));
+
+          if (!isPendingSessionId(sessionId)) {
+            await api.ssh.disconnect(sessionId).catch(() => undefined);
+          }
+
+          await startPendingEcsExecShellConnect(set, get, pendingSessionId);
+          return;
+        }
+
         if (
           currentAttempt?.source === "container-shell" &&
           currentAttempt.hostId &&
@@ -4785,6 +5591,27 @@ export function createAppStore(api: DesktopApi) {
         if (!host) {
           return;
         }
+        if (isAwsEcsHostRecord(host)) {
+          set((state) => {
+            const existingTab = findContainersTab(state, hostId);
+            const nextTab = {
+              ...(existingTab ?? createEmptyContainersTabState(host)),
+              kind: "ecs-cluster" as const,
+              title: buildContainersTabTitle(host),
+              isLoading: true,
+              errorMessage: undefined,
+            };
+            return {
+              activeWorkspaceTab: "containers",
+              activeContainerHostId: hostId,
+              homeSection: "hosts",
+              hostDrawer: { mode: "closed" },
+              containerTabs: upsertContainersTab(state.containerTabs, nextTab),
+            };
+          });
+          await loadEcsClusterSnapshot(set, get, hostId);
+          return;
+        }
         if (
           promptForMissingUsername(set, get, {
             hostId,
@@ -4844,7 +5671,28 @@ export function createAppStore(api: DesktopApi) {
         await loadContainersList(set, get, hostId);
       },
       closeHostContainersTab: async (hostId) => {
-        await api.containers.release(hostId).catch(() => undefined);
+        const host = get().hosts.find((item) => item.id === hostId);
+        const currentTab = findContainersTab(get(), hostId);
+        if (host && isAwsEcsHostRecord(host)) {
+          const runtimeIds = new Set(
+            Object.values(currentTab?.ecsTunnelStatesByServiceName ?? {})
+              .map((state) => state.runtime?.ruleId)
+              .filter((runtimeId): runtimeId is string => Boolean(runtimeId)),
+          );
+          for (const runtimeId of runtimeIds) {
+            await api.aws.stopEcsServiceTunnel(runtimeId).catch(() => undefined);
+          }
+        } else {
+          const runtimeIds = new Set(
+            Object.values(currentTab?.containerTunnelStatesByContainerId ?? {})
+              .map((state) => state.runtime?.ruleId)
+              .filter((runtimeId): runtimeId is string => Boolean(runtimeId)),
+          );
+          for (const runtimeId of runtimeIds) {
+            await api.containers.stopTunnel(runtimeId).catch(() => undefined);
+          }
+          await api.containers.release(hostId).catch(() => undefined);
+        }
         set((state) => {
           const nextActiveContainerHostId =
             state.activeContainerHostId === hostId
@@ -4900,7 +5748,19 @@ export function createAppStore(api: DesktopApi) {
         });
       },
       refreshHostContainers: async (hostId) => {
+        const host = get().hosts.find((item) => item.id === hostId);
+        if (host && isAwsEcsHostRecord(host)) {
+          await loadEcsClusterSnapshot(set, get, hostId);
+          return;
+        }
         await loadContainersList(set, get, hostId);
+      },
+      refreshEcsClusterUtilization: async (hostId) => {
+        const host = get().hosts.find((item) => item.id === hostId);
+        if (!host || !isAwsEcsHostRecord(host)) {
+          return;
+        }
+        await loadEcsClusterUtilization(set, get, hostId);
       },
       selectHostContainer: async (hostId, containerId) => {
         const host = get().hosts.find((item) => item.id === hostId);
@@ -4955,6 +5815,86 @@ export function createAppStore(api: DesktopApi) {
             containerTabs: upsertContainersTab(state.containerTabs, {
               ...currentTab,
               activePanel: panel,
+            }),
+          };
+        }),
+      setHostContainerTunnelState: (hostId, containerId, tunnelState) =>
+        set((state) => {
+          const currentTab = findContainersTab(state, hostId);
+          if (!currentTab || currentTab.kind !== "host-containers") {
+            return state;
+          }
+          const nextTunnelState =
+            normalizeContainerTunnelTabStateForPersistence(tunnelState);
+          const currentTunnelState =
+            currentTab.containerTunnelStatesByContainerId[containerId] ?? null;
+          if (
+            areContainerTunnelTabStatesEqual(currentTunnelState, nextTunnelState)
+          ) {
+            return state;
+          }
+          const nextTunnelStates = {
+            ...currentTab.containerTunnelStatesByContainerId,
+          };
+          if (nextTunnelState) {
+            nextTunnelStates[containerId] = nextTunnelState;
+          } else {
+            delete nextTunnelStates[containerId];
+          }
+          return {
+            containerTabs: upsertContainersTab(state.containerTabs, {
+              ...currentTab,
+              containerTunnelStatesByContainerId: nextTunnelStates,
+            }),
+          };
+        }),
+      setEcsClusterSelectedService: (hostId, serviceName) =>
+        set((state) => {
+          const currentTab = findContainersTab(state, hostId);
+          if (!currentTab || currentTab.kind !== "ecs-cluster") {
+            return state;
+          }
+          return {
+            containerTabs: upsertContainersTab(state.containerTabs, {
+              ...currentTab,
+              ecsSelectedServiceName: serviceName,
+            }),
+          };
+        }),
+      setEcsClusterActivePanel: (hostId, panel) =>
+        set((state) => {
+          const currentTab = findContainersTab(state, hostId);
+          if (!currentTab || currentTab.kind !== "ecs-cluster") {
+            return state;
+          }
+          return {
+            containerTabs: upsertContainersTab(state.containerTabs, {
+              ...currentTab,
+              ecsActivePanel: panel,
+            }),
+          };
+        }),
+      setEcsClusterTunnelState: (hostId, serviceName, tunnelState) =>
+        set((state) => {
+          const currentTab = findContainersTab(state, hostId);
+          if (!currentTab || currentTab.kind !== "ecs-cluster") {
+            return state;
+          }
+          const currentTunnelState =
+            currentTab.ecsTunnelStatesByServiceName[serviceName] ?? null;
+          if (areEcsTunnelTabStatesEqual(currentTunnelState, tunnelState)) {
+            return state;
+          }
+          const nextTunnelStates = { ...currentTab.ecsTunnelStatesByServiceName };
+          if (tunnelState) {
+            nextTunnelStates[serviceName] = tunnelState;
+          } else {
+            delete nextTunnelStates[serviceName];
+          }
+          return {
+            containerTabs: upsertContainersTab(state.containerTabs, {
+              ...currentTab,
+              ecsTunnelStatesByServiceName: nextTunnelStates,
             }),
           };
         }),
@@ -5098,6 +6038,30 @@ export function createAppStore(api: DesktopApi) {
           hostId,
           containerId,
         );
+      },
+      openEcsExecShell: async (
+        hostId,
+        serviceName,
+        taskArn,
+        containerName,
+      ) => {
+        const host = get().hosts.find((item) => item.id === hostId);
+        if (!host || !isAwsEcsHostRecord(host)) {
+          return;
+        }
+        const sessionId = createPendingSessionTabForEcsShell(set, get, {
+          hostId,
+          serviceName,
+          taskArn,
+          containerName,
+          cols: 120,
+          rows: 32,
+          progress: createConnectionProgress(
+            "retrying-session",
+            `${host.label} ECS 셸을 준비하는 중입니다.`,
+          ),
+        });
+        await startPendingEcsExecShellConnect(set, get, sessionId);
       },
       splitSessionIntoWorkspace: (sessionId, direction, targetSessionId) => {
         const state = get();
@@ -5594,7 +6558,7 @@ export function createAppStore(api: DesktopApi) {
           ),
         }));
       },
-      markSessionOutput: (sessionId) => {
+      markSessionOutput: (sessionId, _chunk) => {
         set((state) => {
           const tabIndex = state.tabs.findIndex(
             (tab) => tab.sessionId === sessionId,
@@ -6351,6 +7315,12 @@ export function createAppStore(api: DesktopApi) {
           return;
         }
 
+        const ecsShellAttempt = findPendingConnectionAttempt(get(), sessionId);
+        const resolvedShellKind =
+          typeof event.payload.shellKind === "string"
+            ? event.payload.shellKind.trim() || undefined
+            : undefined;
+
         set((state) => {
           if (event.type === "closed") {
             return removeSessionFromState(state, sessionId);
@@ -6373,7 +7343,9 @@ export function createAppStore(api: DesktopApi) {
               : null;
           const nextProgress =
             event.type === "connected"
-              ? currentTab.source === "local"
+              ? (resolvedShellKind ?? currentTab.shellKind) === "aws-ecs-exec"
+                ? null
+                : currentTab.source === "local"
                 ? resolveLocalWaitingShellProgress()
                 : currentHost
                   ? resolveWaitingShellProgress(currentHost)
@@ -6402,6 +7374,10 @@ export function createAppStore(api: DesktopApi) {
             return {
               ...tab,
               status: nextStatus,
+              shellKind:
+                tab.sessionId === sessionId
+                  ? resolvedShellKind ?? tab.shellKind
+                  : tab.shellKind,
               errorMessage: event.type === "error" ? errorMessage : undefined,
               connectionProgress: nextProgress,
               hasReceivedOutput:
@@ -6540,12 +7516,89 @@ export function createAppStore(api: DesktopApi) {
         }
       },
       handlePortForwardEvent: (event) => {
-        set((state) => ({
-          portForwardRuntimes: upsertForwardRuntime(
-            state.portForwardRuntimes,
-            event.runtime,
-          ),
-        }));
+        set((state) => {
+          const nextState: Partial<AppState> = {
+            portForwardRuntimes: upsertForwardRuntime(
+              state.portForwardRuntimes,
+              event.runtime,
+            ),
+          };
+
+          if (event.runtime.ruleId.startsWith("ecs-service-tunnel:")) {
+            nextState.containerTabs = state.containerTabs.map((tab) => {
+              if (tab.kind !== "ecs-cluster") {
+                return tab;
+              }
+              let changed = false;
+              const nextTunnelStates = Object.fromEntries(
+                Object.entries(tab.ecsTunnelStatesByServiceName).map(
+                  ([serviceName, tunnelState]) => {
+                    if (tunnelState.runtime?.ruleId !== event.runtime.ruleId) {
+                      return [serviceName, tunnelState];
+                    }
+                    changed = true;
+                    return [
+                      serviceName,
+                      {
+                        ...tunnelState,
+                        loading: false,
+                        error:
+                          event.runtime.status === "error"
+                            ? event.runtime.message ?? tunnelState.error
+                            : tunnelState.error,
+                        runtime:
+                          event.runtime.status === "stopped"
+                            ? null
+                            : event.runtime,
+                      },
+                    ];
+                  },
+                ),
+              ) as Record<string, EcsTunnelTabState>;
+              return changed
+                ? { ...tab, ecsTunnelStatesByServiceName: nextTunnelStates }
+                : tab;
+            });
+          } else if (event.runtime.ruleId.startsWith("container-service-tunnel:")) {
+            nextState.containerTabs = (nextState.containerTabs ??
+              state.containerTabs
+            ).map((tab) => {
+              if (tab.kind !== "host-containers") {
+                return tab;
+              }
+              let changed = false;
+              const nextTunnelStates = Object.fromEntries(
+                Object.entries(tab.containerTunnelStatesByContainerId).map(
+                  ([containerId, tunnelState]) => {
+                    if (tunnelState.runtime?.ruleId !== event.runtime.ruleId) {
+                      return [containerId, tunnelState];
+                    }
+                    changed = true;
+                    return [
+                      containerId,
+                      {
+                        ...tunnelState,
+                        loading: false,
+                        error: null,
+                        runtime:
+                          event.runtime.status === "stopped"
+                            ? null
+                            : event.runtime.status === "error"
+                            ? null
+                            : event.runtime,
+                      },
+                    ];
+                  },
+                ),
+              ) as Record<string, ContainerTunnelTabState>;
+              return changed
+                ? { ...tab, containerTunnelStatesByContainerId: nextTunnelStates }
+                : tab;
+            });
+          }
+
+          return nextState;
+        });
         void api.logs.list().then((activityLogs) => {
           set({ activityLogs: sortLogs(activityLogs) });
         });
