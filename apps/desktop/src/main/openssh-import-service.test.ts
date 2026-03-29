@@ -12,7 +12,7 @@ async function createTempDir(prefix: string): Promise<string> {
 }
 
 describe('OpenSSH import service', () => {
-  it('probeDefault reads ~/.ssh/config, follows Include, and skips existing duplicates before showing hosts', async () => {
+  it('probeDefault reads ~/.ssh/config, follows Include, and keeps existing duplicates visible in the preview', async () => {
     const tempDir = await createTempDir('dolssh-openssh-default-');
     try {
       await mkdir(path.join(tempDir, '.ssh', 'conf.d'), { recursive: true });
@@ -59,6 +59,7 @@ describe('OpenSSH import service', () => {
       ]);
       expect(result.hosts.map((host) => host.alias).sort()).toEqual([
         'app',
+        'existing',
         'nested',
       ]);
       expect(
@@ -70,7 +71,7 @@ describe('OpenSSH import service', () => {
         authType: 'privateKey',
         identityFilePath: path.join(tempDir, '.ssh', 'keys', 'app.pem'),
       });
-      expect(result.skippedExistingHostCount).toBe(1);
+      expect(result.skippedExistingHostCount).toBe(0);
       expect(result.skippedDuplicateHostCount).toBe(0);
 
       expect(service.getSnapshot(result.snapshotId)).not.toBeNull();
@@ -96,7 +97,7 @@ describe('OpenSSH import service', () => {
     }
   });
 
-  it('adds manual files into an existing snapshot and skips repeated duplicate hosts', async () => {
+  it('adds manual files into an existing snapshot without reporting duplicate skips', async () => {
     const tempDir = await createTempDir('dolssh-openssh-append-');
     try {
       await mkdir(path.join(tempDir, '.ssh'), { recursive: true });
@@ -147,7 +148,7 @@ describe('OpenSSH import service', () => {
         'db',
         'web',
       ]);
-      expect(appendedAgain.skippedDuplicateHostCount).toBe(1);
+      expect(appendedAgain.skippedDuplicateHostCount).toBe(0);
     } finally {
       await rm(tempDir, { recursive: true, force: true });
     }

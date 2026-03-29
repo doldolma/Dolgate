@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -32,6 +33,11 @@ type runtimeRunner interface {
 	Kill() error
 	Close() error
 	ErrorMessage() string
+}
+
+type bindPortAwareRunner interface {
+	ActualBindPort() int
+	SetBindPortResolvedCallback(func(int))
 }
 
 type runnerFactory func(protocol.SSMPortForwardStartPayload) (runtimeRunner, error)
@@ -101,6 +107,31 @@ func (s *Service) Start(ruleID, requestID string, payload protocol.SSMPortForwar
 	s.runtimes[ruleID] = handle
 	s.mu.Unlock()
 
+	bindPort := payload.BindPort
+	if awareRunner, ok := runner.(bindPortAwareRunner); ok {
+		if actualBindPort := awareRunner.ActualBindPort(); actualBindPort > 0 {
+			bindPort = actualBindPort
+		}
+		awareRunner.SetBindPortResolvedCallback(func(actualBindPort int) {
+			if actualBindPort <= 0 || !s.hasRuntime(ruleID) {
+				return
+			}
+			s.emit(protocol.Event{
+				Type:       protocol.EventPortForwardStarted,
+				RequestID:  requestID,
+				EndpointID: ruleID,
+				Payload: protocol.PortForwardStartedPayload{
+					Transport:   "aws-ssm",
+					Status:      "running",
+					Mode:        "local",
+					Method:      "ssm-remote-host",
+					BindAddress: resolvedBindAddress(payload.BindAddress),
+					BindPort:    actualBindPort,
+				},
+			})
+		})
+	}
+
 	s.emit(protocol.Event{
 		Type:       protocol.EventPortForwardStarted,
 		RequestID:  requestID,
@@ -111,7 +142,7 @@ func (s *Service) Start(ruleID, requestID string, payload protocol.SSMPortForwar
 			Mode:        "local",
 			Method:      "ssm-remote-host",
 			BindAddress: resolvedBindAddress(payload.BindAddress),
-			BindPort:    payload.BindPort,
+			BindPort:    bindPort,
 		},
 	})
 
@@ -208,6 +239,9 @@ type commandRunner struct {
 	waitCh      chan waitResult
 	messageMu   sync.RWMutex
 	lastMessage string
+	bindPortMu  sync.RWMutex
+	actualPort  int
+	onBindPort  func(int)
 }
 
 type waitResult struct {
@@ -293,6 +327,22 @@ func (r *commandRunner) ErrorMessage() string {
 	return r.lastMessage
 }
 
+func (r *commandRunner) ActualBindPort() int {
+	r.bindPortMu.RLock()
+	defer r.bindPortMu.RUnlock()
+	return r.actualPort
+}
+
+func (r *commandRunner) SetBindPortResolvedCallback(callback func(int)) {
+	r.bindPortMu.Lock()
+	r.onBindPort = callback
+	actualPort := r.actualPort
+	r.bindPortMu.Unlock()
+	if callback != nil && actualPort > 0 {
+		callback(actualPort)
+	}
+}
+
 func (r *commandRunner) captureOutput(reader io.Reader) {
 	scanner := bufio.NewScanner(reader)
 	for scanner.Scan() {
@@ -303,7 +353,31 @@ func (r *commandRunner) captureOutput(reader io.Reader) {
 		r.messageMu.Lock()
 		r.lastMessage = line
 		r.messageMu.Unlock()
+		if bindPort := parseStartedBindPort(line); bindPort > 0 {
+			r.bindPortMu.Lock()
+			previousPort := r.actualPort
+			r.actualPort = bindPort
+			callback := r.onBindPort
+			r.bindPortMu.Unlock()
+			if callback != nil && previousPort != bindPort {
+				callback(bindPort)
+			}
+		}
 	}
+}
+
+var startedBindPortPattern = regexp.MustCompile(`(?i)\bport\s+(\d+)\s+opened\b`)
+
+func parseStartedBindPort(line string) int {
+	match := startedBindPortPattern.FindStringSubmatch(line)
+	if len(match) < 2 {
+		return 0
+	}
+	port, err := strconv.Atoi(match[1])
+	if err != nil || port <= 0 {
+		return 0
+	}
+	return port
 }
 
 func buildStartArgs(payload protocol.SSMPortForwardStartPayload) ([]string, error) {
@@ -330,7 +404,7 @@ func buildStartArgs(payload protocol.SSMPortForwardStartPayload) ([]string, erro
 		"ssm",
 		"start-session",
 		"--target",
-		payload.InstanceID,
+		payload.TargetID,
 		"--document-name",
 		documentName,
 		"--parameters",

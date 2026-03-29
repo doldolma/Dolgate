@@ -183,7 +183,30 @@ func startPlatformLocalRunner(payload protocol.LocalConnectPayload, runtime loca
 	}, nil
 }
 
-func resolveLocalRuntime() (localCommandRuntime, error) {
+func resolveLocalRuntime(payload protocol.LocalConnectPayload) (localCommandRuntime, error) {
+	if executablePath := strings.TrimSpace(payload.Executable); executablePath != "" {
+		wrapperPath, err := resolveLocalConPTYWrapperPath()
+		if err != nil {
+			return localCommandRuntime{}, err
+		}
+		shellKind := strings.TrimSpace(payload.ShellKind)
+		if shellKind == "" {
+			shellKind = "shell"
+		}
+		workingDirectory := strings.TrimSpace(payload.WorkingDirectory)
+		if workingDirectory == "" {
+			workingDirectory = resolveUserHomeDirectory()
+		}
+		return localCommandRuntime{
+			shellKind:        shellKind,
+			executablePath:   executablePath,
+			args:             append([]string(nil), payload.Args...),
+			env:              buildRuntimeEnv(os.Environ(), payload.Env),
+			wrapperPath:      wrapperPath,
+			workingDirectory: workingDirectory,
+		}, nil
+	}
+
 	shellRuntime, err := resolveWindowsShellRuntime()
 	if err != nil {
 		return localCommandRuntime{}, err

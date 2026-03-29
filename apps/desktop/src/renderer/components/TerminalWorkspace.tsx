@@ -100,6 +100,25 @@ function debugSessionShareRenderer(message: string, payload?: Record<string, unk
   console.debug(`[session-share] ${message}`);
 }
 
+function hasE2ETerminalHook(): boolean {
+  return Boolean((window as Window & { __dolsshE2E?: unknown }).__dolsshE2E);
+}
+
+function publishTerminalE2EState(sessionId: string, state: Record<string, unknown> | null): void {
+  if (!hasE2ETerminalHook()) {
+    return;
+  }
+
+  window.dispatchEvent(
+    new CustomEvent('dolssh:e2e-terminal-state', {
+      detail: {
+        sessionId,
+        state
+      }
+    })
+  );
+}
+
 export function shouldOpenTerminalSearch(input: {
   active: boolean;
   visible: boolean;
@@ -171,13 +190,17 @@ function isPendingConnectionSessionId(sessionId: string): boolean {
   return sessionId.startsWith('pending:');
 }
 
-function shouldShowSessionOverlay(tab: TerminalTab | undefined, terminalInitError: string | null): boolean {
+export function shouldShowSessionOverlay(tab: TerminalTab | undefined, terminalInitError: string | null): boolean {
   if (!tab || terminalInitError) {
     return false;
   }
 
   if (tab.status === 'pending' || tab.status === 'connecting' || tab.status === 'error') {
     return true;
+  }
+
+  if (tab.status === 'connected' && tab.shellKind === 'aws-ecs-exec') {
+    return false;
   }
 
   return tab.status === 'connected' && !tab.hasReceivedOutput;
@@ -444,6 +467,7 @@ function TerminalSessionView({
   const liveUpdateSessionShareSnapshotRef = useRef(onUpdateSessionShareSnapshot);
   const liveOnSendInputRef = useRef(onSendInput);
   const liveOnSendBinaryInputRef = useRef(onSendBinaryInput);
+  const liveHasOutputRef = useRef(currentTab?.hasReceivedOutput ?? false);
   const shareSnapshotDirtyRef = useRef(false);
   const pendingShareSnapshotKindRef = useRef<SessionShareSnapshotInput['kind'] | null>(null);
   const shareSnapshotInFlightRef = useRef(false);
@@ -487,6 +511,10 @@ function TerminalSessionView({
   useEffect(() => {
     liveOnSendBinaryInputRef.current = onSendBinaryInput;
   }, [onSendBinaryInput]);
+
+  useEffect(() => {
+    liveHasOutputRef.current = currentTab?.hasReceivedOutput ?? false;
+  }, [currentTab?.hasReceivedOutput]);
 
   useEffect(() => {
     setSharePopoverOpen(false);
@@ -573,6 +601,25 @@ function TerminalSessionView({
       return;
     }
     terminal.refresh(0, terminal.rows - 1);
+  }
+
+  function publishCurrentTerminalE2EState() {
+    if (!hasE2ETerminalHook()) {
+      return;
+    }
+
+    const runtime = runtimeRef.current;
+    if (!runtime) {
+      publishTerminalE2EState(liveSessionIdRef.current, null);
+      return;
+    }
+
+    publishTerminalE2EState(liveSessionIdRef.current, {
+      snapshot: runtime.captureSnapshot(),
+      cols: runtime.terminal.cols,
+      rows: runtime.terminal.rows,
+      hasOutput: liveHasOutputRef.current
+    });
   }
 
   function captureShareSnapshot():
@@ -735,6 +782,7 @@ function TerminalSessionView({
       }),
       afterResize: () => {
         refreshViewport();
+        publishCurrentTerminalE2EState();
         if (liveSessionShareStatusRef.current !== 'active') {
           return;
         }
@@ -776,6 +824,7 @@ function TerminalSessionView({
     resizeObserver.observe(containerRef.current);
 
     resizeSchedulerRef.current.request();
+    publishCurrentTerminalE2EState();
 
     return () => {
       resizeObserver.disconnect();
@@ -785,6 +834,7 @@ function TerminalSessionView({
       resizeSchedulerRef.current?.reset();
       resizeSchedulerRef.current = null;
       runtime.dispose();
+      publishTerminalE2EState(liveSessionIdRef.current, null);
       runtimeRef.current = null;
       terminalRef.current = null;
     };
@@ -797,6 +847,7 @@ function TerminalSessionView({
     runtimeRef.current.setAppearance(appearance);
     resizeSchedulerRef.current?.request();
     refreshViewport();
+    publishCurrentTerminalE2EState();
   }, [appearance]);
 
   useEffect(() => {
@@ -827,12 +878,15 @@ function TerminalSessionView({
             byteLength: chunk.byteLength,
             shareStatus: liveSessionShareStatusRef.current
           });
-          markSessionOutput(sessionId);
+          markSessionOutput(sessionId, chunk);
           if (liveSessionShareStatusRef.current === 'active') {
             shareSnapshotDirtyRef.current = true;
           }
         }
         runtimeRef.current?.write(chunk);
+        runtimeRef.current?.scheduleAfterWriteDrain(() => {
+          publishCurrentTerminalE2EState();
+        });
       }),
     [markSessionOutput, sessionId]
   );

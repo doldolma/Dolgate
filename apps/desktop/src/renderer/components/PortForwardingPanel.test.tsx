@@ -56,6 +56,20 @@ const hosts: HostRecord[] = [
     terminalThemeId: null,
     createdAt: '2025-01-01T00:00:00.000Z',
     updatedAt: '2025-01-01T00:00:00.000Z'
+  },
+  {
+    id: 'ecs-host-1',
+    kind: 'aws-ecs',
+    label: 'gridwiz-ecs',
+    awsProfileName: 'default',
+    awsRegion: 'ap-northeast-2',
+    awsEcsClusterArn: 'arn:aws:ecs:ap-northeast-2:123456789012:cluster/gridwiz-ecs',
+    awsEcsClusterName: 'gridwiz-ecs',
+    groupName: null,
+    tags: [],
+    terminalThemeId: null,
+    createdAt: '2025-01-01T00:00:00.000Z',
+    updatedAt: '2025-01-01T00:00:00.000Z'
   }
 ];
 
@@ -111,8 +125,29 @@ const containersApi = {
     };
   }),
   release: vi.fn().mockResolvedValue(undefined),
+  startTunnel: vi.fn().mockResolvedValue({
+    ruleId: 'container-service-tunnel:1',
+    hostId: 'ssh-host-1',
+    transport: 'container',
+    bindAddress: '127.0.0.1',
+    bindPort: 43110,
+    status: 'running',
+    updatedAt: '2025-01-01T00:00:10.000Z',
+    startedAt: '2025-01-01T00:00:05.000Z',
+    mode: 'local',
+    method: 'ssh-native',
+  }),
+  stopTunnel: vi.fn().mockResolvedValue(undefined),
   list: vi.fn().mockResolvedValue({ runtime: 'docker', containers: [], unsupportedReason: null }),
   inspect: vi.fn().mockResolvedValue(null),
+};
+
+const awsApi = {
+  listEcsTaskTunnelServices: vi.fn().mockResolvedValue([]),
+  loadEcsTaskTunnelService: vi.fn().mockResolvedValue({
+    serviceName: '',
+    containers: [],
+  }),
 };
 
 beforeEach(() => {
@@ -121,6 +156,7 @@ beforeEach(() => {
     writable: true,
     value: {
       containers: containersApi,
+      aws: awsApi,
       knownHosts: {
         probeHost: vi.fn().mockResolvedValue({ status: 'trusted' }),
         trust: vi.fn().mockResolvedValue(undefined),
@@ -148,6 +184,11 @@ function openContainerDialog() {
   fireEvent.click(screen.getByRole('button', { name: 'New Container Tunnel' }));
 }
 
+function openEcsTaskDialog() {
+  fireEvent.click(screen.getByRole('tab', { name: 'ECS Task' }));
+  fireEvent.click(screen.getByRole('button', { name: 'New ECS Task Tunnel' }));
+}
+
 async function chooseContainerHost(optionName: RegExp | string) {
   fireEvent.click(screen.getByRole('button', { name: 'Host' }));
   fireEvent.click(await screen.findByRole('option', { name: optionName }));
@@ -161,6 +202,8 @@ async function chooseContainerOption(optionName: RegExp | string) {
 function renderPanel(options?: {
   onSave?: (ruleId: string | null, draft: PortForwardDraft) => Promise<void>;
   runtimes?: PortForwardRuntimeRecord[];
+  rules?: PortForwardRuleRecord[];
+  containerTabs?: any[];
   discoveryInteractiveAuth?: PendingContainersInteractiveAuth | null;
   interactiveAuth?: PendingPortForwardInteractiveAuth | null;
 }) {
@@ -171,7 +214,8 @@ function renderPanel(options?: {
   const view = render(
     <PortForwardingPanel
       hosts={hosts}
-      rules={rules}
+      containerTabs={options?.containerTabs ?? []}
+      rules={options?.rules ?? rules}
       runtimes={options?.runtimes ?? runtimes}
       interactiveAuth={options?.interactiveAuth ?? null}
       discoveryInteractiveAuth={options?.discoveryInteractiveAuth ?? null}
@@ -198,12 +242,14 @@ describe('PortForwardingPanel helpers', () => {
   it('filters rules by transport tab', () => {
     expect(filterPortForwardRules(rules, 'ssh').map((rule) => rule.label)).toEqual(['SSH Rule']);
     expect(filterPortForwardRules(rules, 'aws-ssm').map((rule) => rule.label)).toEqual(['AWS Rule']);
+    expect(filterPortForwardRules(rules, 'ecs-task')).toEqual([]);
     expect(filterPortForwardRules(rules, 'container')).toEqual([]);
   });
 
   it('returns only matching hosts for each transport tab', () => {
     expect(getAvailablePortForwardHosts(hosts, 'ssh').map((host) => host.label)).toEqual(['SSH Host']);
     expect(getAvailablePortForwardHosts(hosts, 'aws-ssm').map((host) => host.label)).toEqual(['Bastion']);
+    expect(getAvailablePortForwardHosts(hosts, 'ecs-task').map((host) => host.label)).toEqual(['gridwiz-ecs']);
     expect(getAvailablePortForwardHosts(hosts, 'container').map((host) => host.label)).toEqual(['SSH Host', 'Bastion', 'Warpgate']);
   });
 
@@ -266,6 +312,320 @@ describe('PortForwardingPanel dialog', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Close port forwarding dialog' }));
 
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+
+  it('renames the AWS tab to AWS EC2 in the panel UI', () => {
+    renderPanel();
+
+    expect(screen.getByRole('tab', { name: 'AWS EC2' })).toBeInTheDocument();
+    expect(screen.queryByRole('tab', { name: 'AWS SSM' })).not.toBeInTheDocument();
+  });
+
+  it('shows ephemeral ECS service tunnels in the ECS Task tab', () => {
+    const runtime: PortForwardRuntimeRecord = {
+      ruleId: 'ecs-service-tunnel:1',
+      hostId: 'ecs-host-1',
+      transport: 'ecs-task',
+      bindAddress: '127.0.0.1',
+      bindPort: 43110,
+      status: 'running',
+      updatedAt: '2025-01-01T00:00:10.000Z',
+      startedAt: '2025-01-01T00:00:00.000Z',
+      mode: 'local',
+      method: 'ssm-remote-host',
+    };
+    const { onStop } = renderPanel({
+      rules: [
+        ...rules,
+        {
+          id: 'ecs-rule-1',
+          transport: 'ecs-task',
+          label: 'Saved ECS tunnel',
+          hostId: 'ecs-host-1',
+          bindAddress: '127.0.0.1',
+          bindPort: 0,
+          serviceName: 'saved-service',
+          containerName: 'saved-container',
+          targetPort: 8080,
+          createdAt: '2025-01-01T00:00:00.000Z',
+          updatedAt: '2025-01-01T00:00:00.000Z',
+        },
+      ],
+      runtimes: [runtime],
+      containerTabs: [
+        {
+          kind: 'ecs-cluster',
+          hostId: 'ecs-host-1',
+          title: 'gridwiz-ecs',
+          runtime: null,
+          unsupportedReason: null,
+          items: [],
+          selectedContainerId: null,
+          activePanel: 'overview',
+          isLoading: false,
+          details: null,
+          detailsLoading: false,
+          logs: null,
+          logsState: 'tail',
+          logsLoading: false,
+          logsFollowEnabled: true,
+          logsTailWindow: 200,
+          logsSearchQuery: '',
+          logsSearchMode: 'local',
+          logsSearchLoading: false,
+          logsSearchResult: null,
+          metricsSamples: [],
+          metricsState: 'live',
+          metricsLoading: false,
+          pendingAction: null,
+          containerTunnelStatesByContainerId: {},
+          ecsSnapshot: null,
+          ecsMetricsWarning: null,
+          ecsMetricsLoadedAt: null,
+          ecsMetricsLoading: false,
+          ecsUtilizationHistoryByServiceName: {},
+          ecsSelectedServiceName: 'worker',
+          ecsActivePanel: 'tunnel',
+          ecsTunnelStatesByServiceName: {
+            worker: {
+              serviceName: 'worker',
+              taskArn: 'arn:aws:ecs:ap-northeast-2:123456789012:task/prod/task-1',
+              containerName: 'api',
+              targetPort: '7001',
+              bindPort: '0',
+              autoLocalPort: true,
+              loading: false,
+              error: null,
+              runtime,
+            },
+          },
+        },
+      ],
+    });
+
+    fireEvent.click(screen.getByRole('tab', { name: 'ECS Task' }));
+
+    expect(screen.getByText('Running tunnels')).toBeInTheDocument();
+    expect(screen.getByText('Saved rules')).toBeInTheDocument();
+    expect(screen.getByText('Ephemeral')).toBeInTheDocument();
+    expect(screen.getByText('worker / api')).toBeInTheDocument();
+    expect(screen.getByText('127.0.0.1:43110')).toBeInTheDocument();
+    expect(screen.getByText('127.0.0.1:7001')).toBeInTheDocument();
+
+    fireEvent.click(screen.getAllByRole('button', { name: 'Stop' })[0]!);
+
+    expect(onStop).toHaveBeenCalledWith('ecs-service-tunnel:1');
+  });
+
+  it('shows ephemeral container tunnels in the Container tab', () => {
+    const runtime: PortForwardRuntimeRecord = {
+      ruleId: 'container-service-tunnel:1',
+      hostId: 'ssh-host-1',
+      transport: 'container',
+      bindAddress: '127.0.0.1',
+      bindPort: 43110,
+      status: 'running',
+      updatedAt: '2025-01-01T00:00:10.000Z',
+      startedAt: '2025-01-01T00:00:00.000Z',
+      mode: 'local',
+      method: 'ssh-native',
+    };
+    const { onStop } = renderPanel({
+      rules: [
+        ...rules,
+        {
+          id: 'container-rule-1',
+          transport: 'container',
+          label: 'Saved container tunnel',
+          hostId: 'ssh-host-1',
+          bindAddress: '127.0.0.1',
+          bindPort: 0,
+          containerId: 'saved-container',
+          containerName: 'saved-api',
+          containerRuntime: 'docker',
+          networkName: 'bridge',
+          targetPort: 9000,
+          createdAt: '2025-01-01T00:00:00.000Z',
+          updatedAt: '2025-01-01T00:00:00.000Z',
+        },
+      ],
+      runtimes: [runtime],
+      containerTabs: [
+        {
+          kind: 'host-containers',
+          hostId: 'ssh-host-1',
+          title: 'SSH Host',
+          runtime: 'docker',
+          unsupportedReason: null,
+          items: [],
+          selectedContainerId: 'container-1',
+          activePanel: 'tunnel',
+          isLoading: false,
+          details: null,
+          detailsLoading: false,
+          logs: null,
+          logsState: 'idle',
+          logsLoading: false,
+          logsFollowEnabled: false,
+          logsTailWindow: 200,
+          logsSearchQuery: '',
+          logsSearchMode: null,
+          logsSearchLoading: false,
+          logsSearchResult: null,
+          metricsSamples: [],
+          metricsState: 'idle',
+          metricsLoading: false,
+          pendingAction: null,
+          containerTunnelStatesByContainerId: {
+            'container-1': {
+              containerId: 'container-1',
+              containerName: 'api',
+              networkName: 'bridge',
+              targetPort: '8080',
+              bindPort: '0',
+              autoLocalPort: true,
+              loading: false,
+              error: null,
+              runtime,
+            },
+          },
+          ecsSnapshot: null,
+          ecsMetricsWarning: null,
+          ecsMetricsLoadedAt: null,
+          ecsMetricsLoading: false,
+          ecsUtilizationHistoryByServiceName: {},
+          ecsSelectedServiceName: null,
+          ecsActivePanel: 'overview',
+          ecsTunnelStatesByServiceName: {},
+        },
+      ],
+    });
+
+    fireEvent.click(screen.getByRole('tab', { name: 'Container' }));
+
+    expect(screen.getByText('Running tunnels')).toBeInTheDocument();
+    expect(screen.getByText('Saved rules')).toBeInTheDocument();
+    expect(screen.getByText('Ephemeral')).toBeInTheDocument();
+    expect(screen.getByText('bridge:8080')).toBeInTheDocument();
+    expect(screen.getByText('127.0.0.1:43110')).toBeInTheDocument();
+
+    fireEvent.click(screen.getAllByRole('button', { name: 'Stop' })[0]!);
+
+    expect(onStop).toHaveBeenCalledWith('container-service-tunnel:1');
+  });
+
+  it('allows saving an ECS task tunnel rule', async () => {
+    awsApi.listEcsTaskTunnelServices.mockResolvedValueOnce([
+      {
+        serviceName: 'api',
+        status: 'ACTIVE',
+        desiredCount: 1,
+        runningCount: 1,
+        pendingCount: 0,
+      },
+    ]);
+    awsApi.loadEcsTaskTunnelService.mockResolvedValueOnce({
+      serviceName: 'api',
+      containers: [
+        {
+          containerName: 'web',
+          ports: [{ port: 8080, protocol: 'tcp' }],
+        },
+      ],
+    });
+
+    const onSave = vi.fn().mockResolvedValue(undefined);
+    renderPanel({ onSave });
+
+    openEcsTaskDialog();
+
+    await waitFor(() => {
+      expect(awsApi.listEcsTaskTunnelServices).toHaveBeenCalledWith('ecs-host-1');
+    });
+
+    fireEvent.change(screen.getByLabelText('Label'), { target: { value: 'API tunnel' } });
+    fireEvent.change(screen.getByLabelText('Service'), { target: { value: 'api' } });
+
+    await waitFor(() => {
+      expect(awsApi.loadEcsTaskTunnelService).toHaveBeenCalledWith('ecs-host-1', 'api');
+    });
+
+    fireEvent.change(screen.getByLabelText('Container'), { target: { value: 'web' } });
+    fireEvent.click(screen.getByRole('switch', { name: 'Auto (random)' }));
+    fireEvent.change(screen.getByPlaceholderText('9000'), { target: { value: '18080' } });
+    fireEvent.click(screen.getByRole('button', { name: '저장' }));
+
+    await waitFor(() => {
+      expect(onSave).toHaveBeenCalledWith(
+        null,
+        expect.objectContaining({
+          transport: 'ecs-task',
+          label: 'API tunnel',
+          hostId: 'ecs-host-1',
+          serviceName: 'api',
+          containerName: 'web',
+          targetPort: 8080,
+          bindAddress: '127.0.0.1',
+          bindPort: 18080,
+        }),
+      );
+    });
+  });
+
+  it('saves an ECS task tunnel rule with auto local port', async () => {
+    awsApi.listEcsTaskTunnelServices.mockResolvedValueOnce([
+      {
+        serviceName: 'api',
+        status: 'ACTIVE',
+        desiredCount: 1,
+        runningCount: 1,
+        pendingCount: 0,
+      },
+    ]);
+    awsApi.loadEcsTaskTunnelService.mockResolvedValueOnce({
+      serviceName: 'api',
+      containers: [
+        {
+          containerName: 'web',
+          ports: [{ port: 8080, protocol: 'tcp' }],
+        },
+      ],
+    });
+
+    const onSave = vi.fn().mockResolvedValue(undefined);
+    renderPanel({ onSave });
+
+    openEcsTaskDialog();
+
+    await waitFor(() => {
+      expect(awsApi.listEcsTaskTunnelServices).toHaveBeenCalledWith('ecs-host-1');
+    });
+
+    fireEvent.change(screen.getByLabelText('Label'), { target: { value: 'API tunnel' } });
+    fireEvent.change(screen.getByLabelText('Service'), { target: { value: 'api' } });
+
+    await waitFor(() => {
+      expect(awsApi.loadEcsTaskTunnelService).toHaveBeenCalledWith('ecs-host-1', 'api');
+    });
+
+    fireEvent.change(screen.getByLabelText('Container'), { target: { value: 'web' } });
+    fireEvent.click(screen.getByRole('button', { name: '저장' }));
+
+    await waitFor(() => {
+      expect(onSave).toHaveBeenCalledWith(
+        null,
+        expect.objectContaining({
+          transport: 'ecs-task',
+          label: 'API tunnel',
+          hostId: 'ecs-host-1',
+          serviceName: 'api',
+          containerName: 'web',
+          targetPort: 8080,
+          bindAddress: '127.0.0.1',
+          bindPort: 0,
+        }),
+      );
+    });
   });
 
   it('closes when the backdrop is clicked while idle', async () => {

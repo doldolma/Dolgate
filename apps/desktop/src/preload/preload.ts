@@ -7,6 +7,7 @@ import type {
   DesktopLocalConnectInput,
   DesktopSftpConnectInput,
   DesktopWindowState,
+  HostContainersEphemeralTunnelInput,
   HostContainersSearchLogsInput,
   HostContainersStatsInput,
   HostContainersLogsInput,
@@ -64,6 +65,8 @@ const e2eTerminalCaptureEnabled =
   process.env.DOLSSH_E2E_CAPTURE_TERMINAL === "1";
 const e2eTerminalDecoder = new TextDecoder();
 const e2eTerminalOutputBySession = new Map<string, string>();
+const e2eTerminalStateBySession = new Map<string, Record<string, unknown>>();
+let e2eReplayState: Record<string, unknown> | null = null;
 const MAX_SESSION_BACKLOG_BYTES = 1024 * 1024;
 
 function cloneChunk(chunk: Uint8Array): Uint8Array {
@@ -93,6 +96,7 @@ ipcRenderer.on(ipcChannels.ssh.event, (_event, payload: CoreEvent) => {
   if (payload.type === "closed" && payload.sessionId) {
     sessionBacklog.delete(payload.sessionId);
     backlogBytes.delete(payload.sessionId);
+    e2eTerminalStateBySession.delete(payload.sessionId);
   }
 });
 
@@ -249,6 +253,34 @@ const api: DesktopApi = {
       ipcRenderer.invoke(ipcChannels.aws.listRegions, profileName),
     listEc2Instances: (profileName: string, region: string) =>
       ipcRenderer.invoke(ipcChannels.aws.listEc2Instances, profileName, region),
+    listEcsClusters: (profileName: string, region: string) =>
+      ipcRenderer.invoke(ipcChannels.aws.listEcsClusters, profileName, region),
+    loadEcsClusterSnapshot: (hostId: string) =>
+      ipcRenderer.invoke(ipcChannels.aws.loadEcsClusterSnapshot, hostId),
+    loadEcsClusterUtilization: (hostId: string) =>
+      ipcRenderer.invoke(ipcChannels.aws.loadEcsClusterUtilization, hostId),
+    loadEcsServiceActionContext: (hostId: string, serviceName: string) =>
+      ipcRenderer.invoke(
+        ipcChannels.aws.loadEcsServiceActionContext,
+        hostId,
+        serviceName,
+      ),
+    loadEcsServiceLogs: (input) =>
+      ipcRenderer.invoke(ipcChannels.aws.loadEcsServiceLogs, input),
+    openEcsExecShell: (input) =>
+      ipcRenderer.invoke(ipcChannels.aws.openEcsExecShell, input),
+    startEcsServiceTunnel: (input) =>
+      ipcRenderer.invoke(ipcChannels.aws.startEcsServiceTunnel, input),
+    stopEcsServiceTunnel: (runtimeId: string) =>
+      ipcRenderer.invoke(ipcChannels.aws.stopEcsServiceTunnel, runtimeId),
+    listEcsTaskTunnelServices: (hostId: string) =>
+      ipcRenderer.invoke(ipcChannels.aws.listEcsTaskTunnelServices, hostId),
+    loadEcsTaskTunnelService: (hostId: string, serviceName: string) =>
+      ipcRenderer.invoke(
+        ipcChannels.aws.loadEcsTaskTunnelService,
+        hostId,
+        serviceName,
+      ),
     inspectHostSshMetadata: (input) =>
       ipcRenderer.invoke(ipcChannels.aws.inspectHostSshMetadata, input),
     loadHostSshMetadata: (hostId: string) =>
@@ -494,6 +526,10 @@ const api: DesktopApi = {
       ipcRenderer.invoke(ipcChannels.containers.inspect, hostId, containerId),
     logs: (input: HostContainersLogsInput) =>
       ipcRenderer.invoke(ipcChannels.containers.logs, input),
+    startTunnel: (input: HostContainersEphemeralTunnelInput) =>
+      ipcRenderer.invoke(ipcChannels.containers.startTunnel, input),
+    stopTunnel: (runtimeId: string) =>
+      ipcRenderer.invoke(ipcChannels.containers.stopTunnel, runtimeId),
     start: (hostId: string, containerId: string) =>
       ipcRenderer.invoke(ipcChannels.containers.start, hostId, containerId),
     stop: (hostId: string, containerId: string) =>
@@ -559,12 +595,46 @@ const api: DesktopApi = {
 contextBridge.exposeInMainWorld("dolssh", api);
 
 if (e2eTerminalCaptureEnabled) {
+  window.addEventListener("dolssh:e2e-terminal-state", (event: Event) => {
+    const customEvent = event as CustomEvent<{
+      sessionId?: string;
+      state?: Record<string, unknown> | null;
+    } | null>;
+    const detail = customEvent.detail;
+    if (!detail || typeof detail.sessionId !== "string" || detail.sessionId.length === 0) {
+      return;
+    }
+
+    if (detail.state && typeof detail.state === "object") {
+      e2eTerminalStateBySession.set(detail.sessionId, detail.state);
+      return;
+    }
+
+    e2eTerminalStateBySession.delete(detail.sessionId);
+  });
+
+  window.addEventListener("dolssh:e2e-replay-state", (event: Event) => {
+    const customEvent = event as CustomEvent<Record<string, unknown> | null>;
+    if (customEvent.detail && typeof customEvent.detail === "object") {
+      e2eReplayState = customEvent.detail;
+      return;
+    }
+
+    e2eReplayState = null;
+  });
+
   contextBridge.exposeInMainWorld("__dolsshE2E", {
     getTerminalOutput(sessionId: string): string {
       return e2eTerminalOutputBySession.get(sessionId) ?? "";
     },
     getTerminalOutputs(): Record<string, string> {
       return Object.fromEntries(e2eTerminalOutputBySession.entries());
+    },
+    getSessionTerminalState(sessionId: string): Record<string, unknown> | null {
+      return e2eTerminalStateBySession.get(sessionId) ?? null;
+    },
+    getReplayState(): Record<string, unknown> | null {
+      return e2eReplayState;
     },
     emitSessionShareEvent(event: SessionShareEvent): void {
       for (const listener of sessionShareListeners) {

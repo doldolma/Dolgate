@@ -612,7 +612,7 @@ async function buildParsedSource(
 function mergeParsedSource(
   snapshot: XshellSnapshot,
   parsedSource: ParsedXshellSource,
-  existingDuplicateKeys: ReadonlySet<string>
+  _existingDuplicateKeys: ReadonlySet<string>
 ): void {
   snapshot.warnings.push(...parsedSource.warnings)
 
@@ -626,16 +626,6 @@ function mergeParsedSource(
   }
 
   for (const host of parsedSource.hosts) {
-    if (existingDuplicateKeys.has(host.duplicateKey)) {
-      snapshot.skippedExistingHostCount += 1
-      continue
-    }
-    if (snapshot.seenDuplicateKeys.has(host.duplicateKey)) {
-      snapshot.skippedDuplicateHostCount += 1
-      continue
-    }
-
-    snapshot.seenDuplicateKeys.add(host.duplicateKey)
     snapshot.hostsByKey.set(host.key, host)
   }
 }

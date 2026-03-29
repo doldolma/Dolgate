@@ -223,6 +223,34 @@ describe('HostRepository', () => {
       awsSshMetadataError: null
     });
   });
+
+  it('persists AWS ECS hosts on create and reload', async () => {
+    const { HostRepository } = await loadRepositories();
+    const hosts = new HostRepository();
+
+    const created = hosts.create('ecs-host-1', {
+      kind: 'aws-ecs',
+      label: 'prod cluster',
+      groupName: 'Production',
+      tags: ['ecs'],
+      terminalThemeId: null,
+      awsProfileName: 'default',
+      awsRegion: 'ap-northeast-2',
+      awsEcsClusterArn: 'arn:aws:ecs:ap-northeast-2:123456789012:cluster/prod',
+      awsEcsClusterName: 'prod',
+    });
+
+    expect(created).toMatchObject({
+      kind: 'aws-ecs',
+      awsProfileName: 'default',
+      awsRegion: 'ap-northeast-2',
+      awsEcsClusterName: 'prod',
+    });
+    expect(hosts.getById('ecs-host-1')).toMatchObject({
+      kind: 'aws-ecs',
+      awsEcsClusterArn: 'arn:aws:ecs:ap-northeast-2:123456789012:cluster/prod',
+    });
+  });
 });
 
 describe('GroupRepository.remove', () => {
@@ -551,6 +579,31 @@ describe('PortForwardRepository', () => {
       targetKind: 'remote-host',
       targetPort: 5432,
       remoteHost: 'db.internal'
+    });
+  });
+
+  it('stores ECS task port forward rules with a fixed localhost bind address', async () => {
+    const { PortForwardRepository } = await loadRepositories();
+    const forwards = new PortForwardRepository();
+
+    const record = forwards.create({
+      transport: 'ecs-task',
+      label: 'api task tunnel',
+      hostId: 'ecs-host-1',
+      bindAddress: '127.0.0.1',
+      bindPort: 18080,
+      serviceName: 'api',
+      containerName: 'web',
+      targetPort: 8080,
+    });
+
+    expect(record).toMatchObject({
+      transport: 'ecs-task',
+      bindAddress: '127.0.0.1',
+      bindPort: 18080,
+      serviceName: 'api',
+      containerName: 'web',
+      targetPort: 8080,
     });
   });
 });

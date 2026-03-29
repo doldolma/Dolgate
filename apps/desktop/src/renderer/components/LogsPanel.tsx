@@ -30,6 +30,9 @@ function getConnectionKindLabel(kind: SessionConnectionKind): string {
   if (kind === 'aws-ssm') {
     return 'AWS SSM';
   }
+  if (kind === 'aws-ecs-exec') {
+    return 'AWS ECS Exec';
+  }
   if (kind === 'warpgate') {
     return 'Warpgate';
   }
@@ -38,6 +41,9 @@ function getConnectionKindLabel(kind: SessionConnectionKind): string {
 
 function getConnectionKindTone(kind: SessionConnectionKind): 'running' | 'starting' | 'paused' {
   if (kind === 'aws-ssm') {
+    return 'starting';
+  }
+  if (kind === 'aws-ecs-exec') {
     return 'starting';
   }
   if (kind === 'warpgate') {

@@ -3,6 +3,13 @@ import type {
   AppSettings,
   AwsSsmPortForwardTargetKind,
   AwsEc2InstanceSummary,
+  AwsEcsClusterListItem,
+  AwsEcsClusterSnapshot,
+  AwsEcsTaskTunnelServiceDetails,
+  AwsEcsTaskTunnelServiceSummary,
+  AwsEcsClusterUtilizationSnapshot,
+  AwsEcsServiceActionContext,
+  AwsEcsServiceLogsSnapshot,
   AwsHostSshInspectionInput,
   AwsHostSshInspectionResult,
   AwsProfileStatus,
@@ -151,6 +158,11 @@ export interface DesktopLocalConnectInput {
   cols: number;
   rows: number;
   title?: string;
+  shellKind?: string;
+  executable?: string;
+  args?: string[];
+  env?: Record<string, string>;
+  workingDirectory?: string | null;
 }
 
 export interface DesktopSftpConnectInput {
@@ -187,6 +199,42 @@ export interface ResolvedLocalConnectPayload {
   cols: number;
   rows: number;
   title?: string;
+  shellKind?: string;
+  executable?: string;
+  args?: string[];
+  env?: Record<string, string>;
+  workingDirectory?: string | null;
+}
+
+export interface AwsEcsServiceLogsInput {
+  hostId: string;
+  serviceName: string;
+  taskArn?: string | null;
+  containerName?: string | null;
+  followCursor?: string | null;
+  startTime?: string | null;
+  endTime?: string | null;
+  limit?: number;
+}
+
+export interface AwsEcsExecShellInput {
+  hostId: string;
+  serviceName: string;
+  taskArn: string;
+  containerName: string;
+  cols: number;
+  rows: number;
+  command?: string;
+}
+
+export interface AwsEcsEphemeralTunnelStartInput {
+  hostId: string;
+  serviceName: string;
+  taskArn: string;
+  containerName: string;
+  targetPort: number;
+  bindAddress: string;
+  bindPort: number;
 }
 
 export interface KeyboardInteractiveRespondInput {
@@ -250,7 +298,8 @@ export interface ResolvedPortForwardStartPayload {
 export interface ResolvedSsmPortForwardStartPayload {
   profileName: string;
   region: string;
-  instanceId: string;
+  targetType: 'instance' | 'ecs-task';
+  targetId: string;
   bindAddress: string;
   bindPort: number;
   targetKind: AwsSsmPortForwardTargetKind;
@@ -309,6 +358,15 @@ export interface HostContainersSearchLogsInput {
   containerId: string;
   tail: number;
   query: string;
+}
+
+export interface HostContainersEphemeralTunnelInput {
+  hostId: string;
+  containerId: string;
+  networkName: string;
+  targetPort: number;
+  bindAddress: string;
+  bindPort: number;
 }
 
 export interface KnownHostProbeInput {
@@ -409,6 +467,35 @@ export interface DesktopApi {
       profileName: string,
       region: string,
     ) => Promise<AwsEc2InstanceSummary[]>;
+    listEcsClusters: (
+      profileName: string,
+      region: string,
+    ) => Promise<AwsEcsClusterListItem[]>;
+    loadEcsClusterSnapshot: (hostId: string) => Promise<AwsEcsClusterSnapshot>;
+    loadEcsClusterUtilization: (
+      hostId: string,
+    ) => Promise<AwsEcsClusterUtilizationSnapshot>;
+    loadEcsServiceActionContext: (
+      hostId: string,
+      serviceName: string,
+    ) => Promise<AwsEcsServiceActionContext>;
+    loadEcsServiceLogs: (
+      input: AwsEcsServiceLogsInput,
+    ) => Promise<AwsEcsServiceLogsSnapshot>;
+    openEcsExecShell: (
+      input: AwsEcsExecShellInput,
+    ) => Promise<{ sessionId: string }>;
+    startEcsServiceTunnel: (
+      input: AwsEcsEphemeralTunnelStartInput,
+    ) => Promise<PortForwardRuntimeRecord>;
+    stopEcsServiceTunnel: (runtimeId: string) => Promise<void>;
+    listEcsTaskTunnelServices: (
+      hostId: string,
+    ) => Promise<AwsEcsTaskTunnelServiceSummary[]>;
+    loadEcsTaskTunnelService: (
+      hostId: string,
+      serviceName: string,
+    ) => Promise<AwsEcsTaskTunnelServiceDetails>;
     inspectHostSshMetadata: (
       input: AwsHostSshInspectionInput,
     ) => Promise<AwsHostSshInspectionResult>;
@@ -566,6 +653,10 @@ export interface DesktopApi {
     logs: (
       input: HostContainersLogsInput,
     ) => Promise<HostContainerLogsSnapshot>;
+    startTunnel: (
+      input: HostContainersEphemeralTunnelInput,
+    ) => Promise<PortForwardRuntimeRecord>;
+    stopTunnel: (runtimeId: string) => Promise<void>;
     openShell: (
       hostId: string,
       containerId: string,

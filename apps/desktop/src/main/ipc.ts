@@ -16,6 +16,7 @@ import {
   buildAwsSsmKnownHostIdentity,
   getParentGroupPath,
   isAwsEc2HostRecord,
+  isAwsEcsHostRecord,
   isWarpgateSshHostRecord,
   isSshHostDraft,
   isSshHostRecord,
@@ -46,6 +47,7 @@ import type {
   KnownHostProbeInput,
   KnownHostTrustInput,
   HostContainersLogsInput,
+  HostContainersEphemeralTunnelInput,
   HostContainersSearchLogsInput,
   HostContainersStatsInput,
   PortForwardDraft,
@@ -58,7 +60,6 @@ import type {
   SftpMkdirInput,
   SftpRenameInput,
   TermiusImportSelectionInput,
-  TermiusImportWarning,
   TransferStartInput,
 } from "@shared";
 import { ipcChannels } from "../common/ipc-channels";
@@ -87,15 +88,10 @@ import {
   resolveOpenSshIdentityImport,
 } from "./openssh-import-service";
 import {
-  buildTermiusEntityKey,
   buildTermiusGroupAncestorPaths,
-  collectSelectedTermiusGroupPaths,
-  collectSelectedTermiusHosts,
-  resolveTermiusCredential,
-  resolveTermiusHostPort,
-  resolveTermiusHostUsername,
   TermiusImportService,
 } from "./termius-import-service";
+import { importTermiusSelection } from "./termius-import-executor";
 import { UpdateService } from "./update-service";
 import { WarpgateService } from "./warpgate-service";
 import {
@@ -107,6 +103,38 @@ import {
   decryptXshellPassword,
   resolveCurrentXshellPasswordSecurityContext,
 } from "./xshell-password-decryptor";
+
+function normalizeEcsExecPermissionError(error: unknown): Error {
+  const message =
+    error instanceof Error
+      ? error.message
+      : typeof error === "string"
+        ? error
+        : "ECS Exec 셸을 열지 못했습니다.";
+  const normalized = message.trim();
+
+  if (normalized.includes("cloudshell:ApproveCommand")) {
+    return new Error(
+      "AWS Console에서 CloudShell로 ECS Exec를 테스트하려면 `cloudshell:ApproveCommand` 권한이 필요합니다. Dolgate 앱 자체에는 필수 권한이 아니며, 앱에서 계속 실패하면 `ecs:ExecuteCommand`와 `ecs:DescribeTasks` 권한도 함께 확인해 주세요.",
+    );
+  }
+  if (normalized.includes("ecs:ExecuteCommand")) {
+    return new Error(
+      `ECS Exec 권한이 없습니다. 사용자/역할에 \`ecs:ExecuteCommand\`와 보통 \`ecs:DescribeTasks\` 권한이 필요합니다. 원본 오류: ${normalized}`,
+    );
+  }
+  if (normalized.includes("ecs:DescribeTasks")) {
+    return new Error(
+      `ECS task 조회 권한이 없습니다. 사용자/역할에 \`ecs:DescribeTasks\` 권한이 필요합니다. 원본 오류: ${normalized}`,
+    );
+  }
+  if (normalized.includes("ssm:StartSession")) {
+    return new Error(
+      `Session Manager 권한이 없습니다. 사용자/역할에 \`ssm:StartSession\` 권한이 필요한지 확인해 주세요. 원본 오류: ${normalized}`,
+    );
+  }
+  return new Error(normalized);
+}
 
 async function persistSecret(
   secretStore: SecretStore,
@@ -541,6 +569,9 @@ async function buildHostKeyProbeResult(
   if (!host) {
     throw new Error("Host not found");
   }
+  if (isAwsEcsHostRecord(host)) {
+    throw new Error("ECS 호스트는 SSH 호스트 키 확인을 지원하지 않습니다.");
+  }
 
   if (isAwsEc2HostRecord(host)) {
     const endpointId = input.endpointId?.trim() || "";
@@ -742,9 +773,26 @@ function assertAwsEc2Host(
   }
 }
 
+function assertAwsEcsHost(
+  host: ReturnType<HostRepository["getById"]>,
+): asserts host is Extract<
+  NonNullable<ReturnType<HostRepository["getById"]>>,
+  { kind: "aws-ecs" }
+> {
+  if (!host) {
+    throw new Error("Host not found");
+  }
+  if (!isAwsEcsHostRecord(host)) {
+    throw new Error("이 기능은 AWS ECS host에서만 사용할 수 있습니다.");
+  }
+}
+
 function describeHostLabel(host: HostDraft | HostRecord): string {
   if (host.kind === "aws-ec2") {
     return host.label || host.awsInstanceName || host.awsInstanceId;
+  }
+  if (host.kind === "aws-ecs") {
+    return host.label || host.awsEcsClusterName || host.awsEcsClusterArn;
   }
   if (host.kind === "warpgate-ssh") {
     return host.label || `${host.warpgateUsername}:${host.warpgateTargetName}`;
@@ -763,6 +811,9 @@ function describeHostTarget(
   }
   if (host.kind === "aws-ec2") {
     return host.awsInstanceId;
+  }
+  if (host.kind === "aws-ecs") {
+    return host.awsEcsClusterArn;
   }
   return host.warpgateTargetId;
 }
@@ -1277,6 +1328,145 @@ export function registerIpcHandlers(
     };
   }
 
+  async function startContainerTunnelRuntime(input: {
+    ruleId: string;
+    host: Extract<HostRecord, { kind: "ssh" | "warpgate-ssh" | "aws-ec2" }>;
+    containerId: string;
+    networkName: string;
+    targetPort: number;
+    bindAddress: string;
+    bindPort: number;
+  }) {
+    const { ruleId, host, containerId, networkName, targetPort, bindAddress, bindPort } =
+      input;
+    const endpointId = buildContainerPortForwardEndpointId(host.id, ruleId);
+    const publishRuntime = (status: "starting" | "error", message?: string) =>
+      coreManager.setPortForwardRuntime({
+        ruleId,
+        hostId: host.id,
+        transport: "container",
+        mode: "local",
+        bindAddress,
+        bindPort,
+        status,
+        updatedAt: new Date().toISOString(),
+        message,
+        startedAt:
+          status === "starting"
+            ? coreManager
+                .listPortForwardRuntimes()
+                .find((runtime) => runtime.ruleId === ruleId)?.startedAt
+            : undefined,
+      });
+
+    const cleanupTemporaryEndpoint = async () => {
+      await coreManager.containersDisconnect(endpointId).catch(() => undefined);
+      await stopAwsContainersTunnelForEndpoint(endpointId);
+    };
+
+    try {
+      publishRuntime("starting", "Checking container runtime");
+      const runtimeInfo = await ensureContainersEndpoint(host, endpointId);
+      if (!runtimeInfo.runtime) {
+        throw new Error(
+          runtimeInfo.unsupportedReason ||
+            "docker/podman 런타임을 확인하지 못했습니다.",
+        );
+      }
+
+      publishRuntime("starting", "Inspecting container");
+      const details = await coreManager.containersInspect(
+        runtimeInfo.endpointId,
+        containerId,
+      );
+      const normalizedStatus = details.status.trim().toLowerCase();
+      if (normalizedStatus !== "running") {
+        throw new Error(
+          `${details.name} 컨테이너가 실행 중이 아닙니다. 현재 상태: ${details.status}`,
+        );
+      }
+
+      const target = resolveContainerTunnelTarget(
+        details,
+        networkName,
+        targetPort,
+      );
+      const targetHost = target.host;
+      const resolvedTargetPort = target.port;
+
+      if (host.kind === "aws-ec2") {
+        moveAwsContainersTunnelRuntime(endpointId, ruleId);
+        publishRuntime("starting", "Starting container tunnel");
+        return coreManager.startPortForward({
+          ruleId,
+          hostId: host.id,
+          host: "",
+          port: 0,
+          username: "",
+          authType: "password",
+          trustedHostKeyBase64: "",
+          bindAddress,
+          bindPort,
+          mode: "local",
+          targetHost,
+          targetPort: resolvedTargetPort,
+          transport: "container",
+          sourceEndpointId: endpointId,
+        });
+      }
+
+      if (host.kind === "warpgate-ssh") {
+        publishRuntime("starting", "Starting container tunnel");
+        return coreManager.startPortForward({
+          ruleId,
+          hostId: host.id,
+          host: host.warpgateSshHost,
+          port: host.warpgateSshPort,
+          username: `${host.warpgateUsername}:${host.warpgateTargetName}`,
+          authType: "keyboardInteractive",
+          trustedHostKeyBase64: "",
+          mode: "local",
+          bindAddress,
+          bindPort,
+          targetHost,
+          targetPort: resolvedTargetPort,
+          transport: "container",
+          sourceEndpointId: endpointId,
+        });
+      }
+
+      publishRuntime("starting", "Starting container tunnel");
+      const username = requireConfiguredSshUsername(host);
+      return coreManager.startPortForward({
+        ruleId,
+        hostId: host.id,
+        host: host.hostname,
+        port: host.port,
+        username,
+        authType: host.authType,
+        trustedHostKeyBase64: "",
+        mode: "local",
+        bindAddress,
+        bindPort,
+        targetHost,
+        targetPort: resolvedTargetPort,
+        transport: "container",
+        sourceEndpointId: endpointId,
+      });
+    } catch (error) {
+      await stopAwsContainersTunnelForEndpoint(ruleId);
+      publishRuntime(
+        "error",
+        error instanceof Error
+          ? error.message
+          : "Container tunnel을 시작하지 못했습니다.",
+      );
+      throw error;
+    } finally {
+      await cleanupTemporaryEndpoint();
+    }
+  }
+
   coreManager.setTerminalEventHandler(async (event) => {
     sessionShareService.handleTerminalEvent(event);
     sessionReplayService.handleTerminalEvent(event);
@@ -1631,6 +1821,229 @@ export function registerIpcHandlers(
   );
 
   ipcMain.handle(
+    ipcChannels.aws.listEcsClusters,
+    async (_event, profileName: string, region: string) => {
+      return awsService.listEcsClusters(profileName, region);
+    },
+  );
+
+  ipcMain.handle(
+    ipcChannels.aws.loadEcsClusterSnapshot,
+    async (_event, hostId: string) => {
+      const host = hosts.getById(hostId);
+      if (!host || !isAwsEcsHostRecord(host)) {
+        throw new Error("이 기능은 ECS host에서만 사용할 수 있습니다.");
+      }
+      return awsService.describeEcsClusterSnapshot(
+        host.awsProfileName,
+        host.awsRegion,
+        host.awsEcsClusterArn,
+      );
+    },
+  );
+
+  ipcMain.handle(
+    ipcChannels.aws.loadEcsClusterUtilization,
+    async (_event, hostId: string) => {
+      const host = hosts.getById(hostId);
+      if (!host || !isAwsEcsHostRecord(host)) {
+        throw new Error("이 기능은 ECS host에서만 사용할 수 있습니다.");
+      }
+      return awsService.describeEcsClusterUtilization(
+        host.awsProfileName,
+        host.awsRegion,
+        host.awsEcsClusterArn,
+      );
+    },
+  );
+
+  ipcMain.handle(
+    ipcChannels.aws.loadEcsServiceActionContext,
+    async (_event, hostId: string, serviceName: string) => {
+      const host = hosts.getById(hostId);
+      assertAwsEcsHost(host);
+      return awsService.describeEcsServiceActionContext(
+        host.awsProfileName,
+        host.awsRegion,
+        host.awsEcsClusterArn,
+        serviceName,
+      );
+    },
+  );
+
+  ipcMain.handle(
+    ipcChannels.aws.loadEcsServiceLogs,
+    async (_event, input: {
+      hostId: string;
+      serviceName: string;
+      taskArn?: string | null;
+      containerName?: string | null;
+      followCursor?: string | null;
+      startTime?: string | null;
+      endTime?: string | null;
+      limit?: number;
+    }) => {
+      const host = hosts.getById(input.hostId);
+      assertAwsEcsHost(host);
+      return awsService.loadEcsServiceLogs({
+        profileName: host.awsProfileName,
+        region: host.awsRegion,
+        clusterArn: host.awsEcsClusterArn,
+        serviceName: input.serviceName,
+        taskArn: input.taskArn ?? null,
+        containerName: input.containerName ?? null,
+        followCursor: input.followCursor ?? null,
+        startTime: input.startTime ?? null,
+        endTime: input.endTime ?? null,
+        limit: input.limit,
+      });
+    },
+  );
+
+  ipcMain.handle(
+    ipcChannels.aws.openEcsExecShell,
+    async (_event, input: {
+      hostId: string;
+      serviceName: string;
+      taskArn: string;
+      containerName: string;
+      cols: number;
+      rows: number;
+      command?: string;
+    }) => {
+      try {
+        const host = hosts.getById(input.hostId);
+        assertAwsEcsHost(host);
+        await awsService.ensureAwsCliAvailable();
+        await awsService.ensureSessionManagerPluginAvailable();
+        const actionContext = await awsService.describeEcsServiceActionContext(
+          host.awsProfileName,
+          host.awsRegion,
+          host.awsEcsClusterArn,
+          input.serviceName,
+        );
+        const task = actionContext.runningTasks.find(
+          (item) => item.taskArn === input.taskArn,
+        );
+        if (!task) {
+          throw new Error("선택한 실행 중 task를 찾지 못했습니다.");
+        }
+        if (!task.enableExecuteCommand) {
+          throw new Error(
+            "이 task는 ECS Exec가 활성화되어 있지 않아 셸에 접속할 수 없습니다.",
+          );
+        }
+        const container = task.containers.find(
+          (item) => item.containerName === input.containerName,
+        );
+        if (!container) {
+          throw new Error("선택한 컨테이너를 실행 중인 task에서 찾지 못했습니다.");
+        }
+        return coreManager.connectLocalSession({
+          cols: input.cols,
+          rows: input.rows,
+          title: `${host.label} · ${input.serviceName} · ${input.containerName}`,
+          shellKind: "aws-ecs-exec",
+          executable: "aws",
+          args: [
+            "ecs",
+            "execute-command",
+            "--profile",
+            host.awsProfileName,
+            "--region",
+            host.awsRegion,
+            "--cluster",
+            host.awsEcsClusterArn,
+            "--task",
+            input.taskArn,
+            "--container",
+            input.containerName,
+            "--interactive",
+            "--command",
+            "/bin/sh",
+          ],
+        });
+      } catch (error) {
+        throw normalizeEcsExecPermissionError(error);
+      }
+    },
+  );
+
+  ipcMain.handle(
+    ipcChannels.aws.startEcsServiceTunnel,
+    async (_event, input: {
+      hostId: string;
+      serviceName: string;
+      taskArn: string;
+      containerName: string;
+      targetPort: number;
+      bindAddress: string;
+      bindPort: number;
+    }) => {
+      const host = hosts.getById(input.hostId);
+      assertAwsEcsHost(host);
+      await awsService.ensureAwsCliAvailable();
+      await awsService.ensureSessionManagerPluginAvailable();
+      const targetId = await awsService.resolveEcsTaskTunnelTargetForTask({
+        profileName: host.awsProfileName,
+        region: host.awsRegion,
+        clusterArn: host.awsEcsClusterArn,
+        taskArn: input.taskArn,
+        containerName: input.containerName,
+      });
+      const runtimeId = `ecs-service-tunnel:${randomUUID()}`;
+      return coreManager.startSsmPortForward({
+        ruleId: runtimeId,
+        hostId: host.id,
+        transport: "ecs-task",
+        profileName: host.awsProfileName,
+        region: host.awsRegion,
+        targetType: "ecs-task",
+        targetId,
+        bindAddress: input.bindAddress,
+        bindPort: input.bindPort,
+        targetKind: "remote-host",
+        targetPort: input.targetPort,
+        remoteHost: "127.0.0.1",
+      });
+    },
+  );
+
+  ipcMain.handle(
+    ipcChannels.aws.stopEcsServiceTunnel,
+    async (_event, runtimeId: string) => {
+      await coreManager.stopPortForward(runtimeId);
+    },
+  );
+
+  ipcMain.handle(
+    ipcChannels.aws.listEcsTaskTunnelServices,
+    async (_event, hostId: string) => {
+      const host = hosts.getById(hostId);
+      assertAwsEcsHost(host);
+      return awsService.listEcsTaskTunnelServices(
+        host.awsProfileName,
+        host.awsRegion,
+        host.awsEcsClusterArn,
+      );
+    },
+  );
+
+  ipcMain.handle(
+    ipcChannels.aws.loadEcsTaskTunnelService,
+    async (_event, hostId: string, serviceName: string) => {
+      const host = hosts.getById(hostId);
+      assertAwsEcsHost(host);
+      return awsService.describeEcsTaskTunnelService(
+        host.awsProfileName,
+        host.awsRegion,
+        host.awsEcsClusterArn,
+        serviceName,
+      );
+    },
+  );
+
+  ipcMain.handle(
     ipcChannels.aws.inspectHostSshMetadata,
     async (
       _event,
@@ -1759,188 +2172,29 @@ export function registerIpcHandlers(
         );
       }
 
-      const selectedHosts = collectSelectedTermiusHosts(snapshot, input);
-      const selectedGroupPaths = collectSelectedTermiusGroupPaths(
-        snapshot,
-        input,
-      );
-      const existingGroupPaths = new Set(
-        groups.list().map((group) => group.path),
-      );
-      const knownSshHosts = new Set(
-        hosts
-          .list()
-          .filter(isSshHostRecord)
-          .map((host) =>
-            buildSshDuplicateKey(host.hostname, host.port, host.username),
-          ),
-      );
-      const sharedSecretRefs = new Map<string, string>();
-      const warnings: TermiusImportWarning[] = [
-        ...(snapshot.bundle.meta?.warnings ?? []).map((message) => ({
-          message,
-        })),
-      ];
+      const result = await importTermiusSelection(snapshot, input, {
+        groups,
+        hosts,
+        activityLogs,
+        secretMetadata,
+        persistSecret: async (label, secrets) =>
+          persistImportedSecret(secretStore, secretMetadata, label, secrets),
+        queueSync,
+      });
 
-      let createdGroupCount = 0;
-      let createdHostCount = 0;
-      let createdSecretCount = 0;
-      let skippedHostCount = 0;
-
-      for (const groupPath of selectedGroupPaths) {
-        for (const candidatePath of buildTermiusGroupAncestorPaths(groupPath)) {
-          if (existingGroupPaths.has(candidatePath)) {
-            continue;
-          }
-          const group = groups.create(
-            randomUUID(),
-            getGroupLabel(candidatePath),
-            getParentGroupPath(candidatePath),
-          );
-          existingGroupPaths.add(group.path);
-          createdGroupCount += 1;
-        }
-      }
-
-      for (const host of selectedHosts) {
-        const label =
-          host.name?.trim() || host.address?.trim() || "Imported Host";
-        const hostname = host.address?.trim();
-        const port = resolveTermiusHostPort(host);
-        const username = resolveTermiusHostUsername(host);
-        const groupPath = normalizeGroupPath(host.groupPath);
-        const hostKey = buildTermiusEntityKey(
-          host.id,
-          host.localId,
-          `${label}|${host.address ?? ""}|${host.groupPath ?? ""}`,
-        );
-
-        if (!hostname || !port) {
-          warnings.push({
-            code: "missing-required-fields",
-            message: `${label}: address 또는 port가 없어 건너뛰었습니다.`,
-          });
-          skippedHostCount += 1;
-          continue;
-        }
-
-        if (!username) {
-          warnings.push({
-            code: "missing-username",
-            message: `${label}: 사용자명이 없어 가져왔지만, 첫 연결 전에 입력이 필요합니다.`,
-          });
-        }
-
-        const duplicateKey = buildSshDuplicateKey(hostname, port, username ?? "");
-        if (knownSshHosts.has(duplicateKey)) {
-          warnings.push({
-            code: "duplicate-host",
-            message: `${label}: 동일한 SSH 호스트가 이미 있어 건너뛰었습니다.`,
-          });
-          skippedHostCount += 1;
-          continue;
-        }
-
-        for (const candidatePath of buildTermiusGroupAncestorPaths(groupPath)) {
-          if (existingGroupPaths.has(candidatePath)) {
-            continue;
-          }
-          groups.create(
-            randomUUID(),
-            getGroupLabel(candidatePath),
-            getParentGroupPath(candidatePath),
-          );
-          existingGroupPaths.add(candidatePath);
-          createdGroupCount += 1;
-        }
-
-        const credential = resolveTermiusCredential(host);
-        let secretRef: string | null = null;
-
-        if (credential.hasCredential) {
-          const sharedSecretKey =
-            credential.sharedSecretKey ?? `host:${hostKey}`;
-          const cachedSecretRef = sharedSecretRefs.get(sharedSecretKey);
-          if (cachedSecretRef) {
-            secretRef = cachedSecretRef;
-          } else {
-            secretRef = await persistImportedSecret(
-              secretStore,
-              secretMetadata,
-              credential.sharedSecretLabel,
-              credential.secrets,
-            );
-            if (secretRef) {
-              sharedSecretRefs.set(sharedSecretKey, secretRef);
-              createdSecretCount += 1;
-            }
-          }
-        } else {
-          warnings.push({
-            code: "missing-credentials",
-            message: `${label}: 저장 가능한 credential이 없어 비밀번호 없이 호스트만 가져왔습니다.`,
-          });
-        }
-
-        hosts.create(
-          randomUUID(),
-          {
-            kind: "ssh",
-            label,
-            groupName: groupPath,
-            tags: [],
-            terminalThemeId: null,
-            hostname,
-            port,
-            username: username ?? "",
-            authType: credential.authType,
-            privateKeyPath: null,
-          },
-          secretRef,
-        );
-        knownSshHosts.add(duplicateKey);
-        createdHostCount += 1;
-      }
-
-      if (
-        createdGroupCount > 0 ||
-        createdHostCount > 0 ||
-        createdSecretCount > 0
-      ) {
-        activityLogs.append(
-          "info",
-          "audit",
-          "Termius 로컬 데이터를 가져왔습니다.",
-          {
-            createdGroupCount,
-            createdHostCount,
-            createdSecretCount,
-            skippedHostCount,
-            termiusDataDir: snapshot.bundle.meta?.termiusDataDir ?? null,
-          },
-        );
-        queueSync();
-      }
-
-      if (warnings.length > 0) {
+      if (result.warnings.length > 0) {
         activityLogs.append(
           "warn",
           "audit",
           "Termius import 중 일부 항목을 건너뛰거나 경고가 발생했습니다.",
           {
-            warningCount: warnings.length,
+            warningCount: result.warnings.length,
           },
         );
       }
 
       termiusImportService.discardSnapshot(input.snapshotId);
-      return {
-        createdGroupCount,
-        createdHostCount,
-        createdSecretCount,
-        skippedHostCount,
-        warnings,
-      };
+      return result;
     },
   );
 
@@ -1963,7 +2217,6 @@ export function registerIpcHandlers(
         const existingGroupPaths = new Set(
           groups.list().map((group) => group.path),
         );
-        const knownSshHosts = buildKnownSshDuplicateKeys(hosts);
         const secretRefsByIdentityPath = new Map<string, string>();
         const warnings: OpenSshImportWarning[] = [...snapshot.warnings];
 
@@ -1988,22 +2241,6 @@ export function registerIpcHandlers(
         }
 
         for (const host of selectedHosts) {
-          const duplicateKey = buildSshDuplicateKey(
-            host.hostname,
-            host.port,
-            host.username,
-          );
-          if (knownSshHosts.has(duplicateKey)) {
-            warnings.push({
-              code: "duplicate-host",
-              message: `${host.alias}: 같은 SSH 대상이 이미 있어 건너뛰었습니다.`,
-              filePath: host.sourceFilePath,
-              lineNumber: host.sourceLine,
-            });
-            skippedHostCount += 1;
-            continue;
-          }
-
           let secretRef: string | null = null;
           let privateKeyPath: string | null = null;
 
@@ -2060,7 +2297,6 @@ export function registerIpcHandlers(
             },
             secretRef,
           );
-          knownSshHosts.add(duplicateKey);
           createdHostCount += 1;
         }
 
@@ -2128,7 +2364,6 @@ export function registerIpcHandlers(
         const existingGroupPaths = new Set(
           groups.list().map((group) => group.path),
         );
-        const knownSshHosts = buildKnownSshDuplicateKeys(hosts);
         const passwordSecurityContext =
           await resolveCurrentXshellPasswordSecurityContext();
         const warnings: XshellImportWarning[] = [...snapshot.warnings];
@@ -2155,21 +2390,6 @@ export function registerIpcHandlers(
         }
 
         for (const host of selectedHosts) {
-          const duplicateKey = buildSshDuplicateKey(
-            host.hostname,
-            host.port,
-            host.username,
-          );
-          if (knownSshHosts.has(duplicateKey)) {
-            warnings.push({
-              code: "duplicate-host",
-              message: `${host.label}: 동일한 SSH 대상이 이미 있어 건너뛰었습니다.`,
-              filePath: host.sourceFilePath,
-            });
-            skippedHostCount += 1;
-            continue;
-          }
-
           const groupPath = normalizeGroupPath(host.groupPath);
           for (const candidatePath of buildTermiusGroupAncestorPaths(
             groupPath,
@@ -2244,7 +2464,6 @@ export function registerIpcHandlers(
             },
             secretRef,
           );
-          knownSshHosts.add(duplicateKey);
           createdHostCount += 1;
         }
 
@@ -2299,6 +2518,9 @@ export function registerIpcHandlers(
       const host = hosts.getById(input.hostId);
       if (!host) {
         throw new Error("Host not found");
+      }
+      if (isAwsEcsHostRecord(host)) {
+        throw new Error("ECS 호스트는 세션 연결 대신 Containers 화면에서 엽니다.");
       }
 
       if (isAwsEc2HostRecord(host)) {
@@ -2398,6 +2620,11 @@ export function registerIpcHandlers(
         cols: input.cols,
         rows: input.rows,
         title: input.title?.trim() || "Terminal",
+        shellKind: input.shellKind?.trim() || undefined,
+        executable: input.executable?.trim() || undefined,
+        args: input.args?.filter((value) => value.trim().length > 0),
+        env: input.env,
+        workingDirectory: input.workingDirectory?.trim() || undefined,
       });
     },
   );
@@ -2525,6 +2752,30 @@ export function registerIpcHandlers(
         input.tail,
         input.followCursor ?? null,
       );
+    },
+  );
+
+  ipcMain.handle(
+    ipcChannels.containers.startTunnel,
+    async (_event, input: HostContainersEphemeralTunnelInput) => {
+      const host = hosts.getById(input.hostId);
+      assertSftpCompatibleHost(host);
+      return startContainerTunnelRuntime({
+        ruleId: `container-service-tunnel:${randomUUID()}`,
+        host,
+        containerId: input.containerId,
+        networkName: input.networkName,
+        targetPort: input.targetPort,
+        bindAddress: input.bindAddress,
+        bindPort: input.bindPort,
+      });
+    },
+  );
+
+  ipcMain.handle(
+    ipcChannels.containers.stopTunnel,
+    async (_event, runtimeId: string) => {
+      await coreManager.stopPortForward(runtimeId);
     },
   );
 
@@ -3013,6 +3264,8 @@ export function registerIpcHandlers(
       const host = hosts.getById(draft.hostId);
       if (draft.transport === "aws-ssm") {
         assertAwsEc2Host(host);
+      } else if (draft.transport === "ecs-task") {
+        assertAwsEcsHost(host);
       } else if (draft.transport === "container") {
         assertSftpCompatibleHost(host);
       } else {
@@ -3029,7 +3282,9 @@ export function registerIpcHandlers(
             ? record.mode
             : record.transport === "aws-ssm"
               ? record.targetKind
-              : "container",
+              : record.transport === "ecs-task"
+                ? "ecs-task"
+                : "container",
       });
       queueSync();
       return record;
@@ -3042,6 +3297,8 @@ export function registerIpcHandlers(
       const host = hosts.getById(draft.hostId);
       if (draft.transport === "aws-ssm") {
         assertAwsEc2Host(host);
+      } else if (draft.transport === "ecs-task") {
+        assertAwsEcsHost(host);
       } else if (draft.transport === "container") {
         assertSftpCompatibleHost(host);
       } else {
@@ -3058,7 +3315,9 @@ export function registerIpcHandlers(
             ? record.mode
             : record.transport === "aws-ssm"
               ? record.targetKind
-              : "container",
+              : record.transport === "ecs-task"
+                ? "ecs-task"
+                : "container",
       });
       queueSync();
       return record;
@@ -3087,7 +3346,9 @@ export function registerIpcHandlers(
                 ? current.mode
                 : current.transport === "aws-ssm"
                   ? current.targetKind
-                  : "container",
+                  : current.transport === "ecs-task"
+                    ? "ecs-task"
+                    : "container",
           },
         );
       }
@@ -3105,10 +3366,18 @@ export function registerIpcHandlers(
       const host = hosts.getById(rule.hostId);
       if (rule.transport === "container") {
         assertSftpCompatibleHost(host);
-        const endpointId = buildContainerPortForwardEndpointId(
-          host.id,
-          rule.id,
-        );
+        return startContainerTunnelRuntime({
+          ruleId: rule.id,
+          host,
+          containerId: rule.containerId,
+          networkName: rule.networkName,
+          targetPort: rule.targetPort,
+          bindAddress: "127.0.0.1",
+          bindPort: rule.bindPort,
+        });
+      }
+      if (rule.transport === "ecs-task") {
+        assertAwsEcsHost(host);
         const publishRuntime = (
           status: "starting" | "error",
           message?: string,
@@ -3116,7 +3385,7 @@ export function registerIpcHandlers(
           coreManager.setPortForwardRuntime({
             ruleId: rule.id,
             hostId: host.id,
-            transport: "container",
+            transport: "ecs-task",
             mode: "local",
             bindAddress: "127.0.0.1",
             bindPort: rule.bindPort,
@@ -3131,112 +3400,67 @@ export function registerIpcHandlers(
                 : undefined,
           });
 
-        const cleanupTemporaryEndpoint = async () => {
-          await coreManager
-            .containersDisconnect(endpointId)
-            .catch(() => undefined);
-          await stopAwsContainersTunnelForEndpoint(endpointId);
-        };
-
         try {
-          publishRuntime("starting", "Checking container runtime");
-          const runtimeInfo = await ensureContainersEndpoint(host, endpointId);
-          if (!runtimeInfo.runtime) {
-            throw new Error(
-              runtimeInfo.unsupportedReason ||
-                "docker/podman 런타임을 확인하지 못했습니다.",
-            );
-          }
-
-          publishRuntime("starting", "Inspecting container");
-          const details = await coreManager.containersInspect(
-            runtimeInfo.endpointId,
-            rule.containerId,
+          publishRuntime("starting", "Checking AWS profile");
+          let profileStatus = await awsService.getProfileStatus(
+            host.awsProfileName,
           );
-          const normalizedStatus = details.status.trim().toLowerCase();
-          if (normalizedStatus !== "running") {
-            throw new Error(
-              `${details.name} 컨테이너가 실행 중이 아닙니다. 현재 상태: ${details.status}`,
+          if (!profileStatus.isAuthenticated) {
+            if (!profileStatus.isSsoProfile) {
+              throw new Error(
+                profileStatus.errorMessage ||
+                  "이 프로필은 AWS CLI 자격 증명이 필요합니다.",
+              );
+            }
+            publishRuntime("starting", "Opening AWS SSO login");
+            await awsService.login(host.awsProfileName);
+            publishRuntime("starting", "Checking AWS profile");
+            profileStatus = await awsService.getProfileStatus(
+              host.awsProfileName,
             );
-          }
-          const target = resolveContainerTunnelTarget(
-            details,
-            rule.networkName,
-            rule.targetPort,
-          );
-          const targetHost = target.host;
-          const resolvedTargetPort = target.port;
-
-          if (host.kind === "aws-ec2") {
-            moveAwsContainersTunnelRuntime(endpointId, rule.id);
-            publishRuntime("starting", "Starting container tunnel");
-            return coreManager.startPortForward({
-              ruleId: rule.id,
-              hostId: host.id,
-              host: "",
-              port: 0,
-              username: "",
-              authType: "password",
-              trustedHostKeyBase64: "",
-              bindAddress: "127.0.0.1",
-              bindPort: rule.bindPort,
-              mode: "local",
-              targetHost,
-              targetPort: resolvedTargetPort,
-              transport: "container",
-              sourceEndpointId: endpointId,
-            });
+            if (!profileStatus.isAuthenticated) {
+              throw new Error(
+                profileStatus.errorMessage ||
+                  "AWS SSO 로그인 결과를 확인하지 못했습니다.",
+              );
+            }
           }
 
-          if (host.kind === "warpgate-ssh") {
-            publishRuntime("starting", "Starting container tunnel");
-            return coreManager.startPortForward({
-              ruleId: rule.id,
-              hostId: host.id,
-              host: host.warpgateSshHost,
-              port: host.warpgateSshPort,
-              username: `${host.warpgateUsername}:${host.warpgateTargetName}`,
-              authType: "keyboardInteractive",
-              trustedHostKeyBase64: "",
-              mode: "local",
-              bindAddress: "127.0.0.1",
-              bindPort: rule.bindPort,
-              targetHost,
-              targetPort: resolvedTargetPort,
-              transport: "container",
-              sourceEndpointId: endpointId,
-            });
-          }
+          publishRuntime("starting", "Checking Session Manager plugin");
+          await awsService.ensureSessionManagerPluginAvailable();
 
-          publishRuntime("starting", "Starting container tunnel");
-          const username = requireConfiguredSshUsername(host);
-          return coreManager.startPortForward({
+          publishRuntime("starting", "Resolving running ECS task");
+          const targetId = await awsService.resolveEcsTaskTunnelTarget({
+            profileName: host.awsProfileName,
+            region: host.awsRegion,
+            clusterArn: host.awsEcsClusterArn,
+            serviceName: rule.serviceName,
+            containerName: rule.containerName,
+          });
+
+          publishRuntime("starting", "Starting ECS task tunnel");
+          return coreManager.startSsmPortForward({
             ruleId: rule.id,
             hostId: host.id,
-            host: host.hostname,
-            port: host.port,
-            username,
-            authType: host.authType,
-            trustedHostKeyBase64: "",
-            mode: "local",
+            profileName: host.awsProfileName,
+            region: host.awsRegion,
+            targetType: "ecs-task",
+            targetId,
             bindAddress: "127.0.0.1",
             bindPort: rule.bindPort,
-            targetHost,
-            targetPort: resolvedTargetPort,
-            transport: "container",
-            sourceEndpointId: endpointId,
+            targetKind: "remote-host",
+            targetPort: rule.targetPort,
+            remoteHost: "127.0.0.1",
+            transport: "ecs-task",
           });
         } catch (error) {
-          await stopAwsContainersTunnelForEndpoint(rule.id);
           publishRuntime(
             "error",
             error instanceof Error
               ? error.message
-              : "Container port forward를 시작하지 못했습니다.",
+              : "ECS task tunnel을 시작하지 못했습니다.",
           );
           throw error;
-        } finally {
-          await cleanupTemporaryEndpoint();
         }
       }
       if (rule.transport === "aws-ssm") {
@@ -3307,7 +3531,8 @@ export function registerIpcHandlers(
             hostId: host.id,
             profileName: host.awsProfileName,
             region: host.awsRegion,
-            instanceId: host.awsInstanceId,
+            targetType: "instance",
+            targetId: host.awsInstanceId,
             bindAddress: "127.0.0.1",
             bindPort: rule.bindPort,
             targetKind: rule.targetKind,

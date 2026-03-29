@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { getAwsEc2HostSshMetadataStatusLabel, isAwsEc2HostRecord, isSshHostDraft, isSshHostRecord, isWarpgateSshHostRecord } from '@shared';
+import { getAwsEc2HostSshMetadataStatusLabel, isAwsEc2HostRecord, isAwsEcsHostRecord, isSshHostDraft, isSshHostRecord, isWarpgateSshHostRecord } from '@shared';
 import type { HostDraft, HostRecord, SecretMetadataRecord, TerminalThemeId } from '@shared';
 import { terminalThemePresets } from '../lib/terminal-presets';
 
@@ -81,6 +81,10 @@ function isHostDraftValid(draft: HostDraft): boolean {
   }
 
   if (draft.kind === 'aws-ec2') {
+    return true;
+  }
+
+  if (draft.kind === 'aws-ecs') {
     return true;
   }
 
@@ -279,6 +283,19 @@ export function HostForm({
         awsSshPort: host.awsSshPort ?? 22,
         awsSshMetadataStatus: host.awsSshMetadataStatus ?? null,
         awsSshMetadataError: host.awsSshMetadataError ?? null
+      };
+      nextCredentialMode = 'none';
+    } else if (isAwsEcsHostRecord(host)) {
+      nextDraft = {
+        kind: 'aws-ecs',
+        label: host.label,
+        tags: host.tags ?? [],
+        groupName: host.groupName ?? '',
+        terminalThemeId: host.terminalThemeId ?? null,
+        awsProfileName: host.awsProfileName,
+        awsRegion: host.awsRegion,
+        awsEcsClusterArn: host.awsEcsClusterArn,
+        awsEcsClusterName: host.awsEcsClusterName
       };
       nextCredentialMode = 'none';
     } else if (isWarpgateSshHostRecord(host)) {
@@ -515,6 +532,7 @@ export function HostForm({
   }, [draft, isEditDirty, isEditMode, isFormValid, persistChanges, saveInFlight]);
 
   const isAwsDraft = draft.kind === 'aws-ec2';
+  const isAwsEcsDraft = draft.kind === 'aws-ecs';
   const saveStatusText =
     saveStatus === 'saving' ? 'Saving...' : saveStatus === 'saved' ? 'Saved' : saveStatus === 'error' ? "Couldn't save changes" : null;
 
@@ -711,6 +729,27 @@ export function HostForm({
               />
             </label>
           </div>
+        </>
+      ) : isAwsEcsDraft ? (
+        <>
+          {renderTerminalThemeField(draft.terminalThemeId ?? null, (terminalThemeId) => setDraft((current) => ({ ...current, terminalThemeId })))}
+
+          <label>
+            AWS Profile
+            <input value={draft.awsProfileName} readOnly />
+          </label>
+          <label>
+            Region
+            <input value={draft.awsRegion} readOnly />
+          </label>
+          <label>
+            ECS Cluster
+            <input value={draft.awsEcsClusterName} readOnly />
+          </label>
+          <label>
+            Cluster ARN
+            <input value={draft.awsEcsClusterArn} readOnly />
+          </label>
         </>
       ) : draft.kind === 'warpgate-ssh' ? (
         <>

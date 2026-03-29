@@ -1,8 +1,19 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import {
+  Component,
+  type ErrorInfo,
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { getHostBadgeLabel } from "@shared";
 import type { HostContainerDetails, HostRecord } from "@shared";
 import { formatConnectionProgressStageLabel } from "../lib/connection-progress";
 import type {
+  ContainerTunnelTabState,
   ContainersWorkspacePanel,
   HostContainersTabState,
   PendingContainersInteractiveAuth,
@@ -23,6 +34,11 @@ interface ContainersWorkspaceProps {
     containerId: string | null,
   ) => Promise<void>;
   onSetPanel: (hostId: string, panel: ContainersWorkspacePanel) => void;
+  onSetTunnelState: (
+    hostId: string,
+    containerId: string,
+    state: ContainerTunnelTabState | null,
+  ) => void;
   onRefreshLogs: (
     hostId: string,
     options?: { tail?: number; followCursor?: string | null },
@@ -489,6 +505,427 @@ function matchesContainerLogQuery(line: string, query: string): boolean {
   return line.toLowerCase().includes(normalizedQuery);
 }
 
+function createEmptyContainerTunnelState(): ContainerTunnelTabState {
+  return {
+    containerId: "",
+    containerName: "",
+    networkName: "",
+    targetPort: "",
+    bindPort: "0",
+    autoLocalPort: true,
+    loading: false,
+    error: null,
+    runtime: null,
+  };
+}
+
+function arePortForwardRuntimeRecordsEqual(
+  left: ContainerTunnelTabState["runtime"],
+  right: ContainerTunnelTabState["runtime"],
+): boolean {
+  if (left === right) {
+    return true;
+  }
+  if (!left || !right) {
+    return false;
+  }
+  return (
+    left.ruleId === right.ruleId &&
+    left.hostId === right.hostId &&
+    left.transport === right.transport &&
+    left.bindAddress === right.bindAddress &&
+    left.bindPort === right.bindPort &&
+    left.status === right.status &&
+    left.updatedAt === right.updatedAt &&
+    left.startedAt === right.startedAt &&
+    left.mode === right.mode &&
+    left.method === right.method &&
+    left.message === right.message
+  );
+}
+
+function areContainerTunnelTabStatesEqual(
+  left: ContainerTunnelTabState | null | undefined,
+  right: ContainerTunnelTabState | null | undefined,
+): boolean {
+  if (left === right) {
+    return true;
+  }
+  if (!left || !right) {
+    return false;
+  }
+  return (
+    left.containerId === right.containerId &&
+    left.containerName === right.containerName &&
+    left.networkName === right.networkName &&
+    left.targetPort === right.targetPort &&
+    left.bindPort === right.bindPort &&
+    left.autoLocalPort === right.autoLocalPort &&
+    left.loading === right.loading &&
+    left.error === right.error &&
+    arePortForwardRuntimeRecordsEqual(left.runtime, right.runtime)
+  );
+}
+
+function getTunnelEligibleNetworks(details: HostContainerDetails | null) {
+  const networks = Array.isArray(details?.networks) ? details.networks : [];
+  return networks.filter((network) => Boolean(network.ipAddress?.trim()));
+}
+
+function getTunnelEligiblePorts(details: HostContainerDetails | null) {
+  const ports = Array.isArray(details?.ports) ? details.ports : [];
+  return ports.filter(
+    (port) => port.protocol === "tcp" && port.containerPort > 0,
+  );
+}
+
+function resolveDefaultTunnelNetworkName(
+  details: HostContainerDetails | null,
+  currentValue: string,
+): string {
+  const eligibleNetworks = getTunnelEligibleNetworks(details);
+  if (eligibleNetworks.length === 0) {
+    return "";
+  }
+  if (eligibleNetworks.some((network) => network.name === currentValue)) {
+    return currentValue;
+  }
+  return eligibleNetworks[0]?.name ?? "";
+}
+
+function resolveDefaultTunnelTargetPort(
+  details: HostContainerDetails | null,
+  currentValue: string,
+): string {
+  const eligiblePorts = getTunnelEligiblePorts(details);
+  if (eligiblePorts.length === 0) {
+    return "";
+  }
+  if (
+    eligiblePorts.some((port) => String(port.containerPort) === currentValue)
+  ) {
+    return currentValue;
+  }
+  return eligiblePorts[0] ? String(eligiblePorts[0].containerPort) : "";
+}
+
+function buildDefaultContainerTunnelState(
+  containerId: string,
+  containerName: string,
+  details: HostContainerDetails | null,
+): ContainerTunnelTabState {
+  return {
+    ...createEmptyContainerTunnelState(),
+    containerId,
+    containerName,
+    networkName: resolveDefaultTunnelNetworkName(details, ""),
+    targetPort: resolveDefaultTunnelTargetPort(details, ""),
+  };
+}
+
+function hydrateContainerTunnelState(
+  containerId: string,
+  containerName: string,
+  details: HostContainerDetails | null,
+  tunnelState: ContainerTunnelTabState | null | undefined,
+): ContainerTunnelTabState {
+  if (!tunnelState) {
+    return buildDefaultContainerTunnelState(containerId, containerName, details);
+  }
+
+  return {
+    ...tunnelState,
+    containerId,
+    containerName,
+    networkName: details
+      ? resolveDefaultTunnelNetworkName(details, tunnelState.networkName)
+      : tunnelState.networkName,
+    targetPort: details
+      ? resolveDefaultTunnelTargetPort(details, tunnelState.targetPort)
+      : tunnelState.targetPort,
+    loading: false,
+    error: null,
+  };
+}
+
+function normalizePersistedContainerTunnelState(
+  tunnelState: ContainerTunnelTabState,
+): ContainerTunnelTabState | null {
+  const nextState: ContainerTunnelTabState = {
+    ...tunnelState,
+    loading: false,
+    error: null,
+  };
+  const shouldClear =
+    !nextState.runtime &&
+    !nextState.networkName &&
+    !nextState.targetPort &&
+    nextState.autoLocalPort &&
+    (nextState.bindPort === "" || nextState.bindPort === "0");
+  return shouldClear ? null : nextState;
+}
+
+export class ContainerTunnelErrorBoundary extends Component<
+  { resetKey: string; children: ReactNode },
+  { hasError: boolean }
+> {
+  state = { hasError: false };
+
+  static getDerivedStateFromError() {
+    return { hasError: true };
+  }
+
+  componentDidCatch(error: Error, info: ErrorInfo) {
+    console.error("Failed to render container tunnel panel.", error, info);
+  }
+
+  componentDidUpdate(prevProps: Readonly<{ resetKey: string }>) {
+    if (prevProps.resetKey !== this.props.resetKey && this.state.hasError) {
+      this.setState({ hasError: false });
+    }
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="callout error">
+          <div>컨테이너 Tunnel을 표시하지 못했습니다.</div>
+          <button
+            type="button"
+            className="secondary-button"
+            onClick={() => {
+              this.setState({ hasError: false });
+            }}
+          >
+            다시 시도
+          </button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
+interface ContainerTunnelPanelProps {
+  selectedContainer: HostContainersTabState["items"][number] | null;
+  selectedContainerDetails: HostContainerDetails | null;
+  detailsLoading: boolean;
+  tunnelState: ContainerTunnelTabState;
+  onUpdateTunnelState: (
+    updater: (previous: ContainerTunnelTabState) => ContainerTunnelTabState,
+  ) => void;
+  onStartTunnel: () => void;
+  onStopTunnel: () => void;
+}
+
+function ContainerTunnelPanel({
+  selectedContainer,
+  selectedContainerDetails,
+  detailsLoading,
+  tunnelState,
+  onUpdateTunnelState,
+  onStartTunnel,
+  onStopTunnel,
+}: ContainerTunnelPanelProps) {
+  const tunnelNetworks = useMemo(
+    () => getTunnelEligibleNetworks(selectedContainerDetails),
+    [selectedContainerDetails],
+  );
+  const tunnelPorts = useMemo(
+    () => getTunnelEligiblePorts(selectedContainerDetails),
+    [selectedContainerDetails],
+  );
+  const isSelectedContainerRunning =
+    selectedContainerDetails?.status.trim().toLowerCase() === "running";
+  const canStartTunnel =
+    !!selectedContainer &&
+    !!selectedContainerDetails &&
+    isSelectedContainerRunning &&
+    !tunnelState.runtime &&
+    !tunnelState.loading &&
+    !!tunnelState.networkName &&
+    !!tunnelState.targetPort &&
+    (tunnelState.autoLocalPort ||
+      (!!tunnelState.bindPort && Number(tunnelState.bindPort) > 0));
+  const isTunnelFormDisabled =
+    !selectedContainer ||
+    !selectedContainerDetails ||
+    detailsLoading ||
+    tunnelState.loading ||
+    !!tunnelState.runtime;
+  const tunnelRuntimeLocalEndpoint = tunnelState.runtime
+    ? `${tunnelState.runtime.bindAddress}:${tunnelState.runtime.bindPort || "auto"}`
+    : null;
+  const tunnelRuntimeRemoteEndpoint =
+    tunnelState.networkName && tunnelState.targetPort
+      ? `${tunnelState.networkName}:${tunnelState.targetPort}`
+      : null;
+
+  if (!selectedContainer) {
+    return (
+      <div className="containers-workspace__empty-detail">
+        컨테이너를 선택하면 터널을 열 수 있습니다.
+      </div>
+    );
+  }
+
+  if (detailsLoading && !selectedContainerDetails) {
+    return (
+      <div className="containers-workspace__empty-detail">
+        터널 정보를 준비하는 중입니다...
+      </div>
+    );
+  }
+
+  return (
+    <div className="containers-workspace__tunnel">
+      <div className="containers-workspace__tunnel-form">
+        <label>
+          <span>Network</span>
+          <select
+            value={tunnelState.networkName}
+            disabled={isTunnelFormDisabled}
+            onChange={(event) => {
+              onUpdateTunnelState((previous) => ({
+                ...previous,
+                networkName: event.target.value,
+              }));
+            }}
+          >
+            {tunnelNetworks.length === 0 ? (
+              <option value="">선택 가능한 네트워크 없음</option>
+            ) : null}
+            {tunnelNetworks.map((network) => (
+              <option key={network.name} value={network.name}>
+                {network.name}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label>
+          <span>Port</span>
+          <select
+            value={tunnelState.targetPort}
+            disabled={isTunnelFormDisabled || tunnelPorts.length === 0}
+            onChange={(event) => {
+              onUpdateTunnelState((previous) => ({
+                ...previous,
+                targetPort: event.target.value,
+              }));
+            }}
+          >
+            {tunnelPorts.length === 0 ? (
+              <option value="">포트 없음</option>
+            ) : null}
+            {tunnelPorts.map((port) => (
+              <option
+                key={`${port.containerPort}/${port.protocol}`}
+                value={String(port.containerPort)}
+              >
+                {port.containerPort}/{port.protocol}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label>
+          <span>Local port</span>
+          <div className="port-forward-local-port containers-workspace__tunnel-local-port">
+            <button
+              type="button"
+              role="switch"
+              aria-checked={tunnelState.autoLocalPort}
+              aria-label="Auto (random)"
+              className={`port-forward-toggle ${tunnelState.autoLocalPort ? "is-active" : ""}`}
+              disabled={isTunnelFormDisabled}
+              onClick={() => {
+                onUpdateTunnelState((previous) => ({
+                  ...previous,
+                  autoLocalPort: !previous.autoLocalPort,
+                  bindPort: previous.autoLocalPort
+                    ? previous.bindPort || "9000"
+                    : "0",
+                }));
+              }}
+            >
+              <span className="port-forward-toggle__track" aria-hidden="true">
+                <span className="port-forward-toggle__thumb" />
+              </span>
+              <span className="port-forward-toggle__content">
+                <strong>Auto (random)</strong>
+                <span>사용 가능한 로컬 포트를 자동으로 할당합니다.</span>
+              </span>
+            </button>
+            <input
+              type="number"
+              className="port-forward-local-port__input"
+              value={tunnelState.bindPort}
+              placeholder="0"
+              disabled={isTunnelFormDisabled || tunnelState.autoLocalPort}
+              onChange={(event) => {
+                onUpdateTunnelState((previous) => ({
+                  ...previous,
+                  bindPort: event.target.value,
+                }));
+              }}
+            />
+          </div>
+        </label>
+      </div>
+
+      {tunnelState.runtime ? (
+        <div className="containers-workspace__tunnel-runtime-card">
+          <div className="containers-workspace__tunnel-runtime-header">
+            <strong>터널 상태</strong>
+            <span
+              className={`status-pill status-pill--${tunnelState.runtime.status}`}
+            >
+              {tunnelState.runtime.status === "running"
+                ? "Running"
+                : tunnelState.runtime.status}
+            </span>
+          </div>
+          <div className="containers-workspace__tunnel-runtime-grid">
+            <div>
+              <span>Local</span>
+              <strong>{tunnelRuntimeLocalEndpoint}</strong>
+            </div>
+            <div>
+              <span>Remote</span>
+              <strong>{tunnelRuntimeRemoteEndpoint}</strong>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {tunnelState.error ? (
+        <div className="callout error">{tunnelState.error}</div>
+      ) : null}
+
+      <div className="containers-workspace__tunnel-actions">
+        {tunnelState.runtime ? (
+          <button
+            type="button"
+            className="secondary-button"
+            disabled={tunnelState.loading}
+            onClick={onStopTunnel}
+          >
+            {tunnelState.loading ? "정지 중..." : "Stop"}
+          </button>
+        ) : (
+          <button
+            type="button"
+            className="primary-button"
+            disabled={!canStartTunnel}
+            onClick={onStartTunnel}
+          >
+            {tunnelState.loading ? "시작 중..." : "Start tunnel"}
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function OverviewSection({
   details,
   statusSummary,
@@ -782,6 +1219,7 @@ export function ContainersWorkspace({
   onRefresh,
   onSelectContainer,
   onSetPanel,
+  onSetTunnelState,
   onRefreshLogs,
   onLoadMoreLogs,
   onSetLogsFollow,
@@ -799,6 +1237,12 @@ export function ContainersWorkspace({
   const [pendingConfirmAction, setPendingConfirmAction] = useState<
     "start" | "stop" | "restart" | "remove" | null
   >(null);
+  const [tunnelState, setTunnelState] = useState<ContainerTunnelTabState>(
+    createEmptyContainerTunnelState,
+  );
+  const tunnelStateRef = useRef<ContainerTunnelTabState>(
+    createEmptyContainerTunnelState(),
+  );
   const logsOutputRef = useRef<HTMLDivElement | null>(null);
   const logsBottomRef = useRef<HTMLDivElement | null>(null);
   const previousPanelRef = useRef<ContainersWorkspacePanel>(tab.activePanel);
@@ -815,12 +1259,16 @@ export function ContainersWorkspace({
   const matchingInteractiveAuth =
     interactiveAuth?.hostId === host.id ? interactiveAuth : null;
   const shouldShowConnectingOverlay = tab.isLoading && !matchingInteractiveAuth;
+  const selectedContainerDetails =
+    tab.details && tab.details.id === tab.selectedContainerId ? tab.details : null;
   const selectedContainerStatusSummary = useMemo(
     () =>
       tab.items.find((item) => item.id === tab.selectedContainerId)?.status ??
       null,
     [tab.items, tab.selectedContainerId],
   );
+  const persistedContainerTunnelStates =
+    tab.containerTunnelStatesByContainerId ?? {};
   const trimmedLogsSearchQuery = tab.logsSearchQuery.trim();
   const effectiveLogLines = useMemo(() => {
     if (tab.logsSearchMode === "remote") {
@@ -874,6 +1322,90 @@ export function ContainersWorkspace({
   const canRemove = selectedContainer
     ? canRemoveContainer(selectedContainer.status)
     : false;
+  const persistedTunnelState = selectedContainer
+    ? persistedContainerTunnelStates[selectedContainer.id] ?? null
+    : null;
+
+  useEffect(() => {
+    tunnelStateRef.current = tunnelState;
+  }, [tunnelState]);
+
+  useEffect(() => {
+    if (!selectedContainer) {
+      const emptyState = createEmptyContainerTunnelState();
+      setTunnelState((previous) =>
+        areContainerTunnelTabStatesEqual(previous, emptyState)
+          ? previous
+          : emptyState,
+      );
+      return;
+    }
+
+    const nextState = hydrateContainerTunnelState(
+      selectedContainer.id,
+      selectedContainer.name,
+      selectedContainerDetails,
+      persistedTunnelState,
+    );
+    setTunnelState((previous) =>
+      areContainerTunnelTabStatesEqual(previous, nextState)
+        ? previous
+        : nextState,
+    );
+  }, [
+    selectedContainer,
+    selectedContainerDetails,
+    persistedTunnelState,
+  ]);
+
+  const persistTunnelState = useCallback(
+    (
+      container: NonNullable<typeof selectedContainer>,
+      nextState: ContainerTunnelTabState,
+    ) => {
+      if (!onSetTunnelState) {
+        return;
+      }
+      onSetTunnelState(
+        host.id,
+        container.id,
+        normalizePersistedContainerTunnelState({
+          ...nextState,
+          containerId: container.id,
+          containerName: container.name,
+        }),
+      );
+    },
+    [host.id, onSetTunnelState],
+  );
+
+  const updateTunnelDraft = useCallback(
+    (
+      updater: (previous: ContainerTunnelTabState) => ContainerTunnelTabState,
+    ) => {
+      if (!selectedContainer) {
+        return;
+      }
+      const previous =
+        tunnelStateRef.current.containerId === selectedContainer.id
+          ? tunnelStateRef.current
+          : hydrateContainerTunnelState(
+              selectedContainer.id,
+              selectedContainer.name,
+              selectedContainerDetails,
+              persistedTunnelState,
+            );
+      const nextState = updater(previous);
+      setTunnelState(nextState);
+      persistTunnelState(selectedContainer, nextState);
+    },
+    [
+      persistTunnelState,
+      persistedTunnelState,
+      selectedContainer,
+      selectedContainerDetails,
+    ],
+  );
 
   useEffect(() => {
     const enteredLogs =
@@ -1056,6 +1588,153 @@ export function ContainersWorkspace({
     }
   }
 
+  async function handleStartTunnel() {
+    if (!selectedContainer || !selectedContainerDetails) {
+      return;
+    }
+    const currentContainer = selectedContainer;
+    const currentDetails = selectedContainerDetails;
+    const currentTunnelState =
+      tunnelStateRef.current.containerId === currentContainer.id
+        ? tunnelStateRef.current
+        : hydrateContainerTunnelState(
+            currentContainer.id,
+            currentContainer.name,
+            currentDetails,
+            persistedTunnelState,
+          );
+    const isSelectedContainerRunning =
+      currentDetails.status.trim().toLowerCase() === "running";
+
+    if (!isSelectedContainerRunning) {
+      setTunnelState((previous) => ({
+        ...previous,
+        error: "실행 중인 컨테이너에서만 터널을 시작할 수 있습니다.",
+      }));
+      return;
+    }
+
+    const targetPort = Number(currentTunnelState.targetPort);
+    const bindPort = currentTunnelState.autoLocalPort
+      ? 0
+      : Number(currentTunnelState.bindPort);
+    if (!currentTunnelState.networkName) {
+      setTunnelState((previous) => ({
+        ...previous,
+        error: "네트워크를 선택해 주세요.",
+      }));
+      return;
+    }
+    if (!Number.isFinite(targetPort) || targetPort <= 0) {
+      setTunnelState((previous) => ({
+        ...previous,
+        error: "포트를 선택해 주세요.",
+      }));
+      return;
+    }
+    if (!tunnelState.autoLocalPort && (!Number.isFinite(bindPort) || bindPort <= 0)) {
+      setTunnelState((previous) => ({
+        ...previous,
+        error: "로컬 포트를 확인해 주세요.",
+      }));
+      return;
+    }
+
+    setTunnelState((previous) => ({
+      ...previous,
+      containerId: currentContainer.id,
+      containerName: currentContainer.name,
+      loading: true,
+      error: null,
+    }));
+    try {
+      const runtime = await window.dolssh.containers.startTunnel({
+        hostId: host.id,
+        containerId: currentContainer.id,
+        networkName: currentTunnelState.networkName,
+        targetPort,
+        bindAddress: "127.0.0.1",
+        bindPort,
+      });
+      const nextState = {
+        ...currentTunnelState,
+        containerId: currentContainer.id,
+        containerName: currentContainer.name,
+        loading: false,
+        runtime,
+        error: null,
+      };
+      persistTunnelState(currentContainer, nextState);
+      setTunnelState((previous) =>
+        previous.containerId === currentContainer.id ? nextState : previous,
+      );
+    } catch (error) {
+      setTunnelState((previous) =>
+        previous.containerId === currentContainer.id
+          ? {
+              ...previous,
+              loading: false,
+              error:
+                error instanceof Error
+                  ? error.message
+                  : "컨테이너 터널을 시작하지 못했습니다.",
+            }
+          : previous,
+      );
+    }
+  }
+
+  async function handleStopTunnel() {
+    if (!selectedContainer || !tunnelStateRef.current.runtime?.ruleId) {
+      return;
+    }
+    const currentContainer = selectedContainer;
+    const currentTunnelState =
+      tunnelStateRef.current.containerId === currentContainer.id
+        ? tunnelStateRef.current
+        : hydrateContainerTunnelState(
+            currentContainer.id,
+            currentContainer.name,
+            selectedContainerDetails,
+            persistedTunnelState,
+          );
+    const runtimeId = currentTunnelState.runtime?.ruleId;
+    if (!runtimeId) {
+      return;
+    }
+    setTunnelState((previous) => ({
+      ...previous,
+      loading: true,
+      error: null,
+    }));
+    try {
+      await window.dolssh.containers.stopTunnel(runtimeId);
+      const nextState = {
+        ...currentTunnelState,
+        loading: false,
+        error: null,
+        runtime: null,
+      };
+      persistTunnelState(currentContainer, nextState);
+      setTunnelState((previous) =>
+        previous.containerId === currentContainer.id ? nextState : previous,
+      );
+    } catch (error) {
+      setTunnelState((previous) =>
+        previous.containerId === currentContainer.id
+          ? {
+              ...previous,
+              loading: false,
+              error:
+                error instanceof Error
+                  ? error.message
+                  : "컨테이너 터널을 중지하지 못했습니다.",
+            }
+          : previous,
+      );
+    }
+  }
+
   return (
     <div className="containers-workspace">
       <div className="containers-workspace__header">
@@ -1199,6 +1878,14 @@ export function ContainersWorkspace({
                   >
                     Metrics
                   </button>
+                  <button
+                    type="button"
+                    className={tab.activePanel === "tunnel" ? "active" : ""}
+                    onClick={() => onSetPanel(host.id, "tunnel")}
+                    disabled={!tab.selectedContainerId}
+                  >
+                    Tunnel
+                  </button>
                 </div>
               </div>
             </div>
@@ -1222,6 +1909,24 @@ export function ContainersWorkspace({
               </>
             ) : tab.activePanel === "metrics" ? (
               <MetricsSection tab={tab} />
+            ) : tab.activePanel === "tunnel" ? (
+              <ContainerTunnelErrorBoundary
+                resetKey={`${selectedContainer?.id ?? "none"}:${tunnelState.runtime?.ruleId ?? "idle"}`}
+              >
+                <ContainerTunnelPanel
+                  selectedContainer={selectedContainer}
+                  selectedContainerDetails={selectedContainerDetails}
+                  detailsLoading={tab.detailsLoading}
+                  tunnelState={tunnelState}
+                  onUpdateTunnelState={updateTunnelDraft}
+                  onStartTunnel={() => {
+                    void handleStartTunnel();
+                  }}
+                  onStopTunnel={() => {
+                    void handleStopTunnel();
+                  }}
+                />
+              </ContainerTunnelErrorBoundary>
             ) : (
               <div className="containers-workspace__logs">
                 <div className="containers-workspace__logs-toolbar">

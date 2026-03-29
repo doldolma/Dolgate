@@ -4,6 +4,23 @@ import path from "node:path";
 import { spawn } from "node:child_process";
 import type {
   AwsEc2InstanceSummary,
+  AwsEcsClusterListItem,
+  AwsEcsClusterSnapshot,
+  AwsEcsDeploymentSummary,
+  AwsEcsEventSummary,
+  AwsEcsServiceActionContext,
+  AwsEcsServiceActionContainerSummary,
+  AwsEcsTaskTunnelContainerSummary,
+  AwsEcsTaskTunnelServiceDetails,
+  AwsEcsTaskTunnelServiceSummary,
+  AwsEcsClusterUtilizationSnapshot,
+  AwsEcsServiceLogsSnapshot,
+  AwsEcsServiceLogEntry,
+  AwsEcsServiceTaskSummary,
+  AwsMetricHistoryPoint,
+  AwsEcsServiceExposureKind,
+  AwsEcsServicePortSummary,
+  AwsEcsServiceSummary,
   AwsHostSshInspectionInput,
   AwsHostSshInspectionResult,
   AwsProfileStatus,
@@ -11,6 +28,7 @@ import type {
 } from "@shared";
 
 const REGION_DISCOVERY_REGION = "us-east-1";
+const ECS_LOG_INITIAL_LOOKBACK_MS = 30 * 60 * 1000;
 
 function isE2EFakeAwsSessionEnabled(): boolean {
   const mode = process.env.DOLSSH_E2E_FAKE_AWS_SESSION;
@@ -27,7 +45,7 @@ interface CommandError extends Error {
   code?: string;
 }
 
-const resolvedExecutableCache = new Map<string, string | null>();
+const resolvedExecutableCache = new Map<string, string>();
 
 function splitPathEnv(): string[] {
   const rawPath = process.env.PATH ?? "";
@@ -67,10 +85,16 @@ function getExecutableCandidates(command: string): string[] {
   }
 
   if (process.platform === "darwin") {
+    if (command === "aws") {
+      candidates.add(`/opt/aws-cli/bin/${command}`);
+    }
     candidates.add(`/opt/homebrew/bin/${command}`);
     candidates.add(`/usr/local/bin/${command}`);
     candidates.add(`/usr/bin/${command}`);
   } else {
+    if (command === "aws") {
+      candidates.add(`/usr/local/aws-cli/v2/current/bin/${command}`);
+    }
     candidates.add(`/usr/local/bin/${command}`);
     candidates.add(`/usr/bin/${command}`);
     candidates.add(`/bin/${command}`);
@@ -90,11 +114,7 @@ async function pathExists(candidatePath: string): Promise<boolean> {
 
 async function resolveExecutable(command: string): Promise<string> {
   if (resolvedExecutableCache.has(command)) {
-    const cached = resolvedExecutableCache.get(command);
-    if (cached) {
-      return cached;
-    }
-    throw new Error(command);
+    return resolvedExecutableCache.get(command)!;
   }
 
   for (const candidate of getExecutableCandidates(command)) {
@@ -104,7 +124,6 @@ async function resolveExecutable(command: string): Promise<string> {
     }
   }
 
-  resolvedExecutableCache.set(command, null);
   throw new Error(command);
 }
 
@@ -221,6 +240,143 @@ interface Ec2DescribeInstancesPayload {
   }>;
 }
 
+interface EcsListClustersPayload {
+  clusterArns?: string[];
+  nextToken?: string;
+}
+
+interface EcsDescribeClustersPayload {
+  clusters?: Array<{
+    clusterArn?: string;
+    clusterName?: string;
+    status?: string;
+    activeServicesCount?: number;
+    runningTasksCount?: number;
+    pendingTasksCount?: number;
+  }>;
+}
+
+interface EcsListServicesPayload {
+  serviceArns?: string[];
+  nextToken?: string;
+}
+
+interface EcsDescribeServicesPayload {
+  services?: Array<{
+    serviceArn?: string;
+    serviceName?: string;
+    status?: string;
+    desiredCount?: number;
+    runningCount?: number;
+    pendingCount?: number;
+    launchType?: string;
+    capacityProviderStrategy?: Array<{
+      capacityProvider?: string;
+      weight?: number;
+      base?: number;
+    }>;
+    loadBalancers?: Array<{
+      loadBalancerName?: string;
+      targetGroupArn?: string;
+      containerName?: string;
+      containerPort?: number;
+    }>;
+    serviceConnectConfiguration?: {
+      enabled?: boolean;
+    };
+    deployments?: Array<{
+      status?: string;
+      rolloutState?: string;
+      rolloutStateReason?: string;
+      desiredCount?: number;
+      runningCount?: number;
+      pendingCount?: number;
+      taskDefinition?: string;
+      updatedAt?: string;
+      createdAt?: string;
+      id?: string;
+    }>;
+    taskDefinition?: string;
+    events?: Array<{
+      message?: string;
+      createdAt?: string;
+    }>;
+  }>;
+}
+
+interface EcsTaskDefinitionPayload {
+  taskDefinition?: {
+    taskDefinitionArn?: string;
+    revision?: number;
+    cpu?: string;
+    memory?: string;
+    containerDefinitions?: Array<{
+      name?: string;
+      cpu?: number;
+      memory?: number;
+      memoryReservation?: number;
+      portMappings?: Array<{
+        containerPort?: number;
+        hostPort?: number;
+        protocol?: string;
+      }>;
+      logConfiguration?: {
+        logDriver?: string;
+        options?: Record<string, string>;
+      };
+    }>;
+  };
+}
+
+interface CloudWatchGetMetricDataPayload {
+  MetricDataResults?: Array<{
+    Id?: string;
+    Timestamps?: string[];
+    Values?: number[];
+  }>;
+}
+
+interface EcsListTasksPayload {
+  taskArns?: string[];
+  nextToken?: string;
+}
+
+interface EcsDescribeTasksPayload {
+  tasks?: Array<{
+    taskArn?: string;
+    lastStatus?: string;
+    enableExecuteCommand?: boolean;
+    startedAt?: string;
+    containers?: Array<{
+      name?: string;
+      runtimeId?: string;
+      lastStatus?: string;
+    }>;
+  }>;
+}
+
+interface CloudWatchLogsFilterEventsPayload {
+  events?: Array<{
+    eventId?: string;
+    timestamp?: number;
+    ingestionTime?: number;
+    message?: string;
+    logStreamName?: string;
+  }>;
+  nextToken?: string;
+}
+
+interface EcsServiceUtilizationMetrics {
+  cpuUtilizationPercent: number | null;
+  memoryUtilizationPercent: number | null;
+  cpuHistory: AwsMetricHistoryPoint[];
+  memoryHistory: AwsMetricHistoryPoint[];
+}
+
+type EcsContainerDefinition = NonNullable<
+  NonNullable<EcsTaskDefinitionPayload["taskDefinition"]>["containerDefinitions"]
+>[number];
+
 function toInstanceSummary(
   instance: NonNullable<
     NonNullable<Ec2DescribeInstancesPayload["Reservations"]>[number]["Instances"]
@@ -240,6 +396,379 @@ function toInstanceSummary(
     privateIp: instance.PrivateIpAddress?.trim() || null,
     state: instance.State?.Name?.trim() || null,
   };
+}
+
+function parseClusterNameFromArn(clusterArn: string): string {
+  const trimmed = clusterArn.trim();
+  if (!trimmed) {
+    return "";
+  }
+  const segments = trimmed.split("/");
+  return segments[segments.length - 1] ?? trimmed;
+}
+
+function parseServiceNameFromArn(serviceArn: string): string {
+  const trimmed = serviceArn.trim();
+  if (!trimmed) {
+    return "";
+  }
+  const segments = trimmed.split("/");
+  return segments[segments.length - 1] ?? trimmed;
+}
+
+function parseTaskIdFromArn(taskArn: string): string {
+  const trimmed = taskArn.trim();
+  if (!trimmed) {
+    return "";
+  }
+  const segments = trimmed.split("/");
+  return segments[segments.length - 1] ?? trimmed;
+}
+
+function chunk<T>(items: T[], size: number): T[][] {
+  const chunks: T[][] = [];
+  for (let index = 0; index < items.length; index += size) {
+    chunks.push(items.slice(index, index + size));
+  }
+  return chunks;
+}
+
+function formatCapacityProviderSummary(
+  strategy: NonNullable<
+    NonNullable<
+      NonNullable<EcsDescribeServicesPayload["services"]>[number][
+        "capacityProviderStrategy"
+      ]
+    >
+  >,
+): string | null {
+  if (!strategy.length) {
+    return null;
+  }
+  return strategy
+    .map((item) => {
+      const name = item.capacityProvider?.trim() ?? "";
+      if (!name) {
+        return null;
+      }
+      const parts: string[] = [];
+      if (typeof item.base === "number" && item.base > 0) {
+        parts.push(`base ${item.base}`);
+      }
+      if (typeof item.weight === "number" && item.weight > 0) {
+        parts.push(`weight ${item.weight}`);
+      }
+      return parts.length > 0 ? `${name} (${parts.join(", ")})` : name;
+    })
+    .filter((value): value is string => Boolean(value))
+    .join(", ");
+}
+
+function normalizeTaskDefinitionCpu(
+  payload: EcsTaskDefinitionPayload["taskDefinition"],
+): string | null {
+  const cpu = payload?.cpu?.trim();
+  if (cpu) {
+    return cpu;
+  }
+  const total = (payload?.containerDefinitions ?? []).reduce(
+    (sum, container) => sum + (typeof container.cpu === "number" ? container.cpu : 0),
+    0,
+  );
+  return total > 0 ? String(total) : null;
+}
+
+function normalizeTaskDefinitionMemory(
+  payload: EcsTaskDefinitionPayload["taskDefinition"],
+): string | null {
+  const memory = payload?.memory?.trim();
+  if (memory) {
+    return memory;
+  }
+  const total = (payload?.containerDefinitions ?? []).reduce((sum, container) => {
+    if (typeof container.memory === "number" && container.memory > 0) {
+      return sum + container.memory;
+    }
+    if (
+      typeof container.memoryReservation === "number" &&
+      container.memoryReservation > 0
+    ) {
+      return sum + container.memoryReservation;
+    }
+    return sum;
+  }, 0);
+  return total > 0 ? String(total) : null;
+}
+
+function normalizeTaskDefinitionPorts(
+  payload: EcsTaskDefinitionPayload["taskDefinition"],
+): AwsEcsServicePortSummary[] {
+  const ports = new Map<string, AwsEcsServicePortSummary>();
+  for (const container of payload?.containerDefinitions ?? []) {
+    for (const portMapping of container.portMappings ?? []) {
+      const port = portMapping.containerPort;
+      if (typeof port !== "number" || port <= 0) {
+        continue;
+      }
+      const protocol = portMapping.protocol?.trim().toLowerCase() || "tcp";
+      const key = `${port}/${protocol}`;
+      if (!ports.has(key)) {
+        ports.set(key, { port, protocol });
+      }
+    }
+  }
+  return [...ports.values()].sort(
+    (left, right) => left.port - right.port || left.protocol.localeCompare(right.protocol),
+  );
+}
+
+function normalizeContainerTaskDefinitionPorts(
+  containerDefinition?: EcsContainerDefinition,
+): AwsEcsServicePortSummary[] {
+  const ports = new Map<string, AwsEcsServicePortSummary>();
+  for (const portMapping of containerDefinition?.portMappings ?? []) {
+    const port = portMapping.containerPort;
+    if (typeof port !== "number" || port <= 0) {
+      continue;
+    }
+    const protocol = portMapping.protocol?.trim().toLowerCase() || "tcp";
+    ports.set(`${port}/${protocol}`, { port, protocol });
+  }
+  return [...ports.values()].sort(
+    (left, right) => left.port - right.port || left.protocol.localeCompare(right.protocol),
+  );
+}
+
+function normalizeServiceExposureKinds(
+  service: NonNullable<EcsDescribeServicesPayload["services"]>[number],
+): AwsEcsServiceExposureKind[] {
+  const exposureKinds = new Set<AwsEcsServiceExposureKind>();
+  if ((service.loadBalancers ?? []).length > 0) {
+    // ECS service payload doesn't reliably distinguish ALB vs NLB here, so v1
+    // treats any attached load balancer as a generic ALB/NLB exposure badge.
+    exposureKinds.add("alb");
+  }
+  if (service.serviceConnectConfiguration?.enabled) {
+    exposureKinds.add("service-connect");
+  }
+  return [...exposureKinds];
+}
+
+function normalizeEcsDeployments(
+  deployments: NonNullable<
+    NonNullable<EcsDescribeServicesPayload["services"]>[number]["deployments"]
+  >,
+): AwsEcsDeploymentSummary[] {
+  return deployments
+    .map((deployment, index) => {
+      const taskDefinitionArn = deployment.taskDefinition?.trim() || null;
+      return {
+        id:
+          deployment.id?.trim() ||
+          `${deployment.status?.trim() || "deployment"}:${taskDefinitionArn ?? index}:${index}`,
+        status: deployment.status?.trim() || "UNKNOWN",
+        rolloutState: deployment.rolloutState?.trim() || null,
+        rolloutStateReason: deployment.rolloutStateReason?.trim() || null,
+        desiredCount:
+          typeof deployment.desiredCount === "number"
+            ? deployment.desiredCount
+            : null,
+        runningCount:
+          typeof deployment.runningCount === "number"
+            ? deployment.runningCount
+            : null,
+        pendingCount:
+          typeof deployment.pendingCount === "number"
+            ? deployment.pendingCount
+            : null,
+        taskDefinitionArn,
+        taskDefinitionRevision: taskDefinitionArn
+          ? parseTaskDefinitionRevision(taskDefinitionArn)
+          : null,
+        updatedAt: deployment.updatedAt?.trim() || deployment.createdAt?.trim() || null,
+      } satisfies AwsEcsDeploymentSummary;
+    })
+    .sort((left, right) => {
+      const leftTime = left.updatedAt ? Date.parse(left.updatedAt) : 0;
+      const rightTime = right.updatedAt ? Date.parse(right.updatedAt) : 0;
+      return rightTime - leftTime;
+    });
+}
+
+function normalizeEcsEvents(
+  events: NonNullable<
+    NonNullable<EcsDescribeServicesPayload["services"]>[number]["events"]
+  >,
+): AwsEcsEventSummary[] {
+  return events
+    .map((event, index) => ({
+      id: `${event.createdAt?.trim() || "event"}:${index}`,
+      message: event.message?.trim() || "",
+      createdAt: event.createdAt?.trim() || null,
+    }))
+    .filter((event) => event.message.length > 0)
+    .sort((left, right) => {
+      const leftTime = left.createdAt ? Date.parse(left.createdAt) : 0;
+      const rightTime = right.createdAt ? Date.parse(right.createdAt) : 0;
+      return rightTime - leftTime;
+    });
+}
+
+function parseTaskDefinitionRevision(taskDefinitionArn: string): number | null {
+  const match = taskDefinitionArn.trim().match(/:(\d+)$/);
+  if (!match) {
+    return null;
+  }
+  const parsed = Number.parseInt(match[1] ?? "", 10);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function shouldHideSteadyStateEvent(message: string): boolean {
+  return /steady state/i.test(message);
+}
+
+function normalizeAwsLogsConfig(containerDefinition?: EcsContainerDefinition): {
+  supported: boolean;
+  reason?: string | null;
+  logGroupName?: string | null;
+  logRegion?: string | null;
+  logStreamPrefix?: string | null;
+} {
+  const logDriver =
+    containerDefinition?.logConfiguration?.logDriver?.trim().toLowerCase() ||
+    "";
+  if (!logDriver) {
+    return {
+      supported: false,
+      reason: "이 컨테이너에는 CloudWatch Logs 설정이 없습니다.",
+    };
+  }
+  if (logDriver !== "awslogs") {
+    return {
+      supported: false,
+      reason: "v2 로그는 awslogs 드라이버만 지원합니다.",
+    };
+  }
+  const options = containerDefinition?.logConfiguration?.options ?? {};
+  const logGroupName = options["awslogs-group"]?.trim() || null;
+  const logRegion = options["awslogs-region"]?.trim() || null;
+  const logStreamPrefix = options["awslogs-stream-prefix"]?.trim() || null;
+  if (!logGroupName || !logStreamPrefix) {
+    return {
+      supported: false,
+      reason: "CloudWatch Logs 그룹 또는 stream prefix가 설정되지 않았습니다.",
+    };
+  }
+  return {
+    supported: true,
+    logGroupName,
+    logRegion,
+    logStreamPrefix,
+  };
+}
+
+function summarizeEcsActionContainers(
+  taskDefinition?: EcsTaskDefinitionPayload["taskDefinition"],
+  runningTasks: AwsEcsServiceTaskSummary[] = [],
+): AwsEcsServiceActionContainerSummary[] {
+  return (taskDefinition?.containerDefinitions ?? [])
+    .map((container): AwsEcsServiceActionContainerSummary | null => {
+      const containerName = container.name?.trim() || "";
+      if (!containerName) {
+        return null;
+      }
+      const logSupport = normalizeAwsLogsConfig(container);
+      const execEnabled = runningTasks.some(
+        (task) =>
+          task.enableExecuteCommand &&
+          task.containers.some(
+            (taskContainer) =>
+              taskContainer.containerName === containerName &&
+              (taskContainer.runtimeId?.trim() || "").length > 0,
+          ),
+      );
+      return {
+        containerName,
+        ports: normalizeContainerTaskDefinitionPorts(container),
+        execEnabled,
+        logSupport: {
+          containerName,
+          supported: logSupport.supported,
+          reason: logSupport.reason ?? null,
+          logGroupName: logSupport.logGroupName ?? null,
+          logRegion: logSupport.logRegion ?? null,
+          logStreamPrefix: logSupport.logStreamPrefix ?? null,
+        },
+      };
+    })
+    .filter((value): value is AwsEcsServiceActionContainerSummary => value !== null)
+    .sort((left, right) => left.containerName.localeCompare(right.containerName));
+}
+
+function parseTaskIdFromLogStreamName(logStreamName: string): string | null {
+  const trimmed = logStreamName.trim();
+  if (!trimmed) {
+    return null;
+  }
+  const segments = trimmed.split("/").filter(Boolean);
+  return segments.at(-1) ?? null;
+}
+
+function pickLatestMetricValue(
+  metricResult: NonNullable<CloudWatchGetMetricDataPayload["MetricDataResults"]>[number],
+): number | null {
+  const values = metricResult.Values ?? [];
+  if (values.length === 0) {
+    return null;
+  }
+  const timestamps = metricResult.Timestamps ?? [];
+  if (timestamps.length !== values.length || timestamps.length === 0) {
+    return typeof values[0] === "number" ? values[0] : null;
+  }
+
+  let latestIndex = 0;
+  let latestTime = Number.NEGATIVE_INFINITY;
+  for (let index = 0; index < timestamps.length; index += 1) {
+    const timestamp = Date.parse(timestamps[index] ?? "");
+    if (!Number.isNaN(timestamp) && timestamp > latestTime) {
+      latestTime = timestamp;
+      latestIndex = index;
+    }
+  }
+
+  return typeof values[latestIndex] === "number" ? values[latestIndex] : null;
+}
+
+function normalizeMetricHistory(
+  metricResult: NonNullable<
+    CloudWatchGetMetricDataPayload["MetricDataResults"]
+  >[number],
+): AwsMetricHistoryPoint[] {
+  const timestamps = metricResult.Timestamps ?? [];
+  const values = metricResult.Values ?? [];
+  if (timestamps.length === 0 || timestamps.length !== values.length) {
+    return [];
+  }
+
+  const pointsByTimestamp = new Map<string, AwsMetricHistoryPoint>();
+  for (let index = 0; index < timestamps.length; index += 1) {
+    const timestamp = timestamps[index] ?? "";
+    const timestampMs = Date.parse(timestamp);
+    const value = values[index];
+    if (Number.isNaN(timestampMs) || typeof value !== "number") {
+      continue;
+    }
+    const normalizedTimestamp = new Date(timestampMs).toISOString();
+    pointsByTimestamp.set(normalizedTimestamp, {
+      timestamp: normalizedTimestamp,
+      value,
+    });
+  }
+
+  return [...pointsByTimestamp.values()].sort(
+    (left, right) =>
+      Date.parse(left.timestamp) - Date.parse(right.timestamp),
+  );
 }
 
 export interface AwsSendSshPublicKeyInput {
@@ -708,6 +1237,1178 @@ export class AwsService {
         left.name.localeCompare(right.name) ||
         left.instanceId.localeCompare(right.instanceId),
     );
+  }
+
+  async listEcsClusters(
+    profileName: string,
+    region: string,
+  ): Promise<AwsEcsClusterListItem[]> {
+    await this.ensureAwsCliAvailable();
+
+    const clusterArns: string[] = [];
+    let nextToken: string | undefined;
+    do {
+      const args = [
+        "ecs",
+        "list-clusters",
+        "--profile",
+        profileName,
+        "--region",
+        region,
+        "--output",
+        "json",
+      ];
+      if (nextToken) {
+        args.push("--starting-token", nextToken);
+      }
+      const result = await this.runResolvedCommand("aws", args, 60_000);
+      if (result.exitCode !== 0) {
+        throw normalizeAwsCliError(
+          result.stderr,
+          "ECS 클러스터 목록을 읽지 못했습니다.",
+        );
+      }
+      const payload = parseJson<EcsListClustersPayload>(
+        result.stdout,
+        "ECS 클러스터 목록 응답을 해석하지 못했습니다.",
+      );
+      clusterArns.push(
+        ...(payload.clusterArns ?? [])
+          .map((value) => value.trim())
+          .filter(Boolean),
+      );
+      nextToken = payload.nextToken?.trim() || undefined;
+    } while (nextToken);
+
+    if (clusterArns.length === 0) {
+      return [];
+    }
+
+    const result = await this.runResolvedCommand(
+      "aws",
+      [
+        "ecs",
+        "describe-clusters",
+        "--profile",
+        profileName,
+        "--region",
+        region,
+        "--clusters",
+        ...clusterArns,
+        "--output",
+        "json",
+      ],
+      60_000,
+    );
+    if (result.exitCode !== 0) {
+      throw normalizeAwsCliError(
+        result.stderr,
+        "ECS 클러스터 상세 정보를 읽지 못했습니다.",
+      );
+    }
+    const payload = parseJson<EcsDescribeClustersPayload>(
+      result.stdout,
+      "ECS 클러스터 상세 응답을 해석하지 못했습니다.",
+    );
+
+    return (payload.clusters ?? [])
+      .map((cluster) => {
+        const clusterArn = cluster.clusterArn?.trim() ?? "";
+        if (!clusterArn) {
+          return null;
+        }
+        const clusterName =
+          cluster.clusterName?.trim() || parseClusterNameFromArn(clusterArn);
+        return {
+          clusterArn,
+          clusterName,
+          status: cluster.status?.trim() || "UNKNOWN",
+          activeServicesCount: cluster.activeServicesCount ?? 0,
+          runningTasksCount: cluster.runningTasksCount ?? 0,
+          pendingTasksCount: cluster.pendingTasksCount ?? 0,
+        } satisfies AwsEcsClusterListItem;
+      })
+      .filter((value): value is AwsEcsClusterListItem => value !== null)
+      .sort(
+        (left, right) =>
+          left.clusterName.localeCompare(right.clusterName) ||
+          left.clusterArn.localeCompare(right.clusterArn),
+      );
+  }
+
+  private async loadEcsServiceUtilizationMetrics(input: {
+    profileName: string;
+    region: string;
+    clusterName: string;
+    serviceNames: string[];
+  }): Promise<{
+    metricsByServiceName: Map<string, EcsServiceUtilizationMetrics>;
+    warning: string | null;
+  }> {
+    const metricsByServiceName = new Map<string, EcsServiceUtilizationMetrics>(
+      input.serviceNames.map((serviceName) => [
+        serviceName,
+        {
+          cpuUtilizationPercent: null,
+          memoryUtilizationPercent: null,
+          cpuHistory: [],
+          memoryHistory: [],
+        },
+      ]),
+    );
+
+    if (input.serviceNames.length === 0) {
+      return { metricsByServiceName, warning: null };
+    }
+
+    try {
+      const endTime = new Date();
+      const startTime = new Date(endTime.getTime() - 10 * 60 * 1000);
+      let offset = 0;
+      for (const serviceChunk of chunk(input.serviceNames, 50)) {
+        const idToMetric = new Map<
+          string,
+          { serviceName: string; kind: "cpu" | "memory" }
+        >();
+        const metricQueries = serviceChunk.flatMap((serviceName, index) => {
+          const queryIndex = offset + index;
+          const cpuId = `cpu${queryIndex}`;
+          const memoryId = `mem${queryIndex}`;
+          idToMetric.set(cpuId, { serviceName, kind: "cpu" });
+          idToMetric.set(memoryId, { serviceName, kind: "memory" });
+          return [
+            {
+              Id: cpuId,
+              MetricStat: {
+                Metric: {
+                  Namespace: "AWS/ECS",
+                  MetricName: "CPUUtilization",
+                  Dimensions: [
+                    { Name: "ClusterName", Value: input.clusterName },
+                    { Name: "ServiceName", Value: serviceName },
+                  ],
+                },
+                Period: 60,
+                Stat: "Average",
+              },
+              ReturnData: true,
+            },
+            {
+              Id: memoryId,
+              MetricStat: {
+                Metric: {
+                  Namespace: "AWS/ECS",
+                  MetricName: "MemoryUtilization",
+                  Dimensions: [
+                    { Name: "ClusterName", Value: input.clusterName },
+                    { Name: "ServiceName", Value: serviceName },
+                  ],
+                },
+                Period: 60,
+                Stat: "Average",
+              },
+              ReturnData: true,
+            },
+          ];
+        });
+
+        const result = await this.runResolvedCommand(
+          "aws",
+          [
+            "cloudwatch",
+            "get-metric-data",
+            "--profile",
+            input.profileName,
+            "--region",
+            input.region,
+            "--start-time",
+            startTime.toISOString(),
+            "--end-time",
+            endTime.toISOString(),
+            "--scan-by",
+            "TimestampDescending",
+            "--metric-data-queries",
+            JSON.stringify(metricQueries),
+            "--output",
+            "json",
+          ],
+          60_000,
+        );
+        if (result.exitCode !== 0) {
+          throw normalizeAwsCliError(
+            result.stderr,
+            "ECS 현재 사용량 지표를 읽지 못했습니다.",
+          );
+        }
+
+        const payload = parseJson<CloudWatchGetMetricDataPayload>(
+          result.stdout,
+          "ECS 현재 사용량 지표 응답을 해석하지 못했습니다.",
+        );
+
+        for (const metricResult of payload.MetricDataResults ?? []) {
+          const resultId = metricResult.Id?.trim() ?? "";
+          const metricInfo = idToMetric.get(resultId);
+          if (!metricInfo) {
+            continue;
+          }
+          const existing = metricsByServiceName.get(metricInfo.serviceName);
+          if (!existing) {
+            continue;
+          }
+          const history = normalizeMetricHistory(metricResult);
+          const value =
+            history[history.length - 1]?.value ??
+            pickLatestMetricValue(metricResult);
+          if (metricInfo.kind === "cpu") {
+            existing.cpuUtilizationPercent = value;
+            existing.cpuHistory = history;
+          } else {
+            existing.memoryUtilizationPercent = value;
+            existing.memoryHistory = history;
+          }
+        }
+
+        offset += serviceChunk.length;
+      }
+
+      return { metricsByServiceName, warning: null };
+    } catch {
+      return {
+        metricsByServiceName,
+        warning:
+          "현재 사용량 지표를 읽지 못해 일부 서비스는 사용률이 표시되지 않을 수 있습니다.",
+      };
+    }
+  }
+
+  private async listEcsServiceNames(input: {
+    profileName: string;
+    region: string;
+    clusterArn: string;
+  }): Promise<string[]> {
+    const serviceArns: string[] = [];
+    let nextToken: string | undefined;
+    do {
+      const args = [
+        "ecs",
+        "list-services",
+        "--profile",
+        input.profileName,
+        "--region",
+        input.region,
+        "--cluster",
+        input.clusterArn,
+        "--output",
+        "json",
+      ];
+      if (nextToken) {
+        args.push("--starting-token", nextToken);
+      }
+      const result = await this.runResolvedCommand("aws", args, 60_000);
+      if (result.exitCode !== 0) {
+        throw normalizeAwsCliError(
+          result.stderr,
+          "ECS 서비스 목록을 읽지 못했습니다.",
+        );
+      }
+      const payload = parseJson<EcsListServicesPayload>(
+        result.stdout,
+        "ECS 서비스 목록 응답을 해석하지 못했습니다.",
+      );
+      serviceArns.push(
+        ...(payload.serviceArns ?? [])
+          .map((value) => value.trim())
+          .filter(Boolean),
+      );
+      nextToken = payload.nextToken?.trim() || undefined;
+    } while (nextToken);
+
+    return [...new Set(serviceArns.map(parseServiceNameFromArn).filter(Boolean))];
+  }
+
+  private async describeEcsServices(input: {
+    profileName: string;
+    region: string;
+    clusterArn: string;
+    serviceNames: string[];
+  }): Promise<NonNullable<EcsDescribeServicesPayload["services"]>> {
+    const services: NonNullable<EcsDescribeServicesPayload["services"]> = [];
+    for (const serviceChunk of chunk(input.serviceNames, 10)) {
+      const result = await this.runResolvedCommand(
+        "aws",
+        [
+          "ecs",
+          "describe-services",
+          "--profile",
+          input.profileName,
+          "--region",
+          input.region,
+          "--cluster",
+          input.clusterArn,
+          "--services",
+          ...serviceChunk,
+          "--output",
+          "json",
+        ],
+        60_000,
+      );
+      if (result.exitCode !== 0) {
+        throw normalizeAwsCliError(
+          result.stderr,
+          "ECS 서비스 상세 정보를 읽지 못했습니다.",
+        );
+      }
+      const payload = parseJson<EcsDescribeServicesPayload>(
+        result.stdout,
+        "ECS 서비스 상세 응답을 해석하지 못했습니다.",
+      );
+      services.push(...(payload.services ?? []));
+    }
+    return services;
+  }
+
+  private async describeTaskDefinitions(
+    profileName: string,
+    region: string,
+    taskDefinitionArns: string[],
+  ): Promise<Map<string, EcsTaskDefinitionPayload["taskDefinition"]>> {
+    const taskDefinitionByArn = new Map<
+      string,
+      EcsTaskDefinitionPayload["taskDefinition"]
+    >();
+    await Promise.all(
+      taskDefinitionArns.map(async (taskDefinitionArn) => {
+        const result = await this.runResolvedCommand(
+          "aws",
+          [
+            "ecs",
+            "describe-task-definition",
+            "--profile",
+            profileName,
+            "--region",
+            region,
+            "--task-definition",
+            taskDefinitionArn,
+            "--output",
+            "json",
+          ],
+          60_000,
+        );
+        if (result.exitCode !== 0) {
+          throw normalizeAwsCliError(
+            result.stderr,
+            "ECS task definition 정보를 읽지 못했습니다.",
+          );
+        }
+        const payload = parseJson<EcsTaskDefinitionPayload>(
+          result.stdout,
+          "ECS task definition 응답을 해석하지 못했습니다.",
+        );
+        taskDefinitionByArn.set(taskDefinitionArn, payload.taskDefinition);
+      }),
+    );
+    return taskDefinitionByArn;
+  }
+
+  private async listRunningEcsTaskArns(input: {
+    profileName: string;
+    region: string;
+    clusterArn: string;
+    serviceName: string;
+  }): Promise<string[]> {
+    const taskArns: string[] = [];
+    let nextToken: string | undefined;
+
+    do {
+      const result = await this.runResolvedCommand(
+        "aws",
+        [
+          "ecs",
+          "list-tasks",
+          "--profile",
+          input.profileName,
+          "--region",
+          input.region,
+          "--cluster",
+          input.clusterArn,
+          "--service-name",
+          input.serviceName,
+          "--desired-status",
+          "RUNNING",
+          ...(nextToken ? ["--next-token", nextToken] : []),
+          "--output",
+          "json",
+        ],
+        60_000,
+      );
+      if (result.exitCode !== 0) {
+        throw normalizeAwsCliError(
+          result.stderr,
+          "ECS task 목록을 읽지 못했습니다.",
+        );
+      }
+      const payload = parseJson<EcsListTasksPayload>(
+        result.stdout,
+        "ECS task 목록 응답을 해석하지 못했습니다.",
+      );
+      taskArns.push(
+        ...(payload.taskArns ?? [])
+          .map((value) => value.trim())
+          .filter(Boolean),
+      );
+      nextToken = payload.nextToken?.trim() || undefined;
+    } while (nextToken);
+
+    return [...new Set(taskArns)];
+  }
+
+  private async describeEcsTasks(input: {
+    profileName: string;
+    region: string;
+    clusterArn: string;
+    taskArns: string[];
+  }): Promise<AwsEcsServiceTaskSummary[]> {
+    if (input.taskArns.length === 0) {
+      return [];
+    }
+    const tasks: AwsEcsServiceTaskSummary[] = [];
+    for (const taskChunk of chunk(input.taskArns, 100)) {
+      const result = await this.runResolvedCommand(
+        "aws",
+        [
+          "ecs",
+          "describe-tasks",
+          "--profile",
+          input.profileName,
+          "--region",
+          input.region,
+          "--cluster",
+          input.clusterArn,
+          "--tasks",
+          ...taskChunk,
+          "--output",
+          "json",
+        ],
+        60_000,
+      );
+      if (result.exitCode !== 0) {
+        throw normalizeAwsCliError(
+          result.stderr,
+          "ECS task 상세 정보를 읽지 못했습니다.",
+        );
+      }
+      const payload = parseJson<EcsDescribeTasksPayload>(
+        result.stdout,
+        "ECS task 상세 응답을 해석하지 못했습니다.",
+      );
+      tasks.push(
+        ...((payload.tasks ?? [])
+          .map((task): AwsEcsServiceTaskSummary | null => {
+            const taskArn = task.taskArn?.trim() || "";
+            if (!taskArn) {
+              return null;
+            }
+            return {
+              taskArn,
+              taskId: parseTaskIdFromArn(taskArn),
+              lastStatus: task.lastStatus?.trim() || null,
+              enableExecuteCommand: task.enableExecuteCommand === true,
+              containers: (task.containers ?? []).flatMap((container) => {
+                const containerName = container.name?.trim() || "";
+                if (!containerName) {
+                  return [];
+                }
+                return [
+                  {
+                    containerName,
+                    lastStatus: container.lastStatus?.trim() || null,
+                    runtimeId: container.runtimeId?.trim() || null,
+                  },
+                ];
+              }),
+            };
+          })
+          .filter((value): value is AwsEcsServiceTaskSummary => value !== null)),
+      );
+    }
+    return tasks.sort((left, right) => left.taskId.localeCompare(right.taskId));
+  }
+
+  private async loadEcsServiceContext(input: {
+    profileName: string;
+    region: string;
+    clusterArn: string;
+    serviceName: string;
+  }): Promise<{
+    service: NonNullable<EcsDescribeServicesPayload["services"]>[number];
+    taskDefinition: EcsTaskDefinitionPayload["taskDefinition"] | undefined;
+    runningTasks: AwsEcsServiceTaskSummary[];
+  }> {
+    const services = await this.describeEcsServices({
+      profileName: input.profileName,
+      region: input.region,
+      clusterArn: input.clusterArn,
+      serviceNames: [input.serviceName],
+    });
+    const service = services.find(
+      (item) =>
+        (item.serviceName?.trim() ||
+          parseServiceNameFromArn(item.serviceArn?.trim() || "")) ===
+        input.serviceName,
+    );
+    if (!service) {
+      throw new Error("선택한 ECS 서비스를 찾지 못했습니다.");
+    }
+
+    const taskDefinitionArn = service.taskDefinition?.trim() || "";
+    const taskDefinitions = await this.describeTaskDefinitions(
+      input.profileName,
+      input.region,
+      taskDefinitionArn ? [taskDefinitionArn] : [],
+    );
+    const runningTaskArns = await this.listRunningEcsTaskArns(input);
+    const runningTasks = await this.describeEcsTasks({
+      profileName: input.profileName,
+      region: input.region,
+      clusterArn: input.clusterArn,
+      taskArns: runningTaskArns,
+    });
+
+    return {
+      service,
+      taskDefinition: taskDefinitionArn
+        ? taskDefinitions.get(taskDefinitionArn)
+        : undefined,
+      runningTasks,
+    };
+  }
+
+  async listEcsTaskTunnelServices(
+    profileName: string,
+    region: string,
+    clusterArn: string,
+  ): Promise<AwsEcsTaskTunnelServiceSummary[]> {
+    await this.ensureAwsCliAvailable();
+    const serviceNames = await this.listEcsServiceNames({
+      profileName,
+      region,
+      clusterArn,
+    });
+    const services = await this.describeEcsServices({
+      profileName,
+      region,
+      clusterArn,
+      serviceNames,
+    });
+    return services
+      .map((service) => {
+        const serviceName = service.serviceName?.trim() || service.serviceArn?.trim() || "";
+        if (!serviceName) {
+          return null;
+        }
+        return {
+          serviceName,
+          status: service.status?.trim() || "UNKNOWN",
+          desiredCount: service.desiredCount ?? 0,
+          runningCount: service.runningCount ?? 0,
+          pendingCount: service.pendingCount ?? 0,
+        } satisfies AwsEcsTaskTunnelServiceSummary;
+      })
+      .filter((value): value is AwsEcsTaskTunnelServiceSummary => value !== null)
+      .sort((left, right) => left.serviceName.localeCompare(right.serviceName));
+  }
+
+  async describeEcsTaskTunnelService(
+    profileName: string,
+    region: string,
+    clusterArn: string,
+    serviceName: string,
+  ): Promise<AwsEcsTaskTunnelServiceDetails> {
+    await this.ensureAwsCliAvailable();
+    const services = await this.describeEcsServices({
+      profileName,
+      region,
+      clusterArn,
+      serviceNames: [serviceName],
+    });
+    const service = services.find(
+      (item) =>
+        (item.serviceName?.trim() || parseServiceNameFromArn(item.serviceArn?.trim() || "")) === serviceName,
+    );
+    if (!service) {
+      throw new Error("선택한 ECS 서비스를 찾지 못했습니다.");
+    }
+
+    const taskDefinitionArn = service.taskDefinition?.trim();
+    if (!taskDefinitionArn) {
+      return {
+        serviceName,
+        containers: [],
+      };
+    }
+    const taskDefinitions = await this.describeTaskDefinitions(
+      profileName,
+      region,
+      [taskDefinitionArn],
+    );
+    const taskDefinition = taskDefinitions.get(taskDefinitionArn);
+    return {
+      serviceName,
+      containers: (taskDefinition?.containerDefinitions ?? [])
+        .map((container): AwsEcsTaskTunnelContainerSummary | null => {
+          const containerName = container.name?.trim() || "";
+          if (!containerName) {
+            return null;
+          }
+          return {
+            containerName,
+            ports: normalizeContainerTaskDefinitionPorts(container),
+          };
+        })
+        .filter((value): value is AwsEcsTaskTunnelContainerSummary => value !== null)
+        .sort((left, right) => left.containerName.localeCompare(right.containerName)),
+    };
+  }
+
+  async describeEcsServiceActionContext(
+    profileName: string,
+    region: string,
+    clusterArn: string,
+    serviceName: string,
+  ): Promise<AwsEcsServiceActionContext> {
+    await this.ensureAwsCliAvailable();
+    const { service, taskDefinition, runningTasks } = await this.loadEcsServiceContext({
+      profileName,
+      region,
+      clusterArn,
+      serviceName,
+    });
+    const serviceArn = service.serviceArn?.trim() || "";
+    if (!serviceArn) {
+      throw new Error("선택한 ECS 서비스를 찾지 못했습니다.");
+    }
+    return {
+      serviceName,
+      serviceArn,
+      taskDefinitionArn: service.taskDefinition?.trim() || null,
+      taskDefinitionRevision: taskDefinition?.revision ?? null,
+      containers: summarizeEcsActionContainers(taskDefinition, runningTasks),
+      runningTasks,
+      deployments: normalizeEcsDeployments(service.deployments ?? []).slice(0, 3),
+      events: normalizeEcsEvents(service.events ?? [])
+        .filter((event) => !shouldHideSteadyStateEvent(event.message))
+        .slice(0, 5),
+    };
+  }
+
+  async resolveEcsTaskTunnelTarget(input: {
+    profileName: string;
+    region: string;
+    clusterArn: string;
+    serviceName: string;
+    containerName: string;
+  }): Promise<string> {
+    await this.ensureAwsCliAvailable();
+    const listResult = await this.runResolvedCommand(
+      "aws",
+      [
+        "ecs",
+        "list-tasks",
+        "--profile",
+        input.profileName,
+        "--region",
+        input.region,
+        "--cluster",
+        input.clusterArn,
+        "--service-name",
+        input.serviceName,
+        "--desired-status",
+        "RUNNING",
+        "--output",
+        "json",
+      ],
+      60_000,
+    );
+    if (listResult.exitCode !== 0) {
+      throw normalizeAwsCliError(
+        listResult.stderr,
+        "ECS task 목록을 읽지 못했습니다.",
+      );
+    }
+    const listPayload = parseJson<EcsListTasksPayload>(
+      listResult.stdout,
+      "ECS task 목록 응답을 해석하지 못했습니다.",
+    );
+    const taskArn = (listPayload.taskArns ?? [])
+      .map((value) => value.trim())
+      .find(Boolean);
+    if (!taskArn) {
+      throw new Error("이 서비스에 실행 중인 task가 없습니다.");
+    }
+
+    const describeResult = await this.runResolvedCommand(
+      "aws",
+      [
+        "ecs",
+        "describe-tasks",
+        "--profile",
+        input.profileName,
+        "--region",
+        input.region,
+        "--cluster",
+        input.clusterArn,
+        "--tasks",
+        taskArn,
+        "--output",
+        "json",
+      ],
+      60_000,
+    );
+    if (describeResult.exitCode !== 0) {
+      throw normalizeAwsCliError(
+        describeResult.stderr,
+        "ECS task 상세 정보를 읽지 못했습니다.",
+      );
+    }
+    const describePayload = parseJson<EcsDescribeTasksPayload>(
+      describeResult.stdout,
+      "ECS task 상세 응답을 해석하지 못했습니다.",
+    );
+    const task = (describePayload.tasks ?? []).find(
+      (item) => item.taskArn?.trim() === taskArn,
+    );
+    if (!task) {
+      throw new Error("실행 중인 ECS task 상세 정보를 찾지 못했습니다.");
+    }
+    if (task.enableExecuteCommand !== true) {
+      throw new Error(
+        "이 task는 ECS Exec가 활성화되어 있지 않아 터널을 열 수 없습니다.",
+      );
+    }
+
+    const container = (task.containers ?? []).find(
+      (item) => item.name?.trim() === input.containerName,
+    );
+    if (!container) {
+      throw new Error("선택한 컨테이너를 실행 중인 task에서 찾지 못했습니다.");
+    }
+    const runtimeId = container.runtimeId?.trim() || "";
+    if (!runtimeId) {
+      throw new Error("선택한 컨테이너의 runtime ID를 확인하지 못했습니다.");
+    }
+
+    const clusterName = parseClusterNameFromArn(input.clusterArn);
+    const taskId = parseTaskIdFromArn(taskArn);
+    if (!clusterName || !taskId) {
+      throw new Error("ECS task target을 구성하지 못했습니다.");
+    }
+    return `ecs:${clusterName}_${taskId}_${runtimeId}`;
+  }
+
+  async resolveEcsTaskTunnelTargetForTask(input: {
+    profileName: string;
+    region: string;
+    clusterArn: string;
+    taskArn: string;
+    containerName: string;
+  }): Promise<string> {
+    await this.ensureAwsCliAvailable();
+    const tasks = await this.describeEcsTasks({
+      profileName: input.profileName,
+      region: input.region,
+      clusterArn: input.clusterArn,
+      taskArns: [input.taskArn],
+    });
+    const task = tasks.find((item) => item.taskArn === input.taskArn);
+    if (!task) {
+      throw new Error("선택한 ECS task 상세 정보를 찾지 못했습니다.");
+    }
+    if (!task.enableExecuteCommand) {
+      throw new Error(
+        "이 task는 ECS Exec가 활성화되어 있지 않아 터널을 열 수 없습니다.",
+      );
+    }
+    const container = task.containers.find(
+      (item) => item.containerName === input.containerName,
+    );
+    if (!container) {
+      throw new Error("선택한 컨테이너를 실행 중인 task에서 찾지 못했습니다.");
+    }
+    const runtimeId = container.runtimeId?.trim() || "";
+    if (!runtimeId) {
+      throw new Error("선택한 컨테이너의 runtime ID를 확인하지 못했습니다.");
+    }
+
+    const clusterName = parseClusterNameFromArn(input.clusterArn);
+    const taskId = parseTaskIdFromArn(input.taskArn);
+    if (!clusterName || !taskId) {
+      throw new Error("ECS task target을 구성하지 못했습니다.");
+    }
+    return `ecs:${clusterName}_${taskId}_${runtimeId}`;
+  }
+
+  async loadEcsServiceLogs(input: {
+    profileName: string;
+    region: string;
+    clusterArn: string;
+    serviceName: string;
+    taskArn?: string | null;
+    containerName?: string | null;
+    followCursor?: string | null;
+    startTime?: string | null;
+    endTime?: string | null;
+    limit?: number;
+  }): Promise<AwsEcsServiceLogsSnapshot> {
+    await this.ensureAwsCliAvailable();
+    const context = await this.describeEcsServiceActionContext(
+      input.profileName,
+      input.region,
+      input.clusterArn,
+      input.serviceName,
+    );
+
+    const taskOptions = context.runningTasks.map((task) => ({
+      taskArn: task.taskArn,
+      taskId: task.taskId,
+    }));
+    const containerOptions = context.containers.map(
+      (container) => container.containerName,
+    );
+    const matchingTasks = context.runningTasks.filter(
+      (task) => !input.taskArn || task.taskArn === input.taskArn,
+    );
+    const taskIds = new Set(matchingTasks.map((task) => task.taskId));
+    const matchingContainers = context.containers.filter(
+      (container) =>
+        !input.containerName || container.containerName === input.containerName,
+    );
+    const supportedContainers = matchingContainers.filter(
+      (container) =>
+        container.logSupport.supported &&
+        Boolean(container.logSupport.logGroupName?.trim()) &&
+        Boolean(container.logSupport.logStreamPrefix?.trim()),
+    );
+
+    if (matchingContainers.length === 0) {
+      return {
+        serviceName: input.serviceName,
+        entries: [],
+        taskOptions,
+        containerOptions,
+        followCursor: input.followCursor ?? null,
+        loadedAt: new Date().toISOString(),
+        unsupportedReason: "선택한 컨테이너 로그 대상을 찾지 못했습니다.",
+      };
+    }
+
+    if (supportedContainers.length === 0) {
+      return {
+        serviceName: input.serviceName,
+        entries: [],
+        taskOptions,
+        containerOptions,
+        followCursor: input.followCursor ?? null,
+        loadedAt: new Date().toISOString(),
+        unsupportedReason:
+          matchingContainers[0]?.logSupport.reason ??
+          "v2 로그는 awslogs 드라이버만 지원합니다.",
+      };
+    }
+
+    if (input.taskArn && matchingTasks.length === 0) {
+      return {
+        serviceName: input.serviceName,
+        entries: [],
+        taskOptions,
+        containerOptions,
+        followCursor: input.followCursor ?? null,
+        loadedAt: new Date().toISOString(),
+        unsupportedReason: null,
+      };
+    }
+
+    const entries: AwsEcsServiceLogEntry[] = [];
+    const limit = input.limit ?? 5000;
+    const absoluteStartTimestamp = input.startTime
+      ? Date.parse(input.startTime)
+      : Number.NaN;
+    const absoluteEndTimestamp = input.endTime
+      ? Date.parse(input.endTime)
+      : Number.NaN;
+    const followTimestamp = input.followCursor
+      ? Date.parse(input.followCursor)
+      : Number.NaN;
+    const useAbsoluteRange =
+      Number.isFinite(absoluteStartTimestamp) &&
+      Number.isFinite(absoluteEndTimestamp);
+    if (useAbsoluteRange && absoluteEndTimestamp < absoluteStartTimestamp) {
+      throw new Error("종료 시간이 시작 시간보다 빠를 수 없습니다.");
+    }
+    const startTimeMs = useAbsoluteRange
+      ? absoluteStartTimestamp
+      : Number.isFinite(followTimestamp)
+        ? followTimestamp + 1
+        : Date.now() - ECS_LOG_INITIAL_LOOKBACK_MS;
+    const endTimeMs = useAbsoluteRange ? absoluteEndTimestamp : null;
+
+    for (const container of supportedContainers) {
+      const logGroupName = container.logSupport.logGroupName?.trim();
+      const logRegion = container.logSupport.logRegion?.trim() || input.region;
+      const logStreamPrefix = container.logSupport.logStreamPrefix?.trim();
+      if (!logGroupName || !logStreamPrefix) {
+        continue;
+      }
+      const result = await this.runResolvedCommand(
+        "aws",
+        [
+          "logs",
+          "filter-log-events",
+          "--profile",
+          input.profileName,
+          "--region",
+          logRegion,
+          "--log-group-name",
+          logGroupName,
+          "--log-stream-name-prefix",
+          `${logStreamPrefix}/${container.containerName}/`,
+          "--limit",
+          String(Math.max(25, Math.ceil(limit / supportedContainers.length))),
+          "--start-time",
+          String(startTimeMs),
+          ...(typeof endTimeMs === "number"
+            ? ["--end-time", String(endTimeMs)]
+            : []),
+          "--output",
+          "json",
+        ],
+        60_000,
+      );
+      if (result.exitCode !== 0) {
+        throw normalizeAwsCliError(
+          result.stderr,
+          "CloudWatch Logs를 읽지 못했습니다.",
+        );
+      }
+      const payload = parseJson<CloudWatchLogsFilterEventsPayload>(
+        result.stdout,
+        "CloudWatch Logs 응답을 해석하지 못했습니다.",
+      );
+      for (const event of payload.events ?? []) {
+        if (typeof event.timestamp !== "number") {
+          continue;
+        }
+        const logStreamName = event.logStreamName?.trim() || null;
+        const taskId = logStreamName
+          ? parseTaskIdFromLogStreamName(logStreamName)
+          : null;
+        if (taskIds.size > 0 && taskId && !taskIds.has(taskId)) {
+          continue;
+        }
+        entries.push({
+          id:
+            event.eventId?.trim() ||
+            `${event.timestamp}:${container.containerName}:${taskId ?? "task"}`,
+          timestamp: new Date(event.timestamp).toISOString(),
+          message: event.message ?? "",
+          ingestionTime:
+            typeof event.ingestionTime === "number"
+              ? new Date(event.ingestionTime).toISOString()
+              : null,
+          logStreamName,
+          taskId,
+          containerName: container.containerName,
+        });
+      }
+    }
+
+    entries.sort(
+      (left, right) =>
+        Date.parse(left.timestamp) - Date.parse(right.timestamp) ||
+        left.id.localeCompare(right.id),
+    );
+    const trimmed = entries.slice(-limit);
+    return {
+      serviceName: input.serviceName,
+      entries: trimmed,
+      taskOptions,
+      containerOptions,
+      followCursor:
+        trimmed[trimmed.length - 1]?.timestamp ?? input.followCursor ?? null,
+      loadedAt: new Date().toISOString(),
+      unsupportedReason: null,
+    };
+  }
+
+  async describeEcsClusterSnapshot(
+    profileName: string,
+    region: string,
+    clusterArn: string,
+  ): Promise<AwsEcsClusterSnapshot> {
+    await this.ensureAwsCliAvailable();
+
+    const clusterResult = await this.runResolvedCommand(
+      "aws",
+      [
+        "ecs",
+        "describe-clusters",
+        "--profile",
+        profileName,
+        "--region",
+        region,
+        "--clusters",
+        clusterArn,
+        "--output",
+        "json",
+      ],
+      60_000,
+    );
+    if (clusterResult.exitCode !== 0) {
+      throw normalizeAwsCliError(
+        clusterResult.stderr,
+        "ECS 클러스터 정보를 읽지 못했습니다.",
+      );
+    }
+    const clusterPayload = parseJson<EcsDescribeClustersPayload>(
+      clusterResult.stdout,
+      "ECS 클러스터 응답을 해석하지 못했습니다.",
+    );
+    const cluster = (clusterPayload.clusters ?? []).find(
+      (item) => item.clusterArn?.trim() === clusterArn,
+    );
+    if (!cluster?.clusterArn?.trim()) {
+      throw new Error("선택한 ECS 클러스터를 찾지 못했습니다.");
+    }
+
+    const serviceNames = await this.listEcsServiceNames({
+      profileName,
+      region,
+      clusterArn,
+    });
+
+    const servicesPayloads = await this.describeEcsServices({
+      profileName,
+      region,
+      clusterArn,
+      serviceNames,
+    });
+
+    const uniqueTaskDefinitionArns = [
+      ...new Set(
+        servicesPayloads
+          .map((service) => service.taskDefinition?.trim() ?? "")
+          .filter(Boolean),
+      ),
+    ];
+    const taskDefinitionByArn = await this.describeTaskDefinitions(
+      profileName,
+      region,
+      uniqueTaskDefinitionArns,
+    );
+
+    const services = servicesPayloads
+      .map((service): AwsEcsServiceSummary | null => {
+        const serviceArn = service.serviceArn?.trim() ?? "";
+        if (!serviceArn) {
+          return null;
+        }
+        const taskDefinitionArn = service.taskDefinition?.trim() || null;
+        const taskDefinition = taskDefinitionArn
+          ? taskDefinitionByArn.get(taskDefinitionArn)
+          : undefined;
+        const primaryDeployment = (service.deployments ?? []).find(
+          (deployment) => deployment.status?.trim().toUpperCase() === "PRIMARY",
+        );
+        return {
+          serviceArn,
+          serviceName: service.serviceName?.trim() || serviceArn,
+          status: service.status?.trim() || "UNKNOWN",
+          rolloutState: primaryDeployment?.rolloutState?.trim() || null,
+          rolloutStateReason:
+            primaryDeployment?.rolloutStateReason?.trim() || null,
+          desiredCount: service.desiredCount ?? 0,
+          runningCount: service.runningCount ?? 0,
+          pendingCount: service.pendingCount ?? 0,
+          launchType: service.launchType?.trim() || null,
+          capacityProviderSummary: formatCapacityProviderSummary(
+            service.capacityProviderStrategy ?? [],
+          ),
+          servicePorts: normalizeTaskDefinitionPorts(taskDefinition),
+          exposureKinds: normalizeServiceExposureKinds(service),
+          cpuUtilizationPercent: null,
+          memoryUtilizationPercent: null,
+          configuredCpu: normalizeTaskDefinitionCpu(taskDefinition),
+          configuredMemory: normalizeTaskDefinitionMemory(taskDefinition),
+          taskDefinitionArn,
+          taskDefinitionRevision: taskDefinition?.revision ?? null,
+          latestEventMessage:
+            service.events?.[0]?.message?.trim() || null,
+          deployments: normalizeEcsDeployments(service.deployments ?? []).slice(0, 3),
+          events: normalizeEcsEvents(service.events ?? [])
+            .filter((event) => !shouldHideSteadyStateEvent(event.message))
+            .slice(0, 5),
+        };
+      })
+      .filter((value): value is AwsEcsServiceSummary => value !== null)
+      .sort(
+        (left, right) =>
+          left.serviceName.localeCompare(right.serviceName) ||
+          left.serviceArn.localeCompare(right.serviceArn),
+      );
+
+    return {
+      profileName,
+      region,
+      cluster: {
+        clusterArn: cluster.clusterArn.trim(),
+        clusterName:
+          cluster.clusterName?.trim() ||
+          parseClusterNameFromArn(cluster.clusterArn),
+        status: cluster.status?.trim() || "UNKNOWN",
+        activeServicesCount: cluster.activeServicesCount ?? 0,
+        runningTasksCount: cluster.runningTasksCount ?? 0,
+        pendingTasksCount: cluster.pendingTasksCount ?? 0,
+      },
+      services,
+      metricsWarning: null,
+      loadedAt: new Date().toISOString(),
+    };
+  }
+
+  async describeEcsClusterUtilization(
+    profileName: string,
+    region: string,
+    clusterArn: string,
+  ): Promise<AwsEcsClusterUtilizationSnapshot> {
+    await this.ensureAwsCliAvailable();
+
+    const serviceNames = await this.listEcsServiceNames({
+      profileName,
+      region,
+      clusterArn,
+    });
+    const { metricsByServiceName, warning } =
+      await this.loadEcsServiceUtilizationMetrics({
+        profileName,
+        region,
+        clusterName: parseClusterNameFromArn(clusterArn),
+        serviceNames,
+      });
+
+    return {
+      loadedAt: new Date().toISOString(),
+      warning,
+      services: serviceNames.map((serviceName) => {
+        const metrics = metricsByServiceName.get(serviceName);
+        return {
+          serviceName,
+          cpuUtilizationPercent: metrics?.cpuUtilizationPercent ?? null,
+          memoryUtilizationPercent: metrics?.memoryUtilizationPercent ?? null,
+          cpuHistory: metrics?.cpuHistory ?? [],
+          memoryHistory: metrics?.memoryHistory ?? [],
+        };
+      }),
+    };
   }
 
   async describeEc2Instance(

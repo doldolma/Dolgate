@@ -1275,6 +1275,11 @@ export class CoreManager {
     cols: number;
     rows: number;
     title: string;
+    shellKind?: string;
+    executable?: string;
+    args?: string[];
+    env?: Record<string, string>;
+    workingDirectory?: string | null;
   }): Promise<{ sessionId: string }> {
     await this.start();
     const sessionId = randomUUID();
@@ -1284,6 +1289,7 @@ export class CoreManager {
       title: payload.title,
       source: "local",
       hostId: null,
+      shellKind: payload.shellKind?.trim() || undefined,
       sessionId,
       status: "connecting",
       lastEventAt: new Date().toISOString(),
@@ -1296,6 +1302,11 @@ export class CoreManager {
         cols: payload.cols,
         rows: payload.rows,
         title: payload.title,
+        shellKind: payload.shellKind?.trim() || undefined,
+        executable: payload.executable?.trim() || undefined,
+        args: payload.args?.filter((value) => value.trim().length > 0),
+        env: payload.env,
+        workingDirectory: payload.workingDirectory?.trim() || undefined,
       },
     });
     return { sessionId };
@@ -2003,6 +2014,7 @@ export class CoreManager {
         this.tabs.set(event.sessionId, {
           ...existing,
           status: nextStatus,
+          shellKind: resolvedLocalShellKind ?? existing.shellKind,
           errorMessage:
             event.type === "error"
               ? String(event.payload.message ?? "SSH error")
@@ -2301,6 +2313,9 @@ export class CoreManager {
   private getConnectionKindLabel(kind: SessionConnectionKind): string {
     if (kind === "aws-ssm") {
       return "AWS SSM";
+    }
+    if (kind === "aws-ecs-exec") {
+      return "AWS ECS Exec";
     }
     if (kind === "warpgate") {
       return "Warpgate";

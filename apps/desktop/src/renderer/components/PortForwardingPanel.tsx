@@ -1,6 +1,9 @@
 import { type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 import {
   isAwsEc2HostRecord,
+  isAwsEcsHostRecord,
+  isEcsTaskPortForwardDraft,
+  isEcsTaskPortForwardRuleRecord,
   isAwsSsmPortForwardDraft,
   isAwsSsmPortForwardRuleRecord,
   isContainerPortForwardDraft,
@@ -11,6 +14,8 @@ import {
   isWarpgateSshHostRecord
 } from '@shared';
 import type {
+  AwsEcsTaskTunnelContainerSummary,
+  AwsEcsTaskTunnelServiceSummary,
   HostContainerDetails,
   HostContainerSummary,
   HostRecord,
@@ -19,6 +24,7 @@ import type {
   PortForwardRuntimeRecord
 } from '@shared';
 import type {
+  HostContainersTabState,
   PendingContainersInteractiveAuth,
   PendingHostKeyPrompt,
   PendingPortForwardInteractiveAuth
@@ -26,10 +32,11 @@ import type {
 import { DialogBackdrop } from './DialogBackdrop';
 import { KnownHostPromptDialog } from './KnownHostPromptDialog';
 
-type ForwardTab = 'ssh' | 'aws-ssm' | 'container';
+type ForwardTab = 'ssh' | 'aws-ssm' | 'ecs-task' | 'container';
 
 interface PortForwardingPanelProps {
   hosts: HostRecord[];
+  containerTabs: HostContainersTabState[];
   rules: PortForwardRuleRecord[];
   runtimes: PortForwardRuntimeRecord[];
   interactiveAuth: PendingPortForwardInteractiveAuth | null;
@@ -52,6 +59,22 @@ interface InteractiveAuthFormProps {
 }
 
 type InteractivePromptResponses = Record<string, string>;
+
+interface EcsEphemeralRuntimeCard {
+  runtime: PortForwardRuntimeRecord;
+  host: HostRecord | null;
+  serviceName: string;
+  containerName: string;
+  targetPort: string;
+}
+
+interface ContainerEphemeralRuntimeCard {
+  runtime: PortForwardRuntimeRecord;
+  host: HostRecord | null;
+  containerName: string;
+  networkName: string;
+  targetPort: string;
+}
 
 type DiscoveryContainerStatusTone = 'running' | 'starting' | 'paused' | 'stopped';
 
@@ -141,6 +164,9 @@ function getContainerHostSecondaryLabel(host: HostRecord): string {
   if (isAwsEc2HostRecord(host)) {
     return `${host.awsProfileName} / ${host.awsRegion} / ${host.awsInstanceId}`;
   }
+  if (isAwsEcsHostRecord(host)) {
+    return `${host.awsProfileName} / ${host.awsRegion} / ${host.awsEcsClusterName}`;
+  }
   if (isWarpgateSshHostRecord(host)) {
     return `${host.warpgateUsername}:${host.warpgateTargetName}`;
   }
@@ -188,6 +214,19 @@ function emptyContainerDraft(hostId?: string): PortForwardDraft {
   };
 }
 
+function emptyEcsTaskDraft(hostId?: string): PortForwardDraft {
+  return {
+    transport: 'ecs-task',
+    label: '',
+    hostId: hostId ?? '',
+    bindAddress: '127.0.0.1',
+    bindPort: 0,
+    serviceName: '',
+    containerName: '',
+    targetPort: 0,
+  };
+}
+
 function toDraft(rule: PortForwardRuleRecord): PortForwardDraft {
   if (isAwsSsmPortForwardRuleRecord(rule)) {
     return {
@@ -213,6 +252,18 @@ function toDraft(rule: PortForwardRuleRecord): PortForwardDraft {
       containerRuntime: rule.containerRuntime,
       networkName: rule.networkName,
       targetPort: rule.targetPort
+    };
+  }
+  if (isEcsTaskPortForwardRuleRecord(rule)) {
+    return {
+      transport: 'ecs-task',
+      label: rule.label,
+      hostId: rule.hostId,
+      bindAddress: '127.0.0.1',
+      bindPort: rule.bindPort,
+      serviceName: rule.serviceName,
+      containerName: rule.containerName,
+      targetPort: rule.targetPort,
     };
   }
 
@@ -259,7 +310,10 @@ function tabTitle(tab: ForwardTab) {
     return 'SSH Forwarding';
   }
   if (tab === 'aws-ssm') {
-    return 'AWS SSM';
+    return 'AWS EC2';
+  }
+  if (tab === 'ecs-task') {
+    return 'ECS Task';
   }
   return 'Container Tunneling';
 }
@@ -269,7 +323,10 @@ function createButtonLabel(tab: ForwardTab) {
     return 'New SSH Forward';
   }
   if (tab === 'aws-ssm') {
-    return 'New AWS SSM Forward';
+    return 'New AWS EC2 Forward';
+  }
+  if (tab === 'ecs-task') {
+    return 'New ECS Task Tunnel';
   }
   return 'New Container Tunnel';
 }
@@ -279,7 +336,10 @@ function emptyStateTitle(tab: ForwardTab) {
     return '아직 저장한 SSH 포워딩 규칙이 없습니다.';
   }
   if (tab === 'aws-ssm') {
-    return '아직 저장한 AWS SSM 포워딩 규칙이 없습니다.';
+    return '아직 저장한 AWS EC2 포워딩 규칙이 없습니다.';
+  }
+  if (tab === 'ecs-task') {
+    return '아직 저장한 ECS Task 터널 규칙이 없습니다.';
   }
   return '아직 저장한 컨테이너 터널 규칙이 없습니다.';
 }
@@ -289,7 +349,10 @@ function emptyStateDescription(tab: ForwardTab) {
     return 'New SSH Forward를 눌러 첫 번째 SSH 포워딩 규칙을 만들어 보세요.';
   }
   if (tab === 'aws-ssm') {
-    return 'New AWS SSM Forward를 눌러 첫 번째 AWS SSM 포워딩 규칙을 만들어 보세요.';
+    return 'New AWS EC2 Forward를 눌러 첫 번째 AWS EC2 포워딩 규칙을 만들어 보세요.';
+  }
+  if (tab === 'ecs-task') {
+    return 'New ECS Task Tunnel을 눌러 첫 번째 ECS task 터널 규칙을 만들어 보세요.';
   }
   return 'New Container Tunnel을 눌러 첫 번째 컨테이너 터널 규칙을 만들어 보세요.';
 }
@@ -302,6 +365,9 @@ export function filterPortForwardRules(rules: PortForwardRuleRecord[], tab: Forw
     if (tab === 'aws-ssm') {
       return isAwsSsmPortForwardRuleRecord(rule);
     }
+    if (tab === 'ecs-task') {
+      return isEcsTaskPortForwardRuleRecord(rule);
+    }
     return isContainerPortForwardRuleRecord(rule);
   });
 }
@@ -312,6 +378,9 @@ export function getAvailablePortForwardHosts(hosts: HostRecord[], tab: ForwardTa
   }
   if (tab === 'aws-ssm') {
     return hosts.filter(isAwsEc2HostRecord);
+  }
+  if (tab === 'ecs-task') {
+    return hosts.filter(isAwsEcsHostRecord);
   }
   return hosts.filter((host) => isSshHostRecord(host) || isAwsEc2HostRecord(host) || isWarpgateSshHostRecord(host));
 }
@@ -488,6 +557,7 @@ function resolveDefaultTargetPort(details: HostContainerDetails, currentValue: n
 
 export function PortForwardingPanel({
   hosts,
+  containerTabs,
   rules,
   runtimes,
   interactiveAuth,
@@ -502,13 +572,25 @@ export function PortForwardingPanel({
 }: PortForwardingPanelProps) {
   const sshHosts = useMemo(() => getAvailablePortForwardHosts(hosts, 'ssh').filter(isSshHostRecord), [hosts]);
   const awsHosts = useMemo(() => getAvailablePortForwardHosts(hosts, 'aws-ssm').filter(isAwsEc2HostRecord), [hosts]);
-  const containerHosts = useMemo(() => getAvailablePortForwardHosts(hosts, 'container'), [hosts]);
+  const ecsHosts = useMemo(() => getAvailablePortForwardHosts(hosts, 'ecs-task').filter(isAwsEcsHostRecord), [hosts]);
+  const containerHosts = useMemo(
+    () => getAvailablePortForwardHosts(hosts, 'container').filter((host) => !isAwsEcsHostRecord(host)),
+    [hosts],
+  );
   const [activeTab, setActiveTab] = useState<ForwardTab>('ssh');
   const [editingRuleId, setEditingRuleId] = useState<string | null>(null);
   const [draft, setDraft] = useState<PortForwardDraft>(() => emptySshDraft(sshHosts[0]?.id));
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [ecsServicesLoading, setEcsServicesLoading] = useState(false);
+  const [ecsServicesError, setEcsServicesError] = useState<string | null>(null);
+  const [ecsServices, setEcsServices] = useState<AwsEcsTaskTunnelServiceSummary[]>([]);
+  const [ecsServiceDetailsLoading, setEcsServiceDetailsLoading] = useState(false);
+  const [ecsServiceDetails, setEcsServiceDetails] = useState<{
+    serviceName: string;
+    containers: AwsEcsTaskTunnelContainerSummary[];
+  } | null>(null);
   const [discoveryLoading, setDiscoveryLoading] = useState(false);
   const [discoveryError, setDiscoveryError] = useState<string | null>(null);
   const [discoveryProgressMessage, setDiscoveryProgressMessage] = useState<string | null>(null);
@@ -523,9 +605,84 @@ export function PortForwardingPanel({
   const discoveryDetailsRequestRef = useRef(0);
   const hostPickerRef = useRef<HTMLDivElement | null>(null);
   const containerPickerRef = useRef<HTMLDivElement | null>(null);
+  const ruleMap = useMemo(
+    () => new Map(rules.map((rule) => [rule.id, rule])),
+    [rules],
+  );
   const runtimeMap = useMemo(() => new Map(runtimes.map((runtime) => [runtime.ruleId, runtime])), [runtimes]);
   const visibleRules = useMemo(() => filterPortForwardRules(rules, activeTab), [activeTab, rules]);
+  const visibleEcsEphemeralRuntimes = useMemo(() => {
+    if (activeTab !== 'ecs-task') {
+      return [];
+    }
+    const next = new Map<string, EcsEphemeralRuntimeCard>();
+    for (const tab of containerTabs) {
+      if (tab.kind !== 'ecs-cluster') {
+        continue;
+      }
+      for (const tunnelState of Object.values(tab.ecsTunnelStatesByServiceName)) {
+        const persistedRuntime = tunnelState.runtime;
+        if (!persistedRuntime?.ruleId.startsWith('ecs-service-tunnel:')) {
+          continue;
+        }
+        const runtime = runtimeMap.get(persistedRuntime.ruleId) ?? persistedRuntime;
+        if (runtime.status === 'stopped' || ruleMap.has(runtime.ruleId) || next.has(runtime.ruleId)) {
+          continue;
+        }
+        next.set(runtime.ruleId, {
+          runtime,
+          host: hosts.find((host) => host.id === runtime.hostId) ?? null,
+          serviceName: tunnelState.serviceName,
+          containerName: tunnelState.containerName ?? '-',
+          targetPort: tunnelState.targetPort,
+        });
+      }
+    }
+    return Array.from(next.values()).sort((left, right) =>
+      `${left.serviceName}:${left.containerName}`.localeCompare(
+        `${right.serviceName}:${right.containerName}`,
+      ),
+    );
+  }, [activeTab, containerTabs, hosts, ruleMap, runtimeMap]);
+  const visibleContainerEphemeralRuntimes = useMemo(() => {
+    if (activeTab !== 'container') {
+      return [];
+    }
+    const next = new Map<string, ContainerEphemeralRuntimeCard>();
+    for (const tab of containerTabs) {
+      if (tab.kind !== 'host-containers') {
+        continue;
+      }
+      for (const tunnelState of Object.values(tab.containerTunnelStatesByContainerId)) {
+        const persistedRuntime = tunnelState.runtime;
+        if (!persistedRuntime?.ruleId.startsWith('container-service-tunnel:')) {
+          continue;
+        }
+        const runtime = runtimeMap.get(persistedRuntime.ruleId) ?? persistedRuntime;
+        if (runtime.status === 'stopped' || ruleMap.has(runtime.ruleId) || next.has(runtime.ruleId)) {
+          continue;
+        }
+        next.set(runtime.ruleId, {
+          runtime,
+          host: hosts.find((host) => host.id === runtime.hostId) ?? null,
+          containerName: tunnelState.containerName || tunnelState.containerId,
+          networkName: tunnelState.networkName,
+          targetPort: tunnelState.targetPort,
+        });
+      }
+    }
+    return Array.from(next.values()).sort((left, right) =>
+      `${left.containerName}:${left.networkName}`.localeCompare(
+        `${right.containerName}:${right.networkName}`,
+      ),
+    );
+  }, [activeTab, containerTabs, hosts, ruleMap, runtimeMap]);
+  const hasVisibleEntries =
+    visibleRules.length > 0 ||
+    visibleEcsEphemeralRuntimes.length > 0 ||
+    visibleContainerEphemeralRuntimes.length > 0;
   const containerDraft = isContainerPortForwardDraft(draft) ? draft : null;
+  const ecsTaskDraft = isEcsTaskPortForwardDraft(draft) ? draft : null;
   const shouldShowDiscoveryProgress = Boolean(discoveryProgressMessage) && (discoveryLoading || discoveryDetailsLoading);
   const selectedContainerSummary =
     containerDraft && containerDraft.containerId
@@ -540,6 +697,235 @@ export function PortForwardingPanel({
     () => discoveryDetails?.ports.filter((port) => port.protocol === 'tcp' && port.containerPort > 0) ?? [],
     [discoveryDetails]
   );
+  const selectedEcsHost = ecsTaskDraft ? ecsHosts.find((host) => host.id === ecsTaskDraft.hostId) ?? null : null;
+  const ecsContainerOptions = useMemo(
+    () => ecsServiceDetails?.containers ?? [],
+    [ecsServiceDetails],
+  );
+  const ecsSelectedContainer = useMemo(
+    () => ecsContainerOptions.find((container) => container.containerName === ecsTaskDraft?.containerName) ?? null,
+    [ecsContainerOptions, ecsTaskDraft?.containerName],
+  );
+  const ecsPortOptions = useMemo(
+    () => ecsSelectedContainer?.ports ?? [],
+    [ecsSelectedContainer],
+  );
+
+  function renderRuleCard(rule: PortForwardRuleRecord) {
+    const runtime = runtimeMap.get(rule.id);
+    const isRunning =
+      runtime?.status === 'running' || runtime?.status === 'starting';
+
+    if (isAwsSsmPortForwardRuleRecord(rule)) {
+      const host = awsHosts.find((item) => item.id === rule.hostId);
+      return (
+        <article key={rule.id} className="operations-card">
+          <div className="operations-card__main">
+            <div className="operations-card__title-row">
+              <strong>{rule.label}</strong>
+              <span className={`status-pill status-pill--${runtime?.status ?? 'stopped'}`}>{statusLabel(runtime)}</span>
+            </div>
+            <div className="operations-card__meta">
+              <span>AWS EC2</span>
+              {runtimeMethodLabel(runtime) ? <span>{runtimeMethodLabel(runtime)}</span> : null}
+              <span>
+                {host ? `${host.label} (${host.awsProfileName} / ${host.awsRegion} / ${host.awsInstanceId})` : 'Unknown AWS host'}
+              </span>
+              <span>{(runtime?.bindAddress ?? rule.bindAddress) || '127.0.0.1'}:{runtime?.bindPort ?? rule.bindPort}</span>
+              <span>{rule.targetKind === 'remote-host' ? `${rule.remoteHost}:${rule.targetPort}` : `instance:${rule.targetPort}`}</span>
+            </div>
+            {runtime?.message ? <p className="operations-card__message">{runtime.message}</p> : null}
+          </div>
+          <div className="operations-card__actions">
+            <button type="button" className="secondary-button" onClick={() => void (isRunning ? onStop(rule.id) : onStart(rule.id))}>
+              {isRunning ? 'Stop' : 'Start'}
+            </button>
+            <button type="button" className="secondary-button" onClick={() => openEdit(rule)}>
+              Edit
+            </button>
+            <button type="button" className="secondary-button danger" onClick={() => void onRemove(rule.id)}>
+              Delete
+            </button>
+          </div>
+        </article>
+      );
+    }
+
+    if (isEcsTaskPortForwardRuleRecord(rule)) {
+      const host = ecsHosts.find((item) => item.id === rule.hostId);
+      return (
+        <article key={rule.id} className="operations-card">
+          <div className="operations-card__main">
+            <div className="operations-card__title-row">
+              <strong>{rule.label}</strong>
+              <span className={`status-pill status-pill--${runtime?.status ?? 'stopped'}`}>{statusLabel(runtime)}</span>
+            </div>
+            <div className="operations-card__meta">
+              <span>ECS Task</span>
+              {runtimeMethodLabel(runtime) ? <span>{runtimeMethodLabel(runtime)}</span> : null}
+              <span>
+                {host
+                  ? `${host.label} (${host.awsProfileName} / ${host.awsRegion} / ${host.awsEcsClusterName})`
+                  : 'Unknown ECS host'}
+              </span>
+              <span>{rule.serviceName} / {rule.containerName}</span>
+              <span>{runtime?.bindAddress ?? '127.0.0.1'}:{(runtime?.bindPort ?? rule.bindPort) || 'auto'}</span>
+              <span>127.0.0.1:{rule.targetPort}</span>
+            </div>
+            {runtime?.message ? <p className="operations-card__message">{runtime.message}</p> : null}
+          </div>
+          <div className="operations-card__actions">
+            <button type="button" className="secondary-button" onClick={() => void (isRunning ? onStop(rule.id) : onStart(rule.id))}>
+              {isRunning ? 'Stop' : 'Start'}
+            </button>
+            <button type="button" className="secondary-button" onClick={() => openEdit(rule)}>
+              Edit
+            </button>
+            <button type="button" className="secondary-button danger" onClick={() => void onRemove(rule.id)}>
+              Delete
+            </button>
+          </div>
+        </article>
+      );
+    }
+
+    if (isContainerPortForwardRuleRecord(rule)) {
+      const host = containerHosts.find((item) => item.id === rule.hostId);
+      return (
+        <article key={rule.id} className="operations-card">
+          <div className="operations-card__main">
+            <div className="operations-card__title-row">
+              <strong>{rule.label}</strong>
+              <span className={`status-pill status-pill--${runtime?.status ?? 'stopped'}`}>{statusLabel(runtime)}</span>
+            </div>
+            <div className="operations-card__meta">
+              <span>Container</span>
+              {runtimeMethodLabel(runtime) ? <span>{runtimeMethodLabel(runtime)}</span> : null}
+              <span>{host ? host.label : 'Unknown host'}</span>
+              <span>{rule.containerName} ({rule.containerRuntime})</span>
+              <span>{runtime?.bindAddress ?? '127.0.0.1'}:{(runtime?.bindPort ?? rule.bindPort) || 'auto'}</span>
+              <span>{rule.networkName}:{rule.targetPort}</span>
+            </div>
+            {runtime?.message ? <p className="operations-card__message">{runtime.message}</p> : null}
+          </div>
+          <div className="operations-card__actions">
+            <button type="button" className="secondary-button" onClick={() => void (isRunning ? onStop(rule.id) : onStart(rule.id))}>
+              {isRunning ? 'Stop' : 'Start'}
+            </button>
+            <button type="button" className="secondary-button" onClick={() => openEdit(rule)}>
+              Edit
+            </button>
+            <button type="button" className="secondary-button danger" onClick={() => void onRemove(rule.id)}>
+              Delete
+            </button>
+          </div>
+        </article>
+      );
+    }
+
+    const host = sshHosts.find((item) => item.id === rule.hostId);
+    return (
+      <article key={rule.id} className="operations-card">
+        <div className="operations-card__main">
+          <div className="operations-card__title-row">
+            <strong>{rule.label}</strong>
+            <span className={`status-pill status-pill--${runtime?.status ?? 'stopped'}`}>{statusLabel(runtime)}</span>
+          </div>
+          <div className="operations-card__meta">
+            <span>{rule.mode.toUpperCase()}</span>
+            {runtimeMethodLabel(runtime) ? <span>{runtimeMethodLabel(runtime)}</span> : null}
+            <span>{host ? `${host.label} (${host.hostname})` : 'Unknown SSH host'}</span>
+            <span>{rule.bindAddress}:{runtime?.bindPort ?? rule.bindPort}</span>
+            <span>{rule.mode === 'dynamic' ? 'SOCKS5' : `${rule.targetHost}:${rule.targetPort}`}</span>
+          </div>
+          {runtime?.message ? <p className="operations-card__message">{runtime.message}</p> : null}
+        </div>
+        <div className="operations-card__actions">
+          <button type="button" className="secondary-button" onClick={() => void (isRunning ? onStop(rule.id) : onStart(rule.id))}>
+            {isRunning ? 'Stop' : 'Start'}
+          </button>
+          <button type="button" className="secondary-button" onClick={() => openEdit(rule)}>
+            Edit
+          </button>
+          <button type="button" className="secondary-button danger" onClick={() => void onRemove(rule.id)}>
+            Delete
+          </button>
+        </div>
+      </article>
+    );
+  }
+
+  function renderEcsEphemeralRuntimeCard({
+    runtime,
+    host,
+    serviceName,
+    containerName,
+    targetPort,
+  }: EcsEphemeralRuntimeCard) {
+    return (
+      <article key={runtime.ruleId} className="operations-card">
+        <div className="operations-card__main">
+          <div className="operations-card__title-row">
+            <strong>{serviceName}</strong>
+            <span className="status-pill">Ephemeral</span>
+            <span className={`status-pill status-pill--${runtime.status}`}>{statusLabel(runtime)}</span>
+          </div>
+          <div className="operations-card__meta">
+            <span>ECS Task</span>
+            {runtimeMethodLabel(runtime) ? <span>{runtimeMethodLabel(runtime)}</span> : null}
+            <span>
+              {host && isAwsEcsHostRecord(host)
+                ? `${host.label} (${host.awsProfileName} / ${host.awsRegion} / ${host.awsEcsClusterName})`
+                : host?.label ?? 'Unknown ECS host'}
+            </span>
+            <span>{serviceName} / {containerName}</span>
+            <span>{runtime.bindAddress}:{runtime.bindPort}</span>
+            <span>127.0.0.1:{targetPort}</span>
+          </div>
+          {runtime.message ? <p className="operations-card__message">{runtime.message}</p> : null}
+        </div>
+        <div className="operations-card__actions">
+          <button type="button" className="secondary-button" onClick={() => void onStop(runtime.ruleId)}>
+            Stop
+          </button>
+        </div>
+      </article>
+    );
+  }
+
+  function renderContainerEphemeralRuntimeCard({
+    runtime,
+    host,
+    containerName,
+    networkName,
+    targetPort,
+  }: ContainerEphemeralRuntimeCard) {
+    return (
+      <article key={runtime.ruleId} className="operations-card">
+        <div className="operations-card__main">
+          <div className="operations-card__title-row">
+            <strong>{containerName}</strong>
+            <span className="status-pill">Ephemeral</span>
+            <span className={`status-pill status-pill--${runtime.status}`}>{statusLabel(runtime)}</span>
+          </div>
+          <div className="operations-card__meta">
+            <span>Container</span>
+            {runtimeMethodLabel(runtime) ? <span>{runtimeMethodLabel(runtime)}</span> : null}
+            <span>{host?.label ?? 'Unknown host'}</span>
+            <span>{containerName}</span>
+            <span>{runtime.bindAddress}:{runtime.bindPort}</span>
+            <span>{networkName}:{targetPort}</span>
+          </div>
+          {runtime.message ? <p className="operations-card__message">{runtime.message}</p> : null}
+        </div>
+        <div className="operations-card__actions">
+          <button type="button" className="secondary-button" onClick={() => void onStop(runtime.ruleId)}>
+            Stop
+          </button>
+        </div>
+      </article>
+    );
+  }
 
   async function releaseDiscoveryHost(hostId: string | null) {
     if (!hostId) {
@@ -559,6 +945,70 @@ export function PortForwardingPanel({
     setKnownHostPrompt(null);
   }
 
+  function resetEcsDiscoveryState() {
+    setEcsServicesLoading(false);
+    setEcsServicesError(null);
+    setEcsServices([]);
+    setEcsServiceDetailsLoading(false);
+    setEcsServiceDetails(null);
+  }
+
+  async function loadEcsServices(hostId: string) {
+    if (!hostId) {
+      resetEcsDiscoveryState();
+      return;
+    }
+    setEcsServicesLoading(true);
+    setEcsServicesError(null);
+    setEcsServices([]);
+    setEcsServiceDetails(null);
+    try {
+      const services = await window.dolssh.aws.listEcsTaskTunnelServices(hostId);
+      setEcsServices(services);
+    } catch (cause) {
+      setEcsServicesError(cause instanceof Error ? cause.message : 'ECS 서비스 목록을 불러오지 못했습니다.');
+    } finally {
+      setEcsServicesLoading(false);
+    }
+  }
+
+  async function loadEcsServiceDetails(hostId: string, serviceName: string) {
+    if (!hostId || !serviceName) {
+      setEcsServiceDetails(null);
+      return;
+    }
+    setEcsServiceDetailsLoading(true);
+    setEcsServicesError(null);
+    try {
+      const details = await window.dolssh.aws.loadEcsTaskTunnelService(hostId, serviceName);
+      setEcsServiceDetails(details);
+      setDraft((current) => {
+        if (!isEcsTaskPortForwardDraft(current) || current.hostId !== hostId || current.serviceName !== serviceName) {
+          return current;
+        }
+        const defaultContainer = details.containers[0];
+        const matchedContainer = details.containers.find(
+          (container) => container.containerName === current.containerName,
+        );
+        const activeContainer = matchedContainer ?? defaultContainer;
+        const defaultPort = activeContainer?.ports[0]?.port ?? 0;
+        return {
+          ...current,
+          containerName: activeContainer?.containerName ?? '',
+          targetPort:
+            activeContainer?.ports.some((port) => port.port === current.targetPort)
+              ? current.targetPort
+              : defaultPort,
+        };
+      });
+    } catch (cause) {
+      setEcsServiceDetails(null);
+      setEcsServicesError(cause instanceof Error ? cause.message : 'ECS 서비스 상세 정보를 불러오지 못했습니다.');
+    } finally {
+      setEcsServiceDetailsLoading(false);
+    }
+  }
+
   function openCreate(tab: ForwardTab = activeTab) {
     setActiveTab(tab);
     setEditingRuleId(null);
@@ -569,11 +1019,14 @@ export function PortForwardingPanel({
         ? emptySshDraft(sshHosts[0]?.id)
         : tab === 'aws-ssm'
           ? emptyAwsDraft(awsHosts[0]?.id)
-          : emptyContainerDraft()
+          : tab === 'ecs-task'
+            ? emptyEcsTaskDraft(ecsHosts[0]?.id)
+            : emptyContainerDraft()
     );
     setIsSubmitting(false);
     setError(null);
     resetDiscoveryState();
+    resetEcsDiscoveryState();
     setIsModalOpen(true);
   }
 
@@ -586,6 +1039,7 @@ export function PortForwardingPanel({
     setIsSubmitting(false);
     setError(null);
     resetDiscoveryState();
+    resetEcsDiscoveryState();
     setIsModalOpen(true);
   }
 
@@ -597,6 +1051,7 @@ export function PortForwardingPanel({
     setIsHostPickerOpen(false);
     setIsContainerPickerOpen(false);
     setKnownHostPrompt(null);
+    resetEcsDiscoveryState();
     await releaseDiscoveryHost(discoveryHostIdRef.current);
     discoveryHostIdRef.current = null;
   }
@@ -742,6 +1197,42 @@ export function PortForwardingPanel({
     }
     if (!draft.hostId) {
       setError('호스트를 선택해 주세요.');
+      return;
+    }
+
+    if (isEcsTaskPortForwardDraft(draft)) {
+      if (draft.bindPort < 0) {
+        setError('로컬 포트를 올바르게 입력해 주세요.');
+        return;
+      }
+      if (!draft.serviceName.trim()) {
+        setError('서비스를 선택해 주세요.');
+        return;
+      }
+      if (!draft.containerName.trim()) {
+        setError('컨테이너를 선택해 주세요.');
+        return;
+      }
+      if (!draft.targetPort || draft.targetPort <= 0) {
+        setError('대상 포트를 선택해 주세요.');
+        return;
+      }
+
+      setIsSubmitting(true);
+      setError(null);
+      try {
+        await onSave(editingRuleId, {
+          ...draft,
+          bindAddress: '127.0.0.1',
+          serviceName: draft.serviceName.trim(),
+          containerName: draft.containerName.trim(),
+        });
+        await closeModal();
+      } catch (cause) {
+        setError(cause instanceof Error ? cause.message : '포워딩 규칙을 저장하지 못했습니다.');
+      } finally {
+        setIsSubmitting(false);
+      }
       return;
     }
 
@@ -912,8 +1403,25 @@ export function PortForwardingPanel({
     void loadContainerDetails(containerDraft.hostId, containerDraft.containerId);
   }, [containerDraft?.hostId, containerDraft?.containerId, isModalOpen]);
 
+  useEffect(() => {
+    if (!isModalOpen || !ecsTaskDraft?.hostId) {
+      resetEcsDiscoveryState();
+      return;
+    }
+    void loadEcsServices(ecsTaskDraft.hostId);
+  }, [ecsTaskDraft?.hostId, isModalOpen]);
+
+  useEffect(() => {
+    if (!isModalOpen || !ecsTaskDraft?.hostId || !ecsTaskDraft.serviceName) {
+      setEcsServiceDetails(null);
+      return;
+    }
+    void loadEcsServiceDetails(ecsTaskDraft.hostId, ecsTaskDraft.serviceName);
+  }, [ecsTaskDraft?.hostId, ecsTaskDraft?.serviceName, isModalOpen]);
+
   const discoveryHost = containerDraft ? containerHosts.find((host) => host.id === containerDraft.hostId) ?? null : null;
   const isAutoLocalPort = containerDraft?.bindPort === 0;
+  const isAutoEcsLocalPort = ecsTaskDraft?.bindPort === 0;
 
   return (
     <div className="operations-panel">
@@ -921,7 +1429,7 @@ export function PortForwardingPanel({
         <div>
           <div className="section-kicker">Forwarding</div>
           <h2>Port Forwarding</h2>
-          <p>SSH 포워딩, AWS SSM 포워딩, 컨테이너 터널 규칙을 저장하고 필요할 때만 실행합니다.</p>
+          <p>SSH 포워딩, AWS EC2 포워딩, ECS Task 터널, 컨테이너 터널 규칙을 저장하고 필요할 때만 실행합니다.</p>
         </div>
         <button type="button" className="primary-button" onClick={() => openCreate(activeTab)}>
           {createButtonLabel(activeTab)}
@@ -965,7 +1473,16 @@ export function PortForwardingPanel({
           className={`operations-tab ${activeTab === 'aws-ssm' ? 'active' : ''}`}
           onClick={() => setActiveTab('aws-ssm')}
         >
-          AWS SSM
+          AWS EC2
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={activeTab === 'ecs-task'}
+          className={`operations-tab ${activeTab === 'ecs-task' ? 'active' : ''}`}
+          onClick={() => setActiveTab('ecs-task')}
+        >
+          ECS Task
         </button>
         <button
           type="button"
@@ -979,116 +1496,39 @@ export function PortForwardingPanel({
       </div>
 
       <div className="operations-list">
-        {visibleRules.length === 0 ? (
+        {!hasVisibleEntries ? (
           <div className="empty-callout">
             <strong>{emptyStateTitle(activeTab)}</strong>
             <p>{emptyStateDescription(activeTab)}</p>
           </div>
         ) : (
-          visibleRules.map((rule) => {
-            const runtime = runtimeMap.get(rule.id);
-            const isRunning = runtime?.status === 'running' || runtime?.status === 'starting';
+          <>
+            {activeTab === 'ecs-task' && visibleEcsEphemeralRuntimes.length > 0 ? (
+              <section className="operations-section">
+                <div className="operations-section__title">Running tunnels</div>
+                {visibleEcsEphemeralRuntimes.map(renderEcsEphemeralRuntimeCard)}
+              </section>
+            ) : null}
 
-            if (isAwsSsmPortForwardRuleRecord(rule)) {
-              const host = awsHosts.find((item) => item.id === rule.hostId);
-              return (
-                <article key={rule.id} className="operations-card">
-                  <div className="operations-card__main">
-                    <div className="operations-card__title-row">
-                      <strong>{rule.label}</strong>
-                      <span className={`status-pill status-pill--${runtime?.status ?? 'stopped'}`}>{statusLabel(runtime)}</span>
-                    </div>
-                    <div className="operations-card__meta">
-                      <span>AWS SSM</span>
-                      {runtimeMethodLabel(runtime) ? <span>{runtimeMethodLabel(runtime)}</span> : null}
-                      <span>
-                        {host ? `${host.label} (${host.awsProfileName} / ${host.awsRegion} / ${host.awsInstanceId})` : 'Unknown AWS host'}
-                      </span>
-                      <span>{(runtime?.bindAddress ?? rule.bindAddress) || '127.0.0.1'}:{runtime?.bindPort ?? rule.bindPort}</span>
-                      <span>{rule.targetKind === 'remote-host' ? `${rule.remoteHost}:${rule.targetPort}` : `instance:${rule.targetPort}`}</span>
-                    </div>
-                    {runtime?.message ? <p className="operations-card__message">{runtime.message}</p> : null}
-                  </div>
-                  <div className="operations-card__actions">
-                    <button type="button" className="secondary-button" onClick={() => void (isRunning ? onStop(rule.id) : onStart(rule.id))}>
-                      {isRunning ? 'Stop' : 'Start'}
-                    </button>
-                    <button type="button" className="secondary-button" onClick={() => openEdit(rule)}>
-                      Edit
-                    </button>
-                    <button type="button" className="secondary-button danger" onClick={() => void onRemove(rule.id)}>
-                      Delete
-                    </button>
-                  </div>
-                </article>
-              );
-            }
+            {activeTab === 'container' &&
+            visibleContainerEphemeralRuntimes.length > 0 ? (
+              <section className="operations-section">
+                <div className="operations-section__title">Running tunnels</div>
+                {visibleContainerEphemeralRuntimes.map(
+                  renderContainerEphemeralRuntimeCard,
+                )}
+              </section>
+            ) : null}
 
-            if (isContainerPortForwardRuleRecord(rule)) {
-              const host = containerHosts.find((item) => item.id === rule.hostId);
-              return (
-                <article key={rule.id} className="operations-card">
-                  <div className="operations-card__main">
-                    <div className="operations-card__title-row">
-                      <strong>{rule.label}</strong>
-                      <span className={`status-pill status-pill--${runtime?.status ?? 'stopped'}`}>{statusLabel(runtime)}</span>
-                    </div>
-                    <div className="operations-card__meta">
-                      <span>Container</span>
-                      {runtimeMethodLabel(runtime) ? <span>{runtimeMethodLabel(runtime)}</span> : null}
-                      <span>{host ? host.label : 'Unknown host'}</span>
-                      <span>{rule.containerName} ({rule.containerRuntime})</span>
-                      <span>{runtime?.bindAddress ?? '127.0.0.1'}:{(runtime?.bindPort ?? rule.bindPort) || 'auto'}</span>
-                      <span>{rule.networkName}:{rule.targetPort}</span>
-                    </div>
-                    {runtime?.message ? <p className="operations-card__message">{runtime.message}</p> : null}
-                  </div>
-                  <div className="operations-card__actions">
-                    <button type="button" className="secondary-button" onClick={() => void (isRunning ? onStop(rule.id) : onStart(rule.id))}>
-                      {isRunning ? 'Stop' : 'Start'}
-                    </button>
-                    <button type="button" className="secondary-button" onClick={() => openEdit(rule)}>
-                      Edit
-                    </button>
-                    <button type="button" className="secondary-button danger" onClick={() => void onRemove(rule.id)}>
-                      Delete
-                    </button>
-                  </div>
-                </article>
-              );
-            }
-
-            const host = sshHosts.find((item) => item.id === rule.hostId);
-            return (
-              <article key={rule.id} className="operations-card">
-                <div className="operations-card__main">
-                  <div className="operations-card__title-row">
-                    <strong>{rule.label}</strong>
-                    <span className={`status-pill status-pill--${runtime?.status ?? 'stopped'}`}>{statusLabel(runtime)}</span>
-                  </div>
-                  <div className="operations-card__meta">
-                    <span>{rule.mode.toUpperCase()}</span>
-                    {runtimeMethodLabel(runtime) ? <span>{runtimeMethodLabel(runtime)}</span> : null}
-                    <span>{host ? `${host.label} (${host.hostname})` : 'Unknown SSH host'}</span>
-                    <span>{rule.bindAddress}:{runtime?.bindPort ?? rule.bindPort}</span>
-                    <span>{rule.mode === 'dynamic' ? 'SOCKS5' : `${rule.targetHost}:${rule.targetPort}`}</span>
-                  </div>
-                  {runtime?.message ? <p className="operations-card__message">{runtime.message}</p> : null}
-                </div>
-                <div className="operations-card__actions">
-                  <button type="button" className="secondary-button" onClick={() => void (isRunning ? onStop(rule.id) : onStart(rule.id))}>
-                    {isRunning ? 'Stop' : 'Start'}
-                  </button>
-                  <button type="button" className="secondary-button" onClick={() => openEdit(rule)}>
-                    Edit
-                  </button>
-                  <button type="button" className="secondary-button danger" onClick={() => void onRemove(rule.id)}>
-                    Delete
-                  </button>
-                </div>
-              </article>
-            );
-          })
+            {visibleRules.length > 0 ? (
+              <section className="operations-section">
+                {activeTab === 'ecs-task' || activeTab === 'container' ? (
+                  <div className="operations-section__title">Saved rules</div>
+                ) : null}
+                {visibleRules.map(renderRuleCard)}
+              </section>
+            ) : null}
+          </>
         )}
       </div>
 
@@ -1183,20 +1623,36 @@ export function PortForwardingPanel({
                 </div>
               ) : (
                 <label className="form-field">
-                  <span>{isAwsSsmPortForwardDraft(draft) ? 'AWS Host' : 'Host'}</span>
+                  <span>{isAwsSsmPortForwardDraft(draft) ? 'AWS EC2 Host' : isEcsTaskPortForwardDraft(draft) ? 'AWS ECS Host' : 'Host'}</span>
                   <select
                     value={draft.hostId}
                     onChange={(event) => {
                       const nextHostId = event.target.value;
-                      setDraft((current) => ({ ...current, hostId: nextHostId }));
+                      setDraft((current) =>
+                        isEcsTaskPortForwardDraft(current)
+                          ? {
+                              ...current,
+                              hostId: nextHostId,
+                              serviceName: '',
+                              containerName: '',
+                              targetPort: 0,
+                            }
+                          : { ...current, hostId: nextHostId }
+                      );
                     }}
                     disabled={isSubmitting}
                   >
                     <option value="">Select host</option>
-                    {(isAwsSsmPortForwardDraft(draft) ? awsHosts : sshHosts).map((host) => (
+                    {(isAwsSsmPortForwardDraft(draft)
+                      ? awsHosts
+                      : isEcsTaskPortForwardDraft(draft)
+                        ? ecsHosts
+                        : sshHosts).map((host) => (
                       <option key={host.id} value={host.id}>
                         {isAwsEc2HostRecord(host)
                           ? `${host.label} (${host.awsProfileName} / ${host.awsRegion} / ${host.awsInstanceId})`
+                          : isAwsEcsHostRecord(host)
+                            ? `${host.label} (${host.awsProfileName} / ${host.awsRegion} / ${host.awsEcsClusterName})`
                           : `${host.label} (${host.hostname})`}
                       </option>
                     ))}
@@ -1456,6 +1912,166 @@ export function PortForwardingPanel({
                     />
                   </label>
                 </>
+              ) : isEcsTaskPortForwardDraft(draft) ? (
+                <>
+                  <label className="form-field">
+                    <span>Service</span>
+                    <select
+                      value={draft.serviceName}
+                      onChange={(event) =>
+                        setDraft((current) =>
+                          isEcsTaskPortForwardDraft(current)
+                            ? {
+                                ...current,
+                                serviceName: event.target.value,
+                                containerName: '',
+                                targetPort: 0,
+                              }
+                            : current
+                        )
+                      }
+                      disabled={isSubmitting || ecsServicesLoading || !draft.hostId}
+                    >
+                      <option value="">Select service</option>
+                      {ecsServices.map((service) => (
+                        <option key={service.serviceName} value={service.serviceName}>
+                          {service.serviceName} ({service.runningCount}/{service.desiredCount})
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+
+                  <label className="form-field">
+                    <span>Container</span>
+                    <select
+                      value={draft.containerName}
+                      onChange={(event) =>
+                        setDraft((current) =>
+                          isEcsTaskPortForwardDraft(current)
+                            ? {
+                                ...current,
+                                containerName: event.target.value,
+                                targetPort:
+                                  ecsServiceDetails?.containers.find(
+                                    (container) => container.containerName === event.target.value,
+                                  )?.ports[0]?.port ?? 0,
+                              }
+                            : current
+                        )
+                      }
+                      disabled={isSubmitting || ecsServiceDetailsLoading || !draft.serviceName}
+                    >
+                      <option value="">Select container</option>
+                      {ecsContainerOptions.map((container) => (
+                        <option key={container.containerName} value={container.containerName}>
+                          {container.containerName}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+
+                  <label className="form-field">
+                    <span>Container port</span>
+                    <select
+                      value={draft.targetPort || ''}
+                      onChange={(event) =>
+                        setDraft((current) =>
+                          isEcsTaskPortForwardDraft(current)
+                            ? {
+                                ...current,
+                                targetPort: Number(event.target.value),
+                              }
+                            : current
+                        )
+                      }
+                      disabled={isSubmitting || !draft.containerName}
+                    >
+                      <option value="">Select TCP port</option>
+                      {ecsPortOptions.map((port) => (
+                        <option key={`${port.protocol}-${port.port}`} value={port.port}>
+                          {port.port}/{port.protocol}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+
+                  <label className="form-field">
+                    <span>Local port</span>
+                    <div className="port-forward-local-port">
+                      <button
+                        type="button"
+                        role="switch"
+                        aria-checked={isAutoEcsLocalPort}
+                        aria-label="Auto (random)"
+                        className={`port-forward-toggle ${isAutoEcsLocalPort ? 'is-active' : ''}`}
+                        onClick={() =>
+                          setDraft((current) =>
+                            isEcsTaskPortForwardDraft(current)
+                              ? {
+                                  ...current,
+                                  bindPort: isAutoEcsLocalPort ? 9000 : 0,
+                                }
+                              : current
+                          )
+                        }
+                        disabled={isSubmitting}
+                      >
+                        <span className="port-forward-toggle__track" aria-hidden="true">
+                          <span className="port-forward-toggle__thumb" />
+                        </span>
+                        <span className="port-forward-toggle__content">
+                          <strong>Auto (random)</strong>
+                          <span>사용 가능한 로컬 포트를 자동으로 할당합니다.</span>
+                        </span>
+                      </button>
+                      <input
+                        type="number"
+                        className="port-forward-local-port__input"
+                        value={isAutoEcsLocalPort ? '' : draft.bindPort}
+                        onChange={(event) =>
+                          setDraft((current) =>
+                            isEcsTaskPortForwardDraft(current)
+                              ? {
+                                  ...current,
+                                  bindPort: Number(event.target.value),
+                                }
+                              : current
+                          )
+                        }
+                        disabled={isSubmitting || isAutoEcsLocalPort}
+                        placeholder={isAutoEcsLocalPort ? '자동 할당' : '9000'}
+                      />
+                    </div>
+                  </label>
+
+                  {selectedEcsHost ? (
+                    <div className="empty-callout">
+                      <strong>{selectedEcsHost.awsEcsClusterName}</strong>
+                      <p>{selectedEcsHost.awsProfileName} / {selectedEcsHost.awsRegion}</p>
+                    </div>
+                  ) : null}
+                  {ecsServicesError ? <div className="form-error">{ecsServicesError}</div> : null}
+                  {ecsServicesLoading ? <div className="empty-callout"><p>ECS 서비스 목록을 불러오는 중입니다.</p></div> : null}
+                  {ecsServiceDetailsLoading ? <div className="empty-callout"><p>ECS 서비스 상세 정보를 불러오는 중입니다.</p></div> : null}
+                  {!ecsServicesLoading && draft.hostId && ecsServices.length === 0 && !ecsServicesError ? (
+                    <div className="empty-callout">
+                      <strong>가져올 수 있는 ECS 서비스가 없습니다.</strong>
+                      <p>이 클러스터에는 포트 포워딩에 사용할 서비스가 없습니다.</p>
+                    </div>
+                  ) : null}
+                  {!ecsServiceDetailsLoading && draft.serviceName && ecsServiceDetails && ecsContainerOptions.length === 0 ? (
+                    <div className="empty-callout">
+                      <strong>선택 가능한 컨테이너가 없습니다.</strong>
+                      <p>이 서비스의 task definition에 사용할 컨테이너가 없습니다.</p>
+                    </div>
+                  ) : null}
+                  {!ecsServiceDetailsLoading && draft.containerName && ecsPortOptions.length === 0 ? (
+                    <div className="empty-callout">
+                      <strong>선택 가능한 TCP 포트가 없습니다.</strong>
+                      <p>이 컨테이너에는 포워딩에 사용할 TCP 포트가 감지되지 않았습니다.</p>
+                    </div>
+                  ) : null}
+                </>
               ) : (
                 <>
                   <label className="form-field">
@@ -1482,7 +2098,7 @@ export function PortForwardingPanel({
                 </>
               )}
 
-              {!isContainerPortForwardDraft(draft) ? (
+              {!isContainerPortForwardDraft(draft) && !isEcsTaskPortForwardDraft(draft) ? (
                 <label className="form-field">
                   <span>{isAwsSsmPortForwardDraft(draft) ? 'Local port' : 'Bind port'}</span>
                   <input
@@ -1580,6 +2196,8 @@ export function PortForwardingPanel({
                 onClick={() => void handleSubmit()}
                 disabled={
                   isSubmitting ||
+                  (isEcsTaskPortForwardDraft(draft) &&
+                    (!draft.serviceName || !draft.containerName || !draft.targetPort)) ||
                   (isContainerPortForwardDraft(draft) &&
                     (!draft.containerId || !draft.networkName || !draft.targetPort || availableNetworks.length === 0 || eligiblePorts.length === 0))
                 }

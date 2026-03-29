@@ -154,9 +154,14 @@ type AWSConnectPayload struct {
 }
 
 type LocalConnectPayload struct {
-	Cols  int    `json:"cols"`
-	Rows  int    `json:"rows"`
-	Title string `json:"title,omitempty"`
+	Cols             int               `json:"cols"`
+	Rows             int               `json:"rows"`
+	Title            string            `json:"title,omitempty"`
+	ShellKind        string            `json:"shellKind,omitempty"`
+	Executable       string            `json:"executable,omitempty"`
+	Args             []string          `json:"args,omitempty"`
+	Env              map[string]string `json:"env,omitempty"`
+	WorkingDirectory string            `json:"workingDirectory,omitempty"`
 }
 
 // SFTPConnectPayload는 원격 파일 브라우저 접속을 위한 인증 정보다.
@@ -305,7 +310,8 @@ type PortForwardStartPayload struct {
 type SSMPortForwardStartPayload struct {
 	ProfileName string `json:"profileName"`
 	Region      string `json:"region"`
-	InstanceID  string `json:"instanceId"`
+	TargetType  string `json:"targetType"`
+	TargetID    string `json:"targetId"`
 	BindAddress string `json:"bindAddress"`
 	BindPort    int    `json:"bindPort"`
 	TargetKind  string `json:"targetKind"`

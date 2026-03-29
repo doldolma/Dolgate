@@ -3,6 +3,7 @@ import { buildGroupOptions, getHostSecretRef, isSshHostRecord } from '@shared';
 import type { AppTheme, AuthState, DesktopWindowState, HostRecord, LinkedHostSummary, UpdateState } from '@shared';
 import { AppTitleBar } from './components/AppTitleBar';
 import { AwsImportDialog } from './components/AwsImportDialog';
+import { AwsEcsWorkspace } from './components/AwsEcsWorkspace';
 import { AwsSftpConfigRetryDialog } from './components/AwsSftpConfigRetryDialog';
 import { ContainersWorkspace } from './components/ContainersWorkspace';
 import { CredentialRetryDialog } from './components/CredentialRetryDialog';
@@ -298,8 +299,14 @@ export function App() {
   const closeHostContainersTab = useAppStore((state) => state.closeHostContainersTab);
   const reorderContainerTab = useAppStore((state) => state.reorderContainerTab);
   const refreshHostContainers = useAppStore((state) => state.refreshHostContainers);
+  const refreshEcsClusterUtilization = useAppStore((state) => state.refreshEcsClusterUtilization);
+  const openEcsExecShell = useAppStore((state) => state.openEcsExecShell);
   const selectHostContainer = useAppStore((state) => state.selectHostContainer);
   const setHostContainersPanel = useAppStore((state) => state.setHostContainersPanel);
+  const setHostContainerTunnelState = useAppStore((state) => state.setHostContainerTunnelState);
+  const setEcsClusterSelectedService = useAppStore((state) => state.setEcsClusterSelectedService);
+  const setEcsClusterActivePanel = useAppStore((state) => state.setEcsClusterActivePanel);
+  const setEcsClusterTunnelState = useAppStore((state) => state.setEcsClusterTunnelState);
   const refreshHostContainerLogs = useAppStore((state) => state.refreshHostContainerLogs);
   const loadMoreHostContainerLogs = useAppStore((state) => state.loadMoreHostContainerLogs);
   const setHostContainerLogsFollow = useAppStore((state) => state.setHostContainerLogsFollow);
@@ -1009,6 +1016,7 @@ export function App() {
             {homeSection === 'portForwarding' ? (
               <PortForwardingPanel
                 hosts={hosts}
+                containerTabs={containerTabs}
                 rules={portForwards}
                 runtimes={portForwardRuntimes}
                 interactiveAuth={pendingInteractiveAuth?.source === 'portForward' ? pendingInteractiveAuth : null}
@@ -1100,7 +1108,7 @@ export function App() {
             onImported={async (result) => {
               await refreshHostCatalog();
               setHostBrowserStatus(
-                `Termius에서 ${result.createdHostCount}개 호스트, ${result.createdGroupCount}개 그룹, ${result.createdSecretCount}개 secret을 가져왔습니다.${result.skippedHostCount > 0 ? ` 기존/불완전 호스트 ${result.skippedHostCount}개는 건너뛰었습니다.` : ''}`
+                `Termius에서 ${result.createdHostCount}개 호스트, ${result.createdGroupCount}개 그룹, ${result.createdSecretCount}개 secret을 가져왔습니다.${result.skippedHostCount > 0 ? ` 불완전 호스트 ${result.skippedHostCount}개는 건너뛰었습니다.` : ''}`
               );
               setHostBrowserError(result.warnings[0]?.message ?? null);
             }}
@@ -1223,9 +1231,11 @@ export function App() {
             {containerTabs.length > 0 ? (
               containerTabs.map((tab) => {
                 const host = findHost(hosts, tab.hostId);
-                const title = host?.label ?? tab.title.replace(/ · Containers$/, '');
+                const title = host?.label ?? tab.title.replace(/ · (Containers|ECS)$/, '');
                 const runtimeLabel =
-                  tab.runtime === 'docker'
+                  tab.kind === 'ecs-cluster'
+                    ? 'ECS'
+                    : tab.runtime === 'docker'
                     ? 'Docker'
                     : tab.runtime === 'podman'
                       ? 'Podman'
@@ -1327,31 +1337,46 @@ export function App() {
           </div>
           <div className="containers-shell__content">
             {activeContainerHost && activeContainersTab ? (
-              <ContainersWorkspace
-                host={activeContainerHost}
-                tab={activeContainersTab}
-                isActive={isContainersActive}
-                interactiveAuth={
-                  pendingInteractiveAuth?.source === "containers"
-                    ? pendingInteractiveAuth
-                    : null
-                }
-                onRefresh={refreshHostContainers}
-                onSelectContainer={selectHostContainer}
-                onSetPanel={setHostContainersPanel}
-                onRefreshLogs={refreshHostContainerLogs}
-                onLoadMoreLogs={loadMoreHostContainerLogs}
-                onSetLogsFollow={setHostContainerLogsFollow}
-                onSetLogsSearchQuery={setHostContainerLogsSearchQuery}
-                onSearchLogs={searchHostContainerLogs}
-                onClearLogsSearch={clearHostContainerLogsSearch}
-                onRefreshMetrics={refreshHostContainerStats}
-                onRunAction={runHostContainerAction}
-                onOpenShell={openHostContainerShell}
-                onRespondInteractiveAuth={respondInteractiveAuth}
-                onReopenInteractiveAuthUrl={reopenInteractiveAuthUrl}
-                onClearInteractiveAuth={clearPendingInteractiveAuth}
-              />
+              activeContainersTab.kind === 'ecs-cluster' ? (
+                <AwsEcsWorkspace
+                  host={activeContainerHost}
+                  tab={activeContainersTab}
+                  isActive={isContainersActive}
+                  onRefresh={refreshHostContainers}
+                  onRefreshUtilization={refreshEcsClusterUtilization}
+                  onSelectService={setEcsClusterSelectedService}
+                  onSetPanel={setEcsClusterActivePanel}
+                  onSetTunnelState={setEcsClusterTunnelState}
+                  onOpenEcsExecShell={openEcsExecShell}
+                />
+              ) : (
+                <ContainersWorkspace
+                  host={activeContainerHost}
+                  tab={activeContainersTab}
+                  isActive={isContainersActive}
+                  interactiveAuth={
+                    pendingInteractiveAuth?.source === "containers"
+                      ? pendingInteractiveAuth
+                      : null
+                  }
+                  onRefresh={refreshHostContainers}
+                  onSelectContainer={selectHostContainer}
+                  onSetPanel={setHostContainersPanel}
+                  onSetTunnelState={setHostContainerTunnelState}
+                  onRefreshLogs={refreshHostContainerLogs}
+                  onLoadMoreLogs={loadMoreHostContainerLogs}
+                  onSetLogsFollow={setHostContainerLogsFollow}
+                  onSetLogsSearchQuery={setHostContainerLogsSearchQuery}
+                  onSearchLogs={searchHostContainerLogs}
+                  onClearLogsSearch={clearHostContainerLogsSearch}
+                  onRefreshMetrics={refreshHostContainerStats}
+                  onRunAction={runHostContainerAction}
+                  onOpenShell={openHostContainerShell}
+                  onRespondInteractiveAuth={respondInteractiveAuth}
+                  onReopenInteractiveAuthUrl={reopenInteractiveAuthUrl}
+                  onClearInteractiveAuth={clearPendingInteractiveAuth}
+                />
+              )
             ) : (
               <div className="empty-state-card containers-shell__empty-state">
                 <div className="eyebrow">Containers</div>
