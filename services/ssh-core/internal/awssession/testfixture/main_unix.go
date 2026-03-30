@@ -35,6 +35,7 @@ type fakeTerminalApp struct {
 func main() {
 	app := &fakeTerminalApp{mode: shellMode}
 
+	app.write("READY:FAKE_AWS_SSM\r\n")
 	app.writef("TTY:%t\r\n", isTTY())
 	app.refreshSize()
 	app.printSize()

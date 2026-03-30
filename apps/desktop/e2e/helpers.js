@@ -8,6 +8,7 @@ const path = require("node:path");
 
 const desktopMainPath = path.resolve(__dirname, "../.vite/build/main.js");
 const timestamp = "2025-01-01T00:00:00.000Z";
+const fakeAwsSessionReadyMarker = "READY:FAKE_AWS_SSM";
 
 async function writeDesktopState(userDataDir) {
   const storageDir = path.join(userDataDir, "storage");
@@ -245,6 +246,10 @@ async function waitForCapturedTerminalOutput(page, expected, timeout = 15_000) {
   );
 }
 
+async function waitForFakeAwsSessionReady(page, timeout = 15_000) {
+  await waitForCapturedTerminalOutput(page, fakeAwsSessionReadyMarker, timeout);
+}
+
 async function getCapturedSessionId(page) {
   const handle = await page.waitForFunction(
     () => {
@@ -413,12 +418,14 @@ async function waitForReplayState(page, expectation = {}, timeout = 15_000) {
 module.exports = {
   buildAwsFixture,
   createFakeAuthSessionJson,
+  fakeAwsSessionReadyMarker,
   getCapturedSessionId,
   getSessionTerminalState,
   getCapturedTerminalSizes,
   launchDesktop,
   waitForSessionTerminalState,
   waitForCapturedTerminalOutput,
+  waitForFakeAwsSessionReady,
   waitForReplayState,
   writeDesktopState,
   rm,

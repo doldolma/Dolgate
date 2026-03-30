@@ -1,5 +1,6 @@
 import { BrowserWindow } from "electron";
 import { Buffer } from "node:buffer";
+import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -21,6 +22,9 @@ import { AuthService } from "./auth-service";
 import { CoreManager } from "./core-manager";
 
 const MAX_PENDING_OWNER_MESSAGES = 512;
+const MAX_CHAT_NICKNAME_RUNES = 24;
+const MAX_CHAT_TEXT_RUNES = 300;
+const OWNER_CHAT_NICKNAME_SUFFIX = " Owner";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 interface CreateShareResponse {
@@ -165,6 +169,43 @@ function appendOwnerChatMessage(
   }
 
   return nextMessages.slice(-SESSION_SHARE_CHAT_HISTORY_LIMIT);
+}
+
+function countRunes(value: string): number {
+  return Array.from(value).length;
+}
+
+function takeRunes(value: string, limit: number): string {
+  return Array.from(value).slice(0, Math.max(0, limit)).join("");
+}
+
+function buildOwnerChatNickname(title: string): string {
+  const trimmedTitle = title.trim();
+  if (!trimmedTitle) {
+    return "Owner";
+  }
+
+  const suffixLength = countRunes(OWNER_CHAT_NICKNAME_SUFFIX);
+  if (countRunes(trimmedTitle) + suffixLength <= MAX_CHAT_NICKNAME_RUNES) {
+    return `${trimmedTitle}${OWNER_CHAT_NICKNAME_SUFFIX}`;
+  }
+
+  const titleLimit = MAX_CHAT_NICKNAME_RUNES - suffixLength;
+  if (titleLimit <= 0) {
+    return "Owner";
+  }
+
+  const truncatedTitle = takeRunes(trimmedTitle, titleLimit).trim();
+  return truncatedTitle ? `${truncatedTitle}${OWNER_CHAT_NICKNAME_SUFFIX}` : "Owner";
+}
+
+function normalizeOwnerChatText(value: string): string {
+  const normalized = value.replace(/\r\n?/g, "\n").trim();
+  if (!normalized) {
+    return "";
+  }
+
+  return countRunes(normalized) <= MAX_CHAT_TEXT_RUNES ? normalized : "";
 }
 
 export class SessionShareService {
@@ -348,6 +389,7 @@ export class SessionShareService {
       return {
         sessionId,
         title: "",
+        ownerNickname: "Owner",
         state: createInactiveShareState(),
         messages: [],
       };
@@ -356,9 +398,46 @@ export class SessionShareService {
     return {
       sessionId,
       title: share.title,
+      ownerNickname: buildOwnerChatNickname(share.title),
       state: { ...share.state },
       messages: [...share.ownerChatMessages],
     };
+  }
+
+  async sendOwnerChatMessage(sessionId: string, text: string): Promise<void> {
+    const share = this.shares.get(sessionId);
+    if (!share || share.state.status !== "active") {
+      throw new Error("세션 공유가 활성 상태가 아닙니다.");
+    }
+
+    const normalizedText = normalizeOwnerChatText(text);
+    if (!normalizedText) {
+      throw new Error("메시지를 입력해 주세요.");
+    }
+
+    if (share.isE2EFake) {
+      const message: SessionShareChatMessage = {
+        id: randomUUID(),
+        nickname: buildOwnerChatNickname(share.title),
+        senderRole: "owner",
+        text: normalizedText,
+        sentAt: new Date().toISOString(),
+      };
+      share.ownerChatMessages = appendOwnerChatMessage(share.ownerChatMessages, message);
+      this.broadcastChatEvent(sessionId, message);
+      return;
+    }
+
+    if (!share.ownerSocketOpen || !share.socket || share.socket.readyState !== WebSocket.OPEN) {
+      throw new Error("채팅 연결이 아직 준비되지 않았습니다.");
+    }
+
+    share.socket.send(
+      encodeOwnerMessage({
+        type: "chat-send",
+        text: normalizedText,
+      }),
+    );
   }
 
   async updateSnapshot(input: SessionShareSnapshotInput): Promise<void> {

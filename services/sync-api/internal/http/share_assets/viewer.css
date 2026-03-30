@@ -275,6 +275,11 @@ body {
   background: rgba(14, 22, 38, 0.92);
 }
 
+.viewer-chat-message--owner {
+  border-color: rgba(125, 152, 255, 0.46);
+  background: linear-gradient(180deg, rgba(24, 38, 69, 0.96), rgba(14, 22, 38, 0.92));
+}
+
 .viewer-chat-message__meta {
   display: flex;
   align-items: baseline;
@@ -282,9 +287,31 @@ body {
   gap: 0.75rem;
 }
 
+.viewer-chat-message__meta-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.42rem;
+  min-width: 0;
+}
+
 .viewer-chat-message__meta strong {
   color: #eef3ff;
   font-size: 0.83rem;
+}
+
+.viewer-chat-message__badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.14rem 0.4rem;
+  border-radius: 999px;
+  border: 1px solid rgba(125, 152, 255, 0.4);
+  background: rgba(125, 152, 255, 0.12);
+  color: #b8c8ff;
+  font-size: 0.67rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
 }
 
 .viewer-chat-message__meta time {

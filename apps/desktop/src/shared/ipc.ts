@@ -571,6 +571,7 @@ export interface DesktopApi {
     ) => Promise<SessionShareState>;
     stop: (sessionId: string) => Promise<void>;
     openOwnerChatWindow: (sessionId: string) => Promise<void>;
+    sendOwnerChatMessage: (sessionId: string, text: string) => Promise<void>;
     getOwnerChatSnapshot: (
       sessionId: string,
     ) => Promise<SessionShareOwnerChatSnapshot>;

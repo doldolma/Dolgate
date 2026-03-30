@@ -10,6 +10,7 @@ const {
   path,
   rm,
   waitForCapturedTerminalOutput,
+  waitForFakeAwsSessionReady,
   writeDesktopState,
 } = require("./helpers");
 
@@ -191,7 +192,7 @@ test.describe("desktop smoke", () => {
 
       await expect(awsCard).toBeVisible();
       await awsCard.dblclick();
-      await waitForCapturedTerminalOutput(page, "TTY:");
+      await waitForFakeAwsSessionReady(page);
       await page.waitForFunction(() => {
         const e2e = window.__dolsshE2E;
         if (!e2e || typeof e2e.getTerminalOutputs !== "function") {
@@ -294,7 +295,7 @@ test.describe("desktop smoke", () => {
 
       await expect(awsCard).toBeVisible();
       await awsCard.dblclick();
-      await waitForCapturedTerminalOutput(page, "TTY:");
+      await waitForFakeAwsSessionReady(page);
 
       const sessionId = await getCapturedSessionId(page);
 

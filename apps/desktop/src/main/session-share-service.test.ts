@@ -1,4 +1,4 @@
-import { Buffer } from "node:buffer";
+﻿import { Buffer } from "node:buffer";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const { browserWindowInstances } = vi.hoisted(() => ({
@@ -115,6 +115,7 @@ function createShare(): any {
     closedByOwner: false,
     pendingMessages: [],
     ownerChatMessages: [] as SessionShareChatMessage[],
+    isE2EFake: false,
     state: {
       status: "active",
       shareUrl: "https://sync.example.com/share/share-1/token-1",
@@ -187,13 +188,13 @@ describe("SessionShareService viewer input relay", () => {
     (service as any).handleOwnerServerMessage(share, {
       type: "viewer-input",
       encoding: "utf8",
-      data: "한a",
+      data: "?쏿",
     });
 
     expect(coreManager.writeBinary).toHaveBeenCalledTimes(1);
     expect(coreManager.write).not.toHaveBeenCalled();
     const [, payload] = coreManager.writeBinary.mock.calls[0];
-    expect(Buffer.from(payload as Uint8Array).toString("utf8")).toBe("한a");
+    expect(Buffer.from(payload as Uint8Array).toString("utf8")).toBe("?쏿");
   });
 
   it("ignores viewer input when session share input is disabled", () => {
@@ -252,8 +253,9 @@ describe("SessionShareService viewer input relay", () => {
       type: "chat-message",
       message: {
         id: "chat-1",
-        nickname: "맑은 여우",
-        text: "안녕하세요",
+        nickname: "viewer one",
+        senderRole: "viewer",
+        text: "hello",
         sentAt: "2026-03-27T00:00:00.000Z",
       },
     });
@@ -262,16 +264,18 @@ describe("SessionShareService viewer input relay", () => {
       sessionId: "session-1",
       message: {
         id: "chat-1",
-        nickname: "맑은 여우",
-        text: "안녕하세요",
+        nickname: "viewer one",
+        senderRole: "viewer",
+        text: "hello",
         sentAt: "2026-03-27T00:00:00.000Z",
       },
     });
     expect(service.getOwnerChatSnapshot("session-1").messages).toEqual([
       {
         id: "chat-1",
-        nickname: "맑은 여우",
-        text: "안녕하세요",
+        nickname: "viewer one",
+        senderRole: "viewer",
+        text: "hello",
         sentAt: "2026-03-27T00:00:00.000Z",
       },
     ]);
@@ -285,8 +289,9 @@ describe("SessionShareService viewer input relay", () => {
         type: "chat-message",
         message: {
           id: `chat-${index + 1}`,
-          nickname: "맑은 여우",
-          text: `메시지 ${index + 1}`,
+          nickname: "留묒? ?ъ슦",
+          senderRole: "viewer",
+          text: `硫붿떆吏 ${index + 1}`,
           sentAt: `2026-03-27T00:${String(index).padStart(2, "0")}:00.000Z`,
         },
       });
@@ -370,7 +375,81 @@ describe("SessionShareService viewer input relay", () => {
       viewerCount: 0,
       errorMessage: null,
     });
+    expect(service.getOwnerChatSnapshot("session-1").ownerNickname).toBe(
+      "Host Session Owner",
+    );
     expect(service.getOwnerChatSnapshot("session-1").state).toEqual(state);
+  });
+
+  it("sends owner chat messages through the owner websocket", async () => {
+    const { service, share } = createServiceHarness();
+    share.ownerSocketOpen = true;
+    share.socket = {
+      readyState: WebSocket.OPEN,
+      send: vi.fn(),
+    };
+
+    await service.sendOwnerChatMessage("session-1", "hello");
+
+    expect(share.socket.send).toHaveBeenCalledWith(
+      JSON.stringify({
+        type: "chat-send",
+        text: "hello",
+      }),
+    );
+  });
+
+  it("appends owner chat messages locally in E2E fake mode", async () => {
+    process.env.DOLSSH_E2E_FAKE_SESSION_SHARE = "1";
+    const authService = {
+      getServerUrl: vi.fn(() => "https://sync.example.com"),
+      getAccessToken: vi.fn(() => "access-token"),
+      refreshSession: vi.fn(),
+    };
+    const coreManager = {
+      write: vi.fn(),
+      writeBinary: vi.fn(),
+      sendControlSignal: vi.fn(),
+    };
+    const service = new SessionShareService(
+      authService as never,
+      coreManager as never,
+    );
+    const send = vi.fn();
+    (service as any).windows.add({
+      isDestroyed: () => false,
+      webContents: { send },
+    });
+
+    await service.start({
+      sessionId: "session-1",
+      title: "Host Session",
+      transport: "ssh",
+      cols: 80,
+      rows: 24,
+      snapshot: "",
+      terminalAppearance,
+      viewportPx: null,
+    });
+
+    await service.sendOwnerChatMessage("session-1", "hello");
+
+    const snapshot = service.getOwnerChatSnapshot("session-1");
+    expect(snapshot.ownerNickname).toBe("Host Session Owner");
+    expect(snapshot.messages).toHaveLength(1);
+    expect(snapshot.messages[0]).toMatchObject({
+      nickname: "Host Session Owner",
+      senderRole: "owner",
+      text: "hello",
+    });
+    expect(send).toHaveBeenCalledWith("session-shares:chat-event", {
+      sessionId: "session-1",
+      message: expect.objectContaining({
+        nickname: "Host Session Owner",
+        senderRole: "owner",
+        text: "hello",
+      }),
+    });
   });
 
   it("updates fake share input mode locally in E2E mode", async () => {
@@ -417,8 +496,9 @@ describe("SessionShareService viewer input relay", () => {
     share.ownerChatMessages = [
       {
         id: "chat-1",
-        nickname: "맑은 다람쥐",
-        text: "안녕하세요",
+        nickname: "viewer one",
+        senderRole: "viewer",
+        text: "hello",
         sentAt: "2026-03-27T00:00:00.000Z",
       },
     ];
@@ -436,6 +516,7 @@ describe("SessionShareService viewer input relay", () => {
     expect(service.getOwnerChatSnapshot("session-1")).toEqual({
       sessionId: "session-1",
       title: "",
+      ownerNickname: "Owner",
       state: {
         status: "inactive",
         shareUrl: null,
@@ -452,8 +533,9 @@ describe("SessionShareService viewer input relay", () => {
     share.ownerChatMessages = [
       {
         id: "chat-1",
-        nickname: "맑은 다람쥐",
-        text: "안녕하세요",
+        nickname: "viewer one",
+        senderRole: "viewer",
+        text: "hello",
         sentAt: "2026-03-27T00:00:00.000Z",
       },
     ];
@@ -467,7 +549,7 @@ describe("SessionShareService viewer input relay", () => {
     const chatWindow = browserWindowInstances[0]!;
     (service as any).handleOwnerServerMessage(share, {
       type: "share-ended",
-      message: "세션 공유가 종료되었습니다.",
+      message: "?몄뀡 怨듭쑀媛 醫낅즺?섏뿀?듬땲??",
     });
 
     expect(chatWindow.close).toHaveBeenCalledTimes(1);

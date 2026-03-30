@@ -69,6 +69,7 @@ func TestUnixPTYRunnerRoutesTTYOutputInputAndResize(t *testing.T) {
 		waitResult <- exit
 	}()
 
+	waitForUnixOutputContains(t, output, "READY:FAKE_AWS_SSM", waitResult, waitErr)
 	waitForUnixOutputContains(t, output, "TTY:true", waitResult, waitErr)
 	waitForUnixOutputContains(t, output, "SIZE:120x32", waitResult, waitErr)
 

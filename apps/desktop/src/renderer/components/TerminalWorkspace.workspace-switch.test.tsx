@@ -540,29 +540,37 @@ describe('TerminalWorkspace workspace switching', () => {
     expect(onMoveWorkspaceSession).not.toHaveBeenCalled();
   });
 
-  it('does not render the broadcast bar for standalone sessions', () => {
+  it('does not render the broadcast control for standalone sessions', () => {
     renderWorkspace({
       activeWorkspace: null,
       activeSessionId: 'session-1',
       viewActivationKey: 'session:session-1'
     });
 
-    expect(screen.queryByText('입력 브로드캐스트')).toBeNull();
     expect(screen.queryByRole('button', { name: '브로드캐스트 켜기' })).toBeNull();
+    expect(screen.queryByRole('tooltip')).toBeNull();
   });
 
-  it('shows the broadcast bar for split workspaces and disables it without two connected remote panes', () => {
+  it('shows the broadcast control for split workspaces and keeps it unavailable without two connected remote panes', () => {
+    const onToggleWorkspaceBroadcast = vi.fn();
     renderWorkspace({
       activeWorkspace: splitWorkspace,
-      viewActivationKey: 'workspace:workspace-split'
+      viewActivationKey: 'workspace:workspace-split',
+      onToggleWorkspaceBroadcast
     });
 
-    expect(screen.getByText('입력 브로드캐스트')).toBeTruthy();
-    expect(screen.getByText('연결된 원격 pane 2개 이상일 때 사용할 수 있습니다.')).toBeTruthy();
-    expect(screen.getByRole('button', { name: '브로드캐스트 켜기' })).toBeDisabled();
+    const toggleButton = screen.getByRole('button', { name: '브로드캐스트 켜기' });
+    expect(toggleButton).toHaveAttribute('aria-disabled', 'true');
+    expect(toggleButton).toHaveAttribute('aria-pressed', 'false');
+
+    fireEvent.mouseEnter(toggleButton);
+    expect(screen.getByRole('tooltip')).toHaveTextContent('원격 pane 2개 이상 연결 시 사용 가능');
+
+    fireEvent.click(toggleButton);
+    expect(onToggleWorkspaceBroadcast).not.toHaveBeenCalled();
   });
 
-  it('toggles broadcast button state and copy for split host workspaces', () => {
+  it('toggles broadcast button state and tooltip copy for split host workspaces', () => {
     const hostTabs: TerminalTab[] = [
       {
         id: 'tab-1',
@@ -597,8 +605,11 @@ describe('TerminalWorkspace workspace switching', () => {
     });
 
     const enableButton = screen.getByRole('button', { name: '브로드캐스트 켜기' });
-    expect(enableButton).toBeEnabled();
-    expect(screen.getByText('현재 활성 원격 pane의 입력을 같은 workspace의 다른 원격 pane에도 보냅니다.')).toBeTruthy();
+    expect(enableButton).toHaveAttribute('aria-pressed', 'false');
+    expect(enableButton).toHaveAttribute('aria-disabled', 'false');
+
+    fireEvent.focus(enableButton);
+    expect(screen.getByRole('tooltip')).toHaveTextContent('브로드캐스트 켜기');
 
     fireEvent.click(enableButton);
     expect(onToggleWorkspaceBroadcast).toHaveBeenCalledWith('workspace-split');
@@ -630,10 +641,12 @@ describe('TerminalWorkspace workspace switching', () => {
       />
     );
 
-    expect(screen.getByRole('button', { name: '브로드캐스트 끄기' })).toBeEnabled();
-    expect(
-      screen.getByText('브로드캐스트가 켜져 있습니다. 현재 활성 원격 pane 입력이 다른 원격 pane에도 전송됩니다.')
-    ).toBeTruthy();
+    const disableButton = screen.getByRole('button', { name: '브로드캐스트 끄기' });
+    expect(disableButton).toHaveAttribute('aria-pressed', 'true');
+    expect(disableButton).toHaveAttribute('aria-disabled', 'false');
+
+    fireEvent.focus(disableButton);
+    expect(screen.getByRole('tooltip')).toHaveTextContent('브로드캐스트 활성 상태');
   });
 
   it('fans out text input only when broadcast is enabled for the active connected host pane', async () => {

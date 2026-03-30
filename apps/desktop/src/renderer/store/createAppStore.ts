@@ -7451,7 +7451,11 @@ export function createAppStore(api: DesktopApi) {
           const currentTab = state.tabs.find(
             (tab) => tab.sessionId === event.sessionId,
           );
-          if (!currentTab || currentTab.sessionShare?.status !== "active") {
+          if (
+            !currentTab ||
+            currentTab.sessionShare?.status !== "active" ||
+            event.message.senderRole === "owner"
+          ) {
             return state;
           }
 

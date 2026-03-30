@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"unicode/utf8"
 )
 
 func TestValidateViewerInputMessage(t *testing.T) {
@@ -130,6 +131,18 @@ func TestNormalizeSessionShareChatText(t *testing.T) {
 	}
 }
 
+func TestResolveOwnerChatNickname(t *testing.T) {
+	if nickname := resolveOwnerChatNickname("Shared Session"); nickname != "Shared Session Owner" {
+		t.Fatalf("expected owner nickname with suffix, got %q", nickname)
+	}
+	if nickname := resolveOwnerChatNickname(""); nickname != "Owner" {
+		t.Fatalf("expected fallback owner nickname, got %q", nickname)
+	}
+	if nickname := resolveOwnerChatNickname(strings.Repeat("가", 30)); utf8.RuneCountInString(nickname) > maxShareChatNicknameRunes {
+		t.Fatalf("expected truncated owner nickname, got %q", nickname)
+	}
+}
+
 func TestViewerChatMessageUpdatesHistoryAndIgnoresInputGate(t *testing.T) {
 	hub := NewSessionShareHub()
 	response := hub.Create("user-1", createSessionShareRequest{
@@ -163,8 +176,74 @@ func TestViewerChatMessageUpdatesHistoryAndIgnoresInputGate(t *testing.T) {
 	if len(share.chatLog) != 1 {
 		t.Fatalf("expected 1 chat message, got %d", len(share.chatLog))
 	}
-	if share.chatLog[0].Nickname != "맑은 여우" || share.chatLog[0].Text != "안녕하세요" {
+	if share.chatLog[0].Nickname != "맑은 여우" || share.chatLog[0].Text != "안녕하세요" || share.chatLog[0].SenderRole != "viewer" {
 		t.Fatalf("unexpected chat payload: %#v", share.chatLog[0])
+	}
+}
+
+func TestOwnerChatMessageUsesFixedNicknameAndRole(t *testing.T) {
+	hub := NewSessionShareHub()
+	response := hub.Create("user-1", createSessionShareRequest{
+		SessionID: "session-1",
+		Title:     "Shared Session",
+		Cols:      80,
+		Rows:      24,
+	}, "https://viewer.example.com")
+
+	hub.shares[response.ShareID].owner = &shareConn{}
+
+	sendPayload, _ := json.Marshal(ownerChatSendMessage{
+		Type: "chat-send",
+		Text: "안녕하세요",
+	})
+	if err := hub.handleOwnerPayload(response.ShareID, sendPayload); err != nil {
+		t.Fatalf("owner chat send failed: %v", err)
+	}
+
+	share := hub.shares[response.ShareID]
+	if len(share.chatLog) != 1 {
+		t.Fatalf("expected 1 owner chat message, got %d", len(share.chatLog))
+	}
+	if share.chatLog[0].Nickname != "Shared Session Owner" || share.chatLog[0].Text != "안녕하세요" || share.chatLog[0].SenderRole != "owner" {
+		t.Fatalf("unexpected owner chat payload: %#v", share.chatLog[0])
+	}
+}
+
+func TestChatHistoryPreservesMixedSenderRoles(t *testing.T) {
+	hub := NewSessionShareHub()
+	response := hub.Create("user-1", createSessionShareRequest{
+		SessionID: "session-1",
+		Title:     "Shared Session",
+		Cols:      80,
+		Rows:      24,
+	}, "https://viewer.example.com")
+
+	viewer := &shareConn{}
+	hub.shares[response.ShareID].owner = &shareConn{}
+	hub.shares[response.ShareID].viewers[viewer] = &sessionShareViewerState{nickname: "맑은 여우"}
+
+	ownerPayload, _ := json.Marshal(ownerChatSendMessage{
+		Type: "chat-send",
+		Text: "주인 메시지",
+	})
+	if err := hub.handleOwnerPayload(response.ShareID, ownerPayload); err != nil {
+		t.Fatalf("owner chat send failed: %v", err)
+	}
+
+	viewerPayload, _ := json.Marshal(viewerChatSendMessage{
+		Type: "chat-send",
+		Text: "뷰어 메시지",
+	})
+	if err := hub.handleViewerPayload(response.ShareID, viewer, viewerPayload); err != nil {
+		t.Fatalf("viewer chat send failed: %v", err)
+	}
+
+	share := hub.shares[response.ShareID]
+	if len(share.chatLog) != 2 {
+		t.Fatalf("expected 2 mixed chat messages, got %d", len(share.chatLog))
+	}
+	if share.chatLog[0].SenderRole != "owner" || share.chatLog[1].SenderRole != "viewer" {
+		t.Fatalf("expected mixed sender roles, got %#v", share.chatLog)
 	}
 }
 
@@ -221,10 +300,11 @@ func TestDeleteByShareIDRemovesChatState(t *testing.T) {
 	viewer := &shareConn{}
 	hub.shares[response.ShareID].viewers[viewer] = &sessionShareViewerState{nickname: "맑은 여우"}
 	hub.shares[response.ShareID].chatLog = []sessionShareChatMessage{{
-		ID:       "chat-1",
-		Nickname: "맑은 여우",
-		Text:     "안녕하세요",
-		SentAt:   "2026-03-27T00:00:00Z",
+		ID:         "chat-1",
+		Nickname:   "맑은 여우",
+		SenderRole: "viewer",
+		Text:       "안녕하세요",
+		SentAt:     "2026-03-27T00:00:00Z",
 	}}
 
 	if err := hub.DeleteByShareID(response.ShareID, "세션 공유가 종료되었습니다."); err != nil {

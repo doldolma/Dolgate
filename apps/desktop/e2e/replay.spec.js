@@ -8,6 +8,7 @@ const {
   path,
   rm,
   waitForCapturedTerminalOutput,
+  waitForFakeAwsSessionReady,
   waitForReplayState,
   writeDesktopState,
 } = require("./helpers");
@@ -51,7 +52,7 @@ test.describe("desktop replay regression", () => {
 
       await expect(awsCard).toBeVisible();
       await awsCard.dblclick();
-      await waitForCapturedTerminalOutput(page, "TTY:");
+      await waitForFakeAwsSessionReady(page);
       await page.locator(".terminal-session.active .terminal-canvas").click();
       await page.keyboard.type("replay-smoke-check");
       await page.keyboard.press("Enter");

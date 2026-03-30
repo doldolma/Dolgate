@@ -85,6 +85,7 @@ export const ipcChannels = {
     setInputEnabled: 'session-shares:set-input-enabled',
     stop: 'session-shares:stop',
     openOwnerChatWindow: 'session-shares:open-owner-chat-window',
+    sendOwnerChatMessage: 'session-shares:send-owner-chat-message',
     getOwnerChatSnapshot: 'session-shares:get-owner-chat-snapshot',
     event: 'session-shares:event',
     chatEvent: 'session-shares:chat-event'

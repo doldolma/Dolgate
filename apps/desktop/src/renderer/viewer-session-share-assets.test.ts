@@ -190,7 +190,7 @@ describe('session share viewer assets', () => {
       (payload) => payload.type === 'chat-send',
     ).length;
 
-    chatInput.value = '안녕하세요';
+    chatInput.value = 'hello';
     chatInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
 
     const payloadsAfterEnter = chatPayloads(socket);
@@ -204,7 +204,7 @@ describe('session share viewer assets', () => {
     const sentBeforeShiftEnter = chatPayloads(socket).filter(
       (payload) => payload.type === 'chat-send',
     ).length;
-    chatInput.value = '줄1';
+    chatInput.value = 'draft';
     chatInput.dispatchEvent(
       new KeyboardEvent('keydown', { key: 'Enter', shiftKey: true, bubbles: true }),
     );
@@ -218,7 +218,7 @@ describe('session share viewer assets', () => {
       configurable: true,
       value: true,
     });
-    chatInput.value = 'ㅋ';
+    chatInput.value = 'ime';
     chatInput.dispatchEvent(composingEnter);
     chatInput.dispatchEvent(new CompositionEvent('compositionend', { bubbles: true }));
 
@@ -227,7 +227,7 @@ describe('session share viewer assets', () => {
     ).toHaveLength(sentBeforeShiftEnter);
   });
 
-  it('renders multiline chat messages and clears chat UI on share end', async () => {
+  it('renders owner messages without duplicating the owner suffix and clears chat UI on share end', async () => {
     const socket = latestSocket();
     const messages = document.getElementById('viewer-chat-messages') as HTMLElement;
     const nicknameInput = document.getElementById('viewer-chat-nickname') as HTMLInputElement;
@@ -240,21 +240,29 @@ describe('session share viewer assets', () => {
           type: 'chat-message',
           message: {
             id: 'chat-1',
-            nickname: '맑은 다람쥐',
-            text: '안녕\n하세요',
+            nickname: 'Synology Owner',
+            senderRole: 'owner',
+            text: 'hello\nthere',
             sentAt: '2026-03-28T00:00:00.000Z',
           },
         }),
       }),
     );
 
-    expect(messages.textContent).toContain('안녕\n하세요');
+    expect(messages.textContent).toContain('hello');
+    expect(messages.textContent).toContain('there');
+    expect(messages.textContent).toContain('Owner');
+    expect(messages.textContent).not.toContain('Synology Owner');
+    expect(messages.querySelector('.viewer-chat-message--owner')).toBeTruthy();
+    expect(
+      messages.querySelector('.viewer-chat-message__meta strong')?.textContent,
+    ).toBe('Synology');
 
     socket.dispatchEvent(
       new MessageEvent('message', {
         data: JSON.stringify({
           type: 'share-ended',
-          message: '세션 공유가 종료되었습니다.',
+          message: 'share ended',
         }),
       }),
     );
@@ -265,10 +273,12 @@ describe('session share viewer assets', () => {
     expect(submitButton.disabled).toBe(true);
   });
 
-  it('keeps multiline and internal scroll styling in the shared asset CSS', () => {
+  it('keeps multiline and owner styling in the shared asset CSS', () => {
     expect(viewerCss).toContain('.viewer-chat-message p {');
     expect(viewerCss).toContain('white-space: pre-wrap;');
     expect(viewerCss).toContain('.viewer-chat-messages {');
     expect(viewerCss).toContain('overflow-y: auto;');
+    expect(viewerCss).toContain('.viewer-chat-message--owner {');
+    expect(viewerCss).toContain('.viewer-chat-message__badge {');
   });
 });

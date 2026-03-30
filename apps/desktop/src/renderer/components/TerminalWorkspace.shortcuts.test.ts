@@ -119,15 +119,57 @@ describe('TerminalWorkspace search shortcut helper', () => {
   it('limits owner chat toasts to the latest three notifications', () => {
     expect(
       getVisibleSessionShareChatNotifications([
-        { id: 'chat-1', nickname: '하나', text: '1', sentAt: '2026-03-27T00:00:00.000Z' },
-        { id: 'chat-2', nickname: '둘', text: '2', sentAt: '2026-03-27T00:01:00.000Z' },
-        { id: 'chat-3', nickname: '셋', text: '3', sentAt: '2026-03-27T00:02:00.000Z' },
-        { id: 'chat-4', nickname: '넷', text: '4', sentAt: '2026-03-27T00:03:00.000Z' }
+        {
+          id: 'chat-1',
+          nickname: 'one',
+          senderRole: 'viewer',
+          text: '1',
+          sentAt: '2026-03-27T00:00:00.000Z'
+        },
+        {
+          id: 'chat-2',
+          nickname: 'two',
+          senderRole: 'viewer',
+          text: '2',
+          sentAt: '2026-03-27T00:01:00.000Z'
+        },
+        {
+          id: 'chat-3',
+          nickname: 'three',
+          senderRole: 'viewer',
+          text: '3',
+          sentAt: '2026-03-27T00:02:00.000Z'
+        },
+        {
+          id: 'chat-4',
+          nickname: 'four',
+          senderRole: 'viewer',
+          text: '4',
+          sentAt: '2026-03-27T00:03:00.000Z'
+        }
       ])
     ).toEqual([
-      { id: 'chat-2', nickname: '둘', text: '2', sentAt: '2026-03-27T00:01:00.000Z' },
-      { id: 'chat-3', nickname: '셋', text: '3', sentAt: '2026-03-27T00:02:00.000Z' },
-      { id: 'chat-4', nickname: '넷', text: '4', sentAt: '2026-03-27T00:03:00.000Z' }
+      {
+        id: 'chat-2',
+        nickname: 'two',
+        senderRole: 'viewer',
+        text: '2',
+        sentAt: '2026-03-27T00:01:00.000Z'
+      },
+      {
+        id: 'chat-3',
+        nickname: 'three',
+        senderRole: 'viewer',
+        text: '3',
+        sentAt: '2026-03-27T00:02:00.000Z'
+      },
+      {
+        id: 'chat-4',
+        nickname: 'four',
+        senderRole: 'viewer',
+        text: '4',
+        sentAt: '2026-03-27T00:03:00.000Z'
+      }
     ]);
   });
 
