@@ -70,7 +70,7 @@ func TestWindowsConPTYRunnerRoutesOutputInputAndResize(t *testing.T) {
 		waitResult <- exit
 	}()
 
-	waitForOutputContains(t, output, "FAKE AWS SSM READY", waitResult, waitErr)
+	waitForOutputContains(t, output, "READY:FAKE_AWS_SSM", waitResult, waitErr)
 	waitForOutputContains(t, output, "SIZE:120x32", waitResult, waitErr)
 
 	if err := runner.Write([]byte("hello-from-conpty\r\n")); err != nil {

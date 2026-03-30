@@ -1458,6 +1458,7 @@ export function TerminalWorkspace({
   const workspaceRef = useRef<HTMLDivElement | null>(null);
   const [dropPreview, setDropPreview] = useState<DropPreview | null>(null);
   const [resizingHandle, setResizingHandle] = useState<SplitHandlePlacement | null>(null);
+  const [isBroadcastTooltipVisible, setIsBroadcastTooltipVisible] = useState(false);
   const pendingInteractiveAuth = useAppStore((state) => state.pendingInteractiveAuth);
 
   const workspaceLayout = useMemo(() => {
@@ -1515,14 +1516,16 @@ export function TerminalWorkspace({
     return activeWorkspaceSessionIds.filter((sessionId) => isConnectedHostSession(tabsBySessionId.get(sessionId)));
   }, [activeWorkspaceSessionIds, tabsBySessionId]);
 
-  const shouldShowBroadcastBar = Boolean(activeWorkspace && activeWorkspaceSessionIds.length >= 2);
+  const shouldShowBroadcastControl = Boolean(activeWorkspace && activeWorkspaceSessionIds.length >= 2);
   const isWorkspaceBroadcastEnabled = Boolean(activeWorkspace?.broadcastEnabled);
   const isBroadcastToggleDisabled = !isWorkspaceBroadcastEnabled && connectedWorkspaceHostSessionIds.length < 2;
-  const broadcastDescription = isWorkspaceBroadcastEnabled
-    ? '브로드캐스트가 켜져 있습니다. 현재 활성 원격 pane 입력이 다른 원격 pane에도 전송됩니다.'
+  const broadcastButtonLabel = isWorkspaceBroadcastEnabled ? '브로드캐스트 끄기' : '브로드캐스트 켜기';
+  const broadcastTooltipText = isWorkspaceBroadcastEnabled
+    ? '브로드캐스트 활성 상태'
     : isBroadcastToggleDisabled
-      ? '연결된 원격 pane 2개 이상일 때 사용할 수 있습니다.'
-      : '현재 활성 원격 pane의 입력을 같은 workspace의 다른 원격 pane에도 보냅니다.';
+      ? '원격 pane 2개 이상 연결 시 사용 가능'
+      : '브로드캐스트 켜기';
+  const broadcastTooltipId = activeWorkspace ? `workspace-broadcast-tooltip-${activeWorkspace.id}` : undefined;
 
   const sendSessionInput = (sourceSessionId: string, data: string) => {
     void Promise.resolve(window.dolssh.ssh.write(sourceSessionId, data)).catch(() => undefined);
@@ -1573,6 +1576,7 @@ export function TerminalWorkspace({
   useEffect(() => {
     setDropPreview(null);
     setResizingHandle(null);
+    setIsBroadcastTooltipVisible(false);
   }, [viewActivationKey]);
 
   useEffect(() => {
@@ -1691,23 +1695,49 @@ export function TerminalWorkspace({
           : undefined
       }
     >
-      {shouldShowBroadcastBar && activeWorkspace ? (
-        <div className="terminal-workspace__broadcast-bar">
-          <div className="terminal-workspace__broadcast-copy">
-            <strong>입력 브로드캐스트</strong>
-            <span>{broadcastDescription}</span>
-          </div>
+      {shouldShowBroadcastControl && activeWorkspace ? (
+        <div className="terminal-workspace__broadcast-control">
           <button
             type="button"
-            className={`secondary-button terminal-workspace__broadcast-button ${isWorkspaceBroadcastEnabled ? 'active' : ''}`}
+            className={`secondary-button terminal-workspace__broadcast-toggle ${isWorkspaceBroadcastEnabled ? 'active' : ''}`}
+            aria-label={broadcastButtonLabel}
             aria-pressed={isWorkspaceBroadcastEnabled}
-            disabled={isBroadcastToggleDisabled}
+            aria-disabled={isBroadcastToggleDisabled}
+            aria-describedby={isBroadcastTooltipVisible && broadcastTooltipId ? broadcastTooltipId : undefined}
+            onMouseEnter={() => {
+              setIsBroadcastTooltipVisible(true);
+            }}
+            onMouseLeave={() => {
+              setIsBroadcastTooltipVisible(false);
+            }}
+            onFocus={() => {
+              setIsBroadcastTooltipVisible(true);
+            }}
+            onBlur={() => {
+              setIsBroadcastTooltipVisible(false);
+            }}
             onClick={() => {
+              if (isBroadcastToggleDisabled) {
+                return;
+              }
               onToggleWorkspaceBroadcast(activeWorkspace.id);
             }}
           >
-            {isWorkspaceBroadcastEnabled ? '브로드캐스트 끄기' : '브로드캐스트 켜기'}
+            <span className="terminal-workspace__broadcast-toggle-icon" aria-hidden="true">
+              <svg viewBox="0 0 16 16" focusable="false">
+                <circle cx="8" cy="8" r="1.35" fill="currentColor" stroke="none" />
+                <path d="M4.85 5.35a3.75 3.75 0 0 1 0 5.3" />
+                <path d="M11.15 5.35a3.75 3.75 0 0 0 0 5.3" />
+                <path d="M2.7 3.3a6.75 6.75 0 0 1 0 9.4" />
+                <path d="M13.3 3.3a6.75 6.75 0 0 0 0 9.4" />
+              </svg>
+            </span>
           </button>
+          {isBroadcastTooltipVisible && broadcastTooltipId ? (
+            <div id={broadcastTooltipId} role="tooltip" className="terminal-workspace__broadcast-tooltip">
+              {broadcastTooltipText}
+            </div>
+          ) : null}
         </div>
       ) : null}
 

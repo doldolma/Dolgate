@@ -15,7 +15,7 @@ type viewerPageData struct {
 	AssetVersion string
 }
 
-const shareAssetVersion = "20260327-session-share-chat-ime-guard-v1"
+const shareAssetVersion = "20260331-session-share-owner-chat-display-v2"
 
 func mustShareAssetFS() fs.FS {
 	assetFS, err := fs.Sub(shareAssets, "share_assets")

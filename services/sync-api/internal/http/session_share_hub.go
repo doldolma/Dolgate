@@ -97,10 +97,11 @@ type ownerInputEnabledMessage struct {
 }
 
 type sessionShareChatMessage struct {
-	ID       string `json:"id"`
-	Nickname string `json:"nickname"`
-	Text     string `json:"text"`
-	SentAt   string `json:"sentAt"`
+	ID         string `json:"id"`
+	Nickname   string `json:"nickname"`
+	SenderRole string `json:"senderRole"`
+	Text       string `json:"text"`
+	SentAt     string `json:"sentAt"`
 }
 
 type ownerChatMessage struct {
@@ -159,6 +160,11 @@ type viewerChatSendMessage struct {
 	Text string `json:"text"`
 }
 
+type ownerChatSendMessage struct {
+	Type string `json:"type"`
+	Text string `json:"text"`
+}
+
 func normalizeSessionShareChatNickname(input string) (string, bool) {
 	trimmed := strings.TrimSpace(input)
 	if trimmed == "" || strings.ContainsAny(trimmed, "\r\n") {
@@ -181,6 +187,44 @@ func normalizeSessionShareChatText(input string) (string, bool) {
 		return "", false
 	}
 	return trimmed, true
+}
+
+func takeSessionShareChatRunes(input string, limit int) string {
+	if limit <= 0 {
+		return ""
+	}
+
+	runes := []rune(input)
+	if len(runes) <= limit {
+		return input
+	}
+	return string(runes[:limit])
+}
+
+func resolveOwnerChatNickname(title string) string {
+	const suffix = " Owner"
+	const fallback = "Owner"
+
+	trimmed := strings.TrimSpace(title)
+	if trimmed == "" {
+		return fallback
+	}
+
+	suffixRunes := utf8.RuneCountInString(suffix)
+	if utf8.RuneCountInString(trimmed)+suffixRunes <= maxShareChatNicknameRunes {
+		return trimmed + suffix
+	}
+
+	titleLimit := maxShareChatNicknameRunes - suffixRunes
+	if titleLimit <= 0 {
+		return fallback
+	}
+
+	truncated := strings.TrimSpace(takeSessionShareChatRunes(trimmed, titleLimit))
+	if truncated == "" {
+		return fallback
+	}
+	return truncated + suffix
 }
 
 type ownerViewerControlSignalMessage struct {
@@ -656,6 +700,16 @@ func (hub *SessionShareHub) handleOwnerPayload(shareID string, payload []byte) e
 		}
 		_, err := hub.SetInputEnabledForOwnerMessage(shareID, message.InputEnabled)
 		return err
+	case "chat-send":
+		var message ownerChatSendMessage
+		if err := json.Unmarshal(payload, &message); err != nil {
+			return err
+		}
+		text, ok := normalizeSessionShareChatText(message.Text)
+		if !ok {
+			return nil
+		}
+		return hub.broadcastOwnerChatMessage(shareID, text)
 	case "session-ended":
 		var message ownerSessionEndedMessage
 		if err := json.Unmarshal(payload, &message); err != nil {
@@ -767,6 +821,35 @@ func (hub *SessionShareHub) updateViewerChatProfile(shareID string, viewer *shar
 	return nil
 }
 
+func appendSessionShareChatMessage(share *sessionShare, message sessionShareChatMessage) ([]*shareConn, *shareConn) {
+	share.chatLog = append(share.chatLog, message)
+	for len(share.chatLog) > maxShareChatEntries {
+		share.chatLog = share.chatLog[1:]
+	}
+
+	viewers := make([]*shareConn, 0, len(share.viewers))
+	for viewerConn := range share.viewers {
+		viewers = append(viewers, viewerConn)
+	}
+	return viewers, share.owner
+}
+
+func dispatchSessionShareChatMessage(viewers []*shareConn, owner *shareConn, message sessionShareChatMessage) {
+	payload := viewerChatMessage{
+		Type:    "chat-message",
+		Message: message,
+	}
+	for _, viewerConn := range viewers {
+		_ = viewerConn.WriteJSON(payload)
+	}
+	if owner != nil {
+		_ = owner.WriteJSON(ownerChatMessage{
+			Type:    "chat-message",
+			Message: message,
+		})
+	}
+}
+
 func (hub *SessionShareHub) broadcastViewerChatMessage(shareID string, viewer *shareConn, text string) error {
 	hub.mu.Lock()
 	share, ok := hub.shares[shareID]
@@ -785,36 +868,38 @@ func (hub *SessionShareHub) broadcastViewerChatMessage(shareID string, viewer *s
 	}
 
 	message := sessionShareChatMessage{
-		ID:       uuid.NewString(),
-		Nickname: viewerState.nickname,
-		Text:     text,
-		SentAt:   time.Now().UTC().Format(time.RFC3339),
+		ID:         uuid.NewString(),
+		Nickname:   viewerState.nickname,
+		SenderRole: "viewer",
+		Text:       text,
+		SentAt:     time.Now().UTC().Format(time.RFC3339),
 	}
-	share.chatLog = append(share.chatLog, message)
-	for len(share.chatLog) > maxShareChatEntries {
-		share.chatLog = share.chatLog[1:]
-	}
-
-	viewers := make([]*shareConn, 0, len(share.viewers))
-	for viewerConn := range share.viewers {
-		viewers = append(viewers, viewerConn)
-	}
-	owner := share.owner
+	viewers, owner := appendSessionShareChatMessage(share, message)
 	hub.mu.Unlock()
 
-	payload := viewerChatMessage{
-		Type:    "chat-message",
-		Message: message,
+	dispatchSessionShareChatMessage(viewers, owner, message)
+	return nil
+}
+
+func (hub *SessionShareHub) broadcastOwnerChatMessage(shareID string, text string) error {
+	hub.mu.Lock()
+	share, ok := hub.shares[shareID]
+	if !ok {
+		hub.mu.Unlock()
+		return errors.New("session share not found")
 	}
-	for _, viewerConn := range viewers {
-		_ = viewerConn.WriteJSON(payload)
+
+	message := sessionShareChatMessage{
+		ID:         uuid.NewString(),
+		Nickname:   resolveOwnerChatNickname(share.title),
+		SenderRole: "owner",
+		Text:       text,
+		SentAt:     time.Now().UTC().Format(time.RFC3339),
 	}
-	if owner != nil {
-		_ = owner.WriteJSON(ownerChatMessage{
-			Type:    "chat-message",
-			Message: message,
-		})
-	}
+	viewers, owner := appendSessionShareChatMessage(share, message)
+	hub.mu.Unlock()
+
+	dispatchSessionShareChatMessage(viewers, owner, message)
 	return nil
 }
 

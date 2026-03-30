@@ -1492,9 +1492,12 @@ export interface SessionShareEvent {
   state: SessionShareState;
 }
 
+export type SessionShareChatSenderRole = 'owner' | 'viewer';
+
 export interface SessionShareChatMessage {
   id: string;
   nickname: string;
+  senderRole: SessionShareChatSenderRole;
   text: string;
   sentAt: string;
 }
@@ -1509,6 +1512,7 @@ export interface SessionShareChatEvent {
 export interface SessionShareOwnerChatSnapshot {
   sessionId: string;
   title: string;
+  ownerNickname: string;
   state: SessionShareState;
   messages: SessionShareChatMessage[];
 }
@@ -1550,6 +1554,10 @@ export type SessionShareOwnerMessage =
   | {
       type: 'input-enabled';
       inputEnabled: boolean;
+    }
+  | {
+      type: 'chat-send';
+      text: string;
     }
   | {
       type: 'chat-message';

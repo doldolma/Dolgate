@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type {
   AppTheme,
   SessionShareChatMessage,
+  SessionShareChatSenderRole,
   SessionShareOwnerChatSnapshot,
 } from '@shared';
 import { SESSION_SHARE_CHAT_HISTORY_LIMIT } from '@shared';
@@ -10,6 +11,7 @@ function createInactiveSnapshot(sessionId: string): SessionShareOwnerChatSnapsho
   return {
     sessionId,
     title: '',
+    ownerNickname: 'Owner',
     state: {
       status: 'inactive',
       shareUrl: null,
@@ -86,6 +88,37 @@ function hydrateChatMessages(
   return clampChatMessages([...snapshotMessages, ...current]);
 }
 
+function normalizeChatText(value: string): string {
+  const normalized = value.replace(/\r\n?/g, '\n').trim();
+  if (!normalized) {
+    return '';
+  }
+
+  return Array.from(normalized).length <= 300 ? normalized : '';
+}
+
+function resolveSenderRole(
+  message: Pick<SessionShareChatMessage, 'senderRole'>,
+): SessionShareChatSenderRole {
+  return message.senderRole === 'owner' ? 'owner' : 'viewer';
+}
+
+function getDisplayChatNickname(
+  nickname: string,
+  senderRole: SessionShareChatSenderRole,
+): string {
+  const normalized = nickname.trim();
+  if (!normalized) {
+    return senderRole === 'owner' ? 'Owner' : '';
+  }
+  if (senderRole !== 'owner') {
+    return normalized;
+  }
+
+  const withoutOwnerSuffix = normalized.replace(/\s+Owner$/u, '').trim();
+  return withoutOwnerSuffix || normalized;
+}
+
 export function SessionShareChatWindow({
   sessionId,
 }: {
@@ -103,12 +136,17 @@ export function SessionShareChatWindow({
   });
   const [loading, setLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [sendErrorMessage, setSendErrorMessage] = useState<string | null>(null);
+  const [draftMessage, setDraftMessage] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isComposing, setIsComposing] = useState(false);
   const listRef = useRef<HTMLDivElement | null>(null);
   const desktopPlatform = useMemo(() => detectDesktopPlatform(), []);
   const resolvedTheme = useMemo(
     () => resolveTheme(settingsTheme, prefersDark),
     [prefersDark, settingsTheme],
   );
+  const isChatActive = snapshot.state.status === 'active';
 
   useEffect(() => {
     document.documentElement.dataset.theme = resolvedTheme;
@@ -233,6 +271,31 @@ export function SessionShareChatWindow({
     listNode.scrollTop = listNode.scrollHeight;
   }, [snapshot.messages.length]);
 
+  const handleSubmit = async () => {
+    const normalizedText = normalizeChatText(draftMessage);
+    if (!normalizedText || !isChatActive || isSubmitting) {
+      return;
+    }
+
+    setIsSubmitting(true);
+    setSendErrorMessage(null);
+    try {
+      await window.dolssh.sessionShares.sendOwnerChatMessage(
+        sessionId,
+        normalizedText,
+      );
+      setDraftMessage('');
+    } catch (error: unknown) {
+      setSendErrorMessage(
+        error instanceof Error
+          ? error.message
+          : '채팅 메시지를 보내지 못했습니다.',
+      );
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
   return (
     <div className="session-share-chat-window">
       <header className="session-share-chat-window__header">
@@ -241,12 +304,20 @@ export function SessionShareChatWindow({
           <strong>{snapshot.title || '채팅 기록'}</strong>
         </div>
         <span className="session-share-chat-window__status">
-          {loading ? '불러오는 중' : '실시간 기록'}
+          {loading
+            ? '불러오는 중'
+            : isSubmitting
+              ? '전송 중'
+              : '실시간 채팅'}
         </span>
       </header>
 
       {errorMessage ? (
         <div className="session-share-chat-window__error">{errorMessage}</div>
+      ) : null}
+
+      {sendErrorMessage ? (
+        <div className="session-share-chat-window__error">{sendErrorMessage}</div>
       ) : null}
 
       <div
@@ -260,18 +331,80 @@ export function SessionShareChatWindow({
           </div>
         ) : null}
 
-        {snapshot.messages.map((message) => (
-          <article key={message.id} className="session-share-chat-window__message">
-            <div className="session-share-chat-window__meta">
-              <strong>{message.nickname}</strong>
-              <time dateTime={message.sentAt}>
-                {formatChatTimestamp(message.sentAt)}
-              </time>
-            </div>
-            <p>{message.text}</p>
-          </article>
-        ))}
+        {snapshot.messages.map((message) => {
+          const senderRole = resolveSenderRole(message);
+          const displayNickname = getDisplayChatNickname(message.nickname, senderRole);
+
+          return (
+            <article
+              key={message.id}
+              className={`session-share-chat-window__message ${
+                senderRole === 'owner'
+                  ? 'session-share-chat-window__message--owner'
+                  : ''
+              }`}
+            >
+              <div className="session-share-chat-window__meta">
+                <div className="session-share-chat-window__meta-name">
+                  <strong>{displayNickname}</strong>
+                  {senderRole === 'owner' ? (
+                    <span className="session-share-chat-window__role-badge">Owner</span>
+                  ) : null}
+                </div>
+                <time dateTime={message.sentAt}>
+                  {formatChatTimestamp(message.sentAt)}
+                </time>
+              </div>
+              <p>{message.text}</p>
+            </article>
+          );
+        })}
       </div>
+
+      <form
+        className="session-share-chat-window__composer"
+        onSubmit={(event) => {
+          event.preventDefault();
+          void handleSubmit();
+        }}
+      >
+        <label className="session-share-chat-window__composer-field">
+          <span>메시지</span>
+          <textarea
+            value={draftMessage}
+            rows={3}
+            maxLength={300}
+            placeholder="메시지를 입력해 주세요"
+            disabled={!isChatActive || loading || isSubmitting}
+            onChange={(event) => {
+              setDraftMessage(event.target.value);
+              if (sendErrorMessage) {
+                setSendErrorMessage(null);
+              }
+            }}
+            onCompositionStart={() => {
+              setIsComposing(true);
+            }}
+            onCompositionEnd={() => {
+              setIsComposing(false);
+            }}
+            onKeyDown={(event) => {
+              if (event.key !== 'Enter' || event.shiftKey || isComposing || event.nativeEvent.isComposing) {
+                return;
+              }
+              event.preventDefault();
+              void handleSubmit();
+            }}
+          />
+        </label>
+        <button
+          type="submit"
+          className="primary-button session-share-chat-window__composer-submit"
+          disabled={!isChatActive || loading || isSubmitting}
+        >
+          전송
+        </button>
+      </form>
     </div>
   );
 }

@@ -8,7 +8,7 @@ const {
   os,
   path,
   rm,
-  waitForCapturedTerminalOutput,
+  waitForFakeAwsSessionReady,
   waitForSessionTerminalState,
   writeDesktopState,
 } = require("./helpers");
@@ -72,7 +72,7 @@ test.describe("desktop TUI regression", () => {
 
       await expect(awsCard).toBeVisible();
       await awsCard.dblclick();
-      await waitForCapturedTerminalOutput(page, "TTY:");
+      await waitForFakeAwsSessionReady(page);
 
       const sessionId = await getCapturedSessionId(page);
       await waitForSessionTerminalState(page, sessionId, {

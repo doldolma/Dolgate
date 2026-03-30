@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+﻿import { describe, expect, it, vi } from "vitest";
 import type {
   DesktopApi,
   HostContainerLogsSnapshot,
@@ -47,7 +47,7 @@ function createContainerTab(
   return {
     kind: "host-containers",
     hostId,
-    title: `${hostId} · Containers`,
+    title: `${hostId} 쨌 Containers`,
     runtime: null,
     unsupportedReason: null,
     connectionProgress: null,
@@ -539,9 +539,11 @@ function createMockApi(): DesktopApi {
       })),
       stop: vi.fn().mockResolvedValue(undefined),
       openOwnerChatWindow: vi.fn().mockResolvedValue(undefined),
+      sendOwnerChatMessage: vi.fn().mockResolvedValue(undefined),
       getOwnerChatSnapshot: vi.fn().mockResolvedValue({
         sessionId: "session-1",
         title: "Host Session",
+        ownerNickname: "Host Session Owner",
         state: {
           status: "active",
           shareUrl: "https://sync.example.com/share/share-1/token-1",
@@ -1858,7 +1860,7 @@ describe("createAppStore", () => {
         isAuthenticated: false,
         accountId: null,
         arn: null,
-        errorMessage: "브라우저 로그인이 필요합니다.",
+        errorMessage: "釉뚮씪?곗? 濡쒓렇?몄씠 ?꾩슂?⑸땲??",
         missingTools: [],
       })
       .mockResolvedValueOnce({
@@ -1910,7 +1912,7 @@ describe("createAppStore", () => {
       isAuthenticated: false,
       accountId: null,
       arn: null,
-      errorMessage: "이 프로필은 AWS CLI 자격 증명이 필요합니다.",
+      errorMessage: "???꾨줈?꾩? AWS CLI ?먭꺽 利앸챸???꾩슂?⑸땲??",
       missingTools: [],
     });
     const store = createAppStore(api);
@@ -1923,7 +1925,7 @@ describe("createAppStore", () => {
     expect(api.ssh.connect).not.toHaveBeenCalled();
     expect(store.getState().tabs[0]?.status).toBe("error");
     expect(store.getState().tabs[0]?.errorMessage).toBe(
-      "이 프로필은 AWS CLI 자격 증명이 필요합니다.",
+      "???꾨줈?꾩? AWS CLI ?먭꺽 利앸챸???꾩슂?⑸땲??",
     );
   });
 
@@ -1986,7 +1988,7 @@ describe("createAppStore", () => {
       isAuthenticated: false,
       accountId: null,
       arn: null,
-      errorMessage: "브라우저 로그인이 필요합니다.",
+      errorMessage: "釉뚮씪?곗? 濡쒓렇?몄씠 ?꾩슂?⑸땲??",
       missingTools: [],
     });
     await flushMicrotasks();
@@ -2291,7 +2293,7 @@ describe("createAppStore", () => {
       fingerprintSha256: "SHA256:test",
       status: "trusted",
       existing: null,
-      targetDescription: "AWS SSM · i-aws-prod",
+      targetDescription: "AWS SSM 쨌 i-aws-prod",
     });
 
     const store = createAppStore(api);
@@ -2349,7 +2351,7 @@ describe("createAppStore", () => {
       fingerprintSha256: "SHA256:test",
       status: "trusted",
       existing: null,
-      targetDescription: "AWS SSM · i-legacy",
+      targetDescription: "AWS SSM 쨌 i-legacy",
     });
 
     const store = createAppStore(api);
@@ -2386,14 +2388,14 @@ describe("createAppStore", () => {
       endpointId: "endpoint-aws",
       hostId: "aws-host-1",
       stage: "browser-login",
-      message: "브라우저에서 default AWS 로그인을 진행하는 중입니다.",
+      message: "釉뚮씪?곗??먯꽌 default AWS 濡쒓렇?몄쓣 吏꾪뻾?섎뒗 以묒엯?덈떎.",
     });
 
     expect(store.getState().sftp.rightPane.connectionProgress).toEqual({
       endpointId: "endpoint-aws",
       hostId: "aws-host-1",
       stage: "browser-login",
-      message: "브라우저에서 default AWS 로그인을 진행하는 중입니다.",
+      message: "釉뚮씪?곗??먯꽌 default AWS 濡쒓렇?몄쓣 吏꾪뻾?섎뒗 以묒엯?덈떎.",
     });
   });
 
@@ -2406,7 +2408,7 @@ describe("createAppStore", () => {
       endpointId: "containers:host-1",
       hostId: "host-1",
       stage: "browser-login",
-      message: "브라우저에서 승인을 진행하는 중입니다.",
+      message: "釉뚮씪?곗??먯꽌 ?뱀씤??吏꾪뻾?섎뒗 以묒엯?덈떎.",
     });
 
     expect(
@@ -2418,7 +2420,7 @@ describe("createAppStore", () => {
       endpointId: "containers:host-1",
       hostId: "host-1",
       stage: "browser-login",
-      message: "브라우저에서 승인을 진행하는 중입니다.",
+      message: "釉뚮씪?곗??먯꽌 ?뱀씤??吏꾪뻾?섎뒗 以묒엯?덈떎.",
     });
   });
 
@@ -2489,7 +2491,7 @@ describe("createAppStore", () => {
         isAuthenticated: false,
         accountId: null,
         arn: null,
-        errorMessage: "브라우저 로그인이 필요합니다.",
+        errorMessage: "釉뚮씪?곗? 濡쒓렇?몄씠 ?꾩슂?⑸땲??",
         missingTools: [],
       })
       .mockResolvedValueOnce({
@@ -2616,7 +2618,7 @@ describe("createAppStore", () => {
       containerTabs: [
         createContainerTab("ecs-host-1", {
           kind: "ecs-cluster",
-          title: "prod cluster · ECS",
+          title: "prod cluster 쨌 ECS",
           ecsSnapshot: {
             profileName: "default",
             region: "ap-northeast-2",
@@ -3144,7 +3146,7 @@ describe("createAppStore", () => {
       containerTabs: [
         createContainerTab("ecs-host-1", {
           kind: "ecs-cluster",
-          title: "prod cluster · ECS",
+          title: "prod cluster 쨌 ECS",
           ecsSnapshot: {
             profileName: "default",
             region: "ap-northeast-2",
@@ -3244,7 +3246,7 @@ describe("createAppStore", () => {
         hostId: "host-1",
         challengeId: "challenge-1",
         name: "warpgate",
-        instruction: "승인을 기다리는 중입니다.",
+        instruction: "?뱀씤??湲곕떎由щ뒗 以묒엯?덈떎.",
         prompts: [],
         provider: "warpgate",
         approvalUrl: "https://warpgate.example.com/authorize",
@@ -3257,7 +3259,7 @@ describe("createAppStore", () => {
       containerTabs: [
         ...state.containerTabs,
         createContainerTab("host-2", {
-          title: "Stage · Containers",
+          title: "Stage 쨌 Containers",
         }),
       ],
     }));
@@ -3300,7 +3302,7 @@ describe("createAppStore", () => {
       containerTabs: [
         ...state.containerTabs,
         createContainerTab("host-2", {
-          title: "Stage · Containers",
+          title: "Stage 쨌 Containers",
           runtime: "docker",
         }),
       ],
@@ -4455,8 +4457,9 @@ describe("createAppStore", () => {
       sessionId: "session-1",
       message: {
         id: "chat-1",
-        nickname: "맑은 여우",
-        text: "안녕하세요",
+        nickname: "留묒? ?ъ슦",
+        senderRole: "viewer",
+        text: "hello",
         sentAt: "2026-03-27T00:00:00.000Z",
       },
     });
@@ -4464,8 +4467,9 @@ describe("createAppStore", () => {
     expect(store.getState().sessionShareChatNotifications["session-1"]).toEqual([
       {
         id: "chat-1",
-        nickname: "맑은 여우",
-        text: "안녕하세요",
+        nickname: "留묒? ?ъ슦",
+        senderRole: "viewer",
+        text: "hello",
         sentAt: "2026-03-27T00:00:00.000Z",
       },
     ]);
@@ -4504,8 +4508,9 @@ describe("createAppStore", () => {
       sessionId: "session-1",
       message: {
         id: "chat-1",
-        nickname: "맑은 여우",
-        text: "첫 번째",
+        nickname: "留묒? ?ъ슦",
+        senderRole: "viewer",
+        text: "first",
         sentAt: "2026-03-27T00:00:00.000Z",
       },
     });
@@ -4513,8 +4518,9 @@ describe("createAppStore", () => {
       sessionId: "session-1",
       message: {
         id: "chat-2",
-        nickname: "반짝이는 해달",
-        text: "두 번째",
+        nickname: "諛섏쭩?대뒗 ?대떖",
+        senderRole: "viewer",
+        text: "second",
         sentAt: "2026-03-27T00:01:00.000Z",
       },
     });
@@ -4524,11 +4530,42 @@ describe("createAppStore", () => {
     expect(store.getState().sessionShareChatNotifications["session-1"]).toEqual([
       {
         id: "chat-2",
-        nickname: "반짝이는 해달",
-        text: "두 번째",
+        nickname: "諛섏쭩?대뒗 ?대떖",
+        senderRole: "viewer",
+        text: "second",
         sentAt: "2026-03-27T00:01:00.000Z",
       },
     ]);
+  });
+
+  it("does not queue owner-authored chat notifications", async () => {
+    const store = createAppStore(createMockApi());
+
+    await store.getState().bootstrap();
+    await store.getState().connectHost("host-1", 120, 32);
+
+    store.getState().handleSessionShareEvent({
+      sessionId: "session-1",
+      state: {
+        status: "active",
+        shareUrl: "https://sync.example.com/share/share-1/token-1",
+        inputEnabled: false,
+        viewerCount: 1,
+        errorMessage: null,
+      },
+    });
+    store.getState().handleSessionShareChatEvent({
+      sessionId: "session-1",
+      message: {
+        id: "chat-owner",
+        nickname: "Host Session Owner",
+        senderRole: "owner",
+        text: "owner message",
+        sentAt: "2026-03-27T00:00:00.000Z",
+      },
+    });
+
+    expect(store.getState().sessionShareChatNotifications["session-1"]).toBeUndefined();
   });
 
   it("drops stale chat events after a share has already become inactive", async () => {
@@ -4552,8 +4589,9 @@ describe("createAppStore", () => {
       sessionId: "session-1",
       message: {
         id: "chat-stale",
-        nickname: "맑은 여우",
-        text: "늦게 도착한 메시지",
+        nickname: "留묒? ?ъ슦",
+        senderRole: "viewer",
+        text: "stale message",
         sentAt: "2026-03-27T00:00:00.000Z",
       },
     });
@@ -4581,8 +4619,9 @@ describe("createAppStore", () => {
       sessionId: "session-1",
       message: {
         id: "chat-too-early",
-        nickname: "맑은 여우",
-        text: "아직 이르다",
+        nickname: "留묒? ?ъ슦",
+        senderRole: "viewer",
+        text: "too early",
         sentAt: "2026-03-27T00:00:00.000Z",
       },
     });
@@ -4603,8 +4642,9 @@ describe("createAppStore", () => {
       sessionId: "session-1",
       message: {
         id: "chat-on-time",
-        nickname: "맑은 여우",
-        text: "이제는 보인다",
+        nickname: "留묒? ?ъ슦",
+        senderRole: "viewer",
+        text: "on time",
         sentAt: "2026-03-27T00:01:00.000Z",
       },
     });
@@ -4612,10 +4652,13 @@ describe("createAppStore", () => {
     expect(store.getState().sessionShareChatNotifications["session-1"]).toEqual([
       {
         id: "chat-on-time",
-        nickname: "맑은 여우",
-        text: "이제는 보인다",
+        nickname: "留묒? ?ъ슦",
+        senderRole: "viewer",
+        text: "on time",
         sentAt: "2026-03-27T00:01:00.000Z",
       },
     ]);
   });
 });
+
+

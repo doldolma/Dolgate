@@ -31,6 +31,7 @@
   const CHAT_EMPTY_MESSAGE = "아직 채팅이 없습니다. 첫 메시지를 보내보세요.";
   const CHAT_COLLAPSED_LABEL = "채팅 열기";
   const CHAT_EXPANDED_LABEL = "채팅 접기";
+  const CHAT_OWNER_ROLE_LABEL = "Owner";
   const KOREAN_CHAT_ADJECTIVES = [
     "맑은",
     "반짝이는",
@@ -335,6 +336,23 @@
     });
   }
 
+  function resolveChatSenderRole(senderRole) {
+    return senderRole === "owner" ? "owner" : "viewer";
+  }
+
+  function getDisplayChatNickname(nickname, senderRole) {
+    const normalized = String(nickname || "").trim();
+    if (!normalized) {
+      return senderRole === "owner" ? CHAT_OWNER_ROLE_LABEL : "알 수 없음";
+    }
+    if (senderRole !== "owner") {
+      return normalized;
+    }
+
+    const withoutOwnerSuffix = normalized.replace(/\s+Owner$/u, "").trim();
+    return withoutOwnerSuffix || normalized;
+  }
+
   function renderChatMessages() {
     chatMessagesNode.replaceChildren();
 
@@ -347,15 +365,28 @@
     }
 
     for (const message of chatMessages) {
+      const senderRole = resolveChatSenderRole(message.senderRole);
       const item = document.createElement("article");
-      item.className = "viewer-chat-message";
+      item.className = senderRole === "owner" ? "viewer-chat-message viewer-chat-message--owner" : "viewer-chat-message";
 
       const meta = document.createElement("div");
       meta.className = "viewer-chat-message__meta";
 
+      const nameGroup = document.createElement("div");
+      nameGroup.className = "viewer-chat-message__meta-name";
+
       const nickname = document.createElement("strong");
-      nickname.textContent = message.nickname || "알 수 없음";
-      meta.appendChild(nickname);
+      nickname.textContent = getDisplayChatNickname(message.nickname, senderRole);
+      nameGroup.appendChild(nickname);
+
+      if (senderRole === "owner") {
+        const badge = document.createElement("span");
+        badge.className = "viewer-chat-message__badge";
+        badge.textContent = CHAT_OWNER_ROLE_LABEL;
+        nameGroup.appendChild(badge);
+      }
+
+      meta.appendChild(nameGroup);
 
       const timestamp = document.createElement("time");
       timestamp.dateTime = message.sentAt || "";
@@ -384,6 +415,7 @@
     chatMessages.push({
       id: String(message.id || ""),
       nickname: String(message.nickname || ""),
+      senderRole: resolveChatSenderRole(message.senderRole),
       text: String(message.text || ""),
       sentAt: String(message.sentAt || ""),
     });

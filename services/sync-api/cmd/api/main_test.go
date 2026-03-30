@@ -79,7 +79,12 @@ func TestPrepareRuntimePathsSkipsMySQLDatabaseDirectoryCreation(t *testing.T) {
 	if _, err := os.Stat(keyDir); err != nil {
 		t.Fatalf("key dir stat error = %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(tempDir, "user:pass@tcp(localhost:3306)")); !os.IsNotExist(err) {
-		t.Fatalf("expected no mysql path directories, got err=%v", err)
+
+	entries, err := os.ReadDir(tempDir)
+	if err != nil {
+		t.Fatalf("ReadDir() error = %v", err)
+	}
+	if len(entries) != 1 || entries[0].Name() != "keys" || !entries[0].IsDir() {
+		t.Fatalf("expected only signing key directory, found %+v", entries)
 	}
 }

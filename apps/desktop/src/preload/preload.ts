@@ -392,6 +392,8 @@ const api: DesktopApi = {
       ipcRenderer.invoke(ipcChannels.sessionShares.stop, sessionId),
     openOwnerChatWindow: (sessionId: string) =>
       ipcRenderer.invoke(ipcChannels.sessionShares.openOwnerChatWindow, sessionId),
+    sendOwnerChatMessage: (sessionId: string, text: string) =>
+      ipcRenderer.invoke(ipcChannels.sessionShares.sendOwnerChatMessage, sessionId, text),
     getOwnerChatSnapshot: (sessionId: string) =>
       ipcRenderer.invoke(ipcChannels.sessionShares.getOwnerChatSnapshot, sessionId),
     onEvent: (listener: (event: SessionShareEvent) => void) => {

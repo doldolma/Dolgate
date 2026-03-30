@@ -1621,6 +1621,12 @@ export function registerIpcHandlers(
     },
   );
   ipcMain.handle(
+    ipcChannels.sessionShares.sendOwnerChatMessage,
+    async (_event, sessionId: string, text: string) => {
+      await sessionShareService.sendOwnerChatMessage(sessionId, text);
+    },
+  );
+  ipcMain.handle(
     ipcChannels.sessionShares.getOwnerChatSnapshot,
     async (_event, sessionId: string) =>
       sessionShareService.getOwnerChatSnapshot(sessionId),

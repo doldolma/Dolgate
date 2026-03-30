@@ -34,7 +34,7 @@ type fakeTerminalApp struct {
 func main() {
 	app := &fakeTerminalApp{mode: shellMode}
 
-	app.write("FAKE AWS SSM READY\r\n")
+	app.write("READY:FAKE_AWS_SSM\r\n")
 	app.refreshSize()
 	app.printSize()
 	installSignalMarkers(app)
