@@ -457,11 +457,15 @@ describe("ContainersWorkspace", () => {
     const cpuChart = uPlotMock.instances[0];
     expect(cpuChart.opts.axes).toHaveLength(2);
     expect(cpuChart.opts.series).toHaveLength(2);
+    expect(cpuChart.opts.scales.y.range).toEqual([0, 100]);
     expect(cpuChart.data[0]).toEqual([
       new Date("2025-01-01T00:00:00.000Z").getTime(),
       new Date("2025-01-01T00:00:05.000Z").getTime(),
     ]);
     expect(cpuChart.data[1]).toEqual([12.5, 15]);
+
+    const memoryChart = uPlotMock.instances[1];
+    expect(memoryChart.opts.scales.y.range).toEqual([0, 100]);
 
     const networkChart = uPlotMock.instances[2];
     expect(networkChart.opts.series).toHaveLength(3);
@@ -485,6 +489,52 @@ describe("ContainersWorkspace", () => {
     );
     await vi.advanceTimersByTimeAsync(5000);
     expect(onRefreshMetrics).toHaveBeenCalledTimes(1);
+  });
+
+  it("expands the CPU chart range above 100% while keeping memory fixed", () => {
+    const metricsTab = {
+      ...createTab(),
+      activePanel: "metrics" as const,
+      metricsState: "ready" as const,
+      metricsSamples: [
+        {
+          hostId: "host-1",
+          containerId: "container-1",
+          runtime: "docker" as const,
+          recordedAt: "2025-01-01T00:00:00.000Z",
+          cpuPercent: 135,
+          memoryUsedBytes: 1024,
+          memoryLimitBytes: 2048,
+          memoryPercent: 50,
+          networkRxBytes: 100,
+          networkTxBytes: 200,
+          blockReadBytes: 300,
+          blockWriteBytes: 400,
+        },
+        {
+          hostId: "host-1",
+          containerId: "container-1",
+          runtime: "docker" as const,
+          recordedAt: "2025-01-01T00:00:05.000Z",
+          cpuPercent: 182,
+          memoryUsedBytes: 1200,
+          memoryLimitBytes: 2048,
+          memoryPercent: 58.6,
+          networkRxBytes: 200,
+          networkTxBytes: 320,
+          blockReadBytes: 450,
+          blockWriteBytes: 560,
+        },
+      ],
+    };
+
+    render(<ContainersWorkspace {...createProps(metricsTab)} />);
+
+    const cpuChart = uPlotMock.instances[0];
+    const memoryChart = uPlotMock.instances[1];
+
+    expect(cpuChart.opts.scales.y.range).toEqual([0, 200]);
+    expect(memoryChart.opts.scales.y.range).toEqual([0, 100]);
   });
 
   it("filters local log results and shows remote search counts", () => {
