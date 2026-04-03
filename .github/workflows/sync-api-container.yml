@@ -1,4 +1,5 @@
 name: Publish sync-api container
+run-name: Sync API Publish • ${{ github.ref_name }}
 
 on:
   push:
