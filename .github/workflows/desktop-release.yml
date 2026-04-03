@@ -1,4 +1,5 @@
 name: Build desktop release
+run-name: Desktop Release • ${{ github.ref_name }}
 
 on:
   push:
