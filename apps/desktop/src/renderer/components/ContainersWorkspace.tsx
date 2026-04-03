@@ -497,6 +497,19 @@ function deriveContainerMetricsPoints(
   });
 }
 
+function resolveCpuMetricChartRange(
+  cpuValues: number[],
+): readonly [number, number] {
+  const validValues = cpuValues.filter((value) => Number.isFinite(value));
+  if (validValues.length === 0) {
+    return [0, 100];
+  }
+
+  const maxCpu = Math.max(0, ...validValues);
+  const paddedUpperBound = Math.ceil((maxCpu * 1.05) / 10) * 10;
+  return [0, Math.max(100, paddedUpperBound)];
+}
+
 function matchesContainerLogQuery(line: string, query: string): boolean {
   const normalizedQuery = query.trim().toLowerCase();
   if (!normalizedQuery) {
@@ -1079,6 +1092,10 @@ function MetricsSection({ tab }: { tab: HostContainersTabState }) {
     ],
     [points],
   );
+  const cpuChartRange = useMemo(
+    () => resolveCpuMetricChartRange(points.map((point) => point.cpuPercent)),
+    [points],
+  );
   const memorySeries = useMemo<MetricChartSeriesDefinition[]>(
     () => [
       {
@@ -1182,7 +1199,7 @@ function MetricsSection({ tab }: { tab: HostContainersTabState }) {
           timestamps={timestamps}
           series={cpuSeries}
           yFormat="percent"
-          fixedRange={[0, 100]}
+          fixedRange={cpuChartRange}
         />
         <UPlotMetricChart
           title="Memory"
