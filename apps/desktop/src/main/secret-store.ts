@@ -39,6 +39,10 @@ function encodeSecret(secret: string): StoredEncryptedValue {
   };
 }
 
+export function encodeSecretForStorage(secret: string): StoredEncryptedValue {
+  return encodeSecret(secret);
+}
+
 function decodeSecret(record: StoredEncryptedValue): string | null {
   try {
     if (record.encrypted) {

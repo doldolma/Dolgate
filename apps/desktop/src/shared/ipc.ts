@@ -18,6 +18,8 @@ import type {
   AwsProfileSummary,
   AuthState,
   AuthType,
+  DesktopBootstrapSnapshot,
+  DesktopSyncedWorkspaceSnapshot,
   KeyboardInteractiveChallenge,
   ManagedSecretPayload,
   OpenSshSnapshotFileInput,
@@ -441,6 +443,10 @@ export interface DesktopApi {
     pushDirty: () => Promise<SyncStatus>;
     status: () => Promise<SyncStatus>;
     exportDecryptedSnapshot: () => Promise<SyncPayloadV2>;
+  };
+  bootstrap: {
+    getInitialSnapshot: () => Promise<DesktopBootstrapSnapshot>;
+    getSyncedWorkspaceSnapshot: () => Promise<DesktopSyncedWorkspaceSnapshot>;
   };
   hosts: {
     list: () => Promise<HostRecord[]>;

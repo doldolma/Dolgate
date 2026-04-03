@@ -13,6 +13,10 @@ export const ipcChannels = {
     status: 'sync:status',
     exportDecryptedSnapshot: 'sync:export-decrypted-snapshot'
   },
+  bootstrap: {
+    getInitialSnapshot: 'bootstrap:get-initial-snapshot',
+    getSyncedWorkspaceSnapshot: 'bootstrap:get-synced-workspace-snapshot'
+  },
   hosts: {
     list: 'hosts:list',
     create: 'hosts:create',

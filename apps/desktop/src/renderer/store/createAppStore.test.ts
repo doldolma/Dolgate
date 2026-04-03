@@ -86,7 +86,7 @@ function createContainerTab(
 function createMockApi(): DesktopApi {
   let sessionCounter = 0;
 
-  return {
+  const api = {
     auth: {
       getState: vi.fn().mockResolvedValue({
         status: "authenticated",
@@ -846,7 +846,60 @@ function createMockApi(): DesktopApi {
       onConnectionProgress: vi.fn(() => () => undefined),
       onTransferEvent: vi.fn(),
     },
+  } as unknown as DesktopApi;
+
+  api.bootstrap = {
+    getInitialSnapshot: vi.fn(async () => {
+      const [
+        hosts,
+        groups,
+        tabs,
+        settings,
+        localHomePath,
+        portForwardSnapshot,
+        dnsOverrides,
+        knownHosts,
+        activityLogs,
+        keychainEntries,
+      ] = await Promise.all([
+        api.hosts.list(),
+        api.groups.list(),
+        api.tabs.list(),
+        api.settings.get(),
+        api.files.getHomeDirectory(),
+        api.portForwards.list(),
+        api.dnsOverrides.list(),
+        api.knownHosts.list(),
+        api.logs.list(),
+        api.keychain.list(),
+      ]);
+      const localHomeListing = await api.files.list(localHomePath);
+      return {
+        hosts,
+        groups,
+        tabs,
+        settings,
+        localHomePath,
+        localHomeListing,
+        portForwardSnapshot,
+        dnsOverrides,
+        knownHosts,
+        activityLogs,
+        keychainEntries,
+      };
+    }),
+    getSyncedWorkspaceSnapshot: vi.fn(async () => ({
+      hosts: await api.hosts.list(),
+      groups: await api.groups.list(),
+      settings: await api.settings.get(),
+      portForwardSnapshot: await api.portForwards.list(),
+      dnsOverrides: await api.dnsOverrides.list(),
+      knownHosts: await api.knownHosts.list(),
+      keychainEntries: await api.keychain.list(),
+    })),
   };
+
+  return api;
 }
 
 describe("upsertTransferJob", () => {
@@ -936,10 +989,12 @@ describe("upsertTransferJob", () => {
 
 describe("createAppStore", () => {
   it("bootstraps home workspace and settings from desktop api", async () => {
-    const store = createAppStore(createMockApi());
+    const api = createMockApi();
+    const store = createAppStore(api);
 
     await store.getState().bootstrap();
 
+    expect(api.bootstrap.getInitialSnapshot).toHaveBeenCalledTimes(1);
     expect(store.getState().hosts).toHaveLength(1);
     expect(store.getState().groups).toHaveLength(1);
     expect(store.getState().activeWorkspaceTab).toBe("home");
@@ -1131,6 +1186,7 @@ describe("createAppStore", () => {
 
     await store.getState().refreshSyncedWorkspaceData();
 
+    expect(api.bootstrap.getSyncedWorkspaceSnapshot).toHaveBeenCalledTimes(1);
     expect(store.getState().hosts.map((host) => host.id)).toEqual(["host-2"]);
     expect(store.getState().groups.map((group) => group.id)).toEqual(["group-2"]);
     expect(store.getState().portForwards.map((rule) => rule.id)).toEqual(["forward-2"]);

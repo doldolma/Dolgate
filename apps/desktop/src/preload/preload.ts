@@ -229,6 +229,12 @@ const api: DesktopApi = {
     exportDecryptedSnapshot: () =>
       ipcRenderer.invoke(ipcChannels.sync.exportDecryptedSnapshot),
   },
+  bootstrap: {
+    getInitialSnapshot: () =>
+      ipcRenderer.invoke(ipcChannels.bootstrap.getInitialSnapshot),
+    getSyncedWorkspaceSnapshot: () =>
+      ipcRenderer.invoke(ipcChannels.bootstrap.getSyncedWorkspaceSnapshot),
+  },
   hosts: {
     list: () => ipcRenderer.invoke(ipcChannels.hosts.list),
     create: (draft: HostDraft, secrets?: HostSecretInput) =>
