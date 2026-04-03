@@ -460,6 +460,57 @@ describe("CoreManager local shell sessions", () => {
     expect(statuses).toEqual(["starting", "running", "stopped"]);
   });
 
+  it("finalizes active port forwards as stopped during shutdown when requested", async () => {
+    const fakeProcess = createFakeChildProcess();
+    spawnMock.mockReturnValue(fakeProcess.child);
+
+    const manager = new CoreManager();
+    const statuses: string[] = [];
+    manager.setPortForwardEventHandler((event) => {
+      statuses.push(event.runtime.status);
+    });
+
+    const startPromise = manager.startPortForward({
+      ruleId: "rule-shutdown-1",
+      hostId: "host-1",
+      host: "example.com",
+      port: 22,
+      username: "ubuntu",
+      authType: "password",
+      password: "secret",
+      privateKeyPem: undefined,
+      privateKeyPath: undefined,
+      passphrase: "",
+      trustedHostKeyBase64: "",
+      mode: "local",
+      bindAddress: "127.0.0.1",
+      bindPort: 15432,
+      targetHost: "db.internal",
+      targetPort: 5432,
+    });
+
+    await Promise.resolve();
+    const startRequest = decodeControlFrame(fakeProcess.writes[0]);
+    fakeProcess.emitControl({
+      type: "portForwardStarted",
+      requestId: startRequest.id,
+      endpointId: "rule-shutdown-1",
+      payload: {
+        transport: "ssh",
+        mode: "local",
+        bindAddress: "127.0.0.1",
+        bindPort: 15432,
+        status: "running",
+      },
+    });
+
+    await startPromise;
+    await manager.shutdown({ finalizePortForwardsAsStopped: true });
+
+    expect(statuses).toEqual(["starting", "running", "stopped"]);
+    expect(manager.listPortForwardRuntimes()).toEqual([]);
+  });
+
   it("rejects malformed container log responses instead of treating them as empty", async () => {
     const manager = new CoreManager();
     vi.spyOn(

@@ -84,6 +84,10 @@ interface PortForwardDefinition {
   bindPort: number;
 }
 
+interface CoreManagerShutdownOptions {
+  finalizePortForwardsAsStopped?: boolean;
+}
+
 interface ContainersEndpointRuntime {
   hostId: string;
   runtime: HostContainerRuntime | null;
@@ -697,9 +701,13 @@ export class CoreManager {
     return runtime;
   }
 
-  async shutdown(): Promise<void> {
+  async shutdown(options: CoreManagerShutdownOptions = {}): Promise<void> {
     if (this.shutdownPromise) {
       return this.shutdownPromise;
+    }
+
+    if (options.finalizePortForwardsAsStopped) {
+      await this.finalizeActivePortForwardsAsStopped();
     }
 
     if (!this.process) {
@@ -736,6 +744,30 @@ export class CoreManager {
     });
 
     return this.shutdownPromise;
+  }
+
+  private async finalizeActivePortForwardsAsStopped(): Promise<void> {
+    const activeRuntimes = this.listPortForwardRuntimes().filter(
+      (runtime) =>
+        runtime.status === "starting" || runtime.status === "running",
+    );
+    if (activeRuntimes.length === 0) {
+      return;
+    }
+
+    const finalizedAt = new Date().toISOString();
+    for (const runtime of activeRuntimes) {
+      const stoppedRuntime: PortForwardRuntimeRecord = {
+        ...runtime,
+        status: "stopped",
+        updatedAt: finalizedAt,
+        message: undefined,
+      };
+      this.portForwardRuntimes.set(runtime.ruleId, stoppedRuntime);
+      const event: PortForwardRuntimeEvent = { runtime: stoppedRuntime };
+      this.broadcastPortForwardEvent(event);
+      await this.onPortForwardEvent?.(event);
+    }
   }
 
   async start(): Promise<void> {
