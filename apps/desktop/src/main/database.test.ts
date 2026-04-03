@@ -11,6 +11,7 @@ async function loadRepositories(): Promise<{
   HostRepository: DatabaseModule['HostRepository'];
   GroupRepository: DatabaseModule['GroupRepository'];
   PortForwardRepository: DatabaseModule['PortForwardRepository'];
+  DnsOverrideRepository: DatabaseModule['DnsOverrideRepository'];
   SettingsRepository: DatabaseModule['SettingsRepository'];
   ActivityLogRepository: DatabaseModule['ActivityLogRepository'];
 }> {
@@ -27,6 +28,7 @@ async function loadRepositories(): Promise<{
     HostRepository: databaseModule.HostRepository,
     GroupRepository: databaseModule.GroupRepository,
     PortForwardRepository: databaseModule.PortForwardRepository,
+    DnsOverrideRepository: databaseModule.DnsOverrideRepository,
     SettingsRepository: databaseModule.SettingsRepository,
     ActivityLogRepository: databaseModule.ActivityLogRepository
   };
@@ -557,7 +559,7 @@ describe('SettingsRepository', () => {
 });
 
 describe('PortForwardRepository', () => {
-  it('stores AWS SSM port forward rules with a fixed localhost bind address', async () => {
+  it('stores AWS SSM port forward rules with the provided bind address', async () => {
     const { PortForwardRepository } = await loadRepositories();
     const forwards = new PortForwardRepository();
 
@@ -565,7 +567,7 @@ describe('PortForwardRepository', () => {
       transport: 'aws-ssm',
       label: 'RDS via bastion',
       hostId: 'aws-host-1',
-      bindAddress: '0.0.0.0',
+      bindAddress: '127.0.0.2',
       bindPort: 15432,
       targetKind: 'remote-host',
       targetPort: 5432,
@@ -574,7 +576,7 @@ describe('PortForwardRepository', () => {
 
     expect(record).toMatchObject({
       transport: 'aws-ssm',
-      bindAddress: '127.0.0.1',
+      bindAddress: '127.0.0.2',
       bindPort: 15432,
       targetKind: 'remote-host',
       targetPort: 5432,
@@ -681,6 +683,115 @@ describe('ActivityLogRepository', () => {
         hostLabel: 'nas',
         disconnectReason: 'socket closed'
       }
+    });
+  });
+
+  it('restores port forward lifecycle logs after reload', async () => {
+    const { ActivityLogRepository } = await loadRepositories();
+    const logs = new ActivityLogRepository();
+
+    logs.upsert({
+      id: 'port-forward:rule-1:attempt-1',
+      level: 'info',
+      category: 'audit',
+      kind: 'port-forward-lifecycle',
+      message: 'RDS tunnel 포트 포워딩',
+      metadata: {
+        ruleId: 'rule-1',
+        ruleLabel: 'RDS tunnel',
+        hostId: 'host-1',
+        hostLabel: 'bastion',
+        transport: 'aws-ssm',
+        mode: 'local',
+        bindAddress: '127.0.0.1',
+        bindPort: 15432,
+        targetSummary: 'Remote host db.internal:5432',
+        startedAt: '2026-03-29T00:00:00.000Z',
+        stoppedAt: '2026-03-29T00:05:00.000Z',
+        durationMs: 300000,
+        status: 'closed'
+      },
+      createdAt: '2026-03-29T00:00:00.000Z',
+      updatedAt: '2026-03-29T00:05:00.000Z'
+    });
+
+    vi.resetModules();
+    const stateStorageModule = await import('./state-storage');
+    stateStorageModule.resetDesktopStateStorageForTests();
+    const databaseModule = await import('./database');
+    const reloadedLogs = new databaseModule.ActivityLogRepository();
+
+    expect(reloadedLogs.list()).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: 'port-forward:rule-1:attempt-1',
+          kind: 'port-forward-lifecycle',
+          metadata: expect.objectContaining({
+            ruleLabel: 'RDS tunnel',
+            targetSummary: 'Remote host db.internal:5432',
+            status: 'closed',
+          }),
+        }),
+      ]),
+    );
+  });
+});
+
+describe('DnsOverrideRepository', () => {
+  it('stores normalized hostnames linked to eligible loopback rules', async () => {
+    const { PortForwardRepository, DnsOverrideRepository } = await loadRepositories();
+    const forwards = new PortForwardRepository();
+    const overrides = new DnsOverrideRepository();
+
+    const rule = forwards.create({
+      transport: 'aws-ssm',
+      label: 'Kafka broker',
+      hostId: 'aws-host-1',
+      bindAddress: '127.0.0.2',
+      bindPort: 9098,
+      targetKind: 'remote-host',
+      targetPort: 9098,
+      remoteHost: 'b-1.kafka.internal'
+    });
+
+    const record = overrides.create(
+      {
+        type: 'linked',
+        hostname: 'B-1.KAFKA.INTERNAL',
+        portForwardRuleId: rule.id
+      },
+      forwards
+    );
+
+    expect(record).toMatchObject({
+      type: 'linked',
+      hostname: 'b-1.kafka.internal',
+      portForwardRuleId: rule.id
+    });
+  });
+
+  it('stores static overrides with validated ip addresses', async () => {
+    const { PortForwardRepository, DnsOverrideRepository } = await loadRepositories();
+    const forwards = new PortForwardRepository();
+    const overrides = new DnsOverrideRepository();
+
+    forwards.list();
+
+    const record = overrides.create(
+      {
+        type: 'static',
+        hostname: 'Kafka-Static.INTERNAL',
+        address: '10.0.0.15',
+        enabled: true,
+      },
+      forwards
+    );
+
+    expect(record).toMatchObject({
+      type: 'static',
+      hostname: 'kafka-static.internal',
+      address: '10.0.0.15',
+      enabled: true,
     });
   });
 });

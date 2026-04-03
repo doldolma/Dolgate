@@ -140,7 +140,9 @@ export function SessionShareChatWindow({
   const [draftMessage, setDraftMessage] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isComposing, setIsComposing] = useState(false);
-  const listRef = useRef<HTMLDivElement | null>(null);
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const messagesEndRef = useRef<HTMLDivElement | null>(null);
+  const refocusAfterSubmitRef = useRef(false);
   const desktopPlatform = useMemo(() => detectDesktopPlatform(), []);
   const resolvedTheme = useMemo(
     () => resolveTheme(settingsTheme, prefersDark),
@@ -263,13 +265,29 @@ export function SessionShareChatWindow({
   }, [sessionId]);
 
   useEffect(() => {
-    const listNode = listRef.current;
-    if (!listNode) {
+    const messagesEndNode = messagesEndRef.current;
+    if (!messagesEndNode) {
       return;
     }
 
-    listNode.scrollTop = listNode.scrollHeight;
-  }, [snapshot.messages.length]);
+    messagesEndNode.scrollIntoView({
+      block: 'end',
+    });
+  }, [snapshot.messages]);
+
+  useEffect(() => {
+    if (isSubmitting || !refocusAfterSubmitRef.current || !isChatActive) {
+      return;
+    }
+
+    refocusAfterSubmitRef.current = false;
+    const frameHandle = window.requestAnimationFrame(() => {
+      textareaRef.current?.focus();
+    });
+    return () => {
+      window.cancelAnimationFrame(frameHandle);
+    };
+  }, [isSubmitting, isChatActive]);
 
   const handleSubmit = async () => {
     const normalizedText = normalizeChatText(draftMessage);
@@ -277,6 +295,7 @@ export function SessionShareChatWindow({
       return;
     }
 
+    refocusAfterSubmitRef.current = true;
     setIsSubmitting(true);
     setSendErrorMessage(null);
     try {
@@ -312,16 +331,18 @@ export function SessionShareChatWindow({
         </span>
       </header>
 
-      {errorMessage ? (
-        <div className="session-share-chat-window__error">{errorMessage}</div>
-      ) : null}
-
-      {sendErrorMessage ? (
-        <div className="session-share-chat-window__error">{sendErrorMessage}</div>
+      {errorMessage || sendErrorMessage ? (
+        <div className="session-share-chat-window__alerts">
+          {errorMessage ? (
+            <div className="session-share-chat-window__error">{errorMessage}</div>
+          ) : null}
+          {sendErrorMessage ? (
+            <div className="session-share-chat-window__error">{sendErrorMessage}</div>
+          ) : null}
+        </div>
       ) : null}
 
       <div
-        ref={listRef}
         className="session-share-chat-window__messages"
         aria-live="polite"
       >
@@ -359,6 +380,7 @@ export function SessionShareChatWindow({
             </article>
           );
         })}
+        <div ref={messagesEndRef} aria-hidden="true" />
       </div>
 
       <form
@@ -371,6 +393,7 @@ export function SessionShareChatWindow({
         <label className="session-share-chat-window__composer-field">
           <span>메시지</span>
           <textarea
+            ref={textareaRef}
             value={draftMessage}
             rows={3}
             maxLength={300}

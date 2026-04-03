@@ -312,30 +312,66 @@ test.describe("desktop smoke", () => {
       const chatWindow = await chatWindowPromise;
       await chatWindow.waitForLoadState("domcontentloaded");
       await expect(chatWindow.getByText("아직 채팅이 없습니다.")).toBeVisible();
+      const chatInput = chatWindow.locator("textarea");
+      await expect(chatInput).toBeVisible();
 
-      const message = {
-        id: "chat-smoke-1",
-        nickname: "맑은 다람쥐",
-        text: "안녕하세요\n반가워요",
-        sentAt: "2026-03-28T10:00:00.000Z",
-      };
+      const messages = [
+        {
+          id: "chat-smoke-1",
+          nickname: "맑은 다람쥐",
+          text: "안녕하세요\n반가워요",
+          sentAt: "2026-03-28T10:00:00.000Z",
+        },
+        ...Array.from({ length: 11 }, (_, index) => ({
+          id: `chat-smoke-${index + 2}`,
+          nickname: "맑은 다람쥐",
+          text: `추가 메시지 ${index + 2}`,
+          sentAt: new Date(Date.UTC(2026, 2, 28, 10, index + 1, 0)).toISOString(),
+        })),
+      ];
       await app.evaluate(
-        ({ BrowserWindow }, eventPayload) => {
+        ({ BrowserWindow }, payload) => {
           for (const window of BrowserWindow.getAllWindows()) {
-            window.webContents.send("session-shares:chat-event", eventPayload);
+            for (const message of payload.messages) {
+              window.webContents.send("session-shares:chat-event", {
+                sessionId: payload.sessionId,
+                message,
+              });
+            }
           }
         },
         {
           sessionId,
-          message,
+          messages,
         },
       );
 
       await expect(
-        page.locator(".terminal-share-chat-toast").filter({ hasText: "안녕하세요" }).first(),
+        page
+          .locator(".terminal-share-chat-toast")
+          .filter({ hasText: "추가 메시지 12" })
+          .first(),
       ).toBeVisible();
-      await expect(chatWindow.getByText("안녕하세요")).toBeVisible();
-      await expect(chatWindow.getByText("반가워요")).toBeVisible();
+      await expect(chatWindow.getByText("추가 메시지 12")).toBeVisible();
+      await expect
+        .poll(() =>
+          chatWindow.evaluate(() => {
+            const scrollingElement = document.scrollingElement;
+            return scrollingElement
+              ? scrollingElement.scrollHeight <= scrollingElement.clientHeight
+              : false;
+          }),
+        )
+        .toBe(true);
+
+      const textareaBounds = await chatInput.evaluate((node) => {
+        const rect = node.getBoundingClientRect();
+        return {
+          bottom: rect.bottom,
+        };
+      });
+      const viewportHeight = await chatWindow.evaluate(() => window.innerHeight);
+      expect(textareaBounds.bottom).toBeLessThanOrEqual(viewportHeight + 1);
 
       await page.getByRole("button", { name: "공유 종료" }).click();
 

@@ -128,6 +128,12 @@ export const ipcChannels = {
     stop: 'port-forwards:stop',
     event: 'port-forwards:event'
   },
+  dnsOverrides: {
+    list: 'dns-overrides:list',
+    create: 'dns-overrides:create',
+    update: 'dns-overrides:update',
+    remove: 'dns-overrides:remove'
+  },
   knownHosts: {
     list: 'known-hosts:list',
     probeHost: 'known-hosts:probe-host',

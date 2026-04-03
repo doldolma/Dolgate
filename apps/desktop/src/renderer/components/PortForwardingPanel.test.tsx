@@ -1,11 +1,17 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { HostRecord, PortForwardDraft, PortForwardRuleRecord, PortForwardRuntimeRecord } from '@shared';
+import type { DnsOverrideRecord, HostRecord, PortForwardDraft, PortForwardRuleRecord, PortForwardRuntimeRecord } from '@shared';
 import type {
   PendingContainersInteractiveAuth,
   PendingPortForwardInteractiveAuth
 } from '../store/createAppStore';
-import { PortForwardingPanel, filterPortForwardRules, getAvailablePortForwardHosts, shouldShowAwsRemoteHostField } from './PortForwardingPanel';
+import {
+  PortForwardingPanel,
+  filterPortForwardRules,
+  getAvailablePortForwardHosts,
+  getDnsOverrideEligibleRules,
+  shouldShowAwsRemoteHostField
+} from './PortForwardingPanel';
 
 const hosts: HostRecord[] = [
   {
@@ -101,6 +107,8 @@ const rules: PortForwardRuleRecord[] = [
     updatedAt: '2025-01-01T00:00:00.000Z'
   }
 ];
+
+const dnsOverrides: DnsOverrideRecord[] = [];
 
 const runtimes: PortForwardRuntimeRecord[] = [];
 let containerConnectionProgressListener: ((event: {
@@ -203,12 +211,15 @@ function renderPanel(options?: {
   onSave?: (ruleId: string | null, draft: PortForwardDraft) => Promise<void>;
   runtimes?: PortForwardRuntimeRecord[];
   rules?: PortForwardRuleRecord[];
+  dnsOverrides?: DnsOverrideRecord[];
   containerTabs?: any[];
   discoveryInteractiveAuth?: PendingContainersInteractiveAuth | null;
   interactiveAuth?: PendingPortForwardInteractiveAuth | null;
 }) {
   const onSave = options?.onSave ?? vi.fn().mockResolvedValue(undefined);
+  const onSaveDnsOverride = vi.fn().mockResolvedValue(undefined);
   const onRemove = vi.fn().mockResolvedValue(undefined);
+  const onRemoveDnsOverride = vi.fn().mockResolvedValue(undefined);
   const onStart = vi.fn().mockResolvedValue(undefined);
   const onStop = vi.fn().mockResolvedValue(undefined);
   const view = render(
@@ -216,11 +227,14 @@ function renderPanel(options?: {
       hosts={hosts}
       containerTabs={options?.containerTabs ?? []}
       rules={options?.rules ?? rules}
+      dnsOverrides={options?.dnsOverrides ?? dnsOverrides}
       runtimes={options?.runtimes ?? runtimes}
       interactiveAuth={options?.interactiveAuth ?? null}
       discoveryInteractiveAuth={options?.discoveryInteractiveAuth ?? null}
       onSave={onSave}
+      onSaveDnsOverride={onSaveDnsOverride}
       onRemove={onRemove}
+      onRemoveDnsOverride={onRemoveDnsOverride}
       onStart={onStart}
       onStop={onStop}
       onRespondInteractiveAuth={vi.fn().mockResolvedValue(undefined)}
@@ -232,7 +246,9 @@ function renderPanel(options?: {
   return {
     ...view,
     onSave,
+    onSaveDnsOverride,
     onRemove,
+    onRemoveDnsOverride,
     onStart,
     onStop
   };
@@ -251,6 +267,41 @@ describe('PortForwardingPanel helpers', () => {
     expect(getAvailablePortForwardHosts(hosts, 'aws-ssm').map((host) => host.label)).toEqual(['Bastion']);
     expect(getAvailablePortForwardHosts(hosts, 'ecs-task').map((host) => host.label)).toEqual(['gridwiz-ecs']);
     expect(getAvailablePortForwardHosts(hosts, 'container').map((host) => host.label)).toEqual(['SSH Host', 'Bastion', 'Warpgate']);
+  });
+
+  it('returns only loopback local rules for DNS overrides', () => {
+    expect(
+      getDnsOverrideEligibleRules([
+        rules[0]!,
+        rules[1]!,
+        {
+          id: 'ssh-rule-remote',
+          transport: 'ssh',
+          label: 'SSH Remote',
+          hostId: 'ssh-host-1',
+          mode: 'remote',
+          bindAddress: '127.0.0.1',
+          bindPort: 9200,
+          targetHost: '127.0.0.1',
+          targetPort: 22,
+          createdAt: '2025-01-01T00:00:00.000Z',
+          updatedAt: '2025-01-01T00:00:00.000Z'
+        },
+        {
+          id: 'aws-rule-public',
+          transport: 'aws-ssm',
+          label: 'AWS Public',
+          hostId: 'aws-host-1',
+          bindAddress: '0.0.0.0',
+          bindPort: 15433,
+          targetKind: 'instance-port',
+          targetPort: 5432,
+          remoteHost: null,
+          createdAt: '2025-01-01T00:00:00.000Z',
+          updatedAt: '2025-01-01T00:00:00.000Z'
+        }
+      ]).map((rule) => rule.id)
+    ).toEqual(['ssh-rule-1', 'aws-rule-1']);
   });
 
   it('shows the remote-host field only for AWS remote-host drafts', () => {
@@ -319,6 +370,60 @@ describe('PortForwardingPanel dialog', () => {
 
     expect(screen.getByRole('tab', { name: 'AWS EC2' })).toBeInTheDocument();
     expect(screen.queryByRole('tab', { name: 'AWS SSM' })).not.toBeInTheDocument();
+  });
+
+  it('normalizes single-label hostname when saving a DNS override', async () => {
+    const { onSaveDnsOverride } = renderPanel();
+
+    fireEvent.click(screen.getByRole('tab', { name: 'DNS Override' }));
+    fireEvent.click(screen.getByRole('button', { name: 'New DNS Override' }));
+
+    fireEvent.change(screen.getByLabelText('Hostname'), {
+      target: { value: 'Basket' }
+    });
+    fireEvent.change(screen.getByLabelText('Linked rule'), {
+      target: { value: 'aws-rule-1' }
+    });
+    fireEvent.click(screen.getByRole('button', { name: '저장' }));
+
+    await waitFor(() =>
+      expect(onSaveDnsOverride).toHaveBeenCalledWith(null, {
+        type: 'linked',
+        hostname: 'basket',
+        portForwardRuleId: 'aws-rule-1'
+      })
+    );
+  });
+
+  it('renders and toggles static DNS overrides', () => {
+    const { onSaveDnsOverride } = renderPanel({
+      dnsOverrides: [
+        {
+          id: 'dns-static-1',
+          type: 'static',
+          hostname: 'api.internal',
+          address: '10.0.0.20',
+          enabled: true,
+          createdAt: '2025-01-01T00:00:00.000Z',
+          updatedAt: '2025-01-01T00:00:00.000Z',
+        },
+      ],
+    });
+
+    fireEvent.click(screen.getByRole('tab', { name: 'DNS Override' }));
+
+    expect(screen.getByText('Static')).toBeInTheDocument();
+    expect(screen.getByText('On')).toBeInTheDocument();
+    expect(screen.getByText('10.0.0.20')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Off' }));
+
+    expect(onSaveDnsOverride).toHaveBeenCalledWith('dns-static-1', {
+      type: 'static',
+      hostname: 'api.internal',
+      address: '10.0.0.20',
+      enabled: false,
+    });
   });
 
   it('shows ephemeral ECS service tunnels in the ECS Task tab', () => {
@@ -635,7 +740,9 @@ describe('PortForwardingPanel dialog', () => {
 
     expect(screen.getByRole('dialog')).toBeInTheDocument();
 
-    fireEvent.click(container.querySelector('.modal-backdrop') as HTMLElement);
+    const backdrop = container.querySelector('.modal-backdrop') as HTMLElement;
+    fireEvent.pointerDown(backdrop);
+    fireEvent.click(backdrop);
 
     await waitFor(() => {
       expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
@@ -655,7 +762,9 @@ describe('PortForwardingPanel dialog', () => {
       expect(onSave).toHaveBeenCalledTimes(1);
     });
 
-    fireEvent.click(container.querySelector('.modal-backdrop') as HTMLElement);
+    const backdrop = container.querySelector('.modal-backdrop') as HTMLElement;
+    fireEvent.pointerDown(backdrop);
+    fireEvent.click(backdrop);
 
     expect(screen.getByRole('dialog')).toBeInTheDocument();
 

@@ -6,10 +6,12 @@ describe('SessionShareChatWindow', () => {
   let sessionShareEventListener: ((event: any) => void) | null;
   let sessionShareChatEventListener: ((event: any) => void) | null;
   let api: any;
+  let scrollIntoViewMock: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
     sessionShareEventListener = null;
     sessionShareChatEventListener = null;
+    scrollIntoViewMock = vi.fn();
 
     Object.defineProperty(window, 'matchMedia', {
       configurable: true,
@@ -19,6 +21,12 @@ describe('SessionShareChatWindow', () => {
         addEventListener: vi.fn(),
         removeEventListener: vi.fn(),
       })),
+    });
+
+    Object.defineProperty(window.HTMLElement.prototype, 'scrollIntoView', {
+      configurable: true,
+      writable: true,
+      value: scrollIntoViewMock,
     });
 
     api = {
@@ -78,6 +86,8 @@ describe('SessionShareChatWindow', () => {
     expect(screen.getByText('Host Session')).toBeInTheDocument();
     expect(screen.queryByText('Synology Owner')).toBeNull();
     expect(screen.queryByText('보내는 이름')).toBeNull();
+    expect(scrollIntoViewMock).toHaveBeenCalled();
+    const initialScrollCallCount = scrollIntoViewMock.mock.calls.length;
 
     await act(async () => {
       sessionShareChatEventListener?.({
@@ -93,18 +103,20 @@ describe('SessionShareChatWindow', () => {
     });
 
     expect(await screen.findByText('second message')).toBeInTheDocument();
+    expect(scrollIntoViewMock.mock.calls.length).toBeGreaterThan(initialScrollCallCount);
     expect(api.window.close).not.toHaveBeenCalled();
   });
 
-  it('sends owner chat messages, clears the draft, and renders owner badges without duplicate owner text', async () => {
+  it('sends owner chat messages, clears the draft, restores focus, and renders owner badges without duplicate owner text', async () => {
     const { container } = render(<SessionShareChatWindow sessionId="session-1" />);
 
     expect(await screen.findByText('hello')).toBeInTheDocument();
 
-    const input = container.querySelector('textarea');
+    const input = container.querySelector('textarea') as HTMLTextAreaElement;
     expect(input).toBeTruthy();
-    fireEvent.change(input!, { target: { value: 'owner message' } });
-    fireEvent.keyDown(input!, { key: 'Enter' });
+    input.focus();
+    fireEvent.change(input, { target: { value: 'owner message' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
 
     await waitFor(() => {
       expect(api.sessionShares.sendOwnerChatMessage).toHaveBeenCalledWith(
@@ -112,7 +124,10 @@ describe('SessionShareChatWindow', () => {
         'owner message',
       );
     });
-    expect((input as HTMLTextAreaElement).value).toBe('');
+    await waitFor(() => {
+      expect(input).toHaveFocus();
+    });
+    expect(input.value).toBe('');
 
     await act(async () => {
       sessionShareChatEventListener?.({
@@ -167,10 +182,14 @@ describe('SessionShareChatWindow', () => {
     const submitButton = container.querySelector('button[type="submit"]');
     expect(submitButton).toBeTruthy();
 
+    input.focus();
     fireEvent.change(input, { target: { value: 'failed message' } });
     fireEvent.click(submitButton!);
 
     expect(await screen.findByText('send failed')).toBeInTheDocument();
+    await waitFor(() => {
+      expect(input).toHaveFocus();
+    });
     expect(input.value).toBe('failed message');
   });
 

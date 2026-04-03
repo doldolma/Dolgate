@@ -9,4 +9,7 @@ require (
 	golang.org/x/sys v0.42.0
 )
 
-require github.com/kr/fs v0.1.0 // indirect
+require (
+	github.com/Microsoft/go-winio v0.6.2 // indirect
+	github.com/kr/fs v0.1.0 // indirect
+)

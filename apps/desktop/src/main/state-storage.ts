@@ -11,12 +11,16 @@ import {
   renameSync,
   writeFileSync
 } from 'node:fs';
+import { isIP } from 'node:net';
 import path from 'node:path';
 import type {
   ActivityLogRecord,
   AwsSsmPortForwardRuleRecord,
   AppTheme,
   ContainerPortForwardRuleRecord,
+  DnsOverrideRecord,
+  LinkedDnsOverrideRecord,
+  StaticDnsOverrideRecord,
   GlobalTerminalThemeId,
   GroupRecord,
   HostRecord,
@@ -99,6 +103,7 @@ export interface DesktopStateFile {
     hosts: HostRecord[];
     knownHosts: KnownHostRecord[];
     portForwards: PortForwardRuleRecord[];
+    dnsOverrides: DnsOverrideRecord[];
     secretMetadata: SecretMetadataRecord[];
     syncOutbox: SyncDeletionRecord[];
   };
@@ -354,6 +359,58 @@ function normalizePortForwardRule(value: unknown): PortForwardRuleRecord | null 
   return record;
 }
 
+function normalizeDnsOverrideRecord(value: unknown): DnsOverrideRecord | null {
+  if (
+    !isObject(value) ||
+    typeof value.id !== 'string' ||
+    typeof value.hostname !== 'string' ||
+    typeof value.createdAt !== 'string' ||
+    typeof value.updatedAt !== 'string'
+  ) {
+    return null;
+  }
+
+  const hostname = value.hostname.trim().toLowerCase();
+  if (!hostname) {
+    return null;
+  }
+
+  const normalizedType = value.type === 'static' ? 'static' : 'linked';
+  if (normalizedType === 'linked') {
+    if (typeof value.portForwardRuleId !== 'string') {
+      return null;
+    }
+    const record: LinkedDnsOverrideRecord = {
+      id: value.id,
+      type: 'linked',
+      hostname,
+      portForwardRuleId: value.portForwardRuleId,
+      createdAt: value.createdAt,
+      updatedAt: value.updatedAt
+    };
+    return record;
+  }
+
+  if (typeof value.address !== 'string' || typeof value.enabled !== 'boolean') {
+    return null;
+  }
+  const address = value.address.trim();
+  if (!address || isIP(address) === 0) {
+    return null;
+  }
+
+  const record: StaticDnsOverrideRecord = {
+    id: value.id,
+    type: 'static',
+    hostname,
+    address,
+    enabled: value.enabled,
+    createdAt: value.createdAt,
+    updatedAt: value.updatedAt
+  };
+  return record;
+}
+
 function createDefaultStateFile(): DesktopStateFile {
   const timestamp = nowIso();
   const defaultTerminalFontFamily = resolveDefaultTerminalFontFamily();
@@ -401,6 +458,7 @@ function createDefaultStateFile(): DesktopStateFile {
       hosts: [],
       knownHosts: [],
       portForwards: [],
+      dnsOverrides: [],
       secretMetadata: [],
       syncOutbox: []
     },
@@ -630,6 +688,11 @@ function normalizeStateFile(value: unknown): DesktopStateFile {
             .map(normalizePortForwardRule)
             .filter((entry): entry is PortForwardRuleRecord => entry !== null)
         : [],
+      dnsOverrides: Array.isArray(data.dnsOverrides)
+        ? data.dnsOverrides
+            .map(normalizeDnsOverrideRecord)
+            .filter((entry): entry is DnsOverrideRecord => entry !== null)
+        : [],
       secretMetadata: Array.isArray(data.secretMetadata) ? (data.secretMetadata as SecretMetadataRecord[]) : [],
       syncOutbox: Array.isArray(data.syncOutbox) ? (data.syncOutbox as SyncDeletionRecord[]) : []
     },
@@ -659,7 +722,7 @@ function normalizeActivityLogRecord(value: unknown): ActivityLogRecord | null {
 
   const level = value.level === 'warn' || value.level === 'error' ? value.level : 'info';
   const kind =
-    value.kind === 'session-lifecycle' || value.kind === 'generic'
+    value.kind === 'session-lifecycle' || value.kind === 'port-forward-lifecycle' || value.kind === 'generic'
       ? value.kind
       : 'generic';
   const metadata = isObject(value.metadata) ? value.metadata : null;

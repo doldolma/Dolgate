@@ -243,6 +243,7 @@ export function App() {
   const containerTabs = useAppStore((state) => state.containerTabs);
   const activeContainerHostId = useAppStore((state) => state.activeContainerHostId);
   const portForwards = useAppStore((state) => state.portForwards);
+  const dnsOverrides = useAppStore((state) => state.dnsOverrides);
   const portForwardRuntimes = useAppStore((state) => state.portForwardRuntimes);
   const knownHosts = useAppStore((state) => state.knownHosts);
   const activityLogs = useAppStore((state) => state.activityLogs);
@@ -318,6 +319,8 @@ export function App() {
   const openHostContainerShell = useAppStore((state) => state.openHostContainerShell);
   const updateSettings = useAppStore((state) => state.updateSettings);
   const savePortForward = useAppStore((state) => state.savePortForward);
+  const saveDnsOverride = useAppStore((state) => state.saveDnsOverride);
+  const removeDnsOverride = useAppStore((state) => state.removeDnsOverride);
   const removePortForward = useAppStore((state) => state.removePortForward);
   const startPortForward = useAppStore((state) => state.startPortForward);
   const stopPortForward = useAppStore((state) => state.stopPortForward);
@@ -1018,10 +1021,13 @@ export function App() {
                 hosts={hosts}
                 containerTabs={containerTabs}
                 rules={portForwards}
+                dnsOverrides={dnsOverrides}
                 runtimes={portForwardRuntimes}
                 interactiveAuth={pendingInteractiveAuth?.source === 'portForward' ? pendingInteractiveAuth : null}
                 discoveryInteractiveAuth={pendingInteractiveAuth?.source === 'containers' ? pendingInteractiveAuth : null}
                 onSave={savePortForward}
+                onSaveDnsOverride={saveDnsOverride}
+                onRemoveDnsOverride={removeDnsOverride}
                 onRemove={removePortForward}
                 onStart={startPortForward}
                 onStop={stopPortForward}

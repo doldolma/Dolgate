@@ -1,6 +1,8 @@
 import type {
   ActivityLogRecord,
   AppSettings,
+  DnsOverrideDraft,
+  DnsOverrideRecord,
   AwsSsmPortForwardTargetKind,
   AwsEc2InstanceSummary,
   AwsEcsClusterListItem,
@@ -620,6 +622,12 @@ export interface DesktopApi {
     start: (ruleId: string) => Promise<PortForwardRuntimeRecord>;
     stop: (ruleId: string) => Promise<PortForwardRuntimeRecord>;
     onEvent: (listener: (event: PortForwardRuntimeEvent) => void) => () => void;
+  };
+  dnsOverrides: {
+    list: () => Promise<DnsOverrideRecord[]>;
+    create: (draft: DnsOverrideDraft) => Promise<DnsOverrideRecord>;
+    update: (id: string, draft: DnsOverrideDraft) => Promise<DnsOverrideRecord>;
+    remove: (id: string) => Promise<void>;
   };
   knownHosts: {
     list: () => Promise<KnownHostRecord[]>;

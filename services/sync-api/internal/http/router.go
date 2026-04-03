@@ -599,6 +599,11 @@ func NewRouter(store store.Store, authService *auth.Service, config RouterConfig
 			ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
+		dnsOverrides, err := store.ListSyncRecords(ctx.Request.Context(), userID, syncmodel.KindDNSOverrides)
+		if err != nil {
+			ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
 		preferences, err := store.ListSyncRecords(ctx.Request.Context(), userID, syncmodel.KindPreferences)
 		if err != nil {
 			ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -611,6 +616,7 @@ func NewRouter(store store.Store, authService *auth.Service, config RouterConfig
 			Secrets:      secrets,
 			KnownHosts:   knownHosts,
 			PortForwards: portForwards,
+			DNSOverrides: dnsOverrides,
 			Preferences:  preferences,
 		})
 	})
@@ -638,6 +644,10 @@ func NewRouter(store store.Store, authService *auth.Service, config RouterConfig
 			return
 		}
 		if err := store.UpsertSyncRecords(ctx.Request.Context(), userID, syncmodel.KindPortForwards, payload.PortForwards); err != nil {
+			ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		if err := store.UpsertSyncRecords(ctx.Request.Context(), userID, syncmodel.KindDNSOverrides, payload.DNSOverrides); err != nil {
 			ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}

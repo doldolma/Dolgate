@@ -1,6 +1,7 @@
 import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
 import { isSshHostRecord } from '@shared';
 import type {
+  DnsOverrideRecord,
   GroupRecord,
   HostRecord,
   KnownHostRecord,
@@ -16,6 +17,7 @@ import {
   GroupRepository,
   HostRepository,
   KnownHostRepository,
+  DnsOverrideRepository,
   PortForwardRepository,
   SecretMetadataRepository,
   SettingsRepository,
@@ -54,7 +56,15 @@ function isE2ESyncDisabled(): boolean {
 }
 
 function totalRecordCount(payload: SyncPayloadV2): number {
-  return payload.groups.length + payload.hosts.length + payload.secrets.length + payload.knownHosts.length + payload.portForwards.length + payload.preferences.length;
+  return (
+    payload.groups.length +
+    payload.hosts.length +
+    payload.secrets.length +
+    payload.knownHosts.length +
+    payload.portForwards.length +
+    payload.dnsOverrides.length +
+    payload.preferences.length
+  );
 }
 
 function normalizeSyncPayload(payload: Partial<SyncPayloadV2> | null | undefined): SyncPayloadV2 {
@@ -64,6 +74,7 @@ function normalizeSyncPayload(payload: Partial<SyncPayloadV2> | null | undefined
     secrets: Array.isArray(payload?.secrets) ? payload.secrets : [],
     knownHosts: Array.isArray(payload?.knownHosts) ? payload.knownHosts : [],
     portForwards: Array.isArray(payload?.portForwards) ? payload.portForwards : [],
+    dnsOverrides: Array.isArray(payload?.dnsOverrides) ? payload.dnsOverrides : [],
     preferences: Array.isArray(payload?.preferences) ? payload.preferences : []
   };
 }
@@ -154,12 +165,14 @@ export class SyncService {
   private pushTimer: NodeJS.Timeout | null = null;
   private pushPromise: Promise<SyncStatus> | null = null;
   private queuedPushAfterCurrent = false;
+  private onAppliedSnapshot: (() => void | Promise<void>) | null = null;
 
   constructor(
     private readonly authService: AuthService,
     private readonly hosts: HostRepository,
     private readonly groups: GroupRepository,
     private readonly portForwards: PortForwardRepository,
+    private readonly dnsOverrides: DnsOverrideRepository,
     private readonly knownHosts: KnownHostRepository,
     private readonly secretMetadata: SecretMetadataRepository,
     private readonly settings: SettingsRepository,
@@ -171,6 +184,10 @@ export class SyncService {
 
   getState(): SyncStatus {
     return this.state;
+  }
+
+  setOnAppliedSnapshot(listener: (() => void | Promise<void>) | null): void {
+    this.onAppliedSnapshot = listener;
   }
 
   pause(errorMessage?: string | null): SyncStatus {
@@ -335,6 +352,7 @@ export class SyncService {
     this.groups.replaceAll([]);
     this.knownHosts.replaceAll([]);
     this.portForwards.replaceAll([]);
+    this.dnsOverrides.replaceAll([]);
     this.settings.clearSyncedTerminalPreferences();
     this.outbox.clearAll();
     this.stateStorage.updateSyncDataOwner({
@@ -405,6 +423,7 @@ export class SyncService {
     const hosts = this.hosts.list().map((record) => this.toSyncRecord(record.id, record.updatedAt, record, vaultKeyBase64));
     const knownHosts = this.knownHosts.list().map((record) => this.toSyncRecord(record.id, record.updatedAt, record, vaultKeyBase64));
     const portForwards = this.portForwards.list().map((record) => this.toSyncRecord(record.id, record.updatedAt, record, vaultKeyBase64));
+    const dnsOverrides = this.dnsOverrides.list().map((record) => this.toSyncRecord(record.id, record.updatedAt, record, vaultKeyBase64));
     const preferences = [this.settings.getSyncedTerminalPreferences()].map((record) =>
       this.toSyncRecord(record.id, record.updatedAt, record, vaultKeyBase64)
     );
@@ -427,6 +446,7 @@ export class SyncService {
           secrets,
           knownHosts,
           portForwards,
+          dnsOverrides,
           preferences
         },
         includedDeletions: []
@@ -457,6 +477,9 @@ export class SyncService {
         case 'portForwards':
           portForwards.push(record);
           break;
+        case 'dnsOverrides':
+          dnsOverrides.push(record);
+          break;
         case 'preferences':
           preferences.push(record);
           break;
@@ -470,6 +493,7 @@ export class SyncService {
         secrets,
         knownHosts,
         portForwards,
+        dnsOverrides,
         preferences
       },
       includedDeletions
@@ -495,6 +519,9 @@ export class SyncService {
     const portForwards = payload.portForwards
       .filter((record) => !record.deleted_at)
       .map((record) => decodeEncryptedPayload<PortForwardRuleRecord>(record.encrypted_payload, vaultKeyBase64));
+    const dnsOverrides = payload.dnsOverrides
+      .filter((record) => !record.deleted_at)
+      .map((record) => decodeEncryptedPayload<DnsOverrideRecord>(record.encrypted_payload, vaultKeyBase64));
     const preferences = payload.preferences
       .filter((record) => !record.deleted_at)
       .map((record) => decodeEncryptedPayload<TerminalPreferencesRecord>(record.encrypted_payload, vaultKeyBase64));
@@ -506,6 +533,7 @@ export class SyncService {
     this.hosts.replaceAll(hosts);
     this.knownHosts.replaceAll(knownHosts);
     this.portForwards.replaceAll(portForwards);
+    this.dnsOverrides.replaceAll(dnsOverrides);
     this.settings.replaceSyncedTerminalPreferences(preferences[0] ?? null);
 
     const existingServerSecrets = this.secretMetadata.listBySource('server_managed');
@@ -532,6 +560,7 @@ export class SyncService {
       });
     }
     this.secretMetadata.replaceAll(nextSecretMetadata, 'server_managed');
+    await this.onAppliedSnapshot?.();
   }
 
   private scheduleRetry(): void {
@@ -586,4 +615,4 @@ export class SyncService {
   }
 }
 
-type SyncRecordKind = 'groups' | 'hosts' | 'secrets' | 'knownHosts' | 'portForwards' | 'preferences';
+type SyncRecordKind = 'groups' | 'hosts' | 'secrets' | 'knownHosts' | 'portForwards' | 'dnsOverrides' | 'preferences';

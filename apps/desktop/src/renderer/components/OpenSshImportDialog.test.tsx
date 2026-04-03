@@ -226,7 +226,9 @@ describe("OpenSSH import dialog", () => {
 
     await waitFor(() => expect(api.openssh.probeDefault).toHaveBeenCalled());
 
-    fireEvent.click(container.querySelector(".modal-backdrop") as HTMLElement);
+    const backdrop = container.querySelector(".modal-backdrop") as HTMLElement;
+    fireEvent.pointerDown(backdrop);
+    fireEvent.click(backdrop);
 
     expect(onClose).toHaveBeenCalledTimes(1);
   });
@@ -257,7 +259,9 @@ describe("OpenSSH import dialog", () => {
       expect(api.openssh.addFileToSnapshot).toHaveBeenCalled(),
     );
 
-    fireEvent.click(container.querySelector(".modal-backdrop") as HTMLElement);
+    const backdrop = container.querySelector(".modal-backdrop") as HTMLElement;
+    fireEvent.pointerDown(backdrop);
+    fireEvent.click(backdrop);
 
     expect(onClose).not.toHaveBeenCalled();
 

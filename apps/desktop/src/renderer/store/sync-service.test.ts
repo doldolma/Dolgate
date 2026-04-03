@@ -70,6 +70,10 @@ function createSyncService() {
     list: vi.fn().mockReturnValue([]),
     replaceAll: vi.fn()
   };
+  const dnsOverrides = {
+    list: vi.fn().mockReturnValue([]),
+    replaceAll: vi.fn()
+  };
   const knownHosts = {
     list: vi.fn().mockReturnValue([]),
     replaceAll: vi.fn()
@@ -168,6 +172,7 @@ function createSyncService() {
     hosts as never,
     groups as never,
     portForwards as never,
+    dnsOverrides as never,
     knownHosts as never,
     secretMetadata as never,
     settings as never,
@@ -181,6 +186,7 @@ function createSyncService() {
     hosts,
     groups,
     portForwards,
+    dnsOverrides,
     knownHosts,
     secretMetadata,
     settings,
@@ -208,7 +214,7 @@ afterEach(() => {
 
 describe('SyncService', () => {
   it('purges all synced cache and every local secret on logout', async () => {
-    const { service, hosts, groups, portForwards, knownHosts, secretMetadata, settings, secretStore, outbox } = createSyncService();
+    const { service, hosts, groups, portForwards, dnsOverrides, knownHosts, secretMetadata, settings, secretStore, outbox } = createSyncService();
 
     await service.purgeSyncedCache();
 
@@ -222,6 +228,7 @@ describe('SyncService', () => {
     expect(groups.replaceAll).toHaveBeenCalledWith([]);
     expect(knownHosts.replaceAll).toHaveBeenCalledWith([]);
     expect(portForwards.replaceAll).toHaveBeenCalledWith([]);
+    expect(dnsOverrides.replaceAll).toHaveBeenCalledWith([]);
     expect(settings.clearSyncedTerminalPreferences).toHaveBeenCalledWith();
     expect(outbox.clearAll).toHaveBeenCalledWith();
     expect(service.getState()).toEqual({
@@ -257,6 +264,7 @@ describe('SyncService', () => {
               secrets: [],
               knownHosts: [],
               portForwards: [],
+              dnsOverrides: [],
               preferences: []
             }),
             {

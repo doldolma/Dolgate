@@ -693,6 +693,7 @@ export class CoreManager {
   ): PortForwardRuntimeRecord {
     this.portForwardRuntimes.set(runtime.ruleId, runtime);
     this.broadcastPortForwardEvent({ runtime });
+    void this.onPortForwardEvent?.({ runtime });
     return runtime;
   }
 
@@ -1367,6 +1368,7 @@ export class CoreManager {
     });
     this.portForwardRuntimes.set(payload.ruleId, baseRuntime);
     this.broadcastPortForwardEvent({ runtime: baseRuntime });
+    void this.onPortForwardEvent?.({ runtime: baseRuntime });
     try {
       const response = await this.requestResponse<Record<string, unknown>>(
         {
@@ -1423,6 +1425,7 @@ export class CoreManager {
     });
     this.portForwardRuntimes.set(payload.ruleId, baseRuntime);
     this.broadcastPortForwardEvent({ runtime: baseRuntime });
+    void this.onPortForwardEvent?.({ runtime: baseRuntime });
 
     const response = await this.requestResponse<Record<string, unknown>>(
       {
@@ -1905,26 +1908,6 @@ export class CoreManager {
       this.portForwardRuntimes.set(ruleId, runtime);
       this.broadcastPortForwardEvent({ runtime });
       void this.onPortForwardEvent?.({ runtime });
-      if (status === "running") {
-        this.log({
-          level: "info",
-          category: "audit",
-          message: "포트 포워딩이 시작되었습니다.",
-          metadata: {
-            ruleId,
-            bindAddress: runtime.bindAddress,
-            bindPort: runtime.bindPort,
-            mode: runtime.mode,
-          },
-        });
-      } else if (status === "stopped") {
-        this.log({
-          level: "info",
-          category: "audit",
-          message: "포트 포워딩이 중지되었습니다.",
-          metadata: { ruleId },
-        });
-      }
       return;
     }
 

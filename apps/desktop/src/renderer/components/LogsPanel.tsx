@@ -3,8 +3,10 @@ import type {
   ActivityLogCategory,
   ActivityLogLevel,
   ActivityLogRecord,
+  PortForwardLifecycleLogMetadata,
   SessionConnectionKind,
-  SessionLifecycleLogMetadata
+  SessionLifecycleLogMetadata,
+  PortForwardTransport,
 } from '@shared';
 
 interface LogsPanelProps {
@@ -22,6 +24,23 @@ function isSessionLifecycleMetadata(value: Record<string, unknown> | null): valu
       typeof value.title === 'string' &&
       typeof value.connectionKind === 'string' &&
       typeof value.connectedAt === 'string' &&
+      typeof value.status === 'string'
+  );
+}
+
+function isPortForwardLifecycleMetadata(value: Record<string, unknown> | null): value is PortForwardLifecycleLogMetadata & Record<string, unknown> {
+  return Boolean(
+    value &&
+      typeof value.ruleId === 'string' &&
+      typeof value.ruleLabel === 'string' &&
+      typeof value.hostId === 'string' &&
+      typeof value.hostLabel === 'string' &&
+      typeof value.transport === 'string' &&
+      typeof value.mode === 'string' &&
+      typeof value.bindAddress === 'string' &&
+      typeof value.bindPort === 'number' &&
+      typeof value.targetSummary === 'string' &&
+      typeof value.startedAt === 'string' &&
       typeof value.status === 'string'
   );
 }
@@ -52,6 +71,26 @@ function getConnectionKindTone(kind: SessionConnectionKind): 'running' | 'starti
   return 'running';
 }
 
+function getPortForwardTransportLabel(transport: PortForwardTransport): string {
+  if (transport === 'aws-ssm') {
+    return 'AWS SSM';
+  }
+  if (transport === 'ecs-task') {
+    return 'ECS Task';
+  }
+  if (transport === 'container') {
+    return 'Container';
+  }
+  return 'SSH';
+}
+
+function getPortForwardTransportTone(transport: PortForwardTransport): 'running' | 'starting' | 'paused' {
+  if (transport === 'aws-ssm' || transport === 'ecs-task') {
+    return 'starting';
+  }
+  return 'running';
+}
+
 function getLifecycleStatusLabel(status: SessionLifecycleLogMetadata['status']): string {
   if (status === 'connected') {
     return 'Connected';
@@ -64,6 +103,26 @@ function getLifecycleStatusLabel(status: SessionLifecycleLogMetadata['status']):
 
 function getLifecycleStatusTone(status: SessionLifecycleLogMetadata['status']): 'running' | 'error' | 'stopped' {
   if (status === 'connected') {
+    return 'running';
+  }
+  if (status === 'error') {
+    return 'error';
+  }
+  return 'stopped';
+}
+
+function getPortForwardStatusLabel(status: PortForwardLifecycleLogMetadata['status']): string {
+  if (status === 'running') {
+    return 'Running';
+  }
+  if (status === 'error') {
+    return 'Error';
+  }
+  return 'Closed';
+}
+
+function getPortForwardStatusTone(status: PortForwardLifecycleLogMetadata['status']): 'running' | 'error' | 'stopped' {
+  if (status === 'running') {
     return 'running';
   }
   if (status === 'error') {
@@ -167,29 +226,33 @@ export function LogsPanel({ logs, onClear, onOpenReplay }: LogsPanelProps) {
           </div>
         ) : (
           visibleLogs.map((log) => {
-            const lifecycleMetadata =
+            const sessionLifecycleMetadata =
               log.kind === 'session-lifecycle' && isSessionLifecycleMetadata(log.metadata)
                 ? log.metadata
                 : null;
+            const portForwardLifecycleMetadata =
+              log.kind === 'port-forward-lifecycle' && isPortForwardLifecycleMetadata(log.metadata)
+                ? log.metadata
+                : null;
             const replayRecordingId =
-              lifecycleMetadata != null &&
-              lifecycleMetadata.hasReplay === true &&
-              typeof lifecycleMetadata.recordingId === 'string'
-                ? lifecycleMetadata.recordingId
+              sessionLifecycleMetadata != null &&
+              sessionLifecycleMetadata.hasReplay === true &&
+              typeof sessionLifecycleMetadata.recordingId === 'string'
+                ? sessionLifecycleMetadata.recordingId
                 : null;
 
-            return lifecycleMetadata ? (
+            return sessionLifecycleMetadata ? (
               <article key={log.id} className="operations-card logs-lifecycle-card">
                 <div className="operations-card__main">
                   <div className="operations-card__title-row logs-lifecycle-card__header">
                     <div>
-                      <strong>{lifecycleMetadata.hostLabel}</strong>
-                      {getSessionLifecycleSubtitle(lifecycleMetadata) ? (
-                        <div className="logs-lifecycle-card__title">{getSessionLifecycleSubtitle(lifecycleMetadata)}</div>
+                      <strong>{sessionLifecycleMetadata.hostLabel}</strong>
+                      {getSessionLifecycleSubtitle(sessionLifecycleMetadata) ? (
+                        <div className="logs-lifecycle-card__title">{getSessionLifecycleSubtitle(sessionLifecycleMetadata)}</div>
                       ) : null}
                     </div>
                     <div className="logs-lifecycle-card__badges">
-                      {lifecycleMetadata.status !== 'connected' && replayRecordingId ? (
+                      {sessionLifecycleMetadata.status !== 'connected' && replayRecordingId ? (
                         <button
                           type="button"
                           className="secondary-button secondary-button--compact"
@@ -198,30 +261,69 @@ export function LogsPanel({ logs, onClear, onOpenReplay }: LogsPanelProps) {
                           Replay
                         </button>
                       ) : null}
-                      <span className={`status-pill status-pill--${getConnectionKindTone(lifecycleMetadata.connectionKind)}`}>
-                        {getConnectionKindLabel(lifecycleMetadata.connectionKind)}
+                      <span className={`status-pill status-pill--${getConnectionKindTone(sessionLifecycleMetadata.connectionKind)}`}>
+                        {getConnectionKindLabel(sessionLifecycleMetadata.connectionKind)}
                       </span>
-                      <span className={`status-pill status-pill--${getLifecycleStatusTone(lifecycleMetadata.status)}`}>
-                        {getLifecycleStatusLabel(lifecycleMetadata.status)}
+                      <span className={`status-pill status-pill--${getLifecycleStatusTone(sessionLifecycleMetadata.status)}`}>
+                        {getLifecycleStatusLabel(sessionLifecycleMetadata.status)}
                       </span>
                     </div>
                   </div>
                   <div className="logs-lifecycle-card__timeline">
                     <div className="logs-lifecycle-card__item">
                       <span>연결 시작</span>
-                      <strong>{formatLogTimestamp(lifecycleMetadata.connectedAt)}</strong>
+                      <strong>{formatLogTimestamp(sessionLifecycleMetadata.connectedAt)}</strong>
                     </div>
                     <div className="logs-lifecycle-card__item">
                       <span>연결 종료</span>
-                      <strong>{lifecycleMetadata.disconnectedAt ? formatLogTimestamp(lifecycleMetadata.disconnectedAt) : '연결 중'}</strong>
+                      <strong>{sessionLifecycleMetadata.disconnectedAt ? formatLogTimestamp(sessionLifecycleMetadata.disconnectedAt) : '연결 중'}</strong>
                     </div>
                     <div className="logs-lifecycle-card__item">
                       <span>연결 시간</span>
-                      <strong>{formatSessionLifecycleDuration(lifecycleMetadata.durationMs)}</strong>
+                      <strong>{formatSessionLifecycleDuration(sessionLifecycleMetadata.durationMs)}</strong>
                     </div>
                   </div>
-                  {lifecycleMetadata.disconnectReason ? (
-                    <div className="logs-lifecycle-card__reason">{lifecycleMetadata.disconnectReason}</div>
+                  {sessionLifecycleMetadata.disconnectReason ? (
+                    <div className="logs-lifecycle-card__reason">{sessionLifecycleMetadata.disconnectReason}</div>
+                  ) : null}
+                </div>
+              </article>
+            ) : portForwardLifecycleMetadata ? (
+              <article key={log.id} className="operations-card logs-lifecycle-card">
+                <div className="operations-card__main">
+                  <div className="operations-card__title-row logs-lifecycle-card__header">
+                    <div>
+                      <strong>{portForwardLifecycleMetadata.ruleLabel}</strong>
+                      <div className="logs-lifecycle-card__title">{portForwardLifecycleMetadata.hostLabel}</div>
+                      <div className="logs-lifecycle-card__title">
+                        {`${portForwardLifecycleMetadata.bindAddress}:${portForwardLifecycleMetadata.bindPort} -> ${portForwardLifecycleMetadata.targetSummary}`}
+                      </div>
+                    </div>
+                    <div className="logs-lifecycle-card__badges">
+                      <span className={`status-pill status-pill--${getPortForwardTransportTone(portForwardLifecycleMetadata.transport)}`}>
+                        {getPortForwardTransportLabel(portForwardLifecycleMetadata.transport)}
+                      </span>
+                      <span className={`status-pill status-pill--${getPortForwardStatusTone(portForwardLifecycleMetadata.status)}`}>
+                        {getPortForwardStatusLabel(portForwardLifecycleMetadata.status)}
+                      </span>
+                    </div>
+                  </div>
+                  <div className="logs-lifecycle-card__timeline">
+                    <div className="logs-lifecycle-card__item">
+                      <span>포워딩 시작</span>
+                      <strong>{formatLogTimestamp(portForwardLifecycleMetadata.startedAt)}</strong>
+                    </div>
+                    <div className="logs-lifecycle-card__item">
+                      <span>포워딩 종료</span>
+                      <strong>{portForwardLifecycleMetadata.stoppedAt ? formatLogTimestamp(portForwardLifecycleMetadata.stoppedAt) : '포워딩 중'}</strong>
+                    </div>
+                    <div className="logs-lifecycle-card__item">
+                      <span>유지 시간</span>
+                      <strong>{formatSessionLifecycleDuration(portForwardLifecycleMetadata.durationMs)}</strong>
+                    </div>
+                  </div>
+                  {portForwardLifecycleMetadata.endReason ? (
+                    <div className="logs-lifecycle-card__reason">{portForwardLifecycleMetadata.endReason}</div>
                   ) : null}
                 </div>
               </article>

@@ -8,6 +8,7 @@ const (
 	KindSecrets      Kind = "secrets"
 	KindKnownHosts   Kind = "knownHosts"
 	KindPortForwards Kind = "portForwards"
+	KindDNSOverrides Kind = "dnsOverrides"
 	KindPreferences  Kind = "preferences"
 )
 
@@ -17,6 +18,7 @@ var AllKinds = []Kind{
 	KindSecrets,
 	KindKnownHosts,
 	KindPortForwards,
+	KindDNSOverrides,
 	KindPreferences,
 }
 
@@ -33,5 +35,6 @@ type Payload struct {
 	Secrets      []Record `json:"secrets"`
 	KnownHosts   []Record `json:"knownHosts"`
 	PortForwards []Record `json:"portForwards"`
+	DNSOverrides []Record `json:"dnsOverrides"`
 	Preferences  []Record `json:"preferences"`
 }

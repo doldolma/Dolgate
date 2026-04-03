@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
-import type { ActivityLogRecord, SessionLifecycleLogMetadata } from '@shared';
+import type { ActivityLogRecord, PortForwardLifecycleLogMetadata, SessionLifecycleLogMetadata } from '@shared';
 import { LogsPanel } from './LogsPanel';
 
 function createLifecycleLog(
@@ -16,6 +16,23 @@ function createLifecycleLog(
     metadata: metadata as unknown as Record<string, unknown>,
     createdAt: metadata.connectedAt,
     updatedAt: metadata.disconnectedAt ?? metadata.connectedAt,
+    ...overrides
+  };
+}
+
+function createPortForwardLifecycleLog(
+  metadata: PortForwardLifecycleLogMetadata,
+  overrides: Partial<ActivityLogRecord> = {}
+): ActivityLogRecord {
+  return {
+    id: `port-forward:${metadata.ruleId}:attempt-1`,
+    level: metadata.status === 'error' ? 'error' : 'info',
+    category: 'audit',
+    kind: 'port-forward-lifecycle',
+    message: `${metadata.ruleLabel} 포트 포워딩`,
+    metadata: metadata as unknown as Record<string, unknown>,
+    createdAt: metadata.startedAt,
+    updatedAt: metadata.stoppedAt ?? metadata.startedAt,
     ...overrides
   };
 }
@@ -132,6 +149,41 @@ describe('LogsPanel', () => {
     expect(screen.getByText(/"field": "theme"/)).toBeInTheDocument();
   });
 
+  it('renders port forward lifecycle rows as a single lifecycle card', () => {
+    render(
+      <LogsPanel
+        logs={[
+          createPortForwardLifecycleLog({
+            ruleId: 'rule-1',
+            ruleLabel: 'RDS tunnel',
+            hostId: 'host-1',
+            hostLabel: 'bastion',
+            transport: 'aws-ssm',
+            mode: 'local',
+            bindAddress: '127.0.0.1',
+            bindPort: 15432,
+            targetSummary: 'Remote host db.internal:5432',
+            startedAt: '2026-03-29T00:00:00.000Z',
+            stoppedAt: '2026-03-29T00:05:00.000Z',
+            durationMs: 300000,
+            status: 'closed'
+          })
+        ]}
+        onClear={vi.fn().mockResolvedValue(undefined)}
+        onOpenReplay={vi.fn().mockResolvedValue(undefined)}
+      />
+    );
+
+    const lifecycleCard = screen.getByText('RDS tunnel').closest('article');
+    expect(lifecycleCard).not.toBeNull();
+    expect(screen.getByText('bastion')).toBeInTheDocument();
+    expect(screen.getByText('127.0.0.1:15432 -> Remote host db.internal:5432')).toBeInTheDocument();
+    expect(screen.getByText('AWS SSM')).toBeInTheDocument();
+    expect(within(lifecycleCard as HTMLElement).getByText('Closed')).toBeInTheDocument();
+    expect(screen.queryByText('포워딩 중')).not.toBeInTheDocument();
+    expect(screen.getByText('5분 0초')).toBeInTheDocument();
+  });
+
   it('keeps category and level filters working for lifecycle rows', () => {
     render(
       <LogsPanel
@@ -216,5 +268,44 @@ describe('LogsPanel', () => {
 
     expect(onOpenReplay).toHaveBeenCalledWith('recording-9');
     expect(screen.queryAllByRole('button', { name: 'Replay' })).toHaveLength(1);
+  });
+
+  it('keeps audit category filters working for port forward lifecycle rows', () => {
+    render(
+      <LogsPanel
+        logs={[
+          createPortForwardLifecycleLog({
+            ruleId: 'rule-2',
+            ruleLabel: 'Kafka tunnel',
+            hostId: 'host-2',
+            hostLabel: 'broker-host',
+            transport: 'ssh',
+            mode: 'local',
+            bindAddress: '127.0.0.2',
+            bindPort: 19092,
+            targetSummary: 'Target kafka.internal:9092',
+            startedAt: '2026-03-29T00:00:00.000Z',
+            status: 'running'
+          }),
+          createLifecycleLog({
+            sessionId: 'ssh-session-3',
+            hostId: 'host-3',
+            hostLabel: 'ssh-host',
+            title: 'SSH Host',
+            connectionKind: 'ssh',
+            connectedAt: '2026-03-29T00:01:00.000Z',
+            status: 'connected'
+          })
+        ]}
+        onClear={vi.fn().mockResolvedValue(undefined)}
+        onOpenReplay={vi.fn().mockResolvedValue(undefined)}
+      />
+    );
+
+    fireEvent.change(screen.getByLabelText('Category'), {
+      target: { value: 'audit' }
+    });
+    expect(screen.getByText('Kafka tunnel')).toBeInTheDocument();
+    expect(screen.queryByText('ssh-host')).not.toBeInTheDocument();
   });
 });

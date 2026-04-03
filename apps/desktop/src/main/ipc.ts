@@ -10,6 +10,8 @@ import {
   shell as electronShell,
 } from "electron";
 import {
+  isDnsOverrideEligiblePortForwardRule,
+  isLinkedDnsOverrideRecord,
   getGroupLabel,
   getAwsEc2HostSftpDisabledReason,
   getAwsEc2HostSshPort,
@@ -28,6 +30,7 @@ import type {
   DesktopConnectInput,
   HostContainerRuntime,
   DesktopLocalConnectInput,
+  DnsOverrideDraft,
   OpenSshSnapshotFileInput,
   OpenSshImportSelectionInput,
   OpenSshImportWarning,
@@ -51,6 +54,7 @@ import type {
   HostContainersSearchLogsInput,
   HostContainersStatsInput,
   PortForwardDraft,
+  PortForwardRuntimeRecord,
   SessionShareInputToggleInput,
   SessionShareSnapshotInput,
   SessionShareStartInput,
@@ -65,6 +69,7 @@ import type {
 import { ipcChannels } from "../common/ipc-channels";
 import {
   ActivityLogRepository,
+  DnsOverrideRepository,
   GroupRepository,
   HostRepository,
   KnownHostRepository,
@@ -79,6 +84,8 @@ import { AwsService } from "./aws-service";
 import { CoreManager } from "./core-manager";
 import { resolveContainerTunnelTarget } from "./container-port-forward-target";
 import { LocalFileService } from "./file-service";
+import { collectActiveDnsOverrideEntries, HostsOverrideManager } from "./hosts-override-manager";
+import { PortForwardLifecycleLogger } from "./port-forward-lifecycle-logger";
 import { SecretStore } from "./secret-store";
 import { SessionShareService } from "./session-share-service";
 import { SessionReplayService } from "./session-replay-service";
@@ -868,6 +875,7 @@ export function registerIpcHandlers(
   groups: GroupRepository,
   settings: SettingsRepository,
   portForwards: PortForwardRepository,
+  dnsOverrides: DnsOverrideRepository,
   knownHosts: KnownHostRepository,
   activityLogs: ActivityLogRepository,
   secretMetadata: SecretMetadataRepository,
@@ -877,6 +885,7 @@ export function registerIpcHandlers(
   awsSsmTunnelService: AwsSsmTunnelService,
   warpgateService: WarpgateService,
   coreManager: CoreManager,
+  hostsOverrideManager: HostsOverrideManager,
   updater: UpdateService,
   authService: AuthService,
   syncService: SyncService,
@@ -1023,6 +1032,41 @@ export function registerIpcHandlers(
     awsSftpPreflightByEndpointId.delete(normalizedEndpointId);
     return cached.hydratedHost;
   };
+
+  async function rewriteActiveDnsOverrides(
+    runtimeOverride?: PortForwardRuntimeRecord[],
+  ): Promise<void> {
+    const runtimes = runtimeOverride ?? coreManager.listPortForwardRuntimes();
+    await hostsOverrideManager.rewrite(
+      collectActiveDnsOverrideEntries(
+        dnsOverrides.list(),
+        portForwards.list(),
+        runtimes,
+      ),
+    );
+  }
+
+  async function stopPortForwardWithDnsOverrideCleanup(
+    ruleId: string,
+  ): Promise<void> {
+    const remainingRuntimes = coreManager
+      .listPortForwardRuntimes()
+      .filter((runtime) => runtime.ruleId !== ruleId);
+
+    await rewriteActiveDnsOverrides(remainingRuntimes);
+    try {
+      await coreManager.stopPortForward(ruleId);
+    } catch (error) {
+      await rewriteActiveDnsOverrides().catch(() => undefined);
+      throw error;
+    }
+  }
+
+  const portForwardLifecycleLogger = new PortForwardLifecycleLogger(
+    activityLogs,
+    portForwards,
+    hosts,
+  );
 
   async function persistHostSpecificSecret(
     hostId: string,
@@ -1528,6 +1572,7 @@ export function registerIpcHandlers(
     }
   });
   coreManager.setPortForwardEventHandler(async (event) => {
+    portForwardLifecycleLogger.handleEvent(event);
     if (
       event.runtime.status === "stopped" ||
       event.runtime.status === "error"
@@ -3265,6 +3310,85 @@ export function registerIpcHandlers(
   }));
 
   ipcMain.handle(
+    ipcChannels.dnsOverrides.list,
+    async () => dnsOverrides.list(),
+  );
+
+  ipcMain.handle(
+    ipcChannels.dnsOverrides.create,
+    async (_event, draft: DnsOverrideDraft) => {
+      const record = dnsOverrides.create(draft, portForwards);
+      try {
+        await rewriteActiveDnsOverrides();
+      } catch (error) {
+        dnsOverrides.remove(record.id);
+        throw error;
+      }
+      activityLogs.append("info", "audit", "DNS override를 생성했습니다.", {
+        dnsOverrideId: record.id,
+        type: record.type,
+        hostname: record.hostname,
+        ...(isLinkedDnsOverrideRecord(record)
+          ? { portForwardRuleId: record.portForwardRuleId }
+          : { address: record.address, enabled: record.enabled }),
+      });
+      queueSync();
+      return record;
+    },
+  );
+
+  ipcMain.handle(
+    ipcChannels.dnsOverrides.update,
+    async (_event, id: string, draft: DnsOverrideDraft) => {
+      const previous = dnsOverrides.list();
+      const record = dnsOverrides.update(id, draft, portForwards);
+      try {
+        await rewriteActiveDnsOverrides();
+      } catch (error) {
+        dnsOverrides.replaceAll(previous);
+        throw error;
+      }
+      activityLogs.append("info", "audit", "DNS override를 수정했습니다.", {
+        dnsOverrideId: record.id,
+        type: record.type,
+        hostname: record.hostname,
+        ...(isLinkedDnsOverrideRecord(record)
+          ? { portForwardRuleId: record.portForwardRuleId }
+          : { address: record.address, enabled: record.enabled }),
+      });
+      queueSync();
+      return record;
+    },
+  );
+
+  ipcMain.handle(
+    ipcChannels.dnsOverrides.remove,
+    async (_event, id: string) => {
+      const previous = dnsOverrides.list();
+      const current = dnsOverrides.getById(id);
+      dnsOverrides.remove(id);
+      try {
+        await rewriteActiveDnsOverrides();
+      } catch (error) {
+        dnsOverrides.replaceAll(previous);
+        throw error;
+      }
+      syncOutbox.upsertDeletion("dnsOverrides", id);
+      if (current) {
+        activityLogs.append("warn", "audit", "DNS override를 삭제했습니다.", {
+          dnsOverrideId: current.id,
+          type: current.type,
+          hostname: current.hostname,
+          ...(isLinkedDnsOverrideRecord(current)
+            ? { portForwardRuleId: current.portForwardRuleId }
+            : { address: current.address, enabled: current.enabled }),
+        });
+      }
+      queueSync();
+    },
+  );
+
+  ipcMain.handle(
     ipcChannels.portForwards.create,
     async (_event, draft: PortForwardDraft) => {
       const host = hosts.getById(draft.hostId);
@@ -3334,7 +3458,20 @@ export function registerIpcHandlers(
     ipcChannels.portForwards.remove,
     async (_event, id: string) => {
       const current = portForwards.getById(id);
-      await coreManager.stopPortForward(id).catch(() => undefined);
+      if (current) {
+        await stopPortForwardWithDnsOverrideCleanup(id).catch(() => undefined);
+      }
+      const linkedOverrides = dnsOverrides
+        .list()
+        .filter(
+          (override) =>
+            isLinkedDnsOverrideRecord(override) &&
+            override.portForwardRuleId === id,
+        );
+      for (const override of linkedOverrides) {
+        dnsOverrides.remove(override.id);
+        syncOutbox.upsertDeletion("dnsOverrides", override.id);
+      }
       syncOutbox.upsertDeletion("portForwards", id);
       portForwards.remove(id);
       if (current) {
@@ -3480,7 +3617,7 @@ export function registerIpcHandlers(
             hostId: host.id,
             transport: "aws-ssm",
             mode: "local",
-            bindAddress: "127.0.0.1",
+            bindAddress: rule.bindAddress,
             bindPort: rule.bindPort,
             status,
             updatedAt: new Date().toISOString(),
@@ -3532,14 +3669,14 @@ export function registerIpcHandlers(
           }
 
           publishRuntime("starting", "Starting SSM port forward");
-          return coreManager.startSsmPortForward({
+          const runtime = await coreManager.startSsmPortForward({
             ruleId: rule.id,
             hostId: host.id,
             profileName: host.awsProfileName,
             region: host.awsRegion,
             targetType: "instance",
             targetId: host.awsInstanceId,
-            bindAddress: "127.0.0.1",
+            bindAddress: rule.bindAddress,
             bindPort: rule.bindPort,
             targetKind: rule.targetKind,
             targetPort: rule.targetPort,
@@ -3548,6 +3685,17 @@ export function registerIpcHandlers(
                 ? (rule.remoteHost ?? undefined)
                 : undefined,
           });
+          try {
+            await rewriteActiveDnsOverrides();
+          } catch (error) {
+            await stopPortForwardWithDnsOverrideCleanup(rule.id).catch(() => undefined);
+            publishRuntime(
+              "error",
+              error instanceof Error ? error.message : "hosts override를 적용하지 못했습니다.",
+            );
+            throw error;
+          }
+          return runtime;
         } catch (error) {
           publishRuntime(
             "error",
@@ -3564,7 +3712,7 @@ export function registerIpcHandlers(
       const username = requireConfiguredSshUsername(host);
       const secrets = await loadSecrets(secretStore, host.secretRef);
 
-      return coreManager.startPortForward({
+      const runtime = await coreManager.startPortForward({
         ruleId: rule.id,
         hostId: host.id,
         host: host.hostname,
@@ -3582,13 +3730,31 @@ export function registerIpcHandlers(
         targetHost: rule.targetHost ?? undefined,
         targetPort: rule.targetPort ?? undefined,
       });
+      try {
+        await rewriteActiveDnsOverrides();
+      } catch (error) {
+        await stopPortForwardWithDnsOverrideCleanup(rule.id).catch(() => undefined);
+        coreManager.setPortForwardRuntime({
+          ruleId: rule.id,
+          hostId: host.id,
+          transport: "ssh",
+          mode: rule.mode,
+          bindAddress: rule.bindAddress,
+          bindPort: rule.bindPort,
+          status: "error",
+          updatedAt: new Date().toISOString(),
+          message: error instanceof Error ? error.message : "hosts override를 적용하지 못했습니다.",
+        });
+        throw error;
+      }
+      return runtime;
     },
   );
 
   ipcMain.handle(
     ipcChannels.portForwards.stop,
     async (_event, ruleId: string) => {
-      await coreManager.stopPortForward(ruleId);
+      await stopPortForwardWithDnsOverrideCleanup(ruleId);
     },
   );
 
