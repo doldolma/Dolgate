@@ -3,6 +3,18 @@
 이 문서는 최근 추가된 복잡한 사용자 흐름을 빠르게 이해하기 위한 요약 문서입니다.
 세부 빌드와 배포는 [build-and-deploy](./build-and-deploy.md), 런타임 경계는 [architecture](./architecture.md)를 참고하세요.
 
+```mermaid
+flowchart TD
+  Start["앱 시작"] --> Refresh["refresh token으로 온라인 복구 시도"]
+  Refresh --> Online{"복구 성공?"}
+  Online -->|예| Ready["정상 세션으로 홈 진입"]
+  Online -->|아니오| Lease{"offline lease 유효?"}
+  Lease -->|예| Offline["offline-authenticated로 홈 진입"]
+  Offline --> Resync["백그라운드 재동기화 재시도"]
+  Lease -->|아니오| Browser["외부 브라우저 로그인"]
+  Browser --> Ready
+```
+
 ## Session Share
 
 ### owner

@@ -1,7 +1,7 @@
 services:
   sync-api:
     # 간단한 self-host 기본값입니다.
-    # 운영에서는 latest 대신 명시 버전 태그(예: 1.1.8)로 고정하는 것을 권장합니다.
+    # 운영에서는 latest 대신 명시 버전 태그(예: 1.2.4)로 고정하는 것을 권장합니다.
     image: ghcr.io/doldolma/dolgate-sync-api:latest
     container_name: dolgate-sync-api
     restart: unless-stopped

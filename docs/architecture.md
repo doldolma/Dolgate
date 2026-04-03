@@ -8,6 +8,21 @@ Dolgate는 세 개의 런타임 경계로 나뉩니다.
 
 복잡한 사용자 흐름은 [feature-flows](./feature-flows.md) 문서를 함께 참고하는 편이 좋습니다.
 
+```mermaid
+flowchart LR
+  subgraph Desktop["Electron Desktop"]
+    Main["main<br/>브라우저 로그인 / 로컬 저장소 / 프로세스 관리"]
+    Preload["preload<br/>contextBridge API"]
+    Renderer["renderer<br/>workspace UI / xterm.js / 상태관리"]
+    Main --> Preload --> Renderer
+  end
+  Main <-->|"stdio framed IPC"| Core["ssh-core<br/>SSH / SFTP / Port Forward"]
+  Main <-->|"auth / sync / share"| Sync["sync-api<br/>browser login / sync records / viewer"]
+  Sync --> DB["SQLite / MySQL"]
+  Browser["External Browser"] <-->|"/login / callback"| Sync
+  Main -. "open browser" .-> Browser
+```
+
 ## 데스크톱 앱
 
 - `main`
