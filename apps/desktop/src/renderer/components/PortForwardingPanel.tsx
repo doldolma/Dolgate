@@ -23,7 +23,7 @@ import type {
   AwsEcsTaskTunnelContainerSummary,
   AwsEcsTaskTunnelServiceSummary,
   DnsOverrideDraft,
-  DnsOverrideRecord,
+  DnsOverrideResolvedRecord,
   HostContainerDetails,
   HostContainerSummary,
   HostRecord,
@@ -46,12 +46,13 @@ interface PortForwardingPanelProps {
   hosts: HostRecord[];
   containerTabs: HostContainersTabState[];
   rules: PortForwardRuleRecord[];
-  dnsOverrides: DnsOverrideRecord[];
+  dnsOverrides: DnsOverrideResolvedRecord[];
   runtimes: PortForwardRuntimeRecord[];
   interactiveAuth: PendingPortForwardInteractiveAuth | null;
   discoveryInteractiveAuth: PendingContainersInteractiveAuth | null;
   onSave: (ruleId: string | null, draft: PortForwardDraft) => Promise<void>;
   onSaveDnsOverride: (overrideId: string | null, draft: DnsOverrideDraft) => Promise<void>;
+  onSetStaticDnsOverrideActive: (overrideId: string, active: boolean) => Promise<void>;
   onRemove: (ruleId: string) => Promise<void>;
   onRemoveDnsOverride: (overrideId: string) => Promise<void>;
   onStart: (ruleId: string) => Promise<void>;
@@ -609,6 +610,7 @@ export function PortForwardingPanel({
   discoveryInteractiveAuth,
   onSave,
   onSaveDnsOverride,
+  onSetStaticDnsOverrideActive,
   onRemove,
   onRemoveDnsOverride,
   onStart,
@@ -1103,7 +1105,7 @@ export function PortForwardingPanel({
     setIsModalOpen(true);
   }
 
-  function openEditDnsOverride(override: DnsOverrideRecord) {
+  function openEditDnsOverride(override: DnsOverrideResolvedRecord) {
     setEditingRuleId(null);
     setEditingDnsOverrideId(override.id);
     setActiveTab('dns');
@@ -1120,7 +1122,6 @@ export function PortForwardingPanel({
             type: 'static',
             hostname: override.hostname,
             address: override.address,
-            enabled: override.enabled,
           },
     );
     setIsSubmitting(false);
@@ -1146,7 +1147,6 @@ export function PortForwardingPanel({
         type: 'static',
         hostname: current.hostname,
         address: isStaticDnsOverrideDraft(current) ? current.address : '',
-        enabled: isStaticDnsOverrideDraft(current) ? current.enabled : false,
       };
     });
   }
@@ -1327,7 +1327,6 @@ export function PortForwardingPanel({
               type: 'static',
               hostname: dnsDraft.hostname.trim().toLowerCase(),
               address: dnsDraft.address.trim(),
-              enabled: dnsDraft.enabled,
             };
         await onSaveDnsOverride(editingDnsOverrideId, nextDnsDraft);
         setIsModalOpen(false);
@@ -1681,8 +1680,8 @@ export function PortForwardingPanel({
                     <div className="operations-card__title-row">
                       <strong>{override.hostname}</strong>
                       <span className="status-pill">{isStatic ? 'Static' : 'Linked'}</span>
-                      <span className={`status-pill status-pill--${isStatic ? (override.enabled ? 'running' : 'stopped') : (runtime?.status ?? 'stopped')}`}>
-                        {isStatic ? (override.enabled ? 'On' : 'Off') : statusLabel(runtime)}
+                      <span className={`status-pill status-pill--${isStatic ? (override.status === 'active' ? 'running' : 'stopped') : (runtime?.status ?? 'stopped')}`}>
+                        {isStatic ? (override.status === 'active' ? 'On' : 'Off') : statusLabel(runtime)}
                       </span>
                     </div>
                     <div className="operations-card__meta">
@@ -1706,16 +1705,9 @@ export function PortForwardingPanel({
                       <button
                         type="button"
                         className="secondary-button"
-                        onClick={() =>
-                          void onSaveDnsOverride(override.id, {
-                            type: 'static',
-                            hostname: override.hostname,
-                            address: override.address,
-                            enabled: !override.enabled,
-                          })
-                        }
+                        onClick={() => void onSetStaticDnsOverrideActive(override.id, override.status !== 'active')}
                       >
-                        {override.enabled ? 'Off' : 'On'}
+                        {override.status === 'active' ? 'Off' : 'On'}
                       </button>
                     ) : null}
                     <button type="button" className="secondary-button" onClick={() => openEditDnsOverride(override)}>

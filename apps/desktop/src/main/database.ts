@@ -196,7 +196,7 @@ function normalizeIncomingDnsOverrideRecord(record: DnsOverrideRecord): DnsOverr
     };
   }
 
-  if (!('address' in record) || typeof record.address !== 'string' || typeof record.enabled !== 'boolean') {
+  if (!('address' in record) || typeof record.address !== 'string') {
     return null;
   }
 
@@ -206,11 +206,12 @@ function normalizeIncomingDnsOverrideRecord(record: DnsOverrideRecord): DnsOverr
   }
 
   return {
-    ...record,
+    id: record.id,
     type: 'static',
     hostname,
     address,
-    enabled: record.enabled,
+    createdAt: record.createdAt,
+    updatedAt: record.updatedAt,
   };
 }
 
@@ -1142,7 +1143,6 @@ export class DnsOverrideRepository {
       type: 'static',
       hostname,
       address,
-      enabled: draft.enabled,
       createdAt,
       updatedAt,
     };

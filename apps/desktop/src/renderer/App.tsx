@@ -261,6 +261,7 @@ export function App() {
   const bootstrap = useAppStore((state) => state.bootstrap);
   const refreshHostCatalog = useAppStore((state) => state.refreshHostCatalog);
   const refreshSyncedWorkspaceData = useAppStore((state) => state.refreshSyncedWorkspaceData);
+  const clearSyncedWorkspaceData = useAppStore((state) => state.clearSyncedWorkspaceData);
   const setSearchQuery = useAppStore((state) => state.setSearchQuery);
   const activateHome = useAppStore((state) => state.activateHome);
   const activateSession = useAppStore((state) => state.activateSession);
@@ -320,6 +321,7 @@ export function App() {
   const updateSettings = useAppStore((state) => state.updateSettings);
   const savePortForward = useAppStore((state) => state.savePortForward);
   const saveDnsOverride = useAppStore((state) => state.saveDnsOverride);
+  const setStaticDnsOverrideActive = useAppStore((state) => state.setStaticDnsOverrideActive);
   const removeDnsOverride = useAppStore((state) => state.removeDnsOverride);
   const removePortForward = useAppStore((state) => state.removePortForward);
   const startPortForward = useAppStore((state) => state.startPortForward);
@@ -460,6 +462,7 @@ export function App() {
         return;
       }
       if (state.status === 'unauthenticated' || state.status === 'error') {
+        clearSyncedWorkspaceData();
         setHydratedSessionUserId(null);
         hydratedOnlineSessionUserIdRef.current = null;
         setWorkspaceBootstrapError(null);
@@ -482,6 +485,7 @@ export function App() {
     refreshSyncedWorkspaceData,
     handleCoreEvent,
     handleContainerConnectionProgressEvent,
+    clearSyncedWorkspaceData,
     handleSftpConnectionProgressEvent,
     handlePortForwardEvent,
     handleSessionShareChatEvent,
@@ -1027,6 +1031,7 @@ export function App() {
                 discoveryInteractiveAuth={pendingInteractiveAuth?.source === 'containers' ? pendingInteractiveAuth : null}
                 onSave={savePortForward}
                 onSaveDnsOverride={saveDnsOverride}
+                onSetStaticDnsOverrideActive={setStaticDnsOverrideActive}
                 onRemoveDnsOverride={removeDnsOverride}
                 onRemove={removePortForward}
                 onStart={startPortForward}

@@ -479,6 +479,8 @@ const api: DesktopApi = {
       ipcRenderer.invoke(ipcChannels.dnsOverrides.create, draft),
     update: (id: string, draft: DnsOverrideDraft) =>
       ipcRenderer.invoke(ipcChannels.dnsOverrides.update, id, draft),
+    setStaticActive: (id: string, active: boolean) =>
+      ipcRenderer.invoke(ipcChannels.dnsOverrides.setStaticActive, id, active),
     remove: (id: string) => ipcRenderer.invoke(ipcChannels.dnsOverrides.remove, id),
   },
   knownHosts: {

@@ -666,6 +666,7 @@ function createMockApi(): DesktopApi {
       list: vi.fn().mockResolvedValue([]),
       create: vi.fn(),
       update: vi.fn(),
+      setStaticActive: vi.fn(),
       remove: vi.fn().mockResolvedValue(undefined),
     },
     knownHosts: {
@@ -1034,6 +1035,19 @@ describe("createAppStore", () => {
         ],
         runtimes: [],
       });
+    vi.mocked(api.dnsOverrides.list)
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        {
+          id: "dns-2",
+          type: "static",
+          hostname: "basket",
+          address: "10.0.1.15",
+          status: "inactive",
+          createdAt: "2025-01-02T00:00:00.000Z",
+          updatedAt: "2025-01-02T00:00:00.000Z",
+        },
+      ]);
     vi.mocked(api.knownHosts.list)
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce([
@@ -1120,6 +1134,7 @@ describe("createAppStore", () => {
     expect(store.getState().hosts.map((host) => host.id)).toEqual(["host-2"]);
     expect(store.getState().groups.map((group) => group.id)).toEqual(["group-2"]);
     expect(store.getState().portForwards.map((rule) => rule.id)).toEqual(["forward-2"]);
+    expect(store.getState().dnsOverrides.map((override) => override.id)).toEqual(["dns-2"]);
     expect(store.getState().knownHosts.map((record) => record.id)).toEqual(["known-2"]);
     expect(store.getState().keychainEntries.map((entry) => entry.secretRef)).toEqual([
       "secret:host-2",
@@ -1129,6 +1144,33 @@ describe("createAppStore", () => {
     expect(store.getState().sftp.leftPane.currentPath).toBe(
       "/Users/tester/Documents",
     );
+  });
+
+  it("clears synced workspace slices without touching local workspace state", async () => {
+    const store = createAppStore(createMockApi());
+
+    await store.getState().bootstrap();
+    store.setState({
+      activeWorkspaceTab: "session:session-1",
+      dnsOverrides: [
+        {
+          id: "dns-1",
+          type: "static",
+          hostname: "basket",
+          address: "10.0.1.15",
+          status: "active",
+          createdAt: "2025-01-01T00:00:00.000Z",
+          updatedAt: "2025-01-01T00:00:00.000Z",
+        },
+      ],
+    });
+
+    store.getState().clearSyncedWorkspaceData();
+
+    expect(store.getState().hosts).toEqual([]);
+    expect(store.getState().groups).toEqual([]);
+    expect(store.getState().dnsOverrides).toEqual([]);
+    expect(store.getState().activeWorkspaceTab).toBe("session:session-1");
   });
 
   it("opens create and edit drawers from home", async () => {

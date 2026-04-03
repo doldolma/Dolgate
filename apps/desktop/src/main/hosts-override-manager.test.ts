@@ -25,6 +25,7 @@ import {
   buildWindowsElevationCommand,
   collectActiveDnsOverrideEntries,
   hasManagedHostsBlock,
+  resolveDnsOverrideRecords,
 } from './hosts-override-manager';
 import type { DnsOverrideRecord, PortForwardRuleRecord, PortForwardRuntimeRecord } from '@shared';
 
@@ -80,7 +81,6 @@ describe('hosts override manager helpers', () => {
         type: 'static',
         hostname: 'static.kafka.internal',
         address: '10.0.0.15',
-        enabled: true,
         createdAt: '2025-01-01T00:00:00.000Z',
         updatedAt: '2025-01-01T00:00:00.000Z',
       },
@@ -108,7 +108,7 @@ describe('hosts override manager helpers', () => {
       },
     ];
 
-    expect(collectActiveDnsOverrideEntries(overrides, rules, runtimes)).toEqual([
+    expect(collectActiveDnsOverrideEntries(overrides, rules, runtimes, new Set(['dns-3']))).toEqual([
       {
         hostname: 'b-1.kafka.internal',
         address: '127.0.0.2',
@@ -176,6 +176,32 @@ describe('hosts override manager helpers', () => {
 
   it('exposes the branded helper binary name', () => {
     expect(DOLGATE_DNS_HELPER_BINARY_NAME).toMatch(/dolgate-dns-helper/);
+  });
+
+  it('marks static overrides inactive unless the current app session activated them', () => {
+    const overrides: DnsOverrideRecord[] = [
+      {
+        id: 'dns-static-1',
+        type: 'static',
+        hostname: 'basket',
+        address: '10.0.1.15',
+        createdAt: '2025-01-01T00:00:00.000Z',
+        updatedAt: '2025-01-01T00:00:00.000Z',
+      },
+    ];
+
+    expect(resolveDnsOverrideRecords(overrides, [], [])).toEqual([
+      {
+        ...overrides[0],
+        status: 'inactive',
+      },
+    ]);
+    expect(resolveDnsOverrideRecords(overrides, [], [], new Set(['dns-static-1']))).toEqual([
+      {
+        ...overrides[0],
+        status: 'active',
+      },
+    ]);
   });
 });
 

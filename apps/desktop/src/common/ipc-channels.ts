@@ -132,6 +132,7 @@ export const ipcChannels = {
     list: 'dns-overrides:list',
     create: 'dns-overrides:create',
     update: 'dns-overrides:update',
+    setStaticActive: 'dns-overrides:set-static-active',
     remove: 'dns-overrides:remove'
   },
   knownHosts: {

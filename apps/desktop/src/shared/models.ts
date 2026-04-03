@@ -1079,7 +1079,6 @@ export interface LinkedDnsOverrideRecord extends DnsOverrideRecordBase {
 export interface StaticDnsOverrideRecord extends DnsOverrideRecordBase {
   type: 'static';
   address: string;
-  enabled: boolean;
 }
 
 export type DnsOverrideRecord = LinkedDnsOverrideRecord | StaticDnsOverrideRecord;
@@ -1097,7 +1096,6 @@ export interface LinkedDnsOverrideDraft extends DnsOverrideDraftBase {
 export interface StaticDnsOverrideDraft extends DnsOverrideDraftBase {
   type: 'static';
   address: string;
-  enabled: boolean;
 }
 
 export type DnsOverrideDraft = LinkedDnsOverrideDraft | StaticDnsOverrideDraft;

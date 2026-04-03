@@ -782,7 +782,6 @@ describe('DnsOverrideRepository', () => {
         type: 'static',
         hostname: 'Kafka-Static.INTERNAL',
         address: '10.0.0.15',
-        enabled: true,
       },
       forwards
     );
@@ -791,7 +790,6 @@ describe('DnsOverrideRepository', () => {
       type: 'static',
       hostname: 'kafka-static.internal',
       address: '10.0.0.15',
-      enabled: true,
     });
   });
 });
