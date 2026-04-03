@@ -2,20 +2,28 @@ import { type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 import {
   isAwsEc2HostRecord,
   isAwsEcsHostRecord,
+  isDnsOverrideEligiblePortForwardRule,
+  isLinkedDnsOverrideDraft,
+  isLinkedDnsOverrideRecord,
   isEcsTaskPortForwardDraft,
   isEcsTaskPortForwardRuleRecord,
   isAwsSsmPortForwardDraft,
   isAwsSsmPortForwardRuleRecord,
   isContainerPortForwardDraft,
   isContainerPortForwardRuleRecord,
+  isLoopbackBindAddress,
   isSshHostRecord,
   isSshPortForwardDraft,
   isSshPortForwardRuleRecord,
+  isStaticDnsOverrideDraft,
+  isStaticDnsOverrideRecord,
   isWarpgateSshHostRecord
 } from '@shared';
 import type {
   AwsEcsTaskTunnelContainerSummary,
   AwsEcsTaskTunnelServiceSummary,
+  DnsOverrideDraft,
+  DnsOverrideRecord,
   HostContainerDetails,
   HostContainerSummary,
   HostRecord,
@@ -32,17 +40,20 @@ import type {
 import { DialogBackdrop } from './DialogBackdrop';
 import { KnownHostPromptDialog } from './KnownHostPromptDialog';
 
-type ForwardTab = 'ssh' | 'aws-ssm' | 'ecs-task' | 'container';
+type ForwardTab = 'ssh' | 'aws-ssm' | 'ecs-task' | 'container' | 'dns';
 
 interface PortForwardingPanelProps {
   hosts: HostRecord[];
   containerTabs: HostContainersTabState[];
   rules: PortForwardRuleRecord[];
+  dnsOverrides: DnsOverrideRecord[];
   runtimes: PortForwardRuntimeRecord[];
   interactiveAuth: PendingPortForwardInteractiveAuth | null;
   discoveryInteractiveAuth: PendingContainersInteractiveAuth | null;
   onSave: (ruleId: string | null, draft: PortForwardDraft) => Promise<void>;
+  onSaveDnsOverride: (overrideId: string | null, draft: DnsOverrideDraft) => Promise<void>;
   onRemove: (ruleId: string) => Promise<void>;
+  onRemoveDnsOverride: (overrideId: string) => Promise<void>;
   onStart: (ruleId: string) => Promise<void>;
   onStop: (ruleId: string) => Promise<void>;
   onRespondInteractiveAuth: (challengeId: string, responses: string[]) => Promise<void>;
@@ -227,6 +238,14 @@ function emptyEcsTaskDraft(hostId?: string): PortForwardDraft {
   };
 }
 
+function emptyDnsDraft(ruleId?: string): DnsOverrideDraft {
+  return {
+    type: 'linked',
+    hostname: '',
+    portForwardRuleId: ruleId ?? ''
+  };
+}
+
 function toDraft(rule: PortForwardRuleRecord): PortForwardDraft {
   if (isAwsSsmPortForwardRuleRecord(rule)) {
     return {
@@ -315,6 +334,9 @@ function tabTitle(tab: ForwardTab) {
   if (tab === 'ecs-task') {
     return 'ECS Task';
   }
+  if (tab === 'dns') {
+    return 'DNS Override';
+  }
   return 'Container Tunneling';
 }
 
@@ -327,6 +349,9 @@ function createButtonLabel(tab: ForwardTab) {
   }
   if (tab === 'ecs-task') {
     return 'New ECS Task Tunnel';
+  }
+  if (tab === 'dns') {
+    return 'New DNS Override';
   }
   return 'New Container Tunnel';
 }
@@ -341,6 +366,9 @@ function emptyStateTitle(tab: ForwardTab) {
   if (tab === 'ecs-task') {
     return '아직 저장한 ECS Task 터널 규칙이 없습니다.';
   }
+  if (tab === 'dns') {
+    return '아직 저장한 DNS Override가 없습니다.';
+  }
   return '아직 저장한 컨테이너 터널 규칙이 없습니다.';
 }
 
@@ -354,10 +382,13 @@ function emptyStateDescription(tab: ForwardTab) {
   if (tab === 'ecs-task') {
     return 'New ECS Task Tunnel을 눌러 첫 번째 ECS task 터널 규칙을 만들어 보세요.';
   }
+  if (tab === 'dns') {
+    return 'New DNS Override를 눌러 hosts 기반 도메인 override를 추가해 보세요.';
+  }
   return 'New Container Tunnel을 눌러 첫 번째 컨테이너 터널 규칙을 만들어 보세요.';
 }
 
-export function filterPortForwardRules(rules: PortForwardRuleRecord[], tab: ForwardTab): PortForwardRuleRecord[] {
+export function filterPortForwardRules(rules: PortForwardRuleRecord[], tab: Exclude<ForwardTab, 'dns'>): PortForwardRuleRecord[] {
   return rules.filter((rule) => {
     if (tab === 'ssh') {
       return isSshPortForwardRuleRecord(rule);
@@ -372,7 +403,7 @@ export function filterPortForwardRules(rules: PortForwardRuleRecord[], tab: Forw
   });
 }
 
-export function getAvailablePortForwardHosts(hosts: HostRecord[], tab: ForwardTab): HostRecord[] {
+export function getAvailablePortForwardHosts(hosts: HostRecord[], tab: Exclude<ForwardTab, 'dns'>): HostRecord[] {
   if (tab === 'ssh') {
     return hosts.filter(isSshHostRecord);
   }
@@ -385,8 +416,21 @@ export function getAvailablePortForwardHosts(hosts: HostRecord[], tab: ForwardTa
   return hosts.filter((host) => isSshHostRecord(host) || isAwsEc2HostRecord(host) || isWarpgateSshHostRecord(host));
 }
 
+export function getDnsOverrideEligibleRules(rules: PortForwardRuleRecord[]): PortForwardRuleRecord[] {
+  return rules.filter(isDnsOverrideEligiblePortForwardRule);
+}
+
 export function shouldShowAwsRemoteHostField(draft: PortForwardDraft): boolean {
   return isAwsSsmPortForwardDraft(draft) && draft.targetKind === 'remote-host';
+}
+
+function isDnsHostname(hostname: string): boolean {
+  const normalized = hostname.trim().toLowerCase();
+  if (!normalized || normalized.includes('*') || normalized.includes(' ') || normalized.endsWith('.')) {
+    return false;
+  }
+  const labels = normalized.split('.');
+  return labels.every((label) => /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/i.test(label));
 }
 
 function InteractiveAuthCard({ auth, title, onRespond, onReopenUrl, onClear }: InteractiveAuthFormProps) {
@@ -559,11 +603,14 @@ export function PortForwardingPanel({
   hosts,
   containerTabs,
   rules,
+  dnsOverrides,
   runtimes,
   interactiveAuth,
   discoveryInteractiveAuth,
   onSave,
+  onSaveDnsOverride,
   onRemove,
+  onRemoveDnsOverride,
   onStart,
   onStop,
   onRespondInteractiveAuth,
@@ -579,7 +626,9 @@ export function PortForwardingPanel({
   );
   const [activeTab, setActiveTab] = useState<ForwardTab>('ssh');
   const [editingRuleId, setEditingRuleId] = useState<string | null>(null);
+  const [editingDnsOverrideId, setEditingDnsOverrideId] = useState<string | null>(null);
   const [draft, setDraft] = useState<PortForwardDraft>(() => emptySshDraft(sshHosts[0]?.id));
+  const [dnsDraft, setDnsDraft] = useState<DnsOverrideDraft>(() => emptyDnsDraft());
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -605,12 +654,16 @@ export function PortForwardingPanel({
   const discoveryDetailsRequestRef = useRef(0);
   const hostPickerRef = useRef<HTMLDivElement | null>(null);
   const containerPickerRef = useRef<HTMLDivElement | null>(null);
+  const eligibleRules = useMemo(() => getDnsOverrideEligibleRules(rules), [rules]);
   const ruleMap = useMemo(
     () => new Map(rules.map((rule) => [rule.id, rule])),
     [rules],
   );
   const runtimeMap = useMemo(() => new Map(runtimes.map((runtime) => [runtime.ruleId, runtime])), [runtimes]);
-  const visibleRules = useMemo(() => filterPortForwardRules(rules, activeTab), [activeTab, rules]);
+  const visibleRules = useMemo(
+    () => (activeTab === 'dns' ? [] : filterPortForwardRules(rules, activeTab)),
+    [activeTab, rules]
+  );
   const visibleEcsEphemeralRuntimes = useMemo(() => {
     if (activeTab !== 'ecs-task') {
       return [];
@@ -678,9 +731,11 @@ export function PortForwardingPanel({
     );
   }, [activeTab, containerTabs, hosts, ruleMap, runtimeMap]);
   const hasVisibleEntries =
-    visibleRules.length > 0 ||
-    visibleEcsEphemeralRuntimes.length > 0 ||
-    visibleContainerEphemeralRuntimes.length > 0;
+    activeTab === 'dns'
+      ? dnsOverrides.length > 0
+      : visibleRules.length > 0 ||
+        visibleEcsEphemeralRuntimes.length > 0 ||
+        visibleContainerEphemeralRuntimes.length > 0;
   const containerDraft = isContainerPortForwardDraft(draft) ? draft : null;
   const ecsTaskDraft = isEcsTaskPortForwardDraft(draft) ? draft : null;
   const shouldShowDiscoveryProgress = Boolean(discoveryProgressMessage) && (discoveryLoading || discoveryDetailsLoading);
@@ -1012,6 +1067,7 @@ export function PortForwardingPanel({
   function openCreate(tab: ForwardTab = activeTab) {
     setActiveTab(tab);
     setEditingRuleId(null);
+    setEditingDnsOverrideId(null);
     setIsHostPickerOpen(false);
     setIsContainerPickerOpen(false);
     setDraft(
@@ -1021,8 +1077,11 @@ export function PortForwardingPanel({
           ? emptyAwsDraft(awsHosts[0]?.id)
           : tab === 'ecs-task'
             ? emptyEcsTaskDraft(ecsHosts[0]?.id)
-            : emptyContainerDraft()
+            : tab === 'container'
+              ? emptyContainerDraft()
+              : emptySshDraft(sshHosts[0]?.id)
     );
+    setDnsDraft(emptyDnsDraft(eligibleRules[0]?.id));
     setIsSubmitting(false);
     setError(null);
     resetDiscoveryState();
@@ -1032,6 +1091,7 @@ export function PortForwardingPanel({
 
   function openEdit(rule: PortForwardRuleRecord) {
     setEditingRuleId(rule.id);
+    setEditingDnsOverrideId(null);
     setActiveTab(rule.transport);
     setIsHostPickerOpen(false);
     setIsContainerPickerOpen(false);
@@ -1041,6 +1101,54 @@ export function PortForwardingPanel({
     resetDiscoveryState();
     resetEcsDiscoveryState();
     setIsModalOpen(true);
+  }
+
+  function openEditDnsOverride(override: DnsOverrideRecord) {
+    setEditingRuleId(null);
+    setEditingDnsOverrideId(override.id);
+    setActiveTab('dns');
+    setIsHostPickerOpen(false);
+    setIsContainerPickerOpen(false);
+    setDnsDraft(
+      isLinkedDnsOverrideRecord(override)
+        ? {
+            type: 'linked',
+            hostname: override.hostname,
+            portForwardRuleId: override.portForwardRuleId,
+          }
+        : {
+            type: 'static',
+            hostname: override.hostname,
+            address: override.address,
+            enabled: override.enabled,
+          },
+    );
+    setIsSubmitting(false);
+    setError(null);
+    resetDiscoveryState();
+    resetEcsDiscoveryState();
+    setIsModalOpen(true);
+  }
+
+  function setDnsDraftType(nextType: 'linked' | 'static') {
+    setDnsDraft((current) => {
+      if (nextType === 'linked') {
+        return {
+          type: 'linked',
+          hostname: current.hostname,
+          portForwardRuleId: isLinkedDnsOverrideDraft(current)
+            ? current.portForwardRuleId
+            : eligibleRules[0]?.id ?? '',
+        };
+      }
+
+      return {
+        type: 'static',
+        hostname: current.hostname,
+        address: isStaticDnsOverrideDraft(current) ? current.address : '',
+        enabled: isStaticDnsOverrideDraft(current) ? current.enabled : false,
+      };
+    });
   }
 
   async function closeModal() {
@@ -1191,6 +1299,46 @@ export function PortForwardingPanel({
       return;
     }
 
+    if (activeTab === 'dns') {
+      if (!isDnsHostname(dnsDraft.hostname)) {
+        setError('호스트 이름을 올바르게 입력해 주세요.');
+        return;
+      }
+      if (isLinkedDnsOverrideDraft(dnsDraft)) {
+        if (!dnsDraft.portForwardRuleId) {
+          setError('연결할 포워딩 규칙을 선택해 주세요.');
+          return;
+        }
+      } else if (!dnsDraft.address.trim()) {
+        setError('IP 주소를 입력해 주세요.');
+        return;
+      }
+
+      setIsSubmitting(true);
+      setError(null);
+      try {
+        const nextDnsDraft: DnsOverrideDraft = isLinkedDnsOverrideDraft(dnsDraft)
+          ? {
+              type: 'linked',
+              hostname: dnsDraft.hostname.trim().toLowerCase(),
+              portForwardRuleId: dnsDraft.portForwardRuleId,
+            }
+          : {
+              type: 'static',
+              hostname: dnsDraft.hostname.trim().toLowerCase(),
+              address: dnsDraft.address.trim(),
+              enabled: dnsDraft.enabled,
+            };
+        await onSaveDnsOverride(editingDnsOverrideId, nextDnsDraft);
+        setIsModalOpen(false);
+      } catch (cause) {
+        setError(cause instanceof Error ? cause.message : 'DNS override를 저장하지 못했습니다.');
+      } finally {
+        setIsSubmitting(false);
+      }
+      return;
+    }
+
     if (!draft.label.trim()) {
       setError('이름을 입력해 주세요.');
       return;
@@ -1275,6 +1423,10 @@ export function PortForwardingPanel({
     }
 
     if (isAwsSsmPortForwardDraft(draft)) {
+      if (!isLoopbackBindAddress(draft.bindAddress)) {
+        setError('AWS SSM 로컬 주소는 loopback 주소여야 합니다.');
+        return;
+      }
       if (!draft.targetPort || draft.targetPort <= 0) {
         setError('대상 포트를 올바르게 입력해 주세요.');
         return;
@@ -1289,7 +1441,7 @@ export function PortForwardingPanel({
       try {
         await onSave(editingRuleId, {
           ...draft,
-          bindAddress: '127.0.0.1',
+          bindAddress: draft.bindAddress.trim() || '127.0.0.1',
           remoteHost: draft.targetKind === 'remote-host' ? draft.remoteHost?.trim() ?? null : null
         });
         await closeModal();
@@ -1422,6 +1574,9 @@ export function PortForwardingPanel({
   const discoveryHost = containerDraft ? containerHosts.find((host) => host.id === containerDraft.hostId) ?? null : null;
   const isAutoLocalPort = containerDraft?.bindPort === 0;
   const isAutoEcsLocalPort = ecsTaskDraft?.bindPort === 0;
+  const selectedDnsRule = isLinkedDnsOverrideDraft(dnsDraft)
+    ? eligibleRules.find((rule) => rule.id === dnsDraft.portForwardRuleId) ?? null
+    : null;
 
   return (
     <div className="operations-panel">
@@ -1429,7 +1584,7 @@ export function PortForwardingPanel({
         <div>
           <div className="section-kicker">Forwarding</div>
           <h2>Port Forwarding</h2>
-          <p>SSH 포워딩, AWS EC2 포워딩, ECS Task 터널, 컨테이너 터널 규칙을 저장하고 필요할 때만 실행합니다.</p>
+          <p>SSH 포워딩, AWS EC2 포워딩, ECS Task 터널, 컨테이너 터널, DNS Override 규칙을 저장하고 필요할 때만 실행합니다.</p>
         </div>
         <button type="button" className="primary-button" onClick={() => openCreate(activeTab)}>
           {createButtonLabel(activeTab)}
@@ -1493,10 +1648,88 @@ export function PortForwardingPanel({
         >
           Container
         </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={activeTab === 'dns'}
+          className={`operations-tab ${activeTab === 'dns' ? 'active' : ''}`}
+          onClick={() => setActiveTab('dns')}
+        >
+          DNS Override
+        </button>
       </div>
 
       <div className="operations-list">
-        {!hasVisibleEntries ? (
+        {activeTab === 'dns' ? (
+          !hasVisibleEntries ? (
+            <div className="empty-callout">
+              <strong>{emptyStateTitle(activeTab)}</strong>
+              <p>{emptyStateDescription(activeTab)}</p>
+            </div>
+          ) : (
+            dnsOverrides.map((override) => {
+              const rule = isLinkedDnsOverrideRecord(override)
+                ? (ruleMap.get(override.portForwardRuleId) ?? null)
+                : null;
+              const runtime = rule ? runtimeMap.get(rule.id) : undefined;
+              const isRunning = runtime?.status === 'running' || runtime?.status === 'starting';
+              const isStatic = isStaticDnsOverrideRecord(override);
+
+              return (
+                <article key={override.id} className="operations-card">
+                  <div className="operations-card__main">
+                    <div className="operations-card__title-row">
+                      <strong>{override.hostname}</strong>
+                      <span className="status-pill">{isStatic ? 'Static' : 'Linked'}</span>
+                      <span className={`status-pill status-pill--${isStatic ? (override.enabled ? 'running' : 'stopped') : (runtime?.status ?? 'stopped')}`}>
+                        {isStatic ? (override.enabled ? 'On' : 'Off') : statusLabel(runtime)}
+                      </span>
+                    </div>
+                    <div className="operations-card__meta">
+                      <span>Hosts file</span>
+                      <span>{isStatic ? 'Static IP' : rule?.label ?? 'Linked rule missing'}</span>
+                      <span>
+                        {isStatic
+                          ? override.address
+                          : `${runtime?.bindAddress ?? rule?.bindAddress ?? '127.0.0.1'}:${runtime?.bindPort ?? rule?.bindPort ?? 0}`}
+                      </span>
+                    </div>
+                    {!isStatic && runtime?.message ? <p className="operations-card__message">{runtime.message}</p> : null}
+                  </div>
+                  <div className="operations-card__actions">
+                    {rule ? (
+                      <button type="button" className="secondary-button" onClick={() => void (isRunning ? onStop(rule.id) : onStart(rule.id))}>
+                        {isRunning ? 'Stop' : 'Start'}
+                      </button>
+                    ) : null}
+                    {isStatic ? (
+                      <button
+                        type="button"
+                        className="secondary-button"
+                        onClick={() =>
+                          void onSaveDnsOverride(override.id, {
+                            type: 'static',
+                            hostname: override.hostname,
+                            address: override.address,
+                            enabled: !override.enabled,
+                          })
+                        }
+                      >
+                        {override.enabled ? 'Off' : 'On'}
+                      </button>
+                    ) : null}
+                    <button type="button" className="secondary-button" onClick={() => openEditDnsOverride(override)}>
+                      Edit
+                    </button>
+                    <button type="button" className="secondary-button danger" onClick={() => void onRemoveDnsOverride(override.id)}>
+                      Delete
+                    </button>
+                  </div>
+                </article>
+              );
+            })
+          )
+        ) : !hasVisibleEntries ? (
           <div className="empty-callout">
             <strong>{emptyStateTitle(activeTab)}</strong>
             <p>{emptyStateDescription(activeTab)}</p>
@@ -1543,7 +1776,15 @@ export function PortForwardingPanel({
             <div className="modal-card__header">
               <div>
                 <div className="section-kicker">Forwarding</div>
-                <h3 id="port-forward-title">{editingRuleId ? `Edit ${tabTitle(activeTab)}` : createButtonLabel(activeTab)}</h3>
+                <h3 id="port-forward-title">
+                  {activeTab === 'dns'
+                    ? editingDnsOverrideId
+                      ? 'Edit DNS Override'
+                      : 'New DNS Override'
+                    : editingRuleId
+                      ? `Edit ${tabTitle(activeTab)}`
+                      : createButtonLabel(activeTab)}
+                </h3>
               </div>
               <button
                 type="button"
@@ -1557,10 +1798,85 @@ export function PortForwardingPanel({
             </div>
 
             <div className="modal-card__body form-grid">
-              <label className="form-field">
-                <span>Label</span>
-                <input value={draft.label} onChange={(event) => setDraft((current) => ({ ...current, label: event.target.value }))} disabled={isSubmitting} />
-              </label>
+              {activeTab === 'dns' ? (
+                <>
+                  <label className="form-field">
+                    <span>Override type</span>
+                    <select
+                      value={dnsDraft.type}
+                      onChange={(event) => setDnsDraftType(event.target.value === 'static' ? 'static' : 'linked')}
+                      disabled={isSubmitting}
+                    >
+                      <option value="linked">Linked</option>
+                      <option value="static">Static</option>
+                    </select>
+                  </label>
+
+                  <label className="form-field">
+                    <span>Hostname</span>
+                    <input
+                      value={dnsDraft.hostname}
+                      onChange={(event) => setDnsDraft((current) => ({ ...current, hostname: event.target.value }))}
+                      disabled={isSubmitting}
+                    />
+                  </label>
+
+                  {isLinkedDnsOverrideDraft(dnsDraft) ? (
+                    <>
+                      <label className="form-field">
+                        <span>Linked rule</span>
+                        <select
+                          value={dnsDraft.portForwardRuleId}
+                          onChange={(event) =>
+                            setDnsDraft((current) =>
+                              isLinkedDnsOverrideDraft(current)
+                                ? { ...current, portForwardRuleId: event.target.value }
+                                : current
+                            )
+                          }
+                          disabled={isSubmitting}
+                        >
+                          <option value="">Select port forward rule</option>
+                          {eligibleRules.map((rule) => (
+                            <option key={rule.id} value={rule.id}>
+                              {rule.label} ({rule.bindAddress}:{rule.bindPort})
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+
+                      <label className="form-field">
+                        <span>Loopback target</span>
+                        <input value={selectedDnsRule ? `${selectedDnsRule.bindAddress}:${selectedDnsRule.bindPort}` : ''} disabled readOnly />
+                      </label>
+                    </>
+                  ) : (
+                    <>
+                      <label className="form-field">
+                        <span>IP Address</span>
+                        <input
+                          value={dnsDraft.address}
+                          onChange={(event) =>
+                            setDnsDraft((current) =>
+                              isStaticDnsOverrideDraft(current)
+                                ? { ...current, address: event.target.value }
+                                : current
+                            )
+                          }
+                          disabled={isSubmitting}
+                        />
+                      </label>
+                    </>
+                  )}
+
+                  {error ? <div className="form-error">{error}</div> : null}
+                </>
+              ) : (
+                <>
+                  <label className="form-field">
+                    <span>Label</span>
+                    <input value={draft.label} onChange={(event) => setDraft((current) => ({ ...current, label: event.target.value }))} disabled={isSubmitting} />
+                  </label>
 
               {isContainerPortForwardDraft(draft) ? (
                 <div ref={hostPickerRef}>
@@ -2093,7 +2409,16 @@ export function PortForwardingPanel({
 
                   <label className="form-field">
                     <span>Local address</span>
-                    <input value="127.0.0.1" disabled readOnly />
+                    <input
+                      value={draft.bindAddress}
+                      onChange={(event) =>
+                        setDraft({
+                          ...draft,
+                          bindAddress: event.target.value
+                        })
+                      }
+                      disabled={isSubmitting}
+                    />
                   </label>
                 </>
               )}
@@ -2184,6 +2509,8 @@ export function PortForwardingPanel({
               ) : null}
 
               {error ? <div className="form-error">{error}</div> : null}
+                </>
+              )}
             </div>
 
             <div className="modal-card__footer">

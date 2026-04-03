@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import type { DesktopWindowState } from '@shared';
 import {
   ActivityLogRepository,
+  DnsOverrideRepository,
   GroupRepository,
   HostRepository,
   KnownHostRepository,
@@ -20,6 +21,7 @@ import { AwsSsmTunnelService } from './aws-ssm-tunnel-service';
 import { ipcChannels } from '../common/ipc-channels';
 import { CoreManager } from './core-manager';
 import { registerIpcHandlers } from './ipc';
+import { collectActiveDnsOverrideEntries, HostsOverrideManager } from './hosts-override-manager';
 import { OpenSshImportService } from './openssh-import-service';
 import { SecretStore } from './secret-store';
 import { SessionShareService } from './session-share-service';
@@ -69,6 +71,7 @@ if (termiusHelperArgIndex >= 0) {
   const desktopConfigService = new DesktopConfigService();
   const settingsRepository = new SettingsRepository(desktopConfigService);
   const portForwardRepository = new PortForwardRepository();
+  const dnsOverrideRepository = new DnsOverrideRepository();
   const knownHostRepository = new KnownHostRepository();
   const activityLogRepository = new ActivityLogRepository();
   const secretMetadataRepository = new SecretMetadataRepository();
@@ -90,11 +93,13 @@ if (termiusHelperArgIndex >= 0) {
   const coreManager = new CoreManager((entry) => {
     appendActivityLog(entry);
   }, upsertActivityLog);
+  const hostsOverrideManager = new HostsOverrideManager();
   const syncService = new SyncService(
     authService,
     hostRepository,
     groupRepository,
     portForwardRepository,
+    dnsOverrideRepository,
     knownHostRepository,
     secretMetadataRepository,
     settingsRepository,
@@ -106,6 +111,34 @@ if (termiusHelperArgIndex >= 0) {
   const updateService = new UpdateService(settingsRepository);
   let isQuitting = false;
   let pendingAuthCallbackUrl: string | null = null;
+
+  const rewriteDnsOverridesForCurrentState = async () => {
+    await hostsOverrideManager.rewrite(
+      collectActiveDnsOverrideEntries(
+        dnsOverrideRepository.list(),
+        portForwardRepository.list(),
+        coreManager.listPortForwardRuntimes()
+      )
+    );
+  };
+  const restoreDnsOverridesForStartup = async () => {
+    const staticEntries = collectActiveDnsOverrideEntries(
+      dnsOverrideRepository.list(),
+      [],
+      [],
+    );
+    const hasStaleManagedBlock = await hostsOverrideManager.hasManagedHostsBlock();
+    if (!hasStaleManagedBlock && staticEntries.length === 0) {
+      return;
+    }
+    await hostsOverrideManager.clear();
+    if (staticEntries.length > 0) {
+      await hostsOverrideManager.rewrite(staticEntries);
+    }
+  };
+  syncService.setOnAppliedSnapshot(() => {
+    void rewriteDnsOverridesForCurrentState().catch(() => undefined);
+  });
 
   type PatchedWriteStream = NodeJS.WriteStream & {
     __dolsshWriteGuardInstalled?: boolean;
@@ -277,6 +310,7 @@ if (termiusHelperArgIndex >= 0) {
     await sessionShareService.shutdown();
     await awsSsmTunnelService.shutdown();
     await coreManager.shutdown();
+    await rewriteDnsOverridesForCurrentState().catch(() => undefined);
     if (context.purgeSyncedCache) {
       await syncService.purgeSyncedCache();
       return;
@@ -292,6 +326,7 @@ if (termiusHelperArgIndex >= 0) {
       groupRepository,
       settingsRepository,
       portForwardRepository,
+      dnsOverrideRepository,
       knownHostRepository,
       activityLogRepository,
       secretMetadataRepository,
@@ -301,6 +336,7 @@ if (termiusHelperArgIndex >= 0) {
       awsSsmTunnelService,
       warpgateService,
       coreManager,
+      hostsOverrideManager,
       updateService,
       authService,
       syncService,
@@ -311,6 +347,9 @@ if (termiusHelperArgIndex >= 0) {
       sessionReplayService
     );
     await createWindow();
+    void restoreDnsOverridesForStartup()
+      .then(() => rewriteDnsOverridesForCurrentState())
+      .catch(() => undefined);
     if (pendingAuthCallbackUrl) {
       const nextUrl = pendingAuthCallbackUrl;
       pendingAuthCallbackUrl = null;
@@ -336,11 +375,13 @@ if (termiusHelperArgIndex >= 0) {
     void sessionShareService.shutdown().finally(() => {
       void awsSsmTunnelService.shutdown().finally(() => {
         void coreManager.shutdown().finally(() => {
-          if (updateService.consumePendingInstall()) {
-            updateService.quitAndInstall();
-            return;
-          }
-          app.quit();
+          void hostsOverrideManager.shutdown().finally(() => {
+            if (updateService.consumePendingInstall()) {
+              updateService.quitAndInstall();
+              return;
+            }
+            app.quit();
+          });
         });
       });
     });

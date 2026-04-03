@@ -1,8 +1,13 @@
 import { randomUUID } from 'node:crypto';
+import { isIP } from 'node:net';
 import {
   DEFAULT_SESSION_REPLAY_RETENTION_COUNT,
   MAX_SESSION_REPLAY_RETENTION_COUNT,
   MIN_SESSION_REPLAY_RETENTION_COUNT,
+  isDnsOverrideEligiblePortForwardRule,
+  isLinkedDnsOverrideDraft,
+  isLinkedDnsOverrideRecord,
+  isStaticDnsOverrideDraft,
   getGroupLabel,
   getServerUrlValidationMessage,
   getParentGroupPath,
@@ -28,6 +33,8 @@ import type {
   AwsEc2HostRecord,
   AwsEcsHostDraft,
   AwsEcsHostRecord,
+  DnsOverrideDraft,
+  DnsOverrideRecord,
   GlobalTerminalThemeId,
   GroupRecord,
   GroupRemoveMode,
@@ -129,8 +136,82 @@ function compareLabels(left: { label: string; secretRef?: string }, right: { lab
   return (left.secretRef ?? '').localeCompare(right.secretRef ?? '');
 }
 
+function compareDnsOverrides(left: DnsOverrideRecord, right: DnsOverrideRecord): number {
+  const hostCompare = left.hostname.localeCompare(right.hostname);
+  if (hostCompare !== 0) {
+    return hostCompare;
+  }
+  const leftKey = isLinkedDnsOverrideRecord(left) ? `linked:${left.portForwardRuleId}` : `static:${left.address}`;
+  const rightKey = isLinkedDnsOverrideRecord(right) ? `linked:${right.portForwardRuleId}` : `static:${right.address}`;
+  return leftKey.localeCompare(rightKey);
+}
+
 function compareDeletedAtDesc(left: SyncDeletionRecord, right: SyncDeletionRecord): number {
   return right.deletedAt.localeCompare(left.deletedAt);
+}
+
+function normalizeDnsOverrideHostname(hostname: string): string {
+  return hostname.trim().toLowerCase();
+}
+
+function isValidDnsOverrideHostname(hostname: string): boolean {
+  if (!hostname || hostname.includes('*') || hostname.includes(' ') || hostname.endsWith('.')) {
+    return false;
+  }
+  const labels = hostname.split('.');
+  return labels.every((label) => /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/i.test(label));
+}
+
+function normalizeDnsOverrideAddress(address: string): string {
+  return address.trim();
+}
+
+function normalizeIncomingDnsOverrideRecord(record: DnsOverrideRecord): DnsOverrideRecord | null {
+  const hostname = normalizeDnsOverrideHostname(record.hostname);
+  if (!isValidDnsOverrideHostname(hostname)) {
+    return null;
+  }
+
+  if (isLinkedDnsOverrideRecord(record)) {
+    if (typeof record.portForwardRuleId !== 'string' || !record.portForwardRuleId.trim()) {
+      return null;
+    }
+    return {
+      ...record,
+      type: 'linked',
+      hostname,
+      portForwardRuleId: record.portForwardRuleId,
+    };
+  }
+
+  const legacyRecord = record as DnsOverrideRecord & { portForwardRuleId?: string };
+  if (!record.type && typeof legacyRecord.portForwardRuleId === 'string') {
+    return {
+      id: legacyRecord.id,
+      type: 'linked',
+      hostname,
+      portForwardRuleId: legacyRecord.portForwardRuleId,
+      createdAt: legacyRecord.createdAt,
+      updatedAt: legacyRecord.updatedAt,
+    };
+  }
+
+  if (!('address' in record) || typeof record.address !== 'string' || typeof record.enabled !== 'boolean') {
+    return null;
+  }
+
+  const address = normalizeDnsOverrideAddress(record.address);
+  if (!address || isIP(address) === 0) {
+    return null;
+  }
+
+  return {
+    ...record,
+    type: 'static',
+    hostname,
+    address,
+    enabled: record.enabled,
+  };
 }
 
 function normalizeTerminalThemeId(terminalThemeId?: TerminalThemeId | null): TerminalThemeId | null {
@@ -937,7 +1018,7 @@ export class PortForwardRepository {
         label,
         hostId: draft.hostId,
         transport: 'aws-ssm',
-        bindAddress: '127.0.0.1',
+        bindAddress: draft.bindAddress.trim() || '127.0.0.1',
         bindPort: draft.bindPort,
         targetKind: draft.targetKind,
         targetPort: draft.targetPort,
@@ -959,6 +1040,111 @@ export class PortForwardRepository {
       targetPort: draft.mode === 'dynamic' ? null : draft.targetPort ?? null,
       createdAt,
       updatedAt
+    };
+  }
+}
+
+export class DnsOverrideRepository {
+  list(): DnsOverrideRecord[] {
+    return stateStorage.getState().data.dnsOverrides.sort(compareDnsOverrides);
+  }
+
+  getById(id: string): DnsOverrideRecord | null {
+    return stateStorage.getState().data.dnsOverrides.find((record) => record.id === id) ?? null;
+  }
+
+  create(draft: DnsOverrideDraft, portForwards: PortForwardRepository): DnsOverrideRecord {
+    const timestamp = nowIso();
+    const record = this.toRecord(randomUUID(), draft, timestamp, timestamp, portForwards);
+    stateStorage.updateState((state) => {
+      state.data.dnsOverrides.push(record);
+    });
+    return record;
+  }
+
+  update(id: string, draft: DnsOverrideDraft, portForwards: PortForwardRepository): DnsOverrideRecord {
+    const current = this.getById(id);
+    if (!current) {
+      throw new Error('DNS override not found');
+    }
+
+    const record = this.toRecord(id, draft, current.createdAt, nowIso(), portForwards);
+    stateStorage.updateState((state) => {
+      state.data.dnsOverrides = state.data.dnsOverrides.map((entry) => (entry.id === id ? record : entry));
+    });
+    return record;
+  }
+
+  remove(id: string): void {
+    stateStorage.updateState((state) => {
+      state.data.dnsOverrides = state.data.dnsOverrides.filter((entry) => entry.id !== id);
+    });
+  }
+
+  replaceAll(records: DnsOverrideRecord[]): void {
+    stateStorage.updateState((state) => {
+      state.data.dnsOverrides = records
+        .map(normalizeIncomingDnsOverrideRecord)
+        .filter((record): record is DnsOverrideRecord => record !== null)
+        .sort(compareDnsOverrides);
+    });
+  }
+
+  private toRecord(
+    id: string,
+    draft: DnsOverrideDraft,
+    createdAt: string,
+    updatedAt: string,
+    portForwards: PortForwardRepository
+  ): DnsOverrideRecord {
+    const hostname = normalizeDnsOverrideHostname(draft.hostname);
+    if (!isValidDnsOverrideHostname(hostname)) {
+      throw new Error('DNS override hostname is invalid');
+    }
+
+    const duplicate = stateStorage
+      .getState()
+      .data.dnsOverrides.find((record) => record.hostname === hostname && record.id !== id);
+    if (duplicate) {
+      throw new Error('DNS override hostname already exists');
+    }
+
+    if (isLinkedDnsOverrideDraft(draft)) {
+      const rule = portForwards.getById(draft.portForwardRuleId);
+      if (!rule) {
+        throw new Error('Linked port forward rule not found');
+      }
+      if (!isDnsOverrideEligiblePortForwardRule(rule)) {
+        throw new Error('Linked port forward rule must be a local listener with a loopback bind address');
+      }
+
+      return {
+        id,
+        type: 'linked',
+        hostname,
+        portForwardRuleId: rule.id,
+        createdAt,
+        updatedAt,
+      };
+    }
+
+    if (!isStaticDnsOverrideDraft(draft)) {
+      throw new Error('DNS override type is invalid');
+    }
+
+    const address = normalizeDnsOverrideAddress(draft.address);
+    if (!address || isIP(address) === 0) {
+      throw new Error('DNS override address must be a valid IPv4 or IPv6 address');
+    }
+
+    return {
+      id,
+      type: 'static',
+      hostname,
+      address,
+      enabled: draft.enabled,
+      createdAt,
+      updatedAt,
     };
   }
 }

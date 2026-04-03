@@ -396,6 +396,70 @@ describe("CoreManager local shell sessions", () => {
     ).toBeNull();
   });
 
+  it("emits starting, running, and stopped port forward runtime events to the handler", async () => {
+    const fakeProcess = createFakeChildProcess();
+    spawnMock.mockReturnValue(fakeProcess.child);
+
+    const manager = new CoreManager();
+    const statuses: string[] = [];
+    manager.setPortForwardEventHandler((event) => {
+      statuses.push(event.runtime.status);
+    });
+
+    const startPromise = manager.startPortForward({
+      ruleId: "rule-handler-1",
+      hostId: "host-1",
+      host: "example.com",
+      port: 22,
+      username: "ubuntu",
+      authType: "password",
+      password: "secret",
+      privateKeyPem: undefined,
+      privateKeyPath: undefined,
+      passphrase: "",
+      trustedHostKeyBase64: "",
+      mode: "local",
+      bindAddress: "127.0.0.1",
+      bindPort: 15432,
+      targetHost: "db.internal",
+      targetPort: 5432,
+    });
+
+    await Promise.resolve();
+    expect(statuses).toEqual(["starting"]);
+
+    const startRequest = decodeControlFrame(fakeProcess.writes[0]);
+    fakeProcess.emitControl({
+      type: "portForwardStarted",
+      requestId: startRequest.id,
+      endpointId: "rule-handler-1",
+      payload: {
+        transport: "ssh",
+        mode: "local",
+        bindAddress: "127.0.0.1",
+        bindPort: 15432,
+        status: "running",
+      },
+    });
+
+    await startPromise;
+
+    const stopPromise = manager.stopPortForward("rule-handler-1");
+    await Promise.resolve();
+    const stopRequest = decodeControlFrame(fakeProcess.writes[1]);
+    fakeProcess.emitControl({
+      type: "portForwardStopped",
+      requestId: stopRequest.id,
+      endpointId: "rule-handler-1",
+      payload: {
+        message: "stopped",
+      },
+    });
+
+    await stopPromise;
+    expect(statuses).toEqual(["starting", "running", "stopped"]);
+  });
+
   it("rejects malformed container log responses instead of treating them as empty", async () => {
     const manager = new CoreManager();
     vi.spyOn(

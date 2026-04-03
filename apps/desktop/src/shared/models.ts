@@ -40,10 +40,11 @@ export type PortForwardMode = 'local' | 'remote' | 'dynamic';
 export type PortForwardTransport = 'ssh' | 'aws-ssm' | 'ecs-task' | 'container';
 export type AwsSsmPortForwardTargetKind = 'instance-port' | 'remote-host';
 export type PortForwardStatus = 'stopped' | 'starting' | 'running' | 'error';
+export type DnsOverrideStatus = 'inactive' | 'active';
 export type KnownHostTrustStatus = 'trusted' | 'untrusted' | 'mismatch';
 export type ActivityLogLevel = 'info' | 'warn' | 'error';
 export type ActivityLogCategory = 'session' | 'audit';
-export type ActivityLogKind = 'generic' | 'session-lifecycle';
+export type ActivityLogKind = 'generic' | 'session-lifecycle' | 'port-forward-lifecycle';
 export type SecretSource = 'local_keychain' | 'server_managed';
 export type AuthStatus = 'loading' | 'unauthenticated' | 'authenticating' | 'authenticated' | 'offline-authenticated' | 'error';
 export type SyncBootstrapStatus = 'idle' | 'syncing' | 'ready' | 'paused' | 'error';
@@ -51,6 +52,7 @@ export type TermiusProbeStatus = 'ready' | 'unsupported' | 'not-installed' | 'no
 export type AwsSshMetadataStatus = 'idle' | 'loading' | 'ready' | 'error';
 export type SessionConnectionKind = 'ssh' | 'aws-ssm' | 'warpgate' | 'aws-ecs-exec';
 export type SessionLifecycleStatus = 'connected' | 'closed' | 'error';
+export type PortForwardLifecycleStatus = 'running' | 'closed' | 'error';
 export type SftpConnectionStage =
   | 'loading-instance-metadata'
   | 'checking-profile'
@@ -1059,6 +1061,67 @@ export interface PortForwardListSnapshot {
   runtimes: PortForwardRuntimeRecord[];
 }
 
+export type DnsOverrideType = 'linked' | 'static';
+
+interface DnsOverrideRecordBase {
+  id: string;
+  type: DnsOverrideType;
+  hostname: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface LinkedDnsOverrideRecord extends DnsOverrideRecordBase {
+  type: 'linked';
+  portForwardRuleId: string;
+}
+
+export interface StaticDnsOverrideRecord extends DnsOverrideRecordBase {
+  type: 'static';
+  address: string;
+  enabled: boolean;
+}
+
+export type DnsOverrideRecord = LinkedDnsOverrideRecord | StaticDnsOverrideRecord;
+
+interface DnsOverrideDraftBase {
+  type: DnsOverrideType;
+  hostname: string;
+}
+
+export interface LinkedDnsOverrideDraft extends DnsOverrideDraftBase {
+  type: 'linked';
+  portForwardRuleId: string;
+}
+
+export interface StaticDnsOverrideDraft extends DnsOverrideDraftBase {
+  type: 'static';
+  address: string;
+  enabled: boolean;
+}
+
+export type DnsOverrideDraft = LinkedDnsOverrideDraft | StaticDnsOverrideDraft;
+
+export type DnsOverrideResolvedRecord = (DnsOverrideRecord & {
+  status: DnsOverrideStatus;
+});
+
+export function isLinkedDnsOverrideRecord(value: DnsOverrideRecord): value is LinkedDnsOverrideRecord {
+  return value.type === 'linked';
+}
+
+export function isStaticDnsOverrideRecord(value: DnsOverrideRecord): value is StaticDnsOverrideRecord {
+  return value.type === 'static';
+}
+
+export function isLinkedDnsOverrideDraft(value: DnsOverrideDraft): value is LinkedDnsOverrideDraft {
+  return value.type === 'linked';
+}
+
+export function isStaticDnsOverrideDraft(value: DnsOverrideDraft): value is StaticDnsOverrideDraft {
+  return value.type === 'static';
+}
+
 export function isSshPortForwardRuleRecord(rule: PortForwardRuleRecord): rule is SshPortForwardRuleRecord {
   return rule.transport === 'ssh';
 }
@@ -1089,6 +1152,24 @@ export function isEcsTaskPortForwardDraft(rule: PortForwardDraft): rule is EcsTa
 
 export function isContainerPortForwardDraft(rule: PortForwardDraft): rule is ContainerPortForwardDraft {
   return rule.transport === 'container';
+}
+
+export function isLoopbackBindAddress(value: string | null | undefined): boolean {
+  if (!value) {
+    return false;
+  }
+  const normalized = value.trim().toLowerCase();
+  return normalized === 'localhost' || normalized === '::1' || normalized === '0:0:0:0:0:0:0:1' || normalized.startsWith('127.');
+}
+
+export function isDnsOverrideEligiblePortForwardRule(rule: PortForwardRuleRecord): boolean {
+  if (rule.transport === 'aws-ssm') {
+    return isLoopbackBindAddress(rule.bindAddress);
+  }
+  if (rule.transport === 'ssh') {
+    return rule.mode === 'local' && isLoopbackBindAddress(rule.bindAddress);
+  }
+  return false;
 }
 
 // KnownHostRecord는 신뢰된 호스트 키 한 건을 나타낸다.
@@ -1144,6 +1225,23 @@ export interface SessionLifecycleLogMetadata {
   disconnectReason?: string | null;
   recordingId?: string | null;
   hasReplay?: boolean | null;
+}
+
+export interface PortForwardLifecycleLogMetadata {
+  ruleId: string;
+  ruleLabel: string;
+  hostId: string;
+  hostLabel: string;
+  transport: PortForwardTransport;
+  mode: PortForwardMode;
+  bindAddress: string;
+  bindPort: number;
+  targetSummary: string;
+  startedAt: string;
+  stoppedAt?: string | null;
+  durationMs?: number | null;
+  status: PortForwardLifecycleStatus;
+  endReason?: string | null;
 }
 
 export interface SessionReplayOutputEntry {

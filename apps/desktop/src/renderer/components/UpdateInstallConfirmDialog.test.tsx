@@ -13,7 +13,9 @@ describe("UpdateInstallConfirmDialog", () => {
       />,
     );
 
-    fireEvent.click(container.querySelector(".modal-backdrop") as HTMLElement);
+    const backdrop = container.querySelector(".modal-backdrop") as HTMLElement;
+    fireEvent.pointerDown(backdrop);
+    fireEvent.click(backdrop);
 
     expect(onClose).toHaveBeenCalledTimes(1);
   });

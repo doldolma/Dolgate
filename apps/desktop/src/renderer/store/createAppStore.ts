@@ -7,6 +7,7 @@ import {
   getParentGroupPath,
   isAwsEc2HostRecord,
   isAwsEcsHostRecord,
+  isLinkedDnsOverrideRecord,
   isSshHostDraft,
   isGroupWithinPath,
   isSshHostRecord,
@@ -24,6 +25,8 @@ import type {
   ContainerConnectionProgressEvent,
   ConnectionProgressStage,
   DesktopApi,
+  DnsOverrideDraft,
+  DnsOverrideRecord,
   DirectoryListing,
   FileEntry,
   GroupRecord,
@@ -514,6 +517,7 @@ export interface AppState {
   activeContainerHostId: string | null;
   tabStrip: DynamicTabStripItem[];
   portForwards: PortForwardRuleRecord[];
+  dnsOverrides: DnsOverrideRecord[];
   portForwardRuntimes: PortForwardRuntimeRecord[];
   knownHosts: KnownHostRecord[];
   activityLogs: ActivityLogRecord[];
@@ -664,6 +668,8 @@ export interface AppState {
     ruleId: string | null,
     draft: PortForwardDraft,
   ) => Promise<void>;
+  saveDnsOverride: (overrideId: string | null, draft: DnsOverrideDraft) => Promise<void>;
+  removeDnsOverride: (overrideId: string) => Promise<void>;
   removePortForward: (ruleId: string) => Promise<void>;
   startPortForward: (ruleId: string) => Promise<void>;
   stopPortForward: (ruleId: string) => Promise<void>;
@@ -1132,6 +1138,16 @@ function sortPortForwards(
     (a, b) =>
       new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime() ||
       a.label.localeCompare(b.label),
+  );
+}
+
+function sortDnsOverrides(overrides: DnsOverrideRecord[]): DnsOverrideRecord[] {
+  return [...overrides].sort(
+    (a, b) =>
+      a.hostname.localeCompare(b.hostname) ||
+      (a.type === "linked" ? `linked:${a.portForwardRuleId}` : `static:${a.address}`).localeCompare(
+        b.type === "linked" ? `linked:${b.portForwardRuleId}` : `static:${b.address}`
+      ),
   );
 }
 
@@ -3384,9 +3400,10 @@ export function createAppStore(api: DesktopApi) {
         | ((state: AppState) => AppState | Partial<AppState>),
     ) => void,
   ) => {
-    const [snapshot, knownHosts, activityLogs, keychainEntries] =
+    const [snapshot, dnsOverrides, knownHosts, activityLogs, keychainEntries] =
       await Promise.all([
         api.portForwards.list(),
+        api.dnsOverrides.list(),
         api.knownHosts.list(),
         api.logs.list(),
         api.keychain.list(),
@@ -3394,6 +3411,7 @@ export function createAppStore(api: DesktopApi) {
 
     set({
       portForwards: sortPortForwards(snapshot.rules),
+      dnsOverrides: sortDnsOverrides(dnsOverrides),
       portForwardRuntimes: snapshot.runtimes,
       knownHosts: sortKnownHosts(knownHosts),
       activityLogs: sortLogs(activityLogs),
@@ -4844,6 +4862,7 @@ export function createAppStore(api: DesktopApi) {
       activeContainerHostId: null,
       tabStrip: [],
       portForwards: [],
+      dnsOverrides: [],
       portForwardRuntimes: [],
       knownHosts: [],
       activityLogs: [],
@@ -4956,6 +4975,7 @@ export function createAppStore(api: DesktopApi) {
           settings,
           localHomePath,
           snapshot,
+          dnsOverrides,
           knownHosts,
           activityLogs,
           keychainEntries,
@@ -4966,6 +4986,7 @@ export function createAppStore(api: DesktopApi) {
           api.settings.get(),
           api.files.getHomeDirectory(),
           api.portForwards.list(),
+          api.dnsOverrides.list(),
           api.knownHosts.list(),
           api.logs.list(),
           api.keychain.list(),
@@ -4988,6 +5009,7 @@ export function createAppStore(api: DesktopApi) {
             sessionId: tab.sessionId,
           })),
           portForwards: sortPortForwards(snapshot.rules),
+          dnsOverrides: sortDnsOverrides(dnsOverrides),
           portForwardRuntimes: snapshot.runtimes,
           knownHosts: sortKnownHosts(knownHosts),
           activityLogs: sortLogs(activityLogs),
@@ -6373,10 +6395,35 @@ export function createAppStore(api: DesktopApi) {
           ]),
         }));
       },
+      saveDnsOverride: async (overrideId, draft) => {
+        const next = overrideId
+          ? await api.dnsOverrides.update(overrideId, draft)
+          : await api.dnsOverrides.create(draft);
+        set((state) => ({
+          homeSection: "portForwarding",
+          dnsOverrides: sortDnsOverrides([
+            ...state.dnsOverrides.filter((override) => override.id !== next.id),
+            next,
+          ]),
+        }));
+        await syncOperationalData(set);
+      },
+      removeDnsOverride: async (overrideId) => {
+        await api.dnsOverrides.remove(overrideId);
+        set((state) => ({
+          dnsOverrides: state.dnsOverrides.filter(
+            (override) => override.id !== overrideId,
+          ),
+        }));
+        await syncOperationalData(set);
+      },
       removePortForward: async (ruleId) => {
         await api.portForwards.remove(ruleId);
         set((state) => ({
           portForwards: state.portForwards.filter((rule) => rule.id !== ruleId),
+          dnsOverrides: state.dnsOverrides.filter(
+            (override) => !isLinkedDnsOverrideRecord(override) || override.portForwardRuleId !== ruleId,
+          ),
           portForwardRuntimes: state.portForwardRuntimes.filter(
             (runtime) => runtime.ruleId !== ruleId,
           ),

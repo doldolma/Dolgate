@@ -183,6 +183,7 @@ function createMockApi(): DesktopApi {
         secrets: [],
         knownHosts: [],
         portForwards: [],
+        dnsOverrides: [],
         preferences: [],
       }),
     },
@@ -661,6 +662,12 @@ function createMockApi(): DesktopApi {
       stop: vi.fn().mockResolvedValue(undefined),
       onEvent: vi.fn(),
     },
+    dnsOverrides: {
+      list: vi.fn().mockResolvedValue([]),
+      create: vi.fn(),
+      update: vi.fn(),
+      remove: vi.fn().mockResolvedValue(undefined),
+    },
     knownHosts: {
       list: vi.fn().mockResolvedValue([]),
       probeHost: vi.fn().mockResolvedValue({
@@ -942,6 +949,7 @@ describe("createAppStore", () => {
     expect(store.getState().sftp.leftPane.currentPath).toBe("/Users/tester");
     expect(store.getState().sftp.rightPane.sourceKind).toBe("host");
     expect(store.getState().portForwards).toHaveLength(0);
+    expect(store.getState().dnsOverrides).toHaveLength(0);
     expect(store.getState().knownHosts).toHaveLength(0);
   });
 

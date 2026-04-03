@@ -643,9 +643,9 @@ describe("SftpWorkspace column resizing", () => {
 
     const contextMenu = openEntryContextMenu("left-alpha.txt");
     fireEvent.click(within(contextMenu).getByRole("button", { name: "삭제" }));
-    fireEvent.click(
-      container.querySelector(".sftp-modal-backdrop") as HTMLElement,
-    );
+    const backdrop = container.querySelector(".sftp-modal-backdrop") as HTMLElement;
+    fireEvent.pointerDown(backdrop);
+    fireEvent.click(backdrop);
 
     expect(onDeleteSelection).not.toHaveBeenCalled();
     expect(screen.queryByLabelText("SFTP delete confirmation")).toBeNull();
@@ -700,9 +700,9 @@ describe("SftpWorkspace column resizing", () => {
       onDismissConflict,
     });
 
-    fireEvent.click(
-      container.querySelector(".sftp-modal-backdrop") as HTMLElement,
-    );
+    const backdrop = container.querySelector(".sftp-modal-backdrop") as HTMLElement;
+    fireEvent.pointerDown(backdrop);
+    fireEvent.click(backdrop);
 
     expect(onDismissConflict).not.toHaveBeenCalled();
     expect(screen.getByText("dup.txt")).toBeTruthy();

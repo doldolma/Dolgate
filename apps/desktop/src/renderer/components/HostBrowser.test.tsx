@@ -282,7 +282,9 @@ describe('HostBrowser dialogs', () => {
 
     expect(screen.getByRole('dialog')).toBeInTheDocument();
 
-    fireEvent.click(container.querySelector('.home-modal-backdrop') as HTMLElement);
+    const backdrop = container.querySelector('.home-modal-backdrop') as HTMLElement;
+    fireEvent.pointerDown(backdrop);
+    fireEvent.click(backdrop);
 
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });

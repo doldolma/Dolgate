@@ -2,6 +2,7 @@ import { contextBridge, ipcRenderer } from "electron";
 import type {
   AuthState,
   CoreEvent,
+  DnsOverrideDraft,
   DesktopApi,
   DesktopConnectInput,
   DesktopLocalConnectInput,
@@ -471,6 +472,14 @@ const api: DesktopApi = {
         portForwardListeners.delete(listener);
       };
     },
+  },
+  dnsOverrides: {
+    list: () => ipcRenderer.invoke(ipcChannels.dnsOverrides.list),
+    create: (draft: DnsOverrideDraft) =>
+      ipcRenderer.invoke(ipcChannels.dnsOverrides.create, draft),
+    update: (id: string, draft: DnsOverrideDraft) =>
+      ipcRenderer.invoke(ipcChannels.dnsOverrides.update, id, draft),
+    remove: (id: string) => ipcRenderer.invoke(ipcChannels.dnsOverrides.remove, id),
   },
   knownHosts: {
     list: () => ipcRenderer.invoke(ipcChannels.knownHosts.list),
