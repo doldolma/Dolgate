@@ -13,8 +13,24 @@ permissions:
   packages: write
 
 jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.25.0"
+
+      - name: Run sync-api tests
+        working-directory: services/sync-api
+        run: go test ./... -cover
+
   publish:
     runs-on: ubuntu-latest
+    needs: test
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
