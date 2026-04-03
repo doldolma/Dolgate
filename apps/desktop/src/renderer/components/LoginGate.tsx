@@ -15,8 +15,17 @@ interface LoginGateProps {
   onAction?: () => Promise<void>;
 }
 
-export function resolveLoginGateActionLabel(status: AuthState['status'], actionLabel?: string): string {
+export function resolveLoginGateActionLabel(
+  status: AuthState['status'],
+  actionLabel?: string
+): string {
   return actionLabel ?? (status === 'authenticating' ? '브라우저 로그인 대기 중...' : '브라우저로 로그인하기');
+}
+
+export function resolveLoginGateStatusMessage(
+  isSyncBootstrapping: boolean
+): string | null {
+  return isSyncBootstrapping ? '최신 데이터 동기화 중...' : null;
 }
 
 export function shouldDisableLoginGatePrimaryAction(input: {
@@ -54,7 +63,11 @@ export function LoginGate({
   const [localErrorMessage, setLocalErrorMessage] = useState<string | null>(null);
   const handleAction = onAction ?? onBeginLogin;
   const label = resolveLoginGateActionLabel(authState.status, actionLabel);
-  const validationMessage = useMemo(() => getServerUrlValidationMessage(draftServerUrl), [draftServerUrl]);
+  const statusMessage = resolveLoginGateStatusMessage(isSyncBootstrapping);
+  const validationMessage = useMemo(
+    () => getServerUrlValidationMessage(draftServerUrl),
+    [draftServerUrl]
+  );
 
   useEffect(() => {
     setDraftServerUrl(serverUrl);
@@ -70,7 +83,9 @@ export function LoginGate({
       }
       await handleAction();
     } catch (error) {
-      setLocalErrorMessage(error instanceof Error ? error.message : '작업을 시작하지 못했습니다.');
+      setLocalErrorMessage(
+        error instanceof Error ? error.message : '작업을 시작하지 못했습니다.'
+      );
     } finally {
       setIsSubmitting(false);
     }
@@ -82,7 +97,11 @@ export function LoginGate({
     try {
       await onResetServerUrl();
     } catch (error) {
-      setLocalErrorMessage(error instanceof Error ? error.message : '기본 로그인 서버를 복원하지 못했습니다.');
+      setLocalErrorMessage(
+        error instanceof Error
+          ? error.message
+          : '기본 로그인 서버를 복원하지 못했습니다.'
+      );
     } finally {
       setIsSubmitting(false);
     }
@@ -103,11 +122,16 @@ export function LoginGate({
               setIsAdvancedOpen((current) => !current);
             }}
           >
-            ⚙
+            ..
           </button>
         </div>
         {localErrorMessage || authState.errorMessage ? (
-          <div className="login-gate__error">{localErrorMessage ?? authState.errorMessage}</div>
+          <div className="login-gate__error">
+            {localErrorMessage ?? authState.errorMessage}
+          </div>
+        ) : null}
+        {statusMessage ? (
+          <div className="login-gate__status">{statusMessage}</div>
         ) : null}
         {isAdvancedOpen ? (
           <div className="login-gate__advanced-panel">
@@ -122,8 +146,14 @@ export function LoginGate({
                 autoCorrect="off"
               />
             </label>
-            <div className="login-gate__advanced-note">경로 없이 서버 루트 주소만 입력해 주세요.</div>
-            {validationMessage ? <div className="login-gate__advanced-error">{validationMessage}</div> : null}
+            <div className="login-gate__advanced-note">
+              경로 없이 서버 루트 주소만 입력해 주세요.
+            </div>
+            {validationMessage ? (
+              <div className="login-gate__advanced-error">
+                {validationMessage}
+              </div>
+            ) : null}
             <div className="login-gate__advanced-actions">
               <button
                 type="button"
@@ -137,7 +167,12 @@ export function LoginGate({
                 닫기
               </button>
               {hasServerUrlOverride ? (
-                <button type="button" className="secondary-button" onClick={handleReset} disabled={isSubmitting}>
+                <button
+                  type="button"
+                  className="secondary-button"
+                  onClick={handleReset}
+                  disabled={isSubmitting}
+                >
                   기본 서버로 복원
                 </button>
               ) : null}
@@ -158,7 +193,7 @@ export function LoginGate({
         >
           <span>{label}</span>
           <span className="login-gate__button-icon" aria-hidden="true">
-            ↗
+            -&gt;
           </span>
         </button>
       </div>

@@ -277,6 +277,12 @@ input::placeholder {
   border: 1px solid rgba(217, 83, 79, 0.18);
 }
 
+.login-gate__status {
+  margin: 0 0 1rem;
+  color: var(--text-soft);
+  font-size: 0.9rem;
+}
+
 .login-gate__button {
   margin-top: 0.15rem;
   width: 100%;

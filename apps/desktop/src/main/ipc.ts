@@ -28,7 +28,9 @@ import {
 import type {
   AuthState,
   AppSettings,
+  DesktopBootstrapSnapshot,
   DesktopConnectInput,
+  DesktopSyncedWorkspaceSnapshot,
   HostContainerRuntime,
   DesktopLocalConnectInput,
   DnsOverrideDraft,
@@ -904,6 +906,10 @@ export function registerIpcHandlers(
   const queueSync = () => {
     void syncService.pushDirty().catch(() => undefined);
   };
+  const listPortForwardSnapshot = () => ({
+    rules: portForwards.list(),
+    runtimes: coreManager.listPortForwardRuntimes(),
+  });
   const pendingSessionSecrets = new Map<
     string,
     {
@@ -921,16 +927,67 @@ export function registerIpcHandlers(
   >();
   const listResolvedDnsOverrides = () => {
     const overrides = dnsOverrides.list();
+    const portForwardSnapshot = listPortForwardSnapshot();
     hostsOverrideManager.pruneStaticOverrideStates(
       overrides.filter(isStaticDnsOverrideRecord).map((record) => record.id),
     );
     return resolveDnsOverrideRecords(
       overrides,
-      portForwards.list(),
-      coreManager.listPortForwardRuntimes(),
+      portForwardSnapshot.rules,
+      portForwardSnapshot.runtimes,
       hostsOverrideManager.getActiveStaticOverrideIds(),
     );
   };
+  const getInitialBootstrapSnapshot =
+    async (): Promise<DesktopBootstrapSnapshot> => {
+      const [
+        nextHosts,
+        nextGroups,
+        tabs,
+        nextSettings,
+        localHomePath,
+        portForwardSnapshot,
+        resolvedDnsOverrides,
+        nextKnownHosts,
+        nextActivityLogs,
+        nextKeychainEntries,
+      ] = await Promise.all([
+        hosts.list(),
+        groups.list(),
+        coreManager.listTabs(),
+        settings.get(),
+        localFiles.getHomeDirectory(),
+        Promise.resolve(listPortForwardSnapshot()),
+        Promise.resolve(listResolvedDnsOverrides()),
+        knownHosts.list(),
+        activityLogs.list(),
+        secretMetadata.list(),
+      ]);
+      const localHomeListing = await localFiles.list(localHomePath);
+      return {
+        hosts: nextHosts,
+        groups: nextGroups,
+        tabs,
+        settings: nextSettings,
+        localHomePath,
+        localHomeListing,
+        portForwardSnapshot,
+        dnsOverrides: resolvedDnsOverrides,
+        knownHosts: nextKnownHosts,
+        activityLogs: nextActivityLogs,
+        keychainEntries: nextKeychainEntries,
+      };
+    };
+  const getSyncedWorkspaceSnapshot =
+    async (): Promise<DesktopSyncedWorkspaceSnapshot> => ({
+      hosts: hosts.list(),
+      groups: groups.list(),
+      settings: settings.get(),
+      portForwardSnapshot: listPortForwardSnapshot(),
+      dnsOverrides: listResolvedDnsOverrides(),
+      knownHosts: knownHosts.list(),
+      keychainEntries: secretMetadata.list(),
+    });
 
   const emitSftpConnectionProgress: AwsConnectionProgressEmitter = (event) => {
     for (const window of BrowserWindow.getAllWindows()) {
@@ -1654,6 +1711,14 @@ export function registerIpcHandlers(
   ipcMain.handle(ipcChannels.sync.status, async () => syncService.getState());
   ipcMain.handle(ipcChannels.sync.exportDecryptedSnapshot, async () =>
     syncService.exportDecryptedSnapshot(),
+  );
+  ipcMain.handle(
+    ipcChannels.bootstrap.getInitialSnapshot,
+    async () => getInitialBootstrapSnapshot(),
+  );
+  ipcMain.handle(
+    ipcChannels.bootstrap.getSyncedWorkspaceSnapshot,
+    async () => getSyncedWorkspaceSnapshot(),
   );
 
   ipcMain.handle(
@@ -3326,10 +3391,9 @@ export function registerIpcHandlers(
     },
   );
 
-  ipcMain.handle(ipcChannels.portForwards.list, async () => ({
-    rules: portForwards.list(),
-    runtimes: coreManager.listPortForwardRuntimes(),
-  }));
+  ipcMain.handle(ipcChannels.portForwards.list, async () =>
+    listPortForwardSnapshot(),
+  );
 
   ipcMain.handle(
     ipcChannels.dnsOverrides.list,

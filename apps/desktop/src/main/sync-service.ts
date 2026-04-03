@@ -1,5 +1,4 @@
 import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
-import { isSshHostRecord } from '@shared';
 import type {
   DnsOverrideRecord,
   GroupRecord,
@@ -24,7 +23,7 @@ import {
   SyncOutboxRepository,
   type SyncDeletionRecord
 } from './database';
-import { SecretStore } from './secret-store';
+import { encodeSecretForStorage, SecretStore } from './secret-store';
 import { AuthService } from './auth-service';
 import { getDesktopStateStorage } from './state-storage';
 import {
@@ -40,6 +39,10 @@ export class SyncAuthenticationError extends Error {
     super(message);
     this.name = 'SyncAuthenticationError';
   }
+}
+
+function nowIso(): string {
+  return new Date().toISOString();
 }
 
 function defaultSyncStatus(): SyncStatus {
@@ -243,7 +246,7 @@ export class SyncService {
         }
       }
 
-      await this.applyRemoteSnapshot(remote);
+      await this.applyRemoteSnapshotAtomically(remote);
       this.outbox.clearAll();
       this.patchState({
         status: 'ready',
@@ -508,11 +511,27 @@ export class SyncService {
     };
   }
 
-  private async applyRemoteSnapshot(payload: SyncPayloadV2): Promise<void> {
+  private async applyRemoteSnapshotAtomically(
+    payload: SyncPayloadV2
+  ): Promise<void> {
     const vaultKeyBase64 = this.authService.getVaultKeyBase64();
 
-    const groups = payload.groups.filter((record) => !record.deleted_at).map((record) => decodeEncryptedPayload<GroupRecord>(record.encrypted_payload, vaultKeyBase64));
-    const hosts = payload.hosts.filter((record) => !record.deleted_at).map((record) => decodeEncryptedPayload<HostRecord>(record.encrypted_payload, vaultKeyBase64));
+    const groups = payload.groups
+      .filter((record) => !record.deleted_at)
+      .map((record) =>
+        decodeEncryptedPayload<GroupRecord>(
+          record.encrypted_payload,
+          vaultKeyBase64
+        )
+      );
+    const hosts = payload.hosts
+      .filter((record) => !record.deleted_at)
+      .map((record) =>
+        decodeEncryptedPayload<HostRecord>(
+          record.encrypted_payload,
+          vaultKeyBase64
+        )
+      );
     const knownHosts = payload.knownHosts
       .filter((record) => !record.deleted_at)
       .map((record) => decodeEncryptedPayload<KnownHostRecord>(record.encrypted_payload, vaultKeyBase64));
@@ -529,37 +548,54 @@ export class SyncService {
       .filter((record) => !record.deleted_at)
       .map((record) => decodeEncryptedPayload<ManagedSecretPayload>(record.encrypted_payload, vaultKeyBase64));
 
-    this.groups.replaceAll(groups);
-    this.hosts.replaceAll(hosts);
-    this.knownHosts.replaceAll(knownHosts);
-    this.portForwards.replaceAll(portForwards);
-    this.dnsOverrides.replaceAll(dnsOverrides);
-    this.settings.replaceSyncedTerminalPreferences(preferences[0] ?? null);
-
-    const existingServerSecrets = this.secretMetadata.listBySource('server_managed');
     const nextSecretRefs = new Set(secrets.map((secret) => secret.secretRef));
-    for (const existing of existingServerSecrets) {
-      if (nextSecretRefs.has(existing.secretRef)) {
-        continue;
-      }
-      await this.secretStore.remove(existing.secretRef).catch(() => undefined);
-    }
-
-    const nextSecretMetadata: SecretMetadataRecord[] = [];
-    for (const secret of secrets) {
-      await this.secretStore.save(secret.secretRef, JSON.stringify(secret));
-      nextSecretMetadata.push({
+    const nextSecretMetadata: SecretMetadataRecord[] = secrets.map((secret) => ({
         secretRef: secret.secretRef,
         label: secret.label,
         hasPassword: Boolean(secret.password),
         hasPassphrase: Boolean(secret.passphrase),
         hasManagedPrivateKey: Boolean(secret.privateKeyPem),
         source: 'server_managed',
-        linkedHostCount: hosts.filter((host) => isSshHostRecord(host) && host.secretRef === secret.secretRef).length,
+        linkedHostCount: 0,
         updatedAt: secret.updatedAt
-      });
-    }
-    this.secretMetadata.replaceAll(nextSecretMetadata, 'server_managed');
+      }));
+    const nextStoredSecrets = new Map(
+      secrets.map((secret) => [
+        secret.secretRef,
+        encodeSecretForStorage(JSON.stringify(secret))
+      ])
+    );
+
+    this.stateStorage.updateState((state) => {
+      const existingServerSecretRefs = new Set(
+        state.data.secretMetadata
+          .filter((record) => record.source === 'server_managed')
+          .map((record) => record.secretRef)
+      );
+      const remainingMetadata = state.data.secretMetadata.filter(
+        (record) => record.source !== 'server_managed'
+      );
+
+      state.data.groups = groups;
+      state.data.hosts = hosts;
+      state.data.knownHosts = knownHosts;
+      state.data.portForwards = portForwards;
+      state.data.dnsOverrides = dnsOverrides;
+      state.terminal.globalThemeId =
+        preferences[0]?.globalTerminalThemeId ?? 'dolssh-dark';
+      state.terminal.globalThemeUpdatedAt =
+        preferences[0]?.updatedAt ?? nowIso();
+      state.data.secretMetadata = [...remainingMetadata, ...nextSecretMetadata];
+
+      for (const secretRef of existingServerSecretRefs) {
+        if (!nextSecretRefs.has(secretRef)) {
+          delete state.secure.managedSecretsByRef[secretRef];
+        }
+      }
+      for (const [secretRef, storedSecret] of nextStoredSecrets) {
+        state.secure.managedSecretsByRef[secretRef] = storedSecret;
+      }
+    });
     await this.onAppliedSnapshot?.();
   }
 

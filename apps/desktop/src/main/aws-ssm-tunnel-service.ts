@@ -1,11 +1,14 @@
 import { randomUUID } from "node:crypto";
 import { spawn, type ChildProcessByStdio } from "node:child_process";
 import { createConnection } from "node:net";
+import path from "node:path";
 import type { Readable } from "node:stream";
 import { buildAwsCommandEnv, resolveAwsExecutable } from "./aws-service";
 
 const TUNNEL_READY_TIMEOUT_MS = 15_000;
 const TUNNEL_READY_POLL_MS = 150;
+const TUNNEL_STOP_TIMEOUT_MS = 6_000;
+const TUNNEL_PORT_RELEASE_TIMEOUT_MS = 5_000;
 
 export interface AwsSsmTunnelStartInput {
   runtimeId?: string;
@@ -27,11 +30,20 @@ interface TunnelRuntime {
   process: ChildProcessByStdio<null, Readable, Readable>;
   stopRequested: boolean;
   lastMessage: string;
+  bindAddress: string;
+  bindPort: number;
+  exitPromise: Promise<void>;
+  resolveExit: () => void;
 }
 
 interface AwsSsmTunnelServiceOptions {
   onRuntimeTerminated?: (runtimeId: string, message: string) => void;
   spawnProcess?: typeof spawn;
+  killProcessTree?: (
+    process: ChildProcessByStdio<null, Readable, Readable>,
+  ) => Promise<void>;
+  stopTimeoutMs?: number;
+  portReleaseTimeoutMs?: number;
 }
 
 export function buildAwsSsmTunnelArgs(
@@ -71,7 +83,15 @@ function normalizeBindAddress(value?: string | null): string {
 }
 
 function resolveProbeAddress(bindAddress: string): string {
-  return bindAddress === "0.0.0.0" ? "127.0.0.1" : bindAddress;
+  switch (bindAddress) {
+    case "0.0.0.0":
+      return "127.0.0.1";
+    case "::":
+    case "[::]":
+      return "::1";
+    default:
+      return bindAddress;
+  }
 }
 
 async function waitForTunnelReady(
@@ -86,7 +106,7 @@ async function waitForTunnelReady(
   while (Date.now() - startedAt < TUNNEL_READY_TIMEOUT_MS) {
     if (process.exitCode !== null) {
       throw new Error(
-        getLastMessage() || "AWS SSM tunnel이 예상보다 빨리 종료되었습니다.",
+        getLastMessage() || "AWS SSM tunnel exited before it became ready.",
       );
     }
 
@@ -116,8 +136,112 @@ async function waitForTunnelReady(
   }
 
   throw new Error(
-    getLastMessage() || "AWS SSM tunnel 준비가 제한 시간을 초과했습니다.",
+    getLastMessage() || "AWS SSM tunnel readiness timed out.",
   );
+}
+
+async function waitForTunnelClosed(
+  bindAddress: string,
+  bindPort: number,
+  getLastMessage: () => string,
+  timeoutMs: number,
+): Promise<void> {
+  if (bindPort <= 0) {
+    return;
+  }
+
+  const startedAt = Date.now();
+  const probeAddress = resolveProbeAddress(bindAddress);
+
+  while (Date.now() - startedAt < timeoutMs) {
+    const isClosed = await new Promise<boolean>((resolve) => {
+      const socket = createConnection(
+        {
+          host: probeAddress,
+          port: bindPort,
+        },
+        () => {
+          socket.destroy();
+          resolve(false);
+        },
+      );
+      socket.setTimeout(1_000);
+      socket.once("error", () => resolve(true));
+      socket.once("timeout", () => {
+        socket.destroy();
+        resolve(false);
+      });
+    });
+
+    if (isClosed) {
+      return;
+    }
+
+    await delay(TUNNEL_READY_POLL_MS);
+  }
+
+  throw new Error(
+    getLastMessage() ||
+      `AWS SSM tunnel ${probeAddress}:${bindPort} is still accepting connections.`,
+  );
+}
+
+function buildTaskkillPath(): string {
+  const windowsRoot =
+    process.env.SystemRoot?.trim() ||
+    process.env.windir?.trim() ||
+    "C:\\Windows";
+  return path.join(windowsRoot, "System32", "taskkill.exe");
+}
+
+async function defaultKillProcessTree(
+  child: ChildProcessByStdio<null, Readable, Readable>,
+): Promise<void> {
+  if (child.exitCode !== null) {
+    return;
+  }
+
+  if (process.platform !== "win32") {
+    if (!child.kill("SIGKILL")) {
+      throw new Error("failed to terminate AWS SSM tunnel process");
+    }
+    return;
+  }
+
+  if (typeof child.pid !== "number" || child.pid <= 0) {
+    throw new Error("AWS SSM tunnel process id is unavailable");
+  }
+
+  const taskkillPath = buildTaskkillPath();
+  await new Promise<void>((resolve, reject) => {
+    const killer = spawn(
+      taskkillPath,
+      ["/PID", String(child.pid), "/T", "/F"],
+      {
+        stdio: ["ignore", "pipe", "pipe"],
+        windowsHide: true,
+      },
+    );
+
+    let stderr = "";
+    killer.stderr.setEncoding("utf8");
+    killer.stderr.on("data", (chunk: string) => {
+      stderr += chunk;
+    });
+    killer.on("error", reject);
+    killer.on("exit", (code) => {
+      if (code === 0 || child.exitCode !== null) {
+        resolve();
+        return;
+      }
+      reject(
+        new Error(
+          stderr.trim() ||
+            `taskkill failed with exit code ${code ?? 0}`,
+        ),
+      );
+    });
+  });
 }
 
 export class AwsSsmTunnelService {
@@ -127,10 +251,19 @@ export class AwsSsmTunnelService {
     message: string,
   ) => void;
   private readonly spawnProcess: typeof spawn;
+  private readonly killProcessTree: (
+    process: ChildProcessByStdio<null, Readable, Readable>,
+  ) => Promise<void>;
+  private readonly stopTimeoutMs: number;
+  private readonly portReleaseTimeoutMs: number;
 
   constructor(options: AwsSsmTunnelServiceOptions = {}) {
     this.onRuntimeTerminated = options.onRuntimeTerminated;
     this.spawnProcess = options.spawnProcess ?? spawn;
+    this.killProcessTree = options.killProcessTree ?? defaultKillProcessTree;
+    this.stopTimeoutMs = options.stopTimeoutMs ?? TUNNEL_STOP_TIMEOUT_MS;
+    this.portReleaseTimeoutMs =
+      options.portReleaseTimeoutMs ?? TUNNEL_PORT_RELEASE_TIMEOUT_MS;
   }
 
   async start(input: AwsSsmTunnelStartInput): Promise<AwsSsmTunnelHandle> {
@@ -158,10 +291,18 @@ export class AwsSsmTunnelService {
       windowsHide: true,
       env,
     });
+
+    let resolveExit!: () => void;
     const runtime: TunnelRuntime = {
       process: child,
       stopRequested: false,
       lastMessage: "",
+      bindAddress,
+      bindPort: input.bindPort,
+      exitPromise: new Promise<void>((resolve) => {
+        resolveExit = resolve;
+      }),
+      resolveExit,
     };
     this.runtimes.set(runtimeId, runtime);
 
@@ -176,6 +317,7 @@ export class AwsSsmTunnelService {
     child.stdout.on("data", captureOutput);
     child.stderr.on("data", captureOutput);
     child.once("exit", (code, signal) => {
+      runtime.resolveExit();
       const current = this.runtimes.get(runtimeId);
       if (!current) {
         return;
@@ -196,7 +338,12 @@ export class AwsSsmTunnelService {
     });
 
     try {
-      await waitForTunnelReady(bindAddress, input.bindPort, child, () => runtime.lastMessage);
+      await waitForTunnelReady(
+        bindAddress,
+        input.bindPort,
+        child,
+        () => runtime.lastMessage,
+      );
       return {
         runtimeId,
         bindAddress,
@@ -213,15 +360,30 @@ export class AwsSsmTunnelService {
     if (!runtime) {
       return;
     }
-    this.runtimes.delete(runtimeId);
+
     runtime.stopRequested = true;
-    runtime.process.removeAllListeners("exit");
-    runtime.process.removeAllListeners("error");
-    runtime.process.stdout.removeAllListeners("data");
-    runtime.process.stderr.removeAllListeners("data");
-    if (!runtime.process.killed && runtime.process.exitCode === null) {
-      runtime.process.kill("SIGKILL");
+    try {
+      await this.killProcessTree(runtime.process);
+    } catch (error) {
+      runtime.stopRequested = false;
+      throw error;
     }
+
+    await Promise.race([
+      runtime.exitPromise,
+      delay(this.stopTimeoutMs).then(() => {
+        throw new Error(
+          `Timed out waiting for AWS SSM tunnel ${runtimeId} to stop.`,
+        );
+      }),
+    ]);
+
+    await waitForTunnelClosed(
+      runtime.bindAddress,
+      runtime.bindPort,
+      () => runtime.lastMessage,
+      this.portReleaseTimeoutMs,
+    );
   }
 
   async shutdown(): Promise<void> {

@@ -3429,26 +3429,17 @@ export function createAppStore(api: DesktopApi) {
         | ((state: AppState) => AppState | Partial<AppState>),
     ) => void,
   ) => {
-    const [hosts, groups, snapshot, dnsOverrides, knownHosts, keychainEntries, settings] =
-      await Promise.all([
-        api.hosts.list(),
-        api.groups.list(),
-        api.portForwards.list(),
-        api.dnsOverrides.list(),
-        api.knownHosts.list(),
-        api.keychain.list(),
-        api.settings.get(),
-      ]);
+    const snapshot = await api.bootstrap.getSyncedWorkspaceSnapshot();
 
     set({
-      hosts: sortHosts(hosts),
-      groups: sortGroups(groups),
-      portForwards: sortPortForwards(snapshot.rules),
-      dnsOverrides: sortDnsOverrides(dnsOverrides),
-      portForwardRuntimes: snapshot.runtimes,
-      knownHosts: sortKnownHosts(knownHosts),
-      keychainEntries: sortKeychainEntries(keychainEntries),
-      settings,
+      hosts: sortHosts(snapshot.hosts),
+      groups: sortGroups(snapshot.groups),
+      portForwards: sortPortForwards(snapshot.portForwardSnapshot.rules),
+      dnsOverrides: sortDnsOverrides(snapshot.dnsOverrides),
+      portForwardRuntimes: snapshot.portForwardSnapshot.runtimes,
+      knownHosts: sortKnownHosts(snapshot.knownHosts),
+      keychainEntries: sortKeychainEntries(snapshot.keychainEntries),
+      settings: snapshot.settings,
     });
   };
 
@@ -4972,34 +4963,11 @@ export function createAppStore(api: DesktopApi) {
           hostDrawer: { mode: "closed" },
         }),
       bootstrap: async () => {
-        const [
-          hosts,
-          groups,
-          tabs,
-          settings,
-          localHomePath,
-          snapshot,
-          dnsOverrides,
-          knownHosts,
-          activityLogs,
-          keychainEntries,
-        ] = await Promise.all([
-          api.hosts.list(),
-          api.groups.list(),
-          api.tabs.list(),
-          api.settings.get(),
-          api.files.getHomeDirectory(),
-          api.portForwards.list(),
-          api.dnsOverrides.list(),
-          api.knownHosts.list(),
-          api.logs.list(),
-          api.keychain.list(),
-        ]);
-        const localListing = await api.files.list(localHomePath);
+        const snapshot = await api.bootstrap.getInitialSnapshot();
         set({
-          hosts: sortHosts(hosts),
-          groups: sortGroups(groups),
-          tabs: tabs.map((tab) => ({
+          hosts: sortHosts(snapshot.hosts),
+          groups: sortGroups(snapshot.groups),
+          tabs: snapshot.tabs.map((tab) => ({
             ...tab,
             sessionShare: normalizeSessionShareState(tab.sessionShare),
             hasReceivedOutput:
@@ -5008,23 +4976,23 @@ export function createAppStore(api: DesktopApi) {
                 : (tab.hasReceivedOutput ?? false),
           })),
           workspaces: [],
-          tabStrip: tabs.map((tab) => ({
+          tabStrip: snapshot.tabs.map((tab) => ({
             kind: "session" as const,
             sessionId: tab.sessionId,
           })),
-          portForwards: sortPortForwards(snapshot.rules),
-          dnsOverrides: sortDnsOverrides(dnsOverrides),
-          portForwardRuntimes: snapshot.runtimes,
-          knownHosts: sortKnownHosts(knownHosts),
-          activityLogs: sortLogs(activityLogs),
-          keychainEntries: sortKeychainEntries(keychainEntries),
+          portForwards: sortPortForwards(snapshot.portForwardSnapshot.rules),
+          dnsOverrides: sortDnsOverrides(snapshot.dnsOverrides),
+          portForwardRuntimes: snapshot.portForwardSnapshot.runtimes,
+          knownHosts: sortKnownHosts(snapshot.knownHosts),
+          activityLogs: sortLogs(snapshot.activityLogs),
+          keychainEntries: sortKeychainEntries(snapshot.keychainEntries),
           activeWorkspaceTab: "home",
           homeSection: "hosts",
           settingsSection: "general",
           hostDrawer: { mode: "closed" },
           currentGroupPath: null,
           selectedHostTags: [],
-          settings,
+          settings: snapshot.settings,
           isReady: true,
           pendingHostKeyPrompt: null,
           pendingCredentialRetry: null,
@@ -5033,16 +5001,16 @@ export function createAppStore(api: DesktopApi) {
           pendingInteractiveAuth: null,
           pendingConnectionAttempts: [],
           sftp: {
-            localHomePath,
+            localHomePath: snapshot.localHomePath,
             leftPane: {
               ...createEmptyPane("left"),
               sourceKind: "local",
-              currentPath: localListing.path,
-              lastLocalPath: localListing.path,
-              history: [localListing.path],
+              currentPath: snapshot.localHomeListing.path,
+              lastLocalPath: snapshot.localHomeListing.path,
+              history: [snapshot.localHomeListing.path],
               historyIndex: 0,
-              entries: localListing.entries,
-              warningMessages: localListing.warnings ?? [],
+              entries: snapshot.localHomeListing.entries,
+              warningMessages: snapshot.localHomeListing.warnings ?? [],
             },
             rightPane: createEmptyPane("right"),
             transfers: [],

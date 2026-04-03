@@ -8,6 +8,18 @@ import { getDesktopStateStorage, resetDesktopStateStorageForTests } from '../../
 
 let tempDir = '';
 
+vi.mock('electron', () => ({
+  app: {
+    getPath: vi.fn((name: string) => (name === 'userData' ? tempDir : os.tmpdir())),
+    isPackaged: false
+  },
+  safeStorage: {
+    isEncryptionAvailable: vi.fn(() => true),
+    encryptString: vi.fn((value: string) => Buffer.from(value, 'utf8')),
+    decryptString: vi.fn((value: Buffer) => Buffer.from(value).toString('utf8'))
+  }
+}));
+
 function encodeEncryptedPayload(plaintext: string, keyBase64: string): string {
   const key = Buffer.from(keyBase64, 'base64');
   const iv = Buffer.alloc(12, 1);
@@ -29,6 +41,7 @@ function createRemoteSnapshotWithPreferences(keyBase64: string) {
     secrets: [],
     knownHosts: [],
     portForwards: [],
+    dnsOverrides: [],
     preferences: [
       {
         id: 'global-terminal',
@@ -36,6 +49,81 @@ function createRemoteSnapshotWithPreferences(keyBase64: string) {
           JSON.stringify({
             id: 'global-terminal',
             globalTerminalThemeId: 'dolssh-dark',
+            updatedAt: '2026-03-22T00:00:00.000Z'
+          }),
+          keyBase64
+        ),
+        updated_at: '2026-03-22T00:00:00.000Z'
+      }
+    ]
+  };
+}
+
+function createRemoteSnapshotWithManagedSecrets(keyBase64: string, secretCount = 220) {
+  return {
+    groups: [
+      {
+        id: 'group-remote',
+        encrypted_payload: encodeEncryptedPayload(
+          JSON.stringify({
+            id: 'group-remote',
+            name: 'Remote',
+            path: 'Remote',
+            parentPath: null,
+            createdAt: '2026-03-22T00:00:00.000Z',
+            updatedAt: '2026-03-22T00:00:00.000Z'
+          }),
+          keyBase64
+        ),
+        updated_at: '2026-03-22T00:00:00.000Z'
+      }
+    ],
+    hosts: Array.from({ length: secretCount }, (_value, index) => ({
+      id: `host-${index + 1}`,
+      encrypted_payload: encodeEncryptedPayload(
+        JSON.stringify({
+          id: `host-${index + 1}`,
+          kind: 'ssh',
+          label: `Remote Host ${index + 1}`,
+          hostname: `remote-${index + 1}.example.com`,
+          port: 22,
+          username: 'ubuntu',
+          authType: 'password',
+          privateKeyPath: null,
+          secretRef: `secret:server-${index + 1}`,
+          groupName: 'Remote',
+          terminalThemeId: null,
+          createdAt: '2026-03-22T00:00:00.000Z',
+          updatedAt: '2026-03-22T00:00:00.000Z'
+        }),
+        keyBase64
+      ),
+      updated_at: '2026-03-22T00:00:00.000Z'
+    })),
+    secrets: Array.from({ length: secretCount }, (_value, index) => ({
+      id: `secret:server-${index + 1}`,
+      encrypted_payload: encodeEncryptedPayload(
+        JSON.stringify({
+          secretRef: `secret:server-${index + 1}`,
+          label: `Server Secret ${index + 1}`,
+          password: `pw-${index + 1}`,
+          source: 'server_managed',
+          updatedAt: `2026-03-22T00:00:${String(index % 60).padStart(2, '0')}.000Z`
+        }),
+        keyBase64
+      ),
+      updated_at: `2026-03-22T00:00:${String(index % 60).padStart(2, '0')}.000Z`
+    })),
+    knownHosts: [],
+    portForwards: [],
+    dnsOverrides: [],
+    preferences: [
+      {
+        id: 'global-terminal',
+        encrypted_payload: encodeEncryptedPayload(
+          JSON.stringify({
+            id: 'global-terminal',
+            globalTerminalThemeId: 'kanagawa-wave',
             updatedAt: '2026-03-22T00:00:00.000Z'
           }),
           keyBase64
@@ -206,6 +294,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
   resetDesktopStateStorageForTests();
   delete process.env.DOLSSH_USER_DATA_DIR;
+  delete process.env.DOLSSH_ALLOW_INSECURE_SECRET_STORAGE_FOR_TESTS;
   if (tempDir) {
     rmSync(tempDir, { recursive: true, force: true });
     tempDir = '';
@@ -399,6 +488,96 @@ describe('SyncService', () => {
     expect(fetchMock.mock.calls[1]?.[1]?.method).toBeUndefined();
     expect(state.status).toBe('ready');
     expect(state.pendingPush).toBe(false);
+  });
+
+  it('applies remote snapshots with many managed secrets in a bounded number of state writes', async () => {
+    process.env.DOLSSH_ALLOW_INSECURE_SECRET_STORAGE_FOR_TESTS = 'true';
+    const { service, authService } = createSyncService();
+    const stateStorage = getDesktopStateStorage();
+    stateStorage.updateState((state) => {
+      state.data.secretMetadata = [
+        {
+          secretRef: 'secret:local',
+          label: 'Local Secret',
+          hasPassword: true,
+          hasPassphrase: false,
+          hasManagedPrivateKey: false,
+          source: 'local_keychain',
+          linkedHostCount: 0,
+          updatedAt: '2026-03-21T00:00:00.000Z'
+        },
+        {
+          secretRef: 'secret:server-stale',
+          label: 'Old Server Secret',
+          hasPassword: true,
+          hasPassphrase: false,
+          hasManagedPrivateKey: false,
+          source: 'server_managed',
+          linkedHostCount: 0,
+          updatedAt: '2026-03-21T00:00:00.000Z'
+        }
+      ];
+      state.secure.managedSecretsByRef['secret:local'] = {
+        encrypted: false,
+        value: Buffer.from(
+          '{"secretRef":"secret:local","label":"Local Secret","password":"local","source":"local_keychain","updatedAt":"2026-03-21T00:00:00.000Z"}',
+          'utf8'
+        ).toString('base64')
+      };
+      state.secure.managedSecretsByRef['secret:server-stale'] = {
+        encrypted: false,
+        value: Buffer.from(
+          '{"secretRef":"secret:server-stale","label":"Old Server Secret","password":"stale","source":"server_managed","updatedAt":"2026-03-21T00:00:00.000Z"}',
+          'utf8'
+        ).toString('base64')
+      };
+    });
+    const updateStateSpy = vi.spyOn(stateStorage, 'updateState');
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify(
+            createRemoteSnapshotWithManagedSecrets(authService.getVaultKeyBase64())
+          ),
+          {
+            status: 200,
+            headers: {
+              'content-type': 'application/json'
+            }
+          }
+        )
+      )
+    );
+
+    const state = await service.bootstrap();
+    const persistedState = stateStorage.getState();
+    const serverMetadata = persistedState.data.secretMetadata.filter(
+      (record) => record.source === 'server_managed'
+    );
+
+    expect(state.status).toBe('ready');
+    expect(updateStateSpy).toHaveBeenCalledTimes(3);
+    expect(serverMetadata).toHaveLength(220);
+    expect(
+      persistedState.data.secretMetadata.some(
+        (record) => record.secretRef === 'secret:local'
+      )
+    ).toBe(true);
+    expect(
+      persistedState.data.secretMetadata.some(
+        (record) => record.secretRef === 'secret:server-stale'
+      )
+    ).toBe(false);
+    expect(persistedState.secure.managedSecretsByRef['secret:local']).toBeDefined();
+    expect(
+      persistedState.secure.managedSecretsByRef['secret:server-stale']
+    ).toBeUndefined();
+    expect(Object.keys(persistedState.secure.managedSecretsByRef)).toHaveLength(221);
+    expect(persistedState.data.hosts).toHaveLength(220);
+    expect(persistedState.data.groups).toHaveLength(1);
+    expect(persistedState.data.dnsOverrides).toHaveLength(0);
+    expect(persistedState.terminal.globalThemeId).toBe('kanagawa-wave');
   });
 
   it('keeps tombstones added during an in-flight push and sends them in a follow-up push', async () => {

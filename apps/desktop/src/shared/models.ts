@@ -614,6 +614,30 @@ export interface AppSettings extends TerminalAppearanceSettings {
   updatedAt: string;
 }
 
+export interface DesktopBootstrapSnapshot {
+  hosts: HostRecord[];
+  groups: GroupRecord[];
+  tabs: TerminalTab[];
+  settings: AppSettings;
+  localHomePath: string;
+  localHomeListing: DirectoryListing;
+  portForwardSnapshot: PortForwardListSnapshot;
+  dnsOverrides: DnsOverrideResolvedRecord[];
+  knownHosts: KnownHostRecord[];
+  activityLogs: ActivityLogRecord[];
+  keychainEntries: SecretMetadataRecord[];
+}
+
+export interface DesktopSyncedWorkspaceSnapshot {
+  hosts: HostRecord[];
+  groups: GroupRecord[];
+  settings: AppSettings;
+  portForwardSnapshot: PortForwardListSnapshot;
+  dnsOverrides: DnsOverrideResolvedRecord[];
+  knownHosts: KnownHostRecord[];
+  keychainEntries: SecretMetadataRecord[];
+}
+
 export interface TerminalPreferencesRecord {
   id: 'global-terminal';
   globalTerminalThemeId: GlobalTerminalThemeId;
