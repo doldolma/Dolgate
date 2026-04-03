@@ -12,6 +12,7 @@ import {
 import {
   isDnsOverrideEligiblePortForwardRule,
   isLinkedDnsOverrideRecord,
+  isStaticDnsOverrideRecord,
   getGroupLabel,
   getAwsEc2HostSftpDisabledReason,
   getAwsEc2HostSshPort,
@@ -84,7 +85,11 @@ import { AwsService } from "./aws-service";
 import { CoreManager } from "./core-manager";
 import { resolveContainerTunnelTarget } from "./container-port-forward-target";
 import { LocalFileService } from "./file-service";
-import { collectActiveDnsOverrideEntries, HostsOverrideManager } from "./hosts-override-manager";
+import {
+  collectActiveDnsOverrideEntries,
+  HostsOverrideManager,
+  resolveDnsOverrideRecords,
+} from "./hosts-override-manager";
 import { PortForwardLifecycleLogger } from "./port-forward-lifecycle-logger";
 import { SecretStore } from "./secret-store";
 import { SessionShareService } from "./session-share-service";
@@ -914,6 +919,18 @@ export function registerIpcHandlers(
     string,
     AwsSftpPreflightCacheEntry
   >();
+  const listResolvedDnsOverrides = () => {
+    const overrides = dnsOverrides.list();
+    hostsOverrideManager.pruneStaticOverrideStates(
+      overrides.filter(isStaticDnsOverrideRecord).map((record) => record.id),
+    );
+    return resolveDnsOverrideRecords(
+      overrides,
+      portForwards.list(),
+      coreManager.listPortForwardRuntimes(),
+      hostsOverrideManager.getActiveStaticOverrideIds(),
+    );
+  };
 
   const emitSftpConnectionProgress: AwsConnectionProgressEmitter = (event) => {
     for (const window of BrowserWindow.getAllWindows()) {
@@ -1036,12 +1053,17 @@ export function registerIpcHandlers(
   async function rewriteActiveDnsOverrides(
     runtimeOverride?: PortForwardRuntimeRecord[],
   ): Promise<void> {
+    const overrides = dnsOverrides.list();
+    hostsOverrideManager.pruneStaticOverrideStates(
+      overrides.filter(isStaticDnsOverrideRecord).map((record) => record.id),
+    );
     const runtimes = runtimeOverride ?? coreManager.listPortForwardRuntimes();
     await hostsOverrideManager.rewrite(
       collectActiveDnsOverrideEntries(
-        dnsOverrides.list(),
+        overrides,
         portForwards.list(),
         runtimes,
+        hostsOverrideManager.getActiveStaticOverrideIds(),
       ),
     );
   }
@@ -3311,7 +3333,7 @@ export function registerIpcHandlers(
 
   ipcMain.handle(
     ipcChannels.dnsOverrides.list,
-    async () => dnsOverrides.list(),
+    async () => listResolvedDnsOverrides(),
   );
 
   ipcMain.handle(
@@ -3330,10 +3352,14 @@ export function registerIpcHandlers(
         hostname: record.hostname,
         ...(isLinkedDnsOverrideRecord(record)
           ? { portForwardRuleId: record.portForwardRuleId }
-          : { address: record.address, enabled: record.enabled }),
+          : { address: record.address }),
       });
       queueSync();
-      return record;
+      const resolved = listResolvedDnsOverrides().find((entry) => entry.id === record.id);
+      if (!resolved) {
+        throw new Error("Resolved DNS override was not found after create");
+      }
+      return resolved;
     },
   );
 
@@ -3354,10 +3380,52 @@ export function registerIpcHandlers(
         hostname: record.hostname,
         ...(isLinkedDnsOverrideRecord(record)
           ? { portForwardRuleId: record.portForwardRuleId }
-          : { address: record.address, enabled: record.enabled }),
+          : { address: record.address }),
       });
       queueSync();
-      return record;
+      const resolved = listResolvedDnsOverrides().find((entry) => entry.id === record.id);
+      if (!resolved) {
+        throw new Error("Resolved DNS override was not found after update");
+      }
+      return resolved;
+    },
+  );
+
+  ipcMain.handle(
+    ipcChannels.dnsOverrides.setStaticActive,
+    async (_event, id: string, active: boolean) => {
+      const record = dnsOverrides.getById(id);
+      if (!record || !isStaticDnsOverrideRecord(record)) {
+        throw new Error("Static DNS override not found");
+      }
+
+      const previousActive = hostsOverrideManager.getActiveStaticOverrideIds().has(id);
+      hostsOverrideManager.setStaticOverrideActive(id, active);
+      try {
+        await rewriteActiveDnsOverrides();
+      } catch (error) {
+        hostsOverrideManager.setStaticOverrideActive(id, previousActive);
+        throw error;
+      }
+
+      activityLogs.append(
+        "info",
+        "audit",
+        active ? "Static DNS override를 활성화했습니다." : "Static DNS override를 비활성화했습니다.",
+        {
+          dnsOverrideId: record.id,
+          type: record.type,
+          hostname: record.hostname,
+          address: record.address,
+          active,
+        },
+      );
+
+      const resolved = listResolvedDnsOverrides().find((entry) => entry.id === record.id);
+      if (!resolved) {
+        throw new Error("Resolved DNS override was not found after toggle");
+      }
+      return resolved;
     },
   );
 
@@ -3375,13 +3443,14 @@ export function registerIpcHandlers(
       }
       syncOutbox.upsertDeletion("dnsOverrides", id);
       if (current) {
+        hostsOverrideManager.removeStaticOverrideState(current.id);
         activityLogs.append("warn", "audit", "DNS override를 삭제했습니다.", {
           dnsOverrideId: current.id,
           type: current.type,
           hostname: current.hostname,
           ...(isLinkedDnsOverrideRecord(current)
             ? { portForwardRuleId: current.portForwardRuleId }
-            : { address: current.address, enabled: current.enabled }),
+            : { address: current.address }),
         });
       }
       queueSync();

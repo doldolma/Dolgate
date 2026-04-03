@@ -391,7 +391,7 @@ function normalizeDnsOverrideRecord(value: unknown): DnsOverrideRecord | null {
     return record;
   }
 
-  if (typeof value.address !== 'string' || typeof value.enabled !== 'boolean') {
+  if (typeof value.address !== 'string') {
     return null;
   }
   const address = value.address.trim();
@@ -404,7 +404,6 @@ function normalizeDnsOverrideRecord(value: unknown): DnsOverrideRecord | null {
     type: 'static',
     hostname,
     address,
-    enabled: value.enabled,
     createdAt: value.createdAt,
     updatedAt: value.updatedAt
   };

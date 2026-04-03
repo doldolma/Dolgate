@@ -26,7 +26,7 @@ import type {
   ConnectionProgressStage,
   DesktopApi,
   DnsOverrideDraft,
-  DnsOverrideRecord,
+  DnsOverrideResolvedRecord,
   DirectoryListing,
   FileEntry,
   GroupRecord,
@@ -517,7 +517,7 @@ export interface AppState {
   activeContainerHostId: string | null;
   tabStrip: DynamicTabStripItem[];
   portForwards: PortForwardRuleRecord[];
-  dnsOverrides: DnsOverrideRecord[];
+  dnsOverrides: DnsOverrideResolvedRecord[];
   portForwardRuntimes: PortForwardRuntimeRecord[];
   knownHosts: KnownHostRecord[];
   activityLogs: ActivityLogRecord[];
@@ -557,6 +557,7 @@ export interface AppState {
   refreshHostCatalog: () => Promise<void>;
   refreshOperationalData: () => Promise<void>;
   refreshSyncedWorkspaceData: () => Promise<void>;
+  clearSyncedWorkspaceData: () => void;
   createGroup: (name: string) => Promise<void>;
   removeGroup: (path: string, mode: GroupRemoveMode) => Promise<void>;
   saveHost: (
@@ -669,6 +670,7 @@ export interface AppState {
     draft: PortForwardDraft,
   ) => Promise<void>;
   saveDnsOverride: (overrideId: string | null, draft: DnsOverrideDraft) => Promise<void>;
+  setStaticDnsOverrideActive: (overrideId: string, active: boolean) => Promise<void>;
   removeDnsOverride: (overrideId: string) => Promise<void>;
   removePortForward: (ruleId: string) => Promise<void>;
   startPortForward: (ruleId: string) => Promise<void>;
@@ -1141,7 +1143,7 @@ function sortPortForwards(
   );
 }
 
-function sortDnsOverrides(overrides: DnsOverrideRecord[]): DnsOverrideRecord[] {
+function sortDnsOverrides(overrides: DnsOverrideResolvedRecord[]): DnsOverrideResolvedRecord[] {
   return [...overrides].sort(
     (a, b) =>
       a.hostname.localeCompare(b.hostname) ||
@@ -3427,11 +3429,12 @@ export function createAppStore(api: DesktopApi) {
         | ((state: AppState) => AppState | Partial<AppState>),
     ) => void,
   ) => {
-    const [hosts, groups, snapshot, knownHosts, keychainEntries, settings] =
+    const [hosts, groups, snapshot, dnsOverrides, knownHosts, keychainEntries, settings] =
       await Promise.all([
         api.hosts.list(),
         api.groups.list(),
         api.portForwards.list(),
+        api.dnsOverrides.list(),
         api.knownHosts.list(),
         api.keychain.list(),
         api.settings.get(),
@@ -3441,6 +3444,7 @@ export function createAppStore(api: DesktopApi) {
       hosts: sortHosts(hosts),
       groups: sortGroups(groups),
       portForwards: sortPortForwards(snapshot.rules),
+      dnsOverrides: sortDnsOverrides(dnsOverrides),
       portForwardRuntimes: snapshot.runtimes,
       knownHosts: sortKnownHosts(knownHosts),
       keychainEntries: sortKeychainEntries(keychainEntries),
@@ -5064,6 +5068,16 @@ export function createAppStore(api: DesktopApi) {
       refreshSyncedWorkspaceData: async () => {
         await syncSyncedWorkspaceData(set);
       },
+      clearSyncedWorkspaceData: () =>
+        set({
+          hosts: [],
+          groups: [],
+          portForwards: [],
+          dnsOverrides: [],
+          portForwardRuntimes: [],
+          knownHosts: [],
+          keychainEntries: [],
+        }),
       createGroup: async (name) => {
         const next = await api.groups.create(name, get().currentGroupPath);
         set((state) => ({
@@ -6407,6 +6421,15 @@ export function createAppStore(api: DesktopApi) {
           ]),
         }));
         await syncOperationalData(set);
+      },
+      setStaticDnsOverrideActive: async (overrideId, active) => {
+        const next = await api.dnsOverrides.setStaticActive(overrideId, active);
+        set((state) => ({
+          dnsOverrides: sortDnsOverrides([
+            ...state.dnsOverrides.filter((override) => override.id !== next.id),
+            next,
+          ]),
+        }));
       },
       removeDnsOverride: async (overrideId) => {
         await api.dnsOverrides.remove(overrideId);

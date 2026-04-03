@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { DnsOverrideRecord, HostRecord, PortForwardDraft, PortForwardRuleRecord, PortForwardRuntimeRecord } from '@shared';
+import type { DnsOverrideResolvedRecord, HostRecord, PortForwardDraft, PortForwardRuleRecord, PortForwardRuntimeRecord } from '@shared';
 import type {
   PendingContainersInteractiveAuth,
   PendingPortForwardInteractiveAuth
@@ -108,7 +108,7 @@ const rules: PortForwardRuleRecord[] = [
   }
 ];
 
-const dnsOverrides: DnsOverrideRecord[] = [];
+const dnsOverrides: DnsOverrideResolvedRecord[] = [];
 
 const runtimes: PortForwardRuntimeRecord[] = [];
 let containerConnectionProgressListener: ((event: {
@@ -211,13 +211,14 @@ function renderPanel(options?: {
   onSave?: (ruleId: string | null, draft: PortForwardDraft) => Promise<void>;
   runtimes?: PortForwardRuntimeRecord[];
   rules?: PortForwardRuleRecord[];
-  dnsOverrides?: DnsOverrideRecord[];
+  dnsOverrides?: DnsOverrideResolvedRecord[];
   containerTabs?: any[];
   discoveryInteractiveAuth?: PendingContainersInteractiveAuth | null;
   interactiveAuth?: PendingPortForwardInteractiveAuth | null;
 }) {
   const onSave = options?.onSave ?? vi.fn().mockResolvedValue(undefined);
   const onSaveDnsOverride = vi.fn().mockResolvedValue(undefined);
+  const onSetStaticDnsOverrideActive = vi.fn().mockResolvedValue(undefined);
   const onRemove = vi.fn().mockResolvedValue(undefined);
   const onRemoveDnsOverride = vi.fn().mockResolvedValue(undefined);
   const onStart = vi.fn().mockResolvedValue(undefined);
@@ -233,6 +234,7 @@ function renderPanel(options?: {
       discoveryInteractiveAuth={options?.discoveryInteractiveAuth ?? null}
       onSave={onSave}
       onSaveDnsOverride={onSaveDnsOverride}
+      onSetStaticDnsOverrideActive={onSetStaticDnsOverrideActive}
       onRemove={onRemove}
       onRemoveDnsOverride={onRemoveDnsOverride}
       onStart={onStart}
@@ -247,6 +249,7 @@ function renderPanel(options?: {
     ...view,
     onSave,
     onSaveDnsOverride,
+    onSetStaticDnsOverrideActive,
     onRemove,
     onRemoveDnsOverride,
     onStart,
@@ -396,14 +399,14 @@ describe('PortForwardingPanel dialog', () => {
   });
 
   it('renders and toggles static DNS overrides', () => {
-    const { onSaveDnsOverride } = renderPanel({
+    const { onSetStaticDnsOverrideActive } = renderPanel({
       dnsOverrides: [
         {
           id: 'dns-static-1',
           type: 'static',
           hostname: 'api.internal',
           address: '10.0.0.20',
-          enabled: true,
+          status: 'active',
           createdAt: '2025-01-01T00:00:00.000Z',
           updatedAt: '2025-01-01T00:00:00.000Z',
         },
@@ -418,12 +421,7 @@ describe('PortForwardingPanel dialog', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Off' }));
 
-    expect(onSaveDnsOverride).toHaveBeenCalledWith('dns-static-1', {
-      type: 'static',
-      hostname: 'api.internal',
-      address: '10.0.0.20',
-      enabled: false,
-    });
+    expect(onSetStaticDnsOverrideActive).toHaveBeenCalledWith('dns-static-1', false);
   });
 
   it('shows ephemeral ECS service tunnels in the ECS Task tab', () => {

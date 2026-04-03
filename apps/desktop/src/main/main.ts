@@ -2,6 +2,7 @@ import { app, BrowserWindow } from 'electron';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
+import { isStaticDnsOverrideRecord } from '@shared';
 import type { DesktopWindowState } from '@shared';
 import {
   ActivityLogRepository,
@@ -113,28 +114,26 @@ if (termiusHelperArgIndex >= 0) {
   let pendingAuthCallbackUrl: string | null = null;
 
   const rewriteDnsOverridesForCurrentState = async () => {
+    const overrides = dnsOverrideRepository.list();
+    hostsOverrideManager.pruneStaticOverrideStates(
+      overrides.filter(isStaticDnsOverrideRecord).map((record) => record.id),
+    );
     await hostsOverrideManager.rewrite(
       collectActiveDnsOverrideEntries(
-        dnsOverrideRepository.list(),
+        overrides,
         portForwardRepository.list(),
-        coreManager.listPortForwardRuntimes()
+        coreManager.listPortForwardRuntimes(),
+        hostsOverrideManager.getActiveStaticOverrideIds(),
       )
     );
   };
   const restoreDnsOverridesForStartup = async () => {
-    const staticEntries = collectActiveDnsOverrideEntries(
-      dnsOverrideRepository.list(),
-      [],
-      [],
-    );
     const hasStaleManagedBlock = await hostsOverrideManager.hasManagedHostsBlock();
-    if (!hasStaleManagedBlock && staticEntries.length === 0) {
+    if (!hasStaleManagedBlock) {
       return;
     }
+    hostsOverrideManager.clearStaticOverrideStates();
     await hostsOverrideManager.clear();
-    if (staticEntries.length > 0) {
-      await hostsOverrideManager.rewrite(staticEntries);
-    }
   };
   syncService.setOnAppliedSnapshot(() => {
     void rewriteDnsOverridesForCurrentState().catch(() => undefined);
@@ -310,6 +309,7 @@ if (termiusHelperArgIndex >= 0) {
     await sessionShareService.shutdown();
     await awsSsmTunnelService.shutdown();
     await coreManager.shutdown();
+    hostsOverrideManager.clearStaticOverrideStates();
     await rewriteDnsOverridesForCurrentState().catch(() => undefined);
     if (context.purgeSyncedCache) {
       await syncService.purgeSyncedCache();

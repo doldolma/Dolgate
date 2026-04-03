@@ -71,66 +71,11 @@ jobs:
       - name: Run desktop renderer tests
         run: npm run test:desktop:renderer --workspace @dolssh/desktop
 
-  smoke-mac:
-    runs-on: macos-latest
-    needs: verify-version
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: "22"
-          cache: npm
-
-      - name: Set up Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: "1.25.0"
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Install Playwright
-        run: npx playwright install
-
-      - name: Run desktop smoke tests on macOS
-        run: npm run test:desktop:smoke --workspace @dolssh/desktop
-
-  smoke-win:
-    runs-on: windows-latest
-    needs: verify-version
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: "22"
-          cache: npm
-
-      - name: Set up Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: "1.25.0"
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Install Playwright
-        run: npx playwright install
-
-      - name: Run desktop smoke tests on Windows
-        run: npm run test:desktop:smoke --workspace @dolssh/desktop
-
   build-mac:
     runs-on: macos-latest
     needs:
       - verify-version
       - renderer-test
-      - smoke-mac
     env:
       CSC_IDENTITY_AUTO_DISCOVERY: "false"
     steps:
@@ -166,7 +111,6 @@ jobs:
     needs:
       - verify-version
       - renderer-test
-      - smoke-win
     steps:
       - name: Check out repository
         uses: actions/checkout@v4

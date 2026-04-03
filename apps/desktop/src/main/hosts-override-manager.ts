@@ -8,6 +8,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { app } from 'electron';
 import {
+  type DnsOverrideResolvedRecord,
   isDnsOverrideEligiblePortForwardRule,
   isLinkedDnsOverrideRecord,
   isLoopbackBindAddress,
@@ -77,6 +78,7 @@ export function collectActiveDnsOverrideEntries(
   overrides: DnsOverrideRecord[],
   rules: PortForwardRuleRecord[],
   runtimes: PortForwardRuntimeRecord[],
+  activeStaticOverrideIds: ReadonlySet<string> = new Set(),
 ): ActiveDnsOverrideEntry[] {
   const ruleMap = new Map(rules.map((rule) => [rule.id, rule]));
   const runtimeMap = new Map(runtimes.map((runtime) => [runtime.ruleId, runtime]));
@@ -88,7 +90,7 @@ export function collectActiveDnsOverrideEntries(
     let address = '';
 
     if (isStaticDnsOverrideRecord(override)) {
-      if (!override.enabled) {
+      if (!activeStaticOverrideIds.has(override.id)) {
         continue;
       }
       address = override.address.trim();
@@ -119,6 +121,26 @@ export function collectActiveDnsOverrideEntries(
   }
 
   return entries.sort((left, right) => left.hostname.localeCompare(right.hostname) || left.address.localeCompare(right.address));
+}
+
+export function resolveDnsOverrideRecords(
+  overrides: DnsOverrideRecord[],
+  rules: PortForwardRuleRecord[],
+  runtimes: PortForwardRuntimeRecord[],
+  activeStaticOverrideIds: ReadonlySet<string> = new Set(),
+): DnsOverrideResolvedRecord[] {
+  const activeKeys = new Set(
+    collectActiveDnsOverrideEntries(overrides, rules, runtimes, activeStaticOverrideIds).map(
+      (entry) => `${entry.hostname}\u0000${entry.ruleId}`,
+    ),
+  );
+
+  return overrides.map((override) => ({
+    ...override,
+    status: activeKeys.has(`${override.hostname.trim().toLowerCase()}\u0000${isLinkedDnsOverrideRecord(override) ? override.portForwardRuleId : override.id}`)
+      ? 'active'
+      : 'inactive',
+  }));
 }
 
 export function buildHostsHelperPayload(entries: ActiveDnsOverrideEntry[]): string {
@@ -372,6 +394,7 @@ export class HostsOverrideManager {
   private queue = Promise.resolve();
   private session: HelperSession | null = null;
   private readyPromise: Promise<void> | null = null;
+  private readonly activeStaticOverrideIds = new Set<string>();
   private readonly hostsFilePath: string;
   private readonly helperPath: string;
   private readonly platform: NodeJS.Platform;
@@ -406,6 +429,35 @@ export class HostsOverrideManager {
     await this.ensureReadyInternal();
   }
 
+  getActiveStaticOverrideIds(): ReadonlySet<string> {
+    return this.activeStaticOverrideIds;
+  }
+
+  setStaticOverrideActive(id: string, active: boolean): void {
+    if (active) {
+      this.activeStaticOverrideIds.add(id);
+      return;
+    }
+    this.activeStaticOverrideIds.delete(id);
+  }
+
+  removeStaticOverrideState(id: string): void {
+    this.activeStaticOverrideIds.delete(id);
+  }
+
+  clearStaticOverrideStates(): void {
+    this.activeStaticOverrideIds.clear();
+  }
+
+  pruneStaticOverrideStates(validIds: Iterable<string>): void {
+    const next = new Set(validIds);
+    for (const id of this.activeStaticOverrideIds) {
+      if (!next.has(id)) {
+        this.activeStaticOverrideIds.delete(id);
+      }
+    }
+  }
+
   rewrite(entries: ActiveDnsOverrideEntry[]): Promise<void> {
     return this.enqueue(async () => {
       if (entries.length === 0) {
@@ -432,6 +484,7 @@ export class HostsOverrideManager {
   shutdown(): Promise<void> {
     return this.enqueue(async () => {
       const shouldClearHosts = this.session !== null || (await this.shouldTouchHostsFile());
+      this.clearStaticOverrideStates();
       if (!shouldClearHosts) {
         return;
       }

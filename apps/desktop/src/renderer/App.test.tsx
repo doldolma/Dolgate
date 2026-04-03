@@ -118,6 +118,7 @@ function createMockStoreState(overrides: Record<string, unknown> = {}) {
     activeContainerHostId: null,
     tabStrip: [{ kind: 'session', sessionId: 'session-1' }],
     portForwards: [],
+    dnsOverrides: [],
     portForwardRuntimes: [],
     knownHosts: [],
     activityLogs: [],
@@ -164,6 +165,7 @@ function createMockStoreState(overrides: Record<string, unknown> = {}) {
     bootstrap: fn(),
     refreshHostCatalog: fn(),
     refreshSyncedWorkspaceData: fn(),
+    clearSyncedWorkspaceData: fn(),
     setSearchQuery: fn(),
     activateHome: fn(),
     activateSession: fn(),
@@ -212,6 +214,9 @@ function createMockStoreState(overrides: Record<string, unknown> = {}) {
     activateSftp: fn(),
     updateSettings: fn(),
     savePortForward: fn(),
+    saveDnsOverride: fn(),
+    setStaticDnsOverrideActive: fn(),
+    removeDnsOverride: fn(),
     removePortForward: fn(),
     startPortForward: fn(),
     stopPortForward: fn(),
@@ -728,6 +733,7 @@ describe('App integration', () => {
       });
     });
 
+    expect(mocks.storeState.clearSyncedWorkspaceData).toHaveBeenCalledTimes(1);
     expect(await screen.findByTestId('login-gate')).toHaveTextContent('unauthenticated');
   });
 
