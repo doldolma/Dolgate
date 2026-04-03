@@ -158,4 +158,43 @@ describe('PortForwardLifecycleLogger', () => {
     expect(lifecycleRecords[1]?.metadata).toMatchObject({ status: 'closed' });
     expect(lifecycleRecords[3]?.metadata).toMatchObject({ status: 'closed' });
   });
+
+  it('closes an existing lifecycle row when shutdown emits a synthetic stopped event', () => {
+    const upsert = vi.fn<(record: ActivityLogRecord) => ActivityLogRecord>().mockImplementation((record) => record);
+    const logger = new PortForwardLifecycleLogger(
+      { upsert },
+      { getById: vi.fn(() => createRule({ transport: 'ssh', mode: 'local' })) },
+      { getById: vi.fn(() => createHost({ label: 'ssh-host' })) },
+      () => '2026-04-03T00:00:00.000Z',
+    );
+
+    logger.handleEvent(
+      createEvent('starting', {
+        transport: 'ssh',
+        updatedAt: '2026-04-03T00:00:00.000Z',
+      }),
+    );
+    logger.handleEvent(
+      createEvent('running', {
+        transport: 'ssh',
+        updatedAt: '2026-04-03T00:00:02.000Z',
+        startedAt: '2026-04-03T00:00:00.000Z',
+      }),
+    );
+    logger.handleEvent(
+      createEvent('stopped', {
+        transport: 'ssh',
+        updatedAt: '2026-04-03T00:00:10.000Z',
+      }),
+    );
+
+    expect(upsert).toHaveBeenCalledTimes(2);
+    const [runningRecord, stoppedRecord] = upsert.mock.calls.map(([record]) => record);
+    expect(stoppedRecord.id).toBe(runningRecord.id);
+    expect(stoppedRecord.metadata).toMatchObject({
+      status: 'closed',
+      stoppedAt: '2026-04-03T00:00:10.000Z',
+      endReason: null,
+    });
+  });
 });
