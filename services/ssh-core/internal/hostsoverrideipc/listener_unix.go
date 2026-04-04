@@ -4,14 +4,18 @@ package hostsoverrideipc
 
 import (
 	"context"
+	"fmt"
 	"net"
 	"os"
+	"runtime"
 )
 
 type cleanupListener struct {
 	net.Listener
 	endpoint string
 }
+
+const darwinUnixSocketPathMaxLength = 103
 
 func (l *cleanupListener) Close() error {
 	err := l.Listener.Close()
@@ -20,10 +24,18 @@ func (l *cleanupListener) Close() error {
 }
 
 func Listen(endpoint string) (net.Listener, error) {
+	if runtime.GOOS == "darwin" && len(endpoint) > darwinUnixSocketPathMaxLength {
+		return nil, fmt.Errorf(
+			"unix socket path too long for darwin (%d > %d): %s",
+			len(endpoint),
+			darwinUnixSocketPathMaxLength,
+			endpoint,
+		)
+	}
 	_ = os.Remove(endpoint)
 	listener, err := net.Listen("unix", endpoint)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("listen unix %s: %w", endpoint, err)
 	}
 	_ = os.Chmod(endpoint, 0o600)
 	return &cleanupListener{Listener: listener, endpoint: endpoint}, nil

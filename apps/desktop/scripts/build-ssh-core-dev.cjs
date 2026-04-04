@@ -2,12 +2,19 @@ const path = require("node:path");
 const { spawnSync } = require("node:child_process");
 
 function main() {
-  if (process.platform !== "win32") {
+  const scriptPath = path.join(__dirname, "build-ssh-core.cjs");
+  const target =
+    process.platform === "win32"
+      ? ["win32", "x64"]
+      : process.platform === "darwin"
+        ? ["darwin", "universal"]
+        : null;
+
+  if (!target) {
     return;
   }
 
-  const scriptPath = path.join(__dirname, "build-ssh-core.cjs");
-  const result = spawnSync(process.execPath, [scriptPath, "win32", "x64"], {
+  const result = spawnSync(process.execPath, [scriptPath, ...target], {
     stdio: "inherit",
   });
 

@@ -48,6 +48,59 @@ jobs:
           console.log(`Desktop version ${desktopVersion} matches ${tagName}`);
           NODE
 
+  ssh-core-test:
+    name: ssh-core test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    needs: verify-version
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - macos-latest
+          - windows-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.25.0"
+
+      - name: Run ssh-core tests
+        working-directory: services/ssh-core
+        run: go test ./... -cover
+
+      - name: Set up Node.js
+        if: matrix.os != 'ubuntu-latest'
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install dependencies
+        if: matrix.os != 'ubuntu-latest'
+        run: npm ci
+
+      - name: Prepare desktop dev ssh-core binaries
+        if: matrix.os != 'ubuntu-latest'
+        run: npm run prepare:ssh-core:dev --workspace @dolssh/desktop
+
+      - name: Verify macOS desktop helper binaries
+        if: matrix.os == 'macos-latest'
+        run: |
+          test -f apps/desktop/release/resources/darwin/universal/bin/ssh-core
+          test -f apps/desktop/release/resources/darwin/universal/bin/dolgate-dns-helper
+
+      - name: Verify Windows desktop helper binaries
+        if: matrix.os == 'windows-latest'
+        shell: bash
+        run: |
+          test -f apps/desktop/release/resources/win32/x64/bin/ssh-core.exe
+          test -f apps/desktop/release/resources/win32/x64/bin/dolgate-dns-helper.exe
+          test -f apps/desktop/release/resources/win32/x64/bin/aws-conpty-wrapper.exe
+
   renderer-test:
     runs-on: ubuntu-latest
     needs: verify-version
@@ -77,6 +130,7 @@ jobs:
     needs:
       - verify-version
       - renderer-test
+      - ssh-core-test
     env:
       CSC_IDENTITY_AUTO_DISCOVERY: "false"
     steps:
@@ -112,6 +166,7 @@ jobs:
     needs:
       - verify-version
       - renderer-test
+      - ssh-core-test
     steps:
       - name: Check out repository
         uses: actions/checkout@v4

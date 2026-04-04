@@ -147,5 +147,5 @@ func buildTestEndpoint(tempDir string) string {
 	if runtime.GOOS == "windows" {
 		return fmt.Sprintf(`\\.\pipe\dolgate-dns-helper-test-%d`, time.Now().UnixNano())
 	}
-	return filepath.Join(tempDir, "dolgate-dns-helper.sock")
+	return filepath.Join(os.TempDir(), fmt.Sprintf("dgdns-test-%d.sock", time.Now().UnixNano()))
 }
