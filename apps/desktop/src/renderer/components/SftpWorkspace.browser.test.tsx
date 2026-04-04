@@ -1,5 +1,5 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_SFTP_BROWSER_COLUMN_WIDTHS } from "@shared";
 import type {
   AppSettings,
@@ -12,7 +12,79 @@ import type {
   SftpPaneState,
   SftpState,
 } from "../store/createAppStore";
+import { resolveResponsiveCardGridLayout } from "../lib/responsive-card-grid";
 import { SftpWorkspace } from "./SftpWorkspace";
+
+const resizeObserverInstances: MockResizeObserver[] = [];
+
+function getObservedWidth(element: Element): number {
+  const width = Number((element as HTMLElement).dataset.testWidth ?? "0");
+  return Number.isFinite(width) ? width : 0;
+}
+
+function createObservedRect(element: Element): DOMRectReadOnly {
+  const width = getObservedWidth(element);
+  return {
+    width,
+    height: 0,
+    top: 0,
+    right: width,
+    bottom: 0,
+    left: 0,
+    x: 0,
+    y: 0,
+    toJSON() {
+      return {};
+    },
+  } as DOMRectReadOnly;
+}
+
+class MockResizeObserver {
+  observedElements = new Set<Element>();
+
+  constructor(private readonly callback: ResizeObserverCallback) {
+    resizeObserverInstances.push(this);
+  }
+
+  observe = (element: Element) => {
+    this.observedElements.add(element);
+    this.callback(
+      [{ target: element, contentRect: createObservedRect(element) } as ResizeObserverEntry],
+      this as unknown as ResizeObserver,
+    );
+  };
+
+  unobserve = (element: Element) => {
+    this.observedElements.delete(element);
+  };
+
+  disconnect = () => {
+    this.observedElements.clear();
+  };
+
+  notify(element: Element) {
+    this.callback(
+      [{ target: element, contentRect: createObservedRect(element) } as ResizeObserverEntry],
+      this as unknown as ResizeObserver,
+    );
+  }
+}
+
+function setObservedWidth(element: HTMLElement, width: number) {
+  element.dataset.testWidth = String(width);
+  Object.defineProperty(element, "getBoundingClientRect", {
+    configurable: true,
+    value: () => createObservedRect(element),
+  });
+}
+
+function triggerResize(element: HTMLElement) {
+  resizeObserverInstances.forEach((instance) => {
+    if (instance.observedElements.has(element)) {
+      instance.notify(element);
+    }
+  });
+}
 
 const baseSettings: AppSettings = {
   theme: "system",
@@ -32,6 +104,16 @@ const baseSettings: AppSettings = {
   dismissedUpdateVersion: null,
   updatedAt: "2026-03-26T00:00:00.000Z",
 };
+
+beforeEach(() => {
+  resizeObserverInstances.length = 0;
+  vi.stubGlobal("ResizeObserver", MockResizeObserver);
+});
+
+afterEach(() => {
+  resizeObserverInstances.length = 0;
+  vi.unstubAllGlobals();
+});
 
 function createEntry(name: string, pathPrefix: string): FileEntry {
   return {
@@ -330,6 +412,62 @@ describe("SftpWorkspace column resizing", () => {
     );
   });
 
+  it("does not re-enter a render loop when equivalent column widths arrive in a new settings object", () => {
+    const { container, rerender } = renderWorkspace();
+
+    rerender(
+      <SftpWorkspace
+        hosts={[]}
+        groups={[]}
+        sftp={createSftpState()}
+        settings={{
+          ...baseSettings,
+          sftpBrowserColumnWidths: { ...DEFAULT_SFTP_BROWSER_COLUMN_WIDTHS },
+        }}
+        interactiveAuth={null}
+        onActivatePaneSource={vi.fn().mockResolvedValue(undefined)}
+        onDisconnectPane={vi.fn().mockResolvedValue(undefined)}
+        onPaneFilterChange={vi.fn()}
+        onHostSearchChange={vi.fn()}
+        onNavigateHostGroup={vi.fn()}
+        onSelectHost={vi.fn()}
+        onConnectHost={vi.fn().mockResolvedValue(undefined)}
+        onOpenEntry={vi.fn().mockResolvedValue(undefined)}
+        onRefreshPane={vi.fn().mockResolvedValue(undefined)}
+        onNavigateBack={vi.fn().mockResolvedValue(undefined)}
+        onNavigateForward={vi.fn().mockResolvedValue(undefined)}
+        onNavigateParent={vi.fn().mockResolvedValue(undefined)}
+        onNavigateBreadcrumb={vi.fn().mockResolvedValue(undefined)}
+        onSelectEntry={vi.fn()}
+        onCreateDirectory={vi.fn().mockResolvedValue(undefined)}
+        onRenameSelection={vi.fn().mockResolvedValue(undefined)}
+        onChangeSelectionPermissions={vi.fn().mockResolvedValue(undefined)}
+        onDeleteSelection={vi.fn().mockResolvedValue(undefined)}
+        onDownloadSelection={vi.fn().mockResolvedValue(undefined)}
+        onPrepareTransfer={vi.fn().mockResolvedValue(undefined)}
+        onPrepareExternalTransfer={vi.fn().mockResolvedValue(undefined)}
+        onTransferSelectionToPane={vi.fn().mockResolvedValue(undefined)}
+        onResolveConflict={vi.fn().mockResolvedValue(undefined)}
+        onDismissConflict={vi.fn()}
+        onCancelTransfer={vi.fn().mockResolvedValue(undefined)}
+        onRetryTransfer={vi.fn().mockResolvedValue(undefined)}
+        onDismissTransfer={vi.fn()}
+        onRespondInteractiveAuth={vi.fn().mockResolvedValue(undefined)}
+        onReopenInteractiveAuthUrl={vi.fn().mockResolvedValue(undefined)}
+        onClearInteractiveAuth={vi.fn()}
+        onUpdateSettings={vi.fn().mockResolvedValue(undefined)}
+      />,
+    );
+
+    expect(queryColumnWidths(container, "name")).toEqual(["360px", "360px"]);
+    expect(queryColumnWidths(container, "dateModified")).toEqual([
+      "168px",
+      "168px",
+    ]);
+    expect(queryColumnWidths(container, "size")).toEqual(["96px", "96px"]);
+    expect(queryColumnWidths(container, "kind")).toEqual(["96px", "96px"]);
+  });
+
   it("keeps row selection working after adding resize handles", () => {
     const { onSelectEntry } = renderWorkspace();
 
@@ -405,6 +543,76 @@ describe("SftpWorkspace column resizing", () => {
     await waitFor(() =>
       expect(onConnectHost).toHaveBeenCalledWith("right", "aws-1"),
     );
+  });
+
+  it("applies the shared responsive card grid sizing in the host picker", async () => {
+    const sftp = createSftpState();
+    sftp.rightPane = createHostPickerPane();
+
+    renderWorkspace({
+      hosts: connectableHosts,
+      groups: hostGroups,
+      sftp,
+    });
+
+    const results = screen.getByLabelText("Available hosts for right pane");
+    const groupGrid = results.querySelector(".group-grid") as HTMLElement;
+    const hostGrid = results.querySelector(".host-grid") as HTMLElement;
+
+    setObservedWidth(groupGrid, 1200);
+    triggerResize(groupGrid);
+    setObservedWidth(hostGrid, 1200);
+    triggerResize(hostGrid);
+
+    const expectedGroupLayout = resolveResponsiveCardGridLayout({
+      containerWidth: 1200,
+      itemCount: 1,
+      minWidth: 220,
+      maxWidth: 280,
+      gap: 12,
+    });
+    const expectedHostLayout = resolveResponsiveCardGridLayout({
+      containerWidth: 1200,
+      itemCount: 3,
+      minWidth: 220,
+      maxWidth: 460,
+      gap: 12,
+    });
+
+    await waitFor(() => {
+      expect(groupGrid.style.gridTemplateColumns).toBe(
+        expectedGroupLayout.gridTemplateColumns,
+      );
+      expect(groupGrid.style.justifyContent).toBe("start");
+      expect(hostGrid.style.gridTemplateColumns).toBe(
+        expectedHostLayout.gridTemplateColumns,
+      );
+    });
+
+    expect(screen.getByText("Prod SSH")).toBeTruthy();
+    expect(screen.getByText("Warpgate Prod")).toBeTruthy();
+  });
+
+  it("navigates SFTP host groups only on double click, matching Home", () => {
+    const sftp = createSftpState();
+    sftp.rightPane = createHostPickerPane();
+    const onNavigateHostGroup = vi.fn();
+
+    const { container } = renderWorkspace({
+      hosts: connectableHosts,
+      groups: hostGroups,
+      sftp,
+      onNavigateHostGroup,
+    });
+
+    const groupCard = container.querySelector(".group-grid .group-card");
+    expect(groupCard).toBeTruthy();
+
+    fireEvent.click(groupCard as HTMLElement);
+    expect(onNavigateHostGroup).not.toHaveBeenCalled();
+
+    fireEvent.doubleClick(groupCard as HTMLElement);
+    expect(onNavigateHostGroup).toHaveBeenCalledWith("right", "Production");
   });
 
   it("shows a disabled reason for unsupported AWS Windows hosts", () => {

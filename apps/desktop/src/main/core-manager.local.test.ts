@@ -760,4 +760,53 @@ describe("CoreManager local shell sessions", () => {
       hasReplay: true,
     });
   });
+
+  it("finalizes connected remote lifecycle rows during shutdown", async () => {
+    const logs: ActivityLogRecord[] = [];
+    const fakeProcess = createFakeChildProcess();
+    spawnMock.mockReturnValue(fakeProcess.child);
+
+    const manager = new CoreManager(undefined, (record) => {
+      const currentIndex = logs.findIndex((entry) => entry.id === record.id);
+      if (currentIndex >= 0) {
+        logs[currentIndex] = record;
+        return;
+      }
+      logs.push(record);
+    });
+
+    const { sessionId } = await manager.connect({
+      host: "nas.example.com",
+      port: 22,
+      username: "ubuntu",
+      authType: "password",
+      password: "secret",
+      trustedHostKeyBase64: "trusted",
+      cols: 120,
+      rows: 32,
+      title: "NAS",
+      hostId: "host-1",
+      hostLabel: "nas",
+      transport: "ssh",
+    });
+
+    fakeProcess.emitControl({
+      type: "connected",
+      sessionId,
+      payload: { status: "connected" },
+    });
+
+    await manager.shutdown();
+
+    expect(logs).toHaveLength(1);
+    expect(logs[0]?.kind).toBe("session-lifecycle");
+    expect(logs[0]?.metadata).toMatchObject({
+      sessionId,
+      status: "closed",
+      disconnectReason: "앱 종료로 세션이 정리되었습니다.",
+    });
+    const metadata = logs[0]?.metadata as unknown as SessionLifecycleLogMetadata;
+    expect(metadata.connectedAt).toBeTypeOf("string");
+    expect(metadata.disconnectedAt).toBeTypeOf("string");
+  });
 });

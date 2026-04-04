@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { LinkedHostSummary } from '@shared';
 import { DialogBackdrop } from './DialogBackdrop';
+import { Button, IconButton, Input, ModalBody, ModalFooter, ModalHeader, ModalShell, SectionLabel, SelectField } from '../ui';
 
 export type SecretEditMode = 'update-shared' | 'clone-for-host';
 export type SecretCredentialKind = 'password' | 'passphrase';
@@ -60,36 +61,28 @@ export function SecretEditDialog({ request, onClose, onSubmit }: SecretEditDialo
 
   return (
     <DialogBackdrop onDismiss={onClose} dismissDisabled={isSubmitting}>
-      <div className="modal-card secret-edit-dialog" role="dialog" aria-modal="true" aria-labelledby="secret-edit-title">
-        <div className="modal-card__header">
+      <ModalShell className="secret-edit-dialog" role="dialog" aria-modal="true" aria-labelledby="secret-edit-title" size="lg">
+        <ModalHeader>
           <div>
-            <div className="eyebrow">Secret</div>
+            <SectionLabel>Secret</SectionLabel>
             <h3 id="secret-edit-title">{credentialLabel} 변경</h3>
           </div>
-          <button type="button" className="icon-button" onClick={onClose} aria-label="Close secret editor">
+          <IconButton type="button" onClick={onClose} aria-label="Close secret editor">
             ×
-          </button>
-        </div>
-        <div className="modal-card__body">
+          </IconButton>
+        </ModalHeader>
+        <ModalBody>
           <p className="secret-edit-dialog__description">
             <strong>{request.label}</strong> secret 항목의 {credentialLabel.toLowerCase()}를 새 값으로 바꿉니다. 현재 값은 표시하지 않습니다.
           </p>
 
           <div className="secret-edit-dialog__scope">
-            <button
-              type="button"
-              className={`secondary-button ${mode === 'clone-for-host' ? 'active' : ''}`}
-              onClick={() => setMode('clone-for-host')}
-            >
+            <Button variant="secondary" active={mode === 'clone-for-host'} onClick={() => setMode('clone-for-host')}>
               이 호스트만 새 secret으로 분리
-            </button>
-            <button
-              type="button"
-              className={`secondary-button ${mode === 'update-shared' ? 'active' : ''}`}
-              onClick={() => setMode('update-shared')}
-            >
+            </Button>
+            <Button variant="secondary" active={mode === 'update-shared'} onClick={() => setMode('update-shared')}>
               공유 항목 전체 변경
-            </button>
+            </Button>
           </div>
 
           {mode === 'update-shared' ? (
@@ -103,19 +96,19 @@ export function SecretEditDialog({ request, onClose, onSubmit }: SecretEditDialo
           {needsHostPicker ? (
             <label className="form-field">
               <span>분리할 호스트</span>
-              <select value={targetHostId} onChange={(event) => setTargetHostId(event.target.value)}>
+              <SelectField value={targetHostId} onChange={(event) => setTargetHostId(event.target.value)}>
                 {request.linkedHosts.map((host) => (
                   <option key={host.id} value={host.id}>
                     {host.label} ({host.username}@{host.hostname})
                   </option>
                 ))}
-              </select>
+              </SelectField>
             </label>
           ) : null}
 
           <label className="form-field">
             <span>새 {credentialLabel}</span>
-            <input
+            <Input
               type="password"
               value={value}
               onChange={(event) => setValue(event.target.value)}
@@ -125,14 +118,13 @@ export function SecretEditDialog({ request, onClose, onSubmit }: SecretEditDialo
           </label>
 
           {error ? <p className="form-error">{error}</p> : null}
-        </div>
-        <div className="modal-card__footer">
-          <button type="button" className="secondary-button" onClick={onClose} disabled={isSubmitting}>
+        </ModalBody>
+        <ModalFooter>
+          <Button variant="secondary" onClick={onClose} disabled={isSubmitting}>
             취소
-          </button>
-          <button
-            type="button"
-            className="primary-button"
+          </Button>
+          <Button
+            variant="primary"
             disabled={!canSubmit || isSubmitting}
             onClick={async () => {
               setIsSubmitting(true);
@@ -153,9 +145,9 @@ export function SecretEditDialog({ request, onClose, onSubmit }: SecretEditDialo
             }}
           >
             {mode === 'update-shared' ? '공유 secret 저장' : '호스트 전용 secret 생성'}
-          </button>
-        </div>
-      </div>
+          </Button>
+        </ModalFooter>
+      </ModalShell>
     </DialogBackdrop>
   );
 }

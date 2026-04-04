@@ -7,7 +7,21 @@ import type {
   TermiusImportWarning,
   TermiusProbeResult
 } from '@shared';
+import { useTermiusImportController } from '../controllers/useImportControllers';
 import { DialogBackdrop } from './DialogBackdrop';
+import {
+  Button,
+  EmptyState,
+  IconButton,
+  Input,
+  ModalBody,
+  ModalFooter,
+  ModalHeader,
+  ModalShell,
+  NoticeCard,
+  SectionLabel,
+  StatusBadge,
+} from '../ui';
 
 interface TermiusImportDialogProps {
   open: boolean;
@@ -76,6 +90,8 @@ function renderWarningList(warnings: TermiusImportWarning[]) {
 }
 
 export function TermiusImportDialog({ open, onClose, onImported }: TermiusImportDialogProps) {
+  const { discardTermiusSnapshot, importTermiusSelection, probeTermiusLocal } =
+    useTermiusImportController();
   const [probe, setProbe] = useState<TermiusProbeResult | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
@@ -97,12 +113,11 @@ export function TermiusImportDialog({ open, onClose, onImported }: TermiusImport
     setError(null);
     setIsLoading(true);
 
-    void window.dolssh.termius
-      .probeLocal()
+    void probeTermiusLocal()
       .then((result) => {
         if (cancelled) {
           if (result.snapshotId) {
-            void window.dolssh.termius.discardSnapshot(result.snapshotId);
+            void discardTermiusSnapshot(result.snapshotId);
           }
           return;
         }
@@ -130,7 +145,7 @@ export function TermiusImportDialog({ open, onClose, onImported }: TermiusImport
       return;
     }
 
-    void window.dolssh.termius.discardSnapshot(probe.snapshotId);
+    void discardTermiusSnapshot(probe.snapshotId);
   }, [open, probe?.snapshotId]);
 
   const visibleGroups = useMemo(() => filterTermiusImportGroups(probe?.groups ?? [], searchQuery), [probe?.groups, searchQuery]);
@@ -148,18 +163,18 @@ export function TermiusImportDialog({ open, onClose, onImported }: TermiusImport
 
   return (
     <DialogBackdrop onDismiss={onClose} dismissDisabled={isImporting}>
-      <div className="modal-card termius-import-dialog" role="dialog" aria-modal="true" aria-labelledby="termius-import-title">
-        <div className="modal-card__header">
+      <ModalShell className="termius-import-dialog" role="dialog" aria-modal="true" aria-labelledby="termius-import-title">
+        <ModalHeader>
           <div>
-            <div className="section-kicker">Termius</div>
+            <SectionLabel>Termius</SectionLabel>
             <h3 id="termius-import-title">Import from Termius</h3>
           </div>
-          <button type="button" className="icon-button" onClick={onClose} aria-label="Close Termius import dialog">
+          <IconButton onClick={onClose} aria-label="Close Termius import dialog">
             ×
-          </button>
-        </div>
+          </IconButton>
+        </ModalHeader>
 
-        <div className="modal-card__body">
+        <ModalBody>
           {isLoading ? <div className="aws-import-dialog__loading">로컬 Termius 데이터를 읽는 중입니다.</div> : null}
           {error ? <div className="terminal-error-banner">{error}</div> : null}
 
@@ -176,9 +191,13 @@ export function TermiusImportDialog({ open, onClose, onImported }: TermiusImport
           ) : null}
 
           {probe?.message ? (
-            <div className={probe.status === 'ready' ? 'form-note' : 'empty-callout'}>
-              <strong>{probe.message}</strong>
-            </div>
+            probe.status === 'ready' ? (
+              <div className="form-note">
+                <strong>{probe.message}</strong>
+              </div>
+            ) : (
+              <NoticeCard title={probe.message} />
+            )
           ) : null}
 
           {probe?.meta?.warnings ? renderWarningList(probe.meta.warnings) : null}
@@ -188,7 +207,7 @@ export function TermiusImportDialog({ open, onClose, onImported }: TermiusImport
               <div className="termius-import-dialog__controls">
                 <label className="form-field">
                   <span>Search</span>
-                  <input
+                  <Input
                     value={searchQuery}
                     onChange={(event) => setSearchQuery(event.target.value)}
                     placeholder="Search groups or hosts"
@@ -196,26 +215,24 @@ export function TermiusImportDialog({ open, onClose, onImported }: TermiusImport
                 </label>
 
                 <div className="termius-import-dialog__selection-actions">
-                  <button
-                    type="button"
-                    className="secondary-button"
+                  <Button
+                    variant="secondary"
                     onClick={() => {
                       setSelectedGroupPaths((current) => Array.from(new Set([...current, ...visibleGroups.map((group) => group.path)])));
                       setSelectedHostKeys((current) => Array.from(new Set([...current, ...visibleHosts.map((host) => host.key)])));
                     }}
                   >
                     Select all visible
-                  </button>
-                  <button
-                    type="button"
-                    className="secondary-button"
+                  </Button>
+                  <Button
+                    variant="secondary"
                     onClick={() => {
                       setSelectedGroupPaths([]);
                       setSelectedHostKeys([]);
                     }}
                   >
                     Clear selection
-                  </button>
+                  </Button>
                 </div>
               </div>
 
@@ -284,13 +301,13 @@ export function TermiusImportDialog({ open, onClose, onImported }: TermiusImport
                                 {host.username ? ` · ${host.username}` : ''}
                               </span>
                               {host.groupPath ? <small>{host.groupPath}</small> : null}
-                            </div>
-                            <div className="termius-import-dialog__badges">
-                              {host.hasPrivateKey ? <small className="status-pill">Key</small> : null}
-                              {!host.hasPrivateKey && host.hasPassword ? <small className="status-pill">Password</small> : null}
-                            </div>
-                          </label>
-                        );
+                          </div>
+                          <div className="termius-import-dialog__badges">
+                              {host.hasPrivateKey ? <StatusBadge>Key</StatusBadge> : null}
+                              {!host.hasPrivateKey && host.hasPassword ? <StatusBadge>Password</StatusBadge> : null}
+                          </div>
+                        </label>
+                      );
                       })}
                     </div>
                   )}
@@ -298,15 +315,14 @@ export function TermiusImportDialog({ open, onClose, onImported }: TermiusImport
               </div>
             </>
           ) : null}
-        </div>
+        </ModalBody>
 
-        <div className="modal-card__footer">
-          <button type="button" className="secondary-button" onClick={onClose} disabled={isImporting}>
+        <ModalFooter>
+          <Button variant="secondary" onClick={onClose} disabled={isImporting}>
             Cancel
-          </button>
-          <button
-            type="button"
-            className="primary-button"
+          </Button>
+          <Button
+            variant="primary"
             disabled={!canImport || isImporting}
             onClick={async () => {
               if (!probe?.snapshotId) {
@@ -315,7 +331,7 @@ export function TermiusImportDialog({ open, onClose, onImported }: TermiusImport
               setError(null);
               setIsImporting(true);
               try {
-                const result = await window.dolssh.termius.importSelection({
+                const result = await importTermiusSelection({
                   snapshotId: probe.snapshotId,
                   selectedGroupPaths,
                   selectedHostKeys
@@ -330,9 +346,9 @@ export function TermiusImportDialog({ open, onClose, onImported }: TermiusImport
             }}
           >
             {isImporting ? 'Importing...' : 'Import'}
-          </button>
-        </div>
-      </div>
+          </Button>
+        </ModalFooter>
+      </ModalShell>
     </DialogBackdrop>
   );
 }

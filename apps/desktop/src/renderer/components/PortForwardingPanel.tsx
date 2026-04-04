@@ -1,4 +1,4 @@
-import { type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
+import { type ComponentProps, type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 import {
   isAwsEc2HostRecord,
   isAwsEcsHostRecord,
@@ -37,10 +37,38 @@ import type {
   PendingHostKeyPrompt,
   PendingPortForwardInteractiveAuth
 } from '../store/createAppStore';
+import { usePortForwardingPanelController } from '../controllers/usePortForwardingPanelController';
+import {
+  Badge,
+  Button,
+  Card,
+  CardActions,
+  CardMain,
+  CardMessage,
+  CardMeta,
+  CardTitleRow,
+  EmptyState,
+  IconButton,
+  ModalBody,
+  ModalFooter,
+  ModalHeader,
+  ModalShell,
+  NoticeCard,
+  SectionLabel,
+  StatusBadge,
+  TabButton,
+  Tabs,
+} from '../ui';
 import { DialogBackdrop } from './DialogBackdrop';
 import { KnownHostPromptDialog } from './KnownHostPromptDialog';
 
 type ForwardTab = 'ssh' | 'aws-ssm' | 'ecs-task' | 'container' | 'dns';
+
+let lastSelectedForwardTab: ForwardTab = 'ssh';
+
+export function resetPortForwardingPanelUiStateForTests() {
+  lastSelectedForwardTab = 'ssh';
+}
 
 interface PortForwardingPanelProps {
   hosts: HostRecord[];
@@ -325,6 +353,23 @@ function runtimeMethodLabel(runtime?: PortForwardRuntimeRecord) {
   return 'SSH Native';
 }
 
+function getRuntimeStatusTone(
+  status?: string | null,
+): ComponentProps<typeof StatusBadge>['tone'] {
+  switch (status) {
+    case 'running':
+      return 'running';
+    case 'starting':
+      return 'starting';
+    case 'paused':
+      return 'paused';
+    case 'error':
+      return 'error';
+    default:
+      return 'stopped';
+  }
+}
+
 function tabTitle(tab: ForwardTab) {
   if (tab === 'ssh') {
     return 'SSH Forwarding';
@@ -446,8 +491,7 @@ function InteractiveAuthCard({ auth, title, onRespond, onReopenUrl, onClear }: I
   }, [auth.challengeId]);
 
   return (
-    <div className="empty-callout">
-      <strong>{title}</strong>
+    <NoticeCard title={title} className="mt-4">
       {auth.provider === 'warpgate' ? (
         <>
           <p>브라우저에서 Warpgate 로그인과 승인을 마치면 앱이 자동으로 다음 단계를 진행합니다.</p>
@@ -456,21 +500,20 @@ function InteractiveAuthCard({ auth, title, onRespond, onReopenUrl, onClear }: I
               인증 코드 <code>{auth.authCode}</code>는 앱이 자동으로 처리합니다.
             </p>
           ) : null}
-          <div className="operations-card__actions" style={{ marginTop: 12 }}>
+          <div className="operations-card__actions mt-3 flex flex-wrap gap-3">
             {auth.approvalUrl ? (
-              <button type="button" className="secondary-button" onClick={() => void onReopenUrl()}>
+              <Button type="button" variant="secondary" size="sm" onClick={() => void onReopenUrl()}>
                 브라우저 다시 열기
-              </button>
+              </Button>
             ) : null}
-            <button type="button" className="ghost-button" onClick={onClear}>
+            <Button type="button" variant="ghost" size="sm" onClick={onClear}>
               닫기
-            </button>
+            </Button>
           </div>
           {warpgateResponses ? null : (
-            <div className="empty-callout" style={{ marginTop: 12 }}>
-              <strong>추가 입력이 필요합니다.</strong>
+            <NoticeCard title="추가 입력이 필요합니다." className="mt-3">
               <p>이 Warpgate challenge는 자동 입력 형식과 다릅니다. 아래 prompt에 직접 응답해 주세요.</p>
-            </div>
+            </NoticeCard>
           )}
           <pre className="terminal-interactive-auth__raw" style={{ marginTop: 12 }}>
             {auth.instruction || '추가 인증이 필요합니다.'}
@@ -480,13 +523,13 @@ function InteractiveAuthCard({ auth, title, onRespond, onReopenUrl, onClear }: I
         <p>{auth.instruction || '추가 인증이 필요합니다.'}</p>
       )}
       {auth.provider !== 'warpgate' && auth.approvalUrl ? (
-        <div className="operations-card__actions" style={{ marginTop: 12 }}>
-          <button type="button" className="secondary-button" onClick={() => void onReopenUrl()}>
+        <div className="operations-card__actions mt-3 flex flex-wrap gap-3">
+          <Button type="button" variant="secondary" size="sm" onClick={() => void onReopenUrl()}>
             브라우저 다시 열기
-          </button>
-          <button type="button" className="ghost-button" onClick={onClear}>
+          </Button>
+          <Button type="button" variant="ghost" size="sm" onClick={onClear}>
             닫기
-          </button>
+          </Button>
         </div>
       ) : null}
       {(auth.provider !== 'warpgate' || !warpgateResponses) && auth.prompts.length > 0 ? (
@@ -506,13 +549,13 @@ function InteractiveAuthCard({ auth, title, onRespond, onReopenUrl, onClear }: I
               />
             </label>
           ))}
-          <div className="modal-card__footer" style={{ padding: 0, marginTop: 12 }}>
-            <button type="button" className="secondary-button" onClick={onClear}>
+          <div className="mt-3 flex items-center justify-end gap-3">
+            <Button type="button" variant="secondary" onClick={onClear}>
               취소
-            </button>
-            <button
+            </Button>
+            <Button
               type="button"
-              className="primary-button"
+              variant="primary"
               onClick={() =>
                 void onRespond(
                   auth.challengeId,
@@ -521,11 +564,11 @@ function InteractiveAuthCard({ auth, title, onRespond, onReopenUrl, onClear }: I
               }
             >
               계속
-            </button>
+            </Button>
           </div>
         </div>
       ) : null}
-    </div>
+    </NoticeCard>
   );
 }
 
@@ -619,6 +662,17 @@ export function PortForwardingPanel({
   onReopenInteractiveAuthUrl,
   onClearInteractiveAuth
 }: PortForwardingPanelProps) {
+  const {
+    inspectHostContainer,
+    listEcsTaskTunnelServices,
+    listHostContainers,
+    loadEcsTaskTunnelService,
+    onContainersConnectionProgress,
+    probeKnownHost,
+    releaseContainerHost,
+    replaceKnownHost,
+    trustKnownHost,
+  } = usePortForwardingPanelController();
   const sshHosts = useMemo(() => getAvailablePortForwardHosts(hosts, 'ssh').filter(isSshHostRecord), [hosts]);
   const awsHosts = useMemo(() => getAvailablePortForwardHosts(hosts, 'aws-ssm').filter(isAwsEc2HostRecord), [hosts]);
   const ecsHosts = useMemo(() => getAvailablePortForwardHosts(hosts, 'ecs-task').filter(isAwsEcsHostRecord), [hosts]);
@@ -626,7 +680,7 @@ export function PortForwardingPanel({
     () => getAvailablePortForwardHosts(hosts, 'container').filter((host) => !isAwsEcsHostRecord(host)),
     [hosts],
   );
-  const [activeTab, setActiveTab] = useState<ForwardTab>('ssh');
+  const [activeTab, setActiveTab] = useState<ForwardTab>(lastSelectedForwardTab);
   const [editingRuleId, setEditingRuleId] = useState<string | null>(null);
   const [editingDnsOverrideId, setEditingDnsOverrideId] = useState<string | null>(null);
   const [draft, setDraft] = useState<PortForwardDraft>(() => emptySshDraft(sshHosts[0]?.id));
@@ -746,6 +800,10 @@ export function PortForwardingPanel({
       ? discoveryContainers.find((container) => container.id === containerDraft.containerId) ?? null
       : null;
   const availableNetworks = useMemo(() => discoveryDetails?.networks ?? [], [discoveryDetails]);
+
+  useEffect(() => {
+    lastSelectedForwardTab = activeTab;
+  }, [activeTab]);
   const eligibleNetworks = useMemo(
     () => discoveryDetails?.networks.filter((network) => Boolean(network.ipAddress?.trim())) ?? [],
     [discoveryDetails]
@@ -776,13 +834,15 @@ export function PortForwardingPanel({
     if (isAwsSsmPortForwardRuleRecord(rule)) {
       const host = awsHosts.find((item) => item.id === rule.hostId);
       return (
-        <article key={rule.id} className="operations-card">
-          <div className="operations-card__main">
-            <div className="operations-card__title-row">
+        <Card key={rule.id} className="operations-card">
+          <CardMain className="operations-card__main">
+            <CardTitleRow className="operations-card__title-row">
               <strong>{rule.label}</strong>
-              <span className={`status-pill status-pill--${runtime?.status ?? 'stopped'}`}>{statusLabel(runtime)}</span>
-            </div>
-            <div className="operations-card__meta">
+              <StatusBadge tone={getRuntimeStatusTone(runtime?.status)}>
+                {statusLabel(runtime)}
+              </StatusBadge>
+            </CardTitleRow>
+            <CardMeta className="operations-card__meta">
               <span>AWS EC2</span>
               {runtimeMethodLabel(runtime) ? <span>{runtimeMethodLabel(runtime)}</span> : null}
               <span>
@@ -790,34 +850,36 @@ export function PortForwardingPanel({
               </span>
               <span>{(runtime?.bindAddress ?? rule.bindAddress) || '127.0.0.1'}:{runtime?.bindPort ?? rule.bindPort}</span>
               <span>{rule.targetKind === 'remote-host' ? `${rule.remoteHost}:${rule.targetPort}` : `instance:${rule.targetPort}`}</span>
-            </div>
-            {runtime?.message ? <p className="operations-card__message">{runtime.message}</p> : null}
-          </div>
-          <div className="operations-card__actions">
-            <button type="button" className="secondary-button" onClick={() => void (isRunning ? onStop(rule.id) : onStart(rule.id))}>
+            </CardMeta>
+            {runtime?.message ? <CardMessage className="operations-card__message">{runtime.message}</CardMessage> : null}
+          </CardMain>
+          <CardActions className="operations-card__actions">
+            <Button type="button" variant="secondary" size="sm" onClick={() => void (isRunning ? onStop(rule.id) : onStart(rule.id))}>
               {isRunning ? 'Stop' : 'Start'}
-            </button>
-            <button type="button" className="secondary-button" onClick={() => openEdit(rule)}>
+            </Button>
+            <Button type="button" variant="secondary" size="sm" onClick={() => openEdit(rule)}>
               Edit
-            </button>
-            <button type="button" className="secondary-button danger" onClick={() => void onRemove(rule.id)}>
+            </Button>
+            <Button type="button" variant="danger" size="sm" onClick={() => void onRemove(rule.id)}>
               Delete
-            </button>
-          </div>
-        </article>
+            </Button>
+          </CardActions>
+        </Card>
       );
     }
 
     if (isEcsTaskPortForwardRuleRecord(rule)) {
       const host = ecsHosts.find((item) => item.id === rule.hostId);
       return (
-        <article key={rule.id} className="operations-card">
-          <div className="operations-card__main">
-            <div className="operations-card__title-row">
+        <Card key={rule.id} className="operations-card">
+          <CardMain className="operations-card__main">
+            <CardTitleRow className="operations-card__title-row">
               <strong>{rule.label}</strong>
-              <span className={`status-pill status-pill--${runtime?.status ?? 'stopped'}`}>{statusLabel(runtime)}</span>
-            </div>
-            <div className="operations-card__meta">
+              <StatusBadge tone={getRuntimeStatusTone(runtime?.status)}>
+                {statusLabel(runtime)}
+              </StatusBadge>
+            </CardTitleRow>
+            <CardMeta className="operations-card__meta">
               <span>ECS Task</span>
               {runtimeMethodLabel(runtime) ? <span>{runtimeMethodLabel(runtime)}</span> : null}
               <span>
@@ -828,87 +890,91 @@ export function PortForwardingPanel({
               <span>{rule.serviceName} / {rule.containerName}</span>
               <span>{runtime?.bindAddress ?? '127.0.0.1'}:{(runtime?.bindPort ?? rule.bindPort) || 'auto'}</span>
               <span>127.0.0.1:{rule.targetPort}</span>
-            </div>
-            {runtime?.message ? <p className="operations-card__message">{runtime.message}</p> : null}
-          </div>
-          <div className="operations-card__actions">
-            <button type="button" className="secondary-button" onClick={() => void (isRunning ? onStop(rule.id) : onStart(rule.id))}>
+            </CardMeta>
+            {runtime?.message ? <CardMessage className="operations-card__message">{runtime.message}</CardMessage> : null}
+          </CardMain>
+          <CardActions className="operations-card__actions">
+            <Button type="button" variant="secondary" size="sm" onClick={() => void (isRunning ? onStop(rule.id) : onStart(rule.id))}>
               {isRunning ? 'Stop' : 'Start'}
-            </button>
-            <button type="button" className="secondary-button" onClick={() => openEdit(rule)}>
+            </Button>
+            <Button type="button" variant="secondary" size="sm" onClick={() => openEdit(rule)}>
               Edit
-            </button>
-            <button type="button" className="secondary-button danger" onClick={() => void onRemove(rule.id)}>
+            </Button>
+            <Button type="button" variant="danger" size="sm" onClick={() => void onRemove(rule.id)}>
               Delete
-            </button>
-          </div>
-        </article>
+            </Button>
+          </CardActions>
+        </Card>
       );
     }
 
     if (isContainerPortForwardRuleRecord(rule)) {
       const host = containerHosts.find((item) => item.id === rule.hostId);
       return (
-        <article key={rule.id} className="operations-card">
-          <div className="operations-card__main">
-            <div className="operations-card__title-row">
+        <Card key={rule.id} className="operations-card">
+          <CardMain className="operations-card__main">
+            <CardTitleRow className="operations-card__title-row">
               <strong>{rule.label}</strong>
-              <span className={`status-pill status-pill--${runtime?.status ?? 'stopped'}`}>{statusLabel(runtime)}</span>
-            </div>
-            <div className="operations-card__meta">
+              <StatusBadge tone={getRuntimeStatusTone(runtime?.status)}>
+                {statusLabel(runtime)}
+              </StatusBadge>
+            </CardTitleRow>
+            <CardMeta className="operations-card__meta">
               <span>Container</span>
               {runtimeMethodLabel(runtime) ? <span>{runtimeMethodLabel(runtime)}</span> : null}
               <span>{host ? host.label : 'Unknown host'}</span>
               <span>{rule.containerName} ({rule.containerRuntime})</span>
               <span>{runtime?.bindAddress ?? '127.0.0.1'}:{(runtime?.bindPort ?? rule.bindPort) || 'auto'}</span>
               <span>{rule.networkName}:{rule.targetPort}</span>
-            </div>
-            {runtime?.message ? <p className="operations-card__message">{runtime.message}</p> : null}
-          </div>
-          <div className="operations-card__actions">
-            <button type="button" className="secondary-button" onClick={() => void (isRunning ? onStop(rule.id) : onStart(rule.id))}>
+            </CardMeta>
+            {runtime?.message ? <CardMessage className="operations-card__message">{runtime.message}</CardMessage> : null}
+          </CardMain>
+          <CardActions className="operations-card__actions">
+            <Button type="button" variant="secondary" size="sm" onClick={() => void (isRunning ? onStop(rule.id) : onStart(rule.id))}>
               {isRunning ? 'Stop' : 'Start'}
-            </button>
-            <button type="button" className="secondary-button" onClick={() => openEdit(rule)}>
+            </Button>
+            <Button type="button" variant="secondary" size="sm" onClick={() => openEdit(rule)}>
               Edit
-            </button>
-            <button type="button" className="secondary-button danger" onClick={() => void onRemove(rule.id)}>
+            </Button>
+            <Button type="button" variant="danger" size="sm" onClick={() => void onRemove(rule.id)}>
               Delete
-            </button>
-          </div>
-        </article>
+            </Button>
+          </CardActions>
+        </Card>
       );
     }
 
     const host = sshHosts.find((item) => item.id === rule.hostId);
     return (
-      <article key={rule.id} className="operations-card">
-        <div className="operations-card__main">
-          <div className="operations-card__title-row">
+      <Card key={rule.id} className="operations-card">
+        <CardMain className="operations-card__main">
+          <CardTitleRow className="operations-card__title-row">
             <strong>{rule.label}</strong>
-            <span className={`status-pill status-pill--${runtime?.status ?? 'stopped'}`}>{statusLabel(runtime)}</span>
-          </div>
-          <div className="operations-card__meta">
+            <StatusBadge tone={getRuntimeStatusTone(runtime?.status)}>
+              {statusLabel(runtime)}
+            </StatusBadge>
+          </CardTitleRow>
+          <CardMeta className="operations-card__meta">
             <span>{rule.mode.toUpperCase()}</span>
             {runtimeMethodLabel(runtime) ? <span>{runtimeMethodLabel(runtime)}</span> : null}
             <span>{host ? `${host.label} (${host.hostname})` : 'Unknown SSH host'}</span>
             <span>{rule.bindAddress}:{runtime?.bindPort ?? rule.bindPort}</span>
             <span>{rule.mode === 'dynamic' ? 'SOCKS5' : `${rule.targetHost}:${rule.targetPort}`}</span>
-          </div>
-          {runtime?.message ? <p className="operations-card__message">{runtime.message}</p> : null}
-        </div>
-        <div className="operations-card__actions">
-          <button type="button" className="secondary-button" onClick={() => void (isRunning ? onStop(rule.id) : onStart(rule.id))}>
+          </CardMeta>
+          {runtime?.message ? <CardMessage className="operations-card__message">{runtime.message}</CardMessage> : null}
+        </CardMain>
+        <CardActions className="operations-card__actions">
+          <Button type="button" variant="secondary" size="sm" onClick={() => void (isRunning ? onStop(rule.id) : onStart(rule.id))}>
             {isRunning ? 'Stop' : 'Start'}
-          </button>
-          <button type="button" className="secondary-button" onClick={() => openEdit(rule)}>
+          </Button>
+          <Button type="button" variant="secondary" size="sm" onClick={() => openEdit(rule)}>
             Edit
-          </button>
-          <button type="button" className="secondary-button danger" onClick={() => void onRemove(rule.id)}>
+          </Button>
+          <Button type="button" variant="danger" size="sm" onClick={() => void onRemove(rule.id)}>
             Delete
-          </button>
-        </div>
-      </article>
+          </Button>
+        </CardActions>
+      </Card>
     );
   }
 
@@ -920,14 +986,16 @@ export function PortForwardingPanel({
     targetPort,
   }: EcsEphemeralRuntimeCard) {
     return (
-      <article key={runtime.ruleId} className="operations-card">
-        <div className="operations-card__main">
-          <div className="operations-card__title-row">
+      <Card key={runtime.ruleId} className="operations-card">
+        <CardMain className="operations-card__main">
+          <CardTitleRow className="operations-card__title-row">
             <strong>{serviceName}</strong>
-            <span className="status-pill">Ephemeral</span>
-            <span className={`status-pill status-pill--${runtime.status}`}>{statusLabel(runtime)}</span>
-          </div>
-          <div className="operations-card__meta">
+            <Badge>Ephemeral</Badge>
+            <StatusBadge tone={getRuntimeStatusTone(runtime.status)}>
+              {statusLabel(runtime)}
+            </StatusBadge>
+          </CardTitleRow>
+          <CardMeta className="operations-card__meta">
             <span>ECS Task</span>
             {runtimeMethodLabel(runtime) ? <span>{runtimeMethodLabel(runtime)}</span> : null}
             <span>
@@ -938,15 +1006,15 @@ export function PortForwardingPanel({
             <span>{serviceName} / {containerName}</span>
             <span>{runtime.bindAddress}:{runtime.bindPort}</span>
             <span>127.0.0.1:{targetPort}</span>
-          </div>
-          {runtime.message ? <p className="operations-card__message">{runtime.message}</p> : null}
-        </div>
-        <div className="operations-card__actions">
-          <button type="button" className="secondary-button" onClick={() => void onStop(runtime.ruleId)}>
+          </CardMeta>
+          {runtime.message ? <CardMessage className="operations-card__message">{runtime.message}</CardMessage> : null}
+        </CardMain>
+        <CardActions className="operations-card__actions">
+          <Button type="button" variant="secondary" size="sm" onClick={() => void onStop(runtime.ruleId)}>
             Stop
-          </button>
-        </div>
-      </article>
+          </Button>
+        </CardActions>
+      </Card>
     );
   }
 
@@ -958,29 +1026,31 @@ export function PortForwardingPanel({
     targetPort,
   }: ContainerEphemeralRuntimeCard) {
     return (
-      <article key={runtime.ruleId} className="operations-card">
-        <div className="operations-card__main">
-          <div className="operations-card__title-row">
+      <Card key={runtime.ruleId} className="operations-card">
+        <CardMain className="operations-card__main">
+          <CardTitleRow className="operations-card__title-row">
             <strong>{containerName}</strong>
-            <span className="status-pill">Ephemeral</span>
-            <span className={`status-pill status-pill--${runtime.status}`}>{statusLabel(runtime)}</span>
-          </div>
-          <div className="operations-card__meta">
+            <Badge>Ephemeral</Badge>
+            <StatusBadge tone={getRuntimeStatusTone(runtime.status)}>
+              {statusLabel(runtime)}
+            </StatusBadge>
+          </CardTitleRow>
+          <CardMeta className="operations-card__meta">
             <span>Container</span>
             {runtimeMethodLabel(runtime) ? <span>{runtimeMethodLabel(runtime)}</span> : null}
             <span>{host?.label ?? 'Unknown host'}</span>
             <span>{containerName}</span>
             <span>{runtime.bindAddress}:{runtime.bindPort}</span>
             <span>{networkName}:{targetPort}</span>
-          </div>
-          {runtime.message ? <p className="operations-card__message">{runtime.message}</p> : null}
-        </div>
-        <div className="operations-card__actions">
-          <button type="button" className="secondary-button" onClick={() => void onStop(runtime.ruleId)}>
+          </CardMeta>
+          {runtime.message ? <CardMessage className="operations-card__message">{runtime.message}</CardMessage> : null}
+        </CardMain>
+        <CardActions className="operations-card__actions">
+          <Button type="button" variant="secondary" size="sm" onClick={() => void onStop(runtime.ruleId)}>
             Stop
-          </button>
-        </div>
-      </article>
+          </Button>
+        </CardActions>
+      </Card>
     );
   }
 
@@ -988,7 +1058,7 @@ export function PortForwardingPanel({
     if (!hostId) {
       return;
     }
-    await window.dolssh.containers.release(hostId).catch(() => undefined);
+    await releaseContainerHost(hostId).catch(() => undefined);
   }
 
   function resetDiscoveryState() {
@@ -1020,7 +1090,7 @@ export function PortForwardingPanel({
     setEcsServices([]);
     setEcsServiceDetails(null);
     try {
-      const services = await window.dolssh.aws.listEcsTaskTunnelServices(hostId);
+      const services = await listEcsTaskTunnelServices(hostId);
       setEcsServices(services);
     } catch (cause) {
       setEcsServicesError(cause instanceof Error ? cause.message : 'ECS 서비스 목록을 불러오지 못했습니다.');
@@ -1037,7 +1107,7 @@ export function PortForwardingPanel({
     setEcsServiceDetailsLoading(true);
     setEcsServicesError(null);
     try {
-      const details = await window.dolssh.aws.loadEcsTaskTunnelService(hostId, serviceName);
+      const details = await loadEcsTaskTunnelService(hostId, serviceName);
       setEcsServiceDetails(details);
       setDraft((current) => {
         if (!isEcsTaskPortForwardDraft(current) || current.hostId !== hostId || current.serviceName !== serviceName) {
@@ -1165,7 +1235,7 @@ export function PortForwardingPanel({
   }
 
   async function probeDiscoveryHost(hostId: string): Promise<boolean> {
-    const probe = await window.dolssh.knownHosts.probeHost({
+    const probe = await probeKnownHost({
       hostId,
       endpointId: buildContainersEndpointId(hostId)
     });
@@ -1200,7 +1270,7 @@ export function PortForwardingPanel({
       if (!trusted) {
         return;
       }
-      const result = await window.dolssh.containers.list(hostId);
+      const result = await listHostContainers(hostId);
       if (
         requestId !== discoveryListRequestRef.current ||
         discoveryHostIdRef.current !== hostId
@@ -1235,7 +1305,7 @@ export function PortForwardingPanel({
     setDiscoveryDetailsLoading(true);
     setDiscoveryError(null);
     try {
-      const details = await window.dolssh.containers.inspect(hostId, containerId);
+      const details = await inspectHostContainer(hostId, containerId);
       if (
         requestId !== discoveryDetailsRequestRef.current ||
         discoveryHostIdRef.current !== hostId
@@ -1285,9 +1355,9 @@ export function PortForwardingPanel({
       fingerprintSha256: knownHostPrompt.probe.fingerprintSha256
     };
     if (mode === 'replace') {
-      await window.dolssh.knownHosts.replace(input);
+      await replaceKnownHost(input);
     } else {
-      await window.dolssh.knownHosts.trust(input);
+      await trustKnownHost(input);
     }
     const hostId = knownHostPrompt.probe.hostId;
     setKnownHostPrompt(null);
@@ -1474,7 +1544,7 @@ export function PortForwardingPanel({
   }
 
   useEffect(() => {
-    const unsubscribe = window.dolssh.containers.onConnectionProgress((event) => {
+    const unsubscribe = onContainersConnectionProgress((event) => {
       if (!containerDraft || !isModalOpen) {
         return;
       }
@@ -1578,16 +1648,16 @@ export function PortForwardingPanel({
     : null;
 
   return (
-    <div className="operations-panel">
-      <div className="operations-panel__header">
+    <div className="space-y-6">
+      <div className="flex flex-wrap items-start justify-between gap-4 rounded-[28px] border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[var(--surface-elevated)] px-6 py-5 shadow-[var(--shadow-soft)]">
         <div>
-          <div className="section-kicker">Forwarding</div>
-          <h2>Port Forwarding</h2>
-          <p>SSH 포워딩, AWS EC2 포워딩, ECS Task 터널, 컨테이너 터널, DNS Override 규칙을 저장하고 필요할 때만 실행합니다.</p>
+          <SectionLabel>Forwarding</SectionLabel>
+          <h2 className="mt-2 text-[1.35rem] font-semibold tracking-[-0.02em] text-[var(--text)]">Port Forwarding</h2>
+          <p className="mt-2 max-w-[46rem] text-[0.95rem] leading-[1.6] text-[var(--text-soft)]">SSH 포워딩, AWS EC2 포워딩, ECS Task 터널, 컨테이너 터널, DNS Override 규칙을 저장하고 필요할 때만 실행합니다.</p>
         </div>
-        <button type="button" className="primary-button" onClick={() => openCreate(activeTab)}>
+        <Button type="button" variant="primary" onClick={() => openCreate(activeTab)}>
           {createButtonLabel(activeTab)}
-        </button>
+        </Button>
       </div>
 
       {interactiveAuth ? (
@@ -1610,61 +1680,28 @@ export function PortForwardingPanel({
         />
       ) : null}
 
-      <div className="operations-tabs" role="tablist" aria-label="Port forwarding transport">
-        <button
-          type="button"
-          role="tab"
-          aria-selected={activeTab === 'ssh'}
-          className={`operations-tab ${activeTab === 'ssh' ? 'active' : ''}`}
-          onClick={() => setActiveTab('ssh')}
-        >
+      <Tabs role="tablist" aria-label="Port forwarding transport" className="gap-2 bg-[var(--surface-elevated)] p-1.5">
+        <TabButton role="tab" aria-selected={activeTab === 'ssh'} active={activeTab === 'ssh'} onClick={() => setActiveTab('ssh')}>
           SSH Forwarding
-        </button>
-        <button
-          type="button"
-          role="tab"
-          aria-selected={activeTab === 'aws-ssm'}
-          className={`operations-tab ${activeTab === 'aws-ssm' ? 'active' : ''}`}
-          onClick={() => setActiveTab('aws-ssm')}
-        >
+        </TabButton>
+        <TabButton role="tab" aria-selected={activeTab === 'aws-ssm'} active={activeTab === 'aws-ssm'} onClick={() => setActiveTab('aws-ssm')}>
           AWS EC2
-        </button>
-        <button
-          type="button"
-          role="tab"
-          aria-selected={activeTab === 'ecs-task'}
-          className={`operations-tab ${activeTab === 'ecs-task' ? 'active' : ''}`}
-          onClick={() => setActiveTab('ecs-task')}
-        >
+        </TabButton>
+        <TabButton role="tab" aria-selected={activeTab === 'ecs-task'} active={activeTab === 'ecs-task'} onClick={() => setActiveTab('ecs-task')}>
           ECS Task
-        </button>
-        <button
-          type="button"
-          role="tab"
-          aria-selected={activeTab === 'container'}
-          className={`operations-tab ${activeTab === 'container' ? 'active' : ''}`}
-          onClick={() => setActiveTab('container')}
-        >
+        </TabButton>
+        <TabButton role="tab" aria-selected={activeTab === 'container'} active={activeTab === 'container'} onClick={() => setActiveTab('container')}>
           Container
-        </button>
-        <button
-          type="button"
-          role="tab"
-          aria-selected={activeTab === 'dns'}
-          className={`operations-tab ${activeTab === 'dns' ? 'active' : ''}`}
-          onClick={() => setActiveTab('dns')}
-        >
+        </TabButton>
+        <TabButton role="tab" aria-selected={activeTab === 'dns'} active={activeTab === 'dns'} onClick={() => setActiveTab('dns')}>
           DNS Override
-        </button>
-      </div>
+        </TabButton>
+      </Tabs>
 
       <div className="operations-list">
         {activeTab === 'dns' ? (
           !hasVisibleEntries ? (
-            <div className="empty-callout">
-              <strong>{emptyStateTitle(activeTab)}</strong>
-              <p>{emptyStateDescription(activeTab)}</p>
-            </div>
+            <EmptyState title={emptyStateTitle(activeTab)} description={emptyStateDescription(activeTab)} />
           ) : (
             dnsOverrides.map((override) => {
               const rule = isLinkedDnsOverrideRecord(override)
@@ -1675,16 +1712,16 @@ export function PortForwardingPanel({
               const isStatic = isStaticDnsOverrideRecord(override);
 
               return (
-                <article key={override.id} className="operations-card">
-                  <div className="operations-card__main">
-                    <div className="operations-card__title-row">
+                <Card key={override.id} className="operations-card">
+                  <CardMain className="operations-card__main">
+                    <CardTitleRow className="operations-card__title-row">
                       <strong>{override.hostname}</strong>
-                      <span className="status-pill">{isStatic ? 'Static' : 'Linked'}</span>
-                      <span className={`status-pill status-pill--${isStatic ? (override.status === 'active' ? 'running' : 'stopped') : (runtime?.status ?? 'stopped')}`}>
+                      <Badge>{isStatic ? 'Static' : 'Linked'}</Badge>
+                      <StatusBadge tone={getRuntimeStatusTone(isStatic ? (override.status === 'active' ? 'running' : 'stopped') : runtime?.status)}>
                         {isStatic ? (override.status === 'active' ? 'On' : 'Off') : statusLabel(runtime)}
-                      </span>
-                    </div>
-                    <div className="operations-card__meta">
+                      </StatusBadge>
+                    </CardTitleRow>
+                    <CardMeta className="operations-card__meta">
                       <span>Hosts file</span>
                       <span>{isStatic ? 'Static IP' : rule?.label ?? 'Linked rule missing'}</span>
                       <span>
@@ -1692,40 +1729,38 @@ export function PortForwardingPanel({
                           ? override.address
                           : `${runtime?.bindAddress ?? rule?.bindAddress ?? '127.0.0.1'}:${runtime?.bindPort ?? rule?.bindPort ?? 0}`}
                       </span>
-                    </div>
-                    {!isStatic && runtime?.message ? <p className="operations-card__message">{runtime.message}</p> : null}
-                  </div>
-                  <div className="operations-card__actions">
+                    </CardMeta>
+                    {!isStatic && runtime?.message ? <CardMessage className="operations-card__message">{runtime.message}</CardMessage> : null}
+                  </CardMain>
+                  <CardActions className="operations-card__actions">
                     {rule ? (
-                      <button type="button" className="secondary-button" onClick={() => void (isRunning ? onStop(rule.id) : onStart(rule.id))}>
+                      <Button type="button" variant="secondary" size="sm" onClick={() => void (isRunning ? onStop(rule.id) : onStart(rule.id))}>
                         {isRunning ? 'Stop' : 'Start'}
-                      </button>
+                      </Button>
                     ) : null}
                     {isStatic ? (
-                      <button
+                      <Button
                         type="button"
-                        className="secondary-button"
+                        variant="secondary"
+                        size="sm"
                         onClick={() => void onSetStaticDnsOverrideActive(override.id, override.status !== 'active')}
                       >
                         {override.status === 'active' ? 'Off' : 'On'}
-                      </button>
+                      </Button>
                     ) : null}
-                    <button type="button" className="secondary-button" onClick={() => openEditDnsOverride(override)}>
+                    <Button type="button" variant="secondary" size="sm" onClick={() => openEditDnsOverride(override)}>
                       Edit
-                    </button>
-                    <button type="button" className="secondary-button danger" onClick={() => void onRemoveDnsOverride(override.id)}>
+                    </Button>
+                    <Button type="button" variant="danger" size="sm" onClick={() => void onRemoveDnsOverride(override.id)}>
                       Delete
-                    </button>
-                  </div>
-                </article>
+                    </Button>
+                  </CardActions>
+                </Card>
               );
             })
           )
         ) : !hasVisibleEntries ? (
-          <div className="empty-callout">
-            <strong>{emptyStateTitle(activeTab)}</strong>
-            <p>{emptyStateDescription(activeTab)}</p>
-          </div>
+          <EmptyState title={emptyStateTitle(activeTab)} description={emptyStateDescription(activeTab)} />
         ) : (
           <>
             {activeTab === 'ecs-task' && visibleEcsEphemeralRuntimes.length > 0 ? (
@@ -1759,16 +1794,16 @@ export function PortForwardingPanel({
 
       {isModalOpen ? (
         <DialogBackdrop onDismiss={() => void closeModal()} dismissDisabled={isSubmitting}>
-          <div
-            className={`modal-card port-forwarding-modal ${isContainerPortForwardDraft(draft) ? 'port-forwarding-modal--container' : ''}`}
+          <ModalShell
+            className={`port-forwarding-modal ${isContainerPortForwardDraft(draft) ? 'port-forwarding-modal--container' : ''}`}
             role="dialog"
             aria-modal="true"
             aria-labelledby="port-forward-title"
           >
-            <div className="modal-card__header">
+            <ModalHeader className="port-forwarding-modal__header">
               <div>
-                <div className="section-kicker">Forwarding</div>
-                <h3 id="port-forward-title">
+                <SectionLabel>Forwarding</SectionLabel>
+                <h3 id="port-forward-title" className="mt-2">
                   {activeTab === 'dns'
                     ? editingDnsOverrideId
                       ? 'Edit DNS Override'
@@ -1778,18 +1813,18 @@ export function PortForwardingPanel({
                       : createButtonLabel(activeTab)}
                 </h3>
               </div>
-              <button
+              <IconButton
                 type="button"
-                className="icon-button"
+                tone="ghost"
                 onClick={() => void closeModal()}
                 disabled={isSubmitting}
                 aria-label="Close port forwarding dialog"
               >
                 &times;
-              </button>
-            </div>
+              </IconButton>
+            </ModalHeader>
 
-            <div className="modal-card__body form-grid">
+            <ModalBody className="port-forwarding-modal__body form-grid">
               {activeTab === 'dns' ? (
                 <>
                   <label className="form-field">
@@ -1971,10 +2006,9 @@ export function PortForwardingPanel({
               {isContainerPortForwardDraft(draft) ? (
                 <>
                   {shouldShowDiscoveryProgress ? (
-                    <div className="empty-callout">
-                      <strong>Container discovery</strong>
+                    <NoticeCard title="Container discovery">
                       <p>{discoveryProgressMessage}</p>
-                    </div>
+                    </NoticeCard>
                   ) : null}
 
                   {discoveryInteractiveAuth && discoveryHost?.id === discoveryInteractiveAuth.hostId ? (
@@ -2007,11 +2041,12 @@ export function PortForwardingPanel({
                               <strong>{selectedContainerSummary.name}</strong>
                               <span>{shortenContainerImage(selectedContainerSummary.image)}</span>
                             </div>
-                            <span
-                              className={`status-pill port-forward-picker__status-badge status-pill--${getDiscoveryContainerStatusPresentation(selectedContainerSummary.status).tone}`}
+                            <StatusBadge
+                              tone={getDiscoveryContainerStatusPresentation(selectedContainerSummary.status).tone}
+                              className="port-forward-picker__status-badge"
                             >
                               {getDiscoveryContainerStatusPresentation(selectedContainerSummary.status).label}
-                            </span>
+                            </StatusBadge>
                           </div>
                         ) : undefined
                       }
@@ -2043,9 +2078,12 @@ export function PortForwardingPanel({
                               <strong>{container.name}</strong>
                               <span>{shortenContainerImage(container.image)}</span>
                             </div>
-                            <span className={`status-pill port-forward-picker__status-badge status-pill--${statusPresentation.tone}`}>
+                            <StatusBadge
+                              tone={statusPresentation.tone}
+                              className="port-forward-picker__status-badge"
+                            >
                               {statusPresentation.label}
-                            </span>
+                            </StatusBadge>
                           </button>
                         );
                       })}
@@ -2166,24 +2204,27 @@ export function PortForwardingPanel({
                   </label>
 
                   {discoveryError ? <div className="form-error">{discoveryError}</div> : null}
-                  {discoveryDetailsLoading ? <div className="empty-callout"><p>컨테이너 상세 정보를 불러오는 중입니다.</p></div> : null}
+                  {discoveryDetailsLoading ? (
+                    <NoticeCard>
+                      <p>컨테이너 상세 정보를 불러오는 중입니다.</p>
+                    </NoticeCard>
+                  ) : null}
                   {discoveryDetails && eligiblePorts.length === 0 ? (
-                    <div className="empty-callout">
-                      <strong>선택 가능한 TCP 포트가 없습니다.</strong>
-                      <p>이 컨테이너에는 포워딩에 사용할 TCP 포트가 감지되지 않았습니다.</p>
-                    </div>
+                    <EmptyState
+                      title="선택 가능한 TCP 포트가 없습니다."
+                      description="이 컨테이너에는 포워딩에 사용할 TCP 포트가 감지되지 않았습니다."
+                    />
                   ) : null}
                   {discoveryDetails && availableNetworks.length === 0 ? (
-                    <div className="empty-callout">
-                      <strong>사용 가능한 네트워크 IP가 없습니다.</strong>
-                      <p>이 컨테이너는 연결할 네트워크 정보가 없어 터널 규칙을 저장할 수 없습니다.</p>
-                    </div>
+                    <EmptyState
+                      title="사용 가능한 네트워크 IP가 없습니다."
+                      description="이 컨테이너는 연결할 네트워크 정보가 없어 터널 규칙을 저장할 수 없습니다."
+                    />
                   ) : null}
                   {discoveryDetails && availableNetworks.length > 0 && eligibleNetworks.length === 0 ? (
-                    <div className="empty-callout">
-                      <strong>현재는 네트워크 IP가 보이지 않습니다.</strong>
+                    <NoticeCard title="현재는 네트워크 IP가 보이지 않습니다.">
                       <p>종료된 컨테이너일 수 있습니다. 규칙은 저장할 수 있고, 시작할 때 현재 IP를 다시 확인합니다.</p>
-                    </div>
+                    </NoticeCard>
                   ) : null}
                 </>
               ) : isSshPortForwardDraft(draft) ? (
@@ -2353,31 +2394,30 @@ export function PortForwardingPanel({
                   </label>
 
                   {selectedEcsHost ? (
-                    <div className="empty-callout">
-                      <strong>{selectedEcsHost.awsEcsClusterName}</strong>
+                    <NoticeCard title={selectedEcsHost.awsEcsClusterName}>
                       <p>{selectedEcsHost.awsProfileName} / {selectedEcsHost.awsRegion}</p>
-                    </div>
+                    </NoticeCard>
                   ) : null}
                   {ecsServicesError ? <div className="form-error">{ecsServicesError}</div> : null}
-                  {ecsServicesLoading ? <div className="empty-callout"><p>ECS 서비스 목록을 불러오는 중입니다.</p></div> : null}
-                  {ecsServiceDetailsLoading ? <div className="empty-callout"><p>ECS 서비스 상세 정보를 불러오는 중입니다.</p></div> : null}
+                  {ecsServicesLoading ? <NoticeCard><p>ECS 서비스 목록을 불러오는 중입니다.</p></NoticeCard> : null}
+                  {ecsServiceDetailsLoading ? <NoticeCard><p>ECS 서비스 상세 정보를 불러오는 중입니다.</p></NoticeCard> : null}
                   {!ecsServicesLoading && draft.hostId && ecsServices.length === 0 && !ecsServicesError ? (
-                    <div className="empty-callout">
-                      <strong>가져올 수 있는 ECS 서비스가 없습니다.</strong>
-                      <p>이 클러스터에는 포트 포워딩에 사용할 서비스가 없습니다.</p>
-                    </div>
+                    <EmptyState
+                      title="가져올 수 있는 ECS 서비스가 없습니다."
+                      description="이 클러스터에는 포트 포워딩에 사용할 서비스가 없습니다."
+                    />
                   ) : null}
                   {!ecsServiceDetailsLoading && draft.serviceName && ecsServiceDetails && ecsContainerOptions.length === 0 ? (
-                    <div className="empty-callout">
-                      <strong>선택 가능한 컨테이너가 없습니다.</strong>
-                      <p>이 서비스의 task definition에 사용할 컨테이너가 없습니다.</p>
-                    </div>
+                    <EmptyState
+                      title="선택 가능한 컨테이너가 없습니다."
+                      description="이 서비스의 task definition에 사용할 컨테이너가 없습니다."
+                    />
                   ) : null}
                   {!ecsServiceDetailsLoading && draft.containerName && ecsPortOptions.length === 0 ? (
-                    <div className="empty-callout">
-                      <strong>선택 가능한 TCP 포트가 없습니다.</strong>
-                      <p>이 컨테이너에는 포워딩에 사용할 TCP 포트가 감지되지 않았습니다.</p>
-                    </div>
+                    <EmptyState
+                      title="선택 가능한 TCP 포트가 없습니다."
+                      description="이 컨테이너에는 포워딩에 사용할 TCP 포트가 감지되지 않았습니다."
+                    />
                   ) : null}
                 </>
               ) : (
@@ -2503,15 +2543,15 @@ export function PortForwardingPanel({
               {error ? <div className="form-error">{error}</div> : null}
                 </>
               )}
-            </div>
+            </ModalBody>
 
-            <div className="modal-card__footer">
-              <button type="button" className="secondary-button" onClick={() => void closeModal()} disabled={isSubmitting}>
+            <ModalFooter className="port-forwarding-modal__footer">
+              <Button type="button" variant="secondary" onClick={() => void closeModal()} disabled={isSubmitting}>
                 취소
-              </button>
-              <button
+              </Button>
+              <Button
                 type="button"
-                className="primary-button"
+                variant="primary"
                 onClick={() => void handleSubmit()}
                 disabled={
                   isSubmitting ||
@@ -2522,9 +2562,9 @@ export function PortForwardingPanel({
                 }
               >
                 저장
-              </button>
-            </div>
-          </div>
+              </Button>
+            </ModalFooter>
+          </ModalShell>
         </DialogBackdrop>
       ) : null}
 

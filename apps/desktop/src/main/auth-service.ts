@@ -283,6 +283,16 @@ export class AuthService {
       return this.refreshPromise;
     }
 
+    if (
+      this.state.status === "unauthenticated" ||
+      this.state.status === "error"
+    ) {
+      this.patchState({
+        status: "loading",
+        errorMessage: null,
+      });
+    }
+
     this.refreshPromise = this.restoreSessionFromRefreshToken(
       "세션이 만료되었습니다. 다시 로그인해 주세요.",
     );

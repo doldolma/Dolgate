@@ -6,6 +6,8 @@ import type {
   WorkspaceTabId
 } from '../store/createAppStore';
 import { DesktopWindowControls, type DesktopPlatform } from './DesktopWindowControls';
+import { cn } from '../lib/cn';
+import { Badge, Button, IconButton, TabButton, Tabs } from '../ui';
 
 interface DraggedSessionPayload {
   sessionId: string;
@@ -141,6 +143,39 @@ function countWorkspacePanes(workspace: WorkspaceTab): number {
     stack.push(node.first, node.second);
   }
   return count;
+}
+
+function getTitlebarTabClass(active: boolean): string {
+  if (active) {
+    return 'border-[rgba(255,255,255,0.16)] bg-[rgba(255,255,255,0.96)] text-[var(--accent-strong)] shadow-[0_14px_34px_rgba(10,18,30,0.18)] hover:text-[var(--accent-strong)]';
+  }
+
+  return 'border-[rgba(255,255,255,0.06)] bg-[rgba(255,255,255,0.08)] text-[rgba(243,247,251,0.78)] shadow-[inset_0_1px_0_rgba(255,255,255,0.04)] hover:bg-[rgba(255,255,255,0.12)] hover:text-white';
+}
+
+function getTitlebarDynamicTabContainerClass(active: boolean): string {
+  if (active) {
+    return 'border-[rgba(255,255,255,0.24)] bg-[rgba(255,255,255,0.96)] shadow-[0_18px_38px_rgba(10,18,30,0.2)]';
+  }
+
+  return 'border-[rgba(255,255,255,0.06)] bg-[rgba(255,255,255,0.08)] shadow-[inset_0_1px_0_rgba(255,255,255,0.04)] hover:bg-[rgba(255,255,255,0.12)]';
+}
+
+function getTitlebarDynamicTabButtonClass(active: boolean): string {
+  return cn(
+    'min-w-0 justify-start border-transparent bg-transparent px-4 py-[0.58rem] shadow-none hover:bg-transparent',
+    active
+      ? 'text-[var(--accent-strong)] hover:text-[var(--accent-strong)]'
+      : 'text-[rgba(243,247,251,0.82)] hover:text-white',
+  );
+}
+
+function getTitlebarCloseButtonClass(active: boolean): string {
+  if (active) {
+    return 'h-8 w-8 rounded-full text-[0.95rem] text-[color-mix(in_srgb,var(--accent-strong)_84%,var(--text)_16%)] hover:bg-[color-mix(in_srgb,var(--accent-strong)_12%,transparent)] hover:text-[var(--accent-strong)]';
+  }
+
+  return 'h-8 w-8 rounded-full text-[0.95rem] text-[rgba(243,247,251,0.78)] hover:bg-[rgba(255,255,255,0.12)] hover:text-white';
 }
 
 export function AppTitleBar({
@@ -295,19 +330,29 @@ export function AppTitleBar({
           onEndSessionDrag();
         }}
       >
-        <button type="button" className={`workspace-tab home ${activeWorkspaceTab === 'home' ? 'active' : ''}`} onClick={onSelectHome}>
-          Home
-        </button>
-        <button type="button" className={`workspace-tab sftp ${activeWorkspaceTab === 'sftp' ? 'active' : ''}`} onClick={onSelectSftp}>
-          SFTP
-        </button>
-        <button
-          type="button"
-          className={`workspace-tab containers ${activeWorkspaceTab === 'containers' ? 'active' : ''}`}
-          onClick={onSelectContainers}
-        >
-          Containers
-        </button>
+        <Tabs className="shrink-0 bg-transparent p-0 shadow-none border-transparent gap-2">
+          <TabButton
+            active={activeWorkspaceTab === 'home'}
+            className={getTitlebarTabClass(activeWorkspaceTab === 'home')}
+            onClick={onSelectHome}
+          >
+            Home
+          </TabButton>
+          <TabButton
+            active={activeWorkspaceTab === 'sftp'}
+            className={getTitlebarTabClass(activeWorkspaceTab === 'sftp')}
+            onClick={onSelectSftp}
+          >
+            SFTP
+          </TabButton>
+          <TabButton
+            active={activeWorkspaceTab === 'containers'}
+            className={getTitlebarTabClass(activeWorkspaceTab === 'containers')}
+            onClick={onSelectContainers}
+          >
+            Containers
+          </TabButton>
+        </Tabs>
         {dynamicItems.map((item) => {
           if (item.kind === 'session') {
             const target = { kind: 'session', sessionId: item.sessionId } as const;
@@ -315,15 +360,16 @@ export function AppTitleBar({
             return (
               <div
                 key={item.sessionId}
-                className={`workspace-tab-shell ${item.active ? 'active' : ''} ${
-                  tabDropPreview?.targetKey === targetKey && tabDropPreview.placement === 'before'
-                    ? 'workspace-tab-shell--drop-before'
-                    : ''
-                } ${
-                  tabDropPreview?.targetKey === targetKey && tabDropPreview.placement === 'after'
-                    ? 'workspace-tab-shell--drop-after'
-                    : ''
-                }`}
+                className={cn(
+                  'group relative flex items-center gap-1 rounded-[22px] border pr-1.5 transition-[box-shadow,background-color,border-color] duration-150',
+                  getTitlebarDynamicTabContainerClass(item.active),
+                  tabDropPreview?.targetKey === targetKey &&
+                    tabDropPreview.placement === 'before' &&
+                    'before:absolute before:-left-1 before:top-2 before:bottom-2 before:w-[3px] before:rounded-full before:bg-[var(--accent-strong)]',
+                  tabDropPreview?.targetKey === targetKey &&
+                    tabDropPreview.placement === 'after' &&
+                    'after:absolute after:-right-1 after:top-2 after:bottom-2 after:w-[3px] after:rounded-full after:bg-[var(--accent-strong)]',
+                )}
                 draggable
                 onDragStart={(event) => {
                   event.dataTransfer.effectAllowed = 'move';
@@ -371,16 +417,20 @@ export function AppTitleBar({
                   onReorderDynamicTab(sourceTab, target, placement);
                 }}
               >
-                <button
-                  type="button"
-                  className={`workspace-tab ${item.active ? 'active' : ''}`}
+                <TabButton
+                  active={item.active}
+                  className={cn(
+                    'min-w-[8.5rem]',
+                    getTitlebarDynamicTabButtonClass(item.active),
+                  )}
                   onClick={() => onSelectSession(item.sessionId)}
                 >
-                  <span className="workspace-tab__title">{item.title}</span>
-                </button>
-                <button
-                  type="button"
-                  className="workspace-tab__close"
+                  <span className="truncate">{item.title}</span>
+                </TabButton>
+                <IconButton
+                  size="sm"
+                  tone="ghost"
+                  className={getTitlebarCloseButtonClass(item.active)}
                   aria-label={`${item.title} 세션 종료`}
                   onClick={async (event) => {
                     event.stopPropagation();
@@ -389,7 +439,7 @@ export function AppTitleBar({
                   disabled={item.status === 'disconnecting'}
                 >
                   ×
-                </button>
+                </IconButton>
               </div>
             );
           }
@@ -399,15 +449,16 @@ export function AppTitleBar({
           return (
             <div
               key={item.workspaceId}
-              className={`workspace-tab-shell workspace-tab-shell--workspace ${item.active ? 'active' : ''} ${
-                tabDropPreview?.targetKey === targetKey && tabDropPreview.placement === 'before'
-                  ? 'workspace-tab-shell--drop-before'
-                  : ''
-              } ${
-                tabDropPreview?.targetKey === targetKey && tabDropPreview.placement === 'after'
-                  ? 'workspace-tab-shell--drop-after'
-                  : ''
-              }`}
+              className={cn(
+                'group relative flex items-center gap-1 rounded-[22px] border pr-1.5 transition-[box-shadow,background-color,border-color] duration-150',
+                getTitlebarDynamicTabContainerClass(item.active),
+                tabDropPreview?.targetKey === targetKey &&
+                  tabDropPreview.placement === 'before' &&
+                  'before:absolute before:-left-1 before:top-2 before:bottom-2 before:w-[3px] before:rounded-full before:bg-[var(--accent-strong)]',
+                tabDropPreview?.targetKey === targetKey &&
+                  tabDropPreview.placement === 'after' &&
+                  'after:absolute after:-right-1 after:top-2 after:bottom-2 after:w-[3px] after:rounded-full after:bg-[var(--accent-strong)]',
+              )}
               draggable
               onDragStart={(event) => {
                 event.dataTransfer.effectAllowed = 'move';
@@ -453,20 +504,41 @@ export function AppTitleBar({
                 onReorderDynamicTab(sourceTab, target, placement);
               }}
             >
-              <button
-                type="button"
-                className={`workspace-tab workspace-tab--workspace ${item.active ? 'active' : ''}`}
+              <TabButton
+                active={item.active}
+                className={cn(
+                  'min-w-[10.5rem] gap-2',
+                  getTitlebarDynamicTabButtonClass(item.active),
+                )}
                 onClick={() => onSelectWorkspace(item.workspaceId)}
               >
-                <span className="workspace-tab__glyph" aria-hidden="true">
+                <span
+                  className={cn(
+                    'inline-flex h-6 w-6 items-center justify-center rounded-full text-[0.88rem]',
+                    item.active
+                      ? 'bg-[color-mix(in_srgb,var(--accent-strong)_12%,white_88%)] text-[var(--accent-strong)]'
+                      : 'bg-[rgba(255,255,255,0.08)] text-[rgba(243,247,251,0.78)]',
+                  )}
+                  aria-hidden="true"
+                >
                   ⊞
                 </span>
-                <span className="workspace-tab__title">{item.title}</span>
-                <span className="workspace-tab__count">{item.paneCount}</span>
-              </button>
-              <button
-                type="button"
-                className="workspace-tab__close"
+                <span className="truncate">{item.title}</span>
+                <span
+                  className={cn(
+                    'ml-auto inline-flex min-w-[1.5rem] items-center justify-center rounded-full px-2 py-0.5 text-[0.72rem] font-semibold',
+                    item.active
+                      ? 'bg-[color-mix(in_srgb,var(--accent-strong)_12%,white_88%)] text-[var(--accent-strong)]'
+                      : 'bg-[rgba(255,255,255,0.08)] text-[rgba(243,247,251,0.78)]',
+                  )}
+                >
+                  {item.paneCount}
+                </span>
+              </TabButton>
+              <IconButton
+                size="sm"
+                tone="ghost"
+                className={getTitlebarCloseButtonClass(item.active)}
                 aria-label={`${item.title} 닫기`}
                 onClick={async (event) => {
                   event.stopPropagation();
@@ -474,7 +546,7 @@ export function AppTitleBar({
                 }}
               >
                 ×
-              </button>
+              </IconButton>
             </div>
           );
         })}
@@ -516,85 +588,81 @@ export function AppTitleBar({
       <div className="titlebar-spacer" />
       <div className="titlebar-actions">
         <div className="update-menu" ref={updateMenuRef}>
-          <button
-            type="button"
-            className={`titlebar-action ${isUpdateOpen ? 'active' : ''}`}
+          <IconButton
+            tone="default"
+            active={isUpdateOpen}
+            className="relative h-12 w-12 rounded-full border-[rgba(255,255,255,0.08)] bg-[rgba(255,255,255,0.08)] text-[1.1rem] text-white shadow-[0_10px_24px_rgba(7,13,24,0.14)] hover:bg-[rgba(255,255,255,0.14)]"
             aria-label="업데이트 상태 보기"
             onClick={() => setIsUpdateOpen((current) => !current)}
           >
-            <span className="titlebar-action__icon" aria-hidden="true">
+            <span aria-hidden="true">
               🔔
             </span>
-            {showBadge ? <span className="titlebar-action__badge" /> : null}
-          </button>
+            {showBadge ? <span className="absolute right-2 top-2 h-2.5 w-2.5 rounded-full bg-[var(--accent-strong)] ring-2 ring-[var(--chrome-bg)]" /> : null}
+          </IconButton>
 
           {isUpdateOpen ? (
-            <div className="update-popover">
-              <div className="update-popover__header">
-                <div className="update-popover__title-group">
-                  <div className="update-popover__headline">
-                    <span className="update-popover__glyph" aria-hidden="true">
+            <div className="update-popover w-[min(24rem,calc(100vw-2rem))] rounded-[26px] border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[var(--dialog-surface)] p-5 shadow-[0_24px_68px_rgba(8,16,30,0.18)]">
+              <div className="mb-4 flex items-start justify-between gap-4">
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2.5 text-[var(--text)]">
+                    <span className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-[color-mix(in_srgb,var(--accent-strong)_14%,var(--surface))] text-[var(--accent-strong)]" aria-hidden="true">
                       ↗
                     </span>
                     <strong>{titleText}</strong>
                   </div>
-                  <div className="update-popover__subline">
+                  <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[0.82rem] text-[var(--text-soft)]">
                     {publishedAt ? <span>{publishedAt}</span> : null}
                     {updateState.release?.version ? <span>Version {updateState.release.version}</span> : null}
                   </div>
                 </div>
-                <span className="status-pill">{updateState.currentVersion}</span>
+                <Badge>{updateState.currentVersion}</Badge>
               </div>
 
-              <div className="update-popover__body">
+              <div className="space-y-3 pb-4 text-[0.93rem] leading-[1.55] text-[var(--text-soft)]">
                 {!updateState.enabled ? (
-                  <p className="update-popover__message">자동 업데이트는 패키지된 릴리즈 빌드에서만 동작합니다.</p>
+                  <p>자동 업데이트는 패키지된 릴리즈 빌드에서만 동작합니다.</p>
                 ) : null}
 
                 {!updateState.release && getEmptyReleaseMessage(updateState) ? (
-                  <p className="update-popover__message">{getEmptyReleaseMessage(updateState)}</p>
+                  <p>{getEmptyReleaseMessage(updateState)}</p>
                 ) : null}
 
-                {updateState.status === 'upToDate' ? <p className="update-popover__message">현재 최신 버전을 사용 중입니다.</p> : null}
+                {updateState.status === 'upToDate' ? <p>현재 최신 버전을 사용 중입니다.</p> : null}
                 {updateState.status === 'downloading' ? (
-                  <p className="update-popover__message">업데이트를 다운로드하는 중입니다. {formatProgressPercent(updateState)}</p>
+                  <p>업데이트를 다운로드하는 중입니다. {formatProgressPercent(updateState)}</p>
                 ) : null}
                 {updateState.status === 'downloaded' ? (
-                  <p className="update-popover__message">업데이트가 준비되었습니다. 재시작하면 새 버전이 적용됩니다.</p>
+                  <p>업데이트가 준비되었습니다. 재시작하면 새 버전이 적용됩니다.</p>
                 ) : null}
                 {updateState.status === 'error' && updateState.errorMessage ? (
-                  <p className="update-popover__error">{updateState.errorMessage}</p>
+                  <p className="text-[var(--danger-text)]">{updateState.errorMessage}</p>
                 ) : null}
               </div>
 
-              <div className="update-popover__footer">
-                <button
-                  type="button"
-                  className="secondary-button"
-                  onClick={async () => {
-                    await onOpenReleasePage(releaseUrl);
-                  }}
-                >
+              <div className="flex flex-wrap items-center justify-end gap-3 border-t border-[color-mix(in_srgb,var(--border)_82%,white_18%)] pt-4">
+                <Button variant="secondary" onClick={async () => {
+                  await onOpenReleasePage(releaseUrl);
+                }}>
                   Changelog ↗
-                </button>
+                </Button>
                 {showCheckAction ? (
-                  <button type="button" className="primary-button" onClick={onCheckForUpdates}>
+                  <Button variant="primary" onClick={onCheckForUpdates}>
                     업데이트 확인
-                  </button>
+                  </Button>
                 ) : null}
                 {showDevDisabledAction ? (
-                  <button type="button" className="secondary-button" disabled>
+                  <Button variant="secondary" disabled>
                     개발 실행에서는 비활성
-                  </button>
+                  </Button>
                 ) : null}
                 {showDownloadAction ? (
                   <>
-                    <button type="button" className="primary-button" onClick={onDownloadUpdate}>
+                    <Button variant="primary" onClick={onDownloadUpdate}>
                       다운로드
-                    </button>
-                    <button
-                      type="button"
-                      className="ghost-button"
+                    </Button>
+                    <Button
+                      variant="ghost"
                       onClick={async () => {
                         if (updateState.release?.version) {
                           await onDismissUpdate(updateState.release.version);
@@ -602,13 +670,13 @@ export function AppTitleBar({
                       }}
                     >
                       나중에
-                    </button>
+                    </Button>
                   </>
                 ) : null}
                 {showInstallAction ? (
-                  <button type="button" className="primary-button" onClick={onInstallUpdate}>
+                  <Button variant="primary" onClick={onInstallUpdate}>
                     재시작 후 업데이트
-                  </button>
+                  </Button>
                 ) : null}
               </div>
             </div>

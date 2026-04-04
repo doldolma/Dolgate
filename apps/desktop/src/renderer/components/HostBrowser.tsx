@@ -15,8 +15,24 @@ import {
   normalizeGroupPath
 } from '@shared';
 import type { GroupRecord, GroupRemoveMode, HostRecord } from '@shared';
+import { useResponsiveCardGrid } from '../lib/useResponsiveCardGrid';
 import { DialogBackdrop } from './DialogBackdrop';
 import type { DesktopPlatform } from './DesktopWindowControls';
+import {
+  Button,
+  EmptyState,
+  Input,
+  ModalBody,
+  ModalFooter,
+  ModalHeader,
+  ModalShell,
+  SectionLabel,
+  SplitButton,
+  SplitButtonMain,
+  SplitButtonMenu,
+  SplitButtonMenuItem,
+  SplitButtonToggle,
+} from '../ui';
 
 export {
   buildVisibleGroups,
@@ -52,6 +68,12 @@ export function getHostBrowserVisibleImportMenuLabels(desktopPlatform: DesktopPl
 export function getHostBrowserEmptyCalloutMessage(hostCount: number, searchQuery: string): string {
   return hostCount === 0 ? 'New Host 또는 Import 메뉴를 눌러 첫 번째 연결 대상을 추가해보세요.' : searchQuery ? '검색어를 지우거나 다른 호스트명으로 다시 찾아보세요.' : 'New Host를 눌러 이 위치에 호스트를 추가하거나, 다른 그룹으로 이동해 장치를 확인해보세요.';
 }
+
+const HOME_BROWSER_GROUP_CARD_MIN_WIDTH_PX = 280;
+const HOME_BROWSER_GROUP_CARD_MAX_WIDTH_PX = 320;
+const HOME_BROWSER_HOST_CARD_MIN_WIDTH_PX = 280;
+const HOME_BROWSER_HOST_CARD_MAX_WIDTH_PX = 460;
+const HOME_BROWSER_CARD_GAP_PX = 13.6;
 
 interface GroupDeleteTarget {
   paths: string[];
@@ -255,6 +277,26 @@ export function HostBrowser({
   const visibleGroupPaths = useMemo(() => visibleGroups.map((group) => group.path), [visibleGroups]);
   const showGroupEmptyState = currentGroupPath === null && visibleGroups.length === 0;
   const showGroupSection = visibleGroups.length > 0 || showGroupEmptyState;
+  const { ref: groupGridRef, style: groupGridStyle, layout: groupGridLayout } = useResponsiveCardGrid({
+    itemCount: visibleGroups.length,
+    minWidth: HOME_BROWSER_GROUP_CARD_MIN_WIDTH_PX,
+    maxWidth: HOME_BROWSER_GROUP_CARD_MAX_WIDTH_PX,
+    gap: HOME_BROWSER_CARD_GAP_PX
+  });
+  const { ref: hostGridRef, style: hostGridStyle, layout: hostGridLayout } = useResponsiveCardGrid({
+    itemCount: visibleHosts.length,
+    minWidth: HOME_BROWSER_HOST_CARD_MIN_WIDTH_PX,
+    maxWidth: HOME_BROWSER_HOST_CARD_MAX_WIDTH_PX,
+    gap: HOME_BROWSER_CARD_GAP_PX
+  });
+  const clampedGroupCardStyle =
+    groupGridLayout.justifyContent === 'start' && groupGridLayout.cardWidth
+      ? { width: '100%', maxWidth: `${groupGridLayout.cardWidth}px` }
+      : undefined;
+  const clampedHostCardStyle =
+    hostGridLayout.justifyContent === 'start' && hostGridLayout.cardWidth
+      ? { width: '100%', maxWidth: `${hostGridLayout.cardWidth}px` }
+      : undefined;
   const breadcrumbs = useMemo(() => {
     if (!currentGroupPath) {
       return [];
@@ -491,19 +533,17 @@ export function HostBrowser({
           />
         </div>
         <div className="home-toolbar__actions">
-          <button
-            type="button"
-            className="secondary-button"
+          <Button
+            variant="secondary"
             onClick={() => {
               setIsImportMenuOpen(false);
               onOpenLocalTerminal();
             }}
           >
             TERMINAL
-          </button>
-          <button
-            type="button"
-            className="secondary-button"
+          </Button>
+          <Button
+            variant="secondary"
             onClick={() => {
               setIsImportMenuOpen(false);
               setIsGroupModalOpen(true);
@@ -512,21 +552,17 @@ export function HostBrowser({
             }}
           >
             New Group
-          </button>
-          <div className="split-button" ref={importMenuRef}>
-            <button
-              type="button"
-              className="primary-button split-button__main"
+          </Button>
+          <SplitButton className="split-button" ref={importMenuRef}>
+            <SplitButtonMain
               onClick={() => {
                 setIsImportMenuOpen(false);
                 onCreateHost();
               }}
             >
               New Host
-            </button>
-            <button
-              type="button"
-              className="primary-button split-button__toggle"
+            </SplitButtonMain>
+            <SplitButtonToggle
               aria-label="Open import menu"
               aria-expanded={isImportMenuOpen}
               aria-haspopup="menu"
@@ -545,14 +581,12 @@ export function HostBrowser({
                   <path d="M1 1.25 6 6.25 11 1.25" />
                 </svg>
               </span>
-            </button>
+            </SplitButtonToggle>
             {isImportMenuOpen ? (
-              <div className="split-button__menu" role="menu" aria-label="Import host menu">
+              <SplitButtonMenu className="split-button__menu" role="menu" aria-label="Import host menu">
                 {importMenuItems.map((item) => (
-                  <button
+                  <SplitButtonMenuItem
                     key={item.label}
-                    type="button"
-                    className="split-button__menu-item"
                     role="menuitem"
                     onClick={() => {
                       setIsImportMenuOpen(false);
@@ -560,11 +594,11 @@ export function HostBrowser({
                     }}
                   >
                     {item.label}
-                  </button>
+                  </SplitButtonMenuItem>
                 ))}
-              </div>
+              </SplitButtonMenu>
             ) : null}
-          </div>
+          </SplitButton>
         </div>
       </div>
 
@@ -596,17 +630,18 @@ export function HostBrowser({
             <h2>Groups</h2>
           </div>
         </div>
-        <div className="group-grid">
+        <div className="group-grid" ref={groupGridRef} style={groupGridStyle}>
           {showGroupEmptyState ? (
-            <div className="empty-callout">
-              <strong>{currentGroupPath ? '이 위치에는 아직 그룹이 없습니다.' : '아직 만든 그룹이 없습니다.'}</strong>
-              <p>New Group을 눌러 현재 위치 아래에 첫 번째 그룹을 만들어보세요.</p>
-            </div>
+            <EmptyState
+              title={currentGroupPath ? '이 위치에는 아직 그룹이 없습니다.' : '아직 만든 그룹이 없습니다.'}
+              description="New Group을 눌러 현재 위치 아래에 첫 번째 그룹을 만들어보세요."
+            />
           ) : (
             visibleGroups.map((group) => (
               <article
                 key={group.path}
                 className={`group-card group-card--interactive ${selectedGroupPathSet.has(group.path) ? 'active' : ''} ${dragTargetGroupPath === group.path ? 'drop-target' : ''}`}
+                style={clampedGroupCardStyle}
                 onClick={(event) => {
                   handleGroupSelection(group.path, event);
                 }}
@@ -680,12 +715,12 @@ export function HostBrowser({
             <h2>Hosts</h2>
           </div>
         </div>
-        <div className="host-grid">
+        <div className="host-grid" ref={hostGridRef} style={hostGridStyle}>
           {visibleHosts.length === 0 ? (
-            <div className="empty-callout">
-              <strong>{emptyMessage}</strong>
-              <p>{getHostBrowserEmptyCalloutMessage(hosts.length, searchQuery)}</p>
-            </div>
+            <EmptyState
+              title={emptyMessage}
+              description={getHostBrowserEmptyCalloutMessage(hosts.length, searchQuery)}
+            />
           ) : (
             visibleHosts.map((host) => {
               const isTagsExpanded = expandedHostTags.includes(host.id);
@@ -699,6 +734,7 @@ export function HostBrowser({
                       (selectedHostIds.length === 0 && selectedGroupPaths.length === 0 && selectedHostId === host.id),
                     isTagsExpanded
                   )}
+                  style={clampedHostCardStyle}
                   draggable
                   onClick={(event) => {
                     handleHostSelection(host.id, event);
@@ -869,10 +905,13 @@ export function HostBrowser({
 
       {isGroupModalOpen ? (
         <DialogBackdrop className="home-modal-backdrop" onDismiss={closeGroupModal}>
-          <div className="home-modal" role="dialog" aria-modal="true" aria-labelledby="new-group-title">
-            <div className="section-kicker">Create</div>
-            <h3 id="new-group-title">New Group</h3>
-            <input
+          <ModalShell className="home-modal" role="dialog" aria-modal="true" aria-labelledby="new-group-title">
+            <ModalHeader className="block">
+              <SectionLabel>Create</SectionLabel>
+              <h3 id="new-group-title">New Group</h3>
+            </ModalHeader>
+            <ModalBody className="grid gap-4">
+            <Input
               value={newGroupName}
               onChange={(event) => {
                 setNewGroupName(event.target.value);
@@ -882,17 +921,13 @@ export function HostBrowser({
               autoFocus
             />
             {groupError ? <p className="home-modal__error">{groupError}</p> : null}
-            <div className="home-modal__actions">
-              <button
-                type="button"
-                className="secondary-button"
-                onClick={closeGroupModal}
-              >
+            </ModalBody>
+            <ModalFooter className="home-modal__actions">
+              <Button variant="secondary" onClick={closeGroupModal}>
                 Cancel
-              </button>
-              <button
-                type="button"
-                className="primary-button"
+              </Button>
+              <Button
+                variant="primary"
                 onClick={async () => {
                   try {
                     await onCreateGroup(newGroupName);
@@ -903,9 +938,9 @@ export function HostBrowser({
                 }}
               >
                 Create group
-              </button>
-            </div>
-          </div>
+              </Button>
+            </ModalFooter>
+          </ModalShell>
         </DialogBackdrop>
       ) : null}
 
@@ -920,19 +955,22 @@ export function HostBrowser({
             setHostDeleteError(null);
           }}
         >
-          <div className="home-modal" role="dialog" aria-modal="true" aria-labelledby="delete-host-title">
-            <div className="section-kicker">Delete</div>
+          <ModalShell className="home-modal" role="dialog" aria-modal="true" aria-labelledby="delete-host-title">
+            <ModalHeader className="block">
+            <SectionLabel>Delete</SectionLabel>
             <h3 id="delete-host-title">
               {hostDeleteTarget.hostCount === 1
                 ? `${hostDeleteTarget.title} 호스트를 삭제할까요?`
                 : `선택한 ${hostDeleteTarget.hostCount}개 호스트를 삭제할까요?`}
             </h3>
+            </ModalHeader>
+            <ModalBody className="grid gap-4">
             <p className="home-modal__copy">연결된 secret 항목은 유지됩니다.</p>
             {hostDeleteError ? <p className="home-modal__error">{hostDeleteError}</p> : null}
-            <div className="home-modal__actions">
-              <button
-                type="button"
-                className="secondary-button"
+            </ModalBody>
+            <ModalFooter className="home-modal__actions">
+              <Button
+                variant="secondary"
                 onClick={() => {
                   setHostDeleteTarget(null);
                   setHostDeleteError(null);
@@ -940,10 +978,9 @@ export function HostBrowser({
                 disabled={isRemovingHost}
               >
                 취소
-              </button>
-              <button
-                type="button"
-                className="secondary-button danger"
+              </Button>
+              <Button
+                variant="danger"
                 disabled={isRemovingHost}
                 onClick={async () => {
                   try {
@@ -962,21 +999,24 @@ export function HostBrowser({
                 }}
               >
                 삭제
-              </button>
-            </div>
-          </div>
+              </Button>
+            </ModalFooter>
+          </ModalShell>
         </DialogBackdrop>
       ) : null}
 
       {groupDeleteTarget ? (
-        <div className="home-modal-backdrop" role="presentation">
-          <div className="home-modal" role="dialog" aria-modal="true" aria-labelledby="delete-group-title">
-            <div className="section-kicker">Delete</div>
+        <DialogBackdrop className="home-modal-backdrop">
+          <ModalShell className="home-modal" role="dialog" aria-modal="true" aria-labelledby="delete-group-title">
+            <ModalHeader className="block">
+            <SectionLabel>Delete</SectionLabel>
             <h3 id="delete-group-title">
               {groupDeleteTarget.groupCount === 1
                 ? `${groupDeleteTarget.title} 그룹을 삭제할까요?`
                 : `선택한 ${groupDeleteTarget.groupCount}개 그룹을 삭제할까요?`}
             </h3>
+            </ModalHeader>
+            <ModalBody className="grid gap-4">
             {getGroupDeleteDialogVariant(groupDeleteTarget.childGroupCount, groupDeleteTarget.hostCount) === 'with-descendants' ? (
               <p className="home-modal__copy">
                 하위 그룹 {groupDeleteTarget.childGroupCount}개와 호스트 {groupDeleteTarget.hostCount}개가 함께 영향을 받습니다.
@@ -985,10 +1025,10 @@ export function HostBrowser({
               <p className="home-modal__copy">이 그룹은 비어 있습니다. 삭제하면 바로 사라집니다.</p>
             )}
             {groupDeleteError ? <p className="home-modal__error">{groupDeleteError}</p> : null}
-            <div className="home-modal__actions">
-              <button
-                type="button"
-                className="secondary-button"
+            </ModalBody>
+            <ModalFooter className="home-modal__actions">
+              <Button
+                variant="secondary"
                 onClick={() => {
                   setGroupDeleteTarget(null);
                   setGroupDeleteError(null);
@@ -996,11 +1036,10 @@ export function HostBrowser({
                 disabled={isRemovingGroup}
               >
                 취소
-              </button>
+              </Button>
               {getGroupDeleteDialogVariant(groupDeleteTarget.childGroupCount, groupDeleteTarget.hostCount) === 'with-descendants' ? (
-                <button
-                  type="button"
-                  className="secondary-button"
+                <Button
+                  variant="secondary"
                   disabled={isRemovingGroup}
                   onClick={async () => {
                     try {
@@ -1019,11 +1058,10 @@ export function HostBrowser({
                   }}
                 >
                   하위 항목 유지
-                </button>
+                </Button>
               ) : null}
-              <button
-                type="button"
-                className="secondary-button danger"
+              <Button
+                variant="danger"
                 disabled={isRemovingGroup}
                 onClick={async () => {
                     try {
@@ -1055,10 +1093,10 @@ export function HostBrowser({
                 {getGroupDeleteDialogVariant(groupDeleteTarget.childGroupCount, groupDeleteTarget.hostCount) === 'with-descendants'
                   ? '하위 항목까지 삭제'
                   : '삭제'}
-              </button>
-            </div>
-          </div>
-        </div>
+              </Button>
+            </ModalFooter>
+          </ModalShell>
+        </DialogBackdrop>
       ) : null}
     </div>
   );

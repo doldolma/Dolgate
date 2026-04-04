@@ -6,12 +6,16 @@ import { SESSION_SHARE_CHAT_TOAST_TTL_MS, TerminalWorkspace } from './TerminalWo
 
 const mocks = vi.hoisted(() => ({
   storeState: {} as any,
+  desktopApi: null as any,
   runtimeRecords: [] as any[],
   schedulerRecords: [] as any[]
 }));
 
 vi.mock('../store/appStore', () => ({
-  useAppStore: (selector: (state: any) => unknown) => selector(mocks.storeState)
+  useAppStore: (selector: (state: any) => unknown) => selector(mocks.storeState),
+  get desktopApi() {
+    return mocks.desktopApi;
+  }
 }));
 
 vi.mock('../lib/terminal-runtime', () => ({
@@ -318,6 +322,7 @@ describe('TerminalWorkspace workspace switching', () => {
         }
       }
     });
+    mocks.desktopApi = window.dolssh;
     Object.defineProperty(window.navigator, 'clipboard', {
       configurable: true,
       value: {

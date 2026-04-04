@@ -1,0 +1,5 @@
+@import "./legacy/misc.css";
+@import "./legacy/terminal.css";
+@import "./legacy/sftp.css";
+@import "./legacy/containers.css";
+@import "./legacy/port-forwarding.css";

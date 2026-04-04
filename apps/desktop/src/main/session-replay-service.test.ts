@@ -352,4 +352,53 @@ describe("SessionReplayService", () => {
       recordingId,
     });
   });
+
+  it("finalizes active recordings during shutdown so replay can still open after app quit", () => {
+    const lifecycleStates = new Map<string, ReturnType<typeof createLifecycleState>>([
+      ["session-1", createLifecycleState()],
+    ]);
+    const coreManager = {
+      getRemoteSessionLifecycleState: vi.fn((sessionId: string) =>
+        lifecycleStates.get(sessionId) ?? null,
+      ),
+      attachRemoteSessionRecording: vi.fn(),
+    };
+    const settingsRepository = {
+      get: vi.fn(() => ({ sessionReplayRetentionCount: 100 })),
+    };
+    const service = new SessionReplayService(
+      settingsRepository as never,
+      coreManager as never,
+    );
+
+    service.noteSessionConfigured("session-1", 132, 44);
+    service.handleTerminalEvent({
+      type: "connected",
+      sessionId: "session-1",
+      payload: { status: "connected" },
+    } as never);
+
+    const recordingId = coreManager.attachRemoteSessionRecording.mock.calls[0]?.[1];
+    expect(typeof recordingId).toBe("string");
+
+    vi.setSystemTime(new Date("2026-03-29T00:00:01.000Z"));
+    service.handleTerminalStream(
+      "session-1",
+      new Uint8Array(Buffer.from("hello\n", "utf8")),
+    );
+
+    service.shutdown();
+
+    const replay = service.get(recordingId);
+    expect(replay).toMatchObject({
+      recordingId,
+      sessionId: "session-1",
+      durationMs: 1000,
+    });
+    expect(replay.entries).toHaveLength(1);
+    expect(replay.entries[0]).toMatchObject({
+      type: "output",
+      atMs: 1000,
+    });
+  });
 });

@@ -5,6 +5,7 @@ import { App } from './App';
 
 const mocks = vi.hoisted(() => ({
   storeState: {} as any,
+  desktopApi: null as any,
   appStoreSetState: vi.fn(),
   loginGateProps: [] as any[],
   terminalWorkspaceProps: [] as any[],
@@ -20,6 +21,9 @@ function stubComponent(testId: string) {
 
 vi.mock('./store/appStore', () => ({
   useAppStore: (selector: (state: any) => unknown) => selector(mocks.storeState),
+  get desktopApi() {
+    return mocks.desktopApi;
+  },
   appStore: {
     setState: mocks.appStoreSetState,
   },
@@ -212,6 +216,7 @@ function createMockStoreState(overrides: Record<string, unknown> = {}) {
     toggleWorkspaceBroadcast: fn(),
     resizeWorkspaceSplit: fn(),
     activateSftp: fn(),
+    loadSettings: vi.fn().mockResolvedValue(undefined),
     updateSettings: fn(),
     savePortForward: fn(),
     saveDnsOverride: fn(),
@@ -391,6 +396,14 @@ describe('App integration', () => {
     mocks.awsEcsWorkspaceProps.length = 0;
     mocks.appStoreSetState.mockReset();
     mocks.storeState = createMockStoreState();
+    mocks.desktopApi = createDolsshApi({
+      authBootstrapState: {
+        status: 'authenticated',
+        session: { user: { id: 'user-1', email: 'user@example.com' } },
+        offline: null,
+        errorMessage: null,
+      },
+    });
     Object.defineProperty(window, 'matchMedia', {
       configurable: true,
       writable: true,
@@ -421,6 +434,7 @@ describe('App integration', () => {
       writable: true,
       value: api,
     });
+    mocks.desktopApi = api;
 
     render(<App />);
 
@@ -430,6 +444,111 @@ describe('App integration', () => {
       expect(mocks.storeState.refreshSyncedWorkspaceData).toHaveBeenCalledTimes(1);
       expect(screen.getByTestId('terminal-workspace')).toBeInTheDocument();
     });
+  });
+
+  it('does not mount inactive heavy shells while the session view is active', async () => {
+    const api = createDolsshApi({
+      authBootstrapState: {
+        status: 'authenticated',
+        session: { user: { id: 'user-1', email: 'user@example.com' } },
+        offline: null,
+        errorMessage: null,
+      },
+    });
+    Object.defineProperty(window, 'dolssh', {
+      configurable: true,
+      writable: true,
+      value: api,
+    });
+    mocks.desktopApi = api;
+    mocks.storeState = createMockStoreState({
+      activeWorkspaceTab: 'session:session-1',
+    });
+
+    render(<App />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('terminal-workspace')).toBeInTheDocument();
+    });
+
+    expect(screen.queryByTestId('host-browser')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('sftp-workspace')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('containers-workspace')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('aws-ecs-workspace')).not.toBeInTheDocument();
+  });
+
+  it('does not keep the terminal workspace mounted while SFTP is active just because session tabs exist', async () => {
+    const api = createDolsshApi({
+      authBootstrapState: {
+        status: 'authenticated',
+        session: { user: { id: 'user-1', email: 'user@example.com' } },
+        offline: null,
+        errorMessage: null,
+      },
+    });
+    Object.defineProperty(window, 'dolssh', {
+      configurable: true,
+      writable: true,
+      value: api,
+    });
+    mocks.desktopApi = api;
+    mocks.storeState = createMockStoreState({
+      activeWorkspaceTab: 'sftp',
+    });
+
+    render(<App />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('sftp-workspace')).toBeInTheDocument();
+    });
+
+    expect(screen.queryByTestId('terminal-workspace')).not.toBeInTheDocument();
+  });
+
+  it('keeps the terminal workspace mounted in the background when a session share is active', async () => {
+    const api = createDolsshApi({
+      authBootstrapState: {
+        status: 'authenticated',
+        session: { user: { id: 'user-1', email: 'user@example.com' } },
+        offline: null,
+        errorMessage: null,
+      },
+    });
+    Object.defineProperty(window, 'dolssh', {
+      configurable: true,
+      writable: true,
+      value: api,
+    });
+    mocks.desktopApi = api;
+    mocks.storeState = createMockStoreState({
+      activeWorkspaceTab: 'sftp',
+      tabs: [
+        {
+          id: 'tab-1',
+          sessionId: 'session-1',
+          source: 'local',
+          hostId: null,
+          title: 'Session 1',
+          status: 'connected',
+          sessionShare: {
+            status: 'active',
+            shareUrl: 'https://example.test/share/session-1',
+            inputEnabled: true,
+            viewerCount: 1,
+          },
+          hasReceivedOutput: true,
+          lastEventAt: '2026-03-28T00:00:00.000Z',
+        },
+      ],
+    });
+
+    render(<App />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('sftp-workspace')).toBeInTheDocument();
+    });
+
+    expect(screen.getByTestId('terminal-workspace')).toBeInTheDocument();
   });
 
   it('rehydrates synced workspace data after logging back in from the login gate', async () => {
@@ -452,6 +571,7 @@ describe('App integration', () => {
       writable: true,
       value: api,
     });
+    mocks.desktopApi = api;
 
     render(<App />);
     await screen.findByTestId('login-gate');
@@ -497,6 +617,7 @@ describe('App integration', () => {
       writable: true,
       value: api,
     });
+    mocks.desktopApi = api;
 
     render(<App />);
 
@@ -535,6 +656,7 @@ describe('App integration', () => {
       writable: true,
       value: api,
     });
+    mocks.desktopApi = api;
     mocks.storeState = createMockStoreState({
       hosts: [
         {
@@ -598,6 +720,7 @@ describe('App integration', () => {
       writable: true,
       value: api,
     });
+    mocks.desktopApi = api;
     mocks.storeState = createMockStoreState({
       hosts: [
         {
@@ -699,6 +822,7 @@ describe('App integration', () => {
       writable: true,
       value: api,
     });
+    mocks.desktopApi = api;
 
     render(<App />);
 
@@ -719,6 +843,7 @@ describe('App integration', () => {
       writable: true,
       value: api,
     });
+    mocks.desktopApi = api;
 
     render(<App />);
 
@@ -759,6 +884,7 @@ describe('App integration', () => {
       writable: true,
       value: api,
     });
+    mocks.desktopApi = api;
 
     const { unmount } = render(<App />);
 

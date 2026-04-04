@@ -18,6 +18,20 @@ import type {
   HostContainersTabState,
   PendingContainersInteractiveAuth,
 } from "../store/createAppStore";
+import { useContainersWorkspaceController } from "../controllers/useContainersWorkspaceController";
+import {
+  Button,
+  EmptyState,
+  ModalBody,
+  ModalFooter,
+  ModalHeader,
+  ModalShell,
+  NoticeCard,
+  SectionLabel,
+  StatusBadge,
+  TabButton,
+  Tabs,
+} from "../ui";
 import {
   UPlotMetricChart,
   type MetricChartSeriesDefinition,
@@ -703,15 +717,16 @@ export class ContainerTunnelErrorBoundary extends Component<
       return (
         <div className="callout error">
           <div>컨테이너 Tunnel을 표시하지 못했습니다.</div>
-          <button
+          <Button
             type="button"
-            className="secondary-button"
+            variant="secondary"
+            size="sm"
             onClick={() => {
               this.setState({ hasError: false });
             }}
           >
             다시 시도
-          </button>
+          </Button>
         </div>
       );
     }
@@ -889,13 +904,11 @@ function ContainerTunnelPanel({
         <div className="containers-workspace__tunnel-runtime-card">
           <div className="containers-workspace__tunnel-runtime-header">
             <strong>터널 상태</strong>
-            <span
-              className={`status-pill status-pill--${tunnelState.runtime.status}`}
-            >
+            <StatusBadge tone={tunnelState.runtime.status === "running" ? "running" : "stopped"}>
               {tunnelState.runtime.status === "running"
                 ? "Running"
                 : tunnelState.runtime.status}
-            </span>
+            </StatusBadge>
           </div>
           <div className="containers-workspace__tunnel-runtime-grid">
             <div>
@@ -916,23 +929,13 @@ function ContainerTunnelPanel({
 
       <div className="containers-workspace__tunnel-actions">
         {tunnelState.runtime ? (
-          <button
-            type="button"
-            className="secondary-button"
-            disabled={tunnelState.loading}
-            onClick={onStopTunnel}
-          >
+          <Button type="button" variant="secondary" disabled={tunnelState.loading} onClick={onStopTunnel}>
             {tunnelState.loading ? "정지 중..." : "Stop"}
-          </button>
+          </Button>
         ) : (
-          <button
-            type="button"
-            className="primary-button"
-            disabled={!canStartTunnel}
-            onClick={onStartTunnel}
-          >
+          <Button type="button" variant="primary" disabled={!canStartTunnel} onClick={onStartTunnel}>
             {tunnelState.loading ? "시작 중..." : "Start tunnel"}
-          </button>
+          </Button>
         )}
       </div>
     </div>
@@ -1250,6 +1253,8 @@ export function ContainersWorkspace({
   onReopenInteractiveAuthUrl,
   onClearInteractiveAuth,
 }: ContainersWorkspaceProps) {
+  const { startContainerTunnel, stopContainerTunnel } =
+    useContainersWorkspaceController();
   const [promptResponses, setPromptResponses] = useState<string[]>([]);
   const [pendingConfirmAction, setPendingConfirmAction] = useState<
     "start" | "stop" | "restart" | "remove" | null
@@ -1665,7 +1670,7 @@ export function ContainersWorkspace({
       error: null,
     }));
     try {
-      const runtime = await window.dolssh.containers.startTunnel({
+      const runtime = await startContainerTunnel({
         hostId: host.id,
         containerId: currentContainer.id,
         networkName: currentTunnelState.networkName,
@@ -1725,7 +1730,7 @@ export function ContainersWorkspace({
       error: null,
     }));
     try {
-      await window.dolssh.containers.stopTunnel(runtimeId);
+      await stopContainerTunnel(runtimeId);
       const nextState = {
         ...currentTunnelState,
         loading: false,
@@ -1756,7 +1761,7 @@ export function ContainersWorkspace({
     <div className="containers-workspace">
       <div className="containers-workspace__header">
         <div>
-          <div className="eyebrow">Host Containers</div>
+          <SectionLabel>Host Containers</SectionLabel>
           <h2>{host.label}</h2>
           <div className="containers-workspace__host-meta">
             <span>{getHostBadgeLabel(host)}</span>
@@ -1766,19 +1771,19 @@ export function ContainersWorkspace({
           </div>
         </div>
         <div className="containers-workspace__header-actions">
-          <button
+          <Button
             type="button"
-            className="secondary-button"
+            variant="secondary"
             onClick={() => {
               void onRefresh(host.id);
             }}
             disabled={tab.isLoading}
           >
             {tab.isLoading ? "새로고침 중..." : "새로고침"}
-          </button>
-          <button
+          </Button>
+          <Button
             type="button"
-            className="primary-button"
+            variant="primary"
             onClick={() => {
               if (!tab.selectedContainerId) {
                 return;
@@ -1788,16 +1793,18 @@ export function ContainersWorkspace({
             disabled={!tab.selectedContainerId}
           >
             셸 접속
-          </button>
+          </Button>
         </div>
       </div>
 
       {tab.unsupportedReason ? (
-        <div className="empty-state-card containers-workspace__empty-state">
-          <div className="eyebrow">Runtime Unavailable</div>
-          <h3>이 호스트에서는 컨테이너 런타임을 찾지 못했습니다.</h3>
+        <NoticeCard
+          title="이 호스트에서는 컨테이너 런타임을 찾지 못했습니다."
+          className="containers-workspace__empty-state"
+        >
+          <SectionLabel className="mb-1">Runtime Unavailable</SectionLabel>
           <p>{tab.unsupportedReason}</p>
-        </div>
+        </NoticeCard>
       ) : (
         <div className="containers-workspace__body">
           <aside className="containers-workspace__sidebar">
@@ -1838,72 +1845,72 @@ export function ContainersWorkspace({
               </div>
               <div className="containers-workspace__detail-actions">
                 <div className="containers-workspace__action-row">
-                  <button
+                  <Button
                     type="button"
-                    className="secondary-button"
+                    variant="secondary"
+                    size="sm"
                     onClick={() => setPendingConfirmAction("start")}
                     disabled={!selectedContainer || !canStart || !!tab.pendingAction}
                   >
                     Start
-                  </button>
-                  <button
+                  </Button>
+                  <Button
                     type="button"
-                    className="secondary-button"
+                    variant="secondary"
+                    size="sm"
                     onClick={() => setPendingConfirmAction("stop")}
                     disabled={!selectedContainer || !canStop || !!tab.pendingAction}
                   >
                     Stop
-                  </button>
-                  <button
+                  </Button>
+                  <Button
                     type="button"
-                    className="secondary-button"
+                    variant="secondary"
+                    size="sm"
                     onClick={() => setPendingConfirmAction("restart")}
                     disabled={!selectedContainer || !canRestart || !!tab.pendingAction}
                   >
                     Restart
-                  </button>
-                  <button
+                  </Button>
+                  <Button
                     type="button"
-                    className="secondary-button danger-button"
+                    variant="danger"
+                    size="sm"
                     onClick={() => setPendingConfirmAction("remove")}
                     disabled={!selectedContainer || !canRemove || !!tab.pendingAction}
                   >
                     Remove
-                  </button>
+                  </Button>
                 </div>
-                <div className="segmented-control">
-                  <button
-                    type="button"
-                    className={tab.activePanel === "overview" ? "active" : ""}
-                    onClick={() => onSetPanel(host.id, "overview")}
-                  >
+                <Tabs className="gap-2 bg-[var(--surface-elevated)] p-1.5">
+                  <TabButton type="button" active={tab.activePanel === "overview"} onClick={() => onSetPanel(host.id, "overview")}>
                     Overview
-                  </button>
-                  <button
+                  </TabButton>
+                  <TabButton
                     type="button"
-                    className={tab.activePanel === "logs" ? "active" : ""}
+                    active={tab.activePanel === "logs"}
                     onClick={() => onSetPanel(host.id, "logs")}
                     disabled={!tab.selectedContainerId}
                   >
                     Logs
-                  </button>
-                  <button
+                  </TabButton>
+                  <TabButton
                     type="button"
-                    className={tab.activePanel === "metrics" ? "active" : ""}
+                    active={tab.activePanel === "metrics"}
                     onClick={() => onSetPanel(host.id, "metrics")}
                     disabled={!tab.selectedContainerId}
                   >
                     Metrics
-                  </button>
-                  <button
+                  </TabButton>
+                  <TabButton
                     type="button"
-                    className={tab.activePanel === "tunnel" ? "active" : ""}
+                    active={tab.activePanel === "tunnel"}
                     onClick={() => onSetPanel(host.id, "tunnel")}
                     disabled={!tab.selectedContainerId}
                   >
                     Tunnel
-                  </button>
-                </div>
+                  </TabButton>
+                </Tabs>
               </div>
             </div>
             {tab.actionError ? <div className="callout error">{tab.actionError}</div> : null}
@@ -1969,46 +1976,50 @@ export function ContainersWorkspace({
                         onSetLogsSearchQuery(host.id, event.target.value)
                       }
                     />
-                    <button
+                    <Button
                       type="button"
-                      className="secondary-button"
+                      variant="secondary"
+                      size="sm"
                       onClick={() => {
                         void onSearchLogs(host.id);
                       }}
                       disabled={!canSearchRemoteLogs}
                     >
                       {tab.logsSearchLoading ? "검색 중..." : "원격 검색"}
-                    </button>
+                    </Button>
                     {(tab.logsSearchMode || tab.logsSearchQuery) ? (
-                      <button
+                      <Button
                         type="button"
-                        className="secondary-button"
+                        variant="secondary"
+                        size="sm"
                         onClick={() => onClearLogsSearch(host.id)}
                       >
                         검색 지우기
-                      </button>
+                      </Button>
                     ) : null}
                   </div>
-                  <button
+                  <Button
                     type="button"
-                    className="secondary-button"
+                    variant="secondary"
+                    size="sm"
                     onClick={() => {
                       void onLoadMoreLogs(host.id);
                     }}
                     disabled={!canLoadMoreLogs}
                   >
                     더 보기
-                  </button>
-                  <button
+                  </Button>
+                  <Button
                     type="button"
-                    className="secondary-button"
+                    variant="secondary"
+                    size="sm"
                     onClick={() => {
                       void onRefreshLogs(host.id);
                     }}
                     disabled={!tab.selectedContainerId || tab.logsLoading}
                   >
                     {tab.logsLoading ? "불러오는 중..." : "다시 불러오기"}
-                  </button>
+                  </Button>
                 </div>
                 {trimmedLogsSearchQuery ? (
                   <div className="containers-workspace__logs-search-meta">
@@ -2108,9 +2119,9 @@ export function ContainersWorkspace({
           <div className="sftp-host-picker__overlay-card terminal-interactive-auth">
             {matchingInteractiveAuth.provider === "warpgate" ? (
               <>
-                <div className="terminal-interactive-auth__eyebrow">
+                <SectionLabel className="terminal-interactive-auth__label">
                   Warpgate Approval
-                </div>
+                </SectionLabel>
                 <strong>Warpgate 승인을 기다리는 중입니다.</strong>
                 <p>
                   브라우저에서 Warpgate 로그인 뒤 <code>Authorize</code>를
@@ -2124,20 +2135,22 @@ export function ContainersWorkspace({
                 ) : null}
                 <div className="terminal-interactive-auth__actions">
                   {matchingInteractiveAuth.approvalUrl ? (
-                    <button
+                    <Button
                       type="button"
-                      className="secondary-button"
+                      variant="secondary"
+                      size="sm"
                       onClick={() => {
                         void onReopenInteractiveAuthUrl();
                       }}
                     >
                       브라우저 다시 열기
-                    </button>
+                    </Button>
                   ) : null}
                   {matchingInteractiveAuth.approvalUrl ? (
-                    <button
+                    <Button
                       type="button"
-                      className="secondary-button"
+                      variant="secondary"
+                      size="sm"
                       onClick={async () => {
                         await navigator.clipboard.writeText(
                           matchingInteractiveAuth.approvalUrl ?? "",
@@ -2145,17 +2158,18 @@ export function ContainersWorkspace({
                       }}
                     >
                       링크 복사
-                    </button>
+                    </Button>
                   ) : null}
-                  <button
+                  <Button
                     type="button"
-                    className="secondary-button"
+                    variant="secondary"
+                    size="sm"
                     onClick={() => {
                       onClearInteractiveAuth();
                     }}
                   >
                     닫기
-                  </button>
+                  </Button>
                 </div>
                 <pre className="terminal-interactive-auth__raw">
                   {matchingInteractiveAuth.instruction}
@@ -2172,9 +2186,9 @@ export function ContainersWorkspace({
                   );
                 }}
               >
-                <div className="terminal-interactive-auth__eyebrow">
+                <SectionLabel className="terminal-interactive-auth__label">
                   Additional Authentication
-                </div>
+                </SectionLabel>
                 <strong>추가 인증 입력이 필요합니다.</strong>
                 {matchingInteractiveAuth.instruction ? (
                   <p>{matchingInteractiveAuth.instruction}</p>
@@ -2197,18 +2211,18 @@ export function ContainersWorkspace({
                   </label>
                 ))}
                 <div className="terminal-interactive-auth__actions">
-                  <button type="submit" className="primary-button">
+                  <Button type="submit" variant="primary">
                     응답 보내기
-                  </button>
-                  <button
+                  </Button>
+                  <Button
                     type="button"
-                    className="secondary-button"
+                    variant="secondary"
                     onClick={() => {
                       onClearInteractiveAuth();
                     }}
                   >
                     닫기
-                  </button>
+                  </Button>
                 </div>
               </form>
             )}
@@ -2237,36 +2251,31 @@ export function ContainersWorkspace({
 
       {pendingConfirmAction && selectedContainer ? (
         <div className="modal-backdrop" role="presentation">
-          <div
-            className="modal-card"
+          <ModalShell
             role="dialog"
             aria-modal="true"
             aria-labelledby="container-action-confirm-title"
           >
-            <div className="modal-card__header">
+            <ModalHeader>
               <h3 id="container-action-confirm-title">
                 {pendingConfirmAction === "remove"
                   ? "컨테이너를 삭제할까요?"
                   : `컨테이너를 ${pendingConfirmAction}할까요?`}
               </h3>
-            </div>
-            <div className="modal-card__body">
+            </ModalHeader>
+            <ModalBody>
               <p>
                 <strong>{selectedContainer.name}</strong> 컨테이너에{" "}
                 <code>{pendingConfirmAction}</code> 작업을 실행합니다.
               </p>
-            </div>
-            <div className="modal-card__footer">
-              <button
-                type="button"
-                className="secondary-button"
-                onClick={() => setPendingConfirmAction(null)}
-              >
+            </ModalBody>
+            <ModalFooter>
+              <Button type="button" variant="secondary" onClick={() => setPendingConfirmAction(null)}>
                 취소
-              </button>
-              <button
+              </Button>
+              <Button
                 type="button"
-                className={pendingConfirmAction === "remove" ? "danger-button" : "primary-button"}
+                variant={pendingConfirmAction === "remove" ? "danger" : "primary"}
                 onClick={() => {
                   void onRunAction(host.id, pendingConfirmAction).finally(() => {
                     setPendingConfirmAction(null);
@@ -2275,9 +2284,9 @@ export function ContainersWorkspace({
                 disabled={!!tab.pendingAction}
               >
                 {tab.pendingAction ? "실행 중..." : "확인"}
-              </button>
-            </div>
-          </div>
+              </Button>
+            </ModalFooter>
+          </ModalShell>
         </div>
       ) : null}
     </div>
@@ -2314,12 +2323,13 @@ function ContainerListItem({
         <strong className="containers-workspace__list-item-name" title={name}>
           {name}
         </strong>
-        <span
-          className={`status-pill containers-workspace__status-pill status-pill--${statusPresentation.tone}`}
+        <StatusBadge
+          tone={statusPresentation.tone}
+          className="containers-workspace__status-pill"
           title={status}
         >
           {statusPresentation.label}
-        </span>
+        </StatusBadge>
       </div>
       <div
         className="containers-workspace__list-item-image"

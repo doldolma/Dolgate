@@ -306,6 +306,7 @@ if (termiusHelperArgIndex >= 0) {
 
   authService.setOnSessionInvalidated(async (context) => {
     // 인증 세션이 사라지면 SSH/SFTP/포워딩 런타임도 함께 정리해서 로그인 게이트 뒤에 연결이 남지 않게 한다.
+    sessionReplayService.shutdown();
     await sessionShareService.shutdown();
     await awsSsmTunnelService.shutdown();
     await coreManager.shutdown({ finalizePortForwardsAsStopped: true });
@@ -372,6 +373,7 @@ if (termiusHelperArgIndex >= 0) {
     }
     event.preventDefault();
     isQuitting = true;
+    sessionReplayService.shutdown();
     void sessionShareService.shutdown().finally(() => {
       void awsSsmTunnelService.shutdown().finally(() => {
         void coreManager

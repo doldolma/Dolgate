@@ -11,6 +11,7 @@ import {
   type ITerminalOptions,
   type ITheme
 } from 'xterm';
+import { openTerminalExternalUrl } from '../services/desktop/terminal';
 
 const WRITE_FLUSH_THRESHOLD_BYTES = 64 * 1024;
 const URL_PATTERN = /https?:\/\/[^\s<>"']+/g;
@@ -106,7 +107,7 @@ function readDefaultDevicePixelRatio(): number {
 }
 
 function defaultOpenExternal(url: string): void | Promise<void> {
-  return window.dolssh.shell.openExternal(url);
+  return openTerminalExternalUrl(url);
 }
 
 function buildTerminalOptions(appearance: TerminalRuntimeAppearance): ITerminalOptions {

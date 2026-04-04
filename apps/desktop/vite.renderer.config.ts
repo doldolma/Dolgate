@@ -1,6 +1,7 @@
 import { fileURLToPath } from 'node:url';
 import { mergeConfig } from 'vite';
 import react from '@vitejs/plugin-react';
+import tailwindcss from '@tailwindcss/vite';
 import baseConfig from './vite.base.config';
 
 const workspaceReactEntry = fileURLToPath(new URL('../../node_modules/react', import.meta.url));
@@ -15,7 +16,8 @@ export default mergeConfig(baseConfig, {
     }
   },
   plugins: [
-    react()
+    react(),
+    tailwindcss()
   ],
   build: {
     outDir: '../../.vite/renderer/main_window'

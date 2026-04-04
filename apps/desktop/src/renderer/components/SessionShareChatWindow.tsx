@@ -6,6 +6,8 @@ import type {
   SessionShareOwnerChatSnapshot,
 } from '@shared';
 import { SESSION_SHARE_CHAT_HISTORY_LIMIT } from '@shared';
+import { useSessionShareChatController } from '../controllers/useSessionShareChatController';
+import { Button, SectionLabel, Textarea } from '../ui';
 
 function createInactiveSnapshot(sessionId: string): SessionShareOwnerChatSnapshot {
   return {
@@ -124,6 +126,14 @@ export function SessionShareChatWindow({
 }: {
   sessionId: string;
 }) {
+  const {
+    closeWindow: requestWindowClose,
+    getDesktopSettings,
+    getOwnerChatSnapshot,
+    onSessionShareChatEvent,
+    onSessionShareEvent,
+    sendOwnerChatMessage,
+  } = useSessionShareChatController();
   const [snapshot, setSnapshot] = useState<SessionShareOwnerChatSnapshot>(() =>
     createInactiveSnapshot(sessionId),
   );
@@ -178,8 +188,7 @@ export function SessionShareChatWindow({
   }, []);
 
   useEffect(() => {
-    void window.dolssh.settings
-      .get()
+    void getDesktopSettings()
       .then((settings) => {
         setSettingsTheme(settings.theme);
       })
@@ -188,16 +197,16 @@ export function SessionShareChatWindow({
 
   useEffect(() => {
     if (!sessionId) {
-      void window.dolssh.window.close().catch(() => undefined);
+      void requestWindowClose().catch(() => undefined);
       return;
     }
 
     let disposed = false;
-    const closeWindow = () => {
-      void window.dolssh.window.close().catch(() => undefined);
+    const closeChatWindow = () => {
+      void requestWindowClose().catch(() => undefined);
     };
 
-    const offChat = window.dolssh.sessionShares.onChatEvent((event) => {
+    const offChat = onSessionShareChatEvent((event) => {
       if (event.sessionId !== sessionId) {
         return;
       }
@@ -208,7 +217,7 @@ export function SessionShareChatWindow({
       }));
     });
 
-    const offState = window.dolssh.sessionShares.onEvent((event) => {
+    const offState = onSessionShareEvent((event) => {
       if (event.sessionId !== sessionId) {
         return;
       }
@@ -219,19 +228,18 @@ export function SessionShareChatWindow({
       }));
 
       if (event.state.status === 'inactive' || event.state.status === 'error') {
-        closeWindow();
+        closeChatWindow();
       }
     });
 
-    void window.dolssh.sessionShares
-      .getOwnerChatSnapshot(sessionId)
+    void getOwnerChatSnapshot(sessionId)
       .then((nextSnapshot) => {
         if (disposed) {
           return;
         }
 
         if (nextSnapshot.state.status !== 'active') {
-          closeWindow();
+          closeChatWindow();
           return;
         }
 
@@ -299,10 +307,7 @@ export function SessionShareChatWindow({
     setIsSubmitting(true);
     setSendErrorMessage(null);
     try {
-      await window.dolssh.sessionShares.sendOwnerChatMessage(
-        sessionId,
-        normalizedText,
-      );
+      await sendOwnerChatMessage(sessionId, normalizedText);
       setDraftMessage('');
     } catch (error: unknown) {
       setSendErrorMessage(
@@ -319,7 +324,7 @@ export function SessionShareChatWindow({
     <div className="session-share-chat-window">
       <header className="session-share-chat-window__header">
         <div>
-          <div className="session-share-chat-window__eyebrow">Session Share</div>
+          <SectionLabel>Session Share</SectionLabel>
           <strong>{snapshot.title || '채팅 기록'}</strong>
         </div>
         <span className="session-share-chat-window__status">
@@ -392,7 +397,7 @@ export function SessionShareChatWindow({
       >
         <label className="session-share-chat-window__composer-field">
           <span>메시지</span>
-          <textarea
+          <Textarea
             ref={textareaRef}
             value={draftMessage}
             rows={3}
@@ -420,13 +425,14 @@ export function SessionShareChatWindow({
             }}
           />
         </label>
-        <button
+        <Button
           type="submit"
-          className="primary-button session-share-chat-window__composer-submit"
+          variant="primary"
+          className="session-share-chat-window__composer-submit"
           disabled={!isChatActive || loading || isSubmitting}
         >
           전송
-        </button>
+        </Button>
       </form>
     </div>
   );

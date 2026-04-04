@@ -39,7 +39,27 @@ import type {
   SftpState,
 } from "../store/createAppStore";
 import { formatConnectionProgressStageLabel } from "../lib/connection-progress";
+import { useResponsiveCardGrid } from "../lib/useResponsiveCardGrid";
 import { DialogBackdrop } from "./DialogBackdrop";
+import {
+  Button,
+  EmptyState,
+  IconButton,
+  ModalBody,
+  ModalFooter,
+  ModalHeader,
+  ModalShell,
+  SectionLabel,
+  StatusBadge,
+  TabButton,
+  Tabs,
+} from "../ui";
+
+const SFTP_HOST_PICKER_GROUP_CARD_MIN_WIDTH_PX = 220;
+const SFTP_HOST_PICKER_GROUP_CARD_MAX_WIDTH_PX = 280;
+const SFTP_HOST_PICKER_HOST_CARD_MIN_WIDTH_PX = 220;
+const SFTP_HOST_PICKER_HOST_CARD_MAX_WIDTH_PX = 460;
+const SFTP_HOST_PICKER_CARD_GAP_PX = 12;
 
 interface SftpWorkspaceProps {
   hosts: HostRecord[];
@@ -506,6 +526,15 @@ const SFTP_BROWSER_COLUMNS: Array<{
   { key: "kind", label: "Kind" },
 ];
 
+function areSftpBrowserColumnWidthsEqual(
+  left: SftpBrowserColumnWidths,
+  right: SftpBrowserColumnWidths,
+): boolean {
+  return SFTP_BROWSER_COLUMNS.every(
+    (column) => left[column.key] === right[column.key],
+  );
+}
+
 const SFTP_BROWSER_RESIZE_BODY_CLASS = "sftp-column-resizing";
 
 interface ColumnResizeState {
@@ -637,62 +666,56 @@ function PaneBrowser({
   return (
     <div className="sftp-pane__content sftp-pane__content--browser">
       <div className="sftp-pane__toolbar">
-        <div className="sftp-source-toggle">
-          <button
-            type="button"
-            className={pane.sourceKind === "local" ? "active" : ""}
-            onClick={() => void onActivatePaneSource("local")}
-          >
+        <Tabs className="sftp-source-toggle" role="tablist" aria-label="SFTP source kind">
+          <TabButton active={pane.sourceKind === "local"} role="tab" aria-selected={pane.sourceKind === "local"} onClick={() => void onActivatePaneSource("local")}>
             Local
-          </button>
-          <button
-            type="button"
-            className={pane.sourceKind === "host" ? "active" : ""}
-            onClick={() => void onActivatePaneSource("host")}
-          >
+          </TabButton>
+          <TabButton active={pane.sourceKind === "host"} role="tab" aria-selected={pane.sourceKind === "host"} onClick={() => void onActivatePaneSource("host")}>
             Host
-          </button>
-        </div>
+          </TabButton>
+        </Tabs>
         <div className="sftp-pane__toolbar-actions">
-          <button
-            type="button"
-            className="icon-button sftp-mini-button"
+          <IconButton
+            size="sm"
+            className="sftp-mini-button"
             onClick={() => void onNavigateBack()}
             disabled={pane.historyIndex <= 0}
           >
             ←
-          </button>
-          <button
-            type="button"
-            className="icon-button sftp-mini-button"
+          </IconButton>
+          <IconButton
+            size="sm"
+            className="sftp-mini-button"
             onClick={() => void onNavigateForward()}
             disabled={pane.historyIndex >= pane.history.length - 1}
           >
             →
-          </button>
-          <button
-            type="button"
-            className="icon-button sftp-mini-button"
+          </IconButton>
+          <IconButton
+            size="sm"
+            className="sftp-mini-button"
             onClick={() => void onNavigateParent()}
           >
             ↑
-          </button>
-          <button
-            type="button"
-            className="secondary-button sftp-action-button"
+          </IconButton>
+          <Button
+            variant="secondary"
+            size="sm"
+            className="sftp-action-button"
             onClick={onOpenCreateDirectoryDialog}
             disabled={pane.isLoading}
           >
             새 폴더
-          </button>
-          <button
-            type="button"
-            className="secondary-button sftp-action-button"
+          </Button>
+          <Button
+            variant="secondary"
+            size="sm"
+            className="sftp-action-button"
             onClick={() => void onRefresh()}
             disabled={pane.isLoading}
           >
             {pane.isLoading ? "새로고침 중..." : "새로고침"}
-          </button>
+          </Button>
         </div>
       </div>
 
@@ -1064,6 +1087,18 @@ function HostPicker({
     isConnecting &&
     !matchingInteractiveAuth &&
     pane.connectingEndpointId !== dismissedInteractiveEndpointId;
+  const { ref: groupGridRef, style: groupGridStyle } = useResponsiveCardGrid({
+    itemCount: visibleGroups.length,
+    minWidth: SFTP_HOST_PICKER_GROUP_CARD_MIN_WIDTH_PX,
+    maxWidth: SFTP_HOST_PICKER_GROUP_CARD_MAX_WIDTH_PX,
+    gap: SFTP_HOST_PICKER_CARD_GAP_PX,
+  });
+  const { ref: hostGridRef, style: hostGridStyle } = useResponsiveCardGrid({
+    itemCount: visibleHosts.length,
+    minWidth: SFTP_HOST_PICKER_HOST_CARD_MIN_WIDTH_PX,
+    maxWidth: SFTP_HOST_PICKER_HOST_CARD_MAX_WIDTH_PX,
+    gap: SFTP_HOST_PICKER_CARD_GAP_PX,
+  });
 
   useEffect(() => {
     setPromptResponses(matchingInteractiveAuth?.prompts.map(() => "") ?? []);
@@ -1141,12 +1176,12 @@ function HostPicker({
         aria-label={`Available hosts for ${pane.id} pane`}
       >
         {visibleGroups.length > 0 ? (
-          <div className="group-grid">
+          <div className="group-grid" ref={groupGridRef} style={groupGridStyle}>
             {visibleGroups.map((group) => (
               <article
                 key={group.path}
                 className={`group-card group-card--interactive ${isConnecting ? "disabled" : ""}`}
-                onClick={() => {
+                onDoubleClick={() => {
                   if (isConnecting) {
                     return;
                   }
@@ -1177,24 +1212,24 @@ function HostPicker({
           </div>
         ) : null}
 
-        <div className="host-grid">
+        <div className="host-grid" ref={hostGridRef} style={hostGridStyle}>
           {isEmpty ? (
-            <div className="empty-callout">
-              <strong>
-                {hosts.length === 0
+            <EmptyState
+              title={
+                hosts.length === 0
                   ? "표시할 host가 없습니다."
                   : pane.hostSearchQuery
                     ? "검색 결과가 없습니다."
-                    : "이 위치에는 아직 host가 없습니다."}
-              </strong>
-              <p>
-                {hosts.length === 0
+                    : "이 위치에는 아직 host가 없습니다."
+              }
+              description={
+                hosts.length === 0
                   ? "Home에서 원격 host를 추가한 뒤 다시 확인해보세요."
                   : pane.hostSearchQuery
                     ? "검색어를 지우거나 다른 이름으로 다시 찾아보세요."
-                    : "다른 그룹으로 이동하거나 Home에서 호스트 구성을 확인해보세요."}
-              </p>
-            </div>
+                    : "다른 그룹으로 이동하거나 Home에서 호스트 구성을 확인해보세요."
+              }
+            />
           ) : (
             visibleHosts.map((host) => {
               const awsHost = isAwsEc2HostRecord(host) ? host : null;
@@ -1252,25 +1287,26 @@ function HostPicker({
                   </div>
                   {isBusy ? (
                     <div className="host-browser-card__status">
-                      <span
-                        className="status-pill status-pill--starting"
+                      <StatusBadge
+                        tone="starting"
                         aria-label="Connecting selected host"
                       >
                         연결 중
-                      </span>
+                      </StatusBadge>
                     </div>
                   ) : canOpenHostSettings && onOpenHostSettings ? (
                     <div className="host-browser-card__status">
-                      <button
-                        type="button"
-                        className="secondary-button sftp-inline-button"
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        className="sftp-inline-button"
                         onClick={(event) => {
                           event.stopPropagation();
                           onOpenHostSettings(host.id);
                         }}
                       >
                         설정 열기
-                      </button>
+                      </Button>
                     </div>
                   ) : null}
                 </article>
@@ -1290,9 +1326,9 @@ function HostPicker({
           <div className="sftp-host-picker__overlay-card terminal-interactive-auth">
             {matchingInteractiveAuth.provider === "warpgate" ? (
               <>
-                <div className="terminal-interactive-auth__eyebrow">
+                <SectionLabel className="terminal-interactive-auth__label">
                   Warpgate Approval
-                </div>
+                </SectionLabel>
                 <strong>Warpgate 승인을 기다리는 중입니다.</strong>
                 <p>
                   브라우저에서 Warpgate 로그인 뒤 <code>Authorize</code>를
@@ -1306,20 +1342,20 @@ function HostPicker({
                 ) : null}
                 <div className="terminal-interactive-auth__actions">
                   {matchingInteractiveAuth.approvalUrl ? (
-                    <button
-                      type="button"
-                      className="secondary-button"
+                    <Button
+                      variant="secondary"
+                      size="sm"
                       onClick={() => {
                         void onReopenInteractiveAuthUrl();
                       }}
                     >
                       브라우저 다시 열기
-                    </button>
+                    </Button>
                   ) : null}
                   {matchingInteractiveAuth.approvalUrl ? (
-                    <button
-                      type="button"
-                      className="secondary-button"
+                    <Button
+                      variant="secondary"
+                      size="sm"
                       onClick={async () => {
                         await navigator.clipboard.writeText(
                           matchingInteractiveAuth.approvalUrl ?? "",
@@ -1327,11 +1363,11 @@ function HostPicker({
                       }}
                     >
                       링크 복사
-                    </button>
+                    </Button>
                   ) : null}
-                  <button
-                    type="button"
-                    className="secondary-button"
+                  <Button
+                    variant="secondary"
+                    size="sm"
                     onClick={() => {
                       setDismissedInteractiveEndpointId(
                         matchingInteractiveAuth.endpointId,
@@ -1340,7 +1376,7 @@ function HostPicker({
                     }}
                   >
                     닫기
-                  </button>
+                  </Button>
                 </div>
                 <pre className="terminal-interactive-auth__raw">
                   {matchingInteractiveAuth.instruction}
@@ -1357,9 +1393,9 @@ function HostPicker({
                   );
                 }}
               >
-                <div className="terminal-interactive-auth__eyebrow">
+                <SectionLabel className="terminal-interactive-auth__label">
                   Additional Authentication
-                </div>
+                </SectionLabel>
                 <strong>추가 인증 입력이 필요합니다.</strong>
                 {matchingInteractiveAuth.instruction ? (
                   <p>{matchingInteractiveAuth.instruction}</p>
@@ -1382,12 +1418,12 @@ function HostPicker({
                   </label>
                 ))}
                 <div className="terminal-interactive-auth__actions">
-                  <button type="submit" className="primary-button">
+                  <Button type="submit" variant="primary" size="sm">
                     응답 보내기
-                  </button>
-                  <button
-                    type="button"
-                    className="secondary-button"
+                  </Button>
+                  <Button
+                    variant="secondary"
+                    size="sm"
                     onClick={() => {
                       setDismissedInteractiveEndpointId(
                         matchingInteractiveAuth.endpointId,
@@ -1396,7 +1432,7 @@ function HostPicker({
                     }}
                   >
                     닫기
-                  </button>
+                  </Button>
                 </div>
               </form>
             )}
@@ -1498,31 +1534,19 @@ function TransferBar({
                 </span>
               ) : null}
               {job.status === "running" ? (
-                <button
-                  type="button"
-                  className="secondary-button sftp-inline-button"
-                  onClick={() => void onCancelTransfer(job.id)}
-                >
+                <Button variant="secondary" size="sm" className="sftp-inline-button" onClick={() => void onCancelTransfer(job.id)}>
                   취소
-                </button>
+                </Button>
               ) : null}
               {job.status === "failed" ? (
-                <button
-                  type="button"
-                  className="secondary-button sftp-inline-button"
-                  onClick={() => void onRetryTransfer(job.id)}
-                >
+                <Button variant="secondary" size="sm" className="sftp-inline-button" onClick={() => void onRetryTransfer(job.id)}>
                   재시도
-                </button>
+                </Button>
               ) : null}
               {job.status !== "running" && job.status !== "queued" ? (
-                <button
-                  type="button"
-                  className="secondary-button sftp-inline-button"
-                  onClick={() => onDismissTransfer(job.id)}
-                >
+                <Button variant="secondary" size="sm" className="sftp-inline-button" onClick={() => onDismissTransfer(job.id)}>
                   닫기
-                </button>
+                </Button>
               ) : null}
             </div>
           </article>
@@ -1552,41 +1576,31 @@ function ConflictDialog({
       className="sftp-modal-backdrop"
       dismissOnBackdrop={false}
     >
-      <div className="sftp-modal">
-        <div className="section-kicker">Conflict</div>
-        <h3>같은 이름의 파일이 이미 존재합니다</h3>
-        <p>{pendingConflictDialog.names.join(", ")}</p>
-        <div className="sftp-modal__actions">
-          <button
-            type="button"
-            className="secondary-button"
-            onClick={onDismissConflict}
-          >
+      <ModalShell className="sftp-modal" size="md">
+        <ModalHeader className="sftp-modal__header">
+          <div>
+            <SectionLabel>Conflict</SectionLabel>
+            <h3 className="m-0">같은 이름의 파일이 이미 존재합니다</h3>
+          </div>
+        </ModalHeader>
+        <ModalBody className="sftp-modal__body">
+          <p>{pendingConflictDialog.names.join(", ")}</p>
+        </ModalBody>
+        <ModalFooter className="sftp-modal__actions">
+          <Button variant="secondary" onClick={onDismissConflict}>
             취소
-          </button>
-          <button
-            type="button"
-            className="secondary-button"
-            onClick={() => void onResolveConflict("skip")}
-          >
+          </Button>
+          <Button variant="secondary" onClick={() => void onResolveConflict("skip")}>
             건너뛰기
-          </button>
-          <button
-            type="button"
-            className="secondary-button"
-            onClick={() => void onResolveConflict("keepBoth")}
-          >
+          </Button>
+          <Button variant="secondary" onClick={() => void onResolveConflict("keepBoth")}>
             이름 바꿔 저장
-          </button>
-          <button
-            type="button"
-            className="primary-button"
-            onClick={() => void onResolveConflict("overwrite")}
-          >
+          </Button>
+          <Button variant="primary" onClick={() => void onResolveConflict("overwrite")}>
             덮어쓰기
-          </button>
-        </div>
-      </div>
+          </Button>
+        </ModalFooter>
+      </ModalShell>
     </DialogBackdrop>
   );
 }
@@ -1612,32 +1626,37 @@ function ActionDialog({
       onDismiss={onClose}
       dismissDisabled={dialog.isSubmitting}
     >
-      <div className="sftp-modal">
-        <div className="section-kicker">
-          {dialog.mode === "mkdir" ? "New Folder" : "Rename"}
-        </div>
-        <h3>{dialog.title}</h3>
-        <input
-          value={dialog.value}
-          onChange={(event) => onChange(event.target.value)}
-          placeholder={dialog.placeholder}
-          autoFocus
-          disabled={dialog.isSubmitting}
-        />
-        <div className="sftp-modal__actions">
-          <button type="button" className="secondary-button" onClick={onClose} disabled={dialog.isSubmitting}>
+      <ModalShell className="sftp-modal" size="md">
+        <ModalHeader className="sftp-modal__header">
+          <div>
+            <SectionLabel>
+              {dialog.mode === "mkdir" ? "New Folder" : "Rename"}
+            </SectionLabel>
+            <h3 className="m-0">{dialog.title}</h3>
+          </div>
+        </ModalHeader>
+        <ModalBody className="sftp-modal__body">
+          <input
+            value={dialog.value}
+            onChange={(event) => onChange(event.target.value)}
+            placeholder={dialog.placeholder}
+            autoFocus
+            disabled={dialog.isSubmitting}
+          />
+        </ModalBody>
+        <ModalFooter className="sftp-modal__actions">
+          <Button variant="secondary" onClick={onClose} disabled={dialog.isSubmitting}>
             취소
-          </button>
-          <button
-            type="button"
-            className="primary-button"
+          </Button>
+          <Button
+            variant="primary"
             onClick={() => void onSubmit()}
             disabled={!dialog.value.trim() || dialog.isSubmitting}
           >
             {dialog.submitLabel}
-          </button>
-        </div>
-      </div>
+          </Button>
+        </ModalFooter>
+      </ModalShell>
     </DialogBackdrop>
   );
 }
@@ -1675,10 +1694,15 @@ function PermissionDialog({
       onDismiss={onClose}
       dismissDisabled={dialog.isSubmitting}
     >
-      <div className="sftp-modal">
-        <div className="section-kicker">Permissions</div>
-        <h3>{dialog.name} 권한 수정</h3>
-        <div className="sftp-permissions-grid">
+      <ModalShell className="sftp-modal" size="md">
+        <ModalHeader className="sftp-modal__header">
+          <div>
+            <SectionLabel>Permissions</SectionLabel>
+            <h3 className="m-0">{dialog.name} 권한 수정</h3>
+          </div>
+        </ModalHeader>
+        <ModalBody className="sftp-modal__body">
+          <div className="sftp-permissions-grid">
           <div />
           {columns.map((column) => (
             <strong key={column.key}>{column.label}</strong>
@@ -1701,24 +1725,24 @@ function PermissionDialog({
               ))}
             </Fragment>
           ))}
-        </div>
-        <div className="sftp-permissions-preview">
-          Mode {formatPermissionMode(mode)}
-        </div>
-        <div className="sftp-modal__actions">
-          <button type="button" className="secondary-button" onClick={onClose} disabled={dialog.isSubmitting}>
+          </div>
+          <div className="sftp-permissions-preview">
+            Mode {formatPermissionMode(mode)}
+          </div>
+        </ModalBody>
+        <ModalFooter className="sftp-modal__actions">
+          <Button variant="secondary" onClick={onClose} disabled={dialog.isSubmitting}>
             취소
-          </button>
-          <button
-            type="button"
-            className="primary-button"
+          </Button>
+          <Button
+            variant="primary"
             onClick={() => void onSubmit()}
             disabled={dialog.isSubmitting}
           >
             적용
-          </button>
-        </div>
-      </div>
+          </Button>
+        </ModalFooter>
+      </ModalShell>
     </DialogBackdrop>
   );
 }
@@ -1746,41 +1770,47 @@ function DeleteDialog({
       onDismiss={onClose}
       dismissDisabled={dialog.isSubmitting}
     >
-      <div
+      <ModalShell
         className="sftp-modal"
+        size="md"
         role="dialog"
         aria-modal="true"
         aria-labelledby="sftp-delete-title"
         aria-label="SFTP delete confirmation"
       >
-        <h3 id="sftp-delete-title">{title}</h3>
-        {dialog.includesDirectory ? (
-          <p className="sftp-modal__warning">
-            폴더를 삭제하면 하위 항목도 함께 삭제됩니다.
-          </p>
-        ) : null}
-        {dialog.errorMessage ? (
-          <p className="sftp-modal__error">{dialog.errorMessage}</p>
-        ) : null}
-        <div className="sftp-modal__actions">
-          <button
-            type="button"
-            className="secondary-button"
+        <ModalHeader className="sftp-modal__header">
+          <div>
+            <SectionLabel>Delete</SectionLabel>
+            <h3 id="sftp-delete-title" className="m-0">{title}</h3>
+          </div>
+        </ModalHeader>
+        <ModalBody className="sftp-modal__body">
+          {dialog.includesDirectory ? (
+            <p className="sftp-modal__warning">
+              폴더를 삭제하면 하위 항목도 함께 삭제됩니다.
+            </p>
+          ) : null}
+          {dialog.errorMessage ? (
+            <p className="sftp-modal__error">{dialog.errorMessage}</p>
+          ) : null}
+        </ModalBody>
+        <ModalFooter className="sftp-modal__actions">
+          <Button
+            variant="secondary"
             onClick={onClose}
             disabled={dialog.isSubmitting}
           >
             취소
-          </button>
-          <button
-            type="button"
-            className="secondary-button danger"
+          </Button>
+          <Button
+            variant="danger"
             onClick={() => void onSubmit()}
             disabled={dialog.isSubmitting}
           >
             삭제
-          </button>
-        </div>
-      </div>
+          </Button>
+        </ModalFooter>
+      </ModalShell>
     </DialogBackdrop>
   );
 }
@@ -1865,9 +1895,16 @@ export function SftpWorkspace({
     if (columnResize) {
       return;
     }
-    setColumnWidths(
-      normalizeSftpBrowserColumnWidths(settings.sftpBrowserColumnWidths),
+    const normalizedWidths = normalizeSftpBrowserColumnWidths(
+      settings.sftpBrowserColumnWidths,
     );
+    setColumnWidths((current) => {
+      if (areSftpBrowserColumnWidthsEqual(current, normalizedWidths)) {
+        return current;
+      }
+      columnWidthsRef.current = normalizedWidths;
+      return normalizedWidths;
+    });
   }, [columnResize, settings.sftpBrowserColumnWidths]);
 
   useEffect(() => {
@@ -2127,9 +2164,10 @@ export function SftpWorkspace({
                   className="sftp-transfer-gutter"
                   aria-label="Pane transfer controls"
                 >
-                  <button
-                    type="button"
-                    className="secondary-button sftp-transfer-arrow"
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    className="sftp-transfer-arrow"
                     aria-label="Transfer selection from left pane to right pane"
                     onClick={() =>
                       void onTransferSelectionToPane("left", "right")
@@ -2142,10 +2180,11 @@ export function SftpWorkspace({
                     }
                   >
                     →
-                  </button>
-                  <button
-                    type="button"
-                    className="secondary-button sftp-transfer-arrow"
+                  </Button>
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    className="sftp-transfer-arrow"
                     aria-label="Transfer selection from right pane to left pane"
                     onClick={() =>
                       void onTransferSelectionToPane("right", "left")
@@ -2158,7 +2197,7 @@ export function SftpWorkspace({
                     }
                   >
                     ←
-                  </button>
+                  </Button>
                 </div>
               </Fragment>
             );

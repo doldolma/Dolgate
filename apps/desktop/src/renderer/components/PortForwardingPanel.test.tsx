@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { DnsOverrideResolvedRecord, HostRecord, PortForwardDraft, PortForwardRuleRecord, PortForwardRuntimeRecord } from '@shared';
 import type {
@@ -10,6 +10,7 @@ import {
   filterPortForwardRules,
   getAvailablePortForwardHosts,
   getDnsOverrideEligibleRules,
+  resetPortForwardingPanelUiStateForTests,
   shouldShowAwsRemoteHostField
 } from './PortForwardingPanel';
 
@@ -177,6 +178,7 @@ beforeEach(() => {
 afterEach(() => {
   vi.clearAllMocks();
   containerConnectionProgressListener = null;
+  resetPortForwardingPanelUiStateForTests();
 });
 
 function createDeferred<T>() {
@@ -373,6 +375,25 @@ describe('PortForwardingPanel dialog', () => {
 
     expect(screen.getByRole('tab', { name: 'AWS EC2' })).toBeInTheDocument();
     expect(screen.queryByRole('tab', { name: 'AWS SSM' })).not.toBeInTheDocument();
+  });
+
+  it('restores the last selected forwarding tab after the panel remounts', () => {
+    const firstRender = renderPanel();
+
+    fireEvent.click(screen.getByRole('tab', { name: 'DNS Override' }));
+    expect(screen.getByRole('tab', { name: 'DNS Override' })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    );
+
+    firstRender.unmount();
+
+    renderPanel();
+
+    expect(screen.getByRole('tab', { name: 'DNS Override' })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    );
   });
 
   it('normalizes single-label hostname when saving a DNS override', async () => {
@@ -754,7 +775,9 @@ describe('PortForwardingPanel dialog', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'New SSH Forward' }));
     fireEvent.change(screen.getByLabelText('Label'), { target: { value: 'My SSH Rule' } });
-    fireEvent.click(container.querySelector('.modal-card__footer .primary-button') as HTMLButtonElement);
+    fireEvent.click(
+      within(screen.getByRole('dialog')).getByRole('button', { name: '저장' }),
+    );
 
     await waitFor(() => {
       expect(onSave).toHaveBeenCalledTimes(1);

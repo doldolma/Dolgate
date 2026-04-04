@@ -332,6 +332,7 @@ describe("SessionReplayWindow", () => {
     await waitFor(() =>
       expect(screen.getByRole("button", { name: "Pause" })).toBeInTheDocument(),
     );
+    await waitFor(() => expect(mocks.rafCallbacks.length).toBeGreaterThan(0));
 
     const runtime = mocks.runtimeRecords[0]!;
     runtime.write.mockClear();

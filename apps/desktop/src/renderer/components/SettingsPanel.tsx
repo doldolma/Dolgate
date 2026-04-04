@@ -14,6 +14,7 @@ import type { SettingsSection } from '../store/createAppStore';
 import { terminalFontOptions, terminalThemePresets } from '../lib/terminal-presets';
 import { KeychainPanel } from './KeychainPanel';
 import { KnownHostsPanel } from './KnownHostsPanel';
+import { Button, SectionLabel, TabButton, Tabs } from '../ui';
 
 interface SettingsPanelProps {
   activeSection: SettingsSection;
@@ -118,31 +119,30 @@ export function SettingsPanel({
   return (
     <div className="settings-panel">
       <div className="settings-panel__header">
-        <div className="section-kicker">Preferences</div>
+        <SectionLabel>Preferences</SectionLabel>
         <h2>Settings</h2>
       </div>
 
-      <div className="operations-tabs settings-panel__tabs" role="tablist" aria-label="Settings sections">
+      <Tabs className="settings-panel__tabs" role="tablist" aria-label="Settings sections">
         {settingsSections.map((section) => (
-          <button
+          <TabButton
             key={section.id}
-            type="button"
             role="tab"
             aria-selected={activeSection === section.id}
-            className={`operations-tab ${activeSection === section.id ? 'active' : ''}`}
+            active={activeSection === section.id}
             onClick={() => onSelectSection(section.id)}
           >
             {section.title}
-          </button>
+          </TabButton>
         ))}
-      </div>
+      </Tabs>
 
       {activeSection === 'general' ? (
         <>
           <section className="settings-card">
             <div className="settings-card__header">
               <div>
-                <div className="eyebrow">Terminal</div>
+                <SectionLabel>Terminal</SectionLabel>
                 <h3>Preferences</h3>
               </div>
             </div>
@@ -283,7 +283,7 @@ export function SettingsPanel({
 
             <div className="settings-card__header terminal-theme-header">
               <div>
-                <div className="eyebrow">Terminal</div>
+                <SectionLabel>Terminal</SectionLabel>
                 <h3>Terminal Theme</h3>
               </div>
             </div>
@@ -344,7 +344,7 @@ export function SettingsPanel({
           <section className="settings-card">
             <div className="settings-card__header">
               <div>
-                <div className="eyebrow">Appearance</div>
+                <SectionLabel>Appearance</SectionLabel>
                 <h3>Theme</h3>
               </div>
             </div>
@@ -365,7 +365,7 @@ export function SettingsPanel({
           <section className="settings-card">
             <div className="settings-card__header">
               <div>
-                <div className="eyebrow">Session</div>
+                <SectionLabel>Session</SectionLabel>
                 <h3>Account</h3>
               </div>
             </div>
@@ -379,9 +379,9 @@ export function SettingsPanel({
                 <dd>{settings.serverUrl || '—'}</dd>
               </div>
             </dl>
-            <button type="button" className="danger-button" onClick={async () => onLogout()}>
+            <Button variant="danger" onClick={async () => onLogout()}>
               로그아웃
-            </button>
+            </Button>
           </section>
         </>
       ) : null}

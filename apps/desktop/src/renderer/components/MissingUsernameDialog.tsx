@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { DialogBackdrop } from "./DialogBackdrop";
+import { Button, Input, ModalBody, ModalFooter, ModalHeader, ModalShell, SectionLabel } from '../ui';
 
 export interface MissingUsernameDialogRequest {
   hostLabel: string;
@@ -48,27 +49,27 @@ export function MissingUsernameDialog({
 
   return (
     <DialogBackdrop dismissOnBackdrop={false}>
-      <div
-        className="modal-card credential-retry-dialog"
+      <ModalShell
+        className="credential-retry-dialog"
         role="dialog"
         aria-modal="true"
         aria-labelledby="missing-username-title"
       >
-        <div className="modal-card__header">
+        <ModalHeader>
           <div>
-            <div className="eyebrow">SSH Username</div>
+            <SectionLabel>SSH Username</SectionLabel>
             <h3 id="missing-username-title">
               {request.hostLabel} 사용자명을 입력해 주세요.
             </h3>
           </div>
-        </div>
-        <div className="modal-card__body">
+        </ModalHeader>
+        <ModalBody>
           <p className="credential-retry-dialog__message">
             {resolveMessage(request.source)}
           </p>
           <label className="credential-retry-dialog__field">
             <span>SSH Username</span>
-            <input
+            <Input
               type="text"
               autoFocus
               value={username}
@@ -82,19 +83,13 @@ export function MissingUsernameDialog({
           {error ? (
             <p className="credential-retry-dialog__error">{error}</p>
           ) : null}
-        </div>
-        <div className="modal-card__footer">
-          <button
-            type="button"
-            className="secondary-button"
-            onClick={onClose}
-            disabled={submitting}
-          >
+        </ModalBody>
+        <ModalFooter>
+          <Button variant="secondary" onClick={onClose} disabled={submitting}>
             취소
-          </button>
-          <button
-            type="button"
-            className="primary-button"
+          </Button>
+          <Button
+            variant="primary"
             disabled={submitting}
             onClick={async () => {
               if (!username.trim()) {
@@ -115,9 +110,9 @@ export function MissingUsernameDialog({
             }}
           >
             저장 후 계속
-          </button>
-        </div>
-      </div>
+          </Button>
+        </ModalFooter>
+      </ModalShell>
     </DialogBackdrop>
   );
 }

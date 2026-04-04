@@ -271,6 +271,53 @@ describe("AuthService offline bootstrap", () => {
     expect(state.errorMessage).toBe("network down");
   });
 
+  it("enters loading while retrying refresh from the unauthenticated login gate", async () => {
+    const serverUrl = "https://ssh.doldolma.com";
+    const { service, secretStore } = await createService(serverUrl);
+    const session = createSession(serverUrl);
+
+    await secretStore.save("auth:refresh-token", session.tokens.refreshToken);
+    (
+      service as unknown as {
+        state: {
+          status: "unauthenticated";
+          session: null;
+          offline: null;
+          errorMessage: string | null;
+        };
+      }
+    ).state = {
+      status: "unauthenticated",
+      session: null,
+      offline: null,
+      errorMessage: "세션이 만료되었습니다.",
+    };
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify(session), {
+          status: 200,
+          headers: {
+            "content-type": "application/json",
+          },
+        }),
+      ),
+    );
+
+    const refreshPromise = service.refreshSession();
+
+    expect(service.getState().status).toBe("loading");
+    expect(service.getState().errorMessage).toBeNull();
+
+    const state = await refreshPromise;
+
+    expect(state.status).toBe("authenticated");
+    expect(state.session?.tokens.accessToken).toBe(
+      session.tokens.accessToken,
+    );
+  });
+
   it("rejects stale offline cache when the configured server URL changed", async () => {
     const { service, secretStore } = await createService(
       "https://new.example.com",

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { HostSecretInput } from '@shared';
 import { DialogBackdrop } from './DialogBackdrop';
+import { Button, Input, ModalBody, ModalFooter, ModalHeader, ModalShell, SectionLabel } from '../ui';
 
 export interface CredentialRetryDialogRequest {
   hostId: string;
@@ -35,18 +36,18 @@ export function CredentialRetryDialog({ request, onClose, onSubmit }: Credential
 
   return (
     <DialogBackdrop dismissOnBackdrop={false}>
-      <div className="modal-card credential-retry-dialog" role="dialog" aria-modal="true" aria-labelledby="credential-retry-title">
-        <div className="modal-card__header">
+      <ModalShell className="credential-retry-dialog" role="dialog" aria-modal="true" aria-labelledby="credential-retry-title">
+        <ModalHeader>
           <div>
-            <div className="eyebrow">{request.source === 'sftp' ? 'SFTP Retry' : 'SSH Retry'}</div>
+            <SectionLabel>{request.source === 'sftp' ? 'SFTP Retry' : 'SSH Retry'}</SectionLabel>
             <h3 id="credential-retry-title">{request.hostLabel} 인증을 다시 입력해 주세요.</h3>
           </div>
-        </div>
-        <div className="modal-card__body">
+        </ModalHeader>
+        <ModalBody>
           <p className="credential-retry-dialog__message">{request.message}</p>
           <label className="credential-retry-dialog__field">
             <span>{isPassword ? 'Password' : 'Passphrase'}</span>
-            <input
+            <Input
               type="password"
               autoFocus
               value={value}
@@ -58,14 +59,13 @@ export function CredentialRetryDialog({ request, onClose, onSubmit }: Credential
             />
           </label>
           {error ? <p className="credential-retry-dialog__error">{error}</p> : null}
-        </div>
-        <div className="modal-card__footer">
-          <button type="button" className="secondary-button" onClick={onClose} disabled={submitting}>
+        </ModalBody>
+        <ModalFooter>
+          <Button variant="secondary" onClick={onClose} disabled={submitting}>
             취소
-          </button>
-          <button
-            type="button"
-            className="primary-button"
+          </Button>
+          <Button
+            variant="primary"
             disabled={submitting}
             onClick={async () => {
               if (!value.trim()) {
@@ -82,9 +82,9 @@ export function CredentialRetryDialog({ request, onClose, onSubmit }: Credential
             }}
           >
             다시 시도
-          </button>
-        </div>
-      </div>
+          </Button>
+        </ModalFooter>
+      </ModalShell>
     </DialogBackdrop>
   );
 }
