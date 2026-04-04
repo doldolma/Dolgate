@@ -8,6 +8,8 @@ coverage
 apps/desktop/.vite
 apps/desktop/.electron-vite
 apps/desktop/out
+apps/desktop/test-results
+apps/desktop/playwright-report
 apps/desktop/release
 apps/desktop/src/renderer/vite-env.d.ts
 services/ssh-core/bin

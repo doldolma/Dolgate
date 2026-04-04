@@ -16,7 +16,7 @@ export function createRuntimeEventServices({ api, set }: SliceDeps) {
     activityLogsRefreshInFlight = true;
     try {
       const activityLogs = await api.logs.list();
-      set({ activityLogs: sortLogs(activityLogs) });
+      set({ activityLogs: sortLogs(Array.isArray(activityLogs) ? activityLogs : []) });
     } finally {
       activityLogsRefreshInFlight = false;
       if (activityLogsRefreshQueued) {

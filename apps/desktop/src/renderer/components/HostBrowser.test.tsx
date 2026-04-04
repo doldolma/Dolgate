@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   buildVisibleGroups,
@@ -173,12 +173,14 @@ interface RenderBrowserOptions {
   hosts?: HostRecord[];
   currentGroupPath?: string | null;
   searchQuery?: string;
+  selectedHostId?: string | null;
   onClearHostSelection?: ReturnType<typeof vi.fn>;
   onSelectHost?: ReturnType<typeof vi.fn>;
   onDuplicateHosts?: ReturnType<typeof vi.fn>;
   onRemoveGroup?: ReturnType<typeof vi.fn>;
   onRemoveHost?: ReturnType<typeof vi.fn>;
   onOpenHostContainers?: ReturnType<typeof vi.fn>;
+  onNavigateGroup?: ReturnType<typeof vi.fn>;
 }
 
 function renderBrowser({
@@ -187,12 +189,14 @@ function renderBrowser({
   hosts: hostsOverride = hosts,
   currentGroupPath = null,
   searchQuery = '',
+  selectedHostId = null,
   onClearHostSelection = vi.fn(),
   onSelectHost = vi.fn(),
   onDuplicateHosts = vi.fn().mockResolvedValue(undefined),
   onRemoveGroup = vi.fn().mockResolvedValue(undefined),
   onRemoveHost = vi.fn().mockResolvedValue(undefined),
-  onOpenHostContainers = vi.fn().mockResolvedValue(undefined)
+  onOpenHostContainers = vi.fn().mockResolvedValue(undefined),
+  onNavigateGroup = vi.fn()
 }: RenderBrowserOptions = {}) {
   return render(
     <HostBrowser
@@ -201,7 +205,7 @@ function renderBrowser({
       groups={groupsOverride}
       currentGroupPath={currentGroupPath}
       searchQuery={searchQuery}
-      selectedHostId={null}
+      selectedHostId={selectedHostId}
       onSearchChange={vi.fn()}
       onOpenLocalTerminal={vi.fn()}
       onCreateHost={vi.fn()}
@@ -212,7 +216,7 @@ function renderBrowser({
       onOpenWarpgateImport={vi.fn()}
       onCreateGroup={vi.fn().mockResolvedValue(undefined)}
       onRemoveGroup={onRemoveGroup}
-      onNavigateGroup={vi.fn()}
+      onNavigateGroup={onNavigateGroup}
       onClearHostSelection={onClearHostSelection}
       onSelectHost={onSelectHost}
       onEditHost={vi.fn()}
@@ -341,29 +345,6 @@ describe('HostBrowser helpers', () => {
     });
   });
 
-  it('caps a single group card at the configured maximum width', async () => {
-    const { container } = renderBrowser({
-      hosts: [],
-      groups: [groups[0]]
-    });
-
-    const groupGrid = container.querySelector('.group-grid') as HTMLElement;
-    const groupCard = container.querySelector('.group-card') as HTMLElement;
-    expect(groupGrid).toBeTruthy();
-    expect(groupCard).toBeTruthy();
-
-    setObservedWidth(groupGrid, 1200);
-    triggerResize(groupGrid);
-
-    await waitFor(() => {
-      expect(groupGrid.style.gridTemplateColumns).toBe(
-        'repeat(1, minmax(0, 320px))'
-      );
-      expect(groupGrid.style.justifyContent).toBe('start');
-      expect(groupCard.style.maxWidth).toBe('320px');
-    });
-  });
-
   it('fills the host row width while staying within the configured maximum', async () => {
     const { container } = renderBrowser({
       currentGroupPath: 'Servers'
@@ -419,22 +400,94 @@ describe('HostBrowser dialogs', () => {
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
 
-  it('shows the group empty state only at the root level', () => {
-    renderBrowser({ groups: [], hosts: [] });
+  it('renders the group tree and navigates immediately when a group is clicked', () => {
+    const onNavigateGroup = vi.fn();
+    renderBrowser({ onNavigateGroup });
 
-    expect(screen.getByRole('heading', { name: 'Groups' })).toBeInTheDocument();
-    expect(screen.getByText('아직 만든 그룹이 없습니다.')).toBeInTheDocument();
+    const groupTree = screen.getByLabelText('Group tree');
+    const treeQueries = within(groupTree);
+    expect(groupTree).toBeInTheDocument();
+    expect(treeQueries.getByRole('button', { name: /All Groups/ })).toBeInTheDocument();
+    expect(treeQueries.getByRole('button', { name: /Servers/ })).toBeInTheDocument();
+    expect(treeQueries.getByRole('button', { name: /Nested/ })).toBeInTheDocument();
+
+    fireEvent.click(treeQueries.getByRole('button', { name: /Nested/ }));
+
+    expect(onNavigateGroup).toHaveBeenCalledWith('Servers/Nested');
   });
 
-  it('hides the groups section when a nested group has no child groups', () => {
-    const { container } = renderBrowser({
-      groups: [],
-      hosts: [],
-      currentGroupPath: 'Servers'
+  it('lets the user toggle subgroup rows with the disclosure and group double click', () => {
+    renderBrowser();
+
+    const groupTree = screen.getByLabelText('Group tree');
+    const treeQueries = within(groupTree);
+    const disclosure = treeQueries.getByRole('button', { name: 'Collapse subgroup' });
+    const serversRow = treeQueries.getByRole('button', { name: /Servers/ });
+
+    expect(treeQueries.getByRole('button', { name: /Nested/ })).toBeInTheDocument();
+
+    fireEvent.click(disclosure);
+    expect(treeQueries.queryByRole('button', { name: /Nested/ })).not.toBeInTheDocument();
+
+    fireEvent.dblClick(serversRow);
+    expect(treeQueries.getByRole('button', { name: /Nested/ })).toBeInTheDocument();
+
+    fireEvent.dblClick(serversRow);
+    expect(treeQueries.queryByRole('button', { name: /Nested/ })).not.toBeInTheDocument();
+
+    fireEvent.click(treeQueries.getByRole('button', { name: 'Expand subgroup' }));
+    expect(treeQueries.getByRole('button', { name: /Nested/ })).toBeInTheDocument();
+  });
+
+  it('keeps the groups area out of the main pane and shows the tree toggle instead', () => {
+    const { container } = renderBrowser();
+
+    expect(screen.getByLabelText('Group tree')).toBeInTheDocument();
+    expect(container.querySelector('.group-grid')).toBeNull();
+    expect(screen.queryByRole('heading', { name: 'Groups' })).not.toBeInTheDocument();
+  });
+
+  it('does not render a duplicate current group breadcrumb above the cards', () => {
+    const { container } = renderBrowser({ currentGroupPath: 'Servers/Nested' });
+    const content = container.querySelector('.host-browser__content') as HTMLElement;
+
+    expect(within(content).queryByText('All Groups')).not.toBeInTheDocument();
+    expect(within(content).queryByText('Servers')).not.toBeInTheDocument();
+    expect(within(content).queryByText('Nested')).not.toBeInTheDocument();
+  });
+
+  it('keeps ungrouped hosts only in the root view and does not add an Ungrouped tree node', () => {
+    renderBrowser({
+      hosts: [
+        ...hosts,
+        {
+          id: 'host-3',
+          kind: 'ssh',
+          label: 'Ungrouped Host',
+          hostname: 'ungrouped.example.com',
+          port: 22,
+          username: 'ubuntu',
+          authType: 'password',
+          privateKeyPath: null,
+          secretRef: null,
+          groupName: null,
+          tags: [],
+          terminalThemeId: null,
+          createdAt: '2025-01-01T00:00:00.000Z',
+          updatedAt: '2025-01-01T00:00:00.000Z'
+        }
+      ]
     });
 
-    expect(screen.queryByRole('heading', { name: 'Groups' })).not.toBeInTheDocument();
-    expect(container.querySelector('.group-grid')).toBeNull();
+    expect(screen.getByText('Ungrouped Host')).toBeInTheDocument();
+    expect(within(screen.getByLabelText('Group tree')).queryByRole('button', { name: /^Ungrouped(?:\s|$)/ })).not.toBeInTheDocument();
+  });
+
+  it('keeps the group tree visible even when there are no groups', () => {
+    renderBrowser({ groups: [], hosts: [] });
+
+    expect(screen.getByLabelText('Group tree')).toBeInTheDocument();
+    expect(screen.getByText('아직 만든 그룹이 없습니다.')).toBeInTheDocument();
   });
 
   it('supports additive host selection and copies all selected hosts from the context menu', async () => {
@@ -489,18 +542,15 @@ describe('HostBrowser dialogs', () => {
     });
 
     const appCard = screen.getByText('App').closest('article') as HTMLElement;
-    const serversCard = screen
-      .getAllByText('Servers')
-      .find((node) => node.tagName === 'STRONG')
-      ?.closest('article') as HTMLElement;
+    const serversTreeItem = within(screen.getByLabelText('Group tree')).getByRole('button', { name: /Servers/ });
 
     fireEvent.click(appCard, { ctrlKey: true });
-    fireEvent.click(serversCard, { ctrlKey: true });
+    fireEvent.click(serversTreeItem, { ctrlKey: true });
 
     expect(appCard.className).toContain('active');
-    expect(serversCard.className).toContain('active');
+    expect(serversTreeItem.className).toContain('selected');
 
-    fireEvent.contextMenu(serversCard);
+    fireEvent.contextMenu(serversTreeItem);
 
     expect(screen.queryByRole('button', { name: /복사/ })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: /삭제/ })).toBeInTheDocument();

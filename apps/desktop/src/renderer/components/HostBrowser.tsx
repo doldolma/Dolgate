@@ -2,11 +2,12 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import Fuse from 'fuse.js';
 import {
-  buildVisibleGroups,
   collectGroupPaths,
+  countHostsInGroupTree,
   filterHostsInGroupTree,
   getAwsEc2HostSshMetadataStatusLabel,
   getGroupDeleteDialogVariant,
+  getGroupLabel,
   getHostBadgeLabel,
   getHostSearchText,
   getHostSubtitle,
@@ -69,8 +70,6 @@ export function getHostBrowserEmptyCalloutMessage(hostCount: number, searchQuery
   return hostCount === 0 ? 'New Host 또는 Import 메뉴를 눌러 첫 번째 연결 대상을 추가해보세요.' : searchQuery ? '검색어를 지우거나 다른 호스트명으로 다시 찾아보세요.' : 'New Host를 눌러 이 위치에 호스트를 추가하거나, 다른 그룹으로 이동해 장치를 확인해보세요.';
 }
 
-const HOME_BROWSER_GROUP_CARD_MIN_WIDTH_PX = 280;
-const HOME_BROWSER_GROUP_CARD_MAX_WIDTH_PX = 320;
 const HOME_BROWSER_HOST_CARD_MIN_WIDTH_PX = 280;
 const HOME_BROWSER_HOST_CARD_MAX_WIDTH_PX = 460;
 const HOME_BROWSER_CARD_GAP_PX = 13.6;
@@ -104,6 +103,32 @@ interface GroupContextMenuState {
 }
 
 type ContextMenuState = HostContextMenuState | GroupContextMenuState;
+
+interface GroupTreeRow {
+  path: string;
+  label: string;
+  depth: number;
+  parentPath: string | null;
+  hasChildren: boolean;
+  hostCount: number;
+}
+
+function buildGroupTreeRows(
+  groupPaths: string[],
+  groups: GroupRecord[],
+  hosts: HostRecord[],
+): GroupTreeRow[] {
+  const explicitGroupMap = new Map(groups.map((group) => [group.path, group]));
+  const groupPathSet = new Set(groupPaths);
+  return groupPaths.map((path) => ({
+    path,
+    label: explicitGroupMap.get(path)?.name ?? getGroupLabel(path),
+    depth: Math.max(0, path.split('/').length - 1),
+    parentPath: normalizeGroupPath(path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : null),
+    hasChildren: [...groupPathSet].some((candidate) => candidate.startsWith(`${path}/`)),
+    hostCount: countHostsInGroupTree(hosts, path),
+  }));
+}
 
 function isAdditiveSelectionEvent(event: Pick<MouseEvent, 'ctrlKey' | 'metaKey'> | Pick<KeyboardEvent, 'ctrlKey' | 'metaKey'>): boolean {
   return event.ctrlKey || event.metaKey;
@@ -207,6 +232,7 @@ export function HostBrowser({
   const [dragTargetGroupPath, setDragTargetGroupPath] = useState<string | null>(null);
   const [expandedHostTags, setExpandedHostTags] = useState<string[]>([]);
   const [isImportMenuOpen, setIsImportMenuOpen] = useState(false);
+  const [collapsedTreeGroupPaths, setCollapsedTreeGroupPaths] = useState<string[]>([]);
   const importMenuRef = useRef<HTMLDivElement | null>(null);
   const importMenuItems = useMemo(
     () =>
@@ -272,42 +298,36 @@ export function HostBrowser({
   }, [currentGroupPath, fuse, searchableHosts, searchQuery]);
 
   const allGroupPaths = useMemo(() => collectGroupPaths(groups, hosts), [groups, hosts]);
-  const visibleGroups = useMemo(() => buildVisibleGroups(groups, hosts, currentGroupPath), [currentGroupPath, groups, hosts]);
+  const groupTreeRows = useMemo(() => buildGroupTreeRows(allGroupPaths, groups, hosts), [allGroupPaths, groups, hosts]);
+  const collapsedTreeGroupPathSet = useMemo(() => new Set(collapsedTreeGroupPaths), [collapsedTreeGroupPaths]);
+  const visibleGroupTreeRows = useMemo(
+    () =>
+      groupTreeRows.filter((group) => {
+        let ancestorPath = group.parentPath;
+        while (ancestorPath) {
+          if (collapsedTreeGroupPathSet.has(ancestorPath)) {
+            return false;
+          }
+          ancestorPath = normalizeGroupPath(ancestorPath.includes('/') ? ancestorPath.slice(0, ancestorPath.lastIndexOf('/')) : null);
+        }
+        return true;
+      }),
+    [collapsedTreeGroupPathSet, groupTreeRows]
+  );
   const visibleHostIds = useMemo(() => visibleHosts.map((host) => host.id), [visibleHosts]);
-  const visibleGroupPaths = useMemo(() => visibleGroups.map((group) => group.path), [visibleGroups]);
-  const showGroupEmptyState = currentGroupPath === null && visibleGroups.length === 0;
-  const showGroupSection = visibleGroups.length > 0 || showGroupEmptyState;
-  const { ref: groupGridRef, style: groupGridStyle, layout: groupGridLayout } = useResponsiveCardGrid({
-    itemCount: visibleGroups.length,
-    minWidth: HOME_BROWSER_GROUP_CARD_MIN_WIDTH_PX,
-    maxWidth: HOME_BROWSER_GROUP_CARD_MAX_WIDTH_PX,
-    gap: HOME_BROWSER_CARD_GAP_PX
-  });
+  const visibleGroupPaths = useMemo(() => visibleGroupTreeRows.map((group) => group.path), [visibleGroupTreeRows]);
   const { ref: hostGridRef, style: hostGridStyle, layout: hostGridLayout } = useResponsiveCardGrid({
     itemCount: visibleHosts.length,
     minWidth: HOME_BROWSER_HOST_CARD_MIN_WIDTH_PX,
     maxWidth: HOME_BROWSER_HOST_CARD_MAX_WIDTH_PX,
     gap: HOME_BROWSER_CARD_GAP_PX
   });
-  const clampedGroupCardStyle =
-    groupGridLayout.justifyContent === 'start' && groupGridLayout.cardWidth
-      ? { width: '100%', maxWidth: `${groupGridLayout.cardWidth}px` }
-      : undefined;
   const clampedHostCardStyle =
     hostGridLayout.justifyContent === 'start' && hostGridLayout.cardWidth
       ? { width: '100%', maxWidth: `${hostGridLayout.cardWidth}px` }
       : undefined;
-  const breadcrumbs = useMemo(() => {
-    if (!currentGroupPath) {
-      return [];
-    }
-    const segments = currentGroupPath.split('/');
-    return segments.map((segment, index) => ({
-      label: segment,
-      path: segments.slice(0, index + 1).join('/')
-    }));
-  }, [currentGroupPath]);
-
+  const currentGroupPathLabel = currentGroupPath ? currentGroupPath.split('/').join(' / ') : 'All Groups';
+  const searchPlaceholder = currentGroupPath ? `Search hosts inside ${currentGroupPathLabel}` : 'Search hosts or instances';
   const emptyMessage = hosts.length === 0 ? '아직 등록된 호스트가 없습니다.' : searchQuery ? '검색 결과가 없습니다.' : '이 위치에는 아직 호스트가 없습니다.';
   const contextMenuStyle = contextMenu
     ? {
@@ -315,6 +335,10 @@ export function HostBrowser({
         top: `${Math.max(12, Math.min(contextMenu.y, window.innerHeight - 72))}px`
       }
     : null;
+
+  useEffect(() => {
+    setCollapsedTreeGroupPaths((current) => current.filter((path) => allGroupPaths.includes(path)));
+  }, [allGroupPaths]);
 
   useEffect(() => {
     setSelectedHostIds((current) => current.filter((hostId) => visibleHostIds.includes(hostId)));
@@ -489,6 +513,23 @@ export function HostBrowser({
       return;
     }
     selectSingleGroup(groupPath);
+    onNavigateGroup(groupPath);
+  }
+
+  function handleNavigateRoot() {
+    setContextMenu(null);
+    setSelectedGroupPaths([]);
+    setSelectedHostIds([]);
+    setGroupSelectionAnchor(null);
+    setHostSelectionAnchor(null);
+    onClearHostSelection();
+    onNavigateGroup(null);
+  }
+
+  function handleToggleGroupBranch(groupPath: string) {
+    setCollapsedTreeGroupPaths((current) =>
+      current.includes(groupPath) ? current.filter((path) => path !== groupPath) : [...current, groupPath]
+    );
   }
 
   function getOrderedSelectedHostIds(hostIds: string[]): string[] {
@@ -528,7 +569,7 @@ export function HostBrowser({
             id="host-search"
             value={searchQuery}
             onChange={(event) => onSearchChange(event.target.value)}
-            placeholder="Search hosts or instances"
+            placeholder={searchPlaceholder}
             aria-label="Search hosts"
           />
         </div>
@@ -605,236 +646,228 @@ export function HostBrowser({
       {statusMessage ? <div className="terminal-status-banner host-browser__status-banner">{statusMessage}</div> : null}
       {errorMessage ? <div className="terminal-error-banner host-browser__error-banner">{errorMessage}</div> : null}
 
-      {breadcrumbs.length > 0 ? (
-        <div className="host-browser__breadcrumbs">
-          <button type="button" className="host-browser__breadcrumb" onClick={() => onNavigateGroup(null)}>
-            Hosts
+      <div className="host-browser__layout">
+        <aside className="host-browser__group-tree" aria-label="Group tree">
+          <div className="host-browser__group-tree-header">
+            <span>Group Tree</span>
+          </div>
+          <button
+            type="button"
+            className={`host-browser__group-tree-root ${currentGroupPath === null ? 'active' : ''}`}
+            onClick={handleNavigateRoot}
+          >
+            <span>All Groups</span>
+            <span className="host-browser__group-tree-count">{hosts.length}</span>
           </button>
-          {breadcrumbs.map((crumb) => (
-            <button
-              key={crumb.path}
-              type="button"
-              className={`host-browser__breadcrumb ${crumb.path === currentGroupPath ? 'active' : ''}`}
-              onClick={() => onNavigateGroup(crumb.path)}
-            >
-              {crumb.label}
-            </button>
-          ))}
-        </div>
-      ) : null}
-
-      {showGroupSection ? (
-        <div className="browser-section">
-        <div className="browser-section__header">
-          <div>
-            <h2>Groups</h2>
-          </div>
-        </div>
-        <div className="group-grid" ref={groupGridRef} style={groupGridStyle}>
-          {showGroupEmptyState ? (
-            <EmptyState
-              title={currentGroupPath ? '이 위치에는 아직 그룹이 없습니다.' : '아직 만든 그룹이 없습니다.'}
-              description="New Group을 눌러 현재 위치 아래에 첫 번째 그룹을 만들어보세요."
-            />
+          {groupTreeRows.length === 0 ? (
+            <div className="host-browser__group-tree-empty">
+              아직 만든 그룹이 없습니다.
+            </div>
           ) : (
-            visibleGroups.map((group) => (
-              <article
-                key={group.path}
-                className={`group-card group-card--interactive ${selectedGroupPathSet.has(group.path) ? 'active' : ''} ${dragTargetGroupPath === group.path ? 'drop-target' : ''}`}
-                style={clampedGroupCardStyle}
-                onClick={(event) => {
-                  handleGroupSelection(group.path, event);
-                }}
-                onDoubleClick={() => onNavigateGroup(group.path)}
-                onContextMenu={(event) => {
-                  event.preventDefault();
-                  const nextGroupPaths = selectedGroupPathSet.has(group.path) ? selectedGroupPaths : [group.path];
-                  if (!selectedGroupPathSet.has(group.path)) {
-                    setSelectedGroupPaths([group.path]);
-                    setSelectedHostIds([]);
-                    setGroupSelectionAnchor(group.path);
-                    setHostSelectionAnchor(null);
-                    onClearHostSelection();
-                  }
-                  setContextMenu({
-                    kind: 'group',
-                    groupPaths: normalizeGroupSelectionForDelete(nextGroupPaths),
-                    x: event.clientX,
-                    y: event.clientY
-                  });
-                }}
-                onDragOver={(event) => {
-                  event.preventDefault();
-                  event.dataTransfer.dropEffect = 'move';
-                  setDragTargetGroupPath(group.path);
-                }}
-                onDragLeave={(event) => {
-                  const nextTarget = event.relatedTarget;
-                  if (nextTarget instanceof Node && event.currentTarget.contains(nextTarget)) {
-                    return;
-                  }
-                  setDragTargetGroupPath((current) => (current === group.path ? null : current));
-                }}
-                onDrop={async (event) => {
-                  event.preventDefault();
-                  const hostId = event.dataTransfer.getData('application/x-dolssh-host-id');
-                  setDragTargetGroupPath(null);
-                  if (!hostId) {
-                    return;
-                  }
-                  await onMoveHostToGroup(hostId, group.path);
-                }}
-                role="button"
-                tabIndex={0}
-                onKeyDown={(event) => {
-                  if (event.key === ' ') {
-                    event.preventDefault();
-                    selectSingleGroup(group.path);
-                  }
-                  if (event.key === 'Enter') {
-                    event.preventDefault();
-                    onNavigateGroup(group.path);
-                  }
-                }}
-              >
-                <div className="group-card__icon">{group.name.slice(0, 1).toUpperCase()}</div>
-                <div className="group-card__body">
-                  <strong>{group.name}</strong>
-                  <span>{group.hostCount} hosts</span>
-                </div>
-              </article>
-            ))
-          )}
-        </div>
-        </div>
-      ) : null}
-
-      <div className="browser-section">
-        <div className="browser-section__header">
-          <div>
-            <h2>Hosts</h2>
-          </div>
-        </div>
-        <div className="host-grid" ref={hostGridRef} style={hostGridStyle}>
-          {visibleHosts.length === 0 ? (
-            <EmptyState
-              title={emptyMessage}
-              description={getHostBrowserEmptyCalloutMessage(hosts.length, searchQuery)}
-            />
-          ) : (
-            visibleHosts.map((host) => {
-              const isTagsExpanded = expandedHostTags.includes(host.id);
-              const badgeLabel = getHostBadgeLabel(host);
-              const awsMetadataStatusLabel = host.kind === 'aws-ec2' ? getAwsEc2HostSshMetadataStatusLabel(host.awsSshMetadataStatus) : null;
-              return (
-                <article
-                  key={host.id}
-                  className={getHostBrowserCardClassName(
-                    selectedHostIdSet.has(host.id) ||
-                      (selectedHostIds.length === 0 && selectedGroupPaths.length === 0 && selectedHostId === host.id),
-                    isTagsExpanded
-                  )}
-                  style={clampedHostCardStyle}
-                  draggable
-                  onClick={(event) => {
-                    handleHostSelection(host.id, event);
-                  }}
-                  onDragStart={(event) => {
-                    selectSingleHost(host.id);
-                    event.dataTransfer.effectAllowed = 'move';
-                    event.dataTransfer.setData('application/x-dolssh-host-id', host.id);
-                    event.dataTransfer.setData('text/plain', host.label);
-                  }}
-                  onDragEnd={() => {
-                    setDragTargetGroupPath(null);
-                  }}
-                  onDoubleClick={async () => {
-                    await onConnectHost(host.id);
-                  }}
-                  onContextMenu={(event) => {
-                    event.preventDefault();
-                    const nextHostIds = selectedHostIdSet.has(host.id) ? getOrderedSelectedHostIds(selectedHostIds) : [host.id];
-                    if (!selectedHostIdSet.has(host.id)) {
-                      setSelectedHostIds([host.id]);
-                      setSelectedGroupPaths([]);
-                      setHostSelectionAnchor(host.id);
-                      setGroupSelectionAnchor(null);
-                      onSelectHost(host.id);
-                    }
-                    setContextMenu({
-                      kind: 'host',
-                      hostIds: nextHostIds,
-                      x: event.clientX,
-                      y: event.clientY
-                    });
-                  }}
-                  role="button"
-                  tabIndex={0}
-                  onKeyDown={(event) => {
-                    if (event.key === 'Enter') {
-                      event.preventDefault();
-                      void (async () => {
-                        await onConnectHost(host.id);
-                      })();
-                    }
-                  }}
+            <div className="host-browser__group-tree-list">
+              {visibleGroupTreeRows.map((group) => (
+                <div
+                  key={group.path}
+                  className="host-browser__group-tree-row"
+                  style={{ paddingLeft: `calc(${group.depth} * 1rem)` }}
                 >
-                  <div className={`host-browser-card__icon ${badgeLabel.length > 3 ? 'host-browser-card__icon--compact' : ''}`}>
-                    {badgeLabel}
-                  </div>
-                  <div className="host-browser-card__meta">
-                    <strong>{host.label}</strong>
-                    <span>{getHostSubtitle(host)}</span>
-                    <small>{normalizeGroupPath(host.groupName) ?? 'Ungrouped'}</small>
-                    {host.kind === 'aws-ec2' && awsMetadataStatusLabel ? (
-                      <small className="host-browser-card__hint">
-                        {awsMetadataStatusLabel}
-                        {host.awsSshMetadataStatus === 'error' && host.awsSshMetadataError ? ` · ${host.awsSshMetadataError}` : ''}
-                      </small>
-                    ) : null}
-                  </div>
-                  <div className="host-browser-card__actions">
+                  {group.hasChildren ? (
                     <button
                       type="button"
-                      className="host-browser-card__edit"
-                      aria-label={`${host.label} 수정`}
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        selectSingleHost(host.id);
-                        onEditHost(host.id);
+                      className={`host-browser__group-tree-disclosure ${collapsedTreeGroupPathSet.has(group.path) ? 'collapsed' : 'expanded'}`}
+                      aria-label={collapsedTreeGroupPathSet.has(group.path) ? 'Expand subgroup' : 'Collapse subgroup'}
+                      onClick={() => {
+                        handleToggleGroupBranch(group.path);
                       }}
                     >
-                      ✎
+                      <span aria-hidden="true">{collapsedTreeGroupPathSet.has(group.path) ? '▸' : '▾'}</span>
                     </button>
-                    {host.tags && host.tags.length > 0 ? (
-                      <button
-                        type="button"
-                        className="host-browser-card__tags-toggle"
-                        aria-expanded={isTagsExpanded}
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          setExpandedHostTags((current) =>
-                            current.includes(host.id) ? current.filter((entry) => entry !== host.id) : [...current, host.id]
-                          );
-                        }}
-                      >
-                        {getHostTagsToggleLabel(isTagsExpanded, host.tags.length)}
-                      </button>
-                    ) : null}
-                  </div>
-                  {host.tags && host.tags.length > 0 && isTagsExpanded ? (
-                    <div className="host-browser-card__tags-panel">
-                      {host.tags.map((tag) => (
-                        <span key={tag} className="host-browser-card__tag">
-                          #{tag}
-                        </span>
-                      ))}
-                    </div>
-                  ) : null}
-                </article>
-              );
-            })
+                  ) : (
+                    <span className="host-browser__group-tree-disclosure-spacer" aria-hidden="true" />
+                  )}
+                  <button
+                    type="button"
+                    className={`host-browser__group-tree-item ${currentGroupPath === group.path ? 'active' : ''} ${selectedGroupPathSet.has(group.path) ? 'selected' : ''} ${dragTargetGroupPath === group.path ? 'drop-target' : ''}`}
+                    onClick={(event) => handleGroupSelection(group.path, event)}
+                    onDoubleClick={() => {
+                      if (group.hasChildren) {
+                        handleToggleGroupBranch(group.path);
+                      }
+                    }}
+                    onContextMenu={(event) => {
+                      event.preventDefault();
+                      const nextGroupPaths = selectedGroupPathSet.has(group.path)
+                        ? selectedGroupPaths
+                        : [group.path];
+                      if (!selectedGroupPathSet.has(group.path)) {
+                        setSelectedGroupPaths([group.path]);
+                        setSelectedHostIds([]);
+                        setGroupSelectionAnchor(group.path);
+                        setHostSelectionAnchor(null);
+                        onClearHostSelection();
+                      }
+                      setContextMenu({
+                        kind: 'group',
+                        groupPaths: normalizeGroupSelectionForDelete(nextGroupPaths),
+                        x: event.clientX,
+                        y: event.clientY,
+                      });
+                    }}
+                    onDragOver={(event) => {
+                      event.preventDefault();
+                      event.dataTransfer.dropEffect = 'move';
+                      setDragTargetGroupPath(group.path);
+                    }}
+                    onDragLeave={(event) => {
+                      const nextTarget = event.relatedTarget;
+                      if (nextTarget instanceof Node && event.currentTarget.contains(nextTarget)) {
+                        return;
+                      }
+                      setDragTargetGroupPath((current) => (current === group.path ? null : current));
+                    }}
+                    onDrop={async (event) => {
+                      event.preventDefault();
+                      const hostId = event.dataTransfer.getData('application/x-dolssh-host-id');
+                      setDragTargetGroupPath(null);
+                      if (!hostId) {
+                        return;
+                      }
+                      await onMoveHostToGroup(hostId, group.path);
+                    }}
+                  >
+                    <span className="host-browser__group-tree-label">{group.label}</span>
+                    <span className="host-browser__group-tree-count">{group.hostCount}</span>
+                  </button>
+                </div>
+              ))}
+            </div>
           )}
+        </aside>
+
+        <div className="host-browser__content">
+          <div className="browser-section browser-section--hosts">
+            <div className="host-grid" ref={hostGridRef} style={hostGridStyle}>
+              {visibleHosts.length === 0 ? (
+                <EmptyState
+                  title={emptyMessage}
+                  description={getHostBrowserEmptyCalloutMessage(hosts.length, searchQuery)}
+                />
+              ) : (
+                visibleHosts.map((host) => {
+                  const isTagsExpanded = expandedHostTags.includes(host.id);
+                  const badgeLabel = getHostBadgeLabel(host);
+                  const awsMetadataStatusLabel = host.kind === 'aws-ec2' ? getAwsEc2HostSshMetadataStatusLabel(host.awsSshMetadataStatus) : null;
+                  return (
+                    <article
+                      key={host.id}
+                      className={getHostBrowserCardClassName(
+                        selectedHostIdSet.has(host.id) ||
+                          (selectedHostIds.length === 0 && selectedGroupPaths.length === 0 && selectedHostId === host.id),
+                        isTagsExpanded
+                      )}
+                      style={clampedHostCardStyle}
+                      draggable
+                      onClick={(event) => {
+                        handleHostSelection(host.id, event);
+                      }}
+                      onDragStart={(event) => {
+                        selectSingleHost(host.id);
+                        event.dataTransfer.effectAllowed = 'move';
+                        event.dataTransfer.setData('application/x-dolssh-host-id', host.id);
+                        event.dataTransfer.setData('text/plain', host.label);
+                      }}
+                      onDragEnd={() => {
+                        setDragTargetGroupPath(null);
+                      }}
+                      onDoubleClick={async () => {
+                        await onConnectHost(host.id);
+                      }}
+                      onContextMenu={(event) => {
+                        event.preventDefault();
+                        const nextHostIds = selectedHostIdSet.has(host.id) ? getOrderedSelectedHostIds(selectedHostIds) : [host.id];
+                        if (!selectedHostIdSet.has(host.id)) {
+                          setSelectedHostIds([host.id]);
+                          setSelectedGroupPaths([]);
+                          setHostSelectionAnchor(host.id);
+                          setGroupSelectionAnchor(null);
+                          onSelectHost(host.id);
+                        }
+                        setContextMenu({
+                          kind: 'host',
+                          hostIds: nextHostIds,
+                          x: event.clientX,
+                          y: event.clientY
+                        });
+                      }}
+                      role="button"
+                      tabIndex={0}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter') {
+                          event.preventDefault();
+                          void (async () => {
+                            await onConnectHost(host.id);
+                          })();
+                        }
+                      }}
+                    >
+                      <div className={`host-browser-card__icon ${badgeLabel.length > 3 ? 'host-browser-card__icon--compact' : ''}`}>
+                        {badgeLabel}
+                      </div>
+                      <div className="host-browser-card__meta">
+                        <strong>{host.label}</strong>
+                        <span>{getHostSubtitle(host)}</span>
+                        <small>{normalizeGroupPath(host.groupName) ?? 'Ungrouped'}</small>
+                        {host.kind === 'aws-ec2' && awsMetadataStatusLabel ? (
+                          <small className="host-browser-card__hint">
+                            {awsMetadataStatusLabel}
+                            {host.awsSshMetadataStatus === 'error' && host.awsSshMetadataError ? ` · ${host.awsSshMetadataError}` : ''}
+                          </small>
+                        ) : null}
+                      </div>
+                      <div className="host-browser-card__actions">
+                        <button
+                          type="button"
+                          className="host-browser-card__edit"
+                          aria-label={`${host.label} 수정`}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            selectSingleHost(host.id);
+                            onEditHost(host.id);
+                          }}
+                        >
+                          ✎
+                        </button>
+                        {host.tags && host.tags.length > 0 ? (
+                          <button
+                            type="button"
+                            className="host-browser-card__tags-toggle"
+                            aria-expanded={isTagsExpanded}
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              setExpandedHostTags((current) =>
+                                current.includes(host.id) ? current.filter((entry) => entry !== host.id) : [...current, host.id]
+                              );
+                            }}
+                          >
+                            {getHostTagsToggleLabel(isTagsExpanded, host.tags.length)}
+                          </button>
+                        ) : null}
+                      </div>
+                      {host.tags && host.tags.length > 0 && isTagsExpanded ? (
+                        <div className="host-browser-card__tags-panel">
+                          {host.tags.map((tag) => (
+                            <span key={tag} className="host-browser-card__tag">
+                              #{tag}
+                            </span>
+                          ))}
+                        </div>
+                      ) : null}
+                    </article>
+                  );
+                })
+              )}
+            </div>
+          </div>
         </div>
       </div>
 
