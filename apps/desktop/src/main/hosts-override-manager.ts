@@ -20,6 +20,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const HELPER_READY_TIMEOUT_MS = 15_000;
 const HELPER_READY_POLL_INTERVAL_MS = 200;
 const HELPER_CONNECT_TIMEOUT_MS = 1_000;
+const DARWIN_MAX_UNIX_SOCKET_PATH_LENGTH = 103;
 
 export const HOSTS_MANAGED_BLOCK_START = '# >>> dolssh managed dns overrides >>>';
 export const HOSTS_MANAGED_BLOCK_END = '# <<< dolssh managed dns overrides <<<';
@@ -175,7 +176,19 @@ export function buildHostsHelperEndpoint(
   }
   if (platform === 'darwin') {
     const normalizedTempDirectory = tempDirectory.replace(/\\/g, '/');
-    return path.posix.join(normalizedTempDirectory, `dolgate-dns-helper-${process.pid}-${id}.sock`);
+    const compactId = id.replace(/[^a-zA-Z0-9]/g, '').toLowerCase().slice(-10) || 'helper';
+    const socketBasename = `dgdns-${process.pid}-${compactId}.sock`;
+    const preferredEndpoint = path.posix.join(normalizedTempDirectory, socketBasename);
+    if (preferredEndpoint.length <= DARWIN_MAX_UNIX_SOCKET_PATH_LENGTH) {
+      return preferredEndpoint;
+    }
+    const fallbackEndpoint = path.posix.join('/tmp', socketBasename);
+    if (fallbackEndpoint.length <= DARWIN_MAX_UNIX_SOCKET_PATH_LENGTH) {
+      return fallbackEndpoint;
+    }
+    throw new Error(
+      `Unable to build a valid Dolgate DNS Helper socket endpoint within ${DARWIN_MAX_UNIX_SOCKET_PATH_LENGTH} characters`,
+    );
   }
   throw new Error(`Hosts overrides are not supported on platform: ${platform}`);
 }
@@ -396,7 +409,7 @@ export class HostsOverrideManager {
   private readyPromise: Promise<void> | null = null;
   private readonly activeStaticOverrideIds = new Set<string>();
   private readonly hostsFilePath: string;
-  private readonly helperPath: string;
+  private readonly helperPathOverride: string | null;
   private readonly platform: NodeJS.Platform;
   private readonly tempDirectory: string;
   private readonly launchTimeoutMs: number;
@@ -410,7 +423,7 @@ export class HostsOverrideManager {
   constructor(options?: HostsOverrideManagerOptions) {
     this.platform = options?.platform ?? process.platform;
     this.hostsFilePath = options?.hostsFilePath ?? resolveHostsFilePath(this.platform);
-    this.helperPath = options?.helperPath ?? resolveHostsHelperPath();
+    this.helperPathOverride = options?.helperPath ?? null;
     this.tempDirectory = options?.tempDirectory ?? tmpdir();
     this.launchTimeoutMs = options?.launchTimeoutMs ?? HELPER_READY_TIMEOUT_MS;
     this.launchPollIntervalMs = options?.launchPollIntervalMs ?? HELPER_READY_POLL_INTERVAL_MS;
@@ -578,10 +591,11 @@ export class HostsOverrideManager {
   private async launchHelperSession(): Promise<void> {
     const endpoint = buildHostsHelperEndpoint(this.platform, this.uuidFactory(), this.tempDirectory);
     const authToken = this.uuidFactory();
+    const helperPath = this.helperPathOverride ?? resolveHostsHelperPath();
 
     await this.launchHelper({
       platform: this.platform,
-      helperPath: this.helperPath,
+      helperPath,
       hostsFilePath: this.hostsFilePath,
       endpoint,
       authToken,

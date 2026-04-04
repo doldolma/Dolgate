@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import { existsSync } from 'node:fs';
 
 vi.mock('electron', () => ({
   app: {
@@ -171,7 +172,17 @@ describe('hosts override manager helpers', () => {
 
   it('builds platform-specific helper endpoints', () => {
     expect(buildHostsHelperEndpoint('win32', 'id-1')).toContain('\\\\.\\pipe\\dolgate-dns-helper-');
-    expect(buildHostsHelperEndpoint('darwin', 'id-2', '/tmp')).toMatch(/\/tmp\/dolgate-dns-helper-\d+-id-2\.sock$/);
+    const shortEndpoint = buildHostsHelperEndpoint('darwin', 'id-2', '/tmp');
+    expect(shortEndpoint).toMatch(/\/tmp\/dgdns-\d+-id2\.sock$/);
+    expect(shortEndpoint.length).toBeLessThanOrEqual(103);
+
+    const fallbackEndpoint = buildHostsHelperEndpoint(
+      'darwin',
+      '123e4567-e89b-12d3-a456-426614174000',
+      '/this/path/is/intentionally/long/enough/to/exceed/the/macos/unix/socket/path/length/limit',
+    );
+    expect(fallbackEndpoint).toMatch(/\/tmp\/dgdns-\d+-6614174000\.sock$/);
+    expect(fallbackEndpoint.length).toBeLessThanOrEqual(103);
   });
 
   it('exposes the branded helper binary name', () => {
@@ -206,6 +217,36 @@ describe('hosts override manager helpers', () => {
 });
 
 describe('HostsOverrideManager', () => {
+  it('does not resolve the helper binary path during construction', () => {
+    const existsSyncMock = vi.mocked(existsSync);
+    existsSyncMock.mockReturnValue(false);
+    try {
+      expect(() => new HostsOverrideManager({ platform: 'darwin' })).not.toThrow();
+    } finally {
+      existsSyncMock.mockReturnValue(true);
+    }
+  });
+
+  it('resolves the helper binary path lazily when launching the helper', async () => {
+    const existsSyncMock = vi.mocked(existsSync);
+    existsSyncMock.mockReturnValue(false);
+    try {
+      const manager = new HostsOverrideManager({
+        platform: 'darwin',
+        hostsFilePath: '/etc/hosts',
+        fileReader: async () => '',
+        launchPollIntervalMs: 0,
+        launchTimeoutMs: 100,
+      });
+
+      expect(existsSyncMock).not.toHaveBeenCalled();
+      await expect(manager.ensureReady()).rejects.toThrow();
+      expect(existsSyncMock).toHaveBeenCalled();
+    } finally {
+      existsSyncMock.mockReturnValue(true);
+    }
+  });
+
   it('reuses the launched helper session across multiple rewrites', async () => {
     const requests: Array<{ command: string; entries?: Array<{ address: string; hostname: string }> }> = [];
     const launchHelper = vi.fn(async () => undefined);
