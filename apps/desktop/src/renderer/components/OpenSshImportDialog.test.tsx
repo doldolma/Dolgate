@@ -148,11 +148,7 @@ describe("OpenSSH import dialog", () => {
     expect(screen.getByText("web")).toBeInTheDocument();
     expect(screen.getByText("Servers/Prod")).toBeInTheDocument();
 
-    const selectionButtons = container.querySelectorAll(
-      ".openssh-import-dialog__selection-actions .secondary-button",
-    );
-
-    fireEvent.click(selectionButtons[0] as HTMLButtonElement);
+    fireEvent.click(screen.getByRole("button", { name: "파일 불러오기" }));
 
     await waitFor(() =>
       expect(api.shell.pickOpenSshConfig).toHaveBeenCalled(),
@@ -166,12 +162,8 @@ describe("OpenSSH import dialog", () => {
 
     expect(screen.getByText("db")).toBeInTheDocument();
 
-    fireEvent.click(selectionButtons[1] as HTMLButtonElement);
-    fireEvent.click(
-      container.querySelector(
-        ".modal-card__footer .primary-button",
-      ) as HTMLButtonElement,
-    );
+    fireEvent.click(screen.getByRole("button", { name: "보이는 항목 모두 선택" }));
+    fireEvent.click(screen.getByRole("button", { name: "가져오기" }));
 
     await waitFor(() =>
       expect(api.openssh.importSelection).toHaveBeenCalledWith({
@@ -204,12 +196,12 @@ describe("OpenSSH import dialog", () => {
 
     await waitFor(() => expect(api.openssh.probeDefault).toHaveBeenCalled());
 
-    expect(container.querySelector(".empty-callout")).toBeTruthy();
     expect(
-      container.querySelector(
-        ".openssh-import-dialog__selection-actions .secondary-button",
-      ),
-    ).toBeTruthy();
+      screen.getByText("가져올 수 있는 OpenSSH 호스트가 없습니다."),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "파일 불러오기" }),
+    ).toBeInTheDocument();
   });
 
   it("closes when the backdrop is clicked while idle", async () => {
@@ -250,10 +242,7 @@ describe("OpenSSH import dialog", () => {
 
     await waitFor(() => expect(api.openssh.probeDefault).toHaveBeenCalled());
 
-    const selectionButtons = container.querySelectorAll(
-      ".openssh-import-dialog__selection-actions .secondary-button",
-    );
-    fireEvent.click(selectionButtons[0] as HTMLButtonElement);
+    fireEvent.click(screen.getByRole("button", { name: "파일 불러오기" }));
 
     await waitFor(() =>
       expect(api.openssh.addFileToSnapshot).toHaveBeenCalled(),

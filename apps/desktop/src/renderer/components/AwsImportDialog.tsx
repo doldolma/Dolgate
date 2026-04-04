@@ -7,7 +7,25 @@ import type {
   AwsProfileSummary,
   HostDraft,
 } from '@shared';
+import { useAwsImportController } from '../controllers/useImportControllers';
 import { DialogBackdrop } from './DialogBackdrop';
+import {
+  Button,
+  Card,
+  CardActions,
+  CardMain,
+  CardMeta,
+  CardTitleRow,
+  EmptyState,
+  IconButton,
+  ModalBody,
+  ModalFooter,
+  ModalHeader,
+  ModalShell,
+  NoticeCard,
+  SectionLabel,
+  StatusBadge,
+} from '../ui';
 
 type AwsImportMode = 'ec2' | 'ecs';
 
@@ -67,6 +85,15 @@ function toAwsSshPortValue(value: string): number | null {
 }
 
 export function AwsImportDialog({ open, currentGroupPath, onClose, onImport }: AwsImportDialogProps) {
+  const {
+    getAwsProfileStatus,
+    inspectAwsHostSshMetadata,
+    listAwsEc2Instances,
+    listAwsEcsClusters,
+    listAwsProfiles,
+    listAwsRegions,
+    loginAwsProfile,
+  } = useAwsImportController();
   const [importMode, setImportMode] = useState<AwsImportMode>('ec2');
   const [profiles, setProfiles] = useState<AwsProfileSummary[]>([]);
   const [selectedProfile, setSelectedProfile] = useState('');
@@ -153,7 +180,7 @@ export function AwsImportDialog({ open, currentGroupPath, onClose, onImport }: A
 
     let result: AwsHostSshInspectionResult;
     try {
-      result = await window.dolssh.aws.inspectHostSshMetadata({
+      result = await inspectAwsHostSshMetadata({
         profileName: selectedProfile,
         region: selectedRegion,
         instanceId: instance.instanceId,
@@ -196,8 +223,7 @@ export function AwsImportDialog({ open, currentGroupPath, onClose, onImport }: A
     resetInspection();
     setIsLoadingProfiles(true);
 
-    void window.dolssh.aws
-      .listProfiles()
+    void listAwsProfiles()
       .then((items) => {
         setProfiles(items);
         if (items.length > 0) {
@@ -231,8 +257,7 @@ export function AwsImportDialog({ open, currentGroupPath, onClose, onImport }: A
     setEcsClusters([]);
     setError(null);
 
-    void window.dolssh.aws
-      .getProfileStatus(selectedProfile)
+    void getAwsProfileStatus(selectedProfile)
       .then((status) => {
         if (cancelled) {
           return;
@@ -270,8 +295,7 @@ export function AwsImportDialog({ open, currentGroupPath, onClose, onImport }: A
     setIsLoadingRegions(true);
     setError(null);
 
-    void window.dolssh.aws
-      .listRegions(selectedProfile)
+    void listAwsRegions(selectedProfile)
       .then((nextRegions) => {
         if (cancelled) {
           return;
@@ -319,8 +343,8 @@ export function AwsImportDialog({ open, currentGroupPath, onClose, onImport }: A
 
     const loadTargets =
       importMode === 'ecs'
-        ? window.dolssh.aws.listEcsClusters(selectedProfile, selectedRegion)
-        : window.dolssh.aws.listEc2Instances(selectedProfile, selectedRegion);
+        ? listAwsEcsClusters(selectedProfile, selectedRegion)
+        : listAwsEc2Instances(selectedProfile, selectedRegion);
 
     void loadTargets
       .then((items) => {
@@ -394,18 +418,18 @@ export function AwsImportDialog({ open, currentGroupPath, onClose, onImport }: A
       onDismiss={onClose}
       dismissDisabled={isRegistering}
     >
-      <div className="modal-card aws-import-dialog" role="dialog" aria-modal="true" aria-labelledby="aws-import-title">
-        <div className="modal-card__header">
+      <ModalShell className="aws-import-dialog" role="dialog" aria-modal="true" aria-labelledby="aws-import-title">
+        <ModalHeader>
           <div>
-            <div className="section-kicker">AWS</div>
+            <SectionLabel>AWS</SectionLabel>
             <h3 id="aws-import-title">Import from AWS</h3>
           </div>
-          <button type="button" className="icon-button" onClick={onClose} aria-label="Close AWS import dialog" disabled={isRegistering}>
+          <IconButton onClick={onClose} aria-label="Close AWS import dialog" disabled={isRegistering}>
             ×
-          </button>
-        </div>
+          </IconButton>
+        </ModalHeader>
 
-        <div className="modal-card__body">
+        <ModalBody>
           <div className="segmented-control aws-import-dialog__mode-toggle" role="tablist" aria-label="AWS import mode">
             <button
               type="button"
@@ -514,10 +538,9 @@ export function AwsImportDialog({ open, currentGroupPath, onClose, onImport }: A
           ) : null}
 
           {profileStatus?.isSsoProfile && !profileStatus.isAuthenticated ? (
-            <div className="modal-card__footer aws-import-dialog__inline-actions">
-              <button
-                type="button"
-                className="primary-button"
+            <div className="aws-import-dialog__inline-actions">
+              <Button
+                variant="primary"
                 onClick={async () => {
                   if (!selectedProfile) {
                     return;
@@ -525,8 +548,8 @@ export function AwsImportDialog({ open, currentGroupPath, onClose, onImport }: A
                   setIsLoggingIn(true);
                   setError(null);
                   try {
-                    await window.dolssh.aws.login(selectedProfile);
-                    const status = await window.dolssh.aws.getProfileStatus(selectedProfile);
+                    await loginAwsProfile(selectedProfile);
+                    const status = await getAwsProfileStatus(selectedProfile);
                     setProfileStatus(status);
                   } catch (loginError) {
                     setError(loginError instanceof Error ? loginError.message : 'AWS SSO 로그인을 시작하지 못했습니다.');
@@ -537,7 +560,7 @@ export function AwsImportDialog({ open, currentGroupPath, onClose, onImport }: A
                 disabled={isLoggingIn}
               >
                 {isLoggingIn ? '로그인 중...' : '브라우저에서 로그인'}
-              </button>
+              </Button>
             </div>
           ) : null}
 
@@ -545,21 +568,21 @@ export function AwsImportDialog({ open, currentGroupPath, onClose, onImport }: A
 
           {inspectionTarget ? (
             <div className="aws-import-dialog__inspection" data-testid="aws-import-inspection">
-              <article className="operations-card aws-import-dialog__inspection-summary">
-                <div className="operations-card__main">
-                  <div className="operations-card__title-row">
+              <Card className="aws-import-dialog__inspection-summary">
+                <CardMain>
+                  <CardTitleRow>
                     <strong>{inspectionTarget.name || inspectionTarget.instanceId}</strong>
-                    <span className="status-pill status-pill--running">{inspectionTarget.state || 'unknown'}</span>
-                  </div>
-                  <div className="operations-card__meta">
+                    <StatusBadge tone="running">{inspectionTarget.state || 'unknown'}</StatusBadge>
+                  </CardTitleRow>
+                  <CardMeta>
                     <span>{inspectionTarget.instanceId}</span>
                     <span>{selectedRegion}</span>
                     <span>{inspectionTarget.availabilityZone || 'AZ unavailable'}</span>
                     <span>{inspectionTarget.privateIp || 'No private IP'}</span>
                     <span>{inspectionTarget.platform || 'linux'}</span>
-                  </div>
-                </div>
-              </article>
+                  </CardMeta>
+                </CardMain>
+              </Card>
 
               {inspectionStatus === 'loading' ? (
                 <div className="aws-import-dialog__loading">
@@ -568,10 +591,12 @@ export function AwsImportDialog({ open, currentGroupPath, onClose, onImport }: A
               ) : null}
 
               {inspectionStatus === 'ready' ? (
-                <div className="empty-callout aws-import-dialog__inspection-callout">
-                  <strong>자동으로 SSH 접속 정보를 확인했습니다.</strong>
+                <NoticeCard
+                  className="aws-import-dialog__inspection-callout"
+                  title="자동으로 SSH 접속 정보를 확인했습니다."
+                >
                   <p>필요하면 아래 값을 바로 수정한 뒤 Host를 등록할 수 있습니다.</p>
-                </div>
+                </NoticeCard>
               ) : null}
 
               {inspectionStatus === 'error' && inspectionError ? (
@@ -613,10 +638,10 @@ export function AwsImportDialog({ open, currentGroupPath, onClose, onImport }: A
               {inspectionCandidateChips.length > 0 ? (
                 <div className="aws-import-dialog__chips">
                   {inspectionCandidateChips.map((candidate) => (
-                    <button
+                    <Button
                       key={candidate}
-                      type="button"
-                      className="secondary-button aws-import-dialog__chip"
+                      variant="secondary"
+                      className="aws-import-dialog__chip"
                       disabled={inspectionStatus === 'loading' || isRegistering}
                       onClick={() => {
                         usernameDirtyRef.current = true;
@@ -625,7 +650,7 @@ export function AwsImportDialog({ open, currentGroupPath, onClose, onImport }: A
                       }}
                     >
                       {candidate}
-                    </button>
+                    </Button>
                   ))}
                 </div>
               ) : null}
@@ -634,31 +659,28 @@ export function AwsImportDialog({ open, currentGroupPath, onClose, onImport }: A
             <div className="aws-import-dialog__instance-list" data-testid="aws-import-ecs-cluster-list">
               <div className="operations-list">
                 {ecsClusters.length === 0 && !isLoadingInstances ? (
-                  <div className="empty-callout">
-                    <strong>이 리전에 가져올 수 있는 ECS 클러스터가 없습니다.</strong>
-                  </div>
+                  <EmptyState title="이 리전에 가져올 수 있는 ECS 클러스터가 없습니다." />
                 ) : (
                   ecsClusters.map((cluster) => (
-                    <article key={cluster.clusterArn} className="operations-card">
-                      <div className="operations-card__main">
-                        <div className="operations-card__title-row">
+                    <Card key={cluster.clusterArn}>
+                      <CardMain>
+                        <CardTitleRow>
                           <strong>{cluster.clusterName}</strong>
-                          <span className="status-pill status-pill--running">
+                          <StatusBadge tone="running">
                             {cluster.status || 'UNKNOWN'}
-                          </span>
-                        </div>
-                        <div className="operations-card__meta">
+                          </StatusBadge>
+                        </CardTitleRow>
+                        <CardMeta>
                           <span>{selectedProfile}</span>
                           <span>{selectedRegion}</span>
                           <span>Services {cluster.activeServicesCount}</span>
                           <span>Running {cluster.runningTasksCount}</span>
                           <span>Pending {cluster.pendingTasksCount}</span>
-                        </div>
-                      </div>
-                      <div className="operations-card__actions">
-                        <button
-                          type="button"
-                          className="primary-button"
+                        </CardMeta>
+                      </CardMain>
+                      <CardActions>
+                        <Button
+                          variant="primary"
                           disabled={isRegistering}
                           onClick={async () => {
                             setIsRegistering(true);
@@ -687,9 +709,9 @@ export function AwsImportDialog({ open, currentGroupPath, onClose, onImport }: A
                           }}
                         >
                           {isRegistering ? '추가 중...' : '클러스터 추가'}
-                        </button>
-                      </div>
-                    </article>
+                        </Button>
+                      </CardActions>
+                    </Card>
                   ))
                 )}
               </div>
@@ -698,29 +720,26 @@ export function AwsImportDialog({ open, currentGroupPath, onClose, onImport }: A
             <div className="aws-import-dialog__instance-list" data-testid="aws-import-instance-list">
               <div className="operations-list">
               {instances.length === 0 && !isLoadingInstances ? (
-                <div className="empty-callout">
-                  <strong>이 리전에 가져올 수 있는 EC2 인스턴스가 없습니다.</strong>
-                </div>
+                <EmptyState title="이 리전에 가져올 수 있는 EC2 인스턴스가 없습니다." />
               ) : (
                 instances.map((instance) => (
-                  <article key={instance.instanceId} className="operations-card">
-                    <div className="operations-card__main">
-                      <div className="operations-card__title-row">
+                  <Card key={instance.instanceId}>
+                    <CardMain>
+                      <CardTitleRow>
                         <strong>{instance.name || instance.instanceId}</strong>
-                        <span className="status-pill status-pill--running">{instance.state || 'unknown'}</span>
-                      </div>
-                      <div className="operations-card__meta">
+                        <StatusBadge tone="running">{instance.state || 'unknown'}</StatusBadge>
+                      </CardTitleRow>
+                      <CardMeta>
                         <span>{instance.instanceId}</span>
                         <span>{selectedRegion}</span>
                         <span>{instance.availabilityZone || 'AZ unavailable'}</span>
                         <span>{instance.privateIp || 'No private IP'}</span>
                         <span>{instance.platform || 'linux'}</span>
-                      </div>
-                    </div>
-                    <div className="operations-card__actions">
-                      <button
-                        type="button"
-                        className="primary-button"
+                      </CardMeta>
+                    </CardMain>
+                    <CardActions>
+                      <Button
+                        variant="primary"
                         disabled={
                           /windows/i.test(instance.platform || '')
                         }
@@ -729,51 +748,49 @@ export function AwsImportDialog({ open, currentGroupPath, onClose, onImport }: A
                         }}
                       >
                         {/windows/i.test(instance.platform || '') ? 'Windows 미지원' : 'SSH 정보 확인'}
-                      </button>
-                    </div>
-                  </article>
+                      </Button>
+                    </CardActions>
+                  </Card>
                 ))
               )}
               </div>
             </div>
           ) : profileStatus?.isAuthenticated && regions.length > 0 ? (
-            <div className="empty-callout" data-testid="aws-import-region-hint">
-              <strong>
-                {importMode === 'ecs'
+            <EmptyState
+              title={
+                importMode === 'ecs'
                   ? '리전을 선택하면 ECS 클러스터를 불러옵니다.'
-                  : '리전을 선택하면 EC2 인스턴스를 불러옵니다.'}
-              </strong>
-            </div>
+                  : '리전을 선택하면 EC2 인스턴스를 불러옵니다.'
+              }
+              data-testid="aws-import-region-hint"
+            />
           ) : null}
-        </div>
+        </ModalBody>
 
-        <div className="modal-card__footer">
+        <ModalFooter>
           {inspectionTarget ? (
             <>
-              <button
-                type="button"
-                className="secondary-button"
+              <Button
+                variant="secondary"
                 disabled={inspectionStatus === 'loading' || isRegistering}
                 onClick={() => {
                   resetInspection();
                 }}
               >
                 뒤로
-              </button>
+              </Button>
               <div className="aws-import-dialog__footer-actions">
-                <button
-                  type="button"
-                  className="secondary-button"
+                <Button
+                  variant="secondary"
                   disabled={inspectionStatus === 'loading' || isRegistering}
                   onClick={() => {
                     void inspectInstance(inspectionTarget, true);
                   }}
                 >
                   다시 확인
-                </button>
-                <button
-                  type="button"
-                  className="primary-button"
+                </Button>
+                <Button
+                  variant="primary"
                   disabled={inspectionStatus === 'loading' || isRegistering}
                   onClick={async () => {
                     try {
@@ -809,18 +826,18 @@ export function AwsImportDialog({ open, currentGroupPath, onClose, onImport }: A
                   }}
                 >
                   {isRegistering ? '등록 중...' : 'Host 등록'}
-                </button>
+                </Button>
               </div>
             </>
           ) : (
             <div className="aws-import-dialog__footer-actions">
-              <button type="button" className="secondary-button" onClick={onClose}>
+              <Button variant="secondary" onClick={onClose}>
                 닫기
-              </button>
+              </Button>
             </div>
           )}
-        </div>
-      </div>
+        </ModalFooter>
+      </ModalShell>
     </DialogBackdrop>
   );
 }

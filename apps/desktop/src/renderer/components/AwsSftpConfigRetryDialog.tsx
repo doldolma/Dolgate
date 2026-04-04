@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { DialogBackdrop } from './DialogBackdrop';
+import { Button, Input, ModalBody, ModalFooter, ModalHeader, ModalShell, SectionLabel } from '../ui';
 
 export interface AwsSftpConfigRetryDialogRequest {
   hostLabel: string;
@@ -35,18 +36,18 @@ export function AwsSftpConfigRetryDialog({ request, onClose, onSubmit }: AwsSftp
 
   return (
     <DialogBackdrop dismissOnBackdrop={false}>
-      <div className="modal-card credential-retry-dialog" role="dialog" aria-modal="true" aria-labelledby="aws-sftp-config-retry-title">
-        <div className="modal-card__header">
+      <ModalShell className="credential-retry-dialog" role="dialog" aria-modal="true" aria-labelledby="aws-sftp-config-retry-title">
+        <ModalHeader>
           <div>
-            <div className="eyebrow">AWS SFTP</div>
+            <SectionLabel>AWS SFTP</SectionLabel>
             <h3 id="aws-sftp-config-retry-title">{request.hostLabel} SSH 설정을 확인해 주세요.</h3>
           </div>
-        </div>
-        <div className="modal-card__body">
+        </ModalHeader>
+        <ModalBody>
           <p className="credential-retry-dialog__message">{request.message}</p>
           <label className="credential-retry-dialog__field">
             <span>SSH Username</span>
-            <input
+            <Input
               type="text"
               autoFocus
               value={username}
@@ -67,7 +68,7 @@ export function AwsSftpConfigRetryDialog({ request, onClose, onSubmit }: AwsSftp
           {showAdvanced ? (
             <label className="credential-retry-dialog__field">
               <span>SSH Port</span>
-              <input
+              <Input
                 type="number"
                 min={1}
                 max={65535}
@@ -80,14 +81,13 @@ export function AwsSftpConfigRetryDialog({ request, onClose, onSubmit }: AwsSftp
             </label>
           ) : null}
           {error ? <p className="credential-retry-dialog__error">{error}</p> : null}
-        </div>
-        <div className="modal-card__footer">
-          <button type="button" className="secondary-button" onClick={onClose} disabled={submitting}>
+        </ModalBody>
+        <ModalFooter>
+          <Button variant="secondary" onClick={onClose} disabled={submitting}>
             취소
-          </button>
-          <button
-            type="button"
-            className="primary-button"
+          </Button>
+          <Button
+            variant="primary"
             disabled={submitting}
             onClick={async () => {
               const trimmedUsername = username.trim();
@@ -109,9 +109,9 @@ export function AwsSftpConfigRetryDialog({ request, onClose, onSubmit }: AwsSftp
             }}
           >
             다시 시도
-          </button>
-        </div>
-      </div>
+          </Button>
+        </ModalFooter>
+      </ModalShell>
     </DialogBackdrop>
   );
 }

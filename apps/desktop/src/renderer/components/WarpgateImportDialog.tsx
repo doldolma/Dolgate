@@ -6,7 +6,25 @@ import type {
   WarpgateImportStatus,
   WarpgateTargetSummary,
 } from "@shared";
+import { useWarpgateImportController } from "../controllers/useImportControllers";
 import { DialogBackdrop } from "./DialogBackdrop";
+import {
+  Button,
+  Card,
+  CardActions,
+  CardMain,
+  CardMeta,
+  CardTitleRow,
+  Input,
+  ModalBody,
+  ModalFooter,
+  ModalHeader,
+  ModalShell,
+  NoticeCard,
+  IconButton,
+  SectionLabel,
+  StatusBadge,
+} from "../ui";
 
 interface WarpgateImportDialogProps {
   open: boolean;
@@ -83,6 +101,11 @@ export function WarpgateImportDialog({
   onClose,
   onImport,
 }: WarpgateImportDialogProps) {
+  const {
+    cancelWarpgateBrowserImport,
+    onWarpgateImportEvent,
+    startWarpgateBrowserImport,
+  } = useWarpgateImportController();
   const [baseUrl, setBaseUrl] = useState("");
   const [fallbackUsername, setFallbackUsername] = useState("");
   const [targets, setTargets] = useState<WarpgateTargetSummary[]>([]);
@@ -121,7 +144,7 @@ export function WarpgateImportDialog({
       return;
     }
 
-    return window.dolssh.warpgate.onImportEvent((event: WarpgateImportEvent) => {
+    return onWarpgateImportEvent((event: WarpgateImportEvent) => {
       if (activeAttemptIdRef.current !== event.attemptId) {
         return;
       }
@@ -183,8 +206,7 @@ export function WarpgateImportDialog({
   const handleClose = async () => {
     const attemptId = activeAttemptIdRef.current;
     if (attemptId) {
-      await window.dolssh.warpgate
-        .cancelBrowserImport(attemptId)
+      await cancelWarpgateBrowserImport(attemptId)
         .catch(() => undefined);
       setActiveAttemptId(null);
     }
@@ -199,7 +221,7 @@ export function WarpgateImportDialog({
 
     setIsCancelling(true);
     try {
-      await window.dolssh.warpgate.cancelBrowserImport(attemptId);
+      await cancelWarpgateBrowserImport(attemptId);
       setActiveAttemptId(null);
       setStatus("cancelled");
       setTargets([]);
@@ -224,34 +246,32 @@ export function WarpgateImportDialog({
       }}
       dismissDisabled={Boolean(savingTargetId)}
     >
-      <div
-        className="modal-card warpgate-import-dialog"
+      <ModalShell
+        className="warpgate-import-dialog"
         role="dialog"
         aria-modal="true"
         aria-labelledby="warpgate-import-title"
       >
-        <div className="modal-card__header">
+        <ModalHeader>
           <div>
-            <div className="section-kicker">Warpgate</div>
+            <SectionLabel>Warpgate</SectionLabel>
             <h3 id="warpgate-import-title">Import from Warpgate</h3>
           </div>
-          <button
-            type="button"
-            className="icon-button"
+          <IconButton
             onClick={() => {
               void handleClose();
             }}
             aria-label="Close Warpgate import dialog"
           >
             ×
-          </button>
-        </div>
+          </IconButton>
+        </ModalHeader>
 
-        <div className="modal-card__body">
+        <ModalBody>
           <div className="form-grid">
             <label className="form-field">
               <span>Warpgate URL</span>
-              <input
+              <Input
                 value={baseUrl}
                 onChange={(event) => setBaseUrl(event.target.value)}
                 placeholder="https://warpgate.example.com"
@@ -277,7 +297,7 @@ export function WarpgateImportDialog({
           {connectionInfo && !connectionInfo.username ? (
             <label className="form-field">
               <span>Warpgate Username</span>
-              <input
+              <Input
                 value={fallbackUsername}
                 onChange={(event) => {
                   setFallbackUsername(event.target.value);
@@ -291,28 +311,25 @@ export function WarpgateImportDialog({
           ) : null}
 
           {statusMessage ? (
-            <div className="warpgate-import-dialog__status-card">
-              <strong>{statusMessage}</strong>
-              {statusDetail ? <span>{statusDetail}</span> : null}
-            </div>
+            <NoticeCard className="warpgate-import-dialog__status-card" title={statusMessage}>
+              {statusDetail ? <p>{statusDetail}</p> : null}
+            </NoticeCard>
           ) : null}
 
           <div className="warpgate-import-dialog__actions">
             {activeAttemptId ? (
-              <button
-                type="button"
-                className="secondary-button danger"
+              <Button
+                variant="danger"
                 disabled={Boolean(savingTargetId) || isCancelling}
                 onClick={() => {
                   void handleCancelAttempt();
                 }}
               >
                 {isCancelling ? "중단 중..." : "중단"}
-              </button>
+              </Button>
             ) : null}
-            <button
-              type="button"
-              className="primary-button"
+            <Button
+              variant="primary"
               disabled={
                 !baseUrl.trim() ||
                 !normalizeBaseUrl(baseUrl) ||
@@ -328,7 +345,7 @@ export function WarpgateImportDialog({
                 setStatus("opening-browser");
                 try {
                   const { attemptId } =
-                    await window.dolssh.warpgate.startBrowserImport(baseUrl);
+                    await startWarpgateBrowserImport(baseUrl);
                   activeAttemptIdRef.current = attemptId;
                   setActiveAttemptId(attemptId);
                 } catch (startError) {
@@ -343,31 +360,28 @@ export function WarpgateImportDialog({
               }}
             >
               브라우저에서 로그인
-            </button>
+            </Button>
           </div>
 
           {error ? <div className="terminal-error-banner">{error}</div> : null}
 
           {targets.length === 0 && !status ? (
-            <div className="empty-callout">
-              <strong>
-                Warpgate 주소를 입력한 뒤 브라우저에서 로그인해 SSH target 목록을
-                불러와 주세요.
-              </strong>
-            </div>
+            <NoticeCard
+              title="Warpgate 주소를 입력한 뒤 브라우저에서 로그인해 SSH target 목록을 불러와 주세요."
+            />
           ) : null}
 
           {targets.length > 0 ? (
             <div className="operations-list">
               {targets.map((target) => {
                 return (
-                  <article key={target.id} className="operations-card">
-                    <div className="operations-card__main">
-                      <div className="operations-card__title-row">
+                  <Card key={target.id}>
+                    <CardMain>
+                      <CardTitleRow>
                         <strong>{target.name}</strong>
-                        <span className="status-pill">SSH</span>
-                      </div>
-                      <div className="operations-card__meta">
+                        <StatusBadge>SSH</StatusBadge>
+                      </CardTitleRow>
+                      <CardMeta>
                         <span>{target.id}</span>
                         {connectionInfo ? (
                           <span>
@@ -377,12 +391,11 @@ export function WarpgateImportDialog({
                         {connectionInfo?.username ? (
                           <span>{connectionInfo.username}</span>
                         ) : null}
-                      </div>
-                    </div>
-                    <div className="operations-card__actions">
-                      <button
-                        type="button"
-                        className="primary-button"
+                      </CardMeta>
+                    </CardMain>
+                    <CardActions>
+                      <Button
+                        variant="primary"
                         disabled={!connectionInfo || savingTargetId === target.id}
                         onClick={async () => {
                           if (!connectionInfo || !resolvedUsername) {
@@ -418,15 +431,20 @@ export function WarpgateImportDialog({
                         }}
                       >
                         {savingTargetId === target.id ? "Adding..." : "Add host"}
-                      </button>
-                    </div>
-                  </article>
+                      </Button>
+                    </CardActions>
+                  </Card>
                 );
               })}
             </div>
           ) : null}
-        </div>
-      </div>
+        </ModalBody>
+        <ModalFooter className="justify-start">
+          <Button variant="secondary" onClick={() => void handleClose()} disabled={Boolean(savingTargetId)}>
+            닫기
+          </Button>
+        </ModalFooter>
+      </ModalShell>
     </DialogBackdrop>
   );
 }

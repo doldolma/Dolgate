@@ -177,6 +177,15 @@ export class SessionReplayService {
     }
   }
 
+  shutdown(): void {
+    for (const sessionId of Array.from(this.activeRecordings.keys())) {
+      this.finalizeRecording(
+        sessionId,
+        "앱 종료로 세션이 정리되었습니다.",
+      );
+    }
+  }
+
   async openReplayWindow(
     recordingId: string,
     _sourceWindow: BrowserWindow,

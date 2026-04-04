@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react';
 import type { HostRecord, SecretMetadataRecord } from '@shared';
 import { HostForm } from './HostForm';
+import { IconButton, SectionLabel } from '../ui';
 
 interface HostDrawerProps {
   open: boolean;
@@ -59,12 +60,12 @@ export function HostDrawer({
     <aside ref={drawerRef} className={`host-drawer ${open ? 'open' : ''}`} aria-hidden={!open}>
       <div className="host-drawer__header">
         <div>
-          <div className="eyebrow">{mode === 'create' ? 'Create' : 'Edit'}</div>
+          <SectionLabel>{mode === 'create' ? 'Create' : 'Edit'}</SectionLabel>
           <h2>{mode === 'create' ? 'New Host' : host?.label ?? 'Host'}</h2>
         </div>
-        <button type="button" className="icon-button" onClick={onClose} aria-label="Close host drawer">
+        <IconButton onClick={onClose} aria-label="Close host drawer">
           ×
-        </button>
+        </IconButton>
       </div>
 
       <div className="host-drawer__body">

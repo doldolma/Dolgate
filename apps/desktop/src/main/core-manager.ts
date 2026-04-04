@@ -114,6 +114,8 @@ const packagedUnixCorePathEntries = [
   "/usr/sbin",
   "/sbin",
 ];
+const SHUTDOWN_SESSION_DISCONNECT_REASON =
+  "앱 종료로 세션이 정리되었습니다.";
 
 type PathDelimiter = ":" | ";";
 
@@ -706,6 +708,8 @@ export class CoreManager {
       return this.shutdownPromise;
     }
 
+    this.finalizeActiveRemoteSessionsOnShutdown();
+
     if (options.finalizePortForwardsAsStopped) {
       await this.finalizeActivePortForwardsAsStopped();
     }
@@ -744,6 +748,20 @@ export class CoreManager {
     });
 
     return this.shutdownPromise;
+  }
+
+  private finalizeActiveRemoteSessionsOnShutdown(): void {
+    for (const [sessionId, lifecycle] of this.remoteSessionLifecycleById) {
+      if (!lifecycle.connectedAt || lifecycle.disconnectedAt) {
+        continue;
+      }
+
+      this.finalizeRemoteSessionLifecycle(
+        sessionId,
+        "closed",
+        SHUTDOWN_SESSION_DISCONNECT_REASON,
+      );
+    }
   }
 
   private async finalizeActivePortForwardsAsStopped(): Promise<void> {

@@ -1,6 +1,7 @@
 import type { AuthState } from '@shared';
 import { getServerUrlValidationMessage } from '@shared';
 import { useEffect, useMemo, useState } from 'react';
+import { Button, IconButton, Input, SectionLabel } from '../ui';
 
 interface LoginGateProps {
   authState: AuthState;
@@ -39,7 +40,6 @@ export function shouldDisableLoginGatePrimaryAction(input: {
     input.authStatus === 'loading' ||
     input.authStatus === 'authenticating' ||
     input.isSyncBootstrapping ||
-    input.isLoadingServerUrl ||
     input.isSubmitting ||
     Boolean(input.serverUrlValidationMessage)
   );
@@ -68,6 +68,11 @@ export function LoginGate({
     () => getServerUrlValidationMessage(draftServerUrl),
     [draftServerUrl]
   );
+  const shouldValidateServerUrlInput =
+    isAdvancedOpen || draftServerUrl.trim() !== serverUrl.trim();
+  const effectiveValidationMessage = shouldValidateServerUrlInput
+    ? validationMessage
+    : null;
 
   useEffect(() => {
     setDraftServerUrl(serverUrl);
@@ -108,36 +113,36 @@ export function LoginGate({
   }
 
   return (
-    <div className="login-gate">
-      <div className="login-gate__card">
-        <div className="login-gate__header">
-          <div className="login-gate__eyebrow">Dolgate</div>
-          <button
+    <div className="grid min-h-0 flex-1 place-items-center px-8 py-10">
+      <div className="w-[min(34rem,100%)] rounded-[32px] border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[linear-gradient(180deg,color-mix(in_srgb,var(--surface-elevated)_98%,white_2%),color-mix(in_srgb,var(--surface)_94%,var(--app-bg)_6%))] px-[2.5rem] pb-[2.45rem] pt-[2.55rem] shadow-[0_28px_70px_rgba(8,16,30,0.18),inset_0_1px_0_rgba(255,255,255,0.08)]">
+        <div className="flex items-center justify-between gap-4">
+          <SectionLabel className="mb-0">Dolgate</SectionLabel>
+          <IconButton
             type="button"
-            className="login-gate__advanced-toggle"
             aria-label="로그인 서버 설정 열기"
             onClick={() => {
               setLocalErrorMessage(null);
               setDraftServerUrl(serverUrl);
               setIsAdvancedOpen((current) => !current);
             }}
+            className="-mt-2 text-[1.1rem]"
           >
-            ..
-          </button>
+            ⚙
+          </IconButton>
         </div>
         {localErrorMessage || authState.errorMessage ? (
-          <div className="login-gate__error">
+          <div className="mb-4 rounded-[20px] border border-[color-mix(in_srgb,var(--danger-text)_22%,var(--border))] bg-[var(--danger-bg)] px-4 py-3.5 text-[var(--danger-text)] shadow-[0_10px_22px_rgba(12,21,35,0.06)]">
             {localErrorMessage ?? authState.errorMessage}
           </div>
         ) : null}
         {statusMessage ? (
-          <div className="login-gate__status">{statusMessage}</div>
+          <div className="mb-4 text-[0.92rem] text-[var(--text-soft)]">{statusMessage}</div>
         ) : null}
         {isAdvancedOpen ? (
-          <div className="login-gate__advanced-panel">
-            <label className="login-gate__advanced-field">
-              <span>Login Server</span>
-              <input
+          <div className="mb-4 rounded-[22px] border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[color-mix(in_srgb,var(--surface-muted)_92%,transparent_8%)] px-4 pb-4 pt-[1rem] shadow-[inset_0_1px_0_rgba(255,255,255,0.06)]">
+            <label className="flex flex-col gap-[0.45rem]">
+              <span className="text-[0.85rem] text-[var(--text-soft)]">Login Server</span>
+              <Input
                 value={draftServerUrl}
                 onChange={(event) => setDraftServerUrl(event.target.value)}
                 placeholder="https://ssh.example.com"
@@ -146,18 +151,17 @@ export function LoginGate({
                 autoCorrect="off"
               />
             </label>
-            <div className="login-gate__advanced-note">
+            <div className="mt-[0.6rem] text-[0.85rem] leading-[1.5] text-[var(--text-soft)]">
               경로 없이 서버 루트 주소만 입력해 주세요.
             </div>
-            {validationMessage ? (
-              <div className="login-gate__advanced-error">
-                {validationMessage}
+            {effectiveValidationMessage ? (
+              <div className="mt-[0.65rem] text-[0.85rem] text-[var(--danger-text)]">
+                {effectiveValidationMessage}
               </div>
             ) : null}
-            <div className="login-gate__advanced-actions">
-              <button
-                type="button"
-                className="secondary-button"
+            <div className="mt-[0.9rem] flex justify-end gap-[0.65rem]">
+              <Button
+                variant="secondary"
                 onClick={() => {
                   setDraftServerUrl(serverUrl);
                   setLocalErrorMessage(null);
@@ -165,37 +169,41 @@ export function LoginGate({
                 }}
               >
                 닫기
-              </button>
+              </Button>
               {hasServerUrlOverride ? (
-                <button
-                  type="button"
-                  className="secondary-button"
+                <Button
+                  variant="secondary"
                   onClick={handleReset}
                   disabled={isSubmitting}
                 >
                   기본 서버로 복원
-                </button>
+                </Button>
               ) : null}
             </div>
           </div>
         ) : null}
-        <button
-          type="button"
-          className="login-gate__button"
+        <Button
+          variant="primary"
+          size="lg"
+          fullWidth
+          className="mt-[0.2rem] min-h-[78px] justify-between rounded-[26px] px-6 text-[1.02rem] shadow-[0_22px_38px_color-mix(in_srgb,var(--accent-strong)_20%,transparent)]"
           disabled={shouldDisableLoginGatePrimaryAction({
             authStatus: authState.status,
             isSyncBootstrapping,
             isLoadingServerUrl,
             isSubmitting,
-            serverUrlValidationMessage: validationMessage
+            serverUrlValidationMessage: effectiveValidationMessage
           })}
           onClick={handlePrimaryAction}
         >
           <span>{label}</span>
-          <span className="login-gate__button-icon" aria-hidden="true">
-            -&gt;
+          <span
+            className="inline-flex h-[2rem] w-[2rem] items-center justify-center rounded-full border border-[rgba(255,255,255,0.18)] bg-[rgba(255,255,255,0.1)] text-[1.08rem] leading-none"
+            aria-hidden="true"
+          >
+            ↗
           </span>
-        </button>
+        </Button>
       </div>
     </div>
   );

@@ -4,12 +4,14 @@ import type {
   SessionReplayRecording,
   TerminalThemeId,
 } from "@shared";
+import { useSessionReplayController } from "../controllers/useSessionReplayController";
 import { createTerminalRuntime, type TerminalRuntime } from "../lib/terminal-runtime";
 import {
   getTerminalFontOption,
   getTerminalThemePreset,
   resolveGlobalTerminalThemeId,
 } from "../lib/terminal-presets";
+import { Badge, Button, EmptyState, SectionLabel } from '../ui';
 
 const MIN_REPLAY_ZOOM_PERCENT = 60;
 const MAX_REPLAY_ZOOM_PERCENT = 180;
@@ -116,6 +118,7 @@ export function SessionReplayWindow({
 }: {
   recordingId: string;
 }) {
+  const { getDesktopSettings, getSessionReplay } = useSessionReplayController();
   const [recording, setRecording] = useState<SessionReplayRecording | null>(null);
   const [settingsTheme, setSettingsTheme] = useState<AppTheme>("system");
   const [prefersDark, setPrefersDark] = useState(() => {
@@ -220,8 +223,7 @@ export function SessionReplayWindow({
 
   useEffect(() => {
     let disposed = false;
-    void window.dolssh.settings
-      .get()
+    void getDesktopSettings()
       .then((settings) => {
         if (disposed) {
           return;
@@ -255,8 +257,7 @@ export function SessionReplayWindow({
 
   useEffect(() => {
     let disposed = false;
-    void window.dolssh.sessionReplays
-      .get(recordingId)
+    void getSessionReplay(recordingId)
       .then((nextRecording) => {
         if (disposed) {
           return;
@@ -577,7 +578,7 @@ export function SessionReplayWindow({
     <div className="session-replay-window">
       <header className="session-replay-window__header">
         <div>
-          <div className="session-replay-window__eyebrow">Session Replay</div>
+          <SectionLabel>Session Replay</SectionLabel>
           <strong>{recording?.hostLabel || "세션 Replay"}</strong>
           {recording?.connectionDetails ? (
             <div className="session-replay-window__subtitle">
@@ -587,30 +588,24 @@ export function SessionReplayWindow({
         </div>
         {recording ? (
           <div className="session-replay-window__badges">
-            <span className="status-pill status-pill--paused">
+            <Badge tone="paused">
               {getConnectionKindLabel(recording.connectionKind)}
-            </span>
-            <span className="status-pill status-pill--stopped">Replay</span>
+            </Badge>
+            <Badge tone="stopped">Replay</Badge>
           </div>
         ) : null}
       </header>
 
       {loading ? (
-        <div className="empty-callout">
-          <strong>세션 replay를 불러오는 중입니다.</strong>
-        </div>
+        <EmptyState title="세션 replay를 불러오는 중입니다." />
       ) : null}
 
       {errorMessage ? (
-        <div className="empty-callout">
-          <strong>{errorMessage}</strong>
-        </div>
+        <EmptyState title={errorMessage} />
       ) : null}
 
       {runtimeErrorMessage ? (
-        <div className="empty-callout">
-          <strong>{runtimeErrorMessage}</strong>
-        </div>
+        <EmptyState title={runtimeErrorMessage} />
       ) : null}
 
       {recording ? (
@@ -631,13 +626,9 @@ export function SessionReplayWindow({
           </section>
 
           <section className="session-replay-window__controls">
-            <button
-              type="button"
-              className="secondary-button session-replay-window__play-toggle"
-              onClick={togglePlayback}
-            >
+            <Button variant="secondary" className="session-replay-window__play-toggle" onClick={togglePlayback}>
               {isPlaying ? "Pause" : "Play"}
-            </button>
+            </Button>
             <input
               aria-label="Replay scrubber"
               className="session-replay-window__scrubber"

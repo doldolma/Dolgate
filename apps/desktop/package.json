@@ -40,10 +40,12 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "clsx": "^2.1.1",
     "electron-updater": "^6.3.9",
     "fuse.js": "^7.0.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
+    "tailwind-merge": "^3.3.1",
     "uplot": "^1.6.32",
     "xterm": "5.3.0",
     "xterm-addon-fit": "0.8.0",
@@ -58,6 +60,7 @@
     "@electron-forge/plugin-vite": "^7.8.1",
     "@electron/notarize": "^3.0.1",
     "@playwright/test": "^1.58.2",
+    "@tailwindcss/vite": "^4.2.2",
     "@testing-library/jest-dom": "^6.6.3",
     "@testing-library/react": "^16.2.0",
     "@types/node": "^22.13.10",
@@ -68,6 +71,7 @@
     "electron": "^35.0.0",
     "electron-builder": "^25.1.8",
     "jsdom": "^26.0.0",
+    "tailwindcss": "^4.2.2",
     "typescript": "^5.8.2",
     "vite": "^6.2.1",
     "vitest": "^3.0.8"

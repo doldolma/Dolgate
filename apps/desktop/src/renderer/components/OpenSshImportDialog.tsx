@@ -6,7 +6,20 @@ import type {
   OpenSshProbeResult,
   OpenSshSourceSummary,
 } from '@shared';
+import { useOpenSshImportController } from '../controllers/useImportControllers';
 import { DialogBackdrop } from './DialogBackdrop';
+import {
+  Button,
+  EmptyState,
+  IconButton,
+  Input,
+  ModalBody,
+  ModalFooter,
+  ModalHeader,
+  ModalShell,
+  SectionLabel,
+  StatusBadge,
+} from '../ui';
 
 interface OpenSshImportDialogProps {
   open: boolean;
@@ -81,6 +94,13 @@ export function OpenSshImportDialog({
   onClose,
   onImported,
 }: OpenSshImportDialogProps) {
+  const {
+    addOpenSshFileToSnapshot,
+    discardOpenSshSnapshot,
+    importOpenSshSelection,
+    pickOpenSshConfig,
+    probeOpenSshDefault,
+  } = useOpenSshImportController();
   const [probe, setProbe] = useState<OpenSshProbeResult | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isAddingFile, setIsAddingFile] = useState(false);
@@ -101,11 +121,10 @@ export function OpenSshImportDialog({
     setError(null);
     setIsLoading(true);
 
-    void window.dolssh.openssh
-      .probeDefault()
+    void probeOpenSshDefault()
       .then((result) => {
         if (cancelled) {
-          void window.dolssh.openssh.discardSnapshot(result.snapshotId);
+          void discardOpenSshSnapshot(result.snapshotId);
           return;
         }
         setProbe(result);
@@ -136,7 +155,7 @@ export function OpenSshImportDialog({
       return;
     }
 
-    void window.dolssh.openssh.discardSnapshot(probe.snapshotId);
+    void discardOpenSshSnapshot(probe.snapshotId);
   }, [open, probe?.snapshotId]);
 
   const visibleHosts = useMemo(
@@ -155,28 +174,23 @@ export function OpenSshImportDialog({
       onDismiss={onClose}
       dismissDisabled={isAddingFile || isImporting}
     >
-      <div
-        className="modal-card openssh-import-dialog"
+      <ModalShell
+        className="openssh-import-dialog"
         role="dialog"
         aria-modal="true"
         aria-labelledby="openssh-import-title"
       >
-        <div className="modal-card__header">
+        <ModalHeader>
           <div>
-            <div className="section-kicker">OpenSSH</div>
+            <SectionLabel>OpenSSH</SectionLabel>
             <h3 id="openssh-import-title">Import OpenSSH</h3>
           </div>
-          <button
-            type="button"
-            className="icon-button"
-            onClick={onClose}
-            aria-label="Import OpenSSH 닫기"
-          >
+          <IconButton onClick={onClose} aria-label="Import OpenSSH 닫기">
             x
-          </button>
-        </div>
+          </IconButton>
+        </ModalHeader>
 
-        <div className="modal-card__body">
+        <ModalBody>
           {isLoading ? (
             <div className="aws-import-dialog__loading">
               기본 OpenSSH 설정에서 호스트를 찾는 중입니다.
@@ -197,7 +211,7 @@ export function OpenSshImportDialog({
               <div className="openssh-import-dialog__controls">
                 <label className="form-field">
                   <span>검색</span>
-                  <input
+                  <Input
                     value={searchQuery}
                     onChange={(event) => setSearchQuery(event.target.value)}
                     placeholder="별칭, 호스트, 사용자 또는 키 경로 검색"
@@ -206,13 +220,12 @@ export function OpenSshImportDialog({
                 </label>
 
                 <div className="openssh-import-dialog__selection-actions">
-                  <button
-                    type="button"
-                    className="secondary-button"
+                  <Button
+                    variant="secondary"
                     disabled={isLoading || isAddingFile}
                     onClick={async () => {
                       setError(null);
-                      const filePath = await window.dolssh.shell.pickOpenSshConfig();
+                      const filePath = await pickOpenSshConfig();
                       if (!filePath || !probe?.snapshotId) {
                         return;
                       }
@@ -220,7 +233,7 @@ export function OpenSshImportDialog({
                       setIsAddingFile(true);
                       try {
                         const nextProbe =
-                          await window.dolssh.openssh.addFileToSnapshot({
+                          await addOpenSshFileToSnapshot({
                             snapshotId: probe.snapshotId,
                             filePath,
                           });
@@ -237,10 +250,9 @@ export function OpenSshImportDialog({
                     }}
                   >
                     {isAddingFile ? '파일 불러오는 중...' : '파일 불러오기'}
-                  </button>
-                  <button
-                    type="button"
-                    className="secondary-button"
+                  </Button>
+                  <Button
+                    variant="secondary"
                     onClick={() => {
                       setSelectedHostKeys((current) =>
                         Array.from(
@@ -254,15 +266,14 @@ export function OpenSshImportDialog({
                     disabled={visibleHosts.length === 0 || isLoading || isAddingFile}
                   >
                     보이는 항목 모두 선택
-                  </button>
-                  <button
-                    type="button"
-                    className="secondary-button"
+                  </Button>
+                  <Button
+                    variant="secondary"
                     onClick={() => setSelectedHostKeys([])}
                     disabled={selectedHostKeys.length === 0}
                   >
                     선택 해제
-                  </button>
+                  </Button>
                 </div>
               </div>
 
@@ -281,13 +292,16 @@ export function OpenSshImportDialog({
               <section className="openssh-import-dialog__section">
                 <h4>호스트</h4>
                 {visibleHosts.length === 0 ? (
-                  <div className="empty-callout openssh-import-dialog__empty">
-                    <strong>가져올 수 있는 OpenSSH 호스트가 없습니다.</strong>
-                    <p>
-                      기본 설정에서 자동 감지된 호스트가 여기에 표시됩니다. 다른
-                      설정 파일은 <strong>파일 불러오기</strong>로 추가할 수 있습니다.
-                    </p>
-                  </div>
+                  <EmptyState
+                    className="openssh-import-dialog__empty"
+                    title="가져올 수 있는 OpenSSH 호스트가 없습니다."
+                    description={
+                      <>
+                        기본 설정에서 자동 감지된 호스트가 여기에 표시됩니다. 다른
+                        설정 파일은 <strong>파일 불러오기</strong>로 추가할 수 있습니다.
+                      </>
+                    }
+                  />
                 ) : (
                   <div className="openssh-import-dialog__items">
                     {visibleHosts.map((host) => {
@@ -323,9 +337,9 @@ export function OpenSshImportDialog({
                             </small>
                           </div>
                           <div className="openssh-import-dialog__badges">
-                            <small className="status-pill">
+                            <StatusBadge>
                               {host.authType === 'privateKey' ? '키' : '비밀번호'}
-                            </small>
+                            </StatusBadge>
                           </div>
                         </label>
                       );
@@ -335,20 +349,14 @@ export function OpenSshImportDialog({
               </section>
             </>
           ) : null}
-        </div>
+        </ModalBody>
 
-        <div className="modal-card__footer">
-          <button
-            type="button"
-            className="secondary-button"
-            onClick={onClose}
-            disabled={isImporting}
-          >
+        <ModalFooter>
+          <Button variant="secondary" onClick={onClose} disabled={isImporting}>
             취소
-          </button>
-          <button
-            type="button"
-            className="primary-button"
+          </Button>
+          <Button
+            variant="primary"
             disabled={!canImport}
             onClick={async () => {
               if (!probe?.snapshotId) {
@@ -357,7 +365,7 @@ export function OpenSshImportDialog({
               setError(null);
               setIsImporting(true);
               try {
-                const result = await window.dolssh.openssh.importSelection({
+                const result = await importOpenSshSelection({
                   snapshotId: probe.snapshotId,
                   selectedHostKeys,
                   groupPath: currentGroupPath,
@@ -376,9 +384,9 @@ export function OpenSshImportDialog({
             }}
           >
             {isImporting ? '가져오는 중...' : '가져오기'}
-          </button>
-        </div>
-      </div>
+          </Button>
+        </ModalFooter>
+      </ModalShell>
     </DialogBackdrop>
   );
 }

@@ -9,7 +9,20 @@ import {
   type XshellProbeResult,
   type XshellSourceSummary
 } from '@shared';
+import { useXshellImportController } from '../controllers/useImportControllers';
 import { DialogBackdrop } from './DialogBackdrop';
+import {
+  Button,
+  EmptyState,
+  IconButton,
+  Input,
+  ModalBody,
+  ModalFooter,
+  ModalHeader,
+  ModalShell,
+  SectionLabel,
+  StatusBadge,
+} from '../ui';
 
 interface XshellImportDialogProps {
   open: boolean;
@@ -480,9 +493,9 @@ function XshellTreeRenderer({
               </div>
             </label>
             <div className="xshell-import-dialog__badges">
-              <small className="status-pill">{node.host.authType === 'privateKey' ? '개인 키' : '비밀번호'}</small>
-              {node.host.hasPasswordHint ? <small className="status-pill">저장된 비밀번호</small> : null}
-              {node.host.hasAuthProfile ? <small className="status-pill">인증 프로필</small> : null}
+              <StatusBadge>{node.host.authType === 'privateKey' ? '개인 키' : '비밀번호'}</StatusBadge>
+              {node.host.hasPasswordHint ? <StatusBadge>저장된 비밀번호</StatusBadge> : null}
+              {node.host.hasAuthProfile ? <StatusBadge>인증 프로필</StatusBadge> : null}
             </div>
           </div>
         </div>
@@ -555,6 +568,13 @@ function XshellTreeRenderer({
 }
 
 export function XshellImportDialog({ open, onClose, onImported }: XshellImportDialogProps) {
+  const {
+    addXshellFolderToSnapshot,
+    discardXshellSnapshot,
+    importXshellSelection,
+    pickXshellSessionFolder,
+    probeXshellDefault,
+  } = useXshellImportController();
   const [probe, setProbe] = useState<XshellProbeResult | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isAddingFolder, setIsAddingFolder] = useState(false);
@@ -583,11 +603,10 @@ export function XshellImportDialog({ open, onClose, onImported }: XshellImportDi
     setError(null);
     setIsLoading(true);
 
-    void window.dolssh.xshell
-      .probeDefault()
+    void probeXshellDefault()
       .then((result) => {
         if (cancelled) {
-          void window.dolssh.xshell.discardSnapshot(result.snapshotId);
+          void discardXshellSnapshot(result.snapshotId);
           return;
         }
         setProbe(result);
@@ -614,7 +633,7 @@ export function XshellImportDialog({ open, onClose, onImported }: XshellImportDi
       return;
     }
 
-    void window.dolssh.xshell.discardSnapshot(probe.snapshotId);
+    void discardXshellSnapshot(probe.snapshotId);
   }, [open, probe?.snapshotId]);
 
   useEffect(() => {
@@ -647,18 +666,18 @@ export function XshellImportDialog({ open, onClose, onImported }: XshellImportDi
 
   return (
     <DialogBackdrop onDismiss={onClose} dismissDisabled={isAddingFolder || isImporting}>
-      <div className="modal-card xshell-import-dialog" role="dialog" aria-modal="true" aria-labelledby="xshell-import-title">
-        <div className="modal-card__header">
+      <ModalShell className="xshell-import-dialog" role="dialog" aria-modal="true" aria-labelledby="xshell-import-title">
+        <ModalHeader>
           <div>
-            <div className="section-kicker">Xshell</div>
+            <SectionLabel>Xshell</SectionLabel>
             <h3 id="xshell-import-title">Xshell 가져오기</h3>
           </div>
-          <button type="button" className="icon-button" onClick={onClose} aria-label="Xshell 가져오기 대화상자 닫기">
+          <IconButton onClick={onClose} aria-label="Xshell 가져오기 대화상자 닫기">
             x
-          </button>
-        </div>
+          </IconButton>
+        </ModalHeader>
 
-        <div className="modal-card__body">
+        <ModalBody>
           {isLoading ? <div className="aws-import-dialog__loading">로컬 Xshell 세션을 읽는 중입니다.</div> : null}
           {error ? <div className="terminal-error-banner">{error}</div> : null}
 
@@ -673,7 +692,7 @@ export function XshellImportDialog({ open, onClose, onImported }: XshellImportDi
               <div className="xshell-import-dialog__controls">
                 <label className="form-field">
                   <span>검색</span>
-                  <input
+                  <Input
                     value={searchQuery}
                     onChange={(event) => setSearchQuery(event.target.value)}
                     placeholder="그룹, 호스트, 사용자명, 경로 검색"
@@ -682,20 +701,19 @@ export function XshellImportDialog({ open, onClose, onImported }: XshellImportDi
                 </label>
 
                 <div className="xshell-import-dialog__selection-actions">
-                  <button
-                    type="button"
-                    className="secondary-button"
+                  <Button
+                    variant="secondary"
                     disabled={isLoading || isAddingFolder}
                     onClick={async () => {
                       setError(null);
-                      const folderPath = await window.dolssh.shell.pickXshellSessionFolder();
+                      const folderPath = await pickXshellSessionFolder();
                       if (!folderPath || !probe.snapshotId) {
                         return;
                       }
 
                       setIsAddingFolder(true);
                       try {
-                        const nextProbe = await window.dolssh.xshell.addFolderToSnapshot({
+                        const nextProbe = await addXshellFolderToSnapshot({
                           snapshotId: probe.snapshotId,
                           folderPath
                         });
@@ -708,10 +726,9 @@ export function XshellImportDialog({ open, onClose, onImported }: XshellImportDi
                     }}
                   >
                     {isAddingFolder ? '폴더를 불러오는 중...' : '세션 폴더 선택'}
-                  </button>
-                  <button
-                    type="button"
-                    className="secondary-button"
+                  </Button>
+                  <Button
+                    variant="secondary"
                     onClick={() => {
                       setSelection((current) =>
                         normalizeXshellSelectionState(
@@ -726,10 +743,9 @@ export function XshellImportDialog({ open, onClose, onImported }: XshellImportDi
                     disabled={visibleSelectionTargets.groupPaths.length === 0 && visibleSelectionTargets.hostKeys.length === 0}
                   >
                     보이는 항목 선택
-                  </button>
-                  <button
-                    type="button"
-                    className="secondary-button"
+                  </Button>
+                  <Button
+                    variant="secondary"
                     onClick={() => {
                       setSelection((current) =>
                         normalizeXshellSelectionState(
@@ -748,10 +764,9 @@ export function XshellImportDialog({ open, onClose, onImported }: XshellImportDi
                     disabled={selectedItemCount === 0}
                   >
                     보이는 항목 해제
-                  </button>
-                  <button
-                    type="button"
-                    className="secondary-button"
+                  </Button>
+                  <Button
+                    variant="secondary"
                     onClick={() =>
                       setSelection({
                         selectedGroupPaths: [],
@@ -761,7 +776,7 @@ export function XshellImportDialog({ open, onClose, onImported }: XshellImportDi
                     disabled={selectedItemCount === 0}
                   >
                     전체 선택 해제
-                  </button>
+                  </Button>
                 </div>
               </div>
 
@@ -783,10 +798,11 @@ export function XshellImportDialog({ open, onClose, onImported }: XshellImportDi
               <section className="xshell-import-dialog__section">
                 <h4>가져올 항목</h4>
                 {treeNodes.length === 0 ? (
-                  <div className="empty-callout xshell-import-dialog__empty">
-                    <strong>현재 조건과 일치하는 Xshell 그룹이나 호스트가 없습니다.</strong>
-                    <p>다른 세션 폴더를 선택하거나 검색어를 바꿔보세요.</p>
-                  </div>
+                  <EmptyState
+                    className="xshell-import-dialog__empty"
+                    title="현재 조건과 일치하는 Xshell 그룹이나 호스트가 없습니다."
+                    description="다른 세션 폴더를 선택하거나 검색어를 바꿔보세요."
+                  />
                 ) : (
                   <div className="xshell-import-dialog__tree" role="tree" aria-label="Xshell 가져오기 항목">
                     <XshellTreeRenderer
@@ -836,15 +852,14 @@ export function XshellImportDialog({ open, onClose, onImported }: XshellImportDi
               </section>
             </>
           ) : null}
-        </div>
+        </ModalBody>
 
-        <div className="modal-card__footer">
-          <button type="button" className="secondary-button" onClick={onClose} disabled={isImporting}>
+        <ModalFooter>
+          <Button variant="secondary" onClick={onClose} disabled={isImporting}>
             취소
-          </button>
-          <button
-            type="button"
-            className="primary-button"
+          </Button>
+          <Button
+            variant="primary"
             disabled={!canImport}
             onClick={async () => {
               if (!probe?.snapshotId) {
@@ -853,7 +868,7 @@ export function XshellImportDialog({ open, onClose, onImported }: XshellImportDi
               setError(null);
               setIsImporting(true);
               try {
-                const result = await window.dolssh.xshell.importSelection({
+                const result = await importXshellSelection({
                   snapshotId: probe.snapshotId,
                   selectedGroupPaths: selection.selectedGroupPaths,
                   selectedHostKeys: selection.selectedHostKeys
@@ -868,9 +883,9 @@ export function XshellImportDialog({ open, onClose, onImported }: XshellImportDi
             }}
           >
             {isImporting ? '가져오는 중...' : '가져오기'}
-          </button>
-        </div>
-      </div>
+          </Button>
+        </ModalFooter>
+      </ModalShell>
     </DialogBackdrop>
   );
 }

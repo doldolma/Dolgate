@@ -1,5 +1,5 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   buildVisibleGroups,
   collectGroupPaths,
@@ -18,6 +18,78 @@ import {
   getHostBrowserVisibleImportMenuLabels,
   HOST_BROWSER_IMPORT_MENU_LABELS
 } from './HostBrowser';
+import { resolveResponsiveCardGridLayout } from '../lib/responsive-card-grid';
+
+const resizeObserverInstances: MockResizeObserver[] = [];
+
+function getObservedWidth(element: Element): number {
+  const width = Number((element as HTMLElement).dataset.testWidth ?? '0');
+  return Number.isFinite(width) ? width : 0;
+}
+
+function createObservedRect(element: Element): DOMRectReadOnly {
+  const width = getObservedWidth(element);
+  return {
+    width,
+    height: 0,
+    top: 0,
+    right: width,
+    bottom: 0,
+    left: 0,
+    x: 0,
+    y: 0,
+    toJSON() {
+      return {};
+    }
+  } as DOMRectReadOnly;
+}
+
+class MockResizeObserver {
+  observedElements = new Set<Element>();
+
+  constructor(private readonly callback: ResizeObserverCallback) {
+    resizeObserverInstances.push(this);
+  }
+
+  observe = (element: Element) => {
+    this.observedElements.add(element);
+    this.callback(
+      [{ target: element, contentRect: createObservedRect(element) } as ResizeObserverEntry],
+      this as unknown as ResizeObserver
+    );
+  };
+
+  unobserve = (element: Element) => {
+    this.observedElements.delete(element);
+  };
+
+  disconnect = () => {
+    this.observedElements.clear();
+  };
+
+  notify(element: Element) {
+    this.callback(
+      [{ target: element, contentRect: createObservedRect(element) } as ResizeObserverEntry],
+      this as unknown as ResizeObserver
+    );
+  }
+}
+
+function setObservedWidth(element: HTMLElement, width: number) {
+  element.dataset.testWidth = String(width);
+  Object.defineProperty(element, 'getBoundingClientRect', {
+    configurable: true,
+    value: () => createObservedRect(element)
+  });
+}
+
+function triggerResize(element: HTMLElement) {
+  resizeObserverInstances.forEach((instance) => {
+    if (instance.observedElements.has(element)) {
+      instance.notify(element);
+    }
+  });
+}
 
 const groups: GroupRecord[] = [
   {
@@ -153,6 +225,16 @@ function renderBrowser({
   );
 }
 
+beforeEach(() => {
+  resizeObserverInstances.length = 0;
+  vi.stubGlobal('ResizeObserver', MockResizeObserver);
+});
+
+afterEach(() => {
+  resizeObserverInstances.length = 0;
+  vi.unstubAllGlobals();
+});
+
 describe('HostBrowser helpers', () => {
   it('normalizes group paths and checks membership within the current tree', () => {
     expect(normalizeGroupPath('  Servers // Nested  ')).toBe('Servers/Nested');
@@ -258,6 +340,54 @@ describe('HostBrowser helpers', () => {
       expect(onOpenHostContainers).toHaveBeenCalledWith('host-1');
     });
   });
+
+  it('caps a single group card at the configured maximum width', async () => {
+    const { container } = renderBrowser({
+      hosts: [],
+      groups: [groups[0]]
+    });
+
+    const groupGrid = container.querySelector('.group-grid') as HTMLElement;
+    const groupCard = container.querySelector('.group-card') as HTMLElement;
+    expect(groupGrid).toBeTruthy();
+    expect(groupCard).toBeTruthy();
+
+    setObservedWidth(groupGrid, 1200);
+    triggerResize(groupGrid);
+
+    await waitFor(() => {
+      expect(groupGrid.style.gridTemplateColumns).toBe(
+        'repeat(1, minmax(0, 320px))'
+      );
+      expect(groupGrid.style.justifyContent).toBe('start');
+      expect(groupCard.style.maxWidth).toBe('320px');
+    });
+  });
+
+  it('fills the host row width while staying within the configured maximum', async () => {
+    const { container } = renderBrowser({
+      currentGroupPath: 'Servers'
+    });
+
+    const hostGrid = container.querySelector('.host-grid') as HTMLElement;
+    expect(hostGrid).toBeTruthy();
+
+    setObservedWidth(hostGrid, 1200);
+    triggerResize(hostGrid);
+
+    const expectedLayout = resolveResponsiveCardGridLayout({
+      containerWidth: 1200,
+      itemCount: 3,
+      minWidth: 280,
+      maxWidth: 460,
+      gap: 13.6
+    });
+
+    await waitFor(() => {
+      expect(hostGrid.style.gridTemplateColumns).toBe(expectedLayout.gridTemplateColumns);
+      expect(hostGrid.style.justifyContent).toBe('');
+    });
+  });
 });
 
 describe('HostBrowser dialogs', () => {
@@ -290,10 +420,10 @@ describe('HostBrowser dialogs', () => {
   });
 
   it('shows the group empty state only at the root level', () => {
-    const { container } = renderBrowser({ groups: [], hosts: [] });
+    renderBrowser({ groups: [], hosts: [] });
 
     expect(screen.getByRole('heading', { name: 'Groups' })).toBeInTheDocument();
-    expect(container.querySelector('.group-grid .empty-callout')).toBeInTheDocument();
+    expect(screen.getByText('아직 만든 그룹이 없습니다.')).toBeInTheDocument();
   });
 
   it('hides the groups section when a nested group has no child groups', () => {

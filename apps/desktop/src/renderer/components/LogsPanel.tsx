@@ -8,6 +8,7 @@ import type {
   SessionLifecycleLogMetadata,
   PortForwardTransport,
 } from '@shared';
+import { Badge, Button, Card, CardMain, EmptyState, SectionLabel } from '../ui';
 
 interface LogsPanelProps {
   logs: ActivityLogRecord[];
@@ -186,15 +187,15 @@ export function LogsPanel({ logs, onClear, onOpenReplay }: LogsPanelProps) {
   );
 
   return (
-    <div className="operations-panel">
-      <div className="operations-panel__header">
+    <div className="flex flex-col gap-[1.05rem]">
+      <div className="flex items-end justify-between gap-4 px-0 pt-1 pb-2">
         <div>
-          <div className="section-kicker">Diagnostics</div>
-          <h2>Logs</h2>
+          <SectionLabel>Diagnostics</SectionLabel>
+          <h2 className="m-0">Logs</h2>
         </div>
-        <button type="button" className="secondary-button" onClick={() => void onClear()}>
+        <Button variant="secondary" onClick={() => void onClear()}>
           Clear logs
-        </button>
+        </Button>
       </div>
 
       <div className="logs-toolbar">
@@ -220,10 +221,10 @@ export function LogsPanel({ logs, onClear, onOpenReplay }: LogsPanelProps) {
 
       <div className="operations-list">
         {visibleLogs.length === 0 ? (
-          <div className="empty-callout">
-            <strong>조건에 맞는 로그가 없습니다.</strong>
-            <p>세션 연결 기록과 보안·설정 변경 기록만 여기에 남습니다.</p>
-          </div>
+          <EmptyState
+            title="조건에 맞는 로그가 없습니다."
+            description="세션 연결 기록과 보안·설정 변경 기록만 여기에 남습니다."
+          />
         ) : (
           visibleLogs.map((log) => {
             const sessionLifecycleMetadata =
@@ -242,9 +243,9 @@ export function LogsPanel({ logs, onClear, onOpenReplay }: LogsPanelProps) {
                 : null;
 
             return sessionLifecycleMetadata ? (
-              <article key={log.id} className="operations-card logs-lifecycle-card">
-                <div className="operations-card__main">
-                  <div className="operations-card__title-row logs-lifecycle-card__header">
+              <Card key={log.id} className="logs-lifecycle-card">
+                <CardMain>
+                  <div className="flex flex-wrap items-center gap-[0.7rem] logs-lifecycle-card__header">
                     <div>
                       <strong>{sessionLifecycleMetadata.hostLabel}</strong>
                       {getSessionLifecycleSubtitle(sessionLifecycleMetadata) ? (
@@ -253,20 +254,16 @@ export function LogsPanel({ logs, onClear, onOpenReplay }: LogsPanelProps) {
                     </div>
                     <div className="logs-lifecycle-card__badges">
                       {sessionLifecycleMetadata.status !== 'connected' && replayRecordingId ? (
-                        <button
-                          type="button"
-                          className="secondary-button secondary-button--compact"
-                          onClick={() => void onOpenReplay(replayRecordingId)}
-                        >
+                        <Button variant="secondary" size="sm" onClick={() => void onOpenReplay(replayRecordingId)}>
                           Replay
-                        </button>
+                        </Button>
                       ) : null}
-                      <span className={`status-pill status-pill--${getConnectionKindTone(sessionLifecycleMetadata.connectionKind)}`}>
+                      <Badge tone={getConnectionKindTone(sessionLifecycleMetadata.connectionKind)}>
                         {getConnectionKindLabel(sessionLifecycleMetadata.connectionKind)}
-                      </span>
-                      <span className={`status-pill status-pill--${getLifecycleStatusTone(sessionLifecycleMetadata.status)}`}>
+                      </Badge>
+                      <Badge tone={getLifecycleStatusTone(sessionLifecycleMetadata.status)}>
                         {getLifecycleStatusLabel(sessionLifecycleMetadata.status)}
-                      </span>
+                      </Badge>
                     </div>
                   </div>
                   <div className="logs-lifecycle-card__timeline">
@@ -286,12 +283,12 @@ export function LogsPanel({ logs, onClear, onOpenReplay }: LogsPanelProps) {
                   {sessionLifecycleMetadata.disconnectReason ? (
                     <div className="logs-lifecycle-card__reason">{sessionLifecycleMetadata.disconnectReason}</div>
                   ) : null}
-                </div>
-              </article>
+                </CardMain>
+              </Card>
             ) : portForwardLifecycleMetadata ? (
-              <article key={log.id} className="operations-card logs-lifecycle-card">
-                <div className="operations-card__main">
-                  <div className="operations-card__title-row logs-lifecycle-card__header">
+              <Card key={log.id} className="logs-lifecycle-card">
+                <CardMain>
+                  <div className="flex flex-wrap items-center gap-[0.7rem] logs-lifecycle-card__header">
                     <div>
                       <strong>{portForwardLifecycleMetadata.ruleLabel}</strong>
                       <div className="logs-lifecycle-card__title">{portForwardLifecycleMetadata.hostLabel}</div>
@@ -300,12 +297,12 @@ export function LogsPanel({ logs, onClear, onOpenReplay }: LogsPanelProps) {
                       </div>
                     </div>
                     <div className="logs-lifecycle-card__badges">
-                      <span className={`status-pill status-pill--${getPortForwardTransportTone(portForwardLifecycleMetadata.transport)}`}>
+                      <Badge tone={getPortForwardTransportTone(portForwardLifecycleMetadata.transport)}>
                         {getPortForwardTransportLabel(portForwardLifecycleMetadata.transport)}
-                      </span>
-                      <span className={`status-pill status-pill--${getPortForwardStatusTone(portForwardLifecycleMetadata.status)}`}>
+                      </Badge>
+                      <Badge tone={getPortForwardStatusTone(portForwardLifecycleMetadata.status)}>
                         {getPortForwardStatusLabel(portForwardLifecycleMetadata.status)}
-                      </span>
+                      </Badge>
                     </div>
                   </div>
                   <div className="logs-lifecycle-card__timeline">
@@ -325,18 +322,18 @@ export function LogsPanel({ logs, onClear, onOpenReplay }: LogsPanelProps) {
                   {portForwardLifecycleMetadata.endReason ? (
                     <div className="logs-lifecycle-card__reason">{portForwardLifecycleMetadata.endReason}</div>
                   ) : null}
-                </div>
-              </article>
+                </CardMain>
+              </Card>
             ) : (
-              <article key={log.id} className="operations-card">
-                <div className="operations-card__main">
-                  <div className="operations-card__title-row">
+              <Card key={log.id}>
+                <CardMain>
+                  <div className="flex flex-wrap items-center gap-[0.7rem]">
                     <strong>{log.message}</strong>
-                    <span className={`status-pill status-pill--${log.level === 'error' ? 'error' : log.level === 'warn' ? 'starting' : 'running'}`}>
+                    <Badge tone={log.level === 'error' ? 'error' : log.level === 'warn' ? 'starting' : 'running'}>
                       {log.level.toUpperCase()}
-                    </span>
+                    </Badge>
                   </div>
-                  <div className="operations-card__meta">
+                  <div className="mt-[0.45rem] flex flex-wrap gap-[0.8rem] text-[0.92rem] text-[var(--text-soft)]">
                     <span>{log.category}</span>
                     <span>{formatLogTimestamp(log.createdAt)}</span>
                   </div>
@@ -346,8 +343,8 @@ export function LogsPanel({ logs, onClear, onOpenReplay }: LogsPanelProps) {
                       <pre>{JSON.stringify(log.metadata, null, 2)}</pre>
                     </details>
                   ) : null}
-                </div>
-              </article>
+                </CardMain>
+              </Card>
             );
           })
         )}

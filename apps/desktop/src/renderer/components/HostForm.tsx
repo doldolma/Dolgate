@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { getAwsEc2HostSshMetadataStatusLabel, isAwsEc2HostRecord, isAwsEcsHostRecord, isSshHostDraft, isSshHostRecord, isWarpgateSshHostRecord } from '@shared';
 import type { HostDraft, HostRecord, SecretMetadataRecord, TerminalThemeId } from '@shared';
+import { useHostFormController } from '../controllers/useHostFormController';
 import { terminalThemePresets } from '../lib/terminal-presets';
+import { Button } from '../ui';
 
 const defaultDraft: HostDraft = {
   kind: 'ssh',
@@ -185,6 +187,7 @@ export function HostForm({
   onEditExistingSecret,
   onOpenSecrets
 }: HostFormProps) {
+  const { pickPrivateKey: pickPrivateKeyFile } = useHostFormController();
   const formRef = useRef<HTMLFormElement | null>(null);
   const saveTimerRef = useRef<number | null>(null);
   const lastHydratedHostIdRef = useRef<string | null>(null);
@@ -394,7 +397,7 @@ export function HostForm({
     if (!sshDraft) {
       return;
     }
-    const selected = await window.dolssh.shell.pickPrivateKey();
+    const selected = await pickPrivateKeyFile();
     if (!selected) {
       return;
     }
@@ -884,13 +887,12 @@ export function HostForm({
             <>
               <p className="form-note">선택한 secret을 이 호스트와 공유합니다. 이 호스트를 삭제해도 secret 항목은 유지됩니다.</p>
               {host && isSshHostRecord(host) && selectedSecretRef && host.secretRef === selectedSecretRef && onEditExistingSecret ? (
-                <button
-                  type="button"
-                  className="secondary-button"
+                <Button
+                  variant="secondary"
                   onClick={() => onEditExistingSecret(selectedSecretRef, sshDraft.authType === 'password' ? 'password' : 'passphrase')}
                 >
                   {sshDraft.authType === 'password' ? '비밀번호 변경' : 'Passphrase 변경'}
-                </button>
+                </Button>
               ) : null}
             </>
           ) : null}
@@ -905,9 +907,9 @@ export function HostForm({
                     onChange={(event) => setDraft({ ...sshDraft, privateKeyPath: event.target.value })}
                     placeholder="/Users/.../.ssh/id_ed25519"
                   />
-                  <button type="button" className="secondary-button" onClick={pickPrivateKey}>
+                  <Button variant="secondary" onClick={pickPrivateKey}>
                     Import
-                  </button>
+                  </Button>
                 </div>
               </label>
               {credentialMode === 'new' ? (
@@ -928,8 +930,8 @@ export function HostForm({
 
       <div className="form-actions">
         {isEditMode ? (
-          <button
-            type="button"
+          <Button
+            variant="primary"
             className="host-form__submit"
             onClick={async () => {
               if (!host || !onConnect) {
@@ -951,22 +953,21 @@ export function HostForm({
             disabled={saveInFlight}
           >
             Connect
-          </button>
+          </Button>
         ) : (
-          <button type="submit" className="host-form__submit">
+          <Button type="submit" variant="primary" className="host-form__submit">
             Create Host
-          </button>
+          </Button>
         )}
         {host && onDelete ? (
-          <button
-            type="button"
-            className="danger-button"
+          <Button
+            variant="danger"
             onClick={async () => {
               await onDelete();
             }}
           >
             Delete
-          </button>
+          </Button>
         ) : null}
       </div>
       {isEditMode && saveStatusText ? <div className={`host-form__save-status host-form__save-status--${saveStatus}`}>{saveStatusText}</div> : null}

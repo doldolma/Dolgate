@@ -1,0 +1,336 @@
+/* Port forwarding legacy widget styles live here. */
+
+.operations-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1.1rem 1.15rem;
+  border-radius: 24px;
+}
+
+.operations-card__main {
+  min-width: 0;
+  flex: 1;
+}
+
+.operations-card__title-row {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  flex-wrap: wrap;
+}
+
+.operations-card__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.8rem;
+  margin-top: 0.45rem;
+  color: var(--text-soft);
+  font-size: 0.92rem;
+}
+
+.operations-card__field {
+  margin-top: 0.9rem;
+}
+
+.operations-card__actions {
+  display: flex;
+  gap: 0.6rem;
+  flex-shrink: 0;
+}
+
+.operations-card__message {
+  margin: 0.55rem 0 0;
+  color: var(--text-soft);
+}
+
+@media (max-width: 760px) {
+  .operations-card {
+    grid-template-columns: 1fr;
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .operations-card__actions {
+    width: 100%;
+    justify-content: stretch;
+  }
+
+  .operations-card__actions button {
+    flex: 1;
+  }
+}
+
+.port-forwarding-modal--container {
+  width: min(720px, calc(100vw - 2rem));
+  --port-forward-field-height: 88px;
+  --port-forward-field-radius: 20px;
+}
+
+.port-forwarding-modal--container .form-field > input:not(.port-forward-local-port__input) {
+  min-height: var(--port-forward-field-height);
+  padding: 1rem 1.05rem;
+  border-radius: var(--port-forward-field-radius);
+  background: var(--dialog-surface-muted);
+}
+
+.port-forward-picker {
+  position: relative;
+}
+
+.port-forward-picker__trigger {
+  width: 100%;
+  min-height: var(--port-forward-field-height, 88px);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.9rem;
+  padding: 1rem 1.05rem;
+  border-radius: var(--port-forward-field-radius, 20px);
+  border: 1px solid var(--border);
+  background: var(--dialog-surface-muted);
+  color: var(--text);
+  text-align: left;
+  transition: border-color 160ms ease, box-shadow 160ms ease, transform 160ms ease;
+}
+
+.port-forward-picker__trigger:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--accent-strong) 28%, var(--border));
+  box-shadow: 0 10px 24px rgba(16, 26, 40, 0.08);
+}
+
+.port-forward-picker__trigger:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent-strong) 52%, white 48%);
+  outline-offset: 2px;
+}
+
+.port-forward-picker__trigger.is-open {
+  border-color: color-mix(in srgb, var(--accent-strong) 34%, var(--border));
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent-strong) 20%, transparent 80%);
+}
+
+.port-forward-picker__trigger:disabled {
+  cursor: not-allowed;
+  opacity: 0.72;
+  box-shadow: none;
+}
+
+.port-forward-picker__placeholder {
+  color: var(--text-soft);
+}
+
+.port-forward-picker__selection,
+.port-forward-picker__option-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.85rem;
+  min-width: 0;
+}
+
+.port-forward-picker__selection-main,
+.port-forward-picker__option-main {
+  min-width: 0;
+  display: grid;
+  gap: 0.18rem;
+}
+
+.port-forward-picker__selection-main strong,
+.port-forward-picker__option-main strong {
+  font-size: 1rem;
+  color: var(--text);
+}
+
+.port-forward-picker__selection-main span,
+.port-forward-picker__option-main span {
+  color: var(--text-soft);
+  font-size: 0.84rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.port-forward-picker__kind-badge {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 1.7rem;
+  padding: 0.22rem 0.62rem;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--accent-strong) 18%, var(--border));
+  background: color-mix(in srgb, var(--accent-strong) 10%, transparent 90%);
+  color: var(--accent-strong);
+  font-size: 0.76rem;
+  font-weight: 700;
+}
+
+.port-forward-picker__status-badge {
+  flex-shrink: 0;
+}
+
+.port-forward-picker__chevron {
+  flex-shrink: 0;
+  color: var(--text-soft);
+  font-size: 0.9rem;
+}
+
+.port-forward-picker__popover {
+  position: absolute;
+  top: calc(100% + 0.45rem);
+  left: 0;
+  right: 0;
+  z-index: 4;
+  display: grid;
+  gap: 0.55rem;
+  max-height: 288px;
+  overflow-y: auto;
+  padding: 0.7rem;
+  border-radius: 22px;
+  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--dialog-surface) 94%, transparent 6%);
+  box-shadow: 0 20px 48px rgba(16, 26, 40, 0.18);
+}
+
+.port-forward-picker__option-card {
+  width: 100%;
+  padding: 0.9rem 0.95rem;
+  border-radius: 18px;
+  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--dialog-surface-muted) 88%, transparent 12%);
+  text-align: left;
+  transition: border-color 160ms ease, background 160ms ease, transform 160ms ease;
+}
+
+.port-forward-picker__option-card:hover,
+.port-forward-picker__option-card:focus-visible {
+  border-color: color-mix(in srgb, var(--accent-strong) 30%, var(--border));
+  background: color-mix(in srgb, var(--dialog-surface) 84%, var(--accent-strong) 16%);
+}
+
+.port-forward-picker__option-card:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent-strong) 45%, white 55%);
+  outline-offset: 2px;
+}
+
+.port-forward-picker__option-card.is-selected {
+  border-color: color-mix(in srgb, var(--accent-strong) 38%, var(--border));
+  background: color-mix(in srgb, var(--dialog-surface) 76%, var(--accent-strong) 24%);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent-strong) 18%, transparent 82%);
+}
+
+.port-forward-native-select {
+  position: relative;
+}
+
+.port-forward-native-select__control {
+  appearance: none;
+  min-height: var(--port-forward-field-height, 88px);
+  padding: 1rem 2.8rem 1rem 1.05rem;
+  border-radius: var(--port-forward-field-radius, 20px);
+  background: var(--dialog-surface-muted);
+}
+
+.port-forward-native-select__control:disabled {
+  opacity: 0.72;
+}
+
+.port-forward-native-select__chevron {
+  position: absolute;
+  top: 50%;
+  right: 1rem;
+  transform: translateY(-50%);
+  pointer-events: none;
+  color: var(--text-soft);
+  font-size: 0.9rem;
+}
+
+.port-forward-local-port {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.port-forward-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.9rem;
+  width: 100%;
+  min-height: 72px;
+  padding: 0.9rem 1rem;
+  border-radius: 20px;
+  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--dialog-surface-muted) 88%, transparent 12%);
+  color: var(--text);
+  text-align: left;
+  transition: border-color 160ms ease, box-shadow 160ms ease, background 160ms ease;
+}
+
+.port-forward-toggle:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--accent-strong) 28%, var(--border));
+}
+
+.port-forward-toggle:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent-strong) 50%, white 50%);
+  outline-offset: 2px;
+}
+
+.port-forward-toggle.is-active {
+  border-color: color-mix(in srgb, var(--accent-strong) 32%, var(--border));
+  background: color-mix(in srgb, var(--accent-strong) 11%, var(--dialog-surface-muted) 89%);
+}
+
+.port-forward-toggle:disabled {
+  cursor: not-allowed;
+  opacity: 0.72;
+}
+
+.port-forward-toggle__track {
+  position: relative;
+  flex-shrink: 0;
+  width: 3rem;
+  height: 1.8rem;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--text-soft) 22%, transparent 78%);
+  transition: background 160ms ease;
+}
+
+.port-forward-toggle.is-active .port-forward-toggle__track {
+  background: color-mix(in srgb, var(--accent-strong) 72%, transparent 28%);
+}
+
+.port-forward-toggle__thumb {
+  position: absolute;
+  top: 0.18rem;
+  left: 0.18rem;
+  width: 1.44rem;
+  height: 1.44rem;
+  border-radius: 999px;
+  background: #fff;
+  box-shadow: 0 6px 14px rgba(16, 26, 40, 0.2);
+  transition: transform 160ms ease;
+}
+
+.port-forward-toggle.is-active .port-forward-toggle__thumb {
+  transform: translateX(1.18rem);
+}
+
+.port-forward-toggle__content {
+  display: grid;
+  gap: 0.18rem;
+}
+
+.port-forward-toggle__content strong {
+  color: var(--text);
+  font-size: 0.94rem;
+}
+
+.port-forward-toggle__content span {
+  color: var(--text-soft);
+  font-size: 0.81rem;
+  line-height: 1.45;
+}
+
+.port-forward-local-port__input:disabled {
+  opacity: 0.72;
+}
