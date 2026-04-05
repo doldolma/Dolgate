@@ -1,7 +1,7 @@
 import type { HTMLAttributes, ReactNode } from 'react';
 import { cn } from '../lib/cn';
 
-type NoticeTone = 'neutral' | 'info' | 'danger';
+type NoticeTone = 'neutral' | 'info' | 'warning' | 'danger';
 
 interface NoticeCardProps extends Omit<HTMLAttributes<HTMLDivElement>, 'title'> {
   title?: ReactNode;
@@ -14,6 +14,8 @@ const toneClasses: Record<NoticeTone, string> = {
     'border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[color-mix(in_srgb,var(--surface-muted)_92%,transparent_8%)] text-[var(--text-soft)]',
   info:
     'border-[color-mix(in_srgb,var(--accent-strong)_20%,var(--border))] bg-[color-mix(in_srgb,var(--accent-strong)_8%,var(--surface-muted)_92%)] text-[var(--text-soft)]',
+  warning:
+    'border-[color-mix(in_srgb,var(--warning,#d9a441)_28%,var(--border))] bg-[color-mix(in_srgb,var(--warning,#d9a441)_10%,var(--surface-muted)_90%)] text-[var(--text)]',
   danger:
     'border-[color-mix(in_srgb,var(--danger-text)_22%,var(--border))] bg-[var(--danger-bg)] text-[var(--danger-text)]',
 };

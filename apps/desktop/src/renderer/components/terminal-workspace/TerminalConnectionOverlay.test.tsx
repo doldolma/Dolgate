@@ -4,7 +4,7 @@ import { TerminalConnectionOverlay } from './TerminalConnectionOverlay';
 
 describe('TerminalConnectionOverlay', () => {
   it('renders blocking copy without action buttons', () => {
-    const { container } = render(
+    render(
       <TerminalConnectionOverlay
         error={false}
         title="Connecting"
@@ -12,26 +12,10 @@ describe('TerminalConnectionOverlay', () => {
       />,
     );
 
+    expect(screen.getByRole('status', { name: 'Connecting' })).toBeInTheDocument();
     expect(screen.getByText('Connecting')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull();
-    expect(
-      container.querySelector('.terminal-connection-overlay'),
-    ).toBeTruthy();
-    expect(
-      container.querySelector('.terminal-connection-overlay__card'),
-    ).toBeTruthy();
-    expect(
-      container.querySelector('.terminal-connection-overlay__copy'),
-    ).toBeTruthy();
-    expect(
-      container.querySelector('.terminal-connection-overlay__message'),
-    ).toBeTruthy();
-    expect(
-      container.querySelector('.terminal-connection-overlay__card')?.tagName,
-    ).toBe('DIV');
-    expect(
-      container.querySelector('.terminal-connection-overlay__message')?.tagName,
-    ).toBe('P');
+    expect(screen.getByText('세션을 연결하는 중입니다...').tagName).toBe('P');
   });
 
   it('renders retry and close actions for errors', () => {
@@ -48,6 +32,7 @@ describe('TerminalConnectionOverlay', () => {
       />,
     );
 
+    expect(screen.getByRole('alertdialog', { name: 'Connection Failed' })).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
     fireEvent.click(screen.getByRole('button', { name: 'Close' }));
 

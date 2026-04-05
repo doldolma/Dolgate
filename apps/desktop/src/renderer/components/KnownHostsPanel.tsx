@@ -1,5 +1,16 @@
 import type { KnownHostRecord } from '@shared';
-import { Badge, Button, Card, CardActions, CardMain, CardMeta, CardTitleRow, EmptyState, SectionLabel } from '../ui';
+import {
+  Badge,
+  Button,
+  Card,
+  CardActions,
+  CardMain,
+  CardMeta,
+  CardTitleRow,
+  EmptyState,
+  PanelSection,
+  SectionLabel,
+} from '../ui';
 
 interface KnownHostsPanelProps {
   records: KnownHostRecord[];
@@ -19,7 +30,7 @@ export function KnownHostsPanel({ records, onRemove }: KnownHostsPanelProps) {
         </div>
       </div>
 
-      <div className="operations-list">
+      <PanelSection>
         {records.length === 0 ? (
           <EmptyState
             title="아직 저장된 known host가 없습니다."
@@ -48,7 +59,7 @@ export function KnownHostsPanel({ records, onRemove }: KnownHostsPanelProps) {
             </Card>
           ))
         )}
-      </div>
+      </PanelSection>
     </div>
   );
 }

@@ -189,16 +189,20 @@ export function HomeShell({
 
   return (
     <section
-      className={`home-shell ${active ? 'active' : 'hidden'} ${
-        isDrawerOpen ? 'drawer-open' : ''
-      }`}
+      className={[
+        'absolute inset-0 grid min-h-0 gap-0 transition-[opacity,transform] duration-180',
+        active ? 'pointer-events-auto opacity-100 scale-100' : 'pointer-events-none opacity-0 scale-[0.995]',
+        isDrawerOpen
+          ? 'grid-cols-[220px_minmax(0,1fr)_380px] max-[1320px]:grid-cols-[200px_minmax(0,1fr)_340px] max-[1040px]:grid-cols-1'
+          : 'grid-cols-[220px_minmax(0,1fr)_0] max-[1320px]:grid-cols-[200px_minmax(0,1fr)_0] max-[1040px]:grid-cols-1',
+      ].join(' ')}
     >
       <HomeNavigation
         activeSection={homeViewModel.homeSection}
         onSelectSection={homeViewModel.openHomeSection}
       />
 
-      <main className="home-main">
+      <main className="flex min-h-0 min-w-0 flex-col overflow-auto px-[1.2rem] pb-[1.25rem] pt-[1.15rem]">
         {authState.status === 'offline-authenticated' && authState.offline ? (
           <OfflineModeBanner
             expiryLabel={offlineLeaseExpiryLabel}

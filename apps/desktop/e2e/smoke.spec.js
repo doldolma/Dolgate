@@ -58,7 +58,7 @@ test.describe("desktop smoke", () => {
       ).toBeVisible();
       await expect(
         page
-          .locator(".host-browser-card")
+          .locator('[data-host-card="true"]')
           .filter({ hasText: "Smoke AWS" })
           .first(),
       ).toBeVisible();
@@ -78,7 +78,7 @@ test.describe("desktop smoke", () => {
       await homeNavigation.getByRole("button", { name: "▣ Hosts" }).click();
       await expect(
         page
-          .locator(".host-browser-card")
+          .locator('[data-host-card="true"]')
           .filter({ hasText: "Smoke AWS" })
           .first(),
       ).toBeVisible();
@@ -90,18 +90,18 @@ test.describe("desktop smoke", () => {
       await expect(page.getByPlaceholder("Search hosts...")).toBeVisible();
       await expect(
         page
-          .locator(".sftp-host-picker .group-card")
+          .locator('[aria-label="Available hosts for right pane"] [data-group-card="true"]')
           .filter({ hasText: "Production" })
           .first(),
       ).toBeVisible();
       await page
-        .locator(".sftp-host-picker .group-card")
+        .locator('[aria-label="Available hosts for right pane"] [data-group-card="true"]')
         .filter({ hasText: "Production" })
         .first()
         .click();
       await expect(
         page
-          .locator(".sftp-host-picker .host-browser-card")
+          .locator('[aria-label="Available hosts for right pane"] [data-host-card="true"]')
           .filter({ hasText: "Smoke SSH" })
           .first(),
       ).toBeVisible();
@@ -132,11 +132,9 @@ test.describe("desktop smoke", () => {
 
       await expect(terminalButton).toBeVisible();
       await terminalButton.click();
-      await expect(
-        page.locator(".terminal-session.active .terminal-canvas"),
-      ).toBeVisible();
+      await expect(page.locator('[data-terminal-canvas="true"]')).toBeVisible();
 
-      await page.locator(".terminal-session.active .terminal-canvas").click();
+      await page.locator('[data-terminal-canvas="true"]').click();
       await page.keyboard.type("echo READY_FROM_LOCAL_SMOKE");
       await page.keyboard.press("Enter");
 
@@ -186,7 +184,7 @@ test.describe("desktop smoke", () => {
       });
 
       const awsCard = page
-        .locator(".host-browser-card")
+        .locator('[data-host-card="true"]')
         .filter({ hasText: "Smoke AWS" })
         .first();
 
@@ -208,7 +206,7 @@ test.describe("desktop smoke", () => {
       const initialSize = initialSizes.at(-1);
       expect(initialSize).toBeTruthy();
 
-      await page.locator(".terminal-session.active .terminal-canvas").click();
+      await page.locator('[data-terminal-canvas="true"]').click();
       await page.keyboard.type("hello-from-playwright");
       await page.keyboard.press("Enter");
       await waitForCapturedTerminalOutput(page, "ECHO:hello-from-playwright");
@@ -222,7 +220,7 @@ test.describe("desktop smoke", () => {
       });
       await page.waitForTimeout(300);
 
-      await page.locator(".terminal-session.active .terminal-canvas").click();
+      await page.locator('[data-terminal-canvas="true"]').click();
       await page.keyboard.type("__REPORT_SIZE__");
       await page.keyboard.press("Enter");
       await page.waitForFunction(
@@ -289,7 +287,7 @@ test.describe("desktop smoke", () => {
     try {
       const page = await app.firstWindow();
       const awsCard = page
-        .locator(".host-browser-card")
+        .locator('[data-host-card="true"]')
         .filter({ hasText: "Smoke AWS" })
         .first();
 
@@ -303,7 +301,7 @@ test.describe("desktop smoke", () => {
       await page.getByRole("button", { name: "공유 시작" }).click();
 
       await expect(page.getByText("공유 링크가 준비되었습니다.")).toBeVisible();
-      await expect(page.locator(".terminal-share-popover__url-text")).toContainText(
+      await expect(page.getByRole("button", { name: "공유 링크 복사" })).toContainText(
         `/share/e2e-share-${sessionId}/e2e-viewer-token-${sessionId}`,
       );
 
@@ -348,7 +346,7 @@ test.describe("desktop smoke", () => {
 
       await expect(
         page
-          .locator(".terminal-share-chat-toast")
+          .locator('[data-testid="terminal-share-toast"]')
           .filter({ hasText: "추가 메시지 12" })
           .first(),
       ).toBeVisible();

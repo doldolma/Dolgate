@@ -440,10 +440,10 @@ describe('TerminalWorkspace workspace switching', () => {
     });
 
     await waitFor(() => {
-      expect(container.querySelectorAll('.terminal-pane-slot')).toHaveLength(2);
+      expect(container.querySelectorAll('[data-terminal-pane-slot="true"]')).toHaveLength(2);
     });
 
-    const targetPane = screen.getByText('Session 2').closest('.terminal-pane-slot') as HTMLElement;
+    const targetPane = screen.getByText('Session 2').closest('[data-terminal-pane-slot="true"]') as HTMLElement;
     targetPane.getBoundingClientRect = () =>
       ({
         left: 50,
@@ -459,7 +459,7 @@ describe('TerminalWorkspace workspace switching', () => {
 
     dispatchDragEvent(targetPane, 'dragover', { clientX: 52, clientY: 50 });
     await waitFor(() => {
-      expect(container.querySelector('.workspace-drop-preview')).toBeTruthy();
+      expect(container.querySelector('[data-workspace-drop-preview="true"]')).toBeTruthy();
     });
 
     dispatchDragEvent(targetPane, 'drop', { clientX: 52, clientY: 50 });
@@ -484,10 +484,10 @@ describe('TerminalWorkspace workspace switching', () => {
     });
 
     await waitFor(() => {
-      expect(container.querySelectorAll('.terminal-pane-slot')).toHaveLength(2);
+      expect(container.querySelectorAll('[data-terminal-pane-slot="true"]')).toHaveLength(2);
     });
 
-    const targetPane = screen.getByText('Session 2').closest('.terminal-pane-slot') as HTMLElement;
+    const targetPane = screen.getByText('Session 2').closest('[data-terminal-pane-slot="true"]') as HTMLElement;
     targetPane.getBoundingClientRect = () =>
       ({
         left: 50,
@@ -522,10 +522,10 @@ describe('TerminalWorkspace workspace switching', () => {
     });
 
     await waitFor(() => {
-      expect(container.querySelectorAll('.terminal-pane-slot')).toHaveLength(2);
+      expect(container.querySelectorAll('[data-terminal-pane-slot="true"]')).toHaveLength(2);
     });
 
-    const ownPane = screen.getByText('Session 1').closest('.terminal-pane-slot') as HTMLElement;
+    const ownPane = screen.getByText('Session 1').closest('[data-terminal-pane-slot="true"]') as HTMLElement;
     ownPane.getBoundingClientRect = () =>
       ({
         left: 0,
@@ -541,7 +541,7 @@ describe('TerminalWorkspace workspace switching', () => {
 
     dispatchDragEvent(ownPane, 'dragover', { clientX: 2, clientY: 50 });
 
-    expect(container.querySelector('.workspace-drop-preview')).toBeFalsy();
+    expect(container.querySelector('[data-workspace-drop-preview="true"]')).toBeFalsy();
     expect(onMoveWorkspaceSession).not.toHaveBeenCalled();
   });
 
@@ -948,7 +948,7 @@ describe('TerminalWorkspace workspace switching', () => {
         dismissSessionShareChatNotification
       };
 
-      const { container } = render(
+      render(
         <TerminalWorkspace
           tabs={hostTabs}
           hosts={mocks.storeState.hosts}
@@ -975,7 +975,7 @@ describe('TerminalWorkspace workspace switching', () => {
         />
       );
 
-      expect(container.querySelectorAll('.terminal-share-chat-toast')).toHaveLength(3);
+      expect(screen.getAllByTestId('terminal-share-toast')).toHaveLength(3);
       expect(screen.queryByText('첫 번째')).toBeNull();
       expect(screen.getByText('두 번째')).toBeTruthy();
       expect(screen.getByText('세 번째')).toBeTruthy();

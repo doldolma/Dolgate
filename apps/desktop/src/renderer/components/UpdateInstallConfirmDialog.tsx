@@ -19,7 +19,6 @@ export function UpdateInstallConfirmDialog({
   return (
     <DialogBackdrop onDismiss={onClose}>
       <ModalShell
-        className="update-install-dialog"
         role="dialog"
         aria-modal="true"
         aria-labelledby="update-install-title"
@@ -34,7 +33,7 @@ export function UpdateInstallConfirmDialog({
           </div>
         </ModalHeader>
         <ModalBody>
-          <p className="update-install-dialog__message">
+          <p className="text-[0.95rem] leading-[1.6] text-[var(--text-soft)]">
             현재 열려 있는 SSH 세션, 진행 중인 전송, 생성된 포트 포워딩이 모두
             종료됩니다. 계속하면 Dolgate가 정리 후 다시 시작되며 새 버전이
             적용됩니다.

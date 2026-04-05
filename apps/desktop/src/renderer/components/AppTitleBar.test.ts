@@ -31,7 +31,7 @@ describe('getWindowControlDescriptors', () => {
     );
 
     expect(controls.map((control) => control.ariaLabel)).toEqual(['최소화', '복원', '닫기']);
-    expect(controls[1]?.iconClassName).toContain('window-control__icon--restore');
+    expect(controls[1]?.icon).toBe('restore');
   });
 
   it('routes descriptors to the expected window action handlers', async () => {

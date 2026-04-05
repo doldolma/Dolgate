@@ -75,7 +75,13 @@ export function SessionShell({
   }, [draggedSession, sessionViewModel.tabStrip, sessionViewModel.workspaces]);
 
   return (
-    <section className={`session-shell ${active ? 'active' : 'hidden'}`}>
+    <section
+      className={
+        active
+          ? 'absolute inset-0 flex min-h-0 flex-col gap-4 p-[1.15rem] opacity-100 pointer-events-auto transition-[opacity,transform] duration-180 scale-100'
+          : 'absolute inset-0 flex min-h-0 flex-col gap-4 p-[1.15rem] opacity-0 pointer-events-none transition-[opacity,transform] duration-180 scale-[0.995]'
+      }
+    >
       {authState.status === 'offline-authenticated' && authState.offline ? (
         <OfflineModeBanner
           expiryLabel={offlineLeaseExpiryLabel}
@@ -85,7 +91,7 @@ export function SessionShell({
           }}
         />
       ) : null}
-      <div className="session-shell__content">
+      <div className="min-h-0 flex-1">
         <TerminalWorkspace
           tabs={sessionViewModel.tabs}
           hosts={homeViewModel.hosts}

@@ -42,9 +42,9 @@ export function LoginShell({
   }
 
   return (
-    <div className="app-frame app-frame--login">
-      <div className="login-window-chrome">
-        <div className="login-window-chrome__spacer" />
+    <div className="relative flex h-screen min-h-0 flex-col overflow-hidden bg-[radial-gradient(circle_at_top_left,color-mix(in_srgb,var(--accent-strong)_10%,transparent),transparent_24%),radial-gradient(circle_at_top_right,rgba(255,255,255,0.3),transparent_24%),linear-gradient(180deg,color-mix(in_srgb,var(--app-bg)_97%,white_3%),var(--app-bg))]">
+      <div className="flex min-h-16 items-center justify-end px-[1.05rem] pb-0 pt-[0.95rem] [-webkit-app-region:drag]">
+        <div className="flex-1" />
         <DesktopWindowControls
           desktopPlatform={desktopPlatform}
           windowState={windowState}

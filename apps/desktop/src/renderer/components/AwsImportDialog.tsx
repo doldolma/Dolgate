@@ -17,14 +17,19 @@ import {
   CardMeta,
   CardTitleRow,
   EmptyState,
+  FieldGroup,
+  FilterRow,
   IconButton,
   ModalBody,
   ModalFooter,
   ModalHeader,
   ModalShell,
   NoticeCard,
+  PanelSection,
   SectionLabel,
   StatusBadge,
+  TabButton,
+  Tabs,
 } from '../ui';
 
 type AwsImportMode = 'ec2' | 'ecs';
@@ -418,7 +423,7 @@ export function AwsImportDialog({ open, currentGroupPath, onClose, onImport }: A
       onDismiss={onClose}
       dismissDisabled={isRegistering}
     >
-      <ModalShell className="aws-import-dialog" role="dialog" aria-modal="true" aria-labelledby="aws-import-title">
+      <ModalShell role="dialog" aria-modal="true" aria-labelledby="aws-import-title" size="xl">
         <ModalHeader>
           <div>
             <SectionLabel>AWS</SectionLabel>
@@ -429,12 +434,11 @@ export function AwsImportDialog({ open, currentGroupPath, onClose, onImport }: A
           </IconButton>
         </ModalHeader>
 
-        <ModalBody>
-          <div className="segmented-control aws-import-dialog__mode-toggle" role="tablist" aria-label="AWS import mode">
-            <button
+        <ModalBody className="grid gap-4">
+          <Tabs aria-label="AWS import mode" className="justify-start">
+            <TabButton
               type="button"
-              className={importMode === 'ec2' ? 'active' : ''}
-              aria-pressed={importMode === 'ec2'}
+              active={importMode === 'ec2'}
               onClick={() => {
                 if (inspectionTarget || isRegistering) {
                   return;
@@ -445,11 +449,10 @@ export function AwsImportDialog({ open, currentGroupPath, onClose, onImport }: A
               disabled={Boolean(inspectionTarget) || isRegistering}
             >
               EC2
-            </button>
-            <button
+            </TabButton>
+            <TabButton
               type="button"
-              className={importMode === 'ecs' ? 'active' : ''}
-              aria-pressed={importMode === 'ecs'}
+              active={importMode === 'ecs'}
               onClick={() => {
                 if (inspectionTarget || isRegistering) {
                   return;
@@ -460,12 +463,11 @@ export function AwsImportDialog({ open, currentGroupPath, onClose, onImport }: A
               disabled={Boolean(inspectionTarget) || isRegistering}
             >
               ECS
-            </button>
-          </div>
+            </TabButton>
+          </Tabs>
 
-          <div className="form-grid">
-            <label className="form-field">
-              <span>Profile</span>
+          <div className="grid gap-4 md:grid-cols-2">
+            <FieldGroup label="Profile">
               <select
                 value={selectedProfile}
                 onChange={(event) => setSelectedProfile(event.target.value)}
@@ -487,12 +489,10 @@ export function AwsImportDialog({ open, currentGroupPath, onClose, onImport }: A
                   </option>
                 ))}
               </select>
-            </label>
+            </FieldGroup>
 
             {profileStatus?.isAuthenticated ? (
-              <>
-                <label className="form-field">
-                  <span>Region</span>
+              <FieldGroup label="Region">
                   <select
                     value={selectedRegion}
                     onChange={(event) => setSelectedRegion(event.target.value)}
@@ -513,32 +513,31 @@ export function AwsImportDialog({ open, currentGroupPath, onClose, onImport }: A
                       </option>
                     ))}
                   </select>
-                </label>
-              </>
+              </FieldGroup>
             ) : null}
           </div>
 
-          {loadingMessage ? <div className="aws-import-dialog__loading">{loadingMessage}</div> : null}
+          {loadingMessage ? <NoticeCard tone="info">{loadingMessage}</NoticeCard> : null}
 
           {shouldShowAwsProfileAuthError(profileStatus, isLoadingStatus) && profileStatus ? (
-            <div className="terminal-error-banner">
+            <NoticeCard tone="danger" role="alert">
               {profileStatus.isSsoProfile
                 ? '이 프로필은 아직 로그인되지 않았습니다. 브라우저에서 AWS SSO 로그인을 완료해 주세요.'
                 : profileStatus.errorMessage || '이 프로필은 AWS CLI 자격 증명이 필요합니다.'}
-            </div>
+            </NoticeCard>
           ) : null}
 
           {shouldShowMissingToolsBanner ? (
-            <div className="terminal-error-banner">
+            <NoticeCard tone="danger" role="alert">
               {missingTools.includes('aws-cli') ? 'AWS CLI가 설치되어 있어야 합니다. ' : ''}
               {importMode === 'ec2' && missingTools.includes('session-manager-plugin')
                 ? 'session-manager-plugin이 설치되어 있어야 SSM 연결을 시작할 수 있습니다.'
                 : ''}
-            </div>
+            </NoticeCard>
           ) : null}
 
           {profileStatus?.isSsoProfile && !profileStatus.isAuthenticated ? (
-            <div className="aws-import-dialog__inline-actions">
+            <div className="flex flex-wrap items-center justify-end gap-3">
               <Button
                 variant="primary"
                 onClick={async () => {
@@ -564,11 +563,15 @@ export function AwsImportDialog({ open, currentGroupPath, onClose, onImport }: A
             </div>
           ) : null}
 
-          {error ? <div className="terminal-error-banner">{error}</div> : null}
+          {error ? (
+            <NoticeCard tone="danger" role="alert">
+              {error}
+            </NoticeCard>
+          ) : null}
 
           {inspectionTarget ? (
-            <div className="aws-import-dialog__inspection" data-testid="aws-import-inspection">
-              <Card className="aws-import-dialog__inspection-summary">
+            <div className="grid min-h-0 gap-4" data-testid="aws-import-inspection">
+              <Card>
                 <CardMain>
                   <CardTitleRow>
                     <strong>{inspectionTarget.name || inspectionTarget.instanceId}</strong>
@@ -585,14 +588,13 @@ export function AwsImportDialog({ open, currentGroupPath, onClose, onImport }: A
               </Card>
 
               {inspectionStatus === 'loading' ? (
-                <div className="aws-import-dialog__loading">
+                <NoticeCard tone="info">
                   유저명 및 SSH 접속 정보를 확인 중입니다.
-                </div>
+                </NoticeCard>
               ) : null}
 
               {inspectionStatus === 'ready' ? (
                 <NoticeCard
-                  className="aws-import-dialog__inspection-callout"
                   title="자동으로 SSH 접속 정보를 확인했습니다."
                 >
                   <p>필요하면 아래 값을 바로 수정한 뒤 Host를 등록할 수 있습니다.</p>
@@ -600,12 +602,13 @@ export function AwsImportDialog({ open, currentGroupPath, onClose, onImport }: A
               ) : null}
 
               {inspectionStatus === 'error' && inspectionError ? (
-                <div className="terminal-error-banner">{inspectionError}</div>
+                <NoticeCard tone="danger" role="alert">
+                  {inspectionError}
+                </NoticeCard>
               ) : null}
 
-              <div className="form-grid aws-import-dialog__inspection-fields">
-                <label className="form-field">
-                  <span>SSH Username</span>
+              <div className="grid gap-4 md:grid-cols-2">
+                <FieldGroup label="SSH Username">
                   <input
                     value={inspectionUsername}
                     onChange={(event) => {
@@ -616,10 +619,9 @@ export function AwsImportDialog({ open, currentGroupPath, onClose, onImport }: A
                     placeholder="자동으로 찾은 사용자명이 없으면 비워둘 수 있습니다."
                     disabled={inspectionStatus === 'loading' || isRegistering}
                   />
-                </label>
+                </FieldGroup>
 
-                <label className="form-field">
-                  <span>SSH Port</span>
+                <FieldGroup label="SSH Port">
                   <input
                     inputMode="numeric"
                     value={inspectionPort}
@@ -632,16 +634,16 @@ export function AwsImportDialog({ open, currentGroupPath, onClose, onImport }: A
                     placeholder="비워두면 기본값 22를 사용합니다."
                     disabled={inspectionStatus === 'loading' || isRegistering}
                   />
-                </label>
+                </FieldGroup>
               </div>
 
               {inspectionCandidateChips.length > 0 ? (
-                <div className="aws-import-dialog__chips">
+                <div className="flex flex-wrap gap-[0.6rem]">
                   {inspectionCandidateChips.map((candidate) => (
                     <Button
                       key={candidate}
                       variant="secondary"
-                      className="aws-import-dialog__chip"
+                      className="px-[0.95rem]"
                       disabled={inspectionStatus === 'loading' || isRegistering}
                       onClick={() => {
                         usernameDirtyRef.current = true;
@@ -656,8 +658,8 @@ export function AwsImportDialog({ open, currentGroupPath, onClose, onImport }: A
               ) : null}
             </div>
           ) : profileStatus?.isAuthenticated && selectedRegion && importMode === 'ecs' ? (
-            <div className="aws-import-dialog__instance-list" data-testid="aws-import-ecs-cluster-list">
-              <div className="operations-list">
+            <div className="mt-[0.95rem] min-h-0 overflow-y-auto pr-[0.1rem]" data-testid="aws-import-ecs-cluster-list">
+              <PanelSection>
                 {ecsClusters.length === 0 && !isLoadingInstances ? (
                   <EmptyState title="이 리전에 가져올 수 있는 ECS 클러스터가 없습니다." />
                 ) : (
@@ -714,11 +716,11 @@ export function AwsImportDialog({ open, currentGroupPath, onClose, onImport }: A
                     </Card>
                   ))
                 )}
-              </div>
+              </PanelSection>
             </div>
           ) : profileStatus?.isAuthenticated && selectedRegion ? (
-            <div className="aws-import-dialog__instance-list" data-testid="aws-import-instance-list">
-              <div className="operations-list">
+            <div className="mt-[0.95rem] min-h-0 overflow-y-auto pr-[0.1rem]" data-testid="aws-import-instance-list">
+              <PanelSection>
               {instances.length === 0 && !isLoadingInstances ? (
                 <EmptyState title="이 리전에 가져올 수 있는 EC2 인스턴스가 없습니다." />
               ) : (
@@ -753,7 +755,7 @@ export function AwsImportDialog({ open, currentGroupPath, onClose, onImport }: A
                   </Card>
                 ))
               )}
-              </div>
+              </PanelSection>
             </div>
           ) : profileStatus?.isAuthenticated && regions.length > 0 ? (
             <EmptyState
@@ -779,7 +781,7 @@ export function AwsImportDialog({ open, currentGroupPath, onClose, onImport }: A
               >
                 뒤로
               </Button>
-              <div className="aws-import-dialog__footer-actions">
+              <div className="ml-auto flex items-center justify-end gap-3">
                 <Button
                   variant="secondary"
                   disabled={inspectionStatus === 'loading' || isRegistering}
@@ -830,7 +832,7 @@ export function AwsImportDialog({ open, currentGroupPath, onClose, onImport }: A
               </div>
             </>
           ) : (
-            <div className="aws-import-dialog__footer-actions">
+            <div className="ml-auto flex items-center justify-end gap-3">
               <Button variant="secondary" onClick={onClose}>
                 닫기
               </Button>

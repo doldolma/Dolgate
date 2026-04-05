@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { getAwsEc2HostSshMetadataStatusLabel, isAwsEc2HostRecord, isAwsEcsHostRecord, isSshHostDraft, isSshHostRecord, isWarpgateSshHostRecord } from '@shared';
 import type { HostDraft, HostRecord, SecretMetadataRecord, TerminalThemeId } from '@shared';
 import { useHostFormController } from '../controllers/useHostFormController';
+import { cn } from '../lib/cn';
 import { terminalThemePresets } from '../lib/terminal-presets';
 import { Button } from '../ui';
 
@@ -158,8 +159,10 @@ function renderTerminalThemeField(
   onChange: (value: TerminalThemeId | null) => void
 ) {
   return (
-    <label>
-      Terminal Theme
+    <label className="flex flex-col gap-[0.45rem] text-[var(--text)]">
+      <span className="text-[0.82rem] font-semibold uppercase tracking-[0.12em] text-[var(--text-soft)]">
+        Terminal Theme
+      </span>
       <select
         value={value ?? ''}
         onChange={(event) => onChange(event.target.value ? (event.target.value as TerminalThemeId) : null)}
@@ -187,6 +190,9 @@ export function HostForm({
   onEditExistingSecret,
   onOpenSecrets
 }: HostFormProps) {
+  const fieldClassName = 'flex flex-col gap-[0.45rem] text-[var(--text)]';
+  const fieldLabelClassName =
+    'text-[0.82rem] font-semibold uppercase tracking-[0.12em] text-[var(--text-soft)]';
   const { pickPrivateKey: pickPrivateKeyFile } = useHostFormController();
   const formRef = useRef<HTMLFormElement | null>(null);
   const saveTimerRef = useRef<number | null>(null);
@@ -542,7 +548,7 @@ export function HostForm({
   return (
     <form
       ref={formRef}
-      className="host-form"
+      className="flex flex-col gap-[0.95rem]"
       onSubmit={async (event) => {
         event.preventDefault();
         if (isEditMode) {
@@ -574,12 +580,12 @@ export function HostForm({
       }}
     >
       {hideTitle ? null : <div className="section-title">Host Editor</div>}
-      <label>
-        Label
+      <label className={fieldClassName}>
+        <span className={fieldLabelClassName}>Label</span>
         <input value={draft.label} onChange={(event) => setDraft({ ...draft, label: event.target.value })} placeholder="Production API" required />
       </label>
-      <label>
-        Group
+      <label className={fieldClassName}>
+        <span className={fieldLabelClassName}>Group</span>
         <select value={draft.groupName ?? ''} onChange={(event) => setDraft({ ...draft, groupName: event.target.value || '' })}>
           {groupOptions.map((option) => (
             <option key={option.value ?? 'ungrouped'} value={option.value ?? ''}>
@@ -588,15 +594,21 @@ export function HostForm({
           ))}
         </select>
       </label>
-      <label>
-        Tags
-        <div className="tag-token-input" onClick={() => document.getElementById('host-tag-input')?.focus()}>
+      <label className={fieldClassName}>
+        <span className={fieldLabelClassName}>Tags</span>
+        <div
+          className="flex min-h-[3.5rem] flex-wrap items-center gap-[0.55rem] rounded-[14px] border border-[var(--border)] bg-[var(--surface-strong)] px-[0.95rem] py-[0.78rem] shadow-[inset_0_1px_0_rgba(255,255,255,0.06)]"
+          onClick={() => document.getElementById('host-tag-input')?.focus()}
+        >
           {tagTokens.map((tag) => (
-            <span key={tag} className="tag-token">
+            <span
+              key={tag}
+              className="inline-flex items-center gap-[0.35rem] rounded-full border border-[color-mix(in_srgb,var(--accent-strong)_24%,var(--border)_76%)] bg-[color-mix(in_srgb,var(--accent-strong)_12%,var(--surface-strong))] px-[0.62rem] py-[0.36rem] text-[var(--text)]"
+            >
               <span>{tag}</span>
               <button
                 type="button"
-                className="tag-token__remove"
+                className="inline-grid h-[1.1rem] w-[1.1rem] place-items-center rounded-full text-[var(--text-soft)]"
                 aria-label={`${tag} 태그 제거`}
                 onClick={() => removeTag(tag)}
               >
@@ -606,7 +618,7 @@ export function HostForm({
           ))}
           <input
             id="host-tag-input"
-            className="tag-token-input__field"
+            className="min-w-[9rem] flex-1 border-none bg-transparent p-0 shadow-none focus:outline-none"
             value={tagInput}
             onChange={(event) => {
               if (skipNextTagBlurCommitRef.current && event.target.value.trim()) {
@@ -684,9 +696,9 @@ export function HostForm({
             State
             <input value={draft.awsState ?? ''} readOnly />
           </label>
-          <div className="host-form__aws-status">
+          <div className="flex flex-col gap-[0.35rem] rounded-[14px] border border-[color-mix(in_srgb,var(--accent-strong)_18%,var(--border)_82%)] bg-[color-mix(in_srgb,var(--surface-elevated)_76%,var(--surface)_24%)] px-[0.95rem] py-[0.85rem]">
             <strong>{getAwsEc2HostSshMetadataStatusLabel(draft.awsSshMetadataStatus) ?? 'SSH 설정 대기 중'}</strong>
-            <span>
+            <span className="text-[var(--text-soft)] leading-[1.5]">
               {draft.awsSshMetadataError
                 ? draft.awsSshMetadataError
                 : draft.awsSshMetadataStatus === 'loading'
@@ -694,9 +706,9 @@ export function HostForm({
                   : '필요하면 아래 값만 수동으로 수정하면 됩니다.'}
             </span>
           </div>
-          <div className="row two-col">
-            <label>
-              SSH Port
+          <div className="grid gap-[0.75rem] md:grid-cols-[120px_minmax(0,1fr)]">
+            <label className={fieldClassName}>
+              <span className={fieldLabelClassName}>SSH Port</span>
               <input
                 type="number"
                 min={1}
@@ -714,8 +726,8 @@ export function HostForm({
                 }
               />
             </label>
-            <label>
-              SSH Username
+            <label className={fieldClassName}>
+              <span className={fieldLabelClassName}>SSH Username</span>
               <input
                 value={draft.awsSshUsername ?? ''}
                 onChange={(event) =>
@@ -737,20 +749,20 @@ export function HostForm({
         <>
           {renderTerminalThemeField(draft.terminalThemeId ?? null, (terminalThemeId) => setDraft((current) => ({ ...current, terminalThemeId })))}
 
-          <label>
-            AWS Profile
+          <label className={fieldClassName}>
+            <span className={fieldLabelClassName}>AWS Profile</span>
             <input value={draft.awsProfileName} readOnly />
           </label>
-          <label>
-            Region
+          <label className={fieldClassName}>
+            <span className={fieldLabelClassName}>Region</span>
             <input value={draft.awsRegion} readOnly />
           </label>
-          <label>
-            ECS Cluster
+          <label className={fieldClassName}>
+            <span className={fieldLabelClassName}>ECS Cluster</span>
             <input value={draft.awsEcsClusterName} readOnly />
           </label>
-          <label>
-            Cluster ARN
+          <label className={fieldClassName}>
+            <span className={fieldLabelClassName}>Cluster ARN</span>
             <input value={draft.awsEcsClusterArn} readOnly />
           </label>
         </>
@@ -795,8 +807,8 @@ export function HostForm({
         </>
       ) : sshDraft ? (
         <>
-          <label>
-            Hostname
+          <label className={fieldClassName}>
+            <span className={fieldLabelClassName}>Hostname</span>
             <input
               value={sshDraft.hostname}
               onChange={(event) => setDraft({ ...sshDraft, hostname: event.target.value })}
@@ -804,9 +816,9 @@ export function HostForm({
               required
             />
           </label>
-          <div className="row two-col">
-            <label>
-              Port
+          <div className="grid gap-[0.75rem] md:grid-cols-[120px_minmax(0,1fr)]">
+            <label className={fieldClassName}>
+              <span className={fieldLabelClassName}>Port</span>
               <input
                 type="number"
                 min={1}
@@ -816,8 +828,8 @@ export function HostForm({
                 required
               />
             </label>
-            <label>
-              Username
+            <label className={fieldClassName}>
+              <span className={fieldLabelClassName}>Username</span>
               <input
                 value={sshDraft.username}
                 onChange={(event) => setDraft({ ...sshDraft, username: event.target.value })}
@@ -825,8 +837,8 @@ export function HostForm({
               />
             </label>
           </div>
-          <label>
-            Auth Type
+          <label className={fieldClassName}>
+            <span className={fieldLabelClassName}>Auth Type</span>
             <select
               value={sshDraft.authType}
               onChange={(event) =>
@@ -871,7 +883,11 @@ export function HostForm({
           </label>
 
           {onOpenSecrets && keychainEntries.length > 0 ? (
-            <button type="button" className="host-form__inline-action" onClick={onOpenSecrets}>
+            <button
+              type="button"
+              className="mt-[-0.2rem] self-start border-0 bg-transparent p-0 text-[0.88rem] font-semibold text-[var(--accent-strong)]"
+              onClick={onOpenSecrets}
+            >
               Secrets 열기
             </button>
           ) : null}
@@ -885,7 +901,7 @@ export function HostForm({
 
           {credentialMode === 'existing' ? (
             <>
-              <p className="form-note">선택한 secret을 이 호스트와 공유합니다. 이 호스트를 삭제해도 secret 항목은 유지됩니다.</p>
+              <p className="mt-[-0.1rem] text-[var(--text-soft)] leading-[1.5]">선택한 secret을 이 호스트와 공유합니다. 이 호스트를 삭제해도 secret 항목은 유지됩니다.</p>
               {host && isSshHostRecord(host) && selectedSecretRef && host.secretRef === selectedSecretRef && onEditExistingSecret ? (
                 <Button
                   variant="secondary"
@@ -901,7 +917,7 @@ export function HostForm({
             <>
               <label>
                 Private key file
-                <div className="file-input-row">
+                <div className="flex gap-[0.75rem]">
                   <input
                     value={sshDraft.privateKeyPath ?? ''}
                     onChange={(event) => setDraft({ ...sshDraft, privateKeyPath: event.target.value })}
@@ -928,11 +944,11 @@ export function HostForm({
         </>
       ) : null}
 
-      <div className="form-actions">
+      <div className="mt-[0.8rem] flex gap-[0.75rem]">
         {isEditMode ? (
           <Button
             variant="primary"
-            className="host-form__submit"
+            className="flex-1 rounded-[16px] border border-[color-mix(in_srgb,var(--accent-strong)_22%,var(--border)_78%)] bg-[linear-gradient(180deg,color-mix(in_srgb,var(--surface-elevated)_88%,white_12%),color-mix(in_srgb,var(--surface)_90%,var(--accent-strong)_10%))] px-[1.1rem] py-[0.95rem] font-[650] text-[var(--text)] shadow-[0_8px_18px_rgba(8,15,28,0.08),inset_0_1px_0_rgba(255,255,255,0.08)] transition-[transform,box-shadow,border-color,background] duration-160 hover:border-[color-mix(in_srgb,var(--accent-strong)_34%,var(--border)_66%)] hover:bg-[linear-gradient(180deg,color-mix(in_srgb,var(--surface-elevated)_82%,white_18%),color-mix(in_srgb,var(--surface)_84%,var(--accent-strong)_16%))] hover:shadow-[0_12px_22px_rgba(8,15,28,0.1),inset_0_1px_0_rgba(255,255,255,0.1)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color-mix(in_srgb,var(--accent-strong)_60%,white_40%)] focus-visible:ring-offset-2"
             onClick={async () => {
               if (!host || !onConnect) {
                 return;
@@ -955,7 +971,11 @@ export function HostForm({
             Connect
           </Button>
         ) : (
-          <Button type="submit" variant="primary" className="host-form__submit">
+          <Button
+            type="submit"
+            variant="primary"
+            className="flex-1 rounded-[16px] border border-[color-mix(in_srgb,var(--accent-strong)_22%,var(--border)_78%)] bg-[linear-gradient(180deg,color-mix(in_srgb,var(--surface-elevated)_88%,white_12%),color-mix(in_srgb,var(--surface)_90%,var(--accent-strong)_10%))] px-[1.1rem] py-[0.95rem] font-[650] text-[var(--text)] shadow-[0_8px_18px_rgba(8,15,28,0.08),inset_0_1px_0_rgba(255,255,255,0.08)] transition-[transform,box-shadow,border-color,background] duration-160 hover:border-[color-mix(in_srgb,var(--accent-strong)_34%,var(--border)_66%)] hover:bg-[linear-gradient(180deg,color-mix(in_srgb,var(--surface-elevated)_82%,white_18%),color-mix(in_srgb,var(--surface)_84%,var(--accent-strong)_16%))] hover:shadow-[0_12px_22px_rgba(8,15,28,0.1),inset_0_1px_0_rgba(255,255,255,0.1)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color-mix(in_srgb,var(--accent-strong)_60%,white_40%)] focus-visible:ring-offset-2"
+          >
             Create Host
           </Button>
         )}
@@ -970,7 +990,16 @@ export function HostForm({
           </Button>
         ) : null}
       </div>
-      {isEditMode && saveStatusText ? <div className={`host-form__save-status host-form__save-status--${saveStatus}`}>{saveStatusText}</div> : null}
+      {isEditMode && saveStatusText ? (
+        <div
+          className={cn(
+            'mt-[0.1rem] text-[0.86rem] leading-[1.4] text-[var(--text-soft)]',
+            saveStatus === 'error' && 'text-[color-mix(in_srgb,var(--danger)_82%,white_18%)]',
+          )}
+        >
+          {saveStatusText}
+        </div>
+      ) : null}
     </form>
   );
 }

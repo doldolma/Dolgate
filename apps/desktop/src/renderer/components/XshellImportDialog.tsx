@@ -14,12 +14,15 @@ import { DialogBackdrop } from './DialogBackdrop';
 import {
   Button,
   EmptyState,
+  FieldGroup,
+  FilterRow,
   IconButton,
   Input,
   ModalBody,
   ModalFooter,
   ModalHeader,
   ModalShell,
+  NoticeCard,
   SectionLabel,
   StatusBadge,
 } from '../ui';
@@ -416,11 +419,14 @@ function renderWarningList(warnings: XshellImportWarning[]) {
   }
 
   return (
-    <div className="xshell-import-dialog__warnings">
+    <div className="grid gap-2">
       {warnings.map((warning, index) => (
-        <div key={`${warning.code ?? 'warning'}:${index}`} className="form-note">
+        <p
+          key={`${warning.code ?? 'warning'}:${index}`}
+          className="text-[0.9rem] leading-[1.6] text-[var(--text-soft)]"
+        >
           {warning.message}
-        </div>
+        </p>
       ))}
     </div>
   );
@@ -432,11 +438,11 @@ function renderSourceList(sources: XshellSourceSummary[]) {
   }
 
   return (
-    <div className="xshell-import-dialog__sources">
+    <div className="grid gap-2">
       {sources.map((source) => (
-        <div key={source.id} className="form-note">
+        <p key={source.id} className="text-[0.9rem] leading-[1.6] text-[var(--text-soft)]">
           <strong>{source.origin === 'default-session-dir' ? '기본 경로' : '추가 폴더'}</strong> <code>{source.folderPath}</code>
-        </div>
+        </p>
       ))}
     </div>
   );
@@ -471,10 +477,13 @@ function XshellTreeRenderer({
       const disabled = inheritedSelection;
 
       return (
-        <div key={node.id} className="xshell-import-dialog__tree-node">
-          <div className="xshell-import-dialog__tree-row xshell-import-dialog__tree-row--host" style={{ paddingLeft: `${depth * 1.1}rem` }}>
-            <span className="xshell-import-dialog__tree-spacer" aria-hidden="true" />
-            <label className="xshell-import-dialog__tree-label">
+        <div key={node.id} className="grid gap-[0.45rem]">
+          <div
+            className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-start gap-3 rounded-[14px] border border-[var(--border)] bg-[var(--dialog-surface)] px-[0.8rem] py-[0.75rem]"
+            style={{ paddingLeft: `${depth * 1.1}rem` }}
+          >
+            <span className="h-[1.8rem] w-[1.8rem] shrink-0" aria-hidden="true" />
+            <label className="grid min-w-0 grid-cols-[auto_minmax(0,1fr)] items-start gap-3">
               <input
                 type="checkbox"
                 checked={checked}
@@ -482,17 +491,17 @@ function XshellTreeRenderer({
                 onChange={(event) => onToggleHost(node.host, event.target.checked)}
                 aria-label={`${node.host.label} 호스트 선택`}
               />
-              <div className="xshell-import-dialog__item-body">
+              <div className="min-w-0">
                 <strong>{node.host.label}</strong>
-                <span>
+                <span className="block truncate text-[0.8rem] text-[var(--text-soft)]">
                   {node.host.username}@{node.host.hostname}:{node.host.port}
                 </span>
-                <small>{node.host.groupPath ? node.host.groupPath : '루트 세션'}</small>
-                <small>{node.host.sourceFilePath}</small>
-                {node.host.privateKeyPath ? <small>{node.host.privateKeyPath}</small> : null}
+                <small className="block truncate text-[0.8rem] text-[var(--text-soft)]">{node.host.groupPath ? node.host.groupPath : '루트 세션'}</small>
+                <small className="block truncate text-[0.8rem] text-[var(--text-soft)]">{node.host.sourceFilePath}</small>
+                {node.host.privateKeyPath ? <small className="block truncate text-[0.8rem] text-[var(--text-soft)]">{node.host.privateKeyPath}</small> : null}
               </div>
             </label>
-            <div className="xshell-import-dialog__badges">
+            <div className="flex flex-wrap items-center gap-2">
               <StatusBadge>{node.host.authType === 'privateKey' ? '개인 키' : '비밀번호'}</StatusBadge>
               {node.host.hasPasswordHint ? <StatusBadge>저장된 비밀번호</StatusBadge> : null}
               {node.host.hasAuthProfile ? <StatusBadge>인증 프로필</StatusBadge> : null}
@@ -519,17 +528,20 @@ function XshellTreeRenderer({
     const isExpanded = Boolean(searchQuery) || expandedGroupPaths.has(node.path);
 
     return (
-      <div key={node.id} className="xshell-import-dialog__tree-node">
-        <div className="xshell-import-dialog__tree-row xshell-import-dialog__tree-row--group" style={{ paddingLeft: `${depth * 1.1}rem` }}>
+      <div key={node.id} className="grid gap-[0.45rem]">
+        <div
+          className="grid grid-cols-[auto_minmax(0,1fr)] items-start gap-3 rounded-[14px] border border-[var(--border)] bg-[color-mix(in_srgb,var(--dialog-surface)_80%,var(--accent-surface)_20%)] px-[0.8rem] py-[0.75rem]"
+          style={{ paddingLeft: `${depth * 1.1}rem` }}
+        >
           <button
             type="button"
-            className={`icon-button xshell-import-dialog__tree-toggle${isExpanded ? ' is-expanded' : ''}`}
+            className={`inline-grid h-[1.8rem] w-[1.8rem] min-w-[1.8rem] place-items-center rounded-[10px] border border-[var(--border)] bg-[var(--dialog-surface)] text-[0.8rem] transition-transform duration-150 ${isExpanded ? 'rotate-90' : ''}`}
             onClick={() => onToggleExpanded(node.path)}
             aria-label={`${node.name} 그룹 ${isExpanded ? '접기' : '펼치기'}`}
           >
             &gt;
           </button>
-          <label className="xshell-import-dialog__tree-label">
+          <label className="grid min-w-0 grid-cols-[auto_minmax(0,1fr)] items-start gap-3">
             <input
               type="checkbox"
               checked={checked}
@@ -542,19 +554,19 @@ function XshellTreeRenderer({
               onChange={(event) => onToggleGroup(node, event.target.checked)}
               aria-label={`${node.name} 그룹 선택`}
             />
-            <div className="xshell-import-dialog__item-body">
+            <div className="min-w-0">
               <strong>{node.name}</strong>
-              <span>{node.path}</span>
-              <small>{node.hostCount > 0 ? `하위 호스트 ${node.hostCount}개` : '빈 그룹'}</small>
+              <span className="block truncate text-[0.8rem] text-[var(--text-soft)]">{node.path}</span>
+              <small className="block text-[0.8rem] text-[var(--text-soft)]">{node.hostCount > 0 ? `하위 호스트 ${node.hostCount}개` : '빈 그룹'}</small>
             </div>
           </label>
         </div>
         {isExpanded ? (
-          <div className="xshell-import-dialog__tree-children">
+          <div className="grid gap-[0.45rem]">
             {node.children.length > 0 ? (
               node.children.map((child) => renderNode(child, depth + 1, checked))
             ) : (
-              <div className="form-note xshell-import-dialog__tree-empty" style={{ marginLeft: `${(depth + 1) * 1.1}rem` }}>
+              <div className="text-[0.9rem] leading-[1.6] text-[var(--text-soft)]" style={{ marginLeft: `${(depth + 1) * 1.1}rem` }}>
                 이 그룹에는 가져올 호스트가 없습니다.
               </div>
             )}
@@ -666,7 +678,7 @@ export function XshellImportDialog({ open, onClose, onImported }: XshellImportDi
 
   return (
     <DialogBackdrop onDismiss={onClose} dismissDisabled={isAddingFolder || isImporting}>
-      <ModalShell className="xshell-import-dialog" role="dialog" aria-modal="true" aria-labelledby="xshell-import-title">
+      <ModalShell role="dialog" aria-modal="true" aria-labelledby="xshell-import-title" size="xl">
         <ModalHeader>
           <div>
             <SectionLabel>Xshell</SectionLabel>
@@ -677,30 +689,33 @@ export function XshellImportDialog({ open, onClose, onImported }: XshellImportDi
           </IconButton>
         </ModalHeader>
 
-        <ModalBody>
-          {isLoading ? <div className="aws-import-dialog__loading">로컬 Xshell 세션을 읽는 중입니다.</div> : null}
-          {error ? <div className="terminal-error-banner">{error}</div> : null}
+        <ModalBody className="grid gap-4">
+          {isLoading ? (
+            <NoticeCard tone="info">로컬 Xshell 세션을 읽는 중입니다.</NoticeCard>
+          ) : null}
+          {error ? (
+            <NoticeCard tone="danger" role="alert">
+              {error}
+            </NoticeCard>
+          ) : null}
 
           {probe ? renderSourceList(probe.sources) : null}
           {probe ? renderWarningList(probe.warnings) : null}
-          {probe && hasSavedPasswordHosts ? (
-            <div className="form-note">암호화된 비밀번호는 복호화를 시도합니다. 실패하면 호스트만 추가됩니다.</div>
-          ) : null}
+          {probe && hasSavedPasswordHosts ? <div className="text-[0.9rem] leading-[1.6] text-[var(--text-soft)]">암호화된 비밀번호는 복호화를 시도합니다. 실패하면 호스트만 추가됩니다.</div> : null}
 
           {probe ? (
             <>
-              <div className="xshell-import-dialog__controls">
-                <label className="form-field">
-                  <span>검색</span>
+              <FilterRow>
+                <FieldGroup label="검색" className="flex-1">
                   <Input
                     value={searchQuery}
                     onChange={(event) => setSearchQuery(event.target.value)}
                     placeholder="그룹, 호스트, 사용자명, 경로 검색"
                     disabled={isLoading || isAddingFolder}
                   />
-                </label>
+                </FieldGroup>
 
-                <div className="xshell-import-dialog__selection-actions">
+                <div className="flex flex-wrap items-center gap-3">
                   <Button
                     variant="secondary"
                     disabled={isLoading || isAddingFolder}
@@ -778,9 +793,9 @@ export function XshellImportDialog({ open, onClose, onImported }: XshellImportDi
                     전체 선택 해제
                   </Button>
                 </div>
-              </div>
+              </FilterRow>
 
-              <div className="xshell-import-dialog__summary">
+              <div className="flex flex-wrap items-center gap-3 text-[0.84rem] font-medium text-[var(--text-soft)]">
                 <span>소스 {probe.sources.length}</span>
                 <span>트리 항목 {probe.groups.length + probe.hosts.length}</span>
                 <span>선택 항목 {selectedItemCount}</span>
@@ -790,21 +805,24 @@ export function XshellImportDialog({ open, onClose, onImported }: XshellImportDi
                 {probe.skippedDuplicateHostCount > 0 ? <span>세션 중복 제외 {probe.skippedDuplicateHostCount}</span> : null}
               </div>
 
-              <div className="xshell-import-dialog__notes">
-                <div className="form-note">호스트를 선택하면 필요한 상위 그룹은 자동 생성됩니다.</div>
-                <div className="form-note">그룹을 선택하면 하위 그룹과 호스트를 모두 가져옵니다. 빈 그룹도 가져올 수 있습니다.</div>
+              <div className="grid gap-[0.35rem]">
+                <div className="text-[0.9rem] leading-[1.6] text-[var(--text-soft)]">호스트를 선택하면 필요한 상위 그룹은 자동 생성됩니다.</div>
+                <div className="text-[0.9rem] leading-[1.6] text-[var(--text-soft)]">그룹을 선택하면 하위 그룹과 호스트를 모두 가져옵니다. 빈 그룹도 가져올 수 있습니다.</div>
               </div>
 
-              <section className="xshell-import-dialog__section">
+              <section className="grid min-h-0 gap-3">
                 <h4>가져올 항목</h4>
                 {treeNodes.length === 0 ? (
                   <EmptyState
-                    className="xshell-import-dialog__empty"
                     title="현재 조건과 일치하는 Xshell 그룹이나 호스트가 없습니다."
                     description="다른 세션 폴더를 선택하거나 검색어를 바꿔보세요."
                   />
                 ) : (
-                  <div className="xshell-import-dialog__tree" role="tree" aria-label="Xshell 가져오기 항목">
+                  <div
+                    className="flex min-h-0 flex-col gap-2 overflow-y-auto rounded-[18px] border border-[var(--border)] bg-[var(--dialog-surface-muted)] p-[0.45rem]"
+                    role="tree"
+                    aria-label="Xshell 가져오기 항목"
+                  >
                     <XshellTreeRenderer
                       nodes={treeNodes}
                       expandedGroupPaths={new Set(expandedGroupPaths)}

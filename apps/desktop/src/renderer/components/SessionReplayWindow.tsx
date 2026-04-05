@@ -575,19 +575,19 @@ export function SessionReplayWindow({
   }, [applyUntil, recording, resetTerminal]);
 
   return (
-    <div className="session-replay-window">
-      <header className="session-replay-window__header">
+    <div className="grid h-full min-h-0 grid-rows-[auto_auto_auto_minmax(0,1fr)] gap-[0.95rem] bg-[linear-gradient(180deg,color-mix(in_srgb,var(--surface-elevated)_97%,white_3%),color-mix(in_srgb,var(--surface)_96%,var(--app-bg)_4%))] p-[1.1rem] text-[var(--text)]">
+      <header className="flex items-start justify-between gap-4">
         <div>
           <SectionLabel>Session Replay</SectionLabel>
           <strong>{recording?.hostLabel || "세션 Replay"}</strong>
           {recording?.connectionDetails ? (
-            <div className="session-replay-window__subtitle">
+            <div className="mt-[0.3rem] text-[0.9rem] text-[var(--text-soft)]">
               {recording.connectionDetails}
             </div>
           ) : null}
         </div>
         {recording ? (
-          <div className="session-replay-window__badges">
+          <div className="inline-flex flex-wrap gap-2">
             <Badge tone="paused">
               {getConnectionKindLabel(recording.connectionKind)}
             </Badge>
@@ -610,28 +610,28 @@ export function SessionReplayWindow({
 
       {recording ? (
         <>
-          <section className="session-replay-window__summary">
-            <div className="session-replay-window__summary-item">
-              <span>연결 시작</span>
+          <section className="grid grid-cols-[repeat(3,minmax(0,1fr))] gap-[0.85rem]">
+            <div className="flex flex-col gap-[0.22rem] rounded-[18px] border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[color-mix(in_srgb,var(--surface-muted)_88%,transparent_12%)] px-[0.95rem] py-[0.8rem]">
+              <span className="text-[0.8rem] text-[var(--text-soft)]">연결 시작</span>
               <strong>{formatTimestamp(recording.connectedAt)}</strong>
             </div>
-            <div className="session-replay-window__summary-item">
-              <span>연결 종료</span>
+            <div className="flex flex-col gap-[0.22rem] rounded-[18px] border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[color-mix(in_srgb,var(--surface-muted)_88%,transparent_12%)] px-[0.95rem] py-[0.8rem]">
+              <span className="text-[0.8rem] text-[var(--text-soft)]">연결 종료</span>
               <strong>{formatTimestamp(recording.disconnectedAt)}</strong>
             </div>
-            <div className="session-replay-window__summary-item">
-              <span>총 재생 길이</span>
+            <div className="flex flex-col gap-[0.22rem] rounded-[18px] border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[color-mix(in_srgb,var(--surface-muted)_88%,transparent_12%)] px-[0.95rem] py-[0.8rem]">
+              <span className="text-[0.8rem] text-[var(--text-soft)]">총 재생 길이</span>
               <strong>{formatPlaybackDuration(recording.durationMs)}</strong>
             </div>
           </section>
 
-          <section className="session-replay-window__controls">
-            <Button variant="secondary" className="session-replay-window__play-toggle" onClick={togglePlayback}>
+          <section className="grid grid-cols-[auto_minmax(0,1fr)_auto_auto_auto] items-center gap-4 rounded-[24px] border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[linear-gradient(180deg,color-mix(in_srgb,var(--surface-muted)_96%,white_4%),color-mix(in_srgb,var(--surface)_94%,transparent_6%))] px-[1.05rem] py-4 shadow-[inset_0_1px_0_color-mix(in_srgb,white_8%,transparent_92%),0_14px_30px_color-mix(in_srgb,black_10%,transparent_90%)]">
+            <Button variant="secondary" className="w-[6.5rem] justify-center px-0 font-bold" onClick={togglePlayback}>
               {isPlaying ? "Pause" : "Play"}
             </Button>
             <input
               aria-label="Replay scrubber"
-              className="session-replay-window__scrubber"
+              data-replay-scrubber="true"
               style={
                 {
                   "--session-replay-progress": `${progressPercent}%`,
@@ -646,25 +646,25 @@ export function SessionReplayWindow({
                 handleSeek(Number(event.target.value));
               }}
             />
-            <div className="session-replay-window__time">
+            <div className="inline-flex items-center gap-[0.35rem] whitespace-nowrap rounded-full border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[color-mix(in_srgb,var(--surface-strong)_90%,transparent_10%)] px-[0.8rem] py-[0.55rem] text-[0.84rem] text-[var(--text-soft)] [font-variant-numeric:tabular-nums]">
               <span>{formatPlaybackDuration(positionMs)}</span>
               <span>/</span>
               <span>{formatPlaybackDuration(totalDurationMs)}</span>
             </div>
-            <div className="session-replay-window__zoom" aria-label="Replay zoom controls">
+            <div className="inline-flex items-center gap-[0.45rem] rounded-full border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[color-mix(in_srgb,var(--surface-strong)_90%,transparent_10%)] px-[0.45rem] py-[0.35rem]" aria-label="Replay zoom controls">
               <button
                 type="button"
-                className="session-replay-window__zoom-button"
+                className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-[color-mix(in_srgb,var(--surface-muted)_94%,transparent_6%)] text-base font-bold leading-none text-[var(--text)] disabled:cursor-default disabled:opacity-45"
                 aria-label="Zoom out"
                 disabled={zoomPercent <= MIN_REPLAY_ZOOM_PERCENT}
                 onClick={() => handleZoomChange(-REPLAY_ZOOM_STEP_PERCENT)}
               >
                 -
               </button>
-              <span className="session-replay-window__zoom-value">{zoomPercent}%</span>
+              <span className="min-w-[3.1rem] text-center text-[0.82rem] font-bold text-[var(--text-soft)] [font-variant-numeric:tabular-nums]">{zoomPercent}%</span>
               <button
                 type="button"
-                className="session-replay-window__zoom-button"
+                className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-[color-mix(in_srgb,var(--surface-muted)_94%,transparent_6%)] text-base font-bold leading-none text-[var(--text)] disabled:cursor-default disabled:opacity-45"
                 aria-label="Zoom in"
                 disabled={zoomPercent >= MAX_REPLAY_ZOOM_PERCENT}
                 onClick={() => handleZoomChange(REPLAY_ZOOM_STEP_PERCENT)}
@@ -672,10 +672,11 @@ export function SessionReplayWindow({
                 +
               </button>
             </div>
-            <label className="session-replay-window__speed">
-              <span className="session-replay-window__speed-label">속도</span>
+            <label className="inline-flex items-center gap-[0.6rem] text-[0.84rem] text-[var(--text-soft)]">
+              <span className="whitespace-nowrap text-[0.8rem] font-semibold tracking-[0.01em]">속도</span>
               <select
                 aria-label="Replay speed"
+                className="h-[2.8rem] min-w-[5.25rem] rounded-full border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[color-mix(in_srgb,var(--surface-strong)_90%,transparent_10%)] px-[0.95rem] pr-[2.25rem] font-semibold text-[var(--text)] shadow-[inset_0_1px_0_color-mix(in_srgb,white_5%,transparent_95%)]"
                 value={String(playbackSpeed)}
                 onChange={(event) =>
                   setPlaybackSpeed(Number(event.target.value))
@@ -689,9 +690,10 @@ export function SessionReplayWindow({
             </label>
           </section>
 
-          <div className="session-replay-window__terminal-shell">
+          <div className="min-h-0 overflow-auto rounded-[20px] border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[color-mix(in_srgb,var(--surface-strong)_94%,transparent_6%)] p-4">
             <div
-              className="session-replay-window__terminal"
+              data-testid="session-replay-terminal"
+              className="min-h-full min-w-full [&_.xterm]:min-h-full [&_.xterm]:h-full [&_.xterm]:w-full [&_.xterm-viewport]:min-h-full [&_.xterm-viewport]:h-full [&_.xterm-viewport]:w-full [&_.xterm-viewport]:bg-transparent"
               ref={terminalRef}
               style={terminalSurfaceStyle}
             />

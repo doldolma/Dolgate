@@ -494,8 +494,8 @@ describe("SftpWorkspace column resizing", () => {
     const results = screen.getByLabelText("Available hosts for right pane");
 
     expect(results).toBeTruthy();
-    expect(results.querySelector(".group-grid")).toBeTruthy();
-    expect(results.querySelector(".host-grid")).toBeTruthy();
+    expect(results.querySelector('[data-group-grid="true"]')).toBeTruthy();
+    expect(results.querySelector('[data-host-grid="true"]')).toBeTruthy();
     expect(results.contains(screen.getByLabelText("Search hosts"))).toBe(false);
   });
 
@@ -535,7 +535,7 @@ describe("SftpWorkspace column resizing", () => {
       onConnectHost,
     });
 
-    const awsCard = screen.getByText("AWS Linux").closest(".host-browser-card");
+    const awsCard = screen.getByText("AWS Linux").closest('[data-host-card="true"]');
     expect(awsCard).toBeTruthy();
 
     fireEvent.doubleClick(awsCard as HTMLElement);
@@ -556,8 +556,8 @@ describe("SftpWorkspace column resizing", () => {
     });
 
     const results = screen.getByLabelText("Available hosts for right pane");
-    const groupGrid = results.querySelector(".group-grid") as HTMLElement;
-    const hostGrid = results.querySelector(".host-grid") as HTMLElement;
+    const groupGrid = results.querySelector('[data-group-grid="true"]') as HTMLElement;
+    const hostGrid = results.querySelector('[data-host-grid="true"]') as HTMLElement;
 
     setObservedWidth(groupGrid, 1200);
     triggerResize(groupGrid);
@@ -605,7 +605,7 @@ describe("SftpWorkspace column resizing", () => {
       onNavigateHostGroup,
     });
 
-    const groupCard = container.querySelector(".group-grid .group-card");
+    const groupCard = container.querySelector('[data-group-grid="true"] [data-group-card="true"]');
     expect(groupCard).toBeTruthy();
 
     fireEvent.click(groupCard as HTMLElement);
@@ -632,11 +632,11 @@ describe("SftpWorkspace column resizing", () => {
       sftp,
     });
 
-    const awsCard = screen.getByText("AWS Windows").closest(".host-browser-card");
+    const awsCard = screen.getByText("AWS Windows").closest('[data-host-card="true"]');
     expect(awsCard).toBeTruthy();
-    expect(awsCard?.className).toContain("disabled");
+    expect((awsCard as HTMLElement | null)?.dataset.hostCardState).toBe("disabled");
     expect(
-      screen.getByText("Windows 인스턴스는 아직 지원하지 않습니다."),
+      within(awsCard as HTMLElement).getByText("Windows 인스턴스는 아직 지원하지 않습니다."),
     ).toBeTruthy();
   });
 
@@ -715,9 +715,7 @@ describe("SftpWorkspace column resizing", () => {
     expect(screen.getByLabelText("Search hosts")).toBeDisabled();
     expect(screen.getByLabelText("Connecting selected host")).toBeTruthy();
     expect(screen.getByText("Prod SSH 연결 중...")).toBeTruthy();
-    expect(
-      container.querySelector(".host-browser-card.connecting"),
-    ).toBeTruthy();
+    expect(container.querySelector('[data-host-card-state="busy"]')).toBeTruthy();
   });
 
   it("renders AWS SFTP progress details inside the connecting overlay", () => {
@@ -745,6 +743,23 @@ describe("SftpWorkspace column resizing", () => {
     expect(
       screen.getByText("EC2 Instance Connect로 공개 키를 전송하는 중입니다."),
     ).toBeTruthy();
+  });
+
+  it("renders browser warnings, errors, and loading state without legacy table wrappers", () => {
+    const sftp = createSftpState();
+    sftp.leftPane.warningMessages = ["권한이 제한된 항목은 숨겨집니다."];
+    sftp.leftPane.errorMessage = "read failed";
+    sftp.leftPane.isLoading = true;
+
+    const { container } = renderWorkspace({ sftp });
+
+    expect(
+      screen.getByText("권한이 제한된 항목은 숨겨집니다."),
+    ).toBeTruthy();
+    expect(screen.getByText("read failed")).toBeTruthy();
+    expect(screen.getByText("목록을 새로 읽는 중...")).toBeTruthy();
+    expect(container.querySelector(".sftp-table-shell")).toBeNull();
+    expect(container.querySelector(".terminal-warning-banner")).toBeNull();
   });
 
   it("renders endpoint-scoped Warpgate approval UI for SFTP panes", async () => {
@@ -812,6 +827,106 @@ describe("SftpWorkspace column resizing", () => {
     ).toBeTruthy();
   });
 
+  it("renders transfer cards and routes transfer actions without legacy transfer classes", async () => {
+    const sftp = createSftpState();
+    sftp.transfers = [
+      {
+        id: "transfer-running",
+        sourceLabel: "left-alpha.txt",
+        targetLabel: "/remote/left-alpha.txt",
+        itemCount: 1,
+        bytesCompleted: 64,
+        bytesTotal: 128,
+        speedBytesPerSecond: 1024,
+        etaSeconds: 1,
+        status: "running",
+        startedAt: "2026-03-26T10:00:00.000Z",
+        updatedAt: "2026-03-26T10:00:01.000Z",
+      },
+      {
+        id: "transfer-failed",
+        sourceLabel: "/remote/right-beta.txt",
+        targetLabel: "/right/right-beta.txt",
+        itemCount: 1,
+        bytesCompleted: 10,
+        bytesTotal: 128,
+        speedBytesPerSecond: null,
+        etaSeconds: null,
+        status: "failed",
+        startedAt: "2026-03-26T10:00:00.000Z",
+        updatedAt: "2026-03-26T10:00:01.000Z",
+      },
+      {
+        id: "transfer-complete",
+        sourceLabel: "/remote/archive.log",
+        targetLabel: "/right/archive.log",
+        itemCount: 1,
+        bytesCompleted: 128,
+        bytesTotal: 128,
+        speedBytesPerSecond: null,
+        etaSeconds: null,
+        status: "completed",
+        startedAt: "2026-03-26T10:00:00.000Z",
+        updatedAt: "2026-03-26T10:00:01.000Z",
+      },
+    ];
+    const onCancelTransfer = vi.fn().mockResolvedValue(undefined);
+    const onRetryTransfer = vi.fn().mockResolvedValue(undefined);
+    const onDismissTransfer = vi.fn();
+
+    const { container } = renderWorkspace({
+      sftp,
+      onCancelTransfer,
+      onRetryTransfer,
+      onDismissTransfer,
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "취소" }));
+    fireEvent.click(screen.getByRole("button", { name: "재시도" }));
+    const dismissButtons = screen.getAllByRole("button", { name: "닫기" });
+    dismissButtons.forEach((button) => fireEvent.click(button));
+
+    await waitFor(() =>
+      expect(onCancelTransfer).toHaveBeenCalledWith("transfer-running"),
+    );
+    await waitFor(() =>
+      expect(onRetryTransfer).toHaveBeenCalledWith("transfer-failed"),
+    );
+    expect(onDismissTransfer).toHaveBeenCalledWith("transfer-failed");
+    expect(onDismissTransfer).toHaveBeenCalledWith("transfer-complete");
+    expect(container.querySelector(".transfer-card")).toBeNull();
+  });
+
+  it("shows the permissions dialog preview and applies the updated mode", async () => {
+    const sftp = createSftpState();
+    sftp.leftPane.selectedPaths = ["/left/left-alpha.txt"];
+    sftp.rightPane = createHostPickerPane();
+    const onChangeSelectionPermissions = vi.fn().mockResolvedValue(undefined);
+
+    renderWorkspace({
+      sftp,
+      onChangeSelectionPermissions,
+    });
+
+    const contextMenu = openEntryContextMenu("left-alpha.txt");
+    fireEvent.click(
+      within(contextMenu).getByRole("button", { name: "권한 수정" }),
+    );
+
+    expect(screen.getByText(/0644/)).toBeTruthy();
+
+    const checkboxes = screen.getAllByRole("checkbox");
+    fireEvent.click(checkboxes[2] as HTMLElement);
+
+    expect(screen.getByText(/0744/)).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "적용" }));
+
+    await waitFor(() =>
+      expect(onChangeSelectionPermissions).toHaveBeenCalledWith("left", 0o744),
+    );
+  });
+
   it("opens a styled delete dialog and waits for confirmation before deleting", async () => {
     const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
     const sftp = createSftpState();
@@ -851,7 +966,7 @@ describe("SftpWorkspace column resizing", () => {
 
     const contextMenu = openEntryContextMenu("left-alpha.txt");
     fireEvent.click(within(contextMenu).getByRole("button", { name: "삭제" }));
-    const backdrop = container.querySelector(".sftp-modal-backdrop") as HTMLElement;
+    const backdrop = container.querySelector(".modal-backdrop") as HTMLElement;
     fireEvent.pointerDown(backdrop);
     fireEvent.click(backdrop);
 
@@ -908,7 +1023,7 @@ describe("SftpWorkspace column resizing", () => {
       onDismissConflict,
     });
 
-    const backdrop = container.querySelector(".sftp-modal-backdrop") as HTMLElement;
+    const backdrop = container.querySelector(".modal-backdrop") as HTMLElement;
     fireEvent.pointerDown(backdrop);
     fireEvent.click(backdrop);
 

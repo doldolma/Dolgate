@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react';
 import type { HostRecord, SecretMetadataRecord } from '@shared';
 import { HostForm } from './HostForm';
+import { cn } from '../lib/cn';
 import { IconButton, SectionLabel } from '../ui';
 
 interface HostDrawerProps {
@@ -57,8 +58,15 @@ export function HostDrawer({
   }, [mode, onClose, open]);
 
   return (
-    <aside ref={drawerRef} className={`host-drawer ${open ? 'open' : ''}`} aria-hidden={!open}>
-      <div className="host-drawer__header">
+    <aside
+      ref={drawerRef}
+      className={cn(
+        'min-w-0 min-h-0 h-full overflow-hidden border-l border-[var(--border)] bg-[color-mix(in_srgb,var(--surface-strong)_96%,transparent_4%)] opacity-0 translate-x-[18px] transition-[opacity,transform] duration-180',
+        open && 'opacity-100 translate-x-0',
+      )}
+      aria-hidden={!open}
+    >
+      <div className="flex items-center justify-between gap-4 border-b border-[var(--border)] px-[1.4rem] pb-[1rem] pt-[1.4rem]">
         <div>
           <SectionLabel>{mode === 'create' ? 'Create' : 'Edit'}</SectionLabel>
           <h2>{mode === 'create' ? 'New Host' : host?.label ?? 'Host'}</h2>
@@ -68,7 +76,7 @@ export function HostDrawer({
         </IconButton>
       </div>
 
-      <div className="host-drawer__body">
+      <div className="h-[calc(100%-88px)] overflow-auto px-[1.4rem] pb-[1.5rem] pt-[1.2rem]">
         <HostForm
           hideTitle
           host={host}

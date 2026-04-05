@@ -7,7 +7,7 @@ import type {
 } from '@shared';
 import { SESSION_SHARE_CHAT_HISTORY_LIMIT } from '@shared';
 import { useSessionShareChatController } from '../controllers/useSessionShareChatController';
-import { Button, SectionLabel, Textarea } from '../ui';
+import { Button, NoticeCard, SectionLabel, Textarea } from '../ui';
 
 function createInactiveSnapshot(sessionId: string): SessionShareOwnerChatSnapshot {
   return {
@@ -321,13 +321,13 @@ export function SessionShareChatWindow({
   };
 
   return (
-    <div className="session-share-chat-window">
-      <header className="session-share-chat-window__header">
+    <div className="fixed inset-0 box-border flex min-h-0 flex-col gap-[0.95rem] overflow-hidden bg-[linear-gradient(180deg,color-mix(in_srgb,var(--surface-elevated)_97%,white_3%),color-mix(in_srgb,var(--surface)_96%,var(--app-bg)_4%))] p-[1.1rem] text-[var(--text)]">
+      <header className="flex items-start justify-between gap-[0.9rem]">
         <div>
           <SectionLabel>Session Share</SectionLabel>
-          <strong>{snapshot.title || '채팅 기록'}</strong>
+          <strong className="block text-[1.02rem]">{snapshot.title || '채팅 기록'}</strong>
         </div>
-        <span className="session-share-chat-window__status">
+        <span className="whitespace-nowrap text-[0.82rem] text-[var(--text-soft)]">
           {loading
             ? '불러오는 중'
             : isSubmitting
@@ -337,24 +337,23 @@ export function SessionShareChatWindow({
       </header>
 
       {errorMessage || sendErrorMessage ? (
-        <div className="session-share-chat-window__alerts">
+        <div className="grid gap-[0.6rem]">
           {errorMessage ? (
-            <div className="session-share-chat-window__error">{errorMessage}</div>
+            <NoticeCard tone="danger">{errorMessage}</NoticeCard>
           ) : null}
           {sendErrorMessage ? (
-            <div className="session-share-chat-window__error">{sendErrorMessage}</div>
+            <NoticeCard tone="danger">{sendErrorMessage}</NoticeCard>
           ) : null}
         </div>
       ) : null}
 
       <div
-        className="session-share-chat-window__messages"
+        data-testid="session-share-chat-messages"
+        className="grid min-h-0 flex-1 auto-rows-max content-start gap-[0.7rem] overflow-y-auto pr-[0.15rem]"
         aria-live="polite"
       >
         {!loading && snapshot.messages.length === 0 ? (
-          <div className="session-share-chat-window__empty">
-            아직 채팅이 없습니다.
-          </div>
+          <NoticeCard tone="neutral">아직 채팅이 없습니다.</NoticeCard>
         ) : null}
 
         {snapshot.messages.map((message) => {
@@ -364,24 +363,25 @@ export function SessionShareChatWindow({
           return (
             <article
               key={message.id}
-              className={`session-share-chat-window__message ${
+              data-owner-message={senderRole === 'owner' ? 'true' : undefined}
+              className={
                 senderRole === 'owner'
-                  ? 'session-share-chat-window__message--owner'
-                  : ''
-              }`}
+                  ? 'grid gap-[0.4rem] rounded-[20px] border border-[color-mix(in_srgb,var(--accent-strong)_34%,var(--share-border)_66%)] bg-[color-mix(in_srgb,var(--accent-strong)_10%,var(--share-surface)_90%)] px-[0.95rem] py-[0.85rem] shadow-[0_12px_26px_rgba(18,31,47,0.08)]'
+                  : 'grid gap-[0.4rem] rounded-[20px] border border-[var(--share-border)] bg-[var(--share-surface)] px-[0.95rem] py-[0.85rem] shadow-[0_12px_26px_rgba(18,31,47,0.08)]'
+              }
             >
-              <div className="session-share-chat-window__meta">
-                <div className="session-share-chat-window__meta-name">
+              <div className="flex items-baseline justify-between gap-3 text-[0.8rem] text-[var(--share-text-soft)]">
+                <div className="inline-flex min-w-0 items-center gap-[0.45rem]">
                   <strong>{displayNickname}</strong>
                   {senderRole === 'owner' ? (
-                    <span className="session-share-chat-window__role-badge">Owner</span>
+                    <span className="inline-flex items-center justify-center rounded-full border border-[color-mix(in_srgb,var(--accent-strong)_26%,var(--border)_74%)] bg-[color-mix(in_srgb,var(--accent-strong)_14%,transparent_86%)] px-[0.42rem] py-[0.14rem] text-[0.68rem] font-bold uppercase tracking-[0.04em] text-[var(--accent-strong)]">Owner</span>
                   ) : null}
                 </div>
                 <time dateTime={message.sentAt}>
                   {formatChatTimestamp(message.sentAt)}
                 </time>
               </div>
-              <p>{message.text}</p>
+              <p className="m-0 whitespace-pre-wrap break-words text-[0.95rem] leading-[1.45] text-[var(--share-text)]">{message.text}</p>
             </article>
           );
         })}
@@ -389,14 +389,15 @@ export function SessionShareChatWindow({
       </div>
 
       <form
-        className="session-share-chat-window__composer"
+        data-testid="session-share-chat-composer"
+        className="mt-auto grid grid-cols-[minmax(0,1fr)_auto] items-end gap-[0.7rem]"
         onSubmit={(event) => {
           event.preventDefault();
           void handleSubmit();
         }}
       >
-        <label className="session-share-chat-window__composer-field">
-          <span>메시지</span>
+        <label className="grid min-w-0 gap-[0.35rem]">
+          <span className="text-[0.76rem] text-[var(--text-soft)]">메시지</span>
           <Textarea
             ref={textareaRef}
             value={draftMessage}
@@ -428,7 +429,7 @@ export function SessionShareChatWindow({
         <Button
           type="submit"
           variant="primary"
-          className="session-share-chat-window__composer-submit"
+          className="min-w-[4.8rem]"
           disabled={!isChatActive || loading || isSubmitting}
         >
           전송

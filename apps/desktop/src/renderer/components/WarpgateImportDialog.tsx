@@ -15,6 +15,7 @@ import {
   CardMain,
   CardMeta,
   CardTitleRow,
+  FieldGroup,
   Input,
   ModalBody,
   ModalFooter,
@@ -22,6 +23,7 @@ import {
   ModalShell,
   NoticeCard,
   IconButton,
+  PanelSection,
   SectionLabel,
   StatusBadge,
 } from "../ui";
@@ -247,10 +249,10 @@ export function WarpgateImportDialog({
       dismissDisabled={Boolean(savingTargetId)}
     >
       <ModalShell
-        className="warpgate-import-dialog"
         role="dialog"
         aria-modal="true"
         aria-labelledby="warpgate-import-title"
+        size="lg"
       >
         <ModalHeader>
           <div>
@@ -267,20 +269,17 @@ export function WarpgateImportDialog({
           </IconButton>
         </ModalHeader>
 
-        <ModalBody>
-          <div className="form-grid">
-            <label className="form-field">
-              <span>Warpgate URL</span>
-              <Input
-                value={baseUrl}
-                onChange={(event) => setBaseUrl(event.target.value)}
-                placeholder="https://warpgate.example.com"
-              />
-            </label>
-          </div>
+        <ModalBody className="grid gap-4">
+          <FieldGroup label="Warpgate URL">
+            <Input
+              value={baseUrl}
+              onChange={(event) => setBaseUrl(event.target.value)}
+              placeholder="https://warpgate.example.com"
+            />
+          </FieldGroup>
 
           {connectionInfo ? (
-            <div className="form-note">
+            <p className="text-[0.92rem] leading-[1.6] text-[var(--text-soft)]">
               SSH endpoint는 <code>{connectionInfo.sshHost}:{connectionInfo.sshPort}</code>
               로 감지되었습니다.
               {connectionInfo.username ? (
@@ -291,12 +290,11 @@ export function WarpgateImportDialog({
               ) : (
                 <> 로그인 사용자명을 자동으로 확인하지 못해 직접 입력이 필요합니다.</>
               )}
-            </div>
+            </p>
           ) : null}
 
           {connectionInfo && !connectionInfo.username ? (
-            <label className="form-field">
-              <span>Warpgate Username</span>
+            <FieldGroup label="Warpgate Username">
               <Input
                 value={fallbackUsername}
                 onChange={(event) => {
@@ -307,16 +305,16 @@ export function WarpgateImportDialog({
                 }}
                 placeholder="example.user"
               />
-            </label>
+            </FieldGroup>
           ) : null}
 
           {statusMessage ? (
-            <NoticeCard className="warpgate-import-dialog__status-card" title={statusMessage}>
+            <NoticeCard title={statusMessage}>
               {statusDetail ? <p>{statusDetail}</p> : null}
             </NoticeCard>
           ) : null}
 
-          <div className="warpgate-import-dialog__actions">
+          <div className="flex flex-wrap items-center justify-end gap-3">
             {activeAttemptId ? (
               <Button
                 variant="danger"
@@ -363,7 +361,11 @@ export function WarpgateImportDialog({
             </Button>
           </div>
 
-          {error ? <div className="terminal-error-banner">{error}</div> : null}
+          {error ? (
+            <NoticeCard tone="danger" role="alert">
+              {error}
+            </NoticeCard>
+          ) : null}
 
           {targets.length === 0 && !status ? (
             <NoticeCard
@@ -372,7 +374,7 @@ export function WarpgateImportDialog({
           ) : null}
 
           {targets.length > 0 ? (
-            <div className="operations-list">
+            <PanelSection>
               {targets.map((target) => {
                 return (
                   <Card key={target.id}>
@@ -436,7 +438,7 @@ export function WarpgateImportDialog({
                   </Card>
                 );
               })}
-            </div>
+            </PanelSection>
           ) : null}
         </ModalBody>
         <ModalFooter className="justify-start">

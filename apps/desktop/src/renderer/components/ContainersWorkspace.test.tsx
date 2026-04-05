@@ -351,6 +351,23 @@ describe("ContainersWorkspace", () => {
     expect(screen.getByText("2 months")).toBeInTheDocument();
   });
 
+  it("uses a wider summary grid and wraps long overview values inside each card", () => {
+    render(<ContainersWorkspace {...createProps()} />);
+
+    const summaryGrid = screen.getByTestId("containers-overview-summary-grid");
+    expect(summaryGrid.className).toContain(
+      "grid-cols-[repeat(auto-fit,minmax(220px,1fr))]",
+    );
+
+    const idValue = screen.getByTestId("containers-overview-summary-id");
+    expect(idValue.className).toContain("min-w-0");
+    expect(idValue.className).toContain("[overflow-wrap:anywhere]");
+
+    const imageValue = screen.getByTestId("containers-overview-summary-image");
+    expect(imageValue.className).toContain("min-w-0");
+    expect(imageValue.className).toContain("[overflow-wrap:anywhere]");
+  });
+
   it("enables running-container actions from inspect status and keeps remove disabled", () => {
     render(<ContainersWorkspace {...createProps()} />);
 
@@ -565,8 +582,10 @@ describe("ContainersWorkspace", () => {
     expect(screen.getByText("error happened")).toBeInTheDocument();
     expect(screen.queryByText("broker connected")).not.toBeInTheDocument();
     expect(
-      screen.getByText("error happened").closest(".containers-workspace__log-row"),
-    ).toHaveClass("containers-workspace__log-row--match");
+      screen
+        .getByText("error happened")
+        .closest('[data-log-match="true"]'),
+    ).toHaveAttribute("data-log-match", "true");
 
     rerender(
       <ContainersWorkspace
@@ -777,7 +796,7 @@ describe("ContainersWorkspace", () => {
       logsState: "ready" as const,
     };
 
-    const { container } = render(
+    render(
       <ContainersWorkspace
         {...createProps(logsTab)}
         host={host}
@@ -785,8 +804,8 @@ describe("ContainersWorkspace", () => {
       />,
     );
 
-    const logsOutput = container.querySelector(
-      ".containers-workspace__logs-output",
+    const logsOutput = screen.getByTestId(
+      "containers-logs-output",
     ) as HTMLDivElement | null;
     expect(logsOutput).not.toBeNull();
 
@@ -846,7 +865,7 @@ describe("ContainersWorkspace", () => {
       logsState: "ready" as const,
     };
 
-    const { container, rerender } = render(
+    const { rerender } = render(
       <ContainersWorkspace
         {...createProps(initialTab)}
         host={host}
@@ -860,8 +879,8 @@ describe("ContainersWorkspace", () => {
 
     scrollIntoView.mockClear();
 
-    const logsOutput = container.querySelector(
-      ".containers-workspace__logs-output",
+    const logsOutput = screen.getByTestId(
+      "containers-logs-output",
     ) as HTMLDivElement | null;
     expect(logsOutput).not.toBeNull();
 
@@ -970,9 +989,10 @@ describe("ContainersWorkspace", () => {
 
     expect(
       screen.getByText("2026-03-28 18:00:54,613"),
-    ).toHaveClass("containers-workspace__log-segment--yellow");
-    expect(screen.getByText("INFO")).toHaveClass(
-      "containers-workspace__log-segment--green",
+    ).toHaveAttribute("data-ansi-tone", "yellow");
+    expect(screen.getByText("INFO")).toHaveAttribute(
+      "data-ansi-tone",
+      "green",
     );
     expect(
       screen.getByText((content) => content.includes("hello")),

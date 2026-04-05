@@ -1,8 +1,8 @@
-import type { MouseEvent, PointerEvent, ReactNode } from 'react';
+import type { HTMLAttributes, MouseEvent, PointerEvent, ReactNode } from 'react';
 import { useRef } from 'react';
 import { cn } from '../lib/cn';
 
-interface DialogBackdropProps {
+interface DialogBackdropProps extends Omit<HTMLAttributes<HTMLDivElement>, 'children'> {
   children: ReactNode;
   className?: string;
   dismissOnBackdrop?: boolean;
@@ -16,6 +16,7 @@ export function DialogBackdrop({
   dismissOnBackdrop = true,
   dismissDisabled = false,
   onDismiss,
+  ...props
 }: DialogBackdropProps) {
   const pointerStartedOnBackdropRef = useRef(false);
 
@@ -49,6 +50,7 @@ export function DialogBackdrop({
       role="presentation"
       onPointerDownCapture={handlePointerDownCapture}
       onClick={handleClick}
+      {...props}
     >
       {children}
     </div>

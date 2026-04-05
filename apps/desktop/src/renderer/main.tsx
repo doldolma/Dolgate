@@ -4,7 +4,6 @@ import 'xterm/css/xterm.css';
 import 'uplot/dist/uPlot.min.css';
 import './styles/tokens.css';
 import './styles/tailwind.css';
-import './styles/legacy.css';
 import { App } from './App';
 import { SessionReplayWindow } from './components/SessionReplayWindow';
 import { SessionShareChatWindow } from './components/SessionShareChatWindow';

@@ -38,6 +38,7 @@ import type {
   PendingPortForwardInteractiveAuth
 } from '../store/createAppStore';
 import { normalizeErrorMessage } from '../store/utils';
+import { cn } from '../lib/cn';
 import { usePortForwardingPanelController } from '../controllers/usePortForwardingPanelController';
 import {
   Badge,
@@ -49,13 +50,17 @@ import {
   CardMeta,
   CardTitleRow,
   EmptyState,
+  FieldGroup,
   IconButton,
+  Input,
   ModalBody,
   ModalFooter,
   ModalHeader,
   ModalShell,
   NoticeCard,
+  PanelSection,
   SectionLabel,
+  SelectField,
   StatusBadge,
   TabButton,
   Tabs,
@@ -497,11 +502,11 @@ function InteractiveAuthCard({ auth, title, onRespond, onReopenUrl, onClear }: I
         <>
           <p>브라우저에서 Warpgate 로그인과 승인을 마치면 앱이 자동으로 다음 단계를 진행합니다.</p>
           {auth.authCode ? (
-            <p className="terminal-interactive-auth__code">
+            <p className="text-sm text-[var(--text-soft)]">
               인증 코드 <code>{auth.authCode}</code>는 앱이 자동으로 처리합니다.
             </p>
           ) : null}
-          <div className="operations-card__actions mt-3 flex flex-wrap gap-3">
+          <div className="mt-3 flex flex-wrap gap-3">
             {auth.approvalUrl ? (
               <Button type="button" variant="secondary" size="sm" onClick={() => void onReopenUrl()}>
                 브라우저 다시 열기
@@ -516,7 +521,7 @@ function InteractiveAuthCard({ auth, title, onRespond, onReopenUrl, onClear }: I
               <p>이 Warpgate challenge는 자동 입력 형식과 다릅니다. 아래 prompt에 직접 응답해 주세요.</p>
             </NoticeCard>
           )}
-          <pre className="terminal-interactive-auth__raw" style={{ marginTop: 12 }}>
+          <pre className="mt-3 rounded-[12px] bg-[color-mix(in_srgb,var(--surface)_88%,transparent_12%)] px-3 py-2 text-[0.84rem] text-[var(--text-soft)] whitespace-pre-wrap break-words">
             {auth.instruction || '추가 인증이 필요합니다.'}
           </pre>
         </>
@@ -524,7 +529,7 @@ function InteractiveAuthCard({ auth, title, onRespond, onReopenUrl, onClear }: I
         <p>{auth.instruction || '추가 인증이 필요합니다.'}</p>
       )}
       {auth.provider !== 'warpgate' && auth.approvalUrl ? (
-        <div className="operations-card__actions mt-3 flex flex-wrap gap-3">
+        <div className="mt-3 flex flex-wrap gap-3">
           <Button type="button" variant="secondary" size="sm" onClick={() => void onReopenUrl()}>
             브라우저 다시 열기
           </Button>
@@ -534,11 +539,13 @@ function InteractiveAuthCard({ auth, title, onRespond, onReopenUrl, onClear }: I
         </div>
       ) : null}
       {(auth.provider !== 'warpgate' || !warpgateResponses) && auth.prompts.length > 0 ? (
-        <div className="form-grid" style={{ marginTop: 16 }}>
+        <div className="mt-4 grid gap-4">
           {auth.prompts.map((prompt, index) => (
-            <label key={`${auth.challengeId}-${index}`} className="form-field">
-              <span>{prompt.label || `Prompt ${index + 1}`}</span>
-              <input
+            <FieldGroup
+              key={`${auth.challengeId}-${index}`}
+              label={prompt.label || `Prompt ${index + 1}`}
+            >
+              <Input
                 type={prompt.echo ? 'text' : 'password'}
                 value={responses[index] ?? ''}
                 onChange={(event) =>
@@ -548,7 +555,7 @@ function InteractiveAuthCard({ auth, title, onRespond, onReopenUrl, onClear }: I
                   }))
                 }
               />
-            </label>
+            </FieldGroup>
           ))}
           <div className="mt-3 flex items-center justify-end gap-3">
             <Button type="button" variant="secondary" onClick={onClear}>
@@ -593,11 +600,16 @@ function PickerField({
   selectedContent,
 }: PickerFieldProps) {
   return (
-    <div className="form-field port-forward-picker">
-      <span>{label}</span>
+    <FieldGroup label={label} className="relative">
       <button
         type="button"
-        className={`port-forward-picker__trigger ${isOpen ? 'is-open' : ''}`}
+        className={cn(
+          'flex w-full min-h-[var(--port-forward-field-height,88px)] items-center justify-between gap-[0.9rem] rounded-[var(--port-forward-field-radius,20px)] border border-[var(--border)] bg-[var(--dialog-surface-muted)] px-[1.05rem] py-4 text-left text-[var(--text)] transition-[border-color,box-shadow,transform] duration-150',
+          isOpen
+            ? 'border-[color-mix(in_srgb,var(--accent-strong)_34%,var(--border))] shadow-[0_0_0_1px_color-mix(in_srgb,var(--accent-strong)_20%,transparent_80%)]'
+            : 'hover:border-[color-mix(in_srgb,var(--accent-strong)_28%,var(--border))] hover:shadow-[0_10px_24px_rgba(16,26,40,0.08)]',
+          disabled && 'cursor-not-allowed opacity-70 shadow-none',
+        )}
         aria-haspopup="listbox"
         aria-expanded={isOpen}
         aria-label={label}
@@ -607,18 +619,22 @@ function PickerField({
         {selectedContent ? (
           selectedContent
         ) : (
-          <div className="port-forward-picker__placeholder">{placeholder}</div>
+          <div className="text-[var(--text-soft)]">{placeholder}</div>
         )}
-        <span className="port-forward-picker__chevron" aria-hidden="true">
+        <span className="shrink-0 text-[0.9rem] text-[var(--text-soft)]" aria-hidden="true">
           ▾
         </span>
       </button>
       {isOpen ? (
-        <div className="port-forward-picker__popover" role="listbox" aria-label={`${label} options`}>
+        <div
+          className="absolute left-0 right-0 top-[calc(100%+0.45rem)] z-[4] grid max-h-[288px] gap-[0.55rem] overflow-y-auto rounded-[22px] border border-[var(--border)] bg-[color-mix(in_srgb,var(--dialog-surface)_94%,transparent_6%)] p-[0.7rem] shadow-[0_20px_48px_rgba(16,26,40,0.18)]"
+          role="listbox"
+          aria-label={`${label} options`}
+        >
           {children}
         </div>
       ) : null}
-    </div>
+    </FieldGroup>
   );
 }
 
@@ -844,15 +860,18 @@ export function PortForwardingPanel({
     if (isAwsSsmPortForwardRuleRecord(rule)) {
       const host = awsHosts.find((item) => item.id === rule.hostId);
       return (
-        <Card key={rule.id} className="operations-card">
-          <CardMain className="operations-card__main">
-            <CardTitleRow className="operations-card__title-row">
+        <Card
+          key={rule.id}
+          className="items-start max-[760px]:flex-col max-[760px]:items-stretch"
+        >
+          <CardMain>
+            <CardTitleRow>
               <strong>{rule.label}</strong>
               <StatusBadge tone={getRuntimeStatusTone(runtime?.status)}>
                 {statusLabel(runtime)}
               </StatusBadge>
             </CardTitleRow>
-            <CardMeta className="operations-card__meta">
+            <CardMeta>
               <span>AWS EC2</span>
               {runtimeMethodLabel(runtime) ? <span>{runtimeMethodLabel(runtime)}</span> : null}
               <span>
@@ -861,9 +880,9 @@ export function PortForwardingPanel({
               <span>{(runtime?.bindAddress ?? rule.bindAddress) || '127.0.0.1'}:{runtime?.bindPort ?? rule.bindPort}</span>
               <span>{rule.targetKind === 'remote-host' ? `${rule.remoteHost}:${rule.targetPort}` : `instance:${rule.targetPort}`}</span>
             </CardMeta>
-            {runtime?.message ? <CardMessage className="operations-card__message">{runtime.message}</CardMessage> : null}
+            {runtime?.message ? <CardMessage>{runtime.message}</CardMessage> : null}
           </CardMain>
-          <CardActions className="operations-card__actions">
+          <CardActions className="max-[760px]:w-full max-[760px]:[&>*]:flex-1">
             <Button type="button" variant="secondary" size="sm" onClick={() => void (isRunning ? onStop(rule.id) : onStart(rule.id))}>
               {isRunning ? 'Stop' : 'Start'}
             </Button>
@@ -881,15 +900,18 @@ export function PortForwardingPanel({
     if (isEcsTaskPortForwardRuleRecord(rule)) {
       const host = ecsHosts.find((item) => item.id === rule.hostId);
       return (
-        <Card key={rule.id} className="operations-card">
-          <CardMain className="operations-card__main">
-            <CardTitleRow className="operations-card__title-row">
+        <Card
+          key={rule.id}
+          className="items-start max-[760px]:flex-col max-[760px]:items-stretch"
+        >
+          <CardMain>
+            <CardTitleRow>
               <strong>{rule.label}</strong>
               <StatusBadge tone={getRuntimeStatusTone(runtime?.status)}>
                 {statusLabel(runtime)}
               </StatusBadge>
             </CardTitleRow>
-            <CardMeta className="operations-card__meta">
+            <CardMeta>
               <span>ECS Task</span>
               {runtimeMethodLabel(runtime) ? <span>{runtimeMethodLabel(runtime)}</span> : null}
               <span>
@@ -901,9 +923,9 @@ export function PortForwardingPanel({
               <span>{runtime?.bindAddress ?? '127.0.0.1'}:{(runtime?.bindPort ?? rule.bindPort) || 'auto'}</span>
               <span>127.0.0.1:{rule.targetPort}</span>
             </CardMeta>
-            {runtime?.message ? <CardMessage className="operations-card__message">{runtime.message}</CardMessage> : null}
+            {runtime?.message ? <CardMessage>{runtime.message}</CardMessage> : null}
           </CardMain>
-          <CardActions className="operations-card__actions">
+          <CardActions className="max-[760px]:w-full max-[760px]:[&>*]:flex-1">
             <Button type="button" variant="secondary" size="sm" onClick={() => void (isRunning ? onStop(rule.id) : onStart(rule.id))}>
               {isRunning ? 'Stop' : 'Start'}
             </Button>
@@ -921,15 +943,18 @@ export function PortForwardingPanel({
     if (isContainerPortForwardRuleRecord(rule)) {
       const host = containerHosts.find((item) => item.id === rule.hostId);
       return (
-        <Card key={rule.id} className="operations-card">
-          <CardMain className="operations-card__main">
-            <CardTitleRow className="operations-card__title-row">
+        <Card
+          key={rule.id}
+          className="items-start max-[760px]:flex-col max-[760px]:items-stretch"
+        >
+          <CardMain>
+            <CardTitleRow>
               <strong>{rule.label}</strong>
               <StatusBadge tone={getRuntimeStatusTone(runtime?.status)}>
                 {statusLabel(runtime)}
               </StatusBadge>
             </CardTitleRow>
-            <CardMeta className="operations-card__meta">
+            <CardMeta>
               <span>Container</span>
               {runtimeMethodLabel(runtime) ? <span>{runtimeMethodLabel(runtime)}</span> : null}
               <span>{host ? host.label : 'Unknown host'}</span>
@@ -937,9 +962,9 @@ export function PortForwardingPanel({
               <span>{runtime?.bindAddress ?? '127.0.0.1'}:{(runtime?.bindPort ?? rule.bindPort) || 'auto'}</span>
               <span>{rule.networkName}:{rule.targetPort}</span>
             </CardMeta>
-            {runtime?.message ? <CardMessage className="operations-card__message">{runtime.message}</CardMessage> : null}
+            {runtime?.message ? <CardMessage>{runtime.message}</CardMessage> : null}
           </CardMain>
-          <CardActions className="operations-card__actions">
+          <CardActions className="max-[760px]:w-full max-[760px]:[&>*]:flex-1">
             <Button type="button" variant="secondary" size="sm" onClick={() => void (isRunning ? onStop(rule.id) : onStart(rule.id))}>
               {isRunning ? 'Stop' : 'Start'}
             </Button>
@@ -956,24 +981,27 @@ export function PortForwardingPanel({
 
     const host = sshHosts.find((item) => item.id === rule.hostId);
     return (
-      <Card key={rule.id} className="operations-card">
-        <CardMain className="operations-card__main">
-          <CardTitleRow className="operations-card__title-row">
+      <Card
+        key={rule.id}
+        className="items-start max-[760px]:flex-col max-[760px]:items-stretch"
+      >
+        <CardMain>
+          <CardTitleRow>
             <strong>{rule.label}</strong>
             <StatusBadge tone={getRuntimeStatusTone(runtime?.status)}>
               {statusLabel(runtime)}
             </StatusBadge>
           </CardTitleRow>
-          <CardMeta className="operations-card__meta">
+          <CardMeta>
             <span>{rule.mode.toUpperCase()}</span>
             {runtimeMethodLabel(runtime) ? <span>{runtimeMethodLabel(runtime)}</span> : null}
             <span>{host ? `${host.label} (${host.hostname})` : 'Unknown SSH host'}</span>
             <span>{rule.bindAddress}:{runtime?.bindPort ?? rule.bindPort}</span>
             <span>{rule.mode === 'dynamic' ? 'SOCKS5' : `${rule.targetHost}:${rule.targetPort}`}</span>
           </CardMeta>
-          {runtime?.message ? <CardMessage className="operations-card__message">{runtime.message}</CardMessage> : null}
+          {runtime?.message ? <CardMessage>{runtime.message}</CardMessage> : null}
         </CardMain>
-        <CardActions className="operations-card__actions">
+        <CardActions className="max-[760px]:w-full max-[760px]:[&>*]:flex-1">
           <Button type="button" variant="secondary" size="sm" onClick={() => void (isRunning ? onStop(rule.id) : onStart(rule.id))}>
             {isRunning ? 'Stop' : 'Start'}
           </Button>
@@ -996,16 +1024,19 @@ export function PortForwardingPanel({
     targetPort,
   }: EcsEphemeralRuntimeCard) {
     return (
-      <Card key={runtime.ruleId} className="operations-card">
-        <CardMain className="operations-card__main">
-          <CardTitleRow className="operations-card__title-row">
+      <Card
+        key={runtime.ruleId}
+        className="items-start max-[760px]:flex-col max-[760px]:items-stretch"
+      >
+        <CardMain>
+          <CardTitleRow>
             <strong>{serviceName}</strong>
             <Badge>Ephemeral</Badge>
             <StatusBadge tone={getRuntimeStatusTone(runtime.status)}>
               {statusLabel(runtime)}
             </StatusBadge>
           </CardTitleRow>
-          <CardMeta className="operations-card__meta">
+          <CardMeta>
             <span>ECS Task</span>
             {runtimeMethodLabel(runtime) ? <span>{runtimeMethodLabel(runtime)}</span> : null}
             <span>
@@ -1017,9 +1048,9 @@ export function PortForwardingPanel({
             <span>{runtime.bindAddress}:{runtime.bindPort}</span>
             <span>127.0.0.1:{targetPort}</span>
           </CardMeta>
-          {runtime.message ? <CardMessage className="operations-card__message">{runtime.message}</CardMessage> : null}
+          {runtime.message ? <CardMessage>{runtime.message}</CardMessage> : null}
         </CardMain>
-        <CardActions className="operations-card__actions">
+        <CardActions className="max-[760px]:w-full max-[760px]:[&>*]:flex-1">
           <Button type="button" variant="secondary" size="sm" onClick={() => void onStop(runtime.ruleId)}>
             Stop
           </Button>
@@ -1036,16 +1067,19 @@ export function PortForwardingPanel({
     targetPort,
   }: ContainerEphemeralRuntimeCard) {
     return (
-      <Card key={runtime.ruleId} className="operations-card">
-        <CardMain className="operations-card__main">
-          <CardTitleRow className="operations-card__title-row">
+      <Card
+        key={runtime.ruleId}
+        className="items-start max-[760px]:flex-col max-[760px]:items-stretch"
+      >
+        <CardMain>
+          <CardTitleRow>
             <strong>{containerName}</strong>
             <Badge>Ephemeral</Badge>
             <StatusBadge tone={getRuntimeStatusTone(runtime.status)}>
               {statusLabel(runtime)}
             </StatusBadge>
           </CardTitleRow>
-          <CardMeta className="operations-card__meta">
+          <CardMeta>
             <span>Container</span>
             {runtimeMethodLabel(runtime) ? <span>{runtimeMethodLabel(runtime)}</span> : null}
             <span>{host?.label ?? 'Unknown host'}</span>
@@ -1053,9 +1087,9 @@ export function PortForwardingPanel({
             <span>{runtime.bindAddress}:{runtime.bindPort}</span>
             <span>{networkName}:{targetPort}</span>
           </CardMeta>
-          {runtime.message ? <CardMessage className="operations-card__message">{runtime.message}</CardMessage> : null}
+          {runtime.message ? <CardMessage>{runtime.message}</CardMessage> : null}
         </CardMain>
-        <CardActions className="operations-card__actions">
+        <CardActions className="max-[760px]:w-full max-[760px]:[&>*]:flex-1">
           <Button type="button" variant="secondary" size="sm" onClick={() => void onStop(runtime.ruleId)}>
             Stop
           </Button>
@@ -1733,11 +1767,11 @@ export function PortForwardingPanel({
         </TabButton>
       </Tabs>
 
-      <div className="operations-list">
+      <PanelSection>
         {activeTab === 'dns' && dnsToggleError ? (
-          <div className="terminal-error-banner" role="alert">
+          <NoticeCard tone="danger" role="alert">
             {dnsToggleError}
-          </div>
+          </NoticeCard>
         ) : null}
         {activeTab === 'dns' ? (
           !hasVisibleEntries ? (
@@ -1752,16 +1786,19 @@ export function PortForwardingPanel({
               const isStatic = isStaticDnsOverrideRecord(override);
 
               return (
-                <Card key={override.id} className="operations-card">
-                  <CardMain className="operations-card__main">
-                    <CardTitleRow className="operations-card__title-row">
+                <Card
+                  key={override.id}
+                  className="items-start max-[760px]:flex-col max-[760px]:items-stretch"
+                >
+                  <CardMain>
+                    <CardTitleRow>
                       <strong>{override.hostname}</strong>
                       <Badge>{isStatic ? 'Static' : 'Linked'}</Badge>
                       <StatusBadge tone={getRuntimeStatusTone(isStatic ? (override.status === 'active' ? 'running' : 'stopped') : runtime?.status)}>
                         {isStatic ? (override.status === 'active' ? 'On' : 'Off') : statusLabel(runtime)}
                       </StatusBadge>
                     </CardTitleRow>
-                    <CardMeta className="operations-card__meta">
+                    <CardMeta>
                       <span>Hosts file</span>
                       <span>{isStatic ? 'Static IP' : rule?.label ?? 'Linked rule missing'}</span>
                       <span>
@@ -1770,9 +1807,9 @@ export function PortForwardingPanel({
                           : `${runtime?.bindAddress ?? rule?.bindAddress ?? '127.0.0.1'}:${runtime?.bindPort ?? rule?.bindPort ?? 0}`}
                       </span>
                     </CardMeta>
-                    {!isStatic && runtime?.message ? <CardMessage className="operations-card__message">{runtime.message}</CardMessage> : null}
+                    {!isStatic && runtime?.message ? <CardMessage>{runtime.message}</CardMessage> : null}
                   </CardMain>
-                  <CardActions className="operations-card__actions">
+                  <CardActions className="max-[760px]:w-full max-[760px]:[&>*]:flex-1">
                     {rule ? (
                       <Button type="button" variant="secondary" size="sm" onClick={() => void (isRunning ? onStop(rule.id) : onStart(rule.id))}>
                         {isRunning ? 'Stop' : 'Start'}
@@ -1805,16 +1842,16 @@ export function PortForwardingPanel({
         ) : (
           <>
             {activeTab === 'ecs-task' && visibleEcsEphemeralRuntimes.length > 0 ? (
-              <section className="operations-section">
-                <div className="operations-section__title">Running tunnels</div>
+              <section className="flex flex-col gap-[0.9rem]">
+                <SectionLabel className="m-0">Running tunnels</SectionLabel>
                 {visibleEcsEphemeralRuntimes.map(renderEcsEphemeralRuntimeCard)}
               </section>
             ) : null}
 
             {activeTab === 'container' &&
             visibleContainerEphemeralRuntimes.length > 0 ? (
-              <section className="operations-section">
-                <div className="operations-section__title">Running tunnels</div>
+              <section className="flex flex-col gap-[0.9rem]">
+                <SectionLabel className="m-0">Running tunnels</SectionLabel>
                 {visibleContainerEphemeralRuntimes.map(
                   renderContainerEphemeralRuntimeCard,
                 )}
@@ -1822,26 +1859,26 @@ export function PortForwardingPanel({
             ) : null}
 
             {visibleRules.length > 0 ? (
-              <section className="operations-section">
+              <section className="flex flex-col gap-[0.9rem]">
                 {activeTab === 'ecs-task' || activeTab === 'container' ? (
-                  <div className="operations-section__title">Saved rules</div>
+                  <SectionLabel className="m-0">Saved rules</SectionLabel>
                 ) : null}
                 {visibleRules.map(renderRuleCard)}
               </section>
             ) : null}
           </>
         )}
-      </div>
+      </PanelSection>
 
       {isModalOpen ? (
         <DialogBackdrop onDismiss={() => void closeModal()} dismissDisabled={isSubmitting}>
           <ModalShell
-            className={`port-forwarding-modal ${isContainerPortForwardDraft(draft) ? 'port-forwarding-modal--container' : ''}`}
+            size={isContainerPortForwardDraft(draft) ? 'lg' : 'md'}
             role="dialog"
             aria-modal="true"
             aria-labelledby="port-forward-title"
           >
-            <ModalHeader className="port-forwarding-modal__header">
+            <ModalHeader>
               <div>
                 <SectionLabel>Forwarding</SectionLabel>
                 <h3 id="port-forward-title" className="mt-2">
@@ -1865,11 +1902,10 @@ export function PortForwardingPanel({
               </IconButton>
             </ModalHeader>
 
-            <ModalBody className="port-forwarding-modal__body form-grid">
+            <ModalBody className="grid gap-4">
               {activeTab === 'dns' ? (
                 <>
-                  <label className="form-field">
-                    <span>Override type</span>
+                  <FieldGroup label="Override type">
                     <select
                       value={dnsDraft.type}
                       onChange={(event) => setDnsDraftType(event.target.value === 'static' ? 'static' : 'linked')}
@@ -1878,21 +1914,19 @@ export function PortForwardingPanel({
                       <option value="linked">Linked</option>
                       <option value="static">Static</option>
                     </select>
-                  </label>
+                  </FieldGroup>
 
-                  <label className="form-field">
-                    <span>Hostname</span>
+                  <FieldGroup label="Hostname">
                     <input
                       value={dnsDraft.hostname}
                       onChange={(event) => setDnsDraft((current) => ({ ...current, hostname: event.target.value }))}
                       disabled={isSubmitting}
                     />
-                  </label>
+                  </FieldGroup>
 
                   {isLinkedDnsOverrideDraft(dnsDraft) ? (
                     <>
-                      <label className="form-field">
-                        <span>Linked rule</span>
+                      <FieldGroup label="Linked rule">
                         <select
                           value={dnsDraft.portForwardRuleId}
                           onChange={(event) =>
@@ -1911,17 +1945,15 @@ export function PortForwardingPanel({
                             </option>
                           ))}
                         </select>
-                      </label>
+                      </FieldGroup>
 
-                      <label className="form-field">
-                        <span>Loopback target</span>
+                      <FieldGroup label="Loopback target">
                         <input value={selectedDnsRule ? `${selectedDnsRule.bindAddress}:${selectedDnsRule.bindPort}` : ''} disabled readOnly />
-                      </label>
+                      </FieldGroup>
                     </>
                   ) : (
                     <>
-                      <label className="form-field">
-                        <span>IP Address</span>
+                      <FieldGroup label="IP Address">
                         <input
                           value={dnsDraft.address}
                           onChange={(event) =>
@@ -1933,18 +1965,17 @@ export function PortForwardingPanel({
                           }
                           disabled={isSubmitting}
                         />
-                      </label>
+                      </FieldGroup>
                     </>
                   )}
 
-                  {error ? <div className="form-error">{error}</div> : null}
+                  {error ? <p className="text-[0.88rem] text-[var(--danger-text)]">{error}</p> : null}
                 </>
               ) : (
                 <>
-                  <label className="form-field">
-                    <span>Label</span>
+                  <FieldGroup label="Label">
                     <input value={draft.label} onChange={(event) => setDraft((current) => ({ ...current, label: event.target.value }))} disabled={isSubmitting} />
-                  </label>
+                  </FieldGroup>
 
               {isContainerPortForwardDraft(draft) ? (
                 <div ref={hostPickerRef}>
@@ -1962,12 +1993,18 @@ export function PortForwardingPanel({
                     }}
                     selectedContent={
                       discoveryHost ? (
-                        <div className="port-forward-picker__selection">
-                          <div className="port-forward-picker__selection-main">
-                            <strong>{discoveryHost.label}</strong>
-                            <span>{getContainerHostSecondaryLabel(discoveryHost)}</span>
+                        <div className="flex min-w-0 items-center justify-between gap-[0.85rem]">
+                          <div className="min-w-0 grid gap-[0.18rem]">
+                            <strong className="text-[1rem] text-[var(--text)]">
+                              {discoveryHost.label}
+                            </strong>
+                            <span className="truncate text-[0.84rem] text-[var(--text-soft)]">
+                              {getContainerHostSecondaryLabel(discoveryHost)}
+                            </span>
                           </div>
-                          <span className="port-forward-picker__kind-badge">{getContainerHostKindLabel(discoveryHost)}</span>
+                          <Badge className="shrink-0">
+                            {getContainerHostKindLabel(discoveryHost)}
+                          </Badge>
                         </div>
                       ) : undefined
                     }
@@ -1978,7 +2015,11 @@ export function PortForwardingPanel({
                         type="button"
                         role="option"
                         aria-selected={draft.hostId === host.id}
-                        className={`port-forward-picker__option-card ${draft.hostId === host.id ? 'is-selected' : ''}`}
+                        className={cn(
+                          'flex w-full items-center justify-between gap-[0.85rem] rounded-[18px] border border-[var(--border)] bg-[color-mix(in_srgb,var(--dialog-surface-muted)_88%,transparent_12%)] px-[0.95rem] py-[0.9rem] text-left transition-[border-color,background,transform] duration-150 hover:border-[color-mix(in_srgb,var(--accent-strong)_30%,var(--border))] hover:bg-[color-mix(in_srgb,var(--dialog-surface)_84%,var(--accent-strong)_16%)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[color-mix(in_srgb,var(--accent-strong)_45%,white_55%)] focus-visible:outline-offset-2',
+                          draft.hostId === host.id &&
+                            'border-[color-mix(in_srgb,var(--accent-strong)_38%,var(--border))] bg-[color-mix(in_srgb,var(--dialog-surface)_76%,var(--accent-strong)_24%)] shadow-[0_0_0_1px_color-mix(in_srgb,var(--accent-strong)_18%,transparent_82%)]',
+                        )}
                         onClick={() => {
                           setIsHostPickerOpen(false);
                           setDraft((current) => {
@@ -1996,18 +2037,23 @@ export function PortForwardingPanel({
                           });
                         }}
                       >
-                        <div className="port-forward-picker__option-main">
-                          <strong>{host.label}</strong>
-                          <span>{getContainerHostSecondaryLabel(host)}</span>
+                        <div className="min-w-0 grid gap-[0.18rem]">
+                          <strong className="text-[1rem] text-[var(--text)]">
+                            {host.label}
+                          </strong>
+                          <span className="truncate text-[0.84rem] text-[var(--text-soft)]">
+                            {getContainerHostSecondaryLabel(host)}
+                          </span>
                         </div>
-                        <span className="port-forward-picker__kind-badge">{getContainerHostKindLabel(host)}</span>
+                        <Badge className="shrink-0">
+                          {getContainerHostKindLabel(host)}
+                        </Badge>
                       </button>
                     ))}
                   </PickerField>
                 </div>
               ) : (
-                <label className="form-field">
-                  <span>{isAwsSsmPortForwardDraft(draft) ? 'AWS EC2 Host' : isEcsTaskPortForwardDraft(draft) ? 'AWS ECS Host' : 'Host'}</span>
+                <FieldGroup label={isAwsSsmPortForwardDraft(draft) ? 'AWS EC2 Host' : isEcsTaskPortForwardDraft(draft) ? 'AWS ECS Host' : 'Host'}>
                   <select
                     value={draft.hostId}
                     onChange={(event) => {
@@ -2041,7 +2087,7 @@ export function PortForwardingPanel({
                       </option>
                     ))}
                   </select>
-                </label>
+                </FieldGroup>
               )}
 
               {isContainerPortForwardDraft(draft) ? (
@@ -2077,14 +2123,18 @@ export function PortForwardingPanel({
                       }}
                       selectedContent={
                         selectedContainerSummary ? (
-                          <div className="port-forward-picker__selection">
-                            <div className="port-forward-picker__selection-main">
-                              <strong>{selectedContainerSummary.name}</strong>
-                              <span>{shortenContainerImage(selectedContainerSummary.image)}</span>
+                          <div className="flex min-w-0 items-center justify-between gap-[0.85rem]">
+                            <div className="min-w-0 grid gap-[0.18rem]">
+                              <strong className="text-[1rem] text-[var(--text)]">
+                                {selectedContainerSummary.name}
+                              </strong>
+                              <span className="truncate text-[0.84rem] text-[var(--text-soft)]">
+                                {shortenContainerImage(selectedContainerSummary.image)}
+                              </span>
                             </div>
                             <StatusBadge
                               tone={getDiscoveryContainerStatusPresentation(selectedContainerSummary.status).tone}
-                              className="port-forward-picker__status-badge"
+                              className="shrink-0"
                             >
                               {getDiscoveryContainerStatusPresentation(selectedContainerSummary.status).label}
                             </StatusBadge>
@@ -2100,7 +2150,11 @@ export function PortForwardingPanel({
                             type="button"
                             role="option"
                             aria-selected={draft.containerId === container.id}
-                            className={`port-forward-picker__option-card ${draft.containerId === container.id ? 'is-selected' : ''}`}
+                            className={cn(
+                              'flex w-full items-center justify-between gap-[0.85rem] rounded-[18px] border border-[var(--border)] bg-[color-mix(in_srgb,var(--dialog-surface-muted)_88%,transparent_12%)] px-[0.95rem] py-[0.9rem] text-left transition-[border-color,background,transform] duration-150 hover:border-[color-mix(in_srgb,var(--accent-strong)_30%,var(--border))] hover:bg-[color-mix(in_srgb,var(--dialog-surface)_84%,var(--accent-strong)_16%)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[color-mix(in_srgb,var(--accent-strong)_45%,white_55%)] focus-visible:outline-offset-2',
+                              draft.containerId === container.id &&
+                                'border-[color-mix(in_srgb,var(--accent-strong)_38%,var(--border))] bg-[color-mix(in_srgb,var(--dialog-surface)_76%,var(--accent-strong)_24%)] shadow-[0_0_0_1px_color-mix(in_srgb,var(--accent-strong)_18%,transparent_82%)]',
+                            )}
                             onClick={() => {
                               setIsContainerPickerOpen(false);
                               setDraft((current) =>
@@ -2115,13 +2169,17 @@ export function PortForwardingPanel({
                               );
                             }}
                           >
-                            <div className="port-forward-picker__option-main">
-                              <strong>{container.name}</strong>
-                              <span>{shortenContainerImage(container.image)}</span>
+                            <div className="min-w-0 grid gap-[0.18rem]">
+                              <strong className="text-[1rem] text-[var(--text)]">
+                                {container.name}
+                              </strong>
+                              <span className="truncate text-[0.84rem] text-[var(--text-soft)]">
+                                {shortenContainerImage(container.image)}
+                              </span>
                             </div>
                             <StatusBadge
                               tone={statusPresentation.tone}
-                              className="port-forward-picker__status-badge"
+                              className="shrink-0"
                             >
                               {statusPresentation.label}
                             </StatusBadge>
@@ -2132,11 +2190,10 @@ export function PortForwardingPanel({
                   </div>
 
                   {availableNetworks.length > 1 ? (
-                    <label className="form-field">
-                      <span>Network</span>
-                      <div className="port-forward-native-select">
-                        <select
-                          className="port-forward-native-select__control"
+                    <FieldGroup label="Network">
+                      <div className="relative">
+                        <SelectField
+                          className="min-h-[5.5rem] rounded-[20px] bg-[var(--dialog-surface-muted)] px-[1.05rem] pr-11"
                           value={draft.networkName}
                           onChange={(event) =>
                             setDraft((current) =>
@@ -2156,19 +2213,18 @@ export function PortForwardingPanel({
                               {network.ipAddress ? `${network.name} (${network.ipAddress})` : `${network.name} (IP 확인 대기)`}
                             </option>
                           ))}
-                        </select>
-                        <span className="port-forward-native-select__chevron" aria-hidden="true">
+                        </SelectField>
+                        <span className="pointer-events-none absolute right-4 top-1/2 -translate-y-1/2 text-[0.9rem] text-[var(--text-soft)]" aria-hidden="true">
                           ▾
                         </span>
                       </div>
-                    </label>
+                    </FieldGroup>
                   ) : null}
 
-                  <label className="form-field">
-                    <span>Container port</span>
-                    <div className="port-forward-native-select">
-                      <select
-                        className="port-forward-native-select__control"
+                  <FieldGroup label="Container port">
+                    <div className="relative">
+                      <SelectField
+                        className="min-h-[5.5rem] rounded-[20px] bg-[var(--dialog-surface-muted)] px-[1.05rem] pr-11"
                         value={draft.targetPort || ''}
                         onChange={(event) =>
                           setDraft((current) =>
@@ -2188,22 +2244,25 @@ export function PortForwardingPanel({
                             {port.containerPort}/tcp
                           </option>
                         ))}
-                      </select>
-                      <span className="port-forward-native-select__chevron" aria-hidden="true">
+                      </SelectField>
+                      <span className="pointer-events-none absolute right-4 top-1/2 -translate-y-1/2 text-[0.9rem] text-[var(--text-soft)]" aria-hidden="true">
                         ▾
                       </span>
                     </div>
-                  </label>
+                  </FieldGroup>
 
-                  <label className="form-field">
-                    <span>Local port</span>
-                    <div className="port-forward-local-port">
+                  <FieldGroup label="Local port">
+                    <div className="grid gap-3">
                       <button
                         type="button"
                         role="switch"
                         aria-checked={isAutoLocalPort}
                         aria-label="Auto (random)"
-                        className={`port-forward-toggle ${isAutoLocalPort ? 'is-active' : ''}`}
+                        className={cn(
+                          'flex w-full items-center gap-[0.9rem] rounded-[20px] border border-[var(--border)] bg-[color-mix(in_srgb,var(--dialog-surface-muted)_88%,transparent_12%)] px-4 py-[0.9rem] text-left text-[var(--text)] transition-[border-color,box-shadow,background] duration-150 hover:border-[color-mix(in_srgb,var(--accent-strong)_28%,var(--border))] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[color-mix(in_srgb,var(--accent-strong)_50%,white_50%)] focus-visible:outline-offset-2',
+                          isAutoLocalPort &&
+                            'border-[color-mix(in_srgb,var(--accent-strong)_32%,var(--border))] bg-[color-mix(in_srgb,var(--accent-strong)_11%,var(--dialog-surface-muted)_89%)]',
+                        )}
                         onClick={() =>
                           setDraft((current) =>
                             isContainerPortForwardDraft(current)
@@ -2216,17 +2275,33 @@ export function PortForwardingPanel({
                         }
                         disabled={isSubmitting}
                       >
-                        <span className="port-forward-toggle__track" aria-hidden="true">
-                          <span className="port-forward-toggle__thumb" />
+                        <span
+                          className={cn(
+                            'relative h-[1.8rem] w-12 shrink-0 rounded-full bg-[color-mix(in_srgb,var(--text-soft)_22%,transparent_78%)] transition-colors duration-150',
+                            isAutoLocalPort &&
+                              'bg-[color-mix(in_srgb,var(--accent-strong)_72%,transparent_28%)]',
+                          )}
+                          aria-hidden="true"
+                        >
+                          <span
+                            className={cn(
+                              'absolute left-[0.18rem] top-[0.18rem] h-[1.44rem] w-[1.44rem] rounded-full bg-white shadow-[0_6px_14px_rgba(16,26,40,0.2)] transition-transform duration-150',
+                              isAutoLocalPort && 'translate-x-[1.18rem]',
+                            )}
+                          />
                         </span>
-                        <span className="port-forward-toggle__content">
-                          <strong>Auto (random)</strong>
-                          <span>사용 가능한 로컬 포트를 자동으로 할당합니다.</span>
+                        <span className="grid gap-[0.18rem]">
+                          <strong className="text-[0.94rem] text-[var(--text)]">
+                            Auto (random)
+                          </strong>
+                          <span className="text-[0.81rem] leading-[1.45] text-[var(--text-soft)]">
+                            사용 가능한 로컬 포트를 자동으로 할당합니다.
+                          </span>
                         </span>
                       </button>
-                      <input
+                      <Input
                         type="number"
-                        className="port-forward-local-port__input"
+                        className="bg-[var(--dialog-surface-muted)]"
                         value={isAutoLocalPort ? '' : draft.bindPort}
                         onChange={(event) =>
                           setDraft((current) =>
@@ -2242,9 +2317,9 @@ export function PortForwardingPanel({
                         placeholder={isAutoLocalPort ? '자동 할당' : '9000'}
                       />
                     </div>
-                  </label>
+                  </FieldGroup>
 
-                  {discoveryError ? <div className="form-error">{discoveryError}</div> : null}
+                  {discoveryError ? <p className="text-[0.88rem] text-[var(--danger-text)]">{discoveryError}</p> : null}
                   {discoveryDetailsLoading ? (
                     <NoticeCard>
                       <p>컨테이너 상세 정보를 불러오는 중입니다.</p>
@@ -2270,8 +2345,7 @@ export function PortForwardingPanel({
                 </>
               ) : isSshPortForwardDraft(draft) ? (
                 <>
-                  <label className="form-field">
-                    <span>Mode</span>
+                  <FieldGroup label="Mode">
                     <select
                       value={draft.mode}
                       onChange={(event) =>
@@ -2286,10 +2360,9 @@ export function PortForwardingPanel({
                       <option value="remote">Remote</option>
                       <option value="dynamic">Dynamic</option>
                     </select>
-                  </label>
+                  </FieldGroup>
 
-                  <label className="form-field">
-                    <span>Bind address</span>
+                  <FieldGroup label="Bind address">
                     <input
                       value={draft.bindAddress}
                       onChange={(event) =>
@@ -2300,12 +2373,11 @@ export function PortForwardingPanel({
                       }
                       disabled={isSubmitting}
                     />
-                  </label>
+                  </FieldGroup>
                 </>
               ) : isEcsTaskPortForwardDraft(draft) ? (
                 <>
-                  <label className="form-field">
-                    <span>Service</span>
+                  <FieldGroup label="Service">
                     <select
                       value={draft.serviceName}
                       onChange={(event) =>
@@ -2329,10 +2401,9 @@ export function PortForwardingPanel({
                         </option>
                       ))}
                     </select>
-                  </label>
+                  </FieldGroup>
 
-                  <label className="form-field">
-                    <span>Container</span>
+                  <FieldGroup label="Container">
                     <select
                       value={draft.containerName}
                       onChange={(event) =>
@@ -2358,10 +2429,9 @@ export function PortForwardingPanel({
                         </option>
                       ))}
                     </select>
-                  </label>
+                  </FieldGroup>
 
-                  <label className="form-field">
-                    <span>Container port</span>
+                  <FieldGroup label="Container port">
                     <select
                       value={draft.targetPort || ''}
                       onChange={(event) =>
@@ -2383,17 +2453,20 @@ export function PortForwardingPanel({
                         </option>
                       ))}
                     </select>
-                  </label>
+                  </FieldGroup>
 
-                  <label className="form-field">
-                    <span>Local port</span>
-                    <div className="port-forward-local-port">
+                  <FieldGroup label="Local port">
+                    <div className="grid gap-3">
                       <button
                         type="button"
                         role="switch"
                         aria-checked={isAutoEcsLocalPort}
                         aria-label="Auto (random)"
-                        className={`port-forward-toggle ${isAutoEcsLocalPort ? 'is-active' : ''}`}
+                        className={cn(
+                          'flex w-full items-center gap-[0.9rem] rounded-[20px] border border-[var(--border)] bg-[color-mix(in_srgb,var(--dialog-surface-muted)_88%,transparent_12%)] px-4 py-[0.9rem] text-left text-[var(--text)] transition-[border-color,box-shadow,background] duration-150 hover:border-[color-mix(in_srgb,var(--accent-strong)_28%,var(--border))] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[color-mix(in_srgb,var(--accent-strong)_50%,white_50%)] focus-visible:outline-offset-2',
+                          isAutoEcsLocalPort &&
+                            'border-[color-mix(in_srgb,var(--accent-strong)_32%,var(--border))] bg-[color-mix(in_srgb,var(--accent-strong)_11%,var(--dialog-surface-muted)_89%)]',
+                        )}
                         onClick={() =>
                           setDraft((current) =>
                             isEcsTaskPortForwardDraft(current)
@@ -2406,17 +2479,33 @@ export function PortForwardingPanel({
                         }
                         disabled={isSubmitting}
                       >
-                        <span className="port-forward-toggle__track" aria-hidden="true">
-                          <span className="port-forward-toggle__thumb" />
+                        <span
+                          className={cn(
+                            'relative h-[1.8rem] w-12 shrink-0 rounded-full bg-[color-mix(in_srgb,var(--text-soft)_22%,transparent_78%)] transition-colors duration-150',
+                            isAutoEcsLocalPort &&
+                              'bg-[color-mix(in_srgb,var(--accent-strong)_72%,transparent_28%)]',
+                          )}
+                          aria-hidden="true"
+                        >
+                          <span
+                            className={cn(
+                              'absolute left-[0.18rem] top-[0.18rem] h-[1.44rem] w-[1.44rem] rounded-full bg-white shadow-[0_6px_14px_rgba(16,26,40,0.2)] transition-transform duration-150',
+                              isAutoEcsLocalPort && 'translate-x-[1.18rem]',
+                            )}
+                          />
                         </span>
-                        <span className="port-forward-toggle__content">
-                          <strong>Auto (random)</strong>
-                          <span>사용 가능한 로컬 포트를 자동으로 할당합니다.</span>
+                        <span className="grid gap-[0.18rem]">
+                          <strong className="text-[0.94rem] text-[var(--text)]">
+                            Auto (random)
+                          </strong>
+                          <span className="text-[0.81rem] leading-[1.45] text-[var(--text-soft)]">
+                            사용 가능한 로컬 포트를 자동으로 할당합니다.
+                          </span>
                         </span>
                       </button>
-                      <input
+                      <Input
                         type="number"
-                        className="port-forward-local-port__input"
+                        className="bg-[var(--dialog-surface-muted)]"
                         value={isAutoEcsLocalPort ? '' : draft.bindPort}
                         onChange={(event) =>
                           setDraft((current) =>
@@ -2432,14 +2521,14 @@ export function PortForwardingPanel({
                         placeholder={isAutoEcsLocalPort ? '자동 할당' : '9000'}
                       />
                     </div>
-                  </label>
+                  </FieldGroup>
 
                   {selectedEcsHost ? (
                     <NoticeCard title={selectedEcsHost.awsEcsClusterName}>
                       <p>{selectedEcsHost.awsProfileName} / {selectedEcsHost.awsRegion}</p>
                     </NoticeCard>
                   ) : null}
-                  {ecsServicesError ? <div className="form-error">{ecsServicesError}</div> : null}
+                  {ecsServicesError ? <p className="text-[0.88rem] text-[var(--danger-text)]">{ecsServicesError}</p> : null}
                   {ecsServicesLoading ? <NoticeCard><p>ECS 서비스 목록을 불러오는 중입니다.</p></NoticeCard> : null}
                   {ecsServiceDetailsLoading ? <NoticeCard><p>ECS 서비스 상세 정보를 불러오는 중입니다.</p></NoticeCard> : null}
                   {!ecsServicesLoading && draft.hostId && ecsServices.length === 0 && !ecsServicesError ? (
@@ -2463,8 +2552,7 @@ export function PortForwardingPanel({
                 </>
               ) : (
                 <>
-                  <label className="form-field">
-                    <span>Target kind</span>
+                  <FieldGroup label="Target kind">
                     <select
                       value={draft.targetKind}
                       onChange={(event) =>
@@ -2478,10 +2566,9 @@ export function PortForwardingPanel({
                       <option value="instance-port">Instance port</option>
                       <option value="remote-host">Remote host</option>
                     </select>
-                  </label>
+                  </FieldGroup>
 
-                  <label className="form-field">
-                    <span>Local address</span>
+                  <FieldGroup label="Local address">
                     <input
                       value={draft.bindAddress}
                       onChange={(event) =>
@@ -2492,13 +2579,12 @@ export function PortForwardingPanel({
                       }
                       disabled={isSubmitting}
                     />
-                  </label>
+                  </FieldGroup>
                 </>
               )}
 
               {!isContainerPortForwardDraft(draft) && !isEcsTaskPortForwardDraft(draft) ? (
-                <label className="form-field">
-                  <span>{isAwsSsmPortForwardDraft(draft) ? 'Local port' : 'Bind port'}</span>
+                <FieldGroup label={isAwsSsmPortForwardDraft(draft) ? 'Local port' : 'Bind port'}>
                   <input
                     type="number"
                     value={draft.bindPort}
@@ -2510,13 +2596,12 @@ export function PortForwardingPanel({
                     }
                     disabled={isSubmitting}
                   />
-                </label>
+                </FieldGroup>
               ) : null}
 
               {isSshPortForwardDraft(draft) && draft.mode !== 'dynamic' ? (
                 <>
-                  <label className="form-field">
-                    <span>Target host</span>
+                  <FieldGroup label="Target host">
                     <input
                       value={draft.targetHost ?? ''}
                       onChange={(event) =>
@@ -2527,10 +2612,9 @@ export function PortForwardingPanel({
                       }
                       disabled={isSubmitting}
                     />
-                  </label>
+                  </FieldGroup>
 
-                  <label className="form-field">
-                    <span>Target port</span>
+                  <FieldGroup label="Target port">
                     <input
                       type="number"
                       value={draft.targetPort ?? ''}
@@ -2542,15 +2626,14 @@ export function PortForwardingPanel({
                       }
                       disabled={isSubmitting}
                     />
-                  </label>
+                  </FieldGroup>
                 </>
               ) : null}
 
               {isAwsSsmPortForwardDraft(draft) ? (
                 <>
                   {shouldShowAwsRemoteHostField(draft) ? (
-                    <label className="form-field">
-                      <span>Remote host</span>
+                    <FieldGroup label="Remote host">
                       <input
                         value={draft.remoteHost ?? ''}
                         onChange={(event) =>
@@ -2561,11 +2644,10 @@ export function PortForwardingPanel({
                         }
                         disabled={isSubmitting}
                       />
-                    </label>
+                    </FieldGroup>
                   ) : null}
 
-                  <label className="form-field">
-                    <span>Target port</span>
+                  <FieldGroup label="Target port">
                     <input
                       type="number"
                       value={draft.targetPort}
@@ -2577,16 +2659,16 @@ export function PortForwardingPanel({
                       }
                       disabled={isSubmitting}
                     />
-                  </label>
+                  </FieldGroup>
                 </>
               ) : null}
 
-              {error ? <div className="form-error">{error}</div> : null}
+              {error ? <p className="text-[0.88rem] text-[var(--danger-text)]">{error}</p> : null}
                 </>
               )}
             </ModalBody>
 
-            <ModalFooter className="port-forwarding-modal__footer">
+            <ModalFooter>
               <Button type="button" variant="secondary" onClick={() => void closeModal()} disabled={isSubmitting}>
                 취소
               </Button>

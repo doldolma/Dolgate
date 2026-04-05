@@ -1,8 +1,8 @@
-import type { PendingSessionInteractiveAuth } from '../../store/createAppStore';
-import { Button, Card, SectionLabel } from '../../ui';
+import type { PendingInteractiveAuth } from '../../store/createAppStore';
+import { Button, Input, SectionLabel } from '../../ui';
 
 interface TerminalInteractiveAuthOverlayProps {
-  interactiveAuth: PendingSessionInteractiveAuth;
+  interactiveAuth: PendingInteractiveAuth;
   promptResponses: string[];
   onPromptResponseChange: (index: number, value: string) => void;
   onSubmit: () => void;
@@ -22,8 +22,8 @@ export function TerminalInteractiveAuthOverlay({
 }: TerminalInteractiveAuthOverlayProps) {
   if (interactiveAuth.provider === 'warpgate') {
     return (
-      <Card className="terminal-interactive-auth grid max-w-[28rem] justify-stretch gap-3 p-5">
-        <SectionLabel className="terminal-interactive-auth__label">
+      <div className="grid max-w-[28rem] gap-3 rounded-[20px] border border-[color-mix(in_srgb,var(--accent-strong)_22%,var(--border)_78%)] bg-[color-mix(in_srgb,var(--surface-raised)_84%,var(--accent-strong)_16%)] px-5 py-5 text-[var(--text)] shadow-[var(--shadow-soft)]">
+        <SectionLabel>
           Warpgate Approval
         </SectionLabel>
         <strong>Warpgate 승인을 기다리는 중입니다.</strong>
@@ -32,12 +32,12 @@ export function TerminalInteractiveAuthOverlay({
           주세요. 가능한 입력은 앱이 자동으로 처리합니다.
         </p>
         {interactiveAuth.authCode ? (
-          <p className="terminal-interactive-auth__code">
+          <p className="text-sm text-[var(--text-soft)]">
             인증 코드 <code>{interactiveAuth.authCode}</code> 는 자동으로
             입력됩니다.
           </p>
         ) : null}
-        <div className="terminal-interactive-auth__actions flex flex-wrap items-center gap-3">
+        <div className="flex flex-wrap items-center gap-3">
           {interactiveAuth.approvalUrl ? (
             <Button variant="secondary" size="sm" onClick={onReopenApprovalUrl}>
               브라우저 다시 열기
@@ -58,23 +58,23 @@ export function TerminalInteractiveAuthOverlay({
             닫기
           </Button>
         </div>
-        <pre className="terminal-interactive-auth__raw">
+        <pre className="rounded-[12px] bg-[color-mix(in_srgb,var(--surface)_88%,transparent_12%)] px-3 py-2 text-[0.84rem] text-[var(--text-soft)] whitespace-pre-wrap break-words">
           {interactiveAuth.instruction}
         </pre>
-      </Card>
+      </div>
     );
   }
 
   return (
-    <Card className="terminal-interactive-auth max-w-[28rem] justify-stretch p-5">
+    <div className="grid max-w-[28rem] gap-4 rounded-[20px] border border-[color-mix(in_srgb,var(--accent-strong)_22%,var(--border)_78%)] bg-[color-mix(in_srgb,var(--surface-raised)_84%,var(--accent-strong)_16%)] px-5 py-5 text-[var(--text)] shadow-[var(--shadow-soft)]">
       <form
-        className="terminal-interactive-auth__form grid gap-4"
+        className="grid gap-4"
         onSubmit={(event) => {
           event.preventDefault();
           onSubmit();
         }}
       >
-        <SectionLabel className="terminal-interactive-auth__label">
+        <SectionLabel>
           Additional Authentication
         </SectionLabel>
         <strong>추가 인증 입력이 필요합니다.</strong>
@@ -82,11 +82,12 @@ export function TerminalInteractiveAuthOverlay({
         {interactiveAuth.prompts.map((prompt, index) => (
           <label
             key={`${interactiveAuth.challengeId}:${index}`}
-            className="terminal-interactive-auth__field"
+            className="grid gap-1.5"
           >
-            <span>{prompt.label || `Prompt ${index + 1}`}</span>
-            <input
-              className="mt-2 min-h-11 rounded-[16px] border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[var(--surface-muted)] px-4 py-3 text-[var(--text)] shadow-[inset_0_1px_0_rgba(255,255,255,0.04)] outline-none transition-[border-color,box-shadow] duration-150 focus:border-[color-mix(in_srgb,var(--accent-strong)_34%,var(--border)_66%)] focus:ring-4 focus:ring-[color-mix(in_srgb,var(--accent-strong)_14%,transparent)]"
+            <span className="text-sm font-medium text-[var(--text)]">
+              {prompt.label || `Prompt ${index + 1}`}
+            </span>
+            <Input
               type={prompt.echo ? 'text' : 'password'}
               value={promptResponses[index] ?? ''}
               onChange={(event) => {
@@ -95,7 +96,7 @@ export function TerminalInteractiveAuthOverlay({
             />
           </label>
         ))}
-        <div className="terminal-interactive-auth__actions flex items-center justify-end gap-3">
+        <div className="flex items-center justify-end gap-3">
           <Button type="submit" variant="primary">
             응답 보내기
           </Button>
@@ -104,6 +105,6 @@ export function TerminalInteractiveAuthOverlay({
           </Button>
         </div>
       </form>
-    </Card>
+    </div>
   );
 }

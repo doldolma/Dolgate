@@ -1,6 +1,7 @@
 import type { AuthState } from '@shared';
 import { SftpWorkspace } from '../components/SftpWorkspace';
 import type { useLoginController } from '../controllers/useLoginController';
+import { cn } from '../lib/cn';
 import type {
   useAppModalViewModel,
   useAppSettingsViewModel,
@@ -31,7 +32,14 @@ export function SftpShell({
   loginController,
 }: SftpShellProps) {
   return (
-    <section className={`sftp-shell ${active ? 'active' : 'hidden'}`}>
+    <section
+      className={cn(
+        'absolute inset-0 flex min-h-0 flex-col gap-4 p-[1rem_1.15rem_1.2rem] transition-[opacity,transform] duration-200',
+        active
+          ? 'pointer-events-auto scale-100 opacity-100'
+          : 'pointer-events-none scale-[0.995] opacity-0',
+      )}
+    >
       {authState.status === 'offline-authenticated' && authState.offline ? (
         <OfflineModeBanner
           expiryLabel={offlineLeaseExpiryLabel}
@@ -41,7 +49,7 @@ export function SftpShell({
           }}
         />
       ) : null}
-      <div className="sftp-shell__content">
+      <div className="min-h-0 flex-1">
         <SftpWorkspace
           hosts={homeViewModel.hosts}
           groups={homeViewModel.groups}

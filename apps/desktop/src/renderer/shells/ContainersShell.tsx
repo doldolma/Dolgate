@@ -2,7 +2,8 @@ import { useState } from 'react';
 import type { AuthState } from '@shared';
 import { AwsEcsWorkspace } from '../components/AwsEcsWorkspace';
 import { ContainersWorkspace } from '../components/ContainersWorkspace';
-import { SectionLabel } from '../ui';
+import { cn } from '../lib/cn';
+import { Badge, EmptyState, IconButton } from '../ui';
 import type { useLoginController } from '../controllers/useLoginController';
 import type {
   useAppModalViewModel,
@@ -52,7 +53,14 @@ export function ContainersShell({
   const activeContainerHost = findHost(homeViewModel.hosts, activeContainersHostId);
 
   return (
-    <section className={`containers-shell ${active ? 'active' : 'hidden'}`}>
+    <section
+      className={cn(
+        'absolute inset-0 flex min-h-0 flex-col gap-4 p-[1rem_1.15rem_1.2rem] transition-[opacity,transform] duration-200',
+        active
+          ? 'pointer-events-auto scale-100 opacity-100'
+          : 'pointer-events-none scale-[0.995] opacity-0',
+      )}
+    >
       {authState.status === 'offline-authenticated' && authState.offline ? (
         <OfflineModeBanner
           expiryLabel={offlineLeaseExpiryLabel}
@@ -62,7 +70,11 @@ export function ContainersShell({
           }}
         />
       ) : null}
-      <div className="containers-shell__tabs" role="tablist" aria-label="Containers hosts">
+      <div
+        className="flex min-w-0 items-stretch gap-[0.55rem] overflow-x-auto px-[0.1rem] py-[0.2rem]"
+        role="tablist"
+        aria-label="Containers hosts"
+      >
         {containersViewModel.containerTabs.length > 0 ? (
           containersViewModel.containerTabs.map((tab) => {
             const host = findHost(homeViewModel.hosts, tab.hostId);
@@ -83,11 +95,15 @@ export function ContainersShell({
             return (
               <div
                 key={tab.hostId}
-                className={`containers-shell__tab-shell ${isActiveTab ? 'active' : ''} ${
-                  preview === 'before'
-                    ? 'containers-shell__tab-shell--drop-before'
-                    : ''
-                } ${preview === 'after' ? 'containers-shell__tab-shell--drop-after' : ''}`}
+                className={cn(
+                  'group relative inline-flex min-w-0 flex-none items-center gap-[0.3rem] rounded-[18px] border border-[color-mix(in_srgb,var(--border)_88%,transparent_12%)] bg-[linear-gradient(180deg,color-mix(in_srgb,var(--surface-strong)_92%,transparent_8%),color-mix(in_srgb,var(--surface)_96%,transparent_4%))] pr-[0.24rem] shadow-[var(--shadow-soft)]',
+                  isActiveTab &&
+                    'border-[color-mix(in_srgb,var(--accent-strong)_38%,var(--border)_62%)] shadow-[0_0_0_1px_color-mix(in_srgb,var(--accent-strong)_14%,transparent_86%),var(--shadow)]',
+                  preview === 'before' &&
+                    "before:pointer-events-none before:absolute before:top-[0.36rem] before:bottom-[0.36rem] before:left-[-0.34rem] before:w-[3px] before:rounded-full before:bg-[color-mix(in_srgb,var(--accent-strong)_88%,white_12%)] before:content-[''] before:shadow-[0_0_0_1px_color-mix(in_srgb,var(--accent-strong)_18%,transparent_82%)]",
+                  preview === 'after' &&
+                    "after:pointer-events-none after:absolute after:top-[0.36rem] after:bottom-[0.36rem] after:right-[-0.34rem] after:w-[3px] after:rounded-full after:bg-[color-mix(in_srgb,var(--accent-strong)_88%,white_12%)] after:content-[''] after:shadow-[0_0_0_1px_color-mix(in_srgb,var(--accent-strong)_18%,transparent_82%)]",
+                )}
                 draggable
                 onDragStart={(event) => {
                   event.dataTransfer.effectAllowed = 'move';
@@ -151,19 +167,32 @@ export function ContainersShell({
                   type="button"
                   role="tab"
                   aria-selected={isActiveTab}
-                  className={`containers-shell__tab ${isActiveTab ? 'active' : ''}`}
+                  className={cn(
+                    'inline-flex min-w-0 max-w-[min(260px,42vw)] items-center gap-[0.55rem] rounded-[16px] bg-transparent px-[0.92rem] py-[0.72rem] text-left text-[var(--text)]',
+                    isActiveTab &&
+                      'bg-[color-mix(in_srgb,var(--surface-strong)_86%,transparent_14%)]',
+                  )}
                   onClick={() => {
                     containersViewModel.focusHostContainersTab(tab.hostId);
                   }}
                 >
-                  <span className="containers-shell__tab-title">{title}</span>
+                  <span className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap font-semibold">
+                    {title}
+                  </span>
                   {runtimeLabel ? (
-                    <span className="containers-shell__tab-badge">{runtimeLabel}</span>
+                    <Badge
+                      tone="neutral"
+                      className="min-h-6 px-[0.52rem] py-[0.14rem] text-[0.72rem]"
+                    >
+                      {runtimeLabel}
+                    </Badge>
                   ) : null}
                 </button>
-                <button
+                <IconButton
                   type="button"
-                  className="containers-shell__tab-close"
+                  tone="ghost"
+                  size="sm"
+                  className="h-[1.9rem] w-[1.9rem] rounded-full text-[var(--text-soft)] hover:text-[var(--text)]"
                   aria-label={`${title} 닫기`}
                   onClick={async (event) => {
                     event.stopPropagation();
@@ -171,17 +200,17 @@ export function ContainersShell({
                   }}
                 >
                   ×
-                </button>
+                </IconButton>
               </div>
             );
           })
         ) : (
-          <div className="containers-shell__tabs-empty">
+          <div className="inline-flex min-h-12 items-center px-[0.2rem] text-[0.92rem] text-[var(--text-soft)]">
             열린 컨테이너 화면이 없습니다.
           </div>
         )}
       </div>
-      <div className="containers-shell__content">
+      <div className="min-h-0 flex-1">
         {activeContainerHost && activeContainersTab ? (
           activeContainersTab.kind === 'ecs-cluster' ? (
             <AwsEcsWorkspace
@@ -226,11 +255,11 @@ export function ContainersShell({
             />
           )
         ) : (
-          <div className="empty-state-card containers-shell__empty-state">
-            <SectionLabel>Containers</SectionLabel>
-            <h3>열린 컨테이너 화면이 없습니다.</h3>
-            <p>Host 카드에서 우클릭한 뒤 컨테이너를 열어 주세요.</p>
-          </div>
+          <EmptyState
+            className="max-w-[620px]"
+            title="열린 컨테이너 화면이 없습니다."
+            description="Host 카드에서 우클릭한 뒤 컨테이너를 열어 주세요."
+          />
         )}
       </div>
     </section>

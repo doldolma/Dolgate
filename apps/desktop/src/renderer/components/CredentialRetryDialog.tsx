@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { HostSecretInput } from '@shared';
 import { DialogBackdrop } from './DialogBackdrop';
-import { Button, Input, ModalBody, ModalFooter, ModalHeader, ModalShell, SectionLabel } from '../ui';
+import { Button, FieldGroup, Input, ModalBody, ModalFooter, ModalHeader, ModalShell, SectionLabel } from '../ui';
 
 export interface CredentialRetryDialogRequest {
   hostId: string;
@@ -36,17 +36,16 @@ export function CredentialRetryDialog({ request, onClose, onSubmit }: Credential
 
   return (
     <DialogBackdrop dismissOnBackdrop={false}>
-      <ModalShell className="credential-retry-dialog" role="dialog" aria-modal="true" aria-labelledby="credential-retry-title">
+      <ModalShell role="dialog" aria-modal="true" aria-labelledby="credential-retry-title">
         <ModalHeader>
           <div>
             <SectionLabel>{request.source === 'sftp' ? 'SFTP Retry' : 'SSH Retry'}</SectionLabel>
             <h3 id="credential-retry-title">{request.hostLabel} 인증을 다시 입력해 주세요.</h3>
           </div>
         </ModalHeader>
-        <ModalBody>
-          <p className="credential-retry-dialog__message">{request.message}</p>
-          <label className="credential-retry-dialog__field">
-            <span>{isPassword ? 'Password' : 'Passphrase'}</span>
+        <ModalBody className="grid gap-4">
+          <p className="text-[0.95rem] leading-[1.6] text-[var(--text-soft)]">{request.message}</p>
+          <FieldGroup label={isPassword ? 'Password' : 'Passphrase'}>
             <Input
               type="password"
               autoFocus
@@ -57,8 +56,8 @@ export function CredentialRetryDialog({ request, onClose, onSubmit }: Credential
               }}
               placeholder={isPassword ? 'Enter password' : 'Enter passphrase'}
             />
-          </label>
-          {error ? <p className="credential-retry-dialog__error">{error}</p> : null}
+          </FieldGroup>
+          {error ? <p className="text-[0.9rem] text-[var(--danger-text)]">{error}</p> : null}
         </ModalBody>
         <ModalFooter>
           <Button variant="secondary" onClick={onClose} disabled={submitting}>

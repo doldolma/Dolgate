@@ -7,6 +7,7 @@ import {
   useState,
 } from "react";
 import { getHostBadgeLabel, getHostSubtitle } from "@shared";
+import { cn } from "../lib/cn";
 import type {
   AwsEcsServiceActionContainerSummary,
   AwsEcsServiceActionContext,
@@ -34,16 +35,22 @@ import {
   CardMeta,
   CardTitleRow,
   EmptyState,
+  FieldGroup,
+  FilterRow,
   IconButton,
+  Input,
   ModalBody,
   ModalFooter,
   ModalHeader,
   ModalShell,
   NoticeCard,
   SectionLabel,
+  SelectField,
   StatusBadge,
   TabButton,
   Tabs,
+  ToggleSwitch,
+  Toolbar,
 } from "../ui";
 import type { StatusBadgeTone } from "../ui/StatusBadge";
 import {
@@ -169,6 +176,32 @@ const RELATIVE_RANGE_UNIT_OPTIONS: Array<{
   { value: "month", label: "월" },
   { value: "year", label: "년" },
 ];
+
+const ecsSummaryCardClass =
+  "grid gap-[0.35rem] rounded-[18px] border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[color-mix(in_srgb,var(--surface-strong)_90%,transparent_10%)] px-[1rem] py-[0.95rem]";
+const ecsSectionCardClass =
+  "grid gap-[0.8rem] rounded-[18px] border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[color-mix(in_srgb,var(--surface)_92%,transparent_8%)] px-[1rem] py-[0.95rem] shadow-[var(--shadow)]";
+const ecsEmptyDetailClass =
+  "rounded-[16px] bg-[color-mix(in_srgb,var(--surface)_82%,transparent_18%)] px-4 py-4 text-[var(--text-soft)]";
+const ecsLogsOutputClass =
+  "grid min-h-0 flex-1 content-start gap-[0.35rem] overflow-auto rounded-[18px] border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[rgba(7,13,24,0.88)] px-[1.05rem] py-4 text-[rgba(226,234,255,0.92)]";
+const ecsFactsGridClass =
+  "grid grid-cols-[repeat(2,minmax(0,1fr))] gap-[0.9rem_1rem] max-[760px]:grid-cols-1";
+const ecsFactsItemClass = "grid gap-[0.2rem]";
+const ecsFactsLabelClass =
+  "m-0 text-[0.76rem] font-semibold uppercase tracking-[0.02em] text-[var(--text-soft)]";
+const ecsFactsValueClass =
+  "m-0 text-[0.98rem] font-semibold text-[var(--text)]";
+const ecsTimelineClass = "grid gap-[0.7rem]";
+const ecsTimelineItemClass =
+  "grid gap-[0.55rem] rounded-[16px] border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[color-mix(in_srgb,var(--surface-strong)_84%,transparent_16%)] px-[0.95rem] py-[0.85rem]";
+const ecsLogsMetaClass = "mt-[-0.2rem]";
+const ecsTunnelFormClass =
+  "grid grid-cols-[repeat(2,minmax(0,1fr))] gap-[0.8rem_0.9rem] max-[760px]:grid-cols-1";
+const ecsTunnelRuntimeCardClass =
+  "grid gap-[0.85rem] rounded-[18px] border border-[color-mix(in_srgb,var(--accent-strong)_20%,var(--border)_80%)] bg-[color-mix(in_srgb,var(--accent-strong)_8%,var(--surface)_92%)] px-[1rem] py-[0.9rem] shadow-[var(--shadow)]";
+const ecsTunnelRuntimeGridClass =
+  "grid grid-cols-[repeat(2,minmax(0,1fr))] gap-[0.9rem] max-[760px]:grid-cols-1";
 
 function padRangeValue(value: number): string {
   return String(value).padStart(2, "0");
@@ -853,14 +886,13 @@ function LogsRangePickerDialog({
 
   return (
     <div
-      className="ecs-workspace__picker-backdrop"
+      className="fixed inset-0 z-[8] grid place-items-center bg-[rgba(12,20,32,0.32)]"
       role="presentation"
       onClick={() => {
         onClose();
       }}
     >
       <ModalShell
-        className="ecs-workspace__picker ecs-workspace__range-picker"
         size="lg"
         role="dialog"
         aria-modal="true"
@@ -869,7 +901,7 @@ function LogsRangePickerDialog({
           event.stopPropagation();
         }}
       >
-        <ModalHeader className="ecs-workspace__picker-header ecs-workspace__range-picker-header">
+        <ModalHeader>
           <Tabs role="tablist" aria-label="로그 범위 모드">
             <TabButton
               role="tab"
@@ -897,8 +929,8 @@ function LogsRangePickerDialog({
         </ModalHeader>
 
         {draftMode === "absolute" ? (
-          <ModalBody className="ecs-workspace__range-picker-body">
-            <div className="ecs-workspace__range-calendar-shell">
+          <ModalBody className="w-[min(1040px,100%)]">
+            <div className="grid items-start gap-[0.9rem] lg:grid-cols-[auto_minmax(0,1fr)_auto]">
               <IconButton
                 size="sm"
                 aria-label="이전 달"
@@ -908,24 +940,24 @@ function LogsRangePickerDialog({
               >
                 {"<"}
               </IconButton>
-              <div className="ecs-workspace__range-calendars">
+              <div className="grid gap-4 lg:grid-cols-2">
                 {[anchorMonth, addRangeMonths(anchorMonth, 1)].map((month) => {
                   const monthKey = `${month.getFullYear()}-${month.getMonth()}`;
                   const monthValue = month.getMonth();
                   return (
                     <section
                       key={monthKey}
-                      className="ecs-workspace__range-month"
+                      className="grid gap-3"
                     >
-                      <header className="ecs-workspace__range-month-header">
+                      <header className="flex min-h-8 items-center justify-center">
                         <strong>{formatRangeMonthLabel(month)}</strong>
                       </header>
-                      <div className="ecs-workspace__range-weekdays">
+                      <div className="grid grid-cols-7 gap-[0.35rem] text-center text-[0.82rem] font-semibold text-[var(--text-soft)]">
                         {RANGE_WEEKDAY_LABELS.map((label) => (
                           <span key={`${monthKey}:${label}`}>{label}</span>
                         ))}
                       </div>
-                      <div className="ecs-workspace__range-grid">
+                      <div className="grid grid-cols-7 gap-[0.28rem]">
                         {buildRangeCalendarDays(month).map((day) => {
                           const dayValue = formatRangeDayValue(day);
                           const isCurrentMonth = day.getMonth() === monthValue;
@@ -937,15 +969,18 @@ function LogsRangePickerDialog({
                             <button
                               key={`${monthKey}:${dayValue}`}
                               type="button"
-                              className={[
-                                "ecs-workspace__range-day",
-                                !isCurrentMonth ? "is-muted" : "",
-                                isInRange ? "is-in-range" : "",
-                                isStart ? "is-start" : "",
-                                isEnd ? "is-end" : "",
-                              ]
-                                .filter(Boolean)
-                                .join(" ")}
+                              className={cn(
+                                "min-h-[2.6rem] rounded-[12px] border border-transparent bg-transparent font-semibold text-[var(--text)] transition-[background,border-color,color] duration-150 hover:border-[color-mix(in_srgb,var(--accent-strong)_30%,var(--border)_70%)] hover:bg-[color-mix(in_srgb,var(--accent-strong)_10%,transparent_90%)]",
+                                !isCurrentMonth
+                                  ? "text-[color-mix(in_srgb,var(--text-soft)_78%,transparent_22%)]"
+                                  : "",
+                                isInRange
+                                  ? "border-[color-mix(in_srgb,var(--accent-strong)_36%,var(--border)_64%)] bg-[color-mix(in_srgb,var(--accent-strong)_12%,transparent_88%)]"
+                                  : "",
+                                isStart || isEnd
+                                  ? "border-[color-mix(in_srgb,var(--accent-strong)_68%,var(--border)_32%)] bg-[var(--accent-strong)] text-white"
+                                  : "",
+                              )}
                               onClick={() => {
                                 handleSelectDay(dayValue);
                               }}
@@ -970,10 +1005,9 @@ function LogsRangePickerDialog({
               </IconButton>
             </div>
 
-            <div className="ecs-workspace__range-form">
-              <label>
-                <span>시작 날짜</span>
-                <input
+            <div className="mt-4 grid gap-[0.85rem_0.9rem] md:grid-cols-2 xl:grid-cols-4">
+              <FieldGroup label="시작 날짜">
+                <Input
                   type="date"
                   value={draftAbsoluteValue.startDate}
                   onChange={(event) => {
@@ -983,10 +1017,9 @@ function LogsRangePickerDialog({
                     }));
                   }}
                 />
-              </label>
-              <label>
-                <span>시작 시간</span>
-                <input
+              </FieldGroup>
+              <FieldGroup label="시작 시간">
+                <Input
                   type="time"
                   step="1"
                   value={draftAbsoluteValue.startTime}
@@ -997,10 +1030,9 @@ function LogsRangePickerDialog({
                     }));
                   }}
                 />
-              </label>
-              <label>
-                <span>종료 날짜</span>
-                <input
+              </FieldGroup>
+              <FieldGroup label="종료 날짜">
+                <Input
                   type="date"
                   value={draftAbsoluteValue.endDate}
                   onChange={(event) => {
@@ -1010,10 +1042,9 @@ function LogsRangePickerDialog({
                     }));
                   }}
                 />
-              </label>
-              <label>
-                <span>종료 시간</span>
-                <input
+              </FieldGroup>
+              <FieldGroup label="종료 시간">
+                <Input
                   type="time"
                   step="1"
                   value={draftAbsoluteValue.endTime}
@@ -1024,19 +1055,19 @@ function LogsRangePickerDialog({
                     }));
                   }}
                 />
-              </label>
+              </FieldGroup>
             </div>
-            <p className="ecs-workspace__range-helper">
+            <p className="mt-3 text-[0.84rem] leading-[1.6] text-[var(--text-soft)]">
               날짜는 로컬 시간대로 적용됩니다. 절대 범위를 적용하면 Follow는 자동으로 꺼집니다.
             </p>
           </ModalBody>
         ) : (
-          <ModalBody className="ecs-workspace__range-relative">
-            <div className="ecs-workspace__range-relative-options">
+          <ModalBody className="grid items-start gap-4 lg:grid-cols-[minmax(240px,0.95fr)_minmax(0,1fr)]">
+            <div className="flex flex-col gap-[0.55rem]">
               {RELATIVE_RANGE_PRESET_OPTIONS.map((option) => (
                 <label
                   key={option.key}
-                  className="ecs-workspace__range-radio"
+                  className="flex min-h-[2.25rem] items-center gap-[0.7rem] text-[0.98rem] font-semibold text-[var(--text)]"
                 >
                   <input
                     type="radio"
@@ -1053,7 +1084,7 @@ function LogsRangePickerDialog({
                   <span>{option.label}</span>
                 </label>
               ))}
-              <label className="ecs-workspace__range-radio ecs-workspace__range-radio--custom">
+              <label className="mt-1 flex min-h-[2.25rem] items-center gap-[0.7rem] text-[0.98rem] font-semibold text-[var(--text)]">
                 <input
                   type="radio"
                   name="ecs-logs-relative-range"
@@ -1068,10 +1099,9 @@ function LogsRangePickerDialog({
                 <span>사용자 지정 범위</span>
               </label>
             </div>
-            <div className="ecs-workspace__range-relative-custom">
-              <label>
-                <span>기간</span>
-                <input
+            <div className="grid items-end gap-[0.9rem] lg:grid-cols-[minmax(0,1fr)_180px]">
+              <FieldGroup label="기간">
+                <Input
                   type="number"
                   min="1"
                   value={draftRelativeValue.amount}
@@ -1084,10 +1114,9 @@ function LogsRangePickerDialog({
                     }));
                   }}
                 />
-              </label>
-              <label>
-                <span>단위</span>
-                <select
+              </FieldGroup>
+              <FieldGroup label="단위">
+                <SelectField
                   value={draftRelativeValue.unit}
                   disabled={draftRelativeValue.presetKey !== "custom"}
                   onChange={(event) => {
@@ -1103,18 +1132,24 @@ function LogsRangePickerDialog({
                       {option.label}
                     </option>
                   ))}
-                </select>
-              </label>
+                </SelectField>
+              </FieldGroup>
             </div>
-            <p className="ecs-workspace__range-helper">
+            <p className="text-[0.84rem] leading-[1.6] text-[var(--text-soft)] lg:col-span-2">
               상대 범위를 적용하면 현재 시점을 기준으로 범위를 계산해 다시 조회합니다.
             </p>
           </ModalBody>
         )}
 
-        {error ? <div className="px-6 pb-2"><div className="terminal-error-banner">{error}</div></div> : null}
+        {error ? (
+          <div className="px-6 pb-2">
+            <NoticeCard tone="danger" role="alert">
+              {error}
+            </NoticeCard>
+          </div>
+        ) : null}
 
-        <ModalFooter className="ecs-workspace__picker-actions">
+        <ModalFooter>
           <Button
             variant="secondary"
             onClick={() => {
@@ -1172,18 +1207,18 @@ function MetricsPanel({
   );
 
   return (
-    <div className="containers-workspace__metrics ecs-workspace__metrics-content">
-      <div className="containers-workspace__summary-grid">
-        <div className="containers-workspace__summary-card">
-          <span>CPU</span>
+    <div className="grid min-h-0 gap-[0.9rem] overflow-y-auto pr-px">
+      <div className="grid grid-cols-[repeat(auto-fit,minmax(180px,1fr))] gap-[0.8rem]">
+        <div className={ecsSummaryCardClass}>
+          <span className="text-[0.82rem] text-[var(--text-soft)]">CPU</span>
           <strong>{formatChartPercent(service.cpuUtilizationPercent)}</strong>
         </div>
-        <div className="containers-workspace__summary-card">
-          <span>Memory</span>
+        <div className={ecsSummaryCardClass}>
+          <span className="text-[0.82rem] text-[var(--text-soft)]">Memory</span>
           <strong>{formatChartPercent(service.memoryUtilizationPercent)}</strong>
         </div>
       </div>
-      <div className="containers-workspace__metrics-grid">
+      <div className="grid grid-cols-[repeat(auto-fit,minmax(240px,1fr))] gap-[0.85rem]">
         {cpuChart.timestamps.length > 0 ? (
           <UPlotMetricChart
             title="CPU"
@@ -1194,12 +1229,14 @@ function MetricsPanel({
             fixedRange={[0, 100]}
           />
         ) : (
-          <div className="containers-workspace__metric-chart-card">
-            <div className="containers-workspace__metric-chart-header">
+          <div className={ecsSectionCardClass}>
+            <div className="flex items-baseline justify-between gap-3">
               <strong>CPU</strong>
-              <span>{formatChartPercent(service.cpuUtilizationPercent)}</span>
+              <span className="tabular-nums text-[0.82rem] text-[var(--text-soft)]">
+                {formatChartPercent(service.cpuUtilizationPercent)}
+              </span>
             </div>
-            <div className="containers-workspace__empty-detail">
+            <div className={ecsEmptyDetailClass}>
               최근 10분 CPU 추세 데이터가 없습니다.
             </div>
           </div>
@@ -1215,12 +1252,14 @@ function MetricsPanel({
             fixedRange={[0, 100]}
           />
         ) : (
-          <div className="containers-workspace__metric-chart-card">
-            <div className="containers-workspace__metric-chart-header">
+          <div className={ecsSectionCardClass}>
+            <div className="flex items-baseline justify-between gap-3">
               <strong>Memory</strong>
-              <span>{formatChartPercent(service.memoryUtilizationPercent)}</span>
+              <span className="tabular-nums text-[0.82rem] text-[var(--text-soft)]">
+                {formatChartPercent(service.memoryUtilizationPercent)}
+              </span>
             </div>
-            <div className="containers-workspace__empty-detail">
+            <div className={ecsEmptyDetailClass}>
               최근 10분 Memory 추세 데이터가 없습니다.
             </div>
           </div>
@@ -2149,15 +2188,15 @@ export function AwsEcsWorkspace({
   );
 
   return (
-    <div className="containers-workspace ecs-workspace">
-      <div className="containers-workspace__header">
+    <div className="relative flex h-full min-h-0 flex-col gap-3">
+      <Toolbar className="justify-between gap-4 rounded-[24px] border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[var(--surface-elevated)] px-[1.15rem] py-[1.1rem]">
         <div>
-          <div className="containers-workspace__host-meta">
+          <div className="flex flex-wrap gap-2 text-[0.9rem] text-[var(--text-soft)]">
             <span>{getHostBadgeLabel(host)}</span>
             <span>{getHostSubtitle(host)}</span>
           </div>
         </div>
-        <div className="containers-workspace__header-actions">
+        <div className="flex flex-wrap items-center gap-3">
           <Button
             variant="secondary"
             size="sm"
@@ -2169,28 +2208,32 @@ export function AwsEcsWorkspace({
             {tab.isLoading ? "불러오는 중..." : "Refresh"}
           </Button>
         </div>
-      </div>
+      </Toolbar>
 
       {tab.errorMessage ? (
-        <div className="terminal-error-banner">{tab.errorMessage}</div>
+        <NoticeCard tone="danger" role="alert">
+          {tab.errorMessage}
+        </NoticeCard>
       ) : null}
 
       {tab.ecsMetricsWarning ? (
-        <div className="ecs-workspace__warning">{tab.ecsMetricsWarning}</div>
+        <NoticeCard tone="warning" title="Metrics warning">
+          <p>{tab.ecsMetricsWarning}</p>
+        </NoticeCard>
       ) : null}
 
       {tab.isLoading && !snapshot ? (
         <EmptyState
-          className="containers-shell__empty-state"
+          className="max-w-[620px]"
           title="클러스터 정보를 불러오는 중입니다."
           description="AWS ECS 서비스 스냅샷과 현재 사용량 지표를 가져오고 있습니다."
         />
       ) : null}
 
       {snapshot ? (
-        <div className="ecs-workspace__body">
-          <div className="ecs-workspace__summary-grid">
-            <Card className="ecs-workspace__summary-card">
+        <div className="grid min-h-0 gap-[0.95rem]">
+          <div className="grid gap-[0.9rem] xl:grid-cols-[repeat(auto-fit,minmax(280px,1fr))]">
+            <Card className="items-start">
               <CardMain>
                 <CardTitleRow>
                   <strong>{snapshot.cluster.clusterName}</strong>
@@ -2206,12 +2249,12 @@ export function AwsEcsWorkspace({
               </CardMain>
             </Card>
 
-            <Card className="ecs-workspace__summary-card">
+            <Card className="items-start">
               <CardMain>
                 <CardTitleRow>
                   <strong>Services</strong>
                 </CardTitleRow>
-                <CardMeta className="ecs-workspace__summary-metrics">
+                <CardMeta className="mt-1">
                   <span>Active {snapshot.cluster.activeServicesCount}</span>
                   <span>Running {snapshot.cluster.runningTasksCount}</span>
                   <span>Pending {snapshot.cluster.pendingTasksCount}</span>
@@ -2220,9 +2263,9 @@ export function AwsEcsWorkspace({
             </Card>
           </div>
 
-          <div className="containers-workspace__body ecs-workspace__split">
-            <aside className="containers-workspace__sidebar ecs-workspace__service-list-shell">
-              <div className="containers-workspace__sidebar-header">
+          <div className="grid min-h-0 gap-4 xl:grid-cols-[minmax(280px,340px)_minmax(0,1fr)]">
+            <aside className="flex min-h-0 flex-col gap-4 rounded-[24px] border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[var(--surface-elevated)] p-[1.15rem]">
+              <div className="flex items-center justify-between gap-3">
                 <strong>Services</strong>
                 <span>{services.length}</span>
               </div>
@@ -2230,36 +2273,53 @@ export function AwsEcsWorkspace({
               {services.length === 0 ? (
                 <EmptyState title="이 클러스터에는 표시할 서비스가 없습니다." />
               ) : (
-                <div className="ecs-workspace__service-list">
+                <div className="flex min-h-0 flex-col gap-[0.55rem] overflow-y-auto pr-px">
                   {services.map((service) => {
                     const tone = getServiceAttentionTone(service);
                     const isSelected = service.serviceName === selectedService?.serviceName;
                     return (
                       <article
                         key={service.serviceArn}
-                        className={`ecs-workspace__service-row ecs-workspace__service-row--${tone} ${isSelected ? "is-selected" : ""}`.trim()}
+                        data-testid="ecs-service-row"
+                        className={cn(
+                          "shrink-0 overflow-hidden rounded-[18px] border bg-[color-mix(in_srgb,var(--surface)_92%,transparent_8%)] shadow-[var(--shadow)] transition-[border-color,background-color,box-shadow,transform] duration-150",
+                          tone === "warning"
+                            ? "border-[color-mix(in_srgb,var(--warning,#d9a441)_30%,var(--border)_70%)]"
+                            : tone === "error"
+                              ? "border-[color-mix(in_srgb,var(--danger)_28%,var(--border)_72%)] bg-[color-mix(in_srgb,var(--danger)_5%,var(--surface)_95%)]"
+                              : "border-[color-mix(in_srgb,var(--border)_82%,white_18%)]",
+                          isSelected
+                            ? "border-[color-mix(in_srgb,var(--accent-strong)_28%,var(--border)_72%)] bg-[color-mix(in_srgb,var(--accent-strong)_8%,var(--surface)_92%)] shadow-[var(--shadow),inset_0_1px_0_color-mix(in_srgb,var(--accent-strong)_10%,transparent_90%)]"
+                            : "",
+                        )}
                       >
                         <button
                           type="button"
-                          className="ecs-workspace__service-row-main"
+                          className="grid w-full min-w-0 content-start gap-[0.34rem] border-0 bg-transparent px-[0.95rem] py-[0.72rem] text-left text-inherit"
                           onClick={() => {
                             handleSelectService(service.serviceName);
                           }}
                         >
-                          <strong className="ecs-workspace__service-row-name">
+                          <strong className="block min-w-0 overflow-wrap-anywhere leading-[1.35]">
                             {service.serviceName}
                           </strong>
-                          <div className="ecs-workspace__service-row-badges">
-                            <StatusBadge tone={getServiceStatusTone(service)}>
+                          <div className="flex flex-wrap gap-[0.45rem]">
+                            <StatusBadge
+                              tone={getServiceStatusTone(service)}
+                              className="min-h-[1.55rem] px-[0.62rem] py-[0.14rem] text-[0.72rem]"
+                            >
                               {service.status}
                             </StatusBadge>
                             {service.rolloutState ? (
-                              <StatusBadge tone={getRolloutTone(service.rolloutState)}>
+                              <StatusBadge
+                                tone={getRolloutTone(service.rolloutState)}
+                                className="min-h-[1.55rem] px-[0.62rem] py-[0.14rem] text-[0.72rem]"
+                              >
                                 {service.rolloutState}
                               </StatusBadge>
                             ) : null}
                           </div>
-                          <div className="ecs-workspace__service-row-metrics">
+                          <div className="flex flex-wrap gap-[0.55rem_0.8rem] text-[0.84rem] text-[var(--text-soft)]">
                             <span>CPU {formatPercent(service.cpuUtilizationPercent)}</span>
                             <span>
                               Memory {formatPercent(service.memoryUtilizationPercent)}
@@ -2273,11 +2333,11 @@ export function AwsEcsWorkspace({
               )}
             </aside>
 
-            <section className="containers-workspace__detail ecs-workspace__detail-shell">
+            <section className="flex min-h-0 flex-col gap-4 rounded-[24px] border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[var(--surface-elevated)] p-[1.15rem]">
               {selectedService ? (
                 <>
-                  <div className="containers-workspace__detail-header ecs-workspace__detail-header">
-                    <div className="ecs-workspace__detail-header-main">
+                  <div className="flex flex-wrap items-start justify-between gap-4">
+                    <div className="min-w-0">
                       <CardTitleRow>
                         <h3>{selectedService.serviceName}</h3>
                         <StatusBadge tone={getServiceStatusTone(selectedService)}>
@@ -2304,14 +2364,14 @@ export function AwsEcsWorkspace({
                           <Badge
                             key={`${selectedService.serviceArn}:${label}`}
                             tone="neutral"
-                            className="ecs-workspace__service-exposure-badge"
+                            className="min-h-[1.42rem] border-[color-mix(in_srgb,var(--accent-strong)_18%,var(--border)_82%)] bg-[color-mix(in_srgb,var(--accent-strong)_10%,transparent_90%)] px-[0.48rem] py-[0.04rem] text-[0.74rem] font-semibold text-[var(--text-soft)]"
                           >
                             {label}
                           </Badge>
                         ))}
                       </CardMeta>
                     </div>
-                    <div className="ecs-workspace__detail-actions">
+                    <div className="flex flex-col items-start gap-3 self-stretch">
                       <Button
                         variant="secondary"
                         size="sm"
@@ -2350,56 +2410,72 @@ export function AwsEcsWorkspace({
                     </div>
                   </div>
 
-                  <div className="ecs-workspace__detail-panel">
+                  <div className="flex min-h-0 flex-1 flex-col gap-[0.9rem]">
                     {activePanel === "overview" ? (
-                      <div className="ecs-workspace__overview">
-                        <div className="ecs-workspace__overview-grid">
-                          <section className="ecs-workspace__section">
-                            <div className="containers-workspace__section-header">
-                              <h3>서비스 요약</h3>
+                      <div className="flex min-h-0 flex-1 flex-col gap-[0.9rem] overflow-y-auto pr-[0.1rem]">
+                        <div className="grid grid-cols-[repeat(2,minmax(0,1fr))] gap-[0.9rem] max-[1180px]:grid-cols-1">
+                          <section className={ecsSectionCardClass}>
+                            <div className="flex items-center justify-between gap-3">
+                              <h3 className="m-0 text-[1rem] font-semibold text-[var(--text)]">
+                                서비스 요약
+                              </h3>
                             </div>
-                            <dl className="ecs-workspace__facts-grid">
-                              <div>
-                                <dt>CPU</dt>
-                                <dd>{formatPercent(selectedService.cpuUtilizationPercent)}</dd>
+                            <dl className={ecsFactsGridClass}>
+                              <div className={ecsFactsItemClass}>
+                                <dt className={ecsFactsLabelClass}>CPU</dt>
+                                <dd className={ecsFactsValueClass}>
+                                  {formatPercent(selectedService.cpuUtilizationPercent)}
+                                </dd>
                               </div>
-                              <div>
-                                <dt>Memory</dt>
-                                <dd>{formatPercent(selectedService.memoryUtilizationPercent)}</dd>
+                              <div className={ecsFactsItemClass}>
+                                <dt className={ecsFactsLabelClass}>Memory</dt>
+                                <dd className={ecsFactsValueClass}>
+                                  {formatPercent(selectedService.memoryUtilizationPercent)}
+                                </dd>
                               </div>
-                              <div>
-                                <dt>Tasks</dt>
-                                <dd>
+                              <div className={ecsFactsItemClass}>
+                                <dt className={ecsFactsLabelClass}>Tasks</dt>
+                                <dd className={ecsFactsValueClass}>
                                   {selectedService.runningCount} / {selectedService.desiredCount}
                                 </dd>
                               </div>
-                              <div>
-                                <dt>Pending</dt>
-                                <dd>{selectedService.pendingCount}</dd>
+                              <div className={ecsFactsItemClass}>
+                                <dt className={ecsFactsLabelClass}>Pending</dt>
+                                <dd className={ecsFactsValueClass}>
+                                  {selectedService.pendingCount}
+                                </dd>
                               </div>
                             </dl>
                           </section>
 
-                          <section className="ecs-workspace__section">
-                            <div className="containers-workspace__section-header">
-                              <h3>배포 정보</h3>
+                          <section className={ecsSectionCardClass}>
+                            <div className="flex items-center justify-between gap-3">
+                              <h3 className="m-0 text-[1rem] font-semibold text-[var(--text)]">
+                                배포 정보
+                              </h3>
                             </div>
-                            <dl className="ecs-workspace__facts-grid ecs-workspace__facts-grid--meta">
-                              <div>
-                                <dt>Launch</dt>
-                                <dd>{selectedService.launchType || "-"}</dd>
+                            <dl className={ecsFactsGridClass}>
+                              <div className={ecsFactsItemClass}>
+                                <dt className={ecsFactsLabelClass}>Launch</dt>
+                                <dd className={ecsFactsValueClass}>
+                                  {selectedService.launchType || "-"}
+                                </dd>
                               </div>
-                              <div>
-                                <dt>Capacity</dt>
-                                <dd>{selectedService.capacityProviderSummary || "-"}</dd>
+                              <div className={ecsFactsItemClass}>
+                                <dt className={ecsFactsLabelClass}>Capacity</dt>
+                                <dd className={ecsFactsValueClass}>
+                                  {selectedService.capacityProviderSummary || "-"}
+                                </dd>
                               </div>
-                              <div>
-                                <dt>Ports</dt>
-                                <dd>{formatServicePorts(selectedService) || "-"}</dd>
+                              <div className={ecsFactsItemClass}>
+                                <dt className={ecsFactsLabelClass}>Ports</dt>
+                                <dd className={ecsFactsValueClass}>
+                                  {formatServicePorts(selectedService) || "-"}
+                                </dd>
                               </div>
-                              <div>
-                                <dt>Task def</dt>
-                                <dd>
+                              <div className={ecsFactsItemClass}>
+                                <dt className={ecsFactsLabelClass}>Task def</dt>
+                                <dd className={ecsFactsValueClass}>
                                   {selectedService.taskDefinitionRevision
                                     ? `rev ${selectedService.taskDefinitionRevision}`
                                     : "-"}
@@ -2409,17 +2485,16 @@ export function AwsEcsWorkspace({
                           </section>
                         </div>
 
-                        <section className="ecs-workspace__section">
-                          <div className="containers-workspace__section-header">
-                            <h3>Deployments</h3>
+                        <section className={ecsSectionCardClass}>
+                          <div className="flex items-center justify-between gap-3">
+                            <h3 className="m-0 text-[1rem] font-semibold text-[var(--text)]">
+                              Deployments
+                            </h3>
                           </div>
                           {selectedService.deployments?.length ? (
-                            <div className="ecs-workspace__timeline">
+                            <div className={ecsTimelineClass}>
                               {selectedService.deployments.map((deployment) => (
-                                <article
-                                  key={deployment.id}
-                                  className="ecs-workspace__timeline-item"
-                                >
+                                <article key={deployment.id} className={ecsTimelineItemClass}>
                                   <CardTitleRow>
                                     <strong>{deployment.status}</strong>
                                     {deployment.rolloutState ? (
@@ -2453,23 +2528,22 @@ export function AwsEcsWorkspace({
                               ))}
                             </div>
                           ) : (
-                            <div className="containers-workspace__empty-detail">
+                            <div className={ecsEmptyDetailClass}>
                               표시할 deployment 정보가 없습니다.
                             </div>
                           )}
                         </section>
 
-                        <section className="ecs-workspace__section">
-                          <div className="containers-workspace__section-header">
-                            <h3>Recent events</h3>
+                        <section className={ecsSectionCardClass}>
+                          <div className="flex items-center justify-between gap-3">
+                            <h3 className="m-0 text-[1rem] font-semibold text-[var(--text)]">
+                              Recent events
+                            </h3>
                           </div>
                           {selectedService.events?.length ? (
-                            <div className="ecs-workspace__timeline">
+                            <div className={ecsTimelineClass}>
                               {selectedService.events.map((event) => (
-                                <article
-                                  key={event.id}
-                                  className="ecs-workspace__timeline-item"
-                                >
+                                <article key={event.id} className={ecsTimelineItemClass}>
                                   <CardMeta>
                                     {event.createdAt ? (
                                       <span>{formatLoadedAt(event.createdAt)}</span>
@@ -2480,7 +2554,7 @@ export function AwsEcsWorkspace({
                               ))}
                             </div>
                           ) : (
-                            <div className="containers-workspace__empty-detail">
+                            <div className={ecsEmptyDetailClass}>
                               표시할 최근 이벤트가 없습니다.
                             </div>
                           )}
@@ -2489,35 +2563,23 @@ export function AwsEcsWorkspace({
                     ) : null}
 
                     {activePanel === "logs" ? (
-                      <div className="containers-workspace__logs ecs-workspace__logs-panel">
-                        <div className="containers-workspace__logs-toolbar ecs-workspace__logs-toolbar">
-                          <button
-                            type="button"
-                            role="switch"
-                            aria-checked={logsState.follow}
-                            aria-label="Follow"
-                            className={`containers-workspace__follow-toggle ${logsState.follow ? "is-active" : ""}`}
+                      <div className="grid min-h-0 flex-1 grid-rows-[auto_auto_auto_auto_1fr] gap-[0.9rem]">
+                        <FilterRow className="items-center justify-between">
+                          <ToggleSwitch
+                            checked={logsState.follow}
+                            label="Follow"
+                            className="w-auto max-w-max"
                             onClick={() => {
                               handleToggleLogsFollow();
                             }}
                             disabled={logsState.loading}
-                          >
-                            <span
-                              className="containers-workspace__follow-toggle-track"
-                              aria-hidden="true"
-                            >
-                              <span className="containers-workspace__follow-toggle-thumb" />
-                            </span>
-                            <span className="containers-workspace__follow-toggle-label">
-                              Follow
-                            </span>
-                          </button>
+                          />
                           <Button
                             variant="secondary"
                             size="sm"
                             active={logsRangeMode === "absolute"}
-                            className="ecs-workspace__logs-range-trigger"
                             aria-label="로그 범위"
+                            className="max-w-[min(360px,100%)] overflow-hidden text-ellipsis whitespace-nowrap"
                             onClick={() => {
                               setLogsRangePickerOpen(true);
                             }}
@@ -2525,9 +2587,8 @@ export function AwsEcsWorkspace({
                           >
                             {logsRangeLabel}
                           </Button>
-                          <label className="ecs-workspace__logs-filter-group">
-                            <span>Task</span>
-                            <select
+                          <FieldGroup label="Task" compact>
+                            <SelectField
                               value={logsState.taskArn ?? ""}
                               disabled={logsState.loading}
                               onChange={(event) => {
@@ -2549,11 +2610,10 @@ export function AwsEcsWorkspace({
                                   {task.taskId}
                                 </option>
                               ))}
-                            </select>
-                          </label>
-                          <label className="ecs-workspace__logs-filter-group">
-                            <span>Container</span>
-                            <select
+                            </SelectField>
+                          </FieldGroup>
+                          <FieldGroup label="Container" compact>
+                            <SelectField
                               value={logsState.containerName ?? ""}
                               disabled={logsState.loading}
                               onChange={(event) => {
@@ -2575,11 +2635,12 @@ export function AwsEcsWorkspace({
                                   {name}
                                 </option>
                               ))}
-                            </select>
-                          </label>
-                          <div className="containers-workspace__logs-search">
-                            <input
+                            </SelectField>
+                          </FieldGroup>
+                          <div className="flex min-w-[18rem] flex-1 flex-wrap items-center gap-3">
+                            <Input
                               type="search"
+                              className="min-w-[14rem] flex-1"
                               aria-label="로그 검색"
                               value={logsState.query}
                               placeholder="로그 검색"
@@ -2609,10 +2670,10 @@ export function AwsEcsWorkspace({
                           >
                             {logsState.loading ? "불러오는 중..." : "다시 불러오기"}
                           </Button>
-                        </div>
+                        </FilterRow>
 
                         {trimmedLogsSearchQuery ? (
-                          <div className="containers-workspace__logs-search-meta">
+                          <div className="text-[0.84rem] text-[var(--text-soft)]">
                             현재 버퍼에서 {logMatchCount}건 일치
                           </div>
                         ) : null}
@@ -2622,7 +2683,9 @@ export function AwsEcsWorkspace({
                         ) : null}
 
                         {logsState.error ? (
-                          <div className="terminal-error-banner">{logsState.error}</div>
+                          <NoticeCard tone="danger" role="alert">
+                            {logsState.error}
+                          </NoticeCard>
                         ) : null}
 
                         {logsState.snapshot?.unsupportedReason ? (
@@ -2631,18 +2694,19 @@ export function AwsEcsWorkspace({
 
                         {logsState.snapshot && !logsState.snapshot.unsupportedReason ? (
                           <>
-                            <CardMeta className="ecs-workspace__logs-meta">
+                            <CardMeta className={ecsLogsMetaClass}>
                               <span>마지막 갱신 {formatLoadedAt(logsState.snapshot.loadedAt)}</span>
                               <span>{logsRangeLabel}</span>
                               <span>{filteredLogs.length} lines</span>
                             </CardMeta>
                             <div
                               ref={logsOutputRef}
-                              className="containers-workspace__logs-output"
+                              className={ecsLogsOutputClass}
+                              data-testid="ecs-logs-output"
                               onScroll={handleLogsScroll}
                             >
                               {filteredLogs.length === 0 ? (
-                                <div className="containers-workspace__empty-detail">
+                                <div className={ecsEmptyDetailClass}>
                                   {trimmedLogsSearchQuery
                                     ? "검색 결과가 없습니다."
                                     : logsRangeMode === "absolute"
@@ -2653,17 +2717,17 @@ export function AwsEcsWorkspace({
                                 filteredLogs.map((entry) => (
                                   <div
                                     key={entry.id}
-                                    className="containers-workspace__log-row"
+                                    className="grid grid-cols-[max-content_minmax(0,1fr)] items-start gap-[0.9rem]"
                                   >
                                     <span
-                                      className="containers-workspace__log-timestamp"
+                                      className="whitespace-nowrap text-[rgba(163,181,214,0.82)]"
                                       title={entry.timestamp}
                                     >
                                       {formatLoadedAt(entry.timestamp)}
                                     </span>
-                                    <span className="containers-workspace__log-message">
+                                    <span className="min-w-0 break-words whitespace-pre-wrap">
                                       {entry.containerName || entry.taskId ? (
-                                        <span className="ecs-workspace__log-context">
+                                        <span className="text-[rgba(163,181,214,0.82)]">
                                           {[entry.containerName, entry.taskId]
                                             .filter(Boolean)
                                             .join(" · ")}{" "}
@@ -2676,7 +2740,7 @@ export function AwsEcsWorkspace({
                               )}
                               <div
                                 ref={logsBottomRef}
-                                className="containers-workspace__logs-end-anchor"
+                                className="h-px w-full"
                                 aria-hidden="true"
                               />
                             </div>
@@ -2693,15 +2757,15 @@ export function AwsEcsWorkspace({
                     ) : null}
 
                     {activePanel === "tunnel" ? (
-                      <div className="ecs-workspace__tunnel-panel">
+                      <div className="flex min-h-0 flex-1 flex-col gap-[0.9rem] overflow-y-auto pr-[0.1rem]">
                         {serviceContextState?.loading && !selectedContext ? (
                           <NoticeCard title="터널 대상을 준비하는 중입니다." />
                         ) : null}
 
                         {serviceContextState?.error ? (
-                          <div className="terminal-error-banner">
-                            <div>{serviceContextState.error}</div>
-                            <div className="ecs-workspace__inline-actions">
+                          <NoticeCard tone="danger" role="alert">
+                            <p>{serviceContextState.error}</p>
+                            <div className="mt-2 flex justify-start">
                               <Button
                                 variant="secondary"
                                 size="sm"
@@ -2712,13 +2776,12 @@ export function AwsEcsWorkspace({
                                 다시 시도
                               </Button>
                             </div>
-                          </div>
+                          </NoticeCard>
                         ) : null}
 
-                        <div className="ecs-workspace__tunnel-form">
-                          <label>
-                            <span>Task</span>
-                            <select
+                        <div className={ecsTunnelFormClass}>
+                          <FieldGroup label="Task">
+                            <SelectField
                               value={tunnelState.taskArn ?? ""}
                               disabled={isTunnelFormDisabled}
                               onChange={(event) => {
@@ -2750,11 +2813,10 @@ export function AwsEcsWorkspace({
                                   {getTaskLabel(task)}
                                 </option>
                               ))}
-                            </select>
-                          </label>
-                          <label>
-                            <span>Container</span>
-                            <select
+                            </SelectField>
+                          </FieldGroup>
+                          <FieldGroup label="Container">
+                            <SelectField
                               value={tunnelState.containerName ?? ""}
                               disabled={isTunnelFormDisabled}
                               onChange={(event) => {
@@ -2784,11 +2846,10 @@ export function AwsEcsWorkspace({
                                   {container.containerName}
                                 </option>
                               ))}
-                            </select>
-                          </label>
-                          <label>
-                            <span>Port</span>
-                            <select
+                            </SelectField>
+                          </FieldGroup>
+                          <FieldGroup label="Port">
+                            <SelectField
                               value={tunnelState.targetPort}
                               disabled={
                                 isTunnelFormDisabled || tunnelPortOptions.length === 0
@@ -2811,17 +2872,14 @@ export function AwsEcsWorkspace({
                                   {port.port}/{port.protocol}
                                 </option>
                               ))}
-                            </select>
-                          </label>
-                          <label>
-                            <span>Local port</span>
-                            <div className="port-forward-local-port ecs-workspace__tunnel-local-port">
-                              <button
-                                type="button"
-                                role="switch"
-                                aria-checked={tunnelState.autoLocalPort}
-                                aria-label="Auto (random)"
-                                className={`port-forward-toggle ${tunnelState.autoLocalPort ? "is-active" : ""}`}
+                            </SelectField>
+                          </FieldGroup>
+                          <FieldGroup label="Local port">
+                            <div className="grid gap-3">
+                              <ToggleSwitch
+                                checked={tunnelState.autoLocalPort}
+                                label="Auto (random)"
+                                description="사용 가능한 로컬 포트를 자동으로 할당합니다."
                                 disabled={isTunnelFormDisabled}
                                 onClick={() => {
                                   setTunnelState((previous) => ({
@@ -2832,18 +2890,10 @@ export function AwsEcsWorkspace({
                                       : "",
                                   }));
                                 }}
-                              >
-                                <span className="port-forward-toggle__track" aria-hidden="true">
-                                  <span className="port-forward-toggle__thumb" />
-                                </span>
-                                <span className="port-forward-toggle__content">
-                                  <strong>Auto (random)</strong>
-                                  <span>사용 가능한 로컬 포트를 자동으로 할당합니다.</span>
-                                </span>
-                              </button>
-                              <input
+                              />
+                              <Input
                                 type="number"
-                                className="port-forward-local-port__input"
+                                className="min-h-[2.35rem] rounded-[12px] bg-[var(--surface)] px-[0.7rem] py-[0.45rem]"
                                 value={tunnelState.bindPort}
                                 placeholder="0"
                                 disabled={
@@ -2857,12 +2907,12 @@ export function AwsEcsWorkspace({
                                 }}
                               />
                             </div>
-                          </label>
+                          </FieldGroup>
                         </div>
 
                         {tunnelState.runtime ? (
-                          <div className="ecs-workspace__tunnel-runtime-card">
-                            <div className="ecs-workspace__tunnel-runtime-header">
+                          <div className={ecsTunnelRuntimeCardClass}>
+                            <div className="flex items-center justify-between gap-3">
                               <strong>터널 상태</strong>
                               <StatusBadge tone={tunnelState.runtime.status}>
                                 {tunnelState.runtime.status === "running"
@@ -2870,26 +2920,34 @@ export function AwsEcsWorkspace({
                                   : tunnelState.runtime.status}
                               </StatusBadge>
                             </div>
-                            <div className="ecs-workspace__tunnel-runtime-grid">
-                              <div>
-                                <span>Local</span>
-                                <strong>{tunnelRuntimeLocalEndpoint}</strong>
+                            <div className={ecsTunnelRuntimeGridClass}>
+                              <div className="grid gap-[0.22rem]">
+                                <span className="text-[0.76rem] font-semibold uppercase tracking-[0.02em] text-[var(--text-soft)]">
+                                  Local
+                                </span>
+                                <strong className="break-words text-[1rem] leading-[1.35] text-[var(--text)]">
+                                  {tunnelRuntimeLocalEndpoint}
+                                </strong>
                               </div>
-                              <div>
-                                <span>Remote</span>
-                                <strong>{tunnelRuntimeRemoteEndpoint}</strong>
+                              <div className="grid gap-[0.22rem]">
+                                <span className="text-[0.76rem] font-semibold uppercase tracking-[0.02em] text-[var(--text-soft)]">
+                                  Remote
+                                </span>
+                                <strong className="break-words text-[1rem] leading-[1.35] text-[var(--text)]">
+                                  {tunnelRuntimeRemoteEndpoint}
+                                </strong>
                               </div>
                             </div>
                           </div>
                         ) : null}
 
                         {tunnelState.error ? (
-                          <div className="terminal-error-banner">
+                          <NoticeCard tone="danger" role="alert">
                             {tunnelState.error}
-                          </div>
+                          </NoticeCard>
                         ) : null}
 
-                        <div className="ecs-workspace__detail-actions">
+                        <div className="flex justify-end gap-[0.6rem]">
                           {tunnelState.runtime ? (
                             <Button
                               variant="secondary"
@@ -2934,15 +2992,17 @@ export function AwsEcsWorkspace({
           />
 
           {shellPickerState.open ? (
-            <div className="ecs-workspace__picker-backdrop" role="presentation">
+            <div
+              className="fixed inset-0 z-[8] grid place-items-center bg-[rgba(12,20,32,0.32)]"
+              role="presentation"
+            >
               <ModalShell
-                className="ecs-workspace__picker"
                 size="md"
                 role="dialog"
                 aria-modal="true"
                 aria-label="ECS shell picker"
               >
-                <ModalHeader className="ecs-workspace__picker-header">
+                <ModalHeader>
                   <div>
                     <h3 className="m-0">쉘 접속</h3>
                     <p className="mt-2 text-[var(--text-soft)]">
@@ -2953,16 +3013,15 @@ export function AwsEcsWorkspace({
 
                 {shellPickerState.error ? (
                   <div className="px-6 pt-4">
-                    <div className="terminal-error-banner">
+                    <NoticeCard tone="danger" role="alert">
                       {shellPickerState.error}
-                    </div>
+                    </NoticeCard>
                   </div>
                 ) : null}
 
-                <ModalBody className="ecs-workspace__picker-form">
-                  <label>
-                    <span>Task</span>
-                    <select
+                <ModalBody className="grid gap-4">
+                  <FieldGroup label="Task">
+                    <SelectField
                       value={shellPickerState.taskArn ?? ""}
                       disabled={shellPickerState.loading}
                       onChange={(event) => {
@@ -2989,11 +3048,10 @@ export function AwsEcsWorkspace({
                           {getTaskLabel(task)}
                         </option>
                       ))}
-                    </select>
-                  </label>
-                  <label>
-                    <span>Container</span>
-                    <select
+                    </SelectField>
+                  </FieldGroup>
+                  <FieldGroup label="Container">
+                    <SelectField
                       value={shellPickerState.containerName ?? ""}
                       disabled={shellPickerState.loading}
                       onChange={(event) => {
@@ -3014,11 +3072,11 @@ export function AwsEcsWorkspace({
                           {container.containerName}
                         </option>
                       ))}
-                    </select>
-                  </label>
+                    </SelectField>
+                  </FieldGroup>
                 </ModalBody>
 
-                <ModalFooter className="ecs-workspace__picker-actions">
+                <ModalFooter>
                   <Button
                     variant="secondary"
                     onClick={() => {

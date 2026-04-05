@@ -41,19 +41,27 @@ import type {
 import { formatConnectionProgressStageLabel } from "../lib/connection-progress";
 import { useResponsiveCardGrid } from "../lib/useResponsiveCardGrid";
 import { DialogBackdrop } from "./DialogBackdrop";
+import { HostCard } from "./HostCard";
+import { TerminalInteractiveAuthOverlay } from "./terminal-workspace/TerminalInteractiveAuthOverlay";
 import {
   Button,
+  Card,
   EmptyState,
+  FilterRow,
   IconButton,
+  Input,
   ModalBody,
   ModalFooter,
   ModalHeader,
   ModalShell,
+  NoticeCard,
   SectionLabel,
   StatusBadge,
   TabButton,
   Tabs,
+  Toolbar,
 } from "../ui";
+import { cn } from "../lib/cn";
 
 const SFTP_HOST_PICKER_GROUP_CARD_MIN_WIDTH_PX = 220;
 const SFTP_HOST_PICKER_GROUP_CARD_MAX_WIDTH_PX = 280;
@@ -664,9 +672,13 @@ function PaneBrowser({
   };
 
   return (
-    <div className="sftp-pane__content sftp-pane__content--browser">
-      <div className="sftp-pane__toolbar">
-        <Tabs className="sftp-source-toggle" role="tablist" aria-label="SFTP source kind">
+    <div className="flex min-h-0 flex-1 flex-col gap-[0.85rem] px-4 pb-4">
+      <Toolbar className="justify-between">
+        <Tabs
+          className="shrink-0 border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[color-mix(in_srgb,var(--surface-strong)_92%,transparent_8%)] p-1"
+          role="tablist"
+          aria-label="SFTP source kind"
+        >
           <TabButton active={pane.sourceKind === "local"} role="tab" aria-selected={pane.sourceKind === "local"} onClick={() => void onActivatePaneSource("local")}>
             Local
           </TabButton>
@@ -674,10 +686,10 @@ function PaneBrowser({
             Host
           </TabButton>
         </Tabs>
-        <div className="sftp-pane__toolbar-actions">
+        <div className="flex min-w-0 flex-1 flex-wrap items-center justify-end gap-2">
           <IconButton
             size="sm"
-            className="sftp-mini-button"
+            className="h-[2.3rem] w-[2.3rem] flex-none rounded-[12px]"
             onClick={() => void onNavigateBack()}
             disabled={pane.historyIndex <= 0}
           >
@@ -685,7 +697,7 @@ function PaneBrowser({
           </IconButton>
           <IconButton
             size="sm"
-            className="sftp-mini-button"
+            className="h-[2.3rem] w-[2.3rem] flex-none rounded-[12px]"
             onClick={() => void onNavigateForward()}
             disabled={pane.historyIndex >= pane.history.length - 1}
           >
@@ -693,7 +705,7 @@ function PaneBrowser({
           </IconButton>
           <IconButton
             size="sm"
-            className="sftp-mini-button"
+            className="h-[2.3rem] w-[2.3rem] flex-none rounded-[12px]"
             onClick={() => void onNavigateParent()}
           >
             ↑
@@ -701,7 +713,7 @@ function PaneBrowser({
           <Button
             variant="secondary"
             size="sm"
-            className="sftp-action-button"
+            className="flex-none rounded-[12px]"
             onClick={onOpenCreateDirectoryDialog}
             disabled={pane.isLoading}
           >
@@ -710,53 +722,72 @@ function PaneBrowser({
           <Button
             variant="secondary"
             size="sm"
-            className="sftp-action-button"
+            className="flex-none rounded-[12px]"
             onClick={() => void onRefresh()}
             disabled={pane.isLoading}
           >
             {pane.isLoading ? "새로고침 중..." : "새로고침"}
           </Button>
         </div>
-      </div>
+      </Toolbar>
 
-      <div className="sftp-breadcrumbs">
+      <div className="flex flex-wrap items-center gap-2">
         {breadcrumbParts(pane.currentPath).map((part) => (
-          <button
+          <Button
             key={part.path}
             type="button"
-            className="sftp-breadcrumb"
+            variant="ghost"
+            size="sm"
+            className="rounded-[12px]"
             onClick={() => void onNavigateBreadcrumb(part.path)}
           >
             {part.label}
-          </button>
+          </Button>
         ))}
       </div>
 
-      <div className="sftp-filter-row">
-        <input
+      <FilterRow className="p-0 border-0 bg-transparent">
+        <Input
+          className="flex-1"
           value={pane.filterQuery}
           onChange={(event) => onFilterChange(event.target.value)}
           placeholder="Filter"
           aria-label="Filter files"
         />
-      </div>
+      </FilterRow>
 
       {pane.warningMessages && pane.warningMessages.length > 0 ? (
-        <div className="sftp-pane__warnings">
+        <div className="grid gap-[0.55rem]">
           {pane.warningMessages.map((warning) => (
-            <div key={warning} className="terminal-warning-banner">
-              {warning}
-            </div>
+            <NoticeCard
+              key={warning}
+              tone="warning"
+              className="rounded-[16px] px-[0.9rem] py-[0.58rem] shadow-none"
+            >
+              <span className="text-[0.92rem] leading-[1.6]">{warning}</span>
+            </NoticeCard>
           ))}
         </div>
       ) : null}
 
       {pane.errorMessage ? (
-        <div className="terminal-error-banner">{pane.errorMessage}</div>
+        <NoticeCard
+          tone="danger"
+          className="rounded-[16px] px-[0.9rem] py-[0.58rem] shadow-none"
+        >
+          <span className="text-[0.92rem] leading-[1.6]">
+            {pane.errorMessage}
+          </span>
+        </NoticeCard>
       ) : null}
 
       <div
-        className={`sftp-table-shell ${pane.isLoading ? "loading" : ""} ${isDropTargetActive ? "drop-target" : ""}`}
+        className={cn(
+          "relative min-h-0 flex-1 overflow-auto rounded-[20px] border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[color-mix(in_srgb,var(--surface-strong)_95%,transparent_5%)] transition-[opacity,border-color,box-shadow]",
+          pane.isLoading && "opacity-[0.82]",
+          isDropTargetActive &&
+            "border-[color-mix(in_srgb,var(--accent-strong)_62%,var(--border)_38%)] shadow-[inset_0_0_0_1px_color-mix(in_srgb,var(--accent-strong)_38%,transparent_62%)]",
+        )}
         data-pane-id={pane.id}
         aria-label={`SFTP browser ${pane.id}`}
         onClick={(event) => {
@@ -804,7 +835,7 @@ function PaneBrowser({
           }
         }}
       >
-        <table className="sftp-table" style={tableStyle}>
+        <table className="w-full table-fixed border-collapse" style={tableStyle}>
           <colgroup>
             {SFTP_BROWSER_COLUMNS.map((column) => (
               <col
@@ -817,10 +848,13 @@ function PaneBrowser({
           <thead>
             <tr>
               {SFTP_BROWSER_COLUMNS.map((column) => (
-                <th key={column.key}>
-                  <div className="sftp-table__header-cell">
+                <th
+                  key={column.key}
+                  className="group/header sticky top-0 z-[1] border-b border-[color-mix(in_srgb,var(--border)_90%,transparent_10%)] bg-[color-mix(in_srgb,var(--surface-muted)_92%,transparent_8%)] px-[0.9rem] py-[0.8rem] text-left text-[0.85rem] font-semibold text-[var(--text-soft)]"
+                >
+                  <div className="relative flex min-h-[1.4rem] items-center">
                     <span
-                      className="sftp-table__header-label"
+                      className="min-w-0 overflow-hidden text-ellipsis"
                       title={column.label}
                     >
                       {column.label}
@@ -829,7 +863,10 @@ function PaneBrowser({
                       role="separator"
                       aria-orientation="vertical"
                       aria-label={`Resize ${column.label} column`}
-                      className={`sftp-column-resize-handle ${resizingColumnKey === column.key ? "active" : ""}`}
+                      className={cn(
+                        "absolute inset-y-[-0.8rem] right-[-0.95rem] z-[2] w-[14px] cursor-col-resize touch-none after:absolute after:top-[0.85rem] after:bottom-[0.85rem] after:left-1/2 after:w-px after:-translate-x-1/2 after:bg-[color-mix(in_srgb,var(--accent-strong)_42%,var(--border)_58%)] after:opacity-0 after:transition-opacity group-hover/header:after:opacity-100",
+                        resizingColumnKey === column.key && "after:opacity-100",
+                      )}
                       onMouseDown={(event) =>
                         onStartColumnResize(column.key, event)
                       }
@@ -843,9 +880,11 @@ function PaneBrowser({
             {entries.map((entry) => (
               <tr
                 key={entry.path}
-                className={
-                  pane.selectedPaths.includes(entry.path) ? "selected" : ""
-                }
+                className={cn(
+                  "cursor-default transition-colors hover:bg-[color-mix(in_srgb,var(--accent-strong)_10%,transparent_90%)]",
+                  pane.selectedPaths.includes(entry.path) &&
+                    "bg-[color-mix(in_srgb,var(--accent-strong)_10%,transparent_90%)]",
+                )}
                 draggable
                 onDragStart={(event) => {
                   const payload = JSON.stringify({
@@ -926,42 +965,65 @@ function PaneBrowser({
                   event.stopPropagation();
                 }}
               >
-                <td title={entry.name}>
-                  <div className="sftp-entry-name">
+                <td
+                  title={entry.name}
+                  className="border-b border-[color-mix(in_srgb,var(--border)_90%,transparent_10%)] px-[0.9rem] py-[0.8rem] text-left whitespace-nowrap"
+                >
+                  <div className="flex min-w-0 items-center gap-[0.6rem]">
                     <span
-                      className={`sftp-entry-icon ${entry.isDirectory ? "directory" : "file"}`}
+                      className={cn(
+                        "inline-grid h-[1.8rem] w-[1.8rem] place-items-center rounded-[12px] text-[0.72rem] font-bold",
+                        entry.isDirectory
+                          ? "bg-[color-mix(in_srgb,var(--accent-strong)_12%,transparent_88%)] text-[var(--accent-strong)]"
+                          : "bg-[color-mix(in_srgb,var(--accent)_14%,transparent_86%)] text-[var(--accent)]",
+                      )}
                     >
                       {entry.isDirectory ? "D" : "F"}
                     </span>
-                    <span className="sftp-entry-label">{entry.name}</span>
+                    <span className="min-w-0 overflow-hidden text-ellipsis">
+                      {entry.name}
+                    </span>
                   </div>
                 </td>
-                <td title={formatDate(entry.mtime)}>
+                <td
+                  title={formatDate(entry.mtime)}
+                  className="border-b border-[color-mix(in_srgb,var(--border)_90%,transparent_10%)] px-[0.9rem] py-[0.8rem] text-left overflow-hidden text-ellipsis whitespace-nowrap"
+                >
                   {formatDate(entry.mtime)}
                 </td>
-                <td title={entry.isDirectory ? "--" : formatSize(entry.size)}>
+                <td
+                  title={entry.isDirectory ? "--" : formatSize(entry.size)}
+                  className="border-b border-[color-mix(in_srgb,var(--border)_90%,transparent_10%)] px-[0.9rem] py-[0.8rem] text-left overflow-hidden text-ellipsis whitespace-nowrap"
+                >
                   {entry.isDirectory ? "--" : formatSize(entry.size)}
                 </td>
-                <td title={entry.kind}>{entry.kind}</td>
+                <td
+                  title={entry.kind}
+                  className="border-b border-[color-mix(in_srgb,var(--border)_90%,transparent_10%)] px-[0.9rem] py-[0.8rem] text-left overflow-hidden text-ellipsis whitespace-nowrap"
+                >
+                  {entry.kind}
+                </td>
               </tr>
             ))}
           </tbody>
         </table>
         {pane.isLoading ? (
-          <div className="sftp-loading-indicator">목록을 새로 읽는 중...</div>
+          <div className="pointer-events-none absolute bottom-4 right-4 rounded-full bg-[color-mix(in_srgb,var(--accent-strong)_12%,var(--surface-strong))] px-[0.7rem] py-[0.45rem] text-[0.82rem] font-semibold text-[var(--accent-strong)]">
+            목록을 새로 읽는 중...
+          </div>
         ) : null}
       </div>
 
       {contextMenu
         ? createPortal(
             <div
-              className="context-menu"
+              className="fixed z-[24] min-w-[148px] rounded-[16px] border border-[var(--border)] bg-[var(--surface-strong)] p-[0.45rem] shadow-[0_20px_60px_rgba(18,30,44,0.24)]"
               style={contextMenuStyle ?? undefined}
               role="menu"
             >
               <button
                 type="button"
-                className="context-menu__item"
+                className="flex w-full items-center rounded-[12px] px-[0.8rem] py-[0.75rem] text-left text-[var(--text)] transition-colors duration-150 hover:bg-[color-mix(in_srgb,var(--surface-muted)_92%,transparent_8%)] disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:bg-transparent"
                 disabled={pane.selectedPaths.length !== 1}
                 onClick={() => {
                   setContextMenu(null);
@@ -972,7 +1034,7 @@ function PaneBrowser({
               </button>
               <button
                 type="button"
-                className="context-menu__item"
+                className="flex w-full items-center rounded-[12px] px-[0.8rem] py-[0.75rem] text-left text-[var(--text)] transition-colors duration-150 hover:bg-[color-mix(in_srgb,var(--surface-muted)_92%,transparent_8%)] disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:bg-transparent"
                 disabled={pane.selectedPaths.length !== 1}
                 onClick={() => {
                   setContextMenu(null);
@@ -983,7 +1045,7 @@ function PaneBrowser({
               </button>
               <button
                 type="button"
-                className="context-menu__item"
+                className="flex w-full items-center rounded-[12px] px-[0.8rem] py-[0.75rem] text-left text-[var(--text)] transition-colors duration-150 hover:bg-[color-mix(in_srgb,var(--surface-muted)_92%,transparent_8%)] disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:bg-transparent"
                 disabled={!canDownloadSelection}
                 onClick={() => {
                   setContextMenu(null);
@@ -994,7 +1056,7 @@ function PaneBrowser({
               </button>
               <button
                 type="button"
-                className="context-menu__item context-menu__item--danger"
+                className="flex w-full items-center rounded-[12px] px-[0.8rem] py-[0.75rem] text-left text-[var(--danger-text)] transition-colors duration-150 hover:bg-[var(--danger-bg)] disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:bg-transparent"
                 disabled={pane.selectedPaths.length === 0}
                 onClick={() => {
                   setContextMenu(null);
@@ -1116,32 +1178,40 @@ function HostPicker({
 
   return (
     <div
-      className="sftp-pane__content sftp-host-picker"
+      className="relative flex min-h-0 flex-1 flex-col gap-[0.85rem] px-4 pb-4"
       aria-busy={isConnecting}
     >
-      <div className="sftp-pane__toolbar">
-        <div className="sftp-source-toggle">
-          <button
+      <Toolbar className="justify-start">
+        <Tabs
+          className="border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[color-mix(in_srgb,var(--surface-strong)_92%,transparent_8%)] p-1"
+          role="tablist"
+          aria-label="SFTP source kind"
+        >
+          <TabButton
             type="button"
-            className={pane.sourceKind === "local" ? "active" : ""}
+            active={pane.sourceKind === "local"}
+            role="tab"
+            aria-selected={pane.sourceKind === "local"}
             onClick={() => void onActivatePaneSource("local")}
             disabled={isConnecting}
           >
             Local
-          </button>
-          <button
+          </TabButton>
+          <TabButton
             type="button"
-            className={pane.sourceKind === "host" ? "active" : ""}
+            active={pane.sourceKind === "host"}
+            role="tab"
+            aria-selected={pane.sourceKind === "host"}
             onClick={() => void onActivatePaneSource("host")}
             disabled={isConnecting}
           >
             Host
-          </button>
-        </div>
-      </div>
+          </TabButton>
+        </Tabs>
+      </Toolbar>
 
-      <div className="search-panel">
-        <input
+      <FilterRow className="p-0 border-0 bg-transparent">
+        <Input
           id={`${pane.id}-host-search`}
           value={pane.hostSearchQuery}
           onChange={(event) => onHostSearchChange(event.target.value)}
@@ -1149,38 +1219,59 @@ function HostPicker({
           placeholder="Search hosts..."
           disabled={isConnecting}
         />
-      </div>
+      </FilterRow>
 
       {breadcrumbs.length > 0 ? (
-        <div className="host-browser__breadcrumbs">
+        <div className="flex flex-wrap items-center gap-2">
           {breadcrumbs.map((crumb) => (
-            <button
+            <Button
               key={crumb.path ?? "root"}
               type="button"
-              className={`host-browser__breadcrumb ${crumb.path === pane.hostGroupPath ? "active" : ""}`}
+              variant={crumb.path === pane.hostGroupPath ? "secondary" : "ghost"}
+              size="sm"
+              active={crumb.path === pane.hostGroupPath}
+              className="rounded-[12px]"
               onClick={() => onNavigateHostGroup(crumb.path)}
               disabled={isConnecting}
             >
               {crumb.label}
-            </button>
+            </Button>
           ))}
         </div>
       ) : null}
 
       {pane.errorMessage ? (
-        <div className="terminal-error-banner">{pane.errorMessage}</div>
+        <NoticeCard
+          tone="danger"
+          className="rounded-[16px] px-[0.9rem] py-[0.58rem] shadow-none"
+        >
+          <span className="text-[0.92rem] leading-[1.6]">
+            {pane.errorMessage}
+          </span>
+        </NoticeCard>
       ) : null}
 
       <div
-        className="sftp-host-picker__results"
+        className="flex min-h-0 flex-1 flex-col gap-[0.85rem] overflow-y-auto pr-[0.1rem]"
         aria-label={`Available hosts for ${pane.id} pane`}
       >
         {visibleGroups.length > 0 ? (
-          <div className="group-grid" ref={groupGridRef} style={groupGridStyle}>
+          <div
+            data-group-grid="true"
+            className="grid content-start gap-[0.75rem]"
+            ref={groupGridRef}
+            style={groupGridStyle}
+          >
             {visibleGroups.map((group) => (
               <article
                 key={group.path}
-                className={`group-card group-card--interactive ${isConnecting ? "disabled" : ""}`}
+                data-group-card="true"
+                className={cn(
+                  'relative flex min-h-[96px] select-none items-center gap-[0.7rem] rounded-[22px] border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[var(--surface-elevated)] px-[0.9rem] py-[0.82rem] shadow-[var(--shadow-soft)] transition-[background-color,border-color,box-shadow,opacity] duration-150',
+                  isConnecting
+                    ? 'cursor-default opacity-65'
+                    : 'cursor-pointer hover:border-[color-mix(in_srgb,var(--accent-strong)_34%,var(--border)_66%)] hover:bg-[color-mix(in_srgb,var(--surface-elevated)_90%,var(--accent-strong)_10%)]',
+                )}
                 onDoubleClick={() => {
                   if (isConnecting) {
                     return;
@@ -1200,19 +1291,26 @@ function HostPicker({
                   }
                 }}
               >
-                <div className="group-card__icon">
+                <div className="inline-grid h-[2.45rem] w-[2.45rem] shrink-0 place-items-center rounded-[14px] bg-[linear-gradient(180deg,color-mix(in_srgb,var(--accent-strong)_90%,white_10%),color-mix(in_srgb,var(--chrome-bg)_84%,var(--accent-strong)_16%))] text-[0.92rem] font-bold text-white">
                   {group.name.slice(0, 1).toUpperCase()}
                 </div>
-                <div>
+                <div className="min-w-0 flex-1">
                   <strong>{group.name}</strong>
-                  <span>{group.hostCount} hosts</span>
+                  <span className="block text-[var(--text-soft)]">
+                    {group.hostCount} hosts
+                  </span>
                 </div>
               </article>
             ))}
           </div>
         ) : null}
 
-        <div className="host-grid" ref={hostGridRef} style={hostGridStyle}>
+        <div
+          data-host-grid="true"
+          className="grid content-start gap-[0.75rem]"
+          ref={hostGridRef}
+          style={hostGridStyle}
+        >
           {isEmpty ? (
             <EmptyState
               title={
@@ -1243,11 +1341,27 @@ function HostPicker({
                 : null;
               const isSelected = pane.selectedHostId === host.id;
               const isBusy = isConnecting && isSelected;
+              const hint = disabledReason
+                ? disabledReason
+                : awsMetadataStatusLabel
+                  ? `${awsMetadataStatusLabel}${
+                      awsHost?.awsSshMetadataStatus === "error" &&
+                      awsHost.awsSshMetadataError
+                        ? ` · ${awsHost.awsSshMetadataError}`
+                        : ""
+                    }`
+                  : undefined;
               return (
-                <article
+                <HostCard
                   key={host.id}
-                  className={`host-browser-card ${isSelected ? "active" : ""} ${isBusy ? "connecting" : ""} ${disabledReason ? "disabled" : ""}`}
-                  aria-busy={isBusy}
+                  selected={isSelected}
+                  busy={isBusy}
+                  disabled={Boolean(disabledReason)}
+                  badgeLabel={badgeLabel}
+                  title={host.label}
+                  subtitle={getHostSubtitle(host)}
+                  groupLabel={host.groupName || "Ungrouped"}
+                  hint={hint}
                   onClick={() => {
                     if (isConnecting) {
                       return;
@@ -1260,46 +1374,19 @@ function HostPicker({
                     }
                     void onConnectHost(host.id);
                   }}
-                >
-                  <div
-                    className={`host-browser-card__icon ${badgeLabel.length > 3 ? "host-browser-card__icon--compact" : ""}`}
-                  >
-                    {badgeLabel}
-                  </div>
-                  <div className="host-browser-card__meta">
-                    <strong>{host.label}</strong>
-                    <span>{getHostSubtitle(host)}</span>
-                    <small>{host.groupName || "Ungrouped"}</small>
-                    {awsMetadataStatusLabel ? (
-                      <small className="host-browser-card__hint">
-                        {awsMetadataStatusLabel}
-                        {awsHost?.awsSshMetadataStatus === "error" &&
-                        awsHost.awsSshMetadataError
-                          ? ` · ${awsHost.awsSshMetadataError}`
-                          : ""}
-                      </small>
-                    ) : null}
-                    {disabledReason ? (
-                      <small className="host-browser-card__hint">
-                        {disabledReason}
-                      </small>
-                    ) : null}
-                  </div>
-                  {isBusy ? (
-                    <div className="host-browser-card__status">
+                  actions={
+                    isBusy ? (
                       <StatusBadge
                         tone="starting"
                         aria-label="Connecting selected host"
                       >
                         연결 중
                       </StatusBadge>
-                    </div>
-                  ) : canOpenHostSettings && onOpenHostSettings ? (
-                    <div className="host-browser-card__status">
+                    ) : canOpenHostSettings && onOpenHostSettings ? (
                       <Button
                         variant="secondary"
                         size="sm"
-                        className="sftp-inline-button"
+                        className="rounded-[12px] whitespace-nowrap"
                         onClick={(event) => {
                           event.stopPropagation();
                           onOpenHostSettings(host.id);
@@ -1307,9 +1394,9 @@ function HostPicker({
                       >
                         설정 열기
                       </Button>
-                    </div>
-                  ) : null}
-                </article>
+                    ) : null
+                  }
+                />
               );
             })
           )}
@@ -1318,150 +1405,68 @@ function HostPicker({
 
       {matchingInteractiveAuth ? (
         <div
-          className="sftp-host-picker__overlay"
+          className="absolute inset-0 z-[3] grid place-items-center rounded-[20px] bg-[rgba(12,20,32,0.18)]"
           role="status"
           aria-live="polite"
           aria-label="SFTP interactive authentication required"
         >
-          <div className="sftp-host-picker__overlay-card terminal-interactive-auth">
-            {matchingInteractiveAuth.provider === "warpgate" ? (
-              <>
-                <SectionLabel className="terminal-interactive-auth__label">
-                  Warpgate Approval
-                </SectionLabel>
-                <strong>Warpgate 승인을 기다리는 중입니다.</strong>
-                <p>
-                  브라우저에서 Warpgate 로그인 뒤 <code>Authorize</code>를
-                  눌러주세요. 가능한 입력은 자동으로 처리됩니다.
-                </p>
-                {matchingInteractiveAuth.authCode ? (
-                  <p className="terminal-interactive-auth__code">
-                    인증 코드 <code>{matchingInteractiveAuth.authCode}</code>는
-                    자동으로 입력됩니다.
-                  </p>
-                ) : null}
-                <div className="terminal-interactive-auth__actions">
-                  {matchingInteractiveAuth.approvalUrl ? (
-                    <Button
-                      variant="secondary"
-                      size="sm"
-                      onClick={() => {
-                        void onReopenInteractiveAuthUrl();
-                      }}
-                    >
-                      브라우저 다시 열기
-                    </Button>
-                  ) : null}
-                  {matchingInteractiveAuth.approvalUrl ? (
-                    <Button
-                      variant="secondary"
-                      size="sm"
-                      onClick={async () => {
-                        await navigator.clipboard.writeText(
-                          matchingInteractiveAuth.approvalUrl ?? "",
-                        );
-                      }}
-                    >
-                      링크 복사
-                    </Button>
-                  ) : null}
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    onClick={() => {
-                      setDismissedInteractiveEndpointId(
-                        matchingInteractiveAuth.endpointId,
-                      );
-                      onClearInteractiveAuth();
-                    }}
-                  >
-                    닫기
-                  </Button>
-                </div>
-                <pre className="terminal-interactive-auth__raw">
-                  {matchingInteractiveAuth.instruction}
-                </pre>
-              </>
-            ) : (
-              <form
-                className="terminal-interactive-auth__form"
-                onSubmit={(event) => {
-                  event.preventDefault();
-                  void onRespondInteractiveAuth(
-                    matchingInteractiveAuth.challengeId,
-                    promptResponses,
-                  );
-                }}
-              >
-                <SectionLabel className="terminal-interactive-auth__label">
-                  Additional Authentication
-                </SectionLabel>
-                <strong>추가 인증 입력이 필요합니다.</strong>
-                {matchingInteractiveAuth.instruction ? (
-                  <p>{matchingInteractiveAuth.instruction}</p>
-                ) : null}
-                {matchingInteractiveAuth.prompts.map((prompt, index) => (
-                  <label
-                    key={`${matchingInteractiveAuth.challengeId}:${index}`}
-                    className="terminal-interactive-auth__field"
-                  >
-                    <span>{prompt.label || `Prompt ${index + 1}`}</span>
-                    <input
-                      type={prompt.echo ? "text" : "password"}
-                      value={promptResponses[index] ?? ""}
-                      onChange={(inputEvent) => {
-                        const nextResponses = [...promptResponses];
-                        nextResponses[index] = inputEvent.target.value;
-                        setPromptResponses(nextResponses);
-                      }}
-                    />
-                  </label>
-                ))}
-                <div className="terminal-interactive-auth__actions">
-                  <Button type="submit" variant="primary" size="sm">
-                    응답 보내기
-                  </Button>
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    onClick={() => {
-                      setDismissedInteractiveEndpointId(
-                        matchingInteractiveAuth.endpointId,
-                      );
-                      onClearInteractiveAuth();
-                    }}
-                  >
-                    닫기
-                  </Button>
-                </div>
-              </form>
-            )}
-          </div>
+          <TerminalInteractiveAuthOverlay
+            interactiveAuth={matchingInteractiveAuth}
+            promptResponses={promptResponses}
+            onPromptResponseChange={(index, value) => {
+              const nextResponses = [...promptResponses];
+              nextResponses[index] = value;
+              setPromptResponses(nextResponses);
+            }}
+            onSubmit={() => {
+              void onRespondInteractiveAuth(
+                matchingInteractiveAuth.challengeId,
+                promptResponses,
+              );
+            }}
+            onCopyApprovalUrl={async () => {
+              await navigator.clipboard.writeText(
+                matchingInteractiveAuth.approvalUrl ?? "",
+              );
+            }}
+            onReopenApprovalUrl={() => {
+              void onReopenInteractiveAuthUrl();
+            }}
+            onClose={() => {
+              setDismissedInteractiveEndpointId(
+                matchingInteractiveAuth.endpointId,
+              );
+              onClearInteractiveAuth();
+            }}
+          />
         </div>
       ) : shouldShowConnectingOverlay ? (
         <div
-          className="sftp-host-picker__overlay"
+          className="absolute inset-0 z-[3] grid place-items-center rounded-[20px] bg-[rgba(12,20,32,0.18)]"
           role="status"
           aria-live="polite"
           aria-label="SFTP host connection in progress"
         >
-          <div className="sftp-host-picker__overlay-card">
-            <div className="sftp-host-picker__spinner" aria-hidden="true" />
+          <Card className="grid max-w-[20rem] justify-items-center gap-[0.45rem] px-[1.1rem] py-4 text-center">
+            <div
+              aria-hidden="true"
+              className="h-5 w-5 animate-spin rounded-full border-2 border-[color-mix(in_srgb,var(--accent-strong)_18%,var(--border)_82%)] border-t-[var(--accent-strong)]"
+            />
             <strong>
               {selectedHost
                 ? `${selectedHost.label} 연결 중...`
                 : "SFTP 연결 중..."}
             </strong>
-            <span className="sftp-host-picker__overlay-stage">
+            <span className="font-semibold text-[var(--text)]">
               {formatConnectionProgressStageLabel(
                 pane.connectionProgress?.stage,
               )}
             </span>
-            <span>
+            <span className="text-[0.9rem] leading-[1.5] text-[var(--text-soft)]">
               {pane.connectionProgress?.message ??
                 "원격 파일 목록을 준비하고 있습니다."}
             </span>
-          </div>
+          </Card>
         </div>
       ) : null}
     </div>
@@ -1484,7 +1489,7 @@ function TransferBar({
   }
 
   return (
-    <div className="sftp-transfer-bar">
+    <div className="flex items-stretch gap-2 overflow-x-auto pb-[0.2rem]">
       {transfers.slice(0, 6).map((job) => {
         const progress =
           job.bytesTotal > 0
@@ -1494,38 +1499,58 @@ function TransferBar({
               )
             : 0;
         return (
-          <article key={job.id} className={`transfer-card ${job.status}`}>
-            <div className="transfer-card__top">
+          <Card
+            key={job.id}
+            as="article"
+            className={cn(
+              "min-w-[360px] max-w-[360px] flex-none flex-col items-stretch justify-start gap-[0.35rem] rounded-[18px] px-[0.95rem] py-[0.85rem]",
+              job.status === "failed" &&
+                "border-[color-mix(in_srgb,var(--danger-text)_22%,var(--border))]",
+              job.status === "completed" &&
+                "border-[color-mix(in_srgb,var(--success-text)_24%,var(--border))]",
+            )}
+          >
+            <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-[0.75rem]">
               <strong
-                className="transfer-card__name"
+                className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap"
                 title={buildTransferCardTitle(job)}
               >
                 {buildTransferCardTitle(job)}
               </strong>
-              <span className="transfer-card__status" title={job.status}>
+              <span
+                className="min-w-0 justify-self-end whitespace-nowrap text-right"
+                title={job.status}
+              >
                 {job.status}
               </span>
             </div>
-            <div className="transfer-card__meta">
+            <div className="mt-[0.35rem] grid grid-cols-[minmax(0,1fr)_auto] items-center gap-[0.75rem] text-[0.86rem] text-[var(--text-soft)]">
               <span
-                className="transfer-card__direction"
+                className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap"
                 title={buildTransferDirection(job)}
               >
                 {buildTransferDirection(job)}
               </span>
-              <span className="transfer-card__percent">
+              <span className="min-w-0 justify-self-end whitespace-nowrap text-right">
                 {job.bytesTotal > 0 ? `${progress}%` : "--"}
               </span>
             </div>
-            <div className="transfer-card__progress">
-              <div style={{ width: `${progress}%` }} />
+            <div className="mt-[0.55rem] h-2 overflow-hidden rounded-full bg-[color-mix(in_srgb,var(--surface-muted)_90%,transparent_10%)]">
+              <div
+                className="h-full rounded-full"
+                style={{
+                  width: `${progress}%`,
+                  background:
+                    "linear-gradient(90deg, var(--accent-strong), color-mix(in srgb, var(--accent-strong) 60%, white 40%))",
+                }}
+              />
             </div>
-            <div className="transfer-card__actions">
-              <span className="transfer-card__bytes">
+            <div className="mt-[0.35rem] grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-[0.85rem] gap-y-[0.35rem] text-[0.86rem] text-[var(--text-soft)]">
+              <span className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap">
                 {formatSize(job.bytesCompleted)} / {formatSize(job.bytesTotal)}
               </span>
               {job.status === "running" ? (
-                <span className="transfer-card__speed">
+                <span className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap">
                   {formatTransferSpeed(job.speedBytesPerSecond) ??
                     "속도 계산 중"}
                   {formatEta(job.etaSeconds)
@@ -1534,22 +1559,37 @@ function TransferBar({
                 </span>
               ) : null}
               {job.status === "running" ? (
-                <Button variant="secondary" size="sm" className="sftp-inline-button" onClick={() => void onCancelTransfer(job.id)}>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  className="col-start-2 row-span-2 row-start-1 justify-self-end rounded-[12px] whitespace-nowrap"
+                  onClick={() => void onCancelTransfer(job.id)}
+                >
                   취소
                 </Button>
               ) : null}
               {job.status === "failed" ? (
-                <Button variant="secondary" size="sm" className="sftp-inline-button" onClick={() => void onRetryTransfer(job.id)}>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  className="col-start-2 row-span-2 row-start-1 justify-self-end rounded-[12px] whitespace-nowrap"
+                  onClick={() => void onRetryTransfer(job.id)}
+                >
                   재시도
                 </Button>
               ) : null}
               {job.status !== "running" && job.status !== "queued" ? (
-                <Button variant="secondary" size="sm" className="sftp-inline-button" onClick={() => onDismissTransfer(job.id)}>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  className="col-start-2 row-span-2 row-start-1 justify-self-end rounded-[12px] whitespace-nowrap"
+                  onClick={() => onDismissTransfer(job.id)}
+                >
                   닫기
                 </Button>
               ) : null}
             </div>
-          </article>
+          </Card>
         );
       })}
     </div>
@@ -1572,21 +1612,18 @@ function ConflictDialog({
   }
 
   return (
-    <DialogBackdrop
-      className="sftp-modal-backdrop"
-      dismissOnBackdrop={false}
-    >
-      <ModalShell className="sftp-modal" size="md">
-        <ModalHeader className="sftp-modal__header">
+    <DialogBackdrop dismissOnBackdrop={false}>
+      <ModalShell size="md">
+        <ModalHeader>
           <div>
             <SectionLabel>Conflict</SectionLabel>
             <h3 className="m-0">같은 이름의 파일이 이미 존재합니다</h3>
           </div>
         </ModalHeader>
-        <ModalBody className="sftp-modal__body">
+        <ModalBody>
           <p>{pendingConflictDialog.names.join(", ")}</p>
         </ModalBody>
-        <ModalFooter className="sftp-modal__actions">
+        <ModalFooter>
           <Button variant="secondary" onClick={onDismissConflict}>
             취소
           </Button>
@@ -1621,13 +1658,9 @@ function ActionDialog({
   }
 
   return (
-    <DialogBackdrop
-      className="sftp-modal-backdrop"
-      onDismiss={onClose}
-      dismissDisabled={dialog.isSubmitting}
-    >
-      <ModalShell className="sftp-modal" size="md">
-        <ModalHeader className="sftp-modal__header">
+    <DialogBackdrop onDismiss={onClose} dismissDisabled={dialog.isSubmitting}>
+      <ModalShell size="md">
+        <ModalHeader>
           <div>
             <SectionLabel>
               {dialog.mode === "mkdir" ? "New Folder" : "Rename"}
@@ -1635,8 +1668,8 @@ function ActionDialog({
             <h3 className="m-0">{dialog.title}</h3>
           </div>
         </ModalHeader>
-        <ModalBody className="sftp-modal__body">
-          <input
+        <ModalBody>
+          <Input
             value={dialog.value}
             onChange={(event) => onChange(event.target.value)}
             placeholder={dialog.placeholder}
@@ -1644,7 +1677,7 @@ function ActionDialog({
             disabled={dialog.isSubmitting}
           />
         </ModalBody>
-        <ModalFooter className="sftp-modal__actions">
+        <ModalFooter>
           <Button variant="secondary" onClick={onClose} disabled={dialog.isSubmitting}>
             취소
           </Button>
@@ -1689,48 +1722,47 @@ function PermissionDialog({
   ];
 
   return (
-    <DialogBackdrop
-      className="sftp-modal-backdrop"
-      onDismiss={onClose}
-      dismissDisabled={dialog.isSubmitting}
-    >
-      <ModalShell className="sftp-modal" size="md">
-        <ModalHeader className="sftp-modal__header">
+    <DialogBackdrop onDismiss={onClose} dismissDisabled={dialog.isSubmitting}>
+      <ModalShell size="md">
+        <ModalHeader>
           <div>
             <SectionLabel>Permissions</SectionLabel>
             <h3 className="m-0">{dialog.name} 권한 수정</h3>
           </div>
         </ModalHeader>
-        <ModalBody className="sftp-modal__body">
-          <div className="sftp-permissions-grid">
-          <div />
-          {columns.map((column) => (
-            <strong key={column.key}>{column.label}</strong>
-          ))}
-          {rows.map((row) => (
-            <Fragment key={row.section}>
-              <span>{row.label}</span>
-              {columns.map((column) => (
-                <label
-                  key={`${row.section}-${column.key}`}
-                  className="sftp-permissions-toggle"
-                >
-                  <input
-                    type="checkbox"
-                    checked={dialog.matrix[row.section][column.key]}
-                    onChange={() => onToggle(row.section, column.key)}
-                    disabled={dialog.isSubmitting}
-                  />
-                </label>
-              ))}
-            </Fragment>
-          ))}
+        <ModalBody>
+          <div className="mt-4 grid grid-cols-[minmax(72px,auto)_repeat(3,minmax(54px,1fr))] items-center gap-x-[0.8rem] gap-y-[0.65rem]">
+            <div />
+            {columns.map((column) => (
+              <strong key={column.key} className="text-center">
+                {column.label}
+              </strong>
+            ))}
+            {rows.map((row) => (
+              <Fragment key={row.section}>
+                <span>{row.label}</span>
+                {columns.map((column) => (
+                  <label
+                    key={`${row.section}-${column.key}`}
+                    className="grid place-items-center"
+                  >
+                    <input
+                      type="checkbox"
+                      className="m-0 h-4 w-4"
+                      checked={dialog.matrix[row.section][column.key]}
+                      onChange={() => onToggle(row.section, column.key)}
+                      disabled={dialog.isSubmitting}
+                    />
+                  </label>
+                ))}
+              </Fragment>
+            ))}
           </div>
-          <div className="sftp-permissions-preview">
+          <div className="mt-[0.95rem] text-[0.9rem] text-[var(--text-soft)]">
             Mode {formatPermissionMode(mode)}
           </div>
         </ModalBody>
-        <ModalFooter className="sftp-modal__actions">
+        <ModalFooter>
           <Button variant="secondary" onClick={onClose} disabled={dialog.isSubmitting}>
             취소
           </Button>
@@ -1765,36 +1797,31 @@ function DeleteDialog({
     : `선택한 ${dialog.itemCount}개 항목을 삭제할까요?`;
 
   return (
-    <DialogBackdrop
-      className="sftp-modal-backdrop"
-      onDismiss={onClose}
-      dismissDisabled={dialog.isSubmitting}
-    >
+    <DialogBackdrop onDismiss={onClose} dismissDisabled={dialog.isSubmitting}>
       <ModalShell
-        className="sftp-modal"
         size="md"
         role="dialog"
         aria-modal="true"
         aria-labelledby="sftp-delete-title"
         aria-label="SFTP delete confirmation"
       >
-        <ModalHeader className="sftp-modal__header">
+        <ModalHeader>
           <div>
             <SectionLabel>Delete</SectionLabel>
             <h3 id="sftp-delete-title" className="m-0">{title}</h3>
           </div>
         </ModalHeader>
-        <ModalBody className="sftp-modal__body">
+        <ModalBody>
           {dialog.includesDirectory ? (
-            <p className="sftp-modal__warning">
+            <p className="rounded-[16px] border border-[color-mix(in_srgb,var(--danger-text)_22%,var(--border)_78%)] bg-[color-mix(in_srgb,var(--danger-bg)_72%,transparent_28%)] px-[0.9rem] py-[0.8rem] leading-[1.6]">
               폴더를 삭제하면 하위 항목도 함께 삭제됩니다.
             </p>
           ) : null}
           {dialog.errorMessage ? (
-            <p className="sftp-modal__error">{dialog.errorMessage}</p>
+            <p className="text-[var(--danger-text)]">{dialog.errorMessage}</p>
           ) : null}
         </ModalBody>
-        <ModalFooter className="sftp-modal__actions">
+        <ModalFooter>
           <Button
             variant="secondary"
             onClick={onClose}
@@ -2007,8 +2034,8 @@ export function SftpWorkspace({
   };
 
   return (
-    <div className="sftp-workspace">
-      <div className="sftp-workspace__panes">
+    <div className="flex h-full min-h-0 flex-col gap-4">
+      <div className="grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] gap-4 max-[1040px]:grid-cols-1">
         {panes.map((pane, index) => {
           const connectActions = {
             onActivatePaneSource: (sourceKind: SftpSourceKind) =>
@@ -2016,21 +2043,24 @@ export function SftpWorkspace({
           };
 
           const section = (
-            <section key={pane.id} className="sftp-pane">
-              <header className="sftp-pane__header">
-                <div className="sftp-pane__header-main">
+            <section
+              key={pane.id}
+              className="flex min-h-0 flex-col overflow-hidden rounded-[28px] border border-[var(--border)] bg-[var(--surface)] shadow-[var(--shadow)]"
+            >
+              <header className="flex items-center justify-between px-[1.1rem] pb-[0.75rem] pt-[1rem]">
+                <div className="min-w-0 flex-1">
                   <h2>{getSftpPaneTitle(pane)}</h2>
                 </div>
                 {pane.sourceKind === "host" && pane.endpoint ? (
-                  <button
-                    type="button"
-                    className="icon-button sftp-pane__disconnect"
+                  <IconButton
                     aria-label="연결 종료"
                     title="연결 종료"
+                    size="sm"
+                    className="h-[2.35rem] w-[2.35rem] rounded-[12px] text-[1.05rem] font-semibold"
                     onClick={() => void onDisconnectPane(pane.id)}
                   >
                     X
-                  </button>
+                  </IconButton>
                 ) : null}
               </header>
 
@@ -2161,13 +2191,13 @@ export function SftpWorkspace({
               <Fragment key={pane.id}>
                 {section}
                 <div
-                  className="sftp-transfer-gutter"
+                  className="flex min-h-0 w-14 flex-col items-center justify-center gap-[0.65rem] max-[1040px]:hidden"
                   aria-label="Pane transfer controls"
                 >
                   <Button
                     variant="secondary"
                     size="sm"
-                    className="sftp-transfer-arrow"
+                    className="h-12 w-12 rounded-[16px] p-0 text-[1.2rem] font-bold whitespace-nowrap"
                     aria-label="Transfer selection from left pane to right pane"
                     onClick={() =>
                       void onTransferSelectionToPane("left", "right")
@@ -2184,7 +2214,7 @@ export function SftpWorkspace({
                   <Button
                     variant="secondary"
                     size="sm"
-                    className="sftp-transfer-arrow"
+                    className="h-12 w-12 rounded-[16px] p-0 text-[1.2rem] font-bold whitespace-nowrap"
                     aria-label="Transfer selection from right pane to left pane"
                     onClick={() =>
                       void onTransferSelectionToPane("right", "left")

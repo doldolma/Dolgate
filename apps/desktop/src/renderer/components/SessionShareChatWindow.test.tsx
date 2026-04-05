@@ -107,6 +107,15 @@ describe('SessionShareChatWindow', () => {
     expect(api.window.close).not.toHaveBeenCalled();
   });
 
+  it('keeps the message list flexible and pins the composer to the bottom shell', async () => {
+    render(<SessionShareChatWindow sessionId="session-1" />);
+
+    await screen.findByText('hello');
+
+    expect(screen.getByTestId('session-share-chat-messages').className).toContain('flex-1');
+    expect(screen.getByTestId('session-share-chat-composer').className).toContain('mt-auto');
+  });
+
   it('sends owner chat messages, clears the draft, restores focus, and renders owner badges without duplicate owner text', async () => {
     const { container } = render(<SessionShareChatWindow sessionId="session-1" />);
 
@@ -147,7 +156,7 @@ describe('SessionShareChatWindow', () => {
     expect(screen.queryByText('Synology Owner')).toBeNull();
     expect(
       container.querySelector(
-        '.session-share-chat-window__message--owner .session-share-chat-window__meta-name strong',
+        '[data-owner-message="true"] strong',
       )?.textContent,
     ).toBe('Synology');
   });
