@@ -19,6 +19,7 @@ import type { GroupRecord, GroupRemoveMode, HostRecord } from '@shared';
 import { useResponsiveCardGrid } from '../lib/useResponsiveCardGrid';
 import { cn } from '../lib/cn';
 import { DialogBackdrop } from './DialogBackdrop';
+import { HostCard } from './HostCard';
 import type { DesktopPlatform } from './DesktopWindowControls';
 import {
   Button,
@@ -28,6 +29,7 @@ import {
   ModalFooter,
   ModalHeader,
   ModalShell,
+  NoticeCard,
   SectionLabel,
   SplitButton,
   SplitButtonMain,
@@ -48,10 +50,6 @@ export {
   isGroupWithinPath,
   normalizeGroupPath
 } from '@shared';
-
-export function getHostBrowserCardClassName(isSelected: boolean, isTagsExpanded: boolean): string {
-  return ['host-browser-card', isSelected ? 'active' : null, isTagsExpanded ? 'host-browser-card--expanded' : null].filter(Boolean).join(' ');
-}
 
 export const HOST_BROWSER_IMPORT_MENU_LABELS = [
   'Import from AWS',
@@ -544,12 +542,12 @@ export function HostBrowser({
   function handleBrowserBackgroundClick(event: React.MouseEvent<HTMLDivElement>) {
     const target = event.target as HTMLElement;
     if (
-      target.closest('.host-browser-card') ||
-      target.closest('.group-card') ||
-      target.closest('.context-menu') ||
+      target.closest('[data-host-card="true"]') ||
+      target.closest('[data-group-card="true"]') ||
+      target.closest('[role="menu"]') ||
       target.closest('button') ||
       target.closest('input') ||
-      target.closest('.home-modal')
+      target.closest('[data-host-browser-modal="true"]')
     ) {
       return;
     }
@@ -566,9 +564,12 @@ export function HostBrowser({
   const selectedGroupPathSet = new Set(selectedGroupPaths);
 
   return (
-    <div className="host-browser" onClickCapture={handleBrowserBackgroundClick}>
-      <div className="home-toolbar">
-        <div className="search-panel">
+    <div
+      className="relative flex min-h-full flex-1 flex-col gap-5 [--home-browser-card-min-width:280px] [--home-browser-tree-width:clamp(10.5rem,14vw,12.5rem)]"
+      onClickCapture={handleBrowserBackgroundClick}
+    >
+      <div className="flex items-end gap-4 pb-[0.8rem] pt-[0.2rem] max-[760px]:flex-col max-[760px]:items-stretch">
+        <div className="flex-1">
           <input
             id="host-search"
             value={searchQuery}
@@ -577,7 +578,7 @@ export function HostBrowser({
             aria-label="Search hosts"
           />
         </div>
-        <div className="home-toolbar__actions">
+        <div className="flex flex-wrap justify-end gap-3">
           <Button
             variant="secondary"
             onClick={() => {
@@ -598,7 +599,7 @@ export function HostBrowser({
           >
             New Group
           </Button>
-          <SplitButton className="split-button" ref={importMenuRef}>
+          <SplitButton ref={importMenuRef}>
             <SplitButtonMain
               onClick={() => {
                 setIsImportMenuOpen(false);
@@ -621,14 +622,20 @@ export function HostBrowser({
                 }
               }}
             >
-              <span className="split-button__chevron" aria-hidden="true">
-                <svg viewBox="0 0 12 8" focusable="false">
+              <span
+                className={cn(
+                  'inline-grid h-[0.72rem] w-[0.98rem] place-items-center transition-transform duration-140',
+                  isImportMenuOpen && 'rotate-180',
+                )}
+                aria-hidden="true"
+              >
+                <svg viewBox="0 0 12 8" focusable="false" className="block h-full w-full">
                   <path d="M1 1.25 6 6.25 11 1.25" />
                 </svg>
               </span>
             </SplitButtonToggle>
             {isImportMenuOpen ? (
-              <SplitButtonMenu className="split-button__menu" role="menu" aria-label="Import host menu">
+              <SplitButtonMenu role="menu" aria-label="Import host menu">
                 {importMenuItems.map((item) => (
                   <SplitButtonMenuItem
                     key={item.label}
@@ -647,38 +654,50 @@ export function HostBrowser({
         </div>
       </div>
 
-      {statusMessage ? <div className="terminal-status-banner host-browser__status-banner">{statusMessage}</div> : null}
-      {errorMessage ? <div className="terminal-error-banner host-browser__error-banner">{errorMessage}</div> : null}
+      {statusMessage ? (
+        <NoticeCard tone="info" className="mb-4">
+          {statusMessage}
+        </NoticeCard>
+      ) : null}
+      {errorMessage ? (
+        <NoticeCard tone="danger" className="mb-4" role="alert">
+          {errorMessage}
+        </NoticeCard>
+      ) : null}
 
-      <div className="host-browser__layout">
-        <aside className="host-browser__group-tree" aria-label="Group tree">
-          <div className="host-browser__group-tree-header">
+      <div className="grid min-h-0 flex-1 grid-cols-[minmax(0,var(--home-browser-tree-width))_minmax(0,1fr)] items-stretch gap-[1.3rem] min-[0px]:min-w-0 max-[1040px]:grid-cols-1">
+        <aside className="flex min-h-0 flex-col gap-[0.85rem] pt-[0.15rem]" aria-label="Group tree">
+          <div className="flex items-center justify-between text-[0.75rem] font-bold uppercase tracking-[0.08em] text-[var(--text-soft)]">
             <span>Group Tree</span>
           </div>
           <button
             type="button"
-            className={`host-browser__group-tree-root ${currentGroupPath === null ? 'active' : ''}`}
+            className={cn(
+              'flex w-full min-w-0 items-center justify-between gap-3 rounded-[18px] border border-transparent bg-transparent px-[0.4rem] py-[0.45rem] text-left text-[var(--text-soft)] transition-[background-color,border-color,color,box-shadow] duration-140 hover:bg-[color-mix(in_srgb,var(--surface-elevated)_72%,transparent_28%)] hover:text-[var(--text)]',
+              currentGroupPath === null &&
+                'border-[color-mix(in_srgb,var(--accent-strong)_30%,transparent_70%)] bg-[color-mix(in_srgb,var(--accent-strong)_14%,var(--surface-elevated)_86%)] text-[var(--accent-strong)]',
+            )}
             onClick={handleNavigateRoot}
           >
             <span>All Groups</span>
-            <span className="host-browser__group-tree-count">{hosts.length}</span>
+            <span className="shrink-0 text-[0.74rem] font-semibold text-[var(--text-muted)]">{hosts.length}</span>
           </button>
           {groupTreeRows.length === 0 ? (
-            <div className="host-browser__group-tree-empty">
+            <div className="px-[0.2rem] py-[0.75rem] text-[0.8rem] leading-[1.45] text-[var(--text-soft)]">
               아직 만든 그룹이 없습니다.
             </div>
           ) : (
-            <div className="host-browser__group-tree-list">
+            <div className="flex flex-col gap-[0.15rem]">
               {visibleGroupTreeRows.map((group) => (
                 <div
                   key={group.path}
-                  className="host-browser__group-tree-row"
+                  className="flex min-w-0 items-center gap-[0.1rem]"
                   style={{ paddingLeft: `calc(${group.depth} * 1rem)` }}
                 >
                   {group.hasChildren ? (
                     <button
                       type="button"
-                      className={`host-browser__group-tree-disclosure ${collapsedTreeGroupPathSet.has(group.path) ? 'collapsed' : 'expanded'}`}
+                      className="inline-grid h-4 w-4 shrink-0 place-items-center rounded-full text-[0.8rem] leading-none text-[var(--text-muted)] hover:text-[var(--text)]"
                       aria-label={collapsedTreeGroupPathSet.has(group.path) ? 'Expand subgroup' : 'Collapse subgroup'}
                       onClick={() => {
                         handleToggleGroupBranch(group.path);
@@ -687,11 +706,22 @@ export function HostBrowser({
                       <span aria-hidden="true">{collapsedTreeGroupPathSet.has(group.path) ? '▸' : '▾'}</span>
                     </button>
                   ) : (
-                    <span className="host-browser__group-tree-disclosure-spacer" aria-hidden="true" />
+                    <span className="h-4 w-4 shrink-0" aria-hidden="true" />
                   )}
                   <button
                     type="button"
-                    className={`host-browser__group-tree-item ${currentGroupPath === group.path ? 'active' : ''} ${selectedGroupPathSet.has(group.path) ? 'selected' : ''} ${dragTargetGroupPath === group.path ? 'drop-target' : ''}`}
+                    className={cn(
+                      'flex w-full min-w-0 items-center justify-between gap-3 rounded-[18px] border border-transparent bg-transparent px-[0.4rem] py-[0.45rem] text-left text-[var(--text-soft)] transition-[background-color,border-color,color,box-shadow] duration-140 hover:bg-[color-mix(in_srgb,var(--surface-elevated)_72%,transparent_28%)] hover:text-[var(--text)]',
+                      currentGroupPath === group.path &&
+                        'border-[color-mix(in_srgb,var(--accent-strong)_30%,transparent_70%)] bg-[color-mix(in_srgb,var(--accent-strong)_14%,var(--surface-elevated)_86%)] text-[var(--accent-strong)]',
+                      !currentGroupPath && selectedGroupPathSet.has(group.path) && 'text-[var(--text)]',
+                      selectedGroupPathSet.has(group.path) &&
+                        currentGroupPath !== group.path &&
+                        'bg-[color-mix(in_srgb,var(--surface-elevated)_66%,transparent_34%)]',
+                      dragTargetGroupPath === group.path &&
+                        'border-[color-mix(in_srgb,var(--accent-strong)_46%,var(--border)_54%)] bg-[color-mix(in_srgb,var(--surface)_84%,var(--accent-strong)_16%)] shadow-[0_0_0_2px_color-mix(in_srgb,var(--accent-strong)_20%,transparent_80%),var(--shadow-soft)]',
+                    )}
+                    data-group-tree-state={selectedGroupPathSet.has(group.path) ? 'selected' : 'idle'}
                     onClick={(event) => handleGroupSelection(group.path, event)}
                     onDoubleClick={() => {
                       if (group.hasChildren) {
@@ -739,8 +769,8 @@ export function HostBrowser({
                       await onMoveHostToGroup(hostId, group.path);
                     }}
                   >
-                    <span className="host-browser__group-tree-label">{group.label}</span>
-                    <span className="host-browser__group-tree-count">{group.hostCount}</span>
+                    <span className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap font-semibold">{group.label}</span>
+                    <span className="shrink-0 text-[0.74rem] font-semibold text-[var(--text-muted)]">{group.hostCount}</span>
                   </button>
                 </div>
               ))}
@@ -748,9 +778,14 @@ export function HostBrowser({
           )}
         </aside>
 
-        <div className="host-browser__content">
-          <div className="browser-section browser-section--hosts">
-            <div className="host-grid" ref={hostGridRef} style={hostGridStyle}>
+        <div className="flex min-w-0 flex-col gap-[0.85rem]" data-testid="host-browser-content">
+          <div className="flex flex-col gap-4">
+            <div
+              data-host-grid="true"
+              className="grid content-start gap-[0.85rem]"
+              ref={hostGridRef}
+              style={hostGridStyle}
+            >
               {visibleHosts.length === 0 ? (
                 <EmptyState
                   title={emptyMessage}
@@ -761,14 +796,22 @@ export function HostBrowser({
                   const isTagsExpanded = expandedHostTags.includes(host.id);
                   const badgeLabel = getHostBadgeLabel(host);
                   const awsMetadataStatusLabel = host.kind === 'aws-ec2' ? getAwsEc2HostSshMetadataStatusLabel(host.awsSshMetadataStatus) : null;
+                  const hint = host.kind === 'aws-ec2' && awsMetadataStatusLabel
+                    ? `${awsMetadataStatusLabel}${host.awsSshMetadataStatus === 'error' && host.awsSshMetadataError ? ` · ${host.awsSshMetadataError}` : ''}`
+                    : null;
                   return (
-                    <article
+                    <HostCard
                       key={host.id}
-                      className={getHostBrowserCardClassName(
+                      selected={
                         selectedHostIdSet.has(host.id) ||
-                          (selectedHostIds.length === 0 && selectedGroupPaths.length === 0 && selectedHostId === host.id),
-                        isTagsExpanded
-                      )}
+                        (selectedHostIds.length === 0 && selectedGroupPaths.length === 0 && selectedHostId === host.id)
+                      }
+                      expanded={isTagsExpanded}
+                      badgeLabel={badgeLabel}
+                      title={host.label}
+                      subtitle={getHostSubtitle(host)}
+                      groupLabel={normalizeGroupPath(host.groupName) ?? 'Ungrouped'}
+                      hint={hint}
                       style={clampedHostCardStyle}
                       draggable
                       onClick={(event) => {
@@ -813,60 +856,52 @@ export function HostBrowser({
                           })();
                         }
                       }}
-                    >
-                      <div className={`host-browser-card__icon ${badgeLabel.length > 3 ? 'host-browser-card__icon--compact' : ''}`}>
-                        {badgeLabel}
-                      </div>
-                      <div className="host-browser-card__meta">
-                        <strong>{host.label}</strong>
-                        <span>{getHostSubtitle(host)}</span>
-                        <small>{normalizeGroupPath(host.groupName) ?? 'Ungrouped'}</small>
-                        {host.kind === 'aws-ec2' && awsMetadataStatusLabel ? (
-                          <small className="host-browser-card__hint">
-                            {awsMetadataStatusLabel}
-                            {host.awsSshMetadataStatus === 'error' && host.awsSshMetadataError ? ` · ${host.awsSshMetadataError}` : ''}
-                          </small>
-                        ) : null}
-                      </div>
-                      <div className="host-browser-card__actions">
-                        <button
-                          type="button"
-                          className="host-browser-card__edit"
-                          aria-label={`${host.label} 수정`}
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            selectSingleHost(host.id);
-                            onEditHost(host.id);
-                          }}
-                        >
-                          ✎
-                        </button>
-                        {host.tags && host.tags.length > 0 ? (
+                      actions={
+                        <div className="flex flex-col items-end gap-[0.3rem]">
                           <button
                             type="button"
-                            className="host-browser-card__tags-toggle"
-                            aria-expanded={isTagsExpanded}
+                            className="inline-grid h-[1.9rem] w-[1.9rem] shrink-0 place-items-center rounded-[10px] border border-[var(--border)] bg-[color-mix(in_srgb,var(--surface-muted)_92%,transparent_8%)] text-[0.8rem] text-[var(--text-soft)] hover:border-[color-mix(in_srgb,var(--accent-strong)_28%,var(--border)_72%)] hover:text-[var(--text)]"
+                            aria-label={`${host.label} 수정`}
                             onClick={(event) => {
                               event.stopPropagation();
-                              setExpandedHostTags((current) =>
-                                current.includes(host.id) ? current.filter((entry) => entry !== host.id) : [...current, host.id]
-                              );
+                              selectSingleHost(host.id);
+                              onEditHost(host.id);
                             }}
                           >
-                            {getHostTagsToggleLabel(isTagsExpanded, host.tags.length)}
+                            ✎
                           </button>
-                        ) : null}
-                      </div>
-                      {host.tags && host.tags.length > 0 && isTagsExpanded ? (
-                        <div className="host-browser-card__tags-panel">
-                          {host.tags.map((tag) => (
-                            <span key={tag} className="host-browser-card__tag">
-                              #{tag}
-                            </span>
-                          ))}
+                          {host.tags && host.tags.length > 0 ? (
+                            <button
+                              type="button"
+                              className="rounded-full border border-[var(--border)] bg-[color-mix(in_srgb,var(--surface-muted)_92%,transparent_8%)] px-[0.42rem] py-[0.24rem] text-[0.66rem] leading-[1.1] text-[var(--text-soft)] hover:border-[color-mix(in_srgb,var(--accent-strong)_28%,var(--border)_72%)] hover:text-[var(--text)]"
+                              aria-expanded={isTagsExpanded}
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                setExpandedHostTags((current) =>
+                                  current.includes(host.id) ? current.filter((entry) => entry !== host.id) : [...current, host.id]
+                                );
+                              }}
+                            >
+                              {getHostTagsToggleLabel(isTagsExpanded, host.tags.length)}
+                            </button>
+                          ) : null}
                         </div>
-                      ) : null}
-                    </article>
+                      }
+                      footer={
+                        host.tags && host.tags.length > 0 && isTagsExpanded ? (
+                          <>
+                            {host.tags.map((tag) => (
+                              <span
+                                key={tag}
+                                className="inline-flex items-center rounded-full border border-[var(--border)] bg-[color-mix(in_srgb,var(--surface-muted)_92%,transparent_8%)] px-[0.46rem] py-[0.18rem] text-[0.7rem] leading-[1.2] text-[var(--text-soft)]"
+                              >
+                                #{tag}
+                              </span>
+                            ))}
+                          </>
+                        ) : null
+                      }
+                    />
                   );
                 })
               )}
@@ -877,12 +912,16 @@ export function HostBrowser({
 
       {contextMenu ? (
         createPortal(
-          <div className="context-menu" style={contextMenuStyle ?? undefined} role="menu">
+          <div
+            className="fixed z-[24] min-w-[148px] rounded-[16px] border border-[var(--border)] bg-[var(--surface-strong)] p-[0.45rem] shadow-[0_20px_60px_rgba(18,30,44,0.24)]"
+            style={contextMenuStyle ?? undefined}
+            role="menu"
+          >
             {contextMenu.kind === 'host' ? (
               <>
                 <button
                   type="button"
-                  className="context-menu__item"
+                  className="flex w-full items-center rounded-[12px] px-[0.8rem] py-[0.75rem] text-left text-[var(--text)] transition-colors duration-150 hover:bg-[color-mix(in_srgb,var(--surface-muted)_92%,transparent_8%)] disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:bg-transparent"
                   disabled={contextMenu.hostIds.length !== 1}
                   onClick={async () => {
                     const orderedHostIds = getOrderedSelectedHostIds(contextMenu.hostIds);
@@ -898,7 +937,7 @@ export function HostBrowser({
                 </button>
                 <button
                   type="button"
-                  className="context-menu__item"
+                  className="flex w-full items-center rounded-[12px] px-[0.8rem] py-[0.75rem] text-left text-[var(--text)] transition-colors duration-150 hover:bg-[color-mix(in_srgb,var(--surface-muted)_92%,transparent_8%)] disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:bg-transparent"
                   onClick={async () => {
                     setContextMenu(null);
                     await onDuplicateHosts(getOrderedSelectedHostIds(contextMenu.hostIds));
@@ -908,7 +947,7 @@ export function HostBrowser({
                 </button>
                 <button
                 type="button"
-                className="context-menu__item context-menu__item--danger"
+                className="flex w-full items-center rounded-[12px] px-[0.8rem] py-[0.75rem] text-left text-[var(--danger-text)] transition-colors duration-150 hover:bg-[var(--danger-bg)] disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:bg-transparent"
                 onClick={async () => {
                   const orderedHostIds = getOrderedSelectedHostIds(contextMenu.hostIds);
                   setContextMenu(null);
@@ -925,7 +964,7 @@ export function HostBrowser({
             ) : (
               <button
                 type="button"
-                className="context-menu__item context-menu__item--danger"
+                className="flex w-full items-center rounded-[12px] px-[0.8rem] py-[0.75rem] text-left text-[var(--danger-text)] transition-colors duration-150 hover:bg-[var(--danger-bg)]"
                 onClick={() => {
                   setGroupDeleteTarget(buildGroupDeleteTarget(contextMenu.groupPaths));
                   setGroupDeleteError(null);
@@ -941,8 +980,8 @@ export function HostBrowser({
       ) : null}
 
       {isGroupModalOpen ? (
-        <DialogBackdrop className="home-modal-backdrop" onDismiss={closeGroupModal}>
-          <ModalShell className="home-modal" role="dialog" aria-modal="true" aria-labelledby="new-group-title">
+        <DialogBackdrop data-testid="host-browser-modal-backdrop" onDismiss={closeGroupModal}>
+          <ModalShell data-host-browser-modal="true" role="dialog" aria-modal="true" aria-labelledby="new-group-title">
             <ModalHeader className="block">
               <SectionLabel>Create</SectionLabel>
               <h3 id="new-group-title">New Group</h3>
@@ -957,9 +996,9 @@ export function HostBrowser({
               placeholder="Group name"
               autoFocus
             />
-            {groupError ? <p className="home-modal__error">{groupError}</p> : null}
+            {groupError ? <p className="text-sm text-[var(--danger-text)]">{groupError}</p> : null}
             </ModalBody>
-            <ModalFooter className="home-modal__actions">
+            <ModalFooter>
               <Button variant="secondary" onClick={closeGroupModal}>
                 Cancel
               </Button>
@@ -983,7 +1022,7 @@ export function HostBrowser({
 
       {hostDeleteTarget ? (
         <DialogBackdrop
-          className="home-modal-backdrop"
+          data-testid="host-browser-modal-backdrop"
           onDismiss={() => {
             if (isRemovingHost) {
               return;
@@ -992,7 +1031,7 @@ export function HostBrowser({
             setHostDeleteError(null);
           }}
         >
-          <ModalShell className="home-modal" role="dialog" aria-modal="true" aria-labelledby="delete-host-title">
+          <ModalShell data-host-browser-modal="true" role="dialog" aria-modal="true" aria-labelledby="delete-host-title">
             <ModalHeader className="block">
             <SectionLabel>Delete</SectionLabel>
             <h3 id="delete-host-title">
@@ -1002,10 +1041,10 @@ export function HostBrowser({
             </h3>
             </ModalHeader>
             <ModalBody className="grid gap-4">
-            <p className="home-modal__copy">연결된 secret 항목은 유지됩니다.</p>
-            {hostDeleteError ? <p className="home-modal__error">{hostDeleteError}</p> : null}
+            <p className="text-sm leading-6 text-[var(--text-soft)]">연결된 secret 항목은 유지됩니다.</p>
+            {hostDeleteError ? <p className="text-sm text-[var(--danger-text)]">{hostDeleteError}</p> : null}
             </ModalBody>
-            <ModalFooter className="home-modal__actions">
+            <ModalFooter>
               <Button
                 variant="secondary"
                 onClick={() => {
@@ -1043,8 +1082,8 @@ export function HostBrowser({
       ) : null}
 
       {groupDeleteTarget ? (
-        <DialogBackdrop className="home-modal-backdrop">
-          <ModalShell className="home-modal" role="dialog" aria-modal="true" aria-labelledby="delete-group-title">
+        <DialogBackdrop data-testid="host-browser-modal-backdrop">
+          <ModalShell data-host-browser-modal="true" role="dialog" aria-modal="true" aria-labelledby="delete-group-title">
             <ModalHeader className="block">
             <SectionLabel>Delete</SectionLabel>
             <h3 id="delete-group-title">
@@ -1055,18 +1094,18 @@ export function HostBrowser({
             </ModalHeader>
             <ModalBody className="grid gap-4">
             {groupDeleteDialogVariant === 'with-descendants' ? (
-              <p className="home-modal__copy">
+              <p className="text-sm leading-6 text-[var(--text-soft)]">
                 하위 그룹 {groupDeleteTarget.childGroupCount}개와 호스트 {groupDeleteTarget.hostCount}개가 함께 영향을 받습니다.
               </p>
             ) : (
-              <p className="home-modal__copy">이 그룹은 비어 있습니다. 삭제하면 바로 사라집니다.</p>
+              <p className="text-sm leading-6 text-[var(--text-soft)]">이 그룹은 비어 있습니다. 삭제하면 바로 사라집니다.</p>
             )}
-            {groupDeleteError ? <p className="home-modal__error">{groupDeleteError}</p> : null}
+            {groupDeleteError ? <p className="text-sm text-[var(--danger-text)]">{groupDeleteError}</p> : null}
             </ModalBody>
-            <ModalFooter className={cn('home-modal__actions', groupDeleteDialogVariant === 'with-descendants' ? 'home-modal__actions--triple' : null)}>
+            <ModalFooter className={groupDeleteDialogVariant === 'with-descendants' ? 'flex-nowrap gap-[0.85rem]' : undefined}>
               <Button
                 variant="secondary"
-                className={groupDeleteDialogVariant === 'with-descendants' ? 'home-modal__action-cancel' : undefined}
+                className={groupDeleteDialogVariant === 'with-descendants' ? 'shrink-0 whitespace-nowrap' : undefined}
                 onClick={() => {
                   setGroupDeleteTarget(null);
                   setGroupDeleteError(null);
@@ -1079,7 +1118,7 @@ export function HostBrowser({
                 <>
                   <Button
                     variant="secondary"
-                    className="home-modal__action-option"
+                    className="min-w-0 flex-1 whitespace-nowrap"
                     disabled={isRemovingGroup}
                     onClick={async () => {
                       try {
@@ -1101,7 +1140,7 @@ export function HostBrowser({
                   </Button>
                   <Button
                     variant="danger"
-                    className="home-modal__action-option"
+                    className="min-w-0 flex-1 whitespace-nowrap"
                     disabled={isRemovingGroup}
                     onClick={async () => {
                       try {

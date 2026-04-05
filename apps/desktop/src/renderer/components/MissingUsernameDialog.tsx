@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { DialogBackdrop } from "./DialogBackdrop";
-import { Button, Input, ModalBody, ModalFooter, ModalHeader, ModalShell, SectionLabel } from '../ui';
+import { Button, FieldGroup, Input, ModalBody, ModalFooter, ModalHeader, ModalShell, SectionLabel } from '../ui';
 
 export interface MissingUsernameDialogRequest {
   hostLabel: string;
@@ -50,7 +50,6 @@ export function MissingUsernameDialog({
   return (
     <DialogBackdrop dismissOnBackdrop={false}>
       <ModalShell
-        className="credential-retry-dialog"
         role="dialog"
         aria-modal="true"
         aria-labelledby="missing-username-title"
@@ -63,12 +62,11 @@ export function MissingUsernameDialog({
             </h3>
           </div>
         </ModalHeader>
-        <ModalBody>
-          <p className="credential-retry-dialog__message">
+        <ModalBody className="grid gap-4">
+          <p className="text-[0.95rem] leading-[1.6] text-[var(--text-soft)]">
             {resolveMessage(request.source)}
           </p>
-          <label className="credential-retry-dialog__field">
-            <span>SSH Username</span>
+          <FieldGroup label="SSH Username">
             <Input
               type="text"
               autoFocus
@@ -79,9 +77,9 @@ export function MissingUsernameDialog({
               }}
               placeholder="ubuntu"
             />
-          </label>
+          </FieldGroup>
           {error ? (
-            <p className="credential-retry-dialog__error">{error}</p>
+            <p className="text-[0.9rem] text-[var(--danger-text)]">{error}</p>
           ) : null}
         </ModalBody>
         <ModalFooter>

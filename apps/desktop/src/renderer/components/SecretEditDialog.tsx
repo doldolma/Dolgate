@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { LinkedHostSummary } from '@shared';
 import { DialogBackdrop } from './DialogBackdrop';
-import { Button, IconButton, Input, ModalBody, ModalFooter, ModalHeader, ModalShell, SectionLabel, SelectField } from '../ui';
+import { Button, FieldGroup, IconButton, Input, ModalBody, ModalFooter, ModalHeader, ModalShell, SectionLabel, SelectField } from '../ui';
 
 export type SecretEditMode = 'update-shared' | 'clone-for-host';
 export type SecretCredentialKind = 'password' | 'passphrase';
@@ -61,7 +61,7 @@ export function SecretEditDialog({ request, onClose, onSubmit }: SecretEditDialo
 
   return (
     <DialogBackdrop onDismiss={onClose} dismissDisabled={isSubmitting}>
-      <ModalShell className="secret-edit-dialog" role="dialog" aria-modal="true" aria-labelledby="secret-edit-title" size="lg">
+      <ModalShell role="dialog" aria-modal="true" aria-labelledby="secret-edit-title" size="lg">
         <ModalHeader>
           <div>
             <SectionLabel>Secret</SectionLabel>
@@ -72,11 +72,11 @@ export function SecretEditDialog({ request, onClose, onSubmit }: SecretEditDialo
           </IconButton>
         </ModalHeader>
         <ModalBody>
-          <p className="secret-edit-dialog__description">
+          <p className="text-[0.95rem] leading-[1.6] text-[var(--text-soft)]">
             <strong>{request.label}</strong> secret 항목의 {credentialLabel.toLowerCase()}를 새 값으로 바꿉니다. 현재 값은 표시하지 않습니다.
           </p>
 
-          <div className="secret-edit-dialog__scope">
+          <div className="flex flex-wrap gap-3">
             <Button variant="secondary" active={mode === 'clone-for-host'} onClick={() => setMode('clone-for-host')}>
               이 호스트만 새 secret으로 분리
             </Button>
@@ -86,16 +86,15 @@ export function SecretEditDialog({ request, onClose, onSubmit }: SecretEditDialo
           </div>
 
           {mode === 'update-shared' ? (
-            <p className="form-note">이 secret을 쓰는 {linkedHostCount}개 호스트가 모두 새 {credentialLabel.toLowerCase()}를 사용합니다.</p>
+            <p className="text-[var(--text-soft)] leading-[1.5]">이 secret을 쓰는 {linkedHostCount}개 호스트가 모두 새 {credentialLabel.toLowerCase()}를 사용합니다.</p>
           ) : null}
 
           {mode === 'clone-for-host' && request.source === 'host' && request.initialHostId ? (
-            <p className="form-note">현재 편집 중인 호스트만 새 secret으로 분리하고, 다른 호스트들은 기존 secret을 유지합니다.</p>
+            <p className="text-[var(--text-soft)] leading-[1.5]">현재 편집 중인 호스트만 새 secret으로 분리하고, 다른 호스트들은 기존 secret을 유지합니다.</p>
           ) : null}
 
           {needsHostPicker ? (
-            <label className="form-field">
-              <span>분리할 호스트</span>
+            <FieldGroup label="분리할 호스트">
               <SelectField value={targetHostId} onChange={(event) => setTargetHostId(event.target.value)}>
                 {request.linkedHosts.map((host) => (
                   <option key={host.id} value={host.id}>
@@ -103,11 +102,10 @@ export function SecretEditDialog({ request, onClose, onSubmit }: SecretEditDialo
                   </option>
                 ))}
               </SelectField>
-            </label>
+            </FieldGroup>
           ) : null}
 
-          <label className="form-field">
-            <span>새 {credentialLabel}</span>
+          <FieldGroup label={`새 ${credentialLabel}`}>
             <Input
               type="password"
               value={value}
@@ -115,9 +113,9 @@ export function SecretEditDialog({ request, onClose, onSubmit }: SecretEditDialo
               placeholder={`${credentialLabel}를 입력하세요`}
               autoFocus
             />
-          </label>
+          </FieldGroup>
 
-          {error ? <p className="form-error">{error}</p> : null}
+          {error ? <p className="text-[0.9rem] text-[var(--danger-text)]">{error}</p> : null}
         </ModalBody>
         <ModalFooter>
           <Button variant="secondary" onClick={onClose} disabled={isSubmitting}>

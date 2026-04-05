@@ -1,4 +1,5 @@
 import type { KeyboardEvent, MutableRefObject } from 'react';
+import { Card, Button, Input } from '../../ui';
 
 interface TerminalSearchOverlayProps {
   inputRef: MutableRefObject<HTMLInputElement | null>;
@@ -22,14 +23,16 @@ export function TerminalSearchOverlay({
   onClose,
 }: TerminalSearchOverlayProps) {
   return (
-    <div
-      className="terminal-search-overlay"
+    <Card
+      as="div"
+      className="absolute right-4 top-4 z-[6] flex w-[min(26rem,calc(100%-2rem))] flex-wrap items-center justify-start gap-2 rounded-[20px] p-3 max-[760px]:left-3 max-[760px]:right-3"
       onMouseDown={(event) => event.stopPropagation()}
     >
-      <input
+      <Input
         ref={inputRef}
         aria-label="Search terminal output"
         type="text"
+        className="min-w-[13.75rem] flex-[1_0_13.75rem]"
         value={searchQuery}
         placeholder="Search terminal output"
         onBlur={onBlur}
@@ -38,27 +41,15 @@ export function TerminalSearchOverlay({
         }}
         onKeyDown={onKeyDown}
       />
-      <button
-        type="button"
-        className="terminal-search-overlay__button"
-        onClick={onFindPrevious}
-      >
+      <Button type="button" variant="secondary" size="sm" onClick={onFindPrevious}>
         Prev
-      </button>
-      <button
-        type="button"
-        className="terminal-search-overlay__button"
-        onClick={onFindNext}
-      >
+      </Button>
+      <Button type="button" variant="secondary" size="sm" onClick={onFindNext}>
         Next
-      </button>
-      <button
-        type="button"
-        className="terminal-search-overlay__button"
-        onClick={onClose}
-      >
+      </Button>
+      <Button type="button" variant="secondary" size="sm" onClick={onClose}>
         Close
-      </button>
-    </div>
+      </Button>
+    </Card>
   );
 }

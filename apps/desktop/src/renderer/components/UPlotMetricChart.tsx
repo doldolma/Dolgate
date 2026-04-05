@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import uPlot from "uplot";
+import { cn } from "../lib/cn";
 
 export type MetricChartValueFormat = "percent" | "bytesPerSecond";
 export type MetricChartSeriesTone = "primary" | "secondary";
@@ -308,38 +309,48 @@ export function UPlotMetricChart({
   }, [chartData]);
 
   return (
-    <div className="containers-workspace__metric-chart-card">
-      <div className="containers-workspace__metric-chart-header">
-        <strong>{title}</strong>
-        <span>{currentLabel}</span>
+    <div className="flex flex-col gap-[0.8rem] rounded-[18px] border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[color-mix(in_srgb,var(--surface-strong)_90%,transparent_10%)] px-4 py-4">
+      <div className="flex items-baseline justify-between gap-3">
+        <strong className="text-[var(--text)]">{title}</strong>
+        <span className="text-[0.82rem] tabular-nums text-[var(--text-soft)]">
+          {currentLabel}
+        </span>
       </div>
-      <div className="containers-workspace__metric-plot-shell">
+      <div className="relative">
         <div
           ref={plotContainerRef}
-          className="containers-workspace__metric-plot"
+          className="min-h-[180px] w-full [&_.u-wrap]:rounded-[14px] [&_.uplot]:w-full [&_.uplot]:font-inherit [&_.uplot]:text-[var(--text-soft)]"
+          data-metric-plot="true"
           data-testid={`metric-plot:${title}`}
         />
         {tooltip ? (
           <div
-            className="containers-workspace__metric-tooltip"
+            className="pointer-events-none absolute z-[2] min-w-[152px] max-w-[184px] rounded-[14px] border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[color-mix(in_srgb,var(--surface-strong)_95%,transparent_5%)] px-[0.8rem] py-[0.7rem] shadow-[0_16px_40px_rgba(15,23,42,0.18)]"
             style={{
               left: `${tooltip.left}px`,
               top: `${tooltip.top}px`,
             }}
           >
-            <strong>{formatMetricsTooltipTime(tooltip.timestamp)}</strong>
-            <div className="containers-workspace__metric-tooltip-rows">
+            <strong className="mb-[0.45rem] block text-[0.78rem] tabular-nums">
+              {formatMetricsTooltipTime(tooltip.timestamp)}
+            </strong>
+            <div className="grid gap-[0.35rem]">
               {tooltip.rows.map((row) => (
                 <div
                   key={`${row.label}:${row.value}`}
-                  className="containers-workspace__metric-tooltip-row"
+                  className="grid grid-cols-[auto_1fr_auto] items-center gap-[0.45rem] text-[0.78rem]"
                 >
                   <span
-                    className={`containers-workspace__metric-tooltip-swatch containers-workspace__metric-tooltip-swatch--${row.tone}`}
+                    className={cn(
+                      "h-[0.6rem] w-[0.6rem] rounded-full",
+                      row.tone === "primary"
+                        ? "bg-[var(--accent-strong)]"
+                        : "bg-[var(--success-text)]",
+                    )}
                     aria-hidden="true"
                   />
                   <span>{row.label}</span>
-                  <strong>{row.value}</strong>
+                  <strong className="tabular-nums">{row.value}</strong>
                 </div>
               ))}
             </div>

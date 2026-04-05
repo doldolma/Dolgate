@@ -302,9 +302,17 @@ export function AppTitleBar({
   }, [isUpdateOpen]);
 
   return (
-    <header className="app-titlebar">
+    <header
+      className={cn(
+        'flex min-h-16 items-center gap-4 border-b border-[var(--chrome-border)] bg-[linear-gradient(180deg,color-mix(in_srgb,var(--chrome-bg)_94%,white_6%),color-mix(in_srgb,var(--chrome-bg)_98%,black_2%))] px-[1rem] pb-[0.85rem] pt-[0.9rem] text-[#f3f7fb] shadow-[inset_0_-1px_0_rgba(255,255,255,0.03)] [-webkit-app-region:drag] max-[760px]:px-[1rem] max-[760px]:pr-[0.8rem]',
+        desktopPlatform === 'darwin' && 'pl-[5.4rem] max-[1040px]:pl-[4.8rem] max-[760px]:px-[4.8rem] max-[760px]:pr-[0.8rem]',
+      )}
+    >
       <div
-        className={`titlebar-tabs ${isDetachHovering ? 'detach-hover' : ''}`}
+        className={cn(
+          'flex min-w-0 items-center gap-[0.55rem] overflow-x-auto rounded-[20px] p-[0.2rem] transition-[background-color,box-shadow] duration-140 [-webkit-app-region:no-drag]',
+          isDetachHovering && 'bg-[rgba(142,209,194,0.08)] shadow-[inset_0_0_0_1px_rgba(142,209,194,0.16)]',
+        )}
         onDragOver={(event) => {
           if (!canDetachToTabs) {
             return;
@@ -552,7 +560,12 @@ export function AppTitleBar({
         })}
         {isTabDragging && dynamicItems.length > 0 ? (
           <div
-            className={`titlebar-tabs__tail-drop ${tabDropPreview?.targetKey === '__tail__' ? 'active' : ''}`}
+            className={cn(
+              'h-10 w-6 shrink-0 rounded-[999px] transition-[background-color,box-shadow] duration-150',
+              tabDropPreview?.targetKey === '__tail__'
+                ? 'bg-[rgba(255,255,255,0.12)] shadow-[inset_0_0_0_1px_rgba(255,255,255,0.16)]'
+                : 'bg-transparent'
+            )}
             onDragOver={(event) => {
               if (!draggedTabRef.current) {
                 return;
@@ -585,9 +598,9 @@ export function AppTitleBar({
           />
         ) : null}
       </div>
-      <div className="titlebar-spacer" />
-      <div className="titlebar-actions">
-        <div className="update-menu" ref={updateMenuRef}>
+      <div className="min-w-16 flex-1" />
+      <div className="relative flex items-center gap-[0.55rem] [-webkit-app-region:no-drag]">
+        <div className="relative [-webkit-app-region:no-drag]" ref={updateMenuRef}>
           <IconButton
             tone="default"
             active={isUpdateOpen}
@@ -602,7 +615,10 @@ export function AppTitleBar({
           </IconButton>
 
           {isUpdateOpen ? (
-            <div className="update-popover w-[min(24rem,calc(100vw-2rem))] rounded-[26px] border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[var(--dialog-surface)] p-5 shadow-[0_24px_68px_rgba(8,16,30,0.18)]">
+            <div
+              data-testid="update-popover"
+              className="absolute right-0 top-[calc(100%+0.8rem)] z-20 w-[min(24rem,calc(100vw-2rem))] rounded-[26px] border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[var(--dialog-surface)] p-5 shadow-[0_24px_68px_rgba(8,16,30,0.18)]"
+            >
               <div className="mb-4 flex items-start justify-between gap-4">
                 <div className="min-w-0">
                   <div className="flex items-center gap-2.5 text-[var(--text)]">

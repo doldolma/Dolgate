@@ -1,6 +1,7 @@
 import type { MutableRefObject } from 'react';
 import type { TerminalTab } from '@shared';
-import { Button, Card, SectionLabel } from '../../ui';
+import { cn } from '../../lib/cn';
+import { Button, SectionLabel } from '../../ui';
 
 interface TerminalSharePopoverProps {
   anchorRef: MutableRefObject<HTMLDivElement | null>;
@@ -36,26 +37,29 @@ export function TerminalSharePopover({
   return (
     <div
       ref={anchorRef}
-      className={`terminal-share-anchor ${showHeader ? 'terminal-share-anchor--pane' : ''}`}
+      className={cn(
+        'absolute right-[0.85rem] top-[0.85rem] z-[4]',
+        showHeader && 'right-[0.8rem] top-[0.8rem]',
+      )}
     >
       <Button
         variant="secondary"
         size="sm"
-        className="terminal-share-button min-h-9 rounded-full px-3.5"
+        className="min-h-9 rounded-full px-3.5"
         onClick={onToggle}
       >
         Share
       </Button>
       {open ? (
-        <Card className="terminal-share-popover absolute right-0 top-[calc(100%+0.6rem)] z-30 w-[min(24rem,calc(100vw-2rem))] rounded-[24px] p-4">
+        <div className="absolute right-0 top-[calc(100%+0.6rem)] z-30 grid min-w-0 w-[min(24rem,calc(100vw-2rem))] max-w-[calc(100vw-2rem)] gap-3 overflow-hidden rounded-[24px] border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[var(--surface-elevated)] p-4 shadow-[var(--shadow-soft)]">
           {shareState?.status === 'inactive' || !shareState ? (
             <>
-              <SectionLabel className="terminal-share-popover__label mb-2">Session Share</SectionLabel>
+              <SectionLabel className="mb-2">Session Share</SectionLabel>
               <strong>현재 세션을 브라우저로 공유합니다.</strong>
               <p className="mt-2 text-sm leading-[1.55] text-[var(--text-soft)]">링크를 아는 사용자는 로그인 없이 접속할 수 있습니다.</p>
               <Button
                 variant="primary"
-                className="terminal-share-popover__action mt-4 w-full"
+                className="mt-4 w-full"
                 onClick={onStartShare}
                 disabled={!canStartShare}
               >
@@ -64,30 +68,30 @@ export function TerminalSharePopover({
             </>
           ) : (
             <>
-              <SectionLabel className="terminal-share-popover__label mb-2">Session Share</SectionLabel>
+              <SectionLabel className="mb-2">Session Share</SectionLabel>
               <strong>
                 {shareState.status === 'starting'
                   ? '공유를 준비하는 중입니다.'
                   : '공유 링크가 준비되었습니다.'}
               </strong>
               {shareState.errorMessage ? (
-                <p className="terminal-share-popover__error mt-2 text-sm text-[var(--danger-text)]">
+                <p className="mt-2 text-sm text-[var(--danger-text)]">
                   {shareState.errorMessage}
                 </p>
               ) : null}
               {shareState.shareUrl ? (
                 <button
                   type="button"
-                  className="terminal-share-popover__url mt-3 flex w-full items-center justify-between gap-3 rounded-[18px] border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[color-mix(in_srgb,var(--surface-muted)_88%,transparent_12%)] px-4 py-3 text-left transition-colors duration-150 hover:bg-[color-mix(in_srgb,var(--surface-muted)_94%,transparent_6%)]"
+                  className="mt-3 flex min-w-0 w-full items-center justify-between gap-3 rounded-[18px] border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[color-mix(in_srgb,var(--surface-muted)_88%,transparent_12%)] px-4 py-3 text-left transition-colors duration-150 hover:bg-[color-mix(in_srgb,var(--surface-muted)_94%,transparent_6%)]"
                   onClick={onCopyShareUrl}
                   aria-label="공유 링크 복사"
                   title="클릭하여 링크 복사"
                 >
-                  <span className="terminal-share-popover__url-text truncate text-sm text-[var(--text)]">
+                  <span className="min-w-0 flex-1 truncate text-sm text-[var(--text)]">
                     {shareState.shareUrl}
                   </span>
                   <span
-                    className="terminal-share-popover__url-icon inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[var(--surface-elevated)] text-[var(--text-soft)]"
+                    className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[var(--surface-elevated)] text-[var(--text-soft)]"
                     aria-hidden="true"
                   >
                     <svg viewBox="0 0 16 16" focusable="false">
@@ -101,21 +105,18 @@ export function TerminalSharePopover({
               ) : (
                 <p className="mt-3 text-sm text-[var(--text-soft)]">공유 링크를 생성하는 중입니다.</p>
               )}
-              <div className="terminal-share-popover__meta mt-3 space-y-3">
+              <div className="mt-3 space-y-3">
                 <span className="block text-sm text-[var(--text-soft)]">시청자 {shareState.viewerCount}명</span>
                 <div
-                  className="terminal-share-popover__mode inline-flex rounded-full border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[color-mix(in_srgb,var(--surface-muted)_88%,transparent_12%)] p-1"
+                  className="inline-flex rounded-full border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[color-mix(in_srgb,var(--surface-muted)_88%,transparent_12%)] p-1"
                   role="group"
                   aria-label="세션 공유 입력 모드"
                 >
                   <Button
                     variant="ghost"
                     size="sm"
-                    className={`terminal-share-popover__mode-button rounded-full px-3 ${
-                      !shareState.inputEnabled
-                        ? 'bg-[var(--surface-elevated)] text-[var(--text)] shadow-[0_8px_18px_rgba(15,23,38,0.08)]'
-                        : ''
-                    }`}
+                    active={!shareState.inputEnabled}
+                    className="rounded-full px-3"
                     onClick={() => {
                       onSetInputEnabled(false);
                     }}
@@ -130,11 +131,8 @@ export function TerminalSharePopover({
                   <Button
                     variant="ghost"
                     size="sm"
-                    className={`terminal-share-popover__mode-button rounded-full px-3 ${
-                      shareState.inputEnabled
-                        ? 'bg-[var(--surface-elevated)] text-[var(--text)] shadow-[0_8px_18px_rgba(15,23,38,0.08)]'
-                        : ''
-                    }`}
+                    active={shareState.inputEnabled}
+                    className="rounded-full px-3"
                     onClick={() => {
                       onSetInputEnabled(true);
                     }}
@@ -149,11 +147,11 @@ export function TerminalSharePopover({
                 </div>
               </div>
               {shareCopyStatus ? (
-                <div className="terminal-share-popover__hint mt-3 text-sm text-[var(--text-soft)]">
+                <div className="mt-3 text-sm text-[var(--text-soft)]">
                   {shareCopyStatus}
                 </div>
               ) : null}
-              <div className="terminal-share-popover__actions mt-4 flex items-center justify-end gap-3">
+              <div className="mt-4 flex items-center justify-end gap-3">
                 <Button
                   variant="secondary"
                   onClick={onOpenChatWindow}
@@ -163,7 +161,6 @@ export function TerminalSharePopover({
                 </Button>
                 <Button
                   variant="danger"
-                  className="terminal-share-popover__danger"
                   onClick={onStopShare}
                 >
                   공유 종료
@@ -171,7 +168,7 @@ export function TerminalSharePopover({
               </div>
             </>
           )}
-        </Card>
+        </div>
       ) : null}
     </div>
   );

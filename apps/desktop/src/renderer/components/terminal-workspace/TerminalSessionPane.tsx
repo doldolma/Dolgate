@@ -1,3 +1,4 @@
+import { cn } from '../../lib/cn';
 import { useTerminalSessionViewController } from '../../controllers/useTerminalSessionViewController';
 import { TerminalChatToastRegion } from './TerminalChatToastRegion';
 import { TerminalConnectionOverlay } from './TerminalConnectionOverlay';
@@ -6,6 +7,7 @@ import { TerminalPaneHeader } from './TerminalPaneHeader';
 import { TerminalSearchOverlay } from './TerminalSearchOverlay';
 import { TerminalSharePopover } from './TerminalSharePopover';
 import type { TerminalSessionPaneProps } from './types';
+import { NoticeCard } from '../../ui';
 
 export function TerminalSessionPane(props: TerminalSessionPaneProps) {
   const {
@@ -30,9 +32,13 @@ export function TerminalSessionPane(props: TerminalSessionPaneProps) {
 
   return (
     <div
-      className={`terminal-session ${visible ? 'visible' : 'hidden'} ${
-        active ? 'active' : ''
-      } ${showHeader ? 'terminal-session--pane' : ''}`}
+      className={cn(
+        'absolute inset-0 min-h-0 flex-col gap-[0.65rem]',
+        visible || active
+          ? 'flex pointer-events-auto opacity-100'
+          : 'hidden pointer-events-none opacity-0',
+        showHeader && 'p-[0.45rem]',
+      )}
       style={style}
       onKeyDownCapture={controller.handlePaneKeyDownCapture}
       onMouseDown={controller.handlePaneMouseDown}
@@ -82,12 +88,14 @@ export function TerminalSessionPane(props: TerminalSessionPaneProps) {
       ) : null}
 
       {tab?.errorMessage ? (
-        <div className="terminal-error-banner">{tab.errorMessage}</div>
+        <NoticeCard tone="danger" className="mx-[0.55rem] mt-[0.55rem]" role="alert">
+          {tab.errorMessage}
+        </NoticeCard>
       ) : null}
       {controller.terminalInitError ? (
-        <div className="terminal-error-banner">
+        <NoticeCard tone="danger" className="mx-[0.55rem] mt-[0.55rem]" role="alert">
           {controller.terminalInitError}
-        </div>
+        </NoticeCard>
       ) : null}
 
       {interactiveAuth ? (
@@ -121,7 +129,15 @@ export function TerminalSessionPane(props: TerminalSessionPaneProps) {
         />
       ) : null}
 
-      <div ref={controller.containerRef} className="terminal-canvas">
+      <div
+        ref={controller.containerRef}
+        className={cn(
+          'relative m-[0.55rem] flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-[6px] bg-[color-mix(in_srgb,var(--surface)_96%,transparent_4%)] p-0 [&_.xterm]:min-h-full [&_.xterm]:h-full [&_.xterm]:w-full [&_.xterm-viewport]:min-h-full [&_.xterm-viewport]:h-full [&_.xterm-viewport]:w-full [&_.xterm-viewport]:bg-transparent [&_.xterm-viewport]:rounded-none',
+          showHeader &&
+            'mx-[0.55rem] mb-[0.55rem] mt-0 rounded-b-[6px] rounded-t-none border border-[var(--border)] border-t-0',
+        )}
+        data-terminal-canvas="true"
+      >
         {controller.shouldShowConnectionOverlay ? (
           <TerminalConnectionOverlay
             error={tab?.status === 'error'}

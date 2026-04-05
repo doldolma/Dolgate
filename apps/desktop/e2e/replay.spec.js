@@ -46,14 +46,14 @@ test.describe("desktop replay regression", () => {
     try {
       const page = await app.firstWindow();
       const awsCard = page
-        .locator(".host-browser-card")
+        .locator('[data-host-card="true"]')
         .filter({ hasText: "Smoke AWS" })
         .first();
 
       await expect(awsCard).toBeVisible();
       await awsCard.dblclick();
       await waitForFakeAwsSessionReady(page);
-      await page.locator(".terminal-session.active .terminal-canvas").click();
+      await page.locator('[data-terminal-canvas="true"]').click();
       await page.keyboard.type("replay-smoke-check");
       await page.keyboard.press("Enter");
       await waitForCapturedTerminalOutput(page, "ECHO:replay-smoke-check");
@@ -66,7 +66,7 @@ test.describe("desktop replay regression", () => {
         .click();
 
       await expect(page.getByRole("heading", { name: "Logs" })).toBeVisible();
-      await expect(page.locator(".logs-lifecycle-card").filter({ hasText: "Smoke AWS" }).first()).toBeVisible();
+      await expect(page.getByTestId("logs-lifecycle-card").filter({ hasText: "Smoke AWS" }).first()).toBeVisible();
       await expect(page.getByText("AWS SSM")).toBeVisible();
       await expect(page.getByText("default · ap-northeast-2 · i-smoke-test")).toBeVisible();
       await expect(page.getByText("Closed")).toBeVisible();

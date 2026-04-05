@@ -11,6 +11,7 @@ import {
 } from "react";
 import { getHostBadgeLabel } from "@shared";
 import type { HostContainerDetails, HostRecord } from "@shared";
+import { cn } from "../lib/cn";
 import { formatConnectionProgressStageLabel } from "../lib/connection-progress";
 import type {
   ContainerTunnelTabState,
@@ -21,21 +22,30 @@ import type {
 import { useContainersWorkspaceController } from "../controllers/useContainersWorkspaceController";
 import {
   Button,
+  Card,
   EmptyState,
+  FieldGroup,
+  FilterRow,
+  Input,
   ModalBody,
   ModalFooter,
   ModalHeader,
   ModalShell,
   NoticeCard,
+  PanelSection,
+  SelectField,
   SectionLabel,
   StatusBadge,
   TabButton,
   Tabs,
+  ToggleSwitch,
+  Toolbar,
 } from "../ui";
 import {
   UPlotMetricChart,
   type MetricChartSeriesDefinition,
 } from "./UPlotMetricChart";
+import { TerminalInteractiveAuthOverlay } from "./terminal-workspace/TerminalInteractiveAuthOverlay";
 
 interface ContainersWorkspaceProps {
   host: HostRecord;
@@ -153,6 +163,36 @@ const ansiForegroundCodeMap = new Map<number, AnsiForegroundTone>([
   [97, "brightWhite"],
 ]);
 
+const ansiToneClasses: Record<AnsiForegroundTone, string> = {
+  black: "text-[var(--ansi-black)]",
+  red: "text-[var(--ansi-red)]",
+  green: "text-[var(--ansi-green)]",
+  yellow: "text-[var(--ansi-yellow)]",
+  blue: "text-[var(--ansi-blue)]",
+  magenta: "text-[var(--ansi-magenta)]",
+  cyan: "text-[var(--ansi-cyan)]",
+  white: "text-[var(--ansi-white)]",
+  brightBlack: "text-[var(--ansi-bright-black)]",
+  brightRed: "text-[var(--ansi-bright-red)]",
+  brightGreen: "text-[var(--ansi-bright-green)]",
+  brightYellow: "text-[var(--ansi-bright-yellow)]",
+  brightBlue: "text-[var(--ansi-bright-blue)]",
+  brightMagenta: "text-[var(--ansi-bright-magenta)]",
+  brightCyan: "text-[var(--ansi-bright-cyan)]",
+  brightWhite: "text-[var(--ansi-bright-white)]",
+};
+
+const detailCardClass =
+  "grid gap-[0.8rem] rounded-[20px] border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[color-mix(in_srgb,var(--surface-strong)_90%,transparent_10%)] px-[1rem] py-[1rem]";
+const summaryGridClass =
+  "grid grid-cols-[repeat(auto-fit,minmax(220px,1fr))] gap-[0.8rem]";
+const summaryCardClass =
+  "grid min-w-0 gap-[0.35rem] rounded-[18px] border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[color-mix(in_srgb,var(--surface-strong)_90%,transparent_10%)] px-[1rem] py-[0.95rem]";
+const emptyDetailClass =
+  "rounded-[16px] bg-[color-mix(in_srgb,var(--surface)_82%,transparent_18%)] px-4 py-4 text-[var(--text-soft)]";
+const logsOutputClass =
+  "grid min-h-0 flex-1 content-start gap-[0.35rem] overflow-auto rounded-[18px] border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[rgba(7,13,24,0.88)] px-[1.05rem] py-4 text-[rgba(226,234,255,0.92)]";
+
 function formatCreatedAt(value: string): string {
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) {
@@ -166,20 +206,20 @@ function formatKeyValuePairs(
   emptyMessage: string,
 ) {
   if (pairs.length === 0) {
-    return (
-      <div className="containers-workspace__empty-detail">{emptyMessage}</div>
-    );
+    return <div className={emptyDetailClass}>{emptyMessage}</div>;
   }
 
   return (
-    <div className="containers-workspace__kv-grid">
+    <div className="grid gap-3">
       {pairs.map((pair) => (
         <div
           key={`${pair.key}:${pair.value}`}
-          className="containers-workspace__kv-item"
+          className="grid gap-[0.3rem] rounded-[16px] bg-[color-mix(in_srgb,var(--surface)_72%,transparent_28%)] px-[0.9rem] py-[0.8rem]"
         >
-          <dt>{pair.key}</dt>
-          <dd>{pair.value || "-"}</dd>
+          <dt className="text-[0.82rem] text-[var(--text-soft)]">{pair.key}</dt>
+          <dd className="m-0 break-words whitespace-pre-wrap">
+            {pair.value || "-"}
+          </dd>
         </div>
       ))}
     </div>
@@ -335,19 +375,15 @@ function renderAnsiStyledMessage(value: string) {
   }
 
   return segments.map((segment, index) => {
-    const classNames = ["containers-workspace__log-segment"];
-    if (segment.bold) {
-      classNames.push("containers-workspace__log-segment--bold");
-    }
-    if (segment.foreground) {
-      classNames.push(
-        `containers-workspace__log-segment--${segment.foreground}`,
-      );
-    }
     return (
       <span
         key={`${index}:${segment.text}:${segment.foreground ?? "plain"}:${segment.bold ? "bold" : "normal"}`}
-        className={classNames.join(" ")}
+        className={cn(
+          segment.bold ? "font-bold" : "",
+          segment.foreground ? ansiToneClasses[segment.foreground] : "",
+        )}
+        data-ansi-tone={segment.foreground ?? undefined}
+        data-ansi-bold={segment.bold ? "true" : undefined}
       >
         {segment.text}
       </span>
@@ -715,8 +751,7 @@ export class ContainerTunnelErrorBoundary extends Component<
   render() {
     if (this.state.hasError) {
       return (
-        <div className="callout error">
-          <div>컨테이너 Tunnel을 표시하지 못했습니다.</div>
+        <NoticeCard tone="danger" title="컨테이너 Tunnel을 표시하지 못했습니다.">
           <Button
             type="button"
             variant="secondary"
@@ -727,7 +762,7 @@ export class ContainerTunnelErrorBoundary extends Component<
           >
             다시 시도
           </Button>
-        </div>
+        </NoticeCard>
       );
     }
     return this.props.children;
@@ -791,26 +826,24 @@ function ContainerTunnelPanel({
 
   if (!selectedContainer) {
     return (
-      <div className="containers-workspace__empty-detail">
-        컨테이너를 선택하면 터널을 열 수 있습니다.
-      </div>
+      <EmptyState
+        title="컨테이너를 선택하면 터널을 열 수 있습니다."
+        description="실행 중인 컨테이너를 선택한 뒤 네트워크와 포트를 고르세요."
+      />
     );
   }
 
   if (detailsLoading && !selectedContainerDetails) {
     return (
-      <div className="containers-workspace__empty-detail">
-        터널 정보를 준비하는 중입니다...
-      </div>
+      <div className={emptyDetailClass}>터널 정보를 준비하는 중입니다...</div>
     );
   }
 
   return (
-    <div className="containers-workspace__tunnel">
-      <div className="containers-workspace__tunnel-form">
-        <label>
-          <span>Network</span>
-          <select
+    <PanelSection className="min-h-0 overflow-y-auto pr-px">
+      <div className="grid gap-[0.8rem] md:grid-cols-2">
+        <FieldGroup label="Network">
+          <SelectField
             value={tunnelState.networkName}
             disabled={isTunnelFormDisabled}
             onChange={(event) => {
@@ -828,11 +861,10 @@ function ContainerTunnelPanel({
                 {network.name}
               </option>
             ))}
-          </select>
-        </label>
-        <label>
-          <span>Port</span>
-          <select
+          </SelectField>
+        </FieldGroup>
+        <FieldGroup label="Port">
+          <SelectField
             value={tunnelState.targetPort}
             disabled={isTunnelFormDisabled || tunnelPorts.length === 0}
             onChange={(event) => {
@@ -853,17 +885,15 @@ function ContainerTunnelPanel({
                 {port.containerPort}/{port.protocol}
               </option>
             ))}
-          </select>
-        </label>
-        <label>
-          <span>Local port</span>
-          <div className="port-forward-local-port containers-workspace__tunnel-local-port">
-            <button
-              type="button"
-              role="switch"
-              aria-checked={tunnelState.autoLocalPort}
+          </SelectField>
+        </FieldGroup>
+        <FieldGroup label="Local port" className="md:col-span-2">
+          <div className="grid gap-3">
+            <ToggleSwitch
+              checked={tunnelState.autoLocalPort}
               aria-label="Auto (random)"
-              className={`port-forward-toggle ${tunnelState.autoLocalPort ? "is-active" : ""}`}
+              label="Auto (random)"
+              description="사용 가능한 로컬 포트를 자동으로 할당합니다."
               disabled={isTunnelFormDisabled}
               onClick={() => {
                 onUpdateTunnelState((previous) => ({
@@ -874,18 +904,10 @@ function ContainerTunnelPanel({
                     : "0",
                 }));
               }}
-            >
-              <span className="port-forward-toggle__track" aria-hidden="true">
-                <span className="port-forward-toggle__thumb" />
-              </span>
-              <span className="port-forward-toggle__content">
-                <strong>Auto (random)</strong>
-                <span>사용 가능한 로컬 포트를 자동으로 할당합니다.</span>
-              </span>
-            </button>
-            <input
+            />
+            <Input
               type="number"
-              className="port-forward-local-port__input"
+              className="min-h-[2.35rem] rounded-[12px] bg-[var(--surface)] px-[0.7rem] py-[0.45rem]"
               value={tunnelState.bindPort}
               placeholder="0"
               disabled={isTunnelFormDisabled || tunnelState.autoLocalPort}
@@ -897,12 +919,12 @@ function ContainerTunnelPanel({
               }}
             />
           </div>
-        </label>
+        </FieldGroup>
       </div>
 
       {tunnelState.runtime ? (
-        <div className="containers-workspace__tunnel-runtime-card">
-          <div className="containers-workspace__tunnel-runtime-header">
+        <div className="grid gap-[0.85rem] rounded-[18px] border border-[color-mix(in_srgb,var(--accent-strong)_20%,var(--border)_80%)] bg-[color-mix(in_srgb,var(--accent-strong)_8%,var(--surface)_92%)] px-4 py-[0.9rem] shadow-[var(--shadow)]">
+          <div className="flex items-center justify-between gap-3">
             <strong>터널 상태</strong>
             <StatusBadge tone={tunnelState.runtime.status === "running" ? "running" : "stopped"}>
               {tunnelState.runtime.status === "running"
@@ -910,24 +932,34 @@ function ContainerTunnelPanel({
                 : tunnelState.runtime.status}
             </StatusBadge>
           </div>
-          <div className="containers-workspace__tunnel-runtime-grid">
-            <div>
-              <span>Local</span>
-              <strong>{tunnelRuntimeLocalEndpoint}</strong>
+          <div className="grid gap-[0.9rem] md:grid-cols-2">
+            <div className="grid gap-[0.22rem]">
+              <span className="text-[0.76rem] font-semibold uppercase tracking-[0.02em] text-[var(--text-soft)]">
+                Local
+              </span>
+              <strong className="break-words text-[1rem] leading-[1.35]">
+                {tunnelRuntimeLocalEndpoint}
+              </strong>
             </div>
-            <div>
-              <span>Remote</span>
-              <strong>{tunnelRuntimeRemoteEndpoint}</strong>
+            <div className="grid gap-[0.22rem]">
+              <span className="text-[0.76rem] font-semibold uppercase tracking-[0.02em] text-[var(--text-soft)]">
+                Remote
+              </span>
+              <strong className="break-words text-[1rem] leading-[1.35]">
+                {tunnelRuntimeRemoteEndpoint}
+              </strong>
             </div>
           </div>
         </div>
       ) : null}
 
       {tunnelState.error ? (
-        <div className="callout error">{tunnelState.error}</div>
+        <NoticeCard tone="danger" role="alert">
+          {tunnelState.error}
+        </NoticeCard>
       ) : null}
 
-      <div className="containers-workspace__tunnel-actions">
+      <div className="flex justify-end gap-[0.6rem]">
         {tunnelState.runtime ? (
           <Button type="button" variant="secondary" disabled={tunnelState.loading} onClick={onStopTunnel}>
             {tunnelState.loading ? "정지 중..." : "Stop"}
@@ -938,7 +970,7 @@ function ContainerTunnelPanel({
           </Button>
         )}
       </div>
-    </div>
+    </PanelSection>
   );
 }
 
@@ -951,9 +983,10 @@ function OverviewSection({
 }) {
   if (!details) {
     return (
-      <div className="containers-workspace__empty-detail">
-        컨테이너를 선택하면 상세 정보를 볼 수 있습니다.
-      </div>
+      <EmptyState
+        title="컨테이너를 선택하면 상세 정보를 볼 수 있습니다."
+        description="목록에서 컨테이너를 선택하면 실행 정보와 메타데이터를 보여줍니다."
+      />
     );
   }
 
@@ -963,64 +996,78 @@ function OverviewSection({
   const shortImage = shortenContainerImage(details.image);
 
   return (
-    <div className="containers-workspace__overview">
-      <div className="containers-workspace__summary-grid">
-        <div className="containers-workspace__summary-card">
-          <span>ID</span>
-          <strong title={details.id}>{details.id}</strong>
+    <PanelSection className="min-h-0 overflow-y-auto pr-px">
+      <div className={summaryGridClass} data-testid="containers-overview-summary-grid">
+        <div className={summaryCardClass}>
+          <span className="text-[0.82rem] text-[var(--text-soft)]">ID</span>
+          <strong
+            title={details.id}
+            data-testid="containers-overview-summary-id"
+            className="min-w-0 leading-[1.35] [overflow-wrap:anywhere]"
+          >
+            {details.id}
+          </strong>
         </div>
-        <div className="containers-workspace__summary-card">
-          <span>이미지</span>
-          <strong title={details.image}>{shortImage}</strong>
+        <div className={summaryCardClass}>
+          <span className="text-[0.82rem] text-[var(--text-soft)]">이미지</span>
+          <strong
+            title={details.image}
+            data-testid="containers-overview-summary-image"
+            className="min-w-0 leading-[1.35] [overflow-wrap:anywhere]"
+          >
+            {shortImage}
+          </strong>
         </div>
-        <div className="containers-workspace__summary-card">
-          <span>상태</span>
-          <strong>{details.status}</strong>
+        <div className={summaryCardClass}>
+          <span className="text-[0.82rem] text-[var(--text-soft)]">상태</span>
+          <strong className="min-w-0 leading-[1.35]">{details.status}</strong>
         </div>
-        <div className="containers-workspace__summary-card">
-          <span>Uptime</span>
-          <strong>{statusPresentation.uptime || "-"}</strong>
+        <div className={summaryCardClass}>
+          <span className="text-[0.82rem] text-[var(--text-soft)]">Uptime</span>
+          <strong className="min-w-0 leading-[1.35]">
+            {statusPresentation.uptime || "-"}
+          </strong>
         </div>
-        <div className="containers-workspace__summary-card">
-          <span>생성 시간</span>
-          <strong>{formatCreatedAt(details.createdAt)}</strong>
+        <div className={summaryCardClass}>
+          <span className="text-[0.82rem] text-[var(--text-soft)]">생성 시간</span>
+          <strong className="min-w-0 leading-[1.35] [overflow-wrap:anywhere]">
+            {formatCreatedAt(details.createdAt)}
+          </strong>
         </div>
       </div>
 
-      <div className="containers-workspace__section-card">
-        <div className="containers-workspace__section-header">
+      <div className={detailCardClass}>
+        <div className="flex items-center justify-between gap-3">
           <h3>실행 정보</h3>
         </div>
-        <dl className="containers-workspace__meta-list">
-          <div>
-            <dt>Entrypoint</dt>
-            <dd>{details.entrypoint || "-"}</dd>
+        <dl className="grid gap-[0.85rem]">
+          <div className="grid gap-[0.3rem]">
+            <dt className="text-[0.82rem] text-[var(--text-soft)]">Entrypoint</dt>
+            <dd className="m-0 break-words whitespace-pre-wrap">{details.entrypoint || "-"}</dd>
           </div>
-          <div>
-            <dt>Command</dt>
-            <dd>{details.command || "-"}</dd>
+          <div className="grid gap-[0.3rem]">
+            <dt className="text-[0.82rem] text-[var(--text-soft)]">Command</dt>
+            <dd className="m-0 break-words whitespace-pre-wrap">{details.command || "-"}</dd>
           </div>
         </dl>
       </div>
 
-      <div className="containers-workspace__section-card">
-        <div className="containers-workspace__section-header">
+      <div className={detailCardClass}>
+        <div className="flex items-center justify-between gap-3">
           <h3>마운트</h3>
         </div>
         {details.mounts.length === 0 ? (
-          <div className="containers-workspace__empty-detail">
-            마운트 정보가 없습니다.
-          </div>
+          <div className={emptyDetailClass}>마운트 정보가 없습니다.</div>
         ) : (
-          <div className="containers-workspace__mount-list">
+          <div className="grid gap-[0.7rem]">
             {details.mounts.map((mount) => (
               <div
                 key={`${mount.source}:${mount.destination}`}
-                className="containers-workspace__mount-item"
+                className="grid gap-[0.2rem] rounded-[16px] bg-[color-mix(in_srgb,var(--surface)_72%,transparent_28%)] px-[0.9rem] py-[0.85rem]"
               >
-                <strong>{mount.destination}</strong>
-                <span>{mount.source}</span>
-                <small>
+                <strong className="break-words">{mount.destination}</strong>
+                <span className="text-[var(--text-soft)]">{mount.source}</span>
+                <small className="text-[var(--text-soft)]">
                   {mount.type}
                   {mount.mode ? ` · ${mount.mode}` : ""}
                   {mount.readOnly ? " · read-only" : ""}
@@ -1031,25 +1078,23 @@ function OverviewSection({
         )}
       </div>
 
-      <div className="containers-workspace__section-card">
-        <div className="containers-workspace__section-header">
+      <div className={detailCardClass}>
+        <div className="flex items-center justify-between gap-3">
           <h3>네트워크</h3>
         </div>
         {details.networks.length === 0 ? (
-          <div className="containers-workspace__empty-detail">
-            네트워크 정보가 없습니다.
-          </div>
+          <div className={emptyDetailClass}>네트워크 정보가 없습니다.</div>
         ) : (
-          <div className="containers-workspace__network-list">
+          <div className="grid gap-[0.7rem]">
             {details.networks.map((network) => (
               <div
                 key={network.name}
-                className="containers-workspace__network-item"
+                className="grid gap-[0.2rem] rounded-[16px] bg-[color-mix(in_srgb,var(--surface)_72%,transparent_28%)] px-[0.9rem] py-[0.85rem]"
               >
-                <strong>{network.name}</strong>
-                <span>{network.ipAddress || "IP 없음"}</span>
+                <strong className="break-words">{network.name}</strong>
+                <span className="text-[var(--text-soft)]">{network.ipAddress || "IP 없음"}</span>
                 {network.aliases.length > 0 ? (
-                  <small>{network.aliases.join(", ")}</small>
+                  <small className="text-[var(--text-soft)]">{network.aliases.join(", ")}</small>
                 ) : null}
               </div>
             ))}
@@ -1057,20 +1102,20 @@ function OverviewSection({
         )}
       </div>
 
-      <div className="containers-workspace__section-card">
-        <div className="containers-workspace__section-header">
+      <div className={detailCardClass}>
+        <div className="flex items-center justify-between gap-3">
           <h3>환경 변수</h3>
         </div>
         {formatKeyValuePairs(details.environment, "환경 변수가 없습니다.")}
       </div>
 
-      <div className="containers-workspace__section-card">
-        <div className="containers-workspace__section-header">
+      <div className={detailCardClass}>
+        <div className="flex items-center justify-between gap-3">
           <h3>라벨</h3>
         </div>
         {formatKeyValuePairs(details.labels, "라벨이 없습니다.")}
       </div>
-    </div>
+    </PanelSection>
   );
 }
 
@@ -1146,56 +1191,63 @@ function MetricsSection({ tab }: { tab: HostContainersTabState }) {
   );
 
   if (tab.metricsError && points.length === 0) {
-    return <div className="callout error">{tab.metricsError}</div>;
+    return (
+      <NoticeCard tone="danger" role="alert">
+        {tab.metricsError}
+      </NoticeCard>
+    );
   }
 
   if (tab.metricsLoading && points.length === 0) {
     return (
-      <div className="containers-workspace__empty-detail">
-        메트릭을 불러오는 중입니다...
-      </div>
+      <div className={emptyDetailClass}>메트릭을 불러오는 중입니다...</div>
     );
   }
 
   if (!latest) {
     return (
-      <div className="containers-workspace__empty-detail">
-        표시할 메트릭이 없습니다. 컨테이너가 실행 중인지 확인해 주세요.
-      </div>
+      <EmptyState
+        title="표시할 메트릭이 없습니다."
+        description="컨테이너가 실행 중인지 확인한 뒤 잠시 후 다시 새로고침해 주세요."
+      />
     );
   }
 
   return (
-    <div className="containers-workspace__metrics">
-      {tab.metricsError ? <div className="callout error">{tab.metricsError}</div> : null}
-      <div className="containers-workspace__summary-grid">
-        <div className="containers-workspace__summary-card">
-          <span>CPU</span>
+    <PanelSection className="min-h-0 overflow-y-auto pr-px">
+      {tab.metricsError ? (
+        <NoticeCard tone="danger" role="alert">
+          {tab.metricsError}
+        </NoticeCard>
+      ) : null}
+      <div className={summaryGridClass}>
+        <div className={summaryCardClass}>
+          <span className="text-[0.82rem] text-[var(--text-soft)]">CPU</span>
           <strong>{formatPercentValue(latest.cpuPercent)}</strong>
         </div>
-        <div className="containers-workspace__summary-card">
-          <span>Memory</span>
+        <div className={summaryCardClass}>
+          <span className="text-[0.82rem] text-[var(--text-soft)]">Memory</span>
           <strong>
             {formatBytes(latest.memoryUsedBytes)} /{" "}
             {formatBytes(latest.memoryLimitBytes)}
           </strong>
         </div>
-        <div className="containers-workspace__summary-card">
-          <span>Network</span>
+        <div className={summaryCardClass}>
+          <span className="text-[0.82rem] text-[var(--text-soft)]">Network</span>
           <strong>
             {formatBytesPerSecond(latest.networkRxRate)} /{" "}
             {formatBytesPerSecond(latest.networkTxRate)}
           </strong>
         </div>
-        <div className="containers-workspace__summary-card">
-          <span>Block I/O</span>
+        <div className={summaryCardClass}>
+          <span className="text-[0.82rem] text-[var(--text-soft)]">Block I/O</span>
           <strong>
             {formatBytesPerSecond(latest.blockReadRate)} /{" "}
             {formatBytesPerSecond(latest.blockWriteRate)}
           </strong>
         </div>
       </div>
-      <div className="containers-workspace__metrics-grid">
+      <div className="grid grid-cols-[repeat(auto-fit,minmax(240px,1fr))] gap-[0.85rem]">
         <UPlotMetricChart
           title="CPU"
           currentLabel={formatPercentValue(latest.cpuPercent)}
@@ -1227,7 +1279,7 @@ function MetricsSection({ tab }: { tab: HostContainersTabState }) {
           yFormat="bytesPerSecond"
         />
       </div>
-    </div>
+    </PanelSection>
   );
 }
 
@@ -1758,19 +1810,19 @@ export function ContainersWorkspace({
   }
 
   return (
-    <div className="containers-workspace">
-      <div className="containers-workspace__header">
+    <div className="relative flex h-full min-h-0 flex-col gap-4">
+      <Toolbar className="justify-between gap-4 rounded-[24px] border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[var(--surface-elevated)] px-[1.15rem] py-[1.1rem]">
         <div>
           <SectionLabel>Host Containers</SectionLabel>
           <h2>{host.label}</h2>
-          <div className="containers-workspace__host-meta">
+          <div className="mt-2 flex flex-wrap gap-2 text-[0.9rem] text-[var(--text-soft)]">
             <span>{getHostBadgeLabel(host)}</span>
             {tab.runtime ? (
               <span>{tab.runtime === "docker" ? "Docker" : "Podman"}</span>
             ) : null}
           </div>
         </div>
-        <div className="containers-workspace__header-actions">
+        <div className="flex flex-wrap items-center gap-3">
           <Button
             type="button"
             variant="secondary"
@@ -1795,31 +1847,31 @@ export function ContainersWorkspace({
             셸 접속
           </Button>
         </div>
-      </div>
+      </Toolbar>
 
       {tab.unsupportedReason ? (
         <NoticeCard
           title="이 호스트에서는 컨테이너 런타임을 찾지 못했습니다."
-          className="containers-workspace__empty-state"
+          className="grid h-full content-center gap-2"
         >
           <SectionLabel className="mb-1">Runtime Unavailable</SectionLabel>
           <p>{tab.unsupportedReason}</p>
         </NoticeCard>
       ) : (
-        <div className="containers-workspace__body">
-          <aside className="containers-workspace__sidebar">
-            <div className="containers-workspace__sidebar-header">
+        <div className="grid min-h-0 flex-1 gap-4 xl:grid-cols-[minmax(280px,340px)_minmax(0,1fr)]">
+          <aside className="flex min-h-0 flex-col gap-4 rounded-[24px] border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[var(--surface-elevated)] p-[1.15rem]">
+            <div className="flex items-center justify-between gap-3">
               <strong>컨테이너</strong>
               <span>{tab.items.length}</span>
             </div>
             {tab.errorMessage ? (
-              <div className="callout error">{tab.errorMessage}</div>
+              <NoticeCard tone="danger" role="alert">
+                {tab.errorMessage}
+              </NoticeCard>
             ) : null}
-            <div className="containers-workspace__list">
+            <div className="flex min-h-0 flex-col gap-[0.7rem] overflow-y-auto pr-px">
               {tab.items.length === 0 && !tab.isLoading ? (
-                <div className="containers-workspace__empty-detail">
-                  감지된 컨테이너가 없습니다.
-                </div>
+                <div className={emptyDetailClass}>감지된 컨테이너가 없습니다.</div>
               ) : null}
               {tab.items.map((item) => (
                 <ContainerListItem
@@ -1837,14 +1889,14 @@ export function ContainersWorkspace({
             </div>
           </aside>
 
-          <section className="containers-workspace__detail">
-            <div className="containers-workspace__detail-header">
+          <section className="flex min-h-0 flex-col gap-4 rounded-[24px] border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[var(--surface-elevated)] p-[1.15rem]">
+            <div className="flex flex-wrap items-start justify-between gap-4">
               <div>
                 <h3>{selectedContainer?.name ?? "컨테이너를 선택하세요"}</h3>
                 {selectedContainer ? <p>{selectedContainer.image}</p> : null}
               </div>
-              <div className="containers-workspace__detail-actions">
-                <div className="containers-workspace__action-row">
+              <div className="flex flex-col items-start gap-3 self-stretch">
+                <div className="flex flex-wrap gap-2">
                   <Button
                     type="button"
                     variant="secondary"
@@ -1882,7 +1934,7 @@ export function ContainersWorkspace({
                     Remove
                   </Button>
                 </div>
-                <Tabs className="gap-2 bg-[var(--surface-elevated)] p-1.5">
+                <Tabs className="gap-2 border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[color-mix(in_srgb,var(--surface-muted)_88%,transparent_12%)] p-1.5">
                   <TabButton type="button" active={tab.activePanel === "overview"} onClick={() => onSetPanel(host.id, "overview")}>
                     Overview
                   </TabButton>
@@ -1913,17 +1965,21 @@ export function ContainersWorkspace({
                 </Tabs>
               </div>
             </div>
-            {tab.actionError ? <div className="callout error">{tab.actionError}</div> : null}
+            {tab.actionError ? (
+              <NoticeCard tone="danger" role="alert">
+                {tab.actionError}
+              </NoticeCard>
+            ) : null}
 
             {tab.activePanel === "overview" ? (
               <>
                 {tab.detailsError ? (
-                  <div className="callout error">{tab.detailsError}</div>
+                  <NoticeCard tone="danger" role="alert">
+                    {tab.detailsError}
+                  </NoticeCard>
                 ) : null}
                 {tab.detailsLoading ? (
-                  <div className="containers-workspace__empty-detail">
-                    상세 정보를 불러오는 중입니다...
-                  </div>
+                  <div className={emptyDetailClass}>상세 정보를 불러오는 중입니다...</div>
                 ) : (
                   <OverviewSection
                     details={tab.details}
@@ -1952,24 +2008,20 @@ export function ContainersWorkspace({
                 />
               </ContainerTunnelErrorBoundary>
             ) : (
-              <div className="containers-workspace__logs">
-                <div className="containers-workspace__logs-toolbar">
-                  <button
-                    type="button"
-                    role="switch"
-                    aria-checked={tab.logsFollowEnabled}
+              <PanelSection className="min-h-0">
+                <FilterRow className="items-center justify-between">
+                  <ToggleSwitch
+                    checked={tab.logsFollowEnabled}
                     aria-label="Follow"
-                    className={`containers-workspace__follow-toggle ${tab.logsFollowEnabled ? "is-active" : ""}`}
+                    className="max-w-[15rem]"
+                    label="Follow"
+                    description="새 로그가 들어오면 하단을 자동으로 따라갑니다."
                     onClick={() => onSetLogsFollow(host.id, !tab.logsFollowEnabled)}
-                  >
-                    <span className="containers-workspace__follow-toggle-track" aria-hidden="true">
-                      <span className="containers-workspace__follow-toggle-thumb" />
-                    </span>
-                    <span className="containers-workspace__follow-toggle-label">Follow</span>
-                  </button>
-                  <div className="containers-workspace__logs-search">
-                    <input
+                  />
+                  <div className="flex min-w-[18rem] flex-1 flex-wrap items-center gap-3">
+                    <Input
                       type="search"
+                      className="min-w-[14rem] flex-1"
                       value={tab.logsSearchQuery}
                       placeholder="로그 검색"
                       onChange={(event) =>
@@ -2020,36 +2072,45 @@ export function ContainersWorkspace({
                   >
                     {tab.logsLoading ? "불러오는 중..." : "다시 불러오기"}
                   </Button>
-                </div>
+                </FilterRow>
                 {trimmedLogsSearchQuery ? (
-                  <div className="containers-workspace__logs-search-meta">
+                  <div className="text-[0.84rem] text-[var(--text-soft)]">
                     {tab.logsSearchMode === "remote"
                       ? `원격 검색 결과 ${logMatchCount}건`
                       : `현재 버퍼에서 ${logMatchCount}건 일치`}
                   </div>
                 ) : null}
                 {tab.logsSearchError ? (
-                  <div className="callout error">{tab.logsSearchError}</div>
+                  <NoticeCard tone="danger" role="alert">
+                    {tab.logsSearchError}
+                  </NoticeCard>
                 ) : null}
                 {tab.logsError ? (
-                  <div className="callout error">{tab.logsError}</div>
+                  <NoticeCard tone="danger" role="alert">
+                    {tab.logsError}
+                  </NoticeCard>
                 ) : null}
                 <div
                   ref={logsOutputRef}
-                  className="containers-workspace__logs-output"
+                  className={logsOutputClass}
+                  data-testid="containers-logs-output"
                   onScroll={handleLogsScroll}
+                  style={{
+                    fontFamily:
+                      "var(--terminal-font-family, 'SFMono-Regular', Consolas, monospace)",
+                    fontSize: "0.83rem",
+                    lineHeight: "1.55",
+                  }}
                 >
                   {tab.logsState === "loading" || tab.logsState === "idle" ? (
-                    <div className="containers-workspace__empty-detail">
-                      로그를 불러오는 중입니다...
-                    </div>
+                    <div className={emptyDetailClass}>로그를 불러오는 중입니다...</div>
                   ) : tab.logsState === "empty" ? (
-                    <div className="containers-workspace__empty-detail">
+                    <div className={emptyDetailClass}>
                       최근 {tab.logsTailWindow}줄 기준 로그가 없습니다.
                     </div>
                   ) : tab.logsState === "error" ||
                     tab.logsState === "malformed" ? (
-                    <div className="containers-workspace__empty-detail">
+                    <div className={emptyDetailClass}>
                       다시 불러오기를 시도해 주세요.
                     </div>
                   ) : effectiveLogLines.length ? (
@@ -2062,11 +2123,15 @@ export function ContainersWorkspace({
                         return (
                           <div
                             key={`${index}:${parsedLine.raw}`}
-                            className={`containers-workspace__log-row containers-workspace__log-row--raw ${
-                              isMatch ? "containers-workspace__log-row--match" : ""
-                            }`}
+                            className={cn(
+                              "grid grid-cols-[minmax(0,1fr)] items-start gap-[0.9rem]",
+                              isMatch
+                                ? "mx-[-0.35rem] rounded-[10px] bg-[color-mix(in_srgb,var(--accent-strong)_16%,transparent_84%)] px-[0.35rem] py-[0.22rem]"
+                                : "",
+                            )}
+                            data-log-match={isMatch ? "true" : undefined}
                           >
-                            <span className="containers-workspace__log-message">
+                            <span className="min-w-0 break-words whitespace-pre-wrap">
                               {renderAnsiStyledMessage(parsedLine.message)}
                             </span>
                           </div>
@@ -2076,34 +2141,36 @@ export function ContainersWorkspace({
                       return (
                         <div
                           key={`${index}:${parsedLine.raw}`}
-                          className={`containers-workspace__log-row ${
-                            isMatch ? "containers-workspace__log-row--match" : ""
-                          }`}
+                          className={cn(
+                            "grid grid-cols-[max-content_minmax(0,1fr)] items-start gap-[0.9rem]",
+                            isMatch
+                              ? "mx-[-0.35rem] rounded-[10px] bg-[color-mix(in_srgb,var(--accent-strong)_16%,transparent_84%)] px-[0.35rem] py-[0.22rem]"
+                              : "",
+                          )}
+                          data-log-match={isMatch ? "true" : undefined}
                         >
                           <span
-                            className="containers-workspace__log-timestamp"
+                            className="whitespace-nowrap text-[rgba(163,181,214,0.82)]"
                             title={parsedLine.timestampRaw}
                           >
                             {parsedLine.timestampLabel}
                           </span>
-                          <span className="containers-workspace__log-message">
+                          <span className="min-w-0 break-words whitespace-pre-wrap">
                             {renderAnsiStyledMessage(parsedLine.message)}
                           </span>
                         </div>
                       );
                     })
                   ) : trimmedLogsSearchQuery ? (
-                    <div className="containers-workspace__empty-detail">
-                      검색 결과가 없습니다.
-                    </div>
+                    <div className={emptyDetailClass}>검색 결과가 없습니다.</div>
                   ) : null}
                   <div
                     ref={logsBottomRef}
-                    className="containers-workspace__logs-end-anchor"
+                    className="h-px w-full"
                     aria-hidden="true"
                   />
                 </div>
-              </div>
+              </PanelSection>
             )}
           </section>
         </div>
@@ -2111,141 +2178,59 @@ export function ContainersWorkspace({
 
       {matchingInteractiveAuth ? (
         <div
-          className="sftp-host-picker__overlay"
+          className="absolute inset-0 z-[3] grid place-items-center rounded-[20px] bg-[rgba(12,20,32,0.18)]"
           role="status"
           aria-live="polite"
           aria-label="Container interactive authentication required"
         >
-          <div className="sftp-host-picker__overlay-card terminal-interactive-auth">
-            {matchingInteractiveAuth.provider === "warpgate" ? (
-              <>
-                <SectionLabel className="terminal-interactive-auth__label">
-                  Warpgate Approval
-                </SectionLabel>
-                <strong>Warpgate 승인을 기다리는 중입니다.</strong>
-                <p>
-                  브라우저에서 Warpgate 로그인 뒤 <code>Authorize</code>를
-                  눌러주세요. 가능한 입력은 자동으로 처리됩니다.
-                </p>
-                {matchingInteractiveAuth.authCode ? (
-                  <p className="terminal-interactive-auth__code">
-                    인증 코드 <code>{matchingInteractiveAuth.authCode}</code>는
-                    자동으로 입력됩니다.
-                  </p>
-                ) : null}
-                <div className="terminal-interactive-auth__actions">
-                  {matchingInteractiveAuth.approvalUrl ? (
-                    <Button
-                      type="button"
-                      variant="secondary"
-                      size="sm"
-                      onClick={() => {
-                        void onReopenInteractiveAuthUrl();
-                      }}
-                    >
-                      브라우저 다시 열기
-                    </Button>
-                  ) : null}
-                  {matchingInteractiveAuth.approvalUrl ? (
-                    <Button
-                      type="button"
-                      variant="secondary"
-                      size="sm"
-                      onClick={async () => {
-                        await navigator.clipboard.writeText(
-                          matchingInteractiveAuth.approvalUrl ?? "",
-                        );
-                      }}
-                    >
-                      링크 복사
-                    </Button>
-                  ) : null}
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    size="sm"
-                    onClick={() => {
-                      onClearInteractiveAuth();
-                    }}
-                  >
-                    닫기
-                  </Button>
-                </div>
-                <pre className="terminal-interactive-auth__raw">
-                  {matchingInteractiveAuth.instruction}
-                </pre>
-              </>
-            ) : (
-              <form
-                className="terminal-interactive-auth__form"
-                onSubmit={(event) => {
-                  event.preventDefault();
-                  void onRespondInteractiveAuth(
-                    matchingInteractiveAuth.challengeId,
-                    promptResponses,
-                  );
-                }}
-              >
-                <SectionLabel className="terminal-interactive-auth__label">
-                  Additional Authentication
-                </SectionLabel>
-                <strong>추가 인증 입력이 필요합니다.</strong>
-                {matchingInteractiveAuth.instruction ? (
-                  <p>{matchingInteractiveAuth.instruction}</p>
-                ) : null}
-                {matchingInteractiveAuth.prompts.map((prompt, index) => (
-                  <label
-                    key={`${matchingInteractiveAuth.challengeId}:${index}`}
-                    className="terminal-interactive-auth__field"
-                  >
-                    <span>{prompt.label || `Prompt ${index + 1}`}</span>
-                    <input
-                      type={prompt.echo ? "text" : "password"}
-                      value={promptResponses[index] ?? ""}
-                      onChange={(inputEvent) => {
-                        const nextResponses = [...promptResponses];
-                        nextResponses[index] = inputEvent.target.value;
-                        setPromptResponses(nextResponses);
-                      }}
-                    />
-                  </label>
-                ))}
-                <div className="terminal-interactive-auth__actions">
-                  <Button type="submit" variant="primary">
-                    응답 보내기
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    onClick={() => {
-                      onClearInteractiveAuth();
-                    }}
-                  >
-                    닫기
-                  </Button>
-                </div>
-              </form>
-            )}
-          </div>
+          <TerminalInteractiveAuthOverlay
+            interactiveAuth={matchingInteractiveAuth}
+            promptResponses={promptResponses}
+            onPromptResponseChange={(index, value) => {
+              const nextResponses = [...promptResponses];
+              nextResponses[index] = value;
+              setPromptResponses(nextResponses);
+            }}
+            onSubmit={() => {
+              void onRespondInteractiveAuth(
+                matchingInteractiveAuth.challengeId,
+                promptResponses,
+              );
+            }}
+            onCopyApprovalUrl={async () => {
+              await navigator.clipboard.writeText(
+                matchingInteractiveAuth.approvalUrl ?? "",
+              );
+            }}
+            onReopenApprovalUrl={() => {
+              void onReopenInteractiveAuthUrl();
+            }}
+            onClose={() => {
+              onClearInteractiveAuth();
+            }}
+          />
         </div>
       ) : shouldShowConnectingOverlay ? (
         <div
-          className="sftp-host-picker__overlay"
+          className="absolute inset-0 z-[3] grid place-items-center rounded-[20px] bg-[rgba(12,20,32,0.18)]"
           role="status"
           aria-live="polite"
           aria-label="Container connection in progress"
         >
-          <div className="sftp-host-picker__overlay-card">
-            <div className="sftp-host-picker__spinner" aria-hidden="true" />
+          <Card className="grid max-w-[20rem] justify-items-center gap-[0.45rem] px-[1.1rem] py-4 text-center">
+            <div
+              aria-hidden="true"
+              className="h-5 w-5 animate-[sftp-spinner_0.8s_linear_infinite] rounded-full border-2 border-[color-mix(in_srgb,var(--accent-strong)_18%,var(--border)_82%)] border-t-[var(--accent-strong)]"
+            />
             <strong>{`${host.label} 연결 중...`}</strong>
-            <span className="sftp-host-picker__overlay-stage">
+            <span className="font-semibold text-[var(--text)]">
               {formatConnectionProgressStageLabel(tab.connectionProgress?.stage)}
             </span>
-            <span>
+            <span className="text-[0.9rem] leading-[1.5] text-[var(--text-soft)]">
               {tab.connectionProgress?.message ??
                 "컨테이너 런타임과 연결 상태를 준비하고 있습니다."}
             </span>
-          </div>
+          </Card>
         </div>
       ) : null}
 
@@ -2314,25 +2299,30 @@ function ContainerListItem({
   return (
     <button
       type="button"
-      className={`containers-workspace__list-item ${isActive ? "active" : ""}`}
+      className={cn(
+        "flex w-full flex-col items-stretch gap-2 rounded-[18px] border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[color-mix(in_srgb,var(--surface-strong)_84%,transparent_16%)] px-4 py-[0.95rem] text-left text-[var(--text)] transition-[border-color,box-shadow] duration-150 hover:border-[color-mix(in_srgb,var(--accent-strong)_34%,var(--border)_66%)] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[color-mix(in_srgb,var(--accent-strong)_12%,transparent)]",
+        isActive
+          ? "border-[color-mix(in_srgb,var(--accent-strong)_34%,var(--border)_66%)] shadow-[0_0_0_1px_color-mix(in_srgb,var(--accent-strong)_14%,transparent_86%),var(--shadow)]"
+          : "",
+      )}
       onClick={onSelect}
       title={name}
       data-container-id={id}
     >
-      <div className="containers-workspace__list-item-header">
-        <strong className="containers-workspace__list-item-name" title={name}>
+      <div className="flex items-center justify-between gap-3">
+        <strong className="min-w-0 truncate" title={name}>
           {name}
         </strong>
         <StatusBadge
           tone={statusPresentation.tone}
-          className="containers-workspace__status-pill"
+          className="min-h-[1.55rem] shrink-0 px-[0.58rem] py-[0.2rem] text-[0.74rem]"
           title={status}
         >
           {statusPresentation.label}
         </StatusBadge>
       </div>
       <div
-        className="containers-workspace__list-item-image"
+        className="min-w-0 truncate text-[var(--text-soft)]"
         title={image}
       >
         {shortImage}

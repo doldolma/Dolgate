@@ -166,7 +166,7 @@ export function AppShell({
   }
 
   return (
-    <div className={`app-frame ${isHomeActive ? 'home-active' : 'session-active'}`}>
+    <div className="flex h-screen min-h-0 flex-col overflow-hidden bg-[radial-gradient(circle_at_top_left,color-mix(in_srgb,var(--accent-strong)_10%,transparent),transparent_24%),radial-gradient(circle_at_top_right,rgba(255,255,255,0.3),transparent_24%),linear-gradient(180deg,color-mix(in_srgb,var(--app-bg)_97%,white_3%),var(--app-bg))]">
       <AppTitleBar
         desktopPlatform={desktopPlatform}
         tabs={sessionViewModel.tabs}
@@ -206,7 +206,7 @@ export function AppShell({
         onCloseWindow={loginController.closeWindow}
       />
 
-      <div className="workspace-shell">
+      <div className="relative flex-1 min-h-0">
         {isHomeActive ? (
           <HomeShell
             active

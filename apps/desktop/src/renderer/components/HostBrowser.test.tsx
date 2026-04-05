@@ -13,7 +13,6 @@ import {
 import type { GroupRecord, HostRecord } from '@shared';
 import {
   HostBrowser,
-  getHostBrowserCardClassName,
   getHostBrowserEmptyCalloutMessage,
   getHostBrowserVisibleImportMenuLabels,
   HOST_BROWSER_IMPORT_MENU_LABELS
@@ -287,10 +286,17 @@ describe('HostBrowser helpers', () => {
     expect(getHostTagsToggleLabel(true, 1)).toBe('Hide tags');
   });
 
-  it('uses a fixed collapsed host card class and only adds the expanded class when tags are open', () => {
-    expect(getHostBrowserCardClassName(false, false)).toBe('host-browser-card');
-    expect(getHostBrowserCardClassName(true, false)).toBe('host-browser-card active');
-    expect(getHostBrowserCardClassName(false, true)).toBe('host-browser-card host-browser-card--expanded');
+  it('describes host card state via data attributes instead of legacy class names', () => {
+    const { container } = renderBrowser();
+
+    const appCard = screen.getByText('App').closest('[data-host-card="true"]') as HTMLElement;
+    expect(appCard.dataset.hostCardState).toBe('idle');
+
+    fireEvent.click(appCard);
+    expect(appCard.dataset.hostCardState).toBe('selected');
+
+    fireEvent.click(within(appCard).getByRole('button', { name: /Tags \(1\)/ }));
+    expect(appCard.className).toContain('h-auto');
   });
 
   it('defines import actions for the split-button menu in the expected order', () => {
@@ -350,7 +356,7 @@ describe('HostBrowser helpers', () => {
       currentGroupPath: 'Servers'
     });
 
-    const hostGrid = container.querySelector('.host-grid') as HTMLElement;
+    const hostGrid = container.querySelector('[data-host-grid="true"]') as HTMLElement;
     expect(hostGrid).toBeTruthy();
 
     setObservedWidth(hostGrid, 1200);
@@ -393,7 +399,7 @@ describe('HostBrowser dialogs', () => {
 
     expect(screen.getByRole('dialog')).toBeInTheDocument();
 
-    const backdrop = container.querySelector('.home-modal-backdrop') as HTMLElement;
+    const backdrop = screen.getByTestId('host-browser-modal-backdrop');
     fireEvent.pointerDown(backdrop);
     fireEvent.click(backdrop);
 
@@ -443,13 +449,13 @@ describe('HostBrowser dialogs', () => {
     const { container } = renderBrowser();
 
     expect(screen.getByLabelText('Group tree')).toBeInTheDocument();
-    expect(container.querySelector('.group-grid')).toBeNull();
+    expect(container.querySelector('[data-group-grid="true"]')).toBeNull();
     expect(screen.queryByRole('heading', { name: 'Groups' })).not.toBeInTheDocument();
   });
 
   it('does not render a duplicate current group breadcrumb above the cards', () => {
     const { container } = renderBrowser({ currentGroupPath: 'Servers/Nested' });
-    const content = container.querySelector('.host-browser__content') as HTMLElement;
+    const content = screen.getByTestId('host-browser-content');
 
     expect(within(content).queryByText('All Groups')).not.toBeInTheDocument();
     expect(within(content).queryByText('Servers')).not.toBeInTheDocument();
@@ -502,8 +508,8 @@ describe('HostBrowser dialogs', () => {
     fireEvent.click(dbCard, { ctrlKey: true });
 
     expect(onSelectHost).toHaveBeenCalledTimes(1);
-    expect(appCard.className).toContain('active');
-    expect(dbCard.className).toContain('active');
+    expect(appCard.dataset.hostCardState).toBe('selected');
+    expect(dbCard.dataset.hostCardState).toBe('selected');
 
     fireEvent.contextMenu(appCard);
     fireEvent.click(screen.getByRole('button', { name: '복사 (2개)' }));
@@ -522,8 +528,8 @@ describe('HostBrowser dialogs', () => {
     fireEvent.click(dbCard, { shiftKey: true });
 
     expect(onSelectHost).toHaveBeenCalledTimes(1);
-    expect(appCard.className).toContain('active');
-    expect(dbCard.className).toContain('active');
+    expect(appCard.dataset.hostCardState).toBe('selected');
+    expect(dbCard.dataset.hostCardState).toBe('selected');
   });
 
   it('keeps mixed host and group selections but scopes the context menu to the clicked type', () => {
@@ -547,8 +553,8 @@ describe('HostBrowser dialogs', () => {
     fireEvent.click(appCard, { ctrlKey: true });
     fireEvent.click(serversTreeItem, { ctrlKey: true });
 
-    expect(appCard.className).toContain('active');
-    expect(serversTreeItem.className).toContain('selected');
+    expect(appCard.dataset.hostCardState).toBe('selected');
+    expect(serversTreeItem.getAttribute('data-group-tree-state')).toBe('selected');
 
     fireEvent.contextMenu(serversTreeItem);
 

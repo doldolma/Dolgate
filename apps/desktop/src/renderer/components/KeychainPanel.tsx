@@ -1,5 +1,15 @@
 import type { SecretMetadataRecord } from '@shared';
-import { Button, Card, CardActions, CardMain, CardMeta, CardTitleRow, EmptyState, SectionLabel } from '../ui';
+import {
+  Button,
+  Card,
+  CardActions,
+  CardMain,
+  CardMeta,
+  CardTitleRow,
+  EmptyState,
+  PanelSection,
+  SectionLabel,
+} from '../ui';
 
 interface KeychainPanelProps {
   entries: SecretMetadataRecord[];
@@ -20,7 +30,7 @@ export function KeychainPanel({ entries, onRemoveSecret, onEditSecret }: Keychai
         </div>
       </div>
 
-      <div className="operations-list">
+      <PanelSection>
         {entries.length === 0 ? (
           <EmptyState
             title="저장된 secret이 없습니다."
@@ -58,7 +68,7 @@ export function KeychainPanel({ entries, onRemoveSecret, onEditSecret }: Keychai
             </Card>
           ))
         )}
-      </div>
+      </PanelSection>
     </div>
   );
 }

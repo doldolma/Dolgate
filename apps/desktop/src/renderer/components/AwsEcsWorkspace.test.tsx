@@ -399,10 +399,13 @@ describe("AwsEcsWorkspace", () => {
     expect(screen.getByText("Recent events")).toBeInTheDocument();
     expect(screen.getByText("waiting for healthy targets")).toBeInTheDocument();
     expect(screen.getByText("deployment in progress")).toBeInTheDocument();
-    expect(container.querySelectorAll(".ecs-workspace__service-row")).toHaveLength(2);
-    expect(container.querySelector(".ecs-workspace__service-row")?.textContent).toContain("worker");
+    expect(container.querySelectorAll('[data-testid="ecs-service-row"]')).toHaveLength(2);
+    expect(container.querySelector('[data-testid="ecs-service-row"]')?.textContent).toContain("worker");
+    expect(
+      container.querySelector('[data-testid="ecs-service-row"]')?.className,
+    ).toContain("shrink-0");
     const selectedRowText =
-      container.querySelector(".ecs-workspace__service-row")?.textContent ?? "";
+      container.querySelector('[data-testid="ecs-service-row"]')?.textContent ?? "";
     expect(selectedRowText).not.toContain("1 / 2");
   });
 

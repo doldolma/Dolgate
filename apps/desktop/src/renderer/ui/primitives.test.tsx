@@ -1,11 +1,17 @@
 import { render, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import { Button } from './Button';
+import { FieldGroup } from './FieldGroup';
+import { FilterRow } from './FilterRow';
+import { Input } from './Input';
 import { ModalBody, ModalFooter, ModalHeader, ModalShell } from './ModalShell';
 import { NoticeCard } from './NoticeCard';
+import { OptionCard } from './OptionCard';
+import { PanelSection } from './PanelSection';
 import { SplitButton, SplitButtonMain, SplitButtonMenu, SplitButtonMenuItem, SplitButtonToggle } from './SplitButton';
 import { StatusBadge } from './StatusBadge';
-import { Input } from './Input';
+import { ToggleSwitch } from './ToggleSwitch';
+import { Toolbar } from './Toolbar';
 
 describe('renderer UI primitives', () => {
   it('renders button variants and disabled state', () => {
@@ -91,5 +97,65 @@ describe('renderer UI primitives', () => {
     expect(screen.getByText('Dark mode')).toBeInTheDocument();
 
     delete document.documentElement.dataset.theme;
+  });
+
+  it('renders toolbar and panel section wrappers without legacy utility classes', () => {
+    render(
+      <Toolbar>
+        <PanelSection data-testid="panel-section">
+          <Button variant="secondary">Item</Button>
+        </PanelSection>
+      </Toolbar>,
+    );
+
+    expect(screen.getByTestId('panel-section')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Item' })).toBeInTheDocument();
+  });
+
+  it('renders field group and filter row wrappers without legacy form shells', () => {
+    render(
+      <FilterRow>
+        <FieldGroup label="Hostname" compact>
+          <Input placeholder="example.internal" />
+        </FieldGroup>
+      </FilterRow>,
+    );
+
+    expect(screen.getByText('Hostname')).toBeInTheDocument();
+    expect(screen.getByPlaceholderText('example.internal')).toBeInTheDocument();
+  });
+
+  it('renders option card previews and active selection state', () => {
+    render(
+      <OptionCard
+        active
+        title="System"
+        description="Follow the desktop setting"
+        preview={<div data-testid="option-preview">Preview</div>}
+      />,
+    );
+
+    expect(screen.getByRole('button', { name: /System/i })).toBeInTheDocument();
+    expect(screen.getByText('Follow the desktop setting')).toBeInTheDocument();
+    expect(screen.getByTestId('option-preview')).toBeInTheDocument();
+  });
+
+  it('renders toggle switch labels and checked state', () => {
+    render(
+      <ToggleSwitch
+        checked
+        aria-label="Follow"
+        label="Follow"
+        description="Keep the log viewport pinned to the bottom"
+      />,
+    );
+
+    expect(screen.getByRole('switch', { name: 'Follow' })).toHaveAttribute(
+      'aria-checked',
+      'true',
+    );
+    expect(
+      screen.getByText('Keep the log viewport pinned to the bottom'),
+    ).toBeInTheDocument();
   });
 });

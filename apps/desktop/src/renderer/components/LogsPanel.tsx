@@ -8,7 +8,17 @@ import type {
   SessionLifecycleLogMetadata,
   PortForwardTransport,
 } from '@shared';
-import { Badge, Button, Card, CardMain, EmptyState, SectionLabel } from '../ui';
+import {
+  Badge,
+  Button,
+  Card,
+  CardMain,
+  EmptyState,
+  PanelSection,
+  SectionLabel,
+  SelectField,
+  Toolbar,
+} from '../ui';
 
 interface LogsPanelProps {
   logs: ActivityLogRecord[];
@@ -198,28 +208,38 @@ export function LogsPanel({ logs, onClear, onOpenReplay }: LogsPanelProps) {
         </Button>
       </div>
 
-      <div className="logs-toolbar">
-        <label className="form-field form-field--compact">
-          <span>Category</span>
-          <select value={category} onChange={(event) => setCategory(event.target.value as 'all' | ActivityLogCategory)}>
+      <Toolbar>
+        <label className="flex w-full max-w-[220px] flex-col gap-[0.45rem]">
+          <span className="text-[0.88rem] text-[var(--text-soft)]">Category</span>
+          <SelectField
+            value={category}
+            onChange={(event) =>
+              setCategory(event.target.value as 'all' | ActivityLogCategory)
+            }
+          >
             <option value="all">All</option>
             <option value="session">Session</option>
             <option value="audit">Audit</option>
-          </select>
+          </SelectField>
         </label>
 
-        <label className="form-field form-field--compact">
-          <span>Level</span>
-          <select value={level} onChange={(event) => setLevel(event.target.value as 'all' | ActivityLogLevel)}>
+        <label className="flex w-full max-w-[220px] flex-col gap-[0.45rem]">
+          <span className="text-[0.88rem] text-[var(--text-soft)]">Level</span>
+          <SelectField
+            value={level}
+            onChange={(event) =>
+              setLevel(event.target.value as 'all' | ActivityLogLevel)
+            }
+          >
             <option value="all">All</option>
             <option value="info">Info</option>
             <option value="warn">Warn</option>
             <option value="error">Error</option>
-          </select>
+          </SelectField>
         </label>
-      </div>
+      </Toolbar>
 
-      <div className="operations-list">
+      <PanelSection>
         {visibleLogs.length === 0 ? (
           <EmptyState
             title="조건에 맞는 로그가 없습니다."
@@ -243,16 +263,16 @@ export function LogsPanel({ logs, onClear, onOpenReplay }: LogsPanelProps) {
                 : null;
 
             return sessionLifecycleMetadata ? (
-              <Card key={log.id} className="logs-lifecycle-card">
+              <Card key={log.id} data-testid="logs-lifecycle-card">
                 <CardMain>
-                  <div className="flex flex-wrap items-center gap-[0.7rem] logs-lifecycle-card__header">
+                  <div className="flex flex-wrap items-center gap-[0.7rem]">
                     <div>
                       <strong>{sessionLifecycleMetadata.hostLabel}</strong>
                       {getSessionLifecycleSubtitle(sessionLifecycleMetadata) ? (
-                        <div className="logs-lifecycle-card__title">{getSessionLifecycleSubtitle(sessionLifecycleMetadata)}</div>
+                        <div className="text-[0.92rem] text-[var(--text-soft)]">{getSessionLifecycleSubtitle(sessionLifecycleMetadata)}</div>
                       ) : null}
                     </div>
-                    <div className="logs-lifecycle-card__badges">
+                    <div className="flex flex-wrap items-center gap-[0.55rem]">
                       {sessionLifecycleMetadata.status !== 'connected' && replayRecordingId ? (
                         <Button variant="secondary" size="sm" onClick={() => void onOpenReplay(replayRecordingId)}>
                           Replay
@@ -266,37 +286,37 @@ export function LogsPanel({ logs, onClear, onOpenReplay }: LogsPanelProps) {
                       </Badge>
                     </div>
                   </div>
-                  <div className="logs-lifecycle-card__timeline">
-                    <div className="logs-lifecycle-card__item">
+                  <div className="mt-[0.85rem] grid gap-[0.75rem] md:grid-cols-3">
+                    <div className="grid gap-[0.25rem] rounded-[16px] bg-[color-mix(in_srgb,var(--surface)_72%,transparent_28%)] px-[0.9rem] py-[0.8rem]">
                       <span>연결 시작</span>
                       <strong>{formatLogTimestamp(sessionLifecycleMetadata.connectedAt)}</strong>
                     </div>
-                    <div className="logs-lifecycle-card__item">
+                    <div className="grid gap-[0.25rem] rounded-[16px] bg-[color-mix(in_srgb,var(--surface)_72%,transparent_28%)] px-[0.9rem] py-[0.8rem]">
                       <span>연결 종료</span>
                       <strong>{sessionLifecycleMetadata.disconnectedAt ? formatLogTimestamp(sessionLifecycleMetadata.disconnectedAt) : '연결 중'}</strong>
                     </div>
-                    <div className="logs-lifecycle-card__item">
+                    <div className="grid gap-[0.25rem] rounded-[16px] bg-[color-mix(in_srgb,var(--surface)_72%,transparent_28%)] px-[0.9rem] py-[0.8rem]">
                       <span>연결 시간</span>
                       <strong>{formatSessionLifecycleDuration(sessionLifecycleMetadata.durationMs)}</strong>
                     </div>
                   </div>
                   {sessionLifecycleMetadata.disconnectReason ? (
-                    <div className="logs-lifecycle-card__reason">{sessionLifecycleMetadata.disconnectReason}</div>
+                    <div className="mt-[0.75rem] rounded-[14px] bg-[color-mix(in_srgb,var(--surface-muted)_88%,transparent_12%)] px-[0.9rem] py-[0.75rem] text-[0.92rem] text-[var(--text-soft)]">{sessionLifecycleMetadata.disconnectReason}</div>
                   ) : null}
                 </CardMain>
               </Card>
             ) : portForwardLifecycleMetadata ? (
-              <Card key={log.id} className="logs-lifecycle-card">
+              <Card key={log.id} data-testid="logs-lifecycle-card">
                 <CardMain>
-                  <div className="flex flex-wrap items-center gap-[0.7rem] logs-lifecycle-card__header">
+                  <div className="flex flex-wrap items-center gap-[0.7rem]">
                     <div>
                       <strong>{portForwardLifecycleMetadata.ruleLabel}</strong>
-                      <div className="logs-lifecycle-card__title">{portForwardLifecycleMetadata.hostLabel}</div>
-                      <div className="logs-lifecycle-card__title">
+                      <div className="text-[0.92rem] text-[var(--text-soft)]">{portForwardLifecycleMetadata.hostLabel}</div>
+                      <div className="text-[0.92rem] text-[var(--text-soft)]">
                         {`${portForwardLifecycleMetadata.bindAddress}:${portForwardLifecycleMetadata.bindPort} -> ${portForwardLifecycleMetadata.targetSummary}`}
                       </div>
                     </div>
-                    <div className="logs-lifecycle-card__badges">
+                    <div className="flex flex-wrap items-center gap-[0.55rem]">
                       <Badge tone={getPortForwardTransportTone(portForwardLifecycleMetadata.transport)}>
                         {getPortForwardTransportLabel(portForwardLifecycleMetadata.transport)}
                       </Badge>
@@ -305,22 +325,22 @@ export function LogsPanel({ logs, onClear, onOpenReplay }: LogsPanelProps) {
                       </Badge>
                     </div>
                   </div>
-                  <div className="logs-lifecycle-card__timeline">
-                    <div className="logs-lifecycle-card__item">
+                  <div className="mt-[0.85rem] grid gap-[0.75rem] md:grid-cols-3">
+                    <div className="grid gap-[0.25rem] rounded-[16px] bg-[color-mix(in_srgb,var(--surface)_72%,transparent_28%)] px-[0.9rem] py-[0.8rem]">
                       <span>포워딩 시작</span>
                       <strong>{formatLogTimestamp(portForwardLifecycleMetadata.startedAt)}</strong>
                     </div>
-                    <div className="logs-lifecycle-card__item">
+                    <div className="grid gap-[0.25rem] rounded-[16px] bg-[color-mix(in_srgb,var(--surface)_72%,transparent_28%)] px-[0.9rem] py-[0.8rem]">
                       <span>포워딩 종료</span>
                       <strong>{portForwardLifecycleMetadata.stoppedAt ? formatLogTimestamp(portForwardLifecycleMetadata.stoppedAt) : '포워딩 중'}</strong>
                     </div>
-                    <div className="logs-lifecycle-card__item">
+                    <div className="grid gap-[0.25rem] rounded-[16px] bg-[color-mix(in_srgb,var(--surface)_72%,transparent_28%)] px-[0.9rem] py-[0.8rem]">
                       <span>유지 시간</span>
                       <strong>{formatSessionLifecycleDuration(portForwardLifecycleMetadata.durationMs)}</strong>
                     </div>
                   </div>
                   {portForwardLifecycleMetadata.endReason ? (
-                    <div className="logs-lifecycle-card__reason">{portForwardLifecycleMetadata.endReason}</div>
+                    <div className="mt-[0.75rem] rounded-[14px] bg-[color-mix(in_srgb,var(--surface-muted)_88%,transparent_12%)] px-[0.9rem] py-[0.75rem] text-[0.92rem] text-[var(--text-soft)]">{portForwardLifecycleMetadata.endReason}</div>
                   ) : null}
                 </CardMain>
               </Card>
@@ -338,9 +358,9 @@ export function LogsPanel({ logs, onClear, onOpenReplay }: LogsPanelProps) {
                     <span>{formatLogTimestamp(log.createdAt)}</span>
                   </div>
                   {log.metadata ? (
-                    <details className="log-details">
+                    <details className="mt-[0.75rem] rounded-[14px] border border-[var(--border)] bg-[color-mix(in_srgb,var(--surface)_72%,transparent_28%)] px-[0.9rem] py-[0.8rem]">
                       <summary>Metadata</summary>
-                      <pre>{JSON.stringify(log.metadata, null, 2)}</pre>
+                      <pre className="mt-[0.6rem] overflow-x-auto whitespace-pre-wrap break-words rounded-[12px] bg-[color-mix(in_srgb,var(--surface-muted)_92%,transparent_8%)] px-3 py-3 text-[0.82rem] leading-[1.55]">{JSON.stringify(log.metadata, null, 2)}</pre>
                     </details>
                   ) : null}
                 </CardMain>
@@ -348,7 +368,7 @@ export function LogsPanel({ logs, onClear, onOpenReplay }: LogsPanelProps) {
             );
           })
         )}
-      </div>
+      </PanelSection>
     </div>
   );
 }

@@ -57,11 +57,11 @@ describe('AppTitleBar update popover', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '업데이트 상태 보기' }));
 
-    expect(document.querySelector('.update-popover')).toBeInTheDocument();
+    expect(screen.getByTestId('update-popover')).toBeInTheDocument();
 
     fireEvent.mouseDown(document.body);
 
-    expect(document.querySelector('.update-popover')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('update-popover')).not.toBeInTheDocument();
   });
 
   it('renders the fixed containers tab and routes select actions', async () => {

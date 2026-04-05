@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { DialogBackdrop } from './DialogBackdrop';
-import { Button, Input, ModalBody, ModalFooter, ModalHeader, ModalShell, SectionLabel } from '../ui';
+import { Button, FieldGroup, Input, ModalBody, ModalFooter, ModalHeader, ModalShell, SectionLabel } from '../ui';
 
 export interface AwsSftpConfigRetryDialogRequest {
   hostLabel: string;
@@ -36,17 +36,16 @@ export function AwsSftpConfigRetryDialog({ request, onClose, onSubmit }: AwsSftp
 
   return (
     <DialogBackdrop dismissOnBackdrop={false}>
-      <ModalShell className="credential-retry-dialog" role="dialog" aria-modal="true" aria-labelledby="aws-sftp-config-retry-title">
+      <ModalShell role="dialog" aria-modal="true" aria-labelledby="aws-sftp-config-retry-title">
         <ModalHeader>
           <div>
             <SectionLabel>AWS SFTP</SectionLabel>
             <h3 id="aws-sftp-config-retry-title">{request.hostLabel} SSH 설정을 확인해 주세요.</h3>
           </div>
         </ModalHeader>
-        <ModalBody>
-          <p className="credential-retry-dialog__message">{request.message}</p>
-          <label className="credential-retry-dialog__field">
-            <span>SSH Username</span>
+        <ModalBody className="grid gap-4">
+          <p className="text-[0.95rem] leading-[1.6] text-[var(--text-soft)]">{request.message}</p>
+          <FieldGroup label="SSH Username">
             <Input
               type="text"
               autoFocus
@@ -57,17 +56,16 @@ export function AwsSftpConfigRetryDialog({ request, onClose, onSubmit }: AwsSftp
               }}
               placeholder="ubuntu"
             />
-          </label>
+          </FieldGroup>
           <button
             type="button"
-            className="text-button"
+            className="self-start border-0 bg-transparent p-0 text-[0.92rem] font-semibold text-[var(--accent-strong)]"
             onClick={() => setShowAdvanced((current) => !current)}
           >
             {showAdvanced ? '고급 옵션 숨기기' : '고급 옵션'}
           </button>
           {showAdvanced ? (
-            <label className="credential-retry-dialog__field">
-              <span>SSH Port</span>
+            <FieldGroup label="SSH Port">
               <Input
                 type="number"
                 min={1}
@@ -78,9 +76,9 @@ export function AwsSftpConfigRetryDialog({ request, onClose, onSubmit }: AwsSftp
                   setError(null);
                 }}
               />
-            </label>
+            </FieldGroup>
           ) : null}
-          {error ? <p className="credential-retry-dialog__error">{error}</p> : null}
+          {error ? <p className="text-[0.9rem] text-[var(--danger-text)]">{error}</p> : null}
         </ModalBody>
         <ModalFooter>
           <Button variant="secondary" onClick={onClose} disabled={submitting}>

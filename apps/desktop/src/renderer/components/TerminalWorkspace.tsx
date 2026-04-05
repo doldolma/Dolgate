@@ -16,6 +16,8 @@ import {
 } from '../lib/terminal-presets';
 import { TerminalSessionPane } from './terminal-workspace/TerminalSessionPane';
 import { TerminalWorkspaceLayoutView } from './terminal-workspace/TerminalWorkspaceLayoutView';
+import { SectionLabel } from '../ui';
+import { cn } from '../lib/cn';
 import {
   collectWorkspacePlacements,
   directionPreviewRect,
@@ -300,11 +302,11 @@ export function TerminalWorkspace({
 
   if (tabs.length === 0) {
     return (
-      <div className="terminal-empty">
-        <div className="empty-state-card">
-          <div className="section-title">연결 준비 완료</div>
+      <div className="grid h-full min-h-0 place-items-center rounded-[28px] border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[var(--surface-elevated)] p-6 shadow-[var(--shadow-soft)]">
+        <div className="grid w-full max-w-[46rem] gap-4 rounded-[30px] border border-[var(--border)] bg-[var(--surface)] px-9 py-8 shadow-[var(--shadow)]">
+          <SectionLabel>연결 준비 완료</SectionLabel>
           <h3>첫 SSH 세션을 시작해보세요</h3>
-          <p>
+          <p className="text-[var(--text-soft)] leading-[1.7]">
             호스트 카드를 더블클릭하면 새 세션이 탭으로 열리고, 탭을 아래로
             끌어내리면 여러 세션을 나란히 볼 수 있습니다.
           </p>
@@ -354,16 +356,13 @@ export function TerminalWorkspace({
     Boolean(activeWorkspace) &&
     draggedSession.workspaceId === activeWorkspace?.id;
 
-  const workspaceClassName = `terminal-workspace ${
-    activeWorkspace
-      ? 'terminal-workspace--split'
-      : 'terminal-workspace--standalone'
-  } ${
-    (draggedSession?.source === 'standalone-tab' && canDropDraggedSession) ||
-    canRearrangeActiveWorkspace
-      ? 'drag-accepting'
-      : ''
-  }`;
+  const workspaceClassName = cn(
+    'relative h-full min-h-0 overflow-hidden rounded-[10px] border border-[var(--border)] shadow-[var(--shadow)]',
+    activeWorkspace ? '' : '',
+    ((draggedSession?.source === 'standalone-tab' && canDropDraggedSession) ||
+      canRearrangeActiveWorkspace) &&
+      'ring-1 ring-[color-mix(in_srgb,var(--accent-strong)_24%,transparent)]',
+  );
 
   const workspacePaneSlots: TerminalWorkspacePaneSlot[] = tabs.map((tab) => {
     const placement = placementBySessionId.get(tab.sessionId);
@@ -373,7 +372,7 @@ export function TerminalWorkspace({
 
     return {
       key: `${tab.sessionId}:${activeWorkspace ? 'workspace' : 'standalone'}`,
-      className: isWorkspacePane ? 'terminal-pane-slot' : undefined,
+      className: isWorkspacePane ? 'absolute p-[0.3rem]' : undefined,
       style: isWorkspacePane ? rectStyle : undefined,
       onDragOver: isWorkspacePane
         ? (event) => {
@@ -530,6 +529,10 @@ export function TerminalWorkspace({
     <TerminalWorkspaceLayoutView
       workspaceRef={workspaceRef}
       className={workspaceClassName}
+      style={{
+        background:
+          'radial-gradient(circle at top left, color-mix(in srgb, var(--accent-strong) 10%, transparent 90%), transparent 32%), color-mix(in srgb, var(--surface) 94%, transparent 6%)',
+      }}
       onDragLeave={(event: DragEvent<HTMLDivElement>) => {
         const nextTarget = event.relatedTarget;
         if (nextTarget instanceof Node && event.currentTarget.contains(nextTarget)) {

@@ -66,7 +66,7 @@ test.describe("desktop TUI regression", () => {
     try {
       const page = await app.firstWindow();
       const awsCard = page
-        .locator(".host-browser-card")
+        .locator('[data-host-card="true"]')
         .filter({ hasText: "Smoke AWS" })
         .first();
 
@@ -80,7 +80,7 @@ test.describe("desktop TUI regression", () => {
         hasOutput: true,
       });
 
-      const terminalCanvas = page.locator(".terminal-session.active .terminal-canvas");
+      const terminalCanvas = page.locator('[data-terminal-canvas="true"]');
       await terminalCanvas.click();
 
       await page.keyboard.type("__START_FAKE_TOP__");

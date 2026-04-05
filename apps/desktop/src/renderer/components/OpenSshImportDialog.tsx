@@ -11,12 +11,15 @@ import { DialogBackdrop } from './DialogBackdrop';
 import {
   Button,
   EmptyState,
+  FieldGroup,
+  FilterRow,
   IconButton,
   Input,
   ModalBody,
   ModalFooter,
   ModalHeader,
   ModalShell,
+  NoticeCard,
   SectionLabel,
   StatusBadge,
 } from '../ui';
@@ -61,11 +64,14 @@ function renderWarningList(warnings: OpenSshImportWarning[]) {
   }
 
   return (
-    <div className="openssh-import-dialog__warnings">
+    <div className="grid gap-2">
       {warnings.map((warning, index) => (
-        <div key={`${warning.code ?? 'warning'}:${index}`} className="form-note">
+        <p
+          key={`${warning.code ?? 'warning'}:${index}`}
+          className="text-[0.9rem] leading-[1.6] text-[var(--text-soft)]"
+        >
           {warning.message}
-        </div>
+        </p>
       ))}
     </div>
   );
@@ -77,12 +83,12 @@ function renderSourceList(sources: OpenSshSourceSummary[]) {
   }
 
   return (
-    <div className="openssh-import-dialog__sources">
+    <div className="grid gap-2">
       {sources.map((source) => (
-        <div key={source.id} className="form-note">
+        <p key={source.id} className="text-[0.9rem] leading-[1.6] text-[var(--text-soft)]">
           <strong>{source.origin === 'default-ssh-dir' ? '기본' : '파일'}</strong>{' '}
           <code>{source.label}</code>
-        </div>
+        </p>
       ))}
     </div>
   );
@@ -175,10 +181,10 @@ export function OpenSshImportDialog({
       dismissDisabled={isAddingFile || isImporting}
     >
       <ModalShell
-        className="openssh-import-dialog"
         role="dialog"
         aria-modal="true"
         aria-labelledby="openssh-import-title"
+        size="xl"
       >
         <ModalHeader>
           <div>
@@ -190,15 +196,19 @@ export function OpenSshImportDialog({
           </IconButton>
         </ModalHeader>
 
-        <ModalBody>
+        <ModalBody className="grid gap-4">
           {isLoading ? (
-            <div className="aws-import-dialog__loading">
+            <NoticeCard tone="info">
               기본 OpenSSH 설정에서 호스트를 찾는 중입니다.
-            </div>
+            </NoticeCard>
           ) : null}
-          {error ? <div className="terminal-error-banner">{error}</div> : null}
+          {error ? (
+            <NoticeCard tone="danger" role="alert">
+              {error}
+            </NoticeCard>
+          ) : null}
 
-          <div className="form-note">
+          <div className="text-[0.9rem] leading-[1.6] text-[var(--text-soft)]">
             <strong>대상 그룹</strong>{' '}
             <span>{currentGroupPath ?? '미분류'}</span>
           </div>
@@ -208,18 +218,17 @@ export function OpenSshImportDialog({
 
           {probe ? (
             <>
-              <div className="openssh-import-dialog__controls">
-                <label className="form-field">
-                  <span>검색</span>
+              <FilterRow>
+                <FieldGroup label="검색" className="flex-1">
                   <Input
                     value={searchQuery}
                     onChange={(event) => setSearchQuery(event.target.value)}
                     placeholder="별칭, 호스트, 사용자 또는 키 경로 검색"
                     disabled={isLoading || isAddingFile}
                   />
-                </label>
+                </FieldGroup>
 
-                <div className="openssh-import-dialog__selection-actions">
+                <div className="flex flex-wrap items-center gap-3">
                   <Button
                     variant="secondary"
                     disabled={isLoading || isAddingFile}
@@ -275,9 +284,9 @@ export function OpenSshImportDialog({
                     선택 해제
                   </Button>
                 </div>
-              </div>
+              </FilterRow>
 
-              <div className="openssh-import-dialog__summary">
+              <div className="flex flex-wrap items-center gap-3 text-[0.84rem] font-medium text-[var(--text-soft)]">
                 <span>소스 {probe.sources.length}</span>
                 <span>가져올 호스트 {probe.hosts.length}</span>
                 <span>선택한 호스트 {selectedHostKeys.length}</span>
@@ -289,11 +298,10 @@ export function OpenSshImportDialog({
                 ) : null}
               </div>
 
-              <section className="openssh-import-dialog__section">
+              <section className="grid min-h-0 gap-3">
                 <h4>호스트</h4>
                 {visibleHosts.length === 0 ? (
                   <EmptyState
-                    className="openssh-import-dialog__empty"
                     title="가져올 수 있는 OpenSSH 호스트가 없습니다."
                     description={
                       <>
@@ -303,13 +311,13 @@ export function OpenSshImportDialog({
                     }
                   />
                 ) : (
-                  <div className="openssh-import-dialog__items">
+                  <div className="grid min-h-0 gap-2 overflow-y-auto rounded-[18px] border border-[var(--border)] bg-[var(--dialog-surface-muted)] p-2">
                     {visibleHosts.map((host) => {
                       const checked = selectedHostKeys.includes(host.key);
                       return (
                         <label
                           key={host.key}
-                          className="openssh-import-dialog__item"
+                          className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-start gap-3 rounded-[14px] border border-[var(--border)] bg-[var(--dialog-surface)] px-[0.8rem] py-[0.75rem]"
                         >
                           <input
                             type="checkbox"
@@ -322,21 +330,21 @@ export function OpenSshImportDialog({
                               );
                             }}
                           />
-                          <div className="openssh-import-dialog__item-body">
+                          <div className="min-w-0">
                             <strong>{host.alias}</strong>
-                            <span>
+                            <span className="block truncate text-[0.8rem] text-[var(--text-soft)]">
                               {host.username}@{host.hostname}:{host.port}
                             </span>
                             {host.identityFilePath ? (
-                              <small>{host.identityFilePath}</small>
+                              <small className="block truncate text-[0.8rem] text-[var(--text-soft)]">{host.identityFilePath}</small>
                             ) : (
-                              <small>비밀번호 인증</small>
+                              <small className="block text-[0.8rem] text-[var(--text-soft)]">비밀번호 인증</small>
                             )}
-                            <small>
+                            <small className="block truncate text-[0.8rem] text-[var(--text-soft)]">
                               {host.sourceFilePath}:{host.sourceLine}
                             </small>
                           </div>
-                          <div className="openssh-import-dialog__badges">
+                          <div className="flex flex-wrap items-center gap-2">
                             <StatusBadge>
                               {host.authType === 'privateKey' ? '키' : '비밀번호'}
                             </StatusBadge>

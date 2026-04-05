@@ -159,8 +159,8 @@ describe("SessionReplayWindow", () => {
     runtime.terminal.resize.mockClear();
     runtime.terminal.clear.mockClear();
     runtime.write.mockClear();
-    const replayTerminal = document.querySelector(
-      ".session-replay-window__terminal",
+    const replayTerminal = screen.getByTestId(
+      "session-replay-terminal",
     ) as HTMLDivElement | null;
     const initialWidth = replayTerminal?.style.width;
     const initialHeight = replayTerminal?.style.height;
@@ -401,8 +401,8 @@ describe("SessionReplayWindow", () => {
       expect(screen.getByRole("button", { name: "Pause" })).toBeInTheDocument(),
     );
     const runtime = mocks.runtimeRecords[0]!;
-    const replayTerminal = document.querySelector(
-      ".session-replay-window__terminal",
+    const replayTerminal = screen.getByTestId(
+      "session-replay-terminal",
     ) as HTMLDivElement | null;
     const initialWidth = replayTerminal?.style.width;
     const initialHeight = replayTerminal?.style.height;
