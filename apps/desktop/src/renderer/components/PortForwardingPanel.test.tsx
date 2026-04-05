@@ -214,13 +214,15 @@ function renderPanel(options?: {
   runtimes?: PortForwardRuntimeRecord[];
   rules?: PortForwardRuleRecord[];
   dnsOverrides?: DnsOverrideResolvedRecord[];
+  onSetStaticDnsOverrideActive?: (overrideId: string, active: boolean) => Promise<void>;
   containerTabs?: any[];
   discoveryInteractiveAuth?: PendingContainersInteractiveAuth | null;
   interactiveAuth?: PendingPortForwardInteractiveAuth | null;
 }) {
   const onSave = options?.onSave ?? vi.fn().mockResolvedValue(undefined);
   const onSaveDnsOverride = vi.fn().mockResolvedValue(undefined);
-  const onSetStaticDnsOverrideActive = vi.fn().mockResolvedValue(undefined);
+  const onSetStaticDnsOverrideActive =
+    options?.onSetStaticDnsOverrideActive ?? vi.fn().mockResolvedValue(undefined);
   const onRemove = vi.fn().mockResolvedValue(undefined);
   const onRemoveDnsOverride = vi.fn().mockResolvedValue(undefined);
   const onStart = vi.fn().mockResolvedValue(undefined);
@@ -443,6 +445,103 @@ describe('PortForwardingPanel dialog', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Off' }));
 
     expect(onSetStaticDnsOverrideActive).toHaveBeenCalledWith('dns-static-1', false);
+  });
+
+  it('shows a DNS error banner when static toggle fails', async () => {
+    const onSetStaticDnsOverrideActive = vi
+      .fn<(overrideId: string, active: boolean) => Promise<void>>()
+      .mockRejectedValue(new Error('DNS Override 권한 승인이 취소되었습니다.'));
+
+    renderPanel({
+      dnsOverrides: [
+        {
+          id: 'dns-static-1',
+          type: 'static',
+          hostname: 'api.internal',
+          address: '10.0.0.20',
+          status: 'inactive',
+          createdAt: '2025-01-01T00:00:00.000Z',
+          updatedAt: '2025-01-01T00:00:00.000Z',
+        },
+      ],
+      onSetStaticDnsOverrideActive,
+    });
+
+    fireEvent.click(screen.getByRole('tab', { name: 'DNS Override' }));
+    fireEvent.click(screen.getByRole('button', { name: 'On' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'DNS Override 권한 승인이 취소되었습니다.',
+    );
+    expect(screen.getByRole('button', { name: 'On' })).toBeInTheDocument();
+  });
+
+  it('disables the active static toggle button while the request is pending', async () => {
+    const deferred = createDeferred<void>();
+    const onSetStaticDnsOverrideActive = vi
+      .fn<(overrideId: string, active: boolean) => Promise<void>>()
+      .mockReturnValue(deferred.promise);
+
+    renderPanel({
+      dnsOverrides: [
+        {
+          id: 'dns-static-1',
+          type: 'static',
+          hostname: 'api.internal',
+          address: '10.0.0.20',
+          status: 'inactive',
+          createdAt: '2025-01-01T00:00:00.000Z',
+          updatedAt: '2025-01-01T00:00:00.000Z',
+        },
+      ],
+      onSetStaticDnsOverrideActive,
+    });
+
+    fireEvent.click(screen.getByRole('tab', { name: 'DNS Override' }));
+    const toggleButton = screen.getByRole('button', { name: 'On' });
+    fireEvent.click(toggleButton);
+
+    await waitFor(() => expect(toggleButton).toBeDisabled());
+
+    deferred.resolve();
+
+    await waitFor(() => expect(toggleButton).not.toBeDisabled());
+  });
+
+  it('clears the DNS error banner after the next successful toggle', async () => {
+    const onSetStaticDnsOverrideActive = vi
+      .fn<(overrideId: string, active: boolean) => Promise<void>>()
+      .mockRejectedValueOnce(new Error('DNS Override 권한 승인이 취소되었습니다.'))
+      .mockResolvedValueOnce(undefined);
+
+    renderPanel({
+      dnsOverrides: [
+        {
+          id: 'dns-static-1',
+          type: 'static',
+          hostname: 'api.internal',
+          address: '10.0.0.20',
+          status: 'inactive',
+          createdAt: '2025-01-01T00:00:00.000Z',
+          updatedAt: '2025-01-01T00:00:00.000Z',
+        },
+      ],
+      onSetStaticDnsOverrideActive,
+    });
+
+    fireEvent.click(screen.getByRole('tab', { name: 'DNS Override' }));
+    const toggleButton = screen.getByRole('button', { name: 'On' });
+    fireEvent.click(toggleButton);
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'DNS Override 권한 승인이 취소되었습니다.',
+    );
+
+    fireEvent.click(toggleButton);
+
+    await waitFor(() =>
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument(),
+    );
   });
 
   it('shows ephemeral ECS service tunnels in the ECS Task tab', () => {

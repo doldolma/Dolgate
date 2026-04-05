@@ -759,6 +759,26 @@
   justify-content: flex-end;
 }
 
+.home-modal__actions--triple {
+  flex-wrap: nowrap;
+  justify-content: flex-end;
+  gap: 0.85rem;
+}
+
+.home-modal__action-cancel,
+.home-modal__action-option {
+  white-space: nowrap;
+}
+
+.home-modal__action-cancel {
+  flex: 0 0 auto;
+}
+
+.home-modal__action-option {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
 
 .host-browser__breadcrumb {
   padding: 0;
@@ -1331,6 +1351,17 @@
   margin: 0.75rem 0 0;
   color: var(--text-soft);
   line-height: 1.6;
+}
+
+@media (max-width: 720px) {
+  .home-modal__actions--triple {
+    flex-direction: column-reverse;
+    align-items: stretch;
+  }
+
+  .home-modal__actions--triple > button {
+    width: 100%;
+  }
 }
 
 .host-drawer {

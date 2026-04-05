@@ -6,6 +6,7 @@ const (
 	CommandPing         = "ping"
 	CommandRewriteBlock = "rewrite-block"
 	CommandClearBlock   = "clear-block"
+	CommandReadHosts    = "read-hosts"
 	CommandShutdown     = "shutdown"
 )
 
@@ -17,6 +18,7 @@ type Request struct {
 }
 
 type Response struct {
-	OK    bool   `json:"ok"`
-	Error string `json:"error,omitempty"`
+	OK               bool   `json:"ok"`
+	Error            string `json:"error,omitempty"`
+	HostsFileContent string `json:"hostsFileContent,omitempty"`
 }

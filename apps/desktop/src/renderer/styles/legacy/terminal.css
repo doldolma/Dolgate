@@ -600,23 +600,56 @@
 }
 
 .terminal-connection-overlay strong,
-.terminal-connection-overlay span {
+.terminal-connection-overlay p {
   margin: 0;
 }
 
-.terminal-connection-overlay strong {
+.terminal-connection-overlay__card {
+  display: grid;
+  width: min(24rem, 100%);
+  justify-items: center;
+  align-content: center;
+  gap: 0.9rem;
+  padding: 1.25rem;
+  border: 1px solid color-mix(in srgb, var(--border) 82%, white 18%);
+  border-radius: 24px;
+  background: var(--surface-elevated);
+  box-shadow: var(--shadow-soft);
+  text-align: center;
+}
+
+.terminal-connection-overlay__copy {
+  display: grid;
+  width: 100%;
+  justify-items: center;
+  align-content: center;
+  gap: 0.55rem;
+  text-align: center;
+}
+
+.terminal-connection-overlay__title {
+  width: 100%;
   color: var(--text);
   font-size: 0.92rem;
   letter-spacing: 0.08em;
+  line-height: 1.35;
+  text-align: center;
   text-transform: uppercase;
 }
 
-.terminal-connection-overlay span {
+.terminal-connection-overlay__message {
   font-size: 0.86rem;
+  width: 100%;
+  max-width: 20rem;
+  margin-inline: auto;
+  line-height: 1.5;
+  text-align: center;
 }
 
 .terminal-connection-overlay__actions {
   display: flex;
+  width: 100%;
+  justify-content: flex-end;
   gap: 0.65rem;
   margin-top: 0.35rem;
 }

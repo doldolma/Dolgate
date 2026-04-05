@@ -20,6 +20,12 @@ func writeManagedHostsFile(targetPath string, content []byte) error {
 	tempPath := tempFile.Name()
 	defer os.Remove(tempPath)
 
+	// /etc/hosts must remain world-readable so the system resolver can read it.
+	if err := tempFile.Chmod(0o644); err != nil {
+		_ = tempFile.Close()
+		return fmt.Errorf("chmod temp file: %w", err)
+	}
+
 	if _, err := tempFile.Write(content); err != nil {
 		_ = tempFile.Close()
 		return fmt.Errorf("write temp file: %w", err)

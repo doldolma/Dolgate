@@ -1,6 +1,6 @@
 {
   "name": "@dolssh/desktop",
-  "version": "1.2.5",
+  "version": "1.2.6",
   "private": true,
   "description": "Dolgate desktop client",
   "author": "doldolma",
@@ -40,6 +40,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@vscode/sudo-prompt": "^9.3.2",
     "clsx": "^2.1.1",
     "electron-updater": "^6.3.9",
     "fuse.js": "^7.0.0",

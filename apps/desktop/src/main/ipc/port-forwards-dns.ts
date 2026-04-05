@@ -6,6 +6,7 @@ import {
 } from "@shared";
 import { ipcMain } from "electron";
 import { ipcChannels } from "../../common/ipc-channels";
+import { describeHostsOverrideFailure as describeHostsOverrideManagerFailure } from "../hosts-override-manager";
 import type {
   AwsEc2HostRecord,
   AwsEcsHostRecord,
@@ -17,6 +18,22 @@ import type {
 export function registerPortForwardAndDnsIpcHandlers(
   ctx: MainIpcContext,
 ): void {
+  const buildUserFacingDnsOverrideErrorMessage = (
+    failure: ReturnType<typeof describeHostsOverrideManagerFailure>,
+  ): string => {
+    if (!failure.rawError) {
+      return failure.message;
+    }
+    if (
+      failure.stage === "helper-not-ready" ||
+      failure.stage === "hosts-verification" ||
+      failure.stage === "unknown"
+    ) {
+      return `${failure.message} 원인: ${failure.rawError}`;
+    }
+    return failure.message;
+  };
+
   ipcMain.handle(ipcChannels.portForwards.list, async () =>
     ctx.listPortForwardSnapshot(),
   );
@@ -100,7 +117,28 @@ export function registerPortForwardAndDnsIpcHandlers(
         await ctx.rewriteActiveDnsOverrides();
       } catch (error) {
         ctx.hostsOverrideManager.setStaticOverrideActive(id, previousActive);
-        throw error;
+        const failure = describeHostsOverrideManagerFailure(
+          error,
+          active
+            ? "Static DNS override를 활성화하지 못했습니다."
+            : "Static DNS override를 비활성화하지 못했습니다.",
+        );
+        const userFacingMessage = buildUserFacingDnsOverrideErrorMessage(failure);
+        ctx.activityLogs.append(
+          "error",
+          "audit",
+          userFacingMessage,
+          {
+            dnsOverrideId: record.id,
+            type: record.type,
+            hostname: record.hostname,
+            address: record.address,
+            active,
+            stage: failure.stage,
+            rawError: failure.rawError,
+          },
+        );
+        throw new Error(userFacingMessage);
       }
 
       ctx.activityLogs.append(

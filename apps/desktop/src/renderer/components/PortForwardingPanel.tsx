@@ -37,6 +37,7 @@ import type {
   PendingHostKeyPrompt,
   PendingPortForwardInteractiveAuth
 } from '../store/createAppStore';
+import { normalizeErrorMessage } from '../store/utils';
 import { usePortForwardingPanelController } from '../controllers/usePortForwardingPanelController';
 import {
   Badge,
@@ -688,6 +689,8 @@ export function PortForwardingPanel({
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [dnsToggleError, setDnsToggleError] = useState<string | null>(null);
+  const [pendingDnsToggleId, setPendingDnsToggleId] = useState<string | null>(null);
   const [ecsServicesLoading, setEcsServicesLoading] = useState(false);
   const [ecsServicesError, setEcsServicesError] = useState<string | null>(null);
   const [ecsServices, setEcsServices] = useState<AwsEcsTaskTunnelServiceSummary[]>([]);
@@ -803,6 +806,13 @@ export function PortForwardingPanel({
 
   useEffect(() => {
     lastSelectedForwardTab = activeTab;
+  }, [activeTab]);
+
+  useEffect(() => {
+    if (activeTab !== 'dns') {
+      setDnsToggleError(null);
+      setPendingDnsToggleId(null);
+    }
   }, [activeTab]);
   const eligibleNetworks = useMemo(
     () => discoveryDetails?.networks.filter((network) => Boolean(network.ipAddress?.trim())) ?? [],
@@ -1647,6 +1657,31 @@ export function PortForwardingPanel({
     ? eligibleRules.find((rule) => rule.id === dnsDraft.portForwardRuleId) ?? null
     : null;
 
+  async function handleSetStaticDnsOverrideActive(
+    overrideId: string,
+    active: boolean,
+  ): Promise<void> {
+    setDnsToggleError(null);
+    setPendingDnsToggleId(overrideId);
+    try {
+      await onSetStaticDnsOverrideActive(overrideId, active);
+      setDnsToggleError(null);
+    } catch (cause) {
+      setDnsToggleError(
+        normalizeErrorMessage(
+          cause,
+          active
+            ? 'DNS Override를 활성화하지 못했습니다.'
+            : 'DNS Override를 비활성화하지 못했습니다.',
+        ),
+      );
+    } finally {
+      setPendingDnsToggleId((current) =>
+        current === overrideId ? null : current,
+      );
+    }
+  }
+
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-start justify-between gap-4 rounded-[28px] border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[var(--surface-elevated)] px-6 py-5 shadow-[var(--shadow-soft)]">
@@ -1699,6 +1734,11 @@ export function PortForwardingPanel({
       </Tabs>
 
       <div className="operations-list">
+        {activeTab === 'dns' && dnsToggleError ? (
+          <div className="terminal-error-banner" role="alert">
+            {dnsToggleError}
+          </div>
+        ) : null}
         {activeTab === 'dns' ? (
           !hasVisibleEntries ? (
             <EmptyState title={emptyStateTitle(activeTab)} description={emptyStateDescription(activeTab)} />
@@ -1743,7 +1783,8 @@ export function PortForwardingPanel({
                         type="button"
                         variant="secondary"
                         size="sm"
-                        onClick={() => void onSetStaticDnsOverrideActive(override.id, override.status !== 'active')}
+                        onClick={() => void handleSetStaticDnsOverrideActive(override.id, override.status !== 'active')}
+                        disabled={pendingDnsToggleId === override.id}
                       >
                         {override.status === 'active' ? 'Off' : 'On'}
                       </Button>
