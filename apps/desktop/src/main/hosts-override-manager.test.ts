@@ -1,5 +1,9 @@
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { existsSync } from 'node:fs';
+
+const sudoPromptSpies = vi.hoisted(() => ({
+  exec: vi.fn(),
+}));
 
 vi.mock('electron', () => ({
   app: {
@@ -16,19 +20,40 @@ vi.mock('node:fs', async () => {
   };
 });
 
+vi.mock('@vscode/sudo-prompt', () => ({
+  exec: sudoPromptSpies.exec,
+}));
+
 import {
   DOLGATE_DNS_HELPER_BINARY_NAME,
+  DOLGATE_DNS_HELPER_PROMPT_NAME,
   HostsOverrideManager,
   buildHostsHelperEndpoint,
   buildHostsHelperPayload,
   buildHostsHelperServeArgs,
-  buildMacElevationScript,
+  buildMacElevationCommand,
   buildWindowsElevationCommand,
   collectActiveDnsOverrideEntries,
   hasManagedHostsBlock,
   resolveDnsOverrideRecords,
 } from './hosts-override-manager';
 import type { DnsOverrideRecord, PortForwardRuleRecord, PortForwardRuntimeRecord } from '@shared';
+
+function buildManagedHostsBlock(
+  entries: Array<{ address: string; hostname: string }>,
+): string {
+  if (entries.length === 0) {
+    return '';
+  }
+  return [
+    '# >>> dolssh managed dns overrides >>>',
+    ...entries
+      .map((entry) => `${entry.address} ${entry.hostname.toLowerCase()}`)
+      .sort((left, right) => left.localeCompare(right)),
+    '# <<< dolssh managed dns overrides <<<',
+    '',
+  ].join('\n');
+}
 
 describe('hosts override manager helpers', () => {
   it('collects only running loopback-linked overrides', () => {
@@ -161,13 +186,23 @@ describe('hosts override manager helpers', () => {
     ).toContain('Start-Process');
   });
 
-  it('renders the macOS elevation script for background helper launch', () => {
+  it('renders the macOS elevation command for helper launch', () => {
     expect(
-      buildMacElevationScript('/tmp/dolgate-dns-helper', ['serve', '--endpoint', '/tmp/dolgate.sock']),
-    ).toContain('nohup');
+      buildMacElevationCommand('/tmp/dolgate-dns-helper', ['serve', '--endpoint', '/tmp/dolgate.sock']),
+    ).toContain("'/tmp/dolgate-dns-helper' 'serve' '--endpoint' '/tmp/dolgate.sock'");
     expect(
-      buildMacElevationScript('/tmp/dolgate-dns-helper', ['serve', '--endpoint', '/tmp/dolgate.sock']),
-    ).toContain('with administrator privileges');
+      buildMacElevationCommand('/tmp/dolgate-dns-helper', ['serve', '--endpoint', '/tmp/dolgate.sock']),
+    ).not.toContain('with administrator privileges');
+    expect(
+      buildMacElevationCommand('/tmp/dolgate-dns-helper', ['serve', '--endpoint', '/tmp/dolgate.sock']),
+    ).not.toContain('nohup');
+    expect(
+      buildMacElevationCommand(
+        '/tmp/dolgate-dns-helper',
+        ['serve', '--endpoint', '/tmp/dolgate.sock'],
+        '/tmp/dolgate-dns-helper.log',
+      ),
+    ).toContain(">'/tmp/dolgate-dns-helper.log' 2>&1 </dev/null");
   });
 
   it('builds platform-specific helper endpoints', () => {
@@ -217,6 +252,14 @@ describe('hosts override manager helpers', () => {
 });
 
 describe('HostsOverrideManager', () => {
+  beforeEach(() => {
+    sudoPromptSpies.exec.mockReset();
+    sudoPromptSpies.exec.mockImplementation((_command, options, callback) => {
+      const done = typeof options === 'function' ? options : callback;
+      done?.(undefined, '', '');
+    });
+  });
+
   it('does not resolve the helper binary path during construction', () => {
     const existsSyncMock = vi.mocked(existsSync);
     existsSyncMock.mockReturnValue(false);
@@ -251,9 +294,13 @@ describe('HostsOverrideManager', () => {
     const requests: Array<{ command: string; entries?: Array<{ address: string; hostname: string }> }> = [];
     const launchHelper = vi.fn(async () => undefined);
     const closeClient = vi.fn();
+    let hostsFileContent = '';
     const client = {
       send: vi.fn(async (request: { command: string; entries?: Array<{ address: string; hostname: string }> }) => {
         requests.push({ command: request.command, entries: request.entries });
+        if (request.command === 'rewrite-block') {
+          hostsFileContent = buildManagedHostsBlock(request.entries ?? []);
+        }
         return { ok: true };
       }),
       close: closeClient,
@@ -263,7 +310,7 @@ describe('HostsOverrideManager', () => {
       platform: 'win32',
       helperPath: 'C:\\dolgate-dns-helper.exe',
       hostsFilePath: 'C:\\Windows\\System32\\drivers\\etc\\hosts',
-      fileReader: async () => '',
+      fileReader: async () => hostsFileContent,
       launchHelper,
       clientFactory: async () => client,
       uuidFactory: (() => {
@@ -288,16 +335,30 @@ describe('HostsOverrideManager', () => {
 
   it('relaunches the helper after the connection breaks', async () => {
     const launchHelper = vi.fn(async () => undefined);
+    let hostsFileContent = '';
     const firstClient = {
-      send: vi
-        .fn()
-        .mockResolvedValueOnce({ ok: true })
-        .mockResolvedValueOnce({ ok: true })
-        .mockRejectedValueOnce(new Error('broken pipe')),
+      send: vi.fn(async (request: { command: string; entries?: Array<{ address: string; hostname: string }> }) => {
+        if (request.command === 'ping') {
+          if (firstClient.send.mock.calls.length >= 3) {
+            throw new Error('broken pipe');
+          }
+          return { ok: true };
+        }
+        if (request.command === 'rewrite-block') {
+          hostsFileContent = buildManagedHostsBlock(request.entries ?? []);
+          return { ok: true };
+        }
+        throw new Error('broken pipe');
+      }),
       close: vi.fn(),
     };
     const secondClient = {
-      send: vi.fn(async () => ({ ok: true })),
+      send: vi.fn(async (request: { command: string }) => {
+        if (request.command === 'clear-block') {
+          hostsFileContent = '';
+        }
+        return { ok: true };
+      }),
       close: vi.fn(),
     };
     const clientFactory = vi
@@ -309,7 +370,7 @@ describe('HostsOverrideManager', () => {
       platform: 'win32',
       helperPath: 'C:\\dolgate-dns-helper.exe',
       hostsFilePath: 'C:\\Windows\\System32\\drivers\\etc\\hosts',
-      fileReader: async () => '# >>> dolssh managed dns overrides >>>\n',
+      fileReader: async () => hostsFileContent,
       launchHelper,
       clientFactory,
       uuidFactory: (() => {
@@ -330,9 +391,15 @@ describe('HostsOverrideManager', () => {
   it('clears and shuts down the helper on shutdown', async () => {
     const sentCommands: string[] = [];
     const launchHelper = vi.fn(async () => undefined);
+    let hostsFileContent = buildManagedHostsBlock([
+      { hostname: 'basket', address: '10.0.1.15' },
+    ]);
     const client = {
       send: vi.fn(async (request: { command: string }) => {
         sentCommands.push(request.command);
+        if (request.command === 'clear-block') {
+          hostsFileContent = '';
+        }
         return { ok: true };
       }),
       close: vi.fn(),
@@ -342,7 +409,7 @@ describe('HostsOverrideManager', () => {
       platform: 'win32',
       helperPath: 'C:\\dolgate-dns-helper.exe',
       hostsFilePath: 'C:\\Windows\\System32\\drivers\\etc\\hosts',
-      fileReader: async () => '# >>> dolssh managed dns overrides >>>\n',
+      fileReader: async () => hostsFileContent,
       launchHelper,
       clientFactory: async () => client,
       uuidFactory: (() => {
@@ -359,5 +426,163 @@ describe('HostsOverrideManager', () => {
     expect(sentCommands).toContain('clear-block');
     expect(sentCommands).toContain('shutdown');
     expect(client.close).toHaveBeenCalled();
+  });
+
+  it('uses sudo-prompt with the branded helper name on macOS', async () => {
+    let hostsFileContent = '';
+    const client = {
+      send: vi.fn(async (request: { command: string; entries?: Array<{ address: string; hostname: string }> }) => {
+        if (request.command === 'rewrite-block') {
+          hostsFileContent = buildManagedHostsBlock(request.entries ?? []);
+        }
+        return { ok: true };
+      }),
+      close: vi.fn(),
+    };
+
+    const manager = new HostsOverrideManager({
+      platform: 'darwin',
+      helperPath: '/tmp/dolgate-dns-helper',
+      hostsFilePath: '/etc/hosts',
+      fileReader: async () => hostsFileContent,
+      clientFactory: async () => client,
+      uuidFactory: (() => {
+        let sequence = 0;
+        return () => `id-${++sequence}`;
+      })(),
+      launchPollIntervalMs: 0,
+      launchTimeoutMs: 100,
+    });
+
+    await manager.rewrite([
+      { hostname: 'basket', address: '10.0.1.15', ruleId: 'dns-1' },
+    ]);
+
+    expect(sudoPromptSpies.exec).toHaveBeenCalledTimes(1);
+    expect(sudoPromptSpies.exec.mock.calls[0]?.[0]).toContain('/tmp/dolgate-dns-helper');
+    expect(sudoPromptSpies.exec.mock.calls[0]?.[0]).not.toContain('nohup');
+    expect(sudoPromptSpies.exec.mock.calls[0]?.[0]).toContain('</dev/null');
+    expect(sudoPromptSpies.exec.mock.calls[0]?.[1]).toMatchObject({
+      name: DOLGATE_DNS_HELPER_PROMPT_NAME,
+    });
+  });
+
+  it('surfaces a permission-denied error when the macOS prompt is cancelled', async () => {
+    sudoPromptSpies.exec.mockImplementationOnce((_command, options, callback) => {
+      const done = typeof options === 'function' ? options : callback;
+      done?.(new Error('User did not grant permission.'));
+    });
+
+    const manager = new HostsOverrideManager({
+      platform: 'darwin',
+      helperPath: '/tmp/dolgate-dns-helper',
+      hostsFilePath: '/etc/hosts',
+      fileReader: async () => '',
+      launchPollIntervalMs: 0,
+      launchTimeoutMs: 100,
+    });
+
+    await expect(manager.ensureReady()).rejects.toMatchObject({
+      stage: 'permission-denied',
+      message: 'DNS Override 권한 승인이 취소되었습니다.',
+    });
+  });
+
+  it('surfaces a helper-not-ready error when the helper never becomes reachable', async () => {
+    const manager = new HostsOverrideManager({
+      platform: 'darwin',
+      helperPath: '/tmp/dolgate-dns-helper',
+      hostsFilePath: '/etc/hosts',
+      fileReader: async () => '',
+      clientFactory: async () => {
+        throw new Error('connect ECONNREFUSED');
+      },
+      launchPollIntervalMs: 0,
+      launchTimeoutMs: 5,
+    });
+
+    await expect(manager.ensureReady()).rejects.toMatchObject({
+      stage: 'helper-not-ready',
+      message: 'Dolgate DNS Helper가 준비되지 않았습니다. 잠시 후 다시 시도해 주세요.',
+      rawError: 'connect ECONNREFUSED',
+    });
+  });
+
+  it('surfaces a hosts-verification error when rewrite does not update the hosts file', async () => {
+    const launchHelper = vi.fn(async () => undefined);
+    const client = {
+      send: vi.fn(async () => ({ ok: true })),
+      close: vi.fn(),
+    };
+
+    const manager = new HostsOverrideManager({
+      platform: 'win32',
+      helperPath: 'C:\\dolgate-dns-helper.exe',
+      hostsFilePath: 'C:\\Windows\\System32\\drivers\\etc\\hosts',
+      fileReader: async () => '',
+      launchHelper,
+      clientFactory: async () => client,
+      uuidFactory: (() => {
+        let sequence = 0;
+        return () => `id-${++sequence}`;
+      })(),
+      launchPollIntervalMs: 0,
+      launchTimeoutMs: 100,
+    });
+
+    await expect(
+      manager.rewrite([
+        { hostname: 'basket', address: '10.0.1.15', ruleId: 'dns-1' },
+      ]),
+    ).rejects.toMatchObject({
+      stage: 'hosts-verification',
+      message: 'DNS Override를 적용했지만 hosts 파일에서 확인되지 않았습니다.',
+    });
+  });
+
+  it('verifies rewritten hosts content through the helper when direct hosts reads are permission denied', async () => {
+    const launchHelper = vi.fn(async () => undefined);
+    const expectedHosts = buildManagedHostsBlock([
+      { hostname: 'basket', address: '10.0.1.15' },
+    ]);
+    const client = {
+      send: vi.fn(async (request: { command: string; entries?: Array<{ address: string; hostname: string }> }) => {
+        if (request.command === 'read-hosts') {
+          return { ok: true, hostsFileContent: expectedHosts };
+        }
+        return { ok: true };
+      }),
+      close: vi.fn(),
+    };
+
+    const manager = new HostsOverrideManager({
+      platform: 'darwin',
+      helperPath: '/tmp/dolgate-dns-helper',
+      hostsFilePath: '/etc/hosts',
+      fileReader: async () => {
+        throw new Error("EACCES: permission denied, open '/etc/hosts'");
+      },
+      launchHelper,
+      clientFactory: async () => client,
+      uuidFactory: (() => {
+        let sequence = 0;
+        return () => `id-${++sequence}`;
+      })(),
+      launchPollIntervalMs: 0,
+      launchTimeoutMs: 100,
+    });
+
+    await expect(
+      manager.rewrite([
+        { hostname: 'basket', address: '10.0.1.15', ruleId: 'dns-1' },
+      ]),
+    ).resolves.toBeUndefined();
+
+    expect(client.send).toHaveBeenCalledWith(
+      expect.objectContaining({
+        command: 'read-hosts',
+        hostsFilePath: '/etc/hosts',
+      }),
+    );
   });
 });

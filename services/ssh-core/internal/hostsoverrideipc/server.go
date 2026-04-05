@@ -115,6 +115,18 @@ func handleRequest(request Request, config ServeConfig, mu *sync.Mutex) (Respons
 			return Response{OK: false, Error: err.Error()}, false
 		}
 		return Response{OK: true}, false
+	case CommandReadHosts:
+		hostsFilePath := resolvePath()
+		if hostsFilePath == "" {
+			return Response{OK: false, Error: "hostsFilePath is required"}, false
+		}
+		mu.Lock()
+		content, err := hostsoverride.ReadHostsFile(hostsFilePath)
+		mu.Unlock()
+		if err != nil {
+			return Response{OK: false, Error: err.Error()}, false
+		}
+		return Response{OK: true, HostsFileContent: content}, false
 	case CommandShutdown:
 		return Response{OK: true}, true
 	default:

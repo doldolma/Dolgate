@@ -12,6 +12,17 @@ import (
 	"dolssh/services/ssh-core/internal/hostsoverride"
 )
 
+func TestSocketFileMode(t *testing.T) {
+	t.Parallel()
+
+	if got := socketFileMode("darwin"); got != 0o666 {
+		t.Fatalf("socketFileMode(darwin) = %o, want %o", got, 0o666)
+	}
+	if got := socketFileMode("linux"); got != 0o600 {
+		t.Fatalf("socketFileMode(linux) = %o, want %o", got, 0o600)
+	}
+}
+
 func TestServeHandlesPingRewriteClearAndShutdown(t *testing.T) {
 	t.Parallel()
 
@@ -39,6 +50,18 @@ func TestServeHandlesPingRewriteClearAndShutdown(t *testing.T) {
 	}()
 
 	waitForEndpoint(t, endpoint)
+
+	if runtime.GOOS != "windows" {
+		info, err := os.Stat(endpoint)
+		if err != nil {
+			t.Fatalf("Stat(endpoint) error = %v", err)
+		}
+		gotMode := info.Mode().Perm()
+		wantMode := socketFileMode(runtime.GOOS)
+		if gotMode != wantMode {
+			t.Fatalf("endpoint mode = %o, want %o", gotMode, wantMode)
+		}
+	}
 
 	response, err := SendRequest(context.Background(), endpoint, Request{
 		Command:   CommandPing,
@@ -77,6 +100,17 @@ func TestServeHandlesPingRewriteClearAndShutdown(t *testing.T) {
 		t.Fatalf("expected rewrite OK, got %#v", response)
 	}
 
+	response, err = SendRequest(context.Background(), endpoint, Request{
+		Command:   CommandReadHosts,
+		AuthToken: "secret",
+	})
+	if err != nil {
+		t.Fatalf("SendRequest(read-hosts) error = %v", err)
+	}
+	if !response.OK {
+		t.Fatalf("expected read-hosts OK, got %#v", response)
+	}
+
 	content, err := os.ReadFile(hostsFilePath)
 	if err != nil {
 		t.Fatalf("ReadFile() error = %v", err)
@@ -84,6 +118,9 @@ func TestServeHandlesPingRewriteClearAndShutdown(t *testing.T) {
 	expected := "127.0.0.1 localhost\n# custom\n# >>> dolssh managed dns overrides >>>\n10.0.1.15 b-1.kafka.internal\n127.0.0.2 basket\n# <<< dolssh managed dns overrides <<<\n"
 	if string(content) != expected {
 		t.Fatalf("unexpected rewritten hosts file:\n%s", string(content))
+	}
+	if response.HostsFileContent != expected {
+		t.Fatalf("unexpected hosts content from helper:\n%s", response.HostsFileContent)
 	}
 
 	response, err = SendRequest(context.Background(), endpoint, Request{

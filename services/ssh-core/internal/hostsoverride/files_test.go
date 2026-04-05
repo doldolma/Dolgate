@@ -3,6 +3,7 @@ package hostsoverride
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -30,6 +31,15 @@ func TestRewriteManagedHostsFileAndClearManagedHostsFile(t *testing.T) {
 	if string(content) != expectedAfterRewrite {
 		t.Fatalf("unexpected rewritten file:\n%s", string(content))
 	}
+	if runtime.GOOS != "windows" {
+		info, err := os.Stat(hostsFilePath)
+		if err != nil {
+			t.Fatalf("Stat() after rewrite error = %v", err)
+		}
+		if got := info.Mode().Perm(); got != 0o644 {
+			t.Fatalf("rewritten hosts file mode = %o, want %o", got, 0o644)
+		}
+	}
 
 	if err := ClearManagedHostsFile(hostsFilePath); err != nil {
 		t.Fatalf("ClearManagedHostsFile() error = %v", err)
@@ -42,5 +52,14 @@ func TestRewriteManagedHostsFileAndClearManagedHostsFile(t *testing.T) {
 
 	if string(content) != "127.0.0.1 localhost\n# custom\n" {
 		t.Fatalf("unexpected cleared file:\n%s", string(content))
+	}
+	if runtime.GOOS != "windows" {
+		info, err := os.Stat(hostsFilePath)
+		if err != nil {
+			t.Fatalf("Stat() after clear error = %v", err)
+		}
+		if got := info.Mode().Perm(); got != 0o644 {
+			t.Fatalf("cleared hosts file mode = %o, want %o", got, 0o644)
+		}
 	}
 }

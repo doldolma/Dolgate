@@ -29,6 +29,10 @@ func ClearManagedHostsFile(targetPath string) error {
 	return writeFileAtomically(targetPath, []byte(next))
 }
 
+func ReadHostsFile(targetPath string) (string, error) {
+	return readHostsFile(targetPath)
+}
+
 func readHostsFile(targetPath string) (string, error) {
 	content, err := os.ReadFile(targetPath)
 	if err != nil && !os.IsNotExist(err) {

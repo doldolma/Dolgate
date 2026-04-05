@@ -195,13 +195,19 @@ export function createNetworkSlice(deps: SliceDeps): NetworkSlice {
             await syncOperationalData(set);
           },
     setStaticDnsOverrideActive: async (overrideId, active) => {
-            const next = await api.dnsOverrides.setStaticActive(overrideId, active);
-            set((state) => ({
-              dnsOverrides: sortDnsOverrides([
-                ...state.dnsOverrides.filter((override) => override.id !== next.id),
-                next,
-              ]),
-            }));
+            try {
+              const next = await api.dnsOverrides.setStaticActive(overrideId, active);
+              set((state) => ({
+                dnsOverrides: sortDnsOverrides([
+                  ...state.dnsOverrides.filter((override) => override.id !== next.id),
+                  next,
+                ]),
+              }));
+              await syncOperationalData(set).catch(() => undefined);
+            } catch (error) {
+              await syncOperationalData(set).catch(() => undefined);
+              throw error;
+            }
           },
     removeDnsOverride: async (overrideId) => {
             await api.dnsOverrides.remove(overrideId);

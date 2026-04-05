@@ -1,4 +1,4 @@
-import { Button, Card } from '../../ui';
+import { Button } from '../../ui';
 
 interface TerminalConnectionOverlayProps {
   error: boolean;
@@ -23,11 +23,13 @@ export function TerminalConnectionOverlay({
           : 'terminal-connection-overlay--blocking'
       }`}
     >
-      <Card className="terminal-connection-overlay__card grid w-full max-w-[24rem] gap-3 p-5 text-center">
-        <strong className="block w-full text-center">{title}</strong>
-        <span className="block w-full text-center">{message}</span>
+      <div className="terminal-connection-overlay__card">
+        <div className="terminal-connection-overlay__copy">
+          <strong className="terminal-connection-overlay__title">{title}</strong>
+          <p className="terminal-connection-overlay__message">{message}</p>
+        </div>
         {error ? (
-          <div className="terminal-connection-overlay__actions flex items-center justify-end gap-3">
+          <div className="terminal-connection-overlay__actions">
             <Button type="button" variant="secondary" onClick={onRetry}>
               Retry
             </Button>
@@ -36,7 +38,7 @@ export function TerminalConnectionOverlay({
             </Button>
           </div>
         ) : null}
-      </Card>
+      </div>
     </div>
   );
 }

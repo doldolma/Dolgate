@@ -20,6 +20,18 @@ describe('TerminalConnectionOverlay', () => {
     expect(
       container.querySelector('.terminal-connection-overlay__card'),
     ).toBeTruthy();
+    expect(
+      container.querySelector('.terminal-connection-overlay__copy'),
+    ).toBeTruthy();
+    expect(
+      container.querySelector('.terminal-connection-overlay__message'),
+    ).toBeTruthy();
+    expect(
+      container.querySelector('.terminal-connection-overlay__card')?.tagName,
+    ).toBe('DIV');
+    expect(
+      container.querySelector('.terminal-connection-overlay__message')?.tagName,
+    ).toBe('P');
   });
 
   it('renders retry and close actions for errors', () => {

@@ -17,6 +17,7 @@ import {
 } from '@shared';
 import type { GroupRecord, GroupRemoveMode, HostRecord } from '@shared';
 import { useResponsiveCardGrid } from '../lib/useResponsiveCardGrid';
+import { cn } from '../lib/cn';
 import { DialogBackdrop } from './DialogBackdrop';
 import type { DesktopPlatform } from './DesktopWindowControls';
 import {
@@ -329,6 +330,9 @@ export function HostBrowser({
   const currentGroupPathLabel = currentGroupPath ? currentGroupPath.split('/').join(' / ') : 'All Groups';
   const searchPlaceholder = currentGroupPath ? `Search hosts inside ${currentGroupPathLabel}` : 'Search hosts or instances';
   const emptyMessage = hosts.length === 0 ? '아직 등록된 호스트가 없습니다.' : searchQuery ? '검색 결과가 없습니다.' : '이 위치에는 아직 호스트가 없습니다.';
+  const groupDeleteDialogVariant = groupDeleteTarget
+    ? getGroupDeleteDialogVariant(groupDeleteTarget.childGroupCount, groupDeleteTarget.hostCount)
+    : null;
   const contextMenuStyle = contextMenu
     ? {
         left: `${Math.max(12, Math.min(contextMenu.x, window.innerWidth - 172))}px`,
@@ -1050,7 +1054,7 @@ export function HostBrowser({
             </h3>
             </ModalHeader>
             <ModalBody className="grid gap-4">
-            {getGroupDeleteDialogVariant(groupDeleteTarget.childGroupCount, groupDeleteTarget.hostCount) === 'with-descendants' ? (
+            {groupDeleteDialogVariant === 'with-descendants' ? (
               <p className="home-modal__copy">
                 하위 그룹 {groupDeleteTarget.childGroupCount}개와 호스트 {groupDeleteTarget.hostCount}개가 함께 영향을 받습니다.
               </p>
@@ -1059,9 +1063,10 @@ export function HostBrowser({
             )}
             {groupDeleteError ? <p className="home-modal__error">{groupDeleteError}</p> : null}
             </ModalBody>
-            <ModalFooter className="home-modal__actions">
+            <ModalFooter className={cn('home-modal__actions', groupDeleteDialogVariant === 'with-descendants' ? 'home-modal__actions--triple' : null)}>
               <Button
                 variant="secondary"
+                className={groupDeleteDialogVariant === 'with-descendants' ? 'home-modal__action-cancel' : undefined}
                 onClick={() => {
                   setGroupDeleteTarget(null);
                   setGroupDeleteError(null);
@@ -1070,14 +1075,66 @@ export function HostBrowser({
               >
                 취소
               </Button>
-              {getGroupDeleteDialogVariant(groupDeleteTarget.childGroupCount, groupDeleteTarget.hostCount) === 'with-descendants' ? (
+              {groupDeleteDialogVariant === 'with-descendants' ? (
+                <>
+                  <Button
+                    variant="secondary"
+                    className="home-modal__action-option"
+                    disabled={isRemovingGroup}
+                    onClick={async () => {
+                      try {
+                        setIsRemovingGroup(true);
+                        for (const path of groupDeleteTarget.paths) {
+                          await onRemoveGroup(path, 'reparent-descendants');
+                        }
+                        setSelectedGroupPaths((current) => current.filter((path) => !groupDeleteTarget.paths.includes(path)));
+                        setGroupDeleteTarget(null);
+                        setGroupDeleteError(null);
+                      } catch (error) {
+                        setGroupDeleteError(error instanceof Error ? error.message : '그룹을 삭제하지 못했습니다.');
+                      } finally {
+                        setIsRemovingGroup(false);
+                      }
+                    }}
+                  >
+                    하위 항목 유지
+                  </Button>
+                  <Button
+                    variant="danger"
+                    className="home-modal__action-option"
+                    disabled={isRemovingGroup}
+                    onClick={async () => {
+                      try {
+                        setIsRemovingGroup(true);
+                        await onRemoveGroup(
+                          groupDeleteTarget.paths[0],
+                          'delete-subtree'
+                        );
+                        for (const path of groupDeleteTarget.paths.slice(1)) {
+                          await onRemoveGroup(path, 'delete-subtree');
+                        }
+                        setSelectedGroupPaths((current) => current.filter((path) => !groupDeleteTarget.paths.includes(path)));
+                        setGroupDeleteTarget(null);
+                        setGroupDeleteError(null);
+                      } catch (error) {
+                        setGroupDeleteError(error instanceof Error ? error.message : '그룹을 삭제하지 못했습니다.');
+                      } finally {
+                        setIsRemovingGroup(false);
+                      }
+                    }}
+                  >
+                    하위 항목까지 삭제
+                  </Button>
+                </>
+              ) : (
                 <Button
-                  variant="secondary"
+                  variant="danger"
                   disabled={isRemovingGroup}
                   onClick={async () => {
                     try {
                       setIsRemovingGroup(true);
-                      for (const path of groupDeleteTarget.paths) {
+                      await onRemoveGroup(groupDeleteTarget.paths[0], 'reparent-descendants');
+                      for (const path of groupDeleteTarget.paths.slice(1)) {
                         await onRemoveGroup(path, 'reparent-descendants');
                       }
                       setSelectedGroupPaths((current) => current.filter((path) => !groupDeleteTarget.paths.includes(path)));
@@ -1090,43 +1147,9 @@ export function HostBrowser({
                     }
                   }}
                 >
-                  하위 항목 유지
+                  삭제
                 </Button>
-              ) : null}
-              <Button
-                variant="danger"
-                disabled={isRemovingGroup}
-                onClick={async () => {
-                    try {
-                      setIsRemovingGroup(true);
-                      await onRemoveGroup(
-                        groupDeleteTarget.paths[0],
-                        getGroupDeleteDialogVariant(groupDeleteTarget.childGroupCount, groupDeleteTarget.hostCount) === 'with-descendants'
-                          ? 'delete-subtree'
-                          : 'reparent-descendants'
-                      );
-                      for (const path of groupDeleteTarget.paths.slice(1)) {
-                        await onRemoveGroup(
-                          path,
-                          getGroupDeleteDialogVariant(groupDeleteTarget.childGroupCount, groupDeleteTarget.hostCount) === 'with-descendants'
-                            ? 'delete-subtree'
-                            : 'reparent-descendants'
-                        );
-                      }
-                    setSelectedGroupPaths((current) => current.filter((path) => !groupDeleteTarget.paths.includes(path)));
-                    setGroupDeleteTarget(null);
-                    setGroupDeleteError(null);
-                  } catch (error) {
-                    setGroupDeleteError(error instanceof Error ? error.message : '그룹을 삭제하지 못했습니다.');
-                  } finally {
-                    setIsRemovingGroup(false);
-                  }
-                }}
-              >
-                {getGroupDeleteDialogVariant(groupDeleteTarget.childGroupCount, groupDeleteTarget.hostCount) === 'with-descendants'
-                  ? '하위 항목까지 삭제'
-                  : '삭제'}
-              </Button>
+              )}
             </ModalFooter>
           </ModalShell>
         </DialogBackdrop>
