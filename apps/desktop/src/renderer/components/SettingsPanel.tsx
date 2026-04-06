@@ -24,6 +24,7 @@ import {
   SelectField,
   TabButton,
   Tabs,
+  ToggleSwitch,
 } from '../ui';
 
 interface SettingsPanelProps {
@@ -41,18 +42,21 @@ interface SettingsPanelProps {
   onLogout: () => Promise<void>;
 }
 
-const themeOptions: Array<{ value: AppTheme; title: string }> = [
+const themeOptions: Array<{ value: AppTheme; title: string; description: string }> = [
   {
     value: 'system',
-    title: 'System'
+    title: 'System',
+    description: '기기 라이트/다크 설정을 따라갑니다.'
   },
   {
     value: 'light',
-    title: 'Light'
+    title: 'Light',
+    description: '밝은 배경과 또렷한 대비를 사용합니다.'
   },
   {
     value: 'dark',
-    title: 'Dark'
+    title: 'Dark',
+    description: '어두운 배경으로 눈부심을 줄입니다.'
   }
 ];
 
@@ -95,6 +99,55 @@ function renderTerminalThemePreviewChrome(accent?: string) {
         <span className="block h-[0.42rem] w-[40%] rounded-full" style={accent ? { background: accent } : undefined} />
       </span>
     </>
+  );
+}
+
+function renderAppearanceThemeMiniWindow(
+  background: string,
+  color: string,
+  accent: string,
+) {
+  return (
+    <div
+      className="grid min-h-[66px] gap-[0.5rem] rounded-[16px] border border-[color-mix(in_srgb,currentColor_12%,transparent_88%)] px-3 py-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]"
+      style={{ background, color }}
+    >
+      <span className="inline-flex gap-[0.28rem]">
+        <i className="h-[0.42rem] w-[0.42rem] rounded-full bg-[color-mix(in_srgb,currentColor_72%,transparent_28%)]" />
+        <i className="h-[0.42rem] w-[0.42rem] rounded-full bg-[color-mix(in_srgb,currentColor_72%,transparent_28%)]" />
+        <i className="h-[0.42rem] w-[0.42rem] rounded-full bg-[color-mix(in_srgb,currentColor_72%,transparent_28%)]" />
+      </span>
+      <span className="grid gap-[0.34rem]">
+        <span className="block h-[0.4rem] w-[58%] rounded-full" style={{ background: accent }} />
+        <span className="block h-[0.4rem] w-[82%] rounded-full bg-[color-mix(in_srgb,currentColor_20%,transparent_80%)]" />
+        <span className="block h-[0.4rem] w-[64%] rounded-full bg-[color-mix(in_srgb,currentColor_20%,transparent_80%)]" />
+      </span>
+    </div>
+  );
+}
+
+function renderAppearanceThemePreview(theme: AppTheme) {
+  if (theme === 'system') {
+    return (
+      <div className="grid w-full grid-cols-2 gap-2" aria-hidden="true">
+        {renderAppearanceThemeMiniWindow('#f5f7fb', '#243041', '#2468ff')}
+        {renderAppearanceThemeMiniWindow('#0b1220', '#dce6ff', '#7aa2ff')}
+      </div>
+    );
+  }
+
+  if (theme === 'light') {
+    return (
+      <div className="w-full" aria-hidden="true">
+        {renderAppearanceThemeMiniWindow('#f5f7fb', '#243041', '#2468ff')}
+      </div>
+    );
+  }
+
+  return (
+    <div className="w-full" aria-hidden="true">
+      {renderAppearanceThemeMiniWindow('#0b1220', '#dce6ff', '#7aa2ff')}
+    </div>
   );
 }
 
@@ -190,7 +243,7 @@ export function SettingsPanel({
               </div>
             </div>
 
-            <div className="mb-[1.15rem] grid grid-cols-[repeat(2,minmax(0,1fr))] gap-[0.9rem] max-[1320px]:grid-cols-[repeat(2,minmax(0,1fr))] max-[760px]:grid-cols-1">
+            <div className="mb-[1.15rem] grid items-start grid-cols-[repeat(2,minmax(0,1fr))] gap-[0.9rem] max-[1320px]:grid-cols-[repeat(2,minmax(0,1fr))] max-[760px]:grid-cols-1">
               <FieldGroup label="Font">
                 <SelectField
                   value={settings.terminalFontFamily}
@@ -223,29 +276,16 @@ export function SettingsPanel({
                 </SelectField>
               </FieldGroup>
 
-              <label
-                className="flex min-h-[72px] items-center justify-between gap-4 rounded-[20px] border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[color-mix(in_srgb,var(--surface-muted)_90%,transparent_10%)] px-4 py-4"
-                htmlFor="terminal-webgl-enabled"
-              >
-                <div className="grid gap-[0.2rem]">
-                  <span className="text-[0.95rem] font-semibold text-[var(--text)]">
-                    WebGL Renderer
-                  </span>
-                  <p className="m-0 text-[0.8rem] leading-[1.45] text-[var(--text-soft)]">
-                    지원되지 않는 환경에서는 자동으로 기본 렌더러로 전환합니다.
-                  </p>
-                </div>
-                <input
-                  id="terminal-webgl-enabled"
-                  aria-label="WebGL Renderer"
-                  type="checkbox"
-                  className="h-4 w-4 shrink-0 accent-[var(--accent-strong)]"
-                  checked={settings.terminalWebglEnabled}
-                  onChange={async (event) =>
-                    handleChangeTerminalWebglEnabled(event.target.checked)
-                  }
-                />
-              </label>
+              <ToggleSwitch
+                checked={settings.terminalWebglEnabled}
+                aria-label="WebGL Renderer"
+                label="WebGL Renderer"
+                description="지원되지 않는 환경에서는 자동으로 기본 렌더러로 전환합니다."
+                className="min-h-[72px] flex-row-reverse justify-between rounded-[20px] px-4 py-4"
+                onClick={() => {
+                  void handleChangeTerminalWebglEnabled(!settings.terminalWebglEnabled);
+                }}
+              />
 
               <FieldGroup label="Scrollback">
                 <Input
@@ -333,29 +373,16 @@ export function SettingsPanel({
               </FieldGroup>
 
               {desktopPlatform === 'darwin' ? (
-                <label
-                  className="flex min-h-[72px] items-center justify-between gap-4 rounded-[20px] border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[color-mix(in_srgb,var(--surface-muted)_90%,transparent_10%)] px-4 py-4"
-                  htmlFor="terminal-alt-is-meta"
-                >
-                  <div className="grid gap-[0.2rem]">
-                    <span className="text-[0.95rem] font-semibold text-[var(--text)]">
-                      Use Option/Alt as Meta
-                    </span>
-                    <p className="m-0 text-[0.8rem] leading-[1.45] text-[var(--text-soft)]">
-                      macOS에서 Option 키를 터미널 메타 키로 사용합니다.
-                    </p>
-                  </div>
-                  <input
-                    id="terminal-alt-is-meta"
-                    aria-label="Use Option/Alt as Meta"
-                    type="checkbox"
-                    className="h-4 w-4 shrink-0 accent-[var(--accent-strong)]"
-                    checked={settings.terminalAltIsMeta}
-                    onChange={async (event) =>
-                      handleChangeTerminalAltIsMeta(event.target.checked)
-                    }
-                  />
-                </label>
+                <ToggleSwitch
+                  checked={settings.terminalAltIsMeta}
+                  aria-label="Use Option/Alt as Meta"
+                  label="Use Option/Alt as Meta"
+                  description="macOS에서 Option 키를 터미널 메타 키로 사용합니다."
+                  className="min-h-[72px] flex-row-reverse justify-between rounded-[20px] px-4 py-4"
+                  onClick={() => {
+                    void handleChangeTerminalAltIsMeta(!settings.terminalAltIsMeta);
+                  }}
+                />
               ) : null}
             </div>
 
@@ -406,6 +433,8 @@ export function SettingsPanel({
                   key={option.value}
                   active={settings.theme === option.value}
                   title={option.title}
+                  description={option.description}
+                  preview={renderAppearanceThemePreview(option.value)}
                   onClick={async () => onUpdateSettings({ theme: option.value })}
                 />
               ))}

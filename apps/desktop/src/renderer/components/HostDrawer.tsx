@@ -2,7 +2,7 @@ import { useEffect, useRef } from 'react';
 import type { HostRecord, SecretMetadataRecord } from '@shared';
 import { HostForm } from './HostForm';
 import { cn } from '../lib/cn';
-import { IconButton, SectionLabel } from '../ui';
+import { CloseIcon, IconButton, SectionLabel } from '../ui';
 
 interface HostDrawerProps {
   open: boolean;
@@ -72,7 +72,7 @@ export function HostDrawer({
           <h2>{mode === 'create' ? 'New Host' : host?.label ?? 'Host'}</h2>
         </div>
         <IconButton onClick={onClose} aria-label="Close host drawer">
-          ×
+          <CloseIcon />
         </IconButton>
       </div>
 

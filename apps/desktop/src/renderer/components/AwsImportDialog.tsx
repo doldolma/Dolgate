@@ -16,6 +16,7 @@ import {
   CardMain,
   CardMeta,
   CardTitleRow,
+  CloseIcon,
   EmptyState,
   FieldGroup,
   FilterRow,
@@ -430,7 +431,7 @@ export function AwsImportDialog({ open, currentGroupPath, onClose, onImport }: A
             <h3 id="aws-import-title">Import from AWS</h3>
           </div>
           <IconButton onClick={onClose} aria-label="Close AWS import dialog" disabled={isRegistering}>
-            ×
+            <CloseIcon />
           </IconButton>
         </ModalHeader>
 

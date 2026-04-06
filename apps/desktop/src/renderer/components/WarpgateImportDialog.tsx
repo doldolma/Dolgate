@@ -15,6 +15,7 @@ import {
   CardMain,
   CardMeta,
   CardTitleRow,
+  CloseIcon,
   FieldGroup,
   Input,
   ModalBody,
@@ -265,7 +266,7 @@ export function WarpgateImportDialog({
             }}
             aria-label="Close Warpgate import dialog"
           >
-            ×
+            <CloseIcon />
           </IconButton>
         </ModalHeader>
 
