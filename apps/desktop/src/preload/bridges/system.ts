@@ -156,6 +156,7 @@ export function buildFilesBridge(
       ipcRenderer.invoke(ipcChannels.files.getHomeDirectory),
     getDownloadsDirectory: () =>
       ipcRenderer.invoke(ipcChannels.files.getDownloadsDirectory),
+    listRoots: () => ipcRenderer.invoke(ipcChannels.files.listRoots),
     getParentPath: (targetPath: string) =>
       ipcRenderer.invoke(ipcChannels.files.getParentPath, targetPath),
     list: (path: string) => ipcRenderer.invoke(ipcChannels.files.list, path),

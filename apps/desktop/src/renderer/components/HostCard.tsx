@@ -2,7 +2,8 @@ import type { HTMLAttributes, ReactNode } from 'react';
 import { cn } from '../lib/cn';
 
 interface HostCardProps extends Omit<HTMLAttributes<HTMLElement>, 'title'> {
-  badgeLabel: string;
+  badgeLabel: ReactNode;
+  badgeMarker?: string;
   title: ReactNode;
   subtitle: ReactNode;
   groupLabel: ReactNode;
@@ -17,6 +18,7 @@ interface HostCardProps extends Omit<HTMLAttributes<HTMLElement>, 'title'> {
 
 export function HostCard({
   badgeLabel,
+  badgeMarker,
   title,
   subtitle,
   groupLabel,
@@ -49,9 +51,12 @@ export function HostCard({
       {...props}
     >
       <div
+        data-host-card-badge={badgeMarker}
         className={cn(
           'inline-grid h-[2.45rem] w-[2.45rem] shrink-0 place-items-center rounded-[14px] bg-[linear-gradient(180deg,color-mix(in_srgb,var(--accent-strong)_88%,white_12%),color-mix(in_srgb,var(--chrome-bg)_90%,black_10%))] text-[0.9rem] font-bold text-white',
-          badgeLabel.length > 3 && 'text-[0.8rem] tracking-[-0.02em]',
+          typeof badgeLabel === 'string' &&
+            badgeLabel.length > 3 &&
+            'text-[0.8rem] tracking-[-0.02em]',
         )}
       >
         {badgeLabel}

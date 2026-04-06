@@ -2,6 +2,7 @@ import type { AuthState } from '@shared';
 import { SftpWorkspace } from '../components/SftpWorkspace';
 import type { useLoginController } from '../controllers/useLoginController';
 import { cn } from '../lib/cn';
+import { listLocalRoots } from '../services/desktop/files';
 import type {
   useAppModalViewModel,
   useAppSettingsViewModel,
@@ -14,6 +15,7 @@ interface SftpShellProps {
   active: boolean;
   authState: AuthState & { session: NonNullable<AuthState['session']> };
   offlineLeaseExpiryLabel: string | null;
+  desktopPlatform: 'darwin' | 'win32' | 'linux' | 'unknown';
   homeViewModel: ReturnType<typeof useHomeViewModel>;
   sftpViewModel: ReturnType<typeof useSftpViewModel>;
   settingsViewModel: ReturnType<typeof useAppSettingsViewModel>;
@@ -25,6 +27,7 @@ export function SftpShell({
   active,
   authState,
   offlineLeaseExpiryLabel,
+  desktopPlatform,
   homeViewModel,
   sftpViewModel,
   settingsViewModel,
@@ -51,6 +54,7 @@ export function SftpShell({
       ) : null}
       <div className="min-h-0 flex-1">
         <SftpWorkspace
+          desktopPlatform={desktopPlatform}
           hosts={homeViewModel.hosts}
           groups={homeViewModel.groups}
           sftp={sftpViewModel.sftp}
@@ -74,6 +78,7 @@ export function SftpShell({
           onNavigateForward={sftpViewModel.navigateSftpForward}
           onNavigateParent={sftpViewModel.navigateSftpParent}
           onNavigateBreadcrumb={sftpViewModel.navigateSftpBreadcrumb}
+          onListLocalRoots={listLocalRoots}
           onSelectEntry={sftpViewModel.selectSftpEntry}
           onCreateDirectory={sftpViewModel.createSftpDirectory}
           onRenameSelection={sftpViewModel.renameSftpSelection}

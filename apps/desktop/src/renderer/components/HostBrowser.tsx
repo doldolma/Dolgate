@@ -8,12 +8,14 @@ import {
   getAwsEc2HostSshMetadataStatusLabel,
   getGroupDeleteDialogVariant,
   getGroupLabel,
+  getParentGroupPath,
   getHostBadgeLabel,
   getHostSearchText,
   getHostSubtitle,
   getHostTagsToggleLabel,
   isGroupWithinPath,
-  normalizeGroupPath
+  normalizeGroupPath,
+  rebaseGroupPath
 } from '@shared';
 import type { GroupRecord, GroupRemoveMode, HostRecord } from '@shared';
 import { useResponsiveCardGrid } from '../lib/useResponsiveCardGrid';
@@ -48,7 +50,8 @@ export {
   getParentGroupPath,
   isDirectHostChild,
   isGroupWithinPath,
-  normalizeGroupPath
+  normalizeGroupPath,
+  rebaseGroupPath
 } from '@shared';
 
 export const HOST_BROWSER_IMPORT_MENU_LABELS = [
@@ -103,6 +106,10 @@ interface GroupContextMenuState {
 
 type ContextMenuState = HostContextMenuState | GroupContextMenuState;
 
+type GroupModalState =
+  | { mode: 'create' }
+  | { mode: 'rename'; path: string };
+
 interface GroupTreeRow {
   path: string;
   label: string;
@@ -155,6 +162,30 @@ function normalizeGroupSelectionForDelete(groupPaths: string[]): string[] {
     .sort((left, right) => left.split('/').length - right.split('/').length || left.localeCompare(right));
 }
 
+function buildNextGroupPath(groupPath: string, targetParentPath: string | null): string | null {
+  const normalizedGroupPath = normalizeGroupPath(groupPath);
+  if (!normalizedGroupPath) {
+    return null;
+  }
+  const normalizedTargetParentPath = normalizeGroupPath(targetParentPath);
+  return normalizeGroupPath(
+    normalizedTargetParentPath ? `${normalizedTargetParentPath}/${getGroupLabel(normalizedGroupPath)}` : getGroupLabel(normalizedGroupPath)
+  );
+}
+
+function canReparentGroup(groupPath: string, targetParentPath: string | null): boolean {
+  const normalizedGroupPath = normalizeGroupPath(groupPath);
+  const normalizedTargetParentPath = normalizeGroupPath(targetParentPath);
+  if (!normalizedGroupPath) {
+    return false;
+  }
+  if (normalizedTargetParentPath && isGroupWithinPath(normalizedTargetParentPath, normalizedGroupPath)) {
+    return false;
+  }
+  const nextGroupPath = buildNextGroupPath(normalizedGroupPath, normalizedTargetParentPath);
+  return Boolean(nextGroupPath && nextGroupPath !== normalizedGroupPath);
+}
+
 interface HostBrowserProps {
   desktopPlatform: DesktopPlatform;
   hosts: HostRecord[];
@@ -174,6 +205,8 @@ interface HostBrowserProps {
   onOpenWarpgateImport: () => void;
   onCreateGroup: (name: string) => Promise<void>;
   onRemoveGroup: (path: string, mode: GroupRemoveMode) => Promise<void>;
+  onMoveGroup: (path: string, targetParentPath: string | null) => Promise<void>;
+  onRenameGroup: (path: string, name: string) => Promise<void>;
   onNavigateGroup: (path: string | null) => void;
   onClearHostSelection: () => void;
   onSelectHost: (hostId: string) => void;
@@ -204,6 +237,8 @@ export function HostBrowser({
   onOpenWarpgateImport,
   onCreateGroup,
   onRemoveGroup,
+  onMoveGroup,
+  onRenameGroup,
   onNavigateGroup,
   onClearHostSelection,
   onSelectHost,
@@ -214,7 +249,7 @@ export function HostBrowser({
   onConnectHost,
   onOpenHostContainers
 }: HostBrowserProps) {
-  const [isGroupModalOpen, setIsGroupModalOpen] = useState(false);
+  const [groupModalState, setGroupModalState] = useState<GroupModalState | null>(null);
   const [newGroupName, setNewGroupName] = useState('');
   const [groupError, setGroupError] = useState<string | null>(null);
   const [selectedHostIds, setSelectedHostIds] = useState<string[]>([]);
@@ -229,6 +264,9 @@ export function HostBrowser({
   const [isRemovingHost, setIsRemovingHost] = useState(false);
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const [dragTargetGroupPath, setDragTargetGroupPath] = useState<string | null>(null);
+  const [draggedHostId, setDraggedHostId] = useState<string | null>(null);
+  const [draggedGroupPath, setDraggedGroupPath] = useState<string | null>(null);
+  const [isRootDragTarget, setIsRootDragTarget] = useState(false);
   const [expandedHostTags, setExpandedHostTags] = useState<string[]>([]);
   const [isImportMenuOpen, setIsImportMenuOpen] = useState(false);
   const [collapsedTreeGroupPaths, setCollapsedTreeGroupPaths] = useState<string[]>([]);
@@ -554,10 +592,45 @@ export function HostBrowser({
     clearSelections();
   }
 
-  function closeGroupModal() {
-    setIsGroupModalOpen(false);
+  function applyGroupPathUiMutation(previousGroupPath: string, nextGroupPath: string) {
+    setSelectedGroupPaths((current) => {
+      const nextSelected = current
+        .map((groupPath) => rebaseGroupPath(groupPath, previousGroupPath, nextGroupPath))
+        .filter((groupPath): groupPath is string => Boolean(groupPath));
+      return [...new Set(nextSelected)];
+    });
+    setGroupSelectionAnchor((current) => rebaseGroupPath(current, previousGroupPath, nextGroupPath));
+    setCollapsedTreeGroupPaths((current) => {
+      const nextCollapsed = current
+        .map((groupPath) => rebaseGroupPath(groupPath, previousGroupPath, nextGroupPath))
+        .filter((groupPath): groupPath is string => Boolean(groupPath));
+      return [...new Set(nextCollapsed)];
+    });
+  }
+
+  function openCreateGroupModal() {
+    setGroupModalState({ mode: 'create' });
     setNewGroupName('');
     setGroupError(null);
+  }
+
+  function openRenameGroupModal(groupPath: string) {
+    setGroupModalState({ mode: 'rename', path: groupPath });
+    setNewGroupName(getGroupLabel(groupPath));
+    setGroupError(null);
+  }
+
+  function closeGroupModal() {
+    setGroupModalState(null);
+    setNewGroupName('');
+    setGroupError(null);
+  }
+
+  function clearDragState() {
+    setDragTargetGroupPath(null);
+    setDraggedHostId(null);
+    setDraggedGroupPath(null);
+    setIsRootDragTarget(false);
   }
 
   const selectedHostIdSet = new Set(selectedHostIds);
@@ -592,9 +665,7 @@ export function HostBrowser({
             variant="secondary"
             onClick={() => {
               setIsImportMenuOpen(false);
-              setIsGroupModalOpen(true);
-              setNewGroupName('');
-              setGroupError(null);
+              openCreateGroupModal();
             }}
           >
             New Group
@@ -676,8 +747,48 @@ export function HostBrowser({
               'flex w-full min-w-0 items-center justify-between gap-3 rounded-[18px] border border-transparent bg-transparent px-[0.4rem] py-[0.45rem] text-left text-[var(--text-soft)] transition-[background-color,border-color,color,box-shadow] duration-140 hover:bg-[color-mix(in_srgb,var(--surface-elevated)_72%,transparent_28%)] hover:text-[var(--text)]',
               currentGroupPath === null &&
                 'border-[color-mix(in_srgb,var(--accent-strong)_30%,transparent_70%)] bg-[color-mix(in_srgb,var(--accent-strong)_14%,var(--surface-elevated)_86%)] text-[var(--accent-strong)]',
+              isRootDragTarget &&
+                'border-[color-mix(in_srgb,var(--accent-strong)_46%,var(--border)_54%)] bg-[color-mix(in_srgb,var(--surface)_84%,var(--accent-strong)_16%)] shadow-[0_0_0_2px_color-mix(in_srgb,var(--accent-strong)_20%,transparent_80%),var(--shadow-soft)]',
             )}
             onClick={handleNavigateRoot}
+            onDragOver={(event) => {
+              const activeDraggedGroupPath =
+                draggedGroupPath ?? normalizeGroupPath(event.dataTransfer.getData('application/x-dolssh-group-path'));
+              if (!activeDraggedGroupPath || !canReparentGroup(activeDraggedGroupPath, null)) {
+                return;
+              }
+              event.preventDefault();
+              event.dataTransfer.dropEffect = 'move';
+              setIsRootDragTarget(true);
+            }}
+            onDragLeave={(event) => {
+              const nextTarget = event.relatedTarget;
+              if (nextTarget instanceof Node && event.currentTarget.contains(nextTarget)) {
+                return;
+              }
+              setIsRootDragTarget(false);
+            }}
+            onDrop={async (event) => {
+              const activeDraggedGroupPath =
+                draggedGroupPath ?? normalizeGroupPath(event.dataTransfer.getData('application/x-dolssh-group-path'));
+              setIsRootDragTarget(false);
+              if (!activeDraggedGroupPath || !canReparentGroup(activeDraggedGroupPath, null)) {
+                return;
+              }
+              event.preventDefault();
+              const nextGroupPath = buildNextGroupPath(activeDraggedGroupPath, null);
+              if (!nextGroupPath) {
+                return;
+              }
+              try {
+                await onMoveGroup(activeDraggedGroupPath, null);
+                applyGroupPathUiMutation(activeDraggedGroupPath, nextGroupPath);
+              } catch {
+                // HomeShell surfaces the error through the shared notice area.
+              } finally {
+                clearDragState();
+              }
+            }}
           >
             <span>All Groups</span>
             <span className="shrink-0 text-[0.74rem] font-semibold text-[var(--text-muted)]">{hosts.length}</span>
@@ -722,7 +833,19 @@ export function HostBrowser({
                         'border-[color-mix(in_srgb,var(--accent-strong)_46%,var(--border)_54%)] bg-[color-mix(in_srgb,var(--surface)_84%,var(--accent-strong)_16%)] shadow-[0_0_0_2px_color-mix(in_srgb,var(--accent-strong)_20%,transparent_80%),var(--shadow-soft)]',
                     )}
                     data-group-tree-state={selectedGroupPathSet.has(group.path) ? 'selected' : 'idle'}
+                    draggable
                     onClick={(event) => handleGroupSelection(group.path, event)}
+                    onDragStart={(event) => {
+                      selectSingleGroup(group.path);
+                      setDraggedHostId(null);
+                      setDraggedGroupPath(group.path);
+                      event.dataTransfer.effectAllowed = 'move';
+                      event.dataTransfer.setData('application/x-dolssh-group-path', group.path);
+                      event.dataTransfer.setData('text/plain', group.label);
+                    }}
+                    onDragEnd={() => {
+                      clearDragState();
+                    }}
                     onDoubleClick={() => {
                       if (group.hasChildren) {
                         handleToggleGroupBranch(group.path);
@@ -748,8 +871,16 @@ export function HostBrowser({
                       });
                     }}
                     onDragOver={(event) => {
+                      const activeDraggedHostId =
+                        draggedHostId ?? event.dataTransfer.getData('application/x-dolssh-host-id');
+                      const activeDraggedGroupPath =
+                        draggedGroupPath ?? normalizeGroupPath(event.dataTransfer.getData('application/x-dolssh-group-path'));
+                      if (!activeDraggedHostId && (!activeDraggedGroupPath || !canReparentGroup(activeDraggedGroupPath, group.path))) {
+                        return;
+                      }
                       event.preventDefault();
                       event.dataTransfer.dropEffect = 'move';
+                      setIsRootDragTarget(false);
                       setDragTargetGroupPath(group.path);
                     }}
                     onDragLeave={(event) => {
@@ -760,13 +891,35 @@ export function HostBrowser({
                       setDragTargetGroupPath((current) => (current === group.path ? null : current));
                     }}
                     onDrop={async (event) => {
-                      event.preventDefault();
-                      const hostId = event.dataTransfer.getData('application/x-dolssh-host-id');
+                      const activeDraggedHostId =
+                        draggedHostId ?? event.dataTransfer.getData('application/x-dolssh-host-id');
+                      const activeDraggedGroupPath =
+                        draggedGroupPath ?? normalizeGroupPath(event.dataTransfer.getData('application/x-dolssh-group-path'));
                       setDragTargetGroupPath(null);
-                      if (!hostId) {
+                      setIsRootDragTarget(false);
+                      if (activeDraggedHostId) {
+                        event.preventDefault();
+                        await onMoveHostToGroup(activeDraggedHostId, group.path);
+                        clearDragState();
                         return;
                       }
-                      await onMoveHostToGroup(hostId, group.path);
+                      if (!activeDraggedGroupPath || !canReparentGroup(activeDraggedGroupPath, group.path)) {
+                        return;
+                      }
+                      event.preventDefault();
+                      const nextGroupPath = buildNextGroupPath(activeDraggedGroupPath, group.path);
+                      if (!nextGroupPath) {
+                        return;
+                      }
+                      try {
+                        await onMoveGroup(activeDraggedGroupPath, group.path);
+                        applyGroupPathUiMutation(activeDraggedGroupPath, nextGroupPath);
+                        setCollapsedTreeGroupPaths((current) => current.filter((path) => path !== group.path));
+                      } catch {
+                        // HomeShell surfaces the error through the shared notice area.
+                      } finally {
+                        clearDragState();
+                      }
                     }}
                   >
                     <span className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap font-semibold">{group.label}</span>
@@ -819,12 +972,14 @@ export function HostBrowser({
                       }}
                       onDragStart={(event) => {
                         selectSingleHost(host.id);
+                        setDraggedGroupPath(null);
+                        setDraggedHostId(host.id);
                         event.dataTransfer.effectAllowed = 'move';
                         event.dataTransfer.setData('application/x-dolssh-host-id', host.id);
                         event.dataTransfer.setData('text/plain', host.label);
                       }}
                       onDragEnd={() => {
-                        setDragTargetGroupPath(null);
+                        clearDragState();
                       }}
                       onDoubleClick={async () => {
                         await onConnectHost(host.id);
@@ -962,29 +1117,53 @@ export function HostBrowser({
                 </button>
               </>
             ) : (
-              <button
-                type="button"
-                className="flex w-full items-center rounded-[12px] px-[0.8rem] py-[0.75rem] text-left text-[var(--danger-text)] transition-colors duration-150 hover:bg-[var(--danger-bg)]"
-                onClick={() => {
-                  setGroupDeleteTarget(buildGroupDeleteTarget(contextMenu.groupPaths));
-                  setGroupDeleteError(null);
-                  setContextMenu(null);
-                }}
-              >
-                삭제
-              </button>
+              <>
+                <button
+                  type="button"
+                  className="flex w-full items-center rounded-[12px] px-[0.8rem] py-[0.75rem] text-left text-[var(--text)] transition-colors duration-150 hover:bg-[color-mix(in_srgb,var(--surface-muted)_92%,transparent_8%)] disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:bg-transparent"
+                  disabled={contextMenu.groupPaths.length !== 1}
+                  onClick={() => {
+                    const targetGroupPath = contextMenu.groupPaths[0];
+                    setContextMenu(null);
+                    if (!targetGroupPath) {
+                      return;
+                    }
+                    openRenameGroupModal(targetGroupPath);
+                  }}
+                >
+                  이름 변경
+                </button>
+                <button
+                  type="button"
+                  className="flex w-full items-center rounded-[12px] px-[0.8rem] py-[0.75rem] text-left text-[var(--danger-text)] transition-colors duration-150 hover:bg-[var(--danger-bg)]"
+                  onClick={() => {
+                    setGroupDeleteTarget(buildGroupDeleteTarget(contextMenu.groupPaths));
+                    setGroupDeleteError(null);
+                    setContextMenu(null);
+                  }}
+                >
+                  삭제
+                </button>
+              </>
             )}
           </div>,
           document.body
         )
       ) : null}
 
-      {isGroupModalOpen ? (
+      {groupModalState ? (
         <DialogBackdrop data-testid="host-browser-modal-backdrop" onDismiss={closeGroupModal}>
-          <ModalShell data-host-browser-modal="true" role="dialog" aria-modal="true" aria-labelledby="new-group-title">
+          <ModalShell
+            data-host-browser-modal="true"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby={groupModalState.mode === 'create' ? 'new-group-title' : 'rename-group-title'}
+          >
             <ModalHeader className="block">
-              <SectionLabel>Create</SectionLabel>
-              <h3 id="new-group-title">New Group</h3>
+              <SectionLabel>{groupModalState.mode === 'create' ? 'Create' : 'Rename'}</SectionLabel>
+              <h3 id={groupModalState.mode === 'create' ? 'new-group-title' : 'rename-group-title'}>
+                {groupModalState.mode === 'create' ? 'New Group' : 'Rename Group'}
+              </h3>
             </ModalHeader>
             <ModalBody className="grid gap-4">
             <Input
@@ -1006,14 +1185,32 @@ export function HostBrowser({
                 variant="primary"
                 onClick={async () => {
                   try {
-                    await onCreateGroup(newGroupName);
+                    if (groupModalState.mode === 'create') {
+                      await onCreateGroup(newGroupName);
+                    } else {
+                      const nextGroupPath = normalizeGroupPath(
+                        getParentGroupPath(groupModalState.path)
+                          ? `${getParentGroupPath(groupModalState.path)}/${newGroupName.trim()}`
+                          : newGroupName.trim()
+                      );
+                      await onRenameGroup(groupModalState.path, newGroupName);
+                      if (nextGroupPath) {
+                        applyGroupPathUiMutation(groupModalState.path, nextGroupPath);
+                      }
+                    }
                     closeGroupModal();
                   } catch (error) {
-                    setGroupError(error instanceof Error ? error.message : '그룹을 만들지 못했습니다.');
+                    setGroupError(
+                      error instanceof Error
+                        ? error.message
+                        : groupModalState.mode === 'create'
+                          ? '그룹을 만들지 못했습니다.'
+                          : '그룹 이름을 변경하지 못했습니다.'
+                    );
                   }
                 }}
               >
-                Create group
+                {groupModalState.mode === 'create' ? 'Create group' : 'Rename group'}
               </Button>
             </ModalFooter>
           </ModalShell>

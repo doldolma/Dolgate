@@ -20,6 +20,7 @@ import {
   normalizeSftpBrowserColumnWidths,
   normalizeServerUrl,
   normalizeGroupPath,
+  rebaseGroupPath,
   stripRemovedGroupSegment
 } from '@shared';
 import type {
@@ -36,6 +37,7 @@ import type {
   DnsOverrideDraft,
   DnsOverrideRecord,
   GlobalTerminalThemeId,
+  GroupPathMutationResult,
   GroupRecord,
   GroupRemoveMode,
   GroupRemoveResult,
@@ -650,6 +652,116 @@ export class GroupRepository {
       state.data.groups.push(record);
     });
     return record;
+  }
+
+  move(targetPath: string, targetParentPath: string | null): GroupPathMutationResult {
+    const normalizedTargetPath = normalizeGroupPath(targetPath);
+    if (!normalizedTargetPath) {
+      throw new Error('Group path is invalid');
+    }
+
+    const normalizedTargetParentPath = normalizeGroupPath(targetParentPath);
+    if (normalizedTargetParentPath && isGroupWithinPath(normalizedTargetParentPath, normalizedTargetPath)) {
+      throw new Error('Group cannot be moved into itself or one of its descendants');
+    }
+
+    const nextPath = normalizeGroupPath(
+      normalizedTargetParentPath
+        ? `${normalizedTargetParentPath}/${getGroupLabel(normalizedTargetPath)}`
+        : getGroupLabel(normalizedTargetPath)
+    );
+    if (!nextPath) {
+      throw new Error('Group path is invalid');
+    }
+    if (nextPath === normalizedTargetPath) {
+      throw new Error('Group path is unchanged');
+    }
+
+    return this.mutatePath(normalizedTargetPath, nextPath);
+  }
+
+  rename(targetPath: string, name: string): GroupPathMutationResult {
+    const normalizedTargetPath = normalizeGroupPath(targetPath);
+    if (!normalizedTargetPath) {
+      throw new Error('Group path is invalid');
+    }
+
+    const cleanedName = name.trim();
+    if (!cleanedName) {
+      throw new Error('Group name is required');
+    }
+
+    const nextPath = normalizeGroupPath(
+      getParentGroupPath(normalizedTargetPath)
+        ? `${getParentGroupPath(normalizedTargetPath)}/${cleanedName}`
+        : cleanedName
+    );
+    if (!nextPath) {
+      throw new Error('Group path is invalid');
+    }
+    if (nextPath === normalizedTargetPath) {
+      throw new Error('Group path is unchanged');
+    }
+
+    return this.mutatePath(normalizedTargetPath, nextPath);
+  }
+
+  private mutatePath(targetPath: string, nextPath: string): GroupPathMutationResult {
+    const nextState = stateStorage.updateState((state) => {
+      const timestamp = nowIso();
+      const affectedGroups = state.data.groups.filter((record) => isGroupWithinPath(record.path, targetPath));
+      const affectedHosts = state.data.hosts.filter((record) => isGroupWithinPath(normalizeGroupPath(record.groupName), targetPath));
+
+      if (affectedGroups.length === 0 && affectedHosts.length === 0) {
+        throw new Error('Group not found');
+      }
+
+      const nextGroupsByPath = new Map<string, GroupRecord>();
+      for (const record of state.data.groups) {
+        if (!isGroupWithinPath(record.path, targetPath)) {
+          nextGroupsByPath.set(record.path, record);
+        }
+      }
+      if (nextGroupsByPath.has(nextPath)) {
+        throw new Error('Group already exists');
+      }
+
+      for (const record of affectedGroups) {
+        const rebasedPath = rebaseGroupPath(record.path, targetPath, nextPath);
+        if (!rebasedPath) {
+          throw new Error('Group path is invalid');
+        }
+        if (nextGroupsByPath.has(rebasedPath)) {
+          throw new Error('Group already exists');
+        }
+        nextGroupsByPath.set(rebasedPath, {
+          ...record,
+          name: getGroupLabel(rebasedPath),
+          path: rebasedPath,
+          parentPath: getParentGroupPath(rebasedPath),
+          updatedAt: timestamp
+        });
+      }
+
+      state.data.groups = [...nextGroupsByPath.values()];
+      state.data.hosts = state.data.hosts.map((record) => {
+        const hostGroupPath = normalizeGroupPath(record.groupName);
+        if (!isGroupWithinPath(hostGroupPath, targetPath)) {
+          return record;
+        }
+        return normalizeIncomingHostRecord({
+          ...record,
+          groupName: rebaseGroupPath(hostGroupPath, targetPath, nextPath),
+          updatedAt: timestamp
+        });
+      });
+    });
+
+    return {
+      groups: nextState.data.groups.sort((left, right) => left.path.localeCompare(right.path)),
+      hosts: nextState.data.hosts.sort(compareHosts),
+      nextPath
+    };
   }
 
   remove(

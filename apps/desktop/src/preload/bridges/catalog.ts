@@ -25,6 +25,10 @@ export function buildGroupsBridge(
       ipcRenderer.invoke(ipcChannels.groups.create, name, parentPath),
     remove: (path: string, mode: GroupRemoveMode) =>
       ipcRenderer.invoke(ipcChannels.groups.remove, path, mode),
+    move: (path: string, targetParentPath: string | null) =>
+      ipcRenderer.invoke(ipcChannels.groups.move, path, targetParentPath),
+    rename: (path: string, name: string) =>
+      ipcRenderer.invoke(ipcChannels.groups.rename, path, name),
   };
 }
 

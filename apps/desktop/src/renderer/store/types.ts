@@ -404,6 +404,8 @@ interface AppStateParts {
   clearSyncedWorkspaceData: () => void;
   createGroup: (name: string) => Promise<void>;
   removeGroup: (path: string, mode: GroupRemoveMode) => Promise<void>;
+  moveGroup: (path: string, targetParentPath: string | null) => Promise<void>;
+  renameGroup: (path: string, name: string) => Promise<void>;
   saveHost: (
     hostId: string | null,
     draft: HostDraft,
@@ -665,6 +667,8 @@ export type CatalogSlice = Pick<
   | "clearSyncedWorkspaceData"
   | "createGroup"
   | "removeGroup"
+  | "moveGroup"
+  | "renameGroup"
   | "saveHost"
   | "duplicateHosts"
   | "moveHostToGroup"

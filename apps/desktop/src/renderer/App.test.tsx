@@ -184,6 +184,8 @@ function createMockStoreState(overrides: Record<string, unknown> = {}) {
     navigateGroup: fn(),
     createGroup: fn(),
     removeGroup: fn(),
+    moveGroup: fn(),
+    renameGroup: fn(),
     saveHost: fn(),
     duplicateHosts: fn(),
     moveHostToGroup: fn(),

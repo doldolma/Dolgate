@@ -21,6 +21,7 @@ export function createCatalogSlice(deps: SliceDeps): CatalogSlice {
     isSshHostRecord,
     isWarpgateSshHostRecord,
     normalizeGroupPath,
+    rebaseGroupPath,
     stripRemovedGroupSegment,
     mergeContainerLogLines,
     normalizeRemoteInvokeErrorMessage,
@@ -113,6 +114,7 @@ export function createCatalogSlice(deps: SliceDeps): CatalogSlice {
     dynamicTabMatches,
     findContainersTab,
     parentPath,
+    resolveCurrentGroupPathAfterGroupMutation,
     resolveCurrentGroupPathAfterGroupRemoval,
     resolveCredentialRetryKind,
     shouldPromptAwsSftpConfigRetry,
@@ -349,6 +351,52 @@ export function createCatalogSlice(deps: SliceDeps): CatalogSlice {
                 path,
                 mode,
               ),
+            }));
+          },
+    moveGroup: async (path, targetParentPath) => {
+            const result = await api.groups.move(path, targetParentPath);
+            set((state) => ({
+              groups: sortGroups(result.groups),
+              hosts: sortHosts(result.hosts),
+              currentGroupPath: resolveCurrentGroupPathAfterGroupMutation(
+                state.currentGroupPath,
+                path,
+                result.nextPath,
+              ),
+              hostDrawer:
+                state.hostDrawer.mode === "create"
+                  ? {
+                      ...state.hostDrawer,
+                      defaultGroupPath: rebaseGroupPath(
+                        state.hostDrawer.defaultGroupPath,
+                        path,
+                        result.nextPath,
+                      ),
+                    }
+                  : state.hostDrawer,
+            }));
+          },
+    renameGroup: async (path, name) => {
+            const result = await api.groups.rename(path, name);
+            set((state) => ({
+              groups: sortGroups(result.groups),
+              hosts: sortHosts(result.hosts),
+              currentGroupPath: resolveCurrentGroupPathAfterGroupMutation(
+                state.currentGroupPath,
+                path,
+                result.nextPath,
+              ),
+              hostDrawer:
+                state.hostDrawer.mode === "create"
+                  ? {
+                      ...state.hostDrawer,
+                      defaultGroupPath: rebaseGroupPath(
+                        state.hostDrawer.defaultGroupPath,
+                        path,
+                        result.nextPath,
+                      ),
+                    }
+                  : state.hostDrawer,
             }));
           },
     saveHost: async (hostId, draft, secrets) => {

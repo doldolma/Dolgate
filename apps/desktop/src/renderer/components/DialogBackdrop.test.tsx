@@ -20,6 +20,8 @@ describe('DialogBackdrop', () => {
   it('dismisses only when the pointer starts on the backdrop', () => {
     const { backdrop, onDismiss } = renderBackdrop();
 
+    expect(backdrop).toHaveClass('modal-backdrop', 'fixed', 'inset-0', 'grid', 'place-items-center', 'p-4');
+
     fireEvent.pointerDown(backdrop);
     fireEvent.click(backdrop);
 

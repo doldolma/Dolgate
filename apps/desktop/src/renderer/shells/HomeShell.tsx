@@ -1,8 +1,11 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
   buildGroupOptions,
+  getGroupLabel,
+  getParentGroupPath,
   getHostSecretRef,
   isSshHostRecord,
+  normalizeGroupPath,
   type AuthState,
 } from '@shared';
 import { AwsImportDialog } from '../components/AwsImportDialog';
@@ -107,6 +110,26 @@ export function HomeShell({
   function resetHostBrowserMessages() {
     setHostBrowserError(null);
     setHostBrowserStatus(null);
+  }
+
+  function buildMovedGroupPath(path: string, targetParentPath: string | null): string | null {
+    const normalizedPath = normalizeGroupPath(path);
+    if (!normalizedPath) {
+      return null;
+    }
+    const normalizedTargetParentPath = normalizeGroupPath(targetParentPath);
+    return normalizeGroupPath(
+      normalizedTargetParentPath ? `${normalizedTargetParentPath}/${getGroupLabel(normalizedPath)}` : getGroupLabel(normalizedPath)
+    );
+  }
+
+  function buildRenamedGroupPath(path: string, name: string): string | null {
+    const normalizedPath = normalizeGroupPath(path);
+    if (!normalizedPath) {
+      return null;
+    }
+    const parentPath = getParentGroupPath(normalizedPath);
+    return normalizeGroupPath(parentPath ? `${parentPath}/${name.trim()}` : name.trim());
   }
 
   function handleSelectHost(hostId: string) {
@@ -267,6 +290,40 @@ export function HomeShell({
             }}
             onCreateGroup={homeViewModel.createGroup}
             onRemoveGroup={homeViewModel.removeGroup}
+            onMoveGroup={async (path, targetParentPath) => {
+              resetHostBrowserMessages();
+              try {
+                await homeViewModel.moveGroup(path, targetParentPath);
+                const nextPath = buildMovedGroupPath(path, targetParentPath);
+                setHostBrowserStatus(
+                  nextPath ? `그룹을 ${nextPath}(으)로 이동했습니다.` : '그룹을 이동했습니다.',
+                );
+              } catch (error) {
+                setHostBrowserError(
+                  error instanceof Error
+                    ? error.message
+                    : '그룹을 이동하지 못했습니다.',
+                );
+                throw error;
+              }
+            }}
+            onRenameGroup={async (path, name) => {
+              resetHostBrowserMessages();
+              try {
+                await homeViewModel.renameGroup(path, name);
+                const nextPath = buildRenamedGroupPath(path, name);
+                setHostBrowserStatus(
+                  nextPath ? `그룹 이름을 ${nextPath}(으)로 변경했습니다.` : '그룹 이름을 변경했습니다.',
+                );
+              } catch (error) {
+                setHostBrowserError(
+                  error instanceof Error
+                    ? error.message
+                    : '그룹 이름을 변경하지 못했습니다.',
+                );
+                throw error;
+              }
+            }}
             onNavigateGroup={(path) => {
               resetHostBrowserMessages();
               setSelectedHostId(null);

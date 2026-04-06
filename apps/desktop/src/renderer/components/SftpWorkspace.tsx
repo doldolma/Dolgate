@@ -23,6 +23,7 @@ import {
 import type {
   AppSettings,
   FileEntry,
+  FileSystemRoot,
   GroupRecord,
   HostRecord,
   SftpBrowserColumnKey,
@@ -63,13 +64,16 @@ import {
 } from "../ui";
 import { cn } from "../lib/cn";
 
-const SFTP_HOST_PICKER_GROUP_CARD_MIN_WIDTH_PX = 220;
-const SFTP_HOST_PICKER_GROUP_CARD_MAX_WIDTH_PX = 280;
 const SFTP_HOST_PICKER_HOST_CARD_MIN_WIDTH_PX = 220;
 const SFTP_HOST_PICKER_HOST_CARD_MAX_WIDTH_PX = 460;
 const SFTP_HOST_PICKER_CARD_GAP_PX = 12;
+const WINDOWS_DRIVE_PATH_PATTERN = /^[a-zA-Z]:(?:[\\/].*)?$/;
+const WINDOWS_DRIVE_ROOT_PATTERN = /^[a-zA-Z]:\\$/;
+
+type DesktopPlatform = "darwin" | "win32" | "linux" | "unknown";
 
 interface SftpWorkspaceProps {
+  desktopPlatform: DesktopPlatform;
   hosts: HostRecord[];
   groups: GroupRecord[];
   sftp: SftpState;
@@ -92,6 +96,7 @@ interface SftpWorkspaceProps {
   onNavigateForward: (paneId: SftpPaneId) => Promise<void>;
   onNavigateParent: (paneId: SftpPaneId) => Promise<void>;
   onNavigateBreadcrumb: (paneId: SftpPaneId, nextPath: string) => Promise<void>;
+  onListLocalRoots: () => Promise<FileSystemRoot[]>;
   onSelectEntry: (paneId: SftpPaneId, input: SftpEntrySelectionInput) => void;
   onCreateDirectory: (paneId: SftpPaneId, name: string) => Promise<void>;
   onRenameSelection: (paneId: SftpPaneId, nextName: string) => Promise<void>;
@@ -302,9 +307,386 @@ export function visibleEntries(pane: SftpPaneState): FileEntry[] {
   );
 }
 
+export type FileEntryVisualKind =
+  | "folder"
+  | "symlink"
+  | "image"
+  | "document"
+  | "pdf"
+  | "spreadsheet"
+  | "presentation"
+  | "code"
+  | "archive"
+  | "media"
+  | "file"
+  | "unknown";
+
+const IMAGE_EXTENSIONS = new Set([
+  "png",
+  "jpg",
+  "jpeg",
+  "gif",
+  "webp",
+  "svg",
+  "ico",
+]);
+const DOCUMENT_EXTENSIONS = new Set(["txt", "md", "doc", "docx", "rtf"]);
+const PDF_EXTENSIONS = new Set(["pdf"]);
+const SPREADSHEET_EXTENSIONS = new Set(["csv", "tsv", "xls", "xlsx"]);
+const PRESENTATION_EXTENSIONS = new Set(["ppt", "pptx", "key"]);
+const CODE_EXTENSIONS = new Set([
+  "js",
+  "ts",
+  "tsx",
+  "jsx",
+  "json",
+  "yaml",
+  "yml",
+  "xml",
+  "sh",
+  "ps1",
+  "py",
+  "java",
+  "c",
+  "cpp",
+  "go",
+  "rs",
+]);
+const ARCHIVE_EXTENSIONS = new Set(["zip", "7z", "rar", "tar", "gz", "bz2", "xz"]);
+const MEDIA_EXTENSIONS = new Set([
+  "mp3",
+  "wav",
+  "flac",
+  "mp4",
+  "mov",
+  "mkv",
+  "avi",
+]);
+const COMPOUND_FILE_SUFFIXES: Array<[string, FileEntryVisualKind]> = [
+  [".tar.gz", "archive"],
+  [".tar.bz2", "archive"],
+  [".tar.xz", "archive"],
+];
+const CODE_FILE_NAMES = new Set([
+  ".gitignore",
+  ".gitattributes",
+  ".editorconfig",
+  "dockerfile",
+  "makefile",
+]);
+
+function getFileExtension(name: string): string | null {
+  const normalizedName = name.trim().toLowerCase();
+  if (!normalizedName) {
+    return null;
+  }
+  for (const [suffix, visualKind] of COMPOUND_FILE_SUFFIXES) {
+    if (visualKind && normalizedName.endsWith(suffix)) {
+      return suffix.slice(1);
+    }
+  }
+  const lastDotIndex = normalizedName.lastIndexOf(".");
+  if (
+    lastDotIndex <= 0 ||
+    lastDotIndex === normalizedName.length - 1
+  ) {
+    return null;
+  }
+  return normalizedName.slice(lastDotIndex + 1);
+}
+
+export function getFileEntryVisualKind(
+  entry: Pick<FileEntry, "name" | "kind">,
+): FileEntryVisualKind {
+  if (entry.kind === "folder") {
+    return "folder";
+  }
+  if (entry.kind === "symlink") {
+    return "symlink";
+  }
+  if (entry.kind === "unknown") {
+    return "unknown";
+  }
+
+  const normalizedName = entry.name.trim().toLowerCase();
+  if (!normalizedName) {
+    return "file";
+  }
+  if (normalizedName === ".env" || normalizedName.startsWith(".env.")) {
+    return "code";
+  }
+  if (CODE_FILE_NAMES.has(normalizedName)) {
+    return "code";
+  }
+  for (const [suffix, visualKind] of COMPOUND_FILE_SUFFIXES) {
+    if (normalizedName.endsWith(suffix)) {
+      return visualKind;
+    }
+  }
+
+  const extension = getFileExtension(normalizedName);
+  if (!extension) {
+    return "file";
+  }
+  if (IMAGE_EXTENSIONS.has(extension)) {
+    return "image";
+  }
+  if (DOCUMENT_EXTENSIONS.has(extension)) {
+    return "document";
+  }
+  if (PDF_EXTENSIONS.has(extension)) {
+    return "pdf";
+  }
+  if (SPREADSHEET_EXTENSIONS.has(extension)) {
+    return "spreadsheet";
+  }
+  if (PRESENTATION_EXTENSIONS.has(extension)) {
+    return "presentation";
+  }
+  if (CODE_EXTENSIONS.has(extension)) {
+    return "code";
+  }
+  if (ARCHIVE_EXTENSIONS.has(extension)) {
+    return "archive";
+  }
+  if (MEDIA_EXTENSIONS.has(extension)) {
+    return "media";
+  }
+  return "file";
+}
+
+export function getFileEntryKindLabel(kind: FileEntry["kind"]): string {
+  switch (kind) {
+    case "folder":
+      return "Folder";
+    case "file":
+      return "File";
+    case "symlink":
+      return "Link";
+    default:
+      return "Unknown";
+  }
+}
+
+function FileEntryIcon({
+  visualKind,
+  fileKind,
+}: {
+  visualKind: FileEntryVisualKind;
+  fileKind: FileEntry["kind"];
+}) {
+  const toneClassName = (() => {
+    switch (visualKind) {
+      case "folder":
+        return "border-[color-mix(in_srgb,var(--accent-strong)_24%,transparent_76%)] bg-[color-mix(in_srgb,var(--accent-strong)_10%,transparent_90%)] text-[var(--accent-strong)]";
+      case "pdf":
+        return "border-[color-mix(in_srgb,#d92d20_28%,transparent_72%)] bg-[color-mix(in_srgb,#d92d20_12%,transparent_88%)] text-[#b42318]";
+      case "spreadsheet":
+        return "border-[color-mix(in_srgb,#15803d_28%,transparent_72%)] bg-[color-mix(in_srgb,#15803d_12%,transparent_88%)] text-[#15803d]";
+      case "presentation":
+        return "border-[color-mix(in_srgb,#ea580c_28%,transparent_72%)] bg-[color-mix(in_srgb,#ea580c_12%,transparent_88%)] text-[#c2410c]";
+      case "image":
+        return "border-[color-mix(in_srgb,#0f766e_28%,transparent_72%)] bg-[color-mix(in_srgb,#0f766e_12%,transparent_88%)] text-[#0f766e]";
+      case "code":
+        return "border-[color-mix(in_srgb,#155eef_28%,transparent_72%)] bg-[color-mix(in_srgb,#155eef_12%,transparent_88%)] text-[#155eef]";
+      case "archive":
+        return "border-[color-mix(in_srgb,#6b7280_28%,transparent_72%)] bg-[color-mix(in_srgb,#6b7280_12%,transparent_88%)] text-[#4b5563]";
+      case "media":
+        return "border-[color-mix(in_srgb,#7c2d12_28%,transparent_72%)] bg-[color-mix(in_srgb,#7c2d12_12%,transparent_88%)] text-[#9a3412]";
+      case "symlink":
+        return "border-[color-mix(in_srgb,#8b5cf6_24%,transparent_76%)] bg-[color-mix(in_srgb,#8b5cf6_10%,transparent_90%)] text-[#7c3aed]";
+      case "unknown":
+        return "border-[color-mix(in_srgb,var(--border)_92%,transparent_8%)] bg-[color-mix(in_srgb,var(--surface-muted)_90%,transparent_10%)] text-[var(--text-muted)]";
+      default:
+        return "border-[color-mix(in_srgb,var(--accent)_24%,transparent_76%)] bg-[color-mix(in_srgb,var(--accent)_10%,transparent_90%)] text-[var(--accent)]";
+    }
+  })();
+
+  return (
+    <span
+      aria-hidden="true"
+      data-file-icon={visualKind}
+      data-file-kind={fileKind}
+      className={cn(
+        "inline-flex h-[1.8rem] w-[1.8rem] shrink-0 items-center justify-center rounded-[12px] border",
+        toneClassName,
+      )}
+    >
+      <svg
+        viewBox="0 0 20 20"
+        className="h-[1rem] w-[1rem]"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      >
+        {visualKind === "folder" ? (
+          <>
+            <path d="M2.75 6.5a2 2 0 0 1 2-2h3.25l1.4 1.5h5.85a2 2 0 0 1 2 2v5.75a2 2 0 0 1-2 2H4.75a2 2 0 0 1-2-2V6.5Z" />
+            <path d="M2.75 7.25h14.5" />
+          </>
+        ) : visualKind === "symlink" ? (
+          <>
+            <path d="M7.1 12.9 4.8 10.6a2.15 2.15 0 1 1 3.04-3.04L9.2 8.9" />
+            <path d="m12.9 7.1 2.3 2.3a2.15 2.15 0 0 1-3.04 3.04L10.8 11.1" />
+            <path d="M7.4 12.6 12.6 7.4" />
+          </>
+        ) : (
+          <>
+            <path d="M6 2.75h5.15L15 6.6v9.15a1.5 1.5 0 0 1-1.5 1.5H6a1.5 1.5 0 0 1-1.5-1.5v-11.5A1.5 1.5 0 0 1 6 2.75Z" />
+            <path d="M11.15 2.75V6.6H15" />
+            {visualKind === "image" ? (
+              <>
+                <circle cx="8.2" cy="9" r="1.1" />
+                <path d="m6.7 14.1 2.25-2.25 1.5 1.45 1.95-2.15 1.25 2.95" />
+              </>
+            ) : null}
+            {visualKind === "document" ? (
+              <>
+                <path d="M6.8 9h5.2" />
+                <path d="M6.8 11.4h5.8" />
+                <path d="M6.8 13.8h4.4" />
+              </>
+            ) : null}
+            {visualKind === "pdf" ? (
+              <>
+                <path d="M6.8 13.8h6.4" />
+                <path d="M7.2 9.1h1.35a1.05 1.05 0 1 1 0 2.1H7.2Z" />
+                <path d="M10 11.2V9.1h1.1a1.05 1.05 0 0 1 0 2.1H10" />
+                <path d="M13 11.2V9.1" />
+                <path d="M13 9.1h1.35" />
+                <path d="M13 10.15h1.1" />
+              </>
+            ) : null}
+            {visualKind === "spreadsheet" ? (
+              <>
+                <path d="M6.8 8.4h6.4v6.2H6.8Z" />
+                <path d="M6.8 10.5h6.4" />
+                <path d="M9 8.4v6.2" />
+                <path d="M11.1 8.4v6.2" />
+              </>
+            ) : null}
+            {visualKind === "presentation" ? (
+              <>
+                <path d="M6.8 8.2h6.4v4.4H6.8Z" />
+                <path d="M10 12.6v2" />
+                <path d="M8.4 14.8h3.2" />
+              </>
+            ) : null}
+            {visualKind === "code" ? (
+              <>
+                <path d="m8.4 8.6-2.2 2.2 2.2 2.2" />
+                <path d="m11.6 8.6 2.2 2.2-2.2 2.2" />
+                <path d="m10.7 7.6-1.4 6.4" />
+              </>
+            ) : null}
+            {visualKind === "archive" ? (
+              <>
+                <path d="M8 8.2h4" />
+                <path d="M10 8.2v6" />
+                <path d="M10 9.7h.01" />
+                <path d="M10 11.4h.01" />
+                <path d="M10 13.1h.01" />
+              </>
+            ) : null}
+            {visualKind === "media" ? (
+              <>
+                <path d="M8 8v4.8a1.4 1.4 0 1 0 1.4 1.4V9.3l4-1.1v3.1a1.4 1.4 0 1 0 1.4 1.4V6.4L8 8Z" />
+              </>
+            ) : null}
+            {visualKind === "unknown" ? (
+              <>
+                <path d="M8.7 9.1a1.45 1.45 0 1 1 2.6.88c-.37.45-.92.8-1.3 1.2-.22.24-.37.5-.37.87" />
+                <path d="M10 14.25h.01" />
+              </>
+            ) : null}
+            {visualKind === "file" ? (
+              <>
+                <path d="M6.8 9h5.2" />
+                <path d="M6.8 11.4h5.2" />
+                <path d="M6.8 13.8h3.6" />
+              </>
+            ) : null}
+          </>
+        )}
+      </svg>
+    </span>
+  );
+}
+
+function HostPickerSectionHeader({
+  label,
+  count,
+}: {
+  label?: string;
+  count: number;
+}) {
+  return (
+    <div
+      className={cn(
+        "flex items-center gap-3",
+        label ? "justify-between" : "justify-end",
+      )}
+    >
+      {label ? <SectionLabel className="mb-0">{label}</SectionLabel> : null}
+      <span className="inline-flex min-w-[2rem] items-center justify-center rounded-full border border-[color-mix(in_srgb,var(--border)_80%,white_20%)] bg-[color-mix(in_srgb,var(--surface-muted)_88%,transparent_12%)] px-[0.5rem] py-[0.1rem] text-[0.72rem] font-semibold text-[var(--text-soft)]">
+        {count}
+      </span>
+    </div>
+  );
+}
+
+function GroupFolderBadge() {
+  return (
+    <svg
+      viewBox="0 0 20 20"
+      className="h-[1rem] w-[1rem]"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.7"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M2.75 6.5a2 2 0 0 1 2-2h3.25l1.4 1.5h5.85a2 2 0 0 1 2 2v5.75a2 2 0 0 1-2 2H4.75a2 2 0 0 1-2-2V6.5Z" />
+      <path d="M2.75 7.25h14.5" />
+    </svg>
+  );
+}
+
 export function breadcrumbParts(
   targetPath: string,
+  desktopPlatform: DesktopPlatform = "unknown",
 ): Array<{ label: string; path: string }> {
+  const normalizedTargetPath = targetPath.trim();
+  const shouldUseWindowsBreadcrumbs =
+    desktopPlatform === "win32" || WINDOWS_DRIVE_PATH_PATTERN.test(normalizedTargetPath);
+
+  if (shouldUseWindowsBreadcrumbs) {
+    const windowsPath = normalizedTargetPath.replace(/\//g, "\\");
+    const driveMatch = windowsPath.match(/^([a-zA-Z]:)(\\.*)?$/);
+    if (driveMatch) {
+      const driveLabel = driveMatch[1].toUpperCase();
+      const drivePath = `${driveLabel}\\`;
+      const segments = (driveMatch[2] ?? "").split("\\").filter(Boolean);
+      const result: Array<{ label: string; path: string }> = [
+        { label: driveLabel, path: drivePath },
+      ];
+      let currentPath = drivePath;
+      for (const segment of segments) {
+        currentPath = currentPath.endsWith("\\")
+          ? `${currentPath}${segment}`
+          : `${currentPath}\\${segment}`;
+        result.push({
+          label: segment,
+          path: currentPath,
+        });
+      }
+      return result;
+    }
+  }
+
   if (!targetPath || targetPath === "/") {
     return [{ label: "/", path: "/" }];
   }
@@ -553,6 +935,7 @@ interface ColumnResizeState {
 }
 
 interface PaneBrowserProps {
+  desktopPlatform: DesktopPlatform;
   pane: SftpPaneState;
   columnWidths: SftpBrowserColumnWidths;
   resizingColumnKey: SftpBrowserColumnKey | null;
@@ -566,6 +949,7 @@ interface PaneBrowserProps {
   onNavigateForward: () => Promise<void>;
   onNavigateParent: () => Promise<void>;
   onNavigateBreadcrumb: (nextPath: string) => Promise<void>;
+  onListLocalRoots: () => Promise<FileSystemRoot[]>;
   onRefresh: () => Promise<void>;
   onSelectEntry: (input: SftpEntrySelectionInput) => void;
   onOpenEntry: (entryPath: string) => Promise<void>;
@@ -586,6 +970,7 @@ interface PaneBrowserProps {
 }
 
 function PaneBrowser({
+  desktopPlatform,
   pane,
   columnWidths,
   resizingColumnKey,
@@ -596,6 +981,7 @@ function PaneBrowser({
   onNavigateForward,
   onNavigateParent,
   onNavigateBreadcrumb,
+  onListLocalRoots,
   onRefresh,
   onSelectEntry,
   onOpenEntry,
@@ -610,6 +996,13 @@ function PaneBrowser({
   const entries = useMemo(() => visibleEntries(pane), [pane]);
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const [isDropTargetActive, setIsDropTargetActive] = useState(false);
+  const [isLocalRootsMenuOpen, setIsLocalRootsMenuOpen] = useState(false);
+  const [localRoots, setLocalRoots] = useState<FileSystemRoot[] | null>(null);
+  const [isLoadingLocalRoots, setIsLoadingLocalRoots] = useState(false);
+  const [localRootsErrorMessage, setLocalRootsErrorMessage] = useState<string | null>(
+    null,
+  );
+  const localBreadcrumbRef = useRef<HTMLDivElement | null>(null);
   const tableStyle = useMemo<CSSProperties>(
     () => ({
       width: `${Object.values(columnWidths).reduce((total, width) => total + width, 0)}px`,
@@ -617,6 +1010,23 @@ function PaneBrowser({
     }),
     [columnWidths],
   );
+  const isWindowsLocalPane =
+    pane.sourceKind === "local" && desktopPlatform === "win32";
+  const breadcrumbs = useMemo(
+    () => breadcrumbParts(pane.currentPath, desktopPlatform),
+    [desktopPlatform, pane.currentPath],
+  );
+  const currentWindowsDriveRoot = useMemo(() => {
+    if (!isWindowsLocalPane) {
+      return null;
+    }
+    const rootPath = breadcrumbs[0]?.path ?? null;
+    if (!rootPath) {
+      return null;
+    }
+    const normalizedPath = rootPath.replace(/\//g, "\\");
+    return WINDOWS_DRIVE_ROOT_PATTERN.test(normalizedPath) ? normalizedPath : null;
+  }, [breadcrumbs, isWindowsLocalPane]);
 
   useEffect(() => {
     if (!contextMenu) {
@@ -632,6 +1042,37 @@ function PaneBrowser({
       window.removeEventListener("resize", close);
     };
   }, [contextMenu]);
+
+  useEffect(() => {
+    setIsLocalRootsMenuOpen(false);
+  }, [desktopPlatform, pane.currentPath, pane.sourceKind]);
+
+  useEffect(() => {
+    if (!isLocalRootsMenuOpen) {
+      return;
+    }
+    const handlePointerDown = (event: PointerEvent) => {
+      const nextTarget = event.target;
+      if (
+        nextTarget instanceof Node &&
+        localBreadcrumbRef.current?.contains(nextTarget)
+      ) {
+        return;
+      }
+      setIsLocalRootsMenuOpen(false);
+    };
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setIsLocalRootsMenuOpen(false);
+      }
+    };
+    window.addEventListener("pointerdown", handlePointerDown);
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      window.removeEventListener("pointerdown", handlePointerDown);
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [isLocalRootsMenuOpen]);
 
   const selectedEntry =
     pane.selectedPaths.length === 1
@@ -670,6 +1111,33 @@ function PaneBrowser({
     void onPrepareExternalTransfer(targetPath, droppedPaths);
     return true;
   };
+
+  async function toggleLocalRootsMenu() {
+    if (!isWindowsLocalPane) {
+      return;
+    }
+    if (isLocalRootsMenuOpen) {
+      setIsLocalRootsMenuOpen(false);
+      return;
+    }
+    setIsLocalRootsMenuOpen(true);
+    if (localRoots !== null || isLoadingLocalRoots) {
+      return;
+    }
+    setIsLoadingLocalRoots(true);
+    setLocalRootsErrorMessage(null);
+    try {
+      setLocalRoots(await onListLocalRoots());
+    } catch (error) {
+      setLocalRootsErrorMessage(
+        error instanceof Error
+          ? error.message
+          : "드라이브 목록을 불러오지 못했습니다.",
+      );
+    } finally {
+      setIsLoadingLocalRoots(false);
+    }
+  }
 
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-[0.85rem] px-4 pb-4">
@@ -731,19 +1199,116 @@ function PaneBrowser({
         </div>
       </Toolbar>
 
-      <div className="flex flex-wrap items-center gap-2">
-        {breadcrumbParts(pane.currentPath).map((part) => (
-          <Button
-            key={part.path}
-            type="button"
-            variant="ghost"
-            size="sm"
-            className="rounded-[12px]"
-            onClick={() => void onNavigateBreadcrumb(part.path)}
+      <div ref={localBreadcrumbRef} className="relative">
+        <nav
+          aria-label={`Local path for ${pane.id} pane`}
+          className="flex flex-wrap items-center gap-x-1.5 gap-y-1 text-[0.92rem] text-[var(--text-muted)]"
+        >
+          {breadcrumbs.map((part, index) => {
+            const isWindowsDrivePart =
+              isWindowsLocalPane &&
+              WINDOWS_DRIVE_ROOT_PATTERN.test(part.path.replace(/\//g, "\\"));
+            const isCurrent = part.path === pane.currentPath;
+            const isInteractive = isWindowsDrivePart || !isCurrent;
+
+            return (
+              <Fragment key={part.path}>
+                {index > 0 ? (
+                  <span
+                    aria-hidden="true"
+                    className="text-[0.86rem] text-[var(--text-dim)]"
+                  >
+                    ›
+                  </span>
+                ) : null}
+                {isInteractive ? (
+                  <button
+                    type="button"
+                    className={cn(
+                      "rounded-[8px] px-[0.1rem] py-[0.05rem] text-left transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-strong)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--surface-panel)] disabled:cursor-default disabled:opacity-60",
+                      isCurrent
+                        ? "font-medium text-[var(--text-primary)]"
+                        : "text-[var(--text-secondary)] hover:text-[var(--accent-strong)]",
+                      isWindowsDrivePart &&
+                        isLocalRootsMenuOpen &&
+                        "text-[var(--accent-strong)]",
+                    )}
+                    aria-haspopup={isWindowsDrivePart ? "menu" : undefined}
+                    aria-expanded={isWindowsDrivePart ? isLocalRootsMenuOpen : undefined}
+                    aria-controls={
+                      isWindowsDrivePart ? `${pane.id}-local-root-menu` : undefined
+                    }
+                    onClick={() => {
+                      if (isWindowsDrivePart) {
+                        void toggleLocalRootsMenu();
+                        return;
+                      }
+                      void onNavigateBreadcrumb(part.path);
+                    }}
+                    disabled={pane.isLoading}
+                  >
+                    {part.label}
+                  </button>
+                ) : (
+                  <span className="font-medium text-[var(--text-primary)]">
+                    {part.label}
+                  </span>
+                )}
+              </Fragment>
+            );
+          })}
+        </nav>
+
+        {isWindowsLocalPane && isLocalRootsMenuOpen ? (
+          <div
+            id={`${pane.id}-local-root-menu`}
+            role="menu"
+            aria-label={`Local drive selector for ${pane.id} pane`}
+            className="absolute left-0 top-[calc(100%+0.45rem)] z-20 min-w-[8.5rem] rounded-[16px] border border-[var(--border)] bg-[var(--surface-elevated)] p-[0.35rem] shadow-[var(--shadow)]"
           >
-            {part.label}
-          </Button>
-        ))}
+            {isLoadingLocalRoots ? (
+              <div className="px-[0.55rem] py-[0.45rem] text-[0.84rem] text-[var(--text-muted)]">
+                드라이브 불러오는 중...
+              </div>
+            ) : localRootsErrorMessage ? (
+              <div className="px-[0.55rem] py-[0.45rem] text-[0.84rem] text-[var(--danger)]">
+                {localRootsErrorMessage}
+              </div>
+            ) : localRoots && localRoots.length > 0 ? (
+              <div className="flex flex-col gap-[0.15rem]">
+                {localRoots.map((root) => {
+                  const isCurrentRoot =
+                    currentWindowsDriveRoot !== null &&
+                    root.path.replace(/\//g, "\\").toUpperCase() ===
+                      currentWindowsDriveRoot.toUpperCase();
+                  return (
+                    <button
+                      key={root.path}
+                      type="button"
+                      role="menuitem"
+                      className={cn(
+                        "rounded-[12px] px-[0.55rem] py-[0.45rem] text-left text-[0.88rem] transition-colors duration-150",
+                        isCurrentRoot
+                          ? "bg-[color-mix(in_srgb,var(--accent-strong)_14%,var(--surface-elevated)_86%)] font-medium text-[var(--accent-strong)] hover:bg-[color-mix(in_srgb,var(--accent-strong)_18%,var(--surface-elevated)_82%)]"
+                          : "text-[var(--text-secondary)] hover:bg-[color-mix(in_srgb,var(--surface-muted)_82%,transparent_18%)] hover:text-[var(--text-primary)]",
+                      )}
+                      onClick={() => {
+                        setIsLocalRootsMenuOpen(false);
+                        void onNavigateBreadcrumb(root.path);
+                      }}
+                    >
+                      {root.label}
+                    </button>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="px-[0.55rem] py-[0.45rem] text-[0.84rem] text-[var(--text-muted)]">
+                사용할 수 있는 드라이브가 없습니다.
+              </div>
+            )}
+          </div>
+        ) : null}
       </div>
 
       <FilterRow className="p-0 border-0 bg-transparent">
@@ -970,16 +1535,10 @@ function PaneBrowser({
                   className="border-b border-[color-mix(in_srgb,var(--border)_90%,transparent_10%)] px-[0.9rem] py-[0.8rem] text-left whitespace-nowrap"
                 >
                   <div className="flex min-w-0 items-center gap-[0.6rem]">
-                    <span
-                      className={cn(
-                        "inline-grid h-[1.8rem] w-[1.8rem] place-items-center rounded-[12px] text-[0.72rem] font-bold",
-                        entry.isDirectory
-                          ? "bg-[color-mix(in_srgb,var(--accent-strong)_12%,transparent_88%)] text-[var(--accent-strong)]"
-                          : "bg-[color-mix(in_srgb,var(--accent)_14%,transparent_86%)] text-[var(--accent)]",
-                      )}
-                    >
-                      {entry.isDirectory ? "D" : "F"}
-                    </span>
+                    <FileEntryIcon
+                      visualKind={getFileEntryVisualKind(entry)}
+                      fileKind={entry.kind}
+                    />
                     <span className="min-w-0 overflow-hidden text-ellipsis">
                       {entry.name}
                     </span>
@@ -998,10 +1557,10 @@ function PaneBrowser({
                   {entry.isDirectory ? "--" : formatSize(entry.size)}
                 </td>
                 <td
-                  title={entry.kind}
-                  className="border-b border-[color-mix(in_srgb,var(--border)_90%,transparent_10%)] px-[0.9rem] py-[0.8rem] text-left overflow-hidden text-ellipsis whitespace-nowrap"
+                  title={getFileEntryKindLabel(entry.kind)}
+                  className="border-b border-[color-mix(in_srgb,var(--border)_90%,transparent_10%)] px-[0.9rem] py-[0.8rem] text-left overflow-hidden text-ellipsis whitespace-nowrap text-[var(--text-muted)]"
                 >
-                  {entry.kind}
+                  {getFileEntryKindLabel(entry.kind)}
                 </td>
               </tr>
             ))}
@@ -1151,8 +1710,8 @@ function HostPicker({
     pane.connectingEndpointId !== dismissedInteractiveEndpointId;
   const { ref: groupGridRef, style: groupGridStyle } = useResponsiveCardGrid({
     itemCount: visibleGroups.length,
-    minWidth: SFTP_HOST_PICKER_GROUP_CARD_MIN_WIDTH_PX,
-    maxWidth: SFTP_HOST_PICKER_GROUP_CARD_MAX_WIDTH_PX,
+    minWidth: SFTP_HOST_PICKER_HOST_CARD_MIN_WIDTH_PX,
+    maxWidth: SFTP_HOST_PICKER_HOST_CARD_MAX_WIDTH_PX,
     gap: SFTP_HOST_PICKER_CARD_GAP_PX,
   });
   const { ref: hostGridRef, style: hostGridStyle } = useResponsiveCardGrid({
@@ -1222,22 +1781,42 @@ function HostPicker({
       </FilterRow>
 
       {breadcrumbs.length > 0 ? (
-        <div className="flex flex-wrap items-center gap-2">
-          {breadcrumbs.map((crumb) => (
-            <Button
-              key={crumb.path ?? "root"}
-              type="button"
-              variant={crumb.path === pane.hostGroupPath ? "secondary" : "ghost"}
-              size="sm"
-              active={crumb.path === pane.hostGroupPath}
-              className="rounded-[12px]"
-              onClick={() => onNavigateHostGroup(crumb.path)}
-              disabled={isConnecting}
-            >
-              {crumb.label}
-            </Button>
-          ))}
-        </div>
+        <nav
+          aria-label={`Host group path for ${pane.id} pane`}
+          className="flex flex-wrap items-center gap-x-1.5 gap-y-1 text-[0.92rem] text-[var(--text-muted)]"
+        >
+          {breadcrumbs.map((crumb, index) => {
+            const isCurrent = crumb.path === pane.hostGroupPath;
+            const displayLabel = crumb.path === null ? "All Groups" : crumb.label;
+
+            return (
+              <Fragment key={crumb.path ?? "root"}>
+                {index > 0 ? (
+                  <span
+                    aria-hidden="true"
+                    className="text-[0.86rem] text-[var(--text-dim)]"
+                  >
+                    ›
+                  </span>
+                ) : null}
+                {isCurrent ? (
+                  <span className="font-medium text-[var(--text-primary)]">
+                    {displayLabel}
+                  </span>
+                ) : (
+                  <button
+                    type="button"
+                    className="rounded-[8px] px-[0.1rem] py-[0.05rem] text-left text-[var(--text-secondary)] transition-colors duration-150 hover:text-[var(--accent-strong)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-strong)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--surface-panel)] disabled:cursor-default disabled:opacity-60"
+                    onClick={() => onNavigateHostGroup(crumb.path)}
+                    disabled={isConnecting}
+                  >
+                    {displayLabel}
+                  </button>
+                )}
+              </Fragment>
+            );
+          })}
+        </nav>
       ) : null}
 
       {pane.errorMessage ? (
@@ -1256,151 +1835,147 @@ function HostPicker({
         aria-label={`Available hosts for ${pane.id} pane`}
       >
         {visibleGroups.length > 0 ? (
-          <div
-            data-group-grid="true"
-            className="grid content-start gap-[0.75rem]"
-            ref={groupGridRef}
-            style={groupGridStyle}
-          >
-            {visibleGroups.map((group) => (
-              <article
-                key={group.path}
-                data-group-card="true"
-                className={cn(
-                  'relative flex min-h-[96px] select-none items-center gap-[0.7rem] rounded-[22px] border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[var(--surface-elevated)] px-[0.9rem] py-[0.82rem] shadow-[var(--shadow-soft)] transition-[background-color,border-color,box-shadow,opacity] duration-150',
-                  isConnecting
-                    ? 'cursor-default opacity-65'
-                    : 'cursor-pointer hover:border-[color-mix(in_srgb,var(--accent-strong)_34%,var(--border)_66%)] hover:bg-[color-mix(in_srgb,var(--surface-elevated)_90%,var(--accent-strong)_10%)]',
-                )}
-                onDoubleClick={() => {
-                  if (isConnecting) {
-                    return;
-                  }
-                  onNavigateHostGroup(group.path);
-                }}
-                role="button"
-                aria-disabled={isConnecting}
-                tabIndex={isConnecting ? -1 : 0}
-                onKeyDown={(event) => {
-                  if (isConnecting) {
-                    return;
-                  }
-                  if (event.key === "Enter" || event.key === " ") {
-                    event.preventDefault();
-                    onNavigateHostGroup(group.path);
-                  }
-                }}
-              >
-                <div className="inline-grid h-[2.45rem] w-[2.45rem] shrink-0 place-items-center rounded-[14px] bg-[linear-gradient(180deg,color-mix(in_srgb,var(--accent-strong)_90%,white_10%),color-mix(in_srgb,var(--chrome-bg)_84%,var(--accent-strong)_16%))] text-[0.92rem] font-bold text-white">
-                  {group.name.slice(0, 1).toUpperCase()}
-                </div>
-                <div className="min-w-0 flex-1">
-                  <strong>{group.name}</strong>
-                  <span className="block text-[var(--text-soft)]">
-                    {group.hostCount} hosts
-                  </span>
-                </div>
-              </article>
-            ))}
-          </div>
-        ) : null}
-
-        <div
-          data-host-grid="true"
-          className="grid content-start gap-[0.75rem]"
-          ref={hostGridRef}
-          style={hostGridStyle}
-        >
-          {isEmpty ? (
-            <EmptyState
-              title={
-                hosts.length === 0
-                  ? "표시할 host가 없습니다."
-                  : pane.hostSearchQuery
-                    ? "검색 결과가 없습니다."
-                    : "이 위치에는 아직 host가 없습니다."
-              }
-              description={
-                hosts.length === 0
-                  ? "Home에서 원격 host를 추가한 뒤 다시 확인해보세요."
-                  : pane.hostSearchQuery
-                    ? "검색어를 지우거나 다른 이름으로 다시 찾아보세요."
-                    : "다른 그룹으로 이동하거나 Home에서 호스트 구성을 확인해보세요."
-              }
-            />
-          ) : (
-            visibleHosts.map((host) => {
-              const awsHost = isAwsEc2HostRecord(host) ? host : null;
-              const badgeLabel = getHostBadgeLabel(host);
-              const disabledReason = getSftpHostPickerDisabledReason(host);
-              const canOpenHostSettings = awsHost
-                ? !awsHost.awsSshUsername?.trim() || awsHost.awsSshMetadataStatus === "error"
-                : false;
-              const awsMetadataStatusLabel = awsHost
-                ? getAwsEc2HostSshMetadataStatusLabel(awsHost.awsSshMetadataStatus)
-                : null;
-              const isSelected = pane.selectedHostId === host.id;
-              const isBusy = isConnecting && isSelected;
-              const hint = disabledReason
-                ? disabledReason
-                : awsMetadataStatusLabel
-                  ? `${awsMetadataStatusLabel}${
-                      awsHost?.awsSshMetadataStatus === "error" &&
-                      awsHost.awsSshMetadataError
-                        ? ` · ${awsHost.awsSshMetadataError}`
-                        : ""
-                    }`
-                  : undefined;
-              return (
+          <section aria-label={`Visible groups for ${pane.id} pane`}>
+            <HostPickerSectionHeader count={visibleGroups.length} />
+            <div
+              data-group-grid="true"
+              className="mt-[0.7rem] grid content-start gap-[0.75rem]"
+              ref={groupGridRef}
+              style={groupGridStyle}
+            >
+              {visibleGroups.map((group) => (
                 <HostCard
-                  key={host.id}
-                  selected={isSelected}
-                  busy={isBusy}
-                  disabled={Boolean(disabledReason)}
-                  badgeLabel={badgeLabel}
-                  title={host.label}
-                  subtitle={getHostSubtitle(host)}
-                  groupLabel={host.groupName || "Ungrouped"}
-                  hint={hint}
-                  onClick={() => {
+                  key={group.path}
+                  data-group-card="true"
+                  badgeLabel={<GroupFolderBadge />}
+                  badgeMarker="folder"
+                  title={group.name}
+                  subtitle={`${group.hostCount} hosts`}
+                  groupLabel="Group"
+                  disabled={isConnecting}
+                  onDoubleClick={() => {
                     if (isConnecting) {
                       return;
                     }
-                    onSelectHost(host.id);
+                    onNavigateHostGroup(group.path);
                   }}
-                  onDoubleClick={() => {
-                    if (isConnecting || disabledReason) {
+                  role="button"
+                  aria-disabled={isConnecting}
+                  tabIndex={isConnecting ? -1 : 0}
+                  onKeyDown={(event) => {
+                    if (isConnecting) {
                       return;
                     }
-                    void onConnectHost(host.id);
+                    if (event.key === "Enter" || event.key === " ") {
+                      event.preventDefault();
+                      onNavigateHostGroup(group.path);
+                    }
                   }}
-                  actions={
-                    isBusy ? (
-                      <StatusBadge
-                        tone="starting"
-                        aria-label="Connecting selected host"
-                      >
-                        연결 중
-                      </StatusBadge>
-                    ) : canOpenHostSettings && onOpenHostSettings ? (
-                      <Button
-                        variant="secondary"
-                        size="sm"
-                        className="rounded-[12px] whitespace-nowrap"
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          onOpenHostSettings(host.id);
-                        }}
-                      >
-                        설정 열기
-                      </Button>
-                    ) : null
-                  }
                 />
-              );
-            })
-          )}
-        </div>
+              ))}
+            </div>
+          </section>
+        ) : null}
+
+        <section aria-label={`Visible hosts for ${pane.id} pane`}>
+          <HostPickerSectionHeader label="Hosts" count={visibleHosts.length} />
+          <div
+            data-host-grid="true"
+            className="mt-[0.7rem] grid content-start gap-[0.75rem]"
+            ref={hostGridRef}
+            style={hostGridStyle}
+          >
+            {isEmpty ? (
+              <EmptyState
+                title={
+                  hosts.length === 0
+                    ? "표시할 host가 없습니다."
+                    : pane.hostSearchQuery
+                      ? "검색 결과가 없습니다."
+                      : "이 위치에는 아직 host가 없습니다."
+                }
+                description={
+                  hosts.length === 0
+                    ? "Home에서 원격 host를 추가한 뒤 다시 확인해보세요."
+                    : pane.hostSearchQuery
+                      ? "검색어를 지우거나 다른 이름으로 다시 찾아보세요."
+                      : "다른 그룹으로 이동하거나 Home에서 호스트 구성을 확인해보세요."
+                }
+              />
+            ) : (
+              visibleHosts.map((host) => {
+                const awsHost = isAwsEc2HostRecord(host) ? host : null;
+                const badgeLabel = getHostBadgeLabel(host);
+                const disabledReason = getSftpHostPickerDisabledReason(host);
+                const canOpenHostSettings = awsHost
+                  ? !awsHost.awsSshUsername?.trim() || awsHost.awsSshMetadataStatus === "error"
+                  : false;
+                const awsMetadataStatusLabel = awsHost
+                  ? getAwsEc2HostSshMetadataStatusLabel(awsHost.awsSshMetadataStatus)
+                  : null;
+                const isSelected = pane.selectedHostId === host.id;
+                const isBusy = isConnecting && isSelected;
+                const hint = disabledReason
+                  ? disabledReason
+                  : awsMetadataStatusLabel
+                    ? `${awsMetadataStatusLabel}${
+                        awsHost?.awsSshMetadataStatus === "error" &&
+                        awsHost.awsSshMetadataError
+                          ? ` · ${awsHost.awsSshMetadataError}`
+                          : ""
+                      }`
+                    : undefined;
+                return (
+                  <HostCard
+                    key={host.id}
+                    selected={isSelected}
+                    busy={isBusy}
+                    disabled={Boolean(disabledReason)}
+                    badgeLabel={badgeLabel}
+                    title={host.label}
+                    subtitle={getHostSubtitle(host)}
+                    groupLabel={host.groupName || "Ungrouped"}
+                    hint={hint}
+                    onClick={() => {
+                      if (isConnecting) {
+                        return;
+                      }
+                      onSelectHost(host.id);
+                    }}
+                    onDoubleClick={() => {
+                      if (isConnecting || disabledReason) {
+                        return;
+                      }
+                      void onConnectHost(host.id);
+                    }}
+                    actions={
+                      isBusy ? (
+                        <StatusBadge
+                          tone="starting"
+                          aria-label="Connecting selected host"
+                        >
+                          연결 중
+                        </StatusBadge>
+                      ) : canOpenHostSettings && onOpenHostSettings ? (
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          className="rounded-[12px] whitespace-nowrap"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            onOpenHostSettings(host.id);
+                          }}
+                        >
+                          설정 열기
+                        </Button>
+                      ) : null
+                    }
+                  />
+                );
+              })
+            )}
+          </div>
+        </section>
       </div>
 
       {matchingInteractiveAuth ? (
@@ -1843,6 +2418,7 @@ function DeleteDialog({
 }
 
 export function SftpWorkspace({
+  desktopPlatform,
   hosts,
   groups,
   sftp,
@@ -1862,6 +2438,7 @@ export function SftpWorkspace({
   onNavigateForward,
   onNavigateParent,
   onNavigateBreadcrumb,
+  onListLocalRoots,
   onSelectEntry,
   onCreateDirectory,
   onRenameSelection,
@@ -2089,6 +2666,7 @@ export function SftpWorkspace({
                 />
               ) : (
                 <PaneBrowser
+                  desktopPlatform={desktopPlatform}
                   pane={pane}
                   columnWidths={columnWidths}
                   resizingColumnKey={columnResize?.key ?? null}
@@ -2101,6 +2679,7 @@ export function SftpWorkspace({
                   onNavigateBreadcrumb={(nextPath) =>
                     onNavigateBreadcrumb(pane.id, nextPath)
                   }
+                  onListLocalRoots={onListLocalRoots}
                   onRefresh={() => onRefreshPane(pane.id)}
                   onSelectEntry={(input) => onSelectEntry(pane.id, input)}
                   onOpenEntry={(entryPath) => onOpenEntry(pane.id, entryPath)}

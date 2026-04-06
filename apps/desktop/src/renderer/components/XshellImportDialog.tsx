@@ -26,6 +26,7 @@ import {
   SectionLabel,
   StatusBadge,
 } from '../ui';
+import { cn } from '../lib/cn';
 
 interface XshellImportDialogProps {
   open: boolean;
@@ -413,37 +414,99 @@ export function collectEffectiveSelectedXshellGroupPaths(
   });
 }
 
-function renderWarningList(warnings: XshellImportWarning[]) {
-  if (warnings.length === 0) {
-    return null;
+function buildXshellNoticeSummary(
+  warnings: XshellImportWarning[],
+  hasSavedPasswordHosts: boolean,
+  additionalSourceCount: number
+) {
+  if (warnings.length > 0 && hasSavedPasswordHosts) {
+    return `주의 사항 ${warnings.length}건, 저장된 비밀번호 포함`;
   }
-
-  return (
-    <div className="grid gap-2">
-      {warnings.map((warning, index) => (
-        <p
-          key={`${warning.code ?? 'warning'}:${index}`}
-          className="text-[0.9rem] leading-[1.6] text-[var(--text-soft)]"
-        >
-          {warning.message}
-        </p>
-      ))}
-    </div>
-  );
+  if (warnings.length > 0) {
+    return `주의 사항 ${warnings.length}건`;
+  }
+  if (hasSavedPasswordHosts) {
+    return '저장된 비밀번호 포함';
+  }
+  if (additionalSourceCount > 0) {
+    return `추가 세션 소스 ${additionalSourceCount}개`;
+  }
+  return null;
 }
 
-function renderSourceList(sources: XshellSourceSummary[]) {
+function renderProbeSummary(
+  sources: XshellSourceSummary[],
+  warnings: XshellImportWarning[],
+  hasSavedPasswordHosts: boolean
+) {
   if (sources.length === 0) {
     return null;
   }
 
+  const [primarySource, ...additionalSources] = sources;
+  const disclosureSummary = buildXshellNoticeSummary(
+    warnings,
+    hasSavedPasswordHosts,
+    additionalSources.length
+  );
+
   return (
-    <div className="grid gap-2">
-      {sources.map((source) => (
-        <p key={source.id} className="text-[0.9rem] leading-[1.6] text-[var(--text-soft)]">
-          <strong>{source.origin === 'default-session-dir' ? '기본 경로' : '추가 폴더'}</strong> <code>{source.folderPath}</code>
-        </p>
-      ))}
+    <div className="grid gap-3">
+      <div className="rounded-[18px] border border-[var(--border)] bg-[var(--dialog-surface-muted)] px-4 py-3">
+        <div
+          className={cn(
+            'grid items-center gap-3 text-[0.9rem] leading-[1.6] text-[var(--text-soft)]',
+            additionalSources.length > 0
+              ? 'grid-cols-[auto_minmax(0,1fr)_auto]'
+              : 'grid-cols-[auto_minmax(0,1fr)]'
+          )}
+        >
+          <strong className="text-[var(--text)]">세션 소스 {sources.length}개</strong>
+          <code className="min-w-0 truncate text-[0.84rem]" title={primarySource.folderPath}>
+            {primarySource.folderPath}
+          </code>
+          {additionalSources.length > 0 ? <span className="shrink-0">외 {additionalSources.length}개</span> : null}
+        </div>
+      </div>
+
+      {disclosureSummary ? (
+        <details className="rounded-[18px] border border-[var(--border)] bg-[var(--dialog-surface-muted)] px-4 py-3">
+          <summary className="cursor-pointer text-[0.9rem] font-medium leading-[1.6] text-[var(--text-soft)]">
+            {disclosureSummary}
+          </summary>
+          <div className="mt-3 grid gap-3">
+            {warnings.length > 0 ? (
+              <div className="grid gap-2">
+                {warnings.map((warning, index) => (
+                  <p
+                    key={`${warning.code ?? 'warning'}:${index}`}
+                    className="text-[0.9rem] leading-[1.6] text-[var(--text-soft)]"
+                  >
+                    {warning.message}
+                  </p>
+                ))}
+              </div>
+            ) : null}
+
+            {hasSavedPasswordHosts ? (
+              <p className="text-[0.9rem] leading-[1.6] text-[var(--text-soft)]">
+                암호화된 비밀번호는 복호화를 시도합니다. 실패하면 호스트만 추가됩니다.
+              </p>
+            ) : null}
+
+            {additionalSources.length > 0 ? (
+              <div className="grid gap-2">
+                {additionalSources.map((source) => (
+                  <p key={source.id} className="text-[0.9rem] leading-[1.6] text-[var(--text-soft)]">
+                    <strong>{source.origin === 'default-session-dir' ? '기본 경로' : '추가 폴더'}</strong>{' '}
+                    <code className="break-all text-[0.84rem]">{source.folderPath}</code>
+                  </p>
+                ))}
+              </div>
+            ) : null}
+          </div>
+        </details>
+      ) : null}
     </div>
   );
 }
@@ -678,7 +741,12 @@ export function XshellImportDialog({ open, onClose, onImported }: XshellImportDi
 
   return (
     <DialogBackdrop onDismiss={onClose} dismissDisabled={isAddingFolder || isImporting}>
-      <ModalShell role="dialog" aria-modal="true" aria-labelledby="xshell-import-title" size="xl">
+      <ModalShell
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="xshell-import-title"
+        size="xl"
+      >
         <ModalHeader>
           <div>
             <SectionLabel>Xshell</SectionLabel>
@@ -699,9 +767,7 @@ export function XshellImportDialog({ open, onClose, onImported }: XshellImportDi
             </NoticeCard>
           ) : null}
 
-          {probe ? renderSourceList(probe.sources) : null}
-          {probe ? renderWarningList(probe.warnings) : null}
-          {probe && hasSavedPasswordHosts ? <div className="text-[0.9rem] leading-[1.6] text-[var(--text-soft)]">암호화된 비밀번호는 복호화를 시도합니다. 실패하면 호스트만 추가됩니다.</div> : null}
+          {probe ? renderProbeSummary(probe.sources, probe.warnings, hasSavedPasswordHosts) : null}
 
           {probe ? (
             <>
@@ -805,12 +871,11 @@ export function XshellImportDialog({ open, onClose, onImported }: XshellImportDi
                 {probe.skippedDuplicateHostCount > 0 ? <span>세션 중복 제외 {probe.skippedDuplicateHostCount}</span> : null}
               </div>
 
-              <div className="grid gap-[0.35rem]">
-                <div className="text-[0.9rem] leading-[1.6] text-[var(--text-soft)]">호스트를 선택하면 필요한 상위 그룹은 자동 생성됩니다.</div>
-                <div className="text-[0.9rem] leading-[1.6] text-[var(--text-soft)]">그룹을 선택하면 하위 그룹과 호스트를 모두 가져옵니다. 빈 그룹도 가져올 수 있습니다.</div>
+              <div className="text-[0.9rem] leading-[1.6] text-[var(--text-soft)]">
+                호스트 선택 시 상위 그룹은 자동 생성되고, 그룹 선택 시 하위 그룹과 호스트를 함께 가져옵니다.
               </div>
 
-              <section className="grid min-h-0 gap-3">
+              <section className="grid gap-3">
                 <h4>가져올 항목</h4>
                 {treeNodes.length === 0 ? (
                   <EmptyState
@@ -819,7 +884,7 @@ export function XshellImportDialog({ open, onClose, onImported }: XshellImportDi
                   />
                 ) : (
                   <div
-                    className="flex min-h-0 flex-col gap-2 overflow-y-auto rounded-[18px] border border-[var(--border)] bg-[var(--dialog-surface-muted)] p-[0.45rem]"
+                    className="grid gap-2 rounded-[18px] border border-[var(--border)] bg-[var(--dialog-surface-muted)] p-[0.45rem]"
                     role="tree"
                     aria-label="Xshell 가져오기 항목"
                   >

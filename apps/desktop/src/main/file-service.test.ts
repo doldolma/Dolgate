@@ -4,6 +4,10 @@ import os from 'node:os';
 import path from 'node:path';
 
 let mockedHomeDirectory = '/Users/tester';
+const processPlatformDescriptor = Object.getOwnPropertyDescriptor(
+  process,
+  'platform',
+);
 
 vi.mock('electron', () => ({
   app: {
@@ -22,6 +26,10 @@ describe('LocalFileService', () => {
   });
 
   afterEach(async () => {
+    if (processPlatformDescriptor) {
+      Object.defineProperty(process, 'platform', processPlatformDescriptor);
+    }
+    vi.restoreAllMocks();
     await fs.rm(tempDir, { recursive: true, force: true });
   });
 
@@ -77,5 +85,31 @@ describe('LocalFileService', () => {
     await service.delete([path.join(tempDir, 'created', 'after.txt'), path.join(tempDir, 'created')]);
 
     await expect(fs.access(path.join(tempDir, 'created'))).rejects.toThrow();
+  });
+
+  it('lists a single posix root on non-Windows platforms', async () => {
+    Object.defineProperty(process, 'platform', { value: 'linux' });
+
+    await expect(service.listRoots()).resolves.toEqual([
+      { label: '/', path: '/' },
+    ]);
+  });
+
+  it('lists accessible drive roots on Windows platforms', async () => {
+    Object.defineProperty(process, 'platform', { value: 'win32' });
+    vi.spyOn(fs, 'access').mockImplementation(async (targetPath: Parameters<typeof fs.access>[0]) => {
+      const normalizedPath = String(targetPath);
+      if (normalizedPath === 'C:\\' || normalizedPath === 'D:\\') {
+        return;
+      }
+      const error = new Error(`ENOENT: ${normalizedPath}`) as NodeJS.ErrnoException;
+      error.code = 'ENOENT';
+      throw error;
+    });
+
+    await expect(service.listRoots()).resolves.toEqual([
+      { label: 'C:', path: 'C:\\' },
+      { label: 'D:', path: 'D:\\' },
+    ]);
   });
 });

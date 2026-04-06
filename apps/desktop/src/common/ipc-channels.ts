@@ -26,7 +26,9 @@ export const ipcChannels = {
   groups: {
     list: 'groups:list',
     create: 'groups:create',
-    remove: 'groups:remove'
+    remove: 'groups:remove',
+    move: 'groups:move',
+    rename: 'groups:rename'
   },
   aws: {
     listProfiles: 'aws:list-profiles',
@@ -180,6 +182,7 @@ export const ipcChannels = {
   files: {
     getHomeDirectory: 'files:get-home-directory',
     getDownloadsDirectory: 'files:get-downloads-directory',
+    listRoots: 'files:list-roots',
     getParentPath: 'files:get-parent-path',
     list: 'files:list',
     mkdir: 'files:mkdir',

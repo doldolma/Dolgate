@@ -226,6 +226,7 @@ export function AppShell({
             active
             authState={authState}
             offlineLeaseExpiryLabel={offlineLeaseExpiryLabel}
+            desktopPlatform={desktopPlatform}
             homeViewModel={homeViewModel}
             sftpViewModel={sftpViewModel}
             settingsViewModel={settingsViewModel}

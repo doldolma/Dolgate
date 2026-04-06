@@ -284,8 +284,13 @@ function renderWorkspace(
   const onDisconnectPane = vi.fn().mockResolvedValue(undefined);
   const onSelectEntry = vi.fn();
   const onDeleteSelection = vi.fn().mockResolvedValue(undefined);
+  const onNavigateBreadcrumb = vi.fn().mockResolvedValue(undefined);
+  const onListLocalRoots = vi
+    .fn()
+    .mockResolvedValue([{ label: "/", path: "/" }]);
   const result = render(
     <SftpWorkspace
+      desktopPlatform="darwin"
       hosts={[]}
       groups={[]}
       sftp={createSftpState()}
@@ -303,7 +308,8 @@ function renderWorkspace(
       onNavigateBack={vi.fn().mockResolvedValue(undefined)}
       onNavigateForward={vi.fn().mockResolvedValue(undefined)}
       onNavigateParent={vi.fn().mockResolvedValue(undefined)}
-      onNavigateBreadcrumb={vi.fn().mockResolvedValue(undefined)}
+      onNavigateBreadcrumb={onNavigateBreadcrumb}
+      onListLocalRoots={onListLocalRoots}
       onSelectEntry={onSelectEntry}
       onCreateDirectory={vi.fn().mockResolvedValue(undefined)}
       onRenameSelection={vi.fn().mockResolvedValue(undefined)}
@@ -329,6 +335,8 @@ function renderWorkspace(
   return {
     ...result,
     onDisconnectPane,
+    onListLocalRoots,
+    onNavigateBreadcrumb,
     onUpdateSettings,
     onSelectEntry,
     onDeleteSelection,
@@ -417,6 +425,7 @@ describe("SftpWorkspace column resizing", () => {
 
     rerender(
       <SftpWorkspace
+        desktopPlatform="darwin"
         hosts={[]}
         groups={[]}
         sftp={createSftpState()}
@@ -438,6 +447,7 @@ describe("SftpWorkspace column resizing", () => {
         onNavigateForward={vi.fn().mockResolvedValue(undefined)}
         onNavigateParent={vi.fn().mockResolvedValue(undefined)}
         onNavigateBreadcrumb={vi.fn().mockResolvedValue(undefined)}
+        onListLocalRoots={vi.fn().mockResolvedValue([{ label: "/", path: "/" }])}
         onSelectEntry={vi.fn()}
         onCreateDirectory={vi.fn().mockResolvedValue(undefined)}
         onRenameSelection={vi.fn().mockResolvedValue(undefined)}
@@ -481,6 +491,121 @@ describe("SftpWorkspace column resizing", () => {
     });
   });
 
+  it("replaces D/F badges with file icons and readable kind labels in both panes", () => {
+    const sftp = createSftpState();
+    sftp.leftPane.entries = [
+      {
+        name: "photos",
+        path: "/left/photos",
+        isDirectory: true,
+        size: 0,
+        mtime: "2026-03-26T10:00:00.000Z",
+        kind: "folder",
+        permissions: "drwxr-xr-x",
+      },
+      {
+        name: "report.PDF",
+        path: "/left/report.PDF",
+        isDirectory: false,
+        size: 128,
+        mtime: "2026-03-26T10:00:00.000Z",
+        kind: "file",
+        permissions: "rw-r--r--",
+      },
+      {
+        name: "cover.png",
+        path: "/left/cover.png",
+        isDirectory: false,
+        size: 128,
+        mtime: "2026-03-26T10:00:00.000Z",
+        kind: "file",
+        permissions: "rw-r--r--",
+      },
+      {
+        name: "backup.tar.gz",
+        path: "/left/backup.tar.gz",
+        isDirectory: false,
+        size: 128,
+        mtime: "2026-03-26T10:00:00.000Z",
+        kind: "file",
+        permissions: "rw-r--r--",
+      },
+    ];
+    sftp.rightPane = {
+      ...createPane("right", createEntry("deploy.ts", "/remote")),
+      sourceKind: "host",
+      endpoint: {
+        id: "endpoint-1",
+        kind: "remote",
+        hostId: "ssh-1",
+        title: "Prod SSH",
+        path: "/remote",
+        connectedAt: "2026-03-26T10:00:00.000Z",
+      },
+      currentPath: "/remote",
+      history: ["/remote"],
+      entries: [
+        {
+          name: "deploy.ts",
+          path: "/remote/deploy.ts",
+          isDirectory: false,
+          size: 128,
+          mtime: "2026-03-26T10:00:00.000Z",
+          kind: "file",
+          permissions: "rw-r--r--",
+        },
+        {
+          name: "latest",
+          path: "/remote/latest",
+          isDirectory: false,
+          size: 0,
+          mtime: "2026-03-26T10:00:00.000Z",
+          kind: "symlink",
+          permissions: "rwxr-xr-x",
+        },
+      ],
+    };
+
+    renderWorkspace({ sftp });
+
+    expect(screen.queryByText(/^D$/)).toBeNull();
+    expect(screen.queryByText(/^F$/)).toBeNull();
+
+    const folderRow = screen.getByText("photos").closest("tr") as HTMLElement;
+    expect(
+      folderRow.querySelector('[data-file-icon="folder"][data-file-kind="folder"]'),
+    ).toBeTruthy();
+    expect(within(folderRow).getByText("Folder")).toBeTruthy();
+
+    const pdfRow = screen.getByText("report.PDF").closest("tr") as HTMLElement;
+    expect(
+      pdfRow.querySelector('[data-file-icon="pdf"][data-file-kind="file"]'),
+    ).toBeTruthy();
+    expect(within(pdfRow).getByText("File")).toBeTruthy();
+
+    const imageRow = screen.getByText("cover.png").closest("tr") as HTMLElement;
+    expect(
+      imageRow.querySelector('[data-file-icon="image"][data-file-kind="file"]'),
+    ).toBeTruthy();
+
+    const archiveRow = screen.getByText("backup.tar.gz").closest("tr") as HTMLElement;
+    expect(
+      archiveRow.querySelector('[data-file-icon="archive"][data-file-kind="file"]'),
+    ).toBeTruthy();
+
+    const codeRow = screen.getByText("deploy.ts").closest("tr") as HTMLElement;
+    expect(
+      codeRow.querySelector('[data-file-icon="code"][data-file-kind="file"]'),
+    ).toBeTruthy();
+    expect(within(codeRow).getByText("File")).toBeTruthy();
+
+    const symlinkRow = screen.getByText("latest").closest("tr") as HTMLElement;
+    expect(
+      symlinkRow.querySelector('[data-file-icon="symlink"][data-file-kind="symlink"]'),
+    ).toBeTruthy();
+    expect(within(symlinkRow).getByText("Link")).toBeTruthy();
+  });
+
   it("renders host picker results in a dedicated scroll container", () => {
     const sftp = createSftpState();
     sftp.rightPane = createHostPickerPane();
@@ -494,9 +619,205 @@ describe("SftpWorkspace column resizing", () => {
     const results = screen.getByLabelText("Available hosts for right pane");
 
     expect(results).toBeTruthy();
+    expect(within(results).queryByText("Groups")).toBeNull();
+    expect(within(results).getByText("Hosts")).toBeTruthy();
     expect(results.querySelector('[data-group-grid="true"]')).toBeTruthy();
+    const groupCard = results.querySelector(
+      '[data-group-card="true"][data-host-card="true"]',
+    ) as HTMLElement | null;
+    expect(groupCard).toBeTruthy();
+    expect(
+      groupCard?.querySelector('[data-host-card-badge="folder"] svg'),
+    ).toBeTruthy();
+    expect(within(groupCard as HTMLElement).queryByText("DIR")).toBeNull();
+    expect(within(groupCard as HTMLElement).getByText("Group")).toBeTruthy();
     expect(results.querySelector('[data-host-grid="true"]')).toBeTruthy();
     expect(results.contains(screen.getByLabelText("Search hosts"))).toBe(false);
+  });
+
+  it("renders the current host group as a compact breadcrumb with a clear root label", () => {
+    const sftp = createSftpState();
+    sftp.rightPane = createHostPickerPane({
+      hostGroupPath: "Production/API",
+    });
+    const onNavigateHostGroup = vi.fn();
+
+    renderWorkspace({
+      hosts: [
+        ...connectableHosts,
+        {
+          ...connectableHosts[0],
+          id: "ssh-api",
+          label: "API SSH",
+          groupName: "Production/API",
+        },
+      ],
+      groups: [
+        ...hostGroups,
+        {
+          id: "group-2",
+          name: "API",
+          path: "Production/API",
+          parentPath: "Production",
+          createdAt: "2026-03-26T00:00:00.000Z",
+          updatedAt: "2026-03-26T00:00:00.000Z",
+        },
+      ],
+      sftp,
+      onNavigateHostGroup,
+    });
+
+    const breadcrumb = screen.getByLabelText("Host group path for right pane");
+    expect(
+      within(breadcrumb).getByRole("button", { name: "All Groups" }),
+    ).toBeTruthy();
+    expect(
+      within(breadcrumb).getByRole("button", { name: "Production" }),
+    ).toBeTruthy();
+    expect(within(breadcrumb).getByText("API")).toBeTruthy();
+
+    fireEvent.click(
+      within(breadcrumb).getByRole("button", { name: "All Groups" }),
+    );
+    fireEvent.click(
+      within(breadcrumb).getByRole("button", { name: "Production" }),
+    );
+
+    expect(onNavigateHostGroup).toHaveBeenNthCalledWith(1, "right", null);
+    expect(onNavigateHostGroup).toHaveBeenNthCalledWith(
+      2,
+      "right",
+      "Production",
+    );
+  });
+
+  it("renders Windows local breadcrumbs without a fake slash root", async () => {
+    const sftp = createSftpState();
+    sftp.leftPane = createPane("left", createEntry("report.txt", "D:\\work\\repo"));
+    sftp.leftPane.currentPath = "D:\\work\\repo";
+    sftp.leftPane.lastLocalPath = "D:\\work\\repo";
+    sftp.leftPane.history = ["D:\\work\\repo"];
+    sftp.leftPane.entries = [
+      {
+        name: "report.txt",
+        path: "D:\\work\\repo\\report.txt",
+        isDirectory: false,
+        size: 128,
+        mtime: "2026-03-26T10:00:00.000Z",
+        kind: "file",
+        permissions: "rw-r--r--",
+      },
+    ];
+    const onNavigateBreadcrumb = vi.fn().mockResolvedValue(undefined);
+
+    renderWorkspace({
+      desktopPlatform: "win32",
+      sftp,
+      onNavigateBreadcrumb,
+    });
+
+    const breadcrumb = screen.getByLabelText("Local path for left pane");
+    expect(within(breadcrumb).queryByRole("button", { name: "/" })).toBeNull();
+    expect(within(breadcrumb).getByRole("button", { name: "D:" })).toBeTruthy();
+    expect(within(breadcrumb).getByRole("button", { name: "work" })).toBeTruthy();
+    expect(within(breadcrumb).getByText("repo")).toBeTruthy();
+
+    fireEvent.click(within(breadcrumb).getByRole("button", { name: "work" }));
+
+    await waitFor(() =>
+      expect(onNavigateBreadcrumb).toHaveBeenCalledWith("left", "D:\\work"),
+    );
+  });
+
+  it("opens a Windows drive picker from the drive breadcrumb and navigates to the selected root", async () => {
+    const sftp = createSftpState();
+    sftp.leftPane = createPane("left", createEntry("report.txt", "D:\\work\\repo"));
+    sftp.leftPane.currentPath = "D:\\work\\repo";
+    sftp.leftPane.lastLocalPath = "D:\\work\\repo";
+    sftp.leftPane.history = ["D:\\work\\repo"];
+    sftp.leftPane.entries = [
+      {
+        name: "report.txt",
+        path: "D:\\work\\repo\\report.txt",
+        isDirectory: false,
+        size: 128,
+        mtime: "2026-03-26T10:00:00.000Z",
+        kind: "file",
+        permissions: "rw-r--r--",
+      },
+    ];
+    const onListLocalRoots = vi.fn().mockResolvedValue([
+      { label: "C:", path: "C:\\" },
+      { label: "D:", path: "D:\\" },
+    ]);
+    const onNavigateBreadcrumb = vi.fn().mockResolvedValue(undefined);
+
+    renderWorkspace({
+      desktopPlatform: "win32",
+      sftp,
+      onListLocalRoots,
+      onNavigateBreadcrumb,
+    });
+
+    const breadcrumb = screen.getByLabelText("Local path for left pane");
+    fireEvent.click(within(breadcrumb).getByRole("button", { name: "D:" }));
+
+    await waitFor(() => expect(onListLocalRoots).toHaveBeenCalledTimes(1));
+
+    const driveMenu = screen.getByLabelText("Local drive selector for left pane");
+    expect(within(driveMenu).getByRole("menuitem", { name: "C:" })).toBeTruthy();
+    expect(
+      within(driveMenu).getByRole("menuitem", { name: "D:" }),
+    ).toBeTruthy();
+
+    fireEvent.click(within(driveMenu).getByRole("menuitem", { name: "C:" }));
+
+    await waitFor(() =>
+      expect(onNavigateBreadcrumb).toHaveBeenCalledWith("left", "C:\\"),
+    );
+  });
+
+  it("allows reselecting the current Windows drive to jump back to the drive root", async () => {
+    const sftp = createSftpState();
+    sftp.leftPane = createPane("left", createEntry("report.txt", "D:\\work\\repo"));
+    sftp.leftPane.currentPath = "D:\\work\\repo";
+    sftp.leftPane.lastLocalPath = "D:\\work\\repo";
+    sftp.leftPane.history = ["D:\\work\\repo"];
+    sftp.leftPane.entries = [
+      {
+        name: "report.txt",
+        path: "D:\\work\\repo\\report.txt",
+        isDirectory: false,
+        size: 128,
+        mtime: "2026-03-26T10:00:00.000Z",
+        kind: "file",
+        permissions: "rw-r--r--",
+      },
+    ];
+    const onListLocalRoots = vi.fn().mockResolvedValue([
+      { label: "C:", path: "C:\\" },
+      { label: "D:", path: "D:\\" },
+    ]);
+    const onNavigateBreadcrumb = vi.fn().mockResolvedValue(undefined);
+
+    renderWorkspace({
+      desktopPlatform: "win32",
+      sftp,
+      onListLocalRoots,
+      onNavigateBreadcrumb,
+    });
+
+    const breadcrumb = screen.getByLabelText("Local path for left pane");
+    fireEvent.click(within(breadcrumb).getByRole("button", { name: "D:" }));
+
+    const driveMenu = await screen.findByLabelText(
+      "Local drive selector for left pane",
+    );
+    fireEvent.click(within(driveMenu).getByRole("menuitem", { name: "D:" }));
+
+    await waitFor(() =>
+      expect(onNavigateBreadcrumb).toHaveBeenCalledWith("left", "D:\\"),
+    );
   });
 
   it("keeps rename, permissions, and delete actions out of the top toolbar", () => {
@@ -568,7 +889,7 @@ describe("SftpWorkspace column resizing", () => {
       containerWidth: 1200,
       itemCount: 1,
       minWidth: 220,
-      maxWidth: 280,
+      maxWidth: 460,
       gap: 12,
     });
     const expectedHostLayout = resolveResponsiveCardGridLayout({

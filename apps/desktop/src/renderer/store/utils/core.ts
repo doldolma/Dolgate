@@ -12,6 +12,7 @@ import {
   isSshHostRecord,
   isWarpgateSshHostRecord,
   normalizeGroupPath,
+  rebaseGroupPath,
   stripRemovedGroupSegment,
 } from "@shared";
 import type {
@@ -80,6 +81,7 @@ export {
   isSshHostRecord,
   isWarpgateSshHostRecord,
   normalizeGroupPath,
+  rebaseGroupPath,
   stripRemovedGroupSegment
 } from "@shared";
 
@@ -576,6 +578,8 @@ export interface AppState {
   clearSyncedWorkspaceData: () => void;
   createGroup: (name: string) => Promise<void>;
   removeGroup: (path: string, mode: GroupRemoveMode) => Promise<void>;
+  moveGroup: (path: string, targetParentPath: string | null) => Promise<void>;
+  renameGroup: (path: string, name: string) => Promise<void>;
   saveHost: (
     hostId: string | null,
     draft: HostDraft,
@@ -2187,6 +2191,14 @@ export function resolveCurrentGroupPathAfterGroupRemoval(
   }
 
   return stripRemovedGroupSegment(normalizedCurrentPath, normalizedRemovedPath);
+}
+
+export function resolveCurrentGroupPathAfterGroupMutation(
+  currentGroupPath: string | null,
+  previousGroupPath: string,
+  nextGroupPath: string,
+): string | null {
+  return rebaseGroupPath(currentGroupPath, previousGroupPath, nextGroupPath);
 }
 
 export function resolveCredentialRetryKind(
