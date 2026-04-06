@@ -52,6 +52,7 @@ import {
   encodeControlFrame,
   encodeStreamFrame,
 } from "./core-framing";
+import { resolveDesktopRepoRoot } from "./repo-root";
 
 interface ActivityLogInput {
   level: "info" | "warn" | "error";
@@ -362,27 +363,10 @@ export function buildCoreChildEnv(
 }
 
 function resolveRepoRoot(): string {
-  const candidates = [
-    path.resolve(app.getAppPath(), "../.."),
-    path.resolve(app.getAppPath(), "../../.."),
-    path.resolve(app.getAppPath(), "../../../.."),
-    path.resolve(__dirname, "../../.."),
-    path.resolve(__dirname, "../../../.."),
-    path.resolve(__dirname, "../../../../.."),
-  ];
-
-  for (const candidate of new Set(candidates)) {
-    if (
-      existsSync(path.join(candidate, "services", "ssh-core")) &&
-      existsSync(path.join(candidate, "apps", "desktop"))
-    ) {
-      return candidate;
-    }
-  }
-
-  throw new Error(
-    `Repository root could not be resolved from appPath=${app.getAppPath()} and __dirname=${__dirname}`,
-  );
+  return resolveDesktopRepoRoot({
+    appPath: app.getAppPath(),
+    currentDir: __dirname,
+  });
 }
 
 function resolveBundledCorePath(): string {

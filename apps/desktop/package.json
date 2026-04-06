@@ -35,7 +35,7 @@
     "test": "npm run test:desktop:main && npm run test:desktop:renderer",
     "test:desktop:main": "vitest run --config vite.main.config.ts",
     "test:desktop:renderer": "vitest run --config vite.renderer.config.ts",
-    "test:desktop:smoke": "npm run prepare:ssh-core:dev && npm run build && playwright test -c playwright.config.ts",
+    "test:desktop:smoke": "npm run prepare:ssh-core:dev && npm run build && cross-env DOLSSH_E2E_USE_PACKAGED_APP=1 playwright test -c playwright.config.ts",
     "test:desktop:smoke:packaged": "npm run prepare:ssh-core:dev && npm run build && cross-env DOLSSH_E2E_USE_PACKAGED_APP=1 playwright test -c playwright.config.ts e2e/replay.spec.js",
     "typecheck": "tsc --noEmit"
   },
