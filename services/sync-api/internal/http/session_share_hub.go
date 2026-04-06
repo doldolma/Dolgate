@@ -263,6 +263,8 @@ type viewerInitMessage struct {
 type viewerSnapshotInitMessage struct {
 	Type               string                 `json:"type"`
 	Snapshot           string                 `json:"snapshot"`
+	Cols               int                    `json:"cols"`
+	Rows               int                    `json:"rows"`
 	TerminalAppearance sessionShareAppearance `json:"terminalAppearance"`
 	ViewportPx         *sessionShareViewport  `json:"viewportPx"`
 }
@@ -270,6 +272,8 @@ type viewerSnapshotInitMessage struct {
 type viewerSnapshotResyncMessage struct {
 	Type               string                 `json:"type"`
 	Snapshot           string                 `json:"snapshot"`
+	Cols               int                    `json:"cols"`
+	Rows               int                    `json:"rows"`
 	TerminalAppearance sessionShareAppearance `json:"terminalAppearance"`
 	ViewportPx         *sessionShareViewport  `json:"viewportPx"`
 }
@@ -597,6 +601,10 @@ func (hub *SessionShareHub) HandleViewerWebSocket(writer http.ResponseWriter, re
 		ViewportPx:         share.viewportPx,
 	}
 	snapshot := share.snapshot
+	snapshotCols := share.cols
+	snapshotRows := share.rows
+	snapshotAppearance := share.appearance
+	snapshotViewport := share.viewportPx
 	replay := append([]string(nil), share.replayLog...)
 	chatHistory := append([]sessionShareChatMessage(nil), share.chatLog...)
 	owner := share.owner
@@ -607,8 +615,10 @@ func (hub *SessionShareHub) HandleViewerWebSocket(writer http.ResponseWriter, re
 		_ = viewer.WriteJSON(viewerSnapshotInitMessage{
 			Type:               "snapshot-init",
 			Snapshot:           snapshot,
-			TerminalAppearance: share.appearance,
-			ViewportPx:         share.viewportPx,
+			Cols:               snapshotCols,
+			Rows:               snapshotRows,
+			TerminalAppearance: snapshotAppearance,
+			ViewportPx:         snapshotViewport,
 		})
 	}
 	if len(replay) > 0 {
@@ -936,16 +946,23 @@ func (hub *SessionShareHub) updateHello(shareID string, message ownerHelloMessag
 		TerminalAppearance: share.appearance,
 		ViewportPx:         share.viewportPx,
 	}
+	snapshot := share.snapshot
+	snapshotCols := share.cols
+	snapshotRows := share.rows
+	snapshotAppearance := share.appearance
+	snapshotViewport := share.viewportPx
 	hub.mu.Unlock()
 
 	for _, viewer := range viewers {
 		_ = viewer.WriteJSON(initMessage)
-		if share.snapshot != "" {
+		if snapshot != "" {
 			_ = viewer.WriteJSON(viewerSnapshotResyncMessage{
 				Type:               "snapshot-resync",
-				Snapshot:           share.snapshot,
-				TerminalAppearance: share.appearance,
-				ViewportPx:         share.viewportPx,
+				Snapshot:           snapshot,
+				Cols:               snapshotCols,
+				Rows:               snapshotRows,
+				TerminalAppearance: snapshotAppearance,
+				ViewportPx:         snapshotViewport,
 			})
 		}
 	}
@@ -1077,6 +1094,8 @@ func (hub *SessionShareHub) updateSnapshot(
 		_ = viewer.WriteJSON(viewerSnapshotResyncMessage{
 			Type:               "snapshot-resync",
 			Snapshot:           snapshot,
+			Cols:               cols,
+			Rows:               rows,
 			TerminalAppearance: share.appearance,
 			ViewportPx:         share.viewportPx,
 		})

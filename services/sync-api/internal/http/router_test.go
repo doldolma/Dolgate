@@ -419,6 +419,9 @@ func TestSessionShareCreateAndViewerPage(t *testing.T) {
 	if !strings.Contains(viewerRecorder.Header().Get("Content-Security-Policy"), "connect-src 'self'") {
 		t.Fatalf("expected viewer CSP header, got %q", viewerRecorder.Header().Get("Content-Security-Policy"))
 	}
+	if !strings.Contains(viewerRecorder.Header().Get("Content-Security-Policy"), "style-src 'self' 'unsafe-inline'") {
+		t.Fatalf("expected viewer CSP to allow inline styles for xterm rendering, got %q", viewerRecorder.Header().Get("Content-Security-Policy"))
+	}
 	if !strings.Contains(viewerRecorder.Body.String(), `data-share-id="`) {
 		t.Fatalf("expected viewer page html to contain share metadata: %s", viewerRecorder.Body.String())
 	}

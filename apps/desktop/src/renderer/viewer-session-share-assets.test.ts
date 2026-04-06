@@ -281,4 +281,37 @@ describe('session share viewer assets', () => {
     expect(viewerCss).toContain('.viewer-chat-message--owner {');
     expect(viewerCss).toContain('.viewer-chat-message__badge {');
   });
+
+  it('writes VT snapshot resync payloads back into the viewer terminal unchanged', async () => {
+    await Promise.resolve();
+    const socket = latestSocket();
+    const terminal = MockTerminal.instances.at(-1);
+    if (!terminal) {
+      throw new Error('viewer asset did not create a terminal');
+    }
+
+    const snapshot = '\u001b[?1049h\u001b[H\tfoo\r\n\t\tbar';
+
+    socket.dispatchEvent(
+      new MessageEvent('message', {
+        data: JSON.stringify({
+          type: 'snapshot-resync',
+          snapshot,
+          cols: 132,
+          rows: 36,
+          terminalAppearance: null,
+          viewportPx: null,
+        }),
+      }),
+    );
+
+    expect(terminal.resize).toHaveBeenCalledWith(132, 36);
+    expect(terminal.reset).toHaveBeenCalled();
+    expect(terminal.write).toHaveBeenCalledWith(snapshot, expect.any(Function));
+    const resizeCallOrder = terminal.resize.mock.invocationCallOrder.at(-1);
+    const resetCallOrder = terminal.reset.mock.invocationCallOrder.at(-1);
+    const writeCallOrder = terminal.write.mock.invocationCallOrder.at(-1);
+    expect(resizeCallOrder).toBeLessThan(resetCallOrder ?? Number.POSITIVE_INFINITY);
+    expect(resetCallOrder).toBeLessThan(writeCallOrder ?? Number.POSITIVE_INFINITY);
+  });
 });

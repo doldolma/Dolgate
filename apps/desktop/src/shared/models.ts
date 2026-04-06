@@ -1714,12 +1714,16 @@ export type SessionShareViewerMessage =
   | {
       type: 'snapshot-init';
       snapshot: string;
+      cols: number;
+      rows: number;
       terminalAppearance: SessionShareTerminalAppearance;
       viewportPx: SessionShareViewportPx | null;
     }
   | {
       type: 'snapshot-resync';
       snapshot: string;
+      cols: number;
+      rows: number;
       terminalAppearance: SessionShareTerminalAppearance;
       viewportPx: SessionShareViewportPx | null;
     }
