@@ -109,6 +109,26 @@ export function stripRemovedGroupSegment(groupPath: string | null, removedGroupP
   return normalizeGroupPath(parentPath ? `${parentPath}/${suffix}` : suffix);
 }
 
+export function rebaseGroupPath(
+  sourcePath: string | null,
+  fromPath: string,
+  toPath: string | null
+): string | null {
+  const normalizedSourcePath = normalizeGroupPath(sourcePath);
+  const normalizedFromPath = normalizeGroupPath(fromPath);
+  const normalizedToPath = normalizeGroupPath(toPath);
+  if (!normalizedSourcePath || !normalizedFromPath || !isGroupWithinPath(normalizedSourcePath, normalizedFromPath)) {
+    return normalizedSourcePath;
+  }
+
+  if (normalizedSourcePath === normalizedFromPath) {
+    return normalizedToPath;
+  }
+
+  const suffix = normalizedSourcePath.slice(normalizedFromPath.length + 1);
+  return normalizeGroupPath(normalizedToPath ? `${normalizedToPath}/${suffix}` : suffix);
+}
+
 export function buildGroupOptions(
   groups: GroupRecord[],
   hosts: HostRecord[],

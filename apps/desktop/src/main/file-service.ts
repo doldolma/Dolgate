@@ -1,7 +1,12 @@
 import { app } from 'electron';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import type { DirectoryListing, FileEntry, FileEntryKind } from '@shared';
+import type {
+  DirectoryListing,
+  FileEntry,
+  FileEntryKind,
+  FileSystemRoot,
+} from '@shared';
 
 function toIsoTime(valueMs: number): string {
   return new Date(valueMs).toISOString();
@@ -50,6 +55,28 @@ export class LocalFileService {
 
   async getDownloadsDirectory(): Promise<string> {
     return app.getPath('downloads');
+  }
+
+  async listRoots(): Promise<FileSystemRoot[]> {
+    if (process.platform !== 'win32') {
+      return [{ label: '/', path: '/' }];
+    }
+
+    const roots: FileSystemRoot[] = [];
+    for (let code = 65; code <= 90; code += 1) {
+      const driveLetter = String.fromCharCode(code);
+      const drivePath = `${driveLetter}:\\`;
+      try {
+        await fs.access(drivePath);
+        roots.push({
+          label: `${driveLetter}:`,
+          path: drivePath,
+        });
+      } catch {
+        continue;
+      }
+    }
+    return roots;
   }
 
   async getParentPath(targetPath: string): Promise<string> {

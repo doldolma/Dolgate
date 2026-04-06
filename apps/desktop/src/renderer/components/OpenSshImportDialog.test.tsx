@@ -145,7 +145,7 @@ describe("OpenSSH import dialog", () => {
     await waitFor(() => expect(api.openssh.probeDefault).toHaveBeenCalled());
 
     expect(screen.getByText("Import OpenSSH")).toBeInTheDocument();
-    expect(screen.getByText("web")).toBeInTheDocument();
+    expect(await screen.findByText("web")).toBeInTheDocument();
     expect(screen.getByText("Servers/Prod")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "파일 불러오기" }));
@@ -160,7 +160,7 @@ describe("OpenSSH import dialog", () => {
       }),
     );
 
-    expect(screen.getByText("db")).toBeInTheDocument();
+    expect(await screen.findByText("db")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "보이는 항목 모두 선택" }));
     fireEvent.click(screen.getByRole("button", { name: "가져오기" }));

@@ -114,6 +114,9 @@ export function registerWindowUpdaterSettingsFilesIpcHandlers(
   ipcMain.handle(ipcChannels.files.getDownloadsDirectory, async () =>
     ctx.localFiles.getDownloadsDirectory(),
   );
+  ipcMain.handle(ipcChannels.files.listRoots, async () =>
+    ctx.localFiles.listRoots(),
+  );
   ipcMain.handle(
     ipcChannels.files.getParentPath,
     async (_event, targetPath: string) => ctx.localFiles.getParentPath(targetPath),

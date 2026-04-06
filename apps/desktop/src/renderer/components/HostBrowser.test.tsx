@@ -177,6 +177,8 @@ interface RenderBrowserOptions {
   onSelectHost?: ReturnType<typeof vi.fn>;
   onDuplicateHosts?: ReturnType<typeof vi.fn>;
   onRemoveGroup?: ReturnType<typeof vi.fn>;
+  onMoveGroup?: ReturnType<typeof vi.fn>;
+  onRenameGroup?: ReturnType<typeof vi.fn>;
   onRemoveHost?: ReturnType<typeof vi.fn>;
   onOpenHostContainers?: ReturnType<typeof vi.fn>;
   onNavigateGroup?: ReturnType<typeof vi.fn>;
@@ -193,6 +195,8 @@ function renderBrowser({
   onSelectHost = vi.fn(),
   onDuplicateHosts = vi.fn().mockResolvedValue(undefined),
   onRemoveGroup = vi.fn().mockResolvedValue(undefined),
+  onMoveGroup = vi.fn().mockResolvedValue(undefined),
+  onRenameGroup = vi.fn().mockResolvedValue(undefined),
   onRemoveHost = vi.fn().mockResolvedValue(undefined),
   onOpenHostContainers = vi.fn().mockResolvedValue(undefined),
   onNavigateGroup = vi.fn()
@@ -215,6 +219,8 @@ function renderBrowser({
       onOpenWarpgateImport={vi.fn()}
       onCreateGroup={vi.fn().mockResolvedValue(undefined)}
       onRemoveGroup={onRemoveGroup}
+      onMoveGroup={onMoveGroup}
+      onRenameGroup={onRenameGroup}
       onNavigateGroup={onNavigateGroup}
       onClearHostSelection={onClearHostSelection}
       onSelectHost={onSelectHost}
@@ -226,6 +232,29 @@ function renderBrowser({
       onOpenHostContainers={onOpenHostContainers}
     />
   );
+}
+
+function createDataTransfer(): DataTransfer {
+  const entries = new Map<string, string>();
+  return {
+    dropEffect: 'none',
+    effectAllowed: 'all',
+    files: [] as unknown as FileList,
+    items: [] as unknown as DataTransferItemList,
+    types: [],
+    clearData: (format?: string) => {
+      if (format) {
+        entries.delete(format);
+      } else {
+        entries.clear();
+      }
+    },
+    getData: (format: string) => entries.get(format) ?? '',
+    setData: (format: string, data: string) => {
+      entries.set(format, data);
+    },
+    setDragImage: () => undefined,
+  } as unknown as DataTransfer;
 }
 
 beforeEach(() => {
@@ -422,6 +451,103 @@ describe('HostBrowser dialogs', () => {
     expect(onNavigateGroup).toHaveBeenCalledWith('Servers/Nested');
   });
 
+  it('moves a dragged group under another group row', async () => {
+    const onMoveGroup = vi.fn().mockResolvedValue(undefined);
+    renderBrowser({
+      groups: [
+        ...groups,
+        {
+          id: 'group-3',
+          name: 'Clients',
+          path: 'Clients',
+          parentPath: null,
+          createdAt: '2025-01-01T00:00:00.000Z',
+          updatedAt: '2025-01-01T00:00:00.000Z'
+        }
+      ],
+      onMoveGroup
+    });
+
+    const groupTree = within(screen.getByLabelText('Group tree'));
+    const clientsRow = groupTree.getByRole('button', { name: /Clients/ });
+    const serversRow = groupTree.getByRole('button', { name: /Servers/ });
+    const dataTransfer = createDataTransfer();
+
+    fireEvent.dragStart(clientsRow, { dataTransfer });
+    fireEvent.dragOver(serversRow, { dataTransfer });
+    fireEvent.drop(serversRow, { dataTransfer });
+
+    await waitFor(() => {
+      expect(onMoveGroup).toHaveBeenCalledWith('Clients', 'Servers');
+    });
+  });
+
+  it('moves a dragged group to the root when dropped on All Groups', async () => {
+    const onMoveGroup = vi.fn().mockResolvedValue(undefined);
+    renderBrowser({ onMoveGroup });
+
+    const groupTree = within(screen.getByLabelText('Group tree'));
+    const nestedRow = groupTree.getByRole('button', { name: /Nested/ });
+    const rootRow = groupTree.getByRole('button', { name: /All Groups/ });
+    const dataTransfer = createDataTransfer();
+
+    fireEvent.dragStart(nestedRow, { dataTransfer });
+    fireEvent.dragOver(rootRow, { dataTransfer });
+    fireEvent.drop(rootRow, { dataTransfer });
+
+    await waitFor(() => {
+      expect(onMoveGroup).toHaveBeenCalledWith('Servers/Nested', null);
+    });
+  });
+
+  it('keeps group drop targets active even when dragover cannot read custom dataTransfer payloads', async () => {
+    const onMoveGroup = vi.fn().mockResolvedValue(undefined);
+    renderBrowser({
+      groups: [
+        ...groups,
+        {
+          id: 'group-3',
+          name: 'Clients',
+          path: 'Clients',
+          parentPath: null,
+          createdAt: '2025-01-01T00:00:00.000Z',
+          updatedAt: '2025-01-01T00:00:00.000Z'
+        }
+      ],
+      onMoveGroup
+    });
+
+    const groupTree = within(screen.getByLabelText('Group tree'));
+    const clientsRow = groupTree.getByRole('button', { name: /Clients/ });
+    const serversRow = groupTree.getByRole('button', { name: /Servers/ });
+    const startDataTransfer = createDataTransfer();
+    const emptyDataTransfer = createDataTransfer();
+
+    fireEvent.dragStart(clientsRow, { dataTransfer: startDataTransfer });
+    fireEvent.dragOver(serversRow, { dataTransfer: emptyDataTransfer });
+    fireEvent.drop(serversRow, { dataTransfer: emptyDataTransfer });
+
+    await waitFor(() => {
+      expect(onMoveGroup).toHaveBeenCalledWith('Clients', 'Servers');
+    });
+  });
+
+  it('does not move a group into one of its descendants', () => {
+    const onMoveGroup = vi.fn().mockResolvedValue(undefined);
+    renderBrowser({ onMoveGroup });
+
+    const groupTree = within(screen.getByLabelText('Group tree'));
+    const serversRow = groupTree.getByRole('button', { name: /Servers/ });
+    const nestedRow = groupTree.getByRole('button', { name: /Nested/ });
+    const dataTransfer = createDataTransfer();
+
+    fireEvent.dragStart(serversRow, { dataTransfer });
+    fireEvent.dragOver(nestedRow, { dataTransfer });
+    fireEvent.drop(nestedRow, { dataTransfer });
+
+    expect(onMoveGroup).not.toHaveBeenCalled();
+  });
+
   it('lets the user toggle subgroup rows with the disclosure and group double click', () => {
     renderBrowser();
 
@@ -494,6 +620,61 @@ describe('HostBrowser dialogs', () => {
 
     expect(screen.getByLabelText('Group tree')).toBeInTheDocument();
     expect(screen.getByText('아직 만든 그룹이 없습니다.')).toBeInTheDocument();
+  });
+
+  it('prefills the rename dialog from the group context menu and saves the new name', async () => {
+    const onRenameGroup = vi.fn().mockResolvedValue(undefined);
+    renderBrowser({ onRenameGroup });
+
+    const nestedRow = within(screen.getByLabelText('Group tree')).getByRole('button', { name: /Nested/ });
+
+    fireEvent.contextMenu(nestedRow);
+    fireEvent.click(screen.getByRole('button', { name: '이름 변경' }));
+
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+    const input = screen.getByPlaceholderText('Group name') as HTMLInputElement;
+    expect(input.value).toBe('Nested');
+
+    fireEvent.change(input, { target: { value: 'API' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Rename group' }));
+
+    await waitFor(() => {
+      expect(onRenameGroup).toHaveBeenCalledWith('Servers/Nested', 'API');
+    });
+  });
+
+  it('uses only the dragged group when multiple groups are selected', async () => {
+    const onMoveGroup = vi.fn().mockResolvedValue(undefined);
+    renderBrowser({
+      groups: [
+        ...groups,
+        {
+          id: 'group-3',
+          name: 'Clients',
+          path: 'Clients',
+          parentPath: null,
+          createdAt: '2025-01-01T00:00:00.000Z',
+          updatedAt: '2025-01-01T00:00:00.000Z'
+        }
+      ],
+      onMoveGroup
+    });
+
+    const groupTree = within(screen.getByLabelText('Group tree'));
+    const clientsRow = groupTree.getByRole('button', { name: /Clients/ });
+    const serversRow = groupTree.getByRole('button', { name: /Servers/ });
+    const nestedRow = groupTree.getByRole('button', { name: /Nested/ });
+    const dataTransfer = createDataTransfer();
+
+    fireEvent.click(serversRow, { ctrlKey: true });
+    fireEvent.click(clientsRow, { ctrlKey: true });
+    fireEvent.dragStart(clientsRow, { dataTransfer });
+    fireEvent.dragOver(nestedRow, { dataTransfer });
+    fireEvent.drop(nestedRow, { dataTransfer });
+
+    await waitFor(() => {
+      expect(onMoveGroup).toHaveBeenCalledWith('Clients', 'Servers/Nested');
+    });
   });
 
   it('supports additive host selection and copies all selected hosts from the context menu', async () => {

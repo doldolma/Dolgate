@@ -43,9 +43,18 @@ describe('renderer UI primitives', () => {
       </ModalShell>,
     );
 
-    expect(screen.getByRole('dialog')).toBeInTheDocument();
+    const dialog = screen.getByRole('dialog');
+    const header = dialog.children.item(0);
+    const body = dialog.children.item(1);
+    const footer = dialog.children.item(2);
+
+    expect(dialog).toBeInTheDocument();
     expect(screen.getByText('Dialog body')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Confirm' })).toBeInTheDocument();
+    expect(dialog).toHaveClass('flex', 'flex-col', 'overflow-hidden', 'max-h-[calc(100vh-7rem)]');
+    expect(body).toHaveClass('min-h-0', 'flex-1', 'overflow-y-auto');
+    expect(header).toHaveClass('shrink-0');
+    expect(footer).toHaveClass('shrink-0');
   });
 
   it('renders status badge and notice card variants', () => {

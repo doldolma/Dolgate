@@ -435,6 +435,75 @@ function createMockApi(): DesktopApi {
         groups: [],
         hosts: [],
       }),
+      move: vi.fn().mockImplementation(async (path: string, targetParentPath: string | null) => {
+        const segments = path.split("/");
+        const leafName = segments[segments.length - 1] ?? path;
+        const nextPath = targetParentPath ? `${targetParentPath}/${leafName}` : leafName;
+        return {
+          groups: [
+            {
+              id: "group-1",
+              name: leafName,
+              path: nextPath,
+              parentPath: targetParentPath,
+              createdAt: "2025-01-01T00:00:00.000Z",
+              updatedAt: "2025-01-04T00:00:00.000Z",
+            },
+          ],
+          hosts: [
+            {
+              id: "host-1",
+              kind: "ssh",
+              label: "Prod",
+              hostname: "prod.example.com",
+              port: 22,
+              username: "ubuntu",
+              authType: "password",
+              privateKeyPath: null,
+              secretRef: "host:host-1",
+              groupName: nextPath,
+              terminalThemeId: null,
+              createdAt: "2025-01-01T00:00:00.000Z",
+              updatedAt: "2025-01-04T00:00:00.000Z",
+            },
+          ],
+          nextPath,
+        };
+      }),
+      rename: vi.fn().mockImplementation(async (path: string, name: string) => {
+        const parentPath = path.includes("/") ? path.slice(0, path.lastIndexOf("/")) : null;
+        const nextPath = parentPath ? `${parentPath}/${name}` : name;
+        return {
+          groups: [
+            {
+              id: "group-1",
+              name,
+              path: nextPath,
+              parentPath,
+              createdAt: "2025-01-01T00:00:00.000Z",
+              updatedAt: "2025-01-04T00:00:00.000Z",
+            },
+          ],
+          hosts: [
+            {
+              id: "host-1",
+              kind: "ssh",
+              label: "Prod",
+              hostname: "prod.example.com",
+              port: 22,
+              username: "ubuntu",
+              authType: "password",
+              privateKeyPath: null,
+              secretRef: "host:host-1",
+              groupName: nextPath,
+              terminalThemeId: null,
+              createdAt: "2025-01-01T00:00:00.000Z",
+              updatedAt: "2025-01-04T00:00:00.000Z",
+            },
+          ],
+          nextPath,
+        };
+      }),
     },
     ssh: {
       connect: vi.fn().mockImplementation(async () => {
@@ -712,6 +781,7 @@ function createMockApi(): DesktopApi {
       getDownloadsDirectory: vi
         .fn()
         .mockResolvedValue("/Users/tester/Downloads"),
+      listRoots: vi.fn().mockResolvedValue([{ label: "/", path: "/" }]),
       getParentPath: vi.fn().mockImplementation(async (targetPath: string) => {
         if (targetPath === "/Users/tester") {
           return "/Users";
@@ -1354,6 +1424,114 @@ describe("createAppStore", () => {
     expect(store.getState().groups).toEqual([]);
     expect(store.getState().hosts).toEqual([]);
     expect(store.getState().currentGroupPath).toBeNull();
+  });
+
+  it("rebases the current group path and create drawer default path when moving a group", async () => {
+    const api = createMockApi();
+    api.groups.move = vi.fn().mockResolvedValue({
+      groups: [
+        {
+          id: "group-1",
+          name: "Nested",
+          path: "Clients/Nested",
+          parentPath: "Clients",
+          createdAt: "2025-01-01T00:00:00.000Z",
+          updatedAt: "2025-01-04T00:00:00.000Z",
+        },
+      ],
+      hosts: [
+        {
+          id: "host-1",
+          kind: "ssh",
+          label: "Prod",
+          hostname: "prod.example.com",
+          port: 22,
+          username: "ubuntu",
+          authType: "password",
+          privateKeyPath: null,
+          secretRef: "host:host-1",
+          groupName: "Clients/Nested",
+          terminalThemeId: null,
+          createdAt: "2025-01-01T00:00:00.000Z",
+          updatedAt: "2025-01-04T00:00:00.000Z",
+        },
+      ],
+      nextPath: "Clients/Nested",
+    });
+    const store = createAppStore(api);
+
+    await store.getState().bootstrap();
+    store.getState().navigateGroup("Servers/Nested");
+    store.setState({
+      hostDrawer: {
+        mode: "create",
+        defaultGroupPath: "Servers/Nested",
+      },
+    });
+
+    await store.getState().moveGroup("Servers/Nested", "Clients");
+
+    expect(api.groups.move).toHaveBeenCalledWith("Servers/Nested", "Clients");
+    expect(store.getState().currentGroupPath).toBe("Clients/Nested");
+    expect(store.getState().hostDrawer).toEqual({
+      mode: "create",
+      defaultGroupPath: "Clients/Nested",
+    });
+    expect(store.getState().hosts[0]?.groupName).toBe("Clients/Nested");
+  });
+
+  it("rebases the current group path and create drawer default path when renaming a group", async () => {
+    const api = createMockApi();
+    api.groups.rename = vi.fn().mockResolvedValue({
+      groups: [
+        {
+          id: "group-1",
+          name: "API",
+          path: "Servers/API",
+          parentPath: "Servers",
+          createdAt: "2025-01-01T00:00:00.000Z",
+          updatedAt: "2025-01-04T00:00:00.000Z",
+        },
+      ],
+      hosts: [
+        {
+          id: "host-1",
+          kind: "ssh",
+          label: "Prod",
+          hostname: "prod.example.com",
+          port: 22,
+          username: "ubuntu",
+          authType: "password",
+          privateKeyPath: null,
+          secretRef: "host:host-1",
+          groupName: "Servers/API",
+          terminalThemeId: null,
+          createdAt: "2025-01-01T00:00:00.000Z",
+          updatedAt: "2025-01-04T00:00:00.000Z",
+        },
+      ],
+      nextPath: "Servers/API",
+    });
+    const store = createAppStore(api);
+
+    await store.getState().bootstrap();
+    store.getState().navigateGroup("Servers");
+    store.setState({
+      hostDrawer: {
+        mode: "create",
+        defaultGroupPath: "Servers/Nested",
+      },
+    });
+
+    await store.getState().renameGroup("Servers/Nested", "API");
+
+    expect(api.groups.rename).toHaveBeenCalledWith("Servers/Nested", "API");
+    expect(store.getState().currentGroupPath).toBe("Servers");
+    expect(store.getState().hostDrawer).toEqual({
+      mode: "create",
+      defaultGroupPath: "Servers/API",
+    });
+    expect(store.getState().hosts[0]?.groupName).toBe("Servers/API");
   });
 
   it("duplicates hosts with copy suffixes and reuses existing auth references", async () => {

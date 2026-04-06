@@ -390,6 +390,141 @@ describe('GroupRepository.remove', () => {
   });
 });
 
+describe('GroupRepository.move', () => {
+  it('moves an explicit group subtree under another group', async () => {
+    const { HostRepository, GroupRepository } = await loadRepositories();
+    const hosts = new HostRepository();
+    const groups = new GroupRepository();
+
+    groups.create('group-servers', 'Servers');
+    groups.create('group-nested', 'Nested', 'Servers');
+    groups.create('group-clients', 'Clients');
+
+    hosts.create('host-nested', {
+      kind: 'ssh',
+      label: 'Nested',
+      hostname: 'nested.example.com',
+      port: 22,
+      username: 'ubuntu',
+      authType: 'password',
+      privateKeyPath: null,
+      secretRef: null,
+      groupName: 'Servers/Nested',
+      tags: [],
+      terminalThemeId: null
+    });
+
+    const result = groups.move('Servers/Nested', 'Clients');
+
+    expect(result.nextPath).toBe('Clients/Nested');
+    expect(result.groups.map((group) => group.path)).toEqual(['Clients', 'Clients/Nested', 'Servers']);
+    expect(result.hosts.map((host) => [host.id, host.groupName])).toEqual([['host-nested', 'Clients/Nested']]);
+  });
+
+  it('moves an implicit group path to the root', async () => {
+    const { HostRepository, GroupRepository } = await loadRepositories();
+    const hosts = new HostRepository();
+    const groups = new GroupRepository();
+
+    groups.create('group-root', 'root');
+    hosts.create('host-implicit', {
+      kind: 'ssh',
+      label: 'Implicit',
+      hostname: 'implicit.example.com',
+      port: 22,
+      username: 'ubuntu',
+      authType: 'password',
+      privateKeyPath: null,
+      secretRef: null,
+      groupName: 'root/implicit',
+      tags: [],
+      terminalThemeId: null
+    });
+
+    const result = groups.move('root/implicit', null);
+
+    expect(result.nextPath).toBe('implicit');
+    expect(result.groups.map((group) => group.path)).toEqual(['root']);
+    expect(result.hosts.map((host) => [host.id, host.groupName])).toEqual([['host-implicit', 'implicit']]);
+  });
+
+  it('blocks moving a group into one of its descendants or into a conflicting path', async () => {
+    const { GroupRepository } = await loadRepositories();
+    const groups = new GroupRepository();
+
+    groups.create('group-root', 'root');
+    groups.create('group-branch', 'branch', 'root');
+    groups.create('group-leaf', 'leaf', 'root/branch');
+    groups.create('group-clients', 'clients');
+    groups.create('group-duplicate', 'branch', 'clients');
+
+    expect(() => groups.move('root/branch', 'root/branch/leaf')).toThrow(
+      'Group cannot be moved into itself or one of its descendants'
+    );
+    expect(() => groups.move('root/branch', 'clients')).toThrow('Group already exists');
+  });
+});
+
+describe('GroupRepository.rename', () => {
+  it('renames an explicit group subtree and rebases descendants', async () => {
+    const { HostRepository, GroupRepository } = await loadRepositories();
+    const hosts = new HostRepository();
+    const groups = new GroupRepository();
+
+    groups.create('group-root', 'root');
+    groups.create('group-branch', 'branch', 'root');
+    groups.create('group-leaf', 'leaf', 'root/branch');
+
+    hosts.create('host-branch', {
+      kind: 'ssh',
+      label: 'Branch',
+      hostname: 'branch.example.com',
+      port: 22,
+      username: 'ubuntu',
+      authType: 'password',
+      privateKeyPath: null,
+      secretRef: null,
+      groupName: 'root/branch/leaf',
+      tags: [],
+      terminalThemeId: null
+    });
+
+    const result = groups.rename('root/branch', 'api');
+
+    expect(result.nextPath).toBe('root/api');
+    expect(result.groups.map((group) => group.path)).toEqual(['root', 'root/api', 'root/api/leaf']);
+    expect(result.hosts.map((host) => [host.id, host.groupName])).toEqual([['host-branch', 'root/api/leaf']]);
+  });
+
+  it('renames an implicit group path and rejects conflicting targets', async () => {
+    const { HostRepository, GroupRepository } = await loadRepositories();
+    const hosts = new HostRepository();
+    const groups = new GroupRepository();
+
+    groups.create('group-root', 'root');
+    groups.create('group-api', 'api', 'root');
+    hosts.create('host-implicit', {
+      kind: 'ssh',
+      label: 'Implicit',
+      hostname: 'implicit.example.com',
+      port: 22,
+      username: 'ubuntu',
+      authType: 'password',
+      privateKeyPath: null,
+      secretRef: null,
+      groupName: 'root/implicit',
+      tags: [],
+      terminalThemeId: null
+    });
+
+    const result = groups.rename('root/implicit', 'ops');
+    expect(result.nextPath).toBe('root/ops');
+    expect(result.hosts.map((host) => [host.id, host.groupName])).toEqual([['host-implicit', 'root/ops']]);
+
+    expect(() => groups.rename('root/ops', 'api')).toThrow('Group already exists');
+  });
+});
+
 describe('SettingsRepository', () => {
   it('persists a login server override and resolves the effective server URL', async () => {
     const { SettingsRepository } = await loadRepositories();

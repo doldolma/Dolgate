@@ -368,6 +368,12 @@ export interface GroupRemoveResult {
   hosts: HostRecord[];
 }
 
+export interface GroupPathMutationResult {
+  groups: GroupRecord[];
+  hosts: HostRecord[];
+  nextPath: string;
+}
+
 export interface TermiusImportCounts {
   groups: number;
   hosts: number;
@@ -1357,6 +1363,11 @@ export interface DirectoryListing {
   path: string;
   entries: FileEntry[];
   warnings?: string[];
+}
+
+export interface FileSystemRoot {
+  label: string;
+  path: string;
 }
 
 // SftpEndpointSummary는 현재 패널이 붙어 있는 remote endpoint 정보를 표현한다.

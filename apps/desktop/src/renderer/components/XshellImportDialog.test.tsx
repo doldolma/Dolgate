@@ -224,7 +224,8 @@ describe('Xshell import dialog', () => {
     await waitFor(() => expect(api.xshell.probeDefault).toHaveBeenCalled());
 
     expect(screen.getByText('Xshell 가져오기')).toBeInTheDocument();
-    expect(screen.getByText('암호화된 비밀번호는 복호화를 시도합니다. 실패하면 호스트만 추가됩니다.')).toBeInTheDocument();
+    expect(screen.getByText('세션 소스 1개')).toBeInTheDocument();
+    expect(screen.getByText('주의 사항 1건, 저장된 비밀번호 포함')).toBeInTheDocument();
     expect(screen.getByText('root-host')).toBeInTheDocument();
     expect(screen.getByText('루트 세션')).toBeInTheDocument();
 
@@ -266,6 +267,40 @@ describe('Xshell import dialog', () => {
     expect(onClose).toHaveBeenCalled();
   });
 
+  it('keeps warnings collapsed until the disclosure is expanded', async () => {
+    const api = installMockApi();
+    render(<XshellImportDialog open onClose={vi.fn()} onImported={vi.fn()} />);
+
+    await waitFor(() => expect(api.xshell.probeDefault).toHaveBeenCalled());
+
+    const disclosure = screen.getByText('주의 사항 1건, 저장된 비밀번호 포함').closest('details') as HTMLDetailsElement;
+    expect(disclosure).not.toHaveAttribute('open');
+
+    fireEvent.click(screen.getByText('주의 사항 1건, 저장된 비밀번호 포함'));
+
+    expect(disclosure).toHaveAttribute('open');
+    expect(screen.getByText('db: Xshell 인증 프로필은 현재 버전에서 가져오지 않습니다.')).toBeInTheDocument();
+    expect(screen.getByText('암호화된 비밀번호는 복호화를 시도합니다. 실패하면 호스트만 추가됩니다.')).toBeInTheDocument();
+  });
+
+  it('summarizes additional sources and reveals them in the disclosure', async () => {
+    const api = installMockApi();
+    render(<XshellImportDialog open onClose={vi.fn()} onImported={vi.fn()} />);
+
+    await waitFor(() => expect(api.xshell.probeDefault).toHaveBeenCalled());
+
+    fireEvent.click(screen.getByRole('button', { name: '세션 폴더 선택' }));
+
+    await waitFor(() => expect(api.shell.pickXshellSessionFolder).toHaveBeenCalled());
+    await waitFor(() => expect(screen.getByText('세션 소스 2개')).toBeInTheDocument());
+
+    expect(screen.getByText('외 1개')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByText('주의 사항 1건, 저장된 비밀번호 포함'));
+
+    expect(screen.getByText('D:/shared/xshell')).toBeInTheDocument();
+  });
+
   it('imports an empty group without adding hosts', async () => {
     const api = installMockApi();
     render(<XshellImportDialog open onClose={vi.fn()} onImported={vi.fn()} />);
@@ -297,5 +332,21 @@ describe('Xshell import dialog', () => {
 
     expect(screen.getByRole('button', { name: '세션 폴더 선택' })).toBeEnabled();
     expect(screen.getByText('현재 조건과 일치하는 Xshell 그룹이나 호스트가 없습니다.')).toBeInTheDocument();
+  });
+
+  it('uses the modal body as the primary scroll container', async () => {
+    const api = installMockApi();
+    render(<XshellImportDialog open onClose={vi.fn()} onImported={vi.fn()} />);
+
+    await waitFor(() => expect(api.xshell.probeDefault).toHaveBeenCalled());
+
+    const dialog = screen.getByRole('dialog', { name: 'Xshell 가져오기' });
+    const body = dialog.children.item(1);
+    const tree = screen.getByRole('tree', { name: 'Xshell 가져오기 항목' });
+
+    expect(dialog).toHaveClass('flex', 'flex-col', 'overflow-hidden', 'max-h-[calc(100vh-7rem)]');
+    expect(body).toHaveClass('min-h-0', 'flex-1', 'overflow-y-auto');
+    expect(tree).not.toHaveClass('overflow-y-auto');
+    expect(tree).toBeInTheDocument();
   });
 });

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { GroupRecord, HostRecord } from '@shared';
-import { buildGroupOptions } from '@shared';
+import { buildGroupOptions, rebaseGroupPath } from '@shared';
 
 const groups: GroupRecord[] = [
   {
@@ -40,5 +40,16 @@ describe('buildGroupOptions', () => {
       { value: 'Servers', label: 'Servers' },
       { value: 'Servers/API', label: 'Servers/API' }
     ]);
+  });
+});
+
+describe('rebaseGroupPath', () => {
+  it('rebases descendants onto the next subtree root', () => {
+    expect(rebaseGroupPath('Servers/Nested/API', 'Servers/Nested', 'Clients/Nested')).toBe('Clients/Nested/API');
+    expect(rebaseGroupPath('Servers/Nested', 'Servers/Nested', 'Clients/Nested')).toBe('Clients/Nested');
+  });
+
+  it('returns the original path when it is outside the moved subtree', () => {
+    expect(rebaseGroupPath('Servers/API', 'Servers/Nested', 'Clients/Nested')).toBe('Servers/API');
   });
 });

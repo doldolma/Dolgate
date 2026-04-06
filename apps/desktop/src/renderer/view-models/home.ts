@@ -28,6 +28,8 @@ export function useHomeViewModel() {
   const navigateGroup = useAppStore((state) => state.navigateGroup);
   const createGroup = useAppStore((state) => state.createGroup);
   const removeGroup = useAppStore((state) => state.removeGroup);
+  const moveGroup = useAppStore((state) => state.moveGroup);
+  const renameGroup = useAppStore((state) => state.renameGroup);
   const saveHost = useAppStore((state) => state.saveHost);
   const duplicateHosts = useAppStore((state) => state.duplicateHosts);
   const moveHostToGroup = useAppStore((state) => state.moveHostToGroup);
@@ -71,6 +73,8 @@ export function useHomeViewModel() {
     navigateGroup,
     createGroup,
     removeGroup,
+    moveGroup,
+    renameGroup,
     saveHost,
     duplicateHosts,
     moveHostToGroup,

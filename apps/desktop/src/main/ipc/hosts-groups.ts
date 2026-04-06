@@ -150,4 +150,32 @@ export function registerHostsGroupsIpcHandlers(ctx: MainIpcContext): void {
       };
     },
   );
+
+  ipcMain.handle(
+    ipcChannels.groups.move,
+    async (_event, path: string, targetParentPath: string | null) => {
+      const result = ctx.groups.move(path, targetParentPath);
+      ctx.activityLogs.append("info", "audit", "그룹을 이동했습니다.", {
+        path,
+        targetParentPath: targetParentPath ?? null,
+        nextPath: result.nextPath,
+      });
+      ctx.queueSync();
+      return result;
+    },
+  );
+
+  ipcMain.handle(
+    ipcChannels.groups.rename,
+    async (_event, path: string, name: string) => {
+      const result = ctx.groups.rename(path, name);
+      ctx.activityLogs.append("info", "audit", "그룹 이름을 변경했습니다.", {
+        path,
+        nextPath: result.nextPath,
+        name,
+      });
+      ctx.queueSync();
+      return result;
+    },
+  );
 }

@@ -8,6 +8,8 @@ import {
   encodeInternalTransferPayload,
   formatEta,
   formatTransferSpeed,
+  getFileEntryKindLabel,
+  getFileEntryVisualKind,
   getSftpPaneTitle,
   groupHosts,
   hasInternalTransferData,
@@ -175,6 +177,42 @@ describe('SftpWorkspace helpers', () => {
       { label: 'tester', path: '/Users/tester' },
       { label: 'projects', path: '/Users/tester/projects' }
     ]);
+  });
+
+  it('builds Windows breadcrumbs from the current drive path', () => {
+    expect(breadcrumbParts('C:\\', 'win32')).toEqual([
+      { label: 'C:', path: 'C:\\' }
+    ]);
+    expect(breadcrumbParts('D:\\work\\repo', 'win32')).toEqual([
+      { label: 'D:', path: 'D:\\' },
+      { label: 'work', path: 'D:\\work' },
+      { label: 'repo', path: 'D:\\work\\repo' }
+    ]);
+  });
+
+  it('maps file kinds to readable labels', () => {
+    expect(getFileEntryKindLabel('folder')).toBe('Folder');
+    expect(getFileEntryKindLabel('file')).toBe('File');
+    expect(getFileEntryKindLabel('symlink')).toBe('Link');
+    expect(getFileEntryKindLabel('unknown')).toBe('Unknown');
+  });
+
+  it('maps common extensions to icon groups', () => {
+    expect(getFileEntryVisualKind({ name: 'README.PDF', kind: 'file' })).toBe('pdf');
+    expect(getFileEntryVisualKind({ name: 'photo.JPG', kind: 'file' })).toBe('image');
+    expect(getFileEntryVisualKind({ name: 'report.xlsx', kind: 'file' })).toBe('spreadsheet');
+    expect(getFileEntryVisualKind({ name: 'slides.pptx', kind: 'file' })).toBe('presentation');
+    expect(getFileEntryVisualKind({ name: 'deploy.ts', kind: 'file' })).toBe('code');
+    expect(getFileEntryVisualKind({ name: 'archive.tar.gz', kind: 'file' })).toBe('archive');
+    expect(getFileEntryVisualKind({ name: 'theme.mp4', kind: 'file' })).toBe('media');
+  });
+
+  it('keeps folders, links, hidden config files, and unknown files distinct', () => {
+    expect(getFileEntryVisualKind({ name: 'src', kind: 'folder' })).toBe('folder');
+    expect(getFileEntryVisualKind({ name: 'latest', kind: 'symlink' })).toBe('symlink');
+    expect(getFileEntryVisualKind({ name: '.env', kind: 'file' })).toBe('code');
+    expect(getFileEntryVisualKind({ name: 'notes', kind: 'file' })).toBe('file');
+    expect(getFileEntryVisualKind({ name: 'mystery', kind: 'unknown' })).toBe('unknown');
   });
 
   it('builds host-picker breadcrumbs from the current group path', () => {

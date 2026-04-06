@@ -44,7 +44,7 @@ export function DialogBackdrop({
   return (
     <div
       className={cn(
-        'modal-backdrop fixed inset-0 z-[8] grid place-items-center bg-[rgba(12,20,32,0.32)]',
+        'modal-backdrop fixed inset-0 z-[8] grid place-items-center bg-[rgba(12,20,32,0.32)] p-4',
         className,
       )}
       role="presentation"

@@ -42,6 +42,7 @@ import type {
   SessionReplayRecording,
   DirectoryListing,
   GroupRecord,
+  GroupPathMutationResult,
   GroupRemoveMode,
   GroupRemoveResult,
   HostDraft,
@@ -54,6 +55,7 @@ import type {
   HostRecord,
   ContainerConnectionProgressEvent,
   SecretMetadataRecord,
+  FileSystemRoot,
   SessionShareChatEvent,
   SessionShareControlSignal,
   SessionShareEvent,
@@ -465,6 +467,11 @@ export interface DesktopApi {
     list: () => Promise<GroupRecord[]>;
     create: (name: string, parentPath?: string | null) => Promise<GroupRecord>;
     remove: (path: string, mode: GroupRemoveMode) => Promise<GroupRemoveResult>;
+    move: (
+      path: string,
+      targetParentPath: string | null,
+    ) => Promise<GroupPathMutationResult>;
+    rename: (path: string, name: string) => Promise<GroupPathMutationResult>;
   };
   aws: {
     listProfiles: () => Promise<AwsProfileSummary[]>;
@@ -710,6 +717,7 @@ export interface DesktopApi {
   files: {
     getHomeDirectory: () => Promise<string>;
     getDownloadsDirectory: () => Promise<string>;
+    listRoots: () => Promise<FileSystemRoot[]>;
     getParentPath: (targetPath: string) => Promise<string>;
     list: (path: string) => Promise<DirectoryListing>;
     mkdir: (path: string, name: string) => Promise<void>;
