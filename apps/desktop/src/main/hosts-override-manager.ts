@@ -16,6 +16,7 @@ import {
   isStaticDnsOverrideRecord,
 } from '@shared';
 import type { DnsOverrideRecord, PortForwardRuleRecord, PortForwardRuntimeRecord } from '@shared';
+import { resolveDesktopRepoRoot } from './repo-root';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const HELPER_READY_TIMEOUT_MS = 15_000;
@@ -254,25 +255,10 @@ export function buildHostsHelperEndpoint(
 }
 
 function resolveRepoRoot(): string {
-  const candidates = [
-    path.resolve(app.getAppPath(), '../..'),
-    path.resolve(app.getAppPath(), '../../..'),
-    path.resolve(app.getAppPath(), '../../../..'),
-    path.resolve(__dirname, '../../..'),
-    path.resolve(__dirname, '../../../..'),
-    path.resolve(__dirname, '../../../../..'),
-  ];
-
-  for (const candidate of new Set(candidates)) {
-    if (
-      existsSync(path.join(candidate, 'services', 'ssh-core')) &&
-      existsSync(path.join(candidate, 'apps', 'desktop'))
-    ) {
-      return candidate;
-    }
-  }
-
-  throw new Error(`Repository root could not be resolved from appPath=${app.getAppPath()} and __dirname=${__dirname}`);
+  return resolveDesktopRepoRoot({
+    appPath: app.getAppPath(),
+    currentDir: __dirname,
+  });
 }
 
 export function resolveHostsHelperPath(): string {
