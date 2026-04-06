@@ -13,8 +13,13 @@ export function registerAuthIpcHandlers(ctx: MainIpcContext): void {
   ipcMain.handle(ipcChannels.auth.beginBrowserLogin, async () => {
     await ctx.authService.beginBrowserLogin();
   });
+  ipcMain.handle(ipcChannels.auth.reopenBrowserLogin, async () => {
+    await ctx.authService.reopenBrowserLogin();
+  });
+  ipcMain.handle(ipcChannels.auth.cancelBrowserLogin, async () => {
+    await ctx.authService.cancelBrowserLogin();
+  });
   ipcMain.handle(ipcChannels.auth.logout, async () => {
     await ctx.authService.logout();
   });
 }
-

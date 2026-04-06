@@ -340,6 +340,8 @@ function createDolsshApi(options: {
       ),
       retryOnline: vi.fn().mockResolvedValue(undefined),
       beginBrowserLogin: vi.fn().mockResolvedValue(undefined),
+      reopenBrowserLogin: vi.fn().mockResolvedValue(undefined),
+      cancelBrowserLogin: vi.fn().mockResolvedValue(undefined),
       logout: vi.fn().mockResolvedValue(undefined),
       onEvent: vi.fn((listener: (state: any) => void) => {
         listeners.auth = listener;

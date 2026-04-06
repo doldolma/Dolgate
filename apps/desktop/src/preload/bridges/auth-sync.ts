@@ -12,6 +12,10 @@ export function buildAuthBridge(
     retryOnline: () => ipcRenderer.invoke(ipcChannels.auth.retryOnline),
     beginBrowserLogin: () =>
       ipcRenderer.invoke(ipcChannels.auth.beginBrowserLogin),
+    reopenBrowserLogin: () =>
+      ipcRenderer.invoke(ipcChannels.auth.reopenBrowserLogin),
+    cancelBrowserLogin: () =>
+      ipcRenderer.invoke(ipcChannels.auth.cancelBrowserLogin),
     logout: () => ipcRenderer.invoke(ipcChannels.auth.logout),
     onEvent: (listener) => subscribeAuthEvent(listener),
   };

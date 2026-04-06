@@ -437,6 +437,8 @@ export interface DesktopApi {
     bootstrap: () => Promise<AuthState>;
     retryOnline: () => Promise<AuthState>;
     beginBrowserLogin: () => Promise<void>;
+    reopenBrowserLogin: () => Promise<void>;
+    cancelBrowserLogin: () => Promise<void>;
     logout: () => Promise<void>;
     onEvent: (listener: (state: AuthState) => void) => () => void;
   };

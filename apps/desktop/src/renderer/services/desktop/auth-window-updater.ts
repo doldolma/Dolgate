@@ -21,6 +21,14 @@ export function beginBrowserLogin() {
   return desktopApi.auth.beginBrowserLogin();
 }
 
+export function reopenBrowserLogin() {
+  return desktopApi.auth.reopenBrowserLogin();
+}
+
+export function cancelBrowserLogin() {
+  return desktopApi.auth.cancelBrowserLogin();
+}
+
 export function retryOnline() {
   return desktopApi.auth.retryOnline();
 }

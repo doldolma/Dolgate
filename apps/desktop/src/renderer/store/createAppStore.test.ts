@@ -155,6 +155,8 @@ function createMockApi(): DesktopApi {
         errorMessage: null,
       }),
       beginBrowserLogin: vi.fn().mockResolvedValue(undefined),
+      reopenBrowserLogin: vi.fn().mockResolvedValue(undefined),
+      cancelBrowserLogin: vi.fn().mockResolvedValue(undefined),
       logout: vi.fn().mockResolvedValue(undefined),
       onEvent: vi.fn().mockReturnValue(() => undefined),
     },
@@ -4944,5 +4946,4 @@ describe("createAppStore", () => {
     ]);
   });
 });
-
 

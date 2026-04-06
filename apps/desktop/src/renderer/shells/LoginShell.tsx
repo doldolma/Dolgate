@@ -68,6 +68,8 @@ export function LoginShell({
         hasServerUrlOverride={Boolean(settingsViewModel.settings.serverUrlOverride)}
         isLoadingServerUrl={isLoginServerSettingsLoading}
         onBeginLogin={loginController.beginBrowserLogin}
+        onReopenBrowserLogin={loginController.reopenBrowserLogin}
+        onCancelBrowserLogin={loginController.cancelBrowserLogin}
         onSaveServerUrl={saveLoginServerUrl}
         onResetServerUrl={resetLoginServerUrl}
         actionLabel={needsWorkspaceRetry ? '다시 시도' : undefined}

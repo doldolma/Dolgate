@@ -2,6 +2,7 @@ import { useCallback, useState, type Dispatch, type SetStateAction } from 'react
 import type { AuthState, UpdateState } from '@shared';
 import {
   beginBrowserLogin,
+  cancelBrowserLogin,
   checkForUpdates,
   closeWindow,
   dismissAvailableUpdate,
@@ -11,6 +12,7 @@ import {
   maximizeWindow,
   minimizeWindow,
   openExternalUrl,
+  reopenBrowserLogin,
   restoreWindow,
   retryOnline,
 } from '../services/desktop/auth-window-updater';
@@ -67,6 +69,8 @@ export function useLoginController({
   return {
     isRetryingOnline,
     beginBrowserLogin,
+    reopenBrowserLogin,
+    cancelBrowserLogin,
     logout,
     minimizeWindow,
     maximizeWindow,
