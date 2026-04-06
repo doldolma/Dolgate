@@ -948,7 +948,7 @@ export function HostForm({
         {isEditMode ? (
           <Button
             variant="primary"
-            className="flex-1 rounded-[16px] border border-[color-mix(in_srgb,var(--accent-strong)_22%,var(--border)_78%)] bg-[linear-gradient(180deg,color-mix(in_srgb,var(--surface-elevated)_88%,white_12%),color-mix(in_srgb,var(--surface)_90%,var(--accent-strong)_10%))] px-[1.1rem] py-[0.95rem] font-[650] text-[var(--text)] shadow-[0_8px_18px_rgba(8,15,28,0.08),inset_0_1px_0_rgba(255,255,255,0.08)] transition-[transform,box-shadow,border-color,background] duration-160 hover:border-[color-mix(in_srgb,var(--accent-strong)_34%,var(--border)_66%)] hover:bg-[linear-gradient(180deg,color-mix(in_srgb,var(--surface-elevated)_82%,white_18%),color-mix(in_srgb,var(--surface)_84%,var(--accent-strong)_16%))] hover:shadow-[0_12px_22px_rgba(8,15,28,0.1),inset_0_1px_0_rgba(255,255,255,0.1)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color-mix(in_srgb,var(--accent-strong)_60%,white_40%)] focus-visible:ring-offset-2"
+            className="flex-1 rounded-[16px] border border-[color-mix(in_srgb,var(--accent-strong)_28%,var(--border)_72%)] bg-[color-mix(in_srgb,var(--surface-elevated)_90%,var(--accent-strong)_10%)] px-[1.1rem] py-[0.95rem] font-[650] text-[var(--text)] shadow-none transition-[border-color,background-color,color] duration-160 hover:border-[color-mix(in_srgb,var(--accent-strong)_40%,var(--border)_60%)] hover:bg-[color-mix(in_srgb,var(--surface-elevated)_84%,var(--accent-strong)_16%)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color-mix(in_srgb,var(--accent-strong)_60%,white_40%)] focus-visible:ring-offset-2"
             onClick={async () => {
               if (!host || !onConnect) {
                 return;
@@ -974,7 +974,7 @@ export function HostForm({
           <Button
             type="submit"
             variant="primary"
-            className="flex-1 rounded-[16px] border border-[color-mix(in_srgb,var(--accent-strong)_22%,var(--border)_78%)] bg-[linear-gradient(180deg,color-mix(in_srgb,var(--surface-elevated)_88%,white_12%),color-mix(in_srgb,var(--surface)_90%,var(--accent-strong)_10%))] px-[1.1rem] py-[0.95rem] font-[650] text-[var(--text)] shadow-[0_8px_18px_rgba(8,15,28,0.08),inset_0_1px_0_rgba(255,255,255,0.08)] transition-[transform,box-shadow,border-color,background] duration-160 hover:border-[color-mix(in_srgb,var(--accent-strong)_34%,var(--border)_66%)] hover:bg-[linear-gradient(180deg,color-mix(in_srgb,var(--surface-elevated)_82%,white_18%),color-mix(in_srgb,var(--surface)_84%,var(--accent-strong)_16%))] hover:shadow-[0_12px_22px_rgba(8,15,28,0.1),inset_0_1px_0_rgba(255,255,255,0.1)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color-mix(in_srgb,var(--accent-strong)_60%,white_40%)] focus-visible:ring-offset-2"
+            className="flex-1 rounded-[16px] border border-[color-mix(in_srgb,var(--accent-strong)_28%,var(--border)_72%)] bg-[color-mix(in_srgb,var(--surface-elevated)_90%,var(--accent-strong)_10%)] px-[1.1rem] py-[0.95rem] font-[650] text-[var(--text)] shadow-none transition-[border-color,background-color,color] duration-160 hover:border-[color-mix(in_srgb,var(--accent-strong)_40%,var(--border)_60%)] hover:bg-[color-mix(in_srgb,var(--surface-elevated)_84%,var(--accent-strong)_16%)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color-mix(in_srgb,var(--accent-strong)_60%,white_40%)] focus-visible:ring-offset-2"
           >
             Create Host
           </Button>

@@ -11,6 +11,7 @@ import { useTermiusImportController } from '../controllers/useImportControllers'
 import { DialogBackdrop } from './DialogBackdrop';
 import {
   Button,
+  CloseIcon,
   EmptyState,
   FieldGroup,
   FilterRow,
@@ -175,7 +176,7 @@ export function TermiusImportDialog({ open, onClose, onImported }: TermiusImport
             <h3 id="termius-import-title">Import from Termius</h3>
           </div>
           <IconButton onClick={onClose} aria-label="Close Termius import dialog">
-            ×
+            <CloseIcon />
           </IconButton>
         </ModalHeader>
 

@@ -1,6 +1,6 @@
 import type { PendingHostKeyPrompt } from '../store/createAppStore';
 import { DialogBackdrop } from './DialogBackdrop';
-import { Button, IconButton, ModalBody, ModalFooter, ModalHeader, ModalShell, SectionLabel } from '../ui';
+import { Button, CloseIcon, IconButton, ModalBody, ModalFooter, ModalHeader, ModalShell, SectionLabel } from '../ui';
 
 interface KnownHostPromptDialogProps {
   pending: PendingHostKeyPrompt | null;
@@ -25,7 +25,7 @@ export function KnownHostPromptDialog({ pending, onAccept, onCancel, onOpenSecur
             <h3 id="known-host-title">{isMismatch ? '호스트 키가 변경되었습니다.' : '새 호스트 키를 확인해 주세요.'}</h3>
           </div>
           <IconButton type="button" onClick={onCancel} aria-label="Close known host prompt">
-            ×
+            <CloseIcon />
           </IconButton>
         </ModalHeader>
 

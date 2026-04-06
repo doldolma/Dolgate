@@ -53,7 +53,7 @@ export function HostCard({
       <div
         data-host-card-badge={badgeMarker}
         className={cn(
-          'inline-grid h-[2.45rem] w-[2.45rem] shrink-0 place-items-center rounded-[14px] bg-[linear-gradient(180deg,color-mix(in_srgb,var(--accent-strong)_88%,white_12%),color-mix(in_srgb,var(--chrome-bg)_90%,black_10%))] text-[0.9rem] font-bold text-white',
+          'inline-grid h-[2.45rem] w-[2.45rem] shrink-0 place-items-center rounded-[14px] bg-[color-mix(in_srgb,var(--accent-strong)_68%,var(--chrome-bg)_32%)] text-[0.9rem] font-bold text-white',
           typeof badgeLabel === 'string' &&
             badgeLabel.length > 3 &&
             'text-[0.8rem] tracking-[-0.02em]',

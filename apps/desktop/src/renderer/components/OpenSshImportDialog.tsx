@@ -10,6 +10,7 @@ import { useOpenSshImportController } from '../controllers/useImportControllers'
 import { DialogBackdrop } from './DialogBackdrop';
 import {
   Button,
+  CloseIcon,
   EmptyState,
   FieldGroup,
   FilterRow,
@@ -192,7 +193,7 @@ export function OpenSshImportDialog({
             <h3 id="openssh-import-title">Import OpenSSH</h3>
           </div>
           <IconButton onClick={onClose} aria-label="Import OpenSSH 닫기">
-            x
+            <CloseIcon />
           </IconButton>
         </ModalHeader>
 

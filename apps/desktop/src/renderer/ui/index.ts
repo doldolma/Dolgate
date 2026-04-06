@@ -1,6 +1,7 @@
 export * from './Badge';
 export * from './Button';
 export * from './Card';
+export * from './CloseIcon';
 export * from './EmptyState';
 export * from './FieldGroup';
 export * from './FilterRow';

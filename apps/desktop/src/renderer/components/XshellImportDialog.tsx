@@ -13,6 +13,7 @@ import { useXshellImportController } from '../controllers/useImportControllers';
 import { DialogBackdrop } from './DialogBackdrop';
 import {
   Button,
+  CloseIcon,
   EmptyState,
   FieldGroup,
   FilterRow,
@@ -753,7 +754,7 @@ export function XshellImportDialog({ open, onClose, onImported }: XshellImportDi
             <h3 id="xshell-import-title">Xshell 가져오기</h3>
           </div>
           <IconButton onClick={onClose} aria-label="Xshell 가져오기 대화상자 닫기">
-            x
+            <CloseIcon />
           </IconButton>
         </ModalHeader>
 

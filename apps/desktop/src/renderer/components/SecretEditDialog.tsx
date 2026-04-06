@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { LinkedHostSummary } from '@shared';
 import { DialogBackdrop } from './DialogBackdrop';
-import { Button, FieldGroup, IconButton, Input, ModalBody, ModalFooter, ModalHeader, ModalShell, SectionLabel, SelectField } from '../ui';
+import { Button, CloseIcon, FieldGroup, IconButton, Input, ModalBody, ModalFooter, ModalHeader, ModalShell, SectionLabel, SelectField } from '../ui';
 
 export type SecretEditMode = 'update-shared' | 'clone-for-host';
 export type SecretCredentialKind = 'password' | 'passphrase';
@@ -68,7 +68,7 @@ export function SecretEditDialog({ request, onClose, onSubmit }: SecretEditDialo
             <h3 id="secret-edit-title">{credentialLabel} 변경</h3>
           </div>
           <IconButton type="button" onClick={onClose} aria-label="Close secret editor">
-            ×
+            <CloseIcon />
           </IconButton>
         </ModalHeader>
         <ModalBody>

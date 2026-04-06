@@ -604,7 +604,7 @@ export function AppTitleBar({
           <IconButton
             tone="default"
             active={isUpdateOpen}
-            className="relative h-12 w-12 rounded-full border-[rgba(255,255,255,0.08)] bg-[rgba(255,255,255,0.08)] text-[1.1rem] text-white shadow-[0_10px_24px_rgba(7,13,24,0.14)] hover:bg-[rgba(255,255,255,0.14)]"
+            className="relative h-12 w-12 rounded-full border-[rgba(255,255,255,0.1)] bg-[rgba(255,255,255,0.06)] text-[1.1rem] text-white shadow-none hover:bg-[rgba(255,255,255,0.1)]"
             aria-label="업데이트 상태 보기"
             onClick={() => setIsUpdateOpen((current) => !current)}
           >

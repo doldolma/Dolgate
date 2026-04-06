@@ -88,6 +88,14 @@ function renderSettingsPanel(overrides: Partial<Parameters<typeof SettingsPanel>
 }
 
 describe('SettingsPanel', () => {
+  it('renders appearance theme cards with descriptions', () => {
+    renderSettingsPanel();
+
+    expect(screen.getByText('기기 라이트/다크 설정을 따라갑니다.')).toBeInTheDocument();
+    expect(screen.getByText('밝은 배경과 또렷한 대비를 사용합니다.')).toBeInTheDocument();
+    expect(screen.getByText('어두운 배경으로 눈부심을 줄입니다.')).toBeInTheDocument();
+  });
+
   it('offers a System terminal theme option that updates the global theme mode', () => {
     const { onUpdateSettings } = renderSettingsPanel();
 
@@ -99,8 +107,8 @@ describe('SettingsPanel', () => {
   it('renders and updates the WebGL renderer toggle', () => {
     const { onUpdateSettings } = renderSettingsPanel();
 
-    const toggle = screen.getByLabelText('WebGL Renderer') as HTMLInputElement;
-    expect(toggle.checked).toBe(true);
+    const toggle = screen.getByRole('switch', { name: 'WebGL Renderer' });
+    expect(toggle).toHaveAttribute('aria-checked', 'true');
     expect(screen.getByText('지원되지 않는 환경에서는 자동으로 기본 렌더러로 전환합니다.')).toBeInTheDocument();
 
     fireEvent.click(toggle);
@@ -116,7 +124,7 @@ describe('SettingsPanel', () => {
     fireEvent.change(screen.getByLabelText('Letter Spacing'), { target: { value: '1' } });
     fireEvent.change(screen.getByLabelText('Minimum Contrast'), { target: { value: '3' } });
     fireEvent.change(screen.getByLabelText('Session Replay Retention'), { target: { value: '250' } });
-    fireEvent.click(screen.getByLabelText('Use Option/Alt as Meta'));
+    fireEvent.click(screen.getByRole('switch', { name: 'Use Option/Alt as Meta' }));
 
     expect(onUpdateSettings).toHaveBeenCalledWith({ terminalScrollbackLines: 6400 });
     expect(onUpdateSettings).toHaveBeenCalledWith({ terminalLineHeight: 1.2 });

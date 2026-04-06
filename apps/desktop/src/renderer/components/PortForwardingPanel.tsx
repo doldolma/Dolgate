@@ -49,6 +49,7 @@ import {
   CardMessage,
   CardMeta,
   CardTitleRow,
+  CloseIcon,
   EmptyState,
   FieldGroup,
   IconButton,
@@ -1898,7 +1899,7 @@ export function PortForwardingPanel({
                 disabled={isSubmitting}
                 aria-label="Close port forwarding dialog"
               >
-                &times;
+                <CloseIcon />
               </IconButton>
             </ModalHeader>
 
