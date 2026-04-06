@@ -375,3 +375,37 @@ describe("AuthService offline bootstrap", () => {
     await expect(secretStore.load("auth:refresh-token")).resolves.toBeNull();
   });
 });
+
+describe("AuthService browser login recovery", () => {
+  it("reopens browser login by reopening the same pending browser login URL", async () => {
+    const { service } = await createService();
+    const electron = await import("electron");
+    const openExternal = vi.mocked(electron.shell.openExternal);
+    openExternal.mockReset().mockResolvedValue(undefined);
+
+    await service.beginBrowserLogin();
+    expect(service.getState().status).toBe("authenticating");
+    const firstLoginUrl = openExternal.mock.calls[0]?.[0];
+    expect(typeof firstLoginUrl).toBe("string");
+
+    await service.reopenBrowserLogin();
+
+    expect(openExternal).toHaveBeenCalledTimes(2);
+    expect(openExternal.mock.calls[1]?.[0]).toBe(firstLoginUrl);
+  });
+
+  it("cancels the pending browser login and returns to unauthenticated", async () => {
+    const { service } = await createService();
+    const electron = await import("electron");
+    vi.mocked(electron.shell.openExternal).mockReset().mockResolvedValue(
+      undefined,
+    );
+
+    await service.beginBrowserLogin();
+    await service.cancelBrowserLogin();
+
+    const state = service.getState();
+    expect(state.status).toBe("unauthenticated");
+    expect(state.errorMessage).toBeNull();
+  });
+});

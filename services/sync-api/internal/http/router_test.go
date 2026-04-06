@@ -282,6 +282,15 @@ func TestLoginPageAppliesSecurityHeaders(t *testing.T) {
 	if !strings.Contains(recorder.Header().Get("Content-Security-Policy"), "default-src 'none'") {
 		t.Fatalf("expected login page CSP header, got %q", recorder.Header().Get("Content-Security-Policy"))
 	}
+	if !strings.Contains(
+		recorder.Header().Get("Content-Security-Policy"),
+		"form-action 'self' http://localhost:* http://127.0.0.1:* http://[::1]:*",
+	) {
+		t.Fatalf(
+			"expected login page CSP to allow loopback form posts, got %q",
+			recorder.Header().Get("Content-Security-Policy"),
+		)
+	}
 }
 
 func TestDesktopCallbackBridgeAppliesSecurityHeaders(t *testing.T) {

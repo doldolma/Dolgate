@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { getServerUrlValidationMessage } from '@shared';
 import {
@@ -9,7 +9,7 @@ import {
 } from './LoginGate';
 
 describe('LoginGate', () => {
-  it('disables the login action while auth or sync bootstrap is in flight', () => {
+  it('disables the login action while loading or sync bootstrap is in flight', () => {
     expect(
       shouldDisableLoginGatePrimaryAction({
         authStatus: 'authenticating',
@@ -18,7 +18,7 @@ describe('LoginGate', () => {
         isSubmitting: false,
         serverUrlValidationMessage: null
       })
-    ).toBe(true);
+    ).toBe(false);
     expect(
       shouldDisableLoginGatePrimaryAction({
         authStatus: 'loading',
@@ -44,7 +44,7 @@ describe('LoginGate', () => {
 
   it('prefers the explicit retry action label when provided', () => {
     expect(resolveLoginGateActionLabel('authenticated', '동기화 다시 시도')).toBe('동기화 다시 시도');
-    expect(resolveLoginGateActionLabel('authenticating')).toBe('브라우저 로그인 대기 중...');
+    expect(resolveLoginGateActionLabel('authenticating')).toBe('브라우저 다시 열기');
   });
 
   it('shows a sync status message only while workspace sync bootstrap is running', () => {
@@ -145,7 +145,7 @@ describe('LoginGate', () => {
     ).toBeInTheDocument();
   });
 
-  it('renders the original settings and launch glyphs', () => {
+  it('renders inline svg icons for the settings and browser login actions', () => {
     render(
       <LoginGate
         authState={{ status: 'unauthenticated', session: null, errorMessage: null }}
@@ -159,11 +159,52 @@ describe('LoginGate', () => {
       />
     );
 
-    expect(
-      screen.getByRole('button', { name: '로그인 서버 설정 열기' })
-    ).toHaveTextContent('⚙');
-    expect(
-      screen.getByRole('button', { name: '브라우저로 로그인하기' })
-    ).toHaveTextContent('↗');
+    const settingsButton = screen.getByRole('button', { name: '로그인 서버 설정 열기' });
+    const loginButton = screen.getByRole('button', { name: '브라우저로 로그인하기' });
+
+    expect(settingsButton.querySelector('svg')).not.toBeNull();
+    expect(loginButton.querySelector('svg')).not.toBeNull();
+    expect(settingsButton).not.toHaveTextContent('⚙');
+    expect(loginButton).not.toHaveTextContent('↗');
+  });
+
+  it('shows reopen and cancel actions while waiting for browser login completion', async () => {
+    const onReopenBrowserLogin = vi.fn().mockResolvedValue(undefined);
+    const onCancelBrowserLogin = vi.fn().mockResolvedValue(undefined);
+
+    render(
+      <LoginGate
+        authState={{
+          status: 'authenticating',
+          session: null,
+          errorMessage: null
+        }}
+        isSyncBootstrapping={false}
+        serverUrl="https://ssh.doldolma.com"
+        hasServerUrlOverride={true}
+        isLoadingServerUrl={false}
+        onBeginLogin={vi.fn().mockResolvedValue(undefined)}
+        onReopenBrowserLogin={onReopenBrowserLogin}
+        onCancelBrowserLogin={onCancelBrowserLogin}
+        onSaveServerUrl={vi.fn().mockResolvedValue(undefined)}
+        onResetServerUrl={vi.fn().mockResolvedValue(undefined)}
+      />
+    );
+
+    expect(screen.getByRole('button', { name: '브라우저 다시 열기' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: '취소' })).toBeEnabled();
+
+    fireEvent.click(screen.getByRole('button', { name: '로그인 서버 설정 열기' }));
+    expect(screen.getByPlaceholderText('https://ssh.example.com')).toBeDisabled();
+
+    fireEvent.click(screen.getByRole('button', { name: '브라우저 다시 열기' }));
+    await waitFor(() => {
+      expect(onReopenBrowserLogin).toHaveBeenCalledTimes(1);
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: '취소' }));
+    await waitFor(() => {
+      expect(onCancelBrowserLogin).toHaveBeenCalledTimes(1);
+    });
   });
 });

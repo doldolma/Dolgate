@@ -208,6 +208,7 @@ export class AuthService {
   private offlineRetryDelayMs = OFFLINE_RETRY_INITIAL_DELAY_MS;
   private refreshPromise: Promise<AuthState> | null = null;
   private pendingBrowserLoginState: string | null = null;
+  private pendingBrowserLoginUrl: string | null = null;
   private exchangeInFlightCode: string | null = null;
   private onSessionInvalidated:
     | ((context: SessionInvalidationContext) => Promise<void> | void)
@@ -366,26 +367,62 @@ export class AuthService {
   }
 
   async beginBrowserLogin(): Promise<void> {
-    const browserState = randomUUID();
-    this.pendingBrowserLoginState = browserState;
-    this.patchState({
-      status: "authenticating",
-      errorMessage: null,
-    });
-
     const redirectUri = await this.prepareBrowserRedirectUri();
-
+    const browserState = randomUUID();
     const loginUrl = new URL("/login", this.getServerUrl());
     loginUrl.searchParams.set("client", this.getDesktopClientId());
     loginUrl.searchParams.set("redirect_uri", redirectUri);
     loginUrl.searchParams.set("state", browserState);
 
+    this.pendingBrowserLoginState = browserState;
+    this.pendingBrowserLoginUrl = loginUrl.toString();
+    this.patchState({
+      status: "authenticating",
+      errorMessage: null,
+    });
+
     try {
-      await shell.openExternal(loginUrl.toString());
+      await shell.openExternal(this.pendingBrowserLoginUrl);
     } catch (error) {
       await this.closeLoopbackCallbackServer();
+      this.pendingBrowserLoginState = null;
+      this.pendingBrowserLoginUrl = null;
+      this.stateStorage.updateAuthStatus("unauthenticated");
+      this.patchState({
+        status: "unauthenticated",
+        errorMessage: null,
+      });
       throw error;
     }
+  }
+
+  async reopenBrowserLogin(): Promise<void> {
+    if (this.pendingBrowserLoginUrl) {
+      await shell.openExternal(this.pendingBrowserLoginUrl);
+      return;
+    }
+    await this.beginBrowserLogin();
+  }
+
+  async cancelBrowserLogin(): Promise<void> {
+    if (
+      !this.pendingBrowserLoginState &&
+      this.state.status !== "authenticating"
+    ) {
+      return;
+    }
+
+    await this.closeLoopbackCallbackServer();
+    this.pendingBrowserLoginState = null;
+    this.pendingBrowserLoginUrl = null;
+    this.exchangeInFlightCode = null;
+    this.stateStorage.updateAuthStatus("unauthenticated");
+    this.patchState({
+      status: "unauthenticated",
+      session: null,
+      offline: null,
+      errorMessage: null,
+    });
   }
 
   async handleCallbackUrl(rawUrl: string): Promise<void> {
@@ -409,6 +446,7 @@ export class AuthService {
       throw new Error("로그인 상태 값이 일치하지 않습니다.");
     }
     this.pendingBrowserLoginState = null;
+    this.pendingBrowserLoginUrl = null;
     this.exchangeInFlightCode = code;
 
     try {
@@ -717,6 +755,7 @@ export class AuthService {
     }
     this.exchangeInFlightCode = null;
     this.pendingBrowserLoginState = null;
+    this.pendingBrowserLoginUrl = null;
     this.state = {
       status: nextState.status,
       session: null,

@@ -5,6 +5,8 @@ import { useLoginController } from './useLoginController';
 
 const mocks = vi.hoisted(() => ({
   beginBrowserLogin: vi.fn(),
+  reopenBrowserLogin: vi.fn(),
+  cancelBrowserLogin: vi.fn(),
   checkForUpdates: vi.fn(),
   closeWindow: vi.fn(),
   dismissAvailableUpdate: vi.fn(),
@@ -58,6 +60,20 @@ describe('useLoginController', () => {
     });
 
     expect(mocks.checkForUpdates).toHaveBeenCalledTimes(1);
+  });
+
+  it('exposes browser login recovery actions from the desktop bridge', async () => {
+    const controller = renderController();
+    mocks.reopenBrowserLogin.mockResolvedValue(undefined);
+    mocks.cancelBrowserLogin.mockResolvedValue(undefined);
+
+    await act(async () => {
+      await controller.reopenBrowserLogin();
+      await controller.cancelBrowserLogin();
+    });
+
+    expect(mocks.reopenBrowserLogin).toHaveBeenCalledTimes(1);
+    expect(mocks.cancelBrowserLogin).toHaveBeenCalledTimes(1);
   });
 
   it('retries online and updates retrying state around the request', async () => {

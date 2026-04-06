@@ -827,7 +827,7 @@ func applyCommonSecurityHeaders(ctx *gin.Context) {
 func applyAuthHTMLResponseHeaders(ctx *gin.Context) {
 	ctx.Header(
 		"Content-Security-Policy",
-		"default-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; connect-src 'self'; font-src 'self' data:",
+		"default-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self' http://localhost:* http://127.0.0.1:* http://[::1]:*; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; connect-src 'self'; font-src 'self' data:",
 	)
 }
 
