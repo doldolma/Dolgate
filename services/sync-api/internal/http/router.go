@@ -832,9 +832,11 @@ func applyAuthHTMLResponseHeaders(ctx *gin.Context) {
 }
 
 func applyShareViewerResponseHeaders(ctx *gin.Context) {
+	// The browser share viewer embeds xterm.js, which relies on runtime inline
+	// styles for accurate terminal sizing and cell layout.
 	ctx.Header(
 		"Content-Security-Policy",
-		"default-src 'none'; base-uri 'none'; frame-ancestors 'none'; img-src 'self' data:; style-src 'self'; script-src 'self'; connect-src 'self'; font-src 'self' data:",
+		"default-src 'none'; base-uri 'none'; frame-ancestors 'none'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; font-src 'self' data:",
 	)
 }
 

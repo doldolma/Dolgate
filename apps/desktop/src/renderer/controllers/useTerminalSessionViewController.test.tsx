@@ -276,6 +276,7 @@ describe('useTerminalSessionViewController', () => {
 
   it('marks share snapshots dirty on incoming chunks and flushes refresh snapshots on the interval', async () => {
     const onUpdateSessionShareSnapshot = vi.fn().mockResolvedValue(undefined);
+    const serializedSnapshot = '\u001b[?1049h\u001b[H\tfoo\r\n\t\tbar';
     renderController(
       createProps({
         tab: {
@@ -295,6 +296,7 @@ describe('useTerminalSessionViewController', () => {
     await act(async () => {
       await Promise.resolve();
     });
+    mocks.runtimeRecords[0].captureSnapshot.mockReturnValue(serializedSnapshot);
     onUpdateSessionShareSnapshot.mockClear();
 
     await act(async () => {
@@ -309,7 +311,7 @@ describe('useTerminalSessionViewController', () => {
     expect(onUpdateSessionShareSnapshot.mock.calls.at(-1)?.[0]).toEqual(
       expect.objectContaining({
         sessionId: 'session-1',
-        snapshot: 'snapshot',
+        snapshot: serializedSnapshot,
       }),
     );
   });

@@ -860,6 +860,9 @@
 
     if (payload.type === "snapshot-init" || payload.type === "snapshot-resync") {
       applyViewerLayoutMetadata(payload);
+      // Resize before replaying the owner snapshot so cursor-addressed content
+      // and tab stops are restored against the same terminal geometry.
+      term.resize(payload.cols || term.cols, payload.rows || term.rows);
       term.reset();
       if (payload.snapshot) {
         term.write(payload.snapshot, () => {

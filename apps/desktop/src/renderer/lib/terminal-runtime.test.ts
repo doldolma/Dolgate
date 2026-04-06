@@ -130,7 +130,8 @@ describe('terminal-runtime', () => {
     });
     expect(terminal.loadAddon).toHaveBeenNthCalledWith(1, fitAddon);
     expect(terminal.loadAddon).toHaveBeenNthCalledWith(2, searchAddon);
-    expect(terminal.loadAddon).toHaveBeenNthCalledWith(3, unicode11Addon);
+    expect(terminal.loadAddon).toHaveBeenNthCalledWith(3, expect.any(Object));
+    expect(terminal.loadAddon).toHaveBeenNthCalledWith(4, unicode11Addon);
     expect(terminal.unicode.activeVersion).toBe('11');
     expect(terminal.open).toHaveBeenCalledWith(container);
     expect(fitAddon.fit).toHaveBeenCalledTimes(1);
@@ -392,6 +393,41 @@ describe('terminal-runtime', () => {
     );
 
     triggerWriteCallback(0);
+  });
+
+  it('captures session-share snapshots with the serialize addon', () => {
+    const { terminal } = createFakeTerminal();
+    const serializedSnapshot = '\u001b[?1049h\u001b[H\tfoo\r\n\t\tbar';
+    const serializeAddon = {
+      activate: vi.fn(),
+      dispose: vi.fn(),
+      serialize: vi.fn(() => serializedSnapshot),
+    };
+
+    const runtime = createTerminalRuntime({
+      container: document.createElement('div'),
+      appearance: createAppearance(),
+      onData: vi.fn(),
+      onBinary: vi.fn(),
+      dependencies: {
+        createTerminal: (() => terminal) as never,
+        createFitAddon: (() => ({ fit: vi.fn(), activate: vi.fn(), dispose: vi.fn() })) as never,
+        createSearchAddon: (() => ({
+          activate: vi.fn(),
+          dispose: vi.fn(),
+          findNext: vi.fn(() => true),
+          findPrevious: vi.fn(() => true),
+          clearDecorations: vi.fn(),
+          clearActiveDecoration: vi.fn()
+        })) as never,
+        createSerializeAddon: (() => serializeAddon) as never,
+        createUnicode11Addon: (() => ({ activate: vi.fn(), dispose: vi.fn() })) as never,
+        openExternal: vi.fn()
+      }
+    });
+
+    expect(runtime.captureSnapshot()).toBe(serializedSnapshot);
+    expect(serializeAddon.serialize).toHaveBeenCalledWith({ scrollback: 0 });
   });
 
   it('cancels pending flushes when disposed', () => {

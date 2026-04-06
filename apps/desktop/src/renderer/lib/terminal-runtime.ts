@@ -1,5 +1,6 @@
 import { FitAddon } from 'xterm-addon-fit/lib/xterm-addon-fit.js';
 import { SearchAddon } from 'xterm-addon-search/lib/xterm-addon-search.js';
+import { SerializeAddon, type ISerializeOptions } from 'xterm-addon-serialize/lib/xterm-addon-serialize.js';
 import { Unicode11Addon } from 'xterm-addon-unicode11/lib/xterm-addon-unicode11.js';
 import {
   Terminal,
@@ -58,6 +59,7 @@ interface CreateTerminalRuntimeDependencies {
   createTerminal?: (options: ITerminalOptions) => Terminal;
   createFitAddon?: () => FitAddon;
   createSearchAddon?: () => SearchAddon;
+  createSerializeAddon?: () => SerializeAddon;
   createUnicode11Addon?: () => Unicode11Addon;
   loadWebglAddonModule?: () => Promise<WebglAddonModuleLike>;
   scheduleAnimationFrame?: (callback: FrameRequestCallback) => number;
@@ -271,6 +273,10 @@ function buildViewportSnapshot(terminal: Terminal): string {
   return `\u001b[2J\u001b[H${lines.join('\r\n')}\u001b[${cursorRow};${cursorCol}H`;
 }
 
+const VIEWPORT_SERIALIZE_OPTIONS: ISerializeOptions = {
+  scrollback: 0,
+};
+
 export function createTerminalRuntime({
   container,
   appearance,
@@ -281,6 +287,7 @@ export function createTerminalRuntime({
   const terminal = (dependencies.createTerminal ?? ((options) => new Terminal(options)))(buildTerminalOptions(appearance));
   const fitAddon = (dependencies.createFitAddon ?? (() => new FitAddon()))();
   let searchAddon: SearchAddon | null = null;
+  let serializeAddon: SerializeAddon | null = null;
   let unicode11Addon: Unicode11Addon | null = null;
   const loadWebglAddonModule = dependencies.loadWebglAddonModule ?? loadDefaultWebglAddonModule;
   const scheduleAnimationFrame = dependencies.scheduleAnimationFrame ?? scheduleDefaultAnimationFrame;
@@ -313,6 +320,17 @@ export function createTerminalRuntime({
   } catch (error) {
     searchAddon = null;
     safeWarn(logger, 'Search addon unavailable, continuing without in-terminal search support.', error);
+  }
+  try {
+    serializeAddon = (dependencies.createSerializeAddon ?? (() => new SerializeAddon()))();
+    terminal.loadAddon(serializeAddon);
+  } catch (error) {
+    serializeAddon = null;
+    safeWarn(
+      logger,
+      'Serialize addon unavailable, continuing with the fallback terminal snapshot implementation.',
+      error,
+    );
   }
   try {
     unicode11Addon = (dependencies.createUnicode11Addon ?? (() => new Unicode11Addon()))();
@@ -461,6 +479,17 @@ export function createTerminalRuntime({
       flushPendingWriteDrainCallback();
     },
     captureSnapshot() {
+      if (serializeAddon) {
+        try {
+          return serializeAddon.serialize(VIEWPORT_SERIALIZE_OPTIONS);
+        } catch (error) {
+          safeWarn(
+            logger,
+            'Serialize addon failed to capture the terminal state, falling back to the viewport snapshot.',
+            error,
+          );
+        }
+      }
       return buildViewportSnapshot(terminal);
     },
     setAppearance(nextAppearance) {
