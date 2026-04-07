@@ -171,6 +171,37 @@ describe('AwsService.getProfileStatus', () => {
   });
 });
 
+describe('AwsService.buildManagedSessionEnvSpec', () => {
+  it('returns the managed AWS session env patch and unset list', () => {
+    const userDataDir = process.env.DOLSSH_USER_DATA_DIR;
+    if (!userDataDir) {
+      throw new Error('DOLSSH_USER_DATA_DIR is not configured for the test');
+    }
+
+    const service = new AwsService();
+    const awsHomeDir = path.join(userDataDir, 'storage', 'aws');
+    const awsRootDir = path.join(awsHomeDir, '.aws');
+
+    expect(service.buildManagedSessionEnvSpec()).toEqual({
+      env: {
+        HOME: awsHomeDir,
+        USERPROFILE: awsHomeDir,
+        AWS_CONFIG_FILE: path.join(awsRootDir, 'config'),
+        AWS_SHARED_CREDENTIALS_FILE: path.join(awsRootDir, 'credentials'),
+      },
+      unsetEnv: [
+        'AWS_PROFILE',
+        'AWS_DEFAULT_PROFILE',
+        'AWS_ACCESS_KEY_ID',
+        'AWS_SECRET_ACCESS_KEY',
+        'AWS_SESSION_TOKEN',
+        'AWS_REGION',
+        'AWS_DEFAULT_REGION',
+      ],
+    });
+  });
+});
+
 describe('AwsService.createProfile', () => {
   it('validates credentials first and writes the new profile when they are valid', async () => {
     const rootDir = await createTempAwsProfileDir();

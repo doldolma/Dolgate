@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"dolssh/services/ssh-core/internal/protocol"
@@ -35,7 +36,6 @@ func resolveAWSRuntimeWithResolver(payload protocol.AWSConnectPayload, resolver 
 		return awsCommandRuntime{}, fmt.Errorf("AWS Session Manager Plugin이 설치되어 있지 않아 SSM 세션을 열 수 없습니다.")
 	}
 
-	pathValue := buildRuntimePathValue(filepath.Dir(awsPath), filepath.Dir(pluginPath))
 	wrapperPath, err := resolveConPTYWrapperPath()
 	if err != nil {
 		return awsCommandRuntime{}, err
@@ -43,12 +43,18 @@ func resolveAWSRuntimeWithResolver(payload protocol.AWSConnectPayload, resolver 
 	return awsCommandRuntime{
 		executablePath: awsPath,
 		args:           buildAWSArgs(payload),
-		env:            mergeChildEnv(pathValue, runtimeEnvPathCaseInsensitive()),
-		wrapperPath:    wrapperPath,
+		env: buildAWSRuntimeEnv(
+			os.Environ(),
+			payload,
+			runtimeEnvPathCaseInsensitive(),
+			filepath.Dir(awsPath),
+			filepath.Dir(pluginPath),
+		),
+		wrapperPath: wrapperPath,
 	}, nil
 }
 
-func resolveProcessBackedFakeRuntime() (awsCommandRuntime, error) {
+func resolveProcessBackedFakeRuntime(payload protocol.AWSConnectPayload) (awsCommandRuntime, error) {
 	fixturePath := strings.TrimSpace(os.Getenv(processBackedFakeAWSFixtureEnv))
 	if fixturePath == "" {
 		return awsCommandRuntime{}, fmt.Errorf("process-backed fake AWS session fixture path is not configured")
@@ -61,12 +67,24 @@ func resolveProcessBackedFakeRuntime() (awsCommandRuntime, error) {
 
 	return awsCommandRuntime{
 		executablePath: fixturePath,
-		env:            os.Environ(),
+		env:            buildAWSRuntimeEnv(os.Environ(), payload, runtimeEnvPathCaseInsensitive()),
 		wrapperPath:    wrapperPath,
 	}, nil
 }
 
-func buildRuntimePathValue(preferredDirs ...string) string {
+func buildAWSRuntimeEnv(baseEnv []string, payload protocol.AWSConnectPayload, caseInsensitive bool, preferredPathDirs ...string) []string {
+	env := mergeRuntimeEnv(baseEnv, payload.UnsetEnv, payload.Env, caseInsensitive)
+	pathValue := buildRuntimePathValue(
+		lookupEnvValueInList(env, "PATH", caseInsensitive),
+		caseInsensitive,
+		preferredPathDirs...,
+	)
+	return mergeRuntimeEnv(env, nil, map[string]string{
+		"PATH": pathValue,
+	}, caseInsensitive)
+}
+
+func buildRuntimePathValue(rawPath string, caseInsensitive bool, preferredDirs ...string) string {
 	entries := make([]string, 0, len(preferredDirs)+8)
 	seen := make(map[string]struct{})
 	appendUnique := func(entry string) {
@@ -75,7 +93,7 @@ func buildRuntimePathValue(preferredDirs ...string) string {
 			return
 		}
 		key := entry
-		if runtimeEnvPathCaseInsensitive() {
+		if caseInsensitive {
 			key = strings.ToLower(entry)
 		}
 		if _, ok := seen[key]; ok {
@@ -88,9 +106,95 @@ func buildRuntimePathValue(preferredDirs ...string) string {
 	for _, preferredDir := range preferredDirs {
 		appendUnique(preferredDir)
 	}
-	for _, entry := range filepath.SplitList(os.Getenv("PATH")) {
+	for _, entry := range filepath.SplitList(rawPath) {
 		appendUnique(entry)
 	}
 
 	return strings.Join(entries, string(os.PathListSeparator))
+}
+
+func mergeRuntimeEnv(baseEnv []string, unsetKeys []string, envPatch map[string]string, caseInsensitive bool) []string {
+	unset := make(map[string]struct{}, len(unsetKeys))
+	for _, key := range unsetKeys {
+		normalizedKey := normalizeEnvKey(key, caseInsensitive)
+		if normalizedKey == "" {
+			continue
+		}
+		unset[normalizedKey] = struct{}{}
+	}
+
+	entries := make([]string, 0, len(baseEnv)+len(envPatch))
+	seen := make(map[string]int, len(baseEnv)+len(envPatch))
+	for _, entry := range baseEnv {
+		key, value, found := strings.Cut(entry, "=")
+		if !found {
+			continue
+		}
+
+		normalizedKey := normalizeEnvKey(key, caseInsensitive)
+		if normalizedKey == "" {
+			continue
+		}
+		if _, shouldUnset := unset[normalizedKey]; shouldUnset {
+			continue
+		}
+
+		nextEntry := fmt.Sprintf("%s=%s", key, value)
+		if index, ok := seen[normalizedKey]; ok {
+			entries[index] = nextEntry
+			continue
+		}
+
+		seen[normalizedKey] = len(entries)
+		entries = append(entries, nextEntry)
+	}
+
+	if len(envPatch) == 0 {
+		return entries
+	}
+
+	keys := make([]string, 0, len(envPatch))
+	for key := range envPatch {
+		if normalizeEnvKey(key, caseInsensitive) == "" {
+			continue
+		}
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+
+	for _, key := range keys {
+		normalizedKey := normalizeEnvKey(key, caseInsensitive)
+		nextEntry := fmt.Sprintf("%s=%s", key, envPatch[key])
+		if index, ok := seen[normalizedKey]; ok {
+			entries[index] = nextEntry
+			continue
+		}
+
+		seen[normalizedKey] = len(entries)
+		entries = append(entries, nextEntry)
+	}
+
+	return entries
+}
+
+func lookupEnvValueInList(env []string, key string, caseInsensitive bool) string {
+	normalizedTarget := normalizeEnvKey(key, caseInsensitive)
+	for _, entry := range env {
+		candidate, value, found := strings.Cut(entry, "=")
+		if !found {
+			continue
+		}
+		if normalizeEnvKey(candidate, caseInsensitive) == normalizedTarget {
+			return value
+		}
+	}
+	return ""
+}
+
+func normalizeEnvKey(key string, caseInsensitive bool) string {
+	normalizedKey := strings.TrimSpace(key)
+	if caseInsensitive {
+		normalizedKey = strings.ToLower(normalizedKey)
+	}
+	return normalizedKey
 }

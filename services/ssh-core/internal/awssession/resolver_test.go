@@ -71,6 +71,61 @@ func TestResolveAWSRuntimeWithResolverBuildsRuntimeArgsAndEnv(t *testing.T) {
 	}
 }
 
+func TestResolveAWSRuntimeWithResolverMergesPayloadEnvAndUnsetsConflictingAwsVariables(t *testing.T) {
+	setTestConPTYWrapperPath(t)
+
+	t.Setenv("PATH", strings.Join([]string{
+		filepath.Join("existing", "bin"),
+		filepath.Join("second", "bin"),
+	}, string(os.PathListSeparator)))
+	t.Setenv("AWS_PROFILE", "legacy-profile")
+	t.Setenv("AWS_DEFAULT_PROFILE", "legacy-default")
+
+	runtime, err := resolveAWSRuntimeWithResolver(protocol.AWSConnectPayload{
+		ProfileName: "default",
+		Region:      "ap-northeast-2",
+		InstanceID:  "i-1234567890",
+		Env: map[string]string{
+			"HOME":                        filepath.Join("tmp", "aws-home"),
+			"USERPROFILE":                 filepath.Join("tmp", "aws-home"),
+			"AWS_CONFIG_FILE":             filepath.Join("tmp", "aws-home", ".aws", "config"),
+			"AWS_SHARED_CREDENTIALS_FILE": filepath.Join("tmp", "aws-home", ".aws", "credentials"),
+		},
+		UnsetEnv: []string{
+			"AWS_PROFILE",
+			"AWS_DEFAULT_PROFILE",
+		},
+	}, func(command string) (string, error) {
+		switch command {
+		case "aws":
+			return filepath.Join("tools", "aws", "aws"), nil
+		case "session-manager-plugin":
+			return filepath.Join("tools", "plugin", "session-manager-plugin"), nil
+		default:
+			return "", errors.New("unexpected command")
+		}
+	})
+	if err != nil {
+		t.Fatalf("resolve runtime failed: %v", err)
+	}
+
+	if got := lookupEnvValue(runtime.env, "HOME"); got != filepath.Join("tmp", "aws-home") {
+		t.Fatalf("HOME = %q", got)
+	}
+	if got := lookupEnvValue(runtime.env, "AWS_CONFIG_FILE"); got != filepath.Join("tmp", "aws-home", ".aws", "config") {
+		t.Fatalf("AWS_CONFIG_FILE = %q", got)
+	}
+	if got := lookupEnvValue(runtime.env, "AWS_SHARED_CREDENTIALS_FILE"); got != filepath.Join("tmp", "aws-home", ".aws", "credentials") {
+		t.Fatalf("AWS_SHARED_CREDENTIALS_FILE = %q", got)
+	}
+	if got := lookupEnvValue(runtime.env, "AWS_PROFILE"); got != "" {
+		t.Fatalf("AWS_PROFILE = %q, want empty", got)
+	}
+	if got := lookupEnvValue(runtime.env, "AWS_DEFAULT_PROFILE"); got != "" {
+		t.Fatalf("AWS_DEFAULT_PROFILE = %q, want empty", got)
+	}
+}
+
 func TestResolveAWSRuntimeWithResolverReturnsExplicitMissingToolErrors(t *testing.T) {
 	setTestConPTYWrapperPath(t)
 

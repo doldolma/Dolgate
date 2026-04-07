@@ -98,6 +98,11 @@ interface AwsSsoTokenCacheEntry {
   expiresAt?: string;
 }
 
+export interface AwsSessionEnvSpec {
+  env: Record<string, string>;
+  unsetEnv: string[];
+}
+
 const resolvedExecutableCache = new Map<string, string>();
 
 function splitPathEnv(): string[] {
@@ -282,6 +287,26 @@ export async function buildAwsCommandEnv(
   }
 
   return env;
+}
+
+function splitAwsSessionEnvSpec(
+  envPatch: Record<string, string | null | undefined>,
+): AwsSessionEnvSpec {
+  const env: Record<string, string> = {};
+  const unsetEnv: string[] = [];
+
+  for (const [key, value] of Object.entries(envPatch)) {
+    if (value === null || value === undefined) {
+      unsetEnv.push(key);
+      continue;
+    }
+    env[key] = value;
+  }
+
+  return {
+    env,
+    unsetEnv,
+  };
 }
 
 function parseJson<T>(raw: string, fallbackMessage: string): T {
@@ -1490,13 +1515,22 @@ export class AwsService {
     baseEnv: NodeJS.ProcessEnv = process.env,
     envPatch?: Record<string, string | null | undefined>,
   ): Promise<NodeJS.ProcessEnv> {
+    const sessionEnv = this.buildManagedSessionEnvSpec();
+    const managedEnvPatch = Object.fromEntries([
+      ...Object.entries(sessionEnv.env),
+      ...sessionEnv.unsetEnv.map((key) => [key, null] as const),
+    ]);
     return buildAwsCommandEnv(
       {
-        ...this.getManagedAwsEnvOverrides(),
+        ...managedEnvPatch,
         ...(envPatch ?? {}),
       },
       baseEnv,
     );
+  }
+
+  buildManagedSessionEnvSpec(): AwsSessionEnvSpec {
+    return splitAwsSessionEnvSpec(this.getManagedAwsEnvOverrides());
   }
 
   private getConfiguredAwsRootEnvPatch(): Record<string, string | null> {

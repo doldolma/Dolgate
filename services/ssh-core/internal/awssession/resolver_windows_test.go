@@ -24,3 +24,28 @@ func TestRuntimeToolCandidatesPreferOfficialExecutablesAndSkipWrappers(t *testin
 		t.Fatalf("second candidate = %q", candidates[1])
 	}
 }
+
+func TestMergeRuntimeEnvTreatsWindowsEnvKeysCaseInsensitively(t *testing.T) {
+	env := mergeRuntimeEnv(
+		[]string{
+			`Path=C:\custom\bin`,
+			`UserProfile=C:\Users\legacy`,
+			`AWS_PROFILE=legacy`,
+		},
+		[]string{"aws_profile"},
+		map[string]string{
+			`USERPROFILE`: `C:\Users\managed`,
+		},
+		true,
+	)
+
+	if got := lookupEnvValueInList(env, "USERPROFILE", true); got != `C:\Users\managed` {
+		t.Fatalf("USERPROFILE = %q", got)
+	}
+	if got := lookupEnvValueInList(env, "AWS_PROFILE", true); got != "" {
+		t.Fatalf("AWS_PROFILE = %q, want empty", got)
+	}
+	if got := lookupEnvValueInList(env, "PATH", true); got != `C:\custom\bin` {
+		t.Fatalf("PATH = %q", got)
+	}
+}

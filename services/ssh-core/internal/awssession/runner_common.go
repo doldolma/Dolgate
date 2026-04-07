@@ -35,7 +35,7 @@ func defaultRunnerFactory(payload protocol.AWSConnectPayload) (sessionRunner, er
 	case "1":
 		return newFakeRunner("Connected to fake AWS SSM smoke session.\r\n"), nil
 	case "process":
-		runtime, err := resolveProcessBackedFakeRuntime()
+		runtime, err := resolveProcessBackedFakeRuntime(payload)
 		if err != nil {
 			return nil, err
 		}
