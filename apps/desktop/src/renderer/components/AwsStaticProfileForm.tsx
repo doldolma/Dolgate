@@ -8,7 +8,7 @@ import {
 } from '../ui'
 
 interface AwsStaticProfileFormProps {
-  title: string
+  title?: string
   descriptions?: string[]
   draft: AwsStaticProfileDraft
   error?: string | null
@@ -49,16 +49,18 @@ export function AwsStaticProfileForm({
         onSubmit()
       }}
     >
-      <div className="grid gap-1.5">
-        <strong>{title}</strong>
-        {descriptions.length > 0 ? (
-          <div className="flex flex-wrap gap-[0.8rem] text-[0.92rem] text-[var(--text-soft)]">
-            {descriptions.map((description) => (
-              <span key={description}>{description}</span>
-            ))}
-          </div>
-        ) : null}
-      </div>
+      {title || descriptions.length > 0 ? (
+        <div className="grid gap-1.5">
+          {title ? <strong>{title}</strong> : null}
+          {descriptions.length > 0 ? (
+            <div className="flex flex-wrap gap-[0.8rem] text-[0.92rem] text-[var(--text-soft)]">
+              {descriptions.map((description) => (
+                <span key={description}>{description}</span>
+              ))}
+            </div>
+          ) : null}
+        </div>
+      ) : null}
 
       <div className="grid gap-4 md:grid-cols-2">
         <FieldGroup label={profileNameLabel}>

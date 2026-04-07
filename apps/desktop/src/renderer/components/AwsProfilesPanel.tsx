@@ -733,8 +733,8 @@ export function AwsProfilesPanel({ hosts }: AwsProfilesPanelProps) {
                 <AwsProfileCreateWizard
                   testId="aws-profiles-create-form"
                   title="새 AWS 프로필 생성"
+                  showTitle={false}
                   descriptions={[
-                    '유효성 검사를 통과한 경우에만 생성합니다.',
                     ...(awsProfilesServerSupport === 'unsupported'
                       ? ['현재 서버는 AWS 프로필 동기화를 지원하지 않아 이 기기에서만 저장됩니다.']
                       : []),

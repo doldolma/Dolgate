@@ -25,6 +25,7 @@ type AwsProfileCreateKind = 'static' | 'sso' | 'role'
 interface AwsProfileCreateWizardProps {
   profiles: AwsProfileSummary[]
   title: string
+  showTitle?: boolean
   descriptions?: string[]
   testId?: string
   onCancel?: () => void
@@ -86,6 +87,7 @@ function validateRoleArnInput(roleArn: string): string | null {
 export function AwsProfileCreateWizard({
   profiles,
   title,
+  showTitle = true,
   descriptions = [],
   testId,
   onCancel,
@@ -238,16 +240,18 @@ export function AwsProfileCreateWizard({
 
   return (
     <div data-testid={testId} className="grid gap-4">
-      <div className="grid gap-1.5">
-        <strong>{title}</strong>
-        {descriptions.length > 0 ? (
-          <div className="flex flex-wrap gap-[0.8rem] text-[0.92rem] text-[var(--text-soft)]">
-            {descriptions.map((description) => (
-              <span key={description}>{description}</span>
-            ))}
-          </div>
-        ) : null}
-      </div>
+      {showTitle || descriptions.length > 0 ? (
+        <div className="grid gap-1.5">
+          {showTitle ? <strong>{title}</strong> : null}
+          {descriptions.length > 0 ? (
+            <div className="flex flex-wrap gap-[0.8rem] text-[0.92rem] text-[var(--text-soft)]">
+              {descriptions.map((description) => (
+                <span key={description}>{description}</span>
+              ))}
+            </div>
+          ) : null}
+        </div>
+      ) : null}
 
       <Tabs aria-label="AWS profile type">
         <TabButton
@@ -275,10 +279,6 @@ export function AwsProfileCreateWizard({
 
       {activeKind === 'static' ? (
         <AwsStaticProfileForm
-          title="Static AWS 프로필 생성"
-          descriptions={[
-            '유효성 검사를 통과한 경우에만 생성합니다.',
-          ]}
           draft={staticDraft}
           error={error}
           isSubmitting={isSubmitting}
@@ -301,13 +301,6 @@ export function AwsProfileCreateWizard({
             void handleSsoSubmit()
           }}
         >
-          <div className="grid gap-1.5">
-            <strong>AWS SSO 프로필 생성</strong>
-            <span className="text-[0.92rem] text-[var(--text-soft)]">
-              SSO 로그인과 account/role 조회가 모두 성공한 경우에만 저장합니다.
-            </span>
-          </div>
-
           <div className="grid gap-4 md:grid-cols-2">
             <FieldGroup label="새 프로필명">
               <Input
@@ -480,13 +473,6 @@ export function AwsProfileCreateWizard({
             void handleRoleSubmit()
           }}
         >
-          <div className="grid gap-1.5">
-            <strong>Role profile 생성</strong>
-            <span className="text-[0.92rem] text-[var(--text-soft)]">
-              source profile로 AssumeRole 검증이 성공한 경우에만 저장합니다.
-            </span>
-          </div>
-
           <div className="grid gap-4 md:grid-cols-2">
             <FieldGroup label="새 프로필명">
               <Input
