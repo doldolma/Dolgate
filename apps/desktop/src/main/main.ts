@@ -100,7 +100,6 @@ if (termiusHelperArgIndex >= 0) {
       appendActivityLog(entry);
     },
     upsertActivityLog,
-    () => awsService.buildManagedCommandEnv()
   );
   const hostsOverrideManager = new HostsOverrideManager();
   const syncService = new SyncService(

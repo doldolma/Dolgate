@@ -207,6 +207,8 @@ export interface ResolvedAwsConnectPayload {
   instanceId: string;
   cols: number;
   rows: number;
+  env?: Record<string, string>;
+  unsetEnv?: string[];
 }
 
 export interface ResolvedLocalConnectPayload {

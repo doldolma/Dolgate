@@ -28,6 +28,7 @@ export function registerSshIpcHandlers(ctx: MainIpcContext): void {
             host.awsProfileId,
             host.awsProfileName,
           ) ?? host.awsProfileName;
+        const awsSessionEnv = ctx.awsService.buildManagedSessionEnvSpec();
         const connection = await ctx.coreManager.connectAwsSession({
           profileName,
           region: host.awsRegion,
@@ -37,6 +38,8 @@ export function registerSshIpcHandlers(ctx: MainIpcContext): void {
           hostId: host.id,
           hostLabel: host.label,
           title: input.title?.trim() || host.label,
+          env: awsSessionEnv.env,
+          unsetEnv: awsSessionEnv.unsetEnv,
         });
         ctx.sessionReplayService.noteSessionConfigured(
           connection.sessionId,

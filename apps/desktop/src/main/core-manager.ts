@@ -1264,6 +1264,8 @@ export class CoreManager {
     title: string;
     hostId: string;
     hostLabel: string;
+    env?: Record<string, string>;
+    unsetEnv?: string[];
   }): Promise<{ sessionId: string }> {
     await this.start();
     const sessionId = randomUUID();
@@ -1298,6 +1300,8 @@ export class CoreManager {
       instanceId: payload.instanceId,
       cols: payload.cols,
       rows: payload.rows,
+      env: payload.env,
+      unsetEnv: payload.unsetEnv,
     };
     this.sendControl<ResolvedAwsConnectPayload>({
       id: randomUUID(),

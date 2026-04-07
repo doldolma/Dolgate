@@ -146,11 +146,13 @@ type ConnectPayload struct {
 }
 
 type AWSConnectPayload struct {
-	ProfileName string `json:"profileName"`
-	Region      string `json:"region"`
-	InstanceID  string `json:"instanceId"`
-	Cols        int    `json:"cols"`
-	Rows        int    `json:"rows"`
+	ProfileName string            `json:"profileName"`
+	Region      string            `json:"region"`
+	InstanceID  string            `json:"instanceId"`
+	Cols        int               `json:"cols"`
+	Rows        int               `json:"rows"`
+	Env         map[string]string `json:"env,omitempty"`
+	UnsetEnv    []string          `json:"unsetEnv,omitempty"`
 }
 
 type LocalConnectPayload struct {

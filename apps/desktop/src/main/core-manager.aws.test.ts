@@ -235,6 +235,8 @@ describe("CoreManager AWS SSM sessions", () => {
       cols: 180,
       rows: 48,
     });
+    expect(connectRequest.payload).not.toHaveProperty("env");
+    expect(connectRequest.payload).not.toHaveProperty("unsetEnv");
 
     fakeProcess.emitControl({
       type: "connected",
@@ -270,6 +272,53 @@ describe("CoreManager AWS SSM sessions", () => {
     );
     expect(metadata.connectionKind).toBe("aws-ssm");
     expect(metadata.status).toBe("connected");
+  });
+
+  it("includes session-scoped AWS env overrides when provided", async () => {
+    const fakeProcess = createFakeChildProcess();
+    spawnMock.mockReturnValue(fakeProcess.child);
+
+    const manager = new CoreManager();
+
+    await manager.connectAwsSession({
+      profileName: "default",
+      region: "ap-northeast-2",
+      instanceId: "i-override",
+      cols: 160,
+      rows: 40,
+      title: "AWS Host",
+      hostId: "host-env",
+      hostLabel: "AWS Host Env",
+      env: {
+        HOME: "/tmp/dolssh-aws-home",
+        USERPROFILE: "/tmp/dolssh-aws-home",
+        AWS_CONFIG_FILE: "/tmp/dolssh-aws-home/.aws/config",
+        AWS_SHARED_CREDENTIALS_FILE: "/tmp/dolssh-aws-home/.aws/credentials",
+      },
+      unsetEnv: [
+        "AWS_PROFILE",
+        "AWS_DEFAULT_PROFILE",
+      ],
+    });
+
+    const connectRequest = decodeControlFrame(fakeProcess.writes[0]);
+    expect(connectRequest.payload).toMatchObject({
+      profileName: "default",
+      region: "ap-northeast-2",
+      instanceId: "i-override",
+      cols: 160,
+      rows: 40,
+      env: {
+        HOME: "/tmp/dolssh-aws-home",
+        USERPROFILE: "/tmp/dolssh-aws-home",
+        AWS_CONFIG_FILE: "/tmp/dolssh-aws-home/.aws/config",
+        AWS_SHARED_CREDENTIALS_FILE: "/tmp/dolssh-aws-home/.aws/credentials",
+      },
+      unsetEnv: [
+        "AWS_PROFILE",
+        "AWS_DEFAULT_PROFILE",
+      ],
+    });
   });
 
   it("keeps AWS-specific logs and terminal events when ssh-core emits error and closed", async () => {
