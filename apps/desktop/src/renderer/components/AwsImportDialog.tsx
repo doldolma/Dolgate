@@ -9,6 +9,7 @@ import {
 } from '@shared';
 import { useAwsImportController } from '../controllers/useImportControllers';
 import { DialogBackdrop } from './DialogBackdrop';
+import { AwsExternalProfileImportDialog } from './AwsExternalProfileImportDialog';
 import { AwsProfileCreateWizard } from './AwsProfileCreateWizard';
 import {
   Button,
@@ -104,8 +105,12 @@ function toAwsSshPortValue(value: string): number | null {
 export function AwsImportDialog({ open, currentGroupPath, onClose, onImport }: AwsImportDialogProps) {
   const {
     createAwsProfile,
+    getSyncStatus,
+    getExternalAwsProfileDetails,
     getAwsProfileStatus,
+    importExternalAwsProfiles,
     inspectAwsHostSshMetadata,
+    listExternalAwsProfiles,
     listAwsEc2Instances,
     listAwsEcsClusters,
     listAwsProfiles,
@@ -127,6 +132,9 @@ export function AwsImportDialog({ open, currentGroupPath, onClose, onImport }: A
   const [isLoadingInstances, setIsLoadingInstances] = useState(false);
   const [isLoggingIn, setIsLoggingIn] = useState(false);
   const [isCreateProfileOpen, setIsCreateProfileOpen] = useState(false);
+  const [isExternalImportOpen, setIsExternalImportOpen] = useState(false);
+  const [externalImportSummary, setExternalImportSummary] = useState<string | null>(null);
+  const [awsProfilesServerSupport, setAwsProfilesServerSupport] = useState<'unknown' | 'supported' | 'unsupported'>('unknown');
   const [error, setError] = useState<string | null>(null);
   const [inspectionTarget, setInspectionTarget] = useState<AwsEc2InstanceSummary | null>(null);
   const [inspectionStatus, setInspectionStatus] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle');
@@ -134,6 +142,11 @@ export function AwsImportDialog({ open, currentGroupPath, onClose, onImport }: A
   const [inspectionUsernameCandidates, setInspectionUsernameCandidates] = useState<string[]>([]);
   const [inspectionUsername, setInspectionUsername] = useState('');
   const [inspectionPort, setInspectionPort] = useState('');
+
+  const selectedProfileSummary = useMemo(
+    () => profiles.find((profile) => profile.name === selectedProfile) ?? null,
+    [profiles, selectedProfile],
+  );
 
   const resetCreateProfileForm = () => {
     setIsCreateProfileOpen(false);
@@ -144,6 +157,17 @@ export function AwsImportDialog({ open, currentGroupPath, onClose, onImport }: A
   const portDirtyRef = useRef(false);
   const usernameValueRef = useRef('');
   const portValueRef = useRef('');
+
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+    void getSyncStatus()
+      .then((status) => {
+        setAwsProfilesServerSupport(status.awsProfilesServerSupport ?? 'unknown');
+      })
+      .catch(() => undefined);
+  }, [getSyncStatus, open]);
 
   const resetInspection = () => {
     inspectionRequestIdRef.current += 1;
@@ -243,6 +267,7 @@ export function AwsImportDialog({ open, currentGroupPath, onClose, onImport }: A
     setSelectedRegion('');
     setInstances([]);
     setEcsClusters([]);
+    setExternalImportSummary(null);
     setError(null);
     resetCreateProfileForm();
     resetInspection();
@@ -413,6 +438,25 @@ export function AwsImportDialog({ open, currentGroupPath, onClose, onImport }: A
     resetCreateProfileForm();
   };
 
+  const handleExternalImportSuccess = async (result: {
+    importedProfileNames: string[]
+    skippedProfileNames: string[]
+  }) => {
+    const parts: string[] = []
+    if (result.importedProfileNames.length > 0) {
+      parts.push(`가져온 프로필 ${result.importedProfileNames.length}개`)
+    }
+    if (result.skippedProfileNames.length > 0) {
+      parts.push(`건너뜀 ${result.skippedProfileNames.length}개`)
+    }
+    setExternalImportSummary(parts.length > 0 ? `${parts.join(', ')}.` : null)
+    const items = await listAwsProfiles()
+    setProfiles(items)
+    setSelectedProfile(
+      resolveSelectedProfileName(items, result.importedProfileNames[0] ?? selectedProfile),
+    )
+  };
+
   const missingTools = useMemo(() => profileStatus?.missingTools ?? [], [profileStatus?.missingTools]);
   const shouldShowMissingToolsBanner =
     missingTools.includes('aws-cli') ||
@@ -445,11 +489,12 @@ export function AwsImportDialog({ open, currentGroupPath, onClose, onImport }: A
   }
 
   return (
-    <DialogBackdrop
-      onDismiss={onClose}
-      dismissDisabled={isRegistering}
-    >
-      <ModalShell role="dialog" aria-modal="true" aria-labelledby="aws-import-title" size="xl">
+    <>
+      <DialogBackdrop
+        onDismiss={onClose}
+        dismissDisabled={isRegistering}
+      >
+        <ModalShell role="dialog" aria-modal="true" aria-labelledby="aws-import-title" size="xl">
         <ModalHeader>
           <div>
             <SectionLabel>AWS</SectionLabel>
@@ -548,6 +593,15 @@ export function AwsImportDialog({ open, currentGroupPath, onClose, onImport }: A
               variant="secondary"
               disabled={Boolean(inspectionTarget) || isRegistering}
               onClick={() => {
+                setIsExternalImportOpen(true)
+              }}
+            >
+              로컬 AWS CLI에서 가져오기
+            </Button>
+            <Button
+              variant="secondary"
+              disabled={Boolean(inspectionTarget) || isRegistering}
+              onClick={() => {
                 setIsCreateProfileOpen((current) => !current);
               }}
             >
@@ -562,9 +616,11 @@ export function AwsImportDialog({ open, currentGroupPath, onClose, onImport }: A
                   testId="aws-create-profile-fields"
                   title="새 AWS 프로필 생성"
                   descriptions={[
-                    '전역 AWS CLI 프로필로 저장됩니다.',
+                    '앱 전용 AWS CLI 프로필로 저장됩니다.',
                     'Static, SSO, Role profile 생성이 모두 가능합니다.',
-                    '실제 프로필과 자격 증명은 다른 기기로 동기화되지 않습니다.',
+                    ...(awsProfilesServerSupport === 'unsupported'
+                      ? ['현재 서버는 AWS 프로필 동기화를 지원하지 않아 이 기기에서만 저장됩니다.']
+                      : []),
                   ]}
                   profiles={profiles}
                   createProfile={createAwsProfile}
@@ -574,6 +630,16 @@ export function AwsImportDialog({ open, currentGroupPath, onClose, onImport }: A
                 />
               </CardMain>
             </Card>
+          ) : null}
+
+          {externalImportSummary ? (
+            <NoticeCard tone="info">{externalImportSummary}</NoticeCard>
+          ) : null}
+
+          {awsProfilesServerSupport === 'unsupported' ? (
+            <NoticeCard tone="warning">
+              현재 서버는 AWS 프로필 동기화를 아직 지원하지 않습니다. 서버를 업데이트하기 전까지 이 기기에서만 저장됩니다.
+            </NoticeCard>
           ) : null}
 
           {loadingMessage ? <NoticeCard tone="info">{loadingMessage}</NoticeCard> : null}
@@ -752,6 +818,7 @@ export function AwsImportDialog({ open, currentGroupPath, onClose, onImport }: A
                                 label: cluster.clusterName,
                                 groupName: currentGroupPath ?? '',
                                 terminalThemeId: null,
+                                awsProfileId: selectedProfileSummary?.id ?? null,
                                 awsProfileName: selectedProfile,
                                 awsRegion: selectedRegion,
                                 awsEcsClusterArn: cluster.clusterArn,
@@ -864,6 +931,7 @@ export function AwsImportDialog({ open, currentGroupPath, onClose, onImport }: A
                         label: inspectionTarget.name || inspectionTarget.instanceId,
                         groupName: currentGroupPath ?? '',
                         terminalThemeId: null,
+                        awsProfileId: selectedProfileSummary?.id ?? null,
                         awsProfileName: selectedProfile,
                         awsRegion: selectedRegion,
                         awsInstanceId: inspectionTarget.instanceId,
@@ -898,7 +966,16 @@ export function AwsImportDialog({ open, currentGroupPath, onClose, onImport }: A
             </div>
           )}
         </ModalFooter>
-      </ModalShell>
-    </DialogBackdrop>
+        </ModalShell>
+      </DialogBackdrop>
+      <AwsExternalProfileImportDialog
+        open={isExternalImportOpen}
+        onClose={() => setIsExternalImportOpen(false)}
+        onImported={(result) => handleExternalImportSuccess(result)}
+        listExternalProfiles={listExternalAwsProfiles}
+        getExternalProfileDetails={getExternalAwsProfileDetails}
+        importExternalProfiles={importExternalAwsProfiles}
+      />
+    </>
   );
 }

@@ -16,6 +16,8 @@ import type {
   AwsHostSshInspectionResult,
   AwsProfileCreateInput,
   AwsProfileDetails,
+  AwsExternalProfileImportInput,
+  AwsExternalProfileImportResult,
   AwsProfileRenameInput,
   AwsSsoProfilePrepareInput,
   AwsSsoProfilePrepareResult,
@@ -483,11 +485,16 @@ export interface DesktopApi {
   };
   aws: {
     listProfiles: () => Promise<AwsProfileSummary[]>;
+    listExternalProfiles: () => Promise<AwsProfileSummary[]>;
     createProfile: (input: AwsProfileCreateInput) => Promise<void>;
     prepareSsoProfile: (
       input: AwsSsoProfilePrepareInput,
     ) => Promise<AwsSsoProfilePrepareResult>;
     getProfileDetails: (profileName: string) => Promise<AwsProfileDetails>;
+    getExternalProfileDetails: (profileName: string) => Promise<AwsProfileDetails>;
+    importExternalProfiles: (
+      input: AwsExternalProfileImportInput,
+    ) => Promise<AwsExternalProfileImportResult>;
     updateProfile: (input: AwsProfileUpdateInput) => Promise<void>;
     renameProfile: (input: AwsProfileRenameInput) => Promise<void>;
     deleteProfile: (profileName: string) => Promise<void>;

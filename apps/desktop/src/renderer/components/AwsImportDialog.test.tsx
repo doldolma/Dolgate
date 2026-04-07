@@ -10,6 +10,7 @@ import {
 
 function createStatus(overrides: Partial<AwsProfileStatus> = {}): AwsProfileStatus {
   return {
+    id: null,
     profileName: 'default',
     available: true,
     isSsoProfile: false,
@@ -25,8 +26,18 @@ function createStatus(overrides: Partial<AwsProfileStatus> = {}): AwsProfileStat
 
 function installMockApi(overrides?: {
   inspectHostSshMetadata?: ReturnType<typeof vi.fn>;
+  awsProfilesServerSupport?: 'unknown' | 'supported' | 'unsupported';
 }) {
   const api = {
+    sync: {
+      status: vi.fn().mockResolvedValue({
+        status: 'ready',
+        lastSuccessfulSyncAt: '2026-04-07T00:00:00.000Z',
+        pendingPush: false,
+        errorMessage: null,
+        awsProfilesServerSupport: overrides?.awsProfilesServerSupport ?? 'supported',
+      }),
+    },
     aws: {
       listProfiles: vi.fn().mockResolvedValue([{ name: 'default' }]),
       createProfile: vi.fn().mockResolvedValue(undefined),
@@ -232,6 +243,27 @@ describe('AwsImportDialog', () => {
     await waitFor(() => expect(screen.getByLabelText('Profile')).toHaveValue('dolssh-prod'));
     await waitFor(() => expect(api.aws.getProfileStatus).toHaveBeenCalledWith('dolssh-prod'));
     expect(screen.queryByTestId('aws-create-profile-form')).not.toBeInTheDocument();
+  });
+
+  it('shows a server update warning when aws profile sync is unsupported', async () => {
+    installMockApi({
+      awsProfilesServerSupport: 'unsupported',
+    });
+
+    render(
+      <AwsImportDialog
+        open
+        currentGroupPath={null}
+        onClose={() => undefined}
+        onImport={vi.fn().mockResolvedValue(undefined)}
+      />,
+    );
+
+    expect(
+      await screen.findByText(
+        '현재 서버는 AWS 프로필 동기화를 아직 지원하지 않습니다. 서버를 업데이트하기 전까지 이 기기에서만 저장됩니다.',
+      ),
+    ).toBeInTheDocument();
   });
 
   it('keeps the create profile form open and shows inline errors when creation fails', async () => {

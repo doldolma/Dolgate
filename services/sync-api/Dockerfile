@@ -2,6 +2,7 @@ FROM --platform=$BUILDPLATFORM golang:1.25-alpine AS builder
 
 ARG TARGETOS
 ARG TARGETARCH
+ARG VERSION=dev
 
 WORKDIR /src
 
@@ -11,7 +12,7 @@ RUN go mod download
 COPY . .
 
 # sync-api는 pure Go SQLite 드라이버를 사용하므로 CGO 없이 정적 바이너리로 빌드한다.
-RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -ldflags="-s -w" -o /out/sync-api ./cmd/api
+RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -ldflags="-s -w -X main.version=${VERSION}" -o /out/sync-api ./cmd/api
 
 FROM alpine:3.22
 

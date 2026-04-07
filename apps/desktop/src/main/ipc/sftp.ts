@@ -38,9 +38,14 @@ export function registerSftpIpcHandlers(ctx: MainIpcContext): void {
             allowBrowserLogin: true,
           }));
         const sshPort = getAwsEc2HostSshPort(hydratedHost);
+        const profileName =
+          ctx.awsService.resolveManagedProfileNameOrFallback(
+            hydratedHost.awsProfileId,
+            hydratedHost.awsProfileName,
+          ) ?? hydratedHost.awsProfileName;
         const trustedHostKeyBase64 = ctx.requireTrustedHostKey({
           hostname: buildAwsSsmKnownHostIdentity({
-            profileName: hydratedHost.awsProfileName,
+            profileName,
             region: hydratedHost.awsRegion,
             instanceId: hydratedHost.awsInstanceId,
           }),
@@ -80,7 +85,7 @@ export function registerSftpIpcHandlers(ctx: MainIpcContext): void {
         });
         try {
           await ctx.awsService.sendSshPublicKey({
-            profileName: hydratedHost.awsProfileName,
+            profileName,
             region: hydratedHost.awsRegion,
             instanceId: hydratedHost.awsInstanceId,
             availabilityZone,
@@ -102,7 +107,7 @@ export function registerSftpIpcHandlers(ctx: MainIpcContext): void {
         try {
           const tunnel = await ctx.awsSsmTunnelService.start({
             runtimeId: `aws-sftp:${endpointId}`,
-            profileName: hydratedHost.awsProfileName,
+            profileName,
             region: hydratedHost.awsRegion,
             instanceId: hydratedHost.awsInstanceId,
             bindAddress: "127.0.0.1",

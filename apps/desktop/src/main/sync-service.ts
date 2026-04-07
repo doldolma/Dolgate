@@ -1,10 +1,13 @@
 import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
 import type {
+  AwsProfilesServerSupport,
   DnsOverrideRecord,
   GroupRecord,
   HostRecord,
   KnownHostRecord,
+  ManagedAwsProfilePayload,
   ManagedSecretPayload,
+  ServerInfoResponse,
   PortForwardRuleRecord,
   SecretMetadataRecord,
   SyncPayloadV2,
@@ -19,6 +22,7 @@ import {
   DnsOverrideRepository,
   PortForwardRepository,
   SecretMetadataRepository,
+  AwsProfileRepository,
   SettingsRepository,
   SyncOutboxRepository,
   type SyncDeletionRecord
@@ -50,7 +54,8 @@ function defaultSyncStatus(): SyncStatus {
     status: 'idle',
     lastSuccessfulSyncAt: null,
     pendingPush: false,
-    errorMessage: null
+    errorMessage: null,
+    awsProfilesServerSupport: 'unknown'
   };
 }
 
@@ -66,11 +71,16 @@ function totalRecordCount(payload: SyncPayloadV2): number {
     payload.knownHosts.length +
     payload.portForwards.length +
     payload.dnsOverrides.length +
-    payload.preferences.length
+    payload.preferences.length +
+    payload.awsProfiles.length
   );
 }
 
-function normalizeSyncPayload(payload: Partial<SyncPayloadV2> | null | undefined): SyncPayloadV2 {
+function normalizeSyncPayload(
+  payload: Partial<SyncPayloadV2> | null | undefined,
+  options?: { includeAwsProfiles?: boolean }
+): SyncPayloadV2 {
+  const includeAwsProfiles = options?.includeAwsProfiles ?? true;
   return {
     groups: Array.isArray(payload?.groups) ? payload.groups : [],
     hosts: Array.isArray(payload?.hosts) ? payload.hosts : [],
@@ -78,7 +88,75 @@ function normalizeSyncPayload(payload: Partial<SyncPayloadV2> | null | undefined
     knownHosts: Array.isArray(payload?.knownHosts) ? payload.knownHosts : [],
     portForwards: Array.isArray(payload?.portForwards) ? payload.portForwards : [],
     dnsOverrides: Array.isArray(payload?.dnsOverrides) ? payload.dnsOverrides : [],
-    preferences: Array.isArray(payload?.preferences) ? payload.preferences : []
+    preferences: Array.isArray(payload?.preferences) ? payload.preferences : [],
+    awsProfiles:
+      includeAwsProfiles && Array.isArray(payload?.awsProfiles) ? payload.awsProfiles : []
+  };
+}
+
+function resolveAwsProfilesServerSupport(
+  payload: Partial<ServerInfoResponse> | null | undefined
+): AwsProfilesServerSupport {
+  return payload?.capabilities?.sync?.awsProfiles === true ? 'supported' : 'unsupported';
+}
+
+function resolveManagedAwsProfileNameConflicts(
+  profiles: ManagedAwsProfilePayload[]
+): { profiles: ManagedAwsProfilePayload[]; hadConflicts: boolean } {
+  if (profiles.length < 2) {
+    return { profiles, hadConflicts: false };
+  }
+
+  const byName = new Map<string, ManagedAwsProfilePayload[]>();
+  for (const profile of profiles) {
+    const bucket = byName.get(profile.name) ?? [];
+    bucket.push(profile);
+    byName.set(profile.name, bucket);
+  }
+
+  const occupiedNames = new Set(profiles.map((profile) => profile.name));
+  const renamedProfiles = new Map<string, ManagedAwsProfilePayload>();
+  let hadConflicts = false;
+
+  for (const [name, duplicates] of byName) {
+    if (duplicates.length < 2) {
+      continue;
+    }
+
+    hadConflicts = true;
+    const ordered = [...duplicates].sort((left, right) => {
+      const updatedCompare = right.updatedAt.localeCompare(left.updatedAt);
+      if (updatedCompare !== 0) {
+        return updatedCompare;
+      }
+      return left.id.localeCompare(right.id);
+    });
+
+    for (const profile of ordered.slice(1)) {
+      occupiedNames.delete(profile.name);
+      const shortId = profile.id.slice(0, 8);
+      let suffix = 0;
+      let nextName = `${name}-conflict-${shortId}`;
+      while (occupiedNames.has(nextName)) {
+        suffix += 1;
+        nextName = `${name}-conflict-${shortId}-${suffix}`;
+      }
+      occupiedNames.add(nextName);
+      renamedProfiles.set(profile.id, {
+        ...profile,
+        name: nextName,
+        updatedAt: nowIso(),
+      });
+    }
+  }
+
+  if (!hadConflicts) {
+    return { profiles, hadConflicts: false };
+  }
+
+  return {
+    profiles: profiles.map((profile) => renamedProfiles.get(profile.id) ?? profile),
+    hadConflicts: true,
   };
 }
 
@@ -178,6 +256,7 @@ export class SyncService {
     private readonly dnsOverrides: DnsOverrideRepository,
     private readonly knownHosts: KnownHostRepository,
     private readonly secretMetadata: SecretMetadataRepository,
+    private readonly awsProfiles: AwsProfileRepository,
     private readonly settings: SettingsRepository,
     private readonly secretStore: SecretStore,
     private readonly outbox: SyncOutboxRepository
@@ -207,6 +286,14 @@ export class SyncService {
     return this.state;
   }
 
+  markLocalChangesPendingPush(): SyncStatus {
+    this.patchState({
+      pendingPush: true,
+      errorMessage: null
+    });
+    return this.state;
+  }
+
   async bootstrap(): Promise<SyncStatus> {
     if (isE2ESyncDisabled()) {
       this.patchState({
@@ -230,30 +317,49 @@ export class SyncService {
     });
 
     try {
-      if (hadPendingLocalChanges) {
-        const local = await this.buildEncryptedSnapshot(true);
+      const previousAwsProfilesServerSupport =
+        this.state.awsProfilesServerSupport ?? 'unknown';
+      const awsProfilesServerSupport =
+        await this.fetchAwsProfilesServerSupport();
+      const shouldBackfillAwsProfiles =
+        previousAwsProfilesServerSupport === 'unsupported' &&
+        awsProfilesServerSupport === 'supported';
+      this.patchState({
+        awsProfilesServerSupport,
+      });
+
+      if (hadPendingLocalChanges || shouldBackfillAwsProfiles) {
+        const local = await this.buildEncryptedSnapshot(true, awsProfilesServerSupport);
         if (totalRecordCount(local) > 0) {
           await this.pushSnapshot(local);
         }
       }
 
-      let remote = await this.fetchRemoteSnapshot();
+      let remote = await this.fetchRemoteSnapshot(awsProfilesServerSupport);
       if (totalRecordCount(remote) === 0) {
-        const local = await this.buildEncryptedSnapshot(true);
+        const local = await this.buildEncryptedSnapshot(true, awsProfilesServerSupport);
         if (totalRecordCount(local) > 0) {
           await this.pushSnapshot(local);
-          remote = await this.fetchRemoteSnapshot();
+          remote = await this.fetchRemoteSnapshot(awsProfilesServerSupport);
         }
       }
 
-      await this.applyRemoteSnapshotAtomically(remote);
-      this.outbox.clearAll();
+      const hadAwsProfileConflicts = await this.applyRemoteSnapshotAtomically(
+        remote,
+        awsProfilesServerSupport
+      );
+      this.outbox.clearMany(
+        this.listSyncableDeletions(awsProfilesServerSupport)
+      );
       this.patchState({
         status: 'ready',
         lastSuccessfulSyncAt: new Date().toISOString(),
-        pendingPush: false,
+        pendingPush: hadAwsProfileConflicts,
         errorMessage: null
       });
+      if (hadAwsProfileConflicts) {
+        this.scheduleRetry();
+      }
     } catch (error) {
       this.patchState({
         status: 'error',
@@ -303,10 +409,15 @@ export class SyncService {
             pendingPush: true,
             errorMessage: null
           });
-          const snapshot = await this.buildEncryptedSnapshotResult(true);
+          const snapshot = await this.buildEncryptedSnapshotResult(
+            true,
+            this.state.awsProfilesServerSupport ?? 'unknown'
+          );
           await this.pushSnapshot(snapshot.payload);
           this.outbox.clearMany(snapshot.includedDeletions);
-          shouldContinuePush = this.queuedPushAfterCurrent || this.outbox.list().length > 0;
+          shouldContinuePush =
+            this.queuedPushAfterCurrent ||
+            this.listSyncableDeletions(this.state.awsProfilesServerSupport ?? 'unknown').length > 0;
         } while (shouldContinuePush);
 
         this.patchState({
@@ -333,7 +444,7 @@ export class SyncService {
   }
 
   async exportDecryptedSnapshot(): Promise<SyncPayloadV2> {
-    return this.buildEncryptedSnapshot(true);
+    return this.buildEncryptedSnapshot(true, this.state.awsProfilesServerSupport ?? 'unknown');
   }
 
   markDeleted(kind: SyncRecordKind, recordId: string): void {
@@ -356,6 +467,7 @@ export class SyncService {
     this.knownHosts.replaceAll([]);
     this.portForwards.replaceAll([]);
     this.dnsOverrides.replaceAll([]);
+    this.awsProfiles.replaceAll([]);
     this.settings.clearSyncedTerminalPreferences();
     this.outbox.clearAll();
     this.stateStorage.updateSyncDataOwner({
@@ -397,9 +509,13 @@ export class SyncService {
     return response;
   }
 
-  private async fetchRemoteSnapshot(): Promise<SyncPayloadV2> {
+  private async fetchRemoteSnapshot(
+    awsProfilesServerSupport: AwsProfilesServerSupport
+  ): Promise<SyncPayloadV2> {
     const response = await this.fetchWithAuthRetry(new URL('/sync', this.authService.getServerUrl()), {}, '동기화 데이터 조회에 실패했습니다.');
-    return normalizeSyncPayload((await response.json()) as Partial<SyncPayloadV2>);
+    return normalizeSyncPayload((await response.json()) as Partial<SyncPayloadV2>, {
+      includeAwsProfiles: this.shouldSyncAwsProfiles(awsProfilesServerSupport),
+    });
   }
 
   private async pushSnapshot(payload: SyncPayloadV2): Promise<void> {
@@ -413,13 +529,17 @@ export class SyncService {
     void response;
   }
 
-  private async buildEncryptedSnapshot(includeDeletions: boolean): Promise<SyncPayloadV2> {
-    const snapshot = await this.buildEncryptedSnapshotResult(includeDeletions);
+  private async buildEncryptedSnapshot(
+    includeDeletions: boolean,
+    awsProfilesServerSupport: AwsProfilesServerSupport = this.state.awsProfilesServerSupport ?? 'unknown'
+  ): Promise<SyncPayloadV2> {
+    const snapshot = await this.buildEncryptedSnapshotResult(includeDeletions, awsProfilesServerSupport);
     return snapshot.payload;
   }
 
   private async buildEncryptedSnapshotResult(
-    includeDeletions: boolean
+    includeDeletions: boolean,
+    awsProfilesServerSupport: AwsProfilesServerSupport = this.state.awsProfilesServerSupport ?? 'unknown'
   ): Promise<{ payload: SyncPayloadV2; includedDeletions: SyncDeletionRecord[] }> {
     const vaultKeyBase64 = this.authService.getVaultKeyBase64();
     const groups = this.groups.list().map((record) => this.toSyncRecord(record.id, record.updatedAt, record, vaultKeyBase64));
@@ -430,6 +550,12 @@ export class SyncService {
     const preferences = [this.settings.getSyncedTerminalPreferences()].map((record) =>
       this.toSyncRecord(record.id, record.updatedAt, record, vaultKeyBase64)
     );
+    const shouldSyncAwsProfiles = this.shouldSyncAwsProfiles(awsProfilesServerSupport);
+    const awsProfiles = shouldSyncAwsProfiles
+      ? this.awsProfiles.listPayloads().map((record) =>
+          this.toSyncRecord(record.id, record.updatedAt, record, vaultKeyBase64)
+        )
+      : [];
 
     const secretEntries = this.secretMetadata.list();
     const secrets: SyncRecord[] = [];
@@ -450,13 +576,14 @@ export class SyncService {
           knownHosts,
           portForwards,
           dnsOverrides,
-          preferences
+          preferences,
+          awsProfiles
         },
         includedDeletions: []
       };
     }
 
-    const includedDeletions = this.outbox.list();
+    const includedDeletions = this.listSyncableDeletions(awsProfilesServerSupport);
     for (const tombstone of includedDeletions) {
       const record: SyncRecord = {
         id: tombstone.recordId,
@@ -486,6 +613,9 @@ export class SyncService {
         case 'preferences':
           preferences.push(record);
           break;
+        case 'awsProfiles':
+          awsProfiles.push(record);
+          break;
       }
     }
 
@@ -497,7 +627,8 @@ export class SyncService {
         knownHosts,
         portForwards,
         dnsOverrides,
-        preferences
+        preferences,
+        awsProfiles
       },
       includedDeletions
     };
@@ -512,9 +643,11 @@ export class SyncService {
   }
 
   private async applyRemoteSnapshotAtomically(
-    payload: SyncPayloadV2
-  ): Promise<void> {
+    payload: SyncPayloadV2,
+    awsProfilesServerSupport: AwsProfilesServerSupport
+  ): Promise<boolean> {
     const vaultKeyBase64 = this.authService.getVaultKeyBase64();
+    const shouldSyncAwsProfiles = this.shouldSyncAwsProfiles(awsProfilesServerSupport);
 
     const groups = payload.groups
       .filter((record) => !record.deleted_at)
@@ -544,6 +677,19 @@ export class SyncService {
     const preferences = payload.preferences
       .filter((record) => !record.deleted_at)
       .map((record) => decodeEncryptedPayload<TerminalPreferencesRecord>(record.encrypted_payload, vaultKeyBase64));
+    const decodedAwsProfiles = shouldSyncAwsProfiles
+      ? payload.awsProfiles
+          .filter((record) => !record.deleted_at)
+          .map((record) =>
+            decodeEncryptedPayload<ManagedAwsProfilePayload>(record.encrypted_payload, vaultKeyBase64)
+          )
+      : [];
+    const {
+      profiles: awsProfiles,
+      hadConflicts: hadAwsProfileConflicts,
+    } = shouldSyncAwsProfiles
+      ? resolveManagedAwsProfileNameConflicts(decodedAwsProfiles)
+      : { profiles: [] as ManagedAwsProfilePayload[], hadConflicts: false };
     const secrets = payload.secrets
       .filter((record) => !record.deleted_at)
       .map((record) => decodeEncryptedPayload<ManagedSecretPayload>(record.encrypted_payload, vaultKeyBase64));
@@ -581,6 +727,14 @@ export class SyncService {
       state.data.knownHosts = knownHosts;
       state.data.portForwards = portForwards;
       state.data.dnsOverrides = dnsOverrides;
+      if (shouldSyncAwsProfiles) {
+        state.data.awsProfiles = awsProfiles.map((record) => ({
+          id: record.id,
+          name: record.name,
+          kind: record.kind,
+          updatedAt: record.updatedAt
+        }));
+      }
       state.terminal.globalThemeId =
         preferences[0]?.globalTerminalThemeId ?? 'dolssh-dark';
       state.terminal.globalThemeUpdatedAt =
@@ -595,8 +749,20 @@ export class SyncService {
       for (const [secretRef, storedSecret] of nextStoredSecrets) {
         state.secure.managedSecretsByRef[secretRef] = storedSecret;
       }
+      if (shouldSyncAwsProfiles) {
+        const nextAwsProfileIds = new Set(awsProfiles.map((profile) => profile.id));
+        for (const profileId of Object.keys(state.secure.managedAwsProfilesById)) {
+          if (!nextAwsProfileIds.has(profileId)) {
+            delete state.secure.managedAwsProfilesById[profileId];
+          }
+        }
+        for (const profile of awsProfiles) {
+          state.secure.managedAwsProfilesById[profile.id] = encodeSecretForStorage(JSON.stringify(profile));
+        }
+      }
     });
     await this.onAppliedSnapshot?.();
+    return hadAwsProfileConflicts;
   }
 
   private scheduleRetry(): void {
@@ -614,12 +780,17 @@ export class SyncService {
       status: 'idle',
       lastSuccessfulSyncAt: syncState.lastSuccessfulSyncAt,
       pendingPush: syncState.pendingPush,
-      errorMessage: syncState.errorMessage
+      errorMessage: syncState.errorMessage,
+      awsProfilesServerSupport: syncState.awsProfilesServerSupport ?? 'unknown'
     };
   }
 
   private hasPendingLocalChanges(): boolean {
-    return this.state.pendingPush || this.stateStorage.getState().sync.pendingPush || this.outbox.list().length > 0;
+    return (
+      this.state.pendingPush ||
+      this.stateStorage.getState().sync.pendingPush ||
+      this.listSyncableDeletions(this.state.awsProfilesServerSupport ?? 'unknown').length > 0
+    );
   }
 
   private markPendingPush(): void {
@@ -646,9 +817,47 @@ export class SyncService {
     this.stateStorage.updateSyncState({
       lastSuccessfulSyncAt: this.state.lastSuccessfulSyncAt ?? null,
       pendingPush: this.state.pendingPush,
-      errorMessage: this.state.errorMessage ?? null
+      errorMessage: this.state.errorMessage ?? null,
+      awsProfilesServerSupport: this.state.awsProfilesServerSupport ?? 'unknown'
     });
+  }
+
+  private shouldSyncAwsProfiles(
+    awsProfilesServerSupport: AwsProfilesServerSupport
+  ): boolean {
+    return awsProfilesServerSupport !== 'unsupported';
+  }
+
+  private listSyncableDeletions(
+    awsProfilesServerSupport: AwsProfilesServerSupport
+  ): SyncDeletionRecord[] {
+    const shouldSyncAwsProfiles = this.shouldSyncAwsProfiles(awsProfilesServerSupport);
+    return this.outbox
+      .list()
+      .filter((record) => shouldSyncAwsProfiles || record.kind !== 'awsProfiles');
+  }
+
+  private async fetchAwsProfilesServerSupport(): Promise<AwsProfilesServerSupport> {
+    try {
+      const response = await fetch(new URL('/api/info', this.authService.getServerUrl()));
+      if (!response.ok) {
+        return 'unsupported';
+      }
+      return resolveAwsProfilesServerSupport(
+        (await response.json()) as Partial<ServerInfoResponse>
+      );
+    } catch {
+      return 'unsupported';
+    }
   }
 }
 
-type SyncRecordKind = 'groups' | 'hosts' | 'secrets' | 'knownHosts' | 'portForwards' | 'dnsOverrides' | 'preferences';
+type SyncRecordKind =
+  | 'groups'
+  | 'hosts'
+  | 'secrets'
+  | 'knownHosts'
+  | 'portForwards'
+  | 'dnsOverrides'
+  | 'preferences'
+  | 'awsProfiles';

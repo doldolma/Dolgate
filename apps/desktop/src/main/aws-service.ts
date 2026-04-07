@@ -1,9 +1,9 @@
-import { access, copyFile, mkdir, mkdtemp, readdir, readFile, rm } from "node:fs/promises";
+import { access, copyFile, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { constants as fsConstants } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { spawn } from "node:child_process";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import type {
   AwsEc2InstanceSummary,
   AwsEcsClusterListItem,
@@ -27,6 +27,8 @@ import type {
   AwsHostSshInspectionResult,
   AwsProfileCreateInput,
   AwsProfileDetails,
+  AwsExternalProfileImportInput,
+  AwsExternalProfileImportResult,
   AwsProfileKind,
   AwsProfileRenameInput,
   AwsSsoProfileAccountOption,
@@ -36,15 +38,22 @@ import type {
   AwsProfileStatus,
   AwsProfileSummary,
   AwsProfileUpdateInput,
+  ManagedAwsProfilePayload,
 } from "@shared";
+import { AwsProfileRepository } from "./database";
 import {
+  copyAwsProfileConfigSectionBetweenDocuments,
+  copyAwsProfileCredentialsSectionBetweenDocuments,
+  copyAwsSsoSessionSectionBetweenDocuments,
   deleteAwsProfileFromDocuments,
   getDefaultAwsProfileRootDir,
+  getManagedAwsHomeDir,
+  getManagedAwsProfileRootDir,
   getAwsSsoSessionValues,
   inspectAwsProfileDocuments,
+  listAwsProfileNames,
   loadAwsProfileDocuments,
   removeAwsProfileKeyFromDocuments,
-  renameAwsProfileInDocuments,
   setAwsProfileKeyValueInDocuments,
   setAwsSsoSessionKeyValueInDocuments,
   writeAwsProfileDocuments,
@@ -94,6 +103,13 @@ const resolvedExecutableCache = new Map<string, string>();
 function splitPathEnv(): string[] {
   const rawPath = process.env.PATH ?? "";
   return rawPath
+    .split(path.delimiter)
+    .map((segment) => segment.trim())
+    .filter(Boolean);
+}
+
+function splitPathValue(rawPath: string | undefined): string[] {
+  return (rawPath ?? "")
     .split(path.delimiter)
     .map((segment) => segment.trim())
     .filter(Boolean);
@@ -236,8 +252,11 @@ export async function resolveAwsExecutable(
   return resolveExecutable(command);
 }
 
-export async function buildAwsCommandEnv(): Promise<NodeJS.ProcessEnv> {
-  const env = { ...process.env };
+export async function buildAwsCommandEnv(
+  envPatch?: Record<string, string | null | undefined>,
+  baseEnv: NodeJS.ProcessEnv = process.env,
+): Promise<NodeJS.ProcessEnv> {
+  const env = { ...baseEnv };
   const resolvedDirs = new Set<string>();
 
   for (const command of ["aws", "session-manager-plugin"] as const) {
@@ -249,8 +268,19 @@ export async function buildAwsCommandEnv(): Promise<NodeJS.ProcessEnv> {
     }
   }
 
-  const mergedPathEntries = [...resolvedDirs, ...splitPathEnv()];
+  const mergedPathEntries = [...resolvedDirs, ...splitPathValue(baseEnv.PATH)];
   env.PATH = [...new Set(mergedPathEntries)].join(path.delimiter);
+
+  if (envPatch) {
+    for (const [key, value] of Object.entries(envPatch)) {
+      if (value === null || value === undefined) {
+        delete env[key];
+        continue;
+      }
+      env[key] = value;
+    }
+  }
+
   return env;
 }
 
@@ -1151,9 +1181,249 @@ export class AwsService {
     AwsPendingSsoPreparation
   >();
 
+  private readonly profileRepository: AwsProfileRepository;
+  private readonly awsProfileRootDir: string;
+  private readonly externalAwsProfileRootDir: string;
+
+  constructor();
+  constructor(awsProfileRootDir: string, externalAwsProfileRootDir?: string);
   constructor(
-    private readonly awsProfileRootDir = getDefaultAwsProfileRootDir(),
-  ) {}
+    profileRepository: AwsProfileRepository,
+    awsProfileRootDir?: string,
+    externalAwsProfileRootDir?: string,
+  );
+  constructor(
+    profileRepositoryOrManagedRootDir?: AwsProfileRepository | string,
+    awsProfileRootDir = getManagedAwsProfileRootDir(),
+    externalAwsProfileRootDir = getDefaultAwsProfileRootDir(),
+  ) {
+    if (typeof profileRepositoryOrManagedRootDir === "string") {
+      this.profileRepository = new AwsProfileRepository();
+      this.awsProfileRootDir = profileRepositoryOrManagedRootDir;
+      this.externalAwsProfileRootDir = awsProfileRootDir;
+      return;
+    }
+
+    this.profileRepository =
+      profileRepositoryOrManagedRootDir ?? new AwsProfileRepository();
+    this.awsProfileRootDir = awsProfileRootDir;
+    this.externalAwsProfileRootDir = externalAwsProfileRootDir;
+  }
+
+  private getManagedProfilePayloads(): ManagedAwsProfilePayload[] {
+    return this.profileRepository.listPayloads();
+  }
+
+  private async ensureManagedProfilesReady(): Promise<void> {
+    if (this.profileRepository.listMetadata().length > 0) {
+      return;
+    }
+    await this.migrateManagedProfilesFromFilesIfNeeded();
+  }
+
+  private getManagedProfileByName(profileName: string): ManagedAwsProfilePayload | null {
+    const metadata = this.profileRepository.getMetadataByName(profileName);
+    if (!metadata) {
+      return null;
+    }
+    return this.profileRepository.getPayloadById(metadata.id);
+  }
+
+  resolveManagedProfileName(profileId: string | null | undefined): string | null {
+    return this.profileRepository.resolveNameById(profileId);
+  }
+
+  resolveManagedProfileNameOrFallback(
+    profileId: string | null | undefined,
+    fallbackProfileName: string | null | undefined,
+  ): string | null {
+    return this.resolveManagedProfileName(profileId) ?? fallbackProfileName?.trim() ?? null;
+  }
+
+  private buildManagedSsoSessionKey(startUrl: string, ssoRegion: string): string {
+    const digest = createHash("sha1")
+      .update(`${startUrl.trim()}|${ssoRegion.trim()}`)
+      .digest("hex")
+      .slice(0, 12);
+    return `dolssh-${digest}`;
+  }
+
+  private buildManagedProfilePayloadsFromDocuments(
+    documents: Awaited<ReturnType<typeof loadAwsProfileDocuments>>,
+  ): ManagedAwsProfilePayload[] {
+    const profileNames = listAwsProfileNames(documents);
+    const profileIdsByName = new Map(profileNames.map((profileName) => [profileName, randomUUID()]));
+    const payloads: ManagedAwsProfilePayload[] = [];
+
+    for (const profileName of profileNames) {
+      const snapshot = inspectAwsProfileDocuments(documents, profileName);
+      const values = snapshot.mergedValues;
+      const region = values.region?.trim() || null;
+      const ssoSession = values.sso_session?.trim() || null;
+      const ssoSessionValues = ssoSession ? getAwsSsoSessionValues(documents, ssoSession) : {};
+      const ssoStartUrl =
+        values.sso_start_url?.trim() ||
+        ssoSessionValues.sso_start_url?.trim() ||
+        null;
+      const ssoRegion =
+        values.sso_region?.trim() ||
+        ssoSessionValues.sso_region?.trim() ||
+        null;
+      const ssoAccountId = values.sso_account_id?.trim() || null;
+      const ssoRoleName = values.sso_role_name?.trim() || null;
+      const roleArn = values.role_arn?.trim() || null;
+      const sourceProfileName = values.source_profile?.trim() || null;
+      const accessKeyId = values.aws_access_key_id?.trim() || null;
+      const secretAccessKey = values.aws_secret_access_key?.trim() || null;
+      const updatedAt = new Date().toISOString();
+      const id = profileIdsByName.get(profileName) ?? randomUUID();
+
+      if (ssoStartUrl && ssoRegion && ssoAccountId && ssoRoleName) {
+        payloads.push({
+          id,
+          kind: "sso",
+          name: profileName,
+          region,
+          ssoStartUrl,
+          ssoRegion,
+          ssoAccountId,
+          ssoRoleName,
+          updatedAt,
+        });
+        continue;
+      }
+
+      if (roleArn && sourceProfileName) {
+        const sourceProfileId = profileIdsByName.get(sourceProfileName);
+        if (!sourceProfileId) {
+          continue;
+        }
+        payloads.push({
+          id,
+          kind: "role",
+          name: profileName,
+          region,
+          roleArn,
+          sourceProfileId,
+          updatedAt,
+        });
+        continue;
+      }
+
+      if (accessKeyId && secretAccessKey) {
+        payloads.push({
+          id,
+          kind: "static",
+          name: profileName,
+          region,
+          accessKeyId,
+          secretAccessKey,
+          updatedAt,
+        });
+      }
+
+    }
+
+    return payloads;
+  }
+
+  async migrateManagedProfilesFromFilesIfNeeded(): Promise<void> {
+    if (this.profileRepository.listMetadata().length > 0) {
+      await this.materializeManagedProfiles();
+      return;
+    }
+
+    const documents = await loadAwsProfileDocuments(this.awsProfileRootDir);
+    const payloads = this.buildManagedProfilePayloadsFromDocuments(documents);
+    if (payloads.length > 0) {
+      this.profileRepository.replaceAll(payloads);
+    }
+    await this.materializeManagedProfiles();
+  }
+
+  async materializeManagedProfiles(): Promise<void> {
+    const payloads = this.getManagedProfilePayloads();
+    const sortedPayloads = [...payloads].sort((left, right) =>
+      left.name.localeCompare(right.name) || left.id.localeCompare(right.id),
+    );
+    const profileNameById = new Map(
+      sortedPayloads.map((payload) => [payload.id, payload.name]),
+    );
+    const configSections: string[] = [];
+    const credentialSections: string[] = [];
+    const writtenSsoSessions = new Set<string>();
+
+    for (const payload of sortedPayloads) {
+      if (payload.kind === "static") {
+        credentialSections.push(
+          `[${payload.name}]`,
+          `aws_access_key_id = ${payload.accessKeyId}`,
+          `aws_secret_access_key = ${payload.secretAccessKey}`,
+          "",
+        );
+        if (payload.region?.trim()) {
+          configSections.push(
+            payload.name === "default" ? "[default]" : `[profile ${payload.name}]`,
+            `region = ${payload.region.trim()}`,
+            "",
+          );
+        }
+        continue;
+      }
+
+      if (payload.kind === "role") {
+        const sourceProfileName = profileNameById.get(payload.sourceProfileId);
+        if (!sourceProfileName) {
+          continue;
+        }
+        configSections.push(
+          payload.name === "default" ? "[default]" : `[profile ${payload.name}]`,
+          `role_arn = ${payload.roleArn}`,
+          `source_profile = ${sourceProfileName}`,
+          ...(payload.region?.trim() ? [`region = ${payload.region.trim()}`] : []),
+          "",
+        );
+        continue;
+      }
+
+      const ssoSessionName = this.buildManagedSsoSessionKey(
+        payload.ssoStartUrl,
+        payload.ssoRegion,
+      );
+      configSections.push(
+        payload.name === "default" ? "[default]" : `[profile ${payload.name}]`,
+        `sso_session = ${ssoSessionName}`,
+        `sso_account_id = ${payload.ssoAccountId}`,
+        `sso_role_name = ${payload.ssoRoleName}`,
+        ...(payload.region?.trim() ? [`region = ${payload.region.trim()}`] : []),
+        "",
+      );
+      if (!writtenSsoSessions.has(ssoSessionName)) {
+        configSections.push(
+          `[sso-session ${ssoSessionName}]`,
+          `sso_region = ${payload.ssoRegion}`,
+          `sso_start_url = ${payload.ssoStartUrl}`,
+          `sso_registration_scopes = ${AWS_SSO_REGISTRATION_SCOPES}`,
+          "",
+        );
+        writtenSsoSessions.add(ssoSessionName);
+      }
+    }
+
+    await mkdir(this.awsProfileRootDir, { recursive: true });
+    await mkdir(path.join(this.awsProfileRootDir, "sso", "cache"), { recursive: true });
+    await mkdir(path.join(this.awsProfileRootDir, "cli", "cache"), { recursive: true });
+    await writeFile(
+      path.join(this.awsProfileRootDir, "config"),
+      configSections.length > 0 ? `${configSections.join("\n").trimEnd()}\n` : "",
+      "utf8",
+    );
+    await writeFile(
+      path.join(this.awsProfileRootDir, "credentials"),
+      credentialSections.length > 0 ? `${credentialSections.join("\n").trimEnd()}\n` : "",
+      "utf8",
+    );
+  }
 
   private async runResolvedCommand(
     command: string,
@@ -1161,7 +1431,7 @@ export class AwsService {
     timeoutMs = 30_000,
   ): Promise<CommandResult> {
     const executablePath = await resolveExecutable(command);
-    const env = await buildAwsCommandEnv();
+    const env = await this.buildManagedCommandEnv();
     return runCommand(executablePath, args, timeoutMs, env);
   }
 
@@ -1172,14 +1442,7 @@ export class AwsService {
     timeoutMs = 30_000,
   ): Promise<CommandResult> {
     const executablePath = await resolveExecutable(command);
-    const env = await buildAwsCommandEnv();
-    for (const [key, value] of Object.entries(envPatch)) {
-      if (value === null || value === undefined) {
-        delete env[key];
-        continue;
-      }
-      env[key] = value;
-    }
+    const env = await this.buildManagedCommandEnv(process.env, envPatch);
     return runCommand(executablePath, args, timeoutMs, env);
   }
 
@@ -1195,12 +1458,49 @@ export class AwsService {
     };
   }
 
-  private getConfiguredAwsRootEnvPatch(): Record<string, string> {
-    const homeDir =
-      path.basename(this.awsProfileRootDir).toLowerCase() === ".aws"
-        ? path.dirname(this.awsProfileRootDir)
-        : process.env.USERPROFILE || process.env.HOME || path.dirname(this.awsProfileRootDir);
-    return this.getAwsRootEnvPatch(homeDir, this.awsProfileRootDir);
+  private getHomeDirForAwsRoot(awsRootDir: string): string {
+    return path.basename(awsRootDir).toLowerCase() === ".aws"
+      ? path.dirname(awsRootDir)
+      : getManagedAwsHomeDir();
+  }
+
+  private getManagedAwsEnvOverrides(
+    awsRootDir = this.awsProfileRootDir,
+  ): Record<string, string | null> {
+    return {
+      ...this.getAwsRootEnvPatch(this.getHomeDirForAwsRoot(awsRootDir), awsRootDir),
+      AWS_PROFILE: null,
+      AWS_DEFAULT_PROFILE: null,
+      AWS_ACCESS_KEY_ID: null,
+      AWS_SECRET_ACCESS_KEY: null,
+      AWS_SESSION_TOKEN: null,
+      AWS_REGION: null,
+      AWS_DEFAULT_REGION: null,
+    };
+  }
+
+  getManagedAwsEnvPatch(): Record<string, string> {
+    return this.getAwsRootEnvPatch(
+      this.getHomeDirForAwsRoot(this.awsProfileRootDir),
+      this.awsProfileRootDir,
+    );
+  }
+
+  async buildManagedCommandEnv(
+    baseEnv: NodeJS.ProcessEnv = process.env,
+    envPatch?: Record<string, string | null | undefined>,
+  ): Promise<NodeJS.ProcessEnv> {
+    return buildAwsCommandEnv(
+      {
+        ...this.getManagedAwsEnvOverrides(),
+        ...(envPatch ?? {}),
+      },
+      baseEnv,
+    );
+  }
+
+  private getConfiguredAwsRootEnvPatch(): Record<string, string | null> {
+    return this.getManagedAwsEnvOverrides();
   }
 
   private async createTempAwsRoot(): Promise<{
@@ -1404,8 +1704,7 @@ export class AwsService {
   }
 
   private async assertProfileNameAvailable(profileName: string): Promise<void> {
-    const existingProfiles = await this.listProfiles();
-    if (existingProfiles.some((profile) => profile.name === profileName)) {
+    if (this.profileRepository.getMetadataByName(profileName)) {
       throw new Error("같은 이름의 AWS 프로필이 이미 존재합니다.");
     }
   }
@@ -1419,93 +1718,40 @@ export class AwsService {
     ssoRoleName: string;
     region?: string | null;
   }): Promise<void> {
-    const documents = await loadAwsProfileDocuments(this.awsProfileRootDir);
-    setAwsProfileKeyValueInDocuments(
-      documents,
-      "config",
-      input.profileName,
-      "sso_session",
-      input.ssoSessionName,
-    );
-    setAwsProfileKeyValueInDocuments(
-      documents,
-      "config",
-      input.profileName,
-      "sso_account_id",
-      input.ssoAccountId,
-    );
-    setAwsProfileKeyValueInDocuments(
-      documents,
-      "config",
-      input.profileName,
-      "sso_role_name",
-      input.ssoRoleName,
-    );
-    if (input.region?.trim()) {
-      setAwsProfileKeyValueInDocuments(
-        documents,
-        "config",
-        input.profileName,
-        "region",
-        input.region.trim(),
-      );
-    } else {
-      removeAwsProfileKeyFromDocuments(documents, input.profileName, "region");
-    }
-    setAwsSsoSessionKeyValueInDocuments(
-      documents,
-      input.ssoSessionName,
-      "sso_region",
-      input.ssoRegion,
-    );
-    setAwsSsoSessionKeyValueInDocuments(
-      documents,
-      input.ssoSessionName,
-      "sso_start_url",
-      input.ssoStartUrl,
-    );
-    setAwsSsoSessionKeyValueInDocuments(
-      documents,
-      input.ssoSessionName,
-      "sso_registration_scopes",
-      AWS_SSO_REGISTRATION_SCOPES,
-    );
-    await writeAwsProfileDocuments(documents);
+    const existing = this.getManagedProfileByName(input.profileName);
+    const payload: ManagedAwsProfilePayload = {
+      id: existing?.id ?? randomUUID(),
+      kind: "sso",
+      name: input.profileName,
+      region: input.region?.trim() || null,
+      ssoStartUrl: input.ssoStartUrl.trim(),
+      ssoRegion: input.ssoRegion.trim(),
+      ssoAccountId: input.ssoAccountId.trim(),
+      ssoRoleName: input.ssoRoleName.trim(),
+      updatedAt: new Date().toISOString(),
+    };
+    this.profileRepository.upsert(payload);
+    await this.materializeManagedProfiles();
   }
 
   private async saveRoleProfileValues(input: {
     profileName: string;
-    sourceProfileName: string;
+    sourceProfileId: string;
     roleArn: string;
     region?: string | null;
   }): Promise<void> {
-    const documents = await loadAwsProfileDocuments(this.awsProfileRootDir);
-    setAwsProfileKeyValueInDocuments(
-      documents,
-      "config",
-      input.profileName,
-      "role_arn",
-      input.roleArn,
-    );
-    setAwsProfileKeyValueInDocuments(
-      documents,
-      "config",
-      input.profileName,
-      "source_profile",
-      input.sourceProfileName,
-    );
-    if (input.region?.trim()) {
-      setAwsProfileKeyValueInDocuments(
-        documents,
-        "config",
-        input.profileName,
-        "region",
-        input.region.trim(),
-      );
-    } else {
-      removeAwsProfileKeyFromDocuments(documents, input.profileName, "region");
-    }
-    await writeAwsProfileDocuments(documents);
+    const existing = this.getManagedProfileByName(input.profileName);
+    const payload: ManagedAwsProfilePayload = {
+      id: existing?.id ?? randomUUID(),
+      kind: "role",
+      name: input.profileName,
+      region: input.region?.trim() || null,
+      roleArn: input.roleArn.trim(),
+      sourceProfileId: input.sourceProfileId,
+      updatedAt: new Date().toISOString(),
+    };
+    this.profileRepository.upsert(payload);
+    await this.materializeManagedProfiles();
   }
 
   private async validateProfileWithTempRoot(input: {
@@ -1590,6 +1836,291 @@ export class AwsService {
     return nextSessionName;
   }
 
+  private buildUniqueSsoSessionNameForDocuments(
+    documents: Awaited<ReturnType<typeof loadAwsProfileDocuments>>,
+    baseName: string,
+  ): string {
+    const existingSessionNames = new Set(
+      documents.config.lines
+        .map((line) => line.match(/^\s*\[sso-session ([^\]]+)\]\s*$/)?.[1]?.trim() ?? "")
+        .filter(Boolean),
+    );
+    let nextSessionName = baseName;
+    let suffix = 2;
+    while (existingSessionNames.has(nextSessionName)) {
+      nextSessionName = `${baseName}-${suffix}`;
+      suffix += 1;
+    }
+    return nextSessionName;
+  }
+
+  private hasSameKeyValues(
+    left: Record<string, string>,
+    right: Record<string, string>,
+  ): boolean {
+    const leftKeys = Object.keys(left).sort();
+    const rightKeys = Object.keys(right).sort();
+    if (leftKeys.length !== rightKeys.length) {
+      return false;
+    }
+    return leftKeys.every(
+      (key, index) =>
+        key === rightKeys[index] && (left[key] ?? "").trim() === (right[key] ?? "").trim(),
+    );
+  }
+
+  private importExternalSsoSession(
+    sourceDocuments: Awaited<ReturnType<typeof loadAwsProfileDocuments>>,
+    targetDocuments: Awaited<ReturnType<typeof loadAwsProfileDocuments>>,
+    sourceSessionName: string,
+    resolvedSessionNames: Map<string, string>,
+  ): string {
+    const normalizedSessionName = sourceSessionName.trim();
+    if (!normalizedSessionName) {
+      return normalizedSessionName;
+    }
+    const cached = resolvedSessionNames.get(normalizedSessionName);
+    if (cached) {
+      return cached;
+    }
+
+    const sourceValues = getAwsSsoSessionValues(sourceDocuments, normalizedSessionName);
+    if (Object.keys(sourceValues).length === 0) {
+      resolvedSessionNames.set(normalizedSessionName, normalizedSessionName);
+      return normalizedSessionName;
+    }
+
+    const targetValues = getAwsSsoSessionValues(targetDocuments, normalizedSessionName);
+    let targetSessionName = normalizedSessionName;
+    if (
+      Object.keys(targetValues).length > 0 &&
+      !this.hasSameKeyValues(sourceValues, targetValues)
+    ) {
+      targetSessionName = this.buildUniqueSsoSessionNameForDocuments(
+        targetDocuments,
+        normalizedSessionName,
+      );
+    }
+
+    if (
+      Object.keys(targetValues).length === 0 ||
+      targetSessionName !== normalizedSessionName
+    ) {
+      copyAwsSsoSessionSectionBetweenDocuments(
+        sourceDocuments,
+        targetDocuments,
+        normalizedSessionName,
+        {
+          nextSessionName: targetSessionName,
+        },
+      );
+    }
+
+    resolvedSessionNames.set(normalizedSessionName, targetSessionName);
+    return targetSessionName;
+  }
+
+  private importExternalProfileRecursive(input: {
+    profileName: string;
+    sourceDocuments: Awaited<ReturnType<typeof loadAwsProfileDocuments>>;
+    targetDocuments: Awaited<ReturnType<typeof loadAwsProfileDocuments>>;
+    importedProfileNames: Set<string>;
+    skippedProfileNames: Set<string>;
+    visitedProfileNames: Set<string>;
+    resolvedSessionNames: Map<string, string>;
+  }): void {
+    const profileName = normalizeAwsProfileName(input.profileName);
+    if (input.visitedProfileNames.has(profileName)) {
+      return;
+    }
+    input.visitedProfileNames.add(profileName);
+
+    const sourceSnapshot = inspectAwsProfileDocuments(input.sourceDocuments, profileName);
+    if (!sourceSnapshot.hasConfigSection && !sourceSnapshot.hasCredentialsSection) {
+      input.skippedProfileNames.add(profileName);
+      return;
+    }
+
+    const targetSnapshot = inspectAwsProfileDocuments(input.targetDocuments, profileName);
+    if (targetSnapshot.hasConfigSection || targetSnapshot.hasCredentialsSection) {
+      input.skippedProfileNames.add(profileName);
+      return;
+    }
+
+    const sourceProfileName = sourceSnapshot.mergedValues.source_profile?.trim();
+    if (sourceProfileName) {
+      this.importExternalProfileRecursive({
+        ...input,
+        profileName: sourceProfileName,
+      });
+    }
+
+    const configOverrides: Record<string, string> = {};
+    const sourceSsoSession = sourceSnapshot.mergedValues.sso_session?.trim();
+    if (sourceSsoSession) {
+      const importedSessionName = this.importExternalSsoSession(
+        input.sourceDocuments,
+        input.targetDocuments,
+        sourceSsoSession,
+        input.resolvedSessionNames,
+      );
+      if (importedSessionName && importedSessionName !== sourceSsoSession) {
+        configOverrides.sso_session = importedSessionName;
+      }
+    }
+
+    copyAwsProfileConfigSectionBetweenDocuments(
+      input.sourceDocuments,
+      input.targetDocuments,
+      profileName,
+      Object.keys(configOverrides).length > 0 ? { overrides: configOverrides } : undefined,
+    );
+    copyAwsProfileCredentialsSectionBetweenDocuments(
+      input.sourceDocuments,
+      input.targetDocuments,
+      profileName,
+    );
+    input.importedProfileNames.add(profileName);
+  }
+
+  private buildImportedPayloadsFromExternalDocuments(input: {
+    requestedProfileNames: string[];
+    sourceDocuments: Awaited<ReturnType<typeof loadAwsProfileDocuments>>;
+  }): {
+    payloads: ManagedAwsProfilePayload[];
+    importedProfileNames: string[];
+    skippedProfileNames: string[];
+  } {
+    const payloadsByName = new Map<string, ManagedAwsProfilePayload>();
+    const importedProfileNames = new Set<string>();
+    const skippedProfileNames = new Set<string>();
+    const visiting = new Set<string>();
+
+    const resolveProfileId = (profileName: string): string | null => {
+      return (
+        payloadsByName.get(profileName)?.id ??
+        this.profileRepository.getMetadataByName(profileName)?.id ??
+        null
+      );
+    };
+
+    const visitProfile = (requestedProfileName: string, explicit = false): string | null => {
+      const profileName = normalizeAwsProfileName(requestedProfileName);
+      if (payloadsByName.has(profileName)) {
+        return payloadsByName.get(profileName)?.id ?? null;
+      }
+      const existing = this.profileRepository.getMetadataByName(profileName);
+      if (existing) {
+        if (explicit) {
+          skippedProfileNames.add(profileName);
+        }
+        return existing.id;
+      }
+      if (visiting.has(profileName)) {
+        return resolveProfileId(profileName);
+      }
+      visiting.add(profileName);
+
+      try {
+        const snapshot = inspectAwsProfileDocuments(input.sourceDocuments, profileName);
+        if (!snapshot.hasConfigSection && !snapshot.hasCredentialsSection) {
+          if (explicit) {
+            skippedProfileNames.add(profileName);
+          }
+          return null;
+        }
+
+        const values = snapshot.mergedValues;
+        const region = values.region?.trim() || null;
+        const ssoSession = values.sso_session?.trim() || null;
+        const ssoSessionValues = ssoSession
+          ? getAwsSsoSessionValues(input.sourceDocuments, ssoSession)
+          : {};
+        const ssoStartUrl =
+          values.sso_start_url?.trim() ||
+          ssoSessionValues.sso_start_url?.trim() ||
+          null;
+        const ssoRegion =
+          values.sso_region?.trim() ||
+          ssoSessionValues.sso_region?.trim() ||
+          null;
+        const ssoAccountId = values.sso_account_id?.trim() || null;
+        const ssoRoleName = values.sso_role_name?.trim() || null;
+        const roleArn = values.role_arn?.trim() || null;
+        const sourceProfileName = values.source_profile?.trim() || null;
+        const accessKeyId = values.aws_access_key_id?.trim() || null;
+        const secretAccessKey = values.aws_secret_access_key?.trim() || null;
+        const updatedAt = new Date().toISOString();
+        const id = randomUUID();
+
+        let payload: ManagedAwsProfilePayload | null = null;
+        if (ssoStartUrl && ssoRegion && ssoAccountId && ssoRoleName) {
+          payload = {
+            id,
+            kind: "sso",
+            name: profileName,
+            region,
+            ssoStartUrl,
+            ssoRegion,
+            ssoAccountId,
+            ssoRoleName,
+            updatedAt,
+          };
+        } else if (roleArn && sourceProfileName) {
+          const sourceProfileId = visitProfile(sourceProfileName);
+          if (!sourceProfileId) {
+            if (explicit) {
+              skippedProfileNames.add(profileName);
+            }
+            return null;
+          }
+          payload = {
+            id,
+            kind: "role",
+            name: profileName,
+            region,
+            roleArn,
+            sourceProfileId,
+            updatedAt,
+          };
+        } else if (accessKeyId && secretAccessKey) {
+          payload = {
+            id,
+            kind: "static",
+            name: profileName,
+            region,
+            accessKeyId,
+            secretAccessKey,
+            updatedAt,
+          };
+        }
+
+        if (!payload) {
+          if (explicit) {
+            skippedProfileNames.add(profileName);
+          }
+          return null;
+        }
+
+        payloadsByName.set(profileName, payload);
+        importedProfileNames.add(profileName);
+        return payload.id;
+      } finally {
+        visiting.delete(profileName);
+      }
+    };
+
+    for (const profileName of input.requestedProfileNames) {
+      visitProfile(profileName, true);
+    }
+
+    return {
+      payloads: [...payloadsByName.values()].sort((left, right) => left.name.localeCompare(right.name)),
+      importedProfileNames: [...importedProfileNames].sort((left, right) => left.localeCompare(right)),
+      skippedProfileNames: [...skippedProfileNames].sort((left, right) => left.localeCompare(right)),
+    };
+  }
+
   private async validateStaticCredentials(input: {
     accessKeyId: string;
     secretAccessKey: string;
@@ -1623,36 +2154,18 @@ export class AwsService {
     secretAccessKey: string;
     region?: string | null;
   }): Promise<void> {
-    const settings: Array<[key: string, value: string]> = [
-      ["aws_access_key_id", input.accessKeyId],
-      ["aws_secret_access_key", input.secretAccessKey],
-    ];
-    if (input.region?.trim()) {
-      settings.push(["region", input.region.trim()]);
-    }
-
-    for (const [key, value] of settings) {
-      const result = await this.runResolvedCommand("aws", [
-        "configure",
-        "set",
-        key,
-        value,
-        "--profile",
-        input.profileName,
-      ]);
-      if (result.exitCode !== 0) {
-        throw normalizeAwsCliError(
-          result.stderr,
-          "AWS 프로필을 저장하지 못했습니다.",
-        );
-      }
-    }
-
-    if (!input.region?.trim()) {
-      const documents = await loadAwsProfileDocuments(this.awsProfileRootDir);
-      removeAwsProfileKeyFromDocuments(documents, input.profileName, "region");
-      await writeAwsProfileDocuments(documents);
-    }
+    const existing = this.getManagedProfileByName(input.profileName);
+    const payload: ManagedAwsProfilePayload = {
+      id: existing?.id ?? randomUUID(),
+      kind: "static",
+      name: input.profileName,
+      region: input.region?.trim() || null,
+      accessKeyId: input.accessKeyId.trim(),
+      secretAccessKey: input.secretAccessKey.trim(),
+      updatedAt: new Date().toISOString(),
+    };
+    this.profileRepository.upsert(payload);
+    await this.materializeManagedProfiles();
   }
 
   async ensureAwsCliAvailable(): Promise<void> {
@@ -1699,23 +2212,48 @@ export class AwsService {
   }
 
   async listProfiles(): Promise<AwsProfileSummary[]> {
-    await this.ensureAwsCliAvailable();
-    const result = await this.runResolvedCommand("aws", [
-      "configure",
-      "list-profiles",
-    ]);
-    if (result.exitCode !== 0) {
-      throw normalizeAwsCliError(
-        result.stderr,
-        "AWS 프로필 목록을 읽지 못했습니다.",
-      );
+    await this.ensureManagedProfilesReady();
+    return this.profileRepository.listMetadata().map((profile) => ({
+      id: profile.id,
+      name: profile.name,
+    }));
+  }
+
+  private async listProfilesFromRoot(rootDir: string): Promise<AwsProfileSummary[]> {
+    const documents = await loadAwsProfileDocuments(rootDir);
+    return listAwsProfileNames(documents).map((name) => ({ id: null, name }));
+  }
+
+  async importExternalProfiles(
+    input: AwsExternalProfileImportInput,
+  ): Promise<AwsExternalProfileImportResult> {
+    await this.ensureManagedProfilesReady();
+    const requestedProfileNames = [...new Set(
+      (input.profileNames ?? [])
+        .map((profileName) => profileName.trim())
+        .filter(Boolean),
+    )];
+    if (requestedProfileNames.length === 0) {
+      return {
+        importedProfileNames: [],
+        skippedProfileNames: [],
+      };
     }
 
-    return result.stdout
-      .split(/\r?\n/)
-      .map((line) => line.trim())
-      .filter(Boolean)
-      .map((name) => ({ name }));
+    const sourceDocuments = await loadAwsProfileDocuments(this.externalAwsProfileRootDir);
+    const result = this.buildImportedPayloadsFromExternalDocuments({
+      requestedProfileNames,
+      sourceDocuments,
+    });
+    for (const payload of result.payloads) {
+      this.profileRepository.upsert(payload);
+    }
+    await this.materializeManagedProfiles();
+
+    return {
+      importedProfileNames: result.importedProfileNames,
+      skippedProfileNames: result.skippedProfileNames,
+    };
   }
 
   async createProfile(input: AwsProfileCreateInput): Promise<void> {
@@ -1723,6 +2261,7 @@ export class AwsService {
       return;
     }
 
+    await this.ensureManagedProfilesReady();
     await this.ensureAwsCliAvailable();
 
     if (input.kind === "static") {
@@ -1755,25 +2294,27 @@ export class AwsService {
 
     if (input.kind === "role") {
       const profileName = normalizeAwsProfileName(input.profileName);
-      const sourceProfileName = normalizeAwsProfileName(
-        input.sourceProfileName,
-        "source profile",
-      );
       const roleArn = input.roleArn.trim();
       const region = input.region?.trim() || null;
+      const sourceProfile =
+        (input.sourceProfileId
+          ? this.profileRepository.getPayloadById(input.sourceProfileId)
+          : null) ??
+        this.getManagedProfileByName(
+          normalizeAwsProfileName(input.sourceProfileName, "source profile"),
+        );
 
       if (!roleArn) {
         throw new Error("Role ARN을 입력해 주세요.");
       }
 
       await this.assertProfileNameAvailable(profileName);
-      const existingProfiles = await this.listProfiles();
-      if (!existingProfiles.some((profile) => profile.name === sourceProfileName)) {
+      if (!sourceProfile) {
         throw new Error("선택한 source profile을 찾지 못했습니다.");
       }
 
       await this.validateAssumeRoleWithSourceProfile({
-        sourceProfileName,
+        sourceProfileName: sourceProfile.name,
         roleArn,
         errorContext: "role-validation",
         fallbackMessage:
@@ -1782,7 +2323,7 @@ export class AwsService {
 
       await this.saveRoleProfileValues({
         profileName,
-        sourceProfileName,
+        sourceProfileId: sourceProfile.id,
         roleArn,
         region,
       });
@@ -1881,6 +2422,7 @@ export class AwsService {
       };
     }
 
+    await this.ensureManagedProfilesReady();
     await this.ensureAwsCliAvailable();
     this.pruneExpiredSsoPreparations();
 
@@ -2025,23 +2567,46 @@ export class AwsService {
   private async readConfigValue(
     profileName: string,
     key: string,
+    awsRootDir = this.awsProfileRootDir,
   ): Promise<string> {
-    const result = await this.runResolvedCommand("aws", [
-      "configure",
-      "get",
-      key,
-      "--profile",
-      profileName,
-    ]);
+    const result = await this.runResolvedCommandWithEnv(
+      "aws",
+      ["configure", "get", key, "--profile", profileName],
+      this.getManagedAwsEnvOverrides(awsRootDir),
+    );
     if (result.exitCode !== 0) {
       return "";
     }
     return result.stdout.trim();
   }
 
-  async getProfileStatus(profileName: string): Promise<AwsProfileStatus> {
+  private async getProfileStatusFromRoot(
+    profileName: string,
+    awsRootDir: string,
+  ): Promise<AwsProfileStatus> {
+    const profileId =
+      awsRootDir === this.awsProfileRootDir
+        ? this.profileRepository.getMetadataByName(profileName)?.id ?? null
+        : null;
+    if (
+      awsRootDir === this.awsProfileRootDir &&
+      !profileId &&
+      this.profileRepository.listMetadata().length > 0
+    ) {
+      return {
+        id: null,
+        profileName,
+        available: false,
+        isSsoProfile: false,
+        isAuthenticated: false,
+        configuredRegion: null,
+        errorMessage: "앱 전용 AWS 프로필을 찾지 못했습니다. 먼저 프로필을 가져오거나 생성해 주세요.",
+        missingTools: [],
+      };
+    }
     if (isE2EFakeAwsSessionEnabled()) {
       return {
+        id: profileId,
         profileName,
         available: true,
         isSsoProfile: false,
@@ -2056,29 +2621,34 @@ export class AwsService {
     await this.ensureAwsCliAvailable();
 
     const [ssoStartUrl, ssoSession, configuredRegion, pluginAvailable] = await Promise.all([
-      this.readConfigValue(profileName, "sso_start_url"),
-      this.readConfigValue(profileName, "sso_session"),
-      this.readConfigValue(profileName, "region"),
+      this.readConfigValue(profileName, "sso_start_url", awsRootDir),
+      this.readConfigValue(profileName, "sso_session", awsRootDir),
+      this.readConfigValue(profileName, "region", awsRootDir),
       resolveExecutable("session-manager-plugin")
         .then(() => true)
         .catch(() => false),
     ]);
     const isSsoProfile = Boolean(ssoStartUrl || ssoSession);
 
-    const identity = await this.runResolvedCommand("aws", [
-      "sts",
-      "get-caller-identity",
-      "--profile",
-      profileName,
-      "--output",
-      "json",
-    ]);
+    const identity = await this.runResolvedCommandWithEnv(
+      "aws",
+      [
+        "sts",
+        "get-caller-identity",
+        "--profile",
+        profileName,
+        "--output",
+        "json",
+      ],
+      this.getManagedAwsEnvOverrides(awsRootDir),
+    );
     if (identity.exitCode === 0) {
       const payload = parseJson<{ Account?: string; Arn?: string }>(
         identity.stdout,
         "AWS 프로필 상태 응답을 해석하지 못했습니다.",
       );
       return {
+        id: profileId,
         profileName,
         available: true,
         isSsoProfile,
@@ -2091,6 +2661,7 @@ export class AwsService {
     }
 
     return {
+      id: profileId,
       profileName,
       available: true,
       isSsoProfile,
@@ -2103,11 +2674,20 @@ export class AwsService {
     };
   }
 
-  async getProfileDetails(profileName: string): Promise<AwsProfileDetails> {
+  async getProfileStatus(profileName: string): Promise<AwsProfileStatus> {
+    await this.ensureManagedProfilesReady();
+    return this.getProfileStatusFromRoot(profileName, this.awsProfileRootDir);
+  }
+
+  private async getProfileDetailsFromRoot(
+    profileName: string,
+    awsRootDir: string,
+  ): Promise<AwsProfileDetails> {
     const normalizedProfileName = normalizeAwsProfileName(profileName);
 
     if (isE2EFakeAwsSessionEnabled()) {
       return {
+        id: this.profileRepository.getMetadataByName(normalizedProfileName)?.id ?? null,
         profileName: normalizedProfileName,
         available: true,
         isSsoProfile: false,
@@ -2134,11 +2714,15 @@ export class AwsService {
     }
 
     const [status, documents] = await Promise.all([
-      this.getProfileStatus(normalizedProfileName),
-      loadAwsProfileDocuments(this.awsProfileRootDir),
+      this.getProfileStatusFromRoot(normalizedProfileName, awsRootDir),
+      loadAwsProfileDocuments(awsRootDir),
     ]);
     const snapshot = inspectAwsProfileDocuments(documents, normalizedProfileName);
     const values = snapshot.mergedValues;
+    const managedProfile =
+      awsRootDir === this.awsProfileRootDir
+        ? this.getManagedProfileByName(normalizedProfileName)
+        : null;
     const ssoSession = values.sso_session?.trim() || null;
     const ssoSessionValues = ssoSession
       ? getAwsSsoSessionValues(documents, ssoSession)
@@ -2178,6 +2762,8 @@ export class AwsService {
       hasSecretAccessKey: Boolean(secretAccessKey),
       hasSessionToken: Boolean(sessionToken),
       roleArn,
+      sourceProfileId:
+        managedProfile?.kind === "role" ? managedProfile.sourceProfileId : null,
       sourceProfile,
       credentialProcess,
       ssoSession,
@@ -2190,11 +2776,25 @@ export class AwsService {
     };
   }
 
+  async getProfileDetails(profileName: string): Promise<AwsProfileDetails> {
+    await this.ensureManagedProfilesReady();
+    return this.getProfileDetailsFromRoot(profileName, this.awsProfileRootDir);
+  }
+
+  async listExternalProfiles(): Promise<AwsProfileSummary[]> {
+    return this.listProfilesFromRoot(this.externalAwsProfileRootDir);
+  }
+
+  async getExternalProfileDetails(profileName: string): Promise<AwsProfileDetails> {
+    return this.getProfileDetailsFromRoot(profileName, this.externalAwsProfileRootDir);
+  }
+
   async updateProfile(input: AwsProfileUpdateInput): Promise<void> {
     if (isE2EFakeAwsSessionEnabled()) {
       return;
     }
 
+    await this.ensureManagedProfilesReady();
     await this.ensureAwsCliAvailable();
 
     const profileName = normalizeAwsProfileName(input.profileName);
@@ -2209,8 +2809,8 @@ export class AwsService {
       throw new Error("Secret을 입력해 주세요.");
     }
 
-    const details = await this.getProfileDetails(profileName);
-    if (details.kind !== "static") {
+    const currentProfile = this.getManagedProfileByName(profileName);
+    if (!currentProfile || currentProfile.kind !== "static") {
       throw new Error("이 프로필은 access key 기반 프로필만 수정할 수 있습니다.");
     }
 
@@ -2232,6 +2832,7 @@ export class AwsService {
       return;
     }
 
+    await this.ensureManagedProfilesReady();
     await this.ensureAwsCliAvailable();
 
     const profileName = normalizeAwsProfileName(input.profileName);
@@ -2243,22 +2844,19 @@ export class AwsService {
       throw new Error("새 프로필명이 기존 프로필명과 같습니다.");
     }
 
-    const existingProfiles = await this.listProfiles();
-    if (!existingProfiles.some((profile) => profile.name === profileName)) {
+    const currentProfile = this.getManagedProfileByName(profileName);
+    if (!currentProfile) {
       throw new Error("선택한 AWS 프로필을 찾지 못했습니다.");
     }
-    if (existingProfiles.some((profile) => profile.name === nextProfileName)) {
+    if (this.getManagedProfileByName(nextProfileName)) {
       throw new Error("같은 이름의 AWS 프로필이 이미 존재합니다.");
     }
-
-    const documents = await loadAwsProfileDocuments(this.awsProfileRootDir);
-    const snapshot = inspectAwsProfileDocuments(documents, profileName);
-    if (!snapshot.hasConfigSection && !snapshot.hasCredentialsSection) {
-      throw new Error("선택한 AWS 프로필을 로컬 설정 파일에서 찾지 못했습니다.");
-    }
-
-    renameAwsProfileInDocuments(documents, profileName, nextProfileName);
-    await writeAwsProfileDocuments(documents);
+    this.profileRepository.upsert({
+      ...currentProfile,
+      name: nextProfileName,
+      updatedAt: new Date().toISOString(),
+    });
+    await this.materializeManagedProfiles();
   }
 
   async deleteProfile(profileName: string): Promise<void> {
@@ -2266,22 +2864,16 @@ export class AwsService {
       return;
     }
 
+    await this.ensureManagedProfilesReady();
     await this.ensureAwsCliAvailable();
 
     const normalizedProfileName = normalizeAwsProfileName(profileName);
-    const existingProfiles = await this.listProfiles();
-    if (!existingProfiles.some((profile) => profile.name === normalizedProfileName)) {
+    const existingProfile = this.getManagedProfileByName(normalizedProfileName);
+    if (!existingProfile) {
       throw new Error("선택한 AWS 프로필을 찾지 못했습니다.");
     }
-
-    const documents = await loadAwsProfileDocuments(this.awsProfileRootDir);
-    const snapshot = inspectAwsProfileDocuments(documents, normalizedProfileName);
-    if (!snapshot.hasConfigSection && !snapshot.hasCredentialsSection) {
-      throw new Error("선택한 AWS 프로필을 로컬 설정 파일에서 찾지 못했습니다.");
-    }
-
-    deleteAwsProfileFromDocuments(documents, normalizedProfileName);
-    await writeAwsProfileDocuments(documents);
+    this.profileRepository.remove(existingProfile.id);
+    await this.materializeManagedProfiles();
   }
 
   async login(profileName: string): Promise<void> {

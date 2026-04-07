@@ -112,6 +112,18 @@ function createFakeChildProcess() {
   };
 }
 
+async function waitForWriteCount(
+  writes: Buffer[],
+  expectedCount: number,
+): Promise<void> {
+  for (let attempt = 0; attempt < 10; attempt += 1) {
+    if (writes.length >= expectedCount) {
+      return;
+    }
+    await Promise.resolve();
+  }
+}
+
 describe("CoreManager AWS SSM sessions", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -628,7 +640,7 @@ describe("CoreManager AWS SSM sessions", () => {
       remoteHost: "db.internal",
     });
 
-    await Promise.resolve();
+    await waitForWriteCount(fakeProcess.writes, 1);
 
     const startRequest = decodeControlFrame(fakeProcess.writes[0]);
     expect(startRequest.type).toBe("ssmPortForwardStart");
@@ -649,7 +661,7 @@ describe("CoreManager AWS SSM sessions", () => {
 
     await startPromise;
     const stopPromise = manager.stopPortForward("rule-ssm-1");
-    await Promise.resolve();
+    await waitForWriteCount(fakeProcess.writes, 2);
 
     const stopRequest = decodeControlFrame(fakeProcess.writes[1]);
     expect(stopRequest.type).toBe("ssmPortForwardStop");
@@ -688,7 +700,7 @@ describe("CoreManager AWS SSM sessions", () => {
       transport: "container",
     });
 
-    await Promise.resolve();
+    await waitForWriteCount(fakeProcess.writes, 1);
 
     const startRequest = decodeControlFrame(fakeProcess.writes[0]);
     expect(startRequest.type).toBe("ssmPortForwardStart");
@@ -714,7 +726,7 @@ describe("CoreManager AWS SSM sessions", () => {
     expect(runtime.bindPort).toBe(15432);
 
     const stopPromise = manager.stopPortForward("rule-container-aws-1");
-    await Promise.resolve();
+    await waitForWriteCount(fakeProcess.writes, 2);
 
     const stopRequest = decodeControlFrame(fakeProcess.writes[1]);
     expect(stopRequest.type).toBe("ssmPortForwardStop");
@@ -753,7 +765,7 @@ describe("CoreManager AWS SSM sessions", () => {
       transport: "ecs-task",
     });
 
-    await Promise.resolve();
+    await waitForWriteCount(fakeProcess.writes, 1);
 
     const startRequest = decodeControlFrame(fakeProcess.writes[0]);
     expect(startRequest.type).toBe("ssmPortForwardStart");

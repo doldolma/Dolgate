@@ -222,6 +222,41 @@ func TestAuthRefreshAndSyncFlow(t *testing.T) {
 	}
 }
 
+func TestServerInfoEndpoint(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := createTestRouterWithConfig(t, httpserver.RouterConfig{
+		LocalAuthEnabled:   true,
+		LocalSignupEnabled: true,
+		ServerVersion:      "2026.04.07-test",
+	})
+
+	request := httptest.NewRequest(http.MethodGet, "/api/info", nil)
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected info endpoint to succeed, got %d: %s", recorder.Code, recorder.Body.String())
+	}
+
+	var response struct {
+		ServerVersion string `json:"serverVersion"`
+		Capabilities  struct {
+			Sync struct {
+				AWSProfiles bool `json:"awsProfiles"`
+			} `json:"sync"`
+		} `json:"capabilities"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode info response: %v", err)
+	}
+	if response.ServerVersion != "2026.04.07-test" {
+		t.Fatalf("expected version to round-trip, got %q", response.ServerVersion)
+	}
+	if !response.Capabilities.Sync.AWSProfiles {
+		t.Fatalf("expected awsProfiles capability to be enabled")
+	}
+}
+
 func TestSyncRequiresAuth(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	router := createTestRouter(t)

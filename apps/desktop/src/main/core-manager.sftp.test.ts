@@ -101,6 +101,18 @@ function createFakeChildProcess() {
   };
 }
 
+async function waitForWriteCount(
+  writes: Buffer[],
+  expectedCount: number,
+): Promise<void> {
+  for (let attempt = 0; attempt < 10; attempt += 1) {
+    if (writes.length >= expectedCount) {
+      return;
+    }
+    await Promise.resolve();
+  }
+}
+
 describe("CoreManager SFTP sessions", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -122,7 +134,7 @@ describe("CoreManager SFTP sessions", () => {
       title: "Warpgate Prod",
     });
 
-    await Promise.resolve();
+    await waitForWriteCount(fakeProcess.writes, 1);
 
     const request = decodeControlFrame(fakeProcess.writes[0]);
     expect(request.type).toBe("sftpConnect");

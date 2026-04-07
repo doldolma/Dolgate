@@ -7,6 +7,7 @@ function createProfileDetails(
   overrides: Partial<AwsProfileDetails> = {},
 ): AwsProfileDetails {
   return {
+    id: null,
     profileName: 'default',
     available: true,
     isSsoProfile: false,
@@ -39,6 +40,7 @@ function createAwsHost(profileName: string): HostRecord {
     id: `aws-host:${profileName}`,
     kind: 'aws-ec2',
     label: `host-${profileName}`,
+    awsProfileId: null,
     awsProfileName: profileName,
     awsRegion: 'ap-northeast-2',
     awsInstanceId: 'i-1234567890',
@@ -61,17 +63,38 @@ function createAwsHost(profileName: string): HostRecord {
 
 function installMockApi(input?: {
   profiles?: Array<{ name: string }>
+  externalProfiles?: Array<{ name: string }>
   detailsByProfileName?: Record<string, AwsProfileDetails>
+  externalDetailsByProfileName?: Record<string, AwsProfileDetails>
+  awsProfilesServerSupport?: 'unknown' | 'supported' | 'unsupported'
 }) {
-  let profiles = input?.profiles ?? [{ name: 'default' }]
+  let profiles = input?.profiles ?? [{ id: 'profile-default', name: 'default' }]
+  const externalProfiles = input?.externalProfiles ?? [{ id: null, name: 'legacy-profile' }]
   let detailsByProfileName: Record<string, AwsProfileDetails> = {
     default: createProfileDetails(),
     ...(input?.detailsByProfileName ?? {}),
   }
+  const externalDetailsByProfileName: Record<string, AwsProfileDetails> = {
+    'legacy-profile': createProfileDetails({
+      profileName: 'legacy-profile',
+      configuredRegion: 'us-east-1',
+    }),
+    ...(input?.externalDetailsByProfileName ?? {}),
+  }
 
   const api = {
+    sync: {
+      status: vi.fn().mockResolvedValue({
+        status: 'ready',
+        lastSuccessfulSyncAt: '2026-04-07T00:00:00.000Z',
+        pendingPush: false,
+        errorMessage: null,
+        awsProfilesServerSupport: input?.awsProfilesServerSupport ?? 'supported',
+      }),
+    },
     aws: {
       listProfiles: vi.fn().mockImplementation(async () => profiles),
+      listExternalProfiles: vi.fn().mockImplementation(async () => externalProfiles),
       createProfile: vi.fn().mockImplementation(async (draft) => {
         profiles = [...profiles, { name: draft.profileName }]
         detailsByProfileName = {
@@ -120,6 +143,38 @@ function installMockApi(input?: {
           throw new Error('missing profile')
         }
         return details
+      }),
+      getExternalProfileDetails: vi.fn().mockImplementation(async (profileName: string) => {
+        const details = externalDetailsByProfileName[profileName]
+        if (!details) {
+          throw new Error('missing external profile')
+        }
+        return details
+      }),
+      importExternalProfiles: vi.fn().mockImplementation(async ({ profileNames }) => {
+        const importedProfileNames = profileNames.filter(
+          (profileName: string) => !profiles.some((profile) => profile.name === profileName),
+        )
+        profiles = [
+          ...profiles,
+          ...importedProfileNames.map((profileName: string) => ({ name: profileName })),
+        ]
+        for (const profileName of importedProfileNames) {
+          detailsByProfileName = {
+            ...detailsByProfileName,
+            [profileName]:
+              externalDetailsByProfileName[profileName] ??
+              createProfileDetails({
+                profileName,
+              }),
+          }
+        }
+        return {
+          importedProfileNames,
+          skippedProfileNames: profileNames.filter(
+            (profileName: string) => !importedProfileNames.includes(profileName),
+          ),
+        }
       }),
       updateProfile: vi.fn().mockResolvedValue(undefined),
       renameProfile: vi.fn().mockImplementation(async (input) => {
@@ -184,7 +239,7 @@ describe('AwsProfilesPanel', () => {
     vi.restoreAllMocks()
   })
 
-  it('shows that aws profiles are stored locally and are not synced to other devices', async () => {
+  it('shows the general app-managed aws profiles description', async () => {
     installMockApi()
 
     render(<AwsProfilesPanel hosts={[]} />)
@@ -192,8 +247,46 @@ describe('AwsProfilesPanel', () => {
     await screen.findByRole('heading', { name: 'default' })
 
     expect(
-      screen.getByText(/실제 프로필과 자격 증명은 다른 기기로 동기화되지 않습니다/),
+      screen.getByText(/앱 전용 AWS CLI 프로필을 확인하고 생성, 수정, 이름 변경, 삭제할 수 있습니다/),
     ).toBeInTheDocument()
+  })
+
+  it('shows a server update warning when aws profile sync is unsupported', async () => {
+    installMockApi({
+      awsProfilesServerSupport: 'unsupported',
+    })
+
+    render(<AwsProfilesPanel hosts={[]} />)
+
+    expect(
+      await screen.findByText(
+        '현재 서버는 AWS 프로필 동기화를 아직 지원하지 않습니다. 서버를 업데이트하기 전까지 이 기기에서만 저장됩니다.',
+      ),
+    ).toBeInTheDocument()
+  })
+
+  it('imports external aws cli profiles into the app-managed profile list', async () => {
+    const { api } = installMockApi({
+      externalProfiles: [{ name: 'legacy-profile' }],
+    })
+
+    render(<AwsProfilesPanel hosts={[]} />)
+
+    await screen.findByRole('heading', { name: 'default' })
+
+    fireEvent.click(screen.getByRole('button', { name: '로컬 AWS CLI에서 가져오기' }))
+    await screen.findByRole('heading', { name: '로컬 AWS CLI에서 가져오기' })
+
+    fireEvent.click(screen.getByRole('button', { name: '선택한 프로필 가져오기' }))
+
+    await waitFor(() =>
+      expect(api.aws.importExternalProfiles).toHaveBeenCalledWith({
+        profileNames: ['legacy-profile'],
+      }),
+    )
+    await waitFor(() =>
+      expect(screen.getByRole('heading', { name: 'legacy-profile' })).toBeInTheDocument(),
+    )
   })
 
   it('creates a new static profile and auto-selects it after refresh', async () => {
@@ -265,6 +358,7 @@ describe('AwsProfilesPanel', () => {
 
   it('shows rename warnings for host references and source_profile references', async () => {
     const { api } = installMockApi({
+      profiles: [{ name: 'default' }],
       detailsByProfileName: {
         default: createProfileDetails({
           referencedByProfileNames: ['assume-admin'],
@@ -279,7 +373,9 @@ describe('AwsProfilesPanel', () => {
     fireEvent.click(screen.getByRole('button', { name: '이름 변경' }))
 
     expect(
-      screen.getByText(/host 데이터와 서버 동기화 데이터는 자동으로 바뀌지 않습니다/),
+      screen.getByText((content) =>
+        content.includes('연결된 host의 표시용 프로필명도 함께 갱신됩니다.'),
+      ),
     ).toBeInTheDocument()
     expect(screen.getAllByText('host-default (aws-ec2)').length).toBeGreaterThan(0)
     expect(screen.getAllByText('assume-admin').length).toBeGreaterThan(0)

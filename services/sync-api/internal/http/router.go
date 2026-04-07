@@ -22,8 +22,22 @@ type RouterConfig struct {
 	LocalAuthEnabled   bool
 	LocalSignupEnabled bool
 	TrustedProxies     []string
+	ServerVersion      string
 	RateLimit          AuthRateLimitConfig
 	OIDC               OIDCConfig
+}
+
+type serverInfoResponse struct {
+	ServerVersion string                 `json:"serverVersion"`
+	Capabilities  serverInfoCapabilities `json:"capabilities"`
+}
+
+type serverInfoCapabilities struct {
+	Sync serverInfoSyncCapabilities `json:"sync"`
+}
+
+type serverInfoSyncCapabilities struct {
+	AWSProfiles bool `json:"awsProfiles"`
 }
 
 type OIDCConfig struct {
@@ -108,6 +122,17 @@ func NewRouter(store store.Store, authService *auth.Service, config RouterConfig
 
 	router.GET("/healthz", func(ctx *gin.Context) {
 		ctx.JSON(http.StatusOK, gin.H{"status": "ok", "time": time.Now().UTC().Format(time.RFC3339)})
+	})
+
+	router.GET("/api/info", func(ctx *gin.Context) {
+		ctx.JSON(http.StatusOK, serverInfoResponse{
+			ServerVersion: resolveServerVersion(config.ServerVersion),
+			Capabilities: serverInfoCapabilities{
+				Sync: serverInfoSyncCapabilities{
+					AWSProfiles: true,
+				},
+			},
+		})
 	})
 
 	router.GET("/login", func(ctx *gin.Context) {
@@ -609,6 +634,11 @@ func NewRouter(store store.Store, authService *auth.Service, config RouterConfig
 			ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
+		awsProfiles, err := store.ListSyncRecords(ctx.Request.Context(), userID, syncmodel.KindAWSProfiles)
+		if err != nil {
+			ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
 
 		ctx.JSON(http.StatusOK, syncmodel.Payload{
 			Groups:       groups,
@@ -618,6 +648,7 @@ func NewRouter(store store.Store, authService *auth.Service, config RouterConfig
 			PortForwards: portForwards,
 			DNSOverrides: dnsOverrides,
 			Preferences:  preferences,
+			AWSProfiles:  awsProfiles,
 		})
 	})
 	syncGroup.POST("", func(ctx *gin.Context) {
@@ -655,10 +686,21 @@ func NewRouter(store store.Store, authService *auth.Service, config RouterConfig
 			ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
+		if err := store.UpsertSyncRecords(ctx.Request.Context(), userID, syncmodel.KindAWSProfiles, payload.AWSProfiles); err != nil {
+			ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
 		ctx.Status(http.StatusAccepted)
 	})
 
 	return router, nil
+}
+
+func resolveServerVersion(value string) string {
+	if strings.TrimSpace(value) == "" {
+		return "dev"
+	}
+	return strings.TrimSpace(value)
 }
 
 func shouldRedirectDirectlyToOIDC(config RouterConfig, runtime *oidcRuntime) bool {

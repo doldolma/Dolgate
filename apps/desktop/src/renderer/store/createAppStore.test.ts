@@ -2309,6 +2309,7 @@ describe("createAppStore", () => {
     );
 
     firstStatus.resolve({
+      id: null,
       profileName: "sso-profile",
       available: true,
       isSsoProfile: true,
@@ -2328,6 +2329,7 @@ describe("createAppStore", () => {
     await flushMicrotasks();
 
     secondStatus.resolve({
+      id: null,
       profileName: "sso-profile",
       available: true,
       isSsoProfile: true,
@@ -2395,6 +2397,7 @@ describe("createAppStore", () => {
     );
 
     status.resolve({
+      id: null,
       profileName: "sso-profile",
       available: true,
       isSsoProfile: true,

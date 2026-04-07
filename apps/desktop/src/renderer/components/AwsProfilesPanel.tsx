@@ -10,6 +10,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useAwsProfilesController } from '../controllers/useImportControllers'
 import { cn } from '../lib/cn'
 import { DialogBackdrop } from './DialogBackdrop'
+import { AwsExternalProfileImportDialog } from './AwsExternalProfileImportDialog'
 import { AwsProfileCreateWizard } from './AwsProfileCreateWizard'
 import { AwsStaticProfileForm } from './AwsStaticProfileForm'
 import { normalizeErrorMessage } from '../store/utils/errors-and-prompts'
@@ -69,11 +70,13 @@ function getNextProfileSelectionAfterDelete(
 
 function getAwsProfileHostReferences(
   hosts: HostRecord[],
-  profileName: string,
+  profile: Pick<AwsProfileSummary, 'id' | 'name'>,
 ): Array<{ id: string; label: string; kind: 'aws-ec2' | 'aws-ecs' }> {
   return hosts
     .filter((host) => isAwsEc2HostRecord(host) || isAwsEcsHostRecord(host))
-    .filter((host) => host.awsProfileName === profileName)
+    .filter((host) =>
+      profile.id ? host.awsProfileId === profile.id : host.awsProfileName === profile.name,
+    )
     .map((host) => ({
       id: host.id,
       label: host.label,
@@ -127,6 +130,20 @@ function getAwsProfileStatusLabel(details?: AwsProfileDetails): string {
   return details.isAuthenticated ? '인증됨' : '인증 필요'
 }
 
+function formatExternalImportSummary(input: {
+  importedProfileNames: string[]
+  skippedProfileNames: string[]
+}): string {
+  const parts: string[] = []
+  if (input.importedProfileNames.length > 0) {
+    parts.push(`가져온 프로필 ${input.importedProfileNames.length}개`)
+  }
+  if (input.skippedProfileNames.length > 0) {
+    parts.push(`건너뜀 ${input.skippedProfileNames.length}개`)
+  }
+  return parts.length > 0 ? `${parts.join(', ')}.` : '가져온 프로필이 없습니다.'
+}
+
 function renderReferenceList(items: string[]) {
   return (
     <ul className="m-0 grid gap-1.5 pl-5 text-sm text-[var(--text-soft)]">
@@ -168,10 +185,14 @@ function ProfileField({
 
 export function AwsProfilesPanel({ hosts }: AwsProfilesPanelProps) {
   const {
+    getSyncStatus,
     listAwsProfiles,
+    listExternalAwsProfiles,
     createAwsProfile,
     prepareAwsSsoProfile,
     getAwsProfileDetails,
+    getExternalAwsProfileDetails,
+    importExternalAwsProfiles,
     updateAwsProfile,
     renameAwsProfile,
     deleteAwsProfile,
@@ -201,16 +222,24 @@ export function AwsProfilesPanel({ hosts }: AwsProfilesPanelProps) {
   const [deleteError, setDeleteError] = useState<string | null>(null)
   const [isDeleting, setIsDeleting] = useState(false)
   const [isLoggingIn, setIsLoggingIn] = useState(false)
+  const [isExternalImportOpen, setIsExternalImportOpen] = useState(false)
+  const [externalImportSummary, setExternalImportSummary] = useState<string | null>(null)
+  const [awsProfilesServerSupport, setAwsProfilesServerSupport] = useState<
+    'unknown' | 'supported' | 'unsupported'
+  >('unknown')
   const requestIdRef = useRef(0)
 
   const selectedDetails = selectedProfileName
     ? detailsByProfileName[selectedProfileName] ?? null
     : null
+  const selectedProfileSummary = selectedProfileName
+    ? profiles.find((profile) => profile.name === selectedProfileName) ?? null
+    : null
   const selectedDetailError = selectedProfileName
     ? detailErrorsByProfileName[selectedProfileName] ?? null
     : null
-  const selectedHostReferences = selectedProfileName
-    ? getAwsProfileHostReferences(hosts, selectedProfileName)
+  const selectedHostReferences = selectedProfileSummary
+    ? getAwsProfileHostReferences(hosts, selectedProfileSummary)
     : []
 
   async function refreshProfiles(preferredProfileName?: string | null) {
@@ -293,6 +322,14 @@ export function AwsProfilesPanel({ hosts }: AwsProfilesPanelProps) {
   }
 
   useEffect(() => {
+    void getSyncStatus()
+      .then((status) => {
+        setAwsProfilesServerSupport(status.awsProfilesServerSupport ?? 'unknown')
+      })
+      .catch(() => undefined)
+  }, [getSyncStatus])
+
+  useEffect(() => {
     void refreshProfiles()
     return () => {
       requestIdRef.current += 1
@@ -342,6 +379,15 @@ export function AwsProfilesPanel({ hosts }: AwsProfilesPanelProps) {
   async function handleCreateProfileSuccess(profileName: string) {
     setProfileFormMode(null)
     await refreshProfiles(profileName)
+  }
+
+  async function handleExternalImport(result: {
+    importedProfileNames: string[]
+    skippedProfileNames: string[]
+  }) {
+    setExternalImportSummary(formatExternalImportSummary(result))
+    const preferredProfileName = result.importedProfileNames[0] ?? selectedProfileName
+    await refreshProfiles(preferredProfileName)
   }
 
   async function handleRenameProfile() {
@@ -421,7 +467,7 @@ export function AwsProfilesPanel({ hosts }: AwsProfilesPanelProps) {
           <SectionLabel>AWS</SectionLabel>
           <h3 className="m-0">Profiles</h3>
           <p className="mb-0 mt-2 text-[0.92rem] text-[var(--text-soft)]">
-            로컬 AWS CLI 프로필을 확인하고 생성, 수정, 이름 변경, 삭제할 수 있습니다.
+            앱 전용 AWS CLI 프로필을 확인하고 생성, 수정, 이름 변경, 삭제할 수 있습니다. 기존 로컬 AWS CLI 프로필은 가져오기 후 사용할 수 있습니다.
           </p>
         </div>
 
@@ -434,6 +480,13 @@ export function AwsProfilesPanel({ hosts }: AwsProfilesPanelProps) {
             }}
           >
             새로고침
+          </Button>
+          <Button
+            variant="secondary"
+            disabled={isLoadingProfiles || isLoggingIn || isSavingProfile || isRenaming || isDeleting}
+            onClick={() => setIsExternalImportOpen(true)}
+          >
+            로컬 AWS CLI에서 가져오기
           </Button>
           <Button
             variant="primary"
@@ -451,12 +504,18 @@ export function AwsProfilesPanel({ hosts }: AwsProfilesPanelProps) {
         </NoticeCard>
       ) : null}
 
-      <NoticeCard tone="info">
-        AWS 프로필은 이 PC의 로컬 AWS CLI 설정에만 저장됩니다. 앱 host 데이터는 동기화되더라도 실제 프로필과 자격 증명은 다른 기기로 동기화되지 않습니다.
-      </NoticeCard>
+      {externalImportSummary ? (
+        <NoticeCard tone="info">{externalImportSummary}</NoticeCard>
+      ) : null}
+
+      {awsProfilesServerSupport === 'unsupported' ? (
+        <NoticeCard tone="warning">
+          현재 서버는 AWS 프로필 동기화를 아직 지원하지 않습니다. 서버를 업데이트하기 전까지 이 기기에서만 저장됩니다.
+        </NoticeCard>
+      ) : null}
 
       <div className="grid gap-5 xl:grid-cols-[minmax(0,20rem)_minmax(0,1fr)]">
-        <section className="grid gap-3 rounded-[28px] border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[var(--surface-elevated)] p-[1.25rem] shadow-[var(--shadow-soft)]">
+        <section className="grid content-start gap-3 rounded-[28px] border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[var(--surface-elevated)] p-[1.25rem] shadow-[var(--shadow-soft)]">
           <div className="flex items-center justify-between gap-3">
             <strong>AWS Profiles</strong>
             <Badge tone="neutral">{profiles.length}</Badge>
@@ -473,7 +532,7 @@ export function AwsProfilesPanel({ hosts }: AwsProfilesPanelProps) {
             />
           ) : null}
 
-          <div className="grid gap-3">
+          <div className="grid content-start gap-3">
             {profiles.map((profile) => {
               const details = detailsByProfileName[profile.name]
               const isSelected = profile.name === selectedProfileName
@@ -527,7 +586,7 @@ export function AwsProfilesPanel({ hosts }: AwsProfilesPanelProps) {
           </div>
         </section>
 
-        <section className="grid gap-4 rounded-[28px] border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[var(--surface-elevated)] p-[1.35rem] shadow-[var(--shadow-soft)]">
+        <section className="grid content-start gap-4 rounded-[28px] border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[var(--surface-elevated)] p-[1.35rem] shadow-[var(--shadow-soft)]">
           {!selectedProfileName ? (
             <EmptyState
               title="선택된 프로필이 없습니다."
@@ -664,7 +723,7 @@ export function AwsProfilesPanel({ hosts }: AwsProfilesPanelProps) {
                 </strong>
                 <span className="text-[0.9rem] text-[var(--text-soft)]">
                   {profileFormMode === 'create'
-                    ? '전역 AWS CLI 프로필로 저장합니다.'
+                    ? '앱 전용 AWS CLI 프로필로 저장합니다.'
                     : 'Static access key 기반 프로필만 수정할 수 있습니다.'}
                 </span>
               </div>
@@ -676,7 +735,9 @@ export function AwsProfilesPanel({ hosts }: AwsProfilesPanelProps) {
                   title="새 AWS 프로필 생성"
                   descriptions={[
                     '유효성 검사를 통과한 경우에만 생성합니다.',
-                    '실제 프로필과 자격 증명은 다른 기기로 동기화되지 않습니다.',
+                    ...(awsProfilesServerSupport === 'unsupported'
+                      ? ['현재 서버는 AWS 프로필 동기화를 지원하지 않아 이 기기에서만 저장됩니다.']
+                      : []),
                   ]}
                   profiles={profiles}
                   createProfile={createAwsProfile}
@@ -736,7 +797,7 @@ export function AwsProfilesPanel({ hosts }: AwsProfilesPanelProps) {
 
               {selectedHostReferences.length > 0 ? (
                 <NoticeCard title="주의" tone="warning">
-                  현재 앱의 host가 이 프로필명을 참조하고 있습니다. 이름을 바꿔도 host 데이터와 서버 동기화 데이터는 자동으로 바뀌지 않습니다.
+                  현재 앱의 host가 이 프로필을 참조하고 있습니다. 이름을 바꾸면 연결된 host의 표시용 프로필명도 함께 갱신됩니다.
                   {renderHostReferenceList(selectedHostReferences)}
                 </NoticeCard>
               ) : null}
@@ -785,7 +846,7 @@ export function AwsProfilesPanel({ hosts }: AwsProfilesPanelProps) {
             </ModalHeader>
             <ModalBody className="grid gap-4">
               <NoticeCard title={selectedDetails.profileName} tone="warning">
-                삭제 후에도 앱의 host 데이터와 서버 동기화 데이터는 자동으로 수정되지 않습니다.
+                삭제 후에는 이 프로필을 참조하던 host가 프로필 없음 상태가 될 수 있습니다.
               </NoticeCard>
 
               {selectedHostReferences.length > 0 ? (
@@ -829,6 +890,15 @@ export function AwsProfilesPanel({ hosts }: AwsProfilesPanelProps) {
           </ModalShell>
         </DialogBackdrop>
       ) : null}
+
+      <AwsExternalProfileImportDialog
+        open={isExternalImportOpen}
+        onClose={() => setIsExternalImportOpen(false)}
+        onImported={(result) => handleExternalImport(result)}
+        listExternalProfiles={listExternalAwsProfiles}
+        getExternalProfileDetails={getExternalAwsProfileDetails}
+        importExternalProfiles={importExternalAwsProfiles}
+      />
     </div>
   )
 }

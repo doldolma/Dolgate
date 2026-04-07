@@ -6,6 +6,7 @@ import { isStaticDnsOverrideRecord } from '@shared';
 import type { DesktopWindowState } from '@shared';
 import {
   ActivityLogRepository,
+  AwsProfileRepository,
   DnsOverrideRepository,
   GroupRepository,
   HostRepository,
@@ -76,10 +77,13 @@ if (termiusHelperArgIndex >= 0) {
   const knownHostRepository = new KnownHostRepository();
   const activityLogRepository = new ActivityLogRepository();
   const secretMetadataRepository = new SecretMetadataRepository();
+  const awsProfileRepository = new AwsProfileRepository();
   const syncOutboxRepository = new SyncOutboxRepository();
   const secretStore = new SecretStore();
-  const awsService = new AwsService();
-  const awsSsmTunnelService = new AwsSsmTunnelService();
+  const awsService = new AwsService(awsProfileRepository);
+  const awsSsmTunnelService = new AwsSsmTunnelService({
+    buildCommandEnv: () => awsService.buildManagedCommandEnv()
+  });
   const warpgateService = new WarpgateService(secretStore);
   const termiusImportService = new TermiusImportService();
   const opensshImportService = new OpenSshImportService();
@@ -91,9 +95,13 @@ if (termiusHelperArgIndex >= 0) {
     activityLogRepository.upsert(record);
   };
   const authService = new AuthService(secretStore, desktopConfigService, settingsRepository, appendActivityLog);
-  const coreManager = new CoreManager((entry) => {
-    appendActivityLog(entry);
-  }, upsertActivityLog);
+  const coreManager = new CoreManager(
+    (entry) => {
+      appendActivityLog(entry);
+    },
+    upsertActivityLog,
+    () => awsService.buildManagedCommandEnv()
+  );
   const hostsOverrideManager = new HostsOverrideManager();
   const syncService = new SyncService(
     authService,
@@ -103,6 +111,7 @@ if (termiusHelperArgIndex >= 0) {
     dnsOverrideRepository,
     knownHostRepository,
     secretMetadataRepository,
+    awsProfileRepository,
     settingsRepository,
     secretStore,
     syncOutboxRepository
@@ -135,7 +144,25 @@ if (termiusHelperArgIndex >= 0) {
     hostsOverrideManager.clearStaticOverrideStates();
     await hostsOverrideManager.clear();
   };
+  const reconcileAwsHostProfileReferences = async () => {
+    const updatedHosts = hostRepository.backfillAwsProfileReferences(
+      awsProfileRepository.listMetadata().map((profile) => ({
+        id: profile.id,
+        name: profile.name
+      }))
+    );
+    if (updatedHosts.length === 0) {
+      return;
+    }
+    if (authService.getState().status === 'authenticated') {
+      void syncService.pushDirty().catch(() => undefined);
+      return;
+    }
+    syncService.markLocalChangesPendingPush();
+  };
   syncService.setOnAppliedSnapshot(() => {
+    void awsService.materializeManagedProfiles().catch(() => undefined);
+    void reconcileAwsHostProfileReferences().catch(() => undefined);
     void rewriteDnsOverridesForCurrentState().catch(() => undefined);
   });
 
@@ -347,6 +374,8 @@ if (termiusHelperArgIndex >= 0) {
       sessionShareService,
       sessionReplayService
     );
+    await awsService.migrateManagedProfilesFromFilesIfNeeded();
+    await reconcileAwsHostProfileReferences();
     await createWindow();
     void restoreDnsOverridesForStartup()
       .then(() => rewriteDnsOverridesForCurrentState())

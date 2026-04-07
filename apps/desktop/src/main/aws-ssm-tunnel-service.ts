@@ -39,6 +39,7 @@ interface TunnelRuntime {
 interface AwsSsmTunnelServiceOptions {
   onRuntimeTerminated?: (runtimeId: string, message: string) => void;
   spawnProcess?: typeof spawn;
+  buildCommandEnv?: () => Promise<NodeJS.ProcessEnv>;
   killProcessTree?: (
     process: ChildProcessByStdio<null, Readable, Readable>,
   ) => Promise<void>;
@@ -251,6 +252,7 @@ export class AwsSsmTunnelService {
     message: string,
   ) => void;
   private readonly spawnProcess: typeof spawn;
+  private readonly buildCommandEnv: () => Promise<NodeJS.ProcessEnv>;
   private readonly killProcessTree: (
     process: ChildProcessByStdio<null, Readable, Readable>,
   ) => Promise<void>;
@@ -260,6 +262,7 @@ export class AwsSsmTunnelService {
   constructor(options: AwsSsmTunnelServiceOptions = {}) {
     this.onRuntimeTerminated = options.onRuntimeTerminated;
     this.spawnProcess = options.spawnProcess ?? spawn;
+    this.buildCommandEnv = options.buildCommandEnv ?? (() => buildAwsCommandEnv());
     this.killProcessTree = options.killProcessTree ?? defaultKillProcessTree;
     this.stopTimeoutMs = options.stopTimeoutMs ?? TUNNEL_STOP_TIMEOUT_MS;
     this.portReleaseTimeoutMs =
@@ -274,7 +277,7 @@ export class AwsSsmTunnelService {
 
     const awsPath = await resolveAwsExecutable("aws");
     await resolveAwsExecutable("session-manager-plugin");
-    const env = await buildAwsCommandEnv();
+    const env = await this.buildCommandEnv();
     env.AWS_PAGER = "";
 
     const bindAddress = normalizeBindAddress(input.bindAddress);

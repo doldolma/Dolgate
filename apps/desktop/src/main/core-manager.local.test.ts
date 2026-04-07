@@ -89,6 +89,18 @@ function createFakeChildProcess() {
   };
 }
 
+async function waitForWriteCount(
+  writes: Buffer[],
+  expectedCount: number,
+): Promise<void> {
+  for (let attempt = 0; attempt < 10; attempt += 1) {
+    if (writes.length >= expectedCount) {
+      return;
+    }
+    await Promise.resolve();
+  }
+}
+
 describe("CoreManager local shell sessions", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -263,7 +275,7 @@ describe("CoreManager local shell sessions", () => {
       transport: "container",
     });
 
-    await Promise.resolve();
+    await waitForWriteCount(fakeProcess.writes, 1);
 
     const startRequest = decodeControlFrame(fakeProcess.writes[0]);
     expect(startRequest.type).toBe("portForwardStart");
@@ -289,7 +301,7 @@ describe("CoreManager local shell sessions", () => {
     expect(runtime.bindPort).toBe(49152);
 
     const stopPromise = manager.stopPortForward("rule-container-1");
-    await Promise.resolve();
+    await waitForWriteCount(fakeProcess.writes, 2);
 
     const stopRequest = decodeControlFrame(fakeProcess.writes[1]);
     expect(stopRequest.type).toBe("portForwardStop");
@@ -327,7 +339,7 @@ describe("CoreManager local shell sessions", () => {
       trustedHostKeyBase64: "",
     });
 
-    await Promise.resolve();
+    await waitForWriteCount(fakeProcess.writes, 1);
     const connectRequest = decodeControlFrame(fakeProcess.writes[0]);
     expect(connectRequest.type).toBe("containersConnect");
 
@@ -366,7 +378,7 @@ describe("CoreManager local shell sessions", () => {
       sourceEndpointId: "containers:host-1:forward:rule-1",
     });
 
-    await Promise.resolve();
+    await waitForWriteCount(fakeProcess.writes, 2);
 
     const startRequest = decodeControlFrame(fakeProcess.writes[1]);
     expect(startRequest.type).toBe("portForwardStart");
@@ -425,7 +437,7 @@ describe("CoreManager local shell sessions", () => {
       targetPort: 5432,
     });
 
-    await Promise.resolve();
+    await waitForWriteCount(fakeProcess.writes, 1);
     expect(statuses).toEqual(["starting"]);
 
     const startRequest = decodeControlFrame(fakeProcess.writes[0]);
@@ -445,7 +457,7 @@ describe("CoreManager local shell sessions", () => {
     await startPromise;
 
     const stopPromise = manager.stopPortForward("rule-handler-1");
-    await Promise.resolve();
+    await waitForWriteCount(fakeProcess.writes, 2);
     const stopRequest = decodeControlFrame(fakeProcess.writes[1]);
     fakeProcess.emitControl({
       type: "portForwardStopped",
@@ -489,7 +501,7 @@ describe("CoreManager local shell sessions", () => {
       targetPort: 5432,
     });
 
-    await Promise.resolve();
+    await waitForWriteCount(fakeProcess.writes, 1);
     const startRequest = decodeControlFrame(fakeProcess.writes[0]);
     fakeProcess.emitControl({
       type: "portForwardStarted",

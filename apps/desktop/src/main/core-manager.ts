@@ -531,6 +531,8 @@ export class CoreManager {
   constructor(
     private readonly appendLog?: (entry: ActivityLogInput) => void,
     private readonly upsertLogRecord?: (record: ActivityLogRecord) => void,
+    private readonly buildChildEnv: () => Promise<NodeJS.ProcessEnv> = async () =>
+      buildCoreChildEnv(process.env),
   ) {}
 
   // Go SSH 코어는 앱 전체에서 하나만 띄우고, 여러 SSH/SFTP 작업을 그 안에서 관리한다.
@@ -779,11 +781,12 @@ export class CoreManager {
     }
 
     const launchConfig = resolveCoreLaunchConfig();
+    const childEnv = await this.buildChildEnv();
 
     this.process = spawn(launchConfig.command, launchConfig.args, {
       cwd: launchConfig.cwd,
       stdio: ["pipe", "pipe", "pipe"],
-      env: buildCoreChildEnv(process.env),
+      env: childEnv,
       windowsHide: true,
     });
 

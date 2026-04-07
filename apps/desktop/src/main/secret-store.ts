@@ -43,7 +43,7 @@ export function encodeSecretForStorage(secret: string): StoredEncryptedValue {
   return encodeSecret(secret);
 }
 
-function decodeSecret(record: StoredEncryptedValue): string | null {
+export function decodeSecretFromStorage(record: StoredEncryptedValue): string | null {
   try {
     if (record.encrypted) {
       if (!safeStorage.isEncryptionAvailable()) {
@@ -77,7 +77,7 @@ export class SecretStore {
     if (!record) {
       return null;
     }
-    return decodeSecret(record);
+    return decodeSecretFromStorage(record);
   }
 
   async remove(account: string): Promise<void> {

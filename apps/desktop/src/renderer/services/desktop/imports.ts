@@ -7,6 +7,14 @@ export function listAwsProfiles() {
   return desktopApi.aws.listProfiles();
 }
 
+export function getSyncStatus() {
+  return desktopApi.sync.status();
+}
+
+export function listExternalAwsProfiles() {
+  return desktopApi.aws.listExternalProfiles();
+}
+
 export function createAwsProfile(
   input: Parameters<typeof desktopApi.aws.createProfile>[0],
 ) {
@@ -21,6 +29,16 @@ export function prepareAwsSsoProfile(
 
 export function getAwsProfileDetails(profileName: string) {
   return desktopApi.aws.getProfileDetails(profileName);
+}
+
+export function getExternalAwsProfileDetails(profileName: string) {
+  return desktopApi.aws.getExternalProfileDetails(profileName);
+}
+
+export function importExternalAwsProfiles(
+  input: Parameters<typeof desktopApi.aws.importExternalProfiles>[0],
+) {
+  return desktopApi.aws.importExternalProfiles(input);
 }
 
 export function updateAwsProfile(

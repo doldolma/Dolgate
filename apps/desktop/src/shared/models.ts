@@ -48,6 +48,7 @@ export type ActivityLogKind = 'generic' | 'session-lifecycle' | 'port-forward-li
 export type SecretSource = 'local_keychain' | 'server_managed';
 export type AuthStatus = 'loading' | 'unauthenticated' | 'authenticating' | 'authenticated' | 'offline-authenticated' | 'error';
 export type SyncBootstrapStatus = 'idle' | 'syncing' | 'ready' | 'paused' | 'error';
+export type AwsProfilesServerSupport = 'unknown' | 'supported' | 'unsupported';
 export type TermiusProbeStatus = 'ready' | 'unsupported' | 'not-installed' | 'no-data' | 'error';
 export type AwsSshMetadataStatus = 'idle' | 'loading' | 'ready' | 'error';
 export type SessionConnectionKind = 'ssh' | 'aws-ssm' | 'warpgate' | 'aws-ecs-exec';
@@ -113,6 +114,7 @@ export interface SshHostDraft extends HostBaseDraft {
 
 export interface AwsEc2HostRecord extends HostBaseRecord {
   kind: 'aws-ec2';
+  awsProfileId?: string | null;
   awsProfileName: string;
   awsRegion: string;
   awsInstanceId: string;
@@ -129,6 +131,7 @@ export interface AwsEc2HostRecord extends HostBaseRecord {
 
 export interface AwsEc2HostDraft extends HostBaseDraft {
   kind: 'aws-ec2';
+  awsProfileId?: string | null;
   awsProfileName: string;
   awsRegion: string;
   awsInstanceId: string;
@@ -145,6 +148,7 @@ export interface AwsEc2HostDraft extends HostBaseDraft {
 
 export interface AwsEcsHostRecord extends HostBaseRecord {
   kind: 'aws-ecs';
+  awsProfileId?: string | null;
   awsProfileName: string;
   awsRegion: string;
   awsEcsClusterArn: string;
@@ -153,6 +157,7 @@ export interface AwsEcsHostRecord extends HostBaseRecord {
 
 export interface AwsEcsHostDraft extends HostBaseDraft {
   kind: 'aws-ecs';
+  awsProfileId?: string | null;
   awsProfileName: string;
   awsRegion: string;
   awsEcsClusterArn: string;
@@ -668,6 +673,7 @@ export interface SyncStatus {
   lastSuccessfulSyncAt?: string | null;
   pendingPush: boolean;
   errorMessage?: string | null;
+  awsProfilesServerSupport?: AwsProfilesServerSupport;
 }
 
 // UpdateReleaseInfo는 GitHub Releases에서 읽어온 배포 메타데이터를 정규화한 형태다.
@@ -711,8 +717,60 @@ export interface TerminalThemePreset {
   title: string;
 }
 
-export interface AwsProfileSummary {
+export type ManagedAwsProfileKind = 'static' | 'sso' | 'role';
+
+export interface AwsProfileMetadataRecord {
+  id: string;
   name: string;
+  kind: ManagedAwsProfileKind;
+  updatedAt: string;
+}
+
+interface ManagedAwsProfileBase {
+  id: string;
+  name: string;
+  kind: ManagedAwsProfileKind;
+  region?: string | null;
+  updatedAt: string;
+}
+
+export interface ManagedAwsStaticProfilePayload extends ManagedAwsProfileBase {
+  kind: 'static';
+  accessKeyId: string;
+  secretAccessKey: string;
+}
+
+export interface ManagedAwsSsoProfilePayload extends ManagedAwsProfileBase {
+  kind: 'sso';
+  ssoStartUrl: string;
+  ssoRegion: string;
+  ssoAccountId: string;
+  ssoRoleName: string;
+}
+
+export interface ManagedAwsRoleProfilePayload extends ManagedAwsProfileBase {
+  kind: 'role';
+  sourceProfileId: string;
+  roleArn: string;
+}
+
+export type ManagedAwsProfilePayload =
+  | ManagedAwsStaticProfilePayload
+  | ManagedAwsSsoProfilePayload
+  | ManagedAwsRoleProfilePayload;
+
+export interface AwsProfileSummary {
+  id: string | null;
+  name: string;
+}
+
+export interface AwsExternalProfileImportInput {
+  profileNames: string[];
+}
+
+export interface AwsExternalProfileImportResult {
+  importedProfileNames: string[];
+  skippedProfileNames: string[];
 }
 
 export interface AwsStaticProfileDraft {
@@ -768,6 +826,7 @@ export interface AwsSsoProfileCreateInput extends AwsSsoProfilePrepareInput {
 export interface AwsRoleProfileCreateInput {
   kind: "role";
   profileName: string;
+  sourceProfileId?: string | null;
   sourceProfileName: string;
   roleArn: string;
   region?: string | null;
@@ -832,6 +891,7 @@ export const AWS_PROFILE_REGION_OPTIONS = [
 ] as const;
 
 export interface AwsProfileStatus {
+  id: string | null;
   profileName: string;
   available: boolean;
   isSsoProfile: boolean;
@@ -849,6 +909,7 @@ export interface AwsProfileDetails extends AwsProfileStatus {
   hasSecretAccessKey: boolean;
   hasSessionToken: boolean;
   roleArn?: string | null;
+  sourceProfileId?: string | null;
   sourceProfile?: string | null;
   credentialProcess?: string | null;
   ssoSession?: string | null;
