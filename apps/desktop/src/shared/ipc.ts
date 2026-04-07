@@ -14,8 +14,14 @@ import type {
   AwsEcsServiceLogsSnapshot,
   AwsHostSshInspectionInput,
   AwsHostSshInspectionResult,
+  AwsProfileCreateInput,
+  AwsProfileDetails,
+  AwsProfileRenameInput,
+  AwsSsoProfilePrepareInput,
+  AwsSsoProfilePrepareResult,
   AwsProfileStatus,
   AwsProfileSummary,
+  AwsProfileUpdateInput,
   AuthState,
   AuthType,
   DesktopBootstrapSnapshot,
@@ -477,6 +483,14 @@ export interface DesktopApi {
   };
   aws: {
     listProfiles: () => Promise<AwsProfileSummary[]>;
+    createProfile: (input: AwsProfileCreateInput) => Promise<void>;
+    prepareSsoProfile: (
+      input: AwsSsoProfilePrepareInput,
+    ) => Promise<AwsSsoProfilePrepareResult>;
+    getProfileDetails: (profileName: string) => Promise<AwsProfileDetails>;
+    updateProfile: (input: AwsProfileUpdateInput) => Promise<void>;
+    renameProfile: (input: AwsProfileRenameInput) => Promise<void>;
+    deleteProfile: (profileName: string) => Promise<void>;
     getProfileStatus: (profileName: string) => Promise<AwsProfileStatus>;
     login: (profileName: string) => Promise<void>;
     listRegions: (profileName: string) => Promise<string[]>;

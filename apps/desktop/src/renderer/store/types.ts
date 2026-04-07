@@ -52,7 +52,7 @@ export type WorkspaceTabId =
   | SessionWorkspaceTabId
   | SplitWorkspaceTabId;
 export type HomeSection = "hosts" | "portForwarding" | "logs" | "settings";
-export type SettingsSection = "general" | "security" | "secrets";
+export type SettingsSection = "general" | "security" | "secrets" | "aws-profiles";
 export type SftpSourceKind = "local" | "host";
 export type WorkspaceDropDirection = "left" | "right" | "top" | "bottom";
 export type HostDrawerState =

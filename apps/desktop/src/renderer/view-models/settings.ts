@@ -21,6 +21,7 @@ export function useAppSettingsViewModel() {
 }
 
 export function useSettingsViewModel() {
+  const hosts = useAppStore((state) => state.hosts);
   const settings = useAppStore((state) => state.settings);
   const settingsSection = useAppStore((state) => state.settingsSection);
   const knownHosts = useAppStore((state) => state.knownHosts);
@@ -38,6 +39,7 @@ export function useSettingsViewModel() {
   );
 
   return {
+    hosts,
     settings,
     settingsSection,
     knownHosts,

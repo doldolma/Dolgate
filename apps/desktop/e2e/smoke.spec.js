@@ -11,6 +11,7 @@ const {
   rm,
   waitForCapturedTerminalOutput,
   waitForFakeAwsSessionReady,
+  waitForTerminalInputReady,
   writeDesktopState,
 } = require("./helpers");
 
@@ -133,6 +134,7 @@ test.describe("desktop smoke", () => {
       await expect(terminalButton).toBeVisible();
       await terminalButton.click();
       await expect(page.locator('[data-terminal-canvas="true"]')).toBeVisible();
+      await waitForTerminalInputReady(page);
 
       await page.locator('[data-terminal-canvas="true"]').click();
       await page.keyboard.type("echo READY_FROM_LOCAL_SMOKE");

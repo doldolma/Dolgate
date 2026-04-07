@@ -94,7 +94,7 @@ export type WorkspaceTabId =
   | SessionWorkspaceTabId
   | SplitWorkspaceTabId;
 export type HomeSection = "hosts" | "portForwarding" | "logs" | "settings";
-export type SettingsSection = "general" | "security" | "secrets";
+export type SettingsSection = "general" | "security" | "secrets" | "aws-profiles";
 export type SftpSourceKind = "local" | "host";
 export type WorkspaceDropDirection = "left" | "right" | "top" | "bottom";
 export type HostDrawerState =
@@ -169,7 +169,10 @@ export function mergeContainerLogLines(
 }
 
 export function normalizeRemoteInvokeErrorMessage(message: string): string {
-  return message.replace(/^Error invoking remote method '[^']+':\s*/u, "").trim();
+  return message
+    .replace(/^Error invoking remote method '[^']+':\s*/u, "")
+    .replace(/^Error:\s*/u, "")
+    .trim();
 }
 
 export function normalizeErrorMessage(error: unknown, fallback: string): string {

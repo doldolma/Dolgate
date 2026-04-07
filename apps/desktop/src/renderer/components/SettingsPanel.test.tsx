@@ -1,7 +1,7 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { DEFAULT_SFTP_BROWSER_COLUMN_WIDTHS } from '@shared';
-import type { AppSettings } from '@shared';
+import type { AppSettings, HostRecord } from '@shared';
 import { SettingsPanel } from './SettingsPanel';
 
 const settings: AppSettings = {
@@ -51,6 +51,31 @@ const keychainEntries = [
   }
 ];
 
+const hosts: HostRecord[] = [
+  {
+    id: 'aws-host-1',
+    kind: 'aws-ec2',
+    label: 'aws-bastion',
+    awsProfileName: 'default',
+    awsRegion: 'ap-northeast-2',
+    awsInstanceId: 'i-1234567890',
+    awsAvailabilityZone: 'ap-northeast-2a',
+    awsInstanceName: 'bastion',
+    awsPlatform: 'Linux/UNIX',
+    awsPrivateIp: '10.0.0.10',
+    awsState: 'running',
+    awsSshUsername: 'ubuntu',
+    awsSshPort: 22,
+    awsSshMetadataStatus: 'ready',
+    awsSshMetadataError: null,
+    groupName: 'Servers',
+    tags: [],
+    terminalThemeId: null,
+    createdAt: '2026-03-24T10:00:00.000Z',
+    updatedAt: '2026-03-24T12:00:00.000Z'
+  }
+];
+
 function renderSettingsPanel(overrides: Partial<Parameters<typeof SettingsPanel>[0]> = {}) {
   const onUpdateSettings = vi.fn().mockResolvedValue(undefined);
   const onSelectSection = vi.fn();
@@ -63,6 +88,7 @@ function renderSettingsPanel(overrides: Partial<Parameters<typeof SettingsPanel>
     <SettingsPanel
       activeSection="general"
       settings={settings}
+      hosts={hosts}
       knownHosts={knownHosts}
       keychainEntries={keychainEntries}
       currentUserEmail="user@example.com"
@@ -151,9 +177,11 @@ describe('SettingsPanel', () => {
 
     fireEvent.click(screen.getByRole('tab', { name: 'Security' }));
     fireEvent.click(screen.getByRole('tab', { name: 'Secrets' }));
+    fireEvent.click(screen.getByRole('tab', { name: 'AWS Profiles' }));
 
     expect(onSelectSection).toHaveBeenCalledWith('security');
     expect(onSelectSection).toHaveBeenCalledWith('secrets');
+    expect(onSelectSection).toHaveBeenCalledWith('aws-profiles');
   });
 
   it('renders known hosts inside the security section', () => {

@@ -1,7 +1,10 @@
 import type { TerminalConnectionProgress } from "@shared";
 
 export function normalizeRemoteInvokeErrorMessage(message: string): string {
-  return message.replace(/^Error invoking remote method '[^']+':\s*/u, "").trim();
+  return message
+    .replace(/^Error invoking remote method '[^']+':\s*/u, "")
+    .replace(/^Error:\s*/u, "")
+    .trim();
 }
 
 export function normalizeErrorMessage(

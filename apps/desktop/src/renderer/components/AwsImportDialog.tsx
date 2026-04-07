@@ -1,14 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type {
-  AwsEc2InstanceSummary,
-  AwsEcsClusterListItem,
-  AwsHostSshInspectionResult,
-  AwsProfileStatus,
-  AwsProfileSummary,
-  HostDraft,
+import {
+  type AwsEc2InstanceSummary,
+  type AwsEcsClusterListItem,
+  type AwsHostSshInspectionResult,
+  type AwsProfileStatus,
+  type AwsProfileSummary,
+  type HostDraft,
 } from '@shared';
 import { useAwsImportController } from '../controllers/useImportControllers';
 import { DialogBackdrop } from './DialogBackdrop';
+import { AwsProfileCreateWizard } from './AwsProfileCreateWizard';
 import {
   Button,
   Card,
@@ -19,7 +20,6 @@ import {
   CloseIcon,
   EmptyState,
   FieldGroup,
-  FilterRow,
   IconButton,
   ModalBody,
   ModalFooter,
@@ -40,6 +40,17 @@ interface AwsImportDialogProps {
   currentGroupPath: string | null;
   onClose: () => void;
   onImport: (draft: HostDraft) => Promise<void>;
+}
+
+function resolveSelectedProfileName(
+  profiles: AwsProfileSummary[],
+  preferredProfile?: string | null,
+): string {
+  const preferred = preferredProfile?.trim() ?? '';
+  if (preferred && profiles.some((profile) => profile.name === preferred)) {
+    return preferred;
+  }
+  return profiles[0]?.name ?? '';
 }
 
 export function shouldShowAwsProfileAuthError(profileStatus: AwsProfileStatus | null, isLoadingStatus: boolean): boolean {
@@ -92,6 +103,7 @@ function toAwsSshPortValue(value: string): number | null {
 
 export function AwsImportDialog({ open, currentGroupPath, onClose, onImport }: AwsImportDialogProps) {
   const {
+    createAwsProfile,
     getAwsProfileStatus,
     inspectAwsHostSshMetadata,
     listAwsEc2Instances,
@@ -99,6 +111,7 @@ export function AwsImportDialog({ open, currentGroupPath, onClose, onImport }: A
     listAwsProfiles,
     listAwsRegions,
     loginAwsProfile,
+    prepareAwsSsoProfile,
   } = useAwsImportController();
   const [importMode, setImportMode] = useState<AwsImportMode>('ec2');
   const [profiles, setProfiles] = useState<AwsProfileSummary[]>([]);
@@ -113,6 +126,7 @@ export function AwsImportDialog({ open, currentGroupPath, onClose, onImport }: A
   const [isLoadingRegions, setIsLoadingRegions] = useState(false);
   const [isLoadingInstances, setIsLoadingInstances] = useState(false);
   const [isLoggingIn, setIsLoggingIn] = useState(false);
+  const [isCreateProfileOpen, setIsCreateProfileOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [inspectionTarget, setInspectionTarget] = useState<AwsEc2InstanceSummary | null>(null);
   const [inspectionStatus, setInspectionStatus] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle');
@@ -120,6 +134,10 @@ export function AwsImportDialog({ open, currentGroupPath, onClose, onImport }: A
   const [inspectionUsernameCandidates, setInspectionUsernameCandidates] = useState<string[]>([]);
   const [inspectionUsername, setInspectionUsername] = useState('');
   const [inspectionPort, setInspectionPort] = useState('');
+
+  const resetCreateProfileForm = () => {
+    setIsCreateProfileOpen(false);
+  };
   const [isRegistering, setIsRegistering] = useState(false);
   const inspectionRequestIdRef = useRef(0);
   const usernameDirtyRef = useRef(false);
@@ -226,15 +244,14 @@ export function AwsImportDialog({ open, currentGroupPath, onClose, onImport }: A
     setInstances([]);
     setEcsClusters([]);
     setError(null);
+    resetCreateProfileForm();
     resetInspection();
     setIsLoadingProfiles(true);
 
     void listAwsProfiles()
       .then((items) => {
         setProfiles(items);
-        if (items.length > 0) {
-          setSelectedProfile(items[0].name);
-        }
+        setSelectedProfile(resolveSelectedProfileName(items));
       })
       .catch((loadError) => {
         setError(loadError instanceof Error ? loadError.message : 'AWS 프로필 목록을 불러오지 못했습니다.');
@@ -388,6 +405,14 @@ export function AwsImportDialog({ open, currentGroupPath, onClose, onImport }: A
     };
   }, [importMode, open, profileStatus?.isAuthenticated, selectedProfile, selectedRegion]);
 
+  const handleCreateProfileSuccess = async (profileName: string) => {
+    setError(null);
+    const items = await listAwsProfiles();
+    setProfiles(items);
+    setSelectedProfile(resolveSelectedProfileName(items, profileName));
+    resetCreateProfileForm();
+  };
+
   const missingTools = useMemo(() => profileStatus?.missingTools ?? [], [profileStatus?.missingTools]);
   const shouldShowMissingToolsBanner =
     missingTools.includes('aws-cli') ||
@@ -517,6 +542,39 @@ export function AwsImportDialog({ open, currentGroupPath, onClose, onImport }: A
               </FieldGroup>
             ) : null}
           </div>
+
+          <div className="flex flex-wrap items-center gap-3">
+            <Button
+              variant="secondary"
+              disabled={Boolean(inspectionTarget) || isRegistering}
+              onClick={() => {
+                setIsCreateProfileOpen((current) => !current);
+              }}
+            >
+              {isCreateProfileOpen ? '프로필 생성 닫기' : '프로필 생성'}
+            </Button>
+          </div>
+
+          {isCreateProfileOpen ? (
+            <Card data-testid="aws-create-profile-form" className="items-stretch">
+              <CardMain>
+                <AwsProfileCreateWizard
+                  testId="aws-create-profile-fields"
+                  title="새 AWS 프로필 생성"
+                  descriptions={[
+                    '전역 AWS CLI 프로필로 저장됩니다.',
+                    'Static, SSO, Role profile 생성이 모두 가능합니다.',
+                    '실제 프로필과 자격 증명은 다른 기기로 동기화되지 않습니다.',
+                  ]}
+                  profiles={profiles}
+                  createProfile={createAwsProfile}
+                  prepareSsoProfile={prepareAwsSsoProfile}
+                  onCancel={() => resetCreateProfileForm()}
+                  onSuccess={(profileName) => handleCreateProfileSuccess(profileName)}
+                />
+              </CardMain>
+            </Card>
+          ) : null}
 
           {loadingMessage ? <NoticeCard tone="info">{loadingMessage}</NoticeCard> : null}
 
@@ -659,7 +717,7 @@ export function AwsImportDialog({ open, currentGroupPath, onClose, onImport }: A
               ) : null}
             </div>
           ) : profileStatus?.isAuthenticated && selectedRegion && importMode === 'ecs' ? (
-            <div className="mt-[0.95rem] min-h-0 overflow-y-auto pr-[0.1rem]" data-testid="aws-import-ecs-cluster-list">
+            <div className="mt-[0.95rem]" data-testid="aws-import-ecs-cluster-list">
               <PanelSection>
                 {ecsClusters.length === 0 && !isLoadingInstances ? (
                   <EmptyState title="이 리전에 가져올 수 있는 ECS 클러스터가 없습니다." />
@@ -720,7 +778,7 @@ export function AwsImportDialog({ open, currentGroupPath, onClose, onImport }: A
               </PanelSection>
             </div>
           ) : profileStatus?.isAuthenticated && selectedRegion ? (
-            <div className="mt-[0.95rem] min-h-0 overflow-y-auto pr-[0.1rem]" data-testid="aws-import-instance-list">
+            <div className="mt-[0.95rem]" data-testid="aws-import-instance-list">
               <PanelSection>
               {instances.length === 0 && !isLoadingInstances ? (
                 <EmptyState title="이 리전에 가져올 수 있는 EC2 인스턴스가 없습니다." />

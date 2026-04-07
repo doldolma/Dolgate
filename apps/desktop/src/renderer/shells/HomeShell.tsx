@@ -423,6 +423,7 @@ export function HomeShell({
         {homeViewModel.homeSection === 'settings' ? (
           <SettingsPanel
             activeSection={settingsViewModel.settingsSection}
+            hosts={settingsViewModel.hosts}
             settings={settingsViewModel.settings}
             knownHosts={settingsViewModel.knownHosts}
             keychainEntries={settingsViewModel.keychainEntries}

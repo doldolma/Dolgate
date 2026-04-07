@@ -35,6 +35,18 @@ export function buildGroupsBridge(
 export function buildAwsBridge(ipcRenderer: IpcRenderer): DesktopApi["aws"] {
   return {
     listProfiles: () => ipcRenderer.invoke(ipcChannels.aws.listProfiles),
+    createProfile: (input) =>
+      ipcRenderer.invoke(ipcChannels.aws.createProfile, input),
+    prepareSsoProfile: (input) =>
+      ipcRenderer.invoke(ipcChannels.aws.prepareSsoProfile, input),
+    getProfileDetails: (profileName: string) =>
+      ipcRenderer.invoke(ipcChannels.aws.getProfileDetails, profileName),
+    updateProfile: (input) =>
+      ipcRenderer.invoke(ipcChannels.aws.updateProfile, input),
+    renameProfile: (input) =>
+      ipcRenderer.invoke(ipcChannels.aws.renameProfile, input),
+    deleteProfile: (profileName: string) =>
+      ipcRenderer.invoke(ipcChannels.aws.deleteProfile, profileName),
     getProfileStatus: (profileName: string) =>
       ipcRenderer.invoke(ipcChannels.aws.getProfileStatus, profileName),
     login: (profileName: string) =>
