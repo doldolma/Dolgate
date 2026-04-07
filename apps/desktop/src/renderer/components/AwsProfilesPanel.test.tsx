@@ -297,6 +297,10 @@ describe('AwsProfilesPanel', () => {
     await screen.findByRole('heading', { name: 'default' })
 
     fireEvent.click(screen.getByRole('button', { name: '새 프로필' }))
+    expect(screen.getAllByText('AWS 프로필 생성')).toHaveLength(1)
+    expect(
+      screen.queryByText('유효성 검사를 통과한 경우에만 생성합니다.'),
+    ).not.toBeInTheDocument()
     fireEvent.change(screen.getByLabelText('새 프로필명'), {
       target: { value: 'prod' },
     })

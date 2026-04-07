@@ -617,7 +617,6 @@ export function AwsImportDialog({ open, currentGroupPath, onClose, onImport }: A
                   title="새 AWS 프로필 생성"
                   descriptions={[
                     '앱 전용 AWS CLI 프로필로 저장됩니다.',
-                    'Static, SSO, Role profile 생성이 모두 가능합니다.',
                     ...(awsProfilesServerSupport === 'unsupported'
                       ? ['현재 서버는 AWS 프로필 동기화를 지원하지 않아 이 기기에서만 저장됩니다.']
                       : []),

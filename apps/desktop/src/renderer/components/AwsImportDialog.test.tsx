@@ -245,6 +245,42 @@ describe('AwsImportDialog', () => {
     expect(screen.queryByTestId('aws-create-profile-form')).not.toBeInTheDocument();
   });
 
+  it('does not show per-tab titles or helper descriptions in the create profile form', async () => {
+    installMockApi();
+
+    render(
+      <AwsImportDialog
+        open
+        currentGroupPath="Servers"
+        onClose={vi.fn()}
+        onImport={vi.fn().mockResolvedValue(undefined)}
+      />,
+    );
+
+    await waitFor(() => expect(screen.getByLabelText('Profile')).toHaveValue('default'));
+
+    fireEvent.click(screen.getByRole('button', { name: '프로필 생성' }));
+
+    expect(screen.queryByText('Static AWS 프로필 생성')).not.toBeInTheDocument();
+    expect(
+      screen.queryByText('유효성 검사를 통과한 경우에만 생성합니다.'),
+    ).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'SSO' }));
+
+    expect(screen.queryByText('AWS SSO 프로필 생성')).not.toBeInTheDocument();
+    expect(
+      screen.queryByText('SSO 로그인과 account/role 조회가 모두 성공한 경우에만 저장합니다.'),
+    ).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Role' }));
+
+    expect(screen.queryByText('Role profile 생성')).not.toBeInTheDocument();
+    expect(
+      screen.queryByText('source profile로 AssumeRole 검증이 성공한 경우에만 저장합니다.'),
+    ).not.toBeInTheDocument();
+  });
+
   it('shows a server update warning when aws profile sync is unsupported', async () => {
     installMockApi({
       awsProfilesServerSupport: 'unsupported',
