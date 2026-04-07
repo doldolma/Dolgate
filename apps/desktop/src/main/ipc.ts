@@ -362,6 +362,7 @@ function toAwsHostDraft(
     groupName: host.groupName ?? "",
     tags: host.tags ?? [],
     terminalThemeId: host.terminalThemeId ?? null,
+    awsProfileId: host.awsProfileId ?? null,
     awsProfileName: host.awsProfileName,
     awsRegion: host.awsRegion,
     awsInstanceId: host.awsInstanceId,
@@ -459,7 +460,10 @@ async function hydrateAwsHostForSftp(
   }
 
   const summary = await awsService.describeEc2Instance(
-    host.awsProfileName,
+    awsService.resolveManagedProfileNameOrFallback(
+      host.awsProfileId,
+      host.awsProfileName,
+    ) ?? host.awsProfileName,
     host.awsRegion,
     host.awsInstanceId,
   );
@@ -521,7 +525,11 @@ async function loadAwsHostSshMetadataRecord(
       onPersist,
     );
     const metadata = await awsService.loadHostSshMetadata({
-      profileName: hydratedHost.awsProfileName,
+      profileName:
+        awsService.resolveManagedProfileNameOrFallback(
+          hydratedHost.awsProfileId,
+          hydratedHost.awsProfileName,
+        ) ?? hydratedHost.awsProfileName,
       region: hydratedHost.awsRegion,
       instanceId: hydratedHost.awsInstanceId,
     });
@@ -578,6 +586,7 @@ async function buildHostKeyProbeResult(
   hosts: HostRepository,
   knownHosts: KnownHostRepository,
   coreManager: CoreManager,
+  awsService: AwsService,
   awsSsmTunnelService: AwsSsmTunnelService,
   emitConnectionProgress: AwsConnectionProgressEmitter,
   resolveAwsSftpPreflight: (input: {
@@ -641,7 +650,11 @@ async function buildHostKeyProbeResult(
       const bindPort = await reserveLoopbackPort();
       const tunnel = await awsSsmTunnelService.start({
         runtimeId: `aws-sftp-probe:${endpointId || host.id}:${randomUUID()}`,
-        profileName: hydratedHost.awsProfileName,
+        profileName:
+          awsService.resolveManagedProfileNameOrFallback(
+            hydratedHost.awsProfileId,
+            hydratedHost.awsProfileName,
+          ) ?? hydratedHost.awsProfileName,
         region: hydratedHost.awsRegion,
         instanceId: hydratedHost.awsInstanceId,
         bindAddress: "127.0.0.1",
@@ -661,7 +674,11 @@ async function buildHostKeyProbeResult(
           port: tunnel.bindPort,
         });
         const knownHost = buildAwsSsmKnownHostIdentity({
-          profileName: hydratedHost.awsProfileName,
+          profileName:
+            awsService.resolveManagedProfileNameOrFallback(
+              hydratedHost.awsProfileId,
+              hydratedHost.awsProfileName,
+            ) ?? hydratedHost.awsProfileName,
           region: hydratedHost.awsRegion,
           instanceId: hydratedHost.awsInstanceId,
         });
@@ -1204,18 +1221,23 @@ export function registerIpcHandlers(
     let currentStage: AwsSftpProgressStage = "checking-profile";
 
     try {
+      const resolvedProfileName =
+        awsService.resolveManagedProfileNameOrFallback(
+          host.awsProfileId,
+          host.awsProfileName,
+        ) ?? host.awsProfileName;
       emitProgress({
         endpointId,
         hostId: host.id,
         stage: "checking-profile",
-        message: `${host.awsProfileName} 프로필 인증 상태를 확인하는 중입니다.`,
+        message: `${resolvedProfileName} 프로필 인증 상태를 확인하는 중입니다.`,
       });
-      let status = await awsService.getProfileStatus(host.awsProfileName);
+      let status = await awsService.getProfileStatus(resolvedProfileName);
       if (!status.isAuthenticated) {
         if (!status.isSsoProfile || !allowBrowserLogin) {
           throw new Error(
             status.errorMessage ||
-              `${host.awsProfileName} 프로필에 AWS CLI 인증이 필요합니다.`,
+              `${resolvedProfileName} 프로필에 AWS CLI 인증이 필요합니다.`,
           );
         }
 
@@ -1224,18 +1246,18 @@ export function registerIpcHandlers(
           endpointId,
           hostId: host.id,
           stage: "browser-login",
-          message: `브라우저에서 ${host.awsProfileName} AWS 로그인을 진행하는 중입니다.`,
+          message: `브라우저에서 ${resolvedProfileName} AWS 로그인을 진행하는 중입니다.`,
         });
-        await awsService.login(host.awsProfileName);
+        await awsService.login(resolvedProfileName);
 
         currentStage = "checking-profile";
         emitProgress({
           endpointId,
           hostId: host.id,
           stage: "checking-profile",
-          message: `${host.awsProfileName} 프로필 로그인 결과를 확인하는 중입니다.`,
+          message: `${resolvedProfileName} 프로필 로그인 결과를 확인하는 중입니다.`,
         });
-        status = await awsService.getProfileStatus(host.awsProfileName);
+        status = await awsService.getProfileStatus(resolvedProfileName);
         if (!status.isAuthenticated) {
           throw new Error(
             status.errorMessage ||
@@ -1259,7 +1281,10 @@ export function registerIpcHandlers(
         queueSync,
       );
       const isManaged = await awsService.isManagedInstance(
-        refreshedHost.awsProfileName,
+        awsService.resolveManagedProfileNameOrFallback(
+          refreshedHost.awsProfileId,
+          refreshedHost.awsProfileName,
+        ) ?? refreshedHost.awsProfileName,
         refreshedHost.awsRegion,
         refreshedHost.awsInstanceId,
       );
@@ -1333,7 +1358,11 @@ export function registerIpcHandlers(
       const sshPort = getAwsEc2HostSshPort(hydratedHost);
       const trustedHostKeyBase64 = requireTrustedHostKey(knownHosts, {
         hostname: buildAwsSsmKnownHostIdentity({
-          profileName: hydratedHost.awsProfileName,
+          profileName:
+            awsService.resolveManagedProfileNameOrFallback(
+              hydratedHost.awsProfileId,
+              hydratedHost.awsProfileName,
+            ) ?? hydratedHost.awsProfileName,
           region: hydratedHost.awsRegion,
           instanceId: hydratedHost.awsInstanceId,
         }),
@@ -1353,7 +1382,11 @@ export function registerIpcHandlers(
 
       const { privateKeyPem, publicKey } = createEphemeralAwsSftpKeyPair();
       await awsService.sendSshPublicKey({
-        profileName: hydratedHost.awsProfileName,
+        profileName:
+          awsService.resolveManagedProfileNameOrFallback(
+            hydratedHost.awsProfileId,
+            hydratedHost.awsProfileName,
+          ) ?? hydratedHost.awsProfileName,
         region: hydratedHost.awsRegion,
         instanceId: hydratedHost.awsInstanceId,
         availabilityZone,
@@ -1365,7 +1398,11 @@ export function registerIpcHandlers(
       try {
         const tunnel = await awsSsmTunnelService.start({
           runtimeId: `aws-containers:${endpointId}`,
-          profileName: hydratedHost.awsProfileName,
+          profileName:
+            awsService.resolveManagedProfileNameOrFallback(
+              hydratedHost.awsProfileId,
+              hydratedHost.awsProfileName,
+            ) ?? hydratedHost.awsProfileName,
           region: hydratedHost.awsRegion,
           instanceId: hydratedHost.awsInstanceId,
           bindAddress: "127.0.0.1",
@@ -1753,6 +1790,7 @@ export function registerIpcHandlers(
         hosts,
         knownHosts,
         coreManager,
+        awsService,
         awsSsmTunnelService,
         emitProgress,
         resolveAwsSftpPreflight,

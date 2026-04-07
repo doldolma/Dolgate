@@ -248,10 +248,15 @@ export function registerContainersIpcHandlers(ctx: MainIpcContext): void {
             host: typedHost as AwsEc2HostRecord,
             allowBrowserLogin: true,
           }));
+        const profileName =
+          ctx.awsService.resolveManagedProfileNameOrFallback(
+            hydratedHost.awsProfileId,
+            hydratedHost.awsProfileName,
+          ) ?? hydratedHost.awsProfileName;
         const sshPort = getAwsEc2HostSshPort(hydratedHost);
         const trustedHostKeyBase64 = ctx.requireTrustedHostKey({
           hostname: buildAwsSsmKnownHostIdentity({
-            profileName: hydratedHost.awsProfileName,
+            profileName,
             region: hydratedHost.awsRegion,
             instanceId: hydratedHost.awsInstanceId,
           }),
@@ -270,7 +275,7 @@ export function registerContainersIpcHandlers(ctx: MainIpcContext): void {
         }
         const { privateKeyPem, publicKey } = ctx.createEphemeralAwsSftpKeyPair();
         await ctx.awsService.sendSshPublicKey({
-          profileName: hydratedHost.awsProfileName,
+          profileName,
           region: hydratedHost.awsRegion,
           instanceId: hydratedHost.awsInstanceId,
           availabilityZone,
@@ -280,7 +285,7 @@ export function registerContainersIpcHandlers(ctx: MainIpcContext): void {
         const bindPort = await ctx.reserveLoopbackPort();
         const tunnel = await ctx.awsSsmTunnelService.start({
           runtimeId: `aws-container-shell:${typedHost.id}:${randomUUID()}`,
-          profileName: hydratedHost.awsProfileName,
+          profileName,
           region: hydratedHost.awsRegion,
           instanceId: hydratedHost.awsInstanceId,
           bindAddress: "127.0.0.1",

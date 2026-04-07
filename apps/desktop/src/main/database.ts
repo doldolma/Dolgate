@@ -29,6 +29,7 @@ import type {
   ActivityLogRecord,
   AppSettings,
   AppTheme,
+  AwsProfileMetadataRecord,
   AwsSshMetadataStatus,
   AwsEc2HostDraft,
   AwsEc2HostRecord,
@@ -45,6 +46,8 @@ import type {
   HostRecord,
   KnownHostRecord,
   KnownHostTrustInput,
+  ManagedAwsProfileKind,
+  ManagedAwsProfilePayload,
   PortForwardDraft,
   PortForwardRuleRecord,
   SecretMetadataRecord,
@@ -61,6 +64,7 @@ import type {
 } from '@shared';
 import { DesktopConfigService } from './app-config';
 import { getDesktopStateStorage, type SyncDeletionRecord } from './state-storage';
+import { decodeSecretFromStorage, encodeSecretForStorage } from './secret-store';
 
 function nowIso(): string {
   return new Date().toISOString();
@@ -150,6 +154,14 @@ function compareDnsOverrides(left: DnsOverrideRecord, right: DnsOverrideRecord):
 
 function compareDeletedAtDesc(left: SyncDeletionRecord, right: SyncDeletionRecord): number {
   return right.deletedAt.localeCompare(left.deletedAt);
+}
+
+function compareAwsProfileMetadata(left: AwsProfileMetadataRecord, right: AwsProfileMetadataRecord): number {
+  const nameCompare = left.name.localeCompare(right.name);
+  if (nameCompare !== 0) {
+    return nameCompare;
+  }
+  return left.id.localeCompare(right.id);
 }
 
 function normalizeDnsOverrideHostname(hostname: string): string {
@@ -317,6 +329,7 @@ function normalizeIncomingHostRecord(record: HostRecord): HostRecord {
       groupName: normalizeGroupPath(legacyRecord.groupName),
       tags: normalizeTags(legacyRecord.tags),
       terminalThemeId: normalizeTerminalThemeId(legacyRecord.terminalThemeId),
+      awsProfileId: typeof legacyRecord.awsProfileId === 'string' ? legacyRecord.awsProfileId : null,
       awsProfileName: legacyRecord.awsProfileName,
       awsRegion: legacyRecord.awsRegion,
       awsInstanceId: legacyRecord.awsInstanceId,
@@ -349,6 +362,7 @@ function normalizeIncomingHostRecord(record: HostRecord): HostRecord {
       groupName: normalizeGroupPath(legacyRecord.groupName),
       tags: normalizeTags(legacyRecord.tags),
       terminalThemeId: normalizeTerminalThemeId(legacyRecord.terminalThemeId),
+      awsProfileId: typeof legacyRecord.awsProfileId === 'string' ? legacyRecord.awsProfileId : null,
       awsProfileName: legacyRecord.awsProfileName,
       awsRegion: legacyRecord.awsRegion,
       awsEcsClusterArn: (legacyRecord as Partial<AwsEcsHostRecord>).awsEcsClusterArn ?? '',
@@ -411,6 +425,7 @@ function toAwsHostRecord(id: string, draft: AwsEc2HostDraft, timestamp: string, 
     id,
     kind: 'aws-ec2',
     label: draft.label,
+    awsProfileId: draft.awsProfileId ?? null,
     awsProfileName: draft.awsProfileName,
     awsRegion: draft.awsRegion,
     awsInstanceId: draft.awsInstanceId,
@@ -441,6 +456,7 @@ function toAwsEcsHostRecord(
     id,
     kind: 'aws-ecs',
     label: draft.label,
+    awsProfileId: draft.awsProfileId ?? null,
     awsProfileName: draft.awsProfileName,
     awsRegion: draft.awsRegion,
     awsEcsClusterArn: draft.awsEcsClusterArn,
@@ -522,7 +538,27 @@ function normalizeTerminalFontFamilyForPlatform(value: TerminalFontFamilyId): Te
   return value;
 }
 
-const stateStorage = getDesktopStateStorage();
+const stateStorage = {
+  getState: () => getDesktopStateStorage().getState(),
+  updateState: (updater: Parameters<ReturnType<typeof getDesktopStateStorage>["updateState"]>[0]) =>
+    getDesktopStateStorage().updateState(updater),
+  readManagedAwsProfileValue: (profileId: string) =>
+    getDesktopStateStorage().readManagedAwsProfileValue(profileId),
+  writeManagedAwsProfileValue: (
+    profileId: string,
+    record: Parameters<ReturnType<typeof getDesktopStateStorage>["writeManagedAwsProfileValue"]>[1]
+  ) => getDesktopStateStorage().writeManagedAwsProfileValue(profileId, record),
+  deleteManagedAwsProfileValue: (profileId: string) =>
+    getDesktopStateStorage().deleteManagedAwsProfileValue(profileId),
+  appendActivityLog: (
+    record: Parameters<ReturnType<typeof getDesktopStateStorage>["appendActivityLog"]>[0]
+  ) => getDesktopStateStorage().appendActivityLog(record),
+  upsertActivityLog: (
+    record: Parameters<ReturnType<typeof getDesktopStateStorage>["upsertActivityLog"]>[0]
+  ) => getDesktopStateStorage().upsertActivityLog(record),
+  listActivityLogs: () => getDesktopStateStorage().listActivityLogs(),
+  clearActivityLogs: () => getDesktopStateStorage().clearActivityLogs(),
+};
 
 function clampInteger(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, Math.round(value)));
@@ -609,6 +645,72 @@ export class HostRepository {
     stateStorage.updateState((state) => {
       state.data.hosts = records.map(normalizeIncomingHostRecord);
     });
+  }
+
+  updateAwsProfileCache(profileId: string, nextProfileName: string): HostRecord[] {
+    const updatedHosts: HostRecord[] = [];
+    const timestamp = nowIso();
+    stateStorage.updateState((state) => {
+      state.data.hosts = state.data.hosts.map((entry) => {
+        if (
+          (entry.kind !== 'aws-ec2' && entry.kind !== 'aws-ecs') ||
+          entry.awsProfileId !== profileId ||
+          entry.awsProfileName === nextProfileName
+        ) {
+          return entry;
+        }
+        const nextRecord = {
+          ...entry,
+          awsProfileName: nextProfileName,
+          updatedAt: timestamp
+        };
+        updatedHosts.push(nextRecord);
+        return nextRecord;
+      });
+    });
+    return updatedHosts;
+  }
+
+  backfillAwsProfileReferences(
+    profiles: Array<{ id: string; name: string }>
+  ): HostRecord[] {
+    const byId = new Map(profiles.map((profile) => [profile.id, profile.name]));
+    const byName = new Map(profiles.map((profile) => [profile.name, profile.id]));
+    const updatedHosts: HostRecord[] = [];
+    const timestamp = nowIso();
+
+    stateStorage.updateState((state) => {
+      state.data.hosts = state.data.hosts.map((entry) => {
+        if (entry.kind !== 'aws-ec2' && entry.kind !== 'aws-ecs') {
+          return entry;
+        }
+
+        let nextProfileId = entry.awsProfileId ?? null;
+        let nextProfileName = entry.awsProfileName;
+
+        if (!nextProfileId) {
+          nextProfileId = byName.get(entry.awsProfileName) ?? null;
+        }
+        if (nextProfileId && byId.has(nextProfileId)) {
+          nextProfileName = byId.get(nextProfileId) ?? entry.awsProfileName;
+        }
+
+        if (nextProfileId === (entry.awsProfileId ?? null) && nextProfileName === entry.awsProfileName) {
+          return entry;
+        }
+
+        const nextRecord = {
+          ...entry,
+          awsProfileId: nextProfileId,
+          awsProfileName: nextProfileName,
+          updatedAt: timestamp
+        };
+        updatedHosts.push(nextRecord);
+        return nextRecord;
+      });
+    });
+
+    return updatedHosts;
   }
 }
 
@@ -1430,6 +1532,122 @@ export class SecretMetadataRepository {
       }));
       state.data.secretMetadata = [...remaining, ...nextRecords];
     });
+  }
+}
+
+export class AwsProfileRepository {
+  listMetadata(): AwsProfileMetadataRecord[] {
+    return stateStorage.getState().data.awsProfiles.sort(compareAwsProfileMetadata);
+  }
+
+  listPayloads(): ManagedAwsProfilePayload[] {
+    return this.listMetadata()
+      .map((metadata) => this.getPayloadById(metadata.id))
+      .filter((payload): payload is ManagedAwsProfilePayload => payload !== null)
+      .sort((left, right) => compareAwsProfileMetadata(this.toMetadata(left), this.toMetadata(right)));
+  }
+
+  getMetadataById(id: string): AwsProfileMetadataRecord | null {
+    return stateStorage.getState().data.awsProfiles.find((record) => record.id === id) ?? null;
+  }
+
+  getMetadataByName(name: string): AwsProfileMetadataRecord | null {
+    return stateStorage.getState().data.awsProfiles.find((record) => record.name === name) ?? null;
+  }
+
+  getPayloadById(id: string): ManagedAwsProfilePayload | null {
+    const metadata = this.getMetadataById(id);
+    if (!metadata) {
+      return null;
+    }
+    const record = stateStorage.readManagedAwsProfileValue(id);
+    if (!record) {
+      return null;
+    }
+    const raw = decodeSecretFromStorage(record);
+    if (!raw) {
+      return null;
+    }
+
+    try {
+      const payload = JSON.parse(raw) as ManagedAwsProfilePayload;
+      return {
+        ...payload,
+        id: metadata.id,
+        name: metadata.name,
+        kind: metadata.kind,
+        updatedAt: payload.updatedAt ?? metadata.updatedAt
+      } as ManagedAwsProfilePayload;
+    } catch {
+      return null;
+    }
+  }
+
+  resolveNameById(id: string | null | undefined): string | null {
+    if (!id) {
+      return null;
+    }
+    return this.getMetadataById(id)?.name ?? null;
+  }
+
+  upsert(payload: ManagedAwsProfilePayload): ManagedAwsProfilePayload {
+    const nextPayload: ManagedAwsProfilePayload = {
+      ...payload,
+      name: payload.name.trim(),
+      updatedAt: payload.updatedAt || nowIso(),
+    };
+    const nextMetadata = this.toMetadata(nextPayload);
+
+    stateStorage.updateState((state) => {
+      const currentIndex = state.data.awsProfiles.findIndex((record) => record.id === nextMetadata.id);
+      if (currentIndex >= 0) {
+        state.data.awsProfiles[currentIndex] = nextMetadata;
+      } else {
+        state.data.awsProfiles.push(nextMetadata);
+      }
+    });
+    stateStorage.writeManagedAwsProfileValue(
+      nextPayload.id,
+      encodeSecretForStorage(JSON.stringify(nextPayload))
+    );
+    return nextPayload;
+  }
+
+  remove(id: string): void {
+    stateStorage.updateState((state) => {
+      state.data.awsProfiles = state.data.awsProfiles.filter((record) => record.id !== id);
+    });
+    stateStorage.deleteManagedAwsProfileValue(id);
+  }
+
+  replaceAll(payloads: ManagedAwsProfilePayload[]): void {
+    const nextPayloads = payloads.map((payload) => ({
+      ...payload,
+      name: payload.name.trim(),
+    }));
+    const nextMetadata = nextPayloads.map((payload) => this.toMetadata(payload));
+    const nextIds = new Set(nextMetadata.map((record) => record.id));
+
+    stateStorage.updateState((state) => {
+      state.data.awsProfiles = nextMetadata;
+      for (const profileId of Object.keys(state.secure.managedAwsProfilesById)) {
+        if (!nextIds.has(profileId)) {
+          delete state.secure.managedAwsProfilesById[profileId];
+        }
+      }
+      for (const payload of nextPayloads) {
+        state.secure.managedAwsProfilesById[payload.id] = encodeSecretForStorage(JSON.stringify(payload));
+      }
+    });
+  }
+
+  private toMetadata(payload: ManagedAwsProfilePayload): AwsProfileMetadataRecord {
+    return {
+      id: payload.id,
+      name: payload.name.trim(),
+      kind: payload.kind as ManagedAwsProfileKind,
+      updatedAt: payload.updatedAt
+    };
   }
 }
 

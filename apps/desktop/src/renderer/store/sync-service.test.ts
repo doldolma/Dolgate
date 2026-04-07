@@ -2,6 +2,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { createCipheriv } from 'node:crypto';
+import type { SyncPayloadV2 } from '@shared';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { SyncAuthenticationError, SyncService, isSyncAuthenticationError } from '../../main/sync-service';
 import { getDesktopStateStorage, resetDesktopStateStorageForTests } from '../../main/state-storage';
@@ -34,7 +35,7 @@ function encodeEncryptedPayload(plaintext: string, keyBase64: string): string {
   });
 }
 
-function createRemoteSnapshotWithPreferences(keyBase64: string) {
+function createRemoteSnapshotWithPreferences(keyBase64: string): SyncPayloadV2 {
   return {
     groups: [],
     hosts: [],
@@ -42,6 +43,7 @@ function createRemoteSnapshotWithPreferences(keyBase64: string) {
     knownHosts: [],
     portForwards: [],
     dnsOverrides: [],
+    awsProfiles: [],
     preferences: [
       {
         id: 'global-terminal',
@@ -59,7 +61,26 @@ function createRemoteSnapshotWithPreferences(keyBase64: string) {
   };
 }
 
-function createRemoteSnapshotWithManagedSecrets(keyBase64: string, secretCount = 220) {
+function createServerInfoResponse(awsProfiles = true, version = '2026.04.07-test') {
+  return new Response(
+    JSON.stringify({
+      serverVersion: version,
+      capabilities: {
+        sync: {
+          awsProfiles,
+        },
+      },
+    }),
+    {
+      status: 200,
+      headers: {
+        'content-type': 'application/json',
+      },
+    }
+  );
+}
+
+function createRemoteSnapshotWithManagedSecrets(keyBase64: string, secretCount = 220): SyncPayloadV2 {
   return {
     groups: [
       {
@@ -117,6 +138,7 @@ function createRemoteSnapshotWithManagedSecrets(keyBase64: string, secretCount =
     knownHosts: [],
     portForwards: [],
     dnsOverrides: [],
+    awsProfiles: [],
     preferences: [
       {
         id: 'global-terminal',
@@ -199,6 +221,10 @@ function createSyncService() {
     load: vi.fn().mockResolvedValue(null),
     save: vi.fn().mockResolvedValue(undefined)
   };
+  const awsProfiles = {
+    listPayloads: vi.fn().mockReturnValue([]),
+    replaceAll: vi.fn()
+  };
   const settings = {
     getSyncedTerminalPreferences: vi.fn().mockReturnValue({
       id: 'global-terminal',
@@ -208,13 +234,13 @@ function createSyncService() {
     replaceSyncedTerminalPreferences: vi.fn(),
     clearSyncedTerminalPreferences: vi.fn()
   };
-  const outboxRecords: Array<{ kind: 'groups' | 'hosts' | 'secrets' | 'knownHosts' | 'portForwards' | 'preferences'; recordId: string; deletedAt: string }> = [];
+  const outboxRecords: Array<{ kind: 'groups' | 'hosts' | 'secrets' | 'knownHosts' | 'portForwards' | 'preferences' | 'awsProfiles'; recordId: string; deletedAt: string }> = [];
   const outbox = {
     clearAll: vi.fn(() => {
       outboxRecords.splice(0, outboxRecords.length);
     }),
     clearMany: vi.fn(
-      (records: Array<{ kind: 'groups' | 'hosts' | 'secrets' | 'knownHosts' | 'portForwards' | 'preferences'; recordId: string; deletedAt?: string }>) => {
+      (records: Array<{ kind: 'groups' | 'hosts' | 'secrets' | 'knownHosts' | 'portForwards' | 'preferences' | 'awsProfiles'; recordId: string; deletedAt?: string }>) => {
         const exactKeys = new Set(
           records
             .filter((record) => typeof record.deletedAt === 'string')
@@ -240,7 +266,7 @@ function createSyncService() {
     list: vi.fn(() => [...outboxRecords]),
     upsertDeletion: vi.fn(
       (
-        kind: 'groups' | 'hosts' | 'secrets' | 'knownHosts' | 'portForwards' | 'preferences',
+        kind: 'groups' | 'hosts' | 'secrets' | 'knownHosts' | 'portForwards' | 'preferences' | 'awsProfiles',
         recordId: string,
         deletedAt: string
       ) => {
@@ -263,6 +289,7 @@ function createSyncService() {
     dnsOverrides as never,
     knownHosts as never,
     secretMetadata as never,
+    awsProfiles as never,
     settings as never,
     secretStore as never,
     outbox as never
@@ -277,6 +304,7 @@ function createSyncService() {
     dnsOverrides,
     knownHosts,
     secretMetadata,
+    awsProfiles,
     settings,
     secretStore,
     outbox
@@ -324,7 +352,8 @@ describe('SyncService', () => {
       status: 'idle',
       lastSuccessfulSyncAt: null,
       pendingPush: false,
-      errorMessage: null
+      errorMessage: null,
+      awsProfilesServerSupport: 'unknown'
     });
   });
 
@@ -337,6 +366,7 @@ describe('SyncService', () => {
       'fetch',
       vi
         .fn()
+        .mockResolvedValueOnce(createServerInfoResponse())
         .mockResolvedValueOnce(
           new Response(JSON.stringify({ error: 'token has invalid claims: token is expired' }), {
             status: 401,
@@ -458,6 +488,7 @@ describe('SyncService', () => {
 
     const fetchMock = vi
       .fn()
+      .mockResolvedValueOnce(createServerInfoResponse())
       .mockResolvedValueOnce(
         new Response(null, {
           status: 202,
@@ -481,13 +512,15 @@ describe('SyncService', () => {
 
     const state = await service.bootstrap();
 
-    expect(fetchMock).toHaveBeenCalledTimes(2);
-    expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(String(fetchMock.mock.calls[0]?.[0])).toContain('/api/info');
+    expect(fetchMock.mock.calls[1]?.[1]).toMatchObject({
       method: 'POST'
     });
-    expect(fetchMock.mock.calls[1]?.[1]?.method).toBeUndefined();
+    expect(fetchMock.mock.calls[2]?.[1]?.method).toBeUndefined();
     expect(state.status).toBe('ready');
     expect(state.pendingPush).toBe(false);
+    expect(state.awsProfilesServerSupport).toBe('supported');
   });
 
   it('applies remote snapshots with many managed secrets in a bounded number of state writes', async () => {
@@ -535,19 +568,22 @@ describe('SyncService', () => {
     const updateStateSpy = vi.spyOn(stateStorage, 'updateState');
     vi.stubGlobal(
       'fetch',
-      vi.fn().mockResolvedValue(
-        new Response(
-          JSON.stringify(
-            createRemoteSnapshotWithManagedSecrets(authService.getVaultKeyBase64())
-          ),
-          {
-            status: 200,
-            headers: {
-              'content-type': 'application/json'
+      vi
+        .fn()
+        .mockResolvedValueOnce(createServerInfoResponse())
+        .mockResolvedValueOnce(
+          new Response(
+            JSON.stringify(
+              createRemoteSnapshotWithManagedSecrets(authService.getVaultKeyBase64())
+            ),
+            {
+              status: 200,
+              headers: {
+                'content-type': 'application/json'
+              }
             }
-          }
+          )
         )
-      )
     );
 
     const state = await service.bootstrap();
@@ -557,7 +593,7 @@ describe('SyncService', () => {
     );
 
     expect(state.status).toBe('ready');
-    expect(updateStateSpy).toHaveBeenCalledTimes(3);
+    expect(updateStateSpy).toHaveBeenCalledTimes(4);
     expect(serverMetadata).toHaveLength(220);
     expect(
       persistedState.data.secretMetadata.some(
@@ -662,5 +698,123 @@ describe('SyncService', () => {
     expect(state.pendingPush).toBe(true);
     expect(outbox.clearMany).not.toHaveBeenCalled();
     expect(outbox.records).toEqual([{ kind: 'hosts', recordId: 'host-1', deletedAt: '2026-03-22T00:00:00.000Z' }]);
+  });
+
+  it('skips awsProfiles payload and tombstones while the server is unsupported', async () => {
+    getDesktopStateStorage().updateSyncState({
+      pendingPush: false,
+      errorMessage: null,
+      awsProfilesServerSupport: 'unsupported',
+    });
+    const { service, outbox } = createSyncService();
+    outbox.records.push({
+      kind: 'awsProfiles',
+      recordId: 'profile-1',
+      deletedAt: '2026-04-07T00:00:00.000Z',
+    });
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(null, {
+        status: 202,
+        headers: {
+          'content-type': 'application/json',
+        },
+      })
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const state = await service.pushDirty();
+    const payload = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)) as {
+      awsProfiles: Array<{ id: string; deleted_at?: string }>;
+    };
+
+    expect(state.status).toBe('ready');
+    expect(payload.awsProfiles).toEqual([]);
+    expect(outbox.records).toEqual([
+      {
+        kind: 'awsProfiles',
+        recordId: 'profile-1',
+        deletedAt: '2026-04-07T00:00:00.000Z',
+      },
+    ]);
+  });
+
+  it('treats missing /api/info support as unsupported and keeps local aws profiles untouched', async () => {
+    const { service, awsProfiles } = createSyncService();
+    const stateStorage = getDesktopStateStorage();
+    stateStorage.updateState((state) => {
+      state.data.awsProfiles = [
+        {
+          id: 'profile-1',
+          name: 'default',
+          kind: 'sso',
+          updatedAt: '2026-04-07T00:00:00.000Z',
+        },
+      ];
+      state.secure.managedAwsProfilesById['profile-1'] = {
+        encrypted: false,
+        value: Buffer.from(
+          JSON.stringify({
+            id: 'profile-1',
+            name: 'default',
+            kind: 'sso',
+            region: 'ap-southeast-1',
+            updatedAt: '2026-04-07T00:00:00.000Z',
+            ssoStartUrl: 'https://example.awsapps.com/start',
+            ssoRegion: 'ap-northeast-2',
+            ssoAccountId: '123456789012',
+            ssoRoleName: 'developer',
+          }),
+          'utf8'
+        ).toString('base64'),
+      };
+    });
+    const remoteSnapshot = createRemoteSnapshotWithPreferences(
+      Buffer.alloc(32, 1).toString('base64')
+    );
+    remoteSnapshot.awsProfiles = [
+      {
+        id: 'remote-profile',
+        encrypted_payload: encodeEncryptedPayload(
+          JSON.stringify({
+            id: 'remote-profile',
+            name: 'remote-default',
+            kind: 'static',
+            region: 'us-east-1',
+            updatedAt: '2026-04-07T01:00:00.000Z',
+            accessKeyId: 'AKIAREMOTE',
+            secretAccessKey: 'secret',
+          }),
+          Buffer.alloc(32, 1).toString('base64')
+        ),
+        updated_at: '2026-04-07T01:00:00.000Z',
+      },
+    ];
+    vi.stubGlobal(
+      'fetch',
+      vi
+        .fn()
+        .mockResolvedValueOnce(new Response('not found', { status: 404 }))
+        .mockResolvedValueOnce(
+          new Response(JSON.stringify(remoteSnapshot), {
+            status: 200,
+            headers: {
+              'content-type': 'application/json',
+            },
+          })
+        )
+    );
+
+    const state = await service.bootstrap();
+
+    expect(state.awsProfilesServerSupport).toBe('unsupported');
+    expect(stateStorage.getState().data.awsProfiles).toEqual([
+      {
+        id: 'profile-1',
+        name: 'default',
+        kind: 'sso',
+        updatedAt: '2026-04-07T00:00:00.000Z',
+      },
+    ]);
+    expect(awsProfiles.replaceAll).not.toHaveBeenCalled();
   });
 });

@@ -1,6 +1,7 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { app } from "electron";
 
 type AwsProfileIniSectionKind = "profile" | "sso-session" | "other";
 type AwsProfileIniFileKind = "config" | "credentials";
@@ -39,6 +40,21 @@ export interface AwsProfileDocumentSnapshot {
 }
 
 const DEFAULT_LINE_ENDING = "\n";
+const APP_AWS_STORAGE_DIRNAME = path.join("storage", "aws");
+const APP_AWS_PROFILE_ROOT_DIRNAME = ".aws";
+
+function resolveUserDataPath(): string {
+  const override = process.env.DOLSSH_USER_DATA_DIR?.trim();
+  if (override) {
+    return path.resolve(override);
+  }
+
+  if (app?.getPath) {
+    return app.getPath("userData");
+  }
+
+  return path.join(process.cwd(), ".tmp", `dolssh-desktop-storage-${process.pid}`);
+}
 
 function toDocumentLines(raw: string): {
   lines: string[];
@@ -238,6 +254,94 @@ function getSectionHeaderLine(
     return `[sso-session ${logicalName}]`;
   }
   return getProfileHeaderLine(fileKind, logicalName);
+}
+
+function getRawSectionLines(
+  document: AwsProfileIniDocument,
+  fileKind: AwsProfileIniFileKind,
+  sectionKind: AwsProfileIniSectionKind,
+  logicalName: string,
+): string[] | null {
+  const section = findSection(document, fileKind, sectionKind, logicalName);
+  if (!section) {
+    return null;
+  }
+  return document.lines.slice(section.startLineIndex, section.endLineIndex);
+}
+
+function applyKeyValueOverridesToSectionLines(
+  lines: string[],
+  overrides: Record<string, string>,
+): string[] {
+  if (Object.keys(overrides).length === 0) {
+    return lines;
+  }
+
+  const nextLines = [...lines];
+  const appliedKeys = new Set<string>();
+
+  for (let lineIndex = 1; lineIndex < nextLines.length; lineIndex += 1) {
+    const parsed = parseKeyValueLine(nextLines[lineIndex] ?? "");
+    if (!parsed) {
+      continue;
+    }
+    if (!(parsed.key in overrides)) {
+      continue;
+    }
+    nextLines[lineIndex] = replaceKeyValueLine(
+      nextLines[lineIndex] ?? "",
+      parsed.key,
+      overrides[parsed.key] ?? "",
+    );
+    appliedKeys.add(parsed.key);
+  }
+
+  for (const [key, value] of Object.entries(overrides)) {
+    if (appliedKeys.has(key)) {
+      continue;
+    }
+    nextLines.push(`${key} = ${value}`);
+  }
+
+  return nextLines;
+}
+
+function upsertSectionLines(
+  document: AwsProfileIniDocument,
+  fileKind: AwsProfileIniFileKind,
+  sectionKind: AwsProfileIniSectionKind,
+  logicalName: string,
+  lines: string[],
+): void {
+  const nextLines = [...lines];
+  if (nextLines.length === 0) {
+    return;
+  }
+
+  nextLines[0] = getSectionHeaderLine(fileKind, sectionKind, logicalName);
+  const section = findSection(document, fileKind, sectionKind, logicalName);
+
+  if (!section) {
+    if (
+      document.lines.length > 0 &&
+      document.lines[document.lines.length - 1]?.trim() !== ""
+    ) {
+      document.lines.push("");
+    }
+    document.lines.push(...nextLines);
+    document.dirty = true;
+    if (!document.exists) {
+      document.hasTrailingNewline = true;
+    }
+    return;
+  }
+
+  document.lines.splice(
+    section.startLineIndex,
+    section.endLineIndex - section.startLineIndex,
+    ...nextLines,
+  );
+  document.dirty = true;
 }
 
 function replaceSectionHeader(
@@ -474,6 +578,14 @@ export function getDefaultAwsProfileRootDir(): string {
   return path.join(os.homedir(), ".aws");
 }
 
+export function getManagedAwsHomeDir(): string {
+  return path.join(resolveUserDataPath(), APP_AWS_STORAGE_DIRNAME);
+}
+
+export function getManagedAwsProfileRootDir(): string {
+  return path.join(getManagedAwsHomeDir(), APP_AWS_PROFILE_ROOT_DIRNAME);
+}
+
 export async function loadAwsProfileDocuments(
   rootDir = getDefaultAwsProfileRootDir(),
 ): Promise<AwsProfileDocuments> {
@@ -486,6 +598,24 @@ export async function loadAwsProfileDocuments(
     config,
     credentials,
   };
+}
+
+export function listAwsProfileNames(documents: AwsProfileDocuments): string[] {
+  const names = new Set<string>();
+
+  for (const section of listSections(documents.config, "config")) {
+    if (section.kind === "profile") {
+      names.add(section.logicalName);
+    }
+  }
+
+  for (const section of listSections(documents.credentials, "credentials")) {
+    if (section.kind === "profile") {
+      names.add(section.logicalName);
+    }
+  }
+
+  return [...names].sort((left, right) => left.localeCompare(right));
 }
 
 export function inspectAwsProfileDocuments(
@@ -614,6 +744,90 @@ export function getAwsSsoSessionValues(
     "sso-session",
     sessionName,
   );
+}
+
+export function copyAwsProfileConfigSectionBetweenDocuments(
+  sourceDocuments: AwsProfileDocuments,
+  targetDocuments: AwsProfileDocuments,
+  profileName: string,
+  options?: {
+    nextProfileName?: string;
+    overrides?: Record<string, string>;
+  },
+): boolean {
+  const lines = getRawSectionLines(
+    sourceDocuments.config,
+    "config",
+    "profile",
+    profileName,
+  );
+  if (!lines) {
+    return false;
+  }
+  upsertSectionLines(
+    targetDocuments.config,
+    "config",
+    "profile",
+    options?.nextProfileName ?? profileName,
+    applyKeyValueOverridesToSectionLines(lines, options?.overrides ?? {}),
+  );
+  return true;
+}
+
+export function copyAwsProfileCredentialsSectionBetweenDocuments(
+  sourceDocuments: AwsProfileDocuments,
+  targetDocuments: AwsProfileDocuments,
+  profileName: string,
+  options?: {
+    nextProfileName?: string;
+    overrides?: Record<string, string>;
+  },
+): boolean {
+  const lines = getRawSectionLines(
+    sourceDocuments.credentials,
+    "credentials",
+    "profile",
+    profileName,
+  );
+  if (!lines) {
+    return false;
+  }
+  upsertSectionLines(
+    targetDocuments.credentials,
+    "credentials",
+    "profile",
+    options?.nextProfileName ?? profileName,
+    applyKeyValueOverridesToSectionLines(lines, options?.overrides ?? {}),
+  );
+  return true;
+}
+
+export function copyAwsSsoSessionSectionBetweenDocuments(
+  sourceDocuments: AwsProfileDocuments,
+  targetDocuments: AwsProfileDocuments,
+  sessionName: string,
+  options?: {
+    nextSessionName?: string;
+    overrides?: Record<string, string>;
+  },
+): boolean {
+  const lines = getRawSectionLines(
+    sourceDocuments.config,
+    "config",
+    "sso-session",
+    sessionName,
+  );
+  if (!lines) {
+    return false;
+  }
+  upsertSectionLines(
+    targetDocuments.config,
+    "config",
+    "sso-session",
+    options?.nextSessionName ?? sessionName,
+    applyKeyValueOverridesToSectionLines(lines, options?.overrides ?? {}),
+  );
+  return true;
 }
 
 export function deleteAwsProfileFromDocuments(

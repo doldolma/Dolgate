@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { getAwsEc2HostSshMetadataStatusLabel, isAwsEc2HostRecord, isAwsEcsHostRecord, isSshHostDraft, isSshHostRecord, isWarpgateSshHostRecord } from '@shared';
-import type { HostDraft, HostRecord, SecretMetadataRecord, TerminalThemeId } from '@shared';
+import type { AwsProfileSummary, HostDraft, HostRecord, SecretMetadataRecord, TerminalThemeId } from '@shared';
 import { useHostFormController } from '../controllers/useHostFormController';
 import { cn } from '../lib/cn';
 import { terminalThemePresets } from '../lib/terminal-presets';
+import { listAwsProfiles } from '../services/desktop/imports';
 import { Button } from '../ui';
 
 const defaultDraft: HostDraft = {
@@ -76,6 +77,13 @@ interface HostFormSubmission {
     password?: string;
     passphrase?: string;
   };
+}
+
+interface AwsProfileSelectOption {
+  value: string;
+  profileId: string | null;
+  profileName: string;
+  isMissingCurrent?: boolean;
 }
 
 function isHostDraftValid(draft: HostDraft): boolean {
@@ -210,10 +218,16 @@ export function HostForm({
   const [saveStatus, setSaveStatus] = useState<HostFormSaveStatus>('idle');
   const [lastSavedSubmissionKey, setLastSavedSubmissionKey] = useState<string | null>(null);
   const [saveInFlight, setSaveInFlight] = useState(false);
+  const [awsProfiles, setAwsProfiles] = useState<AwsProfileSummary[]>([]);
+  const [isLoadingAwsProfiles, setIsLoadingAwsProfiles] = useState(false);
+  const [awsProfilesError, setAwsProfilesError] = useState<string | null>(null);
 
   const isEditMode = Boolean(host);
 
   const sshDraft = isSshHostDraft(draft) ? draft : null;
+  const isAwsEc2Draft = draft.kind === 'aws-ec2';
+  const isAwsEcsDraft = draft.kind === 'aws-ecs';
+  const isAwsDraft = isAwsEc2Draft || isAwsEcsDraft;
   const currentSubmission = useMemo(
     () =>
       buildHostFormSubmission({
@@ -236,6 +250,38 @@ export function HostForm({
       sshDraft.authType === 'password' ? entry.hasPassword : entry.hasManagedPrivateKey || entry.hasPassphrase
     );
   }, [keychainEntries, sshDraft]);
+  const awsProfileOptions = useMemo<AwsProfileSelectOption[]>(() => {
+    if (!isAwsDraft) {
+      return [];
+    }
+    const options: AwsProfileSelectOption[] = awsProfiles.map((profile) => ({
+      value: profile.id ?? profile.name,
+      profileId: profile.id ?? null,
+      profileName: profile.name,
+    }));
+    const currentProfileName = draft.awsProfileName.trim();
+    const currentProfileId = draft.awsProfileId ?? null;
+    const hasCurrentOption = options.some(
+      (option) =>
+        (currentProfileId && option.profileId === currentProfileId) ||
+        option.profileName === currentProfileName,
+    );
+    if (currentProfileName && !hasCurrentOption) {
+      options.unshift({
+        value: currentProfileId ?? currentProfileName,
+        profileId: currentProfileId,
+        profileName: currentProfileName,
+        isMissingCurrent: true,
+      });
+    }
+    return options;
+  }, [awsProfiles, draft, isAwsDraft]);
+  const selectedAwsProfileValue = useMemo(() => {
+    if (!isAwsDraft) {
+      return '';
+    }
+    return draft.awsProfileId ?? draft.awsProfileName;
+  }, [draft, isAwsDraft]);
 
   useEffect(() => {
     if (saveTimerRef.current !== null) {
@@ -280,6 +326,7 @@ export function HostForm({
         tags: host.tags ?? [],
         groupName: host.groupName ?? '',
         terminalThemeId: host.terminalThemeId ?? null,
+        awsProfileId: host.awsProfileId ?? null,
         awsProfileName: host.awsProfileName,
         awsRegion: host.awsRegion,
         awsInstanceId: host.awsInstanceId,
@@ -301,6 +348,7 @@ export function HostForm({
         tags: host.tags ?? [],
         groupName: host.groupName ?? '',
         terminalThemeId: host.terminalThemeId ?? null,
+        awsProfileId: host.awsProfileId ?? null,
         awsProfileName: host.awsProfileName,
         awsRegion: host.awsRegion,
         awsEcsClusterArn: host.awsEcsClusterArn,
@@ -382,6 +430,43 @@ export function HostForm({
   }, [credentialMode, reusableEntries, selectedSecretRef, sshDraft]);
 
   useEffect(() => {
+    if (!isAwsDraft) {
+      setAwsProfiles([]);
+      setAwsProfilesError(null);
+      setIsLoadingAwsProfiles(false);
+      return;
+    }
+
+    let canceled = false;
+    setIsLoadingAwsProfiles(true);
+    setAwsProfilesError(null);
+    void listAwsProfiles()
+      .then((profiles) => {
+        if (canceled) {
+          return;
+        }
+        setAwsProfiles(profiles);
+      })
+      .catch((error) => {
+        if (canceled) {
+          return;
+        }
+        setAwsProfiles([]);
+        setAwsProfilesError(error instanceof Error ? error.message : 'AWS 프로필을 불러오지 못했습니다.');
+      })
+      .finally(() => {
+        if (canceled) {
+          return;
+        }
+        setIsLoadingAwsProfiles(false);
+      });
+
+    return () => {
+      canceled = true;
+    };
+  }, [isAwsDraft]);
+
+  useEffect(() => {
     if (!isEditMode || saveInFlight) {
       return;
     }
@@ -416,6 +501,23 @@ export function HostForm({
       ...current,
       tags: nextTags
     }));
+  }
+
+  function handleAwsProfileChange(nextValue: string) {
+    const selectedProfile = awsProfileOptions.find((option) => option.value === nextValue);
+    if (!selectedProfile) {
+      return;
+    }
+    setDraft((current) => {
+      if (current.kind === 'aws-ec2' || current.kind === 'aws-ecs') {
+        return {
+          ...current,
+          awsProfileId: selectedProfile.profileId,
+          awsProfileName: selectedProfile.profileName,
+        };
+      }
+      return current;
+    });
   }
 
   function commitPendingTag(options?: { suppressNextBlur?: boolean }) {
@@ -540,8 +642,6 @@ export function HostForm({
     };
   }, [draft, isEditDirty, isEditMode, isFormValid, persistChanges, saveInFlight]);
 
-  const isAwsDraft = draft.kind === 'aws-ec2';
-  const isAwsEcsDraft = draft.kind === 'aws-ecs';
   const saveStatusText =
     saveStatus === 'saving' ? 'Saving...' : saveStatus === 'saved' ? 'Saved' : saveStatus === 'error' ? "Couldn't save changes" : null;
 
@@ -660,13 +760,27 @@ export function HostForm({
         </div>
       </label>
 
-      {isAwsDraft ? (
+      {isAwsEc2Draft ? (
         <>
           {renderTerminalThemeField(draft.terminalThemeId ?? null, (terminalThemeId) => setDraft((current) => ({ ...current, terminalThemeId })))}
 
-          <label>
-            AWS Profile
-            <input value={draft.awsProfileName} readOnly />
+          <label className={fieldClassName}>
+            <span className={fieldLabelClassName}>AWS Profile</span>
+            <select
+              aria-label="AWS Profile"
+              value={selectedAwsProfileValue}
+              onChange={(event) => handleAwsProfileChange(event.target.value)}
+              disabled={isLoadingAwsProfiles || awsProfileOptions.length === 0}
+            >
+              {awsProfileOptions.map((profile) => (
+                <option key={profile.value} value={profile.value}>
+                  {profile.isMissingCurrent ? `${profile.profileName} (앱 프로필 없음)` : profile.profileName}
+                </option>
+              ))}
+            </select>
+            {awsProfilesError ? (
+              <span className="text-[0.82rem] text-[var(--danger-text)]">{awsProfilesError}</span>
+            ) : null}
           </label>
           <label>
             Region
@@ -751,7 +865,21 @@ export function HostForm({
 
           <label className={fieldClassName}>
             <span className={fieldLabelClassName}>AWS Profile</span>
-            <input value={draft.awsProfileName} readOnly />
+            <select
+              aria-label="AWS Profile"
+              value={selectedAwsProfileValue}
+              onChange={(event) => handleAwsProfileChange(event.target.value)}
+              disabled={isLoadingAwsProfiles || awsProfileOptions.length === 0}
+            >
+              {awsProfileOptions.map((profile) => (
+                <option key={profile.value} value={profile.value}>
+                  {profile.isMissingCurrent ? `${profile.profileName} (앱 프로필 없음)` : profile.profileName}
+                </option>
+              ))}
+            </select>
+            {awsProfilesError ? (
+              <span className="text-[0.82rem] text-[var(--danger-text)]">{awsProfilesError}</span>
+            ) : null}
           </label>
           <label className={fieldClassName}>
             <span className={fieldLabelClassName}>Region</span>

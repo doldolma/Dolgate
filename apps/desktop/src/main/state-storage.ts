@@ -15,6 +15,7 @@ import { isIP } from 'node:net';
 import path from 'node:path';
 import type {
   ActivityLogRecord,
+  AwsProfileMetadataRecord,
   AwsSsmPortForwardRuleRecord,
   AppTheme,
   ContainerPortForwardRuleRecord,
@@ -94,6 +95,7 @@ export interface DesktopStateFile {
     lastSuccessfulSyncAt: string | null;
     pendingPush: boolean;
     errorMessage: string | null;
+    awsProfilesServerSupport: 'unknown' | 'supported' | 'unsupported';
     ownerUserId: string | null;
     ownerServerUrl: string | null;
     updatedAt: string;
@@ -105,11 +107,13 @@ export interface DesktopStateFile {
     portForwards: PortForwardRuleRecord[];
     dnsOverrides: DnsOverrideRecord[];
     secretMetadata: SecretMetadataRecord[];
+    awsProfiles: AwsProfileMetadataRecord[];
     syncOutbox: SyncDeletionRecord[];
   };
   secure: {
     refreshToken: StoredEncryptedValue | null;
     managedSecretsByRef: Record<string, StoredEncryptedValue>;
+    managedAwsProfilesById: Record<string, StoredEncryptedValue>;
   };
 }
 
@@ -448,6 +452,7 @@ function createDefaultStateFile(): DesktopStateFile {
       lastSuccessfulSyncAt: null,
       pendingPush: false,
       errorMessage: null,
+      awsProfilesServerSupport: 'unknown',
       ownerUserId: null,
       ownerServerUrl: null,
       updatedAt: timestamp
@@ -459,11 +464,13 @@ function createDefaultStateFile(): DesktopStateFile {
       portForwards: [],
       dnsOverrides: [],
       secretMetadata: [],
+      awsProfiles: [],
       syncOutbox: []
     },
     secure: {
       refreshToken: null,
-      managedSecretsByRef: {}
+      managedSecretsByRef: {},
+      managedAwsProfilesById: {}
     }
   };
 }
@@ -501,6 +508,7 @@ function normalizeHostRecord(value: unknown): HostRecord | null {
       groupName: typeof value.groupName === 'string' ? value.groupName : null,
       tags,
       terminalThemeId: isTerminalThemeId(value.terminalThemeId) ? value.terminalThemeId : null,
+      awsProfileId: typeof value.awsProfileId === 'string' ? value.awsProfileId : null,
       awsProfileName: value.awsProfileName,
       awsRegion: value.awsRegion,
       awsInstanceId: value.awsInstanceId,
@@ -544,6 +552,7 @@ function normalizeHostRecord(value: unknown): HostRecord | null {
       groupName: typeof value.groupName === 'string' ? value.groupName : null,
       tags,
       terminalThemeId: isTerminalThemeId(value.terminalThemeId) ? value.terminalThemeId : null,
+      awsProfileId: typeof value.awsProfileId === 'string' ? value.awsProfileId : null,
       awsProfileName: value.awsProfileName,
       awsRegion: value.awsRegion,
       awsEcsClusterArn: value.awsEcsClusterArn,
@@ -623,6 +632,7 @@ function normalizeStateFile(value: unknown): DesktopStateFile {
   const data = isObject(value.data) ? value.data : {};
   const secure = isObject(value.secure) ? value.secure : {};
   const managedSecrets = isObject(secure.managedSecretsByRef) ? secure.managedSecretsByRef : {};
+  const managedAwsProfiles = isObject(secure.managedAwsProfilesById) ? secure.managedAwsProfilesById : {};
   const normalizedTerminalFontFamily = normalizeTerminalFontFamily(terminal.fontFamily, fallback.terminal.fontFamily);
   const normalizedTerminalWebglEnabled = normalizeTerminalWebglEnabled(terminal.webglEnabled);
 
@@ -631,6 +641,13 @@ function normalizeStateFile(value: unknown): DesktopStateFile {
     const normalized = normalizeStoredEncryptedValue(record);
     if (normalized) {
       normalizedManagedSecrets[secretRef] = normalized;
+    }
+  }
+  const normalizedManagedAwsProfiles: Record<string, StoredEncryptedValue> = {};
+  for (const [profileId, record] of Object.entries(managedAwsProfiles)) {
+    const normalized = normalizeStoredEncryptedValue(record);
+    if (normalized) {
+      normalizedManagedAwsProfiles[profileId] = normalized;
     }
   }
 
@@ -674,6 +691,10 @@ function normalizeStateFile(value: unknown): DesktopStateFile {
       lastSuccessfulSyncAt: typeof sync.lastSuccessfulSyncAt === 'string' ? sync.lastSuccessfulSyncAt : null,
       pendingPush: typeof sync.pendingPush === 'boolean' ? sync.pendingPush : false,
       errorMessage: typeof sync.errorMessage === 'string' ? sync.errorMessage : null,
+      awsProfilesServerSupport:
+        sync.awsProfilesServerSupport === 'supported' || sync.awsProfilesServerSupport === 'unsupported'
+          ? sync.awsProfilesServerSupport
+          : 'unknown',
       ownerUserId: typeof sync.ownerUserId === 'string' ? sync.ownerUserId : null,
       ownerServerUrl: typeof sync.ownerServerUrl === 'string' ? sync.ownerServerUrl : null,
       updatedAt: typeof sync.updatedAt === 'string' ? sync.updatedAt : fallback.sync.updatedAt
@@ -693,11 +714,13 @@ function normalizeStateFile(value: unknown): DesktopStateFile {
             .filter((entry): entry is DnsOverrideRecord => entry !== null)
         : [],
       secretMetadata: Array.isArray(data.secretMetadata) ? (data.secretMetadata as SecretMetadataRecord[]) : [],
+      awsProfiles: Array.isArray(data.awsProfiles) ? (data.awsProfiles as AwsProfileMetadataRecord[]) : [],
       syncOutbox: Array.isArray(data.syncOutbox) ? (data.syncOutbox as SyncDeletionRecord[]) : []
     },
     secure: {
       refreshToken: normalizeStoredEncryptedValue(secure.refreshToken),
-      managedSecretsByRef: normalizedManagedSecrets
+      managedSecretsByRef: normalizedManagedSecrets,
+      managedAwsProfilesById: normalizedManagedAwsProfiles
     }
   };
 }
@@ -825,6 +848,24 @@ class DesktopStateStorage {
     });
   }
 
+  readManagedAwsProfileValue(profileId: string): StoredEncryptedValue | null {
+    this.ensureLoaded();
+    const record = this.state.secure.managedAwsProfilesById[profileId];
+    return record ? { ...record } : null;
+  }
+
+  writeManagedAwsProfileValue(profileId: string, record: StoredEncryptedValue): void {
+    this.updateState((draft) => {
+      draft.secure.managedAwsProfilesById[profileId] = { ...record };
+    });
+  }
+
+  deleteManagedAwsProfileValue(profileId: string): void {
+    this.updateState((draft) => {
+      delete draft.secure.managedAwsProfilesById[profileId];
+    });
+  }
+
   updateAuthStatus(status: DesktopStateFile['auth']['status']): void {
     this.updateState((draft) => {
       draft.auth.status = status;
@@ -836,12 +877,16 @@ class DesktopStateStorage {
     lastSuccessfulSyncAt?: string | null;
     pendingPush: boolean;
     errorMessage?: string | null;
+    awsProfilesServerSupport?: 'unknown' | 'supported' | 'unsupported';
   }): void {
     this.updateState((draft) => {
       draft.sync.lastSuccessfulSyncAt =
         Object.prototype.hasOwnProperty.call(snapshot, 'lastSuccessfulSyncAt') ? snapshot.lastSuccessfulSyncAt ?? null : draft.sync.lastSuccessfulSyncAt;
       draft.sync.pendingPush = snapshot.pendingPush;
       draft.sync.errorMessage = snapshot.errorMessage ?? null;
+      if (snapshot.awsProfilesServerSupport) {
+        draft.sync.awsProfilesServerSupport = snapshot.awsProfilesServerSupport;
+      }
       draft.sync.updatedAt = nowIso();
     });
   }

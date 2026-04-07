@@ -16,6 +16,8 @@ import (
 	"dolssh/services/sync-api/internal/store"
 )
 
+var version = "dev"
+
 func main() {
 	if os.Getenv("GIN_MODE") == "" {
 		gin.SetMode(gin.ReleaseMode)
@@ -58,6 +60,7 @@ func main() {
 		LocalAuthEnabled:   cfg.Auth.Local.Enabled,
 		LocalSignupEnabled: cfg.Auth.Local.SignupEnabled,
 		TrustedProxies:     cfg.Server.TrustedProxies,
+		ServerVersion:      version,
 		RateLimit: httpserver.AuthRateLimitConfig{
 			Login: httpserver.RateLimitRuleConfig{
 				Limit:         cfg.Auth.RateLimit.Login.Limit,

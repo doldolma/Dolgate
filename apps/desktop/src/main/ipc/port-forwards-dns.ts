@@ -18,6 +18,15 @@ import type {
 export function registerPortForwardAndDnsIpcHandlers(
   ctx: MainIpcContext,
 ): void {
+  const resolveHostProfileName = (host: {
+    awsProfileId?: string | null;
+    awsProfileName: string;
+  }): string =>
+    ctx.awsService.resolveManagedProfileNameOrFallback(
+      host.awsProfileId,
+      host.awsProfileName,
+    ) ?? host.awsProfileName;
+
   const buildUserFacingDnsOverrideErrorMessage = (
     failure: ReturnType<typeof describeHostsOverrideManagerFailure>,
   ): string => {
@@ -344,8 +353,9 @@ export function registerPortForwardAndDnsIpcHandlers(
 
         try {
           publishRuntime("starting", "Checking AWS profile");
+          const profileName = resolveHostProfileName(ecsHost);
           let profileStatus = await ctx.awsService.getProfileStatus(
-            ecsHost.awsProfileName,
+            profileName,
           );
           if (!profileStatus.isAuthenticated) {
             if (!profileStatus.isSsoProfile) {
@@ -355,10 +365,10 @@ export function registerPortForwardAndDnsIpcHandlers(
               );
             }
             publishRuntime("starting", "Opening AWS SSO login");
-            await ctx.awsService.login(ecsHost.awsProfileName);
+            await ctx.awsService.login(profileName);
             publishRuntime("starting", "Checking AWS profile");
             profileStatus = await ctx.awsService.getProfileStatus(
-              ecsHost.awsProfileName,
+              profileName,
             );
             if (!profileStatus.isAuthenticated) {
               throw new Error(
@@ -373,7 +383,7 @@ export function registerPortForwardAndDnsIpcHandlers(
 
           publishRuntime("starting", "Resolving running ECS task");
           const targetId = await ctx.awsService.resolveEcsTaskTunnelTarget({
-            profileName: ecsHost.awsProfileName,
+            profileName,
             region: ecsHost.awsRegion,
             clusterArn: ecsHost.awsEcsClusterArn,
             serviceName: rule.serviceName,
@@ -384,7 +394,7 @@ export function registerPortForwardAndDnsIpcHandlers(
           return ctx.coreManager.startSsmPortForward({
             ruleId: rule.id,
             hostId: ecsHost.id,
-            profileName: ecsHost.awsProfileName,
+            profileName,
             region: ecsHost.awsRegion,
             targetType: "ecs-task",
             targetId,
@@ -429,8 +439,9 @@ export function registerPortForwardAndDnsIpcHandlers(
 
         try {
           publishRuntime("starting", "Checking AWS profile");
+          const profileName = resolveHostProfileName(awsHost);
           let profileStatus = await ctx.awsService.getProfileStatus(
-            awsHost.awsProfileName,
+            profileName,
           );
           if (!profileStatus.isAuthenticated) {
             if (!profileStatus.isSsoProfile) {
@@ -440,10 +451,10 @@ export function registerPortForwardAndDnsIpcHandlers(
               );
             }
             publishRuntime("starting", "Opening AWS SSO login");
-            await ctx.awsService.login(awsHost.awsProfileName);
+            await ctx.awsService.login(profileName);
             publishRuntime("starting", "Checking AWS profile");
             profileStatus = await ctx.awsService.getProfileStatus(
-              awsHost.awsProfileName,
+              profileName,
             );
             if (!profileStatus.isAuthenticated) {
               throw new Error(
@@ -455,7 +466,7 @@ export function registerPortForwardAndDnsIpcHandlers(
 
           publishRuntime("starting", "Checking SSM managed instance");
           const isManaged = await ctx.awsService.isManagedInstance(
-            awsHost.awsProfileName,
+            profileName,
             awsHost.awsRegion,
             awsHost.awsInstanceId,
           );
@@ -467,7 +478,7 @@ export function registerPortForwardAndDnsIpcHandlers(
           const runtime = await ctx.coreManager.startSsmPortForward({
             ruleId: rule.id,
             hostId: awsHost.id,
-            profileName: awsHost.awsProfileName,
+            profileName,
             region: awsHost.awsRegion,
             targetType: "instance",
             targetId: awsHost.awsInstanceId,

@@ -23,8 +23,13 @@ export function registerSshIpcHandlers(ctx: MainIpcContext): void {
       }
 
       if (isAwsEc2HostRecord(host)) {
+        const profileName =
+          ctx.awsService.resolveManagedProfileNameOrFallback(
+            host.awsProfileId,
+            host.awsProfileName,
+          ) ?? host.awsProfileName;
         const connection = await ctx.coreManager.connectAwsSession({
-          profileName: host.awsProfileName,
+          profileName,
           region: host.awsRegion,
           instanceId: host.awsInstanceId,
           cols: input.cols,

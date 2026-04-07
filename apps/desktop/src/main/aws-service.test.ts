@@ -2,8 +2,25 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import type { AwsProfileDetails } from '@shared';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AwsService, buildSshMetadataProbeCommands } from './aws-service';
+import { resetDesktopStateStorageForTests } from './state-storage';
+
+vi.mock('electron', () => ({
+  app: {
+    getPath: vi.fn((name: string) =>
+      name === 'userData'
+        ? process.env.DOLSSH_USER_DATA_DIR ?? os.tmpdir()
+        : os.tmpdir(),
+    ),
+    isPackaged: false,
+  },
+  safeStorage: {
+    isEncryptionAvailable: vi.fn(() => true),
+    encryptString: vi.fn((value: string) => Buffer.from(value, 'utf8')),
+    decryptString: vi.fn((value: Buffer) => Buffer.from(value).toString('utf8')),
+  },
+}));
 
 const tempDirectories: string[] = [];
 
@@ -12,6 +29,12 @@ async function createTempAwsProfileDir() {
   tempDirectories.push(rootDir);
   return rootDir;
 }
+
+beforeEach(async () => {
+  const userDataDir = await createTempAwsProfileDir();
+  process.env.DOLSSH_USER_DATA_DIR = userDataDir;
+  resetDesktopStateStorageForTests();
+});
 
 async function writeAwsProfileFiles(
   rootDir: string,
@@ -30,6 +53,8 @@ async function writeAwsProfileFiles(
 }
 
 afterEach(async () => {
+  resetDesktopStateStorageForTests();
+  delete process.env.DOLSSH_USER_DATA_DIR;
   while (tempDirectories.length > 0) {
     const rootDir = tempDirectories.pop();
     if (!rootDir) {
@@ -88,7 +113,7 @@ describe('AwsService.getProfileStatus', () => {
     const service = new AwsService() as unknown as {
       ensureAwsCliAvailable: () => Promise<void>;
       readConfigValue: ReturnType<typeof vi.fn>;
-      runResolvedCommand: ReturnType<typeof vi.fn>;
+      runResolvedCommandWithEnv: ReturnType<typeof vi.fn>;
       getProfileStatus: (profileName: string) => Promise<{
         configuredRegion?: string | null;
         isAuthenticated: boolean;
@@ -101,7 +126,7 @@ describe('AwsService.getProfileStatus', () => {
       .mockResolvedValueOnce('')
       .mockResolvedValueOnce('')
       .mockResolvedValueOnce('ap-northeast-2');
-    service.runResolvedCommand = vi.fn().mockResolvedValue({
+    service.runResolvedCommandWithEnv = vi.fn().mockResolvedValue({
       stdout: JSON.stringify({
         Account: '123456789012',
         Arn: 'arn:aws:iam::123456789012:user/test',
@@ -120,7 +145,7 @@ describe('AwsService.getProfileStatus', () => {
     const service = new AwsService() as unknown as {
       ensureAwsCliAvailable: () => Promise<void>;
       readConfigValue: ReturnType<typeof vi.fn>;
-      runResolvedCommand: ReturnType<typeof vi.fn>;
+      runResolvedCommandWithEnv: ReturnType<typeof vi.fn>;
       getProfileStatus: (profileName: string) => Promise<{
         configuredRegion?: string | null;
         isAuthenticated: boolean;
@@ -133,7 +158,7 @@ describe('AwsService.getProfileStatus', () => {
       .mockResolvedValueOnce('')
       .mockResolvedValueOnce('')
       .mockResolvedValueOnce('');
-    service.runResolvedCommand = vi.fn().mockResolvedValue({
+    service.runResolvedCommandWithEnv = vi.fn().mockResolvedValue({
       stdout: '',
       stderr: 'credential missing',
       exitCode: 255,
@@ -148,11 +173,10 @@ describe('AwsService.getProfileStatus', () => {
 
 describe('AwsService.createProfile', () => {
   it('validates credentials first and writes the new profile when they are valid', async () => {
-    const service = new AwsService() as unknown as {
+    const rootDir = await createTempAwsProfileDir();
+    const service = new AwsService(rootDir) as unknown as {
       ensureAwsCliAvailable: ReturnType<typeof vi.fn>;
-      listProfiles: ReturnType<typeof vi.fn>;
       runResolvedCommandWithEnv: ReturnType<typeof vi.fn>;
-      runResolvedCommand: ReturnType<typeof vi.fn>;
       createProfile: (input: {
         kind: 'static';
         profileName: string;
@@ -163,17 +187,11 @@ describe('AwsService.createProfile', () => {
     };
 
     service.ensureAwsCliAvailable = vi.fn().mockResolvedValue(undefined);
-    service.listProfiles = vi.fn().mockResolvedValue([{ name: 'default' }]);
     service.runResolvedCommandWithEnv = vi.fn().mockResolvedValue({
       stdout: JSON.stringify({
         Account: '123456789012',
         Arn: 'arn:aws:iam::123456789012:user/test',
       }),
-      stderr: '',
-      exitCode: 0,
-    });
-    service.runResolvedCommand = vi.fn().mockResolvedValue({
-      stdout: '',
       stderr: '',
       exitCode: 0,
     });
@@ -197,29 +215,24 @@ describe('AwsService.createProfile', () => {
       }),
       30_000,
     );
-    expect(service.runResolvedCommand).toHaveBeenNthCalledWith(
-      1,
-      'aws',
-      ['configure', 'set', 'aws_access_key_id', 'AKIATEST123', '--profile', 'dolssh-prod'],
-    );
-    expect(service.runResolvedCommand).toHaveBeenNthCalledWith(
-      2,
-      'aws',
-      ['configure', 'set', 'aws_secret_access_key', 'secret-value', '--profile', 'dolssh-prod'],
-    );
-    expect(service.runResolvedCommand).toHaveBeenNthCalledWith(
-      3,
-      'aws',
-      ['configure', 'set', 'region', 'ap-northeast-2', '--profile', 'dolssh-prod'],
-    );
+    const config = await readFile(path.join(rootDir, 'config'), 'utf8');
+    const credentials = await readFile(path.join(rootDir, 'credentials'), 'utf8');
+    expect(config).toContain('[profile dolssh-prod]');
+    expect(config).toContain('region = ap-northeast-2');
+    expect(credentials).toContain('[dolssh-prod]');
+    expect(credentials).toContain('aws_access_key_id = AKIATEST123');
+    expect(credentials).toContain('aws_secret_access_key = secret-value');
   });
 
   it('rejects duplicate profile names before validation or writes', async () => {
-    const service = new AwsService() as unknown as {
+    const rootDir = await createTempAwsProfileDir();
+    await writeAwsProfileFiles(rootDir, {
+      config: ['[profile dolssh-prod]', 'region = ap-northeast-2', ''].join('\n'),
+      credentials: ['[dolssh-prod]', 'aws_access_key_id = AKIAEXISTING', 'aws_secret_access_key = secret', ''].join('\n'),
+    });
+    const service = new AwsService(rootDir) as unknown as {
       ensureAwsCliAvailable: ReturnType<typeof vi.fn>;
-      listProfiles: ReturnType<typeof vi.fn>;
       runResolvedCommandWithEnv: ReturnType<typeof vi.fn>;
-      runResolvedCommand: ReturnType<typeof vi.fn>;
       createProfile: (input: {
         kind: 'static';
         profileName: string;
@@ -230,9 +243,7 @@ describe('AwsService.createProfile', () => {
     };
 
     service.ensureAwsCliAvailable = vi.fn().mockResolvedValue(undefined);
-    service.listProfiles = vi.fn().mockResolvedValue([{ name: 'dolssh-prod' }]);
     service.runResolvedCommandWithEnv = vi.fn();
-    service.runResolvedCommand = vi.fn();
 
     await expect(
       service.createProfile({
@@ -244,15 +255,13 @@ describe('AwsService.createProfile', () => {
       }),
     ).rejects.toThrow('같은 이름의 AWS 프로필이 이미 존재합니다.');
     expect(service.runResolvedCommandWithEnv).not.toHaveBeenCalled();
-    expect(service.runResolvedCommand).not.toHaveBeenCalled();
   });
 
   it('does not write a region when it is omitted', async () => {
-    const service = new AwsService() as unknown as {
+    const rootDir = await createTempAwsProfileDir();
+    const service = new AwsService(rootDir) as unknown as {
       ensureAwsCliAvailable: ReturnType<typeof vi.fn>;
-      listProfiles: ReturnType<typeof vi.fn>;
       runResolvedCommandWithEnv: ReturnType<typeof vi.fn>;
-      runResolvedCommand: ReturnType<typeof vi.fn>;
       createProfile: (input: {
         kind: 'static';
         profileName: string;
@@ -263,14 +272,8 @@ describe('AwsService.createProfile', () => {
     };
 
     service.ensureAwsCliAvailable = vi.fn().mockResolvedValue(undefined);
-    service.listProfiles = vi.fn().mockResolvedValue([]);
     service.runResolvedCommandWithEnv = vi.fn().mockResolvedValue({
       stdout: '{}',
-      stderr: '',
-      exitCode: 0,
-    });
-    service.runResolvedCommand = vi.fn().mockResolvedValue({
-      stdout: '',
       stderr: '',
       exitCode: 0,
     });
@@ -283,7 +286,11 @@ describe('AwsService.createProfile', () => {
       region: null,
     });
 
-    expect(service.runResolvedCommand).toHaveBeenCalledTimes(2);
+    const config = await readFile(path.join(rootDir, 'config'), 'utf8');
+    const credentials = await readFile(path.join(rootDir, 'credentials'), 'utf8');
+    expect(config).not.toContain('region =');
+    expect(config).not.toContain('[profile dolssh-prod]');
+    expect(credentials).toContain('[dolssh-prod]');
   });
 
   it('fails validation without writing any profile values when credentials are invalid', async () => {
@@ -362,9 +369,17 @@ describe('AwsService.createProfile', () => {
 
   it('translates AssumeRole access denied errors for role profiles', async () => {
     const rootDir = await createTempAwsProfileDir();
+    await writeAwsProfileFiles(rootDir, {
+      config: ['[default]', 'region = ap-northeast-2', ''].join('\n'),
+      credentials: [
+        '[default]',
+        'aws_access_key_id = AKIADEFAULT1234',
+        'aws_secret_access_key = default-secret',
+        '',
+      ].join('\n'),
+    });
     const service = new AwsService(rootDir) as unknown as {
       ensureAwsCliAvailable: ReturnType<typeof vi.fn>;
-      listProfiles: ReturnType<typeof vi.fn>;
       runResolvedCommandWithEnv: ReturnType<typeof vi.fn>;
       runResolvedCommand: ReturnType<typeof vi.fn>;
       createProfile: (input: {
@@ -377,7 +392,6 @@ describe('AwsService.createProfile', () => {
     };
 
     service.ensureAwsCliAvailable = vi.fn().mockResolvedValue(undefined);
-    service.listProfiles = vi.fn().mockResolvedValue([{ name: 'default' }]);
     service.runResolvedCommandWithEnv = vi.fn().mockResolvedValue({
       stdout: '',
       stderr:
@@ -402,11 +416,18 @@ describe('AwsService.createProfile', () => {
 
   it('validates role profiles by assuming the role with the selected source profile', async () => {
     const rootDir = await createTempAwsProfileDir();
-    await writeAwsProfileFiles(rootDir, {});
+    await writeAwsProfileFiles(rootDir, {
+      config: ['[default]', 'region = ap-northeast-2', ''].join('\n'),
+      credentials: [
+        '[default]',
+        'aws_access_key_id = AKIADEFAULT1234',
+        'aws_secret_access_key = default-secret',
+        '',
+      ].join('\n'),
+    });
 
     const service = new AwsService(rootDir) as unknown as {
       ensureAwsCliAvailable: ReturnType<typeof vi.fn>;
-      listProfiles: ReturnType<typeof vi.fn>;
       runResolvedCommandWithEnv: ReturnType<typeof vi.fn>;
       createProfile: (input: {
         kind: 'role';
@@ -418,7 +439,6 @@ describe('AwsService.createProfile', () => {
     };
 
     service.ensureAwsCliAvailable = vi.fn().mockResolvedValue(undefined);
-    service.listProfiles = vi.fn().mockResolvedValue([{ name: 'default' }]);
     service.runResolvedCommandWithEnv = vi.fn().mockResolvedValue({
       stdout: JSON.stringify({
         Credentials: {
@@ -467,9 +487,22 @@ describe('AwsService.createProfile', () => {
 
   it('translates invalid or expired SSO sessions during role validation', async () => {
     const rootDir = await createTempAwsProfileDir();
+    await writeAwsProfileFiles(rootDir, {
+      config: [
+        '[default]',
+        'sso_session = gridwiz',
+        'sso_account_id = 123456789012',
+        'sso_role_name = developer',
+        '',
+        '[sso-session gridwiz]',
+        'sso_start_url = https://example.awsapps.com/start',
+        'sso_region = ap-northeast-2',
+        '',
+      ].join('\n'),
+      credentials: '',
+    });
     const service = new AwsService(rootDir) as unknown as {
       ensureAwsCliAvailable: ReturnType<typeof vi.fn>;
-      listProfiles: ReturnType<typeof vi.fn>;
       runResolvedCommandWithEnv: ReturnType<typeof vi.fn>;
       createProfile: (input: {
         kind: 'role';
@@ -481,7 +514,6 @@ describe('AwsService.createProfile', () => {
     };
 
     service.ensureAwsCliAvailable = vi.fn().mockResolvedValue(undefined);
-    service.listProfiles = vi.fn().mockResolvedValue([{ name: 'default' }]);
     service.runResolvedCommandWithEnv = vi.fn().mockResolvedValue({
       stdout: '',
       stderr: 'Error when retrieving token from sso: Token has expired and refresh failed',
@@ -503,9 +535,17 @@ describe('AwsService.createProfile', () => {
 
   it('translates RoleArn parameter validation errors during role validation', async () => {
     const rootDir = await createTempAwsProfileDir();
+    await writeAwsProfileFiles(rootDir, {
+      config: ['[default]', 'region = ap-northeast-2', ''].join('\n'),
+      credentials: [
+        '[default]',
+        'aws_access_key_id = AKIADEFAULT1234',
+        'aws_secret_access_key = default-secret',
+        '',
+      ].join('\n'),
+    });
     const service = new AwsService(rootDir) as unknown as {
       ensureAwsCliAvailable: ReturnType<typeof vi.fn>;
-      listProfiles: ReturnType<typeof vi.fn>;
       runResolvedCommandWithEnv: ReturnType<typeof vi.fn>;
       createProfile: (input: {
         kind: 'role';
@@ -517,7 +557,6 @@ describe('AwsService.createProfile', () => {
     };
 
     service.ensureAwsCliAvailable = vi.fn().mockResolvedValue(undefined);
-    service.listProfiles = vi.fn().mockResolvedValue([{ name: 'default' }]);
     service.runResolvedCommandWithEnv = vi.fn().mockResolvedValue({
       stdout: '',
       stderr:
@@ -693,7 +732,6 @@ describe('AwsService AWS profile management', () => {
         '',
         '[profile sso-profile]',
         'sso_session = corp-session',
-        'sso_start_url = https://example.awsapps.com/start',
         'sso_account_id = 123456789012',
         'sso_role_name = AdministratorAccess',
         '',
@@ -709,6 +747,7 @@ describe('AwsService AWS profile management', () => {
         '',
         '[sso-session corp-session]',
         'sso_start_url = https://example.awsapps.com/start',
+        'sso_region = ap-northeast-2',
       ].join('\n'),
       credentials: [
         '[static-profile]',
@@ -718,11 +757,11 @@ describe('AwsService AWS profile management', () => {
     });
 
     const service = new AwsService(rootDir) as unknown as {
-      getProfileStatus: ReturnType<typeof vi.fn>;
+      getProfileStatusFromRoot: ReturnType<typeof vi.fn>;
       getProfileDetails: (profileName: string) => Promise<AwsProfileDetails>;
     };
 
-    service.getProfileStatus = vi.fn().mockImplementation(async (profileName: string) => ({
+    service.getProfileStatusFromRoot = vi.fn().mockImplementation(async (profileName: string) => ({
       profileName,
       available: true,
       isSsoProfile: profileName === 'sso-profile',
@@ -747,11 +786,12 @@ describe('AwsService AWS profile management', () => {
     });
     await expect(service.getProfileDetails('sso-profile')).resolves.toMatchObject({
       kind: 'sso',
-      ssoSession: 'corp-session',
+      ssoSession: expect.stringMatching(/^dolssh-[0-9a-f]{12}$/),
       ssoStartUrl: 'https://example.awsapps.com/start',
+      ssoRegion: 'ap-northeast-2',
       ssoAccountId: '123456789012',
       ssoRoleName: 'AdministratorAccess',
-      orphanedSsoSessionName: 'corp-session',
+      orphanedSsoSessionName: expect.stringMatching(/^dolssh-[0-9a-f]{12}$/),
     });
     await expect(service.getProfileDetails('role-profile')).resolves.toMatchObject({
       kind: 'role',
@@ -759,12 +799,126 @@ describe('AwsService AWS profile management', () => {
       sourceProfile: 'static-profile',
     });
     await expect(service.getProfileDetails('process-profile')).resolves.toMatchObject({
-      kind: 'credential-process',
-      credentialProcess: 'node scripts/aws-creds.js',
+      kind: 'unknown',
+      credentialProcess: null,
     });
     await expect(service.getProfileDetails('unknown-profile')).resolves.toMatchObject({
       kind: 'unknown',
     });
+  });
+
+  it('imports external profiles into the managed store and carries role and sso dependencies with them', async () => {
+    const managedRootDir = await createTempAwsProfileDir();
+    const externalRootDir = await createTempAwsProfileDir();
+    await writeAwsProfileFiles(externalRootDir, {
+      config: [
+        '[profile base-static]',
+        'region = ap-northeast-2',
+        '',
+        '[profile admin-role]',
+        'role_arn = arn:aws:iam::123456789012:role/Admin',
+        'source_profile = base-static',
+        '',
+        '[profile corp-sso]',
+        'sso_session = corp-session',
+        'sso_account_id = 123456789012',
+        'sso_role_name = AdministratorAccess',
+        'region = ap-northeast-2',
+        '',
+        '[sso-session corp-session]',
+        'sso_start_url = https://example.awsapps.com/start',
+        'sso_region = ap-northeast-2',
+        'sso_registration_scopes = sso:account:access',
+        '',
+      ].join('\n'),
+      credentials: [
+        '[base-static]',
+        'aws_access_key_id = AKIATEST12345678',
+        'aws_secret_access_key = secret-value',
+        '',
+      ].join('\n'),
+    });
+    await mkdir(path.join(externalRootDir, 'sso', 'cache'), { recursive: true });
+    await writeFile(
+      path.join(externalRootDir, 'sso', 'cache', 'token.json'),
+      JSON.stringify({ accessToken: 'external-only-token' }),
+      'utf8',
+    );
+
+    const service = new AwsService(managedRootDir, externalRootDir);
+
+    await expect(
+      service.importExternalProfiles({
+        profileNames: ['admin-role', 'corp-sso'],
+      }),
+    ).resolves.toEqual({
+      importedProfileNames: ['admin-role', 'base-static', 'corp-sso'],
+      skippedProfileNames: [],
+    });
+
+    const managedConfig = await readFile(path.join(managedRootDir, 'config'), 'utf8');
+    const managedCredentials = await readFile(
+      path.join(managedRootDir, 'credentials'),
+      'utf8',
+    );
+
+    expect(managedConfig).toContain('[profile base-static]');
+    expect(managedConfig).toContain('[profile admin-role]');
+    expect(managedConfig).toContain('source_profile = base-static');
+    expect(managedConfig).toContain('[profile corp-sso]');
+    expect(managedConfig).toMatch(/sso_session = dolssh-[0-9a-f]{12}/);
+    expect(managedConfig).toMatch(/\[sso-session dolssh-[0-9a-f]{12}\]/);
+    expect(managedCredentials).toContain('[base-static]');
+    await expect(
+      readFile(path.join(managedRootDir, 'sso', 'cache', 'token.json'), 'utf8'),
+    ).rejects.toMatchObject({
+      code: 'ENOENT',
+    });
+  });
+
+  it('skips importing external profiles when the managed store already has the same profile name', async () => {
+    const managedRootDir = await createTempAwsProfileDir();
+    const externalRootDir = await createTempAwsProfileDir();
+    await writeAwsProfileFiles(managedRootDir, {
+      config: ['[profile shared-profile]', 'region = us-east-1', ''].join('\n'),
+      credentials: [
+        '[shared-profile]',
+        'aws_access_key_id = AKIAMANAGED1234',
+        'aws_secret_access_key = managed-secret',
+        '',
+      ].join('\n'),
+    });
+    await writeAwsProfileFiles(externalRootDir, {
+      config: ['[profile shared-profile]', 'region = ap-northeast-2', ''].join('\n'),
+      credentials: [
+        '[shared-profile]',
+        'aws_access_key_id = AKIAEXTERNAL1234',
+        'aws_secret_access_key = external-secret',
+        '',
+      ].join('\n'),
+    });
+
+    const service = new AwsService(managedRootDir, externalRootDir);
+
+    await expect(
+      service.importExternalProfiles({
+        profileNames: ['shared-profile'],
+      }),
+    ).resolves.toEqual({
+      importedProfileNames: [],
+      skippedProfileNames: ['shared-profile'],
+    });
+
+    const managedConfig = await readFile(path.join(managedRootDir, 'config'), 'utf8');
+    const managedCredentials = await readFile(
+      path.join(managedRootDir, 'credentials'),
+      'utf8',
+    );
+
+    expect(managedConfig).toContain('region = us-east-1');
+    expect(managedConfig).not.toContain('region = ap-northeast-2');
+    expect(managedCredentials).toContain('AKIAMANAGED1234');
+    expect(managedCredentials).not.toContain('AKIAEXTERNAL1234');
   });
 
   it('removes region from the config file when updating a static profile without a region', async () => {
@@ -781,9 +935,7 @@ describe('AwsService AWS profile management', () => {
 
     const service = new AwsService(rootDir) as unknown as {
       ensureAwsCliAvailable: ReturnType<typeof vi.fn>;
-      getProfileDetails: ReturnType<typeof vi.fn>;
       runResolvedCommandWithEnv: ReturnType<typeof vi.fn>;
-      runResolvedCommand: ReturnType<typeof vi.fn>;
       updateProfile: (input: {
         profileName: string;
         accessKeyId: string;
@@ -793,37 +945,8 @@ describe('AwsService AWS profile management', () => {
     };
 
     service.ensureAwsCliAvailable = vi.fn().mockResolvedValue(undefined);
-    service.getProfileDetails = vi.fn().mockResolvedValue({
-      profileName: 'static-profile',
-      available: true,
-      isSsoProfile: false,
-      isAuthenticated: true,
-      configuredRegion: 'ap-northeast-2',
-      accountId: null,
-      arn: null,
-      errorMessage: null,
-      missingTools: [],
-      kind: 'static',
-      maskedAccessKeyId: 'AKIA****ALUE',
-      hasSecretAccessKey: true,
-      hasSessionToken: false,
-      roleArn: null,
-      sourceProfile: null,
-      credentialProcess: null,
-      ssoSession: null,
-      ssoStartUrl: null,
-      ssoAccountId: null,
-      ssoRoleName: null,
-      referencedByProfileNames: [],
-      orphanedSsoSessionName: null,
-    });
     service.runResolvedCommandWithEnv = vi.fn().mockResolvedValue({
       stdout: '{}',
-      stderr: '',
-      exitCode: 0,
-    });
-    service.runResolvedCommand = vi.fn().mockResolvedValue({
-      stdout: '',
       stderr: '',
       exitCode: 0,
     });
@@ -836,15 +959,27 @@ describe('AwsService AWS profile management', () => {
     });
 
     const config = await readFile(path.join(rootDir, 'config'), 'utf8');
-    expect(config).toContain('[profile static-profile]');
+    const credentials = await readFile(path.join(rootDir, 'credentials'), 'utf8');
+    expect(config.trim()).toBe('');
     expect(config).not.toContain('region = ap-northeast-2');
+    expect(credentials).toContain('aws_access_key_id = AKIANEWVALUE');
+    expect(credentials).toContain('aws_secret_access_key = new-secret');
     expect(service.runResolvedCommandWithEnv).toHaveBeenCalled();
   });
 
   it('translates SignatureDoesNotMatch during static profile updates', async () => {
-    const service = new AwsService() as unknown as {
+    const rootDir = await createTempAwsProfileDir();
+    await writeAwsProfileFiles(rootDir, {
+      config: ['[profile static-profile]', 'region = ap-northeast-2', ''].join('\n'),
+      credentials: [
+        '[static-profile]',
+        'aws_access_key_id = AKIAOLDVALUE',
+        'aws_secret_access_key = old-secret',
+        '',
+      ].join('\n'),
+    });
+    const service = new AwsService(rootDir) as unknown as {
       ensureAwsCliAvailable: ReturnType<typeof vi.fn>;
-      getProfileDetails: ReturnType<typeof vi.fn>;
       runResolvedCommandWithEnv: ReturnType<typeof vi.fn>;
       runResolvedCommand: ReturnType<typeof vi.fn>;
       updateProfile: (input: {
@@ -856,31 +991,6 @@ describe('AwsService AWS profile management', () => {
     };
 
     service.ensureAwsCliAvailable = vi.fn().mockResolvedValue(undefined);
-    service.getProfileDetails = vi.fn().mockResolvedValue({
-      profileName: 'static-profile',
-      available: true,
-      isSsoProfile: false,
-      isAuthenticated: true,
-      configuredRegion: 'ap-northeast-2',
-      accountId: null,
-      arn: null,
-      errorMessage: null,
-      missingTools: [],
-      kind: 'static',
-      maskedAccessKeyId: 'AKIA****ALUE',
-      hasSecretAccessKey: true,
-      hasSessionToken: false,
-      roleArn: null,
-      sourceProfile: null,
-      credentialProcess: null,
-      ssoSession: null,
-      ssoStartUrl: null,
-      ssoRegion: null,
-      ssoAccountId: null,
-      ssoRoleName: null,
-      referencedByProfileNames: [],
-      orphanedSsoSessionName: null,
-    });
     service.runResolvedCommandWithEnv = vi.fn().mockResolvedValue({
       stdout: '',
       stderr:
@@ -1032,12 +1142,17 @@ describe('AwsService AWS profile management', () => {
       config: [
         '[profile primary-sso]',
         'sso_session = corp-session',
+        'sso_account_id = 123456789012',
+        'sso_role_name = AdministratorAccess',
         '',
         '[profile backup-sso]',
         'sso_session = corp-session',
+        'sso_account_id = 123456789012',
+        'sso_role_name = AdministratorAccess',
         '',
         '[sso-session corp-session]',
         'sso_start_url = https://example.awsapps.com/start',
+        'sso_region = ap-northeast-2',
         '',
       ].join('\n'),
       credentials: '',
@@ -1060,7 +1175,7 @@ describe('AwsService AWS profile management', () => {
     const config = await readFile(path.join(rootDir, 'config'), 'utf8');
     expect(config).not.toContain('[profile primary-sso]');
     expect(config).toContain('[profile backup-sso]');
-    expect(config).toContain('[sso-session corp-session]');
+    expect(config).toMatch(/\[sso-session dolssh-[0-9a-f]{12}\]/);
   });
 
   it('deletes the default profile and removes an orphaned sso-session section', async () => {
@@ -1069,9 +1184,12 @@ describe('AwsService AWS profile management', () => {
       config: [
         '[default]',
         'sso_session = corp-session',
+        'sso_account_id = 123456789012',
+        'sso_role_name = AdministratorAccess',
         '',
         '[sso-session corp-session]',
         'sso_start_url = https://example.awsapps.com/start',
+        'sso_region = ap-northeast-2',
         '',
       ].join('\n'),
       credentials: '',

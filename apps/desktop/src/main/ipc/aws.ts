@@ -11,14 +11,28 @@ import { ipcChannels } from "../../common/ipc-channels";
 import type { AwsEc2HostRecord, AwsEcsHostRecord, MainIpcContext } from "./context";
 
 export function registerAwsIpcHandlers(ctx: MainIpcContext): void {
+  const resolveHostProfileName = (host: {
+    awsProfileId?: string | null;
+    awsProfileName: string;
+  }): string =>
+    ctx.awsService.resolveManagedProfileNameOrFallback(
+      host.awsProfileId,
+      host.awsProfileName,
+    ) ?? host.awsProfileName;
+
   ipcMain.handle(ipcChannels.aws.listProfiles, async () =>
     ctx.awsService.listProfiles(),
+  );
+
+  ipcMain.handle(ipcChannels.aws.listExternalProfiles, async () =>
+    ctx.awsService.listExternalProfiles(),
   );
 
   ipcMain.handle(
     ipcChannels.aws.createProfile,
     async (_event, input: AwsProfileCreateInput) => {
       await ctx.awsService.createProfile(input);
+      ctx.queueSync();
     },
   );
 
@@ -35,9 +49,32 @@ export function registerAwsIpcHandlers(ctx: MainIpcContext): void {
   );
 
   ipcMain.handle(
+    ipcChannels.aws.getExternalProfileDetails,
+    async (_event, profileName: string) =>
+      ctx.awsService.getExternalProfileDetails(profileName),
+  );
+
+  ipcMain.handle(
+    ipcChannels.aws.importExternalProfiles,
+    async (_event, input: { profileNames: string[] }) => {
+      const result = await ctx.awsService.importExternalProfiles(input);
+      const updatedHosts = ctx.hosts.backfillAwsProfileReferences(
+        (await ctx.awsService.listProfiles())
+          .filter((profile) => profile.id)
+          .map((profile) => ({ id: profile.id!, name: profile.name }))
+      );
+      if (result.importedProfileNames.length > 0 || updatedHosts.length > 0) {
+        ctx.queueSync();
+      }
+      return result;
+    },
+  );
+
+  ipcMain.handle(
     ipcChannels.aws.updateProfile,
     async (_event, input: AwsProfileUpdateInput) => {
       await ctx.awsService.updateProfile(input);
+      ctx.queueSync();
     },
   );
 
@@ -45,13 +82,23 @@ export function registerAwsIpcHandlers(ctx: MainIpcContext): void {
     ipcChannels.aws.renameProfile,
     async (_event, input: AwsProfileRenameInput) => {
       await ctx.awsService.renameProfile(input);
+      const details = await ctx.awsService.getProfileDetails(input.nextProfileName);
+      if (details.id) {
+        ctx.hosts.updateAwsProfileCache(details.id, input.nextProfileName);
+      }
+      ctx.queueSync();
     },
   );
 
   ipcMain.handle(
     ipcChannels.aws.deleteProfile,
     async (_event, profileName: string) => {
+      const details = await ctx.awsService.getProfileDetails(profileName);
       await ctx.awsService.deleteProfile(profileName);
+      if (details.id) {
+        ctx.syncOutbox.upsertDeletion("awsProfiles", details.id);
+      }
+      ctx.queueSync();
     },
   );
 
@@ -93,7 +140,7 @@ export function registerAwsIpcHandlers(ctx: MainIpcContext): void {
         throw new Error("이 기능은 ECS host에서만 사용할 수 있습니다.");
       }
       return ctx.awsService.describeEcsClusterSnapshot(
-        host.awsProfileName,
+        resolveHostProfileName(host),
         host.awsRegion,
         host.awsEcsClusterArn,
       );
@@ -108,7 +155,7 @@ export function registerAwsIpcHandlers(ctx: MainIpcContext): void {
         throw new Error("이 기능은 ECS host에서만 사용할 수 있습니다.");
       }
       return ctx.awsService.describeEcsClusterUtilization(
-        host.awsProfileName,
+        resolveHostProfileName(host),
         host.awsRegion,
         host.awsEcsClusterArn,
       );
@@ -122,7 +169,7 @@ export function registerAwsIpcHandlers(ctx: MainIpcContext): void {
       ctx.assertAwsEcsHost(host);
       const ecsHost = host as AwsEcsHostRecord;
       return ctx.awsService.describeEcsServiceActionContext(
-        ecsHost.awsProfileName,
+        resolveHostProfileName(ecsHost),
         ecsHost.awsRegion,
         ecsHost.awsEcsClusterArn,
         serviceName,
@@ -146,7 +193,7 @@ export function registerAwsIpcHandlers(ctx: MainIpcContext): void {
       ctx.assertAwsEcsHost(host);
       const ecsHost = host as AwsEcsHostRecord;
       return ctx.awsService.loadEcsServiceLogs({
-        profileName: ecsHost.awsProfileName,
+        profileName: resolveHostProfileName(ecsHost),
         region: ecsHost.awsRegion,
         clusterArn: ecsHost.awsEcsClusterArn,
         serviceName: input.serviceName,
@@ -175,10 +222,11 @@ export function registerAwsIpcHandlers(ctx: MainIpcContext): void {
         const host = ctx.hosts.getById(input.hostId);
         ctx.assertAwsEcsHost(host);
         const ecsHost = host as AwsEcsHostRecord;
+        const profileName = resolveHostProfileName(ecsHost);
         await ctx.awsService.ensureAwsCliAvailable();
         await ctx.awsService.ensureSessionManagerPluginAvailable();
         const actionContext = await ctx.awsService.describeEcsServiceActionContext(
-          ecsHost.awsProfileName,
+          profileName,
           ecsHost.awsRegion,
           ecsHost.awsEcsClusterArn,
           input.serviceName,
@@ -210,7 +258,7 @@ export function registerAwsIpcHandlers(ctx: MainIpcContext): void {
             "ecs",
             "execute-command",
             "--profile",
-            ecsHost.awsProfileName,
+            profileName,
             "--region",
             ecsHost.awsRegion,
             "--cluster",
@@ -244,10 +292,11 @@ export function registerAwsIpcHandlers(ctx: MainIpcContext): void {
       const host = ctx.hosts.getById(input.hostId);
       ctx.assertAwsEcsHost(host);
       const ecsHost = host as AwsEcsHostRecord;
+      const profileName = resolveHostProfileName(ecsHost);
       await ctx.awsService.ensureAwsCliAvailable();
       await ctx.awsService.ensureSessionManagerPluginAvailable();
       const targetId = await ctx.awsService.resolveEcsTaskTunnelTargetForTask({
-        profileName: ecsHost.awsProfileName,
+        profileName,
         region: ecsHost.awsRegion,
         clusterArn: ecsHost.awsEcsClusterArn,
         taskArn: input.taskArn,
@@ -258,7 +307,7 @@ export function registerAwsIpcHandlers(ctx: MainIpcContext): void {
         ruleId: runtimeId,
         hostId: ecsHost.id,
         transport: "ecs-task",
-        profileName: ecsHost.awsProfileName,
+        profileName,
         region: ecsHost.awsRegion,
         targetType: "ecs-task",
         targetId,
@@ -285,7 +334,7 @@ export function registerAwsIpcHandlers(ctx: MainIpcContext): void {
       ctx.assertAwsEcsHost(host);
       const ecsHost = host as AwsEcsHostRecord;
       return ctx.awsService.listEcsTaskTunnelServices(
-        ecsHost.awsProfileName,
+        resolveHostProfileName(ecsHost),
         ecsHost.awsRegion,
         ecsHost.awsEcsClusterArn,
       );
@@ -299,7 +348,7 @@ export function registerAwsIpcHandlers(ctx: MainIpcContext): void {
       ctx.assertAwsEcsHost(host);
       const ecsHost = host as AwsEcsHostRecord;
       return ctx.awsService.describeEcsTaskTunnelService(
-        ecsHost.awsProfileName,
+        resolveHostProfileName(ecsHost),
         ecsHost.awsRegion,
         ecsHost.awsEcsClusterArn,
         serviceName,

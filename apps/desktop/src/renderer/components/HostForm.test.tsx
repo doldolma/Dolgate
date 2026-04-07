@@ -2,6 +2,14 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest';
 import type { AwsEc2HostRecord, SecretMetadataRecord, SshHostRecord } from '@shared';
 import { HostForm } from './HostForm';
+import { listAwsProfiles } from '../services/desktop/imports';
+
+vi.mock('../services/desktop/imports', () => ({
+  listAwsProfiles: vi.fn().mockResolvedValue([
+    { id: 'profile-default', name: 'default' },
+    { id: 'profile-prod', name: 'prod-admin' },
+  ]),
+}));
 
 const groupOptions = [{ value: null, label: 'Ungrouped' }];
 const keychainEntries: SecretMetadataRecord[] = [];
@@ -33,6 +41,7 @@ function createAwsHost(
     id: 'aws-host-1',
     kind: 'aws-ec2',
     label: 'AWS Prod',
+    awsProfileId: 'profile-default',
     awsProfileName: 'default',
     awsRegion: 'ap-northeast-2',
     awsInstanceId: 'i-abc',
@@ -278,6 +287,38 @@ describe('HostForm', () => {
         awsSshPort: 2222
       }),
       undefined
+    );
+  });
+
+  it('allows changing the AWS profile for an existing AWS host', async () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+
+    render(
+      <HostForm
+        host={createAwsHost()}
+        keychainEntries={keychainEntries}
+        groupOptions={groupOptions}
+        onSubmit={onSubmit}
+      />
+    );
+
+    await waitFor(() => expect(listAwsProfiles).toHaveBeenCalled());
+
+    fireEvent.change(screen.getByLabelText('AWS Profile'), {
+      target: { value: 'profile-prod' },
+    });
+
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1), {
+      timeout: 1200,
+    });
+
+    expect(onSubmit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: 'aws-ec2',
+        awsProfileId: 'profile-prod',
+        awsProfileName: 'prod-admin',
+      }),
+      undefined,
     );
   });
 });
