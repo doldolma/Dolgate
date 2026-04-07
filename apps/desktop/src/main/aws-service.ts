@@ -1,7 +1,9 @@
-import { access } from "node:fs/promises";
+import { access, copyFile, mkdir, mkdtemp, readdir, readFile, rm } from "node:fs/promises";
 import { constants as fsConstants } from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { spawn } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import type {
   AwsEc2InstanceSummary,
   AwsEcsClusterListItem,
@@ -23,12 +25,35 @@ import type {
   AwsEcsServiceSummary,
   AwsHostSshInspectionInput,
   AwsHostSshInspectionResult,
+  AwsProfileCreateInput,
+  AwsProfileDetails,
+  AwsProfileKind,
+  AwsProfileRenameInput,
+  AwsSsoProfileAccountOption,
+  AwsSsoProfilePrepareInput,
+  AwsSsoProfilePrepareResult,
+  AwsSsoProfileRoleOption,
   AwsProfileStatus,
   AwsProfileSummary,
+  AwsProfileUpdateInput,
 } from "@shared";
+import {
+  deleteAwsProfileFromDocuments,
+  getDefaultAwsProfileRootDir,
+  getAwsSsoSessionValues,
+  inspectAwsProfileDocuments,
+  loadAwsProfileDocuments,
+  removeAwsProfileKeyFromDocuments,
+  renameAwsProfileInDocuments,
+  setAwsProfileKeyValueInDocuments,
+  setAwsSsoSessionKeyValueInDocuments,
+  writeAwsProfileDocuments,
+} from "./aws-profile-files";
 
 const REGION_DISCOVERY_REGION = "us-east-1";
 const ECS_LOG_INITIAL_LOOKBACK_MS = 30 * 60 * 1000;
+const AWS_SSO_REGISTRATION_SCOPES = "sso:account:access";
+const SSO_PREPARATION_TTL_MS = 10 * 60 * 1000;
 
 function isE2EFakeAwsSessionEnabled(): boolean {
   const mode = process.env.DOLSSH_E2E_FAKE_AWS_SESSION;
@@ -43,6 +68,25 @@ interface CommandResult {
 
 interface CommandError extends Error {
   code?: string;
+}
+
+interface AwsPendingSsoPreparation {
+  preparationToken: string;
+  profileName: string;
+  ssoSessionName: string;
+  ssoStartUrl: string;
+  ssoRegion: string;
+  region: string | null;
+  awsRootDir: string;
+  homeDir: string;
+  expiresAt: number;
+  accounts: AwsSsoProfileAccountOption[];
+  rolesByAccountId: Record<string, AwsSsoProfileRoleOption[]>;
+}
+
+interface AwsSsoTokenCacheEntry {
+  accessToken?: string;
+  expiresAt?: string;
 }
 
 const resolvedExecutableCache = new Map<string, string>();
@@ -224,6 +268,174 @@ function normalizeAwsCliError(stderr: string, fallback: string): Error {
     return new Error(fallback);
   }
   return new Error(message);
+}
+
+async function copyDirectoryRecursive(
+  sourceDir: string,
+  targetDir: string,
+): Promise<void> {
+  const entries = await readdir(sourceDir, { withFileTypes: true });
+  await mkdir(targetDir, { recursive: true });
+
+  for (const entry of entries) {
+    const sourcePath = path.join(sourceDir, entry.name);
+    const targetPath = path.join(targetDir, entry.name);
+
+    if (entry.isDirectory()) {
+      await copyDirectoryRecursive(sourcePath, targetPath);
+      continue;
+    }
+
+    if (entry.isFile()) {
+      await copyFile(sourcePath, targetPath);
+    }
+  }
+}
+
+type AwsProfileFlowErrorContext =
+  | "static-validation"
+  | "role-validation"
+  | "sso-login"
+  | "sso-account-list"
+  | "sso-role-list"
+  | "sso-final-validation";
+
+function extractAwsCliErrorCode(message: string): string | null {
+  const match = message.match(
+    /An error occurred \(([^)]+)\) when calling the [^:]+ operation:/i,
+  );
+  return match?.[1]?.trim() || null;
+}
+
+function isAwsSsoSessionInvalidMessage(message: string): boolean {
+  return /sso session associated with this profile has expired|sso token.+expired|aws sso login|token has expired|session has expired|otherwise invalid/iu.test(
+    message,
+  );
+}
+
+function normalizeAwsProfileFlowError(
+  stderr: string,
+  fallback: string,
+  context: AwsProfileFlowErrorContext,
+): Error {
+  const message = stderr.trim();
+  if (!message) {
+    return new Error(fallback);
+  }
+
+  const errorCode = extractAwsCliErrorCode(message);
+
+  if (context === "static-validation") {
+    if (
+      errorCode === "SignatureDoesNotMatch" ||
+      /signature does not match the signature you provided/i.test(message)
+    ) {
+      return new Error(
+        "입력한 Access Key 또는 Secret이 올바르지 않습니다. Secret이 다르거나 잘못된 키 조합일 수 있습니다. AWS 자격 증명을 다시 확인해 주세요.",
+      );
+    }
+    if (
+      errorCode === "InvalidClientTokenId" ||
+      errorCode === "UnrecognizedClientException" ||
+      /The security token included in the request is invalid/i.test(message)
+    ) {
+      return new Error(
+        "입력한 Access Key 또는 Secret이 올바르지 않습니다. Access Key가 잘못되었거나 비활성화되었을 수 있습니다. AWS 자격 증명을 다시 확인해 주세요.",
+      );
+    }
+  }
+
+  if (context === "role-validation") {
+    if (
+      isAwsSsoSessionInvalidMessage(message) ||
+      /retrieving token from sso|refresh failed/i.test(message)
+    ) {
+      return new Error(
+        "선택한 source profile의 AWS SSO 로그인 세션이 유효하지 않습니다. 먼저 해당 source profile로 다시 로그인해 주세요.",
+      );
+    }
+    if (
+      (errorCode === "AccessDenied" || /AccessDenied/i.test(message)) &&
+      /(AssumeRole|assume role|sts:AssumeRole)/i.test(message)
+    ) {
+      return new Error(
+        "선택한 source profile로 이 Role을 Assume할 수 없습니다. IAM 권한과 대상 role trust policy를 확인해 주세요.",
+      );
+    }
+    if (
+      /Parameter validation failed:.*RoleArn/i.test(message) ||
+      ((errorCode === "ValidationError" || /ValidationError/i.test(message)) &&
+        /(role.?arn|AssumeRole|arn:aws:iam::)/i.test(message)) ||
+      /invalid arn/i.test(message)
+    ) {
+      return new Error(
+        "입력한 Role ARN이 올바르지 않거나 대상 Role을 찾을 수 없습니다. Role ARN 형식과 대상 Role을 다시 확인해 주세요.",
+      );
+    }
+  }
+
+  if (context === "sso-login") {
+    if (
+      isAwsSsoSessionInvalidMessage(message) ||
+      /(InvalidRequest|authorization_pending|device authorization|browser|expired)/i.test(
+        message,
+      )
+    ) {
+      return new Error(
+        "AWS SSO 로그인에 실패했습니다. SSO Start URL, SSO Region, 브라우저 로그인 상태를 확인해 주세요.",
+      );
+    }
+  }
+
+  if (context === "sso-account-list" || context === "sso-role-list") {
+    if (
+      isAwsSsoSessionInvalidMessage(message) ||
+      /(AccessDenied|Unauthorized|Forbidden|InvalidRequest|expired|token)/i.test(
+        message,
+      )
+    ) {
+      return new Error(
+        "SSO 로그인 후 account 또는 role 목록을 불러오지 못했습니다. 권한과 SSO 설정을 확인해 주세요.",
+      );
+    }
+  }
+
+  if (context === "sso-final-validation") {
+    if (
+      isAwsSsoSessionInvalidMessage(message) ||
+      /(AccessDenied|Unauthorized|Forbidden|expired|token|PermissionSet|Role)/i.test(
+        message,
+      )
+    ) {
+      return new Error(
+        "선택한 account/role로 인증을 완료하지 못했습니다. 다시 로그인하거나 다른 role을 선택해 주세요.",
+      );
+    }
+  }
+
+  return new Error(message);
+}
+
+function maskAwsAccessKeyId(value?: string | null): string | null {
+  const trimmed = value?.trim() ?? "";
+  if (!trimmed) {
+    return null;
+  }
+  if (trimmed.length <= 8) {
+    return trimmed;
+  }
+  return `${trimmed.slice(0, 4)}${"*".repeat(trimmed.length - 8)}${trimmed.slice(-4)}`;
+}
+
+function normalizeAwsProfileName(input: string, fieldLabel = "프로필명"): string {
+  const trimmed = input.trim();
+  if (!trimmed) {
+    throw new Error(`${fieldLabel}을 입력해 주세요.`);
+  }
+  if (/[\r\n\]]/.test(trimmed)) {
+    throw new Error(`${fieldLabel}에 사용할 수 없는 문자가 포함되어 있습니다.`);
+  }
+  return trimmed;
 }
 
 interface Ec2DescribeInstancesPayload {
@@ -934,6 +1146,15 @@ export function buildSshMetadataProbeCommands(): string[] {
 }
 
 export class AwsService {
+  private readonly pendingSsoPreparations = new Map<
+    string,
+    AwsPendingSsoPreparation
+  >();
+
+  constructor(
+    private readonly awsProfileRootDir = getDefaultAwsProfileRootDir(),
+  ) {}
+
   private async runResolvedCommand(
     command: string,
     args: string[],
@@ -942,6 +1163,496 @@ export class AwsService {
     const executablePath = await resolveExecutable(command);
     const env = await buildAwsCommandEnv();
     return runCommand(executablePath, args, timeoutMs, env);
+  }
+
+  private async runResolvedCommandWithEnv(
+    command: string,
+    args: string[],
+    envPatch: Record<string, string | null | undefined>,
+    timeoutMs = 30_000,
+  ): Promise<CommandResult> {
+    const executablePath = await resolveExecutable(command);
+    const env = await buildAwsCommandEnv();
+    for (const [key, value] of Object.entries(envPatch)) {
+      if (value === null || value === undefined) {
+        delete env[key];
+        continue;
+      }
+      env[key] = value;
+    }
+    return runCommand(executablePath, args, timeoutMs, env);
+  }
+
+  private getAwsRootEnvPatch(
+    homeDir: string,
+    awsRootDir: string,
+  ): Record<string, string> {
+    return {
+      HOME: homeDir,
+      USERPROFILE: homeDir,
+      AWS_CONFIG_FILE: path.join(awsRootDir, "config"),
+      AWS_SHARED_CREDENTIALS_FILE: path.join(awsRootDir, "credentials"),
+    };
+  }
+
+  private getConfiguredAwsRootEnvPatch(): Record<string, string> {
+    const homeDir =
+      path.basename(this.awsProfileRootDir).toLowerCase() === ".aws"
+        ? path.dirname(this.awsProfileRootDir)
+        : process.env.USERPROFILE || process.env.HOME || path.dirname(this.awsProfileRootDir);
+    return this.getAwsRootEnvPatch(homeDir, this.awsProfileRootDir);
+  }
+
+  private async createTempAwsRoot(): Promise<{
+    homeDir: string;
+    awsRootDir: string;
+  }> {
+    const homeDir = await mkdtemp(path.join(os.tmpdir(), "dolssh-aws-home-"));
+    const awsRootDir = path.join(homeDir, ".aws");
+    const sourceConfigPath = path.join(this.awsProfileRootDir, "config");
+    const sourceCredentialsPath = path.join(this.awsProfileRootDir, "credentials");
+    const sourceSsoCacheDir = path.join(this.awsProfileRootDir, "sso", "cache");
+    const targetConfigPath = path.join(awsRootDir, "config");
+    const targetCredentialsPath = path.join(awsRootDir, "credentials");
+    const targetSsoCacheDir = path.join(awsRootDir, "sso", "cache");
+
+    await access(this.awsProfileRootDir, fsConstants.F_OK).catch(() => undefined);
+    await access(sourceConfigPath, fsConstants.F_OK)
+      .then(async () => {
+        await mkdir(path.dirname(targetConfigPath), { recursive: true });
+        await copyFile(sourceConfigPath, targetConfigPath);
+      })
+      .catch(() => undefined);
+    await access(sourceCredentialsPath, fsConstants.F_OK)
+      .then(async () => {
+        await mkdir(path.dirname(targetCredentialsPath), { recursive: true });
+        await copyFile(sourceCredentialsPath, targetCredentialsPath);
+      })
+      .catch(() => undefined);
+    await access(sourceSsoCacheDir, fsConstants.F_OK)
+      .then(async () => {
+        await copyDirectoryRecursive(sourceSsoCacheDir, targetSsoCacheDir);
+      })
+      .catch(() => undefined);
+
+    return { homeDir, awsRootDir };
+  }
+
+  private async destroyTempAwsRoot(homeDir: string): Promise<void> {
+    await rm(homeDir, { recursive: true, force: true });
+  }
+
+  private pruneExpiredSsoPreparations(): void {
+    const now = Date.now();
+    for (const [token, preparation] of this.pendingSsoPreparations.entries()) {
+      if (preparation.expiresAt > now) {
+        continue;
+      }
+      this.pendingSsoPreparations.delete(token);
+      void this.destroyTempAwsRoot(preparation.homeDir);
+    }
+  }
+
+  private async consumeSsoPreparation(
+    preparationToken: string,
+  ): Promise<AwsPendingSsoPreparation> {
+    this.pruneExpiredSsoPreparations();
+    const preparation = this.pendingSsoPreparations.get(preparationToken);
+    if (!preparation) {
+      throw new Error("SSO 준비 정보가 만료되었거나 존재하지 않습니다. 다시 로그인해 주세요.");
+    }
+    if (preparation.expiresAt <= Date.now()) {
+      this.pendingSsoPreparations.delete(preparationToken);
+      await this.destroyTempAwsRoot(preparation.homeDir);
+      throw new Error("SSO 준비 정보가 만료되었습니다. 다시 로그인해 주세요.");
+    }
+    this.pendingSsoPreparations.delete(preparationToken);
+    return preparation;
+  }
+
+  private async readSsoAccessToken(homeDir: string): Promise<string> {
+    const cacheDir = path.join(homeDir, ".aws", "sso", "cache");
+    let files: string[] = [];
+    try {
+      files = await readdir(cacheDir);
+    } catch {
+      throw new Error("AWS SSO access token cache를 찾지 못했습니다.");
+    }
+
+    for (const fileName of files) {
+      if (!fileName.toLowerCase().endsWith(".json")) {
+        continue;
+      }
+      try {
+        const raw = await readFile(path.join(cacheDir, fileName), "utf8");
+        const payload = parseJson<AwsSsoTokenCacheEntry>(
+          raw,
+          "AWS SSO token cache를 해석하지 못했습니다.",
+        );
+        const accessToken = payload.accessToken?.trim();
+        if (accessToken) {
+          return accessToken;
+        }
+      } catch {
+        continue;
+      }
+    }
+
+    throw new Error("AWS SSO access token을 찾지 못했습니다.");
+  }
+
+  private async listSsoAccounts(input: {
+    accessToken: string;
+    ssoRegion: string;
+  }): Promise<AwsSsoProfileAccountOption[]> {
+    const result = await this.runResolvedCommand(
+      "aws",
+      [
+        "sso",
+        "list-accounts",
+        "--access-token",
+        input.accessToken,
+        "--region",
+        input.ssoRegion,
+        "--output",
+        "json",
+      ],
+      60_000,
+    );
+    if (result.exitCode !== 0) {
+      throw normalizeAwsProfileFlowError(
+        result.stderr,
+        "AWS SSO 계정 목록을 불러오지 못했습니다.",
+        "sso-account-list",
+      );
+    }
+
+    const payload = parseJson<{
+      accountList?: Array<{
+        accountId?: string;
+        accountName?: string;
+        emailAddress?: string;
+      }>;
+    }>(result.stdout, "AWS SSO 계정 목록 응답을 해석하지 못했습니다.");
+
+    return (payload.accountList ?? [])
+      .flatMap((item) => {
+        const accountId = item.accountId?.trim() ?? "";
+        if (!accountId) {
+          return [];
+        }
+        return [{
+          accountId,
+          accountName: item.accountName?.trim() || accountId,
+          emailAddress: item.emailAddress?.trim() || null,
+        } satisfies AwsSsoProfileAccountOption];
+      })
+      .sort(
+        (left, right) =>
+          left.accountName.localeCompare(right.accountName) ||
+          left.accountId.localeCompare(right.accountId),
+      );
+  }
+
+  private async listSsoRolesForAccount(input: {
+    accessToken: string;
+    ssoRegion: string;
+    accountId: string;
+  }): Promise<AwsSsoProfileRoleOption[]> {
+    const result = await this.runResolvedCommand(
+      "aws",
+      [
+        "sso",
+        "list-account-roles",
+        "--access-token",
+        input.accessToken,
+        "--account-id",
+        input.accountId,
+        "--region",
+        input.ssoRegion,
+        "--output",
+        "json",
+      ],
+      60_000,
+    );
+    if (result.exitCode !== 0) {
+      throw normalizeAwsProfileFlowError(
+        result.stderr,
+        "AWS SSO role 목록을 불러오지 못했습니다.",
+        "sso-role-list",
+      );
+    }
+
+    const payload = parseJson<{
+      roleList?: Array<{
+        roleName?: string;
+      }>;
+    }>(result.stdout, "AWS SSO role 목록 응답을 해석하지 못했습니다.");
+
+    return (payload.roleList ?? [])
+      .flatMap((item) => {
+        const roleName = item.roleName?.trim() ?? "";
+        if (!roleName) {
+          return [];
+        }
+        return [{
+          accountId: input.accountId,
+          roleName,
+        } satisfies AwsSsoProfileRoleOption];
+      })
+      .sort((left, right) => left.roleName.localeCompare(right.roleName));
+  }
+
+  private async assertProfileNameAvailable(profileName: string): Promise<void> {
+    const existingProfiles = await this.listProfiles();
+    if (existingProfiles.some((profile) => profile.name === profileName)) {
+      throw new Error("같은 이름의 AWS 프로필이 이미 존재합니다.");
+    }
+  }
+
+  private async saveSsoProfileValues(input: {
+    profileName: string;
+    ssoSessionName: string;
+    ssoStartUrl: string;
+    ssoRegion: string;
+    ssoAccountId: string;
+    ssoRoleName: string;
+    region?: string | null;
+  }): Promise<void> {
+    const documents = await loadAwsProfileDocuments(this.awsProfileRootDir);
+    setAwsProfileKeyValueInDocuments(
+      documents,
+      "config",
+      input.profileName,
+      "sso_session",
+      input.ssoSessionName,
+    );
+    setAwsProfileKeyValueInDocuments(
+      documents,
+      "config",
+      input.profileName,
+      "sso_account_id",
+      input.ssoAccountId,
+    );
+    setAwsProfileKeyValueInDocuments(
+      documents,
+      "config",
+      input.profileName,
+      "sso_role_name",
+      input.ssoRoleName,
+    );
+    if (input.region?.trim()) {
+      setAwsProfileKeyValueInDocuments(
+        documents,
+        "config",
+        input.profileName,
+        "region",
+        input.region.trim(),
+      );
+    } else {
+      removeAwsProfileKeyFromDocuments(documents, input.profileName, "region");
+    }
+    setAwsSsoSessionKeyValueInDocuments(
+      documents,
+      input.ssoSessionName,
+      "sso_region",
+      input.ssoRegion,
+    );
+    setAwsSsoSessionKeyValueInDocuments(
+      documents,
+      input.ssoSessionName,
+      "sso_start_url",
+      input.ssoStartUrl,
+    );
+    setAwsSsoSessionKeyValueInDocuments(
+      documents,
+      input.ssoSessionName,
+      "sso_registration_scopes",
+      AWS_SSO_REGISTRATION_SCOPES,
+    );
+    await writeAwsProfileDocuments(documents);
+  }
+
+  private async saveRoleProfileValues(input: {
+    profileName: string;
+    sourceProfileName: string;
+    roleArn: string;
+    region?: string | null;
+  }): Promise<void> {
+    const documents = await loadAwsProfileDocuments(this.awsProfileRootDir);
+    setAwsProfileKeyValueInDocuments(
+      documents,
+      "config",
+      input.profileName,
+      "role_arn",
+      input.roleArn,
+    );
+    setAwsProfileKeyValueInDocuments(
+      documents,
+      "config",
+      input.profileName,
+      "source_profile",
+      input.sourceProfileName,
+    );
+    if (input.region?.trim()) {
+      setAwsProfileKeyValueInDocuments(
+        documents,
+        "config",
+        input.profileName,
+        "region",
+        input.region.trim(),
+      );
+    } else {
+      removeAwsProfileKeyFromDocuments(documents, input.profileName, "region");
+    }
+    await writeAwsProfileDocuments(documents);
+  }
+
+  private async validateProfileWithTempRoot(input: {
+    homeDir: string;
+    awsRootDir: string;
+    profileName: string;
+    errorContext: AwsProfileFlowErrorContext;
+    fallbackMessage: string;
+  }): Promise<void> {
+    const validationResult = await this.runResolvedCommandWithEnv(
+      "aws",
+      ["sts", "get-caller-identity", "--profile", input.profileName, "--output", "json"],
+      {
+        ...this.getAwsRootEnvPatch(input.homeDir, input.awsRootDir),
+        AWS_PROFILE: null,
+        AWS_DEFAULT_PROFILE: null,
+      },
+      30_000,
+    );
+    if (validationResult.exitCode !== 0) {
+      throw normalizeAwsProfileFlowError(
+        validationResult.stderr,
+        input.fallbackMessage,
+        input.errorContext,
+      );
+    }
+  }
+
+  private async validateAssumeRoleWithSourceProfile(input: {
+    sourceProfileName: string;
+    roleArn: string;
+    errorContext: AwsProfileFlowErrorContext;
+    fallbackMessage: string;
+  }): Promise<void> {
+    const sessionName = `dolssh-validate-${Date.now()}`;
+    const validationResult = await this.runResolvedCommandWithEnv(
+      "aws",
+      [
+        "sts",
+        "assume-role",
+        "--profile",
+        input.sourceProfileName,
+        "--role-arn",
+        input.roleArn,
+        "--role-session-name",
+        sessionName,
+        "--output",
+        "json",
+      ],
+      {
+        ...this.getConfiguredAwsRootEnvPatch(),
+        AWS_PROFILE: null,
+        AWS_DEFAULT_PROFILE: null,
+        AWS_ACCESS_KEY_ID: null,
+        AWS_SECRET_ACCESS_KEY: null,
+        AWS_SESSION_TOKEN: null,
+      },
+      30_000,
+    );
+    if (validationResult.exitCode !== 0) {
+      throw normalizeAwsProfileFlowError(
+        validationResult.stderr,
+        input.fallbackMessage,
+        input.errorContext,
+      );
+    }
+  }
+
+  private async buildUniqueSsoSessionName(profileName: string): Promise<string> {
+    const documents = await loadAwsProfileDocuments(this.awsProfileRootDir);
+    const existingSessionNames = new Set(
+      documents.config.lines
+        .map((line) => line.match(/^\s*\[sso-session ([^\]]+)\]\s*$/)?.[1]?.trim() ?? "")
+        .filter(Boolean),
+    );
+    let nextSessionName = profileName;
+    let suffix = 2;
+    while (existingSessionNames.has(nextSessionName)) {
+      nextSessionName = `${profileName}-${suffix}`;
+      suffix += 1;
+    }
+    return nextSessionName;
+  }
+
+  private async validateStaticCredentials(input: {
+    accessKeyId: string;
+    secretAccessKey: string;
+    region?: string | null;
+  }): Promise<void> {
+    const validationResult = await this.runResolvedCommandWithEnv(
+      "aws",
+      ["sts", "get-caller-identity", "--output", "json"],
+      {
+        AWS_ACCESS_KEY_ID: input.accessKeyId,
+        AWS_SECRET_ACCESS_KEY: input.secretAccessKey,
+        AWS_REGION: input.region?.trim() || null,
+        AWS_DEFAULT_REGION: input.region?.trim() || null,
+        AWS_PROFILE: null,
+        AWS_DEFAULT_PROFILE: null,
+      },
+      30_000,
+    );
+    if (validationResult.exitCode !== 0) {
+      throw normalizeAwsProfileFlowError(
+        validationResult.stderr,
+        "입력한 AWS 자격 증명이 유효하지 않습니다.",
+        "static-validation",
+      );
+    }
+  }
+
+  private async saveStaticProfileValues(input: {
+    profileName: string;
+    accessKeyId: string;
+    secretAccessKey: string;
+    region?: string | null;
+  }): Promise<void> {
+    const settings: Array<[key: string, value: string]> = [
+      ["aws_access_key_id", input.accessKeyId],
+      ["aws_secret_access_key", input.secretAccessKey],
+    ];
+    if (input.region?.trim()) {
+      settings.push(["region", input.region.trim()]);
+    }
+
+    for (const [key, value] of settings) {
+      const result = await this.runResolvedCommand("aws", [
+        "configure",
+        "set",
+        key,
+        value,
+        "--profile",
+        input.profileName,
+      ]);
+      if (result.exitCode !== 0) {
+        throw normalizeAwsCliError(
+          result.stderr,
+          "AWS 프로필을 저장하지 못했습니다.",
+        );
+      }
+    }
+
+    if (!input.region?.trim()) {
+      const documents = await loadAwsProfileDocuments(this.awsProfileRootDir);
+      removeAwsProfileKeyFromDocuments(documents, input.profileName, "region");
+      await writeAwsProfileDocuments(documents);
+    }
   }
 
   async ensureAwsCliAvailable(): Promise<void> {
@@ -1005,6 +1716,310 @@ export class AwsService {
       .map((line) => line.trim())
       .filter(Boolean)
       .map((name) => ({ name }));
+  }
+
+  async createProfile(input: AwsProfileCreateInput): Promise<void> {
+    if (isE2EFakeAwsSessionEnabled()) {
+      return;
+    }
+
+    await this.ensureAwsCliAvailable();
+
+    if (input.kind === "static") {
+      const profileName = normalizeAwsProfileName(input.profileName);
+      const accessKeyId = input.accessKeyId.trim();
+      const secretAccessKey = input.secretAccessKey.trim();
+      const region = input.region?.trim() || null;
+
+      if (!accessKeyId) {
+        throw new Error("Access key를 입력해 주세요.");
+      }
+      if (!secretAccessKey) {
+        throw new Error("Secret을 입력해 주세요.");
+      }
+
+      await this.assertProfileNameAvailable(profileName);
+      await this.validateStaticCredentials({
+        accessKeyId,
+        secretAccessKey,
+        region,
+      });
+      await this.saveStaticProfileValues({
+        profileName,
+        accessKeyId,
+        secretAccessKey,
+        region,
+      });
+      return;
+    }
+
+    if (input.kind === "role") {
+      const profileName = normalizeAwsProfileName(input.profileName);
+      const sourceProfileName = normalizeAwsProfileName(
+        input.sourceProfileName,
+        "source profile",
+      );
+      const roleArn = input.roleArn.trim();
+      const region = input.region?.trim() || null;
+
+      if (!roleArn) {
+        throw new Error("Role ARN을 입력해 주세요.");
+      }
+
+      await this.assertProfileNameAvailable(profileName);
+      const existingProfiles = await this.listProfiles();
+      if (!existingProfiles.some((profile) => profile.name === sourceProfileName)) {
+        throw new Error("선택한 source profile을 찾지 못했습니다.");
+      }
+
+      await this.validateAssumeRoleWithSourceProfile({
+        sourceProfileName,
+        roleArn,
+        errorContext: "role-validation",
+        fallbackMessage:
+          "선택한 source profile로 이 Role을 검증하지 못했습니다.",
+      });
+
+      await this.saveRoleProfileValues({
+        profileName,
+        sourceProfileName,
+        roleArn,
+        region,
+      });
+      return;
+    }
+
+    const profileName = normalizeAwsProfileName(input.profileName);
+    const ssoAccountId = input.ssoAccountId.trim();
+    const ssoRoleName = input.ssoRoleName.trim();
+    if (!ssoAccountId) {
+      throw new Error("SSO 계정을 선택해 주세요.");
+    }
+    if (!ssoRoleName) {
+      throw new Error("SSO Role을 선택해 주세요.");
+    }
+
+    await this.assertProfileNameAvailable(profileName);
+    const preparation = await this.consumeSsoPreparation(input.preparationToken);
+    if (preparation.profileName !== profileName) {
+      await this.destroyTempAwsRoot(preparation.homeDir);
+      throw new Error("SSO 준비 정보와 선택한 프로필명이 일치하지 않습니다.");
+    }
+    if (
+      preparation.ssoSessionName !== input.ssoSessionName ||
+      preparation.ssoStartUrl !== input.ssoStartUrl.trim() ||
+      preparation.ssoRegion !== input.ssoRegion.trim() ||
+      preparation.region !== (input.region?.trim() || null)
+    ) {
+      await this.destroyTempAwsRoot(preparation.homeDir);
+      throw new Error("SSO 준비 정보가 현재 입력값과 일치하지 않습니다. 다시 로그인해 주세요.");
+    }
+
+    try {
+      const documents = await loadAwsProfileDocuments(preparation.awsRootDir);
+      setAwsProfileKeyValueInDocuments(
+        documents,
+        "config",
+        profileName,
+        "sso_account_id",
+        ssoAccountId,
+      );
+      setAwsProfileKeyValueInDocuments(
+        documents,
+        "config",
+        profileName,
+        "sso_role_name",
+        ssoRoleName,
+      );
+      await writeAwsProfileDocuments(documents);
+      await this.validateProfileWithTempRoot({
+        homeDir: preparation.homeDir,
+        awsRootDir: preparation.awsRootDir,
+        profileName,
+        errorContext: "sso-final-validation",
+        fallbackMessage:
+          "선택한 account/role로 인증을 완료하지 못했습니다.",
+      });
+    } finally {
+      await this.destroyTempAwsRoot(preparation.homeDir);
+    }
+
+    await this.saveSsoProfileValues({
+      profileName,
+      ssoSessionName: preparation.ssoSessionName,
+      ssoStartUrl: preparation.ssoStartUrl,
+      ssoRegion: preparation.ssoRegion,
+      ssoAccountId,
+      ssoRoleName,
+      region: preparation.region,
+    });
+  }
+
+  async prepareSsoProfile(
+    input: AwsSsoProfilePrepareInput,
+  ): Promise<AwsSsoProfilePrepareResult> {
+    if (isE2EFakeAwsSessionEnabled()) {
+      return {
+        preparationToken: "smoke-token",
+        profileName: input.profileName,
+        ssoSessionName: input.profileName,
+        ssoStartUrl: input.ssoStartUrl,
+        ssoRegion: input.ssoRegion,
+        region: input.region?.trim() || null,
+        accounts: [
+          {
+            accountId: "000000000000",
+            accountName: "dolssh-smoke",
+            emailAddress: "smoke@example.com",
+          },
+        ],
+        rolesByAccountId: {
+          "000000000000": [{ accountId: "000000000000", roleName: "AdministratorAccess" }],
+        },
+        defaultAccountId: "000000000000",
+        defaultRoleName: "AdministratorAccess",
+      };
+    }
+
+    await this.ensureAwsCliAvailable();
+    this.pruneExpiredSsoPreparations();
+
+    const profileName = normalizeAwsProfileName(input.profileName);
+    const ssoStartUrl = input.ssoStartUrl.trim();
+    const ssoRegion = input.ssoRegion.trim();
+    const region = input.region?.trim() || null;
+
+    if (!ssoStartUrl) {
+      throw new Error("SSO Start URL을 입력해 주세요.");
+    }
+    if (!ssoRegion) {
+      throw new Error("SSO Region을 선택해 주세요.");
+    }
+
+    await this.assertProfileNameAvailable(profileName);
+
+    const ssoSessionName = await this.buildUniqueSsoSessionName(profileName);
+    const tempRoot = await this.createTempAwsRoot();
+    try {
+      const documents = await loadAwsProfileDocuments(tempRoot.awsRootDir);
+      setAwsProfileKeyValueInDocuments(
+        documents,
+        "config",
+        profileName,
+        "sso_session",
+        ssoSessionName,
+      );
+      if (region) {
+        setAwsProfileKeyValueInDocuments(
+          documents,
+          "config",
+          profileName,
+          "region",
+          region,
+        );
+      }
+      setAwsSsoSessionKeyValueInDocuments(
+        documents,
+        ssoSessionName,
+        "sso_region",
+        ssoRegion,
+      );
+      setAwsSsoSessionKeyValueInDocuments(
+        documents,
+        ssoSessionName,
+        "sso_start_url",
+        ssoStartUrl,
+      );
+      setAwsSsoSessionKeyValueInDocuments(
+        documents,
+        ssoSessionName,
+        "sso_registration_scopes",
+        AWS_SSO_REGISTRATION_SCOPES,
+      );
+      await writeAwsProfileDocuments(documents);
+
+      const envPatch = {
+        ...this.getAwsRootEnvPatch(tempRoot.homeDir, tempRoot.awsRootDir),
+        AWS_PROFILE: null,
+        AWS_DEFAULT_PROFILE: null,
+      };
+      const loginResult = await this.runResolvedCommandWithEnv(
+        "aws",
+        ["sso", "login", "--profile", profileName],
+        envPatch,
+        5 * 60_000,
+      );
+      if (loginResult.exitCode !== 0) {
+        throw normalizeAwsProfileFlowError(
+          loginResult.stderr,
+          "AWS SSO 로그인에 실패했습니다.",
+          "sso-login",
+        );
+      }
+
+      const accessToken = await this.readSsoAccessToken(tempRoot.homeDir);
+      const accounts = await this.listSsoAccounts({
+        accessToken,
+        ssoRegion,
+      });
+      if (accounts.length === 0) {
+        throw new Error("선택 가능한 AWS SSO 계정을 찾지 못했습니다.");
+      }
+
+      const rolesByAccountId: Record<string, AwsSsoProfileRoleOption[]> = {};
+      for (const account of accounts) {
+        const roles = await this.listSsoRolesForAccount({
+          accessToken,
+          ssoRegion,
+          accountId: account.accountId,
+        });
+        if (roles.length > 0) {
+          rolesByAccountId[account.accountId] = roles;
+        }
+      }
+
+      const defaultAccountId =
+        accounts.find((account) => (rolesByAccountId[account.accountId] ?? []).length > 0)
+          ?.accountId ?? null;
+      const defaultRoleName = defaultAccountId
+        ? rolesByAccountId[defaultAccountId]?.[0]?.roleName ?? null
+        : null;
+
+      if (!defaultAccountId || !defaultRoleName) {
+        throw new Error("선택 가능한 AWS SSO account/role 조합을 찾지 못했습니다.");
+      }
+
+      const preparationToken = randomUUID();
+      this.pendingSsoPreparations.set(preparationToken, {
+        preparationToken,
+        profileName,
+        ssoSessionName,
+        ssoStartUrl,
+        ssoRegion,
+        region,
+        awsRootDir: tempRoot.awsRootDir,
+        homeDir: tempRoot.homeDir,
+        expiresAt: Date.now() + SSO_PREPARATION_TTL_MS,
+        accounts,
+        rolesByAccountId,
+      });
+
+      return {
+        preparationToken,
+        profileName,
+        ssoSessionName,
+        ssoStartUrl,
+        ssoRegion,
+        region,
+        accounts,
+        rolesByAccountId,
+        defaultAccountId,
+        defaultRoleName,
+      };
+    } catch (error) {
+      await this.destroyTempAwsRoot(tempRoot.homeDir);
+      throw error;
+    }
   }
 
   private async readConfigValue(
@@ -1086,6 +2101,187 @@ export class AwsService {
         : "이 프로필은 AWS CLI 자격 증명이 필요합니다.",
       missingTools: pluginAvailable ? [] : ["session-manager-plugin"],
     };
+  }
+
+  async getProfileDetails(profileName: string): Promise<AwsProfileDetails> {
+    const normalizedProfileName = normalizeAwsProfileName(profileName);
+
+    if (isE2EFakeAwsSessionEnabled()) {
+      return {
+        profileName: normalizedProfileName,
+        available: true,
+        isSsoProfile: false,
+        isAuthenticated: true,
+        configuredRegion: "ap-northeast-2",
+        accountId: "000000000000",
+        arn: "arn:aws:iam::000000000000:user/dolssh-smoke",
+        kind: "static",
+        maskedAccessKeyId: "AKIA****SMOK",
+        hasSecretAccessKey: true,
+        hasSessionToken: false,
+        roleArn: null,
+        sourceProfile: null,
+        credentialProcess: null,
+        ssoSession: null,
+        ssoStartUrl: null,
+        ssoRegion: null,
+        ssoAccountId: null,
+        ssoRoleName: null,
+        referencedByProfileNames: [],
+        orphanedSsoSessionName: null,
+        missingTools: [],
+      };
+    }
+
+    const [status, documents] = await Promise.all([
+      this.getProfileStatus(normalizedProfileName),
+      loadAwsProfileDocuments(this.awsProfileRootDir),
+    ]);
+    const snapshot = inspectAwsProfileDocuments(documents, normalizedProfileName);
+    const values = snapshot.mergedValues;
+    const ssoSession = values.sso_session?.trim() || null;
+    const ssoSessionValues = ssoSession
+      ? getAwsSsoSessionValues(documents, ssoSession)
+      : {};
+    const ssoStartUrl =
+      values.sso_start_url?.trim() ||
+      ssoSessionValues.sso_start_url?.trim() ||
+      null;
+    const ssoRegion =
+      values.sso_region?.trim() ||
+      ssoSessionValues.sso_region?.trim() ||
+      null;
+    const roleArn = values.role_arn?.trim() || null;
+    const sourceProfile = values.source_profile?.trim() || null;
+    const credentialProcess = values.credential_process?.trim() || null;
+    const accessKeyId = values.aws_access_key_id?.trim() || null;
+    const secretAccessKey = values.aws_secret_access_key?.trim() || null;
+    const sessionToken = values.aws_session_token?.trim() || null;
+    const ssoAccountId = values.sso_account_id?.trim() || null;
+    const ssoRoleName = values.sso_role_name?.trim() || null;
+
+    let kind: AwsProfileKind = "unknown";
+    if (ssoStartUrl || ssoSession) {
+      kind = "sso";
+    } else if (roleArn || sourceProfile) {
+      kind = "role";
+    } else if (credentialProcess) {
+      kind = "credential-process";
+    } else if (accessKeyId || secretAccessKey) {
+      kind = "static";
+    }
+
+    return {
+      ...status,
+      kind,
+      maskedAccessKeyId: maskAwsAccessKeyId(accessKeyId),
+      hasSecretAccessKey: Boolean(secretAccessKey),
+      hasSessionToken: Boolean(sessionToken),
+      roleArn,
+      sourceProfile,
+      credentialProcess,
+      ssoSession,
+      ssoStartUrl,
+      ssoRegion,
+      ssoAccountId,
+      ssoRoleName,
+      referencedByProfileNames: snapshot.referencedByProfileNames,
+      orphanedSsoSessionName: snapshot.orphanedSsoSessionName,
+    };
+  }
+
+  async updateProfile(input: AwsProfileUpdateInput): Promise<void> {
+    if (isE2EFakeAwsSessionEnabled()) {
+      return;
+    }
+
+    await this.ensureAwsCliAvailable();
+
+    const profileName = normalizeAwsProfileName(input.profileName);
+    const accessKeyId = input.accessKeyId.trim();
+    const secretAccessKey = input.secretAccessKey.trim();
+    const region = input.region?.trim() || null;
+
+    if (!accessKeyId) {
+      throw new Error("Access key를 입력해 주세요.");
+    }
+    if (!secretAccessKey) {
+      throw new Error("Secret을 입력해 주세요.");
+    }
+
+    const details = await this.getProfileDetails(profileName);
+    if (details.kind !== "static") {
+      throw new Error("이 프로필은 access key 기반 프로필만 수정할 수 있습니다.");
+    }
+
+    await this.validateStaticCredentials({
+      accessKeyId,
+      secretAccessKey,
+      region,
+    });
+    await this.saveStaticProfileValues({
+      profileName,
+      accessKeyId,
+      secretAccessKey,
+      region,
+    });
+  }
+
+  async renameProfile(input: AwsProfileRenameInput): Promise<void> {
+    if (isE2EFakeAwsSessionEnabled()) {
+      return;
+    }
+
+    await this.ensureAwsCliAvailable();
+
+    const profileName = normalizeAwsProfileName(input.profileName);
+    const nextProfileName = normalizeAwsProfileName(
+      input.nextProfileName,
+      "새 프로필명",
+    );
+    if (profileName === nextProfileName) {
+      throw new Error("새 프로필명이 기존 프로필명과 같습니다.");
+    }
+
+    const existingProfiles = await this.listProfiles();
+    if (!existingProfiles.some((profile) => profile.name === profileName)) {
+      throw new Error("선택한 AWS 프로필을 찾지 못했습니다.");
+    }
+    if (existingProfiles.some((profile) => profile.name === nextProfileName)) {
+      throw new Error("같은 이름의 AWS 프로필이 이미 존재합니다.");
+    }
+
+    const documents = await loadAwsProfileDocuments(this.awsProfileRootDir);
+    const snapshot = inspectAwsProfileDocuments(documents, profileName);
+    if (!snapshot.hasConfigSection && !snapshot.hasCredentialsSection) {
+      throw new Error("선택한 AWS 프로필을 로컬 설정 파일에서 찾지 못했습니다.");
+    }
+
+    renameAwsProfileInDocuments(documents, profileName, nextProfileName);
+    await writeAwsProfileDocuments(documents);
+  }
+
+  async deleteProfile(profileName: string): Promise<void> {
+    if (isE2EFakeAwsSessionEnabled()) {
+      return;
+    }
+
+    await this.ensureAwsCliAvailable();
+
+    const normalizedProfileName = normalizeAwsProfileName(profileName);
+    const existingProfiles = await this.listProfiles();
+    if (!existingProfiles.some((profile) => profile.name === normalizedProfileName)) {
+      throw new Error("선택한 AWS 프로필을 찾지 못했습니다.");
+    }
+
+    const documents = await loadAwsProfileDocuments(this.awsProfileRootDir);
+    const snapshot = inspectAwsProfileDocuments(documents, normalizedProfileName);
+    if (!snapshot.hasConfigSection && !snapshot.hasCredentialsSection) {
+      throw new Error("선택한 AWS 프로필을 로컬 설정 파일에서 찾지 못했습니다.");
+    }
+
+    deleteAwsProfileFromDocuments(documents, normalizedProfileName);
+    await writeAwsProfileDocuments(documents);
   }
 
   async login(profileName: string): Promise<void> {

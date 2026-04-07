@@ -29,6 +29,32 @@ function installMockApi(overrides?: {
   const api = {
     aws: {
       listProfiles: vi.fn().mockResolvedValue([{ name: 'default' }]),
+      createProfile: vi.fn().mockResolvedValue(undefined),
+      prepareSsoProfile: vi.fn().mockResolvedValue({
+        preparationToken: 'prep-token',
+        profileName: 'corp-sso',
+        ssoSessionName: 'corp-sso',
+        ssoStartUrl: 'https://example.awsapps.com/start',
+        ssoRegion: 'ap-northeast-2',
+        region: 'ap-northeast-2',
+        accounts: [
+          {
+            accountId: '123456789012',
+            accountName: 'corp',
+            emailAddress: 'admin@example.com',
+          },
+        ],
+        rolesByAccountId: {
+          '123456789012': [
+            {
+              accountId: '123456789012',
+              roleName: 'AdministratorAccess',
+            },
+          ],
+        },
+        defaultAccountId: '123456789012',
+        defaultRoleName: 'AdministratorAccess',
+      }),
       getProfileStatus: vi.fn().mockResolvedValue(
         createStatus({
           isAuthenticated: true,
@@ -148,6 +174,138 @@ describe('AWS import select disabled state', () => {
 describe('AwsImportDialog', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
+  });
+
+  it('opens the create profile form, saves a valid profile, and auto-selects it', async () => {
+    const api = installMockApi();
+    api.aws.listProfiles = vi
+      .fn()
+      .mockResolvedValueOnce([{ name: 'default' }])
+      .mockResolvedValueOnce([{ name: 'default' }, { name: 'dolssh-prod' }]);
+    api.aws.getProfileStatus.mockImplementation(async (profileName: string) =>
+      createStatus({
+        profileName,
+        isAuthenticated: true,
+        configuredRegion: profileName === 'dolssh-prod' ? 'us-east-1' : 'ap-northeast-2',
+      }),
+    );
+    api.aws.listRegions.mockResolvedValue(['ap-northeast-2', 'us-east-1']);
+
+    render(
+      <AwsImportDialog
+        open
+        currentGroupPath="Servers"
+        onClose={vi.fn()}
+        onImport={vi.fn().mockResolvedValue(undefined)}
+      />,
+    );
+
+    await waitFor(() => expect(screen.getByLabelText('Profile')).toHaveValue('default'));
+
+    fireEvent.click(screen.getByRole('button', { name: '프로필 생성' }));
+    expect(screen.getByTestId('aws-create-profile-form')).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText('새 프로필명'), {
+      target: { value: 'dolssh-prod' },
+    });
+    fireEvent.change(screen.getByLabelText('Access Key'), {
+      target: { value: 'AKIATEST123' },
+    });
+    fireEvent.change(screen.getByLabelText('Secret'), {
+      target: { value: 'secret-value' },
+    });
+    fireEvent.change(screen.getByLabelText('기본 Region'), {
+      target: { value: 'us-east-1' },
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: '프로필 저장' }));
+
+    await waitFor(() =>
+      expect(api.aws.createProfile).toHaveBeenCalledWith({
+        kind: 'static',
+        profileName: 'dolssh-prod',
+        accessKeyId: 'AKIATEST123',
+        secretAccessKey: 'secret-value',
+        region: 'us-east-1',
+      }),
+    );
+    await waitFor(() => expect(screen.getByLabelText('Profile')).toHaveValue('dolssh-prod'));
+    await waitFor(() => expect(api.aws.getProfileStatus).toHaveBeenCalledWith('dolssh-prod'));
+    expect(screen.queryByTestId('aws-create-profile-form')).not.toBeInTheDocument();
+  });
+
+  it('keeps the create profile form open and shows inline errors when creation fails', async () => {
+    const api = installMockApi();
+    api.aws.createProfile.mockRejectedValue(
+      new Error(
+        "Error invoking remote method 'aws:create-profile': Error: 입력한 AWS 자격 증명이 유효하지 않습니다.",
+      ),
+    );
+
+    render(
+      <AwsImportDialog
+        open
+        currentGroupPath="Servers"
+        onClose={vi.fn()}
+        onImport={vi.fn().mockResolvedValue(undefined)}
+      />,
+    );
+
+    await waitFor(() => expect(screen.getByLabelText('Profile')).toHaveValue('default'));
+
+    fireEvent.click(screen.getByRole('button', { name: '프로필 생성' }));
+    fireEvent.change(screen.getByLabelText('새 프로필명'), {
+      target: { value: 'dolssh-prod' },
+    });
+    fireEvent.change(screen.getByLabelText('Access Key'), {
+      target: { value: 'AKIATEST123' },
+    });
+    fireEvent.change(screen.getByLabelText('Secret'), {
+      target: { value: 'secret-value' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: '프로필 저장' }));
+
+    expect(
+      await screen.findByText('입력한 AWS 자격 증명이 유효하지 않습니다.'),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText(/Error invoking remote method 'aws:create-profile'/),
+    ).not.toBeInTheDocument();
+    expect(screen.getByTestId('aws-create-profile-form')).toBeInTheDocument();
+  });
+
+  it('shows a friendly validation error for invalid role arn input before submitting', async () => {
+    const api = installMockApi();
+
+    render(
+      <AwsImportDialog
+        open
+        currentGroupPath="Servers"
+        onClose={vi.fn()}
+        onImport={vi.fn().mockResolvedValue(undefined)}
+      />,
+    );
+
+    await waitFor(() => expect(screen.getByLabelText('Profile')).toHaveValue('default'));
+
+    fireEvent.click(screen.getByRole('button', { name: '프로필 생성' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Role' }));
+
+    fireEvent.change(screen.getByLabelText('Role 프로필명'), {
+      target: { value: 'prod-admin' },
+    });
+    fireEvent.change(screen.getByLabelText('source profile'), {
+      target: { value: 'default' },
+    });
+    fireEvent.change(screen.getByLabelText('Role ARN'), {
+      target: { value: 'asdasd' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: '프로필 저장' }));
+
+    expect(
+      await screen.findByText('입력한 Role ARN이 올바르지 않습니다. Role ARN 형식을 다시 확인해 주세요.'),
+    ).toBeInTheDocument();
+    expect(api.aws.createProfile).not.toHaveBeenCalled();
   });
 
   it('inspects SSH info before importing and only creates the host on final confirmation', async () => {

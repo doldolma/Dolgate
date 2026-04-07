@@ -715,6 +715,122 @@ export interface AwsProfileSummary {
   name: string;
 }
 
+export interface AwsStaticProfileDraft {
+  profileName: string;
+  accessKeyId: string;
+  secretAccessKey: string;
+  region?: string | null;
+}
+
+export interface AwsStaticProfileCreateInput extends AwsStaticProfileDraft {
+  kind: "static";
+}
+
+export interface AwsSsoProfilePrepareInput {
+  profileName: string;
+  ssoStartUrl: string;
+  ssoRegion: string;
+  region?: string | null;
+}
+
+export interface AwsSsoProfileAccountOption {
+  accountId: string;
+  accountName: string;
+  emailAddress?: string | null;
+}
+
+export interface AwsSsoProfileRoleOption {
+  accountId: string;
+  roleName: string;
+}
+
+export interface AwsSsoProfilePrepareResult {
+  preparationToken: string;
+  profileName: string;
+  ssoSessionName: string;
+  ssoStartUrl: string;
+  ssoRegion: string;
+  region?: string | null;
+  accounts: AwsSsoProfileAccountOption[];
+  rolesByAccountId: Record<string, AwsSsoProfileRoleOption[]>;
+  defaultAccountId?: string | null;
+  defaultRoleName?: string | null;
+}
+
+export interface AwsSsoProfileCreateInput extends AwsSsoProfilePrepareInput {
+  kind: "sso";
+  preparationToken: string;
+  ssoSessionName: string;
+  ssoAccountId: string;
+  ssoRoleName: string;
+}
+
+export interface AwsRoleProfileCreateInput {
+  kind: "role";
+  profileName: string;
+  sourceProfileName: string;
+  roleArn: string;
+  region?: string | null;
+}
+
+export type AwsProfileCreateInput =
+  | AwsStaticProfileCreateInput
+  | AwsSsoProfileCreateInput
+  | AwsRoleProfileCreateInput;
+
+export interface AwsProfileUpdateInput extends AwsStaticProfileDraft {
+  profileName: string;
+}
+
+export interface AwsProfileRenameInput {
+  profileName: string;
+  nextProfileName: string;
+}
+
+export type AwsProfileKind =
+  | "static"
+  | "sso"
+  | "role"
+  | "credential-process"
+  | "unknown";
+
+export const AWS_PROFILE_REGION_OPTIONS = [
+  "af-south-1",
+  "ap-east-1",
+  "ap-east-2",
+  "ap-northeast-1",
+  "ap-northeast-2",
+  "ap-northeast-3",
+  "ap-south-1",
+  "ap-south-2",
+  "ap-southeast-1",
+  "ap-southeast-2",
+  "ap-southeast-3",
+  "ap-southeast-4",
+  "ap-southeast-5",
+  "ap-southeast-6",
+  "ap-southeast-7",
+  "ca-central-1",
+  "ca-west-1",
+  "eu-central-1",
+  "eu-central-2",
+  "eu-north-1",
+  "eu-south-1",
+  "eu-south-2",
+  "eu-west-1",
+  "eu-west-2",
+  "eu-west-3",
+  "il-central-1",
+  "me-central-1",
+  "me-south-1",
+  "mx-central-1",
+  "sa-east-1",
+  "us-east-1",
+  "us-east-2",
+  "us-west-1",
+  "us-west-2",
+] as const;
+
 export interface AwsProfileStatus {
   profileName: string;
   available: boolean;
@@ -725,6 +841,23 @@ export interface AwsProfileStatus {
   arn?: string | null;
   errorMessage?: string | null;
   missingTools?: string[];
+}
+
+export interface AwsProfileDetails extends AwsProfileStatus {
+  kind: AwsProfileKind;
+  maskedAccessKeyId?: string | null;
+  hasSecretAccessKey: boolean;
+  hasSessionToken: boolean;
+  roleArn?: string | null;
+  sourceProfile?: string | null;
+  credentialProcess?: string | null;
+  ssoSession?: string | null;
+  ssoStartUrl?: string | null;
+  ssoRegion?: string | null;
+  ssoAccountId?: string | null;
+  ssoRoleName?: string | null;
+  referencedByProfileNames: string[];
+  orphanedSsoSessionName?: string | null;
 }
 
 export interface AwsEc2InstanceSummary {

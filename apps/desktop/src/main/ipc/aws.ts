@@ -1,3 +1,9 @@
+import type {
+  AwsProfileCreateInput,
+  AwsProfileRenameInput,
+  AwsSsoProfilePrepareInput,
+  AwsProfileUpdateInput,
+} from "@shared";
 import { isAwsEcsHostRecord } from "@shared";
 import { randomUUID } from "node:crypto";
 import { ipcMain } from "electron";
@@ -7,6 +13,46 @@ import type { AwsEc2HostRecord, AwsEcsHostRecord, MainIpcContext } from "./conte
 export function registerAwsIpcHandlers(ctx: MainIpcContext): void {
   ipcMain.handle(ipcChannels.aws.listProfiles, async () =>
     ctx.awsService.listProfiles(),
+  );
+
+  ipcMain.handle(
+    ipcChannels.aws.createProfile,
+    async (_event, input: AwsProfileCreateInput) => {
+      await ctx.awsService.createProfile(input);
+    },
+  );
+
+  ipcMain.handle(
+    ipcChannels.aws.prepareSsoProfile,
+    async (_event, input: AwsSsoProfilePrepareInput) =>
+      ctx.awsService.prepareSsoProfile(input),
+  );
+
+  ipcMain.handle(
+    ipcChannels.aws.getProfileDetails,
+    async (_event, profileName: string) =>
+      ctx.awsService.getProfileDetails(profileName),
+  );
+
+  ipcMain.handle(
+    ipcChannels.aws.updateProfile,
+    async (_event, input: AwsProfileUpdateInput) => {
+      await ctx.awsService.updateProfile(input);
+    },
+  );
+
+  ipcMain.handle(
+    ipcChannels.aws.renameProfile,
+    async (_event, input: AwsProfileRenameInput) => {
+      await ctx.awsService.renameProfile(input);
+    },
+  );
+
+  ipcMain.handle(
+    ipcChannels.aws.deleteProfile,
+    async (_event, profileName: string) => {
+      await ctx.awsService.deleteProfile(profileName);
+    },
   );
 
   ipcMain.handle(

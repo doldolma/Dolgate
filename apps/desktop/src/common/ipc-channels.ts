@@ -34,6 +34,12 @@ export const ipcChannels = {
   },
   aws: {
     listProfiles: 'aws:list-profiles',
+    createProfile: 'aws:create-profile',
+    prepareSsoProfile: 'aws:prepare-sso-profile',
+    getProfileDetails: 'aws:get-profile-details',
+    updateProfile: 'aws:update-profile',
+    renameProfile: 'aws:rename-profile',
+    deleteProfile: 'aws:delete-profile',
     getProfileStatus: 'aws:get-profile-status',
     login: 'aws:login',
     listRegions: 'aws:list-regions',

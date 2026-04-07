@@ -2,6 +2,7 @@ import type {
   AppSettings,
   AppTheme,
   GlobalTerminalThemeId,
+  HostRecord,
   KnownHostRecord,
   SecretMetadataRecord,
   TerminalFontFamilyId,
@@ -15,6 +16,7 @@ import type { SettingsSection } from '../store/createAppStore';
 import { terminalFontOptions, terminalThemePresets } from '../lib/terminal-presets';
 import { KeychainPanel } from './KeychainPanel';
 import { KnownHostsPanel } from './KnownHostsPanel';
+import { AwsProfilesPanel } from './AwsProfilesPanel';
 import {
   Button,
   FieldGroup,
@@ -30,6 +32,7 @@ import {
 interface SettingsPanelProps {
   activeSection: SettingsSection;
   settings: AppSettings;
+  hosts: HostRecord[];
   knownHosts: KnownHostRecord[];
   keychainEntries: SecretMetadataRecord[];
   currentUserEmail?: string | null;
@@ -66,7 +69,8 @@ const macOnlyTerminalFonts = new Set<TerminalFontFamilyId>(['sf-mono', 'menlo', 
 const settingsSections: Array<{ id: SettingsSection; title: string }> = [
   { id: 'general', title: 'General' },
   { id: 'security', title: 'Security' },
-  { id: 'secrets', title: 'Secrets' }
+  { id: 'secrets', title: 'Secrets' },
+  { id: 'aws-profiles', title: 'AWS Profiles' }
 ];
 
 function renderTerminalThemePreview(
@@ -154,6 +158,7 @@ function renderAppearanceThemePreview(theme: AppTheme) {
 export function SettingsPanel({
   activeSection,
   settings,
+  hosts,
   knownHosts,
   keychainEntries,
   currentUserEmail = null,
@@ -470,6 +475,8 @@ export function SettingsPanel({
       {activeSection === 'secrets' ? (
         <KeychainPanel entries={keychainEntries} onRemoveSecret={onRemoveSecret} onEditSecret={onEditSecret} />
       ) : null}
+
+      {activeSection === 'aws-profiles' ? <AwsProfilesPanel hosts={hosts} /> : null}
     </div>
   );
 }

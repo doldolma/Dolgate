@@ -7,6 +7,38 @@ export function listAwsProfiles() {
   return desktopApi.aws.listProfiles();
 }
 
+export function createAwsProfile(
+  input: Parameters<typeof desktopApi.aws.createProfile>[0],
+) {
+  return desktopApi.aws.createProfile(input);
+}
+
+export function prepareAwsSsoProfile(
+  input: Parameters<typeof desktopApi.aws.prepareSsoProfile>[0],
+) {
+  return desktopApi.aws.prepareSsoProfile(input);
+}
+
+export function getAwsProfileDetails(profileName: string) {
+  return desktopApi.aws.getProfileDetails(profileName);
+}
+
+export function updateAwsProfile(
+  input: Parameters<typeof desktopApi.aws.updateProfile>[0],
+) {
+  return desktopApi.aws.updateProfile(input);
+}
+
+export function renameAwsProfile(
+  input: Parameters<typeof desktopApi.aws.renameProfile>[0],
+) {
+  return desktopApi.aws.renameProfile(input);
+}
+
+export function deleteAwsProfile(profileName: string) {
+  return desktopApi.aws.deleteProfile(profileName);
+}
+
 export function getAwsProfileStatus(profileName: string) {
   return desktopApi.aws.getProfileStatus(profileName);
 }

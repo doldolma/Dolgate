@@ -246,6 +246,25 @@ async function waitForCapturedTerminalOutput(page, expected, timeout = 15_000) {
   );
 }
 
+async function waitForTerminalInputReady(page, timeout = 15_000) {
+  await page.waitForFunction(
+    () => {
+      const container = document.querySelector('[data-terminal-canvas="true"]');
+      if (!(container instanceof HTMLElement)) {
+        return false;
+      }
+
+      const overlay = container.querySelector('[role="status"], [role="alertdialog"]');
+      if (!(overlay instanceof HTMLElement)) {
+        return true;
+      }
+
+      return overlay.getAttribute("aria-label") === "Connected";
+    },
+    { timeout },
+  );
+}
+
 async function waitForFakeAwsSessionReady(page, timeout = 15_000) {
   await waitForCapturedTerminalOutput(page, fakeAwsSessionReadyMarker, timeout);
 }
@@ -424,6 +443,7 @@ module.exports = {
   getCapturedTerminalSizes,
   launchDesktop,
   waitForSessionTerminalState,
+  waitForTerminalInputReady,
   waitForCapturedTerminalOutput,
   waitForFakeAwsSessionReady,
   waitForReplayState,

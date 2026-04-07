@@ -3,9 +3,12 @@ import {
   addOpenSshFileToSnapshot,
   addXshellFolderToSnapshot,
   cancelWarpgateBrowserImport,
+  createAwsProfile,
+  deleteAwsProfile,
   discardOpenSshSnapshot,
   discardTermiusSnapshot,
   discardXshellSnapshot,
+  getAwsProfileDetails,
   getAwsProfileStatus,
   importOpenSshSelection,
   importTermiusSelection,
@@ -16,19 +19,24 @@ import {
   listAwsProfiles,
   listAwsRegions,
   loginAwsProfile,
+  prepareAwsSsoProfile,
   onWarpgateImportEvent,
   pickOpenSshConfig,
   pickXshellSessionFolder,
   probeOpenSshDefault,
   probeTermiusLocal,
   probeXshellDefault,
+  renameAwsProfile,
   startWarpgateBrowserImport,
+  updateAwsProfile,
 } from '../services/desktop/imports';
 
 export function useAwsImportController() {
   return useMemo(
     () => ({
       listAwsProfiles,
+      createAwsProfile,
+      prepareAwsSsoProfile,
       getAwsProfileStatus,
       loginAwsProfile,
       listAwsRegions,
@@ -48,6 +56,22 @@ export function useOpenSshImportController() {
       pickOpenSshConfig,
       addOpenSshFileToSnapshot,
       importOpenSshSelection,
+    }),
+    [],
+  );
+}
+
+export function useAwsProfilesController() {
+  return useMemo(
+    () => ({
+      listAwsProfiles,
+      createAwsProfile,
+      prepareAwsSsoProfile,
+      getAwsProfileDetails,
+      updateAwsProfile,
+      renameAwsProfile,
+      deleteAwsProfile,
+      loginAwsProfile,
     }),
     [],
   );
