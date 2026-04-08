@@ -139,6 +139,12 @@ describe('AwsService.getProfileStatus', () => {
       isAuthenticated: true,
       configuredRegion: 'ap-northeast-2',
     });
+    expect(service.runResolvedCommandWithEnv).toHaveBeenCalledWith(
+      'aws',
+      ['sts', 'get-caller-identity', '--profile', 'default', '--output', 'json'],
+      expect.any(Object),
+      30_000,
+    );
   });
 
   it('returns null configuredRegion when the profile has no default region', async () => {
@@ -836,6 +842,52 @@ describe('AwsService AWS profile management', () => {
     await expect(service.getProfileDetails('unknown-profile')).resolves.toMatchObject({
       kind: 'unknown',
     });
+  });
+
+  it('uses a shorter timeout when loading profile details', async () => {
+    const rootDir = await createTempAwsProfileDir();
+    await writeAwsProfileFiles(rootDir, {
+      config: ['[profile static-profile]', 'region = ap-northeast-2', ''].join('\n'),
+      credentials: [
+        '[static-profile]',
+        'aws_access_key_id = AKIATEST12345678',
+        'aws_secret_access_key = secret-value',
+        '',
+      ].join('\n'),
+    });
+
+    const service = new AwsService(rootDir) as unknown as {
+      ensureAwsCliAvailable: () => Promise<void>;
+      readConfigValue: ReturnType<typeof vi.fn>;
+      runResolvedCommandWithEnv: ReturnType<typeof vi.fn>;
+      getProfileDetails: (profileName: string) => Promise<AwsProfileDetails>;
+    };
+
+    service.ensureAwsCliAvailable = vi.fn().mockResolvedValue(undefined);
+    service.readConfigValue = vi
+      .fn()
+      .mockResolvedValueOnce('')
+      .mockResolvedValueOnce('')
+      .mockResolvedValueOnce('ap-northeast-2');
+    service.runResolvedCommandWithEnv = vi.fn().mockResolvedValue({
+      stdout: JSON.stringify({
+        Account: '123456789012',
+        Arn: 'arn:aws:iam::123456789012:user/test',
+      }),
+      stderr: '',
+      exitCode: 0,
+    });
+
+    await expect(service.getProfileDetails('static-profile')).resolves.toMatchObject({
+      profileName: 'static-profile',
+      kind: 'static',
+    });
+    expect(service.runResolvedCommandWithEnv).toHaveBeenCalledWith(
+      'aws',
+      ['sts', 'get-caller-identity', '--profile', 'static-profile', '--output', 'json'],
+      expect.any(Object),
+      8_000,
+    );
   });
 
   it('imports external profiles into the managed store and carries role and sso dependencies with them', async () => {

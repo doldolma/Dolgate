@@ -192,10 +192,13 @@ async function resolveExecutable(command: string): Promise<string> {
   throw new Error(command);
 }
 
+const DEFAULT_AWS_COMMAND_TIMEOUT_MS = 30_000;
+const AWS_PROFILE_DETAILS_STATUS_TIMEOUT_MS = 8_000;
+
 function runCommand(
   command: string,
   args: string[],
-  timeoutMs = 30_000,
+  timeoutMs = DEFAULT_AWS_COMMAND_TIMEOUT_MS,
   envOverride?: NodeJS.ProcessEnv,
 ): Promise<CommandResult> {
   return new Promise((resolve, reject) => {
@@ -1453,7 +1456,7 @@ export class AwsService {
   private async runResolvedCommand(
     command: string,
     args: string[],
-    timeoutMs = 30_000,
+    timeoutMs = DEFAULT_AWS_COMMAND_TIMEOUT_MS,
   ): Promise<CommandResult> {
     const executablePath = await resolveExecutable(command);
     const env = await this.buildManagedCommandEnv();
@@ -1464,7 +1467,7 @@ export class AwsService {
     command: string,
     args: string[],
     envPatch: Record<string, string | null | undefined>,
-    timeoutMs = 30_000,
+    timeoutMs = DEFAULT_AWS_COMMAND_TIMEOUT_MS,
   ): Promise<CommandResult> {
     const executablePath = await resolveExecutable(command);
     const env = await this.buildManagedCommandEnv(process.env, envPatch);
@@ -2617,6 +2620,7 @@ export class AwsService {
   private async getProfileStatusFromRoot(
     profileName: string,
     awsRootDir: string,
+    statusTimeoutMs = DEFAULT_AWS_COMMAND_TIMEOUT_MS,
   ): Promise<AwsProfileStatus> {
     const profileId =
       awsRootDir === this.awsProfileRootDir
@@ -2675,6 +2679,7 @@ export class AwsService {
         "json",
       ],
       this.getManagedAwsEnvOverrides(awsRootDir),
+      statusTimeoutMs,
     );
     if (identity.exitCode === 0) {
       const payload = parseJson<{ Account?: string; Arn?: string }>(
@@ -2748,7 +2753,11 @@ export class AwsService {
     }
 
     const [status, documents] = await Promise.all([
-      this.getProfileStatusFromRoot(normalizedProfileName, awsRootDir),
+      this.getProfileStatusFromRoot(
+        normalizedProfileName,
+        awsRootDir,
+        AWS_PROFILE_DETAILS_STATUS_TIMEOUT_MS,
+      ),
       loadAwsProfileDocuments(awsRootDir),
     ]);
     const snapshot = inspectAwsProfileDocuments(documents, normalizedProfileName);
