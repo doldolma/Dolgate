@@ -33,6 +33,51 @@ interface AwsProfilesPanelProps {
   hosts: HostRecord[]
 }
 
+const AWS_PROFILE_DETAILS_CONCURRENCY = 3
+const AWS_PROFILE_DETAIL_ERROR_MESSAGE = 'AWS 프로필 상세 정보를 불러오지 못했습니다.'
+
+type AwsProfilesPanelCacheState = {
+  profiles: AwsProfileSummary[]
+  detailsByProfileName: Record<string, AwsProfileDetails>
+  detailErrorsByProfileName: Record<string, string>
+  selectedProfileName: string
+  externalImportSummary: string | null
+  hasLoaded: boolean
+}
+
+const DEFAULT_AWS_PROFILES_PANEL_CACHE_STATE: AwsProfilesPanelCacheState = {
+  profiles: [],
+  detailsByProfileName: {},
+  detailErrorsByProfileName: {},
+  selectedProfileName: '',
+  externalImportSummary: null,
+  hasLoaded: false,
+}
+
+let awsProfilesPanelCache: AwsProfilesPanelCacheState = {
+  ...DEFAULT_AWS_PROFILES_PANEL_CACHE_STATE,
+}
+
+function isAwsProfilesPanelCacheComplete(cache: AwsProfilesPanelCacheState): boolean {
+  if (!cache.hasLoaded) {
+    return false
+  }
+  if (cache.profiles.length === 0) {
+    return true
+  }
+  return cache.profiles.every(
+    (profile) =>
+      Boolean(cache.detailsByProfileName[profile.name]) ||
+      Boolean(cache.detailErrorsByProfileName[profile.name]),
+  )
+}
+
+export function resetAwsProfilesPanelCacheForTests() {
+  awsProfilesPanelCache = {
+    ...DEFAULT_AWS_PROFILES_PANEL_CACHE_STATE,
+  }
+}
+
 function createEmptyAwsProfileDraft(): AwsProfileUpdateInput {
   return {
     profileName: '',
@@ -116,14 +161,24 @@ function getAwsProfileKindTone(kind: AwsProfileDetails['kind']) {
 
 function getAwsProfileStatusTone(
   details?: AwsProfileDetails,
+  hasError = false,
 ): 'neutral' | 'running' | 'error' {
+  if (hasError) {
+    return 'error'
+  }
   if (!details) {
     return 'neutral'
   }
   return details.isAuthenticated ? 'running' : 'error'
 }
 
-function getAwsProfileStatusLabel(details?: AwsProfileDetails): string {
+function getAwsProfileStatusLabel(
+  details?: AwsProfileDetails,
+  hasError = false,
+): string {
+  if (hasError) {
+    return '조회 실패'
+  }
   if (!details) {
     return '확인 중'
   }
@@ -198,15 +253,26 @@ export function AwsProfilesPanel({ hosts }: AwsProfilesPanelProps) {
     deleteAwsProfile,
     loginAwsProfile,
   } = useAwsProfilesController()
-  const [profiles, setProfiles] = useState<AwsProfileSummary[]>([])
+  const [profiles, setProfiles] = useState<AwsProfileSummary[]>(awsProfilesPanelCache.profiles)
   const [detailsByProfileName, setDetailsByProfileName] = useState<
     Record<string, AwsProfileDetails>
-  >({})
+  >(awsProfilesPanelCache.detailsByProfileName)
   const [detailErrorsByProfileName, setDetailErrorsByProfileName] = useState<
     Record<string, string>
+  >(awsProfilesPanelCache.detailErrorsByProfileName)
+  const [selectedProfileName, setSelectedProfileName] = useState(() =>
+    resolveSelectedProfileName(
+      awsProfilesPanelCache.profiles,
+      awsProfilesPanelCache.selectedProfileName,
+    ),
+  )
+  const [hasLoadedProfilesOnce, setHasLoadedProfilesOnce] = useState(
+    awsProfilesPanelCache.hasLoaded,
+  )
+  const [isLoadingProfileList, setIsLoadingProfileList] = useState(false)
+  const [loadingDetailsByProfileName, setLoadingDetailsByProfileName] = useState<
+    Record<string, boolean>
   >({})
-  const [selectedProfileName, setSelectedProfileName] = useState('')
-  const [isLoadingProfiles, setIsLoadingProfiles] = useState(false)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [profileFormMode, setProfileFormMode] = useState<'create' | 'edit' | null>(null)
   const [profileDraft, setProfileDraft] = useState<AwsProfileUpdateInput>(
@@ -223,11 +289,15 @@ export function AwsProfilesPanel({ hosts }: AwsProfilesPanelProps) {
   const [isDeleting, setIsDeleting] = useState(false)
   const [isLoggingIn, setIsLoggingIn] = useState(false)
   const [isExternalImportOpen, setIsExternalImportOpen] = useState(false)
-  const [externalImportSummary, setExternalImportSummary] = useState<string | null>(null)
+  const [externalImportSummary, setExternalImportSummary] = useState<string | null>(
+    awsProfilesPanelCache.externalImportSummary,
+  )
   const [awsProfilesServerSupport, setAwsProfilesServerSupport] = useState<
     'unknown' | 'supported' | 'unsupported'
   >('unknown')
   const requestIdRef = useRef(0)
+  const isRefreshingProfileDetails =
+    Object.keys(loadingDetailsByProfileName).length > 0
 
   const selectedDetails = selectedProfileName
     ? detailsByProfileName[selectedProfileName] ?? null
@@ -242,10 +312,76 @@ export function AwsProfilesPanel({ hosts }: AwsProfilesPanelProps) {
     ? getAwsProfileHostReferences(hosts, selectedProfileSummary)
     : []
 
+  function removeProfileStateEntry<T>(
+    current: Record<string, T>,
+    profileName: string,
+  ): Record<string, T> {
+    if (!(profileName in current)) {
+      return current
+    }
+    const next = { ...current }
+    delete next[profileName]
+    return next
+  }
+
+  async function loadProfileDetailsIncrementally(
+    requestId: number,
+    items: AwsProfileSummary[],
+  ) {
+    const queue = [...items]
+    const workerCount = Math.min(AWS_PROFILE_DETAILS_CONCURRENCY, queue.length)
+
+    await Promise.all(
+      Array.from({ length: workerCount }, async () => {
+        while (queue.length > 0) {
+          const profile = queue.shift()
+          if (!profile) {
+            return
+          }
+
+          try {
+            const details = await getAwsProfileDetails(profile.name)
+            if (requestIdRef.current !== requestId) {
+              return
+            }
+            setDetailsByProfileName((current) => ({
+              ...current,
+              [profile.name]: details,
+            }))
+            setDetailErrorsByProfileName((current) =>
+              removeProfileStateEntry(current, profile.name),
+            )
+          } catch (error) {
+            if (requestIdRef.current !== requestId) {
+              return
+            }
+            setDetailsByProfileName((current) =>
+              removeProfileStateEntry(current, profile.name),
+            )
+            setDetailErrorsByProfileName((current) => ({
+              ...current,
+              [profile.name]:
+                error instanceof Error
+                  ? error.message
+                  : AWS_PROFILE_DETAIL_ERROR_MESSAGE,
+            }))
+          } finally {
+            if (requestIdRef.current === requestId) {
+              setLoadingDetailsByProfileName((current) =>
+                removeProfileStateEntry(current, profile.name),
+              )
+            }
+          }
+        }
+      }),
+    )
+  }
+
   async function refreshProfiles(preferredProfileName?: string | null) {
     const requestId = requestIdRef.current + 1
     requestIdRef.current = requestId
-    setIsLoadingProfiles(true)
+    setIsLoadingProfileList(true)
+    setLoadingDetailsByProfileName({})
     setLoadError(null)
 
     try {
@@ -261,46 +397,21 @@ export function AwsProfilesPanel({ hosts }: AwsProfilesPanelProps) {
 
       setProfiles(items)
       setSelectedProfileName(nextSelectedProfileName)
+      setHasLoadedProfilesOnce(true)
 
       if (items.length === 0) {
         setDetailsByProfileName({})
         setDetailErrorsByProfileName({})
+        setLoadingDetailsByProfileName({})
         return
       }
 
-      const detailResults = await Promise.allSettled(
-        items.map(async (profile) => [
-          profile.name,
-          await getAwsProfileDetails(profile.name),
-        ] as const),
+      setDetailsByProfileName({})
+      setDetailErrorsByProfileName({})
+      setLoadingDetailsByProfileName(
+        Object.fromEntries(items.map((profile) => [profile.name, true])),
       )
-
-      if (requestIdRef.current !== requestId) {
-        return
-      }
-
-      const nextDetailsByProfileName: Record<string, AwsProfileDetails> = {}
-      const nextDetailErrorsByProfileName: Record<string, string> = {}
-
-      for (let index = 0; index < detailResults.length; index += 1) {
-        const result = detailResults[index]
-        const profileName = items[index]?.name
-        if (!profileName) {
-          continue
-        }
-        if (result?.status === 'fulfilled') {
-          const [name, details] = result.value
-          nextDetailsByProfileName[name] = details
-          continue
-        }
-        nextDetailErrorsByProfileName[profileName] =
-          result?.reason instanceof Error
-            ? result.reason.message
-            : 'AWS 프로필 상세 정보를 불러오지 못했습니다.'
-      }
-
-      setDetailsByProfileName(nextDetailsByProfileName)
-      setDetailErrorsByProfileName(nextDetailErrorsByProfileName)
+      void loadProfileDetailsIncrementally(requestId, items).catch(() => undefined)
     } catch (error) {
       if (requestIdRef.current !== requestId) {
         return
@@ -308,6 +419,7 @@ export function AwsProfilesPanel({ hosts }: AwsProfilesPanelProps) {
       setProfiles([])
       setDetailsByProfileName({})
       setDetailErrorsByProfileName({})
+      setLoadingDetailsByProfileName({})
       setSelectedProfileName('')
       setLoadError(
         error instanceof Error
@@ -316,10 +428,28 @@ export function AwsProfilesPanel({ hosts }: AwsProfilesPanelProps) {
       )
     } finally {
       if (requestIdRef.current === requestId) {
-        setIsLoadingProfiles(false)
+        setIsLoadingProfileList(false)
       }
     }
   }
+
+  useEffect(() => {
+    awsProfilesPanelCache = {
+      profiles,
+      detailsByProfileName,
+      detailErrorsByProfileName,
+      selectedProfileName,
+      externalImportSummary,
+      hasLoaded: hasLoadedProfilesOnce,
+    }
+  }, [
+    detailErrorsByProfileName,
+    detailsByProfileName,
+    externalImportSummary,
+    hasLoadedProfilesOnce,
+    profiles,
+    selectedProfileName,
+  ])
 
   useEffect(() => {
     void getSyncStatus()
@@ -330,7 +460,9 @@ export function AwsProfilesPanel({ hosts }: AwsProfilesPanelProps) {
   }, [getSyncStatus])
 
   useEffect(() => {
-    void refreshProfiles()
+    if (!isAwsProfilesPanelCacheComplete(awsProfilesPanelCache)) {
+      void refreshProfiles(awsProfilesPanelCache.selectedProfileName || undefined)
+    }
     return () => {
       requestIdRef.current += 1
     }
@@ -474,7 +606,14 @@ export function AwsProfilesPanel({ hosts }: AwsProfilesPanelProps) {
         <div className="flex flex-wrap gap-3">
           <Button
             variant="secondary"
-            disabled={isLoadingProfiles || isLoggingIn || isSavingProfile || isRenaming || isDeleting}
+            disabled={
+              isLoadingProfileList ||
+              isRefreshingProfileDetails ||
+              isLoggingIn ||
+              isSavingProfile ||
+              isRenaming ||
+              isDeleting
+            }
             onClick={() => {
               void refreshProfiles(selectedProfileName)
             }}
@@ -483,14 +622,18 @@ export function AwsProfilesPanel({ hosts }: AwsProfilesPanelProps) {
           </Button>
           <Button
             variant="secondary"
-            disabled={isLoadingProfiles || isLoggingIn || isSavingProfile || isRenaming || isDeleting}
+            disabled={
+              isLoadingProfileList || isLoggingIn || isSavingProfile || isRenaming || isDeleting
+            }
             onClick={() => setIsExternalImportOpen(true)}
           >
             로컬 AWS CLI에서 가져오기
           </Button>
           <Button
             variant="primary"
-            disabled={isLoadingProfiles || isLoggingIn || isSavingProfile || isRenaming || isDeleting}
+            disabled={
+              isLoadingProfileList || isLoggingIn || isSavingProfile || isRenaming || isDeleting
+            }
             onClick={openCreateDialog}
           >
             새 프로필
@@ -521,11 +664,11 @@ export function AwsProfilesPanel({ hosts }: AwsProfilesPanelProps) {
             <Badge tone="neutral">{profiles.length}</Badge>
           </div>
 
-          {isLoadingProfiles && profiles.length === 0 ? (
+          {isLoadingProfileList && profiles.length === 0 ? (
             <NoticeCard tone="info">AWS 프로필 목록을 불러오는 중입니다.</NoticeCard>
           ) : null}
 
-          {!isLoadingProfiles && profiles.length === 0 ? (
+          {!isLoadingProfileList && profiles.length === 0 ? (
             <EmptyState
               title="등록된 AWS 프로필이 없습니다."
               description="새 프로필을 생성하면 기존 AWS import와 SSM 연결 흐름에서 바로 사용할 수 있습니다."
@@ -535,6 +678,7 @@ export function AwsProfilesPanel({ hosts }: AwsProfilesPanelProps) {
           <div className="grid content-start gap-3">
             {profiles.map((profile) => {
               const details = detailsByProfileName[profile.name]
+              const detailError = detailErrorsByProfileName[profile.name] ?? null
               const isSelected = profile.name === selectedProfileName
               return (
                 <button
@@ -563,12 +707,12 @@ export function AwsProfilesPanel({ hosts }: AwsProfilesPanelProps) {
                   </div>
 
                   <div className="flex flex-wrap items-center gap-2.5 text-[0.85rem] text-[var(--text-soft)]">
-                    <StatusBadge tone={getAwsProfileStatusTone(details)}>
-                      {getAwsProfileStatusLabel(details)}
+                    <StatusBadge tone={getAwsProfileStatusTone(details, Boolean(detailError))}>
+                      {getAwsProfileStatusLabel(details, Boolean(detailError))}
                     </StatusBadge>
 
                     <span className="rounded-full border border-[color-mix(in_srgb,var(--border)_78%,white_22%)] bg-[color-mix(in_srgb,var(--surface)_88%,transparent_12%)] px-[0.78rem] py-[0.34rem] text-[0.8rem] font-medium text-[var(--text-soft)]">
-                      {details?.configuredRegion ?? 'Region 없음'}
+                      {detailError ? '조회 실패' : details?.configuredRegion ?? 'Region 없음'}
                     </span>
                   </div>
 
@@ -577,7 +721,7 @@ export function AwsProfilesPanel({ hosts }: AwsProfilesPanelProps) {
                       Account
                     </span>
                     <span className="break-all text-[0.92rem] font-medium text-[var(--text-soft)]">
-                      {details?.accountId ?? '인증 후 확인 가능'}
+                      {detailError ? '조회 실패' : details?.accountId ?? '인증 후 확인 가능'}
                     </span>
                   </div>
                 </button>
@@ -627,7 +771,14 @@ export function AwsProfilesPanel({ hosts }: AwsProfilesPanelProps) {
                 <div className="flex flex-wrap gap-3">
                   <Button
                     variant="secondary"
-                    disabled={isLoadingProfiles || isSavingProfile || isRenaming || isDeleting || isLoggingIn}
+                    disabled={
+                      isLoadingProfileList ||
+                      isRefreshingProfileDetails ||
+                      isSavingProfile ||
+                      isRenaming ||
+                      isDeleting ||
+                      isLoggingIn
+                    }
                     onClick={() => {
                       setRenameDraft(selectedDetails.profileName)
                       setRenameError(null)
@@ -640,7 +791,14 @@ export function AwsProfilesPanel({ hosts }: AwsProfilesPanelProps) {
                   {selectedDetails.kind === 'static' ? (
                     <Button
                       variant="secondary"
-                      disabled={isLoadingProfiles || isSavingProfile || isRenaming || isDeleting || isLoggingIn}
+                      disabled={
+                        isLoadingProfileList ||
+                        isRefreshingProfileDetails ||
+                        isSavingProfile ||
+                        isRenaming ||
+                        isDeleting ||
+                        isLoggingIn
+                      }
                       onClick={openEditDialog}
                     >
                       수정
@@ -650,7 +808,14 @@ export function AwsProfilesPanel({ hosts }: AwsProfilesPanelProps) {
                   {selectedDetails.kind === 'sso' ? (
                     <Button
                       variant="secondary"
-                      disabled={isLoadingProfiles || isSavingProfile || isRenaming || isDeleting || isLoggingIn}
+                      disabled={
+                        isLoadingProfileList ||
+                        isRefreshingProfileDetails ||
+                        isSavingProfile ||
+                        isRenaming ||
+                        isDeleting ||
+                        isLoggingIn
+                      }
                       onClick={() => {
                         void handleLogin()
                       }}
@@ -661,7 +826,14 @@ export function AwsProfilesPanel({ hosts }: AwsProfilesPanelProps) {
 
                   <Button
                     variant="danger"
-                    disabled={isLoadingProfiles || isSavingProfile || isRenaming || isDeleting || isLoggingIn}
+                    disabled={
+                      isLoadingProfileList ||
+                      isRefreshingProfileDetails ||
+                      isSavingProfile ||
+                      isRenaming ||
+                      isDeleting ||
+                      isLoggingIn
+                    }
                     onClick={() => {
                       setDeleteError(null)
                       setIsDeleteOpen(true)

@@ -1,7 +1,21 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import type { AwsProfileDetails, DesktopApi, HostRecord } from '@shared'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { AwsProfilesPanel } from './AwsProfilesPanel'
+import { AwsProfilesPanel, resetAwsProfilesPanelCacheForTests } from './AwsProfilesPanel'
+
+function createDeferred<T>() {
+  let resolve!: (value: T) => void
+  let reject!: (reason?: unknown) => void
+  const promise = new Promise<T>((nextResolve, nextReject) => {
+    resolve = nextResolve
+    reject = nextReject
+  })
+  return {
+    promise,
+    resolve,
+    reject,
+  }
+}
 
 function createProfileDetails(
   overrides: Partial<AwsProfileDetails> = {},
@@ -67,6 +81,8 @@ function installMockApi(input?: {
   detailsByProfileName?: Record<string, AwsProfileDetails>
   externalDetailsByProfileName?: Record<string, AwsProfileDetails>
   awsProfilesServerSupport?: 'unknown' | 'supported' | 'unsupported'
+  listProfilesImpl?: () => Promise<Array<{ name: string }>>
+  getProfileDetailsImpl?: (profileName: string) => Promise<AwsProfileDetails>
 }) {
   let profiles = input?.profiles ?? [{ id: 'profile-default', name: 'default' }]
   const externalProfiles = input?.externalProfiles ?? [{ id: null, name: 'legacy-profile' }]
@@ -93,7 +109,11 @@ function installMockApi(input?: {
       }),
     },
     aws: {
-      listProfiles: vi.fn().mockImplementation(async () => profiles),
+      listProfiles: vi
+        .fn()
+        .mockImplementation(
+          input?.listProfilesImpl ?? (async () => profiles),
+        ),
       listExternalProfiles: vi.fn().mockImplementation(async () => externalProfiles),
       createProfile: vi.fn().mockImplementation(async (draft) => {
         profiles = [...profiles, { name: draft.profileName }]
@@ -137,13 +157,16 @@ function installMockApi(input?: {
         defaultAccountId: '123456789012',
         defaultRoleName: 'AdministratorAccess',
       }),
-      getProfileDetails: vi.fn().mockImplementation(async (profileName: string) => {
-        const details = detailsByProfileName[profileName]
-        if (!details) {
-          throw new Error('missing profile')
-        }
-        return details
-      }),
+      getProfileDetails: vi.fn().mockImplementation(
+        input?.getProfileDetailsImpl ??
+          (async (profileName: string) => {
+            const details = detailsByProfileName[profileName]
+            if (!details) {
+              throw new Error('missing profile')
+            }
+            return details
+          }),
+      ),
       getExternalProfileDetails: vi.fn().mockImplementation(async (profileName: string) => {
         const details = externalDetailsByProfileName[profileName]
         if (!details) {
@@ -237,6 +260,7 @@ function installMockApi(input?: {
 describe('AwsProfilesPanel', () => {
   beforeEach(() => {
     vi.restoreAllMocks()
+    resetAwsProfilesPanelCacheForTests()
   })
 
   it('shows the general app-managed aws profiles description', async () => {
@@ -263,6 +287,75 @@ describe('AwsProfilesPanel', () => {
         '현재 서버는 AWS 프로필 동기화를 아직 지원하지 않습니다. 서버를 업데이트하기 전까지 이 기기에서만 저장됩니다.',
       ),
     ).toBeInTheDocument()
+  })
+
+  it('renders profiles before detail lookups finish and updates each row as results arrive', async () => {
+    const defaultDetails = createDeferred<AwsProfileDetails>()
+    const prodDetails = createDeferred<AwsProfileDetails>()
+
+    installMockApi({
+      profiles: [{ name: 'default' }, { name: 'prod' }],
+      getProfileDetailsImpl: vi.fn().mockImplementation((profileName: string) => {
+        if (profileName === 'default') {
+          return defaultDetails.promise
+        }
+        if (profileName === 'prod') {
+          return prodDetails.promise
+        }
+        throw new Error('missing profile')
+      }),
+    })
+
+    render(<AwsProfilesPanel hosts={[]} />)
+
+    const defaultRow = await screen.findByRole('button', { name: /default/ })
+    const prodRow = screen.getByRole('button', { name: /prod/ })
+
+    expect(defaultRow).toHaveTextContent('확인 중')
+    expect(prodRow).toHaveTextContent('확인 중')
+    expect(screen.getByRole('button', { name: '새 프로필' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: '로컬 AWS CLI에서 가져오기' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: '새로고침' })).toBeDisabled()
+    expect(
+      screen.getByText('AWS 프로필 상세 정보를 불러오는 중입니다.'),
+    ).toBeInTheDocument()
+
+    defaultDetails.resolve(
+      createProfileDetails({
+        profileName: 'default',
+        accountId: '111111111111',
+      }),
+    )
+
+    await waitFor(() => expect(defaultRow).toHaveTextContent('인증됨'))
+    expect(defaultRow).toHaveTextContent('111111111111')
+
+    prodDetails.reject(new Error('offline'))
+
+    await waitFor(() => expect(prodRow).toHaveTextContent('조회 실패'))
+
+    fireEvent.click(prodRow)
+
+    expect(await screen.findByText('offline')).toBeInTheDocument()
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: '새로고침' })).toBeEnabled(),
+    )
+  })
+
+  it('restores cached profiles immediately after the panel remounts', async () => {
+    const { api } = installMockApi()
+
+    const firstRender = render(<AwsProfilesPanel hosts={[]} />)
+
+    await screen.findByRole('heading', { name: 'default' })
+    await waitFor(() => expect(api.aws.listProfiles).toHaveBeenCalledTimes(1))
+
+    firstRender.unmount()
+
+    render(<AwsProfilesPanel hosts={[]} />)
+
+    expect(screen.getByRole('heading', { name: 'default' })).toBeInTheDocument()
+    expect(api.aws.listProfiles).toHaveBeenCalledTimes(1)
   })
 
   it('imports external aws cli profiles into the app-managed profile list', async () => {
@@ -327,6 +420,78 @@ describe('AwsProfilesPanel', () => {
     await waitFor(() =>
       expect(screen.getByRole('heading', { name: 'prod' })).toBeInTheDocument(),
     )
+  })
+
+  it('ignores stale detail responses from an earlier refresh after creating a new profile', async () => {
+    const firstDefaultDetails = createDeferred<AwsProfileDetails>()
+    const secondDefaultDetails = createDeferred<AwsProfileDetails>()
+    const prodDetails = createDeferred<AwsProfileDetails>()
+    const defaultRequests = [firstDefaultDetails, secondDefaultDetails]
+
+    const getProfileDetailsImpl = vi.fn().mockImplementation((profileName: string) => {
+      if (profileName === 'default') {
+        const nextRequest = defaultRequests.shift()
+        if (!nextRequest) {
+          throw new Error('missing deferred default profile')
+        }
+        return nextRequest.promise
+      }
+      if (profileName === 'prod') {
+        return prodDetails.promise
+      }
+      throw new Error('missing profile')
+    })
+
+    const { api } = installMockApi({
+      getProfileDetailsImpl,
+    })
+
+    render(<AwsProfilesPanel hosts={[]} />)
+
+    await screen.findByRole('button', { name: /default/ })
+
+    fireEvent.click(screen.getByRole('button', { name: '새 프로필' }))
+    fireEvent.change(screen.getByLabelText('새 프로필명'), {
+      target: { value: 'prod' },
+    })
+    fireEvent.change(screen.getByLabelText('Access Key'), {
+      target: { value: 'AKIATEST123' },
+    })
+    fireEvent.change(screen.getByLabelText('Secret'), {
+      target: { value: 'secret-value' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: '프로필 저장' }))
+
+    await waitFor(() => expect(api.aws.createProfile).toHaveBeenCalledTimes(1))
+    await screen.findByRole('button', { name: /prod/ })
+    await waitFor(() => expect(getProfileDetailsImpl).toHaveBeenCalledTimes(3))
+
+    secondDefaultDetails.resolve(
+      createProfileDetails({
+        profileName: 'default',
+        accountId: '222222222222',
+      }),
+    )
+    prodDetails.resolve(
+      createProfileDetails({
+        profileName: 'prod',
+        accountId: '333333333333',
+      }),
+    )
+
+    const defaultRow = screen.getByRole('button', { name: /default/ })
+    await waitFor(() => expect(defaultRow).toHaveTextContent('222222222222'))
+
+    firstDefaultDetails.resolve(
+      createProfileDetails({
+        profileName: 'default',
+        accountId: '111111111111',
+      }),
+    )
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    expect(defaultRow).toHaveTextContent('222222222222')
+    expect(defaultRow).not.toHaveTextContent('111111111111')
   })
 
   it('normalizes remote invoke prefixes for profile update errors', async () => {
