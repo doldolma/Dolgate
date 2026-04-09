@@ -256,6 +256,7 @@ export function ContainersShell({
                     onSelectService={containersViewModel.setEcsClusterSelectedService}
                     onSetPanel={containersViewModel.setEcsClusterActivePanel}
                     onSetTunnelState={containersViewModel.setEcsClusterTunnelState}
+                    onSetLogsState={containersViewModel.setEcsClusterLogsState}
                     onOpenEcsExecShell={containersViewModel.openEcsExecShell}
                   />
                 ) : (

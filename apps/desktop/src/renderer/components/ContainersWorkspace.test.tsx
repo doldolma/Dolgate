@@ -185,6 +185,7 @@ function createTab(): HostContainersTabState {
     ecsMetricsLoadedAt: null,
     ecsMetricsLoading: false,
     ecsUtilizationHistoryByServiceName: {},
+    ecsLogsByServiceName: {},
     ecsSelectedServiceName: null,
     ecsActivePanel: "overview",
     ecsTunnelStatesByServiceName: {},

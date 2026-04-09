@@ -478,6 +478,25 @@ export function createContainersSlice(deps: SliceDeps): ContainersSlice {
                 }),
               };
             }),
+    setEcsClusterLogsState: (hostId, serviceName, logsState) =>
+            set((state) => {
+              const currentTab = findContainersTab(state, hostId);
+              if (!currentTab || currentTab.kind !== "ecs-cluster") {
+                return state;
+              }
+              const nextLogsByServiceName = { ...currentTab.ecsLogsByServiceName };
+              if (logsState) {
+                nextLogsByServiceName[serviceName] = logsState;
+              } else {
+                delete nextLogsByServiceName[serviceName];
+              }
+              return {
+                containerTabs: upsertContainersTab(state.containerTabs, {
+                  ...currentTab,
+                  ecsLogsByServiceName: nextLogsByServiceName,
+                }),
+              };
+            }),
     refreshHostContainerLogs: async (hostId, options) => {
             await loadContainerLogs(set, get, hostId, options);
           },
