@@ -40,17 +40,10 @@ export function ContainersShell({
     placement: 'before' | 'after';
   } | null>(null);
 
-  const activeContainersHostId = active
-    ? containersViewModel.activeContainerHostId ??
-      containersViewModel.containerTabs[0]?.hostId ??
-      null
-    : null;
-  const activeContainersTab = activeContainersHostId
-    ? containersViewModel.containerTabs.find(
-        (tab) => tab.hostId === activeContainersHostId,
-      ) ?? null
-    : null;
-  const activeContainerHost = findHost(homeViewModel.hosts, activeContainersHostId);
+  const activeContainersHostId =
+    containersViewModel.activeContainerHostId ??
+    containersViewModel.containerTabs[0]?.hostId ??
+    null;
 
   return (
     <section
@@ -211,49 +204,71 @@ export function ContainersShell({
         )}
       </div>
       <div className="min-h-0 flex-1">
-        {activeContainerHost && activeContainersTab ? (
-          activeContainersTab.kind === 'ecs-cluster' ? (
-            <AwsEcsWorkspace
-              host={activeContainerHost}
-              tab={activeContainersTab}
-              isActive={active}
-              onRefresh={containersViewModel.refreshHostContainers}
-              onRefreshUtilization={containersViewModel.refreshEcsClusterUtilization}
-              onSelectService={containersViewModel.setEcsClusterSelectedService}
-              onSetPanel={containersViewModel.setEcsClusterActivePanel}
-              onSetTunnelState={containersViewModel.setEcsClusterTunnelState}
-              onOpenEcsExecShell={containersViewModel.openEcsExecShell}
-            />
-          ) : (
-            <ContainersWorkspace
-              host={activeContainerHost}
-              tab={activeContainersTab}
-              isActive={active}
-              interactiveAuth={
-                modalViewModel.pendingInteractiveAuth?.source === 'containers'
-                  ? modalViewModel.pendingInteractiveAuth
-                  : null
-              }
-              onRefresh={containersViewModel.refreshHostContainers}
-              onSelectContainer={containersViewModel.selectHostContainer}
-              onSetPanel={containersViewModel.setHostContainersPanel}
-              onSetTunnelState={containersViewModel.setHostContainerTunnelState}
-              onRefreshLogs={containersViewModel.refreshHostContainerLogs}
-              onLoadMoreLogs={containersViewModel.loadMoreHostContainerLogs}
-              onSetLogsFollow={containersViewModel.setHostContainerLogsFollow}
-              onSetLogsSearchQuery={
-                containersViewModel.setHostContainerLogsSearchQuery
-              }
-              onSearchLogs={containersViewModel.searchHostContainerLogs}
-              onClearLogsSearch={containersViewModel.clearHostContainerLogsSearch}
-              onRefreshMetrics={containersViewModel.refreshHostContainerStats}
-              onRunAction={containersViewModel.runHostContainerAction}
-              onOpenShell={containersViewModel.openHostContainerShell}
-              onRespondInteractiveAuth={modalViewModel.respondInteractiveAuth}
-              onReopenInteractiveAuthUrl={modalViewModel.reopenInteractiveAuthUrl}
-              onClearInteractiveAuth={modalViewModel.clearPendingInteractiveAuth}
-            />
-          )
+        {containersViewModel.containerTabs.length > 0 ? (
+          containersViewModel.containerTabs.map((tab) => {
+            const host = findHost(homeViewModel.hosts, tab.hostId);
+            if (!host) {
+              return null;
+            }
+            const isActiveTab = activeContainersHostId === tab.hostId;
+            return (
+              <div
+                key={tab.hostId}
+                className={cn('h-full min-h-0', isActiveTab ? 'block' : 'hidden')}
+              >
+                {tab.kind === 'ecs-cluster' ? (
+                  <AwsEcsWorkspace
+                    host={host}
+                    tab={tab}
+                    isActive={active && isActiveTab}
+                    onRefresh={containersViewModel.refreshHostContainers}
+                    onRefreshUtilization={
+                      containersViewModel.refreshEcsClusterUtilization
+                    }
+                    onSelectService={containersViewModel.setEcsClusterSelectedService}
+                    onSetPanel={containersViewModel.setEcsClusterActivePanel}
+                    onSetTunnelState={containersViewModel.setEcsClusterTunnelState}
+                    onOpenEcsExecShell={containersViewModel.openEcsExecShell}
+                  />
+                ) : (
+                  <ContainersWorkspace
+                    host={host}
+                    tab={tab}
+                    isActive={active && isActiveTab}
+                    interactiveAuth={
+                      modalViewModel.pendingInteractiveAuth?.source === 'containers'
+                        ? modalViewModel.pendingInteractiveAuth
+                        : null
+                    }
+                    onRefresh={containersViewModel.refreshHostContainers}
+                    onSelectContainer={containersViewModel.selectHostContainer}
+                    onSetPanel={containersViewModel.setHostContainersPanel}
+                    onSetTunnelState={containersViewModel.setHostContainerTunnelState}
+                    onRefreshLogs={containersViewModel.refreshHostContainerLogs}
+                    onLoadMoreLogs={containersViewModel.loadMoreHostContainerLogs}
+                    onSetLogsFollow={containersViewModel.setHostContainerLogsFollow}
+                    onSetLogsSearchQuery={
+                      containersViewModel.setHostContainerLogsSearchQuery
+                    }
+                    onSearchLogs={containersViewModel.searchHostContainerLogs}
+                    onClearLogsSearch={
+                      containersViewModel.clearHostContainerLogsSearch
+                    }
+                    onRefreshMetrics={containersViewModel.refreshHostContainerStats}
+                    onRunAction={containersViewModel.runHostContainerAction}
+                    onOpenShell={containersViewModel.openHostContainerShell}
+                    onRespondInteractiveAuth={modalViewModel.respondInteractiveAuth}
+                    onReopenInteractiveAuthUrl={
+                      modalViewModel.reopenInteractiveAuthUrl
+                    }
+                    onClearInteractiveAuth={
+                      modalViewModel.clearPendingInteractiveAuth
+                    }
+                  />
+                )}
+              </div>
+            );
+          })
         ) : (
           <EmptyState
             className="max-w-[620px]"
