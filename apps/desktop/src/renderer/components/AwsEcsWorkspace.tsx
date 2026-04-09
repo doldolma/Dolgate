@@ -202,6 +202,14 @@ const ecsTunnelRuntimeCardClass =
   "grid gap-[0.85rem] rounded-[18px] border border-[color-mix(in_srgb,var(--accent-strong)_20%,var(--border)_80%)] bg-[color-mix(in_srgb,var(--accent-strong)_8%,var(--surface)_92%)] px-[1rem] py-[0.9rem] shadow-[var(--shadow)]";
 const ecsTunnelRuntimeGridClass =
   "grid grid-cols-[repeat(2,minmax(0,1fr))] gap-[0.9rem] max-[760px]:grid-cols-1";
+const ecsDetailTabsClass =
+  "gap-[0.55rem] rounded-[18px] border border-[color-mix(in_srgb,var(--border)_84%,white_16%)] bg-[color-mix(in_srgb,var(--surface-muted)_82%,transparent_18%)] p-[0.35rem] shadow-[inset_0_1px_0_rgba(255,255,255,0.06)]";
+const ecsDetailTabButtonBaseClass =
+  "min-w-[5.75rem] border border-transparent bg-[color-mix(in_srgb,var(--surface)_18%,transparent_82%)] text-[color-mix(in_srgb,var(--text-soft)_90%,black_10%)] shadow-none";
+const ecsDetailTabButtonActiveClass =
+  "border-[color-mix(in_srgb,var(--accent-strong)_46%,var(--border)_54%)] bg-[color-mix(in_srgb,var(--accent-strong)_18%,var(--surface-elevated)_82%)] text-[var(--text)] shadow-[0_10px_22px_rgba(15,23,38,0.14)] ring-1 ring-[color-mix(in_srgb,var(--accent-strong)_24%,transparent_76%)]";
+const ecsDetailTabButtonInactiveClass =
+  "hover:border-[color-mix(in_srgb,var(--border)_80%,white_20%)] hover:bg-[color-mix(in_srgb,var(--surface)_56%,transparent_44%)] hover:text-[var(--text)]";
 
 function padRangeValue(value: number): string {
   return String(value).padStart(2, "0");
@@ -1062,16 +1070,17 @@ function LogsRangePickerDialog({
             </p>
           </ModalBody>
         ) : (
-          <ModalBody className="grid items-start gap-4 lg:grid-cols-[minmax(240px,0.95fr)_minmax(0,1fr)]">
-            <div className="flex flex-col gap-[0.55rem]">
+          <ModalBody className="grid items-start gap-5 lg:grid-cols-[13.5rem_minmax(20rem,24rem)]">
+            <div className="grid content-start gap-[0.55rem]">
               {RELATIVE_RANGE_PRESET_OPTIONS.map((option) => (
                 <label
                   key={option.key}
-                  className="flex min-h-[2.25rem] items-center gap-[0.7rem] text-[0.98rem] font-semibold text-[var(--text)]"
+                  className="grid min-h-[2.25rem] grid-cols-[1rem_minmax(0,1fr)] items-center gap-[0.85rem] text-[0.98rem] font-semibold text-[var(--text)]"
                 >
                   <input
                     type="radio"
                     name="ecs-logs-relative-range"
+                    className="m-0 h-4 w-4 justify-self-center accent-[var(--accent-strong)]"
                     checked={draftRelativeValue.presetKey === option.key}
                     onChange={() => {
                       setDraftRelativeValue({
@@ -1081,13 +1090,14 @@ function LogsRangePickerDialog({
                       });
                     }}
                   />
-                  <span>{option.label}</span>
+                  <span className="whitespace-nowrap leading-none">{option.label}</span>
                 </label>
               ))}
-              <label className="mt-1 flex min-h-[2.25rem] items-center gap-[0.7rem] text-[0.98rem] font-semibold text-[var(--text)]">
+              <label className="mt-1 grid min-h-[2.25rem] grid-cols-[1rem_minmax(0,1fr)] items-center gap-[0.85rem] text-[0.98rem] font-semibold text-[var(--text)]">
                 <input
                   type="radio"
                   name="ecs-logs-relative-range"
+                  className="m-0 h-4 w-4 justify-self-center accent-[var(--accent-strong)]"
                   checked={draftRelativeValue.presetKey === "custom"}
                   onChange={() => {
                     setDraftRelativeValue((previous) => ({
@@ -1096,10 +1106,10 @@ function LogsRangePickerDialog({
                     }));
                   }}
                 />
-                <span>사용자 지정 범위</span>
+                <span className="whitespace-nowrap leading-none">사용자 지정 범위</span>
               </label>
             </div>
-            <div className="grid items-end gap-[0.9rem] lg:grid-cols-[minmax(0,1fr)_180px]">
+            <div className="grid max-w-[24rem] items-end gap-[0.9rem] lg:grid-cols-[minmax(0,1fr)_11.25rem]">
               <FieldGroup label="기간">
                 <Input
                   type="number"
@@ -2231,8 +2241,8 @@ export function AwsEcsWorkspace({
       ) : null}
 
       {snapshot ? (
-        <div className="grid min-h-0 gap-[0.95rem]">
-          <div className="grid gap-[0.9rem] xl:grid-cols-[repeat(auto-fit,minmax(280px,1fr))]">
+        <div className="flex min-h-0 flex-1 flex-col gap-[0.95rem]">
+          <div className="grid shrink-0 gap-[0.9rem] lg:grid-cols-[repeat(auto-fit,minmax(280px,1fr))]">
             <Card className="items-start">
               <CardMain>
                 <CardTitleRow>
@@ -2263,8 +2273,8 @@ export function AwsEcsWorkspace({
             </Card>
           </div>
 
-          <div className="grid min-h-0 gap-4 xl:grid-cols-[minmax(280px,340px)_minmax(0,1fr)]">
-            <aside className="flex min-h-0 flex-col gap-4 rounded-[24px] border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[var(--surface-elevated)] p-[1.15rem]">
+          <div className="grid min-h-0 flex-1 gap-4 lg:grid-cols-[minmax(280px,340px)_minmax(0,1fr)]">
+            <aside className="flex min-h-0 flex-col gap-4 overflow-hidden rounded-[24px] border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[var(--surface-elevated)] p-[1.15rem]">
               <div className="flex items-center justify-between gap-3">
                 <strong>Services</strong>
                 <span>{services.length}</span>
@@ -2333,10 +2343,10 @@ export function AwsEcsWorkspace({
               )}
             </aside>
 
-            <section className="flex min-h-0 flex-col gap-4 rounded-[24px] border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[var(--surface-elevated)] p-[1.15rem]">
+            <section className="flex min-h-0 flex-col gap-4 overflow-hidden rounded-[24px] border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[var(--surface-elevated)] p-[1.15rem]">
               {selectedService ? (
                 <>
-                  <div className="flex flex-wrap items-start justify-between gap-4">
+                  <div className="grid shrink-0 items-start gap-4 lg:grid-cols-[minmax(0,1fr)_auto]">
                     <div className="min-w-0">
                       <CardTitleRow>
                         <h3>{selectedService.serviceName}</h3>
@@ -2371,7 +2381,7 @@ export function AwsEcsWorkspace({
                         ))}
                       </CardMeta>
                     </div>
-                    <div className="flex flex-col items-start gap-3 self-stretch">
+                    <div className="flex shrink-0 flex-wrap items-center justify-end gap-3 self-start max-[980px]:w-full max-[980px]:justify-start">
                       <Button
                         variant="secondary"
                         size="sm"
@@ -2381,7 +2391,14 @@ export function AwsEcsWorkspace({
                       >
                         쉘 접속
                       </Button>
-                      <Tabs role="tablist">
+                      <Tabs
+                        role="tablist"
+                        aria-label="ECS 서비스 상세 패널"
+                        className={cn(
+                          ecsDetailTabsClass,
+                          "min-w-0 max-[980px]:overflow-x-auto",
+                        )}
+                      >
                         {(
                           [
                             ["overview", "Overview"],
@@ -2395,6 +2412,12 @@ export function AwsEcsWorkspace({
                             role="tab"
                             aria-selected={activePanel === panel}
                             active={activePanel === panel}
+                            className={cn(
+                              ecsDetailTabButtonBaseClass,
+                              activePanel === panel
+                                ? ecsDetailTabButtonActiveClass
+                                : ecsDetailTabButtonInactiveClass,
+                            )}
                             onClick={() => {
                               if (onSetPanel) {
                                 onSetPanel(host.id, panel);

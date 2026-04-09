@@ -490,6 +490,34 @@ describe('renderer style boundaries', () => {
     expect(source).not.toContain('@layer components');
   });
 
+  it('defines global scrollbar styling with terminal and native opt-outs', () => {
+    const source = fs.readFileSync(path.join(stylesDir, 'tailwind.css'), 'utf8');
+
+    expect(source).toContain('::-webkit-scrollbar');
+    expect(source).toContain('scrollbar-width: thin;');
+    expect(source).toContain('[data-native-scrollbar="true"]');
+    expect(source).toContain('[data-terminal-canvas="true"]');
+    expect(source).toContain('.xterm-viewport');
+    expect(source).toContain('scrollbar-color: auto;');
+  });
+
+  it('defines scrollbar theme tokens for light and dark themes', () => {
+    const source = fs.readFileSync(path.join(stylesDir, 'tokens.css'), 'utf8');
+    const scrollbarTokens = [
+      '--scrollbar-size',
+      '--scrollbar-radius',
+      '--scrollbar-track',
+      '--scrollbar-thumb',
+      '--scrollbar-thumb-hover',
+      '--scrollbar-thumb-active',
+      '--scrollbar-corner',
+    ];
+
+    for (const token of scrollbarTokens) {
+      expect(source.match(new RegExp(`${escapeRegExp(token)}:`, 'g'))?.length ?? 0).toBe(2);
+    }
+  });
+
   it('removes legacy.css imports from renderer entrypoints', () => {
     const mainSource = fs.readFileSync(path.join(rendererDir, 'main.tsx'), 'utf8');
     const indexSource = fs.readFileSync(path.join(stylesDir, 'index.css'), 'utf8');

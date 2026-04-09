@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
+import { TextDecoder } from "node:util";
 import type {
   AwsEc2InstanceSummary,
   AwsEcsClusterListItem,
@@ -194,12 +195,54 @@ async function resolveExecutable(command: string): Promise<string> {
 
 const DEFAULT_AWS_COMMAND_TIMEOUT_MS = 30_000;
 const AWS_PROFILE_DETAILS_STATUS_TIMEOUT_MS = 8_000;
+const WINDOWS_EUC_KR_DECODER = new TextDecoder("euc-kr");
+
+interface AwsCliDecodeOptions {
+  platform?: NodeJS.Platform;
+  allowWindowsLegacyFallback?: boolean;
+}
+
+function countReplacementCharacters(value: string): number {
+  let count = 0;
+  for (const character of value) {
+    if (character === "\uFFFD") {
+      count += 1;
+    }
+  }
+  return count;
+}
+
+function shouldAllowWindowsLegacyAwsCliDecodeFallback(command: string): boolean {
+  const normalizedCommand = command.trim().toLowerCase();
+  return normalizedCommand === "aws" || normalizedCommand === "session-manager-plugin";
+}
+
+export function decodeAwsCliOutput(
+  raw: Uint8Array,
+  options: AwsCliDecodeOptions = {},
+): string {
+  const utf8Decoded = Buffer.from(raw).toString("utf8");
+  const platform = options.platform ?? process.platform;
+  if (platform !== "win32" || !options.allowWindowsLegacyFallback) {
+    return utf8Decoded;
+  }
+  const utf8ReplacementCount = countReplacementCharacters(utf8Decoded);
+  if (utf8ReplacementCount === 0) {
+    return utf8Decoded;
+  }
+  const eucKrDecoded = WINDOWS_EUC_KR_DECODER.decode(raw);
+  if (countReplacementCharacters(eucKrDecoded) < utf8ReplacementCount) {
+    return eucKrDecoded;
+  }
+  return utf8Decoded;
+}
 
 function runCommand(
   command: string,
   args: string[],
   timeoutMs = DEFAULT_AWS_COMMAND_TIMEOUT_MS,
   envOverride?: NodeJS.ProcessEnv,
+  decodeOptions: AwsCliDecodeOptions = {},
 ): Promise<CommandResult> {
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, {
@@ -208,8 +251,8 @@ function runCommand(
       env: envOverride ?? process.env,
     });
 
-    let stdout = "";
-    let stderr = "";
+    const stdoutChunks: Buffer[] = [];
+    const stderrChunks: Buffer[] = [];
     let settled = false;
 
     const finish = (callback: () => void) => {
@@ -221,14 +264,16 @@ function runCommand(
       callback();
     };
 
-    child.stdout.setEncoding("utf8");
-    child.stdout.on("data", (chunk: string) => {
-      stdout += chunk;
+    child.stdout.on("data", (chunk: string | Buffer) => {
+      stdoutChunks.push(
+        Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk, "utf8"),
+      );
     });
 
-    child.stderr.setEncoding("utf8");
-    child.stderr.on("data", (chunk: string) => {
-      stderr += chunk;
+    child.stderr.on("data", (chunk: string | Buffer) => {
+      stderrChunks.push(
+        Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk, "utf8"),
+      );
     });
 
     child.on("error", (error) => {
@@ -238,8 +283,8 @@ function runCommand(
     child.on("exit", (code) => {
       finish(() => {
         resolve({
-          stdout,
-          stderr,
+          stdout: decodeAwsCliOutput(Buffer.concat(stdoutChunks), decodeOptions),
+          stderr: decodeAwsCliOutput(Buffer.concat(stderrChunks), decodeOptions),
           exitCode: code ?? 0,
         });
       });
@@ -1204,9 +1249,37 @@ export function buildSshMetadataProbeCommands(): string[] {
 }
 
 export class AwsService {
+  private static readonly ECS_SERVICE_LIST_CACHE_TTL_MS = 5 * 60_000;
+  private static readonly ECS_TASK_DEFINITION_CACHE_TTL_MS = 5 * 60_000;
+  private static readonly ECS_SERVICE_ACTION_CONTEXT_CACHE_TTL_MS = 3 * 60_000;
+
   private readonly pendingSsoPreparations = new Map<
     string,
     AwsPendingSsoPreparation
+  >();
+  private readonly ecsServiceListCache = new Map<
+    string,
+    { expiresAt: number; value: string[] }
+  >();
+  private readonly ecsServiceListInFlight = new Map<string, Promise<string[]>>();
+  private readonly ecsTaskDefinitionCache = new Map<
+    string,
+    {
+      expiresAt: number;
+      value: EcsTaskDefinitionPayload["taskDefinition"] | undefined;
+    }
+  >();
+  private readonly ecsTaskDefinitionInFlight = new Map<
+    string,
+    Promise<EcsTaskDefinitionPayload["taskDefinition"] | undefined>
+  >();
+  private readonly ecsServiceActionContextCache = new Map<
+    string,
+    { expiresAt: number; value: AwsEcsServiceActionContext }
+  >();
+  private readonly ecsServiceActionContextInFlight = new Map<
+    string,
+    Promise<AwsEcsServiceActionContext>
   >();
 
   private readonly profileRepository: AwsProfileRepository;
@@ -1240,6 +1313,116 @@ export class AwsService {
 
   private getManagedProfilePayloads(): ManagedAwsProfilePayload[] {
     return this.profileRepository.listPayloads();
+  }
+
+  private isCacheEntryFresh(expiresAt: number): boolean {
+    return expiresAt > Date.now();
+  }
+
+  private buildEcsServiceListCacheKey(input: {
+    profileName: string;
+    region: string;
+    clusterArn: string;
+  }): string {
+    return [input.profileName, input.region, input.clusterArn].join("\u0000");
+  }
+
+  private buildEcsActionContextCacheKey(input: {
+    profileName: string;
+    region: string;
+    clusterArn: string;
+    serviceName: string;
+  }): string {
+    return [
+      input.profileName,
+      input.region,
+      input.clusterArn,
+      input.serviceName,
+    ].join("\u0000");
+  }
+
+  private buildEcsClusterCachePrefix(input: {
+    profileName: string;
+    region: string;
+    clusterArn: string;
+  }): string {
+    return `${this.buildEcsServiceListCacheKey(input)}\u0000`;
+  }
+
+  private setEcsServiceListCache(
+    input: { profileName: string; region: string; clusterArn: string },
+    serviceNames: string[],
+  ): void {
+    this.ecsServiceListCache.set(this.buildEcsServiceListCacheKey(input), {
+      expiresAt: Date.now() + AwsService.ECS_SERVICE_LIST_CACHE_TTL_MS,
+      value: [...serviceNames],
+    });
+  }
+
+  private clearEcsServiceActionContextCacheForCluster(input: {
+    profileName: string;
+    region: string;
+    clusterArn: string;
+  }): void {
+    const clusterPrefix = this.buildEcsClusterCachePrefix(input);
+    for (const cacheKey of this.ecsServiceActionContextCache.keys()) {
+      if (cacheKey.startsWith(clusterPrefix)) {
+        this.ecsServiceActionContextCache.delete(cacheKey);
+      }
+    }
+  }
+
+  invalidateEcsServiceActionContext(
+    profileName: string,
+    region: string,
+    clusterArn: string,
+    serviceName: string,
+  ): void {
+    this.ecsServiceActionContextCache.delete(
+      this.buildEcsActionContextCacheKey({
+        profileName,
+        region,
+        clusterArn,
+        serviceName,
+      }),
+    );
+  }
+
+  private getCachedEcsTaskContainerContext(input: {
+    profileName: string;
+    region: string;
+    clusterArn: string;
+    taskArn: string;
+    containerName: string;
+  }):
+    | {
+        enableExecuteCommand: boolean;
+        runtimeId: string | null;
+      }
+    | null {
+    const clusterPrefix = this.buildEcsClusterCachePrefix(input);
+    for (const [cacheKey, cacheEntry] of this.ecsServiceActionContextCache.entries()) {
+      if (!cacheKey.startsWith(clusterPrefix)) {
+        continue;
+      }
+      if (!this.isCacheEntryFresh(cacheEntry.expiresAt)) {
+        this.ecsServiceActionContextCache.delete(cacheKey);
+        continue;
+      }
+      const task = cacheEntry.value.runningTasks.find(
+        (item) => item.taskArn === input.taskArn,
+      );
+      const container = task?.containers.find(
+        (item) => item.containerName === input.containerName,
+      );
+      if (task && container) {
+        return {
+          enableExecuteCommand: task.enableExecuteCommand === true,
+          runtimeId: container.runtimeId?.trim() || null,
+        };
+      }
+    }
+    return null;
   }
 
   private async ensureManagedProfilesReady(): Promise<void> {
@@ -1460,7 +1643,11 @@ export class AwsService {
   ): Promise<CommandResult> {
     const executablePath = await resolveExecutable(command);
     const env = await this.buildManagedCommandEnv();
-    return runCommand(executablePath, args, timeoutMs, env);
+    return runCommand(executablePath, args, timeoutMs, env, {
+      platform: process.platform,
+      allowWindowsLegacyFallback:
+        shouldAllowWindowsLegacyAwsCliDecodeFallback(command),
+    });
   }
 
   private async runResolvedCommandWithEnv(
@@ -1471,7 +1658,11 @@ export class AwsService {
   ): Promise<CommandResult> {
     const executablePath = await resolveExecutable(command);
     const env = await this.buildManagedCommandEnv(process.env, envPatch);
-    return runCommand(executablePath, args, timeoutMs, env);
+    return runCommand(executablePath, args, timeoutMs, env, {
+      platform: process.platform,
+      allowWindowsLegacyFallback:
+        shouldAllowWindowsLegacyAwsCliDecodeFallback(command),
+    });
   }
 
   private getAwsRootEnvPatch(
@@ -3313,7 +3504,7 @@ export class AwsService {
     }
   }
 
-  private async listEcsServiceNames(input: {
+  private async loadEcsServiceNames(input: {
     profileName: string;
     region: string;
     clusterArn: string;
@@ -3356,6 +3547,46 @@ export class AwsService {
     } while (nextToken);
 
     return [...new Set(serviceArns.map(parseServiceNameFromArn).filter(Boolean))];
+  }
+
+  private async listEcsServiceNames(
+    input: {
+      profileName: string;
+      region: string;
+      clusterArn: string;
+    },
+    options?: {
+      forceFresh?: boolean;
+    },
+  ): Promise<string[]> {
+    if (options?.forceFresh) {
+      return this.loadEcsServiceNames(input);
+    }
+
+    const cacheKey = this.buildEcsServiceListCacheKey(input);
+    const cachedEntry = this.ecsServiceListCache.get(cacheKey);
+    if (cachedEntry && this.isCacheEntryFresh(cachedEntry.expiresAt)) {
+      return [...cachedEntry.value];
+    }
+    if (cachedEntry) {
+      this.ecsServiceListCache.delete(cacheKey);
+    }
+
+    const inFlight = this.ecsServiceListInFlight.get(cacheKey);
+    if (inFlight) {
+      return inFlight.then((serviceNames) => [...serviceNames]);
+    }
+
+    const loadPromise = this.loadEcsServiceNames(input)
+      .then((serviceNames) => {
+        this.setEcsServiceListCache(input, serviceNames);
+        return serviceNames;
+      })
+      .finally(() => {
+        this.ecsServiceListInFlight.delete(cacheKey);
+      });
+    this.ecsServiceListInFlight.set(cacheKey, loadPromise);
+    return loadPromise.then((serviceNames) => [...serviceNames]);
   }
 
   private async describeEcsServices(input: {
@@ -3408,9 +3639,25 @@ export class AwsService {
       string,
       EcsTaskDefinitionPayload["taskDefinition"]
     >();
+    const uniqueTaskDefinitionArns = [...new Set(taskDefinitionArns.filter(Boolean))];
     await Promise.all(
-      taskDefinitionArns.map(async (taskDefinitionArn) => {
-        const result = await this.runResolvedCommand(
+      uniqueTaskDefinitionArns.map(async (taskDefinitionArn) => {
+        const cachedEntry = this.ecsTaskDefinitionCache.get(taskDefinitionArn);
+        if (cachedEntry && this.isCacheEntryFresh(cachedEntry.expiresAt)) {
+          taskDefinitionByArn.set(taskDefinitionArn, cachedEntry.value);
+          return;
+        }
+        if (cachedEntry) {
+          this.ecsTaskDefinitionCache.delete(taskDefinitionArn);
+        }
+
+        const inFlight = this.ecsTaskDefinitionInFlight.get(taskDefinitionArn);
+        if (inFlight) {
+          taskDefinitionByArn.set(taskDefinitionArn, await inFlight);
+          return;
+        }
+
+        const loadPromise = this.runResolvedCommand(
           "aws",
           [
             "ecs",
@@ -3425,18 +3672,31 @@ export class AwsService {
             "json",
           ],
           60_000,
-        );
-        if (result.exitCode !== 0) {
-          throw normalizeAwsCliError(
-            result.stderr,
-            "ECS task definition 정보를 읽지 못했습니다.",
-          );
-        }
-        const payload = parseJson<EcsTaskDefinitionPayload>(
-          result.stdout,
-          "ECS task definition 응답을 해석하지 못했습니다.",
-        );
-        taskDefinitionByArn.set(taskDefinitionArn, payload.taskDefinition);
+        )
+          .then((result) => {
+            if (result.exitCode !== 0) {
+              throw normalizeAwsCliError(
+                result.stderr,
+                "ECS task definition 정보를 읽지 못했습니다.",
+              );
+            }
+            const payload = parseJson<EcsTaskDefinitionPayload>(
+              result.stdout,
+              "ECS task definition 응답을 해석하지 못했습니다.",
+            );
+            const taskDefinition = payload.taskDefinition;
+            this.ecsTaskDefinitionCache.set(taskDefinitionArn, {
+              expiresAt:
+                Date.now() + AwsService.ECS_TASK_DEFINITION_CACHE_TTL_MS,
+              value: taskDefinition,
+            });
+            return taskDefinition;
+          })
+          .finally(() => {
+            this.ecsTaskDefinitionInFlight.delete(taskDefinitionArn);
+          });
+        this.ecsTaskDefinitionInFlight.set(taskDefinitionArn, loadPromise);
+        taskDefinitionByArn.set(taskDefinitionArn, await loadPromise);
       }),
     );
     return taskDefinitionByArn;
@@ -3709,28 +3969,60 @@ export class AwsService {
     serviceName: string,
   ): Promise<AwsEcsServiceActionContext> {
     await this.ensureAwsCliAvailable();
-    const { service, taskDefinition, runningTasks } = await this.loadEcsServiceContext({
+    const cacheKey = this.buildEcsActionContextCacheKey({
       profileName,
       region,
       clusterArn,
       serviceName,
     });
-    const serviceArn = service.serviceArn?.trim() || "";
-    if (!serviceArn) {
-      throw new Error("선택한 ECS 서비스를 찾지 못했습니다.");
+    const cachedEntry = this.ecsServiceActionContextCache.get(cacheKey);
+    if (cachedEntry && this.isCacheEntryFresh(cachedEntry.expiresAt)) {
+      return cachedEntry.value;
     }
-    return {
+    if (cachedEntry) {
+      this.ecsServiceActionContextCache.delete(cacheKey);
+    }
+
+    const inFlight = this.ecsServiceActionContextInFlight.get(cacheKey);
+    if (inFlight) {
+      return inFlight;
+    }
+
+    const loadPromise = this.loadEcsServiceContext({
+      profileName,
+      region,
+      clusterArn,
       serviceName,
-      serviceArn,
-      taskDefinitionArn: service.taskDefinition?.trim() || null,
-      taskDefinitionRevision: taskDefinition?.revision ?? null,
-      containers: summarizeEcsActionContainers(taskDefinition, runningTasks),
-      runningTasks,
-      deployments: normalizeEcsDeployments(service.deployments ?? []).slice(0, 3),
-      events: normalizeEcsEvents(service.events ?? [])
-        .filter((event) => !shouldHideSteadyStateEvent(event.message))
-        .slice(0, 5),
-    };
+    })
+      .then(({ service, taskDefinition, runningTasks }) => {
+        const serviceArn = service.serviceArn?.trim() || "";
+        if (!serviceArn) {
+          throw new Error("선택한 ECS 서비스를 찾지 못했습니다.");
+        }
+        const context = {
+          serviceName,
+          serviceArn,
+          taskDefinitionArn: service.taskDefinition?.trim() || null,
+          taskDefinitionRevision: taskDefinition?.revision ?? null,
+          containers: summarizeEcsActionContainers(taskDefinition, runningTasks),
+          runningTasks,
+          deployments: normalizeEcsDeployments(service.deployments ?? []).slice(0, 3),
+          events: normalizeEcsEvents(service.events ?? [])
+            .filter((event) => !shouldHideSteadyStateEvent(event.message))
+            .slice(0, 5),
+        } satisfies AwsEcsServiceActionContext;
+        this.ecsServiceActionContextCache.set(cacheKey, {
+          expiresAt:
+            Date.now() + AwsService.ECS_SERVICE_ACTION_CONTEXT_CACHE_TTL_MS,
+          value: context,
+        });
+        return context;
+      })
+      .finally(() => {
+        this.ecsServiceActionContextInFlight.delete(cacheKey);
+      });
+    this.ecsServiceActionContextInFlight.set(cacheKey, loadPromise);
+    return loadPromise;
   }
 
   async resolveEcsTaskTunnelTarget(input: {
@@ -3845,29 +4137,39 @@ export class AwsService {
     containerName: string;
   }): Promise<string> {
     await this.ensureAwsCliAvailable();
-    const tasks = await this.describeEcsTasks({
-      profileName: input.profileName,
-      region: input.region,
-      clusterArn: input.clusterArn,
-      taskArns: [input.taskArn],
-    });
-    const task = tasks.find((item) => item.taskArn === input.taskArn);
-    if (!task) {
-      throw new Error("선택한 ECS task 상세 정보를 찾지 못했습니다.");
-    }
-    if (!task.enableExecuteCommand) {
+    const cachedContainerContext = this.getCachedEcsTaskContainerContext(input);
+    if (cachedContainerContext && !cachedContainerContext.enableExecuteCommand) {
       throw new Error(
         "이 task는 ECS Exec가 활성화되어 있지 않아 터널을 열 수 없습니다.",
       );
     }
-    const container = task.containers.find(
-      (item) => item.containerName === input.containerName,
-    );
-    if (!container) {
-      throw new Error("선택한 컨테이너를 실행 중인 task에서 찾지 못했습니다.");
+
+    let resolvedRuntimeId = cachedContainerContext?.runtimeId?.trim() || "";
+    if (!resolvedRuntimeId) {
+      const tasks = await this.describeEcsTasks({
+        profileName: input.profileName,
+        region: input.region,
+        clusterArn: input.clusterArn,
+        taskArns: [input.taskArn],
+      });
+      const task = tasks.find((item) => item.taskArn === input.taskArn);
+      if (!task) {
+        throw new Error("선택한 ECS task 상세 정보를 찾지 못했습니다.");
+      }
+      if (!task.enableExecuteCommand) {
+        throw new Error(
+          "이 task는 ECS Exec가 활성화되어 있지 않아 터널을 열 수 없습니다.",
+        );
+      }
+      const container = task.containers.find(
+        (item) => item.containerName === input.containerName,
+      );
+      if (!container) {
+        throw new Error("선택한 컨테이너를 실행 중인 task에서 찾지 못했습니다.");
+      }
+      resolvedRuntimeId = container.runtimeId?.trim() || "";
     }
-    const runtimeId = container.runtimeId?.trim() || "";
-    if (!runtimeId) {
+    if (!resolvedRuntimeId) {
       throw new Error("선택한 컨테이너의 runtime ID를 확인하지 못했습니다.");
     }
 
@@ -3876,7 +4178,7 @@ export class AwsService {
     if (!clusterName || !taskId) {
       throw new Error("ECS task target을 구성하지 못했습니다.");
     }
-    return `ecs:${clusterName}_${taskId}_${runtimeId}`;
+    return `ecs:${clusterName}_${taskId}_${resolvedRuntimeId}`;
   }
 
   async loadEcsServiceLogs(input: {
@@ -4111,11 +4413,14 @@ export class AwsService {
       throw new Error("선택한 ECS 클러스터를 찾지 못했습니다.");
     }
 
-    const serviceNames = await this.listEcsServiceNames({
-      profileName,
-      region,
-      clusterArn,
-    });
+    const serviceNames = await this.listEcsServiceNames(
+      {
+        profileName,
+        region,
+        clusterArn,
+      },
+      { forceFresh: true },
+    );
 
     const servicesPayloads = await this.describeEcsServices({
       profileName,
@@ -4186,6 +4491,20 @@ export class AwsService {
           left.serviceName.localeCompare(right.serviceName) ||
           left.serviceArn.localeCompare(right.serviceArn),
       );
+
+    this.setEcsServiceListCache(
+      {
+        profileName,
+        region,
+        clusterArn,
+      },
+      serviceNames,
+    );
+    this.clearEcsServiceActionContextCacheForCluster({
+      profileName,
+      region,
+      clusterArn,
+    });
 
     return {
       profileName,

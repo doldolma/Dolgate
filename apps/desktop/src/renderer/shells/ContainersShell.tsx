@@ -39,6 +39,26 @@ export function ContainersShell({
     targetHostId: string;
     placement: 'before' | 'after';
   } | null>(null);
+  const hostTabShellBaseClass =
+    'group relative inline-flex min-w-0 flex-none items-center gap-[0.3rem] rounded-[18px] border border-[color-mix(in_srgb,var(--border)_88%,transparent_12%)] bg-[linear-gradient(180deg,color-mix(in_srgb,var(--surface-strong)_92%,transparent_8%),color-mix(in_srgb,var(--surface)_96%,transparent_4%))] pr-[0.24rem] shadow-[var(--shadow-soft)] transition-[border-color,background-color,box-shadow,transform] duration-200';
+  const hostTabShellActiveClass =
+    'border-[color-mix(in_srgb,var(--accent-strong)_52%,var(--border)_48%)] bg-[linear-gradient(180deg,color-mix(in_srgb,var(--accent-strong)_13%,var(--surface-strong)_87%),color-mix(in_srgb,var(--accent-strong)_7%,var(--surface)_93%))] shadow-[0_0_0_1px_color-mix(in_srgb,var(--accent-strong)_18%,transparent_82%),0_16px_28px_-22px_color-mix(in_srgb,var(--accent-strong)_42%,transparent_58%),var(--shadow)]';
+  const hostTabButtonBaseClass =
+    'inline-flex min-w-0 max-w-[min(260px,42vw)] items-center gap-[0.55rem] rounded-[16px] px-[0.92rem] py-[0.72rem] text-left transition-[background-color,color,box-shadow,transform] duration-200';
+  const hostTabButtonActiveClass =
+    'bg-[color-mix(in_srgb,var(--accent-strong)_14%,var(--surface-strong)_86%)] text-[var(--text)] shadow-[inset_0_1px_0_color-mix(in_srgb,white_48%,transparent_52%)]';
+  const hostTabButtonInactiveClass =
+    'bg-transparent text-[var(--text-soft)] hover:bg-[color-mix(in_srgb,var(--surface-strong)_82%,transparent_18%)] hover:text-[var(--text)]';
+  const hostTabBadgeBaseClass =
+    'min-h-6 px-[0.52rem] py-[0.14rem] text-[0.72rem] transition-[border-color,background-color,color] duration-200';
+  const hostTabBadgeActiveClass =
+    'border-[color-mix(in_srgb,var(--accent-strong)_24%,var(--border)_76%)] bg-[color-mix(in_srgb,var(--accent-strong)_12%,transparent_88%)] text-[var(--text)]';
+  const hostTabCloseButtonBaseClass =
+    'h-[1.9rem] w-[1.9rem] rounded-full transition-[background-color,color,box-shadow] duration-200';
+  const hostTabCloseButtonActiveClass =
+    'text-[var(--text)] hover:bg-[color-mix(in_srgb,var(--accent-strong)_12%,transparent_88%)] hover:text-[var(--text)]';
+  const hostTabCloseButtonInactiveClass =
+    'text-[var(--text-soft)] hover:bg-[color-mix(in_srgb,var(--surface-strong)_72%,transparent_28%)] hover:text-[var(--text)]';
 
   const activeContainersHostId =
     containersViewModel.activeContainerHostId ??
@@ -86,15 +106,14 @@ export function ContainersShell({
                 ? containerTabDropPreview.placement
                 : null;
             return (
-              <div
-                key={tab.hostId}
-                className={cn(
-                  'group relative inline-flex min-w-0 flex-none items-center gap-[0.3rem] rounded-[18px] border border-[color-mix(in_srgb,var(--border)_88%,transparent_12%)] bg-[linear-gradient(180deg,color-mix(in_srgb,var(--surface-strong)_92%,transparent_8%),color-mix(in_srgb,var(--surface)_96%,transparent_4%))] pr-[0.24rem] shadow-[var(--shadow-soft)]',
-                  isActiveTab &&
-                    'border-[color-mix(in_srgb,var(--accent-strong)_38%,var(--border)_62%)] shadow-[0_0_0_1px_color-mix(in_srgb,var(--accent-strong)_14%,transparent_86%),var(--shadow)]',
-                  preview === 'before' &&
-                    "before:pointer-events-none before:absolute before:top-[0.36rem] before:bottom-[0.36rem] before:left-[-0.34rem] before:w-[3px] before:rounded-full before:bg-[color-mix(in_srgb,var(--accent-strong)_88%,white_12%)] before:content-[''] before:shadow-[0_0_0_1px_color-mix(in_srgb,var(--accent-strong)_18%,transparent_82%)]",
-                  preview === 'after' &&
+                <div
+                  key={tab.hostId}
+                  className={cn(
+                    hostTabShellBaseClass,
+                    isActiveTab && hostTabShellActiveClass,
+                    preview === 'before' &&
+                      "before:pointer-events-none before:absolute before:top-[0.36rem] before:bottom-[0.36rem] before:left-[-0.34rem] before:w-[3px] before:rounded-full before:bg-[color-mix(in_srgb,var(--accent-strong)_88%,white_12%)] before:content-[''] before:shadow-[0_0_0_1px_color-mix(in_srgb,var(--accent-strong)_18%,transparent_82%)]",
+                    preview === 'after' &&
                     "after:pointer-events-none after:absolute after:top-[0.36rem] after:bottom-[0.36rem] after:right-[-0.34rem] after:w-[3px] after:rounded-full after:bg-[color-mix(in_srgb,var(--accent-strong)_88%,white_12%)] after:content-[''] after:shadow-[0_0_0_1px_color-mix(in_srgb,var(--accent-strong)_18%,transparent_82%)]",
                 )}
                 draggable
@@ -161,9 +180,10 @@ export function ContainersShell({
                   role="tab"
                   aria-selected={isActiveTab}
                   className={cn(
-                    'inline-flex min-w-0 max-w-[min(260px,42vw)] items-center gap-[0.55rem] rounded-[16px] bg-transparent px-[0.92rem] py-[0.72rem] text-left text-[var(--text)]',
-                    isActiveTab &&
-                      'bg-[color-mix(in_srgb,var(--surface-strong)_86%,transparent_14%)]',
+                    hostTabButtonBaseClass,
+                    isActiveTab
+                      ? hostTabButtonActiveClass
+                      : hostTabButtonInactiveClass,
                   )}
                   onClick={() => {
                     containersViewModel.focusHostContainersTab(tab.hostId);
@@ -175,7 +195,10 @@ export function ContainersShell({
                   {runtimeLabel ? (
                     <Badge
                       tone="neutral"
-                      className="min-h-6 px-[0.52rem] py-[0.14rem] text-[0.72rem]"
+                      className={cn(
+                        hostTabBadgeBaseClass,
+                        isActiveTab && hostTabBadgeActiveClass,
+                      )}
                     >
                       {runtimeLabel}
                     </Badge>
@@ -185,7 +208,12 @@ export function ContainersShell({
                   type="button"
                   tone="ghost"
                   size="sm"
-                  className="h-[1.9rem] w-[1.9rem] rounded-full text-[var(--text-soft)] hover:text-[var(--text)]"
+                  className={cn(
+                    hostTabCloseButtonBaseClass,
+                    isActiveTab
+                      ? hostTabCloseButtonActiveClass
+                      : hostTabCloseButtonInactiveClass,
+                  )}
                   aria-label={`${title} 닫기`}
                   onClick={async (event) => {
                     event.stopPropagation();

@@ -3,12 +3,17 @@ import { spawn, type ChildProcessByStdio } from "node:child_process";
 import { createConnection } from "node:net";
 import path from "node:path";
 import type { Readable } from "node:stream";
-import { buildAwsCommandEnv, resolveAwsExecutable } from "./aws-service";
+import {
+  buildAwsCommandEnv,
+  decodeAwsCliOutput,
+  resolveAwsExecutable,
+} from "./aws-service";
 
 const TUNNEL_READY_TIMEOUT_MS = 15_000;
 const TUNNEL_READY_POLL_MS = 150;
 const TUNNEL_STOP_TIMEOUT_MS = 6_000;
 const TUNNEL_PORT_RELEASE_TIMEOUT_MS = 5_000;
+const TUNNEL_OUTPUT_BUFFER_LIMIT_BYTES = 8_192;
 
 export interface AwsSsmTunnelStartInput {
   runtimeId?: string;
@@ -76,6 +81,15 @@ function delay(ms: number): Promise<void> {
   return new Promise((resolve) => {
     setTimeout(resolve, ms);
   });
+}
+
+function appendRecentBytes(current: Buffer, nextChunk: Buffer): Buffer {
+  const merged =
+    current.length === 0 ? Buffer.from(nextChunk) : Buffer.concat([current, nextChunk]);
+  if (merged.length <= TUNNEL_OUTPUT_BUFFER_LIMIT_BYTES) {
+    return merged;
+  }
+  return merged.subarray(merged.length - TUNNEL_OUTPUT_BUFFER_LIMIT_BYTES);
 }
 
 function normalizeBindAddress(value?: string | null): string {
@@ -309,14 +323,20 @@ export class AwsSsmTunnelService {
     };
     this.runtimes.set(runtimeId, runtime);
 
+    let capturedOutput = Buffer.alloc(0);
     const captureOutput = (chunk: string | Buffer) => {
-      const value = chunk.toString().trim();
+      const rawChunk = Buffer.isBuffer(chunk)
+        ? chunk
+        : Buffer.from(chunk, "utf8");
+      capturedOutput = appendRecentBytes(capturedOutput, rawChunk);
+      const value = decodeAwsCliOutput(capturedOutput, {
+        platform: process.platform,
+        allowWindowsLegacyFallback: true,
+      }).trim();
       if (value) {
         runtime.lastMessage = value;
       }
     };
-    child.stdout.setEncoding("utf8");
-    child.stderr.setEncoding("utf8");
     child.stdout.on("data", captureOutput);
     child.stderr.on("data", captureOutput);
     child.once("exit", (code, signal) => {

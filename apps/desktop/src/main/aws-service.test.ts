@@ -3,7 +3,11 @@ import os from 'node:os';
 import path from 'node:path';
 import type { AwsProfileDetails } from '@shared';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { AwsService, buildSshMetadataProbeCommands } from './aws-service';
+import {
+  AwsService,
+  buildSshMetadataProbeCommands,
+  decodeAwsCliOutput,
+} from './aws-service';
 import { resetDesktopStateStorageForTests } from './state-storage';
 
 vi.mock('electron', () => ({
@@ -29,6 +33,78 @@ async function createTempAwsProfileDir() {
   tempDirectories.push(rootDir);
   return rootDir;
 }
+
+function getAwsCommandArgs(call: unknown[]): string[] {
+  return Array.isArray(call[1]) ? (call[1] as string[]) : [];
+}
+
+function getAwsCommandName(call: unknown[]): string {
+  return getAwsCommandArgs(call).slice(0, 2).join(' ');
+}
+
+describe('decodeAwsCliOutput', () => {
+  const cp949KoreanLogBytes = Buffer.from([
+    0xc7, 0xd1, 0xb1, 0xdb, 0x20, 0xb7, 0xce, 0xb1, 0xd7,
+  ]);
+
+  it('keeps valid UTF-8 output unchanged on Windows', () => {
+    expect(
+      decodeAwsCliOutput(Buffer.from('한글 로그', 'utf8'), {
+        platform: 'win32',
+        allowWindowsLegacyFallback: true,
+      }),
+    ).toBe('한글 로그');
+  });
+
+  it('falls back to euc-kr on Windows when UTF-8 decoding introduces replacement characters', () => {
+    expect(
+      decodeAwsCliOutput(cp949KoreanLogBytes, {
+        platform: 'win32',
+        allowWindowsLegacyFallback: true,
+      }),
+    ).toBe('한글 로그');
+  });
+
+  it('keeps ASCII JSON output unchanged across platforms', () => {
+    const raw = Buffer.from('{"message":"ok"}', 'utf8');
+    expect(
+      decodeAwsCliOutput(raw, {
+        platform: 'win32',
+        allowWindowsLegacyFallback: true,
+      }),
+    ).toBe('{"message":"ok"}');
+    expect(
+      decodeAwsCliOutput(raw, {
+        platform: 'darwin',
+        allowWindowsLegacyFallback: true,
+      }),
+    ).toBe('{"message":"ok"}');
+  });
+
+  it('does not apply the euc-kr fallback on macOS', () => {
+    expect(
+      decodeAwsCliOutput(cp949KoreanLogBytes, {
+        platform: 'darwin',
+        allowWindowsLegacyFallback: true,
+      }),
+    ).not.toBe('한글 로그');
+  });
+
+  it('keeps a JSON payload with CP949 message text parseable after Windows fallback', () => {
+    const raw = Buffer.concat([
+      Buffer.from('{"events":[{"timestamp":1,"message":"', 'ascii'),
+      cp949KoreanLogBytes,
+      Buffer.from('"}]}', 'ascii'),
+    ]);
+    const decoded = decodeAwsCliOutput(raw, {
+      platform: 'win32',
+      allowWindowsLegacyFallback: true,
+    });
+    expect(JSON.parse(decoded)).toEqual({
+      events: [{ timestamp: 1, message: '한글 로그' }],
+    });
+  });
+});
 
 beforeEach(async () => {
   const userDataDir = await createTempAwsProfileDir();
@@ -1827,6 +1903,810 @@ describe('AwsService ECS helpers', () => {
     });
   });
 
+  it('reuses the cached ECS service list for consecutive utilization lookups within 5 minutes', async () => {
+    const service = new AwsService() as unknown as {
+      ensureAwsCliAvailable: () => Promise<void>;
+      runResolvedCommand: ReturnType<typeof vi.fn>;
+      describeEcsClusterUtilization: (
+        profileName: string,
+        region: string,
+        clusterArn: string,
+      ) => Promise<Record<string, unknown>>;
+    };
+
+    service.ensureAwsCliAvailable = vi.fn().mockResolvedValue(undefined);
+    service.runResolvedCommand = vi
+      .fn()
+      .mockResolvedValueOnce({
+        stdout: JSON.stringify({
+          serviceArns: ['arn:aws:ecs:ap-northeast-2:123456789012:service/prod/api'],
+        }),
+        stderr: '',
+        exitCode: 0,
+      })
+      .mockResolvedValueOnce({
+        stdout: JSON.stringify({ MetricDataResults: [] }),
+        stderr: '',
+        exitCode: 0,
+      })
+      .mockResolvedValueOnce({
+        stdout: JSON.stringify({ MetricDataResults: [] }),
+        stderr: '',
+        exitCode: 0,
+      });
+
+    await service.describeEcsClusterUtilization(
+      'default',
+      'ap-northeast-2',
+      'arn:aws:ecs:ap-northeast-2:123456789012:cluster/prod',
+    );
+    await service.describeEcsClusterUtilization(
+      'default',
+      'ap-northeast-2',
+      'arn:aws:ecs:ap-northeast-2:123456789012:cluster/prod',
+    );
+
+    const commandNames = service.runResolvedCommand.mock.calls.map(getAwsCommandName);
+    expect(commandNames.filter((name) => name === 'ecs list-services')).toHaveLength(1);
+    expect(commandNames.filter((name) => name === 'cloudwatch get-metric-data')).toHaveLength(2);
+  });
+
+  it('reuses the cached ECS task definition across snapshot, tunnel, and action-context reads', async () => {
+    const service = new AwsService() as unknown as {
+      ensureAwsCliAvailable: () => Promise<void>;
+      runResolvedCommand: ReturnType<typeof vi.fn>;
+      describeEcsClusterSnapshot: (
+        profileName: string,
+        region: string,
+        clusterArn: string,
+      ) => Promise<Record<string, unknown>>;
+      describeEcsTaskTunnelService: (
+        profileName: string,
+        region: string,
+        clusterArn: string,
+        serviceName: string,
+      ) => Promise<Record<string, unknown>>;
+      describeEcsServiceActionContext: (
+        profileName: string,
+        region: string,
+        clusterArn: string,
+        serviceName: string,
+      ) => Promise<Record<string, unknown>>;
+    };
+
+    service.ensureAwsCliAvailable = vi.fn().mockResolvedValue(undefined);
+    service.runResolvedCommand = vi
+      .fn()
+      .mockResolvedValueOnce({
+        stdout: JSON.stringify({
+          clusters: [
+            {
+              clusterArn: 'arn:aws:ecs:ap-northeast-2:123456789012:cluster/prod',
+              clusterName: 'prod',
+              status: 'ACTIVE',
+              activeServicesCount: 1,
+              runningTasksCount: 1,
+              pendingTasksCount: 0,
+            },
+          ],
+        }),
+        stderr: '',
+        exitCode: 0,
+      })
+      .mockResolvedValueOnce({
+        stdout: JSON.stringify({
+          serviceArns: ['arn:aws:ecs:ap-northeast-2:123456789012:service/prod/api'],
+        }),
+        stderr: '',
+        exitCode: 0,
+      })
+      .mockResolvedValueOnce({
+        stdout: JSON.stringify({
+          services: [
+            {
+              serviceArn: 'arn:aws:ecs:ap-northeast-2:123456789012:service/prod/api',
+              serviceName: 'api',
+              status: 'ACTIVE',
+              desiredCount: 1,
+              runningCount: 1,
+              pendingCount: 0,
+              taskDefinition:
+                'arn:aws:ecs:ap-northeast-2:123456789012:task-definition/api:42',
+              deployments: [],
+              events: [],
+            },
+          ],
+        }),
+        stderr: '',
+        exitCode: 0,
+      })
+      .mockResolvedValueOnce({
+        stdout: JSON.stringify({
+          taskDefinition: {
+            revision: 42,
+            containerDefinitions: [
+              {
+                name: 'api',
+                portMappings: [{ containerPort: 8080, protocol: 'tcp' }],
+              },
+            ],
+          },
+        }),
+        stderr: '',
+        exitCode: 0,
+      })
+      .mockResolvedValueOnce({
+        stdout: JSON.stringify({
+          services: [
+            {
+              serviceArn: 'arn:aws:ecs:ap-northeast-2:123456789012:service/prod/api',
+              serviceName: 'api',
+              taskDefinition:
+                'arn:aws:ecs:ap-northeast-2:123456789012:task-definition/api:42',
+            },
+          ],
+        }),
+        stderr: '',
+        exitCode: 0,
+      })
+      .mockResolvedValueOnce({
+        stdout: JSON.stringify({
+          services: [
+            {
+              serviceArn: 'arn:aws:ecs:ap-northeast-2:123456789012:service/prod/api',
+              serviceName: 'api',
+              status: 'ACTIVE',
+              taskDefinition:
+                'arn:aws:ecs:ap-northeast-2:123456789012:task-definition/api:42',
+              deployments: [],
+              events: [],
+            },
+          ],
+        }),
+        stderr: '',
+        exitCode: 0,
+      })
+      .mockResolvedValueOnce({
+        stdout: JSON.stringify({
+          taskArns: ['arn:aws:ecs:ap-northeast-2:123456789012:task/prod/task-1'],
+        }),
+        stderr: '',
+        exitCode: 0,
+      })
+      .mockResolvedValueOnce({
+        stdout: JSON.stringify({
+          tasks: [
+            {
+              taskArn: 'arn:aws:ecs:ap-northeast-2:123456789012:task/prod/task-1',
+              lastStatus: 'RUNNING',
+              enableExecuteCommand: true,
+              containers: [
+                {
+                  name: 'api',
+                  lastStatus: 'RUNNING',
+                  runtimeId: 'runtime-1',
+                },
+              ],
+            },
+          ],
+        }),
+        stderr: '',
+        exitCode: 0,
+      });
+
+    await service.describeEcsClusterSnapshot(
+      'default',
+      'ap-northeast-2',
+      'arn:aws:ecs:ap-northeast-2:123456789012:cluster/prod',
+    );
+    await service.describeEcsTaskTunnelService(
+      'default',
+      'ap-northeast-2',
+      'arn:aws:ecs:ap-northeast-2:123456789012:cluster/prod',
+      'api',
+    );
+    await service.describeEcsServiceActionContext(
+      'default',
+      'ap-northeast-2',
+      'arn:aws:ecs:ap-northeast-2:123456789012:cluster/prod',
+      'api',
+    );
+
+    const commandNames = service.runResolvedCommand.mock.calls.map(getAwsCommandName);
+    expect(commandNames.filter((name) => name === 'ecs describe-task-definition')).toHaveLength(1);
+  });
+
+  it('dedupes concurrent ECS action-context lookups for the same service', async () => {
+    const service = new AwsService() as unknown as {
+      ensureAwsCliAvailable: () => Promise<void>;
+      runResolvedCommand: ReturnType<typeof vi.fn>;
+      describeEcsServiceActionContext: (
+        profileName: string,
+        region: string,
+        clusterArn: string,
+        serviceName: string,
+      ) => Promise<Record<string, unknown>>;
+    };
+
+    service.ensureAwsCliAvailable = vi.fn().mockResolvedValue(undefined);
+    service.runResolvedCommand = vi.fn().mockImplementation(
+      async (_executable: string, args: string[]) => {
+        const commandName = args.slice(0, 2).join(' ');
+        if (commandName === 'ecs describe-services') {
+          await new Promise((resolve) => setTimeout(resolve, 5));
+          return {
+            stdout: JSON.stringify({
+              services: [
+                {
+                  serviceArn: 'arn:aws:ecs:ap-northeast-2:123456789012:service/prod/api',
+                  serviceName: 'api',
+                  status: 'ACTIVE',
+                  taskDefinition:
+                    'arn:aws:ecs:ap-northeast-2:123456789012:task-definition/api:42',
+                  deployments: [],
+                  events: [],
+                },
+              ],
+            }),
+            stderr: '',
+            exitCode: 0,
+          };
+        }
+        if (commandName === 'ecs describe-task-definition') {
+          return {
+            stdout: JSON.stringify({
+              taskDefinition: {
+                revision: 42,
+                containerDefinitions: [{ name: 'api' }],
+              },
+            }),
+            stderr: '',
+            exitCode: 0,
+          };
+        }
+        if (commandName === 'ecs list-tasks') {
+          return {
+            stdout: JSON.stringify({
+              taskArns: ['arn:aws:ecs:ap-northeast-2:123456789012:task/prod/task-1'],
+            }),
+            stderr: '',
+            exitCode: 0,
+          };
+        }
+        if (commandName === 'ecs describe-tasks') {
+          return {
+            stdout: JSON.stringify({
+              tasks: [
+                {
+                  taskArn: 'arn:aws:ecs:ap-northeast-2:123456789012:task/prod/task-1',
+                  lastStatus: 'RUNNING',
+                  enableExecuteCommand: true,
+                  containers: [{ name: 'api', runtimeId: 'runtime-1' }],
+                },
+              ],
+            }),
+            stderr: '',
+            exitCode: 0,
+          };
+        }
+        throw new Error(`Unexpected command: ${commandName}`);
+      },
+    );
+
+    const [first, second] = await Promise.all([
+      service.describeEcsServiceActionContext(
+        'default',
+        'ap-northeast-2',
+        'arn:aws:ecs:ap-northeast-2:123456789012:cluster/prod',
+        'api',
+      ),
+      service.describeEcsServiceActionContext(
+        'default',
+        'ap-northeast-2',
+        'arn:aws:ecs:ap-northeast-2:123456789012:cluster/prod',
+        'api',
+      ),
+    ]);
+
+    expect(first).toEqual(second);
+    expect(service.runResolvedCommand.mock.calls.map(getAwsCommandName)).toEqual([
+      'ecs describe-services',
+      'ecs describe-task-definition',
+      'ecs list-tasks',
+      'ecs describe-tasks',
+    ]);
+  });
+
+  it('reuses the cached ECS action context when loading service logs', async () => {
+    const service = new AwsService() as unknown as {
+      ensureAwsCliAvailable: () => Promise<void>;
+      runResolvedCommand: ReturnType<typeof vi.fn>;
+      describeEcsServiceActionContext: (
+        profileName: string,
+        region: string,
+        clusterArn: string,
+        serviceName: string,
+      ) => Promise<Record<string, unknown>>;
+      loadEcsServiceLogs: (input: {
+        profileName: string;
+        region: string;
+        clusterArn: string;
+        serviceName: string;
+        taskArn?: string | null;
+        containerName?: string | null;
+        followCursor?: string | null;
+        startTime?: string | null;
+        endTime?: string | null;
+        limit?: number;
+      }) => Promise<Record<string, unknown>>;
+    };
+
+    service.ensureAwsCliAvailable = vi.fn().mockResolvedValue(undefined);
+    service.runResolvedCommand = vi.fn().mockImplementation(
+      async (_executable: string, args: string[]) => {
+        const commandName = args.slice(0, 2).join(' ');
+        if (commandName === 'ecs describe-services') {
+          return {
+            stdout: JSON.stringify({
+              services: [
+                {
+                  serviceArn: 'arn:aws:ecs:ap-northeast-2:123456789012:service/prod/api',
+                  serviceName: 'api',
+                  status: 'ACTIVE',
+                  taskDefinition:
+                    'arn:aws:ecs:ap-northeast-2:123456789012:task-definition/api:42',
+                  deployments: [],
+                  events: [],
+                },
+              ],
+            }),
+            stderr: '',
+            exitCode: 0,
+          };
+        }
+        if (commandName === 'ecs describe-task-definition') {
+          return {
+            stdout: JSON.stringify({
+              taskDefinition: {
+                revision: 42,
+                containerDefinitions: [
+                  {
+                    name: 'api',
+                    logConfiguration: {
+                      logDriver: 'awslogs',
+                      options: {
+                        'awslogs-group': '/ecs/api',
+                        'awslogs-region': 'ap-northeast-2',
+                        'awslogs-stream-prefix': 'ecs',
+                      },
+                    },
+                  },
+                ],
+              },
+            }),
+            stderr: '',
+            exitCode: 0,
+          };
+        }
+        if (commandName === 'ecs list-tasks') {
+          return {
+            stdout: JSON.stringify({
+              taskArns: ['arn:aws:ecs:ap-northeast-2:123456789012:task/prod/task-1'],
+            }),
+            stderr: '',
+            exitCode: 0,
+          };
+        }
+        if (commandName === 'ecs describe-tasks') {
+          return {
+            stdout: JSON.stringify({
+              tasks: [
+                {
+                  taskArn: 'arn:aws:ecs:ap-northeast-2:123456789012:task/prod/task-1',
+                  lastStatus: 'RUNNING',
+                  enableExecuteCommand: true,
+                  containers: [{ name: 'api', runtimeId: 'runtime-1', lastStatus: 'RUNNING' }],
+                },
+              ],
+            }),
+            stderr: '',
+            exitCode: 0,
+          };
+        }
+        if (commandName === 'logs filter-log-events') {
+          return {
+            stdout: JSON.stringify({ events: [] }),
+            stderr: '',
+            exitCode: 0,
+          };
+        }
+        throw new Error(`Unexpected command: ${commandName}`);
+      },
+    );
+
+    await service.describeEcsServiceActionContext(
+      'default',
+      'ap-northeast-2',
+      'arn:aws:ecs:ap-northeast-2:123456789012:cluster/prod',
+      'api',
+    );
+    await service.loadEcsServiceLogs({
+      profileName: 'default',
+      region: 'ap-northeast-2',
+      clusterArn: 'arn:aws:ecs:ap-northeast-2:123456789012:cluster/prod',
+      serviceName: 'api',
+      limit: 50,
+    });
+
+    const commandNames = service.runResolvedCommand.mock.calls.map(getAwsCommandName);
+    expect(commandNames.filter((name) => name === 'ecs describe-services')).toHaveLength(1);
+    expect(commandNames.filter((name) => name === 'ecs list-tasks')).toHaveLength(1);
+    expect(commandNames.filter((name) => name === 'ecs describe-tasks')).toHaveLength(1);
+    expect(commandNames.filter((name) => name === 'logs filter-log-events')).toHaveLength(1);
+  });
+
+  it('uses the cached action-context runtime ID before falling back to describe-tasks for ECS tunnel targets', async () => {
+    const service = new AwsService() as unknown as {
+      ensureAwsCliAvailable: () => Promise<void>;
+      runResolvedCommand: ReturnType<typeof vi.fn>;
+      describeEcsServiceActionContext: (
+        profileName: string,
+        region: string,
+        clusterArn: string,
+        serviceName: string,
+      ) => Promise<Record<string, unknown>>;
+      resolveEcsTaskTunnelTargetForTask: (input: {
+        profileName: string;
+        region: string;
+        clusterArn: string;
+        taskArn: string;
+        containerName: string;
+      }) => Promise<string>;
+    };
+
+    service.ensureAwsCliAvailable = vi.fn().mockResolvedValue(undefined);
+    service.runResolvedCommand = vi.fn().mockImplementation(
+      async (_executable: string, args: string[]) => {
+        const commandName = args.slice(0, 2).join(' ');
+        if (commandName === 'ecs describe-services') {
+          return {
+            stdout: JSON.stringify({
+              services: [
+                {
+                  serviceArn: 'arn:aws:ecs:ap-northeast-2:123456789012:service/prod/api',
+                  serviceName: 'api',
+                  status: 'ACTIVE',
+                  taskDefinition:
+                    'arn:aws:ecs:ap-northeast-2:123456789012:task-definition/api:42',
+                  deployments: [],
+                  events: [],
+                },
+              ],
+            }),
+            stderr: '',
+            exitCode: 0,
+          };
+        }
+        if (commandName === 'ecs describe-task-definition') {
+          return {
+            stdout: JSON.stringify({
+              taskDefinition: {
+                revision: 42,
+                containerDefinitions: [{ name: 'api' }],
+              },
+            }),
+            stderr: '',
+            exitCode: 0,
+          };
+        }
+        if (commandName === 'ecs list-tasks') {
+          return {
+            stdout: JSON.stringify({
+              taskArns: ['arn:aws:ecs:ap-northeast-2:123456789012:task/prod/task-1'],
+            }),
+            stderr: '',
+            exitCode: 0,
+          };
+        }
+        if (commandName === 'ecs describe-tasks') {
+          return {
+            stdout: JSON.stringify({
+              tasks: [
+                {
+                  taskArn: 'arn:aws:ecs:ap-northeast-2:123456789012:task/prod/task-1',
+                  lastStatus: 'RUNNING',
+                  enableExecuteCommand: true,
+                  containers: [{ name: 'api', runtimeId: 'runtime-1' }],
+                },
+              ],
+            }),
+            stderr: '',
+            exitCode: 0,
+          };
+        }
+        throw new Error(`Unexpected command: ${commandName}`);
+      },
+    );
+
+    await service.describeEcsServiceActionContext(
+      'default',
+      'ap-northeast-2',
+      'arn:aws:ecs:ap-northeast-2:123456789012:cluster/prod',
+      'api',
+    );
+
+    await expect(
+      service.resolveEcsTaskTunnelTargetForTask({
+        profileName: 'default',
+        region: 'ap-northeast-2',
+        clusterArn: 'arn:aws:ecs:ap-northeast-2:123456789012:cluster/prod',
+        taskArn: 'arn:aws:ecs:ap-northeast-2:123456789012:task/prod/task-1',
+        containerName: 'api',
+      }),
+    ).resolves.toBe('ecs:prod_task-1_runtime-1');
+
+    expect(
+      service.runResolvedCommand.mock.calls
+        .map(getAwsCommandName)
+        .filter((name) => name === 'ecs describe-tasks'),
+    ).toHaveLength(1);
+  });
+
+  it('falls back to describe-tasks for ECS tunnel targets when the action-context cache does not have a runtime ID', async () => {
+    const service = new AwsService() as unknown as {
+      ensureAwsCliAvailable: () => Promise<void>;
+      runResolvedCommand: ReturnType<typeof vi.fn>;
+      resolveEcsTaskTunnelTargetForTask: (input: {
+        profileName: string;
+        region: string;
+        clusterArn: string;
+        taskArn: string;
+        containerName: string;
+      }) => Promise<string>;
+    };
+
+    service.ensureAwsCliAvailable = vi.fn().mockResolvedValue(undefined);
+    service.runResolvedCommand = vi.fn().mockResolvedValue({
+      stdout: JSON.stringify({
+        tasks: [
+          {
+            taskArn: 'arn:aws:ecs:ap-northeast-2:123456789012:task/prod/task-1',
+            lastStatus: 'RUNNING',
+            enableExecuteCommand: true,
+            containers: [{ name: 'api', runtimeId: 'runtime-2' }],
+          },
+        ],
+      }),
+      stderr: '',
+      exitCode: 0,
+    });
+
+    await expect(
+      service.resolveEcsTaskTunnelTargetForTask({
+        profileName: 'default',
+        region: 'ap-northeast-2',
+        clusterArn: 'arn:aws:ecs:ap-northeast-2:123456789012:cluster/prod',
+        taskArn: 'arn:aws:ecs:ap-northeast-2:123456789012:task/prod/task-1',
+        containerName: 'api',
+      }),
+    ).resolves.toBe('ecs:prod_task-1_runtime-2');
+
+    expect(service.runResolvedCommand.mock.calls.map(getAwsCommandName)).toEqual([
+      'ecs describe-tasks',
+    ]);
+  });
+
+  it('refreshes the service-list cache and clears action-context cache after a fresh cluster snapshot', async () => {
+    const service = new AwsService() as unknown as {
+      ensureAwsCliAvailable: () => Promise<void>;
+      runResolvedCommand: ReturnType<typeof vi.fn>;
+      describeEcsServiceActionContext: (
+        profileName: string,
+        region: string,
+        clusterArn: string,
+        serviceName: string,
+      ) => Promise<Record<string, unknown>>;
+      describeEcsClusterSnapshot: (
+        profileName: string,
+        region: string,
+        clusterArn: string,
+      ) => Promise<Record<string, unknown>>;
+      describeEcsClusterUtilization: (
+        profileName: string,
+        region: string,
+        clusterArn: string,
+      ) => Promise<Record<string, unknown>>;
+    };
+
+    service.ensureAwsCliAvailable = vi.fn().mockResolvedValue(undefined);
+    service.runResolvedCommand = vi
+      .fn()
+      .mockResolvedValueOnce({
+        stdout: JSON.stringify({
+          services: [
+            {
+              serviceArn: 'arn:aws:ecs:ap-northeast-2:123456789012:service/prod/api',
+              serviceName: 'api',
+              status: 'ACTIVE',
+              taskDefinition:
+                'arn:aws:ecs:ap-northeast-2:123456789012:task-definition/api:42',
+              deployments: [],
+              events: [],
+            },
+          ],
+        }),
+        stderr: '',
+        exitCode: 0,
+      })
+      .mockResolvedValueOnce({
+        stdout: JSON.stringify({
+          taskDefinition: {
+            revision: 42,
+            containerDefinitions: [{ name: 'api' }],
+          },
+        }),
+        stderr: '',
+        exitCode: 0,
+      })
+      .mockResolvedValueOnce({
+        stdout: JSON.stringify({
+          taskArns: ['arn:aws:ecs:ap-northeast-2:123456789012:task/prod/task-1'],
+        }),
+        stderr: '',
+        exitCode: 0,
+      })
+      .mockResolvedValueOnce({
+        stdout: JSON.stringify({
+          tasks: [
+            {
+              taskArn: 'arn:aws:ecs:ap-northeast-2:123456789012:task/prod/task-1',
+              lastStatus: 'RUNNING',
+              enableExecuteCommand: true,
+              containers: [{ name: 'api', runtimeId: 'runtime-1' }],
+            },
+          ],
+        }),
+        stderr: '',
+        exitCode: 0,
+      })
+      .mockResolvedValueOnce({
+        stdout: JSON.stringify({
+          clusters: [
+            {
+              clusterArn: 'arn:aws:ecs:ap-northeast-2:123456789012:cluster/prod',
+              clusterName: 'prod',
+              status: 'ACTIVE',
+              activeServicesCount: 1,
+              runningTasksCount: 1,
+              pendingTasksCount: 0,
+            },
+          ],
+        }),
+        stderr: '',
+        exitCode: 0,
+      })
+      .mockResolvedValueOnce({
+        stdout: JSON.stringify({
+          serviceArns: ['arn:aws:ecs:ap-northeast-2:123456789012:service/prod/worker'],
+        }),
+        stderr: '',
+        exitCode: 0,
+      })
+      .mockResolvedValueOnce({
+        stdout: JSON.stringify({
+          services: [
+            {
+              serviceArn: 'arn:aws:ecs:ap-northeast-2:123456789012:service/prod/worker',
+              serviceName: 'worker',
+              status: 'ACTIVE',
+              desiredCount: 1,
+              runningCount: 1,
+              pendingCount: 0,
+              taskDefinition:
+                'arn:aws:ecs:ap-northeast-2:123456789012:task-definition/worker:7',
+              deployments: [],
+              events: [],
+            },
+          ],
+        }),
+        stderr: '',
+        exitCode: 0,
+      })
+      .mockResolvedValueOnce({
+        stdout: JSON.stringify({
+          taskDefinition: {
+            revision: 7,
+            containerDefinitions: [{ name: 'worker' }],
+          },
+        }),
+        stderr: '',
+        exitCode: 0,
+      })
+      .mockResolvedValueOnce({
+        stdout: JSON.stringify({ MetricDataResults: [] }),
+        stderr: '',
+        exitCode: 0,
+      })
+      .mockResolvedValueOnce({
+        stdout: JSON.stringify({
+          services: [
+            {
+              serviceArn: 'arn:aws:ecs:ap-northeast-2:123456789012:service/prod/api',
+              serviceName: 'api',
+              status: 'ACTIVE',
+              taskDefinition:
+                'arn:aws:ecs:ap-northeast-2:123456789012:task-definition/api:42',
+              deployments: [],
+              events: [],
+            },
+          ],
+        }),
+        stderr: '',
+        exitCode: 0,
+      })
+      .mockResolvedValueOnce({
+        stdout: JSON.stringify({
+          taskArns: ['arn:aws:ecs:ap-northeast-2:123456789012:task/prod/task-2'],
+        }),
+        stderr: '',
+        exitCode: 0,
+      })
+      .mockResolvedValueOnce({
+        stdout: JSON.stringify({
+          tasks: [
+            {
+              taskArn: 'arn:aws:ecs:ap-northeast-2:123456789012:task/prod/task-2',
+              lastStatus: 'RUNNING',
+              enableExecuteCommand: true,
+              containers: [{ name: 'api', runtimeId: 'runtime-2' }],
+            },
+          ],
+        }),
+        stderr: '',
+        exitCode: 0,
+      });
+
+    await service.describeEcsServiceActionContext(
+      'default',
+      'ap-northeast-2',
+      'arn:aws:ecs:ap-northeast-2:123456789012:cluster/prod',
+      'api',
+    );
+    await service.describeEcsClusterSnapshot(
+      'default',
+      'ap-northeast-2',
+      'arn:aws:ecs:ap-northeast-2:123456789012:cluster/prod',
+    );
+    await expect(
+      service.describeEcsClusterUtilization(
+        'default',
+        'ap-northeast-2',
+        'arn:aws:ecs:ap-northeast-2:123456789012:cluster/prod',
+      ),
+    ).resolves.toMatchObject({
+      services: [
+        {
+          serviceName: 'worker',
+        },
+      ],
+    });
+    await service.describeEcsServiceActionContext(
+      'default',
+      'ap-northeast-2',
+      'arn:aws:ecs:ap-northeast-2:123456789012:cluster/prod',
+      'api',
+    );
+
+    const commandCalls = service.runResolvedCommand.mock.calls;
+    expect(commandCalls.map(getAwsCommandName).filter((name) => name === 'ecs list-services')).toHaveLength(1);
+    expect(
+      commandCalls.filter((call) => {
+        const args = getAwsCommandArgs(call);
+        return getAwsCommandName(call) === 'ecs describe-services' && args.includes('api');
+      }),
+    ).toHaveLength(2);
+  });
+
   it('lists ECS task tunnel services with basic runtime counts', async () => {
     const service = new AwsService() as unknown as {
       ensureAwsCliAvailable: () => Promise<void>;
@@ -2211,5 +3091,81 @@ describe('AwsService ECS helpers', () => {
       ]),
       60_000,
     );
+  });
+
+  it('preserves Korean message text when loading ECS service logs', async () => {
+    const service = new AwsService() as unknown as {
+      ensureAwsCliAvailable: () => Promise<void>;
+      describeEcsServiceActionContext: ReturnType<typeof vi.fn>;
+      runResolvedCommand: ReturnType<typeof vi.fn>;
+      loadEcsServiceLogs: (input: {
+        profileName: string;
+        region: string;
+        clusterArn: string;
+        serviceName: string;
+        taskArn?: string | null;
+        containerName?: string | null;
+        followCursor?: string | null;
+        startTime?: string | null;
+        endTime?: string | null;
+        limit?: number;
+      }) => Promise<{
+        entries: Array<{
+          message: string;
+        }>;
+      }>;
+    };
+
+    service.ensureAwsCliAvailable = vi.fn().mockResolvedValue(undefined);
+    service.describeEcsServiceActionContext = vi.fn().mockResolvedValue({
+      serviceName: 'api',
+      serviceArn: 'arn:aws:ecs:ap-northeast-2:123456789012:service/prod/api',
+      taskDefinitionArn: 'api:7',
+      taskDefinitionRevision: 7,
+      containers: [
+        {
+          containerName: 'api',
+          ports: [{ port: 8080, protocol: 'tcp' }],
+          execEnabled: true,
+          logSupport: {
+            containerName: 'api',
+            supported: true,
+            reason: null,
+            logGroupName: '/ecs/api',
+            logRegion: 'ap-northeast-2',
+            logStreamPrefix: 'ecs',
+          },
+        },
+      ],
+      runningTasks: [],
+      deployments: [],
+      events: [],
+    });
+    service.runResolvedCommand = vi.fn().mockResolvedValue({
+      stdout: JSON.stringify({
+        events: [
+          {
+            eventId: 'event-1',
+            timestamp: Date.parse('2026-03-29T00:05:00.000Z'),
+            message: '한글 로그',
+            logStreamName: 'ecs/api/task-1',
+          },
+        ],
+      }),
+      stderr: '',
+      exitCode: 0,
+    });
+
+    await expect(
+      service.loadEcsServiceLogs({
+        profileName: 'default',
+        region: 'ap-northeast-2',
+        clusterArn: 'arn:aws:ecs:ap-northeast-2:123456789012:cluster/prod',
+        serviceName: 'api',
+        limit: 50,
+      }),
+    ).resolves.toMatchObject({
+      entries: [{ message: '한글 로그' }],
+    });
   });
 });
