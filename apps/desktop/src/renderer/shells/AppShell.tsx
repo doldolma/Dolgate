@@ -65,11 +65,6 @@ export function AppShell({
   const isContainersActive = homeViewModel.activeWorkspaceTab === 'containers';
   const isSessionViewActive =
     !isHomeActive && !isSftpActive && !isContainersActive;
-  const hasLiveSessionShare = sessionViewModel.tabs.some(
-    (tab) =>
-      tab.sessionShare?.status === 'active' ||
-      tab.sessionShare?.status === 'starting',
-  );
   const hasActiveTransfers = sftpViewModel.sftp.transfers.some(
     (job) => job.status === 'queued' || job.status === 'running',
   );
@@ -207,64 +202,56 @@ export function AppShell({
       />
 
       <div className="relative flex-1 min-h-0">
-        {isHomeActive ? (
-          <HomeShell
-            active
-            authState={authState}
-            offlineLeaseExpiryLabel={offlineLeaseExpiryLabel}
-            desktopPlatform={desktopPlatform}
-            homeViewModel={homeViewModel}
-            containersViewModel={containersViewModel}
-            modalViewModel={modalViewModel}
-            loginController={loginController}
-            onRequestSecretEditor={setSecretEditRequest}
-          />
-        ) : null}
+        <HomeShell
+          active={isHomeActive}
+          authState={authState}
+          offlineLeaseExpiryLabel={offlineLeaseExpiryLabel}
+          desktopPlatform={desktopPlatform}
+          homeViewModel={homeViewModel}
+          containersViewModel={containersViewModel}
+          modalViewModel={modalViewModel}
+          loginController={loginController}
+          onRequestSecretEditor={setSecretEditRequest}
+        />
 
-        {isSftpActive ? (
-          <SftpShell
-            active
-            authState={authState}
-            offlineLeaseExpiryLabel={offlineLeaseExpiryLabel}
-            desktopPlatform={desktopPlatform}
-            homeViewModel={homeViewModel}
-            sftpViewModel={sftpViewModel}
-            settingsViewModel={settingsViewModel}
-            modalViewModel={modalViewModel}
-            loginController={loginController}
-          />
-        ) : null}
+        <SftpShell
+          active={isSftpActive}
+          authState={authState}
+          offlineLeaseExpiryLabel={offlineLeaseExpiryLabel}
+          desktopPlatform={desktopPlatform}
+          homeViewModel={homeViewModel}
+          sftpViewModel={sftpViewModel}
+          settingsViewModel={settingsViewModel}
+          modalViewModel={modalViewModel}
+          loginController={loginController}
+        />
 
-        {isContainersActive ? (
-          <ContainersShell
-            active
-            authState={authState}
-            offlineLeaseExpiryLabel={offlineLeaseExpiryLabel}
-            homeViewModel={homeViewModel}
-            containersViewModel={containersViewModel}
-            modalViewModel={modalViewModel}
-            loginController={loginController}
-          />
-        ) : null}
+        <ContainersShell
+          active={isContainersActive}
+          authState={authState}
+          offlineLeaseExpiryLabel={offlineLeaseExpiryLabel}
+          homeViewModel={homeViewModel}
+          containersViewModel={containersViewModel}
+          modalViewModel={modalViewModel}
+          loginController={loginController}
+        />
 
-        {isSessionViewActive || hasLiveSessionShare ? (
-          <SessionShell
-            active={isSessionViewActive}
-            authState={authState}
-            offlineLeaseExpiryLabel={offlineLeaseExpiryLabel}
-            prefersDark={prefersDark}
-            homeViewModel={homeViewModel}
-            sessionViewModel={sessionViewModel}
-            settingsViewModel={settingsViewModel}
-            modalViewModel={modalViewModel}
-            loginController={loginController}
-            draggedSession={draggedSession}
-            onStartSessionDrag={setDraggedSession}
-            onEndSessionDrag={() => {
-              setDraggedSession(null);
-            }}
-          />
-        ) : null}
+        <SessionShell
+          active={isSessionViewActive}
+          authState={authState}
+          offlineLeaseExpiryLabel={offlineLeaseExpiryLabel}
+          prefersDark={prefersDark}
+          homeViewModel={homeViewModel}
+          sessionViewModel={sessionViewModel}
+          settingsViewModel={settingsViewModel}
+          modalViewModel={modalViewModel}
+          loginController={loginController}
+          draggedSession={draggedSession}
+          onStartSessionDrag={setDraggedSession}
+          onEndSessionDrag={() => {
+            setDraggedSession(null);
+          }}
+        />
       </div>
 
       <AppModals

@@ -450,7 +450,7 @@ describe('App integration', () => {
     });
   });
 
-  it('does not mount inactive heavy shells while the session view is active', async () => {
+  it('keeps other workspace shells mounted in the background while the session view is active', async () => {
     const api = createDolsshApi({
       authBootstrapState: {
         status: 'authenticated',
@@ -467,6 +467,44 @@ describe('App integration', () => {
     mocks.desktopApi = api;
     mocks.storeState = createMockStoreState({
       activeWorkspaceTab: 'session:session-1',
+      hosts: [
+        {
+          id: 'host-1',
+          kind: 'ssh',
+          label: 'Prod',
+          hostname: 'prod.example.com',
+          port: 22,
+          username: 'ubuntu',
+          authType: 'password',
+          privateKeyPath: null,
+          secretRef: 'host:host-1',
+          groupName: 'Servers',
+          tags: [],
+          terminalThemeId: null,
+          createdAt: '2026-03-28T00:00:00.000Z',
+          updatedAt: '2026-03-28T00:00:00.000Z',
+        },
+      ],
+      containerTabs: [
+        {
+          hostId: 'host-1',
+          title: 'Prod · Containers',
+          runtime: 'docker',
+          unsupportedReason: null,
+          connectionProgress: null,
+          items: [],
+          selectedContainerId: null,
+          activePanel: 'overview',
+          isLoading: false,
+          details: null,
+          detailsLoading: false,
+          logs: null,
+          logsState: 'idle',
+          logsLoading: false,
+          logsFollowEnabled: false,
+        },
+      ],
+      activeContainerHostId: 'host-1',
     });
 
     render(<App />);
@@ -475,13 +513,15 @@ describe('App integration', () => {
       expect(screen.getByTestId('terminal-workspace')).toBeInTheDocument();
     });
 
-    expect(screen.queryByTestId('host-browser')).not.toBeInTheDocument();
-    expect(screen.queryByTestId('sftp-workspace')).not.toBeInTheDocument();
-    expect(screen.queryByTestId('containers-workspace')).not.toBeInTheDocument();
-    expect(screen.queryByTestId('aws-ecs-workspace')).not.toBeInTheDocument();
+    expect(screen.getByTestId('host-browser')).toBeInTheDocument();
+    expect(screen.getByTestId('sftp-workspace')).toBeInTheDocument();
+    expect(screen.getByTestId('containers-workspace')).toBeInTheDocument();
+    expect(mocks.containersWorkspaceProps.at(-1)).toMatchObject({
+      isActive: false,
+    });
   });
 
-  it('does not keep the terminal workspace mounted while SFTP is active just because session tabs exist', async () => {
+  it('keeps the terminal workspace mounted while SFTP is active', async () => {
     const api = createDolsshApi({
       authBootstrapState: {
         status: 'authenticated',
@@ -506,7 +546,7 @@ describe('App integration', () => {
       expect(screen.getByTestId('sftp-workspace')).toBeInTheDocument();
     });
 
-    expect(screen.queryByTestId('terminal-workspace')).not.toBeInTheDocument();
+    expect(screen.getByTestId('terminal-workspace')).toBeInTheDocument();
   });
 
   it('keeps the terminal workspace mounted in the background when a session share is active', async () => {
@@ -707,6 +747,144 @@ describe('App integration', () => {
 
     await waitFor(() => {
       expect(screen.getByTestId('containers-workspace')).toBeInTheDocument();
+    });
+    expect(mocks.containersWorkspaceProps.at(-1)).toMatchObject({
+      isActive: true,
+    });
+  });
+
+  it('keeps all opened container host workspaces mounted and marks only the active one as interactive', async () => {
+    const api = createDolsshApi({
+      authBootstrapState: {
+        status: 'authenticated',
+        session: { user: { id: 'user-1', email: 'user@example.com' } },
+        offline: null,
+        errorMessage: null,
+      },
+    });
+    Object.defineProperty(window, 'dolssh', {
+      configurable: true,
+      writable: true,
+      value: api,
+    });
+    mocks.desktopApi = api;
+    mocks.storeState = createMockStoreState({
+      hosts: [
+        {
+          id: 'host-1',
+          kind: 'ssh',
+          label: 'Prod',
+          hostname: 'prod.example.com',
+          port: 22,
+          username: 'ubuntu',
+          authType: 'password',
+          privateKeyPath: null,
+          secretRef: 'host:host-1',
+          groupName: 'Servers',
+          tags: [],
+          terminalThemeId: null,
+          createdAt: '2026-03-28T00:00:00.000Z',
+          updatedAt: '2026-03-28T00:00:00.000Z',
+        },
+        {
+          id: 'ecs-host-1',
+          kind: 'aws-ecs',
+          label: 'prod cluster',
+          awsProfileName: 'default',
+          awsRegion: 'ap-northeast-2',
+          awsEcsClusterArn: 'arn:aws:ecs:ap-northeast-2:123456789012:cluster/prod',
+          awsEcsClusterName: 'prod',
+          groupName: 'Servers',
+          tags: [],
+          terminalThemeId: null,
+          createdAt: '2026-03-28T00:00:00.000Z',
+          updatedAt: '2026-03-28T00:00:00.000Z',
+        },
+      ],
+      containerTabs: [
+        {
+          hostId: 'host-1',
+          title: 'Prod · Containers',
+          runtime: 'docker',
+          unsupportedReason: null,
+          connectionProgress: null,
+          items: [],
+          selectedContainerId: null,
+          activePanel: 'overview',
+          isLoading: false,
+          details: null,
+          detailsLoading: false,
+          logs: null,
+          logsState: 'idle',
+          logsLoading: false,
+          logsFollowEnabled: false,
+        },
+        {
+          kind: 'ecs-cluster',
+          hostId: 'ecs-host-1',
+          title: 'prod cluster · ECS',
+          runtime: null,
+          unsupportedReason: null,
+          connectionProgress: null,
+          items: [],
+          selectedContainerId: null,
+          activePanel: 'overview',
+          isLoading: false,
+          details: null,
+          detailsLoading: false,
+          logs: null,
+          logsState: 'idle',
+          logsLoading: false,
+          logsFollowEnabled: false,
+          logsTailWindow: 200,
+          logsSearchQuery: '',
+          logsSearchMode: null,
+          logsSearchLoading: false,
+          logsSearchResult: null,
+          metricsSamples: [],
+          metricsState: 'idle',
+          metricsLoading: false,
+          pendingAction: null,
+          ecsSnapshot: {
+            profileName: 'default',
+            region: 'ap-northeast-2',
+            cluster: {
+              clusterArn: 'arn:aws:ecs:ap-northeast-2:123456789012:cluster/prod',
+              clusterName: 'prod',
+              status: 'ACTIVE',
+              activeServicesCount: 2,
+              runningTasksCount: 3,
+              pendingTasksCount: 1,
+            },
+            services: [],
+            loadedAt: '2026-03-28T00:00:00.000Z',
+          },
+          ecsMetricsWarning: null,
+          ecsMetricsLoadedAt: '2026-03-28T00:00:10.000Z',
+          ecsMetricsLoading: false,
+          ecsUtilizationHistoryByServiceName: {},
+        },
+      ],
+      activeContainerHostId: 'host-1',
+      activeWorkspaceTab: 'containers',
+    });
+
+    render(<App />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('containers-workspace')).toBeInTheDocument();
+      expect(screen.getByTestId('aws-ecs-workspace')).toBeInTheDocument();
+    });
+
+    const latestContainerWorkspace = mocks.containersWorkspaceProps.at(-1);
+    const latestEcsWorkspace = mocks.awsEcsWorkspaceProps.at(-1);
+    expect(latestContainerWorkspace).toMatchObject({
+      host: expect.objectContaining({ id: 'host-1' }),
+      isActive: true,
+    });
+    expect(latestEcsWorkspace).toMatchObject({
+      host: expect.objectContaining({ id: 'ecs-host-1' }),
+      isActive: false,
     });
   });
 
