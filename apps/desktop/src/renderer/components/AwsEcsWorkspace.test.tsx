@@ -227,6 +227,7 @@ function createTab(
         ],
       },
     },
+    ecsLogsByServiceName: {},
     ecsSelectedServiceName: "worker",
     ecsActivePanel: "overview",
     containerTunnelStatesByContainerId: {},
@@ -618,6 +619,234 @@ describe("AwsEcsWorkspace", () => {
       expect(screen.getByLabelText("Container")).not.toBeDisabled();
       expect(logRefreshButton).not.toBeDisabled();
     });
+  });
+
+  it("hides the previous service logs immediately while the next service is loading", async () => {
+    render(
+      <AwsEcsWorkspace
+        host={createHost()}
+        tab={createTab(createSnapshot())}
+        isActive={false}
+        onRefresh={vi.fn().mockResolvedValue(undefined)}
+        onRefreshUtilization={vi.fn().mockResolvedValue(undefined)}
+        onOpenEcsExecShell={vi.fn().mockResolvedValue(undefined)}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("tab", { name: "Logs" }));
+    expect(await screen.findByText("hello from task-1")).toBeInTheDocument();
+
+    const deferredApiLogs = createDeferred<AwsEcsServiceLogsSnapshot>();
+    awsApi.loadEcsServiceLogs.mockReturnValueOnce(deferredApiLogs.promise);
+
+    fireEvent.click(screen.getByRole("button", { name: /^api\b/i }));
+
+    expect(screen.queryByText("hello from task-1")).not.toBeInTheDocument();
+    expect(
+      screen.getByText("서비스 로그를 불러오는 중입니다."),
+    ).toBeInTheDocument();
+
+    deferredApiLogs.resolve(
+      createLogsSnapshot({
+        serviceName: "api",
+        entries: [
+          {
+            id: "api-log-1",
+            timestamp: "2026-03-29T00:12:00.000Z",
+            message: "hello from api",
+            taskId: "task-api-1",
+            containerName: "api",
+          },
+        ],
+        containerOptions: ["api"],
+      }),
+    );
+
+    expect(await screen.findByText("hello from api")).toBeInTheDocument();
+  });
+
+  it("restores cached logs immediately when returning to a previously viewed service", async () => {
+    render(
+      <AwsEcsWorkspace
+        host={createHost()}
+        tab={createTab(createSnapshot())}
+        isActive={false}
+        onRefresh={vi.fn().mockResolvedValue(undefined)}
+        onRefreshUtilization={vi.fn().mockResolvedValue(undefined)}
+        onOpenEcsExecShell={vi.fn().mockResolvedValue(undefined)}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("tab", { name: "Logs" }));
+    expect(await screen.findByText("hello from task-1")).toBeInTheDocument();
+
+    awsApi.loadEcsServiceLogs.mockResolvedValueOnce(
+      createLogsSnapshot({
+        serviceName: "api",
+        entries: [
+          {
+            id: "api-log-1",
+            timestamp: "2026-03-29T00:12:00.000Z",
+            message: "hello from api",
+            taskId: "task-api-1",
+            containerName: "api",
+          },
+        ],
+        containerOptions: ["api"],
+      }),
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /^api\b/i }));
+    expect(await screen.findByText("hello from api")).toBeInTheDocument();
+
+    const loadCallCountBeforeReturn = awsApi.loadEcsServiceLogs.mock.calls.length;
+    fireEvent.click(screen.getByRole("button", { name: /^worker\b/i }));
+
+    expect(screen.getByText("hello from task-1")).toBeInTheDocument();
+    expect(awsApi.loadEcsServiceLogs).toHaveBeenCalledTimes(loadCallCountBeforeReturn);
+  });
+
+  it("keeps late log responses scoped to their service cache without polluting the active view", async () => {
+    const deferredWorkerLogs = createDeferred<AwsEcsServiceLogsSnapshot>();
+    const deferredApiLogs = createDeferred<AwsEcsServiceLogsSnapshot>();
+    awsApi.loadEcsServiceLogs
+      .mockReturnValueOnce(deferredWorkerLogs.promise)
+      .mockReturnValueOnce(deferredApiLogs.promise);
+
+    render(
+      <AwsEcsWorkspace
+        host={createHost()}
+        tab={createTab(createSnapshot())}
+        isActive={false}
+        onRefresh={vi.fn().mockResolvedValue(undefined)}
+        onRefreshUtilization={vi.fn().mockResolvedValue(undefined)}
+        onOpenEcsExecShell={vi.fn().mockResolvedValue(undefined)}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("tab", { name: "Logs" }));
+
+    await waitFor(() => {
+      expect(awsApi.loadEcsServiceLogs).toHaveBeenNthCalledWith(1, {
+        hostId: "ecs-host-1",
+        serviceName: "worker",
+        taskArn: null,
+        containerName: null,
+        followCursor: null,
+        limit: 5000,
+      });
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /^api\b/i }));
+
+    await waitFor(() => {
+      expect(awsApi.loadEcsServiceLogs).toHaveBeenNthCalledWith(2, {
+        hostId: "ecs-host-1",
+        serviceName: "api",
+        taskArn: null,
+        containerName: null,
+        followCursor: null,
+        limit: 5000,
+      });
+    });
+
+    deferredApiLogs.resolve(
+      createLogsSnapshot({
+        serviceName: "api",
+        entries: [
+          {
+            id: "api-log-1",
+            timestamp: "2026-03-29T00:12:00.000Z",
+            message: "hello from api",
+            taskId: "task-api-1",
+            containerName: "api",
+          },
+        ],
+        containerOptions: ["api"],
+      }),
+    );
+
+    expect(await screen.findByText("hello from api")).toBeInTheDocument();
+
+    deferredWorkerLogs.resolve(
+      createLogsSnapshot({
+        serviceName: "worker",
+        entries: [
+          {
+            id: "worker-log-2",
+            timestamp: "2026-03-29T00:12:30.000Z",
+            message: "late worker log",
+            taskId: "task-1",
+            containerName: "worker",
+          },
+        ],
+      }),
+    );
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(screen.getByText("hello from api")).toBeInTheDocument();
+    expect(screen.queryByText("late worker log")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /^worker\b/i }));
+
+    expect(await screen.findByText("late worker log")).toBeInTheDocument();
+    expect(awsApi.loadEcsServiceLogs).toHaveBeenCalledTimes(2);
+  });
+
+  it("restores per-service log UI state when switching between services", async () => {
+    render(
+      <AwsEcsWorkspace
+        host={createHost()}
+        tab={createTab(createSnapshot())}
+        isActive={false}
+        onRefresh={vi.fn().mockResolvedValue(undefined)}
+        onRefreshUtilization={vi.fn().mockResolvedValue(undefined)}
+        onOpenEcsExecShell={vi.fn().mockResolvedValue(undefined)}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("tab", { name: "Logs" }));
+    expect(await screen.findByText("hello from task-1")).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText("로그 검색"), {
+      target: { value: "task-1" },
+    });
+    fireEvent.click(screen.getByRole("switch", { name: "Follow" }));
+
+    awsApi.loadEcsServiceLogs.mockResolvedValueOnce(
+      createLogsSnapshot({
+        serviceName: "api",
+        entries: [
+          {
+            id: "api-log-1",
+            timestamp: "2026-03-29T00:12:00.000Z",
+            message: "hello from api",
+            taskId: "task-api-1",
+            containerName: "api",
+          },
+        ],
+        containerOptions: ["api"],
+      }),
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /^api\b/i }));
+    expect(await screen.findByText("hello from api")).toBeInTheDocument();
+    expect(screen.getByLabelText("로그 검색")).toHaveValue("");
+    expect(screen.getByRole("switch", { name: "Follow" })).toHaveAttribute(
+      "aria-checked",
+      "true",
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /^worker\b/i }));
+
+    expect(await screen.findByDisplayValue("task-1")).toBeInTheDocument();
+    expect(screen.getByRole("switch", { name: "Follow" })).toHaveAttribute(
+      "aria-checked",
+      "false",
+    );
   });
 
   it("opens shell picker and starts ECS Exec through the provided action", async () => {

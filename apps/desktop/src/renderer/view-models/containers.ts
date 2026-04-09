@@ -26,6 +26,9 @@ export function useContainersViewModel() {
   const setEcsClusterTunnelState = useAppStore(
     (state) => state.setEcsClusterTunnelState,
   );
+  const setEcsClusterLogsState = useAppStore(
+    (state) => state.setEcsClusterLogsState,
+  );
   const refreshHostContainerLogs = useAppStore(
     (state) => state.refreshHostContainerLogs,
   );
@@ -69,6 +72,7 @@ export function useContainersViewModel() {
     setEcsClusterSelectedService,
     setEcsClusterActivePanel,
     setEcsClusterTunnelState,
+    setEcsClusterLogsState,
     refreshHostContainerLogs,
     loadMoreHostContainerLogs,
     setHostContainerLogsFollow,

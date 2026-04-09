@@ -607,6 +607,7 @@ describe('PortForwardingPanel dialog', () => {
           ecsMetricsLoadedAt: null,
           ecsMetricsLoading: false,
           ecsUtilizationHistoryByServiceName: {},
+          ecsLogsByServiceName: {},
           ecsSelectedServiceName: 'worker',
           ecsActivePanel: 'tunnel',
           ecsTunnelStatesByServiceName: {
@@ -717,6 +718,7 @@ describe('PortForwardingPanel dialog', () => {
           ecsMetricsLoadedAt: null,
           ecsMetricsLoading: false,
           ecsUtilizationHistoryByServiceName: {},
+          ecsLogsByServiceName: {},
           ecsSelectedServiceName: null,
           ecsActivePanel: 'overview',
           ecsTunnelStatesByServiceName: {},

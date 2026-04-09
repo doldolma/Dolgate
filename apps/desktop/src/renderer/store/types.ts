@@ -3,6 +3,7 @@ import type {
   ActivityLogRecord,
   AppSettings,
   AwsEcsClusterSnapshot,
+  AwsEcsServiceLogsSnapshot,
   AwsMetricHistoryPoint,
   ContainerConnectionProgressEvent,
   CoreEvent,
@@ -111,6 +112,36 @@ export type ContainerMetricsLoadState = "idle" | "loading" | "ready" | "error";
 export type ContainerLogsSearchMode = "local" | "remote" | null;
 export type HostContainersTabKind = "host-containers" | "ecs-cluster";
 export type EcsDetailPanel = "overview" | "logs" | "metrics" | "tunnel";
+export type LogsRangeMode = "recent" | "absolute";
+export type LogsRelativePresetKey =
+  | "30m"
+  | "1h"
+  | "6h"
+  | "1d"
+  | "3d"
+  | "1w"
+  | "custom";
+export type LogsRelativeUnit =
+  | "second"
+  | "minute"
+  | "hour"
+  | "day"
+  | "week"
+  | "month"
+  | "year";
+
+export interface LogsAbsoluteRangeValue {
+  startDate: string;
+  startTime: string;
+  endDate: string;
+  endTime: string;
+}
+
+export interface LogsRelativeRangeValue {
+  presetKey: LogsRelativePresetKey;
+  amount: string;
+  unit: LogsRelativeUnit;
+}
 
 export interface EcsServiceUtilizationHistoryState {
   cpuHistory: AwsMetricHistoryPoint[];
@@ -139,6 +170,19 @@ export interface ContainerTunnelTabState {
   loading: boolean;
   error: string | null;
   runtime: PortForwardRuntimeRecord | null;
+}
+
+export interface EcsServiceLogsViewState {
+  loading: boolean;
+  error: string | null;
+  snapshot: AwsEcsServiceLogsSnapshot | null;
+  follow: boolean;
+  query: string;
+  taskArn: string | null;
+  containerName: string | null;
+  rangeMode: LogsRangeMode;
+  relativeRange: LogsRelativeRangeValue;
+  absoluteRange: LogsAbsoluteRangeValue | null;
 }
 
 export interface HostContainersTabState {
@@ -182,6 +226,7 @@ export interface HostContainersTabState {
     string,
     EcsServiceUtilizationHistoryState
   >;
+  ecsLogsByServiceName: Record<string, EcsServiceLogsViewState>;
   ecsSelectedServiceName: string | null;
   ecsActivePanel: EcsDetailPanel;
   ecsTunnelStatesByServiceName: Record<string, EcsTunnelTabState>;
@@ -468,6 +513,11 @@ interface AppStateParts {
     serviceName: string,
     state: EcsTunnelTabState | null,
   ) => void;
+  setEcsClusterLogsState: (
+    hostId: string,
+    serviceName: string,
+    state: EcsServiceLogsViewState | null,
+  ) => void;
   refreshHostContainerLogs: (
     hostId: string,
     options?: { tail?: number; followCursor?: string | null },
@@ -727,6 +777,7 @@ export type ContainersSlice = Pick<
   | "setEcsClusterSelectedService"
   | "setEcsClusterActivePanel"
   | "setEcsClusterTunnelState"
+  | "setEcsClusterLogsState"
   | "refreshHostContainerLogs"
   | "loadMoreHostContainerLogs"
   | "setHostContainerLogsFollow"

@@ -13,7 +13,6 @@ import type {
   AwsEcsServiceActionContext,
   AwsEcsServiceExposureKind,
   AwsEcsServiceLogEntry,
-  AwsEcsServiceLogsSnapshot,
   AwsEcsServiceSummary,
   AwsEcsServiceTaskSummary,
   AwsMetricHistoryPoint,
@@ -22,8 +21,15 @@ import type {
   PortForwardRuntimeRecord,
 } from "@shared";
 import type {
+  EcsDetailPanel,
+  EcsServiceLogsViewState,
   EcsTunnelTabState,
   HostContainersTabState,
+  LogsAbsoluteRangeValue,
+  LogsRangeMode,
+  LogsRelativePresetKey,
+  LogsRelativeRangeValue,
+  LogsRelativeUnit,
 } from "../store/createAppStore";
 import { useAwsEcsWorkspaceController } from "../controllers/useAwsEcsWorkspaceController";
 import {
@@ -58,25 +64,6 @@ import {
   type MetricChartSeriesDefinition,
 } from "./UPlotMetricChart";
 
-type EcsDetailPanel = "overview" | "logs" | "metrics" | "tunnel";
-type LogsRangeMode = "recent" | "absolute";
-type LogsRelativePresetKey =
-  | "30m"
-  | "1h"
-  | "6h"
-  | "1d"
-  | "3d"
-  | "1w"
-  | "custom";
-type LogsRelativeUnit =
-  | "second"
-  | "minute"
-  | "hour"
-  | "day"
-  | "week"
-  | "month"
-  | "year";
-
 interface AwsEcsWorkspaceProps {
   host: HostRecord;
   tab: HostContainersTabState;
@@ -89,6 +76,11 @@ interface AwsEcsWorkspaceProps {
     hostId: string,
     serviceName: string,
     state: EcsTunnelTabState | null,
+  ) => void;
+  onSetLogsState?: (
+    hostId: string,
+    serviceName: string,
+    state: EcsServiceLogsViewState | null,
   ) => void;
   onOpenEcsExecShell: (
     hostId: string,
@@ -104,29 +96,10 @@ interface ServiceActionContextState {
   data: AwsEcsServiceActionContext | null;
 }
 
-interface LogsPanelState {
-  serviceName: string | null;
-  loading: boolean;
-  error: string | null;
-  snapshot: AwsEcsServiceLogsSnapshot | null;
-  follow: boolean;
-  query: string;
-  taskArn: string | null;
-  containerName: string | null;
-}
-
-interface LogsAbsoluteRangeValue {
-  startDate: string;
-  startTime: string;
-  endDate: string;
-  endTime: string;
-}
-
-interface LogsRelativeRangeValue {
-  presetKey: LogsRelativePresetKey;
-  amount: string;
-  unit: LogsRelativeUnit;
-}
+type LogsPanelState = EcsServiceLogsViewState;
+type LogsStateUpdater =
+  | LogsPanelState
+  | ((previous: LogsPanelState) => LogsPanelState);
 
 interface TunnelPanelState {
   serviceName: string | null;
@@ -534,7 +507,6 @@ function compareServices(
 
 function createEmptyLogsState(): LogsPanelState {
   return {
-    serviceName: null,
     loading: false,
     error: null,
     snapshot: null,
@@ -542,7 +514,22 @@ function createEmptyLogsState(): LogsPanelState {
     query: "",
     taskArn: null,
     containerName: null,
+    rangeMode: "recent",
+    relativeRange: createDefaultLogsRelativeRange(),
+    absoluteRange: null,
   };
+}
+
+function pruneEcsLogsByServiceName<T>(
+  logsByServiceName: Record<string, T>,
+  serviceNames: string[],
+): Record<string, T> {
+  const validServiceNames = new Set(serviceNames);
+  return Object.fromEntries(
+    Object.entries(logsByServiceName).filter(([serviceName]) =>
+      validServiceNames.has(serviceName),
+    ),
+  );
 }
 
 function createEmptyTunnelState(): TunnelPanelState {
@@ -1288,6 +1275,7 @@ export function AwsEcsWorkspace({
   onSelectService,
   onSetPanel,
   onSetTunnelState,
+  onSetLogsState,
   onOpenEcsExecShell,
 }: AwsEcsWorkspaceProps) {
   const {
@@ -1305,12 +1293,9 @@ export function AwsEcsWorkspace({
   const [serviceContexts, setServiceContexts] = useState<
     Record<string, ServiceActionContextState>
   >({});
-  const [logsState, setLogsState] = useState<LogsPanelState>(createEmptyLogsState);
-  const [logsRangeMode, setLogsRangeMode] = useState<LogsRangeMode>("recent");
-  const [logsRelativeRange, setLogsRelativeRange] =
-    useState<LogsRelativeRangeValue>(createDefaultLogsRelativeRange);
-  const [logsAbsoluteRange, setLogsAbsoluteRange] =
-    useState<LogsAbsoluteRangeValue | null>(null);
+  const [localEcsLogsByServiceName, setLocalEcsLogsByServiceName] = useState<
+    Record<string, LogsPanelState>
+  >(tab.ecsLogsByServiceName);
   const [logsRangePickerOpen, setLogsRangePickerOpen] = useState(false);
   const [localSelectedServiceName, setLocalSelectedServiceName] = useState<
     string | null
@@ -1332,7 +1317,11 @@ export function AwsEcsWorkspace({
   const selectedServiceName =
     onSelectService ? tab.ecsSelectedServiceName : localSelectedServiceName;
   const activePanel = onSetPanel ? tab.ecsActivePanel : localActivePanel;
-  const latestLogsRequestIdRef = useRef(0);
+  const ecsLogsByServiceName = onSetLogsState
+    ? tab.ecsLogsByServiceName
+    : localEcsLogsByServiceName;
+  const ecsLogsByServiceNameRef = useRef(ecsLogsByServiceName);
+  const latestLogsRequestIdRef = useRef<Record<string, number>>({});
   const logsOutputRef = useRef<HTMLDivElement | null>(null);
   const logsBottomRef = useRef<HTMLDivElement | null>(null);
   const previousPanelRef = useRef<EcsDetailPanel>(tab.ecsActivePanel);
@@ -1347,17 +1336,19 @@ export function AwsEcsWorkspace({
   }, [serviceContexts]);
 
   useEffect(() => {
+    ecsLogsByServiceNameRef.current = ecsLogsByServiceName;
+  }, [ecsLogsByServiceName]);
+
+  useEffect(() => {
     tunnelStatesRef.current = tab.ecsTunnelStatesByServiceName;
     setServiceContexts({});
     serviceContextsRef.current = {};
     inFlightContextRequestsRef.current = {};
-    setLogsState(createEmptyLogsState());
-    setLogsRangeMode("recent");
-    setLogsRelativeRange(createDefaultLogsRelativeRange());
-    setLogsAbsoluteRange(null);
+    setLocalEcsLogsByServiceName(tab.ecsLogsByServiceName);
     setLogsRangePickerOpen(false);
     setLocalSelectedServiceName(tab.ecsSelectedServiceName);
     setLocalActivePanel(tab.ecsActivePanel);
+    latestLogsRequestIdRef.current = {};
     logsAutoLoadKeyRef.current = null;
     previousLogsTargetRef.current = null;
     hasInitializedLogsViewRef.current = false;
@@ -1368,6 +1359,22 @@ export function AwsEcsWorkspace({
   useEffect(() => {
     tunnelStatesRef.current = tab.ecsTunnelStatesByServiceName;
   }, [tab.ecsTunnelStatesByServiceName]);
+
+  useEffect(() => {
+    if (onSetLogsState) {
+      return;
+    }
+    const nextServiceNames = services.map((service) => service.serviceName);
+    setLocalEcsLogsByServiceName((previous) => {
+      const next = pruneEcsLogsByServiceName(previous, nextServiceNames);
+      const previousKeys = Object.keys(previous).sort();
+      const nextKeys = Object.keys(next).sort();
+      return previousKeys.length === nextKeys.length &&
+        previousKeys.every((key, index) => key === nextKeys[index])
+        ? previous
+        : next;
+    });
+  }, [onSetLogsState, services]);
 
   useEffect(() => {
     return onPortForwardRuntimeEvent((event: PortForwardRuntimeEvent) => {
@@ -1430,6 +1437,43 @@ export function AwsEcsWorkspace({
       services[0] ??
       null,
     [selectedServiceName, services],
+  );
+  const setServiceLogsState = useCallback(
+    (serviceName: string, updater: LogsStateUpdater) => {
+      if (onSetLogsState) {
+        const previous =
+          ecsLogsByServiceNameRef.current[serviceName] ?? createEmptyLogsState();
+        const next =
+          typeof updater === "function" ? updater(previous) : updater;
+        onSetLogsState(host.id, serviceName, next);
+        return;
+      }
+      setLocalEcsLogsByServiceName((previous) => {
+        const current = previous[serviceName] ?? createEmptyLogsState();
+        const next =
+          typeof updater === "function" ? updater(current) : updater;
+        return {
+          ...previous,
+          [serviceName]: next,
+        };
+      });
+    },
+    [host.id, onSetLogsState],
+  );
+  const logsState = selectedService
+    ? ecsLogsByServiceName[selectedService.serviceName] ?? createEmptyLogsState()
+    : createEmptyLogsState();
+  const logsRangeMode = logsState.rangeMode;
+  const logsRelativeRange = logsState.relativeRange;
+  const logsAbsoluteRange = logsState.absoluteRange;
+  const setLogsState = useCallback(
+    (updater: LogsStateUpdater) => {
+      if (!selectedService?.serviceName) {
+        return;
+      }
+      setServiceLogsState(selectedService.serviceName, updater);
+    },
+    [selectedService?.serviceName, setServiceLogsState],
   );
   const serviceContextState = selectedService
     ? serviceContexts[selectedService.serviceName]
@@ -1587,14 +1631,14 @@ export function AwsEcsWorkspace({
       append?: boolean;
       silent?: boolean;
     }) => {
-      const requestId = latestLogsRequestIdRef.current + 1;
-      latestLogsRequestIdRef.current = requestId;
+      const requestId =
+        (latestLogsRequestIdRef.current[input.serviceName] ?? 0) + 1;
+      latestLogsRequestIdRef.current[input.serviceName] = requestId;
       const requestedTaskArn = input.taskArn ?? null;
       const requestedContainerName = input.containerName ?? null;
       if (!input.silent) {
-        setLogsState((previous) => ({
+        setServiceLogsState(input.serviceName, (previous) => ({
           ...previous,
-          serviceName: input.serviceName,
           loading: true,
           error: null,
           taskArn: requestedTaskArn,
@@ -1612,19 +1656,17 @@ export function AwsEcsWorkspace({
           ...(input.endTime ? { endTime: input.endTime } : {}),
           limit: 5000,
         });
-        if (latestLogsRequestIdRef.current !== requestId) {
+        if (latestLogsRequestIdRef.current[input.serviceName] !== requestId) {
           return;
         }
-        setLogsState((previous) => ({
+        setServiceLogsState(input.serviceName, (previous) => ({
           ...previous,
-          serviceName: input.serviceName,
           loading: false,
           error: null,
           taskArn: requestedTaskArn,
           containerName: requestedContainerName,
           snapshot:
             input.append &&
-            previous.serviceName === input.serviceName &&
             previous.snapshot
               ? {
                   ...snapshot,
@@ -1633,12 +1675,11 @@ export function AwsEcsWorkspace({
               : snapshot,
         }));
       } catch (error) {
-        if (latestLogsRequestIdRef.current !== requestId) {
+        if (latestLogsRequestIdRef.current[input.serviceName] !== requestId) {
           return;
         }
-        setLogsState((previous) => ({
+        setServiceLogsState(input.serviceName, (previous) => ({
           ...previous,
-          serviceName: input.serviceName,
           loading: false,
           error:
             error instanceof Error
@@ -1649,7 +1690,7 @@ export function AwsEcsWorkspace({
         }));
       }
     },
-    [host.id],
+    [host.id, loadEcsServiceLogs, setServiceLogsState],
   );
 
   const buildLogsRangeArgs = useCallback(
@@ -1725,10 +1766,7 @@ export function AwsEcsWorkspace({
       rangeArgs.endTime ?? "",
       rangeArgs.followCursor ?? "",
     ].join("|");
-    const shouldReset = logsState.serviceName !== selectedServiceId;
-    const hasLoadedSnapshot =
-      logsState.serviceName === selectedServiceId && logsState.snapshot !== null;
-    if (!shouldReset && hasLoadedSnapshot) {
+    if (logsState.snapshot) {
       return;
     }
     if (logsState.loading || logsAutoLoadKeyRef.current === autoLoadKey) {
@@ -1737,8 +1775,8 @@ export function AwsEcsWorkspace({
     logsAutoLoadKeyRef.current = autoLoadKey;
     void loadLogs({
       serviceName: selectedServiceId,
-      taskArn: shouldReset ? null : logsState.taskArn,
-      containerName: shouldReset ? null : logsState.containerName,
+      taskArn: logsState.taskArn,
+      containerName: logsState.containerName,
       startTime: rangeArgs.startTime,
       endTime: rangeArgs.endTime,
       followCursor: rangeArgs.followCursor,
@@ -1749,7 +1787,6 @@ export function AwsEcsWorkspace({
     loadLogs,
     logsState.containerName,
     logsState.loading,
-    logsState.serviceName,
     logsState.snapshot,
     logsState.taskArn,
     selectedService?.serviceName,
@@ -1938,12 +1975,12 @@ export function AwsEcsWorkspace({
   const handleToggleLogsFollow = useCallback(() => {
     const nextFollow = !logsState.follow;
     if (nextFollow) {
-      setLogsRangeMode("recent");
-      setLogsRelativeRange(createDefaultLogsRelativeRange());
-      setLogsAbsoluteRange(null);
       setLogsState((previous) => ({
         ...previous,
         follow: true,
+        rangeMode: "recent",
+        relativeRange: createDefaultLogsRelativeRange(),
+        absoluteRange: null,
       }));
       if (selectedService) {
         void loadLogs({
@@ -1960,7 +1997,6 @@ export function AwsEcsWorkspace({
     }));
   }, [
     loadLogs,
-    logsRangeMode,
     logsState.containerName,
     logsState.follow,
     logsState.taskArn,
@@ -1974,16 +2010,15 @@ export function AwsEcsWorkspace({
       nextRelativeValue: LogsRelativeRangeValue | null,
     ) => {
       setLogsRangePickerOpen(false);
-      setLogsRangeMode(nextMode);
-      setLogsRelativeRange(
-        nextMode === "recent"
-          ? nextRelativeValue ?? createDefaultLogsRelativeRange()
-          : createDefaultLogsRelativeRange(),
-      );
-      setLogsAbsoluteRange(nextMode === "absolute" ? nextAbsoluteValue : null);
       setLogsState((previous) => ({
         ...previous,
         follow: false,
+        rangeMode: nextMode,
+        relativeRange:
+          nextMode === "recent"
+            ? nextRelativeValue ?? createDefaultLogsRelativeRange()
+            : createDefaultLogsRelativeRange(),
+        absoluteRange: nextMode === "absolute" ? nextAbsoluteValue : null,
       }));
       if (!selectedService) {
         return;

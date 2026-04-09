@@ -203,6 +203,18 @@ export function createContainersServices(deps: SliceDeps) {
       sessionServices.createPendingSessionTabForEcsShell,
   };
 
+  const pruneEcsLogsByServiceName = <T,>(
+    logsByServiceName: Record<string, T>,
+    serviceNames: string[],
+  ): Record<string, T> => {
+    const validServiceNames = new Set(serviceNames);
+    return Object.fromEntries(
+      Object.entries(logsByServiceName).filter(([serviceName]) =>
+        validServiceNames.has(serviceName),
+      ),
+    );
+  };
+
   const loadContainerDetails = async (
     set: StoreSetter,
     get: StoreGetter,
@@ -412,6 +424,10 @@ export function createContainersServices(deps: SliceDeps) {
       set((state) => {
         const currentTab =
           findContainersTab(state, hostId) ?? createEmptyContainersTabState(host);
+        const nextEcsLogsByServiceName = pruneEcsLogsByServiceName(
+          currentTab.ecsLogsByServiceName,
+          snapshot.services.map((service) => service.serviceName),
+        );
         return {
           activeWorkspaceTab: "containers",
           activeContainerHostId: hostId,
@@ -427,6 +443,7 @@ export function createContainersServices(deps: SliceDeps) {
             ecsMetricsWarning: null,
             ecsMetricsLoadedAt: null,
             ecsUtilizationHistoryByServiceName: {},
+            ecsLogsByServiceName: nextEcsLogsByServiceName,
           }),
         };
       });
