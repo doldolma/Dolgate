@@ -20,6 +20,15 @@ export function registerAwsIpcHandlers(ctx: MainIpcContext): void {
       host.awsProfileName,
     ) ?? host.awsProfileName;
 
+  const shouldRetryEcsExecSelectionError = (error: unknown): boolean => {
+    const message = error instanceof Error ? error.message : "";
+    return (
+      message === "선택한 실행 중 task를 찾지 못했습니다." ||
+      message === "선택한 컨테이너를 실행 중인 task에서 찾지 못했습니다." ||
+      message === "이 task는 ECS Exec가 활성화되어 있지 않아 셸에 접속할 수 없습니다."
+    );
+  };
+
   ipcMain.handle(ipcChannels.aws.listProfiles, async () =>
     ctx.awsService.listProfiles(),
   );
@@ -225,53 +234,70 @@ export function registerAwsIpcHandlers(ctx: MainIpcContext): void {
         const profileName = resolveHostProfileName(ecsHost);
         await ctx.awsService.ensureAwsCliAvailable();
         await ctx.awsService.ensureSessionManagerPluginAvailable();
-        const actionContext = await ctx.awsService.describeEcsServiceActionContext(
-          profileName,
-          ecsHost.awsRegion,
-          ecsHost.awsEcsClusterArn,
-          input.serviceName,
-        );
-        const task = actionContext.runningTasks.find(
-          (item) => item.taskArn === input.taskArn,
-        );
-        if (!task) {
-          throw new Error("선택한 실행 중 task를 찾지 못했습니다.");
-        }
-        if (!task.enableExecuteCommand) {
-          throw new Error(
-            "이 task는 ECS Exec가 활성화되어 있지 않아 셸에 접속할 수 없습니다.",
-          );
-        }
-        const container = task.containers.find(
-          (item) => item.containerName === input.containerName,
-        );
-        if (!container) {
-          throw new Error("선택한 컨테이너를 실행 중인 task에서 찾지 못했습니다.");
-        }
-        return ctx.coreManager.connectLocalSession({
-          cols: input.cols,
-          rows: input.rows,
-          title: `${ecsHost.label} · ${input.serviceName} · ${input.containerName}`,
-          shellKind: "aws-ecs-exec",
-          executable: "aws",
-          args: [
-            "ecs",
-            "execute-command",
-            "--profile",
+        const openShell = async () => {
+          const actionContext = await ctx.awsService.describeEcsServiceActionContext(
             profileName,
-            "--region",
             ecsHost.awsRegion,
-            "--cluster",
             ecsHost.awsEcsClusterArn,
-            "--task",
-            input.taskArn,
-            "--container",
-            input.containerName,
-            "--interactive",
-            "--command",
-            "/bin/sh",
-          ],
-        });
+            input.serviceName,
+          );
+          const task = actionContext.runningTasks.find(
+            (item) => item.taskArn === input.taskArn,
+          );
+          if (!task) {
+            throw new Error("선택한 실행 중 task를 찾지 못했습니다.");
+          }
+          if (!task.enableExecuteCommand) {
+            throw new Error(
+              "이 task는 ECS Exec가 활성화되어 있지 않아 셸에 접속할 수 없습니다.",
+            );
+          }
+          const container = task.containers.find(
+            (item) => item.containerName === input.containerName,
+          );
+          if (!container) {
+            throw new Error("선택한 컨테이너를 실행 중인 task에서 찾지 못했습니다.");
+          }
+          return ctx.coreManager.connectLocalSession({
+            cols: input.cols,
+            rows: input.rows,
+            title: `${ecsHost.label} · ${input.serviceName} · ${input.containerName}`,
+            shellKind: "aws-ecs-exec",
+            executable: "aws",
+            args: [
+              "ecs",
+              "execute-command",
+              "--profile",
+              profileName,
+              "--region",
+              ecsHost.awsRegion,
+              "--cluster",
+              ecsHost.awsEcsClusterArn,
+              "--task",
+              input.taskArn,
+              "--container",
+              input.containerName,
+              "--interactive",
+              "--command",
+              "/bin/sh",
+            ],
+          });
+        };
+
+        try {
+          return await openShell();
+        } catch (error) {
+          if (!shouldRetryEcsExecSelectionError(error)) {
+            throw error;
+          }
+          ctx.awsService.invalidateEcsServiceActionContext(
+            profileName,
+            ecsHost.awsRegion,
+            ecsHost.awsEcsClusterArn,
+            input.serviceName,
+          );
+          return await openShell();
+        }
       } catch (error) {
         throw ctx.normalizeEcsExecPermissionError(error);
       }
@@ -295,28 +321,42 @@ export function registerAwsIpcHandlers(ctx: MainIpcContext): void {
       const profileName = resolveHostProfileName(ecsHost);
       await ctx.awsService.ensureAwsCliAvailable();
       await ctx.awsService.ensureSessionManagerPluginAvailable();
-      const targetId = await ctx.awsService.resolveEcsTaskTunnelTargetForTask({
-        profileName,
-        region: ecsHost.awsRegion,
-        clusterArn: ecsHost.awsEcsClusterArn,
-        taskArn: input.taskArn,
-        containerName: input.containerName,
-      });
-      const runtimeId = `ecs-service-tunnel:${randomUUID()}`;
-      return ctx.coreManager.startSsmPortForward({
-        ruleId: runtimeId,
-        hostId: ecsHost.id,
-        transport: "ecs-task",
-        profileName,
-        region: ecsHost.awsRegion,
-        targetType: "ecs-task",
-        targetId,
-        bindAddress: input.bindAddress,
-        bindPort: input.bindPort,
-        targetKind: "remote-host",
-        targetPort: input.targetPort,
-        remoteHost: "127.0.0.1",
-      });
+      const startTunnel = async () => {
+        const targetId = await ctx.awsService.resolveEcsTaskTunnelTargetForTask({
+          profileName,
+          region: ecsHost.awsRegion,
+          clusterArn: ecsHost.awsEcsClusterArn,
+          taskArn: input.taskArn,
+          containerName: input.containerName,
+        });
+        const runtimeId = `ecs-service-tunnel:${randomUUID()}`;
+        return ctx.coreManager.startSsmPortForward({
+          ruleId: runtimeId,
+          hostId: ecsHost.id,
+          transport: "ecs-task",
+          profileName,
+          region: ecsHost.awsRegion,
+          targetType: "ecs-task",
+          targetId,
+          bindAddress: input.bindAddress,
+          bindPort: input.bindPort,
+          targetKind: "remote-host",
+          targetPort: input.targetPort,
+          remoteHost: "127.0.0.1",
+        });
+      };
+
+      try {
+        return await startTunnel();
+      } catch (error) {
+        ctx.awsService.invalidateEcsServiceActionContext(
+          profileName,
+          ecsHost.awsRegion,
+          ecsHost.awsEcsClusterArn,
+          input.serviceName,
+        );
+        return await startTunnel();
+      }
     },
   );
 

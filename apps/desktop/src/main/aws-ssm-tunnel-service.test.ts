@@ -2,6 +2,7 @@ import { createServer } from "node:net";
 import { EventEmitter } from "node:events";
 import { PassThrough } from "node:stream";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { decodeAwsCliOutput } from "./aws-service";
 import {
   AwsSsmTunnelService,
   buildAwsSsmTunnelArgs,
@@ -14,6 +15,7 @@ vi.mock("./aws-service", () => ({
   buildAwsCommandEnv: vi.fn(async () => ({
     PATH: process.env.PATH ?? "",
   })),
+  decodeAwsCliOutput: vi.fn((raw: Uint8Array) => Buffer.from(raw).toString("utf8")),
 }));
 
 class MockTunnelChild extends EventEmitter {
@@ -185,6 +187,38 @@ describe("AwsSsmTunnelService", () => {
       "runtime-2",
       "session ended unexpectedly",
     );
+
+    await listener.close();
+  });
+
+  it("uses the shared AWS CLI decoder for tunnel output messages", async () => {
+    const listener = await listenLoopback();
+    const child = new MockTunnelChild();
+    const onRuntimeTerminated = vi.fn();
+    vi.mocked(decodeAwsCliOutput).mockReturnValue("세션 종료");
+    const service = new AwsSsmTunnelService({
+      spawnProcess: vi.fn(() => child as never),
+      onRuntimeTerminated,
+    });
+
+    await service.start({
+      runtimeId: "runtime-3",
+      profileName: "default",
+      region: "ap-northeast-2",
+      instanceId: "i-abc",
+      bindPort: listener.port,
+      targetPort: 22,
+    });
+
+    child.stderr.write(Buffer.from([0x80]));
+    child.exitCode = 255;
+    child.emit("exit", 255, null);
+
+    expect(decodeAwsCliOutput).toHaveBeenCalledWith(expect.any(Buffer), {
+      platform: process.platform,
+      allowWindowsLegacyFallback: true,
+    });
+    expect(onRuntimeTerminated).toHaveBeenCalledWith("runtime-3", "세션 종료");
 
     await listener.close();
   });

@@ -338,6 +338,30 @@ describe("container list presentation helpers", () => {
 });
 
 describe("ContainersWorkspace", () => {
+  it("marks the selected detail panel tab accessibly and keeps disabled tabs visually inactive", () => {
+    render(
+      <ContainersWorkspace
+        {...createProps({
+          ...createTab(),
+          selectedContainerId: null,
+          activePanel: "overview",
+        })}
+      />,
+    );
+
+    const overviewTab = screen.getByRole("tab", { name: "Overview" });
+    const logsTab = screen.getByRole("tab", { name: "Logs" });
+
+    expect(
+      screen.getByRole("tablist", { name: "컨테이너 상세 패널" }),
+    ).toBeInTheDocument();
+    expect(overviewTab).toHaveAttribute("aria-selected", "true");
+    expect(overviewTab).toHaveClass("ring-1");
+    expect(logsTab).toHaveAttribute("aria-selected", "false");
+    expect(logsTab).toBeDisabled();
+    expect(logsTab).not.toHaveClass("ring-1");
+  });
+
   it("shows only essential list fields and moves uptime into details", () => {
     render(<ContainersWorkspace {...createProps()} />);
 
@@ -1047,7 +1071,11 @@ describe("ContainersWorkspace", () => {
 
     render(<ContainersWorkspace {...props} host={createHost()} />);
 
-    expect(screen.getByRole("button", { name: "Tunnel" })).toHaveClass("active");
+    expect(screen.getByRole("tab", { name: "Tunnel" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    expect(screen.getByRole("tab", { name: "Tunnel" })).toHaveClass("ring-1");
     expect(screen.getByLabelText("Network")).toHaveValue("bridge");
     expect(screen.getByLabelText("Port")).toHaveValue("1883");
     expect(screen.getByRole("button", { name: "Start tunnel" })).toBeEnabled();

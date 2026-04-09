@@ -192,6 +192,14 @@ const emptyDetailClass =
   "rounded-[16px] bg-[color-mix(in_srgb,var(--surface)_82%,transparent_18%)] px-4 py-4 text-[var(--text-soft)]";
 const logsOutputClass =
   "grid min-h-0 flex-1 content-start gap-[0.35rem] overflow-auto rounded-[18px] border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[rgba(7,13,24,0.88)] px-[1.05rem] py-4 text-[rgba(226,234,255,0.92)]";
+const detailPanelTabsClass =
+  "gap-[0.55rem] rounded-[18px] border border-[color-mix(in_srgb,var(--border)_84%,white_16%)] bg-[color-mix(in_srgb,var(--surface-muted)_82%,transparent_18%)] p-[0.35rem] shadow-[inset_0_1px_0_rgba(255,255,255,0.06)]";
+const detailPanelTabButtonBaseClass =
+  "min-w-[5.75rem] border border-transparent bg-[color-mix(in_srgb,var(--surface)_18%,transparent_82%)] text-[color-mix(in_srgb,var(--text-soft)_90%,black_10%)] shadow-none";
+const detailPanelTabButtonActiveClass =
+  "border-[color-mix(in_srgb,var(--accent-strong)_46%,var(--border)_54%)] bg-[color-mix(in_srgb,var(--accent-strong)_18%,var(--surface-elevated)_82%)] text-[var(--text)] shadow-[0_10px_22px_rgba(15,23,38,0.14)] ring-1 ring-[color-mix(in_srgb,var(--accent-strong)_24%,transparent_76%)]";
+const detailPanelTabButtonInactiveClass =
+  "hover:border-[color-mix(in_srgb,var(--border)_80%,white_20%)] hover:bg-[color-mix(in_srgb,var(--surface)_56%,transparent_44%)] hover:text-[var(--text)] disabled:border-transparent disabled:bg-transparent disabled:text-[color-mix(in_srgb,var(--text-soft)_70%,transparent_30%)] disabled:opacity-70";
 
 function formatCreatedAt(value: string): string {
   const parsed = new Date(value);
@@ -1858,7 +1866,7 @@ export function ContainersWorkspace({
           <p>{tab.unsupportedReason}</p>
         </NoticeCard>
       ) : (
-        <div className="grid min-h-0 flex-1 gap-4 xl:grid-cols-[minmax(280px,340px)_minmax(0,1fr)]">
+        <div className="grid min-h-0 flex-1 gap-4 lg:grid-cols-[minmax(280px,340px)_minmax(0,1fr)]">
           <aside className="flex min-h-0 flex-col gap-4 rounded-[24px] border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[var(--surface-elevated)] p-[1.15rem]">
             <div className="flex items-center justify-between gap-3">
               <strong>컨테이너</strong>
@@ -1934,13 +1942,37 @@ export function ContainersWorkspace({
                     Remove
                   </Button>
                 </div>
-                <Tabs className="gap-2 border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[color-mix(in_srgb,var(--surface-muted)_88%,transparent_12%)] p-1.5">
-                  <TabButton type="button" active={tab.activePanel === "overview"} onClick={() => onSetPanel(host.id, "overview")}>
+                <Tabs
+                  role="tablist"
+                  aria-label="컨테이너 상세 패널"
+                  className={detailPanelTabsClass}
+                >
+                  <TabButton
+                    type="button"
+                    role="tab"
+                    aria-selected={tab.activePanel === "overview"}
+                    active={tab.activePanel === "overview"}
+                    className={cn(
+                      detailPanelTabButtonBaseClass,
+                      tab.activePanel === "overview"
+                        ? detailPanelTabButtonActiveClass
+                        : detailPanelTabButtonInactiveClass,
+                    )}
+                    onClick={() => onSetPanel(host.id, "overview")}
+                  >
                     Overview
                   </TabButton>
                   <TabButton
                     type="button"
+                    role="tab"
+                    aria-selected={tab.activePanel === "logs"}
                     active={tab.activePanel === "logs"}
+                    className={cn(
+                      detailPanelTabButtonBaseClass,
+                      tab.activePanel === "logs"
+                        ? detailPanelTabButtonActiveClass
+                        : detailPanelTabButtonInactiveClass,
+                    )}
                     onClick={() => onSetPanel(host.id, "logs")}
                     disabled={!tab.selectedContainerId}
                   >
@@ -1948,7 +1980,15 @@ export function ContainersWorkspace({
                   </TabButton>
                   <TabButton
                     type="button"
+                    role="tab"
+                    aria-selected={tab.activePanel === "metrics"}
                     active={tab.activePanel === "metrics"}
+                    className={cn(
+                      detailPanelTabButtonBaseClass,
+                      tab.activePanel === "metrics"
+                        ? detailPanelTabButtonActiveClass
+                        : detailPanelTabButtonInactiveClass,
+                    )}
                     onClick={() => onSetPanel(host.id, "metrics")}
                     disabled={!tab.selectedContainerId}
                   >
@@ -1956,7 +1996,15 @@ export function ContainersWorkspace({
                   </TabButton>
                   <TabButton
                     type="button"
+                    role="tab"
+                    aria-selected={tab.activePanel === "tunnel"}
                     active={tab.activePanel === "tunnel"}
+                    className={cn(
+                      detailPanelTabButtonBaseClass,
+                      tab.activePanel === "tunnel"
+                        ? detailPanelTabButtonActiveClass
+                        : detailPanelTabButtonInactiveClass,
+                    )}
                     onClick={() => onSetPanel(host.id, "tunnel")}
                     disabled={!tab.selectedContainerId}
                   >

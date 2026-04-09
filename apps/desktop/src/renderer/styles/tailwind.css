@@ -21,6 +21,128 @@
     color: var(--text);
   }
 
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
+  }
+
+  *::-webkit-scrollbar {
+    width: var(--scrollbar-size);
+    height: var(--scrollbar-size);
+  }
+
+  *::-webkit-scrollbar-track {
+    border-radius: var(--scrollbar-radius);
+    background: var(--scrollbar-track);
+  }
+
+  *::-webkit-scrollbar-thumb {
+    min-height: 2rem;
+    min-width: 2rem;
+    border: 3px solid transparent;
+    border-radius: var(--scrollbar-radius);
+    background: var(--scrollbar-thumb);
+    background-clip: padding-box;
+  }
+
+  *:hover::-webkit-scrollbar-thumb,
+  *::-webkit-scrollbar-thumb:hover {
+    background: var(--scrollbar-thumb-hover);
+    background-clip: padding-box;
+  }
+
+  *:active::-webkit-scrollbar-thumb,
+  *::-webkit-scrollbar-thumb:active {
+    background: var(--scrollbar-thumb-active);
+    background-clip: padding-box;
+  }
+
+  *::-webkit-scrollbar-corner {
+    background: var(--scrollbar-corner);
+  }
+
+  input,
+  textarea,
+  select,
+  [data-native-scrollbar="true"],
+  [data-native-scrollbar="true"] *,
+  [data-terminal-canvas="true"],
+  [data-terminal-canvas="true"] *,
+  .xterm,
+  .xterm *,
+  .xterm-viewport,
+  .xterm-viewport *,
+  .xterm-screen,
+  .xterm-screen * {
+    scrollbar-width: auto;
+    scrollbar-color: auto;
+  }
+
+  input::-webkit-scrollbar,
+  textarea::-webkit-scrollbar,
+  select::-webkit-scrollbar,
+  [data-native-scrollbar="true"]::-webkit-scrollbar,
+  [data-native-scrollbar="true"] *::-webkit-scrollbar,
+  [data-terminal-canvas="true"]::-webkit-scrollbar,
+  [data-terminal-canvas="true"] *::-webkit-scrollbar,
+  .xterm::-webkit-scrollbar,
+  .xterm *::-webkit-scrollbar,
+  .xterm-viewport::-webkit-scrollbar,
+  .xterm-viewport *::-webkit-scrollbar,
+  .xterm-screen::-webkit-scrollbar,
+  .xterm-screen *::-webkit-scrollbar {
+    width: auto;
+    height: auto;
+  }
+
+  input::-webkit-scrollbar-track,
+  textarea::-webkit-scrollbar-track,
+  select::-webkit-scrollbar-track,
+  [data-native-scrollbar="true"]::-webkit-scrollbar-track,
+  [data-native-scrollbar="true"] *::-webkit-scrollbar-track,
+  [data-terminal-canvas="true"]::-webkit-scrollbar-track,
+  [data-terminal-canvas="true"] *::-webkit-scrollbar-track,
+  .xterm::-webkit-scrollbar-track,
+  .xterm *::-webkit-scrollbar-track,
+  .xterm-viewport::-webkit-scrollbar-track,
+  .xterm-viewport *::-webkit-scrollbar-track,
+  .xterm-screen::-webkit-scrollbar-track,
+  .xterm-screen *::-webkit-scrollbar-track,
+  input::-webkit-scrollbar-thumb,
+  textarea::-webkit-scrollbar-thumb,
+  select::-webkit-scrollbar-thumb,
+  [data-native-scrollbar="true"]::-webkit-scrollbar-thumb,
+  [data-native-scrollbar="true"] *::-webkit-scrollbar-thumb,
+  [data-terminal-canvas="true"]::-webkit-scrollbar-thumb,
+  [data-terminal-canvas="true"] *::-webkit-scrollbar-thumb,
+  .xterm::-webkit-scrollbar-thumb,
+  .xterm *::-webkit-scrollbar-thumb,
+  .xterm-viewport::-webkit-scrollbar-thumb,
+  .xterm-viewport *::-webkit-scrollbar-thumb,
+  .xterm-screen::-webkit-scrollbar-thumb,
+  .xterm-screen *::-webkit-scrollbar-thumb,
+  input::-webkit-scrollbar-corner,
+  textarea::-webkit-scrollbar-corner,
+  select::-webkit-scrollbar-corner,
+  [data-native-scrollbar="true"]::-webkit-scrollbar-corner,
+  [data-native-scrollbar="true"] *::-webkit-scrollbar-corner,
+  [data-terminal-canvas="true"]::-webkit-scrollbar-corner,
+  [data-terminal-canvas="true"] *::-webkit-scrollbar-corner,
+  .xterm::-webkit-scrollbar-corner,
+  .xterm *::-webkit-scrollbar-corner,
+  .xterm-viewport::-webkit-scrollbar-corner,
+  .xterm-viewport *::-webkit-scrollbar-corner,
+  .xterm-screen::-webkit-scrollbar-corner,
+  .xterm-screen *::-webkit-scrollbar-corner {
+    min-height: initial;
+    min-width: initial;
+    border: initial;
+    border-radius: initial;
+    background: initial;
+    background-clip: border-box;
+    box-shadow: none;
+  }
+
   body.sftp-column-resizing,
   body.sftp-column-resizing * {
     user-select: none;

@@ -394,6 +394,7 @@ describe("AwsEcsWorkspace", () => {
       "aria-selected",
       "true",
     );
+    expect(screen.getByRole("tab", { name: "Overview" })).toHaveClass("ring-1");
     expect(screen.getByText("배포 정보")).toBeInTheDocument();
     expect(screen.getByText("Deployments")).toBeInTheDocument();
     expect(screen.getByText("Recent events")).toBeInTheDocument();
@@ -438,6 +439,7 @@ describe("AwsEcsWorkspace", () => {
       "aria-selected",
       "true",
     );
+    expect(screen.getByRole("tab", { name: "Logs" })).toHaveClass("ring-1");
     expect(await screen.findByText("hello from task-1")).toBeInTheDocument();
   });
 
@@ -493,6 +495,28 @@ describe("AwsEcsWorkspace", () => {
       "aria-checked",
       "false",
     );
+  });
+
+  it("keeps relative range preset labels on a single line in the range dialog", async () => {
+    render(
+      <AwsEcsWorkspace
+        host={createHost()}
+        tab={createTab(createSnapshot())}
+        isActive={false}
+        onRefresh={vi.fn().mockResolvedValue(undefined)}
+        onRefreshUtilization={vi.fn().mockResolvedValue(undefined)}
+        onOpenEcsExecShell={vi.fn().mockResolvedValue(undefined)}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("tab", { name: "Logs" }));
+    expect(await screen.findByText("hello from task-1")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "로그 범위" }));
+    expect(await screen.findByRole("dialog", { name: "로그 범위 선택" })).toBeInTheDocument();
+
+    expect(screen.getByText("1일 전부터")).toHaveClass("whitespace-nowrap");
+    expect(screen.getByText("사용자 지정 범위")).toHaveClass("whitespace-nowrap");
   });
 
   it("scrolls logs to the latest line when the logs panel becomes active", async () => {
@@ -735,6 +759,7 @@ describe("AwsEcsWorkspace", () => {
       "aria-selected",
       "true",
     );
+    expect(screen.getByRole("tab", { name: "Tunnel" })).toHaveClass("ring-1");
     expect(screen.getByText("127.0.0.1:43110")).toBeInTheDocument();
     expect(screen.getByText("127.0.0.1:7001")).toBeInTheDocument();
   });

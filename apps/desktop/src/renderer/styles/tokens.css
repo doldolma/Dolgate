@@ -52,6 +52,13 @@
   --share-active-border: #9fb6ff;
   --share-danger-surface: #fff1f1;
   --share-danger-border: #f0caca;
+  --scrollbar-size: 11px;
+  --scrollbar-radius: 999px;
+  --scrollbar-track: color-mix(in srgb, var(--surface-strong) 36%, transparent 64%);
+  --scrollbar-thumb: color-mix(in srgb, var(--text-soft) 34%, transparent 66%);
+  --scrollbar-thumb-hover: color-mix(in srgb, var(--accent) 44%, transparent 56%);
+  --scrollbar-thumb-active: color-mix(in srgb, var(--accent-strong) 56%, transparent 44%);
+  --scrollbar-corner: transparent;
 }
 
 :root[data-theme="dark"] {
@@ -106,4 +113,11 @@
   --share-active-border: #6e91e8;
   --share-danger-surface: #3a2429;
   --share-danger-border: #6a4048;
+  --scrollbar-size: 11px;
+  --scrollbar-radius: 999px;
+  --scrollbar-track: color-mix(in srgb, var(--surface-strong) 48%, transparent 52%);
+  --scrollbar-thumb: color-mix(in srgb, var(--text-soft) 42%, transparent 58%);
+  --scrollbar-thumb-hover: color-mix(in srgb, var(--accent) 54%, transparent 46%);
+  --scrollbar-thumb-active: color-mix(in srgb, var(--accent-strong) 62%, transparent 38%);
+  --scrollbar-corner: transparent;
 }
