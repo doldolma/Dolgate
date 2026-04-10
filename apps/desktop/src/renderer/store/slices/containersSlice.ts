@@ -44,6 +44,7 @@ export function createContainersSlice(deps: SliceDeps): ContainersSlice {
     createContainerConnectionProgress,
     buildSftpHostPickerPane,
     defaultSftpState,
+    createEmptyEcsServiceLogsViewState,
     sortHosts,
     toHostDraft,
     findSshHostMissingUsername,
@@ -486,7 +487,13 @@ export function createContainersSlice(deps: SliceDeps): ContainersSlice {
               }
               const nextLogsByServiceName = { ...currentTab.ecsLogsByServiceName };
               if (logsState) {
-                nextLogsByServiceName[serviceName] = logsState;
+                const currentLogsState =
+                  currentTab.ecsLogsByServiceName[serviceName] ??
+                  createEmptyEcsServiceLogsViewState();
+                nextLogsByServiceName[serviceName] =
+                  typeof logsState === "function"
+                    ? logsState(currentLogsState)
+                    : logsState;
               } else {
                 delete nextLogsByServiceName[serviceName];
               }

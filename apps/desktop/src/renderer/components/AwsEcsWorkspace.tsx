@@ -22,6 +22,7 @@ import type {
 } from "@shared";
 import type {
   EcsDetailPanel,
+  EcsServiceLogsStateUpdater,
   EcsServiceLogsViewState,
   EcsTunnelTabState,
   HostContainersTabState,
@@ -80,7 +81,7 @@ interface AwsEcsWorkspaceProps {
   onSetLogsState?: (
     hostId: string,
     serviceName: string,
-    state: EcsServiceLogsViewState | null,
+    state: EcsServiceLogsStateUpdater | null,
   ) => void;
   onOpenEcsExecShell: (
     hostId: string,
@@ -97,9 +98,7 @@ interface ServiceActionContextState {
 }
 
 type LogsPanelState = EcsServiceLogsViewState;
-type LogsStateUpdater =
-  | LogsPanelState
-  | ((previous: LogsPanelState) => LogsPanelState);
+type LogsStateUpdater = EcsServiceLogsStateUpdater;
 
 interface TunnelPanelState {
   serviceName: string | null;
@@ -471,19 +470,6 @@ function isRolloutIssue(service: AwsEcsServiceSummary): boolean {
 
 function hasPendingTasks(service: AwsEcsServiceSummary): boolean {
   return service.pendingCount > 0;
-}
-
-function getServiceAttentionTone(
-  service: AwsEcsServiceSummary,
-): "neutral" | "warning" | "error" {
-  const rolloutTone = getRolloutTone(service.rolloutState);
-  if (isStatusIssue(service) || rolloutTone === "error") {
-    return "error";
-  }
-  if (isRolloutIssue(service) || hasPendingTasks(service)) {
-    return "warning";
-  }
-  return "neutral";
 }
 
 function compareServices(
@@ -1320,7 +1306,6 @@ export function AwsEcsWorkspace({
   const ecsLogsByServiceName = onSetLogsState
     ? tab.ecsLogsByServiceName
     : localEcsLogsByServiceName;
-  const ecsLogsByServiceNameRef = useRef(ecsLogsByServiceName);
   const latestLogsRequestIdRef = useRef<Record<string, number>>({});
   const logsOutputRef = useRef<HTMLDivElement | null>(null);
   const logsBottomRef = useRef<HTMLDivElement | null>(null);
@@ -1334,10 +1319,6 @@ export function AwsEcsWorkspace({
   useEffect(() => {
     serviceContextsRef.current = serviceContexts;
   }, [serviceContexts]);
-
-  useEffect(() => {
-    ecsLogsByServiceNameRef.current = ecsLogsByServiceName;
-  }, [ecsLogsByServiceName]);
 
   useEffect(() => {
     tunnelStatesRef.current = tab.ecsTunnelStatesByServiceName;
@@ -1441,11 +1422,7 @@ export function AwsEcsWorkspace({
   const setServiceLogsState = useCallback(
     (serviceName: string, updater: LogsStateUpdater) => {
       if (onSetLogsState) {
-        const previous =
-          ecsLogsByServiceNameRef.current[serviceName] ?? createEmptyLogsState();
-        const next =
-          typeof updater === "function" ? updater(previous) : updater;
-        onSetLogsState(host.id, serviceName, next);
+        onSetLogsState(host.id, serviceName, updater);
         return;
       }
       setLocalEcsLogsByServiceName((previous) => {
@@ -2320,7 +2297,6 @@ export function AwsEcsWorkspace({
               ) : (
                 <div className="flex min-h-0 flex-col gap-[0.55rem] overflow-y-auto pr-px">
                   {services.map((service) => {
-                    const tone = getServiceAttentionTone(service);
                     const isSelected = service.serviceName === selectedService?.serviceName;
                     return (
                       <article
@@ -2328,11 +2304,7 @@ export function AwsEcsWorkspace({
                         data-testid="ecs-service-row"
                         className={cn(
                           "shrink-0 overflow-hidden rounded-[18px] border bg-[color-mix(in_srgb,var(--surface)_92%,transparent_8%)] shadow-[var(--shadow)] transition-[border-color,background-color,box-shadow,transform] duration-150",
-                          tone === "warning"
-                            ? "border-[color-mix(in_srgb,var(--warning,#d9a441)_30%,var(--border)_70%)]"
-                            : tone === "error"
-                              ? "border-[color-mix(in_srgb,var(--danger)_28%,var(--border)_72%)] bg-[color-mix(in_srgb,var(--danger)_5%,var(--surface)_95%)]"
-                              : "border-[color-mix(in_srgb,var(--border)_82%,white_18%)]",
+                          "border-[color-mix(in_srgb,var(--border)_82%,white_18%)]",
                           isSelected
                             ? "border-[color-mix(in_srgb,var(--accent-strong)_28%,var(--border)_72%)] bg-[color-mix(in_srgb,var(--accent-strong)_8%,var(--surface)_92%)] shadow-[var(--shadow),inset_0_1px_0_color-mix(in_srgb,var(--accent-strong)_10%,transparent_90%)]"
                             : "",

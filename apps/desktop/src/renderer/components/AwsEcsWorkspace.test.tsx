@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type {
@@ -7,7 +8,10 @@ import type {
   AwsEcsServiceLogsSnapshot,
   PortForwardRuntimeEvent,
 } from "@shared";
-import type { HostContainersTabState } from "../store/createAppStore";
+import type {
+  EcsServiceLogsViewState,
+  HostContainersTabState,
+} from "../store/createAppStore";
 import { AwsEcsWorkspace } from "./AwsEcsWorkspace";
 
 const uPlotMock = vi.hoisted(() => {
@@ -327,6 +331,81 @@ function createLogsSnapshot(
   };
 }
 
+function createEmptyEcsServiceLogsState(): EcsServiceLogsViewState {
+  return {
+    loading: false,
+    error: null,
+    snapshot: null,
+    follow: true,
+    query: "",
+    taskArn: null,
+    containerName: null,
+    rangeMode: "recent",
+    relativeRange: {
+      presetKey: "30m",
+      amount: "30",
+      unit: "minute",
+    },
+    absoluteRange: null,
+  };
+}
+
+function renderStoreBackedWorkspace(
+  tabOptions: Partial<HostContainersTabState> = {},
+) {
+  const host = createHost();
+  const snapshot = createSnapshot();
+
+  function Harness() {
+    const [tab, setTab] = useState(() => createTab(snapshot, tabOptions));
+
+    return (
+      <AwsEcsWorkspace
+        host={host}
+        tab={tab}
+        isActive={false}
+        onRefresh={vi.fn().mockResolvedValue(undefined)}
+        onRefreshUtilization={vi.fn().mockResolvedValue(undefined)}
+        onSelectService={(_hostId, serviceName) => {
+          setTab((previous) => ({
+            ...previous,
+            ecsSelectedServiceName: serviceName,
+          }));
+        }}
+        onSetPanel={(_hostId, panel) => {
+          setTab((previous) => ({
+            ...previous,
+            ecsActivePanel: panel,
+          }));
+        }}
+        onSetLogsState={(_hostId, serviceName, logsState) => {
+          setTab((previous) => {
+            const nextLogsByServiceName = { ...previous.ecsLogsByServiceName };
+            if (logsState === null) {
+              delete nextLogsByServiceName[serviceName];
+            } else {
+              const currentLogsState =
+                previous.ecsLogsByServiceName[serviceName] ??
+                createEmptyEcsServiceLogsState();
+              nextLogsByServiceName[serviceName] =
+                typeof logsState === "function"
+                  ? logsState(currentLogsState)
+                  : logsState;
+            }
+            return {
+              ...previous,
+              ecsLogsByServiceName: nextLogsByServiceName,
+            };
+          });
+        }}
+        onOpenEcsExecShell={vi.fn().mockResolvedValue(undefined)}
+      />
+    );
+  }
+
+  return render(<Harness />);
+}
+
 describe("AwsEcsWorkspace", () => {
   let portForwardListener: ((event: PortForwardRuntimeEvent) => void) | null = null;
   const awsApi = {
@@ -409,6 +488,55 @@ describe("AwsEcsWorkspace", () => {
     const selectedRowText =
       container.querySelector('[data-testid="ecs-service-row"]')?.textContent ?? "";
     expect(selectedRowText).not.toContain("1 / 2");
+  });
+
+  it("keeps non-selected failed services visually neutral and reserves strong borders for the selected row", () => {
+    const baseSnapshot = createSnapshot();
+    const snapshot = createSnapshot({
+      services: [
+        {
+          ...baseSnapshot.services[0]!,
+          rolloutState: "FAILED",
+          rolloutStateReason: "deployment failed",
+          latestEventMessage: "deployment failed",
+        },
+        {
+          ...baseSnapshot.services[1]!,
+          rolloutState: "COMPLETED",
+          rolloutStateReason: undefined,
+          pendingCount: 0,
+        },
+      ],
+    });
+
+    render(
+      <AwsEcsWorkspace
+        host={createHost()}
+        tab={createTab(snapshot, { ecsSelectedServiceName: "worker" })}
+        isActive={false}
+        onRefresh={vi.fn().mockResolvedValue(undefined)}
+        onRefreshUtilization={vi.fn().mockResolvedValue(undefined)}
+        onOpenEcsExecShell={vi.fn().mockResolvedValue(undefined)}
+      />,
+    );
+
+    const serviceRows = screen.getAllByTestId("ecs-service-row");
+    const failedRow = serviceRows.find((row) => row.textContent?.includes("api"));
+    const selectedRow = serviceRows.find((row) =>
+      row.textContent?.includes("worker"),
+    );
+
+    expect(failedRow).toBeTruthy();
+    expect(selectedRow).toBeTruthy();
+    expect(failedRow?.className).toContain(
+      "border-[color-mix(in_srgb,var(--border)_82%,white_18%)]",
+    );
+    expect(failedRow?.className).not.toContain(
+      "border-[color-mix(in_srgb,var(--danger)_28%,var(--border)_72%)]",
+    );
+    expect(selectedRow?.className).toContain(
+      "border-[color-mix(in_srgb,var(--accent-strong)_28%,var(--border)_72%)]",
+    );
   });
 
   it("switches to logs panel and loads awslogs entries", async () => {
@@ -495,6 +623,106 @@ describe("AwsEcsWorkspace", () => {
     expect(screen.getByRole("switch", { name: "Follow" })).toHaveAttribute(
       "aria-checked",
       "false",
+    );
+  });
+
+  it("keeps the selected absolute range after reload in the store-backed path", async () => {
+    renderStoreBackedWorkspace();
+
+    fireEvent.click(screen.getByRole("tab", { name: "Logs" }));
+    expect(await screen.findByText("hello from task-1")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "로그 범위" }));
+    expect(await screen.findByRole("dialog", { name: "로그 범위 선택" })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("tab", { name: "절대 범위" }));
+    fireEvent.change(screen.getByLabelText("시작 날짜"), {
+      target: { value: "2026-03-01" },
+    });
+    fireEvent.change(screen.getByLabelText("시작 시간"), {
+      target: { value: "00:00:00" },
+    });
+    fireEvent.change(screen.getByLabelText("종료 날짜"), {
+      target: { value: "2026-03-02" },
+    });
+    fireEvent.change(screen.getByLabelText("종료 시간"), {
+      target: { value: "12:30:00" },
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "적용" }));
+
+    await waitFor(() => {
+      expect(awsApi.loadEcsServiceLogs).toHaveBeenLastCalledWith({
+        hostId: "ecs-host-1",
+        serviceName: "worker",
+        taskArn: null,
+        containerName: null,
+        followCursor: null,
+        startTime: new Date(2026, 2, 1, 0, 0, 0).toISOString(),
+        endTime: new Date(2026, 2, 2, 12, 30, 0).toISOString(),
+        limit: 5000,
+      });
+    });
+
+    expect(screen.getByRole("switch", { name: "Follow" })).toHaveAttribute(
+      "aria-checked",
+      "false",
+    );
+    expect(screen.getByRole("button", { name: "로그 범위" })).toHaveTextContent(
+      "2026/03/01 00:00 - 2026/03/02 12:30",
+    );
+  });
+
+  it("restores recent follow mode after re-enabling follow in the store-backed path", async () => {
+    renderStoreBackedWorkspace();
+
+    fireEvent.click(screen.getByRole("tab", { name: "Logs" }));
+    expect(await screen.findByText("hello from task-1")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "로그 범위" }));
+    expect(await screen.findByRole("dialog", { name: "로그 범위 선택" })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("tab", { name: "절대 범위" }));
+    fireEvent.change(screen.getByLabelText("시작 날짜"), {
+      target: { value: "2026-03-01" },
+    });
+    fireEvent.change(screen.getByLabelText("시작 시간"), {
+      target: { value: "00:00:00" },
+    });
+    fireEvent.change(screen.getByLabelText("종료 날짜"), {
+      target: { value: "2026-03-02" },
+    });
+    fireEvent.change(screen.getByLabelText("종료 시간"), {
+      target: { value: "12:30:00" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "적용" }));
+
+    await waitFor(() => {
+      expect(screen.getByRole("switch", { name: "Follow" })).toHaveAttribute(
+        "aria-checked",
+        "false",
+      );
+    });
+
+    fireEvent.click(screen.getByRole("switch", { name: "Follow" }));
+
+    await waitFor(() => {
+      expect(awsApi.loadEcsServiceLogs).toHaveBeenLastCalledWith({
+        hostId: "ecs-host-1",
+        serviceName: "worker",
+        taskArn: null,
+        containerName: null,
+        followCursor: null,
+        limit: 5000,
+      });
+    });
+
+    expect(screen.getByRole("switch", { name: "Follow" })).toHaveAttribute(
+      "aria-checked",
+      "true",
+    );
+    expect(screen.getByRole("button", { name: "로그 범위" })).toHaveTextContent(
+      "최근 30분",
     );
   });
 

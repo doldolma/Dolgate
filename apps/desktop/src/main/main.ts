@@ -297,7 +297,10 @@ if (termiusHelperArgIndex >= 0) {
     window.focus();
   }
 
-  const hasSingleInstanceLock = app.requestSingleInstanceLock();
+  const hasSingleInstanceLock =
+    process.env.DOLSSH_E2E_ALLOW_MULTI_INSTANCE === '1'
+      ? true
+      : app.requestSingleInstanceLock();
   if (!hasSingleInstanceLock) {
     app.quit();
   }

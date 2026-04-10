@@ -277,6 +277,10 @@ export interface EcsServiceLogsViewState {
   absoluteRange: LogsAbsoluteRangeValue | null;
 }
 
+export type EcsServiceLogsStateUpdater =
+  | EcsServiceLogsViewState
+  | ((previous: EcsServiceLogsViewState) => EcsServiceLogsViewState);
+
 export function arePortForwardRuntimeRecordsEqual(
   left: PortForwardRuntimeRecord | null,
   right: PortForwardRuntimeRecord | null,
@@ -690,7 +694,7 @@ export interface AppState {
   setEcsClusterLogsState: (
     hostId: string,
     serviceName: string,
-    state: EcsServiceLogsViewState | null,
+    state: EcsServiceLogsStateUpdater | null,
   ) => void;
   refreshHostContainerLogs: (
     hostId: string,
@@ -1335,6 +1339,25 @@ export function createEmptyContainersTabState(host: HostRecord): HostContainersT
     ecsSelectedServiceName: null,
     ecsActivePanel: "overview",
     ecsTunnelStatesByServiceName: {},
+  };
+}
+
+export function createEmptyEcsServiceLogsViewState(): EcsServiceLogsViewState {
+  return {
+    loading: false,
+    error: null,
+    snapshot: null,
+    follow: true,
+    query: "",
+    taskArn: null,
+    containerName: null,
+    rangeMode: "recent",
+    relativeRange: {
+      presetKey: "30m",
+      amount: "30",
+      unit: "minute",
+    },
+    absoluteRange: null,
   };
 }
 

@@ -127,10 +127,20 @@ function createFakeAuthSessionJson() {
   });
 }
 
-function resolvePackagedAppEntry() {
+function resolvePackagedAppLaunch() {
   const override = process.env.DOLSSH_E2E_PACKAGED_APP_ENTRY?.trim();
   if (override) {
-    return path.resolve(override);
+    const resolvedOverride = path.resolve(override);
+    if (resolvedOverride.toLowerCase().endsWith(".asar")) {
+      return {
+        executablePath: electronPath,
+        args: [resolvedOverride],
+      };
+    }
+    return {
+      executablePath: resolvedOverride,
+      args: [],
+    };
   }
 
   const outDir = path.resolve(__dirname, "../out");
@@ -144,50 +154,92 @@ function resolvePackagedAppEntry() {
 
   if (process.platform === "darwin") {
     for (const outputDir of outputDirs) {
-      const candidate = path.join(
+      const executableCandidate = path.join(
+        outputDir,
+        "dolgate.app",
+        "Contents",
+        "MacOS",
+        "dolgate",
+      );
+      if (existsSync(executableCandidate)) {
+        return {
+          executablePath: executableCandidate,
+          args: [],
+        };
+      }
+      const asarCandidate = path.join(
         outputDir,
         "dolgate.app",
         "Contents",
         "Resources",
         "app.asar",
       );
-      if (existsSync(candidate)) {
-        return candidate;
+      if (existsSync(asarCandidate)) {
+        return {
+          executablePath: electronPath,
+          args: [asarCandidate],
+        };
       }
     }
   }
 
   if (process.platform === "win32") {
     for (const outputDir of outputDirs) {
-      const candidate = path.join(outputDir, "resources", "app.asar");
-      if (existsSync(candidate)) {
-        return candidate;
+      const executableCandidate = path.join(outputDir, "dolgate.exe");
+      if (existsSync(executableCandidate)) {
+        return {
+          executablePath: executableCandidate,
+          args: [],
+        };
+      }
+      const asarCandidate = path.join(outputDir, "resources", "app.asar");
+      if (existsSync(asarCandidate)) {
+        return {
+          executablePath: electronPath,
+          args: [asarCandidate],
+        };
       }
     }
   }
 
   for (const outputDir of outputDirs) {
-    const candidate = path.join(outputDir, "resources", "app.asar");
-    if (existsSync(candidate)) {
-      return candidate;
+    const executableCandidate = path.join(outputDir, "dolgate");
+    if (existsSync(executableCandidate)) {
+      return {
+        executablePath: executableCandidate,
+        args: [],
+      };
+    }
+    const asarCandidate = path.join(outputDir, "resources", "app.asar");
+    if (existsSync(asarCandidate)) {
+      return {
+        executablePath: electronPath,
+        args: [asarCandidate],
+      };
     }
   }
 
-  throw new Error(`failed to locate packaged desktop app entry under ${outDir}`);
+  throw new Error(`failed to locate packaged desktop app under ${outDir}`);
 }
 
 async function launchDesktop(env) {
+  const e2eDefaultEnv = {
+    DOLSSH_E2E_ALLOW_MULTI_INSTANCE:
+      process.env.DOLSSH_E2E_ALLOW_MULTI_INSTANCE ?? "1",
+  };
   const mergedEnv = Object.fromEntries(
     Object.entries({
       ...process.env,
+      ...e2eDefaultEnv,
       ...env,
     }).filter((entry) => typeof entry[1] === "string"),
   );
 
   if (process.env.DOLSSH_E2E_USE_PACKAGED_APP === "1") {
+    const packagedLaunch = resolvePackagedAppLaunch();
     return electron.launch({
-      executablePath: electronPath,
-      args: [resolvePackagedAppEntry()],
+      executablePath: packagedLaunch.executablePath,
+      args: packagedLaunch.args,
       env: mergedEnv,
     });
   }

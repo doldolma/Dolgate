@@ -41,6 +41,25 @@ import type {
   AwsProfileUpdateInput,
   ManagedAwsProfilePayload,
 } from "@shared";
+import {
+  CloudWatchClient,
+  GetMetricDataCommand,
+} from "@aws-sdk/client-cloudwatch";
+import {
+  CloudWatchLogsClient,
+  FilterLogEventsCommand,
+} from "@aws-sdk/client-cloudwatch-logs";
+import {
+  DescribeClustersCommand,
+  DescribeServicesCommand,
+  DescribeTaskDefinitionCommand,
+  DescribeTasksCommand,
+  ECSClient,
+  ListClustersCommand,
+  ListServicesCommand,
+  ListTasksCommand,
+} from "@aws-sdk/client-ecs";
+import { fromIni } from "@aws-sdk/credential-provider-ini";
 import { AwsProfileRepository } from "./database";
 import {
   copyAwsProfileConfigSectionBetweenDocuments,
@@ -371,6 +390,35 @@ function normalizeAwsCliError(stderr: string, fallback: string): Error {
     return new Error(fallback);
   }
   return new Error(message);
+}
+
+function normalizeAwsSdkError(error: unknown, fallback: string): Error {
+  const message = error instanceof Error ? error.message.trim() : "";
+  if (!message) {
+    return new Error(fallback);
+  }
+  if (
+    /The SSO session associated with this profile has expired/i.test(message) ||
+    /The SSO session associated with this profile is invalid/i.test(message)
+  ) {
+    return new Error("AWS SSO 로그인이 만료되었습니다. 다시 로그인해 주세요.");
+  }
+  if (/Profile .+ was not found\./i.test(message)) {
+    return new Error(
+      "앱 전용 AWS 프로필을 찾지 못했습니다. 먼저 프로필을 가져오거나 생성해 주세요.",
+    );
+  }
+  return new Error(message);
+}
+
+function parseSsoCacheExpirationTimestamp(raw: string): number | null {
+  try {
+    const payload = JSON.parse(raw) as AwsSsoTokenCacheEntry;
+    const expiresAt = payload.expiresAt ? Date.parse(payload.expiresAt) : Number.NaN;
+    return Number.isFinite(expiresAt) ? expiresAt : null;
+  } catch {
+    return null;
+  }
 }
 
 async function copyDirectoryRecursive(
@@ -900,7 +948,14 @@ function normalizeEcsDeployments(
         taskDefinitionRevision: taskDefinitionArn
           ? parseTaskDefinitionRevision(taskDefinitionArn)
           : null,
-        updatedAt: deployment.updatedAt?.trim() || deployment.createdAt?.trim() || null,
+        updatedAt:
+          normalizeAwsTimestamp(
+            (deployment.updatedAt as Date | string | null | undefined) ?? null,
+          ) ||
+          normalizeAwsTimestamp(
+            (deployment.createdAt as Date | string | null | undefined) ?? null,
+          ) ||
+          null,
       } satisfies AwsEcsDeploymentSummary;
     })
     .sort((left, right) => {
@@ -916,11 +971,17 @@ function normalizeEcsEvents(
   >,
 ): AwsEcsEventSummary[] {
   return events
-    .map((event, index) => ({
-      id: `${event.createdAt?.trim() || "event"}:${index}`,
+    .map((event, index) => {
+      const createdAt =
+        normalizeAwsTimestamp(
+          (event.createdAt as Date | string | null | undefined) ?? null,
+        ) || null;
+      return {
+        id: `${createdAt || "event"}:${index}`,
       message: event.message?.trim() || "",
-      createdAt: event.createdAt?.trim() || null,
-    }))
+        createdAt,
+      } satisfies AwsEcsEventSummary;
+    })
     .filter((event) => event.message.length > 0)
     .sort((left, right) => {
       const leftTime = left.createdAt ? Date.parse(left.createdAt) : 0;
@@ -1029,8 +1090,34 @@ function parseTaskIdFromLogStreamName(logStreamName: string): string | null {
   return segments.at(-1) ?? null;
 }
 
+function normalizeAwsTimestamp(
+  value: Date | string | null | undefined,
+): string | null {
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (!trimmed) {
+      return null;
+    }
+    const parsed = Date.parse(trimmed);
+    if (Number.isNaN(parsed)) {
+      return trimmed;
+    }
+    return new Date(parsed).toISOString();
+  }
+  if (value instanceof Date && Number.isFinite(value.getTime())) {
+    return value.toISOString();
+  }
+  return null;
+}
+
+type CloudWatchMetricResultLike = {
+  Id?: string | null;
+  Timestamps?: Array<Date | string | null | undefined>;
+  Values?: Array<number | null | undefined>;
+};
+
 function pickLatestMetricValue(
-  metricResult: NonNullable<CloudWatchGetMetricDataPayload["MetricDataResults"]>[number],
+  metricResult: CloudWatchMetricResultLike,
 ): number | null {
   const values = metricResult.Values ?? [];
   if (values.length === 0) {
@@ -1044,20 +1131,22 @@ function pickLatestMetricValue(
   let latestIndex = 0;
   let latestTime = Number.NEGATIVE_INFINITY;
   for (let index = 0; index < timestamps.length; index += 1) {
-    const timestamp = Date.parse(timestamps[index] ?? "");
-    if (!Number.isNaN(timestamp) && timestamp > latestTime) {
-      latestTime = timestamp;
+    const normalizedTimestamp = normalizeAwsTimestamp(
+      (timestamps[index] as Date | string | null | undefined) ?? null,
+    );
+    const timestampMs = normalizedTimestamp ? Date.parse(normalizedTimestamp) : Number.NaN;
+    if (!Number.isNaN(timestampMs) && timestampMs > latestTime) {
+      latestTime = timestampMs;
       latestIndex = index;
     }
   }
 
-  return typeof values[latestIndex] === "number" ? values[latestIndex] : null;
+  const latestValue = values[latestIndex];
+  return typeof latestValue === "number" ? latestValue : null;
 }
 
 function normalizeMetricHistory(
-  metricResult: NonNullable<
-    CloudWatchGetMetricDataPayload["MetricDataResults"]
-  >[number],
+  metricResult: CloudWatchMetricResultLike,
 ): AwsMetricHistoryPoint[] {
   const timestamps = metricResult.Timestamps ?? [];
   const values = metricResult.Values ?? [];
@@ -1067,13 +1156,13 @@ function normalizeMetricHistory(
 
   const pointsByTimestamp = new Map<string, AwsMetricHistoryPoint>();
   for (let index = 0; index < timestamps.length; index += 1) {
-    const timestamp = timestamps[index] ?? "";
-    const timestampMs = Date.parse(timestamp);
+    const normalizedTimestamp = normalizeAwsTimestamp(
+      (timestamps[index] as Date | string | null | undefined) ?? null,
+    );
     const value = values[index];
-    if (Number.isNaN(timestampMs) || typeof value !== "number") {
+    if (!normalizedTimestamp || typeof value !== "number") {
       continue;
     }
-    const normalizedTimestamp = new Date(timestampMs).toISOString();
     pointsByTimestamp.set(normalizedTimestamp, {
       timestamp: normalizedTimestamp,
       value,
@@ -1281,7 +1370,11 @@ export class AwsService {
     string,
     Promise<AwsEcsServiceActionContext>
   >();
-
+  private managedAwsSdkEnvQueue = Promise.resolve();
+  private readonly cloudWatchClientCache = new Map<string, CloudWatchClient>();
+  private readonly cloudWatchLogsClientCache = new Map<string, CloudWatchLogsClient>();
+  private readonly ecsClientCache = new Map<string, ECSClient>();
+  private hasBackfilledManagedSsoCache = false;
   private readonly profileRepository: AwsProfileRepository;
   private readonly awsProfileRootDir: string;
   private readonly externalAwsProfileRootDir: string;
@@ -1347,6 +1440,113 @@ export class AwsService {
     clusterArn: string;
   }): string {
     return `${this.buildEcsServiceListCacheKey(input)}\u0000`;
+  }
+
+  private buildAwsSdkClientCacheKey(profileName: string, region: string): string {
+    return [profileName, region].join("\u0000");
+  }
+
+  private getAwsSdkCredentialsProvider(profileName: string, region: string) {
+    const provider = fromIni({
+      profile: profileName,
+      configFilepath: path.join(this.awsProfileRootDir, "config"),
+      filepath: path.join(this.awsProfileRootDir, "credentials"),
+      ignoreCache: true,
+    });
+    return async () => {
+      await this.ensureManagedProfilesReady();
+      return this.enqueueManagedAwsSdkEnv(async () =>
+        this.withManagedAwsSdkEnv(async () => {
+          const credentials = await provider();
+          return {
+            accessKeyId: credentials.accessKeyId,
+            secretAccessKey: credentials.secretAccessKey,
+            sessionToken: credentials.sessionToken,
+            expiration: credentials.expiration,
+          };
+        }),
+      );
+    };
+  }
+
+  private async enqueueManagedAwsSdkEnv<T>(task: () => Promise<T>): Promise<T> {
+    const next = this.managedAwsSdkEnvQueue.then(task, task);
+    this.managedAwsSdkEnvQueue = next.then(
+      () => undefined,
+      () => undefined,
+    );
+    return next;
+  }
+
+  private async withManagedAwsSdkEnv<T>(task: () => Promise<T>): Promise<T> {
+    const overrides = this.getManagedAwsEnvOverrides();
+    const previousValues = new Map<string, string | undefined>();
+
+    for (const [key, value] of Object.entries(overrides)) {
+      previousValues.set(key, process.env[key]);
+      if (value === null) {
+        delete process.env[key];
+      } else {
+        process.env[key] = value;
+      }
+    }
+
+    try {
+      return await task();
+    } finally {
+      for (const [key, value] of previousValues.entries()) {
+        if (value === undefined) {
+          delete process.env[key];
+        } else {
+          process.env[key] = value;
+        }
+      }
+    }
+  }
+
+  private getCloudWatchClient(profileName: string, region: string): CloudWatchClient {
+    const cacheKey = this.buildAwsSdkClientCacheKey(profileName, region);
+    const cached = this.cloudWatchClientCache.get(cacheKey);
+    if (cached) {
+      return cached;
+    }
+    const client = new CloudWatchClient({
+      credentials: this.getAwsSdkCredentialsProvider(profileName, region),
+      region,
+    });
+    this.cloudWatchClientCache.set(cacheKey, client);
+    return client;
+  }
+
+  private getCloudWatchLogsClient(
+    profileName: string,
+    region: string,
+  ): CloudWatchLogsClient {
+    const cacheKey = this.buildAwsSdkClientCacheKey(profileName, region);
+    const cached = this.cloudWatchLogsClientCache.get(cacheKey);
+    if (cached) {
+      return cached;
+    }
+    const client = new CloudWatchLogsClient({
+      credentials: this.getAwsSdkCredentialsProvider(profileName, region),
+      region,
+    });
+    this.cloudWatchLogsClientCache.set(cacheKey, client);
+    return client;
+  }
+
+  private getEcsClient(profileName: string, region: string): ECSClient {
+    const cacheKey = this.buildAwsSdkClientCacheKey(profileName, region);
+    const cached = this.ecsClientCache.get(cacheKey);
+    if (cached) {
+      return cached;
+    }
+    const client = new ECSClient({
+      credentials: this.getAwsSdkCredentialsProvider(profileName, region),
+      region,
+    });
+    this.ecsClientCache.set(cacheKey, client);
+    return client;
   }
 
   private setEcsServiceListCache(
@@ -1426,10 +1626,10 @@ export class AwsService {
   }
 
   private async ensureManagedProfilesReady(): Promise<void> {
-    if (this.profileRepository.listMetadata().length > 0) {
-      return;
+    if (this.profileRepository.listMetadata().length === 0) {
+      await this.migrateManagedProfilesFromFilesIfNeeded();
     }
-    await this.migrateManagedProfilesFromFilesIfNeeded();
+    await this.backfillManagedSsoCacheFromExternalRootIfNeeded();
   }
 
   private getManagedProfileByName(profileName: string): ManagedAwsProfilePayload | null {
@@ -1764,6 +1964,96 @@ export class AwsService {
       .catch(() => undefined);
 
     return { homeDir, awsRootDir };
+  }
+
+  private async syncSsoCacheIntoManagedRoot(
+    sourceAwsRootDir: string,
+    options: { requireSourceCache?: boolean } = {},
+  ): Promise<void> {
+    if (sourceAwsRootDir === this.awsProfileRootDir) {
+      await mkdir(path.join(this.awsProfileRootDir, "sso", "cache"), {
+        recursive: true,
+      });
+      return;
+    }
+
+    const sourceSsoCacheDir = path.join(sourceAwsRootDir, "sso", "cache");
+    const targetSsoCacheDir = path.join(this.awsProfileRootDir, "sso", "cache");
+    const sourceCacheExists = await access(sourceSsoCacheDir, fsConstants.F_OK)
+      .then(() => true)
+      .catch(() => false);
+    if (!sourceCacheExists) {
+      if (options.requireSourceCache) {
+        throw new Error("AWS SSO access token cache를 찾지 못했습니다. 다시 로그인해 주세요.");
+      }
+      return;
+    }
+
+    await this.mergeSsoCacheDirectories(sourceSsoCacheDir, targetSsoCacheDir);
+  }
+
+  private async mergeSsoCacheDirectories(
+    sourceDir: string,
+    targetDir: string,
+  ): Promise<void> {
+    const entries = await readdir(sourceDir, { withFileTypes: true });
+    await mkdir(targetDir, { recursive: true });
+
+    for (const entry of entries) {
+      const sourcePath = path.join(sourceDir, entry.name);
+      const targetPath = path.join(targetDir, entry.name);
+
+      if (entry.isDirectory()) {
+        await this.mergeSsoCacheDirectories(sourcePath, targetPath);
+        continue;
+      }
+      if (!entry.isFile()) {
+        continue;
+      }
+
+      const shouldCopy = await this.shouldCopySsoCacheFile(sourcePath, targetPath);
+      if (shouldCopy) {
+        await copyFile(sourcePath, targetPath);
+      }
+    }
+  }
+
+  private async shouldCopySsoCacheFile(
+    sourcePath: string,
+    targetPath: string,
+  ): Promise<boolean> {
+    const targetExists = await access(targetPath, fsConstants.F_OK)
+      .then(() => true)
+      .catch(() => false);
+    if (!targetExists) {
+      return true;
+    }
+
+    const [sourceRaw, targetRaw] = await Promise.all([
+      readFile(sourcePath, "utf8").catch(() => ""),
+      readFile(targetPath, "utf8").catch(() => ""),
+    ]);
+    const sourceExpiration = parseSsoCacheExpirationTimestamp(sourceRaw);
+    const targetExpiration = parseSsoCacheExpirationTimestamp(targetRaw);
+
+    if (sourceExpiration === null) {
+      return false;
+    }
+    if (targetExpiration === null) {
+      return true;
+    }
+    return sourceExpiration > targetExpiration;
+  }
+
+  private async backfillManagedSsoCacheFromExternalRootIfNeeded(): Promise<void> {
+    if (this.hasBackfilledManagedSsoCache) {
+      return;
+    }
+    this.hasBackfilledManagedSsoCache = true;
+    if (this.externalAwsProfileRootDir === this.awsProfileRootDir) {
+      return;
+    }
+    await this.syncSsoCacheIntoManagedRoot(this.externalAwsProfileRootDir);
   }
 
   private async destroyTempAwsRoot(homeDir: string): Promise<void> {
@@ -2477,6 +2767,9 @@ export class AwsService {
       this.profileRepository.upsert(payload);
     }
     await this.materializeManagedProfiles();
+    if (result.payloads.some((payload) => payload.kind === "sso")) {
+      await this.syncSsoCacheIntoManagedRoot(this.externalAwsProfileRootDir);
+    }
 
     return {
       importedProfileNames: result.importedProfileNames,
@@ -2609,19 +2902,23 @@ export class AwsService {
         fallbackMessage:
           "선택한 account/role로 인증을 완료하지 못했습니다.",
       });
+
+      await this.syncSsoCacheIntoManagedRoot(preparation.awsRootDir, {
+        requireSourceCache: true,
+      });
+
+      await this.saveSsoProfileValues({
+        profileName,
+        ssoSessionName: preparation.ssoSessionName,
+        ssoStartUrl: preparation.ssoStartUrl,
+        ssoRegion: preparation.ssoRegion,
+        ssoAccountId,
+        ssoRoleName,
+        region: preparation.region,
+      });
     } finally {
       await this.destroyTempAwsRoot(preparation.homeDir);
     }
-
-    await this.saveSsoProfileValues({
-      profileName,
-      ssoSessionName: preparation.ssoSessionName,
-      ssoStartUrl: preparation.ssoStartUrl,
-      ssoRegion: preparation.ssoRegion,
-      ssoAccountId,
-      ssoRoleName,
-      region: preparation.region,
-    });
   }
 
   async prepareSsoProfile(
@@ -3265,97 +3562,66 @@ export class AwsService {
     profileName: string,
     region: string,
   ): Promise<AwsEcsClusterListItem[]> {
-    await this.ensureAwsCliAvailable();
+    try {
+      const client = this.getEcsClient(profileName, region);
+      const clusterArns: string[] = [];
+      let nextToken: string | undefined;
+      do {
+        const payload = await client.send(
+          new ListClustersCommand({
+            nextToken,
+          }),
+        );
+        clusterArns.push(
+          ...((payload.clusterArns as EcsListClustersPayload["clusterArns"]) ?? [])
+            .map((value) => value.trim())
+            .filter(Boolean),
+        );
+        nextToken = payload.nextToken?.trim() || undefined;
+      } while (nextToken);
 
-    const clusterArns: string[] = [];
-    let nextToken: string | undefined;
-    do {
-      const args = [
-        "ecs",
-        "list-clusters",
-        "--profile",
-        profileName,
-        "--region",
-        region,
-        "--output",
-        "json",
-      ];
-      if (nextToken) {
-        args.push("--starting-token", nextToken);
+      if (clusterArns.length === 0) {
+        return [];
       }
-      const result = await this.runResolvedCommand("aws", args, 60_000);
-      if (result.exitCode !== 0) {
-        throw normalizeAwsCliError(
-          result.stderr,
-          "ECS 클러스터 목록을 읽지 못했습니다.",
+
+      const clusters: NonNullable<EcsDescribeClustersPayload["clusters"]> = [];
+      for (const clusterChunk of chunk(clusterArns, 100)) {
+        const payload = await client.send(
+          new DescribeClustersCommand({
+            clusters: clusterChunk,
+          }),
+        );
+        clusters.push(
+          ...((payload.clusters as EcsDescribeClustersPayload["clusters"]) ?? []),
         );
       }
-      const payload = parseJson<EcsListClustersPayload>(
-        result.stdout,
-        "ECS 클러스터 목록 응답을 해석하지 못했습니다.",
-      );
-      clusterArns.push(
-        ...(payload.clusterArns ?? [])
-          .map((value) => value.trim())
-          .filter(Boolean),
-      );
-      nextToken = payload.nextToken?.trim() || undefined;
-    } while (nextToken);
 
-    if (clusterArns.length === 0) {
-      return [];
+      return clusters
+        .map((cluster) => {
+          const clusterArn = cluster.clusterArn?.trim() ?? "";
+          if (!clusterArn) {
+            return null;
+          }
+          const clusterName =
+            cluster.clusterName?.trim() || parseClusterNameFromArn(clusterArn);
+          return {
+            clusterArn,
+            clusterName,
+            status: cluster.status?.trim() || "UNKNOWN",
+            activeServicesCount: cluster.activeServicesCount ?? 0,
+            runningTasksCount: cluster.runningTasksCount ?? 0,
+            pendingTasksCount: cluster.pendingTasksCount ?? 0,
+          } satisfies AwsEcsClusterListItem;
+        })
+        .filter((value): value is AwsEcsClusterListItem => value !== null)
+        .sort(
+          (left, right) =>
+            left.clusterName.localeCompare(right.clusterName) ||
+            left.clusterArn.localeCompare(right.clusterArn),
+        );
+    } catch (error) {
+      throw normalizeAwsSdkError(error, "ECS 클러스터 목록을 읽지 못했습니다.");
     }
-
-    const result = await this.runResolvedCommand(
-      "aws",
-      [
-        "ecs",
-        "describe-clusters",
-        "--profile",
-        profileName,
-        "--region",
-        region,
-        "--clusters",
-        ...clusterArns,
-        "--output",
-        "json",
-      ],
-      60_000,
-    );
-    if (result.exitCode !== 0) {
-      throw normalizeAwsCliError(
-        result.stderr,
-        "ECS 클러스터 상세 정보를 읽지 못했습니다.",
-      );
-    }
-    const payload = parseJson<EcsDescribeClustersPayload>(
-      result.stdout,
-      "ECS 클러스터 상세 응답을 해석하지 못했습니다.",
-    );
-
-    return (payload.clusters ?? [])
-      .map((cluster) => {
-        const clusterArn = cluster.clusterArn?.trim() ?? "";
-        if (!clusterArn) {
-          return null;
-        }
-        const clusterName =
-          cluster.clusterName?.trim() || parseClusterNameFromArn(clusterArn);
-        return {
-          clusterArn,
-          clusterName,
-          status: cluster.status?.trim() || "UNKNOWN",
-          activeServicesCount: cluster.activeServicesCount ?? 0,
-          runningTasksCount: cluster.runningTasksCount ?? 0,
-          pendingTasksCount: cluster.pendingTasksCount ?? 0,
-        } satisfies AwsEcsClusterListItem;
-      })
-      .filter((value): value is AwsEcsClusterListItem => value !== null)
-      .sort(
-        (left, right) =>
-          left.clusterName.localeCompare(right.clusterName) ||
-          left.clusterArn.localeCompare(right.clusterArn),
-      );
   }
 
   private async loadEcsServiceUtilizationMetrics(input: {
@@ -3384,6 +3650,7 @@ export class AwsService {
     }
 
     try {
+      const client = this.getCloudWatchClient(input.profileName, input.region);
       const endTime = new Date();
       const startTime = new Date(endTime.getTime() - 10 * 60 * 1000);
       let offset = 0;
@@ -3434,38 +3701,13 @@ export class AwsService {
           ];
         });
 
-        const result = await this.runResolvedCommand(
-          "aws",
-          [
-            "cloudwatch",
-            "get-metric-data",
-            "--profile",
-            input.profileName,
-            "--region",
-            input.region,
-            "--start-time",
-            startTime.toISOString(),
-            "--end-time",
-            endTime.toISOString(),
-            "--scan-by",
-            "TimestampDescending",
-            "--metric-data-queries",
-            JSON.stringify(metricQueries),
-            "--output",
-            "json",
-          ],
-          60_000,
-        );
-        if (result.exitCode !== 0) {
-          throw normalizeAwsCliError(
-            result.stderr,
-            "ECS 현재 사용량 지표를 읽지 못했습니다.",
-          );
-        }
-
-        const payload = parseJson<CloudWatchGetMetricDataPayload>(
-          result.stdout,
-          "ECS 현재 사용량 지표 응답을 해석하지 못했습니다.",
+        const payload = await client.send(
+          new GetMetricDataCommand({
+            EndTime: endTime,
+            MetricDataQueries: metricQueries,
+            ScanBy: "TimestampDescending",
+            StartTime: startTime,
+          }),
         );
 
         for (const metricResult of payload.MetricDataResults ?? []) {
@@ -3509,37 +3751,18 @@ export class AwsService {
     region: string;
     clusterArn: string;
   }): Promise<string[]> {
+    const client = this.getEcsClient(input.profileName, input.region);
     const serviceArns: string[] = [];
     let nextToken: string | undefined;
     do {
-      const args = [
-        "ecs",
-        "list-services",
-        "--profile",
-        input.profileName,
-        "--region",
-        input.region,
-        "--cluster",
-        input.clusterArn,
-        "--output",
-        "json",
-      ];
-      if (nextToken) {
-        args.push("--starting-token", nextToken);
-      }
-      const result = await this.runResolvedCommand("aws", args, 60_000);
-      if (result.exitCode !== 0) {
-        throw normalizeAwsCliError(
-          result.stderr,
-          "ECS 서비스 목록을 읽지 못했습니다.",
-        );
-      }
-      const payload = parseJson<EcsListServicesPayload>(
-        result.stdout,
-        "ECS 서비스 목록 응답을 해석하지 못했습니다.",
+      const payload = await client.send(
+        new ListServicesCommand({
+          cluster: input.clusterArn,
+          nextToken,
+        }),
       );
       serviceArns.push(
-        ...(payload.serviceArns ?? [])
+        ...((payload.serviceArns as EcsListServicesPayload["serviceArns"]) ?? [])
           .map((value) => value.trim())
           .filter(Boolean),
       );
@@ -3595,37 +3818,16 @@ export class AwsService {
     clusterArn: string;
     serviceNames: string[];
   }): Promise<NonNullable<EcsDescribeServicesPayload["services"]>> {
+    const client = this.getEcsClient(input.profileName, input.region);
     const services: NonNullable<EcsDescribeServicesPayload["services"]> = [];
     for (const serviceChunk of chunk(input.serviceNames, 10)) {
-      const result = await this.runResolvedCommand(
-        "aws",
-        [
-          "ecs",
-          "describe-services",
-          "--profile",
-          input.profileName,
-          "--region",
-          input.region,
-          "--cluster",
-          input.clusterArn,
-          "--services",
-          ...serviceChunk,
-          "--output",
-          "json",
-        ],
-        60_000,
+      const payload = await client.send(
+        new DescribeServicesCommand({
+          cluster: input.clusterArn,
+          services: serviceChunk,
+        }),
       );
-      if (result.exitCode !== 0) {
-        throw normalizeAwsCliError(
-          result.stderr,
-          "ECS 서비스 상세 정보를 읽지 못했습니다.",
-        );
-      }
-      const payload = parseJson<EcsDescribeServicesPayload>(
-        result.stdout,
-        "ECS 서비스 상세 응답을 해석하지 못했습니다.",
-      );
-      services.push(...(payload.services ?? []));
+      services.push(...((payload.services as EcsDescribeServicesPayload["services"]) ?? []));
     }
     return services;
   }
@@ -3635,6 +3837,7 @@ export class AwsService {
     region: string,
     taskDefinitionArns: string[],
   ): Promise<Map<string, EcsTaskDefinitionPayload["taskDefinition"]>> {
+    const client = this.getEcsClient(profileName, region);
     const taskDefinitionByArn = new Map<
       string,
       EcsTaskDefinitionPayload["taskDefinition"]
@@ -3657,34 +3860,16 @@ export class AwsService {
           return;
         }
 
-        const loadPromise = this.runResolvedCommand(
-          "aws",
-          [
-            "ecs",
-            "describe-task-definition",
-            "--profile",
-            profileName,
-            "--region",
-            region,
-            "--task-definition",
-            taskDefinitionArn,
-            "--output",
-            "json",
-          ],
-          60_000,
-        )
-          .then((result) => {
-            if (result.exitCode !== 0) {
-              throw normalizeAwsCliError(
-                result.stderr,
-                "ECS task definition 정보를 읽지 못했습니다.",
-              );
-            }
-            const payload = parseJson<EcsTaskDefinitionPayload>(
-              result.stdout,
-              "ECS task definition 응답을 해석하지 못했습니다.",
-            );
-            const taskDefinition = payload.taskDefinition;
+        const loadPromise = client
+          .send(
+            new DescribeTaskDefinitionCommand({
+              taskDefinition: taskDefinitionArn,
+            }),
+          )
+          .then((payload) => {
+            const taskDefinition =
+              (payload.taskDefinition as EcsTaskDefinitionPayload["taskDefinition"]) ??
+              undefined;
             this.ecsTaskDefinitionCache.set(taskDefinitionArn, {
               expiresAt:
                 Date.now() + AwsService.ECS_TASK_DEFINITION_CACHE_TTL_MS,
@@ -3708,43 +3893,21 @@ export class AwsService {
     clusterArn: string;
     serviceName: string;
   }): Promise<string[]> {
+    const client = this.getEcsClient(input.profileName, input.region);
     const taskArns: string[] = [];
     let nextToken: string | undefined;
 
     do {
-      const result = await this.runResolvedCommand(
-        "aws",
-        [
-          "ecs",
-          "list-tasks",
-          "--profile",
-          input.profileName,
-          "--region",
-          input.region,
-          "--cluster",
-          input.clusterArn,
-          "--service-name",
-          input.serviceName,
-          "--desired-status",
-          "RUNNING",
-          ...(nextToken ? ["--next-token", nextToken] : []),
-          "--output",
-          "json",
-        ],
-        60_000,
-      );
-      if (result.exitCode !== 0) {
-        throw normalizeAwsCliError(
-          result.stderr,
-          "ECS task 목록을 읽지 못했습니다.",
-        );
-      }
-      const payload = parseJson<EcsListTasksPayload>(
-        result.stdout,
-        "ECS task 목록 응답을 해석하지 못했습니다.",
+      const payload = await client.send(
+        new ListTasksCommand({
+          cluster: input.clusterArn,
+          desiredStatus: "RUNNING",
+          nextToken,
+          serviceName: input.serviceName,
+        }),
       );
       taskArns.push(
-        ...(payload.taskArns ?? [])
+        ...((payload.taskArns as EcsListTasksPayload["taskArns"]) ?? [])
           .map((value) => value.trim())
           .filter(Boolean),
       );
@@ -3763,38 +3926,17 @@ export class AwsService {
     if (input.taskArns.length === 0) {
       return [];
     }
+    const client = this.getEcsClient(input.profileName, input.region);
     const tasks: AwsEcsServiceTaskSummary[] = [];
     for (const taskChunk of chunk(input.taskArns, 100)) {
-      const result = await this.runResolvedCommand(
-        "aws",
-        [
-          "ecs",
-          "describe-tasks",
-          "--profile",
-          input.profileName,
-          "--region",
-          input.region,
-          "--cluster",
-          input.clusterArn,
-          "--tasks",
-          ...taskChunk,
-          "--output",
-          "json",
-        ],
-        60_000,
-      );
-      if (result.exitCode !== 0) {
-        throw normalizeAwsCliError(
-          result.stderr,
-          "ECS task 상세 정보를 읽지 못했습니다.",
-        );
-      }
-      const payload = parseJson<EcsDescribeTasksPayload>(
-        result.stdout,
-        "ECS task 상세 응답을 해석하지 못했습니다.",
+      const payload = await client.send(
+        new DescribeTasksCommand({
+          cluster: input.clusterArn,
+          tasks: taskChunk,
+        }),
       );
       tasks.push(
-        ...((payload.tasks ?? [])
+        ...((((payload.tasks as EcsDescribeTasksPayload["tasks"]) ?? []))
           .map((task): AwsEcsServiceTaskSummary | null => {
             const taskArn = task.taskArn?.trim() || "";
             if (!taskArn) {
@@ -3880,7 +4022,6 @@ export class AwsService {
     region: string,
     clusterArn: string,
   ): Promise<AwsEcsTaskTunnelServiceSummary[]> {
-    await this.ensureAwsCliAvailable();
     const serviceNames = await this.listEcsServiceNames({
       profileName,
       region,
@@ -3916,7 +4057,6 @@ export class AwsService {
     clusterArn: string,
     serviceName: string,
   ): Promise<AwsEcsTaskTunnelServiceDetails> {
-    await this.ensureAwsCliAvailable();
     const services = await this.describeEcsServices({
       profileName,
       region,
@@ -3968,7 +4108,6 @@ export class AwsService {
     clusterArn: string,
     serviceName: string,
   ): Promise<AwsEcsServiceActionContext> {
-    await this.ensureAwsCliAvailable();
     const cacheKey = this.buildEcsActionContextCacheKey({
       profileName,
       region,
@@ -4032,86 +4171,38 @@ export class AwsService {
     serviceName: string;
     containerName: string;
   }): Promise<string> {
-    await this.ensureAwsCliAvailable();
-    const listResult = await this.runResolvedCommand(
-      "aws",
-      [
-        "ecs",
-        "list-tasks",
-        "--profile",
-        input.profileName,
-        "--region",
-        input.region,
-        "--cluster",
-        input.clusterArn,
-        "--service-name",
-        input.serviceName,
-        "--desired-status",
-        "RUNNING",
-        "--output",
-        "json",
-      ],
-      60_000,
-    );
-    if (listResult.exitCode !== 0) {
-      throw normalizeAwsCliError(
-        listResult.stderr,
-        "ECS task 목록을 읽지 못했습니다.",
-      );
-    }
-    const listPayload = parseJson<EcsListTasksPayload>(
-      listResult.stdout,
-      "ECS task 목록 응답을 해석하지 못했습니다.",
-    );
-    const taskArn = (listPayload.taskArns ?? [])
-      .map((value) => value.trim())
-      .find(Boolean);
+    const taskArn = (
+      await this.listRunningEcsTaskArns({
+        profileName: input.profileName,
+        region: input.region,
+        clusterArn: input.clusterArn,
+        serviceName: input.serviceName,
+      })
+    ).find(Boolean);
     if (!taskArn) {
       throw new Error("이 서비스에 실행 중인 task가 없습니다.");
     }
 
-    const describeResult = await this.runResolvedCommand(
-      "aws",
-      [
-        "ecs",
-        "describe-tasks",
-        "--profile",
-        input.profileName,
-        "--region",
-        input.region,
-        "--cluster",
-        input.clusterArn,
-        "--tasks",
-        taskArn,
-        "--output",
-        "json",
-      ],
-      60_000,
-    );
-    if (describeResult.exitCode !== 0) {
-      throw normalizeAwsCliError(
-        describeResult.stderr,
-        "ECS task 상세 정보를 읽지 못했습니다.",
-      );
-    }
-    const describePayload = parseJson<EcsDescribeTasksPayload>(
-      describeResult.stdout,
-      "ECS task 상세 응답을 해석하지 못했습니다.",
-    );
-    const task = (describePayload.tasks ?? []).find(
-      (item) => item.taskArn?.trim() === taskArn,
+    const tasks = await this.describeEcsTasks({
+      profileName: input.profileName,
+      region: input.region,
+      clusterArn: input.clusterArn,
+      taskArns: [taskArn],
+    });
+    const task = tasks.find(
+      (item) => item.taskArn === taskArn,
     );
     if (!task) {
       throw new Error("실행 중인 ECS task 상세 정보를 찾지 못했습니다.");
     }
-    if (task.enableExecuteCommand !== true) {
+    if (!task.enableExecuteCommand) {
       throw new Error(
         "이 task는 ECS Exec가 활성화되어 있지 않아 터널을 열 수 없습니다.",
       );
     }
 
-    const container = (task.containers ?? []).find(
-      (item) => item.name?.trim() === input.containerName,
+    const container = task.containers.find(
+      (item) => item.containerName === input.containerName,
     );
     if (!container) {
       throw new Error("선택한 컨테이너를 실행 중인 task에서 찾지 못했습니다.");
@@ -4136,7 +4227,6 @@ export class AwsService {
     taskArn: string;
     containerName: string;
   }): Promise<string> {
-    await this.ensureAwsCliAvailable();
     const cachedContainerContext = this.getCachedEcsTaskContainerContext(input);
     if (cachedContainerContext && !cachedContainerContext.enableExecuteCommand) {
       throw new Error(
@@ -4193,7 +4283,6 @@ export class AwsService {
     endTime?: string | null;
     limit?: number;
   }): Promise<AwsEcsServiceLogsSnapshot> {
-    await this.ensureAwsCliAvailable();
     const context = await this.describeEcsServiceActionContext(
       input.profileName,
       input.region,
@@ -4292,42 +4381,19 @@ export class AwsService {
       if (!logGroupName || !logStreamPrefix) {
         continue;
       }
-      const result = await this.runResolvedCommand(
-        "aws",
-        [
-          "logs",
-          "filter-log-events",
-          "--profile",
-          input.profileName,
-          "--region",
-          logRegion,
-          "--log-group-name",
+      const payload = await this.getCloudWatchLogsClient(
+        input.profileName,
+        logRegion,
+      ).send(
+        new FilterLogEventsCommand({
+          endTime: typeof endTimeMs === "number" ? endTimeMs : undefined,
+          limit: Math.max(25, Math.ceil(limit / supportedContainers.length)),
           logGroupName,
-          "--log-stream-name-prefix",
-          `${logStreamPrefix}/${container.containerName}/`,
-          "--limit",
-          String(Math.max(25, Math.ceil(limit / supportedContainers.length))),
-          "--start-time",
-          String(startTimeMs),
-          ...(typeof endTimeMs === "number"
-            ? ["--end-time", String(endTimeMs)]
-            : []),
-          "--output",
-          "json",
-        ],
-        60_000,
+          logStreamNamePrefix: `${logStreamPrefix}/${container.containerName}/`,
+          startTime: startTimeMs,
+        }),
       );
-      if (result.exitCode !== 0) {
-        throw normalizeAwsCliError(
-          result.stderr,
-          "CloudWatch Logs를 읽지 못했습니다.",
-        );
-      }
-      const payload = parseJson<CloudWatchLogsFilterEventsPayload>(
-        result.stdout,
-        "CloudWatch Logs 응답을 해석하지 못했습니다.",
-      );
-      for (const event of payload.events ?? []) {
+      for (const event of (payload.events as CloudWatchLogsFilterEventsPayload["events"]) ?? []) {
         if (typeof event.timestamp !== "number") {
           continue;
         }
@@ -4378,35 +4444,12 @@ export class AwsService {
     region: string,
     clusterArn: string,
   ): Promise<AwsEcsClusterSnapshot> {
-    await this.ensureAwsCliAvailable();
-
-    const clusterResult = await this.runResolvedCommand(
-      "aws",
-      [
-        "ecs",
-        "describe-clusters",
-        "--profile",
-        profileName,
-        "--region",
-        region,
-        "--clusters",
-        clusterArn,
-        "--output",
-        "json",
-      ],
-      60_000,
+    const clusterPayload = await this.getEcsClient(profileName, region).send(
+      new DescribeClustersCommand({
+        clusters: [clusterArn],
+      }),
     );
-    if (clusterResult.exitCode !== 0) {
-      throw normalizeAwsCliError(
-        clusterResult.stderr,
-        "ECS 클러스터 정보를 읽지 못했습니다.",
-      );
-    }
-    const clusterPayload = parseJson<EcsDescribeClustersPayload>(
-      clusterResult.stdout,
-      "ECS 클러스터 응답을 해석하지 못했습니다.",
-    );
-    const cluster = (clusterPayload.clusters ?? []).find(
+    const cluster = ((clusterPayload.clusters as EcsDescribeClustersPayload["clusters"]) ?? []).find(
       (item) => item.clusterArn?.trim() === clusterArn,
     );
     if (!cluster?.clusterArn?.trim()) {
@@ -4530,8 +4573,6 @@ export class AwsService {
     region: string,
     clusterArn: string,
   ): Promise<AwsEcsClusterUtilizationSnapshot> {
-    await this.ensureAwsCliAvailable();
-
     const serviceNames = await this.listEcsServiceNames({
       profileName,
       region,
