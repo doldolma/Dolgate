@@ -495,6 +495,8 @@ describe('renderer style boundaries', () => {
 
     expect(source).toContain('::-webkit-scrollbar');
     expect(source).toContain('scrollbar-width: thin;');
+    expect(source).toContain('box-shadow: inset 0 0 0 1px');
+    expect(source).toContain('border: 2px solid transparent;');
     expect(source).toContain('[data-native-scrollbar="true"]');
     expect(source).toContain('[data-terminal-canvas="true"]');
     expect(source).toContain('.xterm-viewport');
@@ -516,6 +518,13 @@ describe('renderer style boundaries', () => {
     for (const token of scrollbarTokens) {
       expect(source.match(new RegExp(`${escapeRegExp(token)}:`, 'g'))?.length ?? 0).toBe(2);
     }
+
+    expect(source).toContain(
+      '--scrollbar-thumb: color-mix(in srgb, var(--text-soft) 62%, white 38%);',
+    );
+    expect(source).toContain(
+      '--scrollbar-thumb: color-mix(in srgb, var(--text-soft) 76%, white 24%);',
+    );
   });
 
   it('removes legacy.css imports from renderer entrypoints', () => {
