@@ -488,8 +488,12 @@ export function createContainersSlice(deps: SliceDeps): ContainersSlice {
               const nextLogsByServiceName = { ...currentTab.ecsLogsByServiceName };
               if (logsState) {
                 const currentLogsState =
-                  currentTab.ecsLogsByServiceName[serviceName] ??
-                  createEmptyEcsServiceLogsViewState();
+                  currentTab.ecsLogsByServiceName[serviceName]
+                    ? {
+                        ...createEmptyEcsServiceLogsViewState(),
+                        ...currentTab.ecsLogsByServiceName[serviceName],
+                      }
+                    : createEmptyEcsServiceLogsViewState();
                 nextLogsByServiceName[serviceName] =
                   typeof logsState === "function"
                     ? logsState(currentLogsState)
