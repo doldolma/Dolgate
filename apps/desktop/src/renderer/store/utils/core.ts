@@ -266,6 +266,7 @@ export interface ContainerTunnelTabState {
 
 export interface EcsServiceLogsViewState {
   loading: boolean;
+  refreshing: boolean;
   error: string | null;
   snapshot: AwsEcsServiceLogsSnapshot | null;
   follow: boolean;
@@ -1345,6 +1346,7 @@ export function createEmptyContainersTabState(host: HostRecord): HostContainersT
 export function createEmptyEcsServiceLogsViewState(): EcsServiceLogsViewState {
   return {
     loading: false,
+    refreshing: false,
     error: null,
     snapshot: null,
     follow: true,

@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type {
   AwsEcsClusterSnapshot,
   AwsEcsHostRecord,
@@ -334,6 +334,7 @@ function createLogsSnapshot(
 function createEmptyEcsServiceLogsState(): EcsServiceLogsViewState {
   return {
     loading: false,
+    refreshing: false,
     error: null,
     snapshot: null,
     follow: true,
@@ -454,6 +455,10 @@ describe("AwsEcsWorkspace", () => {
     awsApi.stopEcsServiceTunnel.mockResolvedValue(undefined);
   });
 
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it("renders split view with overview, deployments, and recent events", () => {
     const { container } = render(
       <AwsEcsWorkspace
@@ -570,6 +575,68 @@ describe("AwsEcsWorkspace", () => {
     );
     expect(screen.getByRole("tab", { name: "Logs" })).toHaveClass("ring-1");
     expect(await screen.findByText("hello from task-1")).toBeInTheDocument();
+  });
+
+  it("shows a generic empty-state message when the selected range has no logs", async () => {
+    awsApi.loadEcsServiceLogs.mockResolvedValueOnce(
+      createLogsSnapshot({
+        entries: [],
+        followCursor: null,
+      }),
+    );
+
+    render(
+      <AwsEcsWorkspace
+        host={createHost()}
+        tab={createTab(createSnapshot())}
+        isActive={false}
+        onRefresh={vi.fn().mockResolvedValue(undefined)}
+        onRefreshUtilization={vi.fn().mockResolvedValue(undefined)}
+        onOpenEcsExecShell={vi.fn().mockResolvedValue(undefined)}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("tab", { name: "Logs" }));
+
+    expect(await screen.findByText("표시할 로그가 없습니다.")).toBeInTheDocument();
+    expect(screen.queryByText("최근 30분 기준 로그가 없습니다.")).toBeNull();
+    expect(screen.queryByText("선택한 범위에 로그가 없습니다.")).toBeNull();
+  });
+
+  it("shows a floating loading chip without replacing visible logs during manual refresh", async () => {
+    render(
+      <AwsEcsWorkspace
+        host={createHost()}
+        tab={createTab(createSnapshot())}
+        isActive={false}
+        onRefresh={vi.fn().mockResolvedValue(undefined)}
+        onRefreshUtilization={vi.fn().mockResolvedValue(undefined)}
+        onOpenEcsExecShell={vi.fn().mockResolvedValue(undefined)}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("tab", { name: "Logs" }));
+    expect(await screen.findByText("hello from task-1")).toBeInTheDocument();
+
+    const deferredLogs = createDeferred<AwsEcsServiceLogsSnapshot>();
+    awsApi.loadEcsServiceLogs.mockReturnValueOnce(deferredLogs.promise);
+
+    fireEvent.click(
+      screen.getByRole("button", { name: /불러오는 중|다시 불러오기/ }),
+    );
+
+    expect(screen.getByText("hello from task-1")).toBeInTheDocument();
+    expect(screen.getByTestId("ecs-logs-loading-chip")).toHaveTextContent("갱신 중...");
+    expect(screen.queryByText("서비스 로그를 불러오는 중입니다.")).toBeNull();
+
+    deferredLogs.resolve(createLogsSnapshot());
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    await waitFor(() => {
+      expect(screen.queryByTestId("ecs-logs-loading-chip")).toBeNull();
+    });
   });
 
   it("applies an absolute log range and reloads logs with start and end times", async () => {
@@ -833,6 +900,8 @@ describe("AwsEcsWorkspace", () => {
       expect(screen.getByLabelText("Task")).toBeDisabled();
       expect(screen.getByLabelText("Container")).toBeDisabled();
       expect(logRefreshButton).toBeDisabled();
+      expect(screen.getByTestId("ecs-logs-loading-chip")).toHaveTextContent("갱신 중...");
+      expect(screen.getByText("hello from task-1")).toBeInTheDocument();
     });
 
     deferredWorkerLogs.resolve(createLogsSnapshot());
@@ -846,6 +915,7 @@ describe("AwsEcsWorkspace", () => {
       expect(screen.getByLabelText("Task")).not.toBeDisabled();
       expect(screen.getByLabelText("Container")).not.toBeDisabled();
       expect(logRefreshButton).not.toBeDisabled();
+      expect(screen.queryByTestId("ecs-logs-loading-chip")).toBeNull();
     });
   });
 
@@ -873,6 +943,7 @@ describe("AwsEcsWorkspace", () => {
     expect(
       screen.getByText("서비스 로그를 불러오는 중입니다."),
     ).toBeInTheDocument();
+    expect(screen.queryByTestId("ecs-logs-loading-chip")).toBeNull();
 
     deferredApiLogs.resolve(
       createLogsSnapshot({
@@ -891,6 +962,67 @@ describe("AwsEcsWorkspace", () => {
     );
 
     expect(await screen.findByText("hello from api")).toBeInTheDocument();
+  });
+
+  it("shows the loading chip during silent follow polling without hiding existing logs", async () => {
+    const deferredLogs = createDeferred<AwsEcsServiceLogsSnapshot>();
+    awsApi.loadEcsServiceLogs.mockReturnValueOnce(deferredLogs.promise);
+    let followRefreshTick: (() => void) | null = null;
+    const setIntervalSpy = vi
+      .spyOn(window, "setInterval")
+      .mockImplementation((handler) => {
+        if (typeof handler === "function") {
+          followRefreshTick = handler as () => void;
+        }
+        return 1 as unknown as ReturnType<typeof window.setInterval>;
+      });
+    const clearIntervalSpy = vi
+      .spyOn(window, "clearInterval")
+      .mockImplementation(() => undefined);
+
+    render(
+      <AwsEcsWorkspace
+        host={createHost()}
+        tab={createTab(createSnapshot(), {
+          ecsActivePanel: "logs",
+          ecsLogsByServiceName: {
+            worker: {
+              ...createEmptyEcsServiceLogsState(),
+              snapshot: createLogsSnapshot(),
+              follow: true,
+            },
+          },
+        })}
+        isActive={true}
+        onRefresh={vi.fn().mockResolvedValue(undefined)}
+        onRefreshUtilization={vi.fn().mockResolvedValue(undefined)}
+        onOpenEcsExecShell={vi.fn().mockResolvedValue(undefined)}
+      />,
+    );
+
+    expect(screen.getByText("hello from task-1")).toBeInTheDocument();
+    awsApi.loadEcsServiceLogs.mockClear();
+    expect(followRefreshTick).not.toBeNull();
+
+    await act(async () => {
+      followRefreshTick?.();
+    });
+
+    expect(awsApi.loadEcsServiceLogs).toHaveBeenCalledTimes(1);
+    expect(screen.getByTestId("ecs-logs-loading-chip")).toHaveTextContent("갱신 중...");
+    expect(screen.getByText("hello from task-1")).toBeInTheDocument();
+
+    deferredLogs.resolve(createLogsSnapshot());
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    await waitFor(() => {
+      expect(screen.queryByTestId("ecs-logs-loading-chip")).toBeNull();
+    });
+
+    setIntervalSpy.mockRestore();
+    clearIntervalSpy.mockRestore();
   });
 
   it("restores cached logs immediately when returning to a previously viewed service", async () => {

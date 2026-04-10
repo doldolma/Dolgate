@@ -1,4 +1,11 @@
-import { useState } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from 'react';
+import type { KeyboardEvent as ReactKeyboardEvent } from 'react';
 import type { AuthState } from '@shared';
 import { AwsEcsWorkspace } from '../components/AwsEcsWorkspace';
 import { ContainersWorkspace } from '../components/ContainersWorkspace';
@@ -39,6 +46,10 @@ export function ContainersShell({
     targetHostId: string;
     placement: 'before' | 'after';
   } | null>(null);
+  const containerTabStripRef = useRef<HTMLDivElement | null>(null);
+  const containerTabButtonRefs = useRef<Record<string, HTMLButtonElement | null>>({});
+  const [showLeftTabStripFade, setShowLeftTabStripFade] = useState(false);
+  const [showRightTabStripFade, setShowRightTabStripFade] = useState(false);
   const hostTabShellBaseClass =
     'group relative inline-flex min-w-0 flex-none items-center gap-[0.3rem] rounded-[18px] border border-[color-mix(in_srgb,var(--border)_88%,transparent_12%)] bg-[linear-gradient(180deg,color-mix(in_srgb,var(--surface-strong)_92%,transparent_8%),color-mix(in_srgb,var(--surface)_96%,transparent_4%))] pr-[0.24rem] shadow-[var(--shadow-soft)] transition-[border-color,background-color,box-shadow,transform] duration-200';
   const hostTabShellActiveClass =
@@ -65,6 +76,113 @@ export function ContainersShell({
     containersViewModel.containerTabs[0]?.hostId ??
     null;
 
+  const updateContainerTabStripFades = useCallback(() => {
+    const container = containerTabStripRef.current;
+    if (!container) {
+      setShowLeftTabStripFade(false);
+      setShowRightTabStripFade(false);
+      return;
+    }
+    const maxScrollLeft = Math.max(0, container.scrollWidth - container.clientWidth);
+    const nextShowLeft = container.scrollLeft > 1;
+    const nextShowRight = container.scrollLeft < maxScrollLeft - 1;
+    setShowLeftTabStripFade((previous) =>
+      previous === nextShowLeft ? previous : nextShowLeft,
+    );
+    setShowRightTabStripFade((previous) =>
+      previous === nextShowRight ? previous : nextShowRight,
+    );
+  }, []);
+
+  useEffect(() => {
+    updateContainerTabStripFades();
+  }, [
+    activeContainersHostId,
+    containersViewModel.containerTabs.length,
+    updateContainerTabStripFades,
+  ]);
+
+  useEffect(() => {
+    const handleResize = () => {
+      updateContainerTabStripFades();
+    };
+    window.addEventListener('resize', handleResize);
+    return () => {
+      window.removeEventListener('resize', handleResize);
+    };
+  }, [updateContainerTabStripFades]);
+
+  useLayoutEffect(() => {
+    if (!activeContainersHostId || draggedContainerHostId) {
+      return;
+    }
+    const activeButton = containerTabButtonRefs.current[activeContainersHostId];
+    if (!activeButton) {
+      return;
+    }
+    if (typeof activeButton.scrollIntoView === 'function') {
+      activeButton.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+    }
+    if (typeof window.requestAnimationFrame !== 'function') {
+      updateContainerTabStripFades();
+      return;
+    }
+    const frame = window.requestAnimationFrame(() => {
+      updateContainerTabStripFades();
+    });
+    return () => {
+      window.cancelAnimationFrame(frame);
+    };
+  }, [activeContainersHostId, draggedContainerHostId, updateContainerTabStripFades]);
+
+  const focusContainerTabByIndex = useCallback(
+    (index: number) => {
+      const nextTab = containersViewModel.containerTabs[index];
+      if (!nextTab) {
+        return;
+      }
+      containersViewModel.focusHostContainersTab(nextTab.hostId);
+      containerTabButtonRefs.current[nextTab.hostId]?.focus();
+    },
+    [containersViewModel],
+  );
+
+  const handleContainerTabKeyDown = useCallback(
+    (event: ReactKeyboardEvent<HTMLButtonElement>, currentIndex: number) => {
+      if (containersViewModel.containerTabs.length <= 1) {
+        return;
+      }
+      if (event.key === 'ArrowLeft') {
+        event.preventDefault();
+        const nextIndex =
+          currentIndex <= 0
+            ? containersViewModel.containerTabs.length - 1
+            : currentIndex - 1;
+        focusContainerTabByIndex(nextIndex);
+        return;
+      }
+      if (event.key === 'ArrowRight') {
+        event.preventDefault();
+        const nextIndex =
+          currentIndex >= containersViewModel.containerTabs.length - 1
+            ? 0
+            : currentIndex + 1;
+        focusContainerTabByIndex(nextIndex);
+        return;
+      }
+      if (event.key === 'Home') {
+        event.preventDefault();
+        focusContainerTabByIndex(0);
+        return;
+      }
+      if (event.key === 'End') {
+        event.preventDefault();
+        focusContainerTabByIndex(containersViewModel.containerTabs.length - 1);
+      }
+    },
+    [containersViewModel.containerTabs.length, focusContainerTabByIndex],
+  );
+
   return (
     <section
       className={cn(
@@ -83,29 +201,48 @@ export function ContainersShell({
           }}
         />
       ) : null}
-      <div
-        className="flex min-w-0 items-stretch gap-[0.55rem] overflow-x-auto px-[0.1rem] py-[0.2rem]"
-        role="tablist"
-        aria-label="Containers hosts"
-      >
-        {containersViewModel.containerTabs.length > 0 ? (
-          containersViewModel.containerTabs.map((tab) => {
-            const host = findHost(homeViewModel.hosts, tab.hostId);
-            const title = host?.label ?? tab.title.replace(/ · (Containers|ECS)$/, '');
-            const runtimeLabel =
-              tab.kind === 'ecs-cluster'
-                ? 'ECS'
-                : tab.runtime === 'docker'
-                  ? 'Docker'
-                  : tab.runtime === 'podman'
-                    ? 'Podman'
-                    : null;
-            const isActiveTab = activeContainersHostId === tab.hostId;
-            const preview =
-              containerTabDropPreview?.targetHostId === tab.hostId
-                ? containerTabDropPreview.placement
-                : null;
-            return (
+      <div className="relative min-w-0">
+        {showLeftTabStripFade ? (
+          <div
+            data-testid="containers-host-tab-fade-left"
+            className="pointer-events-none absolute inset-y-[0.2rem] left-0 z-[1] w-10 rounded-l-[22px] bg-[linear-gradient(90deg,color-mix(in_srgb,var(--app-bg)_96%,transparent_4%),transparent)]"
+          />
+        ) : null}
+        {showRightTabStripFade ? (
+          <div
+            data-testid="containers-host-tab-fade-right"
+            className="pointer-events-none absolute inset-y-[0.2rem] right-0 z-[1] w-10 rounded-r-[22px] bg-[linear-gradient(270deg,color-mix(in_srgb,var(--app-bg)_96%,transparent_4%),transparent)]"
+          />
+        ) : null}
+        <div
+          ref={containerTabStripRef}
+          className="flex min-w-0 items-stretch gap-[0.55rem] overflow-x-auto px-[0.1rem] py-[0.2rem]"
+          role="tablist"
+          aria-label="Containers hosts"
+          aria-orientation="horizontal"
+          onScroll={updateContainerTabStripFades}
+        >
+          {containersViewModel.containerTabs.length > 0 ? (
+            containersViewModel.containerTabs.map((tab, index) => {
+              const host = findHost(homeViewModel.hosts, tab.hostId);
+              const title =
+                host?.label ?? tab.title.replace(/ · (Containers|ECS)$/, '');
+              const runtimeLabel =
+                tab.kind === 'ecs-cluster'
+                  ? 'ECS'
+                  : tab.runtime === 'docker'
+                    ? 'Docker'
+                    : tab.runtime === 'podman'
+                      ? 'Podman'
+                      : null;
+              const isActiveTab = activeContainersHostId === tab.hostId;
+              const preview =
+                containerTabDropPreview?.targetHostId === tab.hostId
+                  ? containerTabDropPreview.placement
+                  : null;
+              const tabId = `containers-host-tab-${encodeURIComponent(tab.hostId)}`;
+              const panelId = `containers-host-panel-${encodeURIComponent(tab.hostId)}`;
+              return (
                 <div
                   key={tab.hostId}
                   className={cn(
@@ -176,9 +313,19 @@ export function ContainersShell({
                 }}
               >
                 <button
+                  id={tabId}
+                  ref={(node) => {
+                    if (node) {
+                      containerTabButtonRefs.current[tab.hostId] = node;
+                      return;
+                    }
+                    delete containerTabButtonRefs.current[tab.hostId];
+                  }}
                   type="button"
                   role="tab"
                   aria-selected={isActiveTab}
+                  aria-controls={panelId}
+                  tabIndex={isActiveTab ? 0 : -1}
                   className={cn(
                     hostTabButtonBaseClass,
                     isActiveTab
@@ -187,6 +334,9 @@ export function ContainersShell({
                   )}
                   onClick={() => {
                     containersViewModel.focusHostContainersTab(tab.hostId);
+                  }}
+                  onKeyDown={(event) => {
+                    handleContainerTabKeyDown(event, index);
                   }}
                 >
                   <span className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap font-semibold">
@@ -223,13 +373,14 @@ export function ContainersShell({
                   ×
                 </IconButton>
               </div>
-            );
-          })
-        ) : (
-          <div className="inline-flex min-h-12 items-center px-[0.2rem] text-[0.92rem] text-[var(--text-soft)]">
-            열린 컨테이너 화면이 없습니다.
-          </div>
-        )}
+              );
+            })
+          ) : (
+            <div className="inline-flex min-h-12 items-center px-[0.2rem] text-[0.92rem] text-[var(--text-soft)]">
+              열린 컨테이너 화면이 없습니다.
+            </div>
+          )}
+        </div>
       </div>
       <div className="min-h-0 flex-1">
         {containersViewModel.containerTabs.length > 0 ? (
@@ -241,8 +392,14 @@ export function ContainersShell({
             const isActiveTab = activeContainersHostId === tab.hostId;
             return (
               <div
+                id={`containers-host-panel-${encodeURIComponent(tab.hostId)}`}
                 key={tab.hostId}
-                className={cn('h-full min-h-0', isActiveTab ? 'block' : 'hidden')}
+                role="tabpanel"
+                aria-labelledby={`containers-host-tab-${encodeURIComponent(tab.hostId)}`}
+                aria-hidden={!isActiveTab}
+                hidden={!isActiveTab}
+                tabIndex={isActiveTab ? 0 : -1}
+                className="h-full min-h-0"
               >
                 {tab.kind === 'ecs-cluster' ? (
                   <AwsEcsWorkspace

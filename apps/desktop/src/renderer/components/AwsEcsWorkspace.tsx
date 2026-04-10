@@ -157,6 +157,8 @@ const ecsEmptyDetailClass =
   "rounded-[16px] bg-[color-mix(in_srgb,var(--surface)_82%,transparent_18%)] px-4 py-4 text-[var(--text-soft)]";
 const ecsLogsOutputClass =
   "grid min-h-0 flex-1 content-start gap-[0.35rem] overflow-auto rounded-[18px] border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[rgba(7,13,24,0.88)] px-[1.05rem] py-4 text-[rgba(226,234,255,0.92)]";
+const ecsLogsOverlayChipClass =
+  "pointer-events-none absolute left-[1rem] right-[1rem] top-[1rem] z-[2] flex items-center justify-center gap-[0.45rem] rounded-[12px] border border-[color-mix(in_srgb,var(--accent-strong)_34%,white_16%)] bg-[color-mix(in_srgb,rgba(14,23,38,0.94)_78%,var(--accent-strong)_22%)] px-[0.95rem] py-[0.42rem] text-[0.8rem] font-semibold text-[rgba(243,247,255,0.98)] shadow-[0_16px_32px_rgba(4,10,18,0.34)] backdrop-blur-[10px]";
 const ecsFactsGridClass =
   "grid grid-cols-[repeat(2,minmax(0,1fr))] gap-[0.9rem_1rem] max-[760px]:grid-cols-1";
 const ecsFactsItemClass = "grid gap-[0.2rem]";
@@ -494,6 +496,7 @@ function compareServices(
 function createEmptyLogsState(): LogsPanelState {
   return {
     loading: false,
+    refreshing: false,
     error: null,
     snapshot: null,
     follow: true,
@@ -1426,7 +1429,9 @@ export function AwsEcsWorkspace({
         return;
       }
       setLocalEcsLogsByServiceName((previous) => {
-        const current = previous[serviceName] ?? createEmptyLogsState();
+        const current = previous[serviceName]
+          ? { ...createEmptyLogsState(), ...previous[serviceName] }
+          : createEmptyLogsState();
         const next =
           typeof updater === "function" ? updater(current) : updater;
         return {
@@ -1438,7 +1443,10 @@ export function AwsEcsWorkspace({
     [host.id, onSetLogsState],
   );
   const logsState = selectedService
-    ? ecsLogsByServiceName[selectedService.serviceName] ?? createEmptyLogsState()
+    ? {
+        ...createEmptyLogsState(),
+        ...(ecsLogsByServiceName[selectedService.serviceName] ?? {}),
+      }
     : createEmptyLogsState();
   const logsRangeMode = logsState.rangeMode;
   const logsRelativeRange = logsState.relativeRange;
@@ -1613,15 +1621,15 @@ export function AwsEcsWorkspace({
       latestLogsRequestIdRef.current[input.serviceName] = requestId;
       const requestedTaskArn = input.taskArn ?? null;
       const requestedContainerName = input.containerName ?? null;
-      if (!input.silent) {
-        setServiceLogsState(input.serviceName, (previous) => ({
-          ...previous,
-          loading: true,
-          error: null,
-          taskArn: requestedTaskArn,
-          containerName: requestedContainerName,
-        }));
-      }
+      setServiceLogsState(input.serviceName, (previous) => ({
+        ...previous,
+        loading: input.silent ? previous.loading : true,
+        refreshing:
+          previous.snapshot !== null && !previous.snapshot.unsupportedReason,
+        error: null,
+        taskArn: requestedTaskArn,
+        containerName: requestedContainerName,
+      }));
       try {
         const snapshot = await loadEcsServiceLogs({
           hostId: host.id,
@@ -1639,6 +1647,7 @@ export function AwsEcsWorkspace({
         setServiceLogsState(input.serviceName, (previous) => ({
           ...previous,
           loading: false,
+          refreshing: false,
           error: null,
           taskArn: requestedTaskArn,
           containerName: requestedContainerName,
@@ -1658,6 +1667,7 @@ export function AwsEcsWorkspace({
         setServiceLogsState(input.serviceName, (previous) => ({
           ...previous,
           loading: false,
+          refreshing: false,
           error:
             error instanceof Error
               ? error.message
@@ -2729,50 +2739,59 @@ export function AwsEcsWorkspace({
                               <span>{logsRangeLabel}</span>
                               <span>{filteredLogs.length} lines</span>
                             </CardMeta>
-                            <div
-                              ref={logsOutputRef}
-                              className={ecsLogsOutputClass}
-                              data-testid="ecs-logs-output"
-                              onScroll={handleLogsScroll}
-                            >
-                              {filteredLogs.length === 0 ? (
-                                <div className={ecsEmptyDetailClass}>
-                                  {trimmedLogsSearchQuery
-                                    ? "검색 결과가 없습니다."
-                                    : logsRangeMode === "absolute"
-                                      ? "선택한 범위에 로그가 없습니다."
-                                      : "최근 30분 기준 로그가 없습니다."}
+                            <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
+                              {logsState.refreshing ? (
+                                <div
+                                  className={ecsLogsOverlayChipClass}
+                                  data-testid="ecs-logs-loading-chip"
+                                >
+                                  <span className="h-2.5 w-2.5 rounded-full bg-[var(--accent-strong)] shadow-[0_0_0_4px_color-mix(in_srgb,var(--accent-strong)_24%,transparent_76%)]" />
+                                  갱신 중...
                                 </div>
-                              ) : (
-                                filteredLogs.map((entry) => (
-                                  <div
-                                    key={entry.id}
-                                    className="grid grid-cols-[max-content_minmax(0,1fr)] items-start gap-[0.9rem]"
-                                  >
-                                    <span
-                                      className="whitespace-nowrap text-[rgba(163,181,214,0.82)]"
-                                      title={entry.timestamp}
-                                    >
-                                      {formatLoadedAt(entry.timestamp)}
-                                    </span>
-                                    <span className="min-w-0 break-words whitespace-pre-wrap">
-                                      {entry.containerName || entry.taskId ? (
-                                        <span className="text-[rgba(163,181,214,0.82)]">
-                                          {[entry.containerName, entry.taskId]
-                                            .filter(Boolean)
-                                            .join(" · ")}{" "}
-                                        </span>
-                                      ) : null}
-                                      {entry.message}
-                                    </span>
-                                  </div>
-                                ))
-                              )}
+                              ) : null}
                               <div
-                                ref={logsBottomRef}
-                                className="h-px w-full"
-                                aria-hidden="true"
-                              />
+                                ref={logsOutputRef}
+                                className={ecsLogsOutputClass}
+                                data-testid="ecs-logs-output"
+                                onScroll={handleLogsScroll}
+                              >
+                                {filteredLogs.length === 0 ? (
+                                  <div className={ecsEmptyDetailClass}>
+                                    {trimmedLogsSearchQuery
+                                      ? "검색 결과가 없습니다."
+                                      : "표시할 로그가 없습니다."}
+                                  </div>
+                                ) : (
+                                  filteredLogs.map((entry) => (
+                                    <div
+                                      key={entry.id}
+                                      className="grid grid-cols-[max-content_minmax(0,1fr)] items-start gap-[0.9rem]"
+                                    >
+                                      <span
+                                        className="whitespace-nowrap text-[rgba(163,181,214,0.82)]"
+                                        title={entry.timestamp}
+                                      >
+                                        {formatLoadedAt(entry.timestamp)}
+                                      </span>
+                                      <span className="min-w-0 break-words whitespace-pre-wrap">
+                                        {entry.containerName || entry.taskId ? (
+                                          <span className="text-[rgba(163,181,214,0.82)]">
+                                            {[entry.containerName, entry.taskId]
+                                              .filter(Boolean)
+                                              .join(" · ")}{" "}
+                                          </span>
+                                        ) : null}
+                                        {entry.message}
+                                      </span>
+                                    </div>
+                                  ))
+                                )}
+                                <div
+                                  ref={logsBottomRef}
+                                  className="h-px w-full"
+                                  aria-hidden="true"
+                                />
+                              </div>
                             </div>
                           </>
                         ) : null}

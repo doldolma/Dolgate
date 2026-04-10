@@ -174,6 +174,7 @@ export interface ContainerTunnelTabState {
 
 export interface EcsServiceLogsViewState {
   loading: boolean;
+  refreshing: boolean;
   error: string | null;
   snapshot: AwsEcsServiceLogsSnapshot | null;
   follow: boolean;
