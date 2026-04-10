@@ -34,15 +34,17 @@
   *::-webkit-scrollbar-track {
     border-radius: var(--scrollbar-radius);
     background: var(--scrollbar-track);
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--border) 54%, transparent 46%);
   }
 
   *::-webkit-scrollbar-thumb {
     min-height: 2rem;
     min-width: 2rem;
-    border: 3px solid transparent;
+    border: 2px solid transparent;
     border-radius: var(--scrollbar-radius);
     background: var(--scrollbar-thumb);
     background-clip: padding-box;
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--border) 78%, transparent 22%);
   }
 
   *:hover::-webkit-scrollbar-thumb,

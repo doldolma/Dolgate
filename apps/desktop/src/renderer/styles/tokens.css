@@ -54,10 +54,10 @@
   --share-danger-border: #f0caca;
   --scrollbar-size: 11px;
   --scrollbar-radius: 999px;
-  --scrollbar-track: color-mix(in srgb, var(--surface-strong) 36%, transparent 64%);
-  --scrollbar-thumb: color-mix(in srgb, var(--text-soft) 34%, transparent 66%);
-  --scrollbar-thumb-hover: color-mix(in srgb, var(--accent) 44%, transparent 56%);
-  --scrollbar-thumb-active: color-mix(in srgb, var(--accent-strong) 56%, transparent 44%);
+  --scrollbar-track: color-mix(in srgb, var(--surface-strong) 74%, var(--border) 26%);
+  --scrollbar-thumb: color-mix(in srgb, var(--text-soft) 62%, white 38%);
+  --scrollbar-thumb-hover: color-mix(in srgb, var(--accent) 72%, white 28%);
+  --scrollbar-thumb-active: color-mix(in srgb, var(--accent-strong) 78%, white 22%);
   --scrollbar-corner: transparent;
 }
 
@@ -115,9 +115,9 @@
   --share-danger-border: #6a4048;
   --scrollbar-size: 11px;
   --scrollbar-radius: 999px;
-  --scrollbar-track: color-mix(in srgb, var(--surface-strong) 48%, transparent 52%);
-  --scrollbar-thumb: color-mix(in srgb, var(--text-soft) 42%, transparent 58%);
-  --scrollbar-thumb-hover: color-mix(in srgb, var(--accent) 54%, transparent 46%);
-  --scrollbar-thumb-active: color-mix(in srgb, var(--accent-strong) 62%, transparent 38%);
+  --scrollbar-track: color-mix(in srgb, var(--surface-strong) 86%, black 14%);
+  --scrollbar-thumb: color-mix(in srgb, var(--text-soft) 76%, white 24%);
+  --scrollbar-thumb-hover: color-mix(in srgb, var(--accent) 82%, white 18%);
+  --scrollbar-thumb-active: color-mix(in srgb, var(--accent-strong) 88%, white 12%);
   --scrollbar-corner: transparent;
 }
