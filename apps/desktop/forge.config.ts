@@ -6,18 +6,20 @@ import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const targetPlatform = process.env.DOLSSH_TARGET_PLATFORM ?? process.platform;
+const targetArch = process.env.DOLSSH_TARGET_ARCH ?? process.arch;
+const hasExplicitPackageTarget =
+  Boolean(process.env.DOLSSH_TARGET_PLATFORM) ||
+  Boolean(process.env.DOLSSH_TARGET_ARCH);
 
 function resolveExtraResources(): string[] {
   const extraResources = [path.resolve(__dirname, 'config'), path.resolve(__dirname, 'assets')];
-  const targetPlatform = process.env.DOLSSH_TARGET_PLATFORM;
-  const targetArch = process.env.DOLSSH_TARGET_ARCH;
-  if (!targetPlatform || !targetArch) {
-    return extraResources;
-  }
 
   const binDir = path.resolve(__dirname, `release/resources/${targetPlatform}/${targetArch}/bin`);
   if (!existsSync(binDir)) {
-    throw new Error(`Bundled ssh-core resource directory not found: ${binDir}`);
+    if (hasExplicitPackageTarget) {
+      throw new Error(`Bundled ssh-core resource directory not found: ${binDir}`);
+    }
+    return extraResources;
   }
 
   extraResources.push(binDir);

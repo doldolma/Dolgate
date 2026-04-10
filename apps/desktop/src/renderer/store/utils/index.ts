@@ -11,6 +11,7 @@ export {
   buildWorkspaceTitle,
   classifyContainerLogsErrorMessage,
   createEcsUtilizationHistoryState,
+  createEmptyEcsServiceLogsViewState,
   createPendingSessionId,
   createPendingSessionTab,
   createWorkspaceLeaf,

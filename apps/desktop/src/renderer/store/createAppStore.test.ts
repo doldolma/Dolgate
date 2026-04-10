@@ -3253,6 +3253,55 @@ describe("createAppStore", () => {
     expect(store.getState().containerTabs).toBe(beforeTabs);
   });
 
+  it("merges sequential ECS log state updaters against the latest store state", async () => {
+    const api = createMockApi();
+    const store = createAppStore(api);
+    await store.getState().bootstrap();
+
+    store.setState((state) => ({
+      containerTabs: [
+        ...state.containerTabs,
+        createContainerTab("ecs-host-1", {
+          kind: "ecs-cluster",
+        }),
+      ],
+    }));
+
+    store.getState().setEcsClusterLogsState("ecs-host-1", "worker", (previous) => ({
+      ...previous,
+      follow: false,
+      rangeMode: "absolute",
+      absoluteRange: {
+        startDate: "2026-03-01",
+        startTime: "00:00:00",
+        endDate: "2026-03-02",
+        endTime: "12:30:00",
+      },
+    }));
+    store.getState().setEcsClusterLogsState("ecs-host-1", "worker", (previous) => ({
+      ...previous,
+      loading: true,
+      taskArn: "task-1",
+    }));
+
+    const ecsTab = store
+      .getState()
+      .containerTabs.find((tab) => tab.hostId === "ecs-host-1");
+
+    expect(ecsTab?.ecsLogsByServiceName.worker).toMatchObject({
+      follow: false,
+      rangeMode: "absolute",
+      absoluteRange: {
+        startDate: "2026-03-01",
+        startTime: "00:00:00",
+        endDate: "2026-03-02",
+        endTime: "12:30:00",
+      },
+      loading: true,
+      taskArn: "task-1",
+    });
+  });
+
   it("stops persisted container service tunnels when the host containers tab is closed", async () => {
     const api = createMockApi();
     const store = createAppStore(api);

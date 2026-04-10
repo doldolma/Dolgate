@@ -1,4 +1,5 @@
 const fs = require('node:fs/promises');
+const { existsSync } = require('node:fs');
 const { builtinModules } = require('node:module');
 const path = require('node:path');
 
@@ -50,9 +51,29 @@ async function removePreviouslyCopiedPackages() {
 }
 
 function resolveInstalledPackageJson(packageName) {
-  const entryPath = require.resolve(packageName, {
-    paths: [desktopRoot, repoRoot]
-  });
+  const searchPaths = [desktopRoot, repoRoot];
+  for (const searchRoot of searchPaths) {
+    const manifestCandidate = path.join(
+      searchRoot,
+      'node_modules',
+      ...packageName.split('/'),
+      'package.json'
+    );
+    if (existsSync(manifestCandidate)) {
+      return manifestCandidate;
+    }
+  }
+
+  let entryPath;
+  try {
+    entryPath = require.resolve(`${packageName}/package.json`, {
+      paths: searchPaths
+    });
+  } catch {
+    entryPath = require.resolve(packageName, {
+      paths: searchPaths
+    });
+  }
 
   let currentDirectory = path.dirname(entryPath);
   while (true) {
@@ -159,6 +180,7 @@ if (require.main === module) {
 
 module.exports = {
   copyRuntimeDependencies,
+  resolveInstalledPackageJson,
   shouldIncludeRuntimePackage,
   resolveTargetPlatform
 };

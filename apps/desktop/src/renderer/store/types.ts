@@ -185,6 +185,10 @@ export interface EcsServiceLogsViewState {
   absoluteRange: LogsAbsoluteRangeValue | null;
 }
 
+export type EcsServiceLogsStateUpdater =
+  | EcsServiceLogsViewState
+  | ((previous: EcsServiceLogsViewState) => EcsServiceLogsViewState);
+
 export interface HostContainersTabState {
   kind: HostContainersTabKind;
   hostId: string;
@@ -516,7 +520,7 @@ interface AppStateParts {
   setEcsClusterLogsState: (
     hostId: string,
     serviceName: string,
-    state: EcsServiceLogsViewState | null,
+    state: EcsServiceLogsStateUpdater | null,
   ) => void;
   refreshHostContainerLogs: (
     hostId: string,
