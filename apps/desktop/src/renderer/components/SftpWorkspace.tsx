@@ -2633,10 +2633,21 @@ export function SftpWorkspace({
                     aria-label="연결 종료"
                     title="연결 종료"
                     size="sm"
-                    className="h-[2.35rem] w-[2.35rem] rounded-[12px] text-[1.05rem] font-semibold"
+                    className="h-[2.35rem] w-[2.35rem] rounded-[12px] p-0"
                     onClick={() => void onDisconnectPane(pane.id)}
                   >
-                    X
+                    <svg
+                      aria-hidden="true"
+                      viewBox="0 0 16 16"
+                      className="h-[1rem] w-[1rem]"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                    >
+                      <path d="M4 4 12 12" />
+                      <path d="M12 4 4 12" />
+                    </svg>
                   </IconButton>
                 ) : null}
               </header>

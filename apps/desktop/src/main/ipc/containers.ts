@@ -242,6 +242,7 @@ export function registerContainersIpcHandlers(ctx: MainIpcContext): void {
 
       if (isAwsEc2HostRecord(typedHost)) {
         const hydratedHost =
+          runtimeInfo.hydratedHost ??
           ctx.consumeAwsSftpPreflight(runtimeInfo.endpointId, typedHost.id) ??
           (await ctx.resolveAwsSftpPreflight({
             endpointId: runtimeInfo.endpointId,

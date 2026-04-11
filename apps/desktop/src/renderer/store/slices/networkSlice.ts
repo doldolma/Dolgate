@@ -159,7 +159,11 @@ export function createNetworkSlice(deps: SliceDeps): NetworkSlice {
     promptForMissingUsername,
   } = services;
   const { startPendingSessionConnect } = sessionServices;
-  const { startPendingContainerShellConnect, loadContainersList } =
+  const {
+    clearContainerTabConnectionOverlay,
+    startPendingContainerShellConnect,
+    loadContainersList,
+  } =
     containersServices;
   const { connectTrustedHostPane } = sftpServices;
 
@@ -345,6 +349,15 @@ export function createNetworkSlice(deps: SliceDeps): NetworkSlice {
           },
     dismissPendingHostKeyPrompt: () => {
             const pending = get().pendingHostKeyPrompt;
+            if (pending?.action.kind === "containerShell" && pending.sessionId) {
+              const message = `${pending.probe.hostLabel} 호스트 키 확인이 취소되었습니다.`;
+              markSessionError(set, pending.sessionId, message, {
+                progress: resolveErrorProgress(message),
+              });
+              clearContainerTabConnectionOverlay(set, pending.action.hostId);
+              set({ pendingHostKeyPrompt: null });
+              return;
+            }
             if (pending?.sessionId) {
               const message = `${pending.probe.hostLabel} 호스트 키 확인이 취소되었습니다.`;
               markSessionError(set, pending.sessionId, message, {

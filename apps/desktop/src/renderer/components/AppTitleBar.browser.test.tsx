@@ -111,7 +111,7 @@ describe('AppTitleBar update popover', () => {
     renderTitleBar();
 
     const sftpButton = screen.getByRole('button', { name: 'SFTP' });
-    expect(sftpButton.className).toContain('bg-[rgba(255,255,255,0.08)]');
+    expect(sftpButton.className).toContain('bg-[rgba(255,255,255,0.06)]');
     expect(sftpButton.className).toContain('text-[rgba(243,247,251,0.78)]');
   });
 
@@ -164,7 +164,7 @@ describe('AppTitleBar update popover', () => {
     const pill = sessionButton.closest('.group');
 
     expect(pill).toBeTruthy();
-    expect(pill?.className).toContain('bg-[rgba(255,255,255,0.08)]');
+    expect(pill?.className).toContain('bg-[rgba(255,255,255,0.06)]');
     expect(pill?.contains(closeButton)).toBe(true);
     expect(container.querySelectorAll('.group').length).toBeGreaterThan(0);
   });
@@ -217,8 +217,84 @@ describe('AppTitleBar update popover', () => {
     const pill = sessionButton.closest('.group');
 
     expect(pill).toBeTruthy();
-    expect(pill?.className).toContain('bg-[rgba(255,255,255,0.96)]');
-    expect(pill?.className).toContain('border-[rgba(255,255,255,0.24)]');
+    expect(pill?.className).toContain('bg-[rgba(255,255,255,0.94)]');
+    expect(pill?.className).toContain('border-[rgba(255,255,255,0.14)]');
     expect(sessionButton.className).toContain('text-[var(--accent-strong)]');
+  });
+
+  it('hides the native scrollbar and shows edge fades when the titlebar tab strip overflows', () => {
+    const tabs = Array.from({ length: 4 }, (_, index) => ({
+      id: `tab-${index + 1}`,
+      sessionId: `session-${index + 1}`,
+      source: 'host' as const,
+      hostId: `host-${index + 1}`,
+      title: `Session ${index + 1}`,
+      status: 'connected' as const,
+      lastEventAt: new Date().toISOString(),
+    }));
+
+    const { container } = render(
+      <AppTitleBar
+        desktopPlatform="darwin"
+        tabs={tabs}
+        workspaces={[]}
+        tabStrip={tabs.map((tab) => ({ kind: 'session' as const, sessionId: tab.sessionId }))}
+        activeWorkspaceTab="session:session-4"
+        draggedSession={null}
+        updateState={createUpdateState()}
+        windowState={{ isMaximized: false }}
+        onSelectHome={vi.fn()}
+        onSelectSftp={vi.fn()}
+        onSelectContainers={vi.fn()}
+        onSelectSession={vi.fn()}
+        onSelectWorkspace={vi.fn()}
+        onCloseSession={vi.fn().mockResolvedValue(undefined)}
+        onCloseWorkspace={vi.fn().mockResolvedValue(undefined)}
+        onStartSessionDrag={vi.fn()}
+        onEndSessionDrag={vi.fn()}
+        onDetachSessionToStandalone={vi.fn()}
+        onReorderDynamicTab={vi.fn()}
+        onCheckForUpdates={vi.fn().mockResolvedValue(undefined)}
+        onDownloadUpdate={vi.fn().mockResolvedValue(undefined)}
+        onInstallUpdate={vi.fn().mockResolvedValue(undefined)}
+        onDismissUpdate={vi.fn().mockResolvedValue(undefined)}
+        onOpenReleasePage={vi.fn().mockResolvedValue(undefined)}
+        onMinimizeWindow={vi.fn().mockResolvedValue(undefined)}
+        onMaximizeWindow={vi.fn().mockResolvedValue(undefined)}
+        onRestoreWindow={vi.fn().mockResolvedValue(undefined)}
+        onCloseWindow={vi.fn().mockResolvedValue(undefined)}
+      />,
+    );
+
+    const tabStrip = container.querySelector(
+      '[data-titlebar-tab-strip="true"]',
+    ) as HTMLDivElement | null;
+    expect(tabStrip).not.toBeNull();
+    if (!tabStrip) {
+      throw new Error('expected titlebar tab strip');
+    }
+
+    let scrollLeft = 0;
+    Object.defineProperty(tabStrip, 'clientWidth', {
+      configurable: true,
+      get: () => 260,
+    });
+    Object.defineProperty(tabStrip, 'scrollWidth', {
+      configurable: true,
+      get: () => 720,
+    });
+    Object.defineProperty(tabStrip, 'scrollLeft', {
+      configurable: true,
+      get: () => scrollLeft,
+    });
+
+    fireEvent.scroll(tabStrip);
+    expect(screen.queryByTestId('titlebar-tab-strip-fade-left')).not.toBeInTheDocument();
+    expect(screen.getByTestId('titlebar-tab-strip-fade-right')).toBeInTheDocument();
+
+    scrollLeft = 180;
+    fireEvent.scroll(tabStrip);
+    expect(screen.getByTestId('titlebar-tab-strip-fade-left')).toBeInTheDocument();
+    expect(screen.getByTestId('titlebar-tab-strip-fade-right')).toBeInTheDocument();
   });
 });

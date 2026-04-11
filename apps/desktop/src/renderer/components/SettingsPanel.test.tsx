@@ -122,6 +122,16 @@ describe('SettingsPanel', () => {
     expect(screen.getByText('어두운 배경으로 눈부심을 줄입니다.')).toBeInTheDocument();
   });
 
+  it('shows Appearance before Terminal Theme in the general settings flow', () => {
+    renderSettingsPanel();
+
+    const headings = screen.getAllByRole('heading', { level: 3 }).map((heading) => heading.textContent);
+
+    expect(headings.indexOf('Theme')).toBeGreaterThan(-1);
+    expect(headings.indexOf('Terminal Theme')).toBeGreaterThan(-1);
+    expect(headings.indexOf('Theme')).toBeLessThan(headings.indexOf('Terminal Theme'));
+  });
+
   it('offers a System terminal theme option that updates the global theme mode', () => {
     const { onUpdateSettings } = renderSettingsPanel();
 

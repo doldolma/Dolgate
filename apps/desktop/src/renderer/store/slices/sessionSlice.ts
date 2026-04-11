@@ -183,6 +183,7 @@ export function createSessionSlice(deps: SliceDeps): SessionSlice {
     pendingMissingUsernamePrompt: null,
     pendingInteractiveAuth: null,
     pendingConnectionAttempts: [],
+    sessionReturnTargets: {},
     openLocalTerminal: async (cols, rows) => {
             await startLocalTerminalFlow(set, get, cols, rows);
           },
@@ -1102,9 +1103,19 @@ export function createSessionSlice(deps: SliceDeps): SessionSlice {
                 currentTab.status === "connected"
                   ? null
                   : currentTab.connectionProgress;
+              const nextPendingConnectionAttempts =
+                state.pendingConnectionAttempts.filter(
+                  (attempt) =>
+                    !(
+                      attempt.sessionId === sessionId &&
+                      attempt.source === "container-shell"
+                    ),
+                );
               if (
                 currentTab.hasReceivedOutput === true &&
-                nextConnectionProgress === currentTab.connectionProgress
+                nextConnectionProgress === currentTab.connectionProgress &&
+                nextPendingConnectionAttempts.length ===
+                  state.pendingConnectionAttempts.length
               ) {
                 return state;
               }
@@ -1118,6 +1129,7 @@ export function createSessionSlice(deps: SliceDeps): SessionSlice {
     
               return {
                 tabs: nextTabs,
+                pendingConnectionAttempts: nextPendingConnectionAttempts,
               };
             });
           }

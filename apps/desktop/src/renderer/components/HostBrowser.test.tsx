@@ -330,7 +330,7 @@ describe('HostBrowser helpers', () => {
 
   it('defines import actions for the split-button menu in the expected order', () => {
     expect(HOST_BROWSER_IMPORT_MENU_LABELS).toEqual([
-      'Import from AWS',
+      'Import via AWS SSM',
       'Import OpenSSH',
       'Import from Xshell',
       'Import from Termius',
@@ -340,14 +340,14 @@ describe('HostBrowser helpers', () => {
 
   it('hides the Xshell import action outside Windows', () => {
     expect(getHostBrowserVisibleImportMenuLabels('win32')).toEqual([
-      'Import from AWS',
+      'Import via AWS SSM',
       'Import OpenSSH',
       'Import from Xshell',
       'Import from Termius',
       'Import from Warpgate'
     ]);
     expect(getHostBrowserVisibleImportMenuLabels('darwin')).toEqual([
-      'Import from AWS',
+      'Import via AWS SSM',
       'Import OpenSSH',
       'Import from Termius',
       'Import from Warpgate'
@@ -449,6 +449,15 @@ describe('HostBrowser dialogs', () => {
     fireEvent.click(treeQueries.getByRole('button', { name: /Nested/ }));
 
     expect(onNavigateGroup).toHaveBeenCalledWith('Servers/Nested');
+  });
+
+  it('keeps the root group selection tint-based without drag shadows', () => {
+    renderBrowser();
+
+    const rootButton = screen.getByRole('button', { name: /All Groups/ });
+    expect(rootButton.className).toContain('bg-[var(--selection-tint)]');
+    expect(rootButton.className).toContain('border-[var(--selection-border)]');
+    expect(rootButton.className).not.toContain('shadow-[0_0_0_2px');
   });
 
   it('moves a dragged group under another group row', async () => {

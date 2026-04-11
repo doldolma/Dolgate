@@ -22,9 +22,9 @@ export function ToggleSwitch({
       role="switch"
       aria-checked={checked}
       className={cn(
-        'flex w-full items-center gap-[0.9rem] rounded-[16px] border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[color-mix(in_srgb,var(--surface-strong)_88%,transparent_12%)] px-[0.85rem] py-[0.7rem] text-left text-[var(--text)] transition-[border-color,box-shadow,background] duration-150 hover:border-[color-mix(in_srgb,var(--accent-strong)_28%,var(--border))] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[color-mix(in_srgb,var(--accent-strong)_50%,white_50%)] focus-visible:outline-offset-2',
+        'flex w-full items-center gap-[0.9rem] rounded-[16px] border border-[var(--border)] bg-[color-mix(in_srgb,var(--surface-strong)_88%,transparent_12%)] px-[0.85rem] py-[0.7rem] text-left text-[var(--text)] transition-[border-color,background] duration-150 hover:border-[color-mix(in_srgb,var(--accent-strong)_22%,var(--border)_78%)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[color-mix(in_srgb,var(--accent-strong)_50%,white_50%)] focus-visible:outline-offset-2',
         checked
-          ? 'border-[color-mix(in_srgb,var(--accent-strong)_32%,var(--border))] bg-[color-mix(in_srgb,var(--accent-strong)_11%,var(--surface-strong)_89%)]'
+          ? 'border-[var(--selection-border)] bg-[var(--selection-tint)]'
           : '',
         className,
       )}
@@ -41,7 +41,7 @@ export function ToggleSwitch({
       >
         <span
           className={cn(
-            'absolute left-[0.18rem] top-[0.18rem] h-[1.44rem] w-[1.44rem] rounded-full bg-white shadow-[0_6px_14px_rgba(16,26,40,0.2)] transition-transform duration-150',
+            'absolute left-[0.18rem] top-[0.18rem] h-[1.44rem] w-[1.44rem] rounded-full bg-white shadow-[0_3px_10px_rgba(16,26,40,0.12)] transition-transform duration-150',
             checked ? 'translate-x-[1.18rem]' : '',
           )}
         />

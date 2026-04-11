@@ -15,7 +15,7 @@ export function EmptyState({
   return (
     <div
       className={cn(
-        'grid-column-[1/-1] rounded-[24px] border border-dashed border-[color-mix(in_srgb,var(--accent-strong)_26%,var(--border)_74%)] bg-[color-mix(in_srgb,var(--surface-muted)_92%,transparent_8%)] px-[1.25rem] py-[1.2rem] shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]',
+        'grid-column-[1/-1] rounded-[24px] border border-dashed border-[color-mix(in_srgb,var(--accent-strong)_22%,var(--border)_78%)] bg-[color-mix(in_srgb,var(--surface-muted)_94%,transparent_6%)] px-[1.25rem] py-[1.2rem] shadow-none',
         className,
       )}
       {...props}

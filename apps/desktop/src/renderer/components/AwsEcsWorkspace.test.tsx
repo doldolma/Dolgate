@@ -479,7 +479,9 @@ describe("AwsEcsWorkspace", () => {
       "aria-selected",
       "true",
     );
-    expect(screen.getByRole("tab", { name: "Overview" })).toHaveClass("ring-1");
+    expect(screen.getByRole("tab", { name: "Overview" })).toHaveClass(
+      "bg-[var(--selection-tint)]",
+    );
     expect(screen.getByText("배포 정보")).toBeInTheDocument();
     expect(screen.getByText("Deployments")).toBeInTheDocument();
     expect(screen.getByText("Recent events")).toBeInTheDocument();
@@ -533,15 +535,11 @@ describe("AwsEcsWorkspace", () => {
 
     expect(failedRow).toBeTruthy();
     expect(selectedRow).toBeTruthy();
-    expect(failedRow?.className).toContain(
-      "border-[color-mix(in_srgb,var(--border)_82%,white_18%)]",
-    );
+    expect(failedRow?.className).toContain("border-[var(--border)]");
     expect(failedRow?.className).not.toContain(
       "border-[color-mix(in_srgb,var(--danger)_28%,var(--border)_72%)]",
     );
-    expect(selectedRow?.className).toContain(
-      "border-[color-mix(in_srgb,var(--accent-strong)_28%,var(--border)_72%)]",
-    );
+    expect(selectedRow?.className).toContain("border-[var(--selection-border)]");
   });
 
   it("switches to logs panel and loads awslogs entries", async () => {
@@ -573,7 +571,9 @@ describe("AwsEcsWorkspace", () => {
       "aria-selected",
       "true",
     );
-    expect(screen.getByRole("tab", { name: "Logs" })).toHaveClass("ring-1");
+    expect(screen.getByRole("tab", { name: "Logs" })).toHaveClass(
+      "bg-[var(--selection-tint)]",
+    );
     expect(await screen.findByText("hello from task-1")).toBeInTheDocument();
   });
 
@@ -1348,7 +1348,9 @@ describe("AwsEcsWorkspace", () => {
       "aria-selected",
       "true",
     );
-    expect(screen.getByRole("tab", { name: "Tunnel" })).toHaveClass("ring-1");
+    expect(screen.getByRole("tab", { name: "Tunnel" })).toHaveClass(
+      "bg-[var(--selection-tint)]",
+    );
     expect(screen.getByText("127.0.0.1:43110")).toBeInTheDocument();
     expect(screen.getByText("127.0.0.1:7001")).toBeInTheDocument();
   });

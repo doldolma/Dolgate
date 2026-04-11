@@ -39,12 +39,12 @@ export function HostCard({
       data-host-card-state={busy ? 'busy' : disabled ? 'disabled' : selected ? 'selected' : 'idle'}
       aria-busy={busy || undefined}
       className={cn(
-        'grid min-h-[96px] cursor-pointer grid-cols-[2.45rem_minmax(0,1fr)_auto] items-center gap-[0.7rem] overflow-hidden rounded-[20px] border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[var(--surface-elevated)] px-[0.9rem] py-[0.82rem] text-left shadow-[var(--shadow-soft)] transition-[background-color,border-color,box-shadow,opacity] duration-150',
+        'grid min-h-[96px] cursor-pointer grid-cols-[2.45rem_minmax(0,1fr)_auto] items-center gap-[0.7rem] overflow-hidden rounded-[20px] border border-[var(--border)] bg-[var(--surface-elevated)] px-[0.9rem] py-[0.82rem] text-left shadow-none transition-[background-color,border-color,opacity] duration-150',
         expanded ? 'h-auto items-start' : 'h-[96px]',
         selected || busy
-          ? 'border-[color-mix(in_srgb,var(--accent-strong)_40%,var(--border)_60%)] bg-[color-mix(in_srgb,var(--surface-elevated)_88%,var(--accent-strong)_12%)]'
-          : 'hover:border-[color-mix(in_srgb,var(--accent-strong)_34%,var(--border)_66%)] hover:bg-[color-mix(in_srgb,var(--surface-elevated)_92%,var(--accent-strong)_8%)]',
-        busy && 'shadow-[0_0_0_1px_color-mix(in_srgb,var(--accent-strong)_14%,transparent_86%),var(--shadow-soft)]',
+          ? 'border-[var(--selection-border)] bg-[var(--selection-tint)]'
+          : 'hover:border-[color-mix(in_srgb,var(--accent-strong)_22%,var(--border)_78%)] hover:bg-[color-mix(in_srgb,var(--surface-elevated)_92%,var(--accent-strong)_8%)]',
+        busy && 'bg-[var(--selection-tint-strong)]',
         disabled && 'opacity-70',
         className,
       )}

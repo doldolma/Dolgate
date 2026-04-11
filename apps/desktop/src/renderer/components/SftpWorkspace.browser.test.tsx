@@ -1007,7 +1007,10 @@ describe("SftpWorkspace column resizing", () => {
     const { onDisconnectPane } = renderWorkspace({ sftp });
 
     expect(screen.getByText("synology")).toBeTruthy();
-    fireEvent.click(screen.getByLabelText("연결 종료"));
+    const disconnectButton = screen.getByLabelText("연결 종료");
+
+    expect(disconnectButton.querySelector("svg")).toBeTruthy();
+    fireEvent.click(disconnectButton);
 
     await waitFor(() => expect(onDisconnectPane).toHaveBeenCalledWith("right"));
   });

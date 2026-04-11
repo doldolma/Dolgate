@@ -162,6 +162,15 @@ export function createRuntimeEventSlice(deps: SliceDeps): RuntimeEventSlice {
     scheduleActivityLogsRefresh,
   } = services;
   const { refreshHostAndKeychainState } = bootstrapServices;
+  const missingContainerShellMessage =
+    "컨테이너 셸을 시작하지 못했습니다. /bin/sh 또는 /bin/bash가 없거나 셸이 바로 종료되었습니다.";
+  const missingEcsShellMessage =
+    "ECS 컨테이너 셸을 시작하지 못했습니다. /bin/sh가 없거나 셸 프로세스가 바로 종료되었을 수 있습니다.";
+  const IMMEDIATE_ECS_CLOSE_WINDOW_MS = 5_000;
+  const isLikelyMissingShellErrorMessage = (message: string): boolean =>
+    /status 127|command not found|not found|no such file|cannot execute|exec format|executable file not found/i.test(
+      message,
+    );
 
   return {
     handleCoreEvent: (event) => {
@@ -729,20 +738,118 @@ export function createRuntimeEventSlice(deps: SliceDeps): RuntimeEventSlice {
               return;
             }
     
-            const ecsShellAttempt = findPendingConnectionAttempt(get(), sessionId);
             const resolvedShellKind =
               typeof event.payload.shellKind === "string"
                 ? event.payload.shellKind.trim() || undefined
                 : undefined;
-    
+
             set((state) => {
-              if (event.type === "closed") {
-                return removeSessionFromState(state, sessionId);
-              }
-    
               const currentTab = state.tabs.find(
                 (tab) => tab.sessionId === sessionId,
               );
+              const currentAttempt = findPendingConnectionAttempt(
+                state,
+                sessionId,
+              );
+              const rawEventMessage =
+                event.type === "error"
+                  ? String(event.payload.message ?? "SSH error")
+                  : "";
+              const shellLaunchFailureMessage =
+                currentAttempt?.source === "container-shell"
+                  ? missingContainerShellMessage
+                  : currentAttempt?.source === "ecs-shell"
+                    ? missingEcsShellMessage
+                    : currentTab?.shellKind === "aws-ecs-exec"
+                    ? missingEcsShellMessage
+                    : null;
+              const isEcsExecTab = currentTab?.shellKind === "aws-ecs-exec";
+              const wasClosedImmediatelyAfterLastEvent =
+                currentTab != null &&
+                Date.now() - new Date(currentTab.lastEventAt).getTime() <=
+                  IMMEDIATE_ECS_CLOSE_WINDOW_MS;
+              const hasKnownShellLaunchFailureState =
+                currentTab?.status === "error" &&
+                (
+                  (shellLaunchFailureMessage != null &&
+                    currentTab.errorMessage === shellLaunchFailureMessage) ||
+                  isEcsExecTab
+                );
+              const isContainerShellLaunchFailure =
+                shellLaunchFailureMessage != null &&
+                currentTab != null &&
+                (
+                  hasKnownShellLaunchFailureState ||
+                  (event.type === "error" &&
+                    isEcsExecTab &&
+                    (currentTab.status === "connecting" ||
+                      currentTab.status === "connected" ||
+                      currentTab.status === "error")) ||
+                  (event.type === "error" &&
+                    isLikelyMissingShellErrorMessage(rawEventMessage) &&
+                    (currentAttempt?.source === "container-shell" ||
+                      currentAttempt?.source === "ecs-shell" ||
+                      currentTab?.shellKind === "aws-ecs-exec")) ||
+                  (event.type === "closed" &&
+                    isEcsExecTab &&
+                    wasClosedImmediatelyAfterLastEvent &&
+                    (currentTab.status === "connecting" ||
+                      currentTab.status === "connected" ||
+                      currentTab.status === "error")) ||
+                  (currentTab.hasReceivedOutput !== true &&
+                    (
+                      currentAttempt?.source === "ecs-shell" ||
+                      currentTab?.shellKind === "aws-ecs-exec"
+                        ? currentTab.status === "connecting" ||
+                          currentTab.status === "connected" ||
+                          currentTab.connectionProgress?.stage ===
+                            "waiting-shell"
+                        : currentTab.status === "connected" ||
+                          currentTab.connectionProgress?.stage ===
+                            "waiting-shell"
+                    ))
+                );
+              const nextContainerShellFailureState = (
+                clearAttempt: boolean,
+              ): Partial<AppState> => {
+                if (!shellLaunchFailureMessage) {
+                  return state;
+                }
+                return {
+                  tabs: state.tabs.map((tab): TerminalTab =>
+                    tab.sessionId === sessionId
+                      ? {
+                          ...tab,
+                          status: "error" as const,
+                          errorMessage: shellLaunchFailureMessage,
+                          connectionProgress: createConnectionProgress(
+                            "waiting-shell",
+                            shellLaunchFailureMessage,
+                            {
+                              blockingKind: "dialog",
+                              retryable: false,
+                            },
+                          ),
+                          lastEventAt: new Date().toISOString(),
+                        }
+                      : tab,
+                  ),
+                  pendingConnectionAttempts: clearAttempt
+                    ? state.pendingConnectionAttempts.filter(
+                        (attempt) => attempt.sessionId !== sessionId,
+                      )
+                    : state.pendingConnectionAttempts,
+                };
+              };
+              if (event.type === "error" && isContainerShellLaunchFailure) {
+                return nextContainerShellFailureState(false);
+              }
+              if (event.type === "closed") {
+                if (isContainerShellLaunchFailure) {
+                  return nextContainerShellFailureState(true);
+                }
+                return removeSessionFromState(state, sessionId);
+              }
               if (!currentTab) {
                 return state;
               }
@@ -1046,6 +1153,54 @@ export function createRuntimeEventSlice(deps: SliceDeps): RuntimeEventSlice {
               }
               const expectedEndpointId = buildContainersEndpointId(event.hostId);
               if (event.endpointId !== expectedEndpointId) {
+                return state;
+              }
+              const pendingContainerShellSessionIds = new Set(
+                state.pendingConnectionAttempts
+                  .filter(
+                    (attempt) =>
+                      attempt.source === "container-shell" &&
+                      attempt.hostId === event.hostId,
+                  )
+                  .map((attempt) => attempt.sessionId),
+              );
+              const isAwaitingContainerShellTrust =
+                state.pendingHostKeyPrompt?.action.kind === "containerShell" &&
+                state.pendingHostKeyPrompt.action.hostId === event.hostId;
+
+              if (pendingContainerShellSessionIds.size > 0) {
+                if (isAwaitingContainerShellTrust) {
+                  return state;
+                }
+
+                let didUpdatePendingSession = false;
+                const nextTabs = state.tabs.map((tab) => {
+                  if (!pendingContainerShellSessionIds.has(tab.sessionId)) {
+                    return tab;
+                  }
+                  if (tab.connectionProgress?.stage === "awaiting-host-trust") {
+                    return tab;
+                  }
+
+                  didUpdatePendingSession = true;
+                  return {
+                    ...tab,
+                    connectionProgress: createConnectionProgress(
+                      event.stage,
+                      event.message,
+                      {
+                        blockingKind:
+                          event.stage === "browser-login" ? "browser" : "none",
+                      },
+                    ),
+                    lastEventAt: new Date().toISOString(),
+                  };
+                });
+
+                return didUpdatePendingSession ? { tabs: nextTabs } : state;
+              }
+
+              if (isAwaitingContainerShellTrust) {
                 return state;
               }
               return {

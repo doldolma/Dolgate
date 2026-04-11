@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { DesktopWindowState, TerminalTab, UpdateState } from '@shared';
 import type {
   DynamicTabStripItem,
@@ -147,18 +147,18 @@ function countWorkspacePanes(workspace: WorkspaceTab): number {
 
 function getTitlebarTabClass(active: boolean): string {
   if (active) {
-    return 'border-[rgba(255,255,255,0.16)] bg-[rgba(255,255,255,0.96)] text-[var(--accent-strong)] shadow-[0_14px_34px_rgba(10,18,30,0.18)] hover:text-[var(--accent-strong)]';
+    return 'border-[rgba(255,255,255,0.12)] bg-[rgba(255,255,255,0.94)] text-[var(--accent-strong)] shadow-none hover:text-[var(--accent-strong)]';
   }
 
-  return 'border-[rgba(255,255,255,0.06)] bg-[rgba(255,255,255,0.08)] text-[rgba(243,247,251,0.78)] shadow-[inset_0_1px_0_rgba(255,255,255,0.04)] hover:bg-[rgba(255,255,255,0.12)] hover:text-white';
+  return 'border-[rgba(255,255,255,0.04)] bg-[rgba(255,255,255,0.06)] text-[rgba(243,247,251,0.78)] shadow-none hover:bg-[rgba(255,255,255,0.1)] hover:text-white';
 }
 
 function getTitlebarDynamicTabContainerClass(active: boolean): string {
   if (active) {
-    return 'border-[rgba(255,255,255,0.24)] bg-[rgba(255,255,255,0.96)] shadow-[0_18px_38px_rgba(10,18,30,0.2)]';
+    return 'border-[rgba(255,255,255,0.14)] bg-[rgba(255,255,255,0.94)] shadow-none';
   }
 
-  return 'border-[rgba(255,255,255,0.06)] bg-[rgba(255,255,255,0.08)] shadow-[inset_0_1px_0_rgba(255,255,255,0.04)] hover:bg-[rgba(255,255,255,0.12)]';
+  return 'border-[rgba(255,255,255,0.04)] bg-[rgba(255,255,255,0.06)] shadow-none hover:bg-[rgba(255,255,255,0.1)]';
 }
 
 function getTitlebarDynamicTabButtonClass(active: boolean): string {
@@ -214,6 +214,10 @@ export function AppTitleBar({
   const [isTabDragging, setIsTabDragging] = useState(false);
   const draggedTabRef = useRef<DynamicTabStripItem | null>(null);
   const updateMenuRef = useRef<HTMLDivElement | null>(null);
+  const titlebarTabStripRef = useRef<HTMLDivElement | null>(null);
+  const titlebarTabItemRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  const [showLeftTabStripFade, setShowLeftTabStripFade] = useState(false);
+  const [showRightTabStripFade, setShowRightTabStripFade] = useState(false);
 
   const dynamicItems = useMemo<TitlebarDynamicItem[]>(
     () =>
@@ -267,6 +271,25 @@ export function AppTitleBar({
 
   const canDetachToTabs = draggedSession?.source === 'workspace-pane' && Boolean(draggedSession.workspaceId);
 
+  const updateTitlebarTabStripFades = useCallback(() => {
+    const container = titlebarTabStripRef.current;
+    if (!container) {
+      setShowLeftTabStripFade(false);
+      setShowRightTabStripFade(false);
+      return;
+    }
+
+    const maxScrollLeft = Math.max(0, container.scrollWidth - container.clientWidth);
+    const nextShowLeft = container.scrollLeft > 1;
+    const nextShowRight = container.scrollLeft < maxScrollLeft - 1;
+    setShowLeftTabStripFade((previous) =>
+      previous === nextShowLeft ? previous : nextShowLeft,
+    );
+    setShowRightTabStripFade((previous) =>
+      previous === nextShowRight ? previous : nextShowRight,
+    );
+  }, []);
+
   function getTabKey(item: DynamicTabStripItem): string {
     if (item.kind === 'session') {
       return `session:${item.sessionId}`;
@@ -301,6 +324,48 @@ export function AppTitleBar({
     };
   }, [isUpdateOpen]);
 
+  useEffect(() => {
+    updateTitlebarTabStripFades();
+  }, [activeWorkspaceTab, dynamicItems.length, updateTitlebarTabStripFades]);
+
+  useEffect(() => {
+    const handleResize = () => {
+      updateTitlebarTabStripFades();
+    };
+    window.addEventListener('resize', handleResize);
+    return () => {
+      window.removeEventListener('resize', handleResize);
+    };
+  }, [updateTitlebarTabStripFades]);
+
+  useLayoutEffect(() => {
+    if (isTabDragging) {
+      return;
+    }
+
+    const activeItem = titlebarTabItemRefs.current[activeWorkspaceTab];
+    if (!activeItem) {
+      updateTitlebarTabStripFades();
+      return;
+    }
+
+    if (typeof activeItem.scrollIntoView === 'function') {
+      activeItem.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+    }
+
+    if (typeof window.requestAnimationFrame !== 'function') {
+      updateTitlebarTabStripFades();
+      return;
+    }
+
+    const frame = window.requestAnimationFrame(() => {
+      updateTitlebarTabStripFades();
+    });
+    return () => {
+      window.cancelAnimationFrame(frame);
+    };
+  }, [activeWorkspaceTab, isTabDragging, updateTitlebarTabStripFades]);
+
   return (
     <header
       className={cn(
@@ -310,8 +375,9 @@ export function AppTitleBar({
     >
       <div
         className={cn(
-          'flex min-w-0 items-center gap-[0.55rem] overflow-x-auto rounded-[20px] p-[0.2rem] transition-[background-color,box-shadow] duration-140 [-webkit-app-region:no-drag]',
-          isDetachHovering && 'bg-[rgba(142,209,194,0.08)] shadow-[inset_0_0_0_1px_rgba(142,209,194,0.16)]',
+          'relative min-w-0 rounded-[24px] p-[0.2rem] transition-[background-color,box-shadow] duration-140 [-webkit-app-region:no-drag]',
+          isDetachHovering &&
+            'bg-[rgba(142,209,194,0.08)] shadow-[inset_0_0_0_1px_rgba(142,209,194,0.16)]',
         )}
         onDragOver={(event) => {
           if (!canDetachToTabs) {
@@ -338,38 +404,80 @@ export function AppTitleBar({
           onEndSessionDrag();
         }}
       >
-        <Tabs className="shrink-0 bg-transparent p-0 shadow-none border-transparent gap-2">
-          <TabButton
-            active={activeWorkspaceTab === 'home'}
-            className={getTitlebarTabClass(activeWorkspaceTab === 'home')}
-            onClick={onSelectHome}
-          >
-            Home
-          </TabButton>
-          <TabButton
-            active={activeWorkspaceTab === 'sftp'}
-            className={getTitlebarTabClass(activeWorkspaceTab === 'sftp')}
-            onClick={onSelectSftp}
-          >
-            SFTP
-          </TabButton>
-          <TabButton
-            active={activeWorkspaceTab === 'containers'}
-            className={getTitlebarTabClass(activeWorkspaceTab === 'containers')}
-            onClick={onSelectContainers}
-          >
-            Containers
-          </TabButton>
-        </Tabs>
-        {dynamicItems.map((item) => {
+        {showLeftTabStripFade ? (
+          <div
+            data-testid="titlebar-tab-strip-fade-left"
+            className="pointer-events-none absolute inset-y-[0.24rem] left-[0.2rem] z-[1] w-11 rounded-l-[22px] bg-[linear-gradient(90deg,color-mix(in_srgb,var(--chrome-bg)_92%,rgba(255,255,255,0.08)_8%),transparent)]"
+          />
+        ) : null}
+        {showRightTabStripFade ? (
+          <div
+            data-testid="titlebar-tab-strip-fade-right"
+            className="pointer-events-none absolute inset-y-[0.24rem] right-[0.2rem] z-[1] w-11 rounded-r-[22px] bg-[linear-gradient(270deg,color-mix(in_srgb,var(--chrome-bg)_92%,rgba(255,255,255,0.08)_8%),transparent)]"
+          />
+        ) : null}
+        <div
+          ref={titlebarTabStripRef}
+          data-titlebar-tab-strip="true"
+          className="flex min-w-0 items-center gap-[0.55rem] overflow-x-auto overflow-y-hidden px-[0.05rem] py-[0.02rem]"
+          onScroll={updateTitlebarTabStripFades}
+        >
+          <Tabs className="shrink-0 bg-transparent p-0 shadow-none border-transparent gap-2">
+            <div
+              ref={(node) => {
+                titlebarTabItemRefs.current.home = node;
+              }}
+              className="shrink-0"
+            >
+              <TabButton
+                active={activeWorkspaceTab === 'home'}
+                className={getTitlebarTabClass(activeWorkspaceTab === 'home')}
+                onClick={onSelectHome}
+              >
+                Home
+              </TabButton>
+            </div>
+            <div
+              ref={(node) => {
+                titlebarTabItemRefs.current.sftp = node;
+              }}
+              className="shrink-0"
+            >
+              <TabButton
+                active={activeWorkspaceTab === 'sftp'}
+                className={getTitlebarTabClass(activeWorkspaceTab === 'sftp')}
+                onClick={onSelectSftp}
+              >
+                SFTP
+              </TabButton>
+            </div>
+            <div
+              ref={(node) => {
+                titlebarTabItemRefs.current.containers = node;
+              }}
+              className="shrink-0"
+            >
+              <TabButton
+                active={activeWorkspaceTab === 'containers'}
+                className={getTitlebarTabClass(activeWorkspaceTab === 'containers')}
+                onClick={onSelectContainers}
+              >
+                Containers
+              </TabButton>
+            </div>
+          </Tabs>
+          {dynamicItems.map((item) => {
           if (item.kind === 'session') {
             const target = { kind: 'session', sessionId: item.sessionId } as const;
             const targetKey = getTabKey(target);
             return (
               <div
                 key={item.sessionId}
+                ref={(node) => {
+                  titlebarTabItemRefs.current[targetKey] = node;
+                }}
                 className={cn(
-                  'group relative flex items-center gap-1 rounded-[22px] border pr-1.5 transition-[box-shadow,background-color,border-color] duration-150',
+                  'group relative flex flex-none items-center gap-1 rounded-[22px] border pr-1.5 transition-[box-shadow,background-color,border-color] duration-150',
                   getTitlebarDynamicTabContainerClass(item.active),
                   tabDropPreview?.targetKey === targetKey &&
                     tabDropPreview.placement === 'before' &&
@@ -457,8 +565,11 @@ export function AppTitleBar({
           return (
             <div
               key={item.workspaceId}
+              ref={(node) => {
+                titlebarTabItemRefs.current[targetKey] = node;
+              }}
               className={cn(
-                'group relative flex items-center gap-1 rounded-[22px] border pr-1.5 transition-[box-shadow,background-color,border-color] duration-150',
+                'group relative flex flex-none items-center gap-1 rounded-[22px] border pr-1.5 transition-[box-shadow,background-color,border-color] duration-150',
                 getTitlebarDynamicTabContainerClass(item.active),
                 tabDropPreview?.targetKey === targetKey &&
                   tabDropPreview.placement === 'before' &&
@@ -561,7 +672,7 @@ export function AppTitleBar({
         {isTabDragging && dynamicItems.length > 0 ? (
           <div
             className={cn(
-              'h-10 w-6 shrink-0 rounded-[999px] transition-[background-color,box-shadow] duration-150',
+              'h-10 w-6 flex-none rounded-[999px] transition-[background-color,box-shadow] duration-150',
               tabDropPreview?.targetKey === '__tail__'
                 ? 'bg-[rgba(255,255,255,0.12)] shadow-[inset_0_0_0_1px_rgba(255,255,255,0.16)]'
                 : 'bg-transparent'
@@ -597,6 +708,7 @@ export function AppTitleBar({
             }}
           />
         ) : null}
+        </div>
       </div>
       <div className="min-w-16 flex-1" />
       <div className="relative flex items-center gap-[0.55rem] [-webkit-app-region:no-drag]">
@@ -617,7 +729,7 @@ export function AppTitleBar({
           {isUpdateOpen ? (
             <div
               data-testid="update-popover"
-              className="absolute right-0 top-[calc(100%+0.8rem)] z-20 w-[min(24rem,calc(100vw-2rem))] rounded-[26px] border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[var(--dialog-surface)] p-5 shadow-[0_24px_68px_rgba(8,16,30,0.18)]"
+              className="absolute right-0 top-[calc(100%+0.8rem)] z-20 w-[min(24rem,calc(100vw-2rem))] rounded-[26px] border border-[var(--border)] bg-[var(--dialog-surface)] p-5 shadow-[var(--shadow-floating)]"
             >
               <div className="mb-4 flex items-start justify-between gap-4">
                 <div className="min-w-0">

@@ -55,7 +55,7 @@ export {
 } from '@shared';
 
 export const HOST_BROWSER_IMPORT_MENU_LABELS = [
-  'Import from AWS',
+  'Import via AWS SSM',
   'Import OpenSSH',
   'Import from Xshell',
   'Import from Termius',
@@ -746,9 +746,9 @@ export function HostBrowser({
             className={cn(
               'flex w-full min-w-0 items-center justify-between gap-3 rounded-[18px] border border-transparent bg-transparent px-[0.4rem] py-[0.45rem] text-left text-[var(--text-soft)] transition-[background-color,border-color,color,box-shadow] duration-140 hover:bg-[color-mix(in_srgb,var(--surface-elevated)_72%,transparent_28%)] hover:text-[var(--text)]',
               currentGroupPath === null &&
-                'border-[color-mix(in_srgb,var(--accent-strong)_30%,transparent_70%)] bg-[color-mix(in_srgb,var(--accent-strong)_14%,var(--surface-elevated)_86%)] text-[var(--accent-strong)]',
+                'border-[var(--selection-border)] bg-[var(--selection-tint)] text-[var(--accent-strong)]',
               isRootDragTarget &&
-                'border-[color-mix(in_srgb,var(--accent-strong)_46%,var(--border)_54%)] bg-[color-mix(in_srgb,var(--surface)_84%,var(--accent-strong)_16%)] shadow-[0_0_0_2px_color-mix(in_srgb,var(--accent-strong)_20%,transparent_80%),var(--shadow-soft)]',
+                'border-[var(--selection-border)] bg-[var(--selection-tint-strong)]',
             )}
             onClick={handleNavigateRoot}
             onDragOver={(event) => {
@@ -824,13 +824,13 @@ export function HostBrowser({
                     className={cn(
                       'flex w-full min-w-0 items-center justify-between gap-3 rounded-[18px] border border-transparent bg-transparent px-[0.4rem] py-[0.45rem] text-left text-[var(--text-soft)] transition-[background-color,border-color,color,box-shadow] duration-140 hover:bg-[color-mix(in_srgb,var(--surface-elevated)_72%,transparent_28%)] hover:text-[var(--text)]',
                       currentGroupPath === group.path &&
-                        'border-[color-mix(in_srgb,var(--accent-strong)_30%,transparent_70%)] bg-[color-mix(in_srgb,var(--accent-strong)_14%,var(--surface-elevated)_86%)] text-[var(--accent-strong)]',
+                        'border-[var(--selection-border)] bg-[var(--selection-tint)] text-[var(--accent-strong)]',
                       !currentGroupPath && selectedGroupPathSet.has(group.path) && 'text-[var(--text)]',
                       selectedGroupPathSet.has(group.path) &&
                         currentGroupPath !== group.path &&
                         'bg-[color-mix(in_srgb,var(--surface-elevated)_66%,transparent_34%)]',
                       dragTargetGroupPath === group.path &&
-                        'border-[color-mix(in_srgb,var(--accent-strong)_46%,var(--border)_54%)] bg-[color-mix(in_srgb,var(--surface)_84%,var(--accent-strong)_16%)] shadow-[0_0_0_2px_color-mix(in_srgb,var(--accent-strong)_20%,transparent_80%),var(--shadow-soft)]',
+                        'border-[var(--selection-border)] bg-[var(--selection-tint-strong)]',
                     )}
                     data-group-tree-state={selectedGroupPathSet.has(group.path) ? 'selected' : 'idle'}
                     draggable
@@ -1068,7 +1068,7 @@ export function HostBrowser({
       {contextMenu ? (
         createPortal(
           <div
-            className="fixed z-[24] min-w-[148px] rounded-[16px] border border-[var(--border)] bg-[var(--surface-strong)] p-[0.45rem] shadow-[0_20px_60px_rgba(18,30,44,0.24)]"
+            className="fixed z-[24] min-w-[148px] rounded-[16px] border border-[var(--border)] bg-[var(--surface-strong)] p-[0.45rem] shadow-[var(--shadow-floating)]"
             style={contextMenuStyle ?? undefined}
             role="menu"
           >

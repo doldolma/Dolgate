@@ -391,6 +391,27 @@ export function SettingsPanel({
               ) : null}
             </div>
 
+            <div className="mb-4">
+              <div>
+                <SectionLabel>Appearance</SectionLabel>
+                <h3>Theme</h3>
+              </div>
+            </div>
+            <div className="grid grid-cols-[repeat(3,minmax(0,1fr))] gap-[0.9rem] max-[1320px]:grid-cols-[repeat(2,minmax(0,1fr))] max-[760px]:grid-cols-1">
+              {themeOptions.map((option) => (
+                <OptionCard
+                  key={option.value}
+                  active={settings.theme === option.value}
+                  title={option.title}
+                  description={option.description}
+                  preview={renderAppearanceThemePreview(option.value)}
+                  onClick={async () => onUpdateSettings({ theme: option.value })}
+                />
+              ))}
+            </div>
+          </section>
+
+          <section className="rounded-[28px] border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[var(--surface-elevated)] p-[1.55rem] shadow-[var(--shadow-soft)]">
             <div className="mb-4 mt-1">
               <div>
                 <SectionLabel>Terminal</SectionLabel>
@@ -420,27 +441,6 @@ export function SettingsPanel({
                     option.preview.background,
                     option.preview.foreground,
                   )}
-                />
-              ))}
-            </div>
-          </section>
-
-          <section className="rounded-[28px] border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[var(--surface-elevated)] p-[1.55rem] shadow-[var(--shadow-soft)]">
-            <div className="mb-4">
-              <div>
-                <SectionLabel>Appearance</SectionLabel>
-                <h3>Theme</h3>
-              </div>
-            </div>
-            <div className="grid grid-cols-[repeat(3,minmax(0,1fr))] gap-[0.9rem] max-[1320px]:grid-cols-[repeat(2,minmax(0,1fr))] max-[760px]:grid-cols-1">
-              {themeOptions.map((option) => (
-                <OptionCard
-                  key={option.value}
-                  active={settings.theme === option.value}
-                  title={option.title}
-                  description={option.description}
-                  preview={renderAppearanceThemePreview(option.value)}
-                  onClick={async () => onUpdateSettings({ theme: option.value })}
                 />
               ))}
             </div>

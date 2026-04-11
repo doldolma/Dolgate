@@ -39,4 +39,24 @@ describe('TerminalConnectionOverlay', () => {
     expect(onRetry).toHaveBeenCalledTimes(1);
     expect(onClose).toHaveBeenCalledTimes(1);
   });
+
+  it('renders close only when retry is disabled', () => {
+    const onClose = vi.fn();
+
+    render(
+      <TerminalConnectionOverlay
+        error
+        title="Connection Failed"
+        message="컨테이너 셸을 시작하지 못했습니다."
+        showRetry={false}
+        onClose={onClose}
+      />,
+    );
+
+    expect(screen.getByRole('alertdialog', { name: 'Connection Failed' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
 });

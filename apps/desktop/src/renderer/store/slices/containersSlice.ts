@@ -148,7 +148,9 @@ export function createContainersSlice(deps: SliceDeps): ContainersSlice {
 
   const {
     updateSessionProgress,
+    markSessionError,
     promptForMissingUsername,
+    clearContainerTabConnectionOverlay,
     loadContainerDetails,
     loadEcsClusterUtilization,
     loadEcsClusterSnapshot,
@@ -223,15 +225,38 @@ export function createContainersSlice(deps: SliceDeps): ContainersSlice {
                 containerTabs: upsertContainersTab(state.containerTabs, nextTab),
               };
             });
-    
-            const trusted = await ensureTrustedHost(set, {
-              hostId,
-              endpointId: buildContainersEndpointId(hostId),
-              action: {
-                kind: "containers",
+
+            let trusted = false;
+            try {
+              trusted = await ensureTrustedHost(set, {
                 hostId,
-              },
-            });
+                endpointId: buildContainersEndpointId(hostId),
+                action: {
+                  kind: "containers",
+                  hostId,
+                },
+              });
+            } catch (error) {
+              const message =
+                error instanceof Error
+                  ? error.message
+                  : "컨테이너 페이지를 열지 못했습니다.";
+              set((state) => {
+                const currentTab = findContainersTab(state, hostId);
+                if (!currentTab) {
+                  return state;
+                }
+                return {
+                  containerTabs: upsertContainersTab(state.containerTabs, {
+                    ...currentTab,
+                    isLoading: false,
+                    connectionProgress: null,
+                    errorMessage: message,
+                  }),
+                };
+              });
+              return;
+            }
             if (!trusted) {
               set((state) => {
                 const currentTab = findContainersTab(state, hostId);
@@ -623,17 +648,29 @@ export function createContainersSlice(deps: SliceDeps): ContainersSlice {
               32,
               initialProgress,
             );
-            const trusted = await ensureTrustedHost(set, {
-              hostId,
-              sessionId,
-              endpointId: buildContainersEndpointId(hostId),
-              action: {
-                kind: "containerShell",
+            let trusted = false;
+            try {
+              trusted = await ensureTrustedHost(set, {
                 hostId,
-                containerId,
-              },
-            });
+                sessionId,
+                endpointId: buildContainersEndpointId(hostId),
+                action: {
+                  kind: "containerShell",
+                  hostId,
+                  containerId,
+                },
+              });
+            } catch (error) {
+              const message =
+                error instanceof Error
+                  ? error.message
+                  : "컨테이너 셸을 열지 못했습니다.";
+              clearContainerTabConnectionOverlay(set, hostId);
+              markSessionError(set, sessionId, message);
+              return;
+            }
             if (!trusted) {
+              clearContainerTabConnectionOverlay(set, hostId);
               updateSessionProgress(
                 set,
                 sessionId,

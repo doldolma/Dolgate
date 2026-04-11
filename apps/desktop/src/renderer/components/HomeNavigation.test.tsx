@@ -13,4 +13,13 @@ describe('HomeNavigation', () => {
     expect(screen.queryByRole('button', { name: 'Known Hosts' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Keychain' })).not.toBeInTheDocument();
   });
+
+  it('uses tint and border to emphasize the active section', () => {
+    render(<HomeNavigation activeSection="hosts" onSelectSection={vi.fn()} />);
+
+    const activeButton = screen.getByRole('button', { name: /Hosts$/ });
+    expect(activeButton.className).toContain('bg-[var(--selection-tint)]');
+    expect(activeButton.className).toContain('border-[var(--selection-border)]');
+    expect(activeButton.className).not.toContain('shadow-[var(--shadow-soft)]');
+  });
 });

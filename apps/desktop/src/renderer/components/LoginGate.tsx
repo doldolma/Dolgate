@@ -177,7 +177,7 @@ export function LoginGate({
 
   return (
     <div className="grid min-h-0 flex-1 place-items-center px-8 py-10">
-      <div className="w-[min(34rem,100%)] rounded-[32px] border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[linear-gradient(180deg,color-mix(in_srgb,var(--surface-elevated)_98%,white_2%),color-mix(in_srgb,var(--surface)_94%,var(--app-bg)_6%))] px-[2.5rem] pb-[2.45rem] pt-[2.55rem] shadow-[0_28px_70px_rgba(8,16,30,0.18),inset_0_1px_0_rgba(255,255,255,0.08)]">
+      <div className="w-[min(34rem,100%)] rounded-[32px] border border-[var(--border)] bg-[var(--surface-elevated)] px-[2.5rem] pb-[2.45rem] pt-[2.55rem] shadow-[var(--shadow)]">
         <div className="mb-7 flex items-center justify-between gap-5">
           <SectionLabel className="mb-0 text-[0.96rem] tracking-[0.24em] text-[color-mix(in_srgb,var(--text-soft)_88%,var(--text)_12%)]">
             Dolgate
@@ -191,13 +191,13 @@ export function LoginGate({
               setDraftServerUrl(serverUrl);
               setIsAdvancedOpen((current) => !current);
             }}
-            className="text-[var(--text)] shadow-[0_14px_28px_rgba(12,21,35,0.09)]"
+            className="text-[var(--text)] shadow-none"
           >
             <SettingsGearIcon />
           </IconButton>
         </div>
         {localErrorMessage || authState.errorMessage ? (
-          <div className="mb-4 rounded-[20px] border border-[color-mix(in_srgb,var(--danger-text)_22%,var(--border))] bg-[var(--danger-bg)] px-4 py-3.5 text-[var(--danger-text)] shadow-[0_10px_22px_rgba(12,21,35,0.06)]">
+          <div className="mb-4 rounded-[20px] border border-[color-mix(in_srgb,var(--danger-text)_22%,var(--border))] bg-[var(--danger-bg)] px-4 py-3.5 text-[var(--danger-text)] shadow-none">
             {localErrorMessage ?? authState.errorMessage}
           </div>
         ) : null}
@@ -205,7 +205,7 @@ export function LoginGate({
           <div className="mb-4 text-[0.92rem] text-[var(--text-soft)]">{statusMessage}</div>
         ) : null}
         {isAdvancedOpen ? (
-          <div className="mb-4 rounded-[22px] border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[color-mix(in_srgb,var(--surface-muted)_92%,transparent_8%)] px-4 pb-4 pt-[1rem] shadow-[inset_0_1px_0_rgba(255,255,255,0.06)]">
+          <div className="mb-4 rounded-[22px] border border-[var(--border)] bg-[var(--surface-muted)] px-4 pb-4 pt-[1rem] shadow-none">
             <label className="flex flex-col gap-[0.45rem]">
               <span className="text-[0.85rem] text-[var(--text-soft)]">Login Server</span>
               <Input
@@ -253,7 +253,7 @@ export function LoginGate({
           variant="primary"
           size="lg"
           fullWidth
-          className="min-h-[80px] justify-between rounded-[26px] px-7 text-[1.06rem] shadow-[0_22px_38px_color-mix(in_srgb,var(--accent-strong)_20%,transparent)]"
+          className="min-h-[80px] justify-between rounded-[26px] px-7 text-[1.06rem] shadow-none"
           disabled={shouldDisableLoginGatePrimaryAction({
             authStatus: authState.status,
             isSyncBootstrapping,
@@ -265,7 +265,7 @@ export function LoginGate({
         >
           <span className="tracking-[-0.02em]">{label}</span>
           <span
-            className="inline-flex h-[2.35rem] w-[2.35rem] items-center justify-center rounded-full border border-[rgba(255,255,255,0.22)] bg-[rgba(255,255,255,0.12)] text-[var(--accent-contrast)] shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]"
+            className="inline-flex h-[2.35rem] w-[2.35rem] items-center justify-center rounded-full border border-[rgba(255,255,255,0.14)] bg-[rgba(255,255,255,0.1)] text-[var(--accent-contrast)] shadow-none"
             aria-hidden="true"
           >
             <OpenBrowserIcon />
