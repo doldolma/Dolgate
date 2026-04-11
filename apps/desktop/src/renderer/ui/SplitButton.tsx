@@ -20,15 +20,16 @@ export const SplitButton = forwardRef<HTMLDivElement, SplitButtonProps>(
   },
 );
 
-type SplitButtonActionProps = Omit<ButtonProps, 'variant'>;
+type SplitButtonActionProps = ButtonProps;
 
 export function SplitButtonMain({
   className,
+  variant = 'primary',
   ...props
 }: SplitButtonActionProps) {
   return (
     <Button
-      variant="primary"
+      variant={variant}
       className={cn('rounded-r-none pr-4 shadow-none', className)}
       {...props}
     />
@@ -38,12 +39,19 @@ export function SplitButtonMain({
 export function SplitButtonToggle({
   className,
   children,
+  variant = 'primary',
   ...props
 }: SplitButtonActionProps) {
   return (
     <Button
-      variant="primary"
-      className={cn('min-w-11 rounded-l-none border-l border-l-[color-mix(in_srgb,var(--accent-contrast)_18%,transparent)] px-3 shadow-none', className)}
+      variant={variant}
+      className={cn(
+        'min-w-11 rounded-l-none border-l px-3 shadow-none',
+        variant === 'primary'
+          ? 'border-l-[color-mix(in_srgb,var(--accent-contrast)_18%,transparent)]'
+          : 'border-l-[var(--border)]',
+        className,
+      )}
       {...props}
     >
       {children}

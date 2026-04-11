@@ -10,7 +10,7 @@ import {
   isGroupWithinPath,
   normalizeGroupPath
 } from '@shared';
-import type { GroupRecord, HostRecord } from '@shared';
+import type { GroupRecord, HostRecord, SecretMetadataRecord } from '@shared';
 import {
   HostBrowser,
   getHostBrowserEmptyCalloutMessage,
@@ -166,10 +166,34 @@ const hosts: HostRecord[] = [
   }
 ];
 
+const keychainEntries: SecretMetadataRecord[] = [
+  {
+    secretRef: 'secret:host-1',
+    label: 'App Secret',
+    hasPassword: true,
+    hasPassphrase: false,
+    hasManagedPrivateKey: false,
+    source: 'local_keychain',
+    linkedHostCount: 1,
+    updatedAt: '2025-01-01T00:00:00.000Z',
+  },
+  {
+    secretRef: 'secret:shared',
+    label: 'Shared Secret',
+    hasPassword: true,
+    hasPassphrase: false,
+    hasManagedPrivateKey: false,
+    source: 'local_keychain',
+    linkedHostCount: 2,
+    updatedAt: '2025-01-01T00:00:00.000Z',
+  },
+];
+
 interface RenderBrowserOptions {
   desktopPlatform?: 'darwin' | 'win32' | 'linux' | 'unknown';
   groups?: GroupRecord[];
   hosts?: HostRecord[];
+  keychainEntries?: SecretMetadataRecord[];
   currentGroupPath?: string | null;
   searchQuery?: string;
   selectedHostId?: string | null;
@@ -180,14 +204,23 @@ interface RenderBrowserOptions {
   onMoveGroup?: ReturnType<typeof vi.fn>;
   onRenameGroup?: ReturnType<typeof vi.fn>;
   onRemoveHost?: ReturnType<typeof vi.fn>;
+  onRemoveSecret?: ReturnType<typeof vi.fn>;
   onOpenHostContainers?: ReturnType<typeof vi.fn>;
   onNavigateGroup?: ReturnType<typeof vi.fn>;
+  onOpenLocalTerminal?: ReturnType<typeof vi.fn>;
+  onCreateHost?: ReturnType<typeof vi.fn>;
+  onOpenAwsImport?: ReturnType<typeof vi.fn>;
+  onOpenOpenSshImport?: ReturnType<typeof vi.fn>;
+  onOpenXshellImport?: ReturnType<typeof vi.fn>;
+  onOpenTermiusImport?: ReturnType<typeof vi.fn>;
+  onOpenWarpgateImport?: ReturnType<typeof vi.fn>;
 }
 
 function renderBrowser({
   desktopPlatform = 'win32',
   groups: groupsOverride = groups,
   hosts: hostsOverride = hosts,
+  keychainEntries: keychainEntriesOverride = keychainEntries,
   currentGroupPath = null,
   searchQuery = '',
   selectedHostId = null,
@@ -198,25 +231,34 @@ function renderBrowser({
   onMoveGroup = vi.fn().mockResolvedValue(undefined),
   onRenameGroup = vi.fn().mockResolvedValue(undefined),
   onRemoveHost = vi.fn().mockResolvedValue(undefined),
+  onRemoveSecret = vi.fn().mockResolvedValue(undefined),
   onOpenHostContainers = vi.fn().mockResolvedValue(undefined),
-  onNavigateGroup = vi.fn()
+  onNavigateGroup = vi.fn(),
+  onOpenLocalTerminal = vi.fn(),
+  onCreateHost = vi.fn(),
+  onOpenAwsImport = vi.fn(),
+  onOpenOpenSshImport = vi.fn(),
+  onOpenXshellImport = vi.fn(),
+  onOpenTermiusImport = vi.fn(),
+  onOpenWarpgateImport = vi.fn(),
 }: RenderBrowserOptions = {}) {
   return render(
     <HostBrowser
       desktopPlatform={desktopPlatform}
       hosts={hostsOverride}
       groups={groupsOverride}
+      keychainEntries={keychainEntriesOverride}
       currentGroupPath={currentGroupPath}
       searchQuery={searchQuery}
       selectedHostId={selectedHostId}
       onSearchChange={vi.fn()}
-      onOpenLocalTerminal={vi.fn()}
-      onCreateHost={vi.fn()}
-      onOpenAwsImport={vi.fn()}
-      onOpenOpenSshImport={vi.fn()}
-      onOpenXshellImport={vi.fn()}
-      onOpenTermiusImport={vi.fn()}
-      onOpenWarpgateImport={vi.fn()}
+      onOpenLocalTerminal={onOpenLocalTerminal}
+      onCreateHost={onCreateHost}
+      onOpenAwsImport={onOpenAwsImport}
+      onOpenOpenSshImport={onOpenOpenSshImport}
+      onOpenXshellImport={onOpenXshellImport}
+      onOpenTermiusImport={onOpenTermiusImport}
+      onOpenWarpgateImport={onOpenWarpgateImport}
       onCreateGroup={vi.fn().mockResolvedValue(undefined)}
       onRemoveGroup={onRemoveGroup}
       onMoveGroup={onMoveGroup}
@@ -228,6 +270,7 @@ function renderBrowser({
       onDuplicateHosts={onDuplicateHosts}
       onMoveHostToGroup={vi.fn().mockResolvedValue(undefined)}
       onRemoveHost={onRemoveHost}
+      onRemoveSecret={onRemoveSecret}
       onConnectHost={vi.fn().mockResolvedValue(undefined)}
       onOpenHostContainers={onOpenHostContainers}
     />
@@ -330,34 +373,51 @@ describe('HostBrowser helpers', () => {
 
   it('defines import actions for the split-button menu in the expected order', () => {
     expect(HOST_BROWSER_IMPORT_MENU_LABELS).toEqual([
-      'Import via AWS SSM',
       'Import OpenSSH',
-      'Import from Xshell',
       'Import from Termius',
-      'Import from Warpgate'
+      'Import from Xshell',
+      'Import from Warpgate',
+      'Import via AWS SSM'
     ]);
   });
 
   it('hides the Xshell import action outside Windows', () => {
     expect(getHostBrowserVisibleImportMenuLabels('win32')).toEqual([
-      'Import via AWS SSM',
       'Import OpenSSH',
-      'Import from Xshell',
       'Import from Termius',
-      'Import from Warpgate'
+      'Import from Xshell',
+      'Import from Warpgate',
+      'Import via AWS SSM'
     ]);
     expect(getHostBrowserVisibleImportMenuLabels('darwin')).toEqual([
-      'Import via AWS SSM',
       'Import OpenSSH',
       'Import from Termius',
-      'Import from Warpgate'
+      'Import from Warpgate',
+      'Import via AWS SSM'
     ]);
   });
 
   it('updates the empty-state copy to reference the import menu', () => {
-    expect(getHostBrowserEmptyCalloutMessage(0, '')).toBe('New Host 또는 Import 메뉴를 눌러 첫 번째 연결 대상을 추가해보세요.');
+    expect(getHostBrowserEmptyCalloutMessage(0, '')).toBe('New Host로 첫 번째 SSH host를 추가해보세요. 기존 설정이 있으면 OpenSSH import를 먼저 사용할 수 있습니다.');
     expect(getHostBrowserEmptyCalloutMessage(2, 'nas')).toBe('검색어를 지우거나 다른 호스트명으로 다시 찾아보세요.');
-    expect(getHostBrowserEmptyCalloutMessage(2, '')).toBe('New Host를 눌러 이 위치에 호스트를 추가하거나, 다른 그룹으로 이동해 장치를 확인해보세요.');
+    expect(getHostBrowserEmptyCalloutMessage(2, '')).toBe('New Host를 눌러 이 위치에 SSH host를 추가하거나, 다른 그룹으로 이동해 장치를 확인해보세요.');
+  });
+
+  it('prioritizes New Host while routing the Import primary action to OpenSSH import', () => {
+    const onCreateHost = vi.fn();
+    const onOpenOpenSshImport = vi.fn();
+    renderBrowser({ onCreateHost, onOpenOpenSshImport });
+
+    const newHostButton = screen.getByRole('button', { name: 'New Host' });
+    const importButton = screen.getByRole('button', { name: 'Import' });
+
+    expect(newHostButton.className).toContain('bg-[var(--accent-strong)]');
+    expect(importButton.className).toContain('bg-[var(--surface-elevated)]');
+
+    fireEvent.click(importButton);
+
+    expect(onCreateHost).not.toHaveBeenCalled();
+    expect(onOpenOpenSshImport).toHaveBeenCalledTimes(1);
   });
 
   it('shows AWS SSH metadata status on AWS host cards', () => {
@@ -773,5 +833,38 @@ describe('HostBrowser dialogs', () => {
     await waitFor(() => {
       expect(onRemoveHost).toHaveBeenCalledTimes(2);
     });
+  });
+
+  it('offers to remove an unused local secret and keeps the checkbox enabled by default', async () => {
+    const onRemoveHost = vi.fn().mockResolvedValue(undefined);
+    const onRemoveSecret = vi.fn().mockResolvedValue(undefined);
+    const hostsWithSecret: HostRecord[] = [
+      {
+        ...hosts[0],
+        secretRef: 'secret:host-1',
+      },
+      ...hosts.slice(1),
+    ];
+
+    renderBrowser({
+      hosts: hostsWithSecret,
+      onRemoveHost,
+      onRemoveSecret,
+    });
+
+    const appCard = screen.getByText('App').closest('article') as HTMLElement;
+    fireEvent.click(appCard);
+    fireEvent.contextMenu(appCard);
+    fireEvent.click(screen.getByRole('button', { name: /삭제/ }));
+
+    const checkbox = screen.getByRole('checkbox', {
+      name: '더 이상 사용되지 않는 저장된 인증 정보 1개도 함께 삭제',
+    });
+    expect(checkbox).toBeChecked();
+
+    fireEvent.click(screen.getByRole('button', { name: '삭제' }));
+
+    await waitFor(() => expect(onRemoveHost).toHaveBeenCalledWith('host-1'));
+    await waitFor(() => expect(onRemoveSecret).toHaveBeenCalledWith('secret:host-1'));
   });
 });

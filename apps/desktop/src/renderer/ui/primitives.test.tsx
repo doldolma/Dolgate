@@ -1,5 +1,5 @@
-import { render, screen } from '@testing-library/react';
-import { describe, expect, it } from 'vitest';
+import { fireEvent, render, screen } from '@testing-library/react';
+import { describe, expect, it, vi } from 'vitest';
 import { Button } from './Button';
 import { FieldGroup } from './FieldGroup';
 import { FilterRow } from './FilterRow';
@@ -10,6 +10,7 @@ import { OptionCard } from './OptionCard';
 import { PanelSection } from './PanelSection';
 import { SplitButton, SplitButtonMain, SplitButtonMenu, SplitButtonMenuItem, SplitButtonToggle } from './SplitButton';
 import { StatusBadge } from './StatusBadge';
+import { TagInputField } from './TagInputField';
 import { ToggleSwitch } from './ToggleSwitch';
 import { Toolbar } from './Toolbar';
 
@@ -82,17 +83,20 @@ describe('renderer UI primitives', () => {
   it('renders split button actions and menu items', () => {
     render(
       <SplitButton>
-        <SplitButtonMain>New Host</SplitButtonMain>
-        <SplitButtonToggle aria-label="Open menu">v</SplitButtonToggle>
+        <SplitButtonMain variant="secondary">Import</SplitButtonMain>
+        <SplitButtonToggle variant="secondary" aria-label="Open menu">v</SplitButtonToggle>
         <SplitButtonMenu>
           <SplitButtonMenuItem>Import via AWS SSM</SplitButtonMenuItem>
         </SplitButtonMenu>
       </SplitButton>,
     );
 
-    expect(screen.getByRole('button', { name: 'New Host' })).toBeInTheDocument();
+    const importButton = screen.getByRole('button', { name: 'Import' });
+
+    expect(importButton).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Open menu' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Import via AWS SSM' })).toBeInTheDocument();
+    expect(importButton.className).toContain('bg-[var(--surface-elevated)]');
   });
 
   it('renders core primitives safely under dark theme tokens', () => {
@@ -139,6 +143,37 @@ describe('renderer UI primitives', () => {
 
     expect(screen.getByText('Hostname')).toBeInTheDocument();
     expect(screen.getByPlaceholderText('example.internal')).toBeInTheDocument();
+  });
+
+  it('renders tag input shell with the same focus and sizing contract as standard inputs', () => {
+    const onRemoveTag = vi.fn();
+
+    render(
+      <TagInputField
+        aria-label="Tags"
+        tags={['dev']}
+        value=""
+        placeholder="Type a tag and press Enter"
+        onChange={() => undefined}
+        onRemoveTag={onRemoveTag}
+      />,
+    );
+
+    const shell = screen.getByTestId('tag-input-shell');
+    const input = screen.getByLabelText('Tags');
+
+    expect(shell.className).toContain('min-h-11');
+    expect(shell.className).toContain('border-[var(--border)]');
+    expect(shell.className).toContain('focus-within:border-[var(--selection-border)]');
+    expect(shell.className).toContain('focus-within:ring-4');
+    expect((input as HTMLInputElement).style.all).toBe('unset');
+    expect((input as HTMLInputElement).style.caretColor).toBe('var(--accent-strong)');
+
+    fireEvent.mouseDown(shell);
+    expect(document.activeElement).toBe(input);
+
+    fireEvent.click(screen.getByRole('button', { name: 'dev 태그 제거' }));
+    expect(onRemoveTag).toHaveBeenCalledWith('dev');
   });
 
   it('renders option card previews and active selection state', () => {
