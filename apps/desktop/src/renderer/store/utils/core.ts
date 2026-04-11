@@ -569,6 +569,13 @@ interface PendingConnectionAttempt {
   containerName?: string;
 }
 
+export interface SessionReturnTarget {
+  activeWorkspaceTab: WorkspaceTabId;
+  homeSection?: HomeSection;
+  settingsSection?: SettingsSection;
+  activeContainerHostId?: string | null;
+}
+
 export interface SftpState {
   localHomePath: string;
   leftPane: SftpPaneState;
@@ -609,6 +616,7 @@ export interface AppState {
   pendingMissingUsernamePrompt: PendingMissingUsernamePrompt | null;
   pendingInteractiveAuth: PendingInteractiveAuth | null;
   pendingConnectionAttempts: PendingConnectionAttempt[];
+  sessionReturnTargets: Record<string, SessionReturnTarget>;
   setSearchQuery: (value: string) => void;
   toggleHostTag: (tag: string) => void;
   clearHostTagFilter: () => void;
@@ -1261,6 +1269,105 @@ export function asSessionTabId(sessionId: string): SessionWorkspaceTabId {
 
 export function asWorkspaceTabId(workspaceId: string): SplitWorkspaceTabId {
   return `workspace:${workspaceId}`;
+}
+
+export function captureSessionReturnTarget(
+  state: Pick<
+    AppState,
+    | "activeWorkspaceTab"
+    | "homeSection"
+    | "settingsSection"
+    | "activeContainerHostId"
+  >,
+): SessionReturnTarget {
+  if (state.activeWorkspaceTab === "home") {
+    return {
+      activeWorkspaceTab: "home",
+      homeSection: state.homeSection,
+      settingsSection:
+        state.homeSection === "settings" ? state.settingsSection : undefined,
+    };
+  }
+
+  if (state.activeWorkspaceTab === "containers") {
+    return {
+      activeWorkspaceTab: "containers",
+      activeContainerHostId: state.activeContainerHostId,
+    };
+  }
+
+  return { activeWorkspaceTab: state.activeWorkspaceTab };
+}
+
+export function resolveSessionReturnTarget(
+  state: Pick<
+    AppState,
+    | "activeContainerHostId"
+    | "containerTabs"
+    | "homeSection"
+    | "settingsSection"
+    | "tabStrip"
+    | "workspaces"
+  >,
+  target: SessionReturnTarget,
+): SessionReturnTarget | null {
+  if (target.activeWorkspaceTab === "home") {
+    const homeSection = target.homeSection ?? "hosts";
+    return {
+      activeWorkspaceTab: "home",
+      homeSection,
+      settingsSection:
+        homeSection === "settings"
+          ? (target.settingsSection ?? state.settingsSection)
+          : undefined,
+    };
+  }
+
+  if (target.activeWorkspaceTab === "sftp") {
+    return { activeWorkspaceTab: "sftp" };
+  }
+
+  if (target.activeWorkspaceTab === "containers") {
+    if (state.containerTabs.length === 0) {
+      return null;
+    }
+
+    const availableHostIds = new Set(state.containerTabs.map((tab) => tab.hostId));
+    const activeContainerHostId = availableHostIds.has(
+      target.activeContainerHostId ?? "",
+    )
+      ? (target.activeContainerHostId ?? null)
+      : availableHostIds.has(state.activeContainerHostId ?? "")
+        ? (state.activeContainerHostId ?? null)
+        : (state.containerTabs[0]?.hostId ?? null);
+
+    if (!activeContainerHostId) {
+      return null;
+    }
+
+    return {
+      activeWorkspaceTab: "containers",
+      activeContainerHostId,
+    };
+  }
+
+  if (target.activeWorkspaceTab.startsWith("session:")) {
+    const sessionId = target.activeWorkspaceTab.slice("session:".length);
+    return state.tabStrip.some(
+      (item) => item.kind === "session" && item.sessionId === sessionId,
+    )
+      ? { activeWorkspaceTab: asSessionTabId(sessionId) }
+      : null;
+  }
+
+  if (target.activeWorkspaceTab.startsWith("workspace:")) {
+    const workspaceId = target.activeWorkspaceTab.slice("workspace:".length);
+    return state.workspaces.some((workspace) => workspace.id === workspaceId)
+      ? { activeWorkspaceTab: asWorkspaceTabId(workspaceId) }
+      : null;
+  }
+
+  return null;
 }
 
 export function buildContainersEndpointId(hostId: string): string {
@@ -1947,6 +2054,13 @@ export function replaceSessionReferencesInState(
   nextSessionId: string,
   transformTab?: (tab: TerminalTab) => TerminalTab,
 ): Partial<AppState> {
+  const nextSessionReturnTargets = { ...state.sessionReturnTargets };
+  const existingSessionReturnTarget = nextSessionReturnTargets[previousSessionId];
+  if (existingSessionReturnTarget) {
+    delete nextSessionReturnTargets[previousSessionId];
+    nextSessionReturnTargets[nextSessionId] = existingSessionReturnTarget;
+  }
+
   return {
     tabs: state.tabs.map((tab) => {
       if (tab.sessionId !== previousSessionId) {
@@ -2002,6 +2116,7 @@ export function replaceSessionReferencesInState(
             sessionId: nextSessionId,
           }
         : state.pendingInteractiveAuth,
+    sessionReturnTargets: nextSessionReturnTargets,
   };
 }
 
@@ -2018,6 +2133,16 @@ export function removeSessionFromState(
   );
   let nextWorkspaces = state.workspaces;
   let nextActive = state.activeWorkspaceTab;
+  let nextHomeSection = state.homeSection;
+  let nextSettingsSection = state.settingsSection;
+  let nextActiveContainerHostId = state.activeContainerHostId;
+  const nextSessionReturnTargets = { ...state.sessionReturnTargets };
+  const shouldRestoreReturnTarget =
+    state.activeWorkspaceTab === asSessionTabId(sessionId);
+  const storedReturnTarget = shouldRestoreReturnTarget
+    ? nextSessionReturnTargets[sessionId] ?? null
+    : null;
+  delete nextSessionReturnTargets[sessionId];
 
   const owningWorkspace = state.workspaces.find((workspace) =>
     listWorkspaceSessionIds(workspace.layout).includes(sessionId),
@@ -2093,6 +2218,33 @@ export function removeSessionFromState(
     );
   }
 
+  if (storedReturnTarget) {
+    const resolvedReturnTarget = resolveSessionReturnTarget(
+      {
+        activeContainerHostId: nextActiveContainerHostId,
+        containerTabs: state.containerTabs,
+        homeSection: nextHomeSection,
+        settingsSection: nextSettingsSection,
+        tabStrip: nextTabStrip,
+        workspaces: nextWorkspaces,
+      },
+      storedReturnTarget,
+    );
+    if (resolvedReturnTarget) {
+      nextActive = resolvedReturnTarget.activeWorkspaceTab;
+      if (resolvedReturnTarget.homeSection) {
+        nextHomeSection = resolvedReturnTarget.homeSection;
+      }
+      if (resolvedReturnTarget.settingsSection) {
+        nextSettingsSection = resolvedReturnTarget.settingsSection;
+      }
+      if ("activeContainerHostId" in resolvedReturnTarget) {
+        nextActiveContainerHostId =
+          resolvedReturnTarget.activeContainerHostId ?? null;
+      }
+    }
+  }
+
   return {
     tabs,
     sessionShareChatNotifications: clearSessionShareChatNotifications(
@@ -2102,6 +2254,9 @@ export function removeSessionFromState(
     workspaces: nextWorkspaces,
     tabStrip: nextTabStrip,
     activeWorkspaceTab: nextActive,
+    homeSection: nextHomeSection,
+    settingsSection: nextSettingsSection,
+    activeContainerHostId: nextActiveContainerHostId,
     pendingHostKeyPrompt:
       state.pendingHostKeyPrompt?.sessionId === sessionId
         ? null
@@ -2118,6 +2273,7 @@ export function removeSessionFromState(
     pendingConnectionAttempts: state.pendingConnectionAttempts.filter(
       (attempt) => attempt.sessionId !== sessionId,
     ),
+    sessionReturnTargets: nextSessionReturnTargets,
   };
 }
 

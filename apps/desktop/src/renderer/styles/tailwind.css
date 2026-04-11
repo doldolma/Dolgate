@@ -63,6 +63,25 @@
     background: var(--scrollbar-corner);
   }
 
+  [data-titlebar-tab-strip="true"] {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+    scrollbar-color: transparent transparent;
+  }
+
+  [data-titlebar-tab-strip="true"]::-webkit-scrollbar {
+    width: 0;
+    height: 0;
+  }
+
+  [data-titlebar-tab-strip="true"]::-webkit-scrollbar-track,
+  [data-titlebar-tab-strip="true"]::-webkit-scrollbar-thumb,
+  [data-titlebar-tab-strip="true"]::-webkit-scrollbar-corner {
+    border: none;
+    background: transparent;
+    box-shadow: none;
+  }
+
   input,
   textarea,
   select,

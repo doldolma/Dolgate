@@ -357,10 +357,11 @@ describe("ContainersWorkspace", () => {
       screen.getByRole("tablist", { name: "컨테이너 상세 패널" }),
     ).toBeInTheDocument();
     expect(overviewTab).toHaveAttribute("aria-selected", "true");
-    expect(overviewTab).toHaveClass("ring-1");
+    expect(overviewTab).toHaveClass("bg-[var(--selection-tint)]");
+    expect(overviewTab).toHaveClass("border-[var(--selection-border)]");
     expect(logsTab).toHaveAttribute("aria-selected", "false");
     expect(logsTab).toBeDisabled();
-    expect(logsTab).not.toHaveClass("ring-1");
+    expect(logsTab).not.toHaveClass("bg-[var(--selection-tint)]");
   });
 
   it("shows only essential list fields and moves uptime into details", () => {
@@ -1076,7 +1077,9 @@ describe("ContainersWorkspace", () => {
       "aria-selected",
       "true",
     );
-    expect(screen.getByRole("tab", { name: "Tunnel" })).toHaveClass("ring-1");
+    expect(screen.getByRole("tab", { name: "Tunnel" })).toHaveClass(
+      "bg-[var(--selection-tint)]",
+    );
     expect(screen.getByLabelText("Network")).toHaveValue("bridge");
     expect(screen.getByLabelText("Port")).toHaveValue("1883");
     expect(screen.getByRole("button", { name: "Start tunnel" })).toBeEnabled();

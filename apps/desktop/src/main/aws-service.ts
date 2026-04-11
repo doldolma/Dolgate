@@ -118,6 +118,43 @@ interface AwsSsoTokenCacheEntry {
   expiresAt?: string;
 }
 
+type AwsEc2SsmAvailability = AwsEc2InstanceSummary["ssmAvailability"];
+
+interface SsmManagedInstanceLookupResult {
+  readyInstanceIds: Set<string>;
+  inactiveInstanceIds: Set<string>;
+  unknownReason: string | null;
+}
+
+function resolveSsmLookupUnknownReason(error: unknown): string {
+  const message = error instanceof Error ? error.message.trim() : "";
+  if (/ssm:DescribeInstanceInformation|AccessDenied|UnauthorizedOperation/i.test(message)) {
+    return "SSM 상태를 조회할 권한이 없어 가져오기를 차단했습니다. 사용자/역할에 `ssm:DescribeInstanceInformation` 권한이 포함되어 있는지 확인해 주세요.";
+  }
+  if (
+    /Unable to locate credentials|The security token included in the request is invalid|ExpiredToken|SSO login/i.test(
+      message,
+    )
+  ) {
+    return "AWS 자격 증명을 확인하지 못해 가져오기를 차단했습니다. 선택한 프로필의 로그인 상태와 자격 증명을 먼저 확인해 주세요.";
+  }
+  return "SSM 상태를 확인하지 못해 가져오기를 차단했습니다. 사용자/역할 권한 또는 SSM 설정을 먼저 확인해 주세요.";
+}
+
+function resolveUnavailableSsmReason(input: {
+  state?: string | null;
+  isInactive: boolean;
+}): string {
+  const normalizedState = input.state?.trim().toLowerCase() ?? "";
+  if (normalizedState && normalizedState !== "running") {
+    return `이 인스턴스는 현재 ${normalizedState} 상태라 SSM import를 사용할 수 없습니다. 인스턴스를 실행한 뒤 다시 시도해 주세요.`;
+  }
+  if (input.isInactive) {
+    return "이 인스턴스는 SSM managed instance로 등록되어 있지만 현재 연결이 비활성 상태입니다. SSM Agent, 인스턴스 프로파일, 네트워크 연결을 확인해 주세요.";
+  }
+  return "이 인스턴스는 Systems Manager managed instance 목록에 나타나지 않습니다. SSM Agent 설치와 인스턴스 프로파일(AmazonSSMManagedInstanceCore)을 확인해 주세요.";
+}
+
 export interface AwsSessionEnvSpec {
   env: Record<string, string>;
   unsetEnv: string[];
@@ -744,6 +781,10 @@ function toInstanceSummary(
   instance: NonNullable<
     NonNullable<Ec2DescribeInstancesPayload["Reservations"]>[number]["Instances"]
   >[number],
+  input?: {
+    ssmAvailability?: AwsEc2SsmAvailability;
+    ssmAvailabilityReason?: string | null;
+  },
 ): AwsEc2InstanceSummary | null {
   const instanceId = instance.InstanceId?.trim();
   if (!instanceId) {
@@ -758,6 +799,8 @@ function toInstanceSummary(
       instance.PlatformDetails?.trim() || instance.Platform?.trim() || null,
     privateIp: instance.PrivateIpAddress?.trim() || null,
     state: instance.State?.Name?.trim() || null,
+    ssmAvailability: input?.ssmAvailability ?? "unknown",
+    ssmAvailabilityReason: input?.ssmAvailabilityReason ?? null,
   };
 }
 
@@ -3541,10 +3584,33 @@ export class AwsService {
       "EC2 인스턴스 응답을 해석하지 못했습니다.",
     );
 
+    const treatAllAsSsmReady = isE2EFakeAwsSessionEnabled();
+    const ssmLookup = treatAllAsSsmReady
+      ? null
+      : await this.loadSsmManagedInstanceLookup(profileName, region);
     const instances: AwsEc2InstanceSummary[] = [];
     for (const reservation of payload.Reservations ?? []) {
       for (const instance of reservation.Instances ?? []) {
-        const summary = toInstanceSummary(instance);
+        const instanceId = instance.InstanceId?.trim();
+        const summary = toInstanceSummary(instance, {
+          ssmAvailability: treatAllAsSsmReady
+            ? "ready"
+            : ssmLookup?.unknownReason
+            ? "unknown"
+            : instanceId && ssmLookup?.readyInstanceIds.has(instanceId)
+              ? "ready"
+              : "unavailable",
+          ssmAvailabilityReason: treatAllAsSsmReady
+            ? null
+            : ssmLookup?.unknownReason
+            ? ssmLookup.unknownReason
+            : instanceId && ssmLookup?.readyInstanceIds.has(instanceId)
+              ? null
+              : resolveUnavailableSsmReason({
+                state: instance.State?.Name?.trim() || null,
+                isInactive: Boolean(instanceId && ssmLookup?.inactiveInstanceIds.has(instanceId)),
+              }),
+        });
         if (summary) {
           instances.push(summary);
         }
@@ -3556,6 +3622,77 @@ export class AwsService {
         left.name.localeCompare(right.name) ||
         left.instanceId.localeCompare(right.instanceId),
     );
+  }
+
+  private async loadSsmManagedInstanceLookup(
+    profileName: string,
+    region: string,
+  ): Promise<SsmManagedInstanceLookupResult> {
+    try {
+      const readyInstanceIds = new Set<string>();
+      const inactiveInstanceIds = new Set<string>();
+      let nextToken: string | undefined;
+      do {
+        const args = [
+          "ssm",
+          "describe-instance-information",
+          "--profile",
+          profileName,
+          "--region",
+          region,
+          "--output",
+          "json",
+        ];
+        if (nextToken) {
+          args.push("--next-token", nextToken);
+        }
+
+        const result = await this.runResolvedCommand("aws", args, 60_000);
+        if (result.exitCode !== 0) {
+          throw normalizeAwsCliError(
+            result.stderr,
+            "SSM managed instance 상태를 확인하지 못했습니다.",
+          );
+        }
+
+        const payload = parseJson<{
+          InstanceInformationList?: Array<{
+            InstanceId?: string;
+            PingStatus?: string;
+          }>;
+          NextToken?: string;
+        }>(
+          result.stdout,
+          "SSM managed instance 응답을 해석하지 못했습니다.",
+        );
+
+        for (const item of payload.InstanceInformationList ?? []) {
+          const instanceId = item.InstanceId?.trim();
+          if (!instanceId) {
+            continue;
+          }
+          if ((item.PingStatus?.trim() ?? "") !== "Inactive") {
+            readyInstanceIds.add(instanceId);
+          } else {
+            inactiveInstanceIds.add(instanceId);
+          }
+        }
+
+        nextToken = payload.NextToken?.trim() || undefined;
+      } while (nextToken);
+
+      return {
+        readyInstanceIds,
+        inactiveInstanceIds,
+        unknownReason: null,
+      };
+    } catch (error) {
+      return {
+        readyInstanceIds: new Set<string>(),
+        inactiveInstanceIds: new Set<string>(),
+        unknownReason: resolveSsmLookupUnknownReason(error),
+      };
+    }
   }
 
   async listEcsClusters(

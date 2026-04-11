@@ -950,6 +950,10 @@ export function registerIpcHandlers(
   >();
   const awsSftpTunnelRuntimeByEndpoint = new Map<string, string>();
   const awsContainersTunnelRuntimeByEndpoint = new Map<string, string>();
+  const awsContainersHydratedHostByEndpoint = new Map<
+    string,
+    Extract<HostRecord, { kind: "aws-ec2" }>
+  >();
   const awsContainerShellTunnelRuntimeBySessionId = new Map<string, string>();
   const awsSftpPreflightByEndpointId = new Map<
     string,
@@ -1053,6 +1057,7 @@ export function registerIpcHandlers(
     `containers:${hostId}:forward:${ruleId}`;
 
   const stopAwsContainersTunnelForEndpoint = async (endpointId: string) => {
+    awsContainersHydratedHostByEndpoint.delete(endpointId);
     const runtimeId = awsContainersTunnelRuntimeByEndpoint.get(endpointId);
     if (!runtimeId) {
       return;
@@ -1327,6 +1332,7 @@ export function registerIpcHandlers(
     runtime: HostContainerRuntime | null;
     runtimeCommand: string | null;
     unsupportedReason: string | null;
+    hydratedHost?: Extract<HostRecord, { kind: "aws-ec2" }> | null;
   }> {
     const existingRuntime =
       coreManager.getContainersEndpointRuntime(endpointId);
@@ -1336,6 +1342,9 @@ export function registerIpcHandlers(
         runtime: existingRuntime.runtime,
         runtimeCommand: existingRuntime.runtimeCommand,
         unsupportedReason: existingRuntime.unsupportedReason,
+        hydratedHost: isAwsEc2HostRecord(host)
+          ? (awsContainersHydratedHostByEndpoint.get(endpointId) ?? null)
+          : null,
       };
     }
 
@@ -1431,7 +1440,9 @@ export function registerIpcHandlers(
             endpointId,
             tunnel.runtimeId,
           );
+          awsContainersHydratedHostByEndpoint.set(endpointId, hydratedHost);
         } else {
+          awsContainersHydratedHostByEndpoint.delete(endpointId);
           await awsSsmTunnelService
             .stop(tunnel.runtimeId)
             .catch(() => undefined);
@@ -1441,8 +1452,10 @@ export function registerIpcHandlers(
           runtime: result.runtime,
           runtimeCommand: result.runtimeCommand,
           unsupportedReason: result.unsupportedReason,
+          hydratedHost,
         };
       } catch (error) {
+        awsContainersHydratedHostByEndpoint.delete(endpointId);
         clearAwsSftpPreflight(endpointId);
         if (runtimeId) {
           await awsSsmTunnelService.stop(runtimeId).catch(() => undefined);
@@ -1470,6 +1483,7 @@ export function registerIpcHandlers(
         runtime: result.runtime,
         runtimeCommand: result.runtimeCommand,
         unsupportedReason: result.unsupportedReason,
+        hydratedHost: null,
       };
     }
 
@@ -1494,6 +1508,7 @@ export function registerIpcHandlers(
       runtime: result.runtime,
       runtimeCommand: result.runtimeCommand,
       unsupportedReason: result.unsupportedReason,
+      hydratedHost: null,
     };
   }
 

@@ -193,11 +193,11 @@ const emptyDetailClass =
 const logsOutputClass =
   "grid min-h-0 flex-1 content-start gap-[0.35rem] overflow-auto rounded-[18px] border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[rgba(7,13,24,0.88)] px-[1.05rem] py-4 text-[rgba(226,234,255,0.92)]";
 const detailPanelTabsClass =
-  "gap-[0.55rem] rounded-[18px] border border-[color-mix(in_srgb,var(--border)_84%,white_16%)] bg-[color-mix(in_srgb,var(--surface-muted)_82%,transparent_18%)] p-[0.35rem] shadow-[inset_0_1px_0_rgba(255,255,255,0.06)]";
+  "gap-[0.55rem] rounded-[18px] border border-[var(--border)] bg-[color-mix(in_srgb,var(--surface-muted)_86%,transparent_14%)] p-[0.35rem] shadow-none";
 const detailPanelTabButtonBaseClass =
   "min-w-[5.75rem] border border-transparent bg-[color-mix(in_srgb,var(--surface)_18%,transparent_82%)] text-[color-mix(in_srgb,var(--text-soft)_90%,black_10%)] shadow-none";
 const detailPanelTabButtonActiveClass =
-  "border-[color-mix(in_srgb,var(--accent-strong)_46%,var(--border)_54%)] bg-[color-mix(in_srgb,var(--accent-strong)_18%,var(--surface-elevated)_82%)] text-[var(--text)] shadow-[0_10px_22px_rgba(15,23,38,0.14)] ring-1 ring-[color-mix(in_srgb,var(--accent-strong)_24%,transparent_76%)]";
+  "border-[var(--selection-border)] bg-[var(--selection-tint)] text-[var(--accent-strong)] shadow-none";
 const detailPanelTabButtonInactiveClass =
   "hover:border-[color-mix(in_srgb,var(--border)_80%,white_20%)] hover:bg-[color-mix(in_srgb,var(--surface)_56%,transparent_44%)] hover:text-[var(--text)] disabled:border-transparent disabled:bg-transparent disabled:text-[color-mix(in_srgb,var(--text-soft)_70%,transparent_30%)] disabled:opacity-70";
 
@@ -931,7 +931,7 @@ function ContainerTunnelPanel({
       </div>
 
       {tunnelState.runtime ? (
-        <div className="grid gap-[0.85rem] rounded-[18px] border border-[color-mix(in_srgb,var(--accent-strong)_20%,var(--border)_80%)] bg-[color-mix(in_srgb,var(--accent-strong)_8%,var(--surface)_92%)] px-4 py-[0.9rem] shadow-[var(--shadow)]">
+        <div className="grid gap-[0.85rem] rounded-[18px] border border-[var(--selection-border)] bg-[var(--selection-tint)] px-4 py-[0.9rem] shadow-none">
           <div className="flex items-center justify-between gap-3">
             <strong>터널 상태</strong>
             <StatusBadge tone={tunnelState.runtime.status === "running" ? "running" : "stopped"}>
@@ -2348,9 +2348,9 @@ function ContainerListItem({
     <button
       type="button"
       className={cn(
-        "flex w-full flex-col items-stretch gap-2 rounded-[18px] border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[color-mix(in_srgb,var(--surface-strong)_84%,transparent_16%)] px-4 py-[0.95rem] text-left text-[var(--text)] transition-[border-color,box-shadow] duration-150 hover:border-[color-mix(in_srgb,var(--accent-strong)_34%,var(--border)_66%)] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[color-mix(in_srgb,var(--accent-strong)_12%,transparent)]",
+        "flex w-full flex-col items-stretch gap-2 rounded-[18px] border border-[var(--border)] bg-[color-mix(in_srgb,var(--surface-strong)_84%,transparent_16%)] px-4 py-[0.95rem] text-left text-[var(--text)] transition-[border-color,background-color] duration-150 hover:border-[color-mix(in_srgb,var(--accent-strong)_22%,var(--border)_78%)] hover:bg-[color-mix(in_srgb,var(--surface-strong)_88%,var(--accent-strong)_12%)] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[color-mix(in_srgb,var(--accent-strong)_12%,transparent)]",
         isActive
-          ? "border-[color-mix(in_srgb,var(--accent-strong)_34%,var(--border)_66%)] shadow-[0_0_0_1px_color-mix(in_srgb,var(--accent-strong)_14%,transparent_86%),var(--shadow)]"
+          ? "border-[var(--selection-border)] bg-[var(--selection-tint)]"
           : "",
       )}
       onClick={onSelect}

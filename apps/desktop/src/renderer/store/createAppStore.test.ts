@@ -40,6 +40,30 @@ function createEcsHost(): HostRecord {
   };
 }
 
+function createAwsEc2Host(): HostRecord {
+  return {
+    id: "aws-host-1",
+    kind: "aws-ec2",
+    label: "AWS Linux",
+    awsProfileName: "default",
+    awsRegion: "ap-northeast-2",
+    awsInstanceId: "i-aws",
+    awsAvailabilityZone: "ap-northeast-2a",
+    awsInstanceName: "aws-linux",
+    awsPlatform: "Linux/UNIX",
+    awsPrivateIp: "10.0.0.20",
+    awsState: "running",
+    awsSshUsername: "ubuntu",
+    awsSshPort: 22,
+    awsSshMetadataStatus: "ready",
+    awsSshMetadataError: null,
+    groupName: "Servers",
+    terminalThemeId: null,
+    createdAt: "2025-01-01T00:00:00.000Z",
+    updatedAt: "2025-01-01T00:00:00.000Z",
+  };
+}
+
 function createContainerTab(
   hostId: string,
   options: Partial<HostContainersTabState> = {},
@@ -81,6 +105,50 @@ function createContainerTab(
     ecsActivePanel: "overview",
     ecsTunnelStatesByServiceName: {},
     ...options,
+  };
+}
+
+function createContainerSummary() {
+  return {
+    id: "container-1",
+    name: "app",
+    runtime: "docker" as const,
+    image: "nginx:latest",
+    status: "Up 1 minute",
+    createdAt: "2025-01-01T00:00:00.000Z",
+    ports: "80/tcp",
+  };
+}
+
+function createContainerDetails() {
+  return {
+    id: "container-1",
+    name: "app",
+    runtime: "docker" as const,
+    image: "nginx:latest",
+    status: "running",
+    createdAt: "2025-01-01T00:00:00.000Z",
+    command: "nginx -g daemon off;",
+    entrypoint: "/docker-entrypoint.sh",
+    mounts: [],
+    networks: [],
+    ports: [],
+    environment: [],
+    labels: [],
+  };
+}
+
+function createUntrustedHostProbe() {
+  return {
+    hostId: "host-1",
+    hostLabel: "Prod",
+    host: "prod.example.com",
+    port: 22,
+    algorithm: "ssh-ed25519",
+    publicKeyBase64: "AAAATEST",
+    fingerprintSha256: "SHA256:test",
+    status: "untrusted" as const,
+    existing: null,
   };
 }
 
@@ -1946,7 +2014,7 @@ describe("createAppStore", () => {
     });
   });
 
-  it("treats a connected ECS exec shell like a regular local session without fallback retries", async () => {
+  it("keeps a missing-shell ECS exec session open as a close-only error overlay", async () => {
     const api = createMockApi();
     api.aws.openEcsExecShell = vi
       .fn()
@@ -1988,7 +2056,15 @@ describe("createAppStore", () => {
     await flushMicrotasks();
 
     expect(api.aws.openEcsExecShell).toHaveBeenCalledTimes(1);
-    expect(store.getState().tabs).toHaveLength(0);
+    expect(store.getState().tabs).toHaveLength(1);
+    expect(store.getState().tabs[0]?.status).toBe("error");
+    expect(store.getState().tabs[0]?.errorMessage).toContain(
+      "ECS 컨테이너 셸을 시작하지 못했습니다.",
+    );
+    expect(store.getState().tabs[0]?.connectionProgress).toMatchObject({
+      blockingKind: "dialog",
+      retryable: false,
+    });
   });
 
   it("retries a failed ECS exec shell using /bin/sh again", async () => {
@@ -2030,6 +2106,139 @@ describe("createAppStore", () => {
       command: "/bin/sh",
     });
     expect(store.getState().tabs[0]?.sessionId).toBe("ecs-shell-2");
+  });
+
+  it("closes a missing-shell ECS exec session through the standard close action", async () => {
+    const api = createMockApi();
+    api.aws.openEcsExecShell = vi
+      .fn()
+      .mockResolvedValueOnce({ sessionId: "ecs-shell-1" });
+    const store = createAppStore(api);
+
+    await store.getState().bootstrap();
+    store.setState((state) => ({
+      hosts: [...state.hosts, createEcsHost()],
+    }));
+    await store.getState().openEcsExecShell(
+      "ecs-host-1",
+      "api",
+      "arn:aws:ecs:ap-northeast-2:123456789012:task/prod/api-1",
+      "api",
+    );
+
+    store.getState().handleCoreEvent({
+      type: "connected",
+      sessionId: "ecs-shell-1",
+      payload: { shellKind: "aws-ecs-exec" },
+    });
+    store.getState().handleCoreEvent({
+      type: "error",
+      sessionId: "ecs-shell-1",
+      payload: {
+        message: "Process exited with status 127",
+      },
+    });
+    store.getState().handleCoreEvent({
+      type: "closed",
+      sessionId: "ecs-shell-1",
+      payload: {},
+    });
+
+    await store.getState().disconnectTab("ecs-shell-1");
+
+    expect(api.ssh.disconnect).toHaveBeenCalledWith("ecs-shell-1");
+    expect(store.getState().tabs).toHaveLength(0);
+  });
+
+  it("keeps a missing-shell ECS exec session open even if a small chunk arrives before the 127 error", async () => {
+    const api = createMockApi();
+    api.aws.openEcsExecShell = vi
+      .fn()
+      .mockResolvedValueOnce({ sessionId: "ecs-shell-1" });
+    const store = createAppStore(api);
+
+    await store.getState().bootstrap();
+    store.setState((state) => ({
+      hosts: [...state.hosts, createEcsHost()],
+    }));
+    await store.getState().openEcsExecShell(
+      "ecs-host-1",
+      "api",
+      "arn:aws:ecs:ap-northeast-2:123456789012:task/prod/api-1",
+      "api",
+    );
+
+    store.getState().handleCoreEvent({
+      type: "connected",
+      sessionId: "ecs-shell-1",
+      payload: { shellKind: "aws-ecs-exec" },
+    });
+    store.getState().markSessionOutput(
+      "ecs-shell-1",
+      new Uint8Array([27, 91, 54, 110]),
+    );
+    store.getState().handleCoreEvent({
+      type: "error",
+      sessionId: "ecs-shell-1",
+      payload: {
+        message: "Process exited with status 127",
+      },
+    });
+    store.getState().handleCoreEvent({
+      type: "closed",
+      sessionId: "ecs-shell-1",
+      payload: {},
+    });
+
+    expect(store.getState().tabs).toHaveLength(1);
+    expect(store.getState().tabs[0]?.status).toBe("error");
+    expect(store.getState().tabs[0]?.errorMessage).toContain(
+      "ECS 컨테이너 셸을 시작하지 못했습니다.",
+    );
+    expect(store.getState().tabs[0]?.connectionProgress).toMatchObject({
+      blockingKind: "dialog",
+      retryable: false,
+    });
+  });
+
+  it("keeps an ECS exec session open when it closes immediately without a separate error event", async () => {
+    const api = createMockApi();
+    api.aws.openEcsExecShell = vi
+      .fn()
+      .mockResolvedValueOnce({ sessionId: "ecs-shell-1" });
+    const store = createAppStore(api);
+
+    await store.getState().bootstrap();
+    store.setState((state) => ({
+      hosts: [...state.hosts, createEcsHost()],
+    }));
+    await store.getState().openEcsExecShell(
+      "ecs-host-1",
+      "api",
+      "arn:aws:ecs:ap-northeast-2:123456789012:task/prod/api-1",
+      "api",
+    );
+
+    store.getState().handleCoreEvent({
+      type: "connected",
+      sessionId: "ecs-shell-1",
+      payload: { shellKind: "aws-ecs-exec" },
+    });
+    store.getState().handleCoreEvent({
+      type: "closed",
+      sessionId: "ecs-shell-1",
+      payload: {},
+    });
+
+    expect(store.getState().tabs).toHaveLength(1);
+    expect(store.getState().tabs[0]?.status).toBe("error");
+    expect(store.getState().tabs[0]?.errorMessage).toContain(
+      "ECS 컨테이너 셸을 시작하지 못했습니다.",
+    );
+    expect(store.getState().tabs[0]?.connectionProgress).toMatchObject({
+      blockingKind: "dialog",
+      retryable: false,
+    });
   });
 
   it("shows a clearer permission error when ECS exec is denied by IAM", async () => {
@@ -2131,6 +2340,151 @@ describe("createAppStore", () => {
 
     expect(store.getState().tabs).toHaveLength(0);
     expect(store.getState().activeWorkspaceTab).toBe("home");
+  });
+
+  it("returns to the containers tab when a container shell session closes", async () => {
+    const store = createAppStore(createMockApi());
+
+    await store.getState().bootstrap();
+    await store.getState().openHostContainersTab("host-1");
+    await store.getState().openHostContainerShell("host-1", "container-1");
+    await store.getState().disconnectTab("session-container-1");
+
+    store.getState().handleCoreEvent({
+      type: "closed",
+      sessionId: "session-container-1",
+      payload: {},
+    });
+
+    expect(store.getState().tabs).toHaveLength(0);
+    expect(store.getState().activeWorkspaceTab).toBe("containers");
+    expect(store.getState().activeContainerHostId).toBe("host-1");
+  });
+
+  it("falls back to home when the stored containers return target no longer exists", async () => {
+    const store = createAppStore(createMockApi());
+
+    await store.getState().bootstrap();
+    await store.getState().openHostContainersTab("host-1");
+    await store.getState().openHostContainerShell("host-1", "container-1");
+    await store.getState().closeHostContainersTab("host-1");
+    await store.getState().disconnectTab("session-container-1");
+
+    store.getState().handleCoreEvent({
+      type: "closed",
+      sessionId: "session-container-1",
+      payload: {},
+    });
+
+    expect(store.getState().tabs).toHaveLength(0);
+    expect(store.getState().activeWorkspaceTab).toBe("home");
+  });
+
+  it("returns to the previous settings section when a session closes", async () => {
+    const store = createAppStore(createMockApi());
+
+    await store.getState().bootstrap();
+    store.getState().openSettingsSection("security");
+    await store.getState().openLocalTerminal(120, 32);
+    await store.getState().disconnectTab("local-session-1");
+
+    store.getState().handleCoreEvent({
+      type: "closed",
+      sessionId: "local-session-1",
+      payload: {},
+    });
+
+    expect(store.getState().tabs).toHaveLength(0);
+    expect(store.getState().activeWorkspaceTab).toBe("home");
+    expect(store.getState().homeSection).toBe("settings");
+    expect(store.getState().settingsSection).toBe("security");
+  });
+
+  it("returns to the sftp tab when a session opened from sftp closes", async () => {
+    const store = createAppStore(createMockApi());
+
+    await store.getState().bootstrap();
+    store.getState().activateSftp();
+    await store.getState().openLocalTerminal(120, 32);
+    await store.getState().disconnectTab("local-session-1");
+
+    store.getState().handleCoreEvent({
+      type: "closed",
+      sessionId: "local-session-1",
+      payload: {},
+    });
+
+    expect(store.getState().tabs).toHaveLength(0);
+    expect(store.getState().activeWorkspaceTab).toBe("sftp");
+  });
+
+  it("returns to the previously active session when the latest session closes", async () => {
+    const store = createAppStore(createMockApi());
+
+    await store.getState().bootstrap();
+    await store.getState().openLocalTerminal(120, 32);
+    await store.getState().openLocalTerminal(120, 32);
+    await store.getState().disconnectTab("local-session-2");
+
+    store.getState().handleCoreEvent({
+      type: "closed",
+      sessionId: "local-session-2",
+      payload: {},
+    });
+
+    expect(store.getState().activeWorkspaceTab).toBe("session:local-session-1");
+    expect(store.getState().tabs.map((tab) => tab.sessionId)).toEqual([
+      "local-session-1",
+    ]);
+  });
+
+  it("preserves the original return target across a retried local session", async () => {
+    const store = createAppStore(createMockApi());
+
+    await store.getState().bootstrap();
+    store.getState().openSettingsSection("security");
+    await store.getState().openLocalTerminal(120, 32);
+
+    store.getState().handleCoreEvent({
+      type: "error",
+      sessionId: "local-session-1",
+      payload: {
+        message: "failed to start shell",
+      },
+    });
+
+    await store.getState().retrySessionConnection("local-session-1");
+    await store.getState().disconnectTab("local-session-2");
+
+    store.getState().handleCoreEvent({
+      type: "closed",
+      sessionId: "local-session-2",
+      payload: {},
+    });
+
+    expect(store.getState().tabs).toHaveLength(0);
+    expect(store.getState().activeWorkspaceTab).toBe("home");
+    expect(store.getState().homeSection).toBe("settings");
+    expect(store.getState().settingsSection).toBe("security");
+  });
+
+  it("does not change focus when a background session closes", async () => {
+    const store = createAppStore(createMockApi());
+
+    await store.getState().bootstrap();
+    await store.getState().openLocalTerminal(120, 32);
+    await store.getState().openLocalTerminal(120, 32);
+
+    store.getState().handleCoreEvent({
+      type: "closed",
+      sessionId: "local-session-1",
+      payload: {},
+    });
+
+    expect(store.getState().activeWorkspaceTab).toBe("session:local-session-2");
+    expect(store.getState().tabs.map((tab) => tab.sessionId)).toEqual([
+      "local-session-2",
+    ]);
   });
 
   it("updates theme settings through the desktop api", async () => {
@@ -3716,6 +4070,511 @@ describe("createAppStore", () => {
 
     expect(api.ssh.disconnect).toHaveBeenCalledWith("session-container-1");
     expect(store.getState().tabs[0]?.status).toBe("disconnecting");
+  });
+
+  it("surfaces AWS host-key probe timeouts on the containers tab instead of leaving the overlay stuck", async () => {
+    const api = createMockApi();
+    vi.mocked(api.knownHosts.probeHost).mockRejectedValue(
+      new Error("Timed out waiting for SSH core response: probeHostKey"),
+    );
+    const store = createAppStore(api);
+
+    await store.getState().bootstrap();
+    store.setState((state) => ({
+      hosts: [...state.hosts, createAwsEc2Host()],
+    }));
+
+    await expect(
+      store.getState().openHostContainersTab("aws-host-1"),
+    ).resolves.toBeUndefined();
+
+    const containerTab = store
+      .getState()
+      .containerTabs.find((tab) => tab.hostId === "aws-host-1");
+
+    expect(store.getState().activeWorkspaceTab).toBe("containers");
+    expect(containerTab?.isLoading).toBe(false);
+    expect(containerTab?.connectionProgress).toBeNull();
+    expect(containerTab?.errorMessage).toBe(
+      "Timed out waiting for SSH core response: probeHostKey",
+    );
+  });
+
+  it("marks the pending AWS container shell session as error when host-key probing times out", async () => {
+    const api = createMockApi();
+    vi.mocked(api.containers.list).mockResolvedValue({
+      hostId: "aws-host-1",
+      runtime: "docker",
+      containers: [createContainerSummary()],
+    });
+    vi.mocked(api.containers.inspect).mockResolvedValue(createContainerDetails());
+    vi.mocked(api.knownHosts.probeHost).mockResolvedValueOnce({
+      hostId: "aws-host-1",
+      hostLabel: "AWS Linux",
+      host: "aws-ssm://i-aws",
+      port: 22,
+      algorithm: "ssh-ed25519",
+      publicKeyBase64: "AAAATEST",
+      fingerprintSha256: "SHA256:test",
+      status: "trusted",
+      existing: null,
+    });
+    vi.mocked(api.knownHosts.probeHost).mockRejectedValueOnce(
+      new Error("Timed out waiting for SSH core response: probeHostKey"),
+    );
+    const store = createAppStore(api);
+
+    await store.getState().bootstrap();
+    store.setState((state) => ({
+      hosts: [...state.hosts, createAwsEc2Host()],
+    }));
+    await store.getState().openHostContainersTab("aws-host-1");
+
+    await expect(
+      store.getState().openHostContainerShell("aws-host-1", "container-1"),
+    ).resolves.toBeUndefined();
+
+    const containerTab = store
+      .getState()
+      .containerTabs.find((tab) => tab.hostId === "aws-host-1");
+
+    expect(api.containers.openShell).not.toHaveBeenCalled();
+    expect(store.getState().tabs[0]?.status).toBe("error");
+    expect(store.getState().tabs[0]?.errorMessage).toBe(
+      "Timed out waiting for SSH core response: probeHostKey",
+    );
+    expect(containerTab?.isLoading).toBe(false);
+    expect(containerTab?.connectionProgress).toBeNull();
+  });
+
+  it("forwards AWS container-shell progress events into the pending session tab", async () => {
+    const api = createMockApi();
+    const openShellDeferred = createDeferred<{ sessionId: string }>();
+    vi.mocked(api.containers.list).mockResolvedValue({
+      hostId: "aws-host-1",
+      runtime: "docker",
+      containers: [createContainerSummary()],
+    });
+    vi.mocked(api.containers.inspect).mockResolvedValue(createContainerDetails());
+    vi.mocked(api.containers.openShell).mockReturnValue(openShellDeferred.promise);
+    vi.mocked(api.knownHosts.probeHost).mockResolvedValue({
+      hostId: "aws-host-1",
+      hostLabel: "AWS Linux",
+      host: "aws-ssm://i-aws",
+      port: 22,
+      algorithm: "ssh-ed25519",
+      publicKeyBase64: "AAAATEST",
+      fingerprintSha256: "SHA256:test",
+      status: "trusted",
+      existing: null,
+    });
+    const store = createAppStore(api);
+
+    await store.getState().bootstrap();
+    store.setState((state) => ({
+      hosts: [...state.hosts, createAwsEc2Host()],
+    }));
+    await store.getState().openHostContainersTab("aws-host-1");
+    const openShellPromise = store
+      .getState()
+      .openHostContainerShell("aws-host-1", "container-1");
+    await flushMicrotasks();
+
+    const pendingSessionId = store.getState().tabs[0]?.sessionId;
+    expect(pendingSessionId?.startsWith("pending:")).toBe(true);
+
+    store.getState().handleContainerConnectionProgressEvent({
+      endpointId: "containers:aws-host-1",
+      hostId: "aws-host-1",
+      stage: "browser-login",
+      message: "브라우저에서 default AWS 로그인을 진행하는 중입니다.",
+    });
+    expect(store.getState().tabs[0]?.connectionProgress).toMatchObject({
+      stage: "browser-login",
+      message: "브라우저에서 default AWS 로그인을 진행하는 중입니다.",
+      blockingKind: "browser",
+    });
+
+    store.getState().handleContainerConnectionProgressEvent({
+      endpointId: "containers:aws-host-1",
+      hostId: "aws-host-1",
+      stage: "checking-ssm",
+      message: "AWS Linux 인스턴스의 SSM 연결 상태를 확인하는 중입니다.",
+    });
+    expect(store.getState().tabs[0]?.connectionProgress).toMatchObject({
+      stage: "checking-ssm",
+      message: "AWS Linux 인스턴스의 SSM 연결 상태를 확인하는 중입니다.",
+      blockingKind: "none",
+    });
+
+    store.getState().handleContainerConnectionProgressEvent({
+      endpointId: "containers:aws-host-1",
+      hostId: "aws-host-1",
+      stage: "loading-instance-metadata",
+      message: "SSH 설정을 자동으로 확인하는 중입니다.",
+    });
+    expect(store.getState().tabs[0]?.connectionProgress).toMatchObject({
+      stage: "loading-instance-metadata",
+      message: "SSH 설정을 자동으로 확인하는 중입니다.",
+    });
+
+    store.getState().handleContainerConnectionProgressEvent({
+      endpointId: "containers:aws-host-1",
+      hostId: "aws-host-1",
+      stage: "opening-tunnel",
+      message: "컨테이너 런타임 확인을 위한 내부 터널을 여는 중입니다.",
+    });
+
+    const containerTab = store
+      .getState()
+      .containerTabs.find((tab) => tab.hostId === "aws-host-1");
+
+    expect(store.getState().tabs[0]?.connectionProgress).toMatchObject({
+      stage: "opening-tunnel",
+      message: "컨테이너 런타임 확인을 위한 내부 터널을 여는 중입니다.",
+      blockingKind: "none",
+    });
+    expect(containerTab?.isLoading).toBe(false);
+    expect(containerTab?.connectionProgress).toBeNull();
+
+    openShellDeferred.resolve({ sessionId: "session-container-1" });
+    await openShellPromise;
+  });
+
+  it("keeps a loaded containers tab visible while container shell waits for host trust", async () => {
+    const api = createMockApi();
+    vi.mocked(api.containers.list).mockResolvedValue({
+      hostId: "host-1",
+      runtime: "docker",
+      containers: [createContainerSummary()],
+    });
+    vi.mocked(api.containers.inspect).mockResolvedValue(createContainerDetails());
+    const store = createAppStore(api);
+
+    await store.getState().bootstrap();
+    await store.getState().openHostContainersTab("host-1");
+
+    vi.mocked(api.knownHosts.probeHost).mockResolvedValue(
+      createUntrustedHostProbe(),
+    );
+    store.getState().handleContainerConnectionProgressEvent({
+      endpointId: "containers:host-1",
+      hostId: "host-1",
+      stage: "probing-host-key",
+      message: "SSH 호스트 키를 확인하는 중입니다.",
+    });
+
+    await store.getState().openHostContainerShell("host-1", "container-1");
+
+    store.getState().handleContainerConnectionProgressEvent({
+      endpointId: "containers:host-1",
+      hostId: "host-1",
+      stage: "opening-tunnel",
+      message: "SSH 호스트 키 확인을 위한 내부 터널을 여는 중입니다.",
+    });
+
+    const containerTab = store
+      .getState()
+      .containerTabs.find((tab) => tab.hostId === "host-1");
+
+    expect(api.containers.openShell).not.toHaveBeenCalled();
+    expect(store.getState().pendingHostKeyPrompt?.probe.status).toBe("untrusted");
+    expect(store.getState().tabs[0]?.connectionProgress?.stage).toBe(
+      "awaiting-host-trust",
+    );
+    expect(containerTab?.isLoading).toBe(false);
+    expect(containerTab?.connectionProgress).toBeNull();
+    expect(containerTab?.details?.id).toBe("container-1");
+  });
+
+  it("keeps the containers tab visible after trusting a container shell host key", async () => {
+    const api = createMockApi();
+    const openShellDeferred = createDeferred<{ sessionId: string }>();
+    vi.mocked(api.containers.list).mockResolvedValue({
+      hostId: "host-1",
+      runtime: "docker",
+      containers: [createContainerSummary()],
+    });
+    vi.mocked(api.containers.inspect).mockResolvedValue(createContainerDetails());
+    vi.mocked(api.containers.openShell).mockReturnValue(openShellDeferred.promise);
+    const store = createAppStore(api);
+
+    await store.getState().bootstrap();
+    await store.getState().openHostContainersTab("host-1");
+
+    vi.mocked(api.knownHosts.probeHost).mockResolvedValue(
+      createUntrustedHostProbe(),
+    );
+    store.getState().handleContainerConnectionProgressEvent({
+      endpointId: "containers:host-1",
+      hostId: "host-1",
+      stage: "probing-host-key",
+      message: "SSH 호스트 키를 확인하는 중입니다.",
+    });
+
+    await store.getState().openHostContainerShell("host-1", "container-1");
+
+    store.getState().handleContainerConnectionProgressEvent({
+      endpointId: "containers:host-1",
+      hostId: "host-1",
+      stage: "opening-tunnel",
+      message: "SSH 호스트 키 확인을 위한 내부 터널을 여는 중입니다.",
+    });
+
+    const acceptPromise = store.getState().acceptPendingHostKeyPrompt("trust");
+    await flushMicrotasks();
+
+    store.getState().handleContainerConnectionProgressEvent({
+      endpointId: "containers:host-1",
+      hostId: "host-1",
+      stage: "connecting-containers",
+      message: "Prod 컨테이너 런타임 연결을 준비하는 중입니다.",
+    });
+
+    let containerTab = store
+      .getState()
+      .containerTabs.find((tab) => tab.hostId === "host-1");
+
+    expect(containerTab?.isLoading).toBe(false);
+    expect(containerTab?.connectionProgress).toBeNull();
+    expect(store.getState().activeWorkspaceTab).toContain("session:");
+
+    openShellDeferred.resolve({ sessionId: "session-container-1" });
+    await acceptPromise;
+
+    containerTab = store
+      .getState()
+      .containerTabs.find((tab) => tab.hostId === "host-1");
+
+    expect(api.knownHosts.trust).toHaveBeenCalled();
+    expect(api.containers.openShell).toHaveBeenCalledWith(
+      "host-1",
+      "container-1",
+    );
+    expect(store.getState().pendingHostKeyPrompt).toBeNull();
+    expect(store.getState().tabs[0]?.sessionId).toBe("session-container-1");
+    expect(store.getState().tabs[0]?.status).toBe("connecting");
+    expect(containerTab?.isLoading).toBe(false);
+    expect(containerTab?.connectionProgress).toBeNull();
+    expect(containerTab?.details?.id).toBe("container-1");
+  });
+
+  it("clears the containers tab overlay when container shell host trust is dismissed", async () => {
+    const api = createMockApi();
+    vi.mocked(api.containers.list).mockResolvedValue({
+      hostId: "host-1",
+      runtime: "docker",
+      containers: [createContainerSummary()],
+    });
+    vi.mocked(api.containers.inspect).mockResolvedValue(createContainerDetails());
+    const store = createAppStore(api);
+
+    await store.getState().bootstrap();
+    await store.getState().openHostContainersTab("host-1");
+
+    vi.mocked(api.knownHosts.probeHost).mockResolvedValue(
+      createUntrustedHostProbe(),
+    );
+    store.getState().handleContainerConnectionProgressEvent({
+      endpointId: "containers:host-1",
+      hostId: "host-1",
+      stage: "probing-host-key",
+      message: "SSH 호스트 키를 확인하는 중입니다.",
+    });
+
+    await store.getState().openHostContainerShell("host-1", "container-1");
+
+    store.getState().handleContainerConnectionProgressEvent({
+      endpointId: "containers:host-1",
+      hostId: "host-1",
+      stage: "opening-tunnel",
+      message: "SSH 호스트 키 확인을 위한 내부 터널을 여는 중입니다.",
+    });
+
+    store.getState().dismissPendingHostKeyPrompt();
+
+    const containerTab = store
+      .getState()
+      .containerTabs.find((tab) => tab.hostId === "host-1");
+
+    expect(store.getState().pendingHostKeyPrompt).toBeNull();
+    expect(store.getState().tabs[0]?.status).toBe("error");
+    expect(store.getState().tabs[0]?.errorMessage).toContain(
+      "호스트 키 확인이 취소되었습니다.",
+    );
+    expect(containerTab?.isLoading).toBe(false);
+    expect(containerTab?.connectionProgress).toBeNull();
+    expect(containerTab?.details?.id).toBe("container-1");
+  });
+
+  it("keeps container-shell retry context until the first shell output arrives", async () => {
+    const api = createMockApi();
+    const store = createAppStore(api);
+
+    await store.getState().bootstrap();
+    await store.getState().openHostContainerShell("host-1", "container-1");
+
+    expect(store.getState().tabs[0]?.sessionId).toBe("session-container-1");
+    expect(store.getState().pendingConnectionAttempts).toEqual([
+      expect.objectContaining({
+        sessionId: "session-container-1",
+        source: "container-shell",
+        hostId: "host-1",
+        containerId: "container-1",
+      }),
+    ]);
+
+    store.getState().handleCoreEvent({
+      type: "connected",
+      sessionId: "session-container-1",
+      payload: {},
+    });
+
+    expect(store.getState().tabs[0]?.status).toBe("connected");
+    expect(store.getState().pendingConnectionAttempts).toEqual([
+      expect.objectContaining({
+        sessionId: "session-container-1",
+        source: "container-shell",
+      }),
+    ]);
+
+    store.getState().markSessionOutput("session-container-1");
+
+    expect(store.getState().tabs[0]?.hasReceivedOutput).toBe(true);
+    expect(store.getState().pendingConnectionAttempts).toEqual([]);
+  });
+
+  it("keeps an immediate-closing container shell session open as a close-only error overlay", async () => {
+    const api = createMockApi();
+    const store = createAppStore(api);
+
+    await store.getState().bootstrap();
+    await store.getState().openHostContainerShell("host-1", "container-1");
+
+    store.getState().handleCoreEvent({
+      type: "connected",
+      sessionId: "session-container-1",
+      payload: {},
+    });
+    store.getState().handleCoreEvent({
+      type: "closed",
+      sessionId: "session-container-1",
+      payload: {
+        message: "Process exited with status 127",
+      },
+    });
+
+    expect(store.getState().tabs).toHaveLength(1);
+    expect(store.getState().tabs[0]?.sessionId).toBe("session-container-1");
+    expect(store.getState().tabs[0]?.status).toBe("error");
+    expect(store.getState().tabs[0]?.errorMessage).toContain(
+      "컨테이너 셸을 시작하지 못했습니다.",
+    );
+    expect(store.getState().tabs[0]?.connectionProgress).toMatchObject({
+      blockingKind: "dialog",
+      retryable: false,
+    });
+    expect(store.getState().pendingConnectionAttempts).toEqual([]);
+  });
+
+  it("keeps a missing-shell container session open when core reports error before close", async () => {
+    const api = createMockApi();
+    const store = createAppStore(api);
+
+    await store.getState().bootstrap();
+    await store.getState().openHostContainerShell("host-1", "container-1");
+
+    store.getState().handleCoreEvent({
+      type: "connected",
+      sessionId: "session-container-1",
+      payload: {},
+    });
+    store.getState().handleCoreEvent({
+      type: "error",
+      sessionId: "session-container-1",
+      payload: {
+        message: "Process exited with status 127",
+      },
+    });
+
+    expect(store.getState().tabs).toHaveLength(1);
+    expect(store.getState().tabs[0]?.status).toBe("error");
+    expect(store.getState().tabs[0]?.errorMessage).toContain(
+      "컨테이너 셸을 시작하지 못했습니다.",
+    );
+    expect(store.getState().tabs[0]?.connectionProgress).toMatchObject({
+      blockingKind: "dialog",
+      retryable: false,
+    });
+    expect(store.getState().pendingConnectionAttempts).toEqual([
+      expect.objectContaining({
+        sessionId: "session-container-1",
+        source: "container-shell",
+      }),
+    ]);
+
+    store.getState().handleCoreEvent({
+      type: "closed",
+      sessionId: "session-container-1",
+      payload: {
+        message: "Process exited with status 127",
+      },
+    });
+
+    expect(store.getState().tabs).toHaveLength(1);
+    expect(store.getState().tabs[0]?.status).toBe("error");
+    expect(store.getState().pendingConnectionAttempts).toEqual([]);
+  });
+
+  it("removes a connected container shell normally after the first output and later close", async () => {
+    const api = createMockApi();
+    const store = createAppStore(api);
+
+    await store.getState().bootstrap();
+    await store.getState().openHostContainerShell("host-1", "container-1");
+
+    store.getState().handleCoreEvent({
+      type: "connected",
+      sessionId: "session-container-1",
+      payload: {},
+    });
+    store.getState().markSessionOutput("session-container-1");
+    store.getState().handleCoreEvent({
+      type: "closed",
+      sessionId: "session-container-1",
+      payload: {
+        message: "closed",
+      },
+    });
+
+    expect(store.getState().tabs).toHaveLength(0);
+    expect(store.getState().pendingConnectionAttempts).toEqual([]);
+  });
+
+  it("closes a missing-shell container session through the standard close action", async () => {
+    const api = createMockApi();
+    const store = createAppStore(api);
+
+    await store.getState().bootstrap();
+    await store.getState().openHostContainerShell("host-1", "container-1");
+
+    store.getState().handleCoreEvent({
+      type: "connected",
+      sessionId: "session-container-1",
+      payload: {},
+    });
+    store.getState().handleCoreEvent({
+      type: "closed",
+      sessionId: "session-container-1",
+      payload: {
+        message: "Process exited with status 127",
+      },
+    });
+
+    await store.getState().disconnectTab("session-container-1");
+
+    expect(api.ssh.disconnect).toHaveBeenCalledWith("session-container-1");
+    expect(store.getState().tabs).toHaveLength(0);
   });
 
   it("deduplicates overlapping container log lines while following", async () => {

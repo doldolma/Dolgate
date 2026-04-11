@@ -5,6 +5,7 @@ interface TerminalConnectionOverlayProps {
   error: boolean;
   title: string;
   message: string;
+  showRetry?: boolean;
   onRetry?: () => void;
   onClose?: () => void;
 }
@@ -13,6 +14,7 @@ export function TerminalConnectionOverlay({
   error,
   title,
   message,
+  showRetry = true,
   onRetry,
   onClose,
 }: TerminalConnectionOverlayProps) {
@@ -39,9 +41,11 @@ export function TerminalConnectionOverlay({
         </div>
         {error ? (
           <div className="flex w-full justify-end gap-[0.65rem] pt-[0.35rem]">
-            <Button type="button" variant="secondary" onClick={onRetry}>
-              Retry
-            </Button>
+            {showRetry ? (
+              <Button type="button" variant="secondary" onClick={onRetry}>
+                Retry
+              </Button>
+            ) : null}
             <Button type="button" variant="secondary" onClick={onClose}>
               Close
             </Button>

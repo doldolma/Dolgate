@@ -143,6 +143,7 @@ export function TerminalSessionPane(props: TerminalSessionPaneProps) {
             error={tab?.status === 'error'}
             title={controller.connectionOverlayTitle}
             message={controller.connectionOverlayMessage}
+            showRetry={tab?.connectionProgress?.retryable !== false}
             onRetry={() => {
               void onRetry?.();
             }}

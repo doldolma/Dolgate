@@ -37,6 +37,27 @@ export function createContainersServices(deps: SliceDeps) {
   const { api } = deps;
   const sessionServices = createSessionServices(deps);
   const trustServices = createTrustAuthServices(deps);
+  const clearContainerTabConnectionOverlay = (
+    set: StoreSetter,
+    hostId: string,
+  ) => {
+    set((state) => {
+      const currentTab = findContainersTab(state, hostId);
+      if (!currentTab) {
+        return state;
+      }
+      if (!currentTab.isLoading && currentTab.connectionProgress == null) {
+        return state;
+      }
+      return {
+        containerTabs: upsertContainersTab(state.containerTabs, {
+          ...currentTab,
+          isLoading: false,
+          connectionProgress: null,
+        }),
+      };
+    });
+  };
   const {
     updateSessionProgress,
     promptForMissingUsername,
@@ -59,6 +80,7 @@ export function createContainersServices(deps: SliceDeps) {
         return;
       }
 
+      clearContainerTabConnectionOverlay(set, hostId);
       sessionServices.updateSessionProgress(
         set,
         sessionId,
@@ -95,10 +117,15 @@ export function createContainersServices(deps: SliceDeps) {
               lastEventAt: new Date().toISOString(),
             }),
           ),
-          pendingConnectionAttempts:
-            currentState.pendingConnectionAttempts.filter(
-              (attempt) => attempt.sessionId !== sessionId,
-            ),
+          pendingConnectionAttempts: currentState.pendingConnectionAttempts.map(
+            (attempt) =>
+              attempt.sessionId === sessionId
+                ? {
+                    ...attempt,
+                    sessionId: connection.sessionId,
+                  }
+                : attempt,
+          ),
         }));
       } catch (error) {
         const message =
@@ -950,8 +977,10 @@ export function createContainersServices(deps: SliceDeps) {
 
   return {
     updateSessionProgress,
+    markSessionError: sessionServices.markSessionError,
     promptForMissingUsername,
     ensureTrustedHost: trustServices.ensureTrustedHost,
+    clearContainerTabConnectionOverlay,
     createPendingSessionTabForContainerShell,
     createPendingSessionTabForEcsShell,
     startPendingContainerShellConnect,

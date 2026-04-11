@@ -928,6 +928,8 @@ export interface AwsEc2InstanceSummary {
   platform?: string | null;
   privateIp?: string | null;
   state?: string | null;
+  ssmAvailability: "ready" | "unavailable" | "unknown";
+  ssmAvailabilityReason?: string | null;
 }
 
 export interface AwsEcsClusterSummary {
@@ -1751,10 +1753,9 @@ export interface TransferStartInput {
 }
 
 export type TerminalConnectionStage =
+  | ConnectionProgressStage
   | 'host-key-check'
   | 'awaiting-host-trust'
-  | 'checking-profile'
-  | 'browser-login'
   | 'retrying-session'
   | 'connecting'
   | 'awaiting-credentials'

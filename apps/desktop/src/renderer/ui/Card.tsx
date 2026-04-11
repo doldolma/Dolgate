@@ -11,9 +11,9 @@ interface CardProps extends HTMLAttributes<HTMLElement> {
 
 const toneClasses: Record<CardTone, string> = {
   surface:
-    'border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[var(--surface-elevated)] shadow-[var(--shadow-soft)]',
+    'border-[var(--border)] bg-[var(--surface-elevated)] shadow-none',
   muted:
-    'border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[color-mix(in_srgb,var(--surface-muted)_92%,transparent_8%)]',
+    'border-[var(--border)] bg-[var(--surface-muted)] shadow-none',
 };
 
 export function Card({

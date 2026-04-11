@@ -22,10 +22,10 @@ export function OptionCard({
     <button
       type={type}
       className={cn(
-        'flex min-h-[150px] w-full flex-col items-start gap-3 rounded-[22px] border px-4 py-4 text-left transition-[border-color,box-shadow,background-color,transform] duration-150 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[color-mix(in_srgb,var(--accent-strong)_14%,transparent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--app-bg)]',
+        'flex min-h-[150px] w-full flex-col items-start gap-3 rounded-[22px] border px-4 py-4 text-left transition-[border-color,box-shadow,background-color] duration-150 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[color-mix(in_srgb,var(--accent-strong)_14%,transparent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--app-bg)]',
         active
-          ? 'border-[color-mix(in_srgb,var(--accent-strong)_48%,var(--border)_52%)] bg-[color-mix(in_srgb,var(--accent-strong)_8%,var(--surface-muted)_92%)] shadow-[0_0_0_1px_color-mix(in_srgb,var(--accent-strong)_24%,transparent)]'
-          : 'border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[color-mix(in_srgb,var(--surface-muted)_92%,transparent_8%)] hover:-translate-y-[1px] hover:bg-[color-mix(in_srgb,var(--surface-muted)_96%,transparent_4%)]',
+          ? 'border-[var(--selection-border)] bg-[var(--selection-tint)] shadow-none'
+          : 'border-[var(--border)] bg-[color-mix(in_srgb,var(--surface-muted)_92%,transparent_8%)] hover:bg-[color-mix(in_srgb,var(--surface-muted)_96%,transparent_4%)]',
         className,
       )}
       {...props}

@@ -51,19 +51,19 @@ export function ContainersShell({
   const [showLeftTabStripFade, setShowLeftTabStripFade] = useState(false);
   const [showRightTabStripFade, setShowRightTabStripFade] = useState(false);
   const hostTabShellBaseClass =
-    'group relative inline-flex min-w-0 flex-none items-center gap-[0.3rem] rounded-[18px] border border-[color-mix(in_srgb,var(--border)_88%,transparent_12%)] bg-[linear-gradient(180deg,color-mix(in_srgb,var(--surface-strong)_92%,transparent_8%),color-mix(in_srgb,var(--surface)_96%,transparent_4%))] pr-[0.24rem] shadow-[var(--shadow-soft)] transition-[border-color,background-color,box-shadow,transform] duration-200';
+    'group relative inline-flex min-w-0 flex-none items-center gap-[0.24rem] rounded-[18px] border border-[var(--border)] bg-[var(--surface-elevated)] p-[0.24rem] shadow-none transition-[border-color,background-color] duration-200';
   const hostTabShellActiveClass =
-    'border-[color-mix(in_srgb,var(--accent-strong)_52%,var(--border)_48%)] bg-[linear-gradient(180deg,color-mix(in_srgb,var(--accent-strong)_13%,var(--surface-strong)_87%),color-mix(in_srgb,var(--accent-strong)_7%,var(--surface)_93%))] shadow-[0_0_0_1px_color-mix(in_srgb,var(--accent-strong)_18%,transparent_82%),0_16px_28px_-22px_color-mix(in_srgb,var(--accent-strong)_42%,transparent_58%),var(--shadow)]';
+    'border-[var(--selection-border)] bg-[var(--selection-tint)] shadow-none';
   const hostTabButtonBaseClass =
-    'inline-flex min-w-0 max-w-[min(260px,42vw)] items-center gap-[0.55rem] rounded-[16px] px-[0.92rem] py-[0.72rem] text-left transition-[background-color,color,box-shadow,transform] duration-200';
+    'inline-flex min-w-0 max-w-[min(260px,42vw)] items-center gap-[0.55rem] rounded-[16px] px-[0.92rem] py-[0.72rem] text-left transition-[background-color,color] duration-200';
   const hostTabButtonActiveClass =
-    'bg-[color-mix(in_srgb,var(--accent-strong)_14%,var(--surface-strong)_86%)] text-[var(--text)] shadow-[inset_0_1px_0_color-mix(in_srgb,white_48%,transparent_52%)]';
+    'bg-[var(--surface-strong)] text-[var(--text)] shadow-none';
   const hostTabButtonInactiveClass =
-    'bg-transparent text-[var(--text-soft)] hover:bg-[color-mix(in_srgb,var(--surface-strong)_82%,transparent_18%)] hover:text-[var(--text)]';
+    'bg-transparent text-[var(--text-soft)] hover:bg-[color-mix(in_srgb,var(--surface-muted)_82%,transparent_18%)] hover:text-[var(--text)]';
   const hostTabBadgeBaseClass =
     'min-h-6 px-[0.52rem] py-[0.14rem] text-[0.72rem] transition-[border-color,background-color,color] duration-200';
   const hostTabBadgeActiveClass =
-    'border-[color-mix(in_srgb,var(--accent-strong)_24%,var(--border)_76%)] bg-[color-mix(in_srgb,var(--accent-strong)_12%,transparent_88%)] text-[var(--text)]';
+    'border-[var(--selection-border)] bg-[var(--selection-tint)] text-[var(--accent-strong)]';
   const hostTabCloseButtonBaseClass =
     'h-[1.9rem] w-[1.9rem] rounded-full transition-[background-color,color,box-shadow] duration-200';
   const hostTabCloseButtonActiveClass =

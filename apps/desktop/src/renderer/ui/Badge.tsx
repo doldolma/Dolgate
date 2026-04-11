@@ -10,11 +10,11 @@ interface BadgeProps extends HTMLAttributes<HTMLSpanElement> {
 
 const toneClasses: Record<BadgeTone, string> = {
   neutral:
-    'border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[color-mix(in_srgb,var(--surface-muted)_92%,transparent_8%)] text-[var(--text-soft)]',
+    'border-[var(--border)] bg-[color-mix(in_srgb,var(--surface-muted)_94%,transparent_6%)] text-[var(--text-soft)]',
   running:
-    'border-[color-mix(in_srgb,var(--success-text)_24%,var(--border))] bg-[color-mix(in_srgb,var(--success-bg)_70%,transparent_30%)] text-[var(--success-text)]',
+    'border-[color-mix(in_srgb,var(--success-text)_22%,var(--border))] bg-[color-mix(in_srgb,var(--success-bg)_64%,transparent_36%)] text-[var(--success-text)]',
   starting:
-    'border-[color-mix(in_srgb,var(--accent-strong)_26%,var(--border))] bg-[color-mix(in_srgb,var(--accent-strong)_12%,transparent_88%)] text-[var(--accent-strong)]',
+    'border-[color-mix(in_srgb,var(--accent-strong)_24%,var(--border))] bg-[color-mix(in_srgb,var(--accent-strong)_10%,transparent_90%)] text-[var(--accent-strong)]',
   paused:
     'border-[var(--border)] bg-[color-mix(in_srgb,var(--surface-muted)_92%,transparent_8%)] text-[var(--text-soft)]',
   error:

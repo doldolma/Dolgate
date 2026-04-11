@@ -498,6 +498,7 @@ describe('renderer style boundaries', () => {
     expect(source).toContain('box-shadow: inset 0 0 0 1px');
     expect(source).toContain('border: 2px solid transparent;');
     expect(source).toContain('[data-native-scrollbar="true"]');
+    expect(source).toContain('[data-titlebar-tab-strip="true"]');
     expect(source).toContain('[data-terminal-canvas="true"]');
     expect(source).toContain('.xterm-viewport');
     expect(source).toContain('scrollbar-color: auto;');
@@ -525,6 +526,66 @@ describe('renderer style boundaries', () => {
     expect(source).toContain(
       '--scrollbar-thumb: color-mix(in srgb, var(--text-soft) 76%, white 24%);',
     );
+  });
+
+  it('defines shell background theme tokens for light and dark themes', () => {
+    const source = fs.readFileSync(path.join(stylesDir, 'tokens.css'), 'utf8');
+
+    expect(source.match(/--shell-background:/g)?.length ?? 0).toBe(2);
+    expect(source).toContain('radial-gradient(circle at top right, rgba(255, 255, 255, 0.3), transparent 24%)');
+    expect(source).toContain('color-mix(in srgb, var(--accent-strong) 7%, transparent)');
+    expect(source).toContain('color-mix(in srgb, var(--app-bg) 88%, black 12%)');
+  });
+
+  it('defines quiet selection and floating elevation tokens for both themes', () => {
+    const source = fs.readFileSync(path.join(stylesDir, 'tokens.css'), 'utf8');
+    const quietTokens = [
+      '--selection-tint',
+      '--selection-tint-strong',
+      '--selection-border',
+      '--shadow-floating',
+    ];
+
+    for (const token of quietTokens) {
+      expect(source.match(new RegExp(`${escapeRegExp(token)}:`, 'g'))?.length ?? 0).toBe(2);
+    }
+  });
+
+  it('routes shell backgrounds through the shared shell token', () => {
+    const appShellSource = fs.readFileSync(
+      path.join(rendererDir, 'shells', 'AppShell.tsx'),
+      'utf8',
+    );
+    const loginShellSource = fs.readFileSync(
+      path.join(rendererDir, 'shells', 'LoginShell.tsx'),
+      'utf8',
+    );
+
+    for (const source of [appShellSource, loginShellSource]) {
+      expect(source).toContain('bg-[var(--shell-background)]');
+      expect(source).not.toContain('circle_at_top_right');
+      expect(source).not.toContain('rgba(255,255,255,0.3)');
+    }
+  });
+
+  it('removes strong embossed chrome styling from key shell surfaces', () => {
+    const appTitleBarSource = fs.readFileSync(
+      path.join(rendererDir, 'components', 'AppTitleBar.tsx'),
+      'utf8',
+    );
+    const homeNavigationSource = fs.readFileSync(
+      path.join(rendererDir, 'components', 'HomeNavigation.tsx'),
+      'utf8',
+    );
+    const loginGateSource = fs.readFileSync(
+      path.join(rendererDir, 'components', 'LoginGate.tsx'),
+      'utf8',
+    );
+
+    expect(appTitleBarSource).not.toContain('shadow-[0_14px_34px_rgba(10,18,30,0.18)]');
+    expect(appTitleBarSource).not.toContain('shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]');
+    expect(homeNavigationSource).not.toContain('shadow-[var(--shadow-soft)]');
+    expect(loginGateSource).not.toContain('shadow-[0_28px_70px_rgba(8,16,30,0.18),inset_0_1px_0_rgba(255,255,255,0.08)]');
   });
 
   it('removes legacy.css imports from renderer entrypoints', () => {

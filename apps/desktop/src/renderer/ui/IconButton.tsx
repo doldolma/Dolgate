@@ -19,9 +19,9 @@ const sizeClasses: Record<IconButtonSize, string> = {
 
 const toneClasses: Record<IconButtonTone, string> = {
   default:
-    'border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[var(--surface-elevated)] text-[var(--text)] shadow-[0_8px_18px_rgba(15,23,38,0.08)] hover:bg-[color-mix(in_srgb,var(--surface-elevated)_92%,var(--surface-muted)_8%)]',
+    'border-[var(--border)] bg-[var(--surface-elevated)] text-[var(--text)] shadow-none hover:bg-[color-mix(in_srgb,var(--surface-muted)_88%,var(--surface-elevated)_12%)]',
   ghost:
-    'border-transparent bg-transparent text-[var(--text-soft)] hover:bg-[color-mix(in_srgb,var(--surface-muted)_88%,transparent_12%)]',
+    'border-transparent bg-transparent text-[var(--text-soft)] shadow-none hover:bg-[color-mix(in_srgb,var(--surface-muted)_88%,transparent_12%)] hover:text-[var(--text)]',
   danger:
     'border-[color-mix(in_srgb,var(--danger-text)_26%,var(--border))] bg-[var(--danger-bg)] text-[var(--danger-text)]',
 };
@@ -44,7 +44,7 @@ export function IconButton({
         toneClasses[tone],
         active &&
           tone === 'default' &&
-          'border-[color-mix(in_srgb,var(--accent-strong)_34%,var(--border)_66%)] bg-[color-mix(in_srgb,var(--accent-strong)_12%,var(--surface))] text-[var(--accent-strong)]',
+          'border-[var(--selection-border)] bg-[var(--selection-tint)] text-[var(--accent-strong)]',
         className,
       )}
       {...props}

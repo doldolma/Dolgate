@@ -11,7 +11,7 @@ export const SplitButton = forwardRef<HTMLDivElement, SplitButtonProps>(
     return (
       <div
         ref={ref}
-        className={cn('relative inline-flex items-stretch rounded-2xl shadow-[var(--shadow-soft)]', className)}
+        className={cn('relative inline-flex items-stretch rounded-2xl shadow-none', className)}
         {...props}
       >
         {children}
@@ -43,7 +43,7 @@ export function SplitButtonToggle({
   return (
     <Button
       variant="primary"
-      className={cn('min-w-11 rounded-l-none border-l border-l-[rgba(255,255,255,0.18)] px-3 shadow-none', className)}
+      className={cn('min-w-11 rounded-l-none border-l border-l-[color-mix(in_srgb,var(--accent-contrast)_18%,transparent)] px-3 shadow-none', className)}
       {...props}
     >
       {children}
@@ -58,7 +58,7 @@ export function SplitButtonMenu({
   return (
     <div
       className={cn(
-        'absolute right-0 top-[calc(100%+0.45rem)] z-[3] min-w-[14rem] rounded-[18px] border border-[var(--border)] bg-[var(--dialog-surface)] p-2 shadow-[var(--shadow)]',
+        'absolute right-0 top-[calc(100%+0.45rem)] z-[3] min-w-[14rem] rounded-[18px] border border-[var(--border)] bg-[var(--dialog-surface)] p-2 shadow-[var(--shadow-floating)]',
         className,
       )}
       {...props}

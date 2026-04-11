@@ -393,6 +393,13 @@ export interface PendingConnectionAttempt {
   containerName?: string;
 }
 
+export interface SessionReturnTarget {
+  activeWorkspaceTab: WorkspaceTabId;
+  homeSection?: HomeSection;
+  settingsSection?: SettingsSection;
+  activeContainerHostId?: string | null;
+}
+
 export interface SftpState {
   localHomePath: string;
   leftPane: SftpPaneState;
@@ -432,6 +439,7 @@ interface AppStateParts {
   pendingMissingUsernamePrompt: PendingMissingUsernamePrompt | null;
   pendingInteractiveAuth: PendingInteractiveAuth | null;
   pendingConnectionAttempts: PendingConnectionAttempt[];
+  sessionReturnTargets: Record<string, SessionReturnTarget>;
   setSearchQuery: (value: string) => void;
   toggleHostTag: (tag: string) => void;
   clearHostTagFilter: () => void;
@@ -740,6 +748,7 @@ export type SessionSlice = Pick<
   | "pendingMissingUsernamePrompt"
   | "pendingInteractiveAuth"
   | "pendingConnectionAttempts"
+  | "sessionReturnTargets"
   | "openLocalTerminal"
   | "connectHost"
   | "retrySessionConnection"

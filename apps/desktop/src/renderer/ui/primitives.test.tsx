@@ -24,8 +24,14 @@ describe('renderer UI primitives', () => {
       </div>,
     );
 
-    expect(screen.getByRole('button', { name: 'Save' })).toBeEnabled();
-    expect(screen.getByRole('button', { name: 'Cancel' })).toBeDisabled();
+    const saveButton = screen.getByRole('button', { name: 'Save' });
+    const cancelButton = screen.getByRole('button', { name: 'Cancel' });
+
+    expect(saveButton).toBeEnabled();
+    expect(cancelButton).toBeDisabled();
+    expect(saveButton.className).toContain('shadow-none');
+    expect(saveButton.className).not.toContain('hover:-translate-y-[1px]');
+    expect(cancelButton.className).toContain('border-[var(--border)]');
   });
 
   it('renders modal shell sections without legacy modal wrappers', () => {
@@ -52,6 +58,7 @@ describe('renderer UI primitives', () => {
     expect(screen.getByText('Dialog body')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Confirm' })).toBeInTheDocument();
     expect(dialog).toHaveClass('flex', 'flex-col', 'overflow-hidden', 'max-h-[calc(100vh-7rem)]');
+    expect(dialog.className).toContain('shadow-[var(--shadow-floating)]');
     expect(body).toHaveClass('min-h-0', 'flex-1', 'overflow-y-auto');
     expect(header).toHaveClass('shrink-0');
     expect(footer).toHaveClass('shrink-0');
@@ -78,14 +85,14 @@ describe('renderer UI primitives', () => {
         <SplitButtonMain>New Host</SplitButtonMain>
         <SplitButtonToggle aria-label="Open menu">v</SplitButtonToggle>
         <SplitButtonMenu>
-          <SplitButtonMenuItem>Import from AWS</SplitButtonMenuItem>
+          <SplitButtonMenuItem>Import via AWS SSM</SplitButtonMenuItem>
         </SplitButtonMenu>
       </SplitButton>,
     );
 
     expect(screen.getByRole('button', { name: 'New Host' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Open menu' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Import from AWS' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Import via AWS SSM' })).toBeInTheDocument();
   });
 
   it('renders core primitives safely under dark theme tokens', () => {
@@ -147,6 +154,9 @@ describe('renderer UI primitives', () => {
     expect(screen.getByRole('button', { name: /System/i })).toBeInTheDocument();
     expect(screen.getByText('Follow the desktop setting')).toBeInTheDocument();
     expect(screen.getByTestId('option-preview')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /System/i }).className).toContain(
+      'bg-[var(--selection-tint)]',
+    );
   });
 
   it('renders toggle switch labels and checked state', () => {

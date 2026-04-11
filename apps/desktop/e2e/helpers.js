@@ -1,10 +1,10 @@
 const { _electron: electron } = require("@playwright/test");
 const electronPath = require("electron");
 const { mkdtemp, mkdir, rm, writeFile } = require("node:fs/promises");
-const { existsSync, readdirSync, statSync } = require("node:fs");
 const { spawnSync } = require("node:child_process");
 const os = require("node:os");
 const path = require("node:path");
+const { resolvePackagedAppLaunch } = require("./packaged-app-launch.cjs");
 
 const desktopMainPath = path.resolve(__dirname, "../.vite/build/main.js");
 const timestamp = "2025-01-01T00:00:00.000Z";
@@ -127,101 +127,6 @@ function createFakeAuthSessionJson() {
   });
 }
 
-function resolvePackagedAppLaunch() {
-  const override = process.env.DOLSSH_E2E_PACKAGED_APP_ENTRY?.trim();
-  if (override) {
-    const resolvedOverride = path.resolve(override);
-    if (resolvedOverride.toLowerCase().endsWith(".asar")) {
-      return {
-        executablePath: electronPath,
-        args: [resolvedOverride],
-      };
-    }
-    return {
-      executablePath: resolvedOverride,
-      args: [],
-    };
-  }
-
-  const outDir = path.resolve(__dirname, "../out");
-  if (!existsSync(outDir)) {
-    throw new Error(`packaged desktop app not found: ${outDir}`);
-  }
-
-  const outputDirs = readdirSync(outDir)
-    .map((entry) => path.join(outDir, entry))
-    .filter((entryPath) => statSync(entryPath).isDirectory());
-
-  if (process.platform === "darwin") {
-    for (const outputDir of outputDirs) {
-      const executableCandidate = path.join(
-        outputDir,
-        "dolgate.app",
-        "Contents",
-        "MacOS",
-        "dolgate",
-      );
-      if (existsSync(executableCandidate)) {
-        return {
-          executablePath: executableCandidate,
-          args: [],
-        };
-      }
-      const asarCandidate = path.join(
-        outputDir,
-        "dolgate.app",
-        "Contents",
-        "Resources",
-        "app.asar",
-      );
-      if (existsSync(asarCandidate)) {
-        return {
-          executablePath: electronPath,
-          args: [asarCandidate],
-        };
-      }
-    }
-  }
-
-  if (process.platform === "win32") {
-    for (const outputDir of outputDirs) {
-      const executableCandidate = path.join(outputDir, "dolgate.exe");
-      if (existsSync(executableCandidate)) {
-        return {
-          executablePath: executableCandidate,
-          args: [],
-        };
-      }
-      const asarCandidate = path.join(outputDir, "resources", "app.asar");
-      if (existsSync(asarCandidate)) {
-        return {
-          executablePath: electronPath,
-          args: [asarCandidate],
-        };
-      }
-    }
-  }
-
-  for (const outputDir of outputDirs) {
-    const executableCandidate = path.join(outputDir, "dolgate");
-    if (existsSync(executableCandidate)) {
-      return {
-        executablePath: executableCandidate,
-        args: [],
-      };
-    }
-    const asarCandidate = path.join(outputDir, "resources", "app.asar");
-    if (existsSync(asarCandidate)) {
-      return {
-        executablePath: electronPath,
-        args: [asarCandidate],
-      };
-    }
-  }
-
-  throw new Error(`failed to locate packaged desktop app under ${outDir}`);
-}
-
 async function launchDesktop(env) {
   const e2eDefaultEnv = {
     DOLSSH_E2E_ALLOW_MULTI_INSTANCE:
@@ -236,7 +141,15 @@ async function launchDesktop(env) {
   );
 
   if (process.env.DOLSSH_E2E_USE_PACKAGED_APP === "1") {
-    const packagedLaunch = resolvePackagedAppLaunch();
+    const packagedLaunch = resolvePackagedAppLaunch({
+      override: process.env.DOLSSH_E2E_PACKAGED_APP_ENTRY,
+      electronPath,
+      outDir: path.resolve(__dirname, "../out"),
+      platform: process.platform,
+      arch: process.arch,
+      targetPlatform: process.env.DOLSSH_TARGET_PLATFORM,
+      targetArch: process.env.DOLSSH_TARGET_ARCH,
+    });
     return electron.launch({
       executablePath: packagedLaunch.executablePath,
       args: packagedLaunch.args,

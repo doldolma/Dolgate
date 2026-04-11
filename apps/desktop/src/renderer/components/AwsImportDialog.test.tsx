@@ -82,6 +82,8 @@ function installMockApi(overrides?: {
           platform: 'Linux/UNIX',
           privateIp: '10.0.0.10',
           state: 'running',
+          ssmAvailability: 'ready',
+          ssmAvailabilityReason: null,
         },
       ]),
       listEcsClusters: vi.fn().mockResolvedValue([
@@ -425,6 +427,23 @@ describe('AwsImportDialog', () => {
     );
   });
 
+  it('renders the AWS SSM specific title and EC2 tab label', async () => {
+    installMockApi();
+
+    render(
+      <AwsImportDialog
+        open
+        currentGroupPath="Servers"
+        onClose={vi.fn()}
+        onImport={vi.fn().mockResolvedValue(undefined)}
+      />,
+    );
+
+    expect(await screen.findByText('Import via AWS SSM')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'EC2 (SSM)' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'ECS' })).toBeInTheDocument();
+  });
+
   it('auto-selects the configured region and loads instances immediately', async () => {
     const api = installMockApi();
     api.aws.getProfileStatus.mockResolvedValue(
@@ -511,6 +530,109 @@ describe('AwsImportDialog', () => {
         }),
       ),
     );
+  });
+
+  it('shows SSM Unavailable on EC2 cards and blocks inspection for unmanaged instances', async () => {
+    const api = installMockApi();
+    api.aws.listEc2Instances.mockResolvedValue([
+      {
+        instanceId: 'i-aws',
+        name: 'web-1',
+        availabilityZone: 'ap-northeast-2a',
+        platform: 'Linux/UNIX',
+        privateIp: '10.0.0.10',
+        state: 'running',
+        ssmAvailability: 'unavailable',
+        ssmAvailabilityReason:
+          '이 인스턴스는 Systems Manager managed instance 목록에 나타나지 않습니다. SSM Agent 설치와 인스턴스 프로파일(AmazonSSMManagedInstanceCore)을 확인해 주세요.',
+      },
+    ]);
+
+    render(
+      <AwsImportDialog
+        open
+        currentGroupPath="Servers"
+        onClose={vi.fn()}
+        onImport={vi.fn().mockResolvedValue(undefined)}
+      />,
+    );
+
+    expect(await screen.findByText('SSM Unavailable')).toBeInTheDocument();
+    expect(
+      screen.getByText('이 인스턴스는 Systems Manager managed instance 목록에 나타나지 않습니다. SSM Agent 설치와 인스턴스 프로파일(AmazonSSMManagedInstanceCore)을 확인해 주세요.'),
+    ).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'SSM 미설정' })).toBeDisabled();
+    expect(api.aws.inspectHostSshMetadata).not.toHaveBeenCalled();
+  });
+
+  it('shows a blocking notice when SSM availability is unknown and disables inspection', async () => {
+    const api = installMockApi();
+    api.aws.listEc2Instances.mockResolvedValue([
+      {
+        instanceId: 'i-aws',
+        name: 'web-1',
+        availabilityZone: 'ap-northeast-2a',
+        platform: 'Linux/UNIX',
+        privateIp: '10.0.0.10',
+        state: 'running',
+        ssmAvailability: 'unknown',
+        ssmAvailabilityReason:
+          'SSM 상태를 조회할 권한이 없어 가져오기를 차단했습니다. 사용자/역할에 `ssm:DescribeInstanceInformation` 권한이 포함되어 있는지 확인해 주세요.',
+      },
+    ]);
+
+    render(
+      <AwsImportDialog
+        open
+        currentGroupPath="Servers"
+        onClose={vi.fn()}
+        onImport={vi.fn().mockResolvedValue(undefined)}
+      />,
+    );
+
+    await waitFor(() =>
+      expect(
+        screen.getAllByText(
+          'SSM 상태를 조회할 권한이 없어 가져오기를 차단했습니다. 사용자/역할에 `ssm:DescribeInstanceInformation` 권한이 포함되어 있는지 확인해 주세요.',
+        ).length,
+      ).toBeGreaterThan(0),
+    );
+    expect(screen.getByText('SSM Unknown')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '가져오기 차단됨' })).toBeDisabled();
+    expect(api.aws.inspectHostSshMetadata).not.toHaveBeenCalled();
+  });
+
+  it('shows an inactive-agent reason for managed instances that are not currently reachable over SSM', async () => {
+    const api = installMockApi();
+    api.aws.listEc2Instances.mockResolvedValue([
+      {
+        instanceId: 'i-aws',
+        name: 'web-1',
+        availabilityZone: 'ap-northeast-2a',
+        platform: 'Linux/UNIX',
+        privateIp: '10.0.0.10',
+        state: 'running',
+        ssmAvailability: 'unavailable',
+        ssmAvailabilityReason:
+          '이 인스턴스는 SSM managed instance로 등록되어 있지만 현재 연결이 비활성 상태입니다. SSM Agent, 인스턴스 프로파일, 네트워크 연결을 확인해 주세요.',
+      },
+    ]);
+
+    render(
+      <AwsImportDialog
+        open
+        currentGroupPath="Servers"
+        onClose={vi.fn()}
+        onImport={vi.fn().mockResolvedValue(undefined)}
+      />,
+    );
+
+    expect(
+      await screen.findByText(
+        '이 인스턴스는 SSM managed instance로 등록되어 있지만 현재 연결이 비활성 상태입니다. SSM Agent, 인스턴스 프로파일, 네트워크 연결을 확인해 주세요.',
+      ),
+    ).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'SSM 미설정' })).toBeDisabled();
   });
 
   it('does not auto-select a configured region when it is missing from the loaded region list', async () => {

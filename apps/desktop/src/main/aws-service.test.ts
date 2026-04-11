@@ -1541,31 +1541,40 @@ describe('AwsService EC2 helpers', () => {
   it('includes availability zone when listing EC2 instances', async () => {
     const service = new AwsService() as unknown as {
       ensureAwsCliAvailable: () => Promise<void>;
-      runResolvedCommand: () => Promise<{ stdout: string; stderr: string; exitCode: number }>;
+      runResolvedCommand: ReturnType<typeof vi.fn>;
       listEc2Instances: (profileName: string, region: string) => Promise<Array<Record<string, unknown>>>;
     };
 
     service.ensureAwsCliAvailable = vi.fn().mockResolvedValue(undefined);
-    service.runResolvedCommand = vi.fn().mockResolvedValue({
-      stdout: JSON.stringify({
-        Reservations: [
-          {
-            Instances: [
-              {
-                InstanceId: 'i-123',
-                PrivateIpAddress: '10.0.0.10',
-                PlatformDetails: 'Linux/UNIX',
-                Placement: { AvailabilityZone: 'ap-northeast-2a' },
-                State: { Name: 'running' },
-                Tags: [{ Key: 'Name', Value: 'web-1' }]
-              }
-            ]
-          }
-        ]
-      }),
-      stderr: '',
-      exitCode: 0
-    });
+    service.runResolvedCommand = vi
+      .fn()
+      .mockResolvedValueOnce({
+        stdout: JSON.stringify({
+          Reservations: [
+            {
+              Instances: [
+                {
+                  InstanceId: 'i-123',
+                  PrivateIpAddress: '10.0.0.10',
+                  PlatformDetails: 'Linux/UNIX',
+                  Placement: { AvailabilityZone: 'ap-northeast-2a' },
+                  State: { Name: 'running' },
+                  Tags: [{ Key: 'Name', Value: 'web-1' }]
+                }
+              ]
+            }
+          ]
+        }),
+        stderr: '',
+        exitCode: 0
+      })
+      .mockResolvedValueOnce({
+        stdout: JSON.stringify({
+          InstanceInformationList: [{ InstanceId: 'i-123', PingStatus: 'Online' }]
+        }),
+        stderr: '',
+        exitCode: 0
+      });
 
     await expect(service.listEc2Instances('default', 'ap-northeast-2')).resolves.toEqual([
       {
@@ -1574,7 +1583,166 @@ describe('AwsService EC2 helpers', () => {
         availabilityZone: 'ap-northeast-2a',
         platform: 'Linux/UNIX',
         privateIp: '10.0.0.10',
-        state: 'running'
+        state: 'running',
+        ssmAvailability: 'ready',
+        ssmAvailabilityReason: null,
+      }
+    ]);
+  });
+
+  it('marks inactive managed instances unavailable with a more specific reason', async () => {
+    const service = new AwsService() as unknown as {
+      ensureAwsCliAvailable: () => Promise<void>;
+      runResolvedCommand: ReturnType<typeof vi.fn>;
+      listEc2Instances: (profileName: string, region: string) => Promise<Array<Record<string, unknown>>>;
+    };
+
+    service.ensureAwsCliAvailable = vi.fn().mockResolvedValue(undefined);
+    service.runResolvedCommand = vi
+      .fn()
+      .mockResolvedValueOnce({
+        stdout: JSON.stringify({
+          Reservations: [
+            {
+              Instances: [
+                {
+                  InstanceId: 'i-123',
+                  PrivateIpAddress: '10.0.0.10',
+                  PlatformDetails: 'Linux/UNIX',
+                  Placement: { AvailabilityZone: 'ap-northeast-2a' },
+                  State: { Name: 'running' },
+                  Tags: [{ Key: 'Name', Value: 'web-1' }]
+                }
+              ]
+            }
+          ]
+        }),
+        stderr: '',
+        exitCode: 0
+      })
+      .mockResolvedValueOnce({
+        stdout: JSON.stringify({
+          InstanceInformationList: [{ InstanceId: 'i-123', PingStatus: 'Inactive' }]
+        }),
+        stderr: '',
+        exitCode: 0
+      });
+
+    await expect(service.listEc2Instances('default', 'ap-northeast-2')).resolves.toEqual([
+      {
+        instanceId: 'i-123',
+        name: 'web-1',
+        availabilityZone: 'ap-northeast-2a',
+        platform: 'Linux/UNIX',
+        privateIp: '10.0.0.10',
+        state: 'running',
+        ssmAvailability: 'unavailable',
+        ssmAvailabilityReason:
+          '이 인스턴스는 SSM managed instance로 등록되어 있지만 현재 연결이 비활성 상태입니다. SSM Agent, 인스턴스 프로파일, 네트워크 연결을 확인해 주세요.',
+      }
+    ]);
+  });
+
+  it('marks non-running instances unavailable with a state-specific reason', async () => {
+    const service = new AwsService() as unknown as {
+      ensureAwsCliAvailable: () => Promise<void>;
+      runResolvedCommand: ReturnType<typeof vi.fn>;
+      listEc2Instances: (profileName: string, region: string) => Promise<Array<Record<string, unknown>>>;
+    };
+
+    service.ensureAwsCliAvailable = vi.fn().mockResolvedValue(undefined);
+    service.runResolvedCommand = vi
+      .fn()
+      .mockResolvedValueOnce({
+        stdout: JSON.stringify({
+          Reservations: [
+            {
+              Instances: [
+                {
+                  InstanceId: 'i-123',
+                  PrivateIpAddress: '10.0.0.10',
+                  PlatformDetails: 'Linux/UNIX',
+                  Placement: { AvailabilityZone: 'ap-northeast-2a' },
+                  State: { Name: 'stopped' },
+                  Tags: [{ Key: 'Name', Value: 'web-1' }]
+                }
+              ]
+            }
+          ]
+        }),
+        stderr: '',
+        exitCode: 0
+      })
+      .mockResolvedValueOnce({
+        stdout: JSON.stringify({
+          InstanceInformationList: []
+        }),
+        stderr: '',
+        exitCode: 0
+      });
+
+    await expect(service.listEc2Instances('default', 'ap-northeast-2')).resolves.toEqual([
+      {
+        instanceId: 'i-123',
+        name: 'web-1',
+        availabilityZone: 'ap-northeast-2a',
+        platform: 'Linux/UNIX',
+        privateIp: '10.0.0.10',
+        state: 'stopped',
+        ssmAvailability: 'unavailable',
+        ssmAvailabilityReason:
+          '이 인스턴스는 현재 stopped 상태라 SSM import를 사용할 수 없습니다. 인스턴스를 실행한 뒤 다시 시도해 주세요.',
+      }
+    ]);
+  });
+
+  it('keeps the EC2 list but marks every instance unknown when SSM availability lookup fails', async () => {
+    const service = new AwsService() as unknown as {
+      ensureAwsCliAvailable: () => Promise<void>;
+      runResolvedCommand: ReturnType<typeof vi.fn>;
+      listEc2Instances: (profileName: string, region: string) => Promise<Array<Record<string, unknown>>>;
+    };
+
+    service.ensureAwsCliAvailable = vi.fn().mockResolvedValue(undefined);
+    service.runResolvedCommand = vi
+      .fn()
+      .mockResolvedValueOnce({
+        stdout: JSON.stringify({
+          Reservations: [
+            {
+              Instances: [
+                {
+                  InstanceId: 'i-123',
+                  PrivateIpAddress: '10.0.0.10',
+                  PlatformDetails: 'Linux/UNIX',
+                  Placement: { AvailabilityZone: 'ap-northeast-2a' },
+                  State: { Name: 'running' },
+                  Tags: [{ Key: 'Name', Value: 'web-1' }]
+                }
+              ]
+            }
+          ]
+        }),
+        stderr: '',
+        exitCode: 0
+      })
+      .mockResolvedValueOnce({
+        stdout: '',
+        stderr: 'AccessDeniedException',
+        exitCode: 255
+      });
+
+    await expect(service.listEc2Instances('default', 'ap-northeast-2')).resolves.toEqual([
+      {
+        instanceId: 'i-123',
+        name: 'web-1',
+        availabilityZone: 'ap-northeast-2a',
+        platform: 'Linux/UNIX',
+        privateIp: '10.0.0.10',
+        state: 'running',
+        ssmAvailability: 'unknown',
+        ssmAvailabilityReason:
+          'SSM 상태를 조회할 권한이 없어 가져오기를 차단했습니다. 사용자/역할에 `ssm:DescribeInstanceInformation` 권한이 포함되어 있는지 확인해 주세요.',
       }
     ]);
   });
@@ -1621,7 +1789,9 @@ describe('AwsService EC2 helpers', () => {
       availabilityZone: 'ap-northeast-2c',
       platform: 'Linux/UNIX',
       privateIp: '10.0.0.99',
-      state: 'running'
+      state: 'running',
+      ssmAvailability: 'unknown',
+      ssmAvailabilityReason: null,
     });
     await expect(service.describeEc2Instance('default', 'ap-northeast-2', 'i-missing')).resolves.toBeNull();
   });

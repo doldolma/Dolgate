@@ -21,20 +21,20 @@ const sizeClasses: Record<ButtonSize, string> = {
 
 const variantClasses: Record<ButtonVariant, string> = {
   primary:
-    'border-[color-mix(in_srgb,var(--accent-strong)_80%,black_20%)] bg-[var(--accent-strong)] text-[var(--accent-contrast)] shadow-[0_16px_30px_color-mix(in_srgb,var(--accent-strong)_20%,transparent)] hover:-translate-y-[1px] hover:brightness-[1.03] active:translate-y-0 disabled:brightness-100',
+    'border-[color-mix(in_srgb,var(--accent-strong)_76%,black_24%)] bg-[var(--accent-strong)] text-[var(--accent-contrast)] shadow-none hover:bg-[color-mix(in_srgb,var(--accent-strong)_92%,white_8%)]',
   secondary:
-    'border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[var(--surface-elevated)] text-[var(--text)] shadow-[0_8px_20px_rgba(15,23,38,0.08)] hover:bg-[color-mix(in_srgb,var(--surface-elevated)_92%,var(--surface-muted)_8%)]',
+    'border-[var(--border)] bg-[var(--surface-elevated)] text-[var(--text)] shadow-none hover:bg-[color-mix(in_srgb,var(--surface-muted)_88%,var(--surface-elevated)_12%)]',
   ghost:
-    'border-transparent bg-transparent text-[var(--text-soft)] hover:bg-[color-mix(in_srgb,var(--surface-muted)_88%,transparent_12%)]',
+    'border-transparent bg-transparent text-[var(--text-soft)] shadow-none hover:bg-[color-mix(in_srgb,var(--surface-muted)_88%,transparent_12%)] hover:text-[var(--text)]',
   danger:
-    'border-[color-mix(in_srgb,var(--danger-text)_26%,var(--border))] bg-[var(--danger-bg)] text-[var(--danger-text)] shadow-[0_10px_20px_color-mix(in_srgb,var(--danger-text)_10%,transparent)] hover:-translate-y-[1px] hover:brightness-[1.02] active:translate-y-0',
+    'border-[color-mix(in_srgb,var(--danger-text)_24%,var(--border))] bg-[var(--danger-bg)] text-[var(--danger-text)] shadow-none hover:bg-[color-mix(in_srgb,var(--danger-bg)_90%,var(--surface)_10%)]',
 };
 
 const activeVariantClasses: Partial<Record<ButtonVariant, string>> = {
   secondary:
-    'border-[color-mix(in_srgb,var(--accent-strong)_34%,var(--border)_66%)] bg-[color-mix(in_srgb,var(--accent-strong)_14%,var(--surface))] text-[var(--accent-strong)]',
+    'border-[var(--selection-border)] bg-[var(--selection-tint)] text-[var(--accent-strong)]',
   ghost:
-    'bg-[color-mix(in_srgb,var(--surface-muted)_92%,transparent_8%)] text-[var(--text)]',
+    'bg-[var(--selection-tint)] text-[var(--accent-strong)]',
 };
 
 export function Button({
@@ -51,7 +51,7 @@ export function Button({
     <button
       type={type}
       className={cn(
-        'inline-flex items-center justify-center gap-2 border font-semibold tracking-[-0.01em] transition-[transform,box-shadow,background-color,border-color,color,filter] duration-150 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[color-mix(in_srgb,var(--accent-strong)_16%,transparent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--app-bg)] disabled:cursor-default disabled:opacity-70 disabled:shadow-none',
+        'inline-flex items-center justify-center gap-2 border font-semibold tracking-[-0.01em] transition-[background-color,border-color,color,box-shadow] duration-150 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[color-mix(in_srgb,var(--accent-strong)_14%,transparent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--app-bg)] disabled:cursor-default disabled:opacity-70 disabled:shadow-none',
         sizeClasses[size],
         variantClasses[variant],
         active ? activeVariantClasses[variant] : null,

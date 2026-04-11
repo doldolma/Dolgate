@@ -6,10 +6,24 @@ import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const targetPlatform = process.env.DOLSSH_TARGET_PLATFORM ?? process.platform;
-const targetArch = process.env.DOLSSH_TARGET_ARCH ?? process.arch;
 const hasExplicitPackageTarget =
   Boolean(process.env.DOLSSH_TARGET_PLATFORM) ||
   Boolean(process.env.DOLSSH_TARGET_ARCH);
+
+function resolveDefaultTargetArch(platform: string): string {
+  if (platform === 'darwin') {
+    return 'universal';
+  }
+
+  if (platform === 'win32') {
+    return 'x64';
+  }
+
+  return process.arch;
+}
+
+const targetArch =
+  process.env.DOLSSH_TARGET_ARCH ?? resolveDefaultTargetArch(targetPlatform);
 
 function resolveExtraResources(): string[] {
   const extraResources = [path.resolve(__dirname, 'config'), path.resolve(__dirname, 'assets')];

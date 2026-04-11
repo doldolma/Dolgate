@@ -11,6 +11,7 @@ import {
   activateSessionContextInState,
   asSessionTabId,
   buildSessionTitle,
+  captureSessionReturnTarget,
   createConnectionProgress,
   createPendingSessionId,
   createPendingSessionTab,
@@ -173,6 +174,10 @@ export function createSessionServices(deps: SliceDeps) {
         homeSection: "hosts",
         hostDrawer: { mode: "closed" },
         pendingConnectionAttempts: nextAttempts,
+        sessionReturnTargets: {
+          ...state.sessionReturnTargets,
+          [sessionId]: captureSessionReturnTarget(state),
+        },
       };
     });
 
@@ -243,6 +248,10 @@ export function createSessionServices(deps: SliceDeps) {
         homeSection: "hosts",
         hostDrawer: { mode: "closed" },
         pendingConnectionAttempts: nextAttempts,
+        sessionReturnTargets: {
+          ...state.sessionReturnTargets,
+          [sessionId]: captureSessionReturnTarget(state),
+        },
       };
     });
 
@@ -323,6 +332,10 @@ export function createSessionServices(deps: SliceDeps) {
         homeSection: "hosts",
         hostDrawer: { mode: "closed" },
         pendingConnectionAttempts: nextAttempts,
+        sessionReturnTargets: {
+          ...state.sessionReturnTargets,
+          [sessionId]: captureSessionReturnTarget(state),
+        },
       };
     });
 
@@ -405,6 +418,10 @@ export function createSessionServices(deps: SliceDeps) {
         homeSection: "hosts",
         hostDrawer: { mode: "closed" },
         pendingConnectionAttempts: nextAttempts,
+        sessionReturnTargets: {
+          ...state.sessionReturnTargets,
+          [sessionId]: captureSessionReturnTarget(state),
+        },
       };
     });
 

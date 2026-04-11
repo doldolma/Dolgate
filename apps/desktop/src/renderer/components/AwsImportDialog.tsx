@@ -16,6 +16,7 @@ import {
   Card,
   CardActions,
   CardMain,
+  CardMessage,
   CardMeta,
   CardTitleRow,
   CloseIcon,
@@ -41,6 +42,65 @@ interface AwsImportDialogProps {
   currentGroupPath: string | null;
   onClose: () => void;
   onImport: (draft: HostDraft) => Promise<void>;
+}
+
+function getSsmAvailabilityBadgeLabel(
+  availability: AwsEc2InstanceSummary['ssmAvailability'],
+): string {
+  switch (availability) {
+    case 'ready':
+      return 'SSM Ready';
+    case 'unavailable':
+      return 'SSM Unavailable';
+    case 'unknown':
+    default:
+      return 'SSM Unknown';
+  }
+}
+
+function getSsmAvailabilityBadgeTone(
+  availability: AwsEc2InstanceSummary['ssmAvailability'],
+): 'running' | 'stopped' | 'neutral' {
+  switch (availability) {
+    case 'ready':
+      return 'running';
+    case 'unavailable':
+      return 'stopped';
+    case 'unknown':
+    default:
+      return 'neutral';
+  }
+}
+
+function getSsmAvailabilityReason(instance: AwsEc2InstanceSummary): string | null {
+  const trimmed = instance.ssmAvailabilityReason?.trim();
+  if (trimmed) {
+    return trimmed;
+  }
+  if (instance.ssmAvailability === 'unavailable') {
+    return '이 인스턴스는 Systems Manager managed instance 목록에 나타나지 않습니다. SSM Agent 설치와 인스턴스 프로파일(AmazonSSMManagedInstanceCore)을 확인해 주세요.';
+  }
+  if (instance.ssmAvailability === 'unknown') {
+    return 'SSM 상태를 확인하지 못해 가져오기를 차단했습니다. 사용자/역할 권한 또는 SSM 설정을 먼저 확인해 주세요.';
+  }
+  return null;
+}
+
+function canInspectEc2Instance(instance: AwsEc2InstanceSummary): boolean {
+  return instance.ssmAvailability === 'ready' && !/windows/i.test(instance.platform || '');
+}
+
+function getInspectButtonLabel(instance: AwsEc2InstanceSummary): string {
+  if (/windows/i.test(instance.platform || '')) {
+    return 'Windows 미지원';
+  }
+  if (instance.ssmAvailability === 'unavailable') {
+    return 'SSM 미설정';
+  }
+  if (instance.ssmAvailability === 'unknown') {
+    return '가져오기 차단됨';
+  }
+  return 'SSH 정보 확인';
 }
 
 function resolveSelectedProfileName(
@@ -461,6 +521,17 @@ export function AwsImportDialog({ open, currentGroupPath, onClose, onImport }: A
   const shouldShowMissingToolsBanner =
     missingTools.includes('aws-cli') ||
     (importMode === 'ec2' && missingTools.includes('session-manager-plugin'));
+  const unknownSsmAvailabilityReason = useMemo(
+    () =>
+      instances.find((instance) => instance.ssmAvailability === 'unknown')
+        ?.ssmAvailabilityReason?.trim() ||
+      'SSM 상태를 확인하지 못해 가져오기를 차단했습니다. 사용자/역할 권한 또는 SSM 설정을 먼저 확인해 주세요.',
+    [instances],
+  );
+  const shouldShowUnknownSsmNotice =
+    importMode === 'ec2' &&
+    !inspectionTarget &&
+    instances.some((instance) => instance.ssmAvailability === 'unknown');
   const loadingMessage = inspectionTarget
     ? null
     : isLoadingProfiles
@@ -495,15 +566,15 @@ export function AwsImportDialog({ open, currentGroupPath, onClose, onImport }: A
         dismissDisabled={isRegistering}
       >
         <ModalShell role="dialog" aria-modal="true" aria-labelledby="aws-import-title" size="xl">
-        <ModalHeader>
-          <div>
-            <SectionLabel>AWS</SectionLabel>
-            <h3 id="aws-import-title">Import from AWS</h3>
-          </div>
-          <IconButton onClick={onClose} aria-label="Close AWS import dialog" disabled={isRegistering}>
-            <CloseIcon />
-          </IconButton>
-        </ModalHeader>
+          <ModalHeader>
+            <div>
+              <SectionLabel>AWS</SectionLabel>
+              <h3 id="aws-import-title">Import via AWS SSM</h3>
+            </div>
+            <IconButton onClick={onClose} aria-label="Close AWS import dialog" disabled={isRegistering}>
+              <CloseIcon />
+            </IconButton>
+          </ModalHeader>
 
         <ModalBody className="grid gap-4">
           <Tabs aria-label="AWS import mode" className="justify-start">
@@ -519,7 +590,7 @@ export function AwsImportDialog({ open, currentGroupPath, onClose, onImport }: A
               }}
               disabled={Boolean(inspectionTarget) || isRegistering}
             >
-              EC2
+              EC2 (SSM)
             </TabButton>
             <TabButton
               type="button"
@@ -564,26 +635,26 @@ export function AwsImportDialog({ open, currentGroupPath, onClose, onImport }: A
 
             {profileStatus?.isAuthenticated ? (
               <FieldGroup label="Region">
-                  <select
-                    value={selectedRegion}
-                    onChange={(event) => setSelectedRegion(event.target.value)}
-                    disabled={
-                      shouldDisableAwsRegionSelect({
-                        isLoadingStatus,
-                        isLoadingRegions,
-                        isLoadingInstances,
-                        isLoggingIn,
-                        regionCount: regions.length
-                      }) || Boolean(inspectionTarget)
-                    }
-                  >
-                    {regions.length === 0 ? <option value="">No regions found</option> : null}
-                    {regions.map((region) => (
-                      <option key={region} value={region}>
-                        {region}
-                      </option>
-                    ))}
-                  </select>
+                <select
+                  value={selectedRegion}
+                  onChange={(event) => setSelectedRegion(event.target.value)}
+                  disabled={
+                    shouldDisableAwsRegionSelect({
+                      isLoadingStatus,
+                      isLoadingRegions,
+                      isLoadingInstances,
+                      isLoggingIn,
+                      regionCount: regions.length
+                    }) || Boolean(inspectionTarget)
+                  }
+                >
+                  {regions.length === 0 ? <option value="">No regions found</option> : null}
+                  {regions.map((region) => (
+                    <option key={region} value={region}>
+                      {region}
+                    </option>
+                  ))}
+                </select>
               </FieldGroup>
             ) : null}
           </div>
@@ -657,6 +728,12 @@ export function AwsImportDialog({ open, currentGroupPath, onClose, onImport }: A
               {importMode === 'ec2' && missingTools.includes('session-manager-plugin')
                 ? 'session-manager-plugin이 설치되어 있어야 SSM 연결을 시작할 수 있습니다.'
                 : ''}
+            </NoticeCard>
+          ) : null}
+
+          {shouldShowUnknownSsmNotice ? (
+            <NoticeCard tone="warning" role="alert">
+              {unknownSsmAvailabilityReason}
             </NoticeCard>
           ) : null}
 
@@ -846,40 +923,47 @@ export function AwsImportDialog({ open, currentGroupPath, onClose, onImport }: A
           ) : profileStatus?.isAuthenticated && selectedRegion ? (
             <div className="mt-[0.95rem]" data-testid="aws-import-instance-list">
               <PanelSection>
-              {instances.length === 0 && !isLoadingInstances ? (
-                <EmptyState title="이 리전에 가져올 수 있는 EC2 인스턴스가 없습니다." />
-              ) : (
-                instances.map((instance) => (
-                  <Card key={instance.instanceId}>
-                    <CardMain>
-                      <CardTitleRow>
-                        <strong>{instance.name || instance.instanceId}</strong>
-                        <StatusBadge tone="running">{instance.state || 'unknown'}</StatusBadge>
-                      </CardTitleRow>
-                      <CardMeta>
-                        <span>{instance.instanceId}</span>
-                        <span>{selectedRegion}</span>
-                        <span>{instance.availabilityZone || 'AZ unavailable'}</span>
-                        <span>{instance.privateIp || 'No private IP'}</span>
-                        <span>{instance.platform || 'linux'}</span>
-                      </CardMeta>
-                    </CardMain>
-                    <CardActions>
-                      <Button
-                        variant="primary"
-                        disabled={
-                          /windows/i.test(instance.platform || '')
-                        }
-                        onClick={async () => {
-                          await inspectInstance(instance, false);
-                        }}
-                      >
-                        {/windows/i.test(instance.platform || '') ? 'Windows 미지원' : 'SSH 정보 확인'}
-                      </Button>
-                    </CardActions>
-                  </Card>
-                ))
-              )}
+                {instances.length === 0 && !isLoadingInstances ? (
+                  <EmptyState title="이 리전에 가져올 수 있는 EC2 인스턴스가 없습니다." />
+                ) : (
+                  instances.map((instance) => (
+                    <Card key={instance.instanceId}>
+                      <CardMain>
+                        <CardTitleRow>
+                          <strong>{instance.name || instance.instanceId}</strong>
+                          <StatusBadge tone="running">{instance.state || 'unknown'}</StatusBadge>
+                          <StatusBadge tone={getSsmAvailabilityBadgeTone(instance.ssmAvailability)}>
+                            {getSsmAvailabilityBadgeLabel(instance.ssmAvailability)}
+                          </StatusBadge>
+                        </CardTitleRow>
+                        <CardMeta>
+                          <span>{instance.instanceId}</span>
+                          <span>{selectedRegion}</span>
+                          <span>{instance.availabilityZone || 'AZ unavailable'}</span>
+                          <span>{instance.privateIp || 'No private IP'}</span>
+                          <span>{instance.platform || 'linux'}</span>
+                        </CardMeta>
+                        {instance.ssmAvailability !== 'ready' ? (
+                          <CardMessage>{getSsmAvailabilityReason(instance)}</CardMessage>
+                        ) : null}
+                      </CardMain>
+                      <CardActions>
+                        <Button
+                          variant="primary"
+                          disabled={!canInspectEc2Instance(instance)}
+                          onClick={async () => {
+                            if (!canInspectEc2Instance(instance)) {
+                              return;
+                            }
+                            await inspectInstance(instance, false);
+                          }}
+                        >
+                          {getInspectButtonLabel(instance)}
+                        </Button>
+                      </CardActions>
+                    </Card>
+                  ))
+                )}
               </PanelSection>
             </div>
           ) : profileStatus?.isAuthenticated && regions.length > 0 ? (

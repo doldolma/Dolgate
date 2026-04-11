@@ -152,13 +152,13 @@ const RELATIVE_RANGE_UNIT_OPTIONS: Array<{
 const ecsSummaryCardClass =
   "grid gap-[0.35rem] rounded-[18px] border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[color-mix(in_srgb,var(--surface-strong)_90%,transparent_10%)] px-[1rem] py-[0.95rem]";
 const ecsSectionCardClass =
-  "grid gap-[0.8rem] rounded-[18px] border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[color-mix(in_srgb,var(--surface)_92%,transparent_8%)] px-[1rem] py-[0.95rem] shadow-[var(--shadow)]";
+  "grid gap-[0.8rem] rounded-[18px] border border-[var(--border)] bg-[color-mix(in_srgb,var(--surface)_92%,transparent_8%)] px-[1rem] py-[0.95rem] shadow-none";
 const ecsEmptyDetailClass =
   "rounded-[16px] bg-[color-mix(in_srgb,var(--surface)_82%,transparent_18%)] px-4 py-4 text-[var(--text-soft)]";
 const ecsLogsOutputClass =
   "grid min-h-0 flex-1 content-start gap-[0.35rem] overflow-auto rounded-[18px] border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[rgba(7,13,24,0.88)] px-[1.05rem] py-4 text-[rgba(226,234,255,0.92)]";
 const ecsLogsOverlayChipClass =
-  "pointer-events-none absolute left-[1rem] right-[1rem] top-[1rem] z-[2] flex items-center justify-center gap-[0.45rem] rounded-[12px] border border-[color-mix(in_srgb,var(--accent-strong)_34%,white_16%)] bg-[color-mix(in_srgb,rgba(14,23,38,0.94)_78%,var(--accent-strong)_22%)] px-[0.95rem] py-[0.42rem] text-[0.8rem] font-semibold text-[rgba(243,247,255,0.98)] shadow-[0_16px_32px_rgba(4,10,18,0.34)] backdrop-blur-[10px]";
+  "pointer-events-none absolute left-[1rem] right-[1rem] top-[1rem] z-[2] flex items-center justify-center gap-[0.45rem] rounded-[12px] border border-[color-mix(in_srgb,var(--accent-strong)_28%,var(--border)_72%)] bg-[color-mix(in_srgb,var(--surface-strong)_76%,var(--accent-strong)_24%)] px-[0.95rem] py-[0.42rem] text-[0.8rem] font-semibold text-[rgba(243,247,255,0.98)] shadow-[var(--shadow)] backdrop-blur-[10px]";
 const ecsFactsGridClass =
   "grid grid-cols-[repeat(2,minmax(0,1fr))] gap-[0.9rem_1rem] max-[760px]:grid-cols-1";
 const ecsFactsItemClass = "grid gap-[0.2rem]";
@@ -173,15 +173,15 @@ const ecsLogsMetaClass = "mt-[-0.2rem]";
 const ecsTunnelFormClass =
   "grid grid-cols-[repeat(2,minmax(0,1fr))] gap-[0.8rem_0.9rem] max-[760px]:grid-cols-1";
 const ecsTunnelRuntimeCardClass =
-  "grid gap-[0.85rem] rounded-[18px] border border-[color-mix(in_srgb,var(--accent-strong)_20%,var(--border)_80%)] bg-[color-mix(in_srgb,var(--accent-strong)_8%,var(--surface)_92%)] px-[1rem] py-[0.9rem] shadow-[var(--shadow)]";
+  "grid gap-[0.85rem] rounded-[18px] border border-[var(--selection-border)] bg-[var(--selection-tint)] px-[1rem] py-[0.9rem] shadow-none";
 const ecsTunnelRuntimeGridClass =
   "grid grid-cols-[repeat(2,minmax(0,1fr))] gap-[0.9rem] max-[760px]:grid-cols-1";
 const ecsDetailTabsClass =
-  "gap-[0.55rem] rounded-[18px] border border-[color-mix(in_srgb,var(--border)_84%,white_16%)] bg-[color-mix(in_srgb,var(--surface-muted)_82%,transparent_18%)] p-[0.35rem] shadow-[inset_0_1px_0_rgba(255,255,255,0.06)]";
+  "gap-[0.55rem] rounded-[18px] border border-[var(--border)] bg-[color-mix(in_srgb,var(--surface-muted)_86%,transparent_14%)] p-[0.35rem] shadow-none";
 const ecsDetailTabButtonBaseClass =
   "min-w-[5.75rem] border border-transparent bg-[color-mix(in_srgb,var(--surface)_18%,transparent_82%)] text-[color-mix(in_srgb,var(--text-soft)_90%,black_10%)] shadow-none";
 const ecsDetailTabButtonActiveClass =
-  "border-[color-mix(in_srgb,var(--accent-strong)_46%,var(--border)_54%)] bg-[color-mix(in_srgb,var(--accent-strong)_18%,var(--surface-elevated)_82%)] text-[var(--text)] shadow-[0_10px_22px_rgba(15,23,38,0.14)] ring-1 ring-[color-mix(in_srgb,var(--accent-strong)_24%,transparent_76%)]";
+  "border-[var(--selection-border)] bg-[var(--selection-tint)] text-[var(--accent-strong)] shadow-none";
 const ecsDetailTabButtonInactiveClass =
   "hover:border-[color-mix(in_srgb,var(--border)_80%,white_20%)] hover:bg-[color-mix(in_srgb,var(--surface)_56%,transparent_44%)] hover:text-[var(--text)]";
 
@@ -2313,10 +2313,10 @@ export function AwsEcsWorkspace({
                         key={service.serviceArn}
                         data-testid="ecs-service-row"
                         className={cn(
-                          "shrink-0 overflow-hidden rounded-[18px] border bg-[color-mix(in_srgb,var(--surface)_92%,transparent_8%)] shadow-[var(--shadow)] transition-[border-color,background-color,box-shadow,transform] duration-150",
-                          "border-[color-mix(in_srgb,var(--border)_82%,white_18%)]",
+                          "shrink-0 overflow-hidden rounded-[18px] border bg-[color-mix(in_srgb,var(--surface)_92%,transparent_8%)] shadow-none transition-[border-color,background-color] duration-150",
+                          "border-[var(--border)]",
                           isSelected
-                            ? "border-[color-mix(in_srgb,var(--accent-strong)_28%,var(--border)_72%)] bg-[color-mix(in_srgb,var(--accent-strong)_8%,var(--surface)_92%)] shadow-[var(--shadow),inset_0_1px_0_color-mix(in_srgb,var(--accent-strong)_10%,transparent_90%)]"
+                            ? "border-[var(--selection-border)] bg-[var(--selection-tint)]"
                             : "",
                         )}
                       >
@@ -2745,7 +2745,7 @@ export function AwsEcsWorkspace({
                                   className={ecsLogsOverlayChipClass}
                                   data-testid="ecs-logs-loading-chip"
                                 >
-                                  <span className="h-2.5 w-2.5 rounded-full bg-[var(--accent-strong)] shadow-[0_0_0_4px_color-mix(in_srgb,var(--accent-strong)_24%,transparent_76%)]" />
+                                  <span className="h-2.5 w-2.5 rounded-full bg-[var(--accent-strong)]" />
                                   갱신 중...
                                 </div>
                               ) : null}

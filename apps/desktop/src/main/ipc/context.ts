@@ -170,6 +170,7 @@ export interface MainIpcContext {
     runtime: HostContainerRuntime | null;
     runtimeCommand: string | null;
     unsupportedReason: string | null;
+    hydratedHost?: AwsEc2HostRecord | null;
   }>;
   startContainerTunnelRuntime: (input: {
     ruleId: string;
