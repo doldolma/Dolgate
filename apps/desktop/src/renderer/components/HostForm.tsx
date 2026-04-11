@@ -1,11 +1,10 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, type ReactNode } from 'react';
 import { getAwsEc2HostSshMetadataStatusLabel, isAwsEc2HostRecord, isAwsEcsHostRecord, isSshHostDraft, isSshHostRecord, isWarpgateSshHostRecord } from '@shared';
 import type { AwsProfileSummary, HostDraft, HostRecord, SecretMetadataRecord, TerminalThemeId } from '@shared';
 import { useHostFormController } from '../controllers/useHostFormController';
-import { cn } from '../lib/cn';
 import { terminalThemePresets } from '../lib/terminal-presets';
 import { listAwsProfiles } from '../services/desktop/imports';
-import { Button } from '../ui';
+import { Button, Input, SelectField, TagInputField } from '../ui';
 
 const defaultDraft: HostDraft = {
   kind: 'ssh',
@@ -56,7 +55,17 @@ function appendPendingTag(tags: string[], pendingInput: string): string[] {
   return dedupeTags([...tags, pendingInput]);
 }
 
-interface HostFormProps {
+export interface HostFormActionState {
+  saveInFlight: boolean;
+  saveStatusText: string | null;
+}
+
+export interface HostFormHandle {
+  submitCreate: () => Promise<boolean>;
+  submitAndConnect: () => Promise<boolean>;
+}
+
+export interface HostFormProps {
   host: HostRecord | null;
   keychainEntries: SecretMetadataRecord[];
   groupOptions: Array<{ value: string | null; label: string }>;
@@ -64,9 +73,9 @@ interface HostFormProps {
   hideTitle?: boolean;
   onSubmit: (draft: HostDraft, secrets?: { password?: string; passphrase?: string }) => Promise<void>;
   onConnect?: (hostId: string) => Promise<void>;
-  onDelete?: () => Promise<void>;
   onEditExistingSecret?: (secretRef: string, credentialKind: 'password' | 'passphrase') => void;
   onOpenSecrets?: () => void;
+  onActionStateChange?: (state: HostFormActionState) => void;
 }
 
 type HostFormSaveStatus = 'idle' | 'saving' | 'saved' | 'error';
@@ -171,7 +180,7 @@ function renderTerminalThemeField(
       <span className="text-[0.82rem] font-semibold uppercase tracking-[0.12em] text-[var(--text-soft)]">
         Terminal Theme
       </span>
-      <select
+      <SelectField
         value={value ?? ''}
         onChange={(event) => onChange(event.target.value ? (event.target.value as TerminalThemeId) : null)}
       >
@@ -181,12 +190,34 @@ function renderTerminalThemeField(
             {preset.title}
           </option>
         ))}
-      </select>
+      </SelectField>
     </label>
   );
 }
 
-export function HostForm({
+interface FormSectionProps {
+  title: string;
+  description: string;
+  testId?: string;
+  children: ReactNode;
+}
+
+function FormSection({ title, description, testId, children }: FormSectionProps) {
+  return (
+    <section
+      data-testid={testId}
+      className="grid gap-[0.95rem] rounded-[20px] border border-[var(--border)] bg-[var(--surface-muted)] px-[1rem] py-[1rem]"
+    >
+      <div className="grid gap-[0.3rem]">
+        <h3 className="text-[0.95rem] font-semibold tracking-[-0.01em] text-[var(--text)]">{title}</h3>
+        <p className="text-[0.84rem] leading-[1.45] text-[var(--text-soft)]">{description}</p>
+      </div>
+      <div className="grid gap-[0.95rem]">{children}</div>
+    </section>
+  );
+}
+
+export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostForm({
   host,
   keychainEntries,
   groupOptions,
@@ -194,10 +225,10 @@ export function HostForm({
   hideTitle = false,
   onSubmit,
   onConnect,
-  onDelete,
   onEditExistingSecret,
-  onOpenSecrets
-}: HostFormProps) {
+  onOpenSecrets,
+  onActionStateChange
+}: HostFormProps, ref) {
   const fieldClassName = 'flex flex-col gap-[0.45rem] text-[var(--text)]';
   const fieldLabelClassName =
     'text-[0.82rem] font-semibold uppercase tracking-[0.12em] text-[var(--text-soft)]';
@@ -644,6 +675,152 @@ export function HostForm({
 
   const saveStatusText =
     saveStatus === 'saving' ? 'Saving...' : saveStatus === 'saved' ? 'Saved' : saveStatus === 'error' ? "Couldn't save changes" : null;
+  const metadataFields = (
+    <>
+      <label className={fieldClassName}>
+        <span className={fieldLabelClassName}>Label</span>
+        <Input value={draft.label} onChange={(event) => setDraft({ ...draft, label: event.target.value })} placeholder="Production API" required />
+      </label>
+      <label className={fieldClassName}>
+        <span className={fieldLabelClassName}>Group</span>
+        <SelectField value={draft.groupName ?? ''} onChange={(event) => setDraft({ ...draft, groupName: event.target.value || '' })}>
+          {groupOptions.map((option) => (
+            <option key={option.value ?? 'ungrouped'} value={option.value ?? ''}>
+              {option.label}
+            </option>
+          ))}
+        </SelectField>
+      </label>
+      <label className={fieldClassName}>
+        <span className={fieldLabelClassName}>Tags</span>
+        <TagInputField
+          id="host-tag-input"
+          aria-label="Tags"
+          tags={tagTokens}
+          value={tagInput}
+          onRemoveTag={removeTag}
+          onChange={(event) => {
+            if (skipNextTagBlurCommitRef.current && event.target.value.trim()) {
+              skipNextTagBlurCommitRef.current = false;
+            }
+            setTagInput(event.target.value);
+          }}
+          onCompositionStart={() => {
+            isTagInputComposingRef.current = true;
+          }}
+          onCompositionEnd={() => {
+            isTagInputComposingRef.current = false;
+          }}
+          onBlur={() => {
+            if (skipNextTagBlurCommitRef.current) {
+              skipNextTagBlurCommitRef.current = false;
+              return;
+            }
+            if (tagInput.trim()) {
+              commitPendingTag();
+            }
+          }}
+          onKeyDown={(event) => {
+            if (isTagInputComposingRef.current || event.nativeEvent.isComposing) {
+              return;
+            }
+            if (event.key === 'Enter' || event.key === ',') {
+              event.preventDefault();
+              commitPendingTag({ suppressNextBlur: true });
+              return;
+            }
+            if (event.key === 'Backspace' && tagInput.length === 0 && tagTokens.length > 0) {
+              event.preventDefault();
+              updateDraftTags(tagTokens.slice(0, -1));
+            }
+          }}
+          placeholder={tagTokens.length === 0 ? 'Type a tag and press Enter' : 'Add tag'}
+        />
+      </label>
+    </>
+  );
+
+  const reportCurrentValidity = useCallback(() => {
+    const valid = isFormValid(draft);
+    if (!valid) {
+      formRef.current?.reportValidity();
+    }
+    return valid;
+  }, [draft, isFormValid]);
+
+  const submitCreate = useCallback(async () => {
+    if (isEditMode) {
+      return false;
+    }
+    if (!reportCurrentValidity()) {
+      return false;
+    }
+
+    const nextTags = appendPendingTag(tagTokens, tagInput);
+    if (!isSshHostDraft(draft)) {
+      await onSubmit({
+        ...draft,
+        tags: nextTags
+      });
+      return true;
+    }
+
+    const nextDraft: HostDraft = {
+      ...draft,
+      tags: nextTags,
+      secretRef: credentialMode === 'existing' ? selectedSecretRef || null : null
+    };
+    await onSubmit(
+      nextDraft,
+      credentialMode === 'new'
+        ? {
+            password: password || undefined,
+            passphrase: passphrase || undefined
+          }
+        : undefined
+    );
+    return true;
+  }, [
+    credentialMode,
+    draft,
+    isEditMode,
+    onSubmit,
+    passphrase,
+    password,
+    reportCurrentValidity,
+    selectedSecretRef,
+    tagInput,
+    tagTokens
+  ]);
+
+  const submitAndConnect = useCallback(async () => {
+    if (!isEditMode || !host || !onConnect) {
+      return false;
+    }
+    if (!reportCurrentValidity()) {
+      return false;
+    }
+
+    const didSave = await persistChanges({ commitPendingTag: true }).catch(() => false);
+    if (!didSave) {
+      return false;
+    }
+
+    await onConnect(host.id);
+    return true;
+  }, [host, isEditMode, onConnect, persistChanges, reportCurrentValidity]);
+
+  useImperativeHandle(ref, () => ({
+    submitCreate,
+    submitAndConnect
+  }), [submitAndConnect, submitCreate]);
+
+  useEffect(() => {
+    onActionStateChange?.({
+      saveInFlight,
+      saveStatusText: isEditMode ? saveStatusText : null
+    });
+  }, [isEditMode, onActionStateChange, saveInFlight, saveStatusText]);
 
   return (
     <form
@@ -651,114 +828,11 @@ export function HostForm({
       className="flex flex-col gap-[0.95rem]"
       onSubmit={async (event) => {
         event.preventDefault();
-        if (isEditMode) {
-          return;
-        }
-        const nextTags = appendPendingTag(tagTokens, tagInput);
-        if (!isSshHostDraft(draft)) {
-          await onSubmit({
-            ...draft,
-            tags: nextTags
-          });
-          return;
-        }
-
-        const nextDraft: HostDraft = {
-          ...draft,
-          tags: nextTags,
-          secretRef: credentialMode === 'existing' ? selectedSecretRef || null : null
-        };
-        await onSubmit(
-          nextDraft,
-          credentialMode === 'new'
-            ? {
-                password: password || undefined,
-                passphrase: passphrase || undefined
-              }
-            : undefined
-        );
+        await submitCreate();
       }}
     >
       {hideTitle ? null : <div className="section-title">Host Editor</div>}
-      <label className={fieldClassName}>
-        <span className={fieldLabelClassName}>Label</span>
-        <input value={draft.label} onChange={(event) => setDraft({ ...draft, label: event.target.value })} placeholder="Production API" required />
-      </label>
-      <label className={fieldClassName}>
-        <span className={fieldLabelClassName}>Group</span>
-        <select value={draft.groupName ?? ''} onChange={(event) => setDraft({ ...draft, groupName: event.target.value || '' })}>
-          {groupOptions.map((option) => (
-            <option key={option.value ?? 'ungrouped'} value={option.value ?? ''}>
-              {option.label}
-            </option>
-          ))}
-        </select>
-      </label>
-      <label className={fieldClassName}>
-        <span className={fieldLabelClassName}>Tags</span>
-        <div
-          className="flex min-h-[3.5rem] flex-wrap items-center gap-[0.55rem] rounded-[14px] border border-[var(--border)] bg-[var(--surface-strong)] px-[0.95rem] py-[0.78rem] shadow-[inset_0_1px_0_rgba(255,255,255,0.06)]"
-          onClick={() => document.getElementById('host-tag-input')?.focus()}
-        >
-          {tagTokens.map((tag) => (
-            <span
-              key={tag}
-              className="inline-flex items-center gap-[0.35rem] rounded-full border border-[color-mix(in_srgb,var(--accent-strong)_24%,var(--border)_76%)] bg-[color-mix(in_srgb,var(--accent-strong)_12%,var(--surface-strong))] px-[0.62rem] py-[0.36rem] text-[var(--text)]"
-            >
-              <span>{tag}</span>
-              <button
-                type="button"
-                className="inline-grid h-[1.1rem] w-[1.1rem] place-items-center rounded-full text-[var(--text-soft)]"
-                aria-label={`${tag} 태그 제거`}
-                onClick={() => removeTag(tag)}
-              >
-                ×
-              </button>
-            </span>
-          ))}
-          <input
-            id="host-tag-input"
-            className="min-w-[9rem] flex-1 border-none bg-transparent p-0 shadow-none focus:outline-none"
-            value={tagInput}
-            onChange={(event) => {
-              if (skipNextTagBlurCommitRef.current && event.target.value.trim()) {
-                skipNextTagBlurCommitRef.current = false;
-              }
-              setTagInput(event.target.value);
-            }}
-            onCompositionStart={() => {
-              isTagInputComposingRef.current = true;
-            }}
-            onCompositionEnd={() => {
-              isTagInputComposingRef.current = false;
-            }}
-            onBlur={() => {
-              if (skipNextTagBlurCommitRef.current) {
-                skipNextTagBlurCommitRef.current = false;
-                return;
-              }
-              if (tagInput.trim()) {
-                commitPendingTag();
-              }
-            }}
-            onKeyDown={(event) => {
-              if (isTagInputComposingRef.current || event.nativeEvent.isComposing) {
-                return;
-              }
-              if (event.key === 'Enter' || event.key === ',') {
-                event.preventDefault();
-                commitPendingTag({ suppressNextBlur: true });
-                return;
-              }
-              if (event.key === 'Backspace' && tagInput.length === 0 && tagTokens.length > 0) {
-                event.preventDefault();
-                updateDraftTags(tagTokens.slice(0, -1));
-              }
-            }}
-            placeholder={tagTokens.length === 0 ? 'Type a tag and press Enter' : 'Add tag'}
-          />
-        </div>
-      </label>
+      {sshDraft ? null : metadataFields}
 
       {isAwsEc2Draft ? (
         <>
@@ -766,7 +840,7 @@ export function HostForm({
 
           <label className={fieldClassName}>
             <span className={fieldLabelClassName}>AWS Profile</span>
-            <select
+            <SelectField
               aria-label="AWS Profile"
               value={selectedAwsProfileValue}
               onChange={(event) => handleAwsProfileChange(event.target.value)}
@@ -777,38 +851,38 @@ export function HostForm({
                   {profile.isMissingCurrent ? `${profile.profileName} (앱 프로필 없음)` : profile.profileName}
                 </option>
               ))}
-            </select>
+            </SelectField>
             {awsProfilesError ? (
               <span className="text-[0.82rem] text-[var(--danger-text)]">{awsProfilesError}</span>
             ) : null}
           </label>
-          <label>
-            Region
-            <input value={draft.awsRegion} readOnly />
+          <label className={fieldClassName}>
+            <span className={fieldLabelClassName}>Region</span>
+            <Input value={draft.awsRegion} readOnly />
           </label>
-          <label>
-            Availability Zone
-            <input value={draft.awsAvailabilityZone ?? ''} readOnly />
+          <label className={fieldClassName}>
+            <span className={fieldLabelClassName}>Availability Zone</span>
+            <Input value={draft.awsAvailabilityZone ?? ''} readOnly />
           </label>
-          <label>
-            Instance ID
-            <input value={draft.awsInstanceId} readOnly />
+          <label className={fieldClassName}>
+            <span className={fieldLabelClassName}>Instance ID</span>
+            <Input value={draft.awsInstanceId} readOnly />
           </label>
-          <label>
-            Instance Name
-            <input value={draft.awsInstanceName ?? ''} readOnly />
+          <label className={fieldClassName}>
+            <span className={fieldLabelClassName}>Instance Name</span>
+            <Input value={draft.awsInstanceName ?? ''} readOnly />
           </label>
-          <label>
-            Platform
-            <input value={draft.awsPlatform ?? ''} readOnly />
+          <label className={fieldClassName}>
+            <span className={fieldLabelClassName}>Platform</span>
+            <Input value={draft.awsPlatform ?? ''} readOnly />
           </label>
-          <label>
-            Private IP
-            <input value={draft.awsPrivateIp ?? ''} readOnly />
+          <label className={fieldClassName}>
+            <span className={fieldLabelClassName}>Private IP</span>
+            <Input value={draft.awsPrivateIp ?? ''} readOnly />
           </label>
-          <label>
-            State
-            <input value={draft.awsState ?? ''} readOnly />
+          <label className={fieldClassName}>
+            <span className={fieldLabelClassName}>State</span>
+            <Input value={draft.awsState ?? ''} readOnly />
           </label>
           <div className="flex flex-col gap-[0.35rem] rounded-[14px] border border-[color-mix(in_srgb,var(--accent-strong)_18%,var(--border)_82%)] bg-[color-mix(in_srgb,var(--surface-elevated)_76%,var(--surface)_24%)] px-[0.95rem] py-[0.85rem]">
             <strong>{getAwsEc2HostSshMetadataStatusLabel(draft.awsSshMetadataStatus) ?? 'SSH 설정 대기 중'}</strong>
@@ -823,7 +897,7 @@ export function HostForm({
           <div className="grid gap-[0.75rem] md:grid-cols-[120px_minmax(0,1fr)]">
             <label className={fieldClassName}>
               <span className={fieldLabelClassName}>SSH Port</span>
-              <input
+              <Input
                 type="number"
                 min={1}
                 max={65535}
@@ -842,7 +916,7 @@ export function HostForm({
             </label>
             <label className={fieldClassName}>
               <span className={fieldLabelClassName}>SSH Username</span>
-              <input
+              <Input
                 value={draft.awsSshUsername ?? ''}
                 onChange={(event) =>
                   setDraft((current) =>
@@ -865,7 +939,7 @@ export function HostForm({
 
           <label className={fieldClassName}>
             <span className={fieldLabelClassName}>AWS Profile</span>
-            <select
+            <SelectField
               aria-label="AWS Profile"
               value={selectedAwsProfileValue}
               onChange={(event) => handleAwsProfileChange(event.target.value)}
@@ -876,47 +950,47 @@ export function HostForm({
                   {profile.isMissingCurrent ? `${profile.profileName} (앱 프로필 없음)` : profile.profileName}
                 </option>
               ))}
-            </select>
+            </SelectField>
             {awsProfilesError ? (
               <span className="text-[0.82rem] text-[var(--danger-text)]">{awsProfilesError}</span>
             ) : null}
           </label>
           <label className={fieldClassName}>
             <span className={fieldLabelClassName}>Region</span>
-            <input value={draft.awsRegion} readOnly />
+            <Input value={draft.awsRegion} readOnly />
           </label>
           <label className={fieldClassName}>
             <span className={fieldLabelClassName}>ECS Cluster</span>
-            <input value={draft.awsEcsClusterName} readOnly />
+            <Input value={draft.awsEcsClusterName} readOnly />
           </label>
           <label className={fieldClassName}>
             <span className={fieldLabelClassName}>Cluster ARN</span>
-            <input value={draft.awsEcsClusterArn} readOnly />
+            <Input value={draft.awsEcsClusterArn} readOnly />
           </label>
         </>
       ) : draft.kind === 'warpgate-ssh' ? (
         <>
           {renderTerminalThemeField(draft.terminalThemeId ?? null, (terminalThemeId) => setDraft((current) => ({ ...current, terminalThemeId })))}
 
-          <label>
-            Warpgate URL
-            <input value={draft.warpgateBaseUrl} readOnly />
+          <label className={fieldClassName}>
+            <span className={fieldLabelClassName}>Warpgate URL</span>
+            <Input value={draft.warpgateBaseUrl} readOnly />
           </label>
-          <label>
-            Warpgate SSH Endpoint
-            <input value={`${draft.warpgateSshHost}:${draft.warpgateSshPort}`} readOnly />
+          <label className={fieldClassName}>
+            <span className={fieldLabelClassName}>Warpgate SSH Endpoint</span>
+            <Input value={`${draft.warpgateSshHost}:${draft.warpgateSshPort}`} readOnly />
           </label>
-          <label>
-            Target
-            <input value={draft.warpgateTargetName} readOnly />
+          <label className={fieldClassName}>
+            <span className={fieldLabelClassName}>Target</span>
+            <Input value={draft.warpgateTargetName} readOnly />
           </label>
-          <label>
-            Target ID
-            <input value={draft.warpgateTargetId} readOnly />
+          <label className={fieldClassName}>
+            <span className={fieldLabelClassName}>Target ID</span>
+            <Input value={draft.warpgateTargetId} readOnly />
           </label>
-          <label>
-            Warpgate Username
-            <input
+          <label className={fieldClassName}>
+            <span className={fieldLabelClassName}>Warpgate Username</span>
+            <Input
               value={draft.warpgateUsername}
               onChange={(event) =>
                 setDraft((current) =>
@@ -935,199 +1009,165 @@ export function HostForm({
         </>
       ) : sshDraft ? (
         <>
-          <label className={fieldClassName}>
-            <span className={fieldLabelClassName}>Hostname</span>
-            <input
-              value={sshDraft.hostname}
-              onChange={(event) => setDraft({ ...sshDraft, hostname: event.target.value })}
-              placeholder="prod.example.com"
-              required
-            />
-          </label>
-          <div className="grid gap-[0.75rem] md:grid-cols-[120px_minmax(0,1fr)]">
+          <FormSection
+            title="Connection"
+            description="Required to connect."
+            testId="hostform-section-connection"
+          >
             <label className={fieldClassName}>
-              <span className={fieldLabelClassName}>Port</span>
-              <input
-                type="number"
-                min={1}
-                max={65535}
-                value={sshDraft.port}
-                onChange={(event) => setDraft({ ...sshDraft, port: Number(event.target.value) || 22 })}
+              <span className={fieldLabelClassName}>Hostname</span>
+              <Input
+                value={sshDraft.hostname}
+                onChange={(event) => setDraft({ ...sshDraft, hostname: event.target.value })}
+                placeholder="prod.example.com"
                 required
               />
             </label>
-            <label className={fieldClassName}>
-              <span className={fieldLabelClassName}>Username</span>
-              <input
-                value={sshDraft.username}
-                onChange={(event) => setDraft({ ...sshDraft, username: event.target.value })}
-                placeholder="ubuntu"
-              />
-            </label>
-          </div>
-          <label className={fieldClassName}>
-            <span className={fieldLabelClassName}>Auth Type</span>
-            <select
-              value={sshDraft.authType}
-              onChange={(event) =>
-                setDraft({
-                  ...sshDraft,
-                  authType: event.target.value === 'privateKey' ? 'privateKey' : 'password'
-                })
-              }
-            >
-              <option value="password">Password</option>
-              <option value="privateKey">Private key</option>
-            </select>
-          </label>
-
-          {renderTerminalThemeField(sshDraft.terminalThemeId ?? null, (terminalThemeId) => setDraft({ ...sshDraft, terminalThemeId }))}
-
-          <label>
-            Secret
-            <select
-              value={credentialMode === 'existing' ? `existing:${selectedSecretRef}` : credentialMode}
-              onChange={(event) => {
-                const value = event.target.value;
-                if (value === 'new' || value === 'none') {
-                  setCredentialMode(value);
-                  setSelectedSecretRef('');
-                  return;
-                }
-                if (value.startsWith('existing:')) {
-                  setCredentialMode('existing');
-                  setSelectedSecretRef(value.slice('existing:'.length));
-                }
-              }}
-            >
-              {sshDraft.authType === 'privateKey' ? <option value="none">사용 안 함</option> : null}
-              <option value="new">새 secret 생성</option>
-              {reusableEntries.map((entry) => (
-                <option key={entry.secretRef} value={`existing:${entry.secretRef}`}>
-                  {entry.label} ({entry.linkedHostCount}개 호스트)
-                </option>
-              ))}
-            </select>
-          </label>
-
-          {onOpenSecrets && keychainEntries.length > 0 ? (
-            <button
-              type="button"
-              className="mt-[-0.2rem] self-start border-0 bg-transparent p-0 text-[0.88rem] font-semibold text-[var(--accent-strong)]"
-              onClick={onOpenSecrets}
-            >
-              Secrets 열기
-            </button>
-          ) : null}
-
-          {sshDraft.authType === 'password' && credentialMode === 'new' ? (
-            <label>
-              Password
-              <input type="password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder={host ? 'Leave blank to keep' : ''} />
-            </label>
-          ) : null}
-
-          {credentialMode === 'existing' ? (
-            <>
-              <p className="mt-[-0.1rem] text-[var(--text-soft)] leading-[1.5]">선택한 secret을 이 호스트와 공유합니다. 이 호스트를 삭제해도 secret 항목은 유지됩니다.</p>
-              {host && isSshHostRecord(host) && selectedSecretRef && host.secretRef === selectedSecretRef && onEditExistingSecret ? (
-                <Button
-                  variant="secondary"
-                  onClick={() => onEditExistingSecret(selectedSecretRef, sshDraft.authType === 'password' ? 'password' : 'passphrase')}
-                >
-                  {sshDraft.authType === 'password' ? '비밀번호 변경' : 'Passphrase 변경'}
-                </Button>
-              ) : null}
-            </>
-          ) : null}
-
-          {sshDraft.authType === 'privateKey' ? (
-            <>
-              <label>
-                Private key file
-                <div className="flex gap-[0.75rem]">
-                  <input
-                    value={sshDraft.privateKeyPath ?? ''}
-                    onChange={(event) => setDraft({ ...sshDraft, privateKeyPath: event.target.value })}
-                    placeholder="/Users/.../.ssh/id_ed25519"
-                  />
-                  <Button variant="secondary" onClick={pickPrivateKey}>
-                    Import
-                  </Button>
-                </div>
+            <div className="grid gap-[0.75rem] md:grid-cols-[120px_minmax(0,1fr)]">
+              <label className={fieldClassName}>
+                <span className={fieldLabelClassName}>Port</span>
+                <Input
+                  type="number"
+                  min={1}
+                  max={65535}
+                  value={sshDraft.port}
+                  onChange={(event) => setDraft({ ...sshDraft, port: Number(event.target.value) || 22 })}
+                  required
+                />
               </label>
-              {credentialMode === 'new' ? (
-                <label>
-                  Passphrase
-                  <input
-                    type="password"
-                    value={passphrase}
-                    onChange={(event) => setPassphrase(event.target.value)}
-                    placeholder={host ? 'Leave blank to keep' : ''}
-                  />
+              <label className={fieldClassName}>
+                <span className={fieldLabelClassName}>Username</span>
+                <Input
+                  aria-label="Username"
+                  value={sshDraft.username}
+                  onChange={(event) => setDraft({ ...sshDraft, username: event.target.value })}
+                  placeholder="ubuntu"
+                />
+              </label>
+            </div>
+            <label className={fieldClassName}>
+              <span className={fieldLabelClassName}>Auth Type</span>
+              <SelectField
+                value={sshDraft.authType}
+                onChange={(event) =>
+                  setDraft({
+                    ...sshDraft,
+                    authType: event.target.value === 'privateKey' ? 'privateKey' : 'password'
+                  })
+                }
+              >
+                <option value="password">Password</option>
+                <option value="privateKey">Private key</option>
+              </SelectField>
+            </label>
+
+            {sshDraft.authType === 'password' && credentialMode === 'new' ? (
+              <label className={fieldClassName}>
+                <span className={fieldLabelClassName}>Password</span>
+                <Input type="password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder={host ? 'Leave blank to keep' : ''} />
+              </label>
+            ) : null}
+
+            {sshDraft.authType === 'privateKey' ? (
+              <>
+                <label className={fieldClassName}>
+                  <span className={fieldLabelClassName}>Private key file</span>
+                  <div className="flex gap-[0.75rem]">
+                    <Input
+                      value={sshDraft.privateKeyPath ?? ''}
+                      onChange={(event) => setDraft({ ...sshDraft, privateKeyPath: event.target.value })}
+                      placeholder="/Users/.../.ssh/id_ed25519"
+                    />
+                    <Button variant="secondary" onClick={pickPrivateKey}>
+                      Import
+                    </Button>
+                  </div>
                 </label>
-              ) : null}
-            </>
-          ) : null}
+                {credentialMode === 'new' ? (
+                  <label className={fieldClassName}>
+                    <span className={fieldLabelClassName}>Passphrase</span>
+                    <Input
+                      type="password"
+                      value={passphrase}
+                      onChange={(event) => setPassphrase(event.target.value)}
+                      placeholder={host ? 'Leave blank to keep' : ''}
+                    />
+                  </label>
+                ) : null}
+              </>
+            ) : null}
+
+            <div className="grid gap-[0.55rem]">
+              <div className="flex items-center justify-between gap-3">
+                <span className={fieldLabelClassName}>Saved Secret</span>
+                {onOpenSecrets && keychainEntries.length > 0 ? (
+                  <button
+                    type="button"
+                    className="border-0 bg-transparent p-0 text-[0.88rem] font-semibold text-[var(--accent-strong)]"
+                    onClick={onOpenSecrets}
+                  >
+                    Secrets 열기
+                  </button>
+                ) : null}
+              </div>
+              <SelectField
+                aria-label="Saved Secret"
+                value={credentialMode === 'existing' ? `existing:${selectedSecretRef}` : credentialMode}
+                onChange={(event) => {
+                  const value = event.target.value;
+                  if (value === 'new' || value === 'none') {
+                    setCredentialMode(value);
+                    setSelectedSecretRef('');
+                    return;
+                  }
+                  if (value.startsWith('existing:')) {
+                    setCredentialMode('existing');
+                    setSelectedSecretRef(value.slice('existing:'.length));
+                  }
+                }}
+              >
+                {sshDraft.authType === 'privateKey' ? <option value="none">사용 안 함</option> : null}
+                <option value="new">새 secret 생성</option>
+                {reusableEntries.map((entry) => (
+                  <option key={entry.secretRef} value={`existing:${entry.secretRef}`}>
+                    {entry.label} ({entry.linkedHostCount}개 호스트)
+                  </option>
+                ))}
+              </SelectField>
+            </div>
+
+            {credentialMode === 'existing' ? (
+              <>
+                {host && isSshHostRecord(host) && selectedSecretRef && host.secretRef === selectedSecretRef && onEditExistingSecret ? (
+                  <Button
+                    variant="secondary"
+                    onClick={() => onEditExistingSecret(selectedSecretRef, sshDraft.authType === 'password' ? 'password' : 'passphrase')}
+                  >
+                    {sshDraft.authType === 'password' ? '비밀번호 변경' : 'Passphrase 변경'}
+                  </Button>
+                ) : null}
+              </>
+            ) : null}
+          </FormSection>
+
+          <FormSection
+            title="Details"
+            description="How this host appears in the app."
+            testId="hostform-section-details"
+          >
+            {metadataFields}
+          </FormSection>
+
+          <FormSection
+            title="Preferences"
+            description="Optional local preference."
+            testId="hostform-section-preferences"
+          >
+            {renderTerminalThemeField(sshDraft.terminalThemeId ?? null, (terminalThemeId) => setDraft({ ...sshDraft, terminalThemeId }))}
+          </FormSection>
         </>
       ) : null}
 
-      <div className="mt-[0.8rem] flex gap-[0.75rem]">
-        {isEditMode ? (
-          <Button
-            variant="primary"
-            className="flex-1 rounded-[16px] border border-[color-mix(in_srgb,var(--accent-strong)_28%,var(--border)_72%)] bg-[color-mix(in_srgb,var(--surface-elevated)_90%,var(--accent-strong)_10%)] px-[1.1rem] py-[0.95rem] font-[650] text-[var(--text)] shadow-none transition-[border-color,background-color,color] duration-160 hover:border-[color-mix(in_srgb,var(--accent-strong)_40%,var(--border)_60%)] hover:bg-[color-mix(in_srgb,var(--surface-elevated)_84%,var(--accent-strong)_16%)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color-mix(in_srgb,var(--accent-strong)_60%,white_40%)] focus-visible:ring-offset-2"
-            onClick={async () => {
-              if (!host || !onConnect) {
-                return;
-              }
-
-              if (!isFormValid(draft)) {
-                formRef.current?.reportValidity();
-                return;
-              }
-
-              const didSave = await persistChanges({ commitPendingTag: true }).catch(() => false);
-              if (!didSave) {
-                return;
-              }
-
-              await onConnect(host.id);
-            }}
-            disabled={saveInFlight}
-          >
-            Connect
-          </Button>
-        ) : (
-          <Button
-            type="submit"
-            variant="primary"
-            className="flex-1 rounded-[16px] border border-[color-mix(in_srgb,var(--accent-strong)_28%,var(--border)_72%)] bg-[color-mix(in_srgb,var(--surface-elevated)_90%,var(--accent-strong)_10%)] px-[1.1rem] py-[0.95rem] font-[650] text-[var(--text)] shadow-none transition-[border-color,background-color,color] duration-160 hover:border-[color-mix(in_srgb,var(--accent-strong)_40%,var(--border)_60%)] hover:bg-[color-mix(in_srgb,var(--surface-elevated)_84%,var(--accent-strong)_16%)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color-mix(in_srgb,var(--accent-strong)_60%,white_40%)] focus-visible:ring-offset-2"
-          >
-            Create Host
-          </Button>
-        )}
-        {host && onDelete ? (
-          <Button
-            variant="danger"
-            onClick={async () => {
-              await onDelete();
-            }}
-          >
-            Delete
-          </Button>
-        ) : null}
-      </div>
-      {isEditMode && saveStatusText ? (
-        <div
-          className={cn(
-            'mt-[0.1rem] text-[0.86rem] leading-[1.4] text-[var(--text-soft)]',
-            saveStatus === 'error' && 'text-[color-mix(in_srgb,var(--danger)_82%,white_18%)]',
-          )}
-        >
-          {saveStatusText}
-        </div>
-      ) : null}
     </form>
   );
-}
+});

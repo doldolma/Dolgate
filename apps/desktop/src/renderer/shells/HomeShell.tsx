@@ -241,6 +241,7 @@ export function HomeShell({
             desktopPlatform={desktopPlatform}
             hosts={homeViewModel.hosts}
             groups={homeViewModel.groups}
+            keychainEntries={settingsViewModel.keychainEntries}
             currentGroupPath={homeViewModel.currentGroupPath}
             searchQuery={homeViewModel.searchQuery}
             selectedHostId={highlightedHostId}
@@ -353,6 +354,7 @@ export function HomeShell({
             }}
             onMoveHostToGroup={homeViewModel.moveHostToGroup}
             onRemoveHost={homeViewModel.removeHost}
+            onRemoveSecret={settingsViewModel.removeKeychainSecret}
             onConnectHost={async (hostId) => {
               try {
                 setHostBrowserError(null);
@@ -443,6 +445,7 @@ export function HomeShell({
         open={isDrawerOpen}
         mode={homeViewModel.hostDrawer.mode === 'create' ? 'create' : 'edit'}
         host={currentHost}
+        allHosts={homeViewModel.hosts}
         keychainEntries={settingsViewModel.keychainEntries}
         groupOptions={groupOptions}
         defaultGroupPath={
@@ -473,10 +476,10 @@ export function HomeShell({
             ? async () => {
                 await homeViewModel.removeHost(currentHost.id);
                 setSelectedHostId(null);
-                homeViewModel.closeHostDrawer();
               }
             : undefined
         }
+        onRemoveSecret={settingsViewModel.removeKeychainSecret}
       />
 
       <AwsImportDialog

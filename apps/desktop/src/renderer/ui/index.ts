@@ -13,6 +13,7 @@ export * from './SelectField';
 export * from './PanelSection';
 export * from './SplitButton';
 export * from './StatusBadge';
+export * from './TagInputField';
 export * from './Tabs';
 export * from './Textarea';
 export * from './NoticeCard';

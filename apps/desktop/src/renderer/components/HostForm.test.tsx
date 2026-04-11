@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import type { AwsEc2HostRecord, SecretMetadataRecord, SshHostRecord } from '@shared';
 import { HostForm } from './HostForm';
@@ -13,6 +13,28 @@ vi.mock('../services/desktop/imports', () => ({
 
 const groupOptions = [{ value: null, label: 'Ungrouped' }];
 const keychainEntries: SecretMetadataRecord[] = [];
+const reusableKeychainEntries: SecretMetadataRecord[] = [
+  {
+    secretRef: 'secret-password',
+    label: 'Shared Password',
+    hasPassword: true,
+    hasPassphrase: false,
+    hasManagedPrivateKey: false,
+    source: 'local_keychain',
+    linkedHostCount: 2,
+    updatedAt: '2026-03-25T00:00:00.000Z',
+  },
+  {
+    secretRef: 'secret-private-key',
+    label: 'Shared Key',
+    hasPassword: false,
+    hasPassphrase: true,
+    hasManagedPrivateKey: true,
+    source: 'local_keychain',
+    linkedHostCount: 1,
+    updatedAt: '2026-03-25T00:00:00.000Z',
+  },
+];
 
 function createHost(overrides: Partial<SshHostRecord> = {}): SshHostRecord {
   return {
@@ -72,8 +94,17 @@ async function wait(duration: number) {
 describe('HostForm', () => {
   it('auto-saves edit-mode changes after the debounce window', async () => {
     const onSubmit = vi.fn().mockResolvedValue(undefined);
+    const onActionStateChange = vi.fn();
 
-    render(<HostForm host={createHost()} keychainEntries={keychainEntries} groupOptions={groupOptions} onSubmit={onSubmit} />);
+    render(
+      <HostForm
+        host={createHost()}
+        keychainEntries={keychainEntries}
+        groupOptions={groupOptions}
+        onSubmit={onSubmit}
+        onActionStateChange={onActionStateChange}
+      />,
+    );
 
     fireEvent.change(screen.getByLabelText('Label'), { target: { value: 'Prod API' } });
 
@@ -90,16 +121,18 @@ describe('HostForm', () => {
       undefined
     );
     expect((screen.getByLabelText('Label') as HTMLInputElement).value).toBe('Prod API');
-    expect(screen.getByText('Saved')).toBeInTheDocument();
+    await waitFor(() =>
+      expect(onActionStateChange).toHaveBeenLastCalledWith({
+        saveInFlight: false,
+        saveStatusText: 'Saved',
+      }),
+    );
   });
 
-  it('keeps create mode manual and still shows the Create Host button', async () => {
+  it('keeps create mode manual without auto-saving', async () => {
     const onSubmit = vi.fn().mockResolvedValue(undefined);
 
     render(<HostForm host={null} keychainEntries={keychainEntries} groupOptions={groupOptions} onSubmit={onSubmit} />);
-
-    expect(screen.getByRole('button', { name: 'Create Host' })).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Connect' })).not.toBeInTheDocument();
 
     fireEvent.change(screen.getByLabelText('Label'), { target: { value: 'New host' } });
     await wait(900);
@@ -107,98 +140,53 @@ describe('HostForm', () => {
     expect(onSubmit).not.toHaveBeenCalled();
   });
 
-  it('allows creating an SSH host without a username', async () => {
-    const onSubmit = vi.fn().mockResolvedValue(undefined);
-
+  it('shows saved secret controls inline for a new SSH host', () => {
     render(
       <HostForm
         host={null}
-        keychainEntries={keychainEntries}
+        keychainEntries={reusableKeychainEntries}
         groupOptions={groupOptions}
-        onSubmit={onSubmit}
+        onSubmit={vi.fn().mockResolvedValue(undefined)}
+        onOpenSecrets={vi.fn()}
       />,
     );
 
-    fireEvent.change(screen.getByLabelText('Label'), {
-      target: { value: 'New host' },
-    });
-    fireEvent.change(screen.getByLabelText('Hostname'), {
-      target: { value: 'new.example.com' },
-    });
-    fireEvent.change(screen.getByLabelText('Username'), {
-      target: { value: '' },
-    });
-
-    fireEvent.click(screen.getByRole('button', { name: 'Create Host' }));
-
-    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
-    expect(onSubmit).toHaveBeenCalledWith(
-      expect.objectContaining({
-        kind: 'ssh',
-        label: 'New host',
-        hostname: 'new.example.com',
-        username: '',
-      }),
-      expect.objectContaining({
-        password: undefined,
-        passphrase: undefined,
-      }),
-    );
+    expect(screen.getByText('Saved Secret')).toBeInTheDocument();
+    expect(screen.getByLabelText('Saved Secret')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Secrets 열기' })).toBeInTheDocument();
   });
 
-  it('flushes pending changes before connecting in edit mode', async () => {
-    const onSubmit = vi.fn().mockResolvedValue(undefined);
-    const onConnect = vi.fn().mockResolvedValue(undefined);
-
+  it('preselects the existing saved secret when editing a host with an attached secret', async () => {
     render(
       <HostForm
-        host={createHost()}
-        keychainEntries={keychainEntries}
+        host={createHost({ secretRef: 'secret-password' })}
+        keychainEntries={reusableKeychainEntries}
         groupOptions={groupOptions}
-        onSubmit={onSubmit}
-        onConnect={onConnect}
-      />
+        onSubmit={vi.fn().mockResolvedValue(undefined)}
+        onOpenSecrets={vi.fn()}
+      />,
     );
 
-    fireEvent.change(screen.getByLabelText('Label'), { target: { value: 'Prod SSH' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Connect' }));
-
-    await act(async () => {
-      await Promise.resolve();
-    });
-
-    expect(onSubmit).toHaveBeenCalledTimes(1);
-    expect(onConnect).toHaveBeenCalledWith('host-1');
-    expect(onSubmit.mock.invocationCallOrder[0]).toBeLessThan(onConnect.mock.invocationCallOrder[0]);
+    const savedSecretSelect = screen.getByLabelText('Saved Secret') as HTMLSelectElement;
+    await waitFor(() => expect(savedSecretSelect.value).toBe('existing:secret-password'));
+    expect(screen.getByRole('button', { name: 'Secrets 열기' })).toBeInTheDocument();
   });
 
-  it('disables Connect only while an auto-save request is in flight', async () => {
-    let resolveSave: (() => void) | null = null;
-    const onSubmit = vi.fn().mockImplementation(
-      () =>
-        new Promise<void>((resolve) => {
-          resolveSave = resolve;
-        })
+  it('does not render extra saved secret helper copy', () => {
+    render(
+      <HostForm
+        host={null}
+        keychainEntries={reusableKeychainEntries}
+        groupOptions={groupOptions}
+        onSubmit={vi.fn().mockResolvedValue(undefined)}
+        onOpenSecrets={vi.fn()}
+      />,
     );
 
-    render(<HostForm host={createHost()} keychainEntries={keychainEntries} groupOptions={groupOptions} onSubmit={onSubmit} onConnect={vi.fn()} />);
-
-    const connectButton = screen.getByRole('button', { name: 'Connect' }) as HTMLButtonElement;
-    expect(connectButton.disabled).toBe(false);
-
-    fireEvent.change(screen.getByLabelText('Label'), { target: { value: 'Prod SSH' } });
-    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1), { timeout: 1200 });
-
-    expect(onSubmit).toHaveBeenCalledTimes(1);
-    expect(connectButton.disabled).toBe(true);
-
-    await act(async () => {
-      resolveSave?.();
-      await Promise.resolve();
-    });
-
-    expect(connectButton.disabled).toBe(false);
+    expect(screen.queryByText('현재 선택된 secret을 재사용합니다.')).not.toBeInTheDocument();
+    expect(screen.queryByText('선택한 secret을 이 호스트와 공유합니다. 이 호스트를 삭제해도 secret 항목은 유지됩니다.')).not.toBeInTheDocument();
   });
+
 
   it('does not overwrite local edits when the same host id rehydrates while dirty', async () => {
     const onSubmit = vi.fn().mockResolvedValue(undefined);
@@ -252,6 +240,89 @@ describe('HostForm', () => {
     fireEvent.blur(tagInput);
 
     expect(screen.getAllByText('개발')).toHaveLength(1);
+  });
+
+  it('aligns tags and hostname fields to the same shared input contract', () => {
+    render(
+      <HostForm
+        host={null}
+        keychainEntries={keychainEntries}
+        groupOptions={groupOptions}
+        onSubmit={vi.fn().mockResolvedValue(undefined)}
+      />,
+    );
+
+    const hostnameInput = screen.getByLabelText('Hostname');
+    const tagShell = screen.getByTestId('tag-input-shell');
+
+    expect(hostnameInput.className).toContain('min-h-11');
+    expect(hostnameInput.className).toContain('rounded-[16px]');
+    expect(hostnameInput.className).toContain('border-[var(--border)]');
+    expect(hostnameInput.className).toContain('focus:border-[var(--selection-border)]');
+    expect(hostnameInput.className).toContain('focus:ring-4');
+
+    expect(tagShell.className).toContain('min-h-11');
+    expect(tagShell.className).toContain('rounded-[16px]');
+    expect(tagShell.className).toContain('border-[var(--border)]');
+    expect(tagShell.className).toContain('focus-within:border-[var(--selection-border)]');
+    expect(tagShell.className).toContain('focus-within:ring-4');
+  });
+
+  it('groups the SSH form into connection, details, and preferences sections', () => {
+    render(
+      <HostForm
+        host={null}
+        keychainEntries={reusableKeychainEntries}
+        groupOptions={groupOptions}
+        onSubmit={vi.fn().mockResolvedValue(undefined)}
+      />,
+    );
+
+    const connectionSection = screen.getByTestId('hostform-section-connection');
+    const detailsSection = screen.getByTestId('hostform-section-details');
+    const preferencesSection = screen.getByTestId('hostform-section-preferences');
+
+    expect(within(connectionSection).getByText('Connection')).toBeInTheDocument();
+    expect(within(connectionSection).getByLabelText('Hostname')).toBeInTheDocument();
+    expect(within(connectionSection).getByText('Auth Type')).toBeInTheDocument();
+    expect(within(connectionSection).getByLabelText('Password')).toBeInTheDocument();
+    expect(within(connectionSection).getByText('Saved Secret')).toBeInTheDocument();
+
+    expect(within(detailsSection).getByText('Details')).toBeInTheDocument();
+    expect(within(detailsSection).getByLabelText('Label')).toBeInTheDocument();
+    expect(within(detailsSection).getByLabelText('Group')).toBeInTheDocument();
+    expect(within(detailsSection).getByLabelText('Tags')).toBeInTheDocument();
+
+    expect(within(preferencesSection).getByText('Preferences')).toBeInTheDocument();
+    expect(within(preferencesSection).getByText('Terminal Theme')).toBeInTheDocument();
+
+    expect(connectionSection.compareDocumentPosition(detailsSection) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(detailsSection.compareDocumentPosition(preferencesSection) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it('places auth credentials before saved secret and terminal theme in the SSH form', () => {
+    render(
+      <HostForm
+        host={null}
+        keychainEntries={reusableKeychainEntries}
+        groupOptions={groupOptions}
+        onSubmit={vi.fn().mockResolvedValue(undefined)}
+      />,
+    );
+
+    const connectionSection = screen.getByTestId('hostform-section-connection');
+    const preferencesSection = screen.getByTestId('hostform-section-preferences');
+    const authTypeField = within(connectionSection).getByText('Auth Type').closest('label');
+    const passwordField = within(connectionSection).getByLabelText('Password').closest('label');
+    const savedSecretHeading = within(connectionSection).getByText('Saved Secret');
+    const terminalThemeField = within(preferencesSection).getByText('Terminal Theme').closest('label');
+
+    expect(authTypeField).not.toBeNull();
+    expect(passwordField).not.toBeNull();
+    expect(terminalThemeField).not.toBeNull();
+    expect(authTypeField?.compareDocumentPosition(passwordField as Node) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(passwordField?.compareDocumentPosition(savedSecretHeading) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(connectionSection.compareDocumentPosition(preferencesSection) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   it('renders AWS SSH metadata fields and auto-saves edited username and port', async () => {

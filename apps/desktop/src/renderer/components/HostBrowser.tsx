@@ -17,10 +17,12 @@ import {
   normalizeGroupPath,
   rebaseGroupPath
 } from '@shared';
-import type { GroupRecord, GroupRemoveMode, HostRecord } from '@shared';
+import type { GroupRecord, GroupRemoveMode, HostRecord, SecretMetadataRecord } from '@shared';
+import { getUnusedLocalSecretsAfterHostDeletion } from '../lib/host-secret-cleanup';
 import { useResponsiveCardGrid } from '../lib/useResponsiveCardGrid';
 import { cn } from '../lib/cn';
 import { DialogBackdrop } from './DialogBackdrop';
+import { HostDeleteConfirmDialog } from './HostDeleteConfirmDialog';
 import { HostCard } from './HostCard';
 import type { DesktopPlatform } from './DesktopWindowControls';
 import {
@@ -55,11 +57,11 @@ export {
 } from '@shared';
 
 export const HOST_BROWSER_IMPORT_MENU_LABELS = [
-  'Import via AWS SSM',
   'Import OpenSSH',
-  'Import from Xshell',
   'Import from Termius',
-  'Import from Warpgate'
+  'Import from Xshell',
+  'Import from Warpgate',
+  'Import via AWS SSM',
 ] as const;
 
 export function getHostBrowserVisibleImportMenuLabels(desktopPlatform: DesktopPlatform): string[] {
@@ -69,7 +71,11 @@ export function getHostBrowserVisibleImportMenuLabels(desktopPlatform: DesktopPl
 }
 
 export function getHostBrowserEmptyCalloutMessage(hostCount: number, searchQuery: string): string {
-  return hostCount === 0 ? 'New Host 또는 Import 메뉴를 눌러 첫 번째 연결 대상을 추가해보세요.' : searchQuery ? '검색어를 지우거나 다른 호스트명으로 다시 찾아보세요.' : 'New Host를 눌러 이 위치에 호스트를 추가하거나, 다른 그룹으로 이동해 장치를 확인해보세요.';
+  return hostCount === 0
+    ? 'New Host로 첫 번째 SSH host를 추가해보세요. 기존 설정이 있으면 OpenSSH import를 먼저 사용할 수 있습니다.'
+    : searchQuery
+      ? '검색어를 지우거나 다른 호스트명으로 다시 찾아보세요.'
+      : 'New Host를 눌러 이 위치에 SSH host를 추가하거나, 다른 그룹으로 이동해 장치를 확인해보세요.';
 }
 
 const HOME_BROWSER_HOST_CARD_MIN_WIDTH_PX = 280;
@@ -190,6 +196,7 @@ interface HostBrowserProps {
   desktopPlatform: DesktopPlatform;
   hosts: HostRecord[];
   groups: GroupRecord[];
+  keychainEntries: SecretMetadataRecord[];
   currentGroupPath: string | null;
   searchQuery: string;
   selectedHostId: string | null;
@@ -214,6 +221,7 @@ interface HostBrowserProps {
   onDuplicateHosts: (hostIds: string[]) => Promise<void>;
   onMoveHostToGroup: (hostId: string, groupPath: string | null) => Promise<void>;
   onRemoveHost: (hostId: string) => Promise<void>;
+  onRemoveSecret: (secretRef: string) => Promise<void>;
   onConnectHost: (hostId: string) => Promise<void>;
   onOpenHostContainers: (hostId: string) => Promise<void>;
 }
@@ -222,6 +230,7 @@ export function HostBrowser({
   desktopPlatform,
   hosts,
   groups,
+  keychainEntries,
   currentGroupPath,
   searchQuery,
   selectedHostId,
@@ -246,6 +255,7 @@ export function HostBrowser({
   onDuplicateHosts,
   onMoveHostToGroup,
   onRemoveHost,
+  onRemoveSecret,
   onConnectHost,
   onOpenHostContainers
 }: HostBrowserProps) {
@@ -262,6 +272,7 @@ export function HostBrowser({
   const [hostDeleteTarget, setHostDeleteTarget] = useState<HostDeleteTarget | null>(null);
   const [hostDeleteError, setHostDeleteError] = useState<string | null>(null);
   const [isRemovingHost, setIsRemovingHost] = useState(false);
+  const [removeUnusedSecretsOnHostDelete, setRemoveUnusedSecretsOnHostDelete] = useState(true);
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const [dragTargetGroupPath, setDragTargetGroupPath] = useState<string | null>(null);
   const [draggedHostId, setDraggedHostId] = useState<string | null>(null);
@@ -274,11 +285,13 @@ export function HostBrowser({
   const importMenuItems = useMemo(
     () =>
       [
-        { label: HOST_BROWSER_IMPORT_MENU_LABELS[0], onSelect: onOpenAwsImport },
-        { label: HOST_BROWSER_IMPORT_MENU_LABELS[1], onSelect: onOpenOpenSshImport },
-        ...(desktopPlatform === 'win32' ? [{ label: HOST_BROWSER_IMPORT_MENU_LABELS[2], onSelect: onOpenXshellImport }] : []),
-        { label: HOST_BROWSER_IMPORT_MENU_LABELS[3], onSelect: onOpenTermiusImport },
-        { label: HOST_BROWSER_IMPORT_MENU_LABELS[4], onSelect: onOpenWarpgateImport }
+        { label: HOST_BROWSER_IMPORT_MENU_LABELS[0], onSelect: onOpenOpenSshImport },
+        { label: HOST_BROWSER_IMPORT_MENU_LABELS[1], onSelect: onOpenTermiusImport },
+        ...(desktopPlatform === 'win32'
+          ? [{ label: HOST_BROWSER_IMPORT_MENU_LABELS[2], onSelect: onOpenXshellImport }]
+          : []),
+        { label: HOST_BROWSER_IMPORT_MENU_LABELS[3], onSelect: onOpenWarpgateImport },
+        { label: HOST_BROWSER_IMPORT_MENU_LABELS[4], onSelect: onOpenAwsImport }
       ],
     [desktopPlatform, onOpenAwsImport, onOpenOpenSshImport, onOpenTermiusImport, onOpenWarpgateImport, onOpenXshellImport]
   );
@@ -369,6 +382,13 @@ export function HostBrowser({
   const groupDeleteDialogVariant = groupDeleteTarget
     ? getGroupDeleteDialogVariant(groupDeleteTarget.childGroupCount, groupDeleteTarget.hostCount)
     : null;
+  const hostDeleteUnusedLocalSecretRefs = useMemo(
+    () =>
+      hostDeleteTarget
+        ? getUnusedLocalSecretsAfterHostDeletion(hosts, keychainEntries, hostDeleteTarget.hostIds)
+        : [],
+    [hostDeleteTarget, hosts, keychainEntries],
+  );
   const contextMenuStyle = contextMenu
     ? {
         left: `${Math.max(12, Math.min(contextMenu.x, window.innerWidth - 172))}px`,
@@ -403,6 +423,10 @@ export function HostBrowser({
   useEffect(() => {
     setExpandedHostTags((current) => current.filter((hostId) => hosts.some((host) => host.id === hostId && (host.tags?.length ?? 0) > 0)));
   }, [hosts]);
+
+  useEffect(() => {
+    setRemoveUnusedSecretsOnHostDelete(hostDeleteUnusedLocalSecretRefs.length > 0);
+  }, [hostDeleteTarget, hostDeleteUnusedLocalSecretRefs.length]);
 
   useEffect(() => {
     if (!isImportMenuOpen) {
@@ -653,33 +677,26 @@ export function HostBrowser({
         </div>
         <div className="flex flex-wrap justify-end gap-3">
           <Button
-            variant="secondary"
+            variant="primary"
             onClick={() => {
               setIsImportMenuOpen(false);
-              onOpenLocalTerminal();
+              onCreateHost();
             }}
           >
-            TERMINAL
-          </Button>
-          <Button
-            variant="secondary"
-            onClick={() => {
-              setIsImportMenuOpen(false);
-              openCreateGroupModal();
-            }}
-          >
-            New Group
+            New Host
           </Button>
           <SplitButton ref={importMenuRef}>
             <SplitButtonMain
+              variant="secondary"
               onClick={() => {
                 setIsImportMenuOpen(false);
-                onCreateHost();
+                onOpenOpenSshImport();
               }}
             >
-              New Host
+              Import
             </SplitButtonMain>
             <SplitButtonToggle
+              variant="secondary"
               aria-label="Open import menu"
               aria-expanded={isImportMenuOpen}
               aria-haspopup="menu"
@@ -722,6 +739,24 @@ export function HostBrowser({
               </SplitButtonMenu>
             ) : null}
           </SplitButton>
+          <Button
+            variant="secondary"
+            onClick={() => {
+              setIsImportMenuOpen(false);
+              onOpenLocalTerminal();
+            }}
+          >
+            Local Terminal
+          </Button>
+          <Button
+            variant="secondary"
+            onClick={() => {
+              setIsImportMenuOpen(false);
+              openCreateGroupModal();
+            }}
+          >
+            New Group
+          </Button>
         </div>
       </div>
 
@@ -1218,64 +1253,53 @@ export function HostBrowser({
       ) : null}
 
       {hostDeleteTarget ? (
-        <DialogBackdrop
-          data-testid="host-browser-modal-backdrop"
-          onDismiss={() => {
+        <HostDeleteConfirmDialog
+          open
+          backdropTestId="host-browser-modal-backdrop"
+          title={
+            hostDeleteTarget.hostCount === 1
+              ? `${hostDeleteTarget.title} 호스트를 삭제할까요?`
+              : `선택한 ${hostDeleteTarget.hostCount}개 호스트를 삭제할까요?`
+          }
+          unusedLocalSecretCount={hostDeleteUnusedLocalSecretRefs.length}
+          removeUnusedSecrets={removeUnusedSecretsOnHostDelete}
+          onToggleRemoveUnusedSecrets={setRemoveUnusedSecretsOnHostDelete}
+          errorMessage={hostDeleteError}
+          isDeleting={isRemovingHost}
+          onClose={() => {
             if (isRemovingHost) {
               return;
             }
             setHostDeleteTarget(null);
             setHostDeleteError(null);
           }}
-        >
-          <ModalShell data-host-browser-modal="true" role="dialog" aria-modal="true" aria-labelledby="delete-host-title">
-            <ModalHeader className="block">
-            <SectionLabel>Delete</SectionLabel>
-            <h3 id="delete-host-title">
-              {hostDeleteTarget.hostCount === 1
-                ? `${hostDeleteTarget.title} 호스트를 삭제할까요?`
-                : `선택한 ${hostDeleteTarget.hostCount}개 호스트를 삭제할까요?`}
-            </h3>
-            </ModalHeader>
-            <ModalBody className="grid gap-4">
-            <p className="text-sm leading-6 text-[var(--text-soft)]">연결된 secret 항목은 유지됩니다.</p>
-            {hostDeleteError ? <p className="text-sm text-[var(--danger-text)]">{hostDeleteError}</p> : null}
-            </ModalBody>
-            <ModalFooter>
-              <Button
-                variant="secondary"
-                onClick={() => {
-                  setHostDeleteTarget(null);
-                  setHostDeleteError(null);
-                }}
-                disabled={isRemovingHost}
-              >
-                취소
-              </Button>
-              <Button
-                variant="danger"
-                disabled={isRemovingHost}
-                onClick={async () => {
-                  try {
-                    setIsRemovingHost(true);
-                    for (const hostId of hostDeleteTarget.hostIds) {
-                      await onRemoveHost(hostId);
-                    }
-                    clearSelections();
-                    setHostDeleteTarget(null);
-                    setHostDeleteError(null);
-                  } catch (error) {
-                    setHostDeleteError(error instanceof Error ? error.message : '호스트를 삭제하지 못했습니다.');
-                  } finally {
-                    setIsRemovingHost(false);
-                  }
-                }}
-              >
-                삭제
-              </Button>
-            </ModalFooter>
-          </ModalShell>
-        </DialogBackdrop>
+          onConfirm={async () => {
+            try {
+              setIsRemovingHost(true);
+              for (const hostId of hostDeleteTarget.hostIds) {
+                await onRemoveHost(hostId);
+              }
+            } catch (error) {
+              setHostDeleteError(error instanceof Error ? error.message : '호스트를 삭제하지 못했습니다.');
+              return;
+            }
+
+            try {
+              if (removeUnusedSecretsOnHostDelete) {
+                for (const secretRef of hostDeleteUnusedLocalSecretRefs) {
+                  await onRemoveSecret(secretRef);
+                }
+              }
+              clearSelections();
+              setHostDeleteTarget(null);
+              setHostDeleteError(null);
+            } catch (error) {
+              setHostDeleteError(error instanceof Error ? error.message : '사용하지 않는 secret을 삭제하지 못했습니다.');
+            } finally {
+              setIsRemovingHost(false);
+            }
+          }}
+        />
       ) : null}
 
       {groupDeleteTarget ? (
