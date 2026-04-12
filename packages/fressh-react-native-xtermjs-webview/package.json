@@ -1,0 +1,16 @@
+{
+  "name": "@fressh/react-native-xtermjs-webview",
+  "version": "0.0.8",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": "./dist/index.js"
+  },
+  "dependencies": {
+    "js-base64": "^3.7.8"
+  },
+  "peerDependencies": {
+    "react": ">=19.1.0",
+    "react-native-webview": ">=13.15.0"
+  }
+}

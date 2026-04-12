@@ -1,0 +1,54 @@
+{
+  "name": "@fressh/react-native-uniffi-russh",
+  "license": "MIT",
+  "description": "Uniffi bindings for russh",
+  "version": "0.0.5",
+  "type": "module",
+  "main": "./lib/module/api.js",
+  "types": "./lib/typescript/src/api.d.ts",
+  "exports": {
+    ".": {
+      "types": "./lib/typescript/src/api.d.ts",
+      "default": "./lib/module/api.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "dependencies": {
+    "uniffi-bindgen-react-native": "*"
+  },
+  "peerDependencies": {
+    "react": ">=19.1.0",
+    "react-native": ">=0.81.4"
+  },
+  "react-native-builder-bob": {
+    "source": "src",
+    "output": "lib",
+    "targets": [
+      [
+        "module",
+        {
+          "esm": true
+        }
+      ],
+      [
+        "typescript",
+        {
+          "project": "tsconfig.build.json"
+        }
+      ]
+    ]
+  },
+  "codegenConfig": {
+    "name": "UniffiRusshSpec",
+    "type": "modules",
+    "jsSrcsDir": "src",
+    "android": {
+      "javaPackageName": "com.uniffirussh"
+    }
+  },
+  "create-react-native-library": {
+    "languages": "kotlin-objc",
+    "type": "turbo-module",
+    "version": "0.54.3"
+  }
+}

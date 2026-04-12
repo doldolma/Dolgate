@@ -1,0 +1,24 @@
+[package]
+name = "uniffi-fixture-gc-callbacks-crasher"
+edition = "2021"
+version = "0.22.0"
+license = "MPL-2.0"
+publish = false
+
+[lib]
+name = "gc_callbacks_crasher"
+crate-type = ["lib", "cdylib"]
+
+[dependencies]
+async-std = "1.12.0"
+async-trait = "0.1.83"
+thiserror = "1.0"
+uniffi = { workspace = true, features = ["tokio"] }
+
+[build-dependencies]
+uniffi = { workspace = true, features = ["build"] }
+
+[dev-dependencies]
+ubrn_macros = { workspace = true }
+ubrn_fixture_testing = { workspace = true }
+uniffi = { workspace = true, features = ["bindgen-tests"] }

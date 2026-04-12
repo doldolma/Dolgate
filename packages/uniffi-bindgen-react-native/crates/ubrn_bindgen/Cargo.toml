@@ -1,0 +1,42 @@
+[package]
+name = "ubrn_bindgen"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[features]
+default = []
+wasm = ["quote", "prettyplease", "syn", "proc-macro2"]
+
+[dependencies]
+anyhow = { workspace = true }
+askama = { workspace = true }
+camino = { workspace = true }
+cargo_metadata = { workspace = true }
+clap = { workspace = true }
+extend = { workspace = true }
+heck = { workspace = true }
+paste = { workspace = true }
+serde = { workspace = true }
+textwrap = "0.16.1"
+toml = ">=0.8, <=0.9"
+topological-sort = "0.2.2"
+ubrn_common = { path = "../ubrn_common" }
+uniffi_bindgen = { workspace = true }
+uniffi_meta = { workspace = true }
+
+[dependencies.quote]
+version = "1.0"
+optional = true
+
+[dependencies.prettyplease]
+version = "0.2"
+optional = true
+
+[dependencies.syn]
+version = "2.0"
+optional = true
+
+[dependencies.proc-macro2]
+version = "1.0"
+optional = true

@@ -3,13 +3,17 @@
   "version": "1.4.0",
   "private": true,
   "workspaces": [
-    "apps/*"
+    "apps/*",
+    "packages/*"
   ],
   "scripts": {
     "dev": "npm-run-all --parallel dev:desktop dev:api",
     "dev:desktop": "npm run dev --workspace @dolssh/desktop",
+    "dev:mobile": "npm run start --workspace @dolssh/mobile",
     "dev:api": "cd services/sync-api && go run ./cmd/api",
     "build": "npm run build --workspace @dolssh/desktop",
+    "mobile:android": "npm run android --workspace @dolssh/mobile",
+    "mobile:ios": "npm run ios --workspace @dolssh/mobile",
     "release:dist:mac": "npm run release:dist:mac --workspace @dolssh/desktop",
     "release:dist:win": "npm run release:dist:win --workspace @dolssh/desktop",
     "release:mac": "npm run release:publish:mac --workspace @dolssh/desktop",
@@ -21,12 +25,15 @@
     "test:desktop:main": "npm run test:desktop:main --workspace @dolssh/desktop",
     "test:desktop:renderer": "npm run test:desktop:renderer --workspace @dolssh/desktop",
     "test:desktop:smoke": "npm run test:desktop:smoke --workspace @dolssh/desktop",
+    "test:mobile": "npm run test --workspace @dolssh/mobile",
     "test:ssh-core": "cd services/ssh-core && go test ./... -cover",
     "test:sync-api": "cd services/sync-api && go test ./... -cover",
     "test:services": "npm run test:ssh-core && npm run test:sync-api",
     "test:smoke": "npm run test:desktop:smoke",
     "test:all": "npm run test:fast && npm run test:smoke",
-    "typecheck": "npm run typecheck --workspace @dolssh/desktop"
+    "typecheck": "npm-run-all --parallel typecheck:desktop typecheck:mobile",
+    "typecheck:desktop": "npm run typecheck --workspace @dolssh/desktop",
+    "typecheck:mobile": "npm run typecheck --workspace @dolssh/mobile"
   },
   "devDependencies": {
     "npm-run-all": "^4.1.5"

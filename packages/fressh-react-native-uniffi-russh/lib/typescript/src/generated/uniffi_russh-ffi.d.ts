@@ -1,0 +1,222 @@
+import { type UniffiRustCallStatus, type UniffiRustArcPtr, type UniffiResult } from 'uniffi-bindgen-react-native';
+interface NativeModuleInterface {
+    ubrn_uniffi_internal_fn_func_ffi__string_to_byte_length(string: string, uniffi_out_err: UniffiRustCallStatus): number;
+    ubrn_uniffi_internal_fn_func_ffi__string_to_arraybuffer(string: string, uniffi_out_err: UniffiRustCallStatus): Uint8Array;
+    ubrn_uniffi_internal_fn_func_ffi__arraybuffer_to_string(buffer: Uint8Array, uniffi_out_err: UniffiRustCallStatus): string;
+    ubrn_uniffi_uniffi_russh_fn_clone_connectprogresscallback(ptr: bigint, uniffi_out_err: UniffiRustCallStatus): bigint;
+    ubrn_uniffi_uniffi_russh_fn_free_connectprogresscallback(ptr: bigint, uniffi_out_err: UniffiRustCallStatus): void;
+    ubrn_uniffi_uniffi_russh_fn_init_callback_vtable_connectprogresscallback(vtable: UniffiVTableCallbackInterfaceConnectProgressCallback): void;
+    ubrn_uniffi_uniffi_russh_fn_method_connectprogresscallback_on_change(ptr: bigint, status: Uint8Array, uniffi_out_err: UniffiRustCallStatus): void;
+    ubrn_uniffi_uniffi_russh_fn_clone_connectiondisconnectedcallback(ptr: bigint, uniffi_out_err: UniffiRustCallStatus): bigint;
+    ubrn_uniffi_uniffi_russh_fn_free_connectiondisconnectedcallback(ptr: bigint, uniffi_out_err: UniffiRustCallStatus): void;
+    ubrn_uniffi_uniffi_russh_fn_init_callback_vtable_connectiondisconnectedcallback(vtable: UniffiVTableCallbackInterfaceConnectionDisconnectedCallback): void;
+    ubrn_uniffi_uniffi_russh_fn_method_connectiondisconnectedcallback_on_change(ptr: bigint, connectionId: Uint8Array, uniffi_out_err: UniffiRustCallStatus): void;
+    ubrn_uniffi_uniffi_russh_fn_clone_serverkeycallback(ptr: bigint, uniffi_out_err: UniffiRustCallStatus): bigint;
+    ubrn_uniffi_uniffi_russh_fn_free_serverkeycallback(ptr: bigint, uniffi_out_err: UniffiRustCallStatus): void;
+    ubrn_uniffi_uniffi_russh_fn_init_callback_vtable_serverkeycallback(vtable: UniffiVTableCallbackInterfaceServerKeyCallback): void;
+    ubrn_uniffi_uniffi_russh_fn_method_serverkeycallback_on_change(ptr: bigint, serverKeyInfo: Uint8Array): bigint;
+    ubrn_uniffi_uniffi_russh_fn_clone_shellclosedcallback(ptr: bigint, uniffi_out_err: UniffiRustCallStatus): bigint;
+    ubrn_uniffi_uniffi_russh_fn_free_shellclosedcallback(ptr: bigint, uniffi_out_err: UniffiRustCallStatus): void;
+    ubrn_uniffi_uniffi_russh_fn_init_callback_vtable_shellclosedcallback(vtable: UniffiVTableCallbackInterfaceShellClosedCallback): void;
+    ubrn_uniffi_uniffi_russh_fn_method_shellclosedcallback_on_change(ptr: bigint, channelId: number, uniffi_out_err: UniffiRustCallStatus): void;
+    ubrn_uniffi_uniffi_russh_fn_clone_shelllistener(ptr: bigint, uniffi_out_err: UniffiRustCallStatus): bigint;
+    ubrn_uniffi_uniffi_russh_fn_free_shelllistener(ptr: bigint, uniffi_out_err: UniffiRustCallStatus): void;
+    ubrn_uniffi_uniffi_russh_fn_init_callback_vtable_shelllistener(vtable: UniffiVTableCallbackInterfaceShellListener): void;
+    ubrn_uniffi_uniffi_russh_fn_method_shelllistener_on_event(ptr: bigint, ev: Uint8Array, uniffi_out_err: UniffiRustCallStatus): void;
+    ubrn_uniffi_uniffi_russh_fn_clone_shellsession(ptr: bigint, uniffi_out_err: UniffiRustCallStatus): bigint;
+    ubrn_uniffi_uniffi_russh_fn_free_shellsession(ptr: bigint, uniffi_out_err: UniffiRustCallStatus): void;
+    ubrn_uniffi_uniffi_russh_fn_method_shellsession_add_listener(ptr: bigint, listener: bigint, opts: Uint8Array, uniffi_out_err: UniffiRustCallStatus): bigint;
+    ubrn_uniffi_uniffi_russh_fn_method_shellsession_buffer_stats(ptr: bigint, uniffi_out_err: UniffiRustCallStatus): Uint8Array;
+    ubrn_uniffi_uniffi_russh_fn_method_shellsession_close(ptr: bigint): bigint;
+    ubrn_uniffi_uniffi_russh_fn_method_shellsession_current_seq(ptr: bigint, uniffi_out_err: UniffiRustCallStatus): bigint;
+    ubrn_uniffi_uniffi_russh_fn_method_shellsession_get_info(ptr: bigint, uniffi_out_err: UniffiRustCallStatus): Uint8Array;
+    ubrn_uniffi_uniffi_russh_fn_method_shellsession_read_buffer(ptr: bigint, cursor: Uint8Array, maxBytes: Uint8Array, uniffi_out_err: UniffiRustCallStatus): Uint8Array;
+    ubrn_uniffi_uniffi_russh_fn_method_shellsession_remove_listener(ptr: bigint, id: bigint, uniffi_out_err: UniffiRustCallStatus): void;
+    ubrn_uniffi_uniffi_russh_fn_method_shellsession_send_data(ptr: bigint, data: Uint8Array): bigint;
+    ubrn_uniffi_uniffi_russh_fn_clone_sshconnection(ptr: bigint, uniffi_out_err: UniffiRustCallStatus): bigint;
+    ubrn_uniffi_uniffi_russh_fn_free_sshconnection(ptr: bigint, uniffi_out_err: UniffiRustCallStatus): void;
+    ubrn_uniffi_uniffi_russh_fn_method_sshconnection_disconnect(ptr: bigint): bigint;
+    ubrn_uniffi_uniffi_russh_fn_method_sshconnection_get_info(ptr: bigint, uniffi_out_err: UniffiRustCallStatus): Uint8Array;
+    ubrn_uniffi_uniffi_russh_fn_method_sshconnection_start_shell(ptr: bigint, opts: Uint8Array): bigint;
+    ubrn_uniffi_uniffi_russh_fn_func_connect(options: Uint8Array): bigint;
+    ubrn_uniffi_uniffi_russh_fn_func_generate_key_pair(keyType: Uint8Array, uniffi_out_err: UniffiRustCallStatus): Uint8Array;
+    ubrn_uniffi_uniffi_russh_fn_func_validate_private_key(privateKeyContent: Uint8Array, uniffi_out_err: UniffiRustCallStatus): Uint8Array;
+    ubrn_ffi_uniffi_russh_rust_future_poll_u8(handle: bigint, callback: UniffiRustFutureContinuationCallback, callbackData: bigint): void;
+    ubrn_ffi_uniffi_russh_rust_future_cancel_u8(handle: bigint): void;
+    ubrn_ffi_uniffi_russh_rust_future_free_u8(handle: bigint): void;
+    ubrn_ffi_uniffi_russh_rust_future_complete_u8(handle: bigint, uniffi_out_err: UniffiRustCallStatus): number;
+    ubrn_ffi_uniffi_russh_rust_future_poll_i8(handle: bigint, callback: UniffiRustFutureContinuationCallback, callbackData: bigint): void;
+    ubrn_ffi_uniffi_russh_rust_future_cancel_i8(handle: bigint): void;
+    ubrn_ffi_uniffi_russh_rust_future_free_i8(handle: bigint): void;
+    ubrn_ffi_uniffi_russh_rust_future_complete_i8(handle: bigint, uniffi_out_err: UniffiRustCallStatus): number;
+    ubrn_ffi_uniffi_russh_rust_future_poll_u16(handle: bigint, callback: UniffiRustFutureContinuationCallback, callbackData: bigint): void;
+    ubrn_ffi_uniffi_russh_rust_future_cancel_u16(handle: bigint): void;
+    ubrn_ffi_uniffi_russh_rust_future_free_u16(handle: bigint): void;
+    ubrn_ffi_uniffi_russh_rust_future_complete_u16(handle: bigint, uniffi_out_err: UniffiRustCallStatus): number;
+    ubrn_ffi_uniffi_russh_rust_future_poll_i16(handle: bigint, callback: UniffiRustFutureContinuationCallback, callbackData: bigint): void;
+    ubrn_ffi_uniffi_russh_rust_future_cancel_i16(handle: bigint): void;
+    ubrn_ffi_uniffi_russh_rust_future_free_i16(handle: bigint): void;
+    ubrn_ffi_uniffi_russh_rust_future_complete_i16(handle: bigint, uniffi_out_err: UniffiRustCallStatus): number;
+    ubrn_ffi_uniffi_russh_rust_future_poll_u32(handle: bigint, callback: UniffiRustFutureContinuationCallback, callbackData: bigint): void;
+    ubrn_ffi_uniffi_russh_rust_future_cancel_u32(handle: bigint): void;
+    ubrn_ffi_uniffi_russh_rust_future_free_u32(handle: bigint): void;
+    ubrn_ffi_uniffi_russh_rust_future_complete_u32(handle: bigint, uniffi_out_err: UniffiRustCallStatus): number;
+    ubrn_ffi_uniffi_russh_rust_future_poll_i32(handle: bigint, callback: UniffiRustFutureContinuationCallback, callbackData: bigint): void;
+    ubrn_ffi_uniffi_russh_rust_future_cancel_i32(handle: bigint): void;
+    ubrn_ffi_uniffi_russh_rust_future_free_i32(handle: bigint): void;
+    ubrn_ffi_uniffi_russh_rust_future_complete_i32(handle: bigint, uniffi_out_err: UniffiRustCallStatus): number;
+    ubrn_ffi_uniffi_russh_rust_future_poll_u64(handle: bigint, callback: UniffiRustFutureContinuationCallback, callbackData: bigint): void;
+    ubrn_ffi_uniffi_russh_rust_future_cancel_u64(handle: bigint): void;
+    ubrn_ffi_uniffi_russh_rust_future_free_u64(handle: bigint): void;
+    ubrn_ffi_uniffi_russh_rust_future_complete_u64(handle: bigint, uniffi_out_err: UniffiRustCallStatus): bigint;
+    ubrn_ffi_uniffi_russh_rust_future_poll_i64(handle: bigint, callback: UniffiRustFutureContinuationCallback, callbackData: bigint): void;
+    ubrn_ffi_uniffi_russh_rust_future_cancel_i64(handle: bigint): void;
+    ubrn_ffi_uniffi_russh_rust_future_free_i64(handle: bigint): void;
+    ubrn_ffi_uniffi_russh_rust_future_complete_i64(handle: bigint, uniffi_out_err: UniffiRustCallStatus): bigint;
+    ubrn_ffi_uniffi_russh_rust_future_poll_f32(handle: bigint, callback: UniffiRustFutureContinuationCallback, callbackData: bigint): void;
+    ubrn_ffi_uniffi_russh_rust_future_cancel_f32(handle: bigint): void;
+    ubrn_ffi_uniffi_russh_rust_future_free_f32(handle: bigint): void;
+    ubrn_ffi_uniffi_russh_rust_future_complete_f32(handle: bigint, uniffi_out_err: UniffiRustCallStatus): number;
+    ubrn_ffi_uniffi_russh_rust_future_poll_f64(handle: bigint, callback: UniffiRustFutureContinuationCallback, callbackData: bigint): void;
+    ubrn_ffi_uniffi_russh_rust_future_cancel_f64(handle: bigint): void;
+    ubrn_ffi_uniffi_russh_rust_future_free_f64(handle: bigint): void;
+    ubrn_ffi_uniffi_russh_rust_future_complete_f64(handle: bigint, uniffi_out_err: UniffiRustCallStatus): number;
+    ubrn_ffi_uniffi_russh_rust_future_poll_pointer(handle: bigint, callback: UniffiRustFutureContinuationCallback, callbackData: bigint): void;
+    ubrn_ffi_uniffi_russh_rust_future_cancel_pointer(handle: bigint): void;
+    ubrn_ffi_uniffi_russh_rust_future_free_pointer(handle: bigint): void;
+    ubrn_ffi_uniffi_russh_rust_future_complete_pointer(handle: bigint, uniffi_out_err: UniffiRustCallStatus): bigint;
+    ubrn_ffi_uniffi_russh_rust_future_poll_rust_buffer(handle: bigint, callback: UniffiRustFutureContinuationCallback, callbackData: bigint): void;
+    ubrn_ffi_uniffi_russh_rust_future_cancel_rust_buffer(handle: bigint): void;
+    ubrn_ffi_uniffi_russh_rust_future_free_rust_buffer(handle: bigint): void;
+    ubrn_ffi_uniffi_russh_rust_future_complete_rust_buffer(handle: bigint, uniffi_out_err: UniffiRustCallStatus): Uint8Array;
+    ubrn_ffi_uniffi_russh_rust_future_poll_void(handle: bigint, callback: UniffiRustFutureContinuationCallback, callbackData: bigint): void;
+    ubrn_ffi_uniffi_russh_rust_future_cancel_void(handle: bigint): void;
+    ubrn_ffi_uniffi_russh_rust_future_free_void(handle: bigint): void;
+    ubrn_ffi_uniffi_russh_rust_future_complete_void(handle: bigint, uniffi_out_err: UniffiRustCallStatus): void;
+    ubrn_uniffi_uniffi_russh_checksum_func_connect(): number;
+    ubrn_uniffi_uniffi_russh_checksum_func_generate_key_pair(): number;
+    ubrn_uniffi_uniffi_russh_checksum_func_validate_private_key(): number;
+    ubrn_uniffi_uniffi_russh_checksum_method_connectprogresscallback_on_change(): number;
+    ubrn_uniffi_uniffi_russh_checksum_method_connectiondisconnectedcallback_on_change(): number;
+    ubrn_uniffi_uniffi_russh_checksum_method_serverkeycallback_on_change(): number;
+    ubrn_uniffi_uniffi_russh_checksum_method_shellclosedcallback_on_change(): number;
+    ubrn_uniffi_uniffi_russh_checksum_method_shelllistener_on_event(): number;
+    ubrn_uniffi_uniffi_russh_checksum_method_shellsession_add_listener(): number;
+    ubrn_uniffi_uniffi_russh_checksum_method_shellsession_buffer_stats(): number;
+    ubrn_uniffi_uniffi_russh_checksum_method_shellsession_close(): number;
+    ubrn_uniffi_uniffi_russh_checksum_method_shellsession_current_seq(): number;
+    ubrn_uniffi_uniffi_russh_checksum_method_shellsession_get_info(): number;
+    ubrn_uniffi_uniffi_russh_checksum_method_shellsession_read_buffer(): number;
+    ubrn_uniffi_uniffi_russh_checksum_method_shellsession_remove_listener(): number;
+    ubrn_uniffi_uniffi_russh_checksum_method_shellsession_send_data(): number;
+    ubrn_uniffi_uniffi_russh_checksum_method_sshconnection_disconnect(): number;
+    ubrn_uniffi_uniffi_russh_checksum_method_sshconnection_get_info(): number;
+    ubrn_uniffi_uniffi_russh_checksum_method_sshconnection_start_shell(): number;
+    ubrn_ffi_uniffi_russh_uniffi_contract_version(): number;
+    ubrn_uniffi_internal_fn_method_connectprogresscallback_ffi__bless_pointer(pointer: bigint, uniffi_out_err: UniffiRustCallStatus): UniffiRustArcPtr;
+    ubrn_uniffi_internal_fn_method_connectiondisconnectedcallback_ffi__bless_pointer(pointer: bigint, uniffi_out_err: UniffiRustCallStatus): UniffiRustArcPtr;
+    ubrn_uniffi_internal_fn_method_serverkeycallback_ffi__bless_pointer(pointer: bigint, uniffi_out_err: UniffiRustCallStatus): UniffiRustArcPtr;
+    ubrn_uniffi_internal_fn_method_shellclosedcallback_ffi__bless_pointer(pointer: bigint, uniffi_out_err: UniffiRustCallStatus): UniffiRustArcPtr;
+    ubrn_uniffi_internal_fn_method_shelllistener_ffi__bless_pointer(pointer: bigint, uniffi_out_err: UniffiRustCallStatus): UniffiRustArcPtr;
+    ubrn_uniffi_internal_fn_method_shellsession_ffi__bless_pointer(pointer: bigint, uniffi_out_err: UniffiRustCallStatus): UniffiRustArcPtr;
+    ubrn_uniffi_internal_fn_method_sshconnection_ffi__bless_pointer(pointer: bigint, uniffi_out_err: UniffiRustCallStatus): UniffiRustArcPtr;
+}
+declare const getter: () => NativeModuleInterface;
+export default getter;
+export type UniffiRustFutureContinuationCallback = (data: bigint, pollResult: number) => void;
+type UniffiForeignFutureFree = (handle: bigint) => void;
+type UniffiCallbackInterfaceFree = (handle: bigint) => void;
+export type UniffiForeignFuture = {
+    handle: bigint;
+    free: UniffiForeignFutureFree;
+};
+export type UniffiForeignFutureStructU8 = {
+    returnValue: number;
+    callStatus: UniffiRustCallStatus;
+};
+export type UniffiForeignFutureCompleteU8 = (callbackData: bigint, result: UniffiForeignFutureStructU8) => void;
+export type UniffiForeignFutureStructI8 = {
+    returnValue: number;
+    callStatus: UniffiRustCallStatus;
+};
+export type UniffiForeignFutureCompleteI8 = (callbackData: bigint, result: UniffiForeignFutureStructI8) => void;
+export type UniffiForeignFutureStructU16 = {
+    returnValue: number;
+    callStatus: UniffiRustCallStatus;
+};
+export type UniffiForeignFutureCompleteU16 = (callbackData: bigint, result: UniffiForeignFutureStructU16) => void;
+export type UniffiForeignFutureStructI16 = {
+    returnValue: number;
+    callStatus: UniffiRustCallStatus;
+};
+export type UniffiForeignFutureCompleteI16 = (callbackData: bigint, result: UniffiForeignFutureStructI16) => void;
+export type UniffiForeignFutureStructU32 = {
+    returnValue: number;
+    callStatus: UniffiRustCallStatus;
+};
+export type UniffiForeignFutureCompleteU32 = (callbackData: bigint, result: UniffiForeignFutureStructU32) => void;
+export type UniffiForeignFutureStructI32 = {
+    returnValue: number;
+    callStatus: UniffiRustCallStatus;
+};
+export type UniffiForeignFutureCompleteI32 = (callbackData: bigint, result: UniffiForeignFutureStructI32) => void;
+export type UniffiForeignFutureStructU64 = {
+    returnValue: bigint;
+    callStatus: UniffiRustCallStatus;
+};
+export type UniffiForeignFutureCompleteU64 = (callbackData: bigint, result: UniffiForeignFutureStructU64) => void;
+export type UniffiForeignFutureStructI64 = {
+    returnValue: bigint;
+    callStatus: UniffiRustCallStatus;
+};
+export type UniffiForeignFutureCompleteI64 = (callbackData: bigint, result: UniffiForeignFutureStructI64) => void;
+export type UniffiForeignFutureStructF32 = {
+    returnValue: number;
+    callStatus: UniffiRustCallStatus;
+};
+export type UniffiForeignFutureCompleteF32 = (callbackData: bigint, result: UniffiForeignFutureStructF32) => void;
+export type UniffiForeignFutureStructF64 = {
+    returnValue: number;
+    callStatus: UniffiRustCallStatus;
+};
+export type UniffiForeignFutureCompleteF64 = (callbackData: bigint, result: UniffiForeignFutureStructF64) => void;
+export type UniffiForeignFutureStructPointer = {
+    returnValue: bigint;
+    callStatus: UniffiRustCallStatus;
+};
+export type UniffiForeignFutureCompletePointer = (callbackData: bigint, result: UniffiForeignFutureStructPointer) => void;
+export type UniffiForeignFutureStructRustBuffer = {
+    returnValue: Uint8Array;
+    callStatus: UniffiRustCallStatus;
+};
+export type UniffiForeignFutureCompleteRustBuffer = (callbackData: bigint, result: UniffiForeignFutureStructRustBuffer) => void;
+export type UniffiForeignFutureStructVoid = {
+    callStatus: UniffiRustCallStatus;
+};
+export type UniffiForeignFutureCompleteVoid = (callbackData: bigint, result: UniffiForeignFutureStructVoid) => void;
+type UniffiCallbackInterfaceConnectProgressCallbackMethod0 = (uniffiHandle: bigint, status: Uint8Array) => UniffiResult<void>;
+type UniffiCallbackInterfaceConnectionDisconnectedCallbackMethod0 = (uniffiHandle: bigint, connectionId: Uint8Array) => UniffiResult<void>;
+type UniffiCallbackInterfaceServerKeyCallbackMethod0 = (uniffiHandle: bigint, serverKeyInfo: Uint8Array, uniffiFutureCallback: UniffiForeignFutureCompleteI8, uniffiCallbackData: bigint) => UniffiForeignFuture;
+type UniffiCallbackInterfaceShellClosedCallbackMethod0 = (uniffiHandle: bigint, channelId: number) => UniffiResult<void>;
+type UniffiCallbackInterfaceShellListenerMethod0 = (uniffiHandle: bigint, ev: Uint8Array) => UniffiResult<void>;
+export type UniffiVTableCallbackInterfaceConnectProgressCallback = {
+    onChange: UniffiCallbackInterfaceConnectProgressCallbackMethod0;
+    uniffiFree: UniffiCallbackInterfaceFree;
+};
+export type UniffiVTableCallbackInterfaceConnectionDisconnectedCallback = {
+    onChange: UniffiCallbackInterfaceConnectionDisconnectedCallbackMethod0;
+    uniffiFree: UniffiCallbackInterfaceFree;
+};
+export type UniffiVTableCallbackInterfaceServerKeyCallback = {
+    onChange: UniffiCallbackInterfaceServerKeyCallbackMethod0;
+    uniffiFree: UniffiCallbackInterfaceFree;
+};
+export type UniffiVTableCallbackInterfaceShellClosedCallback = {
+    onChange: UniffiCallbackInterfaceShellClosedCallbackMethod0;
+    uniffiFree: UniffiCallbackInterfaceFree;
+};
+export type UniffiVTableCallbackInterfaceShellListener = {
+    onEvent: UniffiCallbackInterfaceShellListenerMethod0;
+    uniffiFree: UniffiCallbackInterfaceFree;
+};
+//# sourceMappingURL=uniffi_russh-ffi.d.ts.map

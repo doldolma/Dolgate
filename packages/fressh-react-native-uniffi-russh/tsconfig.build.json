@@ -1,0 +1,8 @@
+{
+	"extends": "./tsconfig",
+	"exclude": ["example", "lib", "scripts"],
+	"compilerOptions": {
+		"noUnusedParameters": false,
+		"noUnusedLocals": false
+	}
+}
