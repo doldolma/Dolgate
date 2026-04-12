@@ -197,8 +197,21 @@ export interface MainIpcContext {
     current: HostSecretInput,
     patch: HostSecretInput,
   ) => HostSecretInput;
+  resolveRuntimeSshSecrets: (
+    host: SshHostRecord,
+    secrets?: HostSecretInput,
+  ) => Promise<{
+    secrets: HostSecretInput;
+    shouldPersistHostSecret: boolean;
+  }>;
   resolveManagedPrivateKeyPem: (
     draft: HostDraft,
+    nextSecrets: HostSecretInput | undefined,
+    currentSecretRef: string | null,
+  ) => Promise<string | undefined>;
+  resolveManagedCertificateText: (
+    draft: HostDraft,
+    nextSecrets: HostSecretInput | undefined,
     currentSecretRef: string | null,
   ) => Promise<string | undefined>;
   requireTrustedHostKey: (host: { hostname: string; port: number }) => string;

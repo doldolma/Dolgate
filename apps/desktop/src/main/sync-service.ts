@@ -701,6 +701,7 @@ export class SyncService {
         hasPassword: Boolean(secret.password),
         hasPassphrase: Boolean(secret.passphrase),
         hasManagedPrivateKey: Boolean(secret.privateKeyPem),
+        hasCertificate: Boolean(secret.certificateText),
         source: 'server_managed',
         linkedHostCount: 0,
         updatedAt: secret.updatedAt

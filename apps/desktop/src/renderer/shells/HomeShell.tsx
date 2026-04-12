@@ -445,7 +445,6 @@ export function HomeShell({
         open={isDrawerOpen}
         mode={homeViewModel.hostDrawer.mode === 'create' ? 'create' : 'edit'}
         host={currentHost}
-        allHosts={homeViewModel.hosts}
         keychainEntries={settingsViewModel.keychainEntries}
         groupOptions={groupOptions}
         defaultGroupPath={
@@ -471,15 +470,6 @@ export function HomeShell({
         }
         onEditExistingSecret={openHostSecretEditor}
         onOpenSecrets={() => settingsViewModel.openSettingsSection('secrets')}
-        onDelete={
-          currentHost
-            ? async () => {
-                await homeViewModel.removeHost(currentHost.id);
-                setSelectedHostId(null);
-              }
-            : undefined
-        }
-        onRemoveSecret={settingsViewModel.removeKeychainSecret}
       />
 
       <AwsImportDialog

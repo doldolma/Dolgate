@@ -16,6 +16,7 @@ import {
   getPane,
   hasProvidedSecrets,
   isAwsEc2HostRecord,
+  isSshHostRecord,
   pushHistory,
   resolveCredentialRetryKind,
   shouldPromptAwsSftpConfigRetry,
@@ -295,7 +296,7 @@ export function createSftpServices(deps: SliceDeps) {
       endpointId: string;
       secrets?: HostSecretInput;
     },
-  ) => {
+  ): Promise<boolean> => {
     const pane = getPane(get(), input.paneId);
     if (pane.endpoint) {
       await api.sftp.disconnect(pane.endpoint.id);
@@ -345,20 +346,27 @@ export function createSftpServices(deps: SliceDeps) {
       if (hasProvidedSecrets(input.secrets)) {
         await refreshHostAndKeychainState(set);
       }
+      return true;
     } catch (error) {
       const host = get().hosts.find((item) => item.id === input.hostId);
       const message =
         error instanceof Error ? error.message : "SFTP 연결에 실패했습니다.";
-      const credentialKind = resolveCredentialRetryKind(host, message);
+      const shouldPromptCredentialRetry = resolveCredentialRetryKind(host, message);
       const shouldPromptAwsConfig = shouldPromptAwsSftpConfigRetry(host, message);
-      if (credentialKind) {
+      if (shouldPromptCredentialRetry && host && isSshHostRecord(host)) {
         set({
           pendingCredentialRetry: {
             hostId: input.hostId,
             source: "sftp",
-            credentialKind,
+            authType:
+              host.authType === "certificate"
+                ? "certificate"
+                : host.authType === "privateKey"
+                  ? "privateKey"
+                  : "password",
             paneId: input.paneId,
             message,
+            initialUsername: host.username,
           },
         });
       } else if (host && shouldPromptAwsConfig && isAwsEc2HostRecord(host)) {
@@ -383,10 +391,13 @@ export function createSftpServices(deps: SliceDeps) {
           entries: [],
           isLoading: false,
           errorMessage:
-            credentialKind || shouldPromptAwsConfig ? undefined : message,
+            shouldPromptCredentialRetry || shouldPromptAwsConfig
+              ? undefined
+              : message,
           warningMessages: [],
         }),
       }));
+      return false;
     }
   };
 

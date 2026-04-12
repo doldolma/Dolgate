@@ -157,6 +157,7 @@ function createMockStoreState(overrides: Record<string, unknown> = {}) {
     },
     pendingHostKeyPrompt: null,
     pendingCredentialRetry: null,
+    activeCredentialRetryAttempt: null,
     pendingAwsSftpConfigRetry: null,
     pendingInteractiveAuth: null,
     sftp: {

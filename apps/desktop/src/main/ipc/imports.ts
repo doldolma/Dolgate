@@ -158,7 +158,6 @@ export function registerImportIpcHandlers(ctx: MainIpcContext): void {
 
         for (const host of selectedHosts) {
           let secretRef: string | null = null;
-          let privateKeyPath: string | null = null;
 
           if (host.authType === "privateKey" && host.identityFilePath) {
             const cachedSecretRef = secretRefsByIdentityPath.get(host.identityFilePath);
@@ -177,13 +176,10 @@ export function registerImportIpcHandlers(ctx: MainIpcContext): void {
                   createdSecretCount += 1;
                 }
               } else {
-                privateKeyPath = host.identityFilePath;
                 warnings.push(identityImport.warning);
+                skippedHostCount += 1;
+                continue;
               }
-            }
-
-            if (!secretRef && !privateKeyPath) {
-              privateKeyPath = host.identityFilePath;
             }
           }
 
@@ -199,7 +195,6 @@ export function registerImportIpcHandlers(ctx: MainIpcContext): void {
               port: host.port,
               username: host.username,
               authType: host.authType,
-              privateKeyPath,
             },
             secretRef,
           );
@@ -309,6 +304,44 @@ export function registerImportIpcHandlers(ctx: MainIpcContext): void {
           }
 
           let secretRef: string | null = null;
+          if (host.authType === "privateKey") {
+            if (!host.privateKeyPath) {
+              warnings.push({
+                code: "private-key-import-failed",
+                message: `${host.label}: 개인키 파일 경로를 찾지 못해 호스트를 가져오지 않았습니다.`,
+                filePath: host.sourceFilePath,
+              });
+              skippedHostCount += 1;
+              continue;
+            }
+            const identityImport = await resolveOpenSshIdentityImport(
+              host.privateKeyPath,
+            );
+            if (identityImport.kind !== "managed-key") {
+              warnings.push({
+                ...identityImport.warning,
+                message: `${host.label}: ${identityImport.warning.message}`,
+                filePath: host.sourceFilePath,
+              });
+              skippedHostCount += 1;
+              continue;
+            }
+            secretRef = await ctx.persistImportedSecret(`Xshell • ${host.label}`, {
+              privateKeyPem: identityImport.privateKeyPem,
+            });
+            if (secretRef) {
+              createdSecretCount += 1;
+            } else {
+              warnings.push({
+                code: "private-key-import-failed",
+                message: `${host.label}: 개인키를 저장하지 못해 호스트를 가져오지 않았습니다.`,
+                filePath: host.sourceFilePath,
+              });
+              skippedHostCount += 1;
+              continue;
+            }
+          }
+
           if (
             host.authType === "password" &&
             host.encryptedPassword &&
@@ -357,7 +390,6 @@ export function registerImportIpcHandlers(ctx: MainIpcContext): void {
               port: host.port,
               username: host.username,
               authType: host.authType,
-              privateKeyPath: host.privateKeyPath,
             },
             secretRef,
           );
@@ -409,4 +441,3 @@ export function registerImportIpcHandlers(ctx: MainIpcContext): void {
     },
   );
 }
-

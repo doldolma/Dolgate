@@ -94,6 +94,8 @@ func (s *Service) Connect(endpointID, requestID string, payload protocol.SFTPCon
 		Password:             payload.Password,
 		PrivateKeyPEM:        payload.PrivateKeyPEM,
 		PrivateKeyPath:       payload.PrivateKeyPath,
+		CertificateText:      payload.CertificateText,
+		CertificatePath:      payload.CertificatePath,
 		Passphrase:           payload.Passphrase,
 		TrustedHostKeyBase64: payload.TrustedHostKeyBase64,
 	}, sshconn.DefaultConfig, func(challenge sshconn.InteractiveChallenge) ([]string, error) {

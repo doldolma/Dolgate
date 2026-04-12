@@ -10,6 +10,7 @@ import {
   PanelSection,
   SectionLabel,
 } from '../ui';
+import { describeSecretType } from '../lib/secret-display';
 
 interface KeychainPanelProps {
   entries: SecretMetadataRecord[];
@@ -44,19 +45,18 @@ export function KeychainPanel({ entries, onRemoveSecret, onEditSecret }: Keychai
                   <strong>{entry.label}</strong>
                 </CardTitleRow>
                 <CardMeta>
+                  <span>{describeSecretType(entry)}</span>
                   <span>{entry.linkedHostCount}개 호스트에서 사용 중</span>
-                  <span>{entry.hasPassword ? 'Password saved' : 'No password'}</span>
-                  <span>{entry.hasPassphrase ? 'Passphrase saved' : 'No passphrase'}</span>
                   <span>{new Date(entry.updatedAt).toLocaleString('ko-KR')}</span>
                 </CardMeta>
               </CardMain>
               <CardActions>
-                {entry.hasPassword ? (
+                {!entry.hasCertificate && entry.hasPassword ? (
                   <Button variant="secondary" onClick={() => onEditSecret(entry.secretRef, 'password')}>
                     Edit password
                   </Button>
                 ) : null}
-                {entry.hasPassphrase ? (
+                {!entry.hasCertificate && entry.hasPassphrase ? (
                   <Button variant="secondary" onClick={() => onEditSecret(entry.secretRef, 'passphrase')}>
                     Edit passphrase
                   </Button>

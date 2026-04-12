@@ -610,11 +610,35 @@ function normalizeHostRecord(value: unknown): HostRecord | null {
     hostname: value.hostname,
     port: value.port,
     username: value.username,
-    authType: value.authType === 'privateKey' ? 'privateKey' : 'password',
+    authType:
+      value.authType === 'privateKey'
+        ? 'privateKey'
+        : value.authType === 'certificate'
+          ? 'certificate'
+          : 'password',
     privateKeyPath: typeof value.privateKeyPath === 'string' ? value.privateKeyPath : null,
+    certificatePath: typeof value.certificatePath === 'string' ? value.certificatePath : null,
     secretRef: typeof value.secretRef === 'string' ? value.secretRef : null,
     createdAt: typeof value.createdAt === 'string' ? value.createdAt : nowIso(),
     updatedAt: typeof value.updatedAt === 'string' ? value.updatedAt : nowIso()
+  };
+}
+
+function normalizeSecretMetadataRecord(value: unknown): SecretMetadataRecord | null {
+  if (!isObject(value) || typeof value.secretRef !== 'string' || typeof value.label !== 'string') {
+    return null;
+  }
+
+  return {
+    secretRef: value.secretRef,
+    label: value.label,
+    hasPassword: Boolean(value.hasPassword),
+    hasPassphrase: Boolean(value.hasPassphrase),
+    hasManagedPrivateKey: Boolean(value.hasManagedPrivateKey),
+    hasCertificate: Boolean(value.hasCertificate),
+    source: value.source === 'server_managed' ? 'server_managed' : 'local_keychain',
+    linkedHostCount: typeof value.linkedHostCount === 'number' ? value.linkedHostCount : 0,
+    updatedAt: typeof value.updatedAt === 'string' ? value.updatedAt : nowIso(),
   };
 }
 
@@ -713,7 +737,11 @@ function normalizeStateFile(value: unknown): DesktopStateFile {
             .map(normalizeDnsOverrideRecord)
             .filter((entry): entry is DnsOverrideRecord => entry !== null)
         : [],
-      secretMetadata: Array.isArray(data.secretMetadata) ? (data.secretMetadata as SecretMetadataRecord[]) : [],
+      secretMetadata: Array.isArray(data.secretMetadata)
+        ? data.secretMetadata
+            .map(normalizeSecretMetadataRecord)
+            .filter((entry): entry is SecretMetadataRecord => entry !== null)
+        : [],
       awsProfiles: Array.isArray(data.awsProfiles) ? (data.awsProfiles as AwsProfileMetadataRecord[]) : [],
       syncOutbox: Array.isArray(data.syncOutbox) ? (data.syncOutbox as SyncDeletionRecord[]) : []
     },

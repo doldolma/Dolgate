@@ -1,6 +1,7 @@
 import type { StoreApi } from "zustand/vanilla";
 import type {
   ActivityLogRecord,
+  AuthType,
   AppSettings,
   AwsEcsClusterSnapshot,
   AwsEcsServiceLogsSnapshot,
@@ -310,9 +311,23 @@ export interface PendingCredentialRetry {
   sessionId?: string | null;
   hostId: string;
   source: "ssh" | "sftp";
-  credentialKind: "password" | "passphrase";
+  authType: Extract<AuthType, "password" | "privateKey" | "certificate">;
   message: string;
+  initialUsername: string;
   paneId?: SftpPaneId;
+}
+
+export interface PendingCredentialRetryAttempt {
+  sessionId?: string | null;
+  hostId: string;
+  source: "ssh" | "sftp";
+  paneId?: SftpPaneId;
+  originalUsername: string;
+  attemptedUsername: string;
+}
+
+export interface CredentialRetryInput extends HostSecretInput {
+  username: string;
 }
 
 export interface PendingAwsSftpConfigRetry {
@@ -435,6 +450,7 @@ interface AppStateParts {
   sftp: SftpState;
   pendingHostKeyPrompt: PendingHostKeyPrompt | null;
   pendingCredentialRetry: PendingCredentialRetry | null;
+  activeCredentialRetryAttempt: PendingCredentialRetryAttempt | null;
   pendingAwsSftpConfigRetry: PendingAwsSftpConfigRetry | null;
   pendingMissingUsernamePrompt: PendingMissingUsernamePrompt | null;
   pendingInteractiveAuth: PendingInteractiveAuth | null;
@@ -609,7 +625,7 @@ interface AppStateParts {
   acceptPendingHostKeyPrompt: (mode: "trust" | "replace") => Promise<void>;
   dismissPendingHostKeyPrompt: () => void;
   dismissPendingCredentialRetry: () => void;
-  submitCredentialRetry: (secrets: HostSecretInput) => Promise<void>;
+  submitCredentialRetry: (input: CredentialRetryInput) => Promise<void>;
   dismissPendingAwsSftpConfigRetry: () => void;
   submitAwsSftpConfigRetry: (input: {
     username: string;
@@ -745,6 +761,7 @@ export type SessionSlice = Pick<
   | "workspaces"
   | "tabStrip"
   | "pendingCredentialRetry"
+  | "activeCredentialRetryAttempt"
   | "pendingMissingUsernamePrompt"
   | "pendingInteractiveAuth"
   | "pendingConnectionAttempts"

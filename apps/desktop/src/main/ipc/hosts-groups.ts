@@ -5,6 +5,40 @@ import { ipcMain } from "electron";
 import { ipcChannels } from "../../common/ipc-channels";
 import type { MainIpcContext } from "./context";
 
+function normalizeSshDraftForPersistence(
+  draft: HostDraft,
+  secretRef: string | null,
+): HostDraft {
+  if (!isSshHostDraft(draft)) {
+    return draft;
+  }
+
+  if (secretRef) {
+    return {
+      ...draft,
+      privateKeyPath: null,
+      certificatePath: null,
+    };
+  }
+
+  if (draft.authType === "privateKey") {
+    return {
+      ...draft,
+      certificatePath: null,
+    };
+  }
+
+  if (draft.authType === "certificate") {
+    return draft;
+  }
+
+  return {
+    ...draft,
+    privateKeyPath: null,
+    certificatePath: null,
+  };
+}
+
 export function registerHostsGroupsIpcHandlers(ctx: MainIpcContext): void {
   ipcMain.handle(ipcChannels.hosts.list, async () => ctx.hosts.list());
 
@@ -12,25 +46,31 @@ export function registerHostsGroupsIpcHandlers(ctx: MainIpcContext): void {
     ipcChannels.hosts.create,
     async (_event, draft: HostDraft, secrets?: HostSecretInput) => {
       const hostId = randomUUID();
+      const existingSecretRef = isSshHostDraft(draft)
+        ? (draft.secretRef ?? null)
+        : null;
       const resolvedSecrets: HostSecretInput = isSshHostDraft(draft)
         ? {
             ...secrets,
-            privateKeyPem: await ctx.resolveManagedPrivateKeyPem(draft, null),
+            privateKeyPem: await ctx.resolveManagedPrivateKeyPem(draft, secrets, null),
+            certificateText: await ctx.resolveManagedCertificateText(draft, secrets, null),
           }
         : {};
-      const secretRef = isSshHostDraft(draft)
+      const createdSecretRef = isSshHostDraft(draft)
         ? await ctx.persistSecret(
             ctx.describeHostLabel(draft),
             resolvedSecrets,
           )
         : null;
+      const secretRef = createdSecretRef ?? existingSecretRef;
       if (secretRef) {
         ctx.activityLogs.append("info", "audit", "호스트 secret이 저장되었습니다.", {
           hostId,
           secretRef,
         });
       }
-      const record = ctx.hosts.create(hostId, draft, secretRef);
+      const persistedDraft = normalizeSshDraftForPersistence(draft, secretRef);
+      const record = ctx.hosts.create(hostId, persistedDraft, secretRef);
       ctx.activityLogs.append("info", "audit", "호스트를 생성했습니다.", {
         hostId: record.id,
         label: record.label,
@@ -56,12 +96,30 @@ export function registerHostsGroupsIpcHandlers(ctx: MainIpcContext): void {
             ? draft.secretRef
             : (current.secretRef ?? null)
           : null;
+      const shouldReuseCurrentSecretMaterial =
+        Boolean(
+          secrets &&
+            (secrets.password !== undefined ||
+              secrets.passphrase !== undefined ||
+              secrets.privateKeyPem !== undefined ||
+              secrets.certificateText !== undefined),
+        );
       const resolvedSecrets: HostSecretInput = isSshHostDraft(draft)
         ? {
             ...secrets,
             privateKeyPem: await ctx.resolveManagedPrivateKeyPem(
               draft,
-              isSshHostRecord(current) ? (current.secretRef ?? null) : null,
+              secrets,
+              shouldReuseCurrentSecretMaterial && isSshHostRecord(current)
+                ? (current.secretRef ?? null)
+                : null,
+            ),
+            certificateText: await ctx.resolveManagedCertificateText(
+              draft,
+              secrets,
+              shouldReuseCurrentSecretMaterial && isSshHostRecord(current)
+                ? (current.secretRef ?? null)
+                : null,
             ),
           }
         : {};
@@ -69,7 +127,8 @@ export function registerHostsGroupsIpcHandlers(ctx: MainIpcContext): void {
         isSshHostDraft(draft) &&
         (resolvedSecrets.password ||
           resolvedSecrets.passphrase ||
-          resolvedSecrets.privateKeyPem)
+          resolvedSecrets.privateKeyPem ||
+          resolvedSecrets.certificateText)
       ) {
         secretRef = await ctx.persistSecret(
           ctx.describeHostLabel(draft),
@@ -82,7 +141,8 @@ export function registerHostsGroupsIpcHandlers(ctx: MainIpcContext): void {
       } else if (isSshHostDraft(draft) && secrets) {
         secretRef = isSshHostRecord(current) ? (current.secretRef ?? null) : null;
       }
-      const record = ctx.hosts.update(id, draft, secretRef);
+      const persistedDraft = normalizeSshDraftForPersistence(draft, secretRef);
+      const record = ctx.hosts.update(id, persistedDraft, secretRef);
       ctx.activityLogs.append("info", "audit", "호스트를 수정했습니다.", {
         hostId: record.id,
         label: record.label,

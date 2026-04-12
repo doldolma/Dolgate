@@ -1,5 +1,6 @@
 import type { AppSettings } from "@shared";
 import path from "node:path";
+import { readFile } from "node:fs/promises";
 import { app, dialog, ipcMain } from "electron";
 import { ipcChannels } from "../../common/ipc-channels";
 import type { MainIpcContext } from "./context";
@@ -70,16 +71,34 @@ export function registerWindowUpdaterSettingsFilesIpcHandlers(
 
   ipcMain.handle(ipcChannels.shell.pickPrivateKey, async () => {
     const result = await dialog.showOpenDialog({
+      defaultPath: path.join(app.getPath("home"), ".ssh"),
       properties: ["openFile"],
-      filters: [
-        { name: "Private keys", extensions: ["pem", "key", "ppk"] },
-        { name: "All files", extensions: ["*"] },
-      ],
     });
     if (result.canceled || result.filePaths.length === 0) {
       return null;
     }
-    return result.filePaths[0];
+    const filePath = result.filePaths[0];
+    return {
+      path: filePath,
+      name: path.basename(filePath),
+      content: await readFile(filePath, "utf8"),
+    };
+  });
+
+  ipcMain.handle(ipcChannels.shell.pickSshCertificate, async () => {
+    const result = await dialog.showOpenDialog({
+      defaultPath: path.join(app.getPath("home"), ".ssh"),
+      properties: ["openFile"],
+    });
+    if (result.canceled || result.filePaths.length === 0) {
+      return null;
+    }
+    const filePath = result.filePaths[0];
+    return {
+      path: filePath,
+      name: path.basename(filePath),
+      content: await readFile(filePath, "utf8"),
+    };
   });
 
   ipcMain.handle(ipcChannels.shell.pickOpenSshConfig, async () => {

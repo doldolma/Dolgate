@@ -147,6 +147,7 @@ export function createSettingsSlice(deps: SliceDeps): SettingsSlice {
 
   const {
     syncOperationalData,
+    refreshHostAndKeychainState,
   } = services;
 
   return {
@@ -170,7 +171,7 @@ export function createSettingsSlice(deps: SliceDeps): SettingsSlice {
           },
     removeKeychainSecret: async (secretRef) => {
             await api.keychain.remove(secretRef);
-            await syncOperationalData(set);
+            await refreshHostAndKeychainState(set);
           },
     updateKeychainSecret: async (secretRef, secrets) => {
             await api.keychain.update({ secretRef, secrets });
@@ -182,7 +183,7 @@ export function createSettingsSlice(deps: SliceDeps): SettingsSlice {
               sourceSecretRef,
               secrets,
             });
-            await syncOperationalData(set);
+            await refreshHostAndKeychainState(set);
           }
   };
 

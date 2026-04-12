@@ -7,3 +7,7 @@ export function getDesktopSettings() {
 export function pickPrivateKey() {
   return desktopApi.shell.pickPrivateKey();
 }
+
+export function pickSshCertificate() {
+  return desktopApi.shell.pickSshCertificate();
+}

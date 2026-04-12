@@ -32,7 +32,7 @@ describe("progress utils", () => {
   });
 
   it("marks credential retry prompts as retryable dialogs", () => {
-    expect(resolveCredentialRetryProgress(sshHost(), "password")).toMatchObject({
+    expect(resolveCredentialRetryProgress(sshHost())).toMatchObject({
       stage: "awaiting-credentials",
       blockingKind: "dialog",
       retryable: true,

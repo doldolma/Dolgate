@@ -251,7 +251,7 @@ describe('OpenSSH import service', () => {
         kind: 'path-fallback',
         warning: {
           code: 'unsupported-key-format',
-          message: expect.stringContaining('경로만 가져왔습니다.'),
+          message: expect.stringContaining('가져오지 않았습니다.'),
         },
       });
       await expect(

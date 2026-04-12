@@ -486,9 +486,19 @@ export interface PendingCredentialRetry {
   sessionId?: string | null;
   hostId: string;
   source: "ssh" | "sftp";
-  credentialKind: "password" | "passphrase";
+  authType: "password" | "privateKey" | "certificate";
   message: string;
+  initialUsername: string;
   paneId?: SftpPaneId;
+}
+
+export interface PendingCredentialRetryAttempt {
+  sessionId?: string | null;
+  hostId: string;
+  source: "ssh" | "sftp";
+  paneId?: SftpPaneId;
+  originalUsername: string;
+  attemptedUsername: string;
 }
 
 export interface PendingAwsSftpConfigRetry {
@@ -612,6 +622,7 @@ export interface AppState {
   sftp: SftpState;
   pendingHostKeyPrompt: PendingHostKeyPrompt | null;
   pendingCredentialRetry: PendingCredentialRetry | null;
+  activeCredentialRetryAttempt: PendingCredentialRetryAttempt | null;
   pendingAwsSftpConfigRetry: PendingAwsSftpConfigRetry | null;
   pendingMissingUsernamePrompt: PendingMissingUsernamePrompt | null;
   pendingInteractiveAuth: PendingInteractiveAuth | null;
@@ -777,7 +788,9 @@ export interface AppState {
   acceptPendingHostKeyPrompt: (mode: "trust" | "replace") => Promise<void>;
   dismissPendingHostKeyPrompt: () => void;
   dismissPendingCredentialRetry: () => void;
-  submitCredentialRetry: (secrets: HostSecretInput) => Promise<void>;
+  submitCredentialRetry: (
+    input: HostSecretInput & { username: string },
+  ) => Promise<void>;
   dismissPendingAwsSftpConfigRetry: () => void;
   submitAwsSftpConfigRetry: (input: {
     username: string;
@@ -2108,6 +2121,13 @@ export function replaceSessionReferencesInState(
             sessionId: nextSessionId,
           }
         : state.pendingCredentialRetry,
+    activeCredentialRetryAttempt:
+      state.activeCredentialRetryAttempt?.sessionId === previousSessionId
+        ? {
+            ...state.activeCredentialRetryAttempt,
+            sessionId: nextSessionId,
+          }
+        : state.activeCredentialRetryAttempt,
     pendingInteractiveAuth:
       isPendingSessionInteractiveAuth(state.pendingInteractiveAuth) &&
       state.pendingInteractiveAuth.sessionId === previousSessionId
@@ -2265,6 +2285,10 @@ export function removeSessionFromState(
       state.pendingCredentialRetry?.sessionId === sessionId
         ? null
         : state.pendingCredentialRetry,
+    activeCredentialRetryAttempt:
+      state.activeCredentialRetryAttempt?.sessionId === sessionId
+        ? null
+        : state.activeCredentialRetryAttempt,
     pendingInteractiveAuth:
       isPendingSessionInteractiveAuth(state.pendingInteractiveAuth) &&
       state.pendingInteractiveAuth.sessionId === sessionId
@@ -2441,23 +2465,27 @@ export function resolveCurrentGroupPathAfterGroupMutation(
 export function resolveCredentialRetryKind(
   host: HostRecord | undefined,
   message: string,
-): "password" | "passphrase" | null {
+): "auth" | null {
   if (!host || !isSshHostRecord(host)) {
     return null;
   }
 
+  if (host.authType === "keyboardInteractive") {
+    return null;
+  }
+
   if (host.authType === "password") {
-    return /requires a password|password required|permission denied|unable to authenticate|authentication failed|ssh handshake failed/i.test(
+    return /requires a password|password required|permission denied|unable to authenticate|authentication failed|ssh handshake failed|unexpected message type 51/i.test(
       message,
     )
-      ? "password"
+      ? "auth"
       : null;
   }
 
-  return /passphrase|private key|unable to authenticate|authentication failed|ssh handshake failed|parse private key/i.test(
+  return /passphrase|private key|certificate|unable to authenticate|authentication failed|ssh handshake failed|unexpected message type 51|parse private key/i.test(
     message,
   )
-    ? "passphrase"
+    ? "auth"
     : null;
 }
 
@@ -2540,13 +2568,11 @@ export function resolveLocalWaitingShellProgress(): TerminalConnectionProgress {
 
 export function resolveCredentialRetryProgress(
   host: HostRecord,
-  credentialKind: PendingCredentialRetry["credentialKind"],
+  _credentialKind?: "auth",
 ): TerminalConnectionProgress {
   return createConnectionProgress(
     "awaiting-credentials",
-    credentialKind === "password"
-      ? `${host.label} 비밀번호를 다시 입력해 주세요.`
-      : `${host.label} passphrase를 다시 입력해 주세요.`,
+    `${host.label} 인증 정보를 다시 확인해 주세요.`,
     {
       blockingKind: "dialog",
       retryable: true,

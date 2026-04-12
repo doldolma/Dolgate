@@ -194,6 +194,8 @@ export interface ResolvedCoreConnectPayload {
   password?: string;
   privateKeyPem?: string;
   privateKeyPath?: string;
+  certificateText?: string;
+  certificatePath?: string;
   passphrase?: string;
   trustedHostKeyBase64: string;
   cols: number;
@@ -272,6 +274,8 @@ export interface ResolvedSftpConnectPayload {
   password?: string;
   privateKeyPem?: string;
   privateKeyPath?: string;
+  certificateText?: string;
+  certificatePath?: string;
   passphrase?: string;
   trustedHostKeyBase64: string;
 }
@@ -284,6 +288,8 @@ export interface ResolvedContainersConnectPayload {
   password?: string;
   privateKeyPem?: string;
   privateKeyPath?: string;
+  certificateText?: string;
+  certificatePath?: string;
   passphrase?: string;
   trustedHostKeyBase64: string;
 }
@@ -301,6 +307,8 @@ export interface ResolvedPortForwardStartPayload {
   password?: string;
   privateKeyPem?: string;
   privateKeyPath?: string;
+  certificateText?: string;
+  certificatePath?: string;
   passphrase?: string;
   trustedHostKeyBase64: string;
   mode: PortForwardMode;
@@ -422,6 +430,13 @@ export interface HostSecretInput {
   password?: string;
   passphrase?: string;
   privateKeyPem?: string;
+  certificateText?: string;
+}
+
+export interface PickedShellFile {
+  path: string;
+  name: string;
+  content: string;
 }
 
 export interface KeychainSecretUpdateInput {
@@ -619,7 +634,8 @@ export interface DesktopApi {
     onChatEvent: (listener: (event: SessionShareChatEvent) => void) => () => void;
   };
   shell: {
-    pickPrivateKey: () => Promise<string | null>;
+    pickPrivateKey: () => Promise<PickedShellFile | null>;
+    pickSshCertificate: () => Promise<PickedShellFile | null>;
     pickOpenSshConfig: () => Promise<string | null>;
     pickXshellSessionFolder: () => Promise<string | null>;
     openExternal: (url: string) => Promise<void>;

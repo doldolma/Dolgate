@@ -1,8 +1,6 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { HostRecord, SecretMetadataRecord } from '@shared';
-import { getUnusedLocalSecretsAfterHostDeletion } from '../lib/host-secret-cleanup';
 import { HostForm, type HostFormActionState, type HostFormHandle, type HostFormProps } from './HostForm';
-import { HostDeleteConfirmDialog } from './HostDeleteConfirmDialog';
 import { cn } from '../lib/cn';
 import { Button, CloseIcon, IconButton, SectionLabel } from '../ui';
 
@@ -10,15 +8,12 @@ interface HostDrawerProps {
   open: boolean;
   mode: 'create' | 'edit';
   host: HostRecord | null;
-  allHosts: HostRecord[];
   keychainEntries: SecretMetadataRecord[];
   groupOptions: Array<{ value: string | null; label: string }>;
   defaultGroupPath?: string | null;
   onClose: () => void;
   onSubmit: HostFormProps['onSubmit'];
   onConnect?: HostFormProps['onConnect'];
-  onDelete?: () => Promise<void>;
-  onRemoveSecret?: (secretRef: string) => Promise<void>;
   onEditExistingSecret?: (secretRef: string, credentialKind: 'password' | 'passphrase') => void;
   onOpenSecrets?: () => void;
 }
@@ -27,15 +22,12 @@ export function HostDrawer({
   open,
   mode,
   host,
-  allHosts,
   keychainEntries,
   groupOptions,
   defaultGroupPath = null,
   onClose,
   onSubmit,
   onConnect,
-  onDelete,
-  onRemoveSecret,
   onEditExistingSecret,
   onOpenSecrets
 }: HostDrawerProps) {
@@ -46,23 +38,11 @@ export function HostDrawer({
     saveInFlight: false,
     saveStatusText: null,
   });
-  const [isDeleteConfirmOpen, setIsDeleteConfirmOpen] = useState(false);
-  const [deleteError, setDeleteError] = useState<string | null>(null);
-  const [removeUnusedSecretsOnDelete, setRemoveUnusedSecretsOnDelete] = useState(true);
-  const [deleteTargetHost, setDeleteTargetHost] = useState<HostRecord | null>(null);
-  const [deleteTargetSecretRefs, setDeleteTargetSecretRefs] = useState<string[]>([]);
   const isFooterBusy = isActionInFlight || formActionState.saveInFlight;
-  const unusedLocalSecretRefs = useMemo(
-    () =>
-      host
-        ? getUnusedLocalSecretsAfterHostDeletion(allHosts, keychainEntries, [host.id])
-        : [],
-    [allHosts, host, keychainEntries],
-  );
-  const formHost = host ?? deleteTargetHost;
+  const formHost = host;
 
   useEffect(() => {
-    if (!open || mode !== 'edit' || isDeleteConfirmOpen) {
+    if (!open || mode !== 'edit') {
       return;
     }
 
@@ -81,20 +61,7 @@ export function HostDrawer({
     return () => {
       document.removeEventListener('mousedown', handlePointerDown);
     };
-  }, [isDeleteConfirmOpen, mode, onClose, open]);
-
-  useEffect(() => {
-    setRemoveUnusedSecretsOnDelete(unusedLocalSecretRefs.length > 0);
-  }, [host?.id, unusedLocalSecretRefs.length]);
-
-  useEffect(() => {
-    if (!open) {
-      setIsDeleteConfirmOpen(false);
-      setDeleteError(null);
-      setDeleteTargetHost(null);
-      setDeleteTargetSecretRefs([]);
-    }
-  }, [open]);
+  }, [mode, onClose, open]);
 
   async function handlePrimaryAction() {
     if (!hostFormRef.current) {
@@ -107,36 +74,6 @@ export function HostDrawer({
         return;
       }
       await hostFormRef.current.submitAndConnect();
-    } finally {
-      setIsActionInFlight(false);
-    }
-  }
-
-  async function handleDeleteAction() {
-    if (!onDelete) {
-      return;
-    }
-    setIsActionInFlight(true);
-    try {
-      await onDelete();
-    } catch (error) {
-      setDeleteError(error instanceof Error ? error.message : '호스트를 삭제하지 못했습니다.');
-      return;
-    }
-
-    try {
-      if (removeUnusedSecretsOnDelete && onRemoveSecret) {
-        for (const secretRef of deleteTargetSecretRefs) {
-          await onRemoveSecret(secretRef);
-        }
-      }
-      setDeleteError(null);
-      setIsDeleteConfirmOpen(false);
-      setDeleteTargetHost(null);
-      setDeleteTargetSecretRefs([]);
-      onClose();
-    } catch (error) {
-      setDeleteError(error instanceof Error ? error.message : '사용하지 않는 secret을 삭제하지 못했습니다.');
     } finally {
       setIsActionInFlight(false);
     }
@@ -156,13 +93,13 @@ export function HostDrawer({
           <SectionLabel>{mode === 'create' ? 'Create' : 'Edit'}</SectionLabel>
           <h2>{mode === 'create' ? 'New Host' : formHost?.label ?? 'Host'}</h2>
         </div>
-        <IconButton onClick={onClose} aria-label="Close host drawer">
+        <IconButton onClick={onClose} aria-label="Close host editor">
           <CloseIcon />
         </IconButton>
       </div>
 
       <div
-        data-testid="host-drawer-scroll-body"
+        data-testid="drawer-scroll-body"
         className="min-h-0 flex-1 overflow-y-auto px-[1.4rem] pb-[1.25rem] pt-[1.2rem]"
       >
         <HostForm
@@ -181,7 +118,7 @@ export function HostDrawer({
       </div>
 
       <div
-        data-testid="host-drawer-footer"
+        data-testid="drawer-footer"
         className="shrink-0 border-t border-[var(--border)] bg-[color-mix(in_srgb,var(--surface-strong)_98%,transparent_2%)] px-[1.4rem] pb-[1.3rem] pt-[1rem]"
       >
         <div className="flex gap-[0.75rem]">
@@ -195,24 +132,6 @@ export function HostDrawer({
           >
             {mode === 'create' ? 'Create Host' : 'Connect'}
           </Button>
-          {mode === 'edit' && onDelete ? (
-            <Button
-              variant="danger"
-              disabled={isFooterBusy}
-              onClick={() => {
-                if (!host) {
-                  return;
-                }
-                setDeleteError(null);
-                setRemoveUnusedSecretsOnDelete(unusedLocalSecretRefs.length > 0);
-                setDeleteTargetHost(host);
-                setDeleteTargetSecretRefs(unusedLocalSecretRefs);
-                setIsDeleteConfirmOpen(true);
-              }}
-            >
-              Delete
-            </Button>
-          ) : null}
         </div>
         {mode === 'edit' && formActionState.saveStatusText ? (
           <div
@@ -226,32 +145,6 @@ export function HostDrawer({
           </div>
         ) : null}
       </div>
-
-      {mode === 'edit' && deleteTargetHost && onDelete ? (
-        <HostDeleteConfirmDialog
-          open={isDeleteConfirmOpen}
-          title={`${deleteTargetHost.label} 호스트를 삭제할까요?`}
-          unusedLocalSecretCount={onRemoveSecret ? deleteTargetSecretRefs.length : 0}
-          removeUnusedSecrets={removeUnusedSecretsOnDelete}
-          onToggleRemoveUnusedSecrets={setRemoveUnusedSecretsOnDelete}
-          errorMessage={deleteError}
-          isDeleting={isActionInFlight}
-          onClose={() => {
-            if (isActionInFlight) {
-              return;
-            }
-            const shouldCloseDrawer = !host && Boolean(deleteTargetHost);
-            setIsDeleteConfirmOpen(false);
-            setDeleteError(null);
-            setDeleteTargetHost(null);
-            setDeleteTargetSecretRefs([]);
-            if (shouldCloseDrawer) {
-              onClose();
-            }
-          }}
-          onConfirm={handleDeleteAction}
-        />
-      ) : null}
     </aside>
   );
 }

@@ -37,8 +37,11 @@
     "test:desktop:preload": "vitest run --config vite.preload.config.ts",
     "test:desktop:renderer": "vitest run --config vite.renderer.config.ts",
     "test:desktop:e2e-helpers": "node --test e2e/*.unit.cjs",
-    "test:desktop:smoke": "npm run prepare:ssh-core:dev && npm run build && cross-env DOLSSH_E2E_USE_PACKAGED_APP=1 playwright test -c playwright.config.ts",
-    "test:desktop:smoke:packaged": "npm run prepare:ssh-core:dev && npm run build && cross-env DOLSSH_E2E_USE_PACKAGED_APP=1 playwright test -c playwright.config.ts e2e/replay.spec.js",
+    "ensure:smoke-package": "node ./scripts/ensure-smoke-package.cjs",
+    "ensure:smoke-package:fresh": "node ./scripts/ensure-smoke-package.cjs --fresh",
+    "test:desktop:smoke": "npm run prepare:ssh-core:dev && npm run ensure:smoke-package && cross-env DOLSSH_E2E_USE_PACKAGED_APP=1 playwright test -c playwright.config.ts",
+    "test:desktop:smoke:fresh": "npm run prepare:ssh-core:dev && npm run ensure:smoke-package:fresh && cross-env DOLSSH_E2E_USE_PACKAGED_APP=1 playwright test -c playwright.config.ts",
+    "test:desktop:smoke:packaged": "npm run prepare:ssh-core:dev && npm run ensure:smoke-package && cross-env DOLSSH_E2E_USE_PACKAGED_APP=1 playwright test -c playwright.config.ts e2e/replay.spec.js",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

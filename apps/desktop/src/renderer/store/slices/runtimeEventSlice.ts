@@ -13,6 +13,7 @@ import type {
 import * as defaults from "../defaults";
 import * as utils from "../utils";
 import { createBootstrapSyncServices } from "../services/bootstrap-sync";
+import { updateStoredSshUsername } from "../services/credential-retry";
 import { createRuntimeEventServices } from "../services/runtime-events";
 
 export function createRuntimeEventSlice(deps: SliceDeps): RuntimeEventSlice {
@@ -176,7 +177,8 @@ export function createRuntimeEventSlice(deps: SliceDeps): RuntimeEventSlice {
     handleCoreEvent: (event) => {
             const sessionId = event.sessionId;
             const endpointId = event.endpointId;
-            const pendingRetryBeforeUpdate = get().pendingCredentialRetry;
+            const activeRetryAttemptBeforeUpdate =
+              get().activeCredentialRetryAttempt;
             scheduleActivityLogsRefresh();
     
             if (endpointId) {
@@ -845,6 +847,18 @@ export function createRuntimeEventSlice(deps: SliceDeps): RuntimeEventSlice {
                 return nextContainerShellFailureState(false);
               }
               if (event.type === "closed") {
+                if (
+                  activeRetryAttemptBeforeUpdate?.source === "ssh" &&
+                  activeRetryAttemptBeforeUpdate.sessionId === sessionId &&
+                  activeRetryAttemptBeforeUpdate.originalUsername !==
+                    activeRetryAttemptBeforeUpdate.attemptedUsername
+                ) {
+                  void updateStoredSshUsername(
+                    { api, get, set },
+                    activeRetryAttemptBeforeUpdate.hostId,
+                    activeRetryAttemptBeforeUpdate.originalUsername,
+                  ).catch(() => undefined);
+                }
                 if (isContainerShellLaunchFailure) {
                   return nextContainerShellFailureState(true);
                 }
@@ -857,10 +871,21 @@ export function createRuntimeEventSlice(deps: SliceDeps): RuntimeEventSlice {
                 currentTab.source === "host" && currentTab.hostId
                   ? state.hosts.find((host) => host.id === currentTab.hostId)
                   : undefined;
+              const currentSshHost =
+                currentHost && isSshHostRecord(currentHost) ? currentHost : null;
               const errorMessage = String(event.payload.message ?? "SSH error");
-              const retryKind =
+              const shouldPromptCredentialRetry =
                 event.type === "error"
-                  ? resolveCredentialRetryKind(currentHost, errorMessage)
+                  ? resolveCredentialRetryKind(
+                      currentSshHost ?? undefined,
+                      errorMessage,
+                    )
+                  : null;
+              const matchingRetryAttempt =
+                currentSshHost &&
+                state.activeCredentialRetryAttempt?.source === "ssh" &&
+                state.activeCredentialRetryAttempt.hostId === currentSshHost.id
+                  ? state.activeCredentialRetryAttempt
                   : null;
               const nextProgress =
                 event.type === "connected"
@@ -875,8 +900,8 @@ export function createRuntimeEventSlice(deps: SliceDeps): RuntimeEventSlice {
                           "원격 셸이 첫 출력을 보내는 중입니다.",
                         )
                   : event.type === "error"
-                    ? retryKind && currentHost
-                      ? resolveCredentialRetryProgress(currentHost, retryKind)
+                    ? shouldPromptCredentialRetry && currentHost
+                      ? resolveCredentialRetryProgress(currentHost, "auth")
                       : resolveErrorProgress(errorMessage)
                     : currentTab.connectionProgress;
     
@@ -917,13 +942,21 @@ export function createRuntimeEventSlice(deps: SliceDeps): RuntimeEventSlice {
                       : state.pendingInteractiveAuth
                     : state.pendingInteractiveAuth,
                 pendingCredentialRetry:
-                  retryKind && currentHost
+                  shouldPromptCredentialRetry && currentSshHost
                     ? {
                         sessionId,
-                        hostId: currentHost.id,
+                        hostId: currentSshHost.id,
                         source: "ssh",
-                        credentialKind: retryKind,
+                        authType:
+                          currentSshHost.authType === "certificate"
+                            ? "certificate"
+                            : currentSshHost.authType === "privateKey"
+                              ? "privateKey"
+                              : "password",
                         message: errorMessage,
+                        initialUsername:
+                          matchingRetryAttempt?.attemptedUsername ??
+                          currentSshHost.username,
                       }
                     : event.type === "connected" &&
                         state.pendingCredentialRetry?.source === "ssh" &&
@@ -932,12 +965,18 @@ export function createRuntimeEventSlice(deps: SliceDeps): RuntimeEventSlice {
                           : state.pendingCredentialRetry.hostId === currentHost?.id)
                       ? null
                       : state.pendingCredentialRetry,
+                activeCredentialRetryAttempt:
+                  event.type === "connected" || event.type === "error"
+                    ? matchingRetryAttempt
+                      ? null
+                      : state.activeCredentialRetryAttempt
+                    : state.activeCredentialRetryAttempt,
               };
             });
-    
+
             if (
               event.type === "connected" &&
-              pendingRetryBeforeUpdate?.source === "ssh"
+              activeRetryAttemptBeforeUpdate?.source === "ssh"
             ) {
               const currentTab = get().tabs.find(
                 (tab) => tab.sessionId === sessionId,
@@ -949,10 +988,23 @@ export function createRuntimeEventSlice(deps: SliceDeps): RuntimeEventSlice {
                   : null;
               if (
                 currentHost &&
-                currentHost.id === pendingRetryBeforeUpdate.hostId
+                currentHost.id === activeRetryAttemptBeforeUpdate.hostId
               ) {
                 void refreshHostAndKeychainState(set);
               }
+            }
+            if (
+              event.type === "error" &&
+              activeRetryAttemptBeforeUpdate?.source === "ssh" &&
+              activeRetryAttemptBeforeUpdate.sessionId === sessionId &&
+              activeRetryAttemptBeforeUpdate.originalUsername !==
+                activeRetryAttemptBeforeUpdate.attemptedUsername
+            ) {
+              void updateStoredSshUsername(
+                { api, get, set },
+                activeRetryAttemptBeforeUpdate.hostId,
+                activeRetryAttemptBeforeUpdate.originalUsername,
+              ).catch(() => undefined);
             }
           },
     handleSessionShareEvent: (event) => {

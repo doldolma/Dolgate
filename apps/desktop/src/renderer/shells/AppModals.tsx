@@ -52,14 +52,23 @@ export function AppModals({
       />
 
       <CredentialRetryDialog
-        request={
-          modalViewModel.pendingCredentialRetry
-            ? {
-                ...modalViewModel.pendingCredentialRetry,
-                hostLabel: findHost(hosts, modalViewModel.pendingCredentialRetry.hostId)?.label ?? 'Host',
-              }
-            : null
-        }
+        request={(() => {
+          const pending = modalViewModel.pendingCredentialRetry;
+          if (!pending) {
+            return null;
+          }
+          const host = findHost(hosts, pending.hostId);
+          if (!host || host.kind !== "ssh") {
+            return null;
+          }
+          return {
+            ...pending,
+            hostLabel: host.label,
+            hasStoredSecret: Boolean(host.secretRef),
+            hasLegacyPrivateKeyPath: Boolean(host.privateKeyPath),
+            hasLegacyCertificatePath: Boolean(host.certificatePath),
+          };
+        })()}
         onClose={modalViewModel.dismissPendingCredentialRetry}
         onSubmit={modalViewModel.submitCredentialRetry}
       />

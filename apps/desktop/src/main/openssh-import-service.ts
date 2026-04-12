@@ -660,7 +660,7 @@ export async function resolveOpenSshIdentityImport(
       return {
         kind: 'path-fallback',
         warning: toWarning(
-          `${path.basename(identityFilePath)} 키는 지원되지 않는 형식이라 경로만 가져왔습니다.`,
+          `${path.basename(identityFilePath)} 키는 지원되지 않는 형식이라 가져오지 않았습니다.`,
           'unsupported-key-format',
           identityFilePath,
         ),
@@ -675,7 +675,7 @@ export async function resolveOpenSshIdentityImport(
     return {
       kind: 'path-fallback',
       warning: toWarning(
-        `${path.basename(identityFilePath)} 키 파일을 읽지 못해 경로만 가져왔습니다.`,
+        `${path.basename(identityFilePath)} 키 파일을 읽지 못해 가져오지 않았습니다.`,
         'identity-read-failed',
         identityFilePath,
       ),
