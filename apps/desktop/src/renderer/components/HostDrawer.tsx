@@ -11,6 +11,8 @@ interface HostDrawerProps {
   keychainEntries: SecretMetadataRecord[];
   groupOptions: Array<{ value: string | null; label: string }>;
   defaultGroupPath?: string | null;
+  createKind?: 'ssh' | 'serial';
+  desktopPlatform?: 'darwin' | 'win32' | 'linux' | 'unknown';
   onClose: () => void;
   onSubmit: HostFormProps['onSubmit'];
   onConnect?: HostFormProps['onConnect'];
@@ -25,6 +27,8 @@ export function HostDrawer({
   keychainEntries,
   groupOptions,
   defaultGroupPath = null,
+  createKind = 'ssh',
+  desktopPlatform = 'unknown',
   onClose,
   onSubmit,
   onConnect,
@@ -109,6 +113,8 @@ export function HostDrawer({
           keychainEntries={keychainEntries}
           groupOptions={groupOptions}
           defaultGroupPath={defaultGroupPath}
+          createKind={createKind}
+          desktopPlatform={desktopPlatform}
           onSubmit={onSubmit}
           onConnect={onConnect}
           onEditExistingSecret={onEditExistingSecret}

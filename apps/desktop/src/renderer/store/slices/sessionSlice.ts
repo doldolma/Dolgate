@@ -24,6 +24,7 @@ export function createSessionSlice(deps: SliceDeps): SessionSlice {
     getParentGroupPath,
     isAwsEc2HostRecord,
     isAwsEcsHostRecord,
+    isSerialHostRecord,
     isLinkedDnsOverrideRecord,
     isSshHostDraft,
     isGroupWithinPath,
@@ -196,6 +197,23 @@ export function createSessionSlice(deps: SliceDeps): SessionSlice {
             }
             if (isAwsEcsHostRecord(host)) {
               await get().openHostContainersTab(hostId);
+              return;
+            }
+            if (isSerialHostRecord(host)) {
+              const existingPendingAttempt = findPendingConnectionAttemptByHost(
+                get(),
+                hostId,
+              );
+              if (existingPendingAttempt) {
+                set((state) =>
+                  activateSessionContextInState(
+                    state,
+                    existingPendingAttempt.sessionId,
+                  ),
+                );
+                return;
+              }
+              await startSessionConnectionFlow(set, get, hostId, cols, rows);
               return;
             }
             if (

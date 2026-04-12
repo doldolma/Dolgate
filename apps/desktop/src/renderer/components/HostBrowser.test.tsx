@@ -209,6 +209,7 @@ interface RenderBrowserOptions {
   onNavigateGroup?: ReturnType<typeof vi.fn>;
   onOpenLocalTerminal?: ReturnType<typeof vi.fn>;
   onCreateHost?: ReturnType<typeof vi.fn>;
+  onOpenSerialImport?: ReturnType<typeof vi.fn>;
   onOpenAwsImport?: ReturnType<typeof vi.fn>;
   onOpenOpenSshImport?: ReturnType<typeof vi.fn>;
   onOpenXshellImport?: ReturnType<typeof vi.fn>;
@@ -236,6 +237,7 @@ function renderBrowser({
   onNavigateGroup = vi.fn(),
   onOpenLocalTerminal = vi.fn(),
   onCreateHost = vi.fn(),
+  onOpenSerialImport = vi.fn(),
   onOpenAwsImport = vi.fn(),
   onOpenOpenSshImport = vi.fn(),
   onOpenXshellImport = vi.fn(),
@@ -254,6 +256,7 @@ function renderBrowser({
       onSearchChange={vi.fn()}
       onOpenLocalTerminal={onOpenLocalTerminal}
       onCreateHost={onCreateHost}
+      onOpenSerialImport={onOpenSerialImport}
       onOpenAwsImport={onOpenAwsImport}
       onOpenOpenSshImport={onOpenOpenSshImport}
       onOpenXshellImport={onOpenXshellImport}
@@ -374,6 +377,7 @@ describe('HostBrowser helpers', () => {
   it('defines import actions for the split-button menu in the expected order', () => {
     expect(HOST_BROWSER_IMPORT_MENU_LABELS).toEqual([
       'Import OpenSSH',
+      'Import Serial',
       'Import from Termius',
       'Import from Xshell',
       'Import from Warpgate',
@@ -384,6 +388,7 @@ describe('HostBrowser helpers', () => {
   it('hides the Xshell import action outside Windows', () => {
     expect(getHostBrowserVisibleImportMenuLabels('win32')).toEqual([
       'Import OpenSSH',
+      'Import Serial',
       'Import from Termius',
       'Import from Xshell',
       'Import from Warpgate',
@@ -391,6 +396,7 @@ describe('HostBrowser helpers', () => {
     ]);
     expect(getHostBrowserVisibleImportMenuLabels('darwin')).toEqual([
       'Import OpenSSH',
+      'Import Serial',
       'Import from Termius',
       'Import from Warpgate',
       'Import via AWS SSM'
@@ -398,9 +404,9 @@ describe('HostBrowser helpers', () => {
   });
 
   it('updates the empty-state copy to reference the import menu', () => {
-    expect(getHostBrowserEmptyCalloutMessage(0, '')).toBe('New Host로 첫 번째 SSH host를 추가해보세요. 기존 설정이 있으면 OpenSSH import를 먼저 사용할 수 있습니다.');
+    expect(getHostBrowserEmptyCalloutMessage(0, '')).toBe('New Host로 첫 번째 SSH host를 추가해보세요. 시리얼 연결은 Import Serial에서 시작할 수 있습니다.');
     expect(getHostBrowserEmptyCalloutMessage(2, 'nas')).toBe('검색어를 지우거나 다른 호스트명으로 다시 찾아보세요.');
-    expect(getHostBrowserEmptyCalloutMessage(2, '')).toBe('New Host를 눌러 이 위치에 SSH host를 추가하거나, 다른 그룹으로 이동해 장치를 확인해보세요.');
+    expect(getHostBrowserEmptyCalloutMessage(2, '')).toBe('New Host로 SSH host를 추가하거나, 시리얼 연결이 필요하면 Import Serial을 사용해보세요.');
   });
 
   it('prioritizes New Host while routing the Import primary action to OpenSSH import', () => {
@@ -418,6 +424,16 @@ describe('HostBrowser helpers', () => {
 
     expect(onCreateHost).not.toHaveBeenCalled();
     expect(onOpenOpenSshImport).toHaveBeenCalledTimes(1);
+  });
+
+  it('routes the Import Serial menu item to the serial create flow', () => {
+    const onOpenSerialImport = vi.fn();
+    renderBrowser({ onOpenSerialImport });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open import menu' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Import Serial' }));
+
+    expect(onOpenSerialImport).toHaveBeenCalledTimes(1);
   });
 
   it('shows AWS SSH metadata status on AWS host cards', () => {

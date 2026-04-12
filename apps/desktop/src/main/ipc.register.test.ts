@@ -8,6 +8,7 @@ const moduleSpies = vi.hoisted(() => ({
   aws: vi.fn(),
   imports: vi.fn(),
   ssh: vi.fn(),
+  serial: vi.fn(),
   containers: vi.fn(),
   sftp: vi.fn(),
   portForwardsDns: vi.fn(),
@@ -54,6 +55,9 @@ vi.mock("./ipc/imports", () => ({
 }));
 vi.mock("./ipc/ssh", () => ({
   registerSshIpcHandlers: moduleSpies.ssh,
+}));
+vi.mock("./ipc/serial", () => ({
+  registerSerialIpcHandlers: moduleSpies.serial,
 }));
 vi.mock("./ipc/containers", () => ({
   registerContainersIpcHandlers: moduleSpies.containers,
@@ -155,6 +159,7 @@ describe("registerIpcHandlers", () => {
     expect(moduleSpies.aws).toHaveBeenCalledTimes(1);
     expect(moduleSpies.imports).toHaveBeenCalledTimes(1);
     expect(moduleSpies.ssh).toHaveBeenCalledTimes(1);
+    expect(moduleSpies.serial).toHaveBeenCalledTimes(1);
     expect(moduleSpies.containers).toHaveBeenCalledTimes(1);
     expect(moduleSpies.sftp).toHaveBeenCalledTimes(1);
     expect(moduleSpies.portForwardsDns).toHaveBeenCalledTimes(1);
@@ -162,4 +167,3 @@ describe("registerIpcHandlers", () => {
     expect(moduleSpies.windowUpdaterSettingsFiles).toHaveBeenCalledTimes(1);
   });
 });
-

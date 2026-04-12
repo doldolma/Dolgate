@@ -6,6 +6,7 @@ import { loadSavedCredential } from "../services/desktop/settings";
 
 vi.mock("../controllers/useHostFormController", () => ({
   useHostFormController: vi.fn(() => ({
+    listSerialPorts: vi.fn().mockResolvedValue([]),
     pickPrivateKey: vi.fn(),
     pickSshCertificate: vi.fn(),
   })),
@@ -21,6 +22,7 @@ describe("CredentialRetryDialog", () => {
   beforeEach(() => {
     vi.mocked(loadSavedCredential).mockReset();
     vi.mocked(useHostFormController).mockImplementation(() => ({
+      listSerialPorts: vi.fn().mockResolvedValue([]),
       pickPrivateKey: vi.fn(),
       pickSshCertificate: vi.fn(),
     }));

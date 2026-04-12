@@ -253,6 +253,11 @@ export function HomeShell({
               setSelectedHostId(null);
               homeViewModel.openCreateHostDrawer();
             }}
+            onOpenSerialImport={() => {
+              resetHostBrowserMessages();
+              setSelectedHostId(null);
+              homeViewModel.openCreateSerialDrawer();
+            }}
             onOpenAwsImport={() => {
               resetHostBrowserMessages();
               setSelectedHostId(null);
@@ -441,6 +446,8 @@ export function HomeShell({
             ? homeViewModel.hostDrawer.defaultGroupPath
             : homeViewModel.currentGroupPath
         }
+        createKind={homeViewModel.hostDrawer.mode === 'create' ? homeViewModel.hostDrawer.kind : 'ssh'}
+        desktopPlatform={desktopPlatform}
         onClose={homeViewModel.closeHostDrawer}
         onSubmit={async (draft, secrets) => {
           await homeViewModel.saveHost(

@@ -20,6 +20,8 @@ describe("createDesktopApi", () => {
     await api.sessionShares.openOwnerChatWindow("session-1");
     await api.containers.openShell("host-1", "container-1");
     await api.sftp.startTransfer({} as any);
+    await api.serial.listPorts();
+    await api.serial.control({ sessionId: "session-1", action: "break" });
     await api.groups.move("Servers/Nested", "Clients");
     await api.groups.rename("Servers/Nested", "API");
 
@@ -49,12 +51,21 @@ describe("createDesktopApi", () => {
     );
     expect(ipcRenderer.invoke).toHaveBeenNthCalledWith(
       6,
+      ipcChannels.serial.listPorts,
+    );
+    expect(ipcRenderer.invoke).toHaveBeenNthCalledWith(
+      7,
+      ipcChannels.serial.control,
+      { sessionId: "session-1", action: "break" },
+    );
+    expect(ipcRenderer.invoke).toHaveBeenNthCalledWith(
+      8,
       ipcChannels.groups.move,
       "Servers/Nested",
       "Clients",
     );
     expect(ipcRenderer.invoke).toHaveBeenNthCalledWith(
-      7,
+      9,
       ipcChannels.groups.rename,
       "Servers/Nested",
       "API",

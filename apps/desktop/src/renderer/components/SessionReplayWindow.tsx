@@ -84,6 +84,9 @@ function getConnectionKindLabel(kind: SessionReplayRecording["connectionKind"]):
   if (kind === "aws-ssm") {
     return "AWS SSM";
   }
+  if (kind === "serial") {
+    return "Serial";
+  }
   if (kind === "warpgate") {
     return "Warpgate";
   }

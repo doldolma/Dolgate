@@ -232,6 +232,17 @@ export function createCatalogSlice(deps: SliceDeps): CatalogSlice {
               hostDrawer: {
                 mode: "create",
                 defaultGroupPath: get().currentGroupPath,
+                kind: "ssh",
+              },
+            }),
+    openCreateSerialDrawer: () =>
+            set({
+              activeWorkspaceTab: "home",
+              homeSection: "hosts",
+              hostDrawer: {
+                mode: "create",
+                defaultGroupPath: get().currentGroupPath,
+                kind: "serial",
               },
             }),
     openEditHostDrawer: (hostId) =>

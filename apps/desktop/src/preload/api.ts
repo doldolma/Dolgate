@@ -16,6 +16,7 @@ import {
 } from "./bridges/catalog";
 import {
   buildContainersBridge,
+  buildSerialBridge,
   buildSessionSharesBridge,
   buildSftpBridge,
   buildSshBridge,
@@ -48,6 +49,7 @@ export function createDesktopApi(ipcRenderer: IpcRenderer): DesktopApi {
     openssh: buildOpenSshBridge(ipcRenderer),
     xshell: buildXshellBridge(ipcRenderer),
     ssh: buildSshBridge(ipcRenderer),
+    serial: buildSerialBridge(ipcRenderer),
     sessionShares: buildSessionSharesBridge(ipcRenderer),
     shell: buildShellBridge(ipcRenderer),
     window: buildWindowBridge(ipcRenderer),

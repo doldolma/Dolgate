@@ -34,6 +34,7 @@ export {
   isLinkedDnsOverrideRecord,
   isPendingEcsShellAttempt,
   isPendingSessionId,
+  isSerialHostRecord,
   isSshHostDraft,
   isSshHostRecord,
   isWarpgateSshHostRecord,

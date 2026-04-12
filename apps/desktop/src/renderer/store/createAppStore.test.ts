@@ -634,6 +634,13 @@ function createMockApi(): DesktopApi {
       onEvent: vi.fn(),
       onData: vi.fn(),
     },
+    serial: {
+      connect: vi.fn().mockImplementation(async () => {
+        sessionCounter += 1;
+        return { sessionId: `serial-session-${sessionCounter}` };
+      }),
+      listPorts: vi.fn().mockResolvedValue([]),
+    },
     containers: {
       list: vi.fn().mockResolvedValue({
         hostId: "host-1",
@@ -1420,6 +1427,14 @@ describe("createAppStore", () => {
     expect(store.getState().hostDrawer).toEqual({
       mode: "create",
       defaultGroupPath: null,
+      kind: "ssh",
+    });
+
+    store.getState().openCreateSerialDrawer();
+    expect(store.getState().hostDrawer).toEqual({
+      mode: "create",
+      defaultGroupPath: null,
+      kind: "serial",
     });
 
     store.getState().openEditHostDrawer("host-1");
@@ -1509,6 +1524,7 @@ describe("createAppStore", () => {
     expect(store.getState().hostDrawer).toEqual({
       mode: "create",
       defaultGroupPath: "Servers",
+      kind: "ssh",
     });
 
     await store.getState().createGroup("Production");
@@ -1579,6 +1595,7 @@ describe("createAppStore", () => {
       hostDrawer: {
         mode: "create",
         defaultGroupPath: "Servers/Nested",
+        kind: "ssh",
       },
     });
 
@@ -1589,6 +1606,7 @@ describe("createAppStore", () => {
     expect(store.getState().hostDrawer).toEqual({
       mode: "create",
       defaultGroupPath: "Clients/Nested",
+      kind: "ssh",
     });
     expect(store.getState().hosts[0]?.groupName).toBe("Clients/Nested");
   });
@@ -1633,6 +1651,7 @@ describe("createAppStore", () => {
       hostDrawer: {
         mode: "create",
         defaultGroupPath: "Servers/Nested",
+        kind: "ssh",
       },
     });
 
@@ -1643,6 +1662,7 @@ describe("createAppStore", () => {
     expect(store.getState().hostDrawer).toEqual({
       mode: "create",
       defaultGroupPath: "Servers/API",
+      kind: "ssh",
     });
     expect(store.getState().hosts[0]?.groupName).toBe("Servers/API");
   });
@@ -1761,14 +1781,33 @@ describe("createAppStore", () => {
           awsEcsClusterName: draft.awsEcsClusterName,
         } satisfies HostRecord;
       }
+      if (draft.kind === "serial") {
+        return {
+          ...recordBase,
+          kind: "serial",
+          transport: draft.transport,
+          devicePath: draft.devicePath ?? null,
+          host: draft.host ?? null,
+          port: draft.port ?? null,
+          baudRate: draft.baudRate,
+          dataBits: draft.dataBits,
+          parity: draft.parity,
+          stopBits: draft.stopBits,
+          flowControl: draft.flowControl,
+          transmitLineEnding: draft.transmitLineEnding,
+          localEcho: draft.localEcho,
+          localLineEditing: draft.localLineEditing,
+        } satisfies HostRecord;
+      }
       return {
         ...recordBase,
         kind: "ssh",
         hostname: draft.hostname,
-        port: draft.port,
+        port: draft.port ?? 22,
         username: draft.username,
         authType: draft.authType,
         privateKeyPath: draft.privateKeyPath ?? null,
+        certificatePath: draft.certificatePath ?? null,
         secretRef: draft.secretRef ?? null,
       } satisfies HostRecord;
     });
@@ -1818,6 +1857,49 @@ describe("createAppStore", () => {
     ]);
     expect(store.getState().activeWorkspaceTab).toBe("session:session-1");
     expect(store.getState().hostDrawer).toEqual({ mode: "closed" });
+  });
+
+  it("uses the serial connection flow for serial hosts without SSH auth prompts", async () => {
+    const api = createMockApi();
+    api.hosts.list = vi.fn().mockResolvedValue([
+      {
+        id: "serial-1",
+        kind: "serial",
+        label: "Console",
+        transport: "local",
+        devicePath: "/dev/tty.usbserial-0001",
+        host: null,
+        port: null,
+        baudRate: 115200,
+        dataBits: 8,
+        parity: "none",
+        stopBits: 1,
+        flowControl: "none",
+        transmitLineEnding: "none",
+        localEcho: false,
+        localLineEditing: false,
+        groupName: null,
+        tags: [],
+        terminalThemeId: null,
+        createdAt: "2025-01-01T00:00:00.000Z",
+        updatedAt: "2025-01-01T00:00:00.000Z",
+      },
+    ]);
+    const store = createAppStore(api);
+
+    await store.getState().bootstrap();
+    await store.getState().connectHost("serial-1", 120, 32);
+
+    expect(api.serial.connect).toHaveBeenCalledWith(
+      expect.objectContaining({
+        hostId: "serial-1",
+        cols: 120,
+        rows: 32,
+      }),
+    );
+    expect(api.ssh.connect).not.toHaveBeenCalled();
+    expect(store.getState().pendingMissingUsernamePrompt).toBeNull();
+    expect(store.getState().tabs[0]?.sessionId).toBe("serial-session-1");
   });
 
   it("prompts for a missing SSH username before opening a session", async () => {

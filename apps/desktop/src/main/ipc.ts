@@ -127,6 +127,7 @@ import { registerImportIpcHandlers } from "./ipc/imports";
 import { registerKnownHostsLogsKeychainIpcHandlers } from "./ipc/known-hosts-logs-keychain";
 import { registerPortForwardAndDnsIpcHandlers } from "./ipc/port-forwards-dns";
 import { registerSessionShareIpcHandlers } from "./ipc/session-shares";
+import { registerSerialIpcHandlers } from "./ipc/serial";
 import { registerSftpIpcHandlers } from "./ipc/sftp";
 import { registerSshIpcHandlers } from "./ipc/ssh";
 import { registerSyncIpcHandlers } from "./ipc/sync";
@@ -866,10 +867,22 @@ async function buildHostKeyProbeResult(
 
   const probeHost = isWarpgateSshHostRecord(host)
     ? host.warpgateSshHost
-    : host.hostname;
+    : isSshHostRecord(host)
+      ? host.hostname
+      : (() => {
+          throw new Error(
+            "이 기능은 SSH, AWS, Warpgate host에서만 사용할 수 있습니다.",
+          );
+        })();
   const probePort = isWarpgateSshHostRecord(host)
     ? host.warpgateSshPort
-    : host.port;
+    : isSshHostRecord(host)
+      ? host.port
+      : (() => {
+          throw new Error(
+            "이 기능은 SSH, AWS, Warpgate host에서만 사용할 수 있습니다.",
+          );
+        })();
 
   const probed = await coreManager.probeHostKey({
     host: probeHost,
@@ -985,6 +998,17 @@ function describeHostLabel(host: HostDraft | HostRecord): string {
   if (host.kind === "warpgate-ssh") {
     return host.label || `${host.warpgateUsername}:${host.warpgateTargetName}`;
   }
+  if (host.kind === "serial") {
+    if (host.transport === "local") {
+      return host.label || host.devicePath?.trim() || "Serial";
+    }
+    const targetHost = host.host?.trim() || "";
+    const targetPort =
+      typeof host.port === "number" && Number.isFinite(host.port)
+        ? `:${host.port}`
+        : "";
+    return host.label || `${host.transport} ${targetHost}${targetPort}`.trim();
+  }
   return host.label || (host.username.trim() ? `${host.username}@${host.hostname}` : host.hostname);
 }
 
@@ -1002,6 +1026,17 @@ function describeHostTarget(
   }
   if (host.kind === "aws-ecs") {
     return host.awsEcsClusterArn;
+  }
+  if (host.kind === "serial") {
+    if (host.transport === "local") {
+      return host.devicePath?.trim() || null;
+    }
+    const targetHost = host.host?.trim() || "";
+    const targetPort =
+      typeof host.port === "number" && Number.isFinite(host.port)
+        ? `:${host.port}`
+        : "";
+    return `${host.transport} ${targetHost}${targetPort}`.trim() || null;
   }
   return host.warpgateTargetId;
 }
@@ -2000,6 +2035,7 @@ export function registerIpcHandlers(
   registerAwsIpcHandlers(ctx);
   registerImportIpcHandlers(ctx);
   registerSshIpcHandlers(ctx);
+  registerSerialIpcHandlers(ctx);
   registerContainersIpcHandlers(ctx);
   registerSftpIpcHandlers(ctx);
   registerPortForwardAndDnsIpcHandlers(ctx);

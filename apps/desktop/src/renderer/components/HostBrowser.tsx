@@ -58,6 +58,7 @@ export {
 
 export const HOST_BROWSER_IMPORT_MENU_LABELS = [
   'Import OpenSSH',
+  'Import Serial',
   'Import from Termius',
   'Import from Xshell',
   'Import from Warpgate',
@@ -72,10 +73,10 @@ export function getHostBrowserVisibleImportMenuLabels(desktopPlatform: DesktopPl
 
 export function getHostBrowserEmptyCalloutMessage(hostCount: number, searchQuery: string): string {
   return hostCount === 0
-    ? 'New Host로 첫 번째 SSH host를 추가해보세요. 기존 설정이 있으면 OpenSSH import를 먼저 사용할 수 있습니다.'
+    ? 'New Host로 첫 번째 SSH host를 추가해보세요. 시리얼 연결은 Import Serial에서 시작할 수 있습니다.'
     : searchQuery
       ? '검색어를 지우거나 다른 호스트명으로 다시 찾아보세요.'
-      : 'New Host를 눌러 이 위치에 SSH host를 추가하거나, 다른 그룹으로 이동해 장치를 확인해보세요.';
+      : 'New Host로 SSH host를 추가하거나, 시리얼 연결이 필요하면 Import Serial을 사용해보세요.';
 }
 
 const HOME_BROWSER_HOST_CARD_MIN_WIDTH_PX = 280;
@@ -205,6 +206,7 @@ interface HostBrowserProps {
   onSearchChange: (query: string) => void;
   onOpenLocalTerminal: () => void;
   onCreateHost: () => void;
+  onOpenSerialImport: () => void;
   onOpenAwsImport: () => void;
   onOpenOpenSshImport: () => void;
   onOpenXshellImport: () => void;
@@ -239,6 +241,7 @@ export function HostBrowser({
   onSearchChange,
   onOpenLocalTerminal,
   onCreateHost,
+  onOpenSerialImport,
   onOpenAwsImport,
   onOpenOpenSshImport,
   onOpenXshellImport,
@@ -286,14 +289,15 @@ export function HostBrowser({
     () =>
       [
         { label: HOST_BROWSER_IMPORT_MENU_LABELS[0], onSelect: onOpenOpenSshImport },
-        { label: HOST_BROWSER_IMPORT_MENU_LABELS[1], onSelect: onOpenTermiusImport },
+        { label: HOST_BROWSER_IMPORT_MENU_LABELS[1], onSelect: onOpenSerialImport },
+        { label: HOST_BROWSER_IMPORT_MENU_LABELS[2], onSelect: onOpenTermiusImport },
         ...(desktopPlatform === 'win32'
-          ? [{ label: HOST_BROWSER_IMPORT_MENU_LABELS[2], onSelect: onOpenXshellImport }]
+          ? [{ label: HOST_BROWSER_IMPORT_MENU_LABELS[3], onSelect: onOpenXshellImport }]
           : []),
-        { label: HOST_BROWSER_IMPORT_MENU_LABELS[3], onSelect: onOpenWarpgateImport },
-        { label: HOST_BROWSER_IMPORT_MENU_LABELS[4], onSelect: onOpenAwsImport }
+        { label: HOST_BROWSER_IMPORT_MENU_LABELS[4], onSelect: onOpenWarpgateImport },
+        { label: HOST_BROWSER_IMPORT_MENU_LABELS[5], onSelect: onOpenAwsImport }
       ],
-    [desktopPlatform, onOpenAwsImport, onOpenOpenSshImport, onOpenTermiusImport, onOpenWarpgateImport, onOpenXshellImport]
+    [desktopPlatform, onOpenAwsImport, onOpenOpenSshImport, onOpenSerialImport, onOpenTermiusImport, onOpenWarpgateImport, onOpenXshellImport]
   );
 
   useEffect(() => {

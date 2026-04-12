@@ -63,6 +63,9 @@ function getConnectionKindLabel(kind: SessionConnectionKind): string {
   if (kind === 'aws-ecs-exec') {
     return 'AWS ECS Exec';
   }
+  if (kind === 'serial') {
+    return 'Serial';
+  }
   if (kind === 'warpgate') {
     return 'Warpgate';
   }
@@ -75,6 +78,9 @@ function getConnectionKindTone(kind: SessionConnectionKind): 'running' | 'starti
   }
   if (kind === 'aws-ecs-exec') {
     return 'starting';
+  }
+  if (kind === 'serial') {
+    return 'running';
   }
   if (kind === 'warpgate') {
     return 'paused';

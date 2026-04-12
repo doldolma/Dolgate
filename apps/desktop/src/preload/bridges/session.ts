@@ -4,6 +4,8 @@ import type {
   DesktopApi,
   DesktopConnectInput,
   DesktopLocalConnectInput,
+  DesktopSerialControlInput,
+  DesktopSerialConnectInput,
   DesktopSftpConnectInput,
   KeyboardInteractiveRespondInput,
 } from "@shared";
@@ -38,6 +40,18 @@ export function buildSshBridge(ipcRenderer: IpcRenderer): DesktopApi["ssh"] {
       subscribeCoreEvent(listener),
     onData: (sessionId: string, listener: (chunk: Uint8Array) => void) =>
       subscribeSshData(sessionId, listener),
+  };
+}
+
+export function buildSerialBridge(
+  ipcRenderer: IpcRenderer,
+): DesktopApi["serial"] {
+  return {
+    connect: (input: DesktopSerialConnectInput) =>
+      ipcRenderer.invoke(ipcChannels.serial.connect, input),
+    listPorts: () => ipcRenderer.invoke(ipcChannels.serial.listPorts),
+    control: (input: DesktopSerialControlInput) =>
+      ipcRenderer.invoke(ipcChannels.serial.control, input),
   };
 }
 

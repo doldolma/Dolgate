@@ -1,5 +1,5 @@
 import { desktopApi } from '../desktopApi';
-import type { LoadedManagedSecretPayload } from '@shared';
+import type { LoadedManagedSecretPayload, SerialPortSummary } from '@shared';
 
 export function getDesktopSettings() {
   return desktopApi.settings.get();
@@ -17,4 +17,8 @@ export function pickPrivateKey() {
 
 export function pickSshCertificate() {
   return desktopApi.shell.pickSshCertificate();
+}
+
+export function listSerialPorts(): Promise<SerialPortSummary[]> {
+  return desktopApi.serial.listPorts();
 }

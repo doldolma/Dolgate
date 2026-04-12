@@ -15,8 +15,10 @@ import {
   isAwsEcsHostDraft,
   isGroupWithinPath,
   isWarpgateSshHostDraft,
+  isSerialHostDraft,
   isSshHostDraft,
   isSshHostRecord,
+  isSerialHostRecord,
   normalizeSftpBrowserColumnWidths,
   normalizeServerUrl,
   normalizeGroupPath,
@@ -54,6 +56,12 @@ import type {
   SftpBrowserColumnWidths,
   SshHostDraft,
   SshHostRecord,
+  SerialHostDraft,
+  SerialHostRecord,
+  SerialDataBits,
+  SerialFlowControl,
+  SerialParity,
+  SerialStopBits,
   SyncKind,
   TerminalFontFamilyId,
   TerminalPreferencesRecord,
@@ -127,6 +135,16 @@ function compareHosts(left: HostRecord, right: HostRecord): number {
         return hostCompare;
       }
       return left.warpgateTargetName.localeCompare(right.warpgateTargetName);
+    }
+    if (left.kind === 'serial' && right.kind === 'serial') {
+      if (left.transport === 'local' && right.transport === 'local') {
+        return (left.devicePath ?? '').localeCompare(right.devicePath ?? '');
+      }
+      const endpointCompare = (left.host ?? '').localeCompare(right.host ?? '');
+      if (endpointCompare !== 0) {
+        return endpointCompare;
+      }
+      return (left.port ?? 0) - (right.port ?? 0);
     }
     return 0;
   }
@@ -291,6 +309,17 @@ function normalizeIncomingHostRecord(record: HostRecord): HostRecord {
       groupName: normalizeGroupPath(record.groupName),
       tags: normalizeTags(record.tags),
       terminalThemeId: normalizeTerminalThemeId(record.terminalThemeId)
+    };
+  }
+  if (record.kind === 'serial') {
+    return {
+      ...record,
+      groupName: normalizeGroupPath(record.groupName),
+      tags: normalizeTags(record.tags),
+      terminalThemeId: normalizeTerminalThemeId(record.terminalThemeId),
+      devicePath: record.devicePath?.trim() || null,
+      host: record.host?.trim() || null,
+      port: typeof record.port === 'number' ? Math.round(record.port) : null,
     };
   }
 
@@ -499,6 +528,76 @@ function toWarpgateHostRecord(
   };
 }
 
+function normalizeSerialDataBits(value: number): SerialDataBits {
+  if (value === 5 || value === 6 || value === 7) {
+    return value;
+  }
+  return 8;
+}
+
+function normalizeSerialParity(value?: string | null): SerialParity {
+  if (
+    value === 'odd' ||
+    value === 'even' ||
+    value === 'mark' ||
+    value === 'space'
+  ) {
+    return value;
+  }
+  return 'none';
+}
+
+function normalizeSerialStopBits(value: number): SerialStopBits {
+  if (value === 1.5 || value === 2) {
+    return value;
+  }
+  return 1;
+}
+
+function normalizeSerialFlowControl(value?: string | null): SerialFlowControl {
+  if (value === 'xon-xoff' || value === 'rts-cts' || value === 'dsr-dtr') {
+    return value;
+  }
+  return 'none';
+}
+
+function normalizeSerialLineEnding(value?: string | null) {
+  if (value === 'cr' || value === 'lf' || value === 'crlf') {
+    return value;
+  }
+  return 'none';
+}
+
+function toSerialHostRecord(
+  id: string,
+  draft: SerialHostDraft,
+  timestamp: string,
+  current?: SerialHostRecord,
+): SerialHostRecord {
+  return {
+    id,
+    kind: 'serial',
+    label: draft.label,
+    transport: draft.transport,
+    devicePath: draft.transport === 'local' ? draft.devicePath?.trim() || null : null,
+    host: draft.transport === 'local' ? null : draft.host?.trim() || null,
+    port: draft.transport === 'local' ? null : typeof draft.port === 'number' ? Math.round(draft.port) : null,
+    baudRate: Math.max(1, Math.round(draft.baudRate)),
+    dataBits: normalizeSerialDataBits(draft.dataBits),
+    parity: normalizeSerialParity(draft.parity),
+    stopBits: normalizeSerialStopBits(draft.stopBits),
+    flowControl: normalizeSerialFlowControl(draft.flowControl),
+    transmitLineEnding: normalizeSerialLineEnding(draft.transmitLineEnding),
+    localEcho: Boolean(draft.localEcho),
+    localLineEditing: Boolean(draft.localLineEditing),
+    groupName: normalizeGroupPath(draft.groupName),
+    tags: normalizeTags(draft.tags),
+    terminalThemeId: normalizeTerminalThemeId(draft.terminalThemeId),
+    createdAt: current?.createdAt ?? timestamp,
+    updatedAt: timestamp,
+  };
+}
+
 function toHostRecord(id: string, draft: HostDraft, secretRef: string | null, timestamp: string, current?: HostRecord): HostRecord {
   if (isSshHostDraft(draft)) {
     return toSshHostRecord(id, draft, secretRef, timestamp, current?.kind === 'ssh' ? current : undefined);
@@ -511,6 +610,9 @@ function toHostRecord(id: string, draft: HostDraft, secretRef: string | null, ti
   }
   if (isWarpgateSshHostDraft(draft)) {
     return toWarpgateHostRecord(id, draft, timestamp, current && current.kind === 'warpgate-ssh' ? current : undefined);
+  }
+  if (isSerialHostDraft(draft)) {
+    return toSerialHostRecord(id, draft, timestamp, current && current.kind === 'serial' ? current : undefined);
   }
   throw new Error('Unsupported host draft type');
 }

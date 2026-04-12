@@ -64,6 +64,15 @@ import type {
   HostRecord,
   ContainerConnectionProgressEvent,
   SecretMetadataRecord,
+  SerialControlAction,
+  SerialDataBits,
+  SerialFlowControl,
+  SerialHostDraft,
+  SerialLineEnding,
+  SerialParity,
+  SerialPortSummary,
+  SerialStopBits,
+  SerialTransport,
   FileSystemRoot,
   SessionShareChatEvent,
   SessionShareControlSignal,
@@ -99,6 +108,9 @@ export type CoreCommandType =
   | "connect"
   | "awsConnect"
   | "localConnect"
+  | "serialConnect"
+  | "serialListPorts"
+  | "serialControl"
   | "controlSignal"
   | "resize"
   | "disconnect"
@@ -135,6 +147,8 @@ export type CoreEventType =
   | "data"
   | "error"
   | "closed"
+  | "serialPortsListed"
+  | "serialControlCompleted"
   | "hostKeyProbed"
   | "certificateInspected"
   | "keyboardInteractiveChallenge"
@@ -183,6 +197,13 @@ export interface DesktopLocalConnectInput {
   workingDirectory?: string | null;
 }
 
+export interface DesktopSerialConnectInput {
+  hostId: string;
+  cols: number;
+  rows: number;
+  title?: string;
+}
+
 export interface DesktopSftpConnectInput {
   hostId: string;
   endpointId: string;
@@ -224,6 +245,48 @@ export interface ResolvedLocalConnectPayload {
   args?: string[];
   env?: Record<string, string>;
   workingDirectory?: string | null;
+}
+
+export interface ResolvedSerialConnectPayload {
+  transport: SerialTransport;
+  cols: number;
+  rows: number;
+  title?: string;
+  devicePath?: string;
+  host?: string;
+  port?: number;
+  baudRate: number;
+  dataBits: SerialDataBits;
+  parity: SerialParity;
+  stopBits: SerialStopBits;
+  flowControl: SerialFlowControl;
+  transmitLineEnding: SerialLineEnding;
+  localEcho: boolean;
+  localLineEditing: boolean;
+}
+
+export interface ResolvedSerialListPortsPayload {
+  includeBusy?: boolean;
+}
+
+export interface ResolvedSerialListPortsResult {
+  ports: SerialPortSummary[];
+}
+
+export interface DesktopSerialControlInput {
+  sessionId: string;
+  action: SerialControlAction;
+  enabled?: boolean;
+}
+
+export interface ResolvedSerialControlPayload {
+  action: SerialControlAction;
+  enabled?: boolean;
+}
+
+export interface ResolvedSerialControlResult {
+  action: SerialControlAction;
+  enabled?: boolean;
 }
 
 export interface ResolvedCertificateInspectPayload {
@@ -620,6 +683,11 @@ export interface DesktopApi {
       sessionId: string,
       listener: (chunk: Uint8Array) => void,
     ) => () => void;
+  };
+  serial: {
+    connect: (input: DesktopSerialConnectInput) => Promise<{ sessionId: string }>;
+    listPorts: () => Promise<SerialPortSummary[]>;
+    control: (input: DesktopSerialControlInput) => Promise<void>;
   };
   sessionShares: {
     start: (input: SessionShareStartInput) => Promise<SessionShareState>;

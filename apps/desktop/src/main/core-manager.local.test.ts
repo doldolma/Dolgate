@@ -147,6 +147,161 @@ describe("CoreManager local shell sessions", () => {
     expect(decodeControlFrame(fakeProcess.writes[3]).type).toBe("disconnect");
   });
 
+  it("sends serialConnect through ssh-core and reuses terminal lifecycle flow", async () => {
+    const fakeProcess = createFakeChildProcess();
+    spawnMock.mockReturnValue(fakeProcess.child);
+
+    const manager = new CoreManager();
+
+    const { sessionId } = await manager.connectSerialSession({
+      title: "Console",
+      hostId: "serial-1",
+      hostLabel: "Console",
+      cols: 120,
+      rows: 32,
+      transport: "local",
+      devicePath: "/dev/tty.usbserial-0001",
+      baudRate: 115200,
+      dataBits: 8,
+      parity: "none",
+      stopBits: 1,
+      flowControl: "none",
+      transmitLineEnding: "none",
+      localEcho: false,
+      localLineEditing: false,
+    });
+
+    const connectRequest = decodeControlFrame(fakeProcess.writes[0]);
+    expect(connectRequest.type).toBe("serialConnect");
+    expect(connectRequest.sessionId).toBe(sessionId);
+    expect(connectRequest.payload).toMatchObject({
+      transport: "local",
+      devicePath: "/dev/tty.usbserial-0001",
+      baudRate: 115200,
+      dataBits: 8,
+      parity: "none",
+      stopBits: 1,
+      flowControl: "none",
+      transmitLineEnding: "none",
+      localEcho: false,
+      localLineEditing: false,
+    });
+
+    fakeProcess.emitControl({
+      type: "connected",
+      sessionId,
+      payload: {
+        status: "connected",
+      },
+    });
+
+    manager.write(sessionId, "status\r");
+    manager.resize(sessionId, 140, 36);
+    manager.disconnect(sessionId);
+
+    expect(decodeControlFrame(fakeProcess.writes[2]).type).toBe("resize");
+    expect(decodeControlFrame(fakeProcess.writes[2]).payload).toMatchObject({
+      cols: 140,
+      rows: 36,
+    });
+    expect(decodeControlFrame(fakeProcess.writes[3]).type).toBe("disconnect");
+  });
+
+  it("lists serial ports through ssh-core", async () => {
+    const fakeProcess = createFakeChildProcess();
+    spawnMock.mockReturnValue(fakeProcess.child);
+
+    const manager = new CoreManager();
+    const listPromise = manager.listSerialPorts();
+    await waitForWriteCount(fakeProcess.writes, 1);
+
+    const request = decodeControlFrame(fakeProcess.writes[0]);
+    expect(request.type).toBe("serialListPorts");
+
+    fakeProcess.emitControl({
+      type: "serialPortsListed",
+      requestId: request.id,
+      payload: {
+        ports: [
+          {
+            path: "/dev/tty.usbserial-0001",
+            displayName: "/dev/tty.usbserial-0001 (USB Serial)",
+            manufacturer: "FTDI",
+          },
+        ],
+      },
+    });
+
+    await expect(listPromise).resolves.toEqual([
+      {
+        path: "/dev/tty.usbserial-0001",
+        displayName: "/dev/tty.usbserial-0001 (USB Serial)",
+        manufacturer: "FTDI",
+      },
+    ]);
+  });
+
+  it("sends serialControl through ssh-core", async () => {
+    const fakeProcess = createFakeChildProcess();
+    spawnMock.mockReturnValue(fakeProcess.child);
+
+    const manager = new CoreManager();
+
+    const { sessionId } = await manager.connectSerialSession({
+      title: "Console",
+      hostId: "serial-1",
+      hostLabel: "Console",
+      cols: 120,
+      rows: 32,
+      transport: "local",
+      devicePath: "/dev/tty.usbserial-0001",
+      baudRate: 115200,
+      dataBits: 8,
+      parity: "none",
+      stopBits: 1,
+      flowControl: "none",
+      transmitLineEnding: "none",
+      localEcho: false,
+      localLineEditing: false,
+    });
+
+    fakeProcess.emitControl({
+      type: "connected",
+      sessionId,
+      payload: {
+        status: "connected",
+      },
+    });
+
+    const controlPromise = manager.controlSerialSession(sessionId, {
+      action: "set-dtr",
+      enabled: true,
+    });
+    await waitForWriteCount(fakeProcess.writes, 2);
+
+    const request = decodeControlFrame(fakeProcess.writes[1]);
+    expect(request.type).toBe("serialControl");
+    expect(request.payload).toMatchObject({
+      action: "set-dtr",
+      enabled: true,
+    });
+
+    fakeProcess.emitControl({
+      type: "serialControlCompleted",
+      requestId: request.id,
+      sessionId,
+      payload: {
+        action: "set-dtr",
+        enabled: true,
+      },
+    });
+
+    await expect(controlPromise).resolves.toEqual({
+      action: "set-dtr",
+      enabled: true,
+    });
+  });
+
   it("uses an extended timeout for containersConnect", async () => {
     const fakeProcess = createFakeChildProcess();
     spawnMock.mockReturnValue(fakeProcess.child);

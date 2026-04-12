@@ -1,7 +1,14 @@
 import type { AuthSession } from './api';
 
 export type AuthType = 'password' | 'privateKey' | 'keyboardInteractive' | 'certificate';
-export type HostKind = 'ssh' | 'aws-ec2' | 'aws-ecs' | 'warpgate-ssh';
+export type HostKind = 'ssh' | 'aws-ec2' | 'aws-ecs' | 'warpgate-ssh' | 'serial';
+export type SerialTransport = 'local' | 'raw-tcp' | 'rfc2217';
+export type SerialDataBits = 5 | 6 | 7 | 8;
+export type SerialParity = 'none' | 'odd' | 'even' | 'mark' | 'space';
+export type SerialStopBits = 1 | 1.5 | 2;
+export type SerialFlowControl = 'none' | 'xon-xoff' | 'rts-cts' | 'dsr-dtr';
+export type SerialLineEnding = 'none' | 'cr' | 'lf' | 'crlf';
+export type SerialControlAction = 'break' | 'set-dtr' | 'set-rts';
 export type AppTheme = 'system' | 'light' | 'dark';
 export type TerminalThemeId =
   | 'dolssh-dark'
@@ -50,7 +57,7 @@ export type SyncBootstrapStatus = 'idle' | 'syncing' | 'ready' | 'paused' | 'err
 export type AwsProfilesServerSupport = 'unknown' | 'supported' | 'unsupported';
 export type TermiusProbeStatus = 'ready' | 'unsupported' | 'not-installed' | 'no-data' | 'error';
 export type AwsSshMetadataStatus = 'idle' | 'loading' | 'ready' | 'error';
-export type SessionConnectionKind = 'ssh' | 'aws-ssm' | 'warpgate' | 'aws-ecs-exec';
+export type SessionConnectionKind = 'ssh' | 'aws-ssm' | 'warpgate' | 'aws-ecs-exec' | 'serial';
 export type SessionLifecycleStatus = 'connected' | 'closed' | 'error';
 export type PortForwardLifecycleStatus = 'running' | 'closed' | 'error';
 export type SftpConnectionStage =
@@ -185,19 +192,59 @@ export interface WarpgateSshHostDraft extends HostBaseDraft {
   warpgateUsername: string;
 }
 
+export interface SerialHostRecord extends HostBaseRecord {
+  kind: 'serial';
+  transport: SerialTransport;
+  devicePath?: string | null;
+  host?: string | null;
+  port?: number | null;
+  baudRate: number;
+  dataBits: SerialDataBits;
+  parity: SerialParity;
+  stopBits: SerialStopBits;
+  flowControl: SerialFlowControl;
+  transmitLineEnding: SerialLineEnding;
+  localEcho: boolean;
+  localLineEditing: boolean;
+}
+
+export interface SerialHostDraft extends HostBaseDraft {
+  kind: 'serial';
+  transport: SerialTransport;
+  devicePath?: string | null;
+  host?: string | null;
+  port?: number | null;
+  baudRate: number;
+  dataBits: SerialDataBits;
+  parity: SerialParity;
+  stopBits: SerialStopBits;
+  flowControl: SerialFlowControl;
+  transmitLineEnding: SerialLineEnding;
+  localEcho: boolean;
+  localLineEditing: boolean;
+}
+
+export interface SerialPortSummary {
+  path: string;
+  displayName: string;
+  manufacturer?: string | null;
+}
+
 // HostRecord는 로컬 스토리지와 sync payload가 공유하는 정규화된 호스트 모델이다.
 export type HostRecord =
   | SshHostRecord
   | AwsEc2HostRecord
   | AwsEcsHostRecord
-  | WarpgateSshHostRecord;
+  | WarpgateSshHostRecord
+  | SerialHostRecord;
 
 // HostDraft는 생성/수정 폼에서 사용하는 입력 전용 모델이다.
 export type HostDraft =
   | SshHostDraft
   | AwsEc2HostDraft
   | AwsEcsHostDraft
-  | WarpgateSshHostDraft;
+  | WarpgateSshHostDraft
+  | SerialHostDraft;
 
 export function isSshHostRecord(host: HostRecord): host is SshHostRecord {
   return host.kind === 'ssh';
@@ -215,6 +262,10 @@ export function isWarpgateSshHostRecord(host: HostRecord): host is WarpgateSshHo
   return host.kind === 'warpgate-ssh';
 }
 
+export function isSerialHostRecord(host: HostRecord): host is SerialHostRecord {
+  return host.kind === 'serial';
+}
+
 export function isSshHostDraft(host: HostDraft): host is SshHostDraft {
   return host.kind === 'ssh';
 }
@@ -229,6 +280,10 @@ export function isAwsEcsHostDraft(host: HostDraft): host is AwsEcsHostDraft {
 
 export function isWarpgateSshHostDraft(host: HostDraft): host is WarpgateSshHostDraft {
   return host.kind === 'warpgate-ssh';
+}
+
+export function isSerialHostDraft(host: HostDraft): host is SerialHostDraft {
+  return host.kind === 'serial';
 }
 
 export function getHostSearchText(host: HostRecord): string[] {
@@ -268,6 +323,17 @@ export function getHostSearchText(host: HostRecord): string[] {
       ...(host.tags ?? []),
     ];
   }
+  if (host.kind === 'serial') {
+    return [
+      host.label,
+      host.transport,
+      host.devicePath ?? '',
+      host.host ?? '',
+      typeof host.port === 'number' ? String(host.port) : '',
+      host.groupName ?? '',
+      ...(host.tags ?? []),
+    ];
+  }
   return [host.label, host.hostname, host.username, host.groupName ?? '', ...(host.tags ?? [])];
 }
 
@@ -285,6 +351,18 @@ export function getHostSubtitle(host: HostRecord): string {
       .filter(Boolean)
       .join(' • ');
   }
+  if (host.kind === 'serial') {
+    if (host.transport === 'local') {
+      return ['Serial', host.devicePath ?? '장치 경로 미설정'].join(' • ');
+    }
+    return [
+      'Serial',
+      host.transport,
+      host.host && host.port ? `${host.host}:${host.port}` : '원격 주소 미설정',
+    ]
+      .filter(Boolean)
+      .join(' • ');
+  }
   return host.username.trim()
     ? `${host.username}@${host.hostname}:${host.port}`
     : `${host.hostname}:${host.port} • 사용자명 미설정`;
@@ -299,6 +377,9 @@ export function getHostBadgeLabel(host: HostRecord): string {
   }
   if (host.kind === 'aws-ecs') {
     return 'ECS';
+  }
+  if (host.kind === 'serial') {
+    return 'SER';
   }
   if (host.authType === 'privateKey') {
     return 'K';

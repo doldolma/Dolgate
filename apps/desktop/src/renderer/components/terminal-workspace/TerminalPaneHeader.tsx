@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react';
 import { cn } from '../../lib/cn';
 import { IconButton } from '../../ui';
 
@@ -11,6 +12,7 @@ interface TerminalPaneHeaderProps {
   onClose?: () => void;
   onStartDrag?: () => void;
   onEndDrag?: () => void;
+  actions?: ReactNode;
 }
 
 export function TerminalPaneHeader({
@@ -23,6 +25,7 @@ export function TerminalPaneHeader({
   onClose,
   onStartDrag,
   onEndDrag,
+  actions,
 }: TerminalPaneHeaderProps) {
   return (
     <div
@@ -53,16 +56,19 @@ export function TerminalPaneHeader({
       >
         {title}
       </button>
-      <IconButton
-        aria-label={`${title} 세션 종료`}
-        tone="ghost"
-        size="sm"
-        className="h-[1.55rem] w-[1.55rem] rounded-[6px] text-[0.95rem] text-[var(--text-soft)] hover:bg-[color-mix(in_srgb,var(--surface)_88%,transparent_12%)]"
-        onClick={onClose}
-        disabled={closingDisabled}
-      >
-        ×
-      </IconButton>
+      <div className="flex items-center gap-1.5">
+        {actions}
+        <IconButton
+          aria-label={`${title} 세션 종료`}
+          tone="ghost"
+          size="sm"
+          className="h-[1.55rem] w-[1.55rem] rounded-[6px] text-[0.95rem] text-[var(--text-soft)] hover:bg-[color-mix(in_srgb,var(--surface)_88%,transparent_12%)]"
+          onClick={onClose}
+          disabled={closingDisabled}
+        >
+          ×
+        </IconButton>
+      </div>
     </div>
   );
 }
