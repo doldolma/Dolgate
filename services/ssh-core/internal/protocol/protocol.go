@@ -19,6 +19,9 @@ const (
 	CommandConnect                    CommandType = "connect"
 	CommandAWSConnect                 CommandType = "awsConnect"
 	CommandLocalConnect               CommandType = "localConnect"
+	CommandSerialConnect              CommandType = "serialConnect"
+	CommandSerialListPorts            CommandType = "serialListPorts"
+	CommandSerialControl              CommandType = "serialControl"
 	CommandKeyboardInteractiveRespond CommandType = "keyboardInteractiveRespond"
 	CommandControlSignal              CommandType = "controlSignal"
 	CommandResize                     CommandType = "resize"
@@ -58,6 +61,8 @@ const (
 	EventData                         EventType = "data"
 	EventError                        EventType = "error"
 	EventClosed                       EventType = "closed"
+	EventSerialPortsListed            EventType = "serialPortsListed"
+	EventSerialControlCompleted       EventType = "serialControlCompleted"
 	EventHostKeyProbed                EventType = "hostKeyProbed"
 	EventCertificateInspected         EventType = "certificateInspected"
 	EventKeyboardInteractiveChallenge EventType = "keyboardInteractiveChallenge"
@@ -166,6 +171,48 @@ type LocalConnectPayload struct {
 	Args             []string          `json:"args,omitempty"`
 	Env              map[string]string `json:"env,omitempty"`
 	WorkingDirectory string            `json:"workingDirectory,omitempty"`
+}
+
+type SerialConnectPayload struct {
+	Transport          string  `json:"transport"`
+	Cols               int     `json:"cols"`
+	Rows               int     `json:"rows"`
+	Title              string  `json:"title,omitempty"`
+	DevicePath         string  `json:"devicePath,omitempty"`
+	Host               string  `json:"host,omitempty"`
+	Port               int     `json:"port,omitempty"`
+	BaudRate           int     `json:"baudRate"`
+	DataBits           int     `json:"dataBits"`
+	Parity             string  `json:"parity"`
+	StopBits           float64 `json:"stopBits"`
+	FlowControl        string  `json:"flowControl"`
+	TransmitLineEnding string  `json:"transmitLineEnding"`
+	LocalEcho          bool    `json:"localEcho"`
+	LocalLineEditing   bool    `json:"localLineEditing"`
+}
+
+type SerialListPortsPayload struct {
+	IncludeBusy bool `json:"includeBusy,omitempty"`
+}
+
+type SerialPortSummary struct {
+	Path         string `json:"path"`
+	DisplayName  string `json:"displayName,omitempty"`
+	Manufacturer string `json:"manufacturer,omitempty"`
+}
+
+type SerialPortsListedPayload struct {
+	Ports []SerialPortSummary `json:"ports"`
+}
+
+type SerialControlPayload struct {
+	Action  string `json:"action"`
+	Enabled *bool  `json:"enabled,omitempty"`
+}
+
+type SerialControlCompletedPayload struct {
+	Action  string `json:"action"`
+	Enabled *bool  `json:"enabled,omitempty"`
 }
 
 // SFTPConnectPayload는 원격 파일 브라우저 접속을 위한 인증 정보다.

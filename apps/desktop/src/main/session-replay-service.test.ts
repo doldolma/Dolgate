@@ -101,7 +101,7 @@ function createLifecycleState(
     hostLabel: string;
     title: string;
     connectionDetails: string | null;
-    connectionKind: "ssh" | "aws-ssm" | "warpgate";
+    connectionKind: "ssh" | "aws-ssm" | "warpgate" | "serial";
     connectedAt: string;
   }> = {},
 ) {

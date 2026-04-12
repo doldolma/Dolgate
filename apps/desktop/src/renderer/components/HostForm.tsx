@@ -1,13 +1,13 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, type ReactNode } from 'react';
-import { getAwsEc2HostSshMetadataStatusLabel, isAwsEc2HostRecord, isAwsEcsHostRecord, isSshHostDraft, isSshHostRecord, isWarpgateSshHostRecord } from '@shared';
-import type { AwsProfileSummary, HostDraft, HostRecord, HostSecretInput, SecretMetadataRecord, SshHostDraft, TerminalThemeId } from '@shared';
+import { getAwsEc2HostSshMetadataStatusLabel, isAwsEc2HostRecord, isAwsEcsHostRecord, isSerialHostDraft, isSerialHostRecord, isSshHostDraft, isSshHostRecord, isWarpgateSshHostRecord } from '@shared';
+import type { AwsProfileSummary, HostDraft, HostRecord, HostSecretInput, SecretMetadataRecord, SerialHostDraft, SerialPortSummary, SshHostDraft, TerminalThemeId } from '@shared';
 import { useHostFormController } from '../controllers/useHostFormController';
 import { formatSavedSecretOptionLabel } from '../lib/secret-display';
 import { terminalThemePresets } from '../lib/terminal-presets';
 import { listAwsProfiles } from '../services/desktop/imports';
-import { Button, Input, SelectField, TagInputField } from '../ui';
+import { Button, Input, SelectField, TagInputField, ToggleSwitch } from '../ui';
 
-const defaultDraft: HostDraft = {
+const defaultSshDraft: SshHostDraft = {
   kind: 'ssh',
   label: '',
   tags: [],
@@ -20,9 +20,35 @@ const defaultDraft: HostDraft = {
   terminalThemeId: null
 };
 
-function createDraft(defaultGroupPath?: string | null): HostDraft {
+const defaultSerialDraft: SerialHostDraft = {
+  kind: 'serial',
+  label: '',
+  tags: [],
+  transport: 'local',
+  devicePath: '',
+  host: '',
+  port: 4001,
+  baudRate: 115200,
+  dataBits: 8,
+  parity: 'none',
+  stopBits: 1,
+  flowControl: 'none',
+  transmitLineEnding: 'none',
+  localEcho: false,
+  localLineEditing: false,
+  groupName: '',
+  terminalThemeId: null,
+};
+
+function createDraft(defaultGroupPath?: string | null, kind: 'ssh' | 'serial' = 'ssh'): HostDraft {
+  if (kind === 'serial') {
+    return {
+      ...defaultSerialDraft,
+      groupName: defaultGroupPath ?? ''
+    };
+  }
   return {
-    ...defaultDraft,
+    ...defaultSshDraft,
     groupName: defaultGroupPath ?? ''
   };
 }
@@ -59,6 +85,16 @@ function deriveDefaultHostLabel(draft: HostDraft): string {
   if (draft.kind === 'ssh') {
     return draft.hostname.trim();
   }
+  if (draft.kind === 'serial') {
+    if (draft.transport === 'local') {
+      return draft.devicePath?.trim() || '';
+    }
+    const host = draft.host?.trim() ?? '';
+    if (!host) {
+      return '';
+    }
+    return draft.port ? `${host}:${draft.port}` : host;
+  }
   if (draft.kind === 'aws-ec2') {
     return draft.awsInstanceName?.trim() || draft.awsInstanceId.trim();
   }
@@ -83,6 +119,8 @@ export interface HostFormProps {
   keychainEntries: SecretMetadataRecord[];
   groupOptions: Array<{ value: string | null; label: string }>;
   defaultGroupPath?: string | null;
+  createKind?: 'ssh' | 'serial';
+  desktopPlatform?: 'darwin' | 'win32' | 'linux' | 'unknown';
   hideTitle?: boolean;
   onSubmit: (draft: HostDraft, secrets?: HostSecretInput) => Promise<void>;
   onConnect?: (hostId: string) => Promise<void>;
@@ -125,6 +163,12 @@ function isHostDraftValid(draft: HostDraft): boolean {
 
   if (draft.kind === 'ssh') {
     return Boolean(draft.hostname.trim()) && Number.isInteger(draft.port) && draft.port >= 1 && draft.port <= 65535;
+  }
+  if (draft.kind === 'serial') {
+    if (draft.transport === 'local') {
+      return Boolean((draft.devicePath ?? '').trim());
+    }
+    return Boolean((draft.host ?? '').trim()) && Number.isInteger(draft.port) && (draft.port ?? 0) >= 1 && (draft.port ?? 0) <= 65535;
   }
 
   if (draft.kind === 'warpgate-ssh') {
@@ -252,6 +296,8 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
   keychainEntries,
   groupOptions,
   defaultGroupPath = null,
+  createKind = 'ssh',
+  desktopPlatform = 'unknown',
   hideTitle = false,
   onSubmit,
   onConnect,
@@ -263,6 +309,7 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
   const fieldLabelClassName =
     'text-[0.82rem] font-semibold uppercase tracking-[0.12em] text-[var(--text-soft)]';
   const {
+    listSerialPorts,
     pickPrivateKey: pickPrivateKeyFile,
     pickSshCertificate: pickSshCertificateFile,
   } = useHostFormController();
@@ -272,7 +319,7 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
   const lastHydratedHostKeyRef = useRef<string | null>(null);
   const isTagInputComposingRef = useRef(false);
   const skipNextTagBlurCommitRef = useRef(false);
-  const [draft, setDraft] = useState<HostDraft>(createDraft(defaultGroupPath));
+  const [draft, setDraft] = useState<HostDraft>(createDraft(defaultGroupPath, createKind));
   const [tagTokens, setTagTokens] = useState<string[]>([]);
   const [tagInput, setTagInput] = useState('');
   const [password, setPassword] = useState('');
@@ -287,10 +334,14 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
   const [awsProfiles, setAwsProfiles] = useState<AwsProfileSummary[]>([]);
   const [isLoadingAwsProfiles, setIsLoadingAwsProfiles] = useState(false);
   const [awsProfilesError, setAwsProfilesError] = useState<string | null>(null);
+  const [serialPorts, setSerialPorts] = useState<SerialPortSummary[]>([]);
+  const [isLoadingSerialPorts, setIsLoadingSerialPorts] = useState(false);
+  const [serialPortsError, setSerialPortsError] = useState<string | null>(null);
 
   const isEditMode = Boolean(host);
 
   const sshDraft = isSshHostDraft(draft) ? draft : null;
+  const serialDraft = isSerialHostDraft(draft) ? draft : null;
   const isAwsEc2Draft = draft.kind === 'aws-ec2';
   const isAwsEcsDraft = draft.kind === 'aws-ecs';
   const isAwsDraft = isAwsEc2Draft || isAwsEcsDraft;
@@ -373,7 +424,7 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
     }
 
     if (!host) {
-      setDraft(createDraft(defaultGroupPath));
+      setDraft(createDraft(defaultGroupPath, createKind));
       setPassword('');
       setPassphrase('');
       setSelectedSecretRef('');
@@ -457,6 +508,27 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
         warpgateUsername: host.warpgateUsername
       };
       nextCredentialMode = 'new';
+    } else if (isSerialHostRecord(host)) {
+      nextDraft = {
+        kind: 'serial',
+        label: host.label,
+        tags: host.tags ?? [],
+        groupName: host.groupName ?? '',
+        terminalThemeId: host.terminalThemeId ?? null,
+        transport: host.transport,
+        devicePath: host.devicePath ?? '',
+        host: host.host ?? '',
+        port: host.port ?? 4001,
+        baudRate: host.baudRate,
+        dataBits: host.dataBits,
+        parity: host.parity,
+        stopBits: host.stopBits,
+        flowControl: host.flowControl,
+        transmitLineEnding: host.transmitLineEnding,
+        localEcho: host.localEcho,
+        localLineEditing: host.localLineEditing,
+      };
+      nextCredentialMode = 'new';
     } else {
       nextDraft = {
         kind: 'ssh',
@@ -500,7 +572,7 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
     setLastSavedSubmissionKey(nextSubmissionKey);
     lastHydratedHostIdRef.current = host.id;
     lastHydratedHostKeyRef.current = nextHydrationKey;
-  }, [defaultGroupPath, host, isEditDirty, saveInFlight]);
+  }, [createKind, defaultGroupPath, host, isEditDirty, saveInFlight]);
 
   useEffect(() => {
     if (!sshDraft) {
@@ -512,6 +584,30 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
       setCredentialMode('new');
     }
   }, [credentialMode, reusableEntries, selectedSecretRef, sshDraft]);
+
+  const refreshSerialPorts = useCallback(async () => {
+    setIsLoadingSerialPorts(true);
+    setSerialPortsError(null);
+    try {
+      const nextPorts = await listSerialPorts();
+      setSerialPorts(nextPorts);
+    } catch (error) {
+      setSerialPorts([]);
+      setSerialPortsError(error instanceof Error ? error.message : '시리얼 포트 목록을 불러오지 못했습니다.');
+    } finally {
+      setIsLoadingSerialPorts(false);
+    }
+  }, [listSerialPorts]);
+
+  useEffect(() => {
+    if (!serialDraft || serialDraft.transport !== 'local') {
+      setSerialPorts([]);
+      setSerialPortsError(null);
+      setIsLoadingSerialPorts(false);
+      return;
+    }
+    void refreshSerialPorts();
+  }, [refreshSerialPorts, serialDraft?.transport, serialDraft]);
 
   useEffect(() => {
     if (!isAwsDraft) {
@@ -627,6 +723,28 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
       const nextDraft: HostDraft = {
         ...current,
         hostname: nextHostname
+      };
+      return shouldSyncLabel
+        ? {
+            ...nextDraft,
+            label: deriveDefaultHostLabel(nextDraft)
+          }
+        : nextDraft;
+    });
+  }
+
+  function handleSerialFieldChange<K extends keyof SerialHostDraft>(key: K, value: SerialHostDraft[K]) {
+    setDraft((current) => {
+      if (!isSerialHostDraft(current)) {
+        return current;
+      }
+      const previousAutoLabel = deriveDefaultHostLabel(current);
+      const shouldSyncLabel =
+        !host &&
+        (current.label.trim() === '' || current.label.trim() === previousAutoLabel);
+      const nextDraft: SerialHostDraft = {
+        ...current,
+        [key]: value
       };
       return shouldSyncLabel
         ? {
@@ -944,7 +1062,7 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
       }}
     >
       {hideTitle ? null : <div className="section-title">Host Editor</div>}
-      {sshDraft ? null : metadataFields}
+      {sshDraft || serialDraft ? null : metadataFields}
 
       {isAwsEc2Draft ? (
         <>
@@ -1305,6 +1423,219 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
             testId="hostform-section-preferences"
           >
             {renderTerminalThemeField(sshDraft.terminalThemeId ?? null, (terminalThemeId) => setDraft({ ...sshDraft, terminalThemeId }))}
+          </FormSection>
+        </>
+      ) : serialDraft ? (
+        <>
+          <FormSection
+            title="Connection"
+            description="Configure the serial transport and terminal behavior."
+            testId="hostform-section-connection"
+          >
+            <label className={fieldClassName}>
+              <span className={fieldLabelClassName}>Transport</span>
+              <SelectField
+                value={serialDraft.transport}
+                onChange={(event) => {
+                  const nextTransport =
+                    event.target.value === 'raw-tcp'
+                      ? 'raw-tcp'
+                      : event.target.value === 'rfc2217'
+                        ? 'rfc2217'
+                        : 'local';
+                  handleSerialFieldChange('transport', nextTransport);
+                }}
+              >
+                <option value="local">Local serial port</option>
+                <option value="raw-tcp">Raw TCP</option>
+                <option value="rfc2217">RFC2217</option>
+              </SelectField>
+            </label>
+
+            {serialDraft.transport === 'local' ? (
+              <>
+                <div className="grid gap-[0.55rem]">
+                  <div className="flex items-center justify-between gap-3">
+                    <span className={fieldLabelClassName}>Detected Ports</span>
+                    <Button variant="secondary" onClick={() => void refreshSerialPorts()}>
+                      Refresh
+                    </Button>
+                  </div>
+                  <SelectField
+                    aria-label="Detected Serial Port"
+                    value={
+                      serialPorts.some((port) => port.path === (serialDraft.devicePath ?? ''))
+                        ? serialDraft.devicePath ?? ''
+                        : ''
+                    }
+                    onChange={(event) => handleSerialFieldChange('devicePath', event.target.value)}
+                  >
+                    <option value="">Select detected port</option>
+                    {serialPorts.map((port) => (
+                      <option key={port.path} value={port.path}>
+                        {port.displayName}
+                      </option>
+                    ))}
+                  </SelectField>
+                  {serialPortsError ? (
+                    <span className="text-[0.82rem] text-[var(--danger-text)]">{serialPortsError}</span>
+                  ) : isLoadingSerialPorts ? (
+                    <span className="text-[0.82rem] text-[var(--text-soft)]">Loading serial ports...</span>
+                  ) : null}
+                </div>
+                <label className={fieldClassName}>
+                  <span className={fieldLabelClassName}>Device Path</span>
+                  <Input
+                    value={serialDraft.devicePath ?? ''}
+                    onChange={(event) => handleSerialFieldChange('devicePath', event.target.value)}
+                    placeholder={desktopPlatform === 'win32' ? 'COM3' : '/dev/tty.usbserial-0001'}
+                    required
+                  />
+                </label>
+              </>
+            ) : (
+              <div className="grid gap-[0.75rem] md:grid-cols-[minmax(0,1fr)_120px]">
+                <label className={fieldClassName}>
+                  <span className={fieldLabelClassName}>Remote Host</span>
+                  <Input
+                    value={serialDraft.host ?? ''}
+                    onChange={(event) => handleSerialFieldChange('host', event.target.value)}
+                    placeholder="serial-gateway.local"
+                    required
+                  />
+                </label>
+                <label className={fieldClassName}>
+                  <span className={fieldLabelClassName}>Port</span>
+                  <Input
+                    type="number"
+                    min={1}
+                    max={65535}
+                    value={serialDraft.port ?? 4001}
+                    onChange={(event) => handleSerialFieldChange('port', Number(event.target.value) || 4001)}
+                    required
+                  />
+                </label>
+              </div>
+            )}
+
+            {serialDraft.transport !== 'raw-tcp' ? (
+              <>
+                <div className="grid gap-[0.75rem] md:grid-cols-2">
+                  <label className={fieldClassName}>
+                    <span className={fieldLabelClassName}>Baud Rate</span>
+                    <Input
+                      type="number"
+                      min={1}
+                      value={serialDraft.baudRate}
+                      onChange={(event) => handleSerialFieldChange('baudRate', Number(event.target.value) || 115200)}
+                      required
+                    />
+                  </label>
+                  <label className={fieldClassName}>
+                    <span className={fieldLabelClassName}>Data Bits</span>
+                    <SelectField
+                      value={String(serialDraft.dataBits)}
+                      onChange={(event) => handleSerialFieldChange('dataBits', Number(event.target.value) as SerialHostDraft['dataBits'])}
+                    >
+                      <option value="5">5</option>
+                      <option value="6">6</option>
+                      <option value="7">7</option>
+                      <option value="8">8</option>
+                    </SelectField>
+                  </label>
+                  <label className={fieldClassName}>
+                    <span className={fieldLabelClassName}>Parity</span>
+                    <SelectField
+                      value={serialDraft.parity}
+                      onChange={(event) => handleSerialFieldChange('parity', event.target.value as SerialHostDraft['parity'])}
+                    >
+                      <option value="none">None</option>
+                      <option value="odd">Odd</option>
+                      <option value="even">Even</option>
+                      <option value="mark">Mark</option>
+                      <option value="space">Space</option>
+                    </SelectField>
+                  </label>
+                  <label className={fieldClassName}>
+                    <span className={fieldLabelClassName}>Stop Bits</span>
+                    <SelectField
+                      value={String(serialDraft.stopBits)}
+                      onChange={(event) =>
+                        handleSerialFieldChange(
+                          'stopBits',
+                          (event.target.value === '1.5' ? 1.5 : Number(event.target.value)) as SerialHostDraft['stopBits']
+                        )
+                      }
+                    >
+                      <option value="1">1</option>
+                      <option value="1.5">1.5</option>
+                      <option value="2">2</option>
+                    </SelectField>
+                  </label>
+                </div>
+                <label className={fieldClassName}>
+                  <span className={fieldLabelClassName}>Flow Control</span>
+                  <SelectField
+                    value={serialDraft.flowControl}
+                    onChange={(event) => handleSerialFieldChange('flowControl', event.target.value as SerialHostDraft['flowControl'])}
+                  >
+                    <option value="none">None</option>
+                    <option value="xon-xoff">XON/XOFF</option>
+                    <option value="rts-cts">RTS/CTS</option>
+                    <option value="dsr-dtr">DSR/DTR</option>
+                  </SelectField>
+                </label>
+              </>
+            ) : null}
+
+            <div className="grid gap-[0.75rem]">
+              <ToggleSwitch
+                checked={serialDraft.localEcho}
+                label="Local Echo"
+                description="Echo typed characters locally."
+                onClick={() => handleSerialFieldChange('localEcho', !serialDraft.localEcho)}
+              />
+              <ToggleSwitch
+                checked={serialDraft.localLineEditing}
+                label="Local Line Editing"
+                description="Handle backspace and basic line editing locally."
+                onClick={() => handleSerialFieldChange('localLineEditing', !serialDraft.localLineEditing)}
+              />
+            </div>
+          </FormSection>
+
+          <FormSection
+            title="Details"
+            description="How this host appears in the app."
+            testId="hostform-section-details"
+          >
+            {metadataFields}
+          </FormSection>
+
+          <FormSection
+            title="Preferences"
+            description="Optional local preference."
+            testId="hostform-section-preferences"
+          >
+            <label className={fieldClassName}>
+              <span className={fieldLabelClassName}>Line Ending</span>
+              <SelectField
+                aria-label="Line Ending"
+                value={serialDraft.transmitLineEnding}
+                onChange={(event) =>
+                  handleSerialFieldChange(
+                    'transmitLineEnding',
+                    event.target.value as SerialHostDraft['transmitLineEnding'],
+                  )
+                }
+              >
+                <option value="none">None</option>
+                <option value="cr">CR</option>
+                <option value="lf">LF</option>
+                <option value="crlf">CRLF</option>
+              </SelectField>
+            </label>
+            {renderTerminalThemeField(serialDraft.terminalThemeId ?? null, (terminalThemeId) => setDraft({ ...serialDraft, terminalThemeId }))}
           </FormSection>
         </>
       ) : null}

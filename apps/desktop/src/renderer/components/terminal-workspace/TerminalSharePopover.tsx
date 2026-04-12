@@ -1,4 +1,4 @@
-import type { MutableRefObject } from 'react';
+import type { MutableRefObject, ReactNode } from 'react';
 import type { TerminalTab } from '@shared';
 import { cn } from '../../lib/cn';
 import { Button, SectionLabel } from '../../ui';
@@ -7,6 +7,7 @@ interface TerminalSharePopoverProps {
   anchorRef: MutableRefObject<HTMLDivElement | null>;
   showHeader: boolean;
   open: boolean;
+  actions?: ReactNode;
   canStartShare: boolean;
   shareCopyStatus: string | null;
   shareState: TerminalTab['sessionShare'] | null;
@@ -23,6 +24,7 @@ export function TerminalSharePopover({
   anchorRef,
   showHeader,
   open,
+  actions,
   canStartShare,
   shareCopyStatus,
   shareState,
@@ -38,10 +40,11 @@ export function TerminalSharePopover({
     <div
       ref={anchorRef}
       className={cn(
-        'absolute right-[0.85rem] top-[0.85rem] z-[4]',
+        'absolute right-[0.85rem] top-[0.85rem] z-[4] flex items-center gap-2',
         showHeader && 'right-[0.8rem] top-[0.8rem]',
       )}
     >
+      {actions}
       <Button
         variant="secondary"
         size="sm"

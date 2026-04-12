@@ -21,6 +21,7 @@ import {
   findSshHostMissingUsername,
   isAwsEc2HostRecord,
   isAwsEcsHostRecord,
+  isSerialHostRecord,
   isSshHostRecord,
   isPendingEcsShellAttempt,
   normalizeEcsExecShellPermissionMessage,
@@ -452,13 +453,20 @@ export function createSessionServices(deps: SliceDeps) {
     }
 
     try {
-      const connection = await api.ssh.connect({
-        hostId,
-        title: attempt.title,
-        cols: attempt.latestCols,
-        rows: attempt.latestRows,
-        secrets,
-      });
+      const connection = isSerialHostRecord(host)
+        ? await api.serial.connect({
+            hostId,
+            title: attempt.title,
+            cols: attempt.latestCols,
+            rows: attempt.latestRows,
+          })
+        : await api.ssh.connect({
+            hostId,
+            title: attempt.title,
+            cols: attempt.latestCols,
+            rows: attempt.latestRows,
+            secrets,
+          });
       const latestAttempt = findPendingConnectionAttempt(get(), sessionId);
       if (!latestAttempt) {
         await api.ssh.disconnect(connection.sessionId).catch(() => undefined);
@@ -489,7 +497,8 @@ export function createSessionServices(deps: SliceDeps) {
         error instanceof Error
           ? error.message
           : "호스트 연결을 시작하지 못했습니다.";
-      const shouldPromptCredentialRetry = resolveCredentialRetryKind(host, message);
+      const shouldPromptCredentialRetry =
+        !isSerialHostRecord(host) && resolveCredentialRetryKind(host, message);
       if (shouldPromptCredentialRetry && isSshHostRecord(host)) {
         set({
           pendingCredentialRetry: {
@@ -590,6 +599,8 @@ export function createSessionServices(deps: SliceDeps) {
           "checking-profile",
           `${host.awsProfileName} 프로필 인증 상태를 확인하는 중입니다.`,
         )
+      : isSerialHostRecord(host)
+        ? resolveConnectingProgress(host)
       : resolveHostKeyCheckProgress(host);
     const sessionId = createPendingSessionTabForHost(
       set,
@@ -625,6 +636,11 @@ export function createSessionServices(deps: SliceDeps) {
           ),
         );
         await startPendingSessionConnect(set, get, sessionId, host.id, secrets);
+        return;
+      }
+
+      if (isSerialHostRecord(host)) {
+        await startPendingSessionConnect(set, get, sessionId, host.id);
         return;
       }
 

@@ -6,6 +6,7 @@ import { loadSavedCredential } from '../services/desktop/settings';
 
 vi.mock('../controllers/useHostFormController', () => ({
   useHostFormController: vi.fn(() => ({
+    listSerialPorts: vi.fn().mockResolvedValue([]),
     pickPrivateKey: vi.fn(),
     pickSshCertificate: vi.fn(),
   })),
@@ -19,6 +20,7 @@ const pickPrivateKeyMock = vi.fn();
 const pickSshCertificateMock = vi.fn();
 
 vi.mocked(useHostFormController).mockImplementation(() => ({
+  listSerialPorts: vi.fn().mockResolvedValue([]),
   pickPrivateKey: pickPrivateKeyMock,
   pickSshCertificate: pickSshCertificateMock,
 }));

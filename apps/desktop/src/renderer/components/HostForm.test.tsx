@@ -14,6 +14,7 @@ vi.mock('../services/desktop/imports', () => ({
 
 vi.mock('../controllers/useHostFormController', () => ({
   useHostFormController: vi.fn(() => ({
+    listSerialPorts: vi.fn().mockResolvedValue([]),
     pickPrivateKey: vi.fn(),
     pickSshCertificate: vi.fn(),
   })),
@@ -56,8 +57,10 @@ const reusableKeychainEntries: SecretMetadataRecord[] = [
 
 const pickPrivateKeyMock = vi.fn();
 const pickSshCertificateMock = vi.fn();
+const listSerialPortsMock = vi.fn();
 
 vi.mocked(useHostFormController).mockImplementation(() => ({
+  listSerialPorts: listSerialPortsMock,
   pickPrivateKey: pickPrivateKeyMock,
   pickSshCertificate: pickSshCertificateMock,
 }));
@@ -120,6 +123,8 @@ async function wait(duration: number) {
 
 describe('HostForm', () => {
   beforeEach(() => {
+    listSerialPortsMock.mockReset();
+    listSerialPortsMock.mockResolvedValue([]);
     pickPrivateKeyMock.mockReset();
     pickSshCertificateMock.mockReset();
   });
@@ -230,6 +235,73 @@ describe('HostForm', () => {
     expect(within(select).getByRole('option', { name: /Shared Certificate · SSH certificate \+ Passphrase/ })).toBeInTheDocument();
     expect(within(select).queryByRole('option', { name: /Shared Key/ })).not.toBeInTheDocument();
     expect(within(select).queryByRole('option', { name: /Shared Password/ })).not.toBeInTheDocument();
+  });
+
+  it('renders serial connection fields and hides auth controls when Serial is selected', async () => {
+    listSerialPortsMock.mockResolvedValue([
+      {
+        path: '/dev/tty.usbserial-0001',
+        displayName: '/dev/tty.usbserial-0001',
+        manufacturer: null,
+      },
+    ]);
+
+    render(
+      <HostForm
+        host={null}
+        keychainEntries={reusableKeychainEntries}
+        groupOptions={groupOptions}
+        createKind="serial"
+        onSubmit={vi.fn().mockResolvedValue(undefined)}
+      />,
+    );
+
+    expect(await screen.findByLabelText('Transport')).toBeInTheDocument();
+    expect(await screen.findByLabelText('Detected Serial Port')).toBeInTheDocument();
+    expect(screen.getByLabelText('Device Path')).toBeInTheDocument();
+    expect(screen.getByLabelText('Line Ending')).toBeInTheDocument();
+    expect(screen.queryByLabelText('Auth Type')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Saved Credentials')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Connection Type')).not.toBeInTheDocument();
+    expect(listSerialPortsMock).toHaveBeenCalled();
+  });
+
+  it('shows raw TCP serial fields without framing controls', async () => {
+    render(
+      <HostForm
+        host={null}
+        keychainEntries={reusableKeychainEntries}
+        groupOptions={groupOptions}
+        createKind="serial"
+        onSubmit={vi.fn().mockResolvedValue(undefined)}
+      />,
+    );
+
+    fireEvent.change(await screen.findByLabelText('Transport'), {
+      target: { value: 'raw-tcp' },
+    });
+
+    expect(screen.getByLabelText('Remote Host')).toBeInTheDocument();
+    expect(screen.getByLabelText('Port')).toBeInTheDocument();
+    expect(screen.getByLabelText('Line Ending')).toBeInTheDocument();
+    expect(screen.queryByLabelText('Baud Rate')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Data Bits')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Flow Control')).not.toBeInTheDocument();
+  });
+
+  it('uses a Windows-friendly serial device placeholder on win32', async () => {
+    render(
+      <HostForm
+        host={null}
+        keychainEntries={reusableKeychainEntries}
+        groupOptions={groupOptions}
+        createKind="serial"
+        desktopPlatform="win32"
+        onSubmit={vi.fn().mockResolvedValue(undefined)}
+      />,
+    );
+
+    expect(await screen.findByPlaceholderText('COM3')).toBeInTheDocument();
   });
 
   it('preselects the existing saved secret when editing a host with an attached secret', async () => {

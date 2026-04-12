@@ -1,9 +1,11 @@
+import { useEffect, useMemo, useState } from 'react';
 import { cn } from '../../lib/cn';
 import { useTerminalSessionViewController } from '../../controllers/useTerminalSessionViewController';
 import { TerminalChatToastRegion } from './TerminalChatToastRegion';
 import { TerminalConnectionOverlay } from './TerminalConnectionOverlay';
 import { TerminalInteractiveAuthOverlay } from './TerminalInteractiveAuthOverlay';
 import { TerminalPaneHeader } from './TerminalPaneHeader';
+import { SerialSessionActions } from './SerialSessionActions';
 import { TerminalSearchOverlay } from './TerminalSearchOverlay';
 import { TerminalSharePopover } from './TerminalSharePopover';
 import type { TerminalSessionPaneProps } from './types';
@@ -29,6 +31,37 @@ export function TerminalSessionPane(props: TerminalSessionPaneProps) {
   } = props;
 
   const controller = useTerminalSessionViewController(props);
+  const [serialNotice, setSerialNotice] = useState<string | null>(null);
+
+  useEffect(() => {
+    setSerialNotice(null);
+  }, [sessionId]);
+
+  useEffect(() => {
+    if (!serialNotice) {
+      return;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      setSerialNotice(null);
+    }, 4000);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [serialNotice]);
+
+  const serialActions = useMemo(
+    () => (
+      <SerialSessionActions
+        sessionId={sessionId}
+        host={props.host}
+        connected={tab?.status === 'connected'}
+        onNotice={setSerialNotice}
+      />
+    ),
+    [props.host, sessionId, tab?.status],
+  );
 
   return (
     <div
@@ -54,6 +87,7 @@ export function TerminalSessionPane(props: TerminalSessionPaneProps) {
           anchorRef={controller.sharePopoverRef}
           showHeader={showHeader}
           open={controller.sharePopoverOpen}
+          actions={serialActions}
           canStartShare={controller.canStartShare}
           shareCopyStatus={controller.shareCopyStatus}
           shareState={controller.shareState}
@@ -90,6 +124,11 @@ export function TerminalSessionPane(props: TerminalSessionPaneProps) {
       {tab?.errorMessage ? (
         <NoticeCard tone="danger" className="mx-[0.55rem] mt-[0.55rem]" role="alert">
           {tab.errorMessage}
+        </NoticeCard>
+      ) : null}
+      {serialNotice ? (
+        <NoticeCard tone="warning" className="mx-[0.55rem] mt-[0.55rem]" role="status">
+          {serialNotice}
         </NoticeCard>
       ) : null}
       {controller.terminalInitError ? (

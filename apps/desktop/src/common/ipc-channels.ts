@@ -96,6 +96,11 @@ export const ipcChannels = {
     event: 'ssh:core-event',
     data: 'ssh:stream-data'
   },
+  serial: {
+    connect: 'serial:connect',
+    listPorts: 'serial:list-ports',
+    control: 'serial:control',
+  },
   sessionShares: {
     start: 'session-shares:start',
     updateSnapshot: 'session-shares:update-snapshot',

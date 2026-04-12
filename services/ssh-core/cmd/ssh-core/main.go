@@ -16,6 +16,7 @@ import (
 	"dolssh/services/ssh-core/internal/forwarding"
 	"dolssh/services/ssh-core/internal/localsession"
 	"dolssh/services/ssh-core/internal/protocol"
+	"dolssh/services/ssh-core/internal/serialsession"
 	coresftp "dolssh/services/ssh-core/internal/sftp"
 	"dolssh/services/ssh-core/internal/sshconn"
 	"dolssh/services/ssh-core/internal/sshsession"
@@ -49,6 +50,7 @@ func main() {
 	manager := sshsession.NewManager(writer.emit, writer.emitStream)
 	awsManager := awssession.NewManager(writer.emit, writer.emitStream)
 	localManager := localsession.NewManager(writer.emit, writer.emitStream)
+	serialManager := serialsession.NewManager(writer.emit, writer.emitStream)
 	sftpService := coresftp.New(writer.emit)
 	containersService := containersvc.New(writer.emit)
 	forwardingService := forwarding.New(writer.emit)
@@ -83,7 +85,7 @@ func main() {
 			return
 		}
 
-		if err := dispatchFrame(manager, awsManager, localManager, sftpService, containersService, forwardingService, ssmForwardingService, writer, frame); err != nil {
+		if err := dispatchFrame(manager, awsManager, localManager, serialManager, sftpService, containersService, forwardingService, ssmForwardingService, writer, frame); err != nil {
 			// 명령 단위 오류는 requestId/sessionId를 포함해 상위 레이어가 추적하기 쉽게 한다.
 			eventType := protocol.EventError
 			if isSFTPCommand(frame) {
@@ -111,6 +113,7 @@ func dispatchFrame(
 	manager *sshsession.Manager,
 	awsManager *awssession.Manager,
 	localManager *localsession.Manager,
+	serialManager *serialsession.Manager,
 	sftpService *coresftp.Service,
 	containersService *containersvc.Service,
 	forwardingService *forwarding.Service,
@@ -132,6 +135,9 @@ func dispatchFrame(
 		if localManager.HasSession(metadata.SessionID) {
 			return localManager.WriteBytes(metadata.SessionID, frame.Payload)
 		}
+		if serialManager.HasSession(metadata.SessionID) {
+			return serialManager.WriteBytes(metadata.SessionID, frame.Payload)
+		}
 		return manager.WriteBytes(metadata.SessionID, frame.Payload)
 	}
 
@@ -139,13 +145,14 @@ func dispatchFrame(
 	if err := protocol.DecodeControlFrame(frame, &request); err != nil {
 		return fmt.Errorf("invalid control frame: %w", err)
 	}
-	return dispatch(manager, awsManager, localManager, sftpService, containersService, forwardingService, ssmForwardingService, writer, request)
+	return dispatch(manager, awsManager, localManager, serialManager, sftpService, containersService, forwardingService, ssmForwardingService, writer, request)
 }
 
 func dispatch(
 	manager *sshsession.Manager,
 	awsManager *awssession.Manager,
 	localManager *localsession.Manager,
+	serialManager *serialsession.Manager,
 	sftpService *coresftp.Service,
 	containersService *containersvc.Service,
 	forwardingService *forwarding.Service,
@@ -219,6 +226,50 @@ func dispatch(
 			}
 		}(request.ID, request.SessionID, payload)
 		return nil
+	case protocol.CommandSerialConnect:
+		var payload protocol.SerialConnectPayload
+		if err := json.Unmarshal(request.Payload, &payload); err != nil {
+			return err
+		}
+		go func(requestID, sessionID string, payload protocol.SerialConnectPayload) {
+			if err := serialManager.Connect(sessionID, requestID, payload); err != nil {
+				writer.emit(protocol.Event{
+					Type:      protocol.EventError,
+					RequestID: requestID,
+					SessionID: sessionID,
+					Payload: protocol.ErrorPayload{
+						Message: err.Error(),
+					},
+				})
+			}
+		}(request.ID, request.SessionID, payload)
+		return nil
+	case protocol.CommandSerialListPorts:
+		var payload protocol.SerialListPortsPayload
+		if len(request.Payload) > 0 {
+			if err := json.Unmarshal(request.Payload, &payload); err != nil {
+				return err
+			}
+		}
+		return serialManager.ListPorts(request.ID, payload)
+	case protocol.CommandSerialControl:
+		var payload protocol.SerialControlPayload
+		if err := json.Unmarshal(request.Payload, &payload); err != nil {
+			return err
+		}
+		if err := serialManager.Control(request.SessionID, payload.Action, payload.Enabled); err != nil {
+			return err
+		}
+		writer.emit(protocol.Event{
+			Type:      protocol.EventSerialControlCompleted,
+			RequestID: request.ID,
+			SessionID: request.SessionID,
+			Payload: protocol.SerialControlCompletedPayload{
+				Action:  payload.Action,
+				Enabled: payload.Enabled,
+			},
+		})
+		return nil
 	case protocol.CommandProbeHostKey:
 		var payload protocol.HostKeyProbePayload
 		if err := json.Unmarshal(request.Payload, &payload); err != nil {
@@ -284,6 +335,9 @@ func dispatch(
 		if localManager.HasSession(request.SessionID) {
 			return localManager.Resize(request.SessionID, payload.Cols, payload.Rows)
 		}
+		if serialManager.HasSession(request.SessionID) {
+			return serialManager.Resize(request.SessionID, payload.Cols, payload.Rows)
+		}
 		return manager.Resize(request.SessionID, payload.Cols, payload.Rows)
 	case protocol.CommandDisconnect:
 		if awsManager.HasSession(request.SessionID) {
@@ -291,6 +345,9 @@ func dispatch(
 		}
 		if localManager.HasSession(request.SessionID) {
 			return localManager.Disconnect(request.SessionID)
+		}
+		if serialManager.HasSession(request.SessionID) {
+			return serialManager.Disconnect(request.SessionID)
 		}
 		return manager.Disconnect(request.SessionID)
 	case protocol.CommandKeyboardInteractiveRespond:

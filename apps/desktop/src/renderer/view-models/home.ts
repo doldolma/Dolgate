@@ -23,6 +23,7 @@ export function useHomeViewModel() {
   const activateHome = useAppStore((state) => state.activateHome);
   const openHomeSection = useAppStore((state) => state.openHomeSection);
   const openCreateHostDrawer = useAppStore((state) => state.openCreateHostDrawer);
+  const openCreateSerialDrawer = useAppStore((state) => state.openCreateSerialDrawer);
   const openEditHostDrawer = useAppStore((state) => state.openEditHostDrawer);
   const closeHostDrawer = useAppStore((state) => state.closeHostDrawer);
   const navigateGroup = useAppStore((state) => state.navigateGroup);
@@ -68,6 +69,7 @@ export function useHomeViewModel() {
     activateHome,
     openHomeSection,
     openCreateHostDrawer,
+    openCreateSerialDrawer,
     openEditHostDrawer,
     closeHostDrawer,
     navigateGroup,

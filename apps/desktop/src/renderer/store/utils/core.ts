@@ -7,6 +7,7 @@ import {
   isAwsEc2HostRecord,
   isAwsEcsHostRecord,
   isLinkedDnsOverrideRecord,
+  isSerialHostRecord,
   isSshHostDraft,
   isGroupWithinPath,
   isSshHostRecord,
@@ -77,6 +78,7 @@ export {
   isAwsEc2HostRecord,
   isAwsEcsHostRecord,
   isLinkedDnsOverrideRecord,
+  isSerialHostRecord,
   isSshHostDraft,
   isGroupWithinPath,
   isSshHostRecord,
@@ -100,7 +102,7 @@ export type SftpSourceKind = "local" | "host";
 export type WorkspaceDropDirection = "left" | "right" | "top" | "bottom";
 export type HostDrawerState =
   | { mode: "closed" }
-  | { mode: "create"; defaultGroupPath: string | null }
+  | { mode: "create"; defaultGroupPath: string | null; kind: "ssh" | "serial" }
   | { mode: "edit"; hostId: string };
 
 export interface WorkspaceLeafNode {
@@ -640,6 +642,7 @@ export interface AppState {
   openHomeSection: (section: HomeSection) => void;
   openSettingsSection: (section: SettingsSection) => void;
   openCreateHostDrawer: () => void;
+  openCreateSerialDrawer: () => void;
   openEditHostDrawer: (hostId: string) => void;
   closeHostDrawer: () => void;
   navigateGroup: (path: string | null) => void;
@@ -1148,6 +1151,28 @@ export function toHostDraft(record: HostRecord, label: string): HostDraft {
       awsRegion: record.awsRegion,
       awsEcsClusterArn: record.awsEcsClusterArn,
       awsEcsClusterName: record.awsEcsClusterName,
+    };
+  }
+
+  if (record.kind === "serial") {
+    return {
+      kind: "serial",
+      label,
+      groupName: record.groupName ?? null,
+      tags: record.tags ?? [],
+      terminalThemeId: record.terminalThemeId ?? null,
+      transport: record.transport,
+      devicePath: record.devicePath ?? null,
+      host: record.host ?? null,
+      port: record.port ?? null,
+      baudRate: record.baudRate,
+      dataBits: record.dataBits,
+      parity: record.parity,
+      stopBits: record.stopBits,
+      flowControl: record.flowControl,
+      transmitLineEnding: record.transmitLineEnding,
+      localEcho: record.localEcho,
+      localLineEditing: record.localLineEditing,
     };
   }
 
@@ -2539,6 +2564,12 @@ export function resolveConnectingProgress(
     return createConnectionProgress(
       "connecting",
       `${host.label} Warpgate SSH 세션을 연결하는 중입니다.`,
+    );
+  }
+  if (host.kind === "serial") {
+    return createConnectionProgress(
+      "connecting",
+      `${host.label} Serial 세션을 연결하는 중입니다.`,
     );
   }
   return createConnectionProgress(

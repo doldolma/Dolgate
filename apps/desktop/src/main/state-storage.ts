@@ -592,6 +592,65 @@ function normalizeHostRecord(value: unknown): HostRecord | null {
     };
   }
 
+  if (value.kind === 'serial') {
+    if (
+      (value.transport !== 'local' && value.transport !== 'raw-tcp' && value.transport !== 'rfc2217') ||
+      typeof value.baudRate !== 'number' ||
+      !Number.isFinite(value.baudRate)
+    ) {
+      return null;
+    }
+
+    const rawDataBits = typeof value.dataBits === 'number' ? value.dataBits : 8;
+    const dataBits = rawDataBits === 5 || rawDataBits === 6 || rawDataBits === 7 ? rawDataBits : 8;
+    const rawStopBits = typeof value.stopBits === 'number' ? value.stopBits : 1;
+    const stopBits = rawStopBits === 1.5 || rawStopBits === 2 ? rawStopBits : 1;
+    const parity =
+      value.parity === 'odd' ||
+      value.parity === 'even' ||
+      value.parity === 'mark' ||
+      value.parity === 'space'
+        ? value.parity
+        : 'none';
+    const flowControl =
+      value.flowControl === 'xon-xoff' ||
+      value.flowControl === 'rts-cts' ||
+      value.flowControl === 'dsr-dtr'
+        ? value.flowControl
+        : 'none';
+
+    return {
+      id: value.id,
+      kind: 'serial',
+      label: value.label,
+      groupName: typeof value.groupName === 'string' ? value.groupName : null,
+      tags,
+      terminalThemeId: isTerminalThemeId(value.terminalThemeId) ? value.terminalThemeId : null,
+      transport: value.transport,
+      devicePath: typeof value.devicePath === 'string' ? value.devicePath : null,
+      host: typeof value.host === 'string' ? value.host : null,
+      port:
+        typeof value.port === 'number' && Number.isFinite(value.port)
+          ? Math.round(value.port)
+          : null,
+      baudRate: Math.max(1, Math.round(value.baudRate)),
+      dataBits,
+      parity,
+      stopBits,
+      flowControl,
+      transmitLineEnding:
+        value.transmitLineEnding === 'cr' ||
+        value.transmitLineEnding === 'lf' ||
+        value.transmitLineEnding === 'crlf'
+          ? value.transmitLineEnding
+          : 'none',
+      localEcho: Boolean(value.localEcho),
+      localLineEditing: Boolean(value.localLineEditing),
+      createdAt: typeof value.createdAt === 'string' ? value.createdAt : nowIso(),
+      updatedAt: typeof value.updatedAt === 'string' ? value.updatedAt : nowIso()
+    };
+  }
+
   if (value.kind !== 'ssh' && typeof value.hostname !== 'string') {
     return null;
   }

@@ -11,5 +11,7 @@ require (
 
 require (
 	github.com/Microsoft/go-winio v0.6.2 // indirect
+	github.com/creack/goselect v0.1.2 // indirect
 	github.com/kr/fs v0.1.0 // indirect
+	go.bug.st/serial v1.6.4 // indirect
 )

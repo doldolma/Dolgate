@@ -59,7 +59,7 @@ export type SftpSourceKind = "local" | "host";
 export type WorkspaceDropDirection = "left" | "right" | "top" | "bottom";
 export type HostDrawerState =
   | { mode: "closed" }
-  | { mode: "create"; defaultGroupPath: string | null }
+  | { mode: "create"; defaultGroupPath: string | null; kind: "ssh" | "serial" }
   | { mode: "edit"; hostId: string };
 
 export interface WorkspaceLeafNode {
@@ -468,6 +468,7 @@ interface AppStateParts {
   openHomeSection: (section: HomeSection) => void;
   openSettingsSection: (section: SettingsSection) => void;
   openCreateHostDrawer: () => void;
+  openCreateSerialDrawer: () => void;
   openEditHostDrawer: (hostId: string) => void;
   closeHostDrawer: () => void;
   navigateGroup: (path: string | null) => void;
@@ -736,6 +737,7 @@ export type CatalogSlice = Pick<
   | "openHomeSection"
   | "openSettingsSection"
   | "openCreateHostDrawer"
+  | "openCreateSerialDrawer"
   | "openEditHostDrawer"
   | "closeHostDrawer"
   | "navigateGroup"

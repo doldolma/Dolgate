@@ -254,6 +254,65 @@ describe('HostRepository', () => {
     });
   });
 
+  it('persists serial hosts on create and reload', async () => {
+    const { HostRepository } = await loadRepositories();
+    const hosts = new HostRepository();
+
+    const created = hosts.create('serial-host-1', {
+      kind: 'serial',
+      label: 'Console',
+      groupName: 'Lab',
+      tags: ['serial'],
+      terminalThemeId: null,
+      transport: 'rfc2217',
+      devicePath: null,
+      host: 'serial.example.com',
+      port: 2217,
+      baudRate: 115200,
+      dataBits: 8,
+      parity: 'none',
+      stopBits: 1,
+      flowControl: 'rts-cts',
+      transmitLineEnding: 'crlf',
+      localEcho: false,
+      localLineEditing: true,
+    });
+
+    expect(created).toMatchObject({
+      kind: 'serial',
+      transport: 'rfc2217',
+      host: 'serial.example.com',
+      port: 2217,
+      baudRate: 115200,
+      flowControl: 'rts-cts',
+      transmitLineEnding: 'crlf',
+      localEcho: false,
+      localLineEditing: true,
+    });
+
+    vi.resetModules();
+    const stateStorageModule = await import('./state-storage');
+    stateStorageModule.resetDesktopStateStorageForTests();
+    const databaseModule = await import('./database');
+    const reloadedHosts = new databaseModule.HostRepository();
+
+    expect(reloadedHosts.getById('serial-host-1')).toMatchObject({
+      kind: 'serial',
+      label: 'Console',
+      transport: 'rfc2217',
+      host: 'serial.example.com',
+      port: 2217,
+      baudRate: 115200,
+      dataBits: 8,
+      parity: 'none',
+      stopBits: 1,
+      flowControl: 'rts-cts',
+      transmitLineEnding: 'crlf',
+      localEcho: false,
+      localLineEditing: true,
+    });
+  });
+
   it('clears key paths when unlinking a secret-backed SSH host', async () => {
     const { HostRepository } = await loadRepositories();
     const hosts = new HostRepository();

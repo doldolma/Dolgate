@@ -217,6 +217,12 @@ function getContainerHostSecondaryLabel(host: HostRecord): string {
   if (isWarpgateSshHostRecord(host)) {
     return `${host.warpgateUsername}:${host.warpgateTargetName}`;
   }
+  if (host.kind === 'serial') {
+    if (host.transport === 'local') {
+      return host.devicePath ?? 'Local serial port';
+    }
+    return `${host.transport} / ${host.host ?? ''}:${host.port ?? ''}`.replace(/:$/, '');
+  }
   return host.hostname;
 }
 

@@ -67,4 +67,28 @@ describe('TerminalSharePopover', () => {
     expect(onSetInputEnabled).toHaveBeenCalledWith(true);
     expect(onStopShare).toHaveBeenCalledTimes(1);
   });
+
+  it('renders extra session actions next to the share control', () => {
+    render(
+      <TerminalSharePopover
+        anchorRef={{ current: null }}
+        showHeader={false}
+        open={false}
+        actions={<button type="button">Serial actions</button>}
+        canStartShare
+        shareCopyStatus={null}
+        shareState={null}
+        onToggle={vi.fn()}
+        onStartShare={vi.fn()}
+        onCopyShareUrl={vi.fn()}
+        onSetInputEnabled={vi.fn()}
+        onOpenChatWindow={vi.fn()}
+        onStopShare={vi.fn()}
+        canOpenChatWindow={false}
+      />,
+    );
+
+    expect(screen.getByRole('button', { name: 'Serial actions' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Share' })).toBeInTheDocument();
+  });
 });

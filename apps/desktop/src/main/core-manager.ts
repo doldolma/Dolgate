@@ -30,11 +30,16 @@ import type {
   ResolvedCoreConnectPayload,
   ResolvedHostKeyProbePayload,
   ResolvedLocalConnectPayload,
+  ResolvedSerialConnectPayload,
+  ResolvedSerialControlPayload,
+  ResolvedSerialControlResult,
+  ResolvedSerialListPortsPayload,
   ResolvedPortForwardStartPayload,
   ResolvedSsmPortForwardStartPayload,
   ResolvedSftpConnectPayload,
   SessionConnectionKind,
   SessionLifecycleLogMetadata,
+  SerialPortSummary,
   SftpChmodInput,
   SftpDeleteInput,
   SftpEndpointSummary,
@@ -98,7 +103,7 @@ interface ContainersEndpointRuntime {
   unsupportedReason: string | null;
 }
 
-type SessionTransport = "ssh" | "aws-ssm" | "warpgate" | "local-shell";
+type SessionTransport = "ssh" | "aws-ssm" | "warpgate" | "local-shell" | "serial";
 
 const AWS_SSM_CONTROL_SIGNAL_BY_BYTE: ReadonlyMap<
   number,
@@ -1356,6 +1361,122 @@ export class CoreManager {
     return { sessionId };
   }
 
+  async connectSerialSession(
+    payload: ResolvedSerialConnectPayload & {
+      title: string;
+      hostId: string;
+      hostLabel: string;
+    },
+  ): Promise<{ sessionId: string }> {
+    await this.start();
+    const sessionId = randomUUID();
+    this.sessionTransportById.set(sessionId, "serial");
+    const targetDescription =
+      payload.transport === "local"
+        ? payload.devicePath ?? "Local serial port"
+        : `${payload.transport} · ${payload.host ?? ""}:${payload.port ?? ""}`.replace(/:$/, "");
+    this.remoteSessionLifecycleById.set(sessionId, {
+      hostId: payload.hostId,
+      hostLabel: payload.hostLabel,
+      title: payload.title,
+      connectionDetails: targetDescription,
+      connectionKind: "serial",
+      connectedAt: null,
+      disconnectedAt: null,
+      disconnectReason: null,
+      status: null,
+      recordingId: null,
+      hasReplay: false,
+    });
+    this.tabs.set(sessionId, {
+      id: sessionId,
+      title: payload.title,
+      source: "host",
+      hostId: payload.hostId,
+      sessionId,
+      status: "connecting",
+      lastEventAt: new Date().toISOString(),
+    });
+    this.sendControl<ResolvedSerialConnectPayload>({
+      id: randomUUID(),
+      type: "serialConnect",
+      sessionId,
+      payload,
+    });
+    return { sessionId };
+  }
+
+  async listSerialPorts(): Promise<SerialPortSummary[]> {
+    await this.start();
+    const response = await this.requestResponse<Record<string, unknown>>(
+      {
+        id: randomUUID(),
+        type: "serialListPorts",
+        payload: {} satisfies ResolvedSerialListPortsPayload,
+      },
+      ["serialPortsListed"],
+    );
+    if (!Array.isArray(response.ports)) {
+      return [];
+    }
+    return response.ports.flatMap((entry) => {
+      if (!entry || typeof entry !== "object") {
+        return [];
+      }
+      const candidate = entry as Record<string, unknown>;
+      const pathValue = typeof candidate.path === "string" ? candidate.path : "";
+      if (!pathValue) {
+        return [];
+      }
+      return [{
+        path: pathValue,
+        displayName:
+          typeof candidate.displayName === "string" && candidate.displayName.trim()
+            ? candidate.displayName
+            : pathValue,
+        manufacturer:
+          typeof candidate.manufacturer === "string"
+            ? candidate.manufacturer
+            : null,
+      }];
+    });
+  }
+
+  async controlSerialSession(
+    sessionId: string,
+    payload: ResolvedSerialControlPayload,
+  ): Promise<ResolvedSerialControlResult> {
+    await this.start();
+    const tab = this.tabs.get(sessionId);
+    if (!tab) {
+      throw new Error("Serial session not found");
+    }
+    if (this.sessionTransportById.get(sessionId) !== "serial") {
+      throw new Error("이 기능은 Serial 세션에서만 사용할 수 있습니다.");
+    }
+
+    const response = await this.requestResponse<Record<string, unknown>>(
+      {
+        id: randomUUID(),
+        type: "serialControl",
+        sessionId,
+        payload,
+      },
+      ["serialControlCompleted"],
+    );
+
+    return {
+      action:
+        response.action === "break" ||
+        response.action === "set-dtr" ||
+        response.action === "set-rts"
+          ? response.action
+          : payload.action,
+      enabled:
+        typeof response.enabled === "boolean" ? response.enabled : payload.enabled,
+    };
+  }
+
   async probeHostKey(
     payload: ResolvedHostKeyProbePayload,
   ): Promise<HostKeyProbeResult> {
@@ -2375,6 +2496,9 @@ export class CoreManager {
     }
     if (kind === "aws-ecs-exec") {
       return "AWS ECS Exec";
+    }
+    if (kind === "serial") {
+      return "Serial";
     }
     if (kind === "warpgate") {
       return "Warpgate";
