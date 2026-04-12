@@ -173,6 +173,7 @@ const keychainEntries: SecretMetadataRecord[] = [
     hasPassword: true,
     hasPassphrase: false,
     hasManagedPrivateKey: false,
+    hasCertificate: false,
     source: 'local_keychain',
     linkedHostCount: 1,
     updatedAt: '2025-01-01T00:00:00.000Z',
@@ -183,6 +184,7 @@ const keychainEntries: SecretMetadataRecord[] = [
     hasPassword: true,
     hasPassphrase: false,
     hasManagedPrivateKey: false,
+    hasCertificate: false,
     source: 'local_keychain',
     linkedHostCount: 2,
     updatedAt: '2025-01-01T00:00:00.000Z',
@@ -840,7 +842,7 @@ describe('HostBrowser dialogs', () => {
     const onRemoveSecret = vi.fn().mockResolvedValue(undefined);
     const hostsWithSecret: HostRecord[] = [
       {
-        ...hosts[0],
+        ...(hosts[0] as Extract<HostRecord, { kind: 'ssh' }>),
         secretRef: 'secret:host-1',
       },
       ...hosts.slice(1),

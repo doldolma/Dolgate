@@ -309,8 +309,14 @@ function normalizeIncomingHostRecord(record: HostRecord): HostRecord {
       hostname: legacyRecord.hostname,
       port: legacyRecord.port,
       username: legacyRecord.username,
-      authType: legacyRecord.authType === 'privateKey' ? 'privateKey' : 'password',
+      authType:
+        legacyRecord.authType === 'privateKey'
+          ? 'privateKey'
+          : legacyRecord.authType === 'certificate'
+            ? 'certificate'
+            : 'password',
       privateKeyPath: legacyRecord.privateKeyPath ?? null,
+      certificatePath: legacyRecord.certificatePath ?? null,
       secretRef: legacyRecord.secretRef ?? null,
       createdAt: legacyRecord.createdAt,
       updatedAt: legacyRecord.updatedAt
@@ -411,6 +417,7 @@ function toSshHostRecord(id: string, draft: SshHostDraft, secretRef: string | nu
     username: draft.username,
     authType: draft.authType,
     privateKeyPath: draft.privateKeyPath ?? null,
+    certificatePath: draft.certificatePath ?? null,
     secretRef: secretRef ?? draft.secretRef ?? null,
     groupName: normalizeGroupPath(draft.groupName),
     tags: normalizeTags(draft.tags),
@@ -609,6 +616,8 @@ export class HostRepository {
         nextRecord = {
           ...entry,
           secretRef,
+          privateKeyPath: secretRef ? null : entry.privateKeyPath ?? null,
+          certificatePath: secretRef ? null : entry.certificatePath ?? null,
           tags: normalizeTags(entry.tags),
           terminalThemeId: normalizeTerminalThemeId(entry.terminalThemeId),
           updatedAt: nowIso()
@@ -629,6 +638,8 @@ export class HostRepository {
         return {
           ...entry,
           secretRef: null,
+          privateKeyPath: null,
+          certificatePath: null,
           updatedAt: timestamp
         };
       });
@@ -1470,6 +1481,7 @@ export class SecretMetadataRepository {
     hasPassword: boolean;
     hasPassphrase: boolean;
     hasManagedPrivateKey?: boolean;
+    hasCertificate?: boolean;
     source?: SecretSource;
   }): void {
     stateStorage.updateState((state) => {
@@ -1480,6 +1492,7 @@ export class SecretMetadataRepository {
         hasPassword: input.hasPassword,
         hasPassphrase: input.hasPassphrase,
         hasManagedPrivateKey: input.hasManagedPrivateKey ?? false,
+        hasCertificate: input.hasCertificate ?? false,
         source: input.source ?? 'local_keychain',
         linkedHostCount: 0,
         updatedAt: timestamp

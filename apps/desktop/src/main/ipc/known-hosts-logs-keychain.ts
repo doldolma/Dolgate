@@ -154,6 +154,7 @@ export function registerKnownHostsLogsKeychainIpcHandlers(
           password: mergedSecrets.password,
           passphrase: mergedSecrets.passphrase,
           privateKeyPem: mergedSecrets.privateKeyPem,
+          certificateText: mergedSecrets.certificateText,
           source: currentMetadata.source,
           updatedAt: new Date().toISOString(),
         } satisfies ManagedSecretPayload),
@@ -163,9 +164,8 @@ export function registerKnownHostsLogsKeychainIpcHandlers(
         label: currentMetadata.label,
         hasPassword: Boolean(mergedSecrets.password),
         hasPassphrase: Boolean(mergedSecrets.passphrase),
-        hasManagedPrivateKey:
-          Boolean(mergedSecrets.privateKeyPem) ||
-          currentMetadata.hasManagedPrivateKey,
+        hasManagedPrivateKey: Boolean(mergedSecrets.privateKeyPem),
+        hasCertificate: Boolean(mergedSecrets.certificateText),
         source: currentMetadata.source,
       });
 
@@ -215,4 +215,3 @@ export function registerKnownHostsLogsKeychainIpcHandlers(
     },
   );
 }
-

@@ -740,6 +740,7 @@ function createMockApi(): DesktopApi {
     },
     shell: {
       pickPrivateKey: vi.fn(),
+      pickSshCertificate: vi.fn(),
       pickOpenSshConfig: vi.fn(),
       pickXshellSessionFolder: vi.fn(),
       openExternal: vi.fn().mockResolvedValue(undefined),
@@ -1309,6 +1310,7 @@ describe("createAppStore", () => {
           hasPassword: true,
           hasPassphrase: false,
           hasManagedPrivateKey: false,
+          hasCertificate: false,
           source: "server_managed",
           linkedHostCount: 1,
           updatedAt: "2025-01-02T00:00:00.000Z",
@@ -1904,6 +1906,112 @@ describe("createAppStore", () => {
         : null,
     ).toBe("ubuntu");
     expect(store.getState().tabs[0]?.sessionId).toBe("session-1");
+  });
+
+  it("opens a unified auth retry request for SSH authentication failures", async () => {
+    const api = createMockApi();
+    const store = createAppStore(api);
+
+    await store.getState().bootstrap();
+    await store.getState().connectHost("host-1", 120, 32);
+
+    store.getState().handleCoreEvent({
+      type: "error",
+      sessionId: "session-1",
+      payload: {
+        message:
+          "ssh handshake failed: ssh: handshake failed: ssh: unexpected message type 51 (expected 60)",
+      },
+    });
+
+    expect(store.getState().pendingCredentialRetry).toMatchObject({
+      hostId: "host-1",
+      source: "ssh",
+      authType: "password",
+      initialUsername: "ubuntu",
+    });
+  });
+
+  it("retries SSH auth with username and reopens using the attempted username on failure", async () => {
+    const api = createMockApi();
+    let currentHost: HostRecord = {
+      id: "host-1",
+      kind: "ssh",
+      label: "Prod",
+      hostname: "prod.example.com",
+      port: 22,
+      username: "ubuntu",
+      authType: "certificate",
+      privateKeyPath: null,
+      certificatePath: null,
+      secretRef: "host:host-1",
+      groupName: "Servers",
+      terminalThemeId: null,
+      createdAt: "2025-01-01T00:00:00.000Z",
+      updatedAt: "2025-01-01T00:00:00.000Z",
+    };
+    api.hosts.list = vi.fn().mockResolvedValue([currentHost]);
+    api.hosts.update = vi.fn().mockImplementation(async (_id, draft) => {
+      currentHost = {
+        ...currentHost,
+        ...draft,
+        kind: "ssh",
+        id: currentHost.id,
+        createdAt: currentHost.createdAt,
+        updatedAt: "2025-01-02T00:00:00.000Z",
+      };
+      return currentHost;
+    });
+    const store = createAppStore(api);
+
+    await store.getState().bootstrap();
+    await store.getState().connectHost("host-1", 120, 32);
+    store.getState().handleCoreEvent({
+      type: "error",
+      sessionId: "session-1",
+      payload: {
+        message: "authentication failed",
+      },
+    });
+
+    await store.getState().submitCredentialRetry({
+      username: "test11",
+      privateKeyPem: "PRIVATE KEY",
+      certificateText: "ssh-ed25519-cert-v01@openssh.com AAAA",
+      passphrase: "secret",
+    });
+
+    expect(api.hosts.update).toHaveBeenCalledWith(
+      "host-1",
+      expect.objectContaining({
+        kind: "ssh",
+        username: "test11",
+      }),
+    );
+    expect(api.ssh.connect).toHaveBeenCalledTimes(2);
+    expect(store.getState().pendingCredentialRetry).toBeNull();
+
+    store.getState().handleCoreEvent({
+      type: "error",
+      sessionId: "session-2",
+      payload: {
+        message: "authentication failed",
+      },
+    });
+    await flushMicrotasks();
+
+    expect(api.hosts.update).toHaveBeenLastCalledWith(
+      "host-1",
+      expect.objectContaining({
+        kind: "ssh",
+        username: "ubuntu",
+      }),
+    );
+    expect(store.getState().pendingCredentialRetry).toMatchObject({
+      hostId: "host-1",
+      authType: "certificate",
+      initialUsername: "test11",
+    });
   });
 
   it("creates a pending tab immediately before the real session id is resolved", async () => {
@@ -2510,6 +2618,152 @@ describe("createAppStore", () => {
     });
     expect(api.sync.pushDirty).toHaveBeenCalledTimes(1);
     expect(store.getState().settings.globalTerminalThemeId).toBe("system");
+  });
+
+  it("refreshes hosts and keychain entries after removing a keychain secret", async () => {
+    const api = createMockApi();
+    let hosts: HostRecord[] = [
+      {
+        id: "host-1",
+        kind: "ssh",
+        label: "Prod",
+        hostname: "prod.example.com",
+        port: 22,
+        username: "ubuntu",
+        authType: "password",
+        privateKeyPath: null,
+        certificatePath: null,
+        secretRef: "secret-1",
+        groupName: "Servers",
+        tags: [],
+        terminalThemeId: null,
+        createdAt: "2025-01-01T00:00:00.000Z",
+        updatedAt: "2025-01-01T00:00:00.000Z",
+      },
+    ];
+    let keychainEntries = [
+      {
+        secretRef: "secret-1",
+        label: "Prod Secret",
+        hasPassword: true,
+        hasPassphrase: false,
+        hasManagedPrivateKey: false,
+        hasCertificate: false,
+        source: "local_keychain" as const,
+        linkedHostCount: 1,
+        updatedAt: "2025-01-01T00:00:00.000Z",
+      },
+    ];
+
+    api.hosts.list = vi.fn().mockImplementation(async () => hosts);
+    api.keychain.list = vi.fn().mockImplementation(async () => keychainEntries);
+    api.keychain.remove = vi.fn().mockImplementation(async (secretRef: string) => {
+      hosts = hosts.map((host) =>
+        isSshHostRecord(host) && host.secretRef === secretRef
+          ? { ...host, secretRef: null, updatedAt: "2025-01-02T00:00:00.000Z" }
+          : host,
+      );
+      keychainEntries = keychainEntries.filter((entry) => entry.secretRef !== secretRef);
+    });
+
+    const store = createAppStore(api);
+    await store.getState().bootstrap();
+
+    await store.getState().removeKeychainSecret("secret-1");
+
+    expect(api.keychain.remove).toHaveBeenCalledWith("secret-1");
+    expect(api.hosts.list).toHaveBeenCalledTimes(2);
+    expect(api.keychain.list).toHaveBeenCalledTimes(2);
+    const refreshedHost = store.getState().hosts[0];
+    expect(isSshHostRecord(refreshedHost)).toBe(true);
+    if (isSshHostRecord(refreshedHost)) {
+      expect(refreshedHost.secretRef).toBeNull();
+    }
+    expect(store.getState().keychainEntries).toEqual([]);
+  });
+
+  it("refreshes hosts and keychain entries after cloning a keychain secret for a host", async () => {
+    const api = createMockApi();
+    let hosts: HostRecord[] = [
+      {
+        id: "host-1",
+        kind: "ssh",
+        label: "Prod",
+        hostname: "prod.example.com",
+        port: 22,
+        username: "ubuntu",
+        authType: "password",
+        privateKeyPath: null,
+        certificatePath: null,
+        secretRef: "secret-1",
+        groupName: "Servers",
+        tags: [],
+        terminalThemeId: null,
+        createdAt: "2025-01-01T00:00:00.000Z",
+        updatedAt: "2025-01-01T00:00:00.000Z",
+      },
+    ];
+    let keychainEntries = [
+      {
+        secretRef: "secret-1",
+        label: "Shared Secret",
+        hasPassword: false,
+        hasPassphrase: true,
+        hasManagedPrivateKey: true,
+        hasCertificate: false,
+        source: "local_keychain" as const,
+        linkedHostCount: 1,
+        updatedAt: "2025-01-01T00:00:00.000Z",
+      },
+    ];
+
+    api.hosts.list = vi.fn().mockImplementation(async () => hosts);
+    api.keychain.list = vi.fn().mockImplementation(async () => keychainEntries);
+    api.keychain.cloneForHost = vi.fn().mockImplementation(async ({ hostId }: { hostId: string }) => {
+      hosts = hosts.map((host) =>
+        isSshHostRecord(host) && host.id === hostId
+          ? { ...host, secretRef: "secret-2", updatedAt: "2025-01-02T00:00:00.000Z" }
+          : host,
+      );
+      keychainEntries = [
+        ...keychainEntries,
+        {
+          secretRef: "secret-2",
+          label: "Prod Host Secret",
+          hasPassword: false,
+          hasPassphrase: true,
+          hasManagedPrivateKey: true,
+          hasCertificate: false,
+          source: "local_keychain" as const,
+          linkedHostCount: 1,
+          updatedAt: "2025-01-02T00:00:00.000Z",
+        },
+      ];
+    });
+
+    const store = createAppStore(api);
+    await store.getState().bootstrap();
+
+    await store.getState().cloneKeychainSecretForHost("host-1", "secret-1", {
+      passphrase: "next-passphrase",
+    });
+
+    expect(api.keychain.cloneForHost).toHaveBeenCalledWith({
+      hostId: "host-1",
+      sourceSecretRef: "secret-1",
+      secrets: { passphrase: "next-passphrase" },
+    });
+    expect(api.hosts.list).toHaveBeenCalledTimes(2);
+    expect(api.keychain.list).toHaveBeenCalledTimes(2);
+    const clonedHost = store.getState().hosts[0];
+    expect(isSshHostRecord(clonedHost)).toBe(true);
+    if (isSshHostRecord(clonedHost)) {
+      expect(clonedHost.secretRef).toBe("secret-2");
+    }
+    expect(store.getState().keychainEntries.map((entry) => entry.secretRef)).toEqual([
+      "secret-2",
+      "secret-1",
+    ]);
   });
 
   it("starts AWS SSO login and retries the session connect once when the profile is expired", async () => {

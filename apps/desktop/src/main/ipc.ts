@@ -170,7 +170,12 @@ async function persistSecret(
   secrets?: HostSecretInput,
 ): Promise<string | null> {
   // 비밀값이 없으면 키체인을 건드리지 않고 바로 빠져나간다.
-  if (!secrets?.password && !secrets?.passphrase && !secrets?.privateKeyPem) {
+  if (
+    !secrets?.password &&
+    !secrets?.passphrase &&
+    !secrets?.privateKeyPem &&
+    !secrets?.certificateText
+  ) {
     return null;
   }
 
@@ -184,6 +189,7 @@ async function persistSecret(
       password: secrets.password,
       passphrase: secrets.passphrase,
       privateKeyPem: secrets.privateKeyPem,
+      certificateText: secrets.certificateText,
       source: "local_keychain",
       updatedAt,
     } satisfies ManagedSecretPayload),
@@ -194,6 +200,7 @@ async function persistSecret(
     hasPassword: Boolean(secrets.password),
     hasPassphrase: Boolean(secrets.passphrase),
     hasManagedPrivateKey: Boolean(secrets.privateKeyPem),
+    hasCertificate: Boolean(secrets.certificateText),
     source: "local_keychain",
   });
   return secretRef;
@@ -221,6 +228,10 @@ async function loadSecrets(
       typeof parsed.privateKeyPem === "string"
         ? parsed.privateKeyPem
         : undefined,
+    certificateText:
+      typeof parsed.certificateText === "string"
+        ? parsed.certificateText
+        : undefined,
     source:
       parsed.source === "server_managed" ? "server_managed" : "local_keychain",
     updatedAt:
@@ -232,7 +243,10 @@ async function loadSecrets(
 
 function hasSecretValue(secrets: HostSecretInput): boolean {
   return Boolean(
-    secrets.password || secrets.passphrase || secrets.privateKeyPem,
+    secrets.password ||
+      secrets.passphrase ||
+      secrets.privateKeyPem ||
+      secrets.certificateText,
   );
 }
 
@@ -248,16 +262,28 @@ function mergeSecrets(
       patch.privateKeyPem !== undefined
         ? patch.privateKeyPem
         : current.privateKeyPem,
+    certificateText:
+      patch.certificateText !== undefined
+        ? patch.certificateText
+        : current.certificateText,
   };
 }
 
 async function resolveManagedPrivateKeyPem(
   draft: HostDraft,
+  nextSecrets: HostSecretInput | undefined,
   currentSecretRef: string | null,
   secretStore: SecretStore,
 ): Promise<string | undefined> {
-  if (!isSshHostDraft(draft) || draft.authType !== "privateKey") {
+  if (
+    !isSshHostDraft(draft) ||
+    (draft.authType !== "privateKey" && draft.authType !== "certificate")
+  ) {
     return undefined;
+  }
+
+  if (nextSecrets?.privateKeyPem) {
+    return nextSecrets.privateKeyPem;
   }
 
   if (draft.privateKeyPath) {
@@ -273,6 +299,74 @@ async function resolveManagedPrivateKeyPem(
   }
 
   return undefined;
+}
+
+async function resolveManagedCertificateText(
+  draft: HostDraft,
+  nextSecrets: HostSecretInput | undefined,
+  currentSecretRef: string | null,
+  secretStore: SecretStore,
+): Promise<string | undefined> {
+  if (!isSshHostDraft(draft) || draft.authType !== "certificate") {
+    return undefined;
+  }
+
+  if (nextSecrets?.certificateText) {
+    return nextSecrets.certificateText;
+  }
+
+  if (draft.certificatePath) {
+    const certificateText = await readFile(draft.certificatePath, "utf8");
+    return certificateText.trim() || undefined;
+  }
+
+  if (currentSecretRef) {
+    const currentSecrets = await loadSecrets(secretStore, currentSecretRef);
+    if (currentSecrets.certificateText) {
+      return currentSecrets.certificateText;
+    }
+  }
+
+  return undefined;
+}
+
+async function resolveRuntimeSshSecrets(
+  secretStore: SecretStore,
+  host: Extract<HostRecord, { kind: "ssh" }>,
+  secrets?: HostSecretInput,
+): Promise<{
+  secrets: HostSecretInput;
+  shouldPersistHostSecret: boolean;
+}> {
+  const resolvedSecrets = mergeSecrets(
+    await loadSecrets(secretStore, host.secretRef),
+    secrets ?? {},
+  );
+  let shouldPersistHostSecret = Boolean(secrets && hasSecretValue(secrets));
+
+  if (
+    (host.authType === "privateKey" || host.authType === "certificate") &&
+    !resolvedSecrets.privateKeyPem &&
+    host.privateKeyPath
+  ) {
+    resolvedSecrets.privateKeyPem = await readFile(host.privateKeyPath, "utf8");
+    shouldPersistHostSecret = true;
+  }
+
+  if (
+    host.authType === "certificate" &&
+    !resolvedSecrets.certificateText &&
+    host.certificatePath
+  ) {
+    const certificateText = await readFile(host.certificatePath, "utf8");
+    resolvedSecrets.certificateText = certificateText.trim() || undefined;
+    shouldPersistHostSecret = true;
+  }
+
+  return {
+    secrets: resolvedSecrets,
+    shouldPersistHostSecret,
+  };
 }
 
 function base64UrlToBuffer(value: string): Buffer {
@@ -1489,7 +1583,8 @@ export function registerIpcHandlers(
 
     const trustedHostKeyBase64 = requireTrustedHostKey(knownHosts, host);
     const username = requireConfiguredSshUsername(host);
-    const secrets = await loadSecrets(secretStore, host.secretRef);
+    const { secrets, shouldPersistHostSecret } =
+      await resolveRuntimeSshSecrets(secretStore, host);
     const result = await coreManager.containersConnect({
       endpointId,
       host: host.hostname,
@@ -1498,11 +1593,14 @@ export function registerIpcHandlers(
       authType: host.authType,
       password: secrets.password,
       privateKeyPem: secrets.privateKeyPem,
-      privateKeyPath: host.privateKeyPath ?? undefined,
+      certificateText: secrets.certificateText,
       passphrase: secrets.passphrase,
       trustedHostKeyBase64,
       hostId: host.id,
     });
+    if (shouldPersistHostSecret) {
+      await persistHostSpecificSecret(host.id, host.label, secrets);
+    }
     return {
       endpointId,
       runtime: result.runtime,
@@ -1789,8 +1887,17 @@ export function registerIpcHandlers(
       loadSecrets(secretStore, secretRef) as Promise<HostSecretInput>,
     hasSecretValue,
     mergeSecrets,
-    resolveManagedPrivateKeyPem: (draft, currentSecretRef) =>
-      resolveManagedPrivateKeyPem(draft, currentSecretRef, secretStore),
+    resolveRuntimeSshSecrets: (host, secrets) =>
+      resolveRuntimeSshSecrets(secretStore, host, secrets),
+    resolveManagedPrivateKeyPem: (draft, nextSecrets, currentSecretRef) =>
+      resolveManagedPrivateKeyPem(draft, nextSecrets, currentSecretRef, secretStore),
+    resolveManagedCertificateText: (draft, nextSecrets, currentSecretRef) =>
+      resolveManagedCertificateText(
+        draft,
+        nextSecrets,
+        currentSecretRef,
+        secretStore,
+      ),
     requireTrustedHostKey: (host) => requireTrustedHostKey(knownHosts, host),
     requireConfiguredSshUsername,
     buildKnownSshDuplicateKeys: () => buildKnownSshDuplicateKeys(hosts),

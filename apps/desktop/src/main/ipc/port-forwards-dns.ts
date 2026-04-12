@@ -519,7 +519,8 @@ export function registerPortForwardAndDnsIpcHandlers(
       const sshHost = host as SshHostRecord;
       const trustedHostKeyBase64 = ctx.requireTrustedHostKey(sshHost);
       const username = ctx.requireConfiguredSshUsername(sshHost);
-      const secrets = await ctx.loadSecrets(sshHost.secretRef);
+      const { secrets, shouldPersistHostSecret } =
+        await ctx.resolveRuntimeSshSecrets(sshHost);
 
       const runtime = await ctx.coreManager.startPortForward({
         ruleId: rule.id,
@@ -530,7 +531,7 @@ export function registerPortForwardAndDnsIpcHandlers(
         authType: sshHost.authType,
         password: secrets.password,
         privateKeyPem: secrets.privateKeyPem,
-        privateKeyPath: sshHost.privateKeyPath ?? undefined,
+        certificateText: secrets.certificateText,
         passphrase: secrets.passphrase,
         trustedHostKeyBase64,
         mode: rule.mode,
@@ -539,6 +540,9 @@ export function registerPortForwardAndDnsIpcHandlers(
         targetHost: rule.targetHost ?? undefined,
         targetPort: rule.targetPort ?? undefined,
       });
+      if (shouldPersistHostSecret) {
+        await ctx.persistHostSpecificSecret(sshHost.id, sshHost.label, secrets);
+      }
       try {
         await ctx.rewriteActiveDnsOverrides();
       } catch (error) {

@@ -23,6 +23,8 @@ type Target struct {
 	Password             string
 	PrivateKeyPEM        string
 	PrivateKeyPath       string
+	CertificateText      string
+	CertificatePath      string
 	Passphrase           string
 	TrustedHostKeyBase64 string
 }
@@ -197,31 +199,29 @@ func resolveAuthMethods(target Target, responder InteractiveResponder) ([]ssh.Au
 			resolveKeyboardInteractiveAuthMethod(responder),
 		}, nil
 	case "privateKey":
-		var privateKey []byte
-		if target.PrivateKeyPEM != "" {
-			privateKey = []byte(target.PrivateKeyPEM)
-		} else {
-			if target.PrivateKeyPath == "" {
-				return nil, fmt.Errorf("private key auth requires a privateKeyPem or privateKeyPath")
-			}
-			var err error
-			privateKey, err = os.ReadFile(target.PrivateKeyPath)
-			if err != nil {
-				return nil, fmt.Errorf("read private key: %w", err)
-			}
-		}
-		var signer ssh.Signer
-		var err error
-		if target.Passphrase != "" {
-			signer, err = ssh.ParsePrivateKeyWithPassphrase(privateKey, []byte(target.Passphrase))
-		} else {
-			signer, err = ssh.ParsePrivateKey(privateKey)
-		}
+		signer, err := resolvePrivateKeySigner(target)
 		if err != nil {
-			return nil, fmt.Errorf("parse private key: %w", err)
+			return nil, err
 		}
 		return []ssh.AuthMethod{
 			ssh.PublicKeys(signer),
+			resolveKeyboardInteractiveAuthMethod(responder),
+		}, nil
+	case "certificate":
+		signer, err := resolvePrivateKeySigner(target)
+		if err != nil {
+			return nil, err
+		}
+		cert, err := resolveCertificate(target)
+		if err != nil {
+			return nil, err
+		}
+		certSigner, err := ssh.NewCertSigner(cert, signer)
+		if err != nil {
+			return nil, fmt.Errorf("create cert signer: %w", err)
+		}
+		return []ssh.AuthMethod{
+			ssh.PublicKeys(certSigner),
 			resolveKeyboardInteractiveAuthMethod(responder),
 		}, nil
 	case "keyboardInteractive":
@@ -229,4 +229,63 @@ func resolveAuthMethods(target Target, responder InteractiveResponder) ([]ssh.Au
 	default:
 		return nil, fmt.Errorf("unsupported auth type: %s", target.AuthType)
 	}
+}
+
+func loadPrivateKeyBytes(target Target) ([]byte, error) {
+	if target.PrivateKeyPEM != "" {
+		return []byte(target.PrivateKeyPEM), nil
+	}
+	if target.PrivateKeyPath == "" {
+		return nil, fmt.Errorf("private key auth requires a privateKeyPem or privateKeyPath")
+	}
+	privateKey, err := os.ReadFile(target.PrivateKeyPath)
+	if err != nil {
+		return nil, fmt.Errorf("read private key: %w", err)
+	}
+	return privateKey, nil
+}
+
+func resolvePrivateKeySigner(target Target) (ssh.Signer, error) {
+	privateKey, err := loadPrivateKeyBytes(target)
+	if err != nil {
+		return nil, err
+	}
+	if target.Passphrase != "" {
+		signer, err := ssh.ParsePrivateKeyWithPassphrase(privateKey, []byte(target.Passphrase))
+		if err != nil {
+			return nil, fmt.Errorf("parse private key: %w", err)
+		}
+		return signer, nil
+	}
+	signer, err := ssh.ParsePrivateKey(privateKey)
+	if err != nil {
+		return nil, fmt.Errorf("parse private key: %w", err)
+	}
+	return signer, nil
+}
+
+func resolveCertificate(target Target) (*ssh.Certificate, error) {
+	var rawCertificate string
+	if target.CertificateText != "" {
+		rawCertificate = target.CertificateText
+	} else {
+		if target.CertificatePath == "" {
+			return nil, fmt.Errorf("certificate auth requires a certificateText or certificatePath")
+		}
+		certificateBytes, err := os.ReadFile(target.CertificatePath)
+		if err != nil {
+			return nil, fmt.Errorf("read certificate: %w", err)
+		}
+		rawCertificate = string(certificateBytes)
+	}
+
+	raw, _, _, _, err := ssh.ParseAuthorizedKey([]byte(rawCertificate))
+	if err != nil {
+		return nil, fmt.Errorf("parse certificate: %w", err)
+	}
+	cert, ok := raw.(*ssh.Certificate)
+	if !ok {
+		return nil, fmt.Errorf("parse certificate: not an ssh certificate")
+	}
+	return cert, nil
 }

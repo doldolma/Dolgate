@@ -47,6 +47,7 @@ const keychainEntries = [
     hasPassword: true,
     hasPassphrase: false,
     hasManagedPrivateKey: false,
+    hasCertificate: false,
     updatedAt: '2026-03-24T12:00:00.000Z'
   }
 ];
@@ -208,11 +209,40 @@ describe('SettingsPanel', () => {
 
     expect(screen.getByRole('heading', { name: 'Secrets' })).toBeInTheDocument();
     expect(screen.queryByText('local_keychain')).not.toBeInTheDocument();
+    expect(screen.getByText('Password')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Edit password' }));
     fireEvent.click(screen.getByRole('button', { name: 'Delete secret' }));
 
     expect(onEditSecret).toHaveBeenCalledWith('secret-1', 'password');
     expect(onRemoveSecret).toHaveBeenCalledWith('secret-1');
+  });
+
+  it('shows certificate secrets without edit actions', () => {
+    const { onEditSecret, onRemoveSecret } = renderSettingsPanel({
+      activeSection: 'secrets',
+      keychainEntries: [
+        {
+          secretRef: 'secret-cert',
+          label: 'Prod cert',
+          source: 'local_keychain' as const,
+          linkedHostCount: 1,
+          hasPassword: false,
+          hasPassphrase: true,
+          hasManagedPrivateKey: true,
+          hasCertificate: true,
+          updatedAt: '2026-03-24T12:00:00.000Z',
+        },
+      ],
+    });
+
+    expect(screen.getByText('Certificate + Passphrase')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Edit password' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Edit passphrase' })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Delete secret' }));
+
+    expect(onEditSecret).not.toHaveBeenCalled();
+    expect(onRemoveSecret).toHaveBeenCalledWith('secret-cert');
   });
 
   it('shows the signed-in email and current server in the account section', () => {

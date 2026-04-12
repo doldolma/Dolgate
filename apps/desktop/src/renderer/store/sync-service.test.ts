@@ -196,6 +196,7 @@ function createSyncService() {
         hasPassword: true,
         hasPassphrase: false,
         hasManagedPrivateKey: false,
+        hasCertificate: false,
         source: 'local_keychain',
         linkedHostCount: 1,
         updatedAt: '2026-03-22T00:00:00.000Z'
@@ -206,6 +207,7 @@ function createSyncService() {
         hasPassword: false,
         hasPassphrase: true,
         hasManagedPrivateKey: true,
+        hasCertificate: false,
         source: 'server_managed',
         linkedHostCount: 2,
         updatedAt: '2026-03-22T00:00:00.000Z'
@@ -535,6 +537,7 @@ describe('SyncService', () => {
           hasPassword: true,
           hasPassphrase: false,
           hasManagedPrivateKey: false,
+          hasCertificate: false,
           source: 'local_keychain',
           linkedHostCount: 0,
           updatedAt: '2026-03-21T00:00:00.000Z'
@@ -545,6 +548,7 @@ describe('SyncService', () => {
           hasPassword: true,
           hasPassphrase: false,
           hasManagedPrivateKey: false,
+          hasCertificate: false,
           source: 'server_managed',
           linkedHostCount: 0,
           updatedAt: '2026-03-21T00:00:00.000Z'

@@ -344,15 +344,16 @@ export function registerContainersIpcHandlers(ctx: MainIpcContext): void {
       const sshHost = typedHost as SshHostRecord;
       const trustedHostKeyBase64 = ctx.requireTrustedHostKey(sshHost);
       const username = ctx.requireConfiguredSshUsername(sshHost);
-      const secrets = await ctx.loadSecrets(sshHost.secretRef);
-      return ctx.coreManager.connect({
+      const { secrets, shouldPersistHostSecret } =
+        await ctx.resolveRuntimeSshSecrets(sshHost);
+      const connection = await ctx.coreManager.connect({
         host: sshHost.hostname,
         port: sshHost.port,
         username,
         authType: sshHost.authType,
         password: secrets.password,
         privateKeyPem: secrets.privateKeyPem,
-        privateKeyPath: sshHost.privateKeyPath ?? undefined,
+        certificateText: secrets.certificateText,
         passphrase: secrets.passphrase,
         trustedHostKeyBase64,
         cols: 120,
@@ -363,6 +364,14 @@ export function registerContainersIpcHandlers(ctx: MainIpcContext): void {
         title,
         transport: "ssh",
       });
+      if (shouldPersistHostSecret) {
+        ctx.pendingSessionSecrets.set(connection.sessionId, {
+          hostId: sshHost.id,
+          label: title,
+          secrets,
+        });
+      }
+      return connection;
     },
   );
 }

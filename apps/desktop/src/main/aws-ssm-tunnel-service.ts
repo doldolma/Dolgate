@@ -83,9 +83,11 @@ function delay(ms: number): Promise<void> {
   });
 }
 
-function appendRecentBytes(current: Buffer, nextChunk: Buffer): Buffer {
+function appendRecentBytes(current: Uint8Array, nextChunk: Uint8Array): Uint8Array {
   const merged =
-    current.length === 0 ? Buffer.from(nextChunk) : Buffer.concat([current, nextChunk]);
+    current.length === 0
+      ? Buffer.from(nextChunk)
+      : Buffer.concat([Buffer.from(current), Buffer.from(nextChunk)]);
   if (merged.length <= TUNNEL_OUTPUT_BUFFER_LIMIT_BYTES) {
     return merged;
   }
@@ -323,7 +325,7 @@ export class AwsSsmTunnelService {
     };
     this.runtimes.set(runtimeId, runtime);
 
-    let capturedOutput = Buffer.alloc(0);
+    let capturedOutput: Uint8Array = Buffer.alloc(0);
     const captureOutput = (chunk: string | Buffer) => {
       const rawChunk = Buffer.isBuffer(chunk)
         ? chunk

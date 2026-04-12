@@ -1,6 +1,6 @@
 import type { AuthSession } from './api';
 
-export type AuthType = 'password' | 'privateKey' | 'keyboardInteractive';
+export type AuthType = 'password' | 'privateKey' | 'keyboardInteractive' | 'certificate';
 export type HostKind = 'ssh' | 'aws-ec2' | 'aws-ecs' | 'warpgate-ssh';
 export type AppTheme = 'system' | 'light' | 'dark';
 export type TerminalThemeId =
@@ -99,6 +99,7 @@ export interface SshHostRecord extends HostBaseRecord {
   username: string;
   authType: AuthType;
   privateKeyPath?: string | null;
+  certificatePath?: string | null;
   secretRef?: string | null;
 }
 
@@ -109,6 +110,7 @@ export interface SshHostDraft extends HostBaseDraft {
   username: string;
   authType: AuthType;
   privateKeyPath?: string | null;
+  certificatePath?: string | null;
   secretRef?: string | null;
 }
 
@@ -299,7 +301,13 @@ export function getHostBadgeLabel(host: HostRecord): string {
   if (host.kind === 'aws-ecs') {
     return 'ECS';
   }
-  return host.authType === 'privateKey' ? 'K' : 'S';
+  if (host.authType === 'privateKey') {
+    return 'K';
+  }
+  if (host.authType === 'certificate') {
+    return 'C';
+  }
+  return 'S';
 }
 
 export function getHostSecretRef(host: HostRecord): string | null {
@@ -1519,6 +1527,7 @@ export interface SecretMetadataRecord {
   hasPassword: boolean;
   hasPassphrase: boolean;
   hasManagedPrivateKey: boolean;
+  hasCertificate: boolean;
   source: SecretSource;
   linkedHostCount: number;
   updatedAt: string;
@@ -1532,6 +1541,7 @@ export interface ManagedSecretPayload {
   password?: string;
   passphrase?: string;
   privateKeyPem?: string;
+  certificateText?: string;
   source: SecretSource;
   updatedAt: string;
 }

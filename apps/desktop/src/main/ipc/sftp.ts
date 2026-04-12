@@ -167,10 +167,8 @@ export function registerSftpIpcHandlers(ctx: MainIpcContext): void {
       const sshHost = typedHost as SshHostRecord;
       const trustedHostKeyBase64 = ctx.requireTrustedHostKey(sshHost);
       const username = ctx.requireConfiguredSshUsername(sshHost);
-      const secrets = ctx.mergeSecrets(
-        await ctx.loadSecrets(sshHost.secretRef),
-        input.secrets ?? {},
-      );
+      const { secrets, shouldPersistHostSecret } =
+        await ctx.resolveRuntimeSshSecrets(sshHost, input.secrets);
 
       const endpoint = await ctx.coreManager.sftpConnect({
         endpointId: input.endpointId,
@@ -180,14 +178,14 @@ export function registerSftpIpcHandlers(ctx: MainIpcContext): void {
         authType: sshHost.authType,
         password: secrets.password,
         privateKeyPem: secrets.privateKeyPem,
-        privateKeyPath: sshHost.privateKeyPath ?? undefined,
+        certificateText: secrets.certificateText,
         passphrase: secrets.passphrase,
         trustedHostKeyBase64,
         hostId: sshHost.id,
         title: sshHost.label,
       });
 
-      if (input.secrets && ctx.hasSecretValue(input.secrets)) {
+      if (shouldPersistHostSecret) {
         await ctx.persistHostSpecificSecret(sshHost.id, sshHost.label, secrets);
       }
 

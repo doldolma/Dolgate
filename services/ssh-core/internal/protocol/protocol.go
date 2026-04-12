@@ -138,6 +138,8 @@ type ConnectPayload struct {
 	Password             string `json:"password,omitempty"`
 	PrivateKeyPEM        string `json:"privateKeyPem,omitempty"`
 	PrivateKeyPath       string `json:"privateKeyPath,omitempty"`
+	CertificateText      string `json:"certificateText,omitempty"`
+	CertificatePath      string `json:"certificatePath,omitempty"`
 	Passphrase           string `json:"passphrase,omitempty"`
 	TrustedHostKeyBase64 string `json:"trustedHostKeyBase64"`
 	Cols                 int    `json:"cols"`
@@ -175,6 +177,8 @@ type SFTPConnectPayload struct {
 	Password             string `json:"password,omitempty"`
 	PrivateKeyPEM        string `json:"privateKeyPem,omitempty"`
 	PrivateKeyPath       string `json:"privateKeyPath,omitempty"`
+	CertificateText      string `json:"certificateText,omitempty"`
+	CertificatePath      string `json:"certificatePath,omitempty"`
 	Passphrase           string `json:"passphrase,omitempty"`
 	TrustedHostKeyBase64 string `json:"trustedHostKeyBase64"`
 }
@@ -187,6 +191,8 @@ type ContainersConnectPayload struct {
 	Password             string `json:"password,omitempty"`
 	PrivateKeyPEM        string `json:"privateKeyPem,omitempty"`
 	PrivateKeyPath       string `json:"privateKeyPath,omitempty"`
+	CertificateText      string `json:"certificateText,omitempty"`
+	CertificatePath      string `json:"certificatePath,omitempty"`
 	Passphrase           string `json:"passphrase,omitempty"`
 	TrustedHostKeyBase64 string `json:"trustedHostKeyBase64"`
 }
@@ -299,6 +305,8 @@ type PortForwardStartPayload struct {
 	Password             string `json:"password,omitempty"`
 	PrivateKeyPEM        string `json:"privateKeyPem,omitempty"`
 	PrivateKeyPath       string `json:"privateKeyPath,omitempty"`
+	CertificateText      string `json:"certificateText,omitempty"`
+	CertificatePath      string `json:"certificatePath,omitempty"`
 	Passphrase           string `json:"passphrase,omitempty"`
 	TrustedHostKeyBase64 string `json:"trustedHostKeyBase64"`
 	Mode                 string `json:"mode"`

@@ -81,10 +81,8 @@ export function registerSshIpcHandlers(ctx: MainIpcContext): void {
       const sshHost = host as SshHostRecord;
       const trustedHostKeyBase64 = ctx.requireTrustedHostKey(sshHost);
       const username = ctx.requireConfiguredSshUsername(sshHost);
-      const secrets = ctx.mergeSecrets(
-        await ctx.loadSecrets(sshHost.secretRef),
-        input.secrets ?? {},
-      );
+      const { secrets, shouldPersistHostSecret } =
+        await ctx.resolveRuntimeSshSecrets(sshHost, input.secrets);
       const title = input.title?.trim() || sshHost.label;
       const connection = await ctx.coreManager.connect({
         host: sshHost.hostname,
@@ -93,7 +91,7 @@ export function registerSshIpcHandlers(ctx: MainIpcContext): void {
         authType: sshHost.authType,
         password: secrets.password,
         privateKeyPem: secrets.privateKeyPem,
-        privateKeyPath: sshHost.privateKeyPath ?? undefined,
+        certificateText: secrets.certificateText,
         passphrase: secrets.passphrase,
         trustedHostKeyBase64,
         cols: input.cols,
@@ -110,7 +108,7 @@ export function registerSshIpcHandlers(ctx: MainIpcContext): void {
         input.rows,
       );
 
-      if (input.secrets && ctx.hasSecretValue(input.secrets)) {
+      if (shouldPersistHostSecret) {
         ctx.pendingSessionSecrets.set(connection.sessionId, {
           hostId: sshHost.id,
           label: title,

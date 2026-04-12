@@ -1,14 +1,22 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AwsEc2HostRecord, SecretMetadataRecord, SshHostRecord } from '@shared';
 import { HostForm } from './HostForm';
 import { listAwsProfiles } from '../services/desktop/imports';
+import { useHostFormController } from '../controllers/useHostFormController';
 
 vi.mock('../services/desktop/imports', () => ({
   listAwsProfiles: vi.fn().mockResolvedValue([
     { id: 'profile-default', name: 'default' },
     { id: 'profile-prod', name: 'prod-admin' },
   ]),
+}));
+
+vi.mock('../controllers/useHostFormController', () => ({
+  useHostFormController: vi.fn(() => ({
+    pickPrivateKey: vi.fn(),
+    pickSshCertificate: vi.fn(),
+  })),
 }));
 
 const groupOptions = [{ value: null, label: 'Ungrouped' }];
@@ -20,6 +28,7 @@ const reusableKeychainEntries: SecretMetadataRecord[] = [
     hasPassword: true,
     hasPassphrase: false,
     hasManagedPrivateKey: false,
+    hasCertificate: false,
     source: 'local_keychain',
     linkedHostCount: 2,
     updatedAt: '2026-03-25T00:00:00.000Z',
@@ -30,11 +39,31 @@ const reusableKeychainEntries: SecretMetadataRecord[] = [
     hasPassword: false,
     hasPassphrase: true,
     hasManagedPrivateKey: true,
+    hasCertificate: false,
+    source: 'local_keychain',
+    linkedHostCount: 1,
+    updatedAt: '2026-03-25T00:00:00.000Z',
+  },
+  {
+    secretRef: 'secret-certificate',
+    label: 'Shared Certificate',
+    hasPassword: false,
+    hasPassphrase: true,
+    hasManagedPrivateKey: true,
+    hasCertificate: true,
     source: 'local_keychain',
     linkedHostCount: 1,
     updatedAt: '2026-03-25T00:00:00.000Z',
   },
 ];
+
+const pickPrivateKeyMock = vi.fn();
+const pickSshCertificateMock = vi.fn();
+
+vi.mocked(useHostFormController).mockImplementation(() => ({
+  pickPrivateKey: pickPrivateKeyMock,
+  pickSshCertificate: pickSshCertificateMock,
+}));
 
 function createHost(overrides: Partial<SshHostRecord> = {}): SshHostRecord {
   return {
@@ -46,6 +75,7 @@ function createHost(overrides: Partial<SshHostRecord> = {}): SshHostRecord {
     username: 'ubuntu',
     authType: 'password',
     privateKeyPath: null,
+    certificatePath: null,
     secretRef: null,
     groupName: null,
     tags: [],
@@ -92,6 +122,11 @@ async function wait(duration: number) {
 }
 
 describe('HostForm', () => {
+  beforeEach(() => {
+    pickPrivateKeyMock.mockReset();
+    pickSshCertificateMock.mockReset();
+  });
+
   it('auto-saves edit-mode changes after the debounce window', async () => {
     const onSubmit = vi.fn().mockResolvedValue(undefined);
     const onActionStateChange = vi.fn();
@@ -140,6 +175,24 @@ describe('HostForm', () => {
     expect(onSubmit).not.toHaveBeenCalled();
   });
 
+  it('auto-fills the label from hostname for a new SSH host', () => {
+    render(<HostForm host={null} keychainEntries={keychainEntries} groupOptions={groupOptions} onSubmit={vi.fn().mockResolvedValue(undefined)} />);
+
+    fireEvent.change(screen.getByLabelText('Hostname'), { target: { value: 'prod.example.com' } });
+
+    expect((screen.getByLabelText('Label') as HTMLInputElement).value).toBe('prod.example.com');
+  });
+
+  it('keeps a manually edited label when hostname changes afterwards', () => {
+    render(<HostForm host={null} keychainEntries={keychainEntries} groupOptions={groupOptions} onSubmit={vi.fn().mockResolvedValue(undefined)} />);
+
+    fireEvent.change(screen.getByLabelText('Hostname'), { target: { value: 'prod.example.com' } });
+    fireEvent.change(screen.getByLabelText('Label'), { target: { value: 'Production API' } });
+    fireEvent.change(screen.getByLabelText('Hostname'), { target: { value: 'api.example.com' } });
+
+    expect((screen.getByLabelText('Label') as HTMLInputElement).value).toBe('Production API');
+  });
+
   it('shows saved secret controls inline for a new SSH host', () => {
     render(
       <HostForm
@@ -156,6 +209,32 @@ describe('HostForm', () => {
     expect(screen.getByRole('button', { name: 'Secrets 열기' })).toBeInTheDocument();
   });
 
+  it('shows certificate-specific fields and filters saved secrets for certificate auth', () => {
+    render(
+      <HostForm
+        host={null}
+        keychainEntries={reusableKeychainEntries}
+        groupOptions={groupOptions}
+        onSubmit={vi.fn().mockResolvedValue(undefined)}
+        onOpenSecrets={vi.fn()}
+      />,
+    );
+
+    fireEvent.change(screen.getByLabelText('Auth Type'), {
+      target: { value: 'certificate' },
+    });
+
+    expect(screen.getByLabelText('Private key file')).toBeInTheDocument();
+    expect(screen.getByLabelText('SSH certificate file')).toBeInTheDocument();
+    expect(screen.getByLabelText('Passphrase')).toBeInTheDocument();
+
+    const select = screen.getByLabelText('Saved Secret');
+    expect(within(select).queryByRole('option', { name: '사용 안 함' })).not.toBeInTheDocument();
+    expect(within(select).getByRole('option', { name: /Shared Certificate · Certificate \+ Passphrase/ })).toBeInTheDocument();
+    expect(within(select).queryByRole('option', { name: /Shared Key/ })).not.toBeInTheDocument();
+    expect(within(select).queryByRole('option', { name: /Shared Password/ })).not.toBeInTheDocument();
+  });
+
   it('preselects the existing saved secret when editing a host with an attached secret', async () => {
     render(
       <HostForm
@@ -170,6 +249,102 @@ describe('HostForm', () => {
     const savedSecretSelect = screen.getByLabelText('Saved Secret') as HTMLSelectElement;
     await waitFor(() => expect(savedSecretSelect.value).toBe('existing:secret-password'));
     expect(screen.getByRole('button', { name: 'Secrets 열기' })).toBeInTheDocument();
+  });
+
+  it('falls back to creating a new password secret when the selected saved secret disappears', async () => {
+    const { rerender } = render(
+      <HostForm
+        host={createHost({ secretRef: 'secret-password', authType: 'password' })}
+        keychainEntries={reusableKeychainEntries}
+        groupOptions={groupOptions}
+        onSubmit={vi.fn().mockResolvedValue(undefined)}
+        onOpenSecrets={vi.fn()}
+      />,
+    );
+
+    const savedSecretSelect = screen.getByLabelText('Saved Secret') as HTMLSelectElement;
+    await waitFor(() => expect(savedSecretSelect.value).toBe('existing:secret-password'));
+
+    rerender(
+      <HostForm
+        host={createHost({ secretRef: 'secret-password', authType: 'password' })}
+        keychainEntries={reusableKeychainEntries.filter((entry) => entry.secretRef !== 'secret-password')}
+        groupOptions={groupOptions}
+        onSubmit={vi.fn().mockResolvedValue(undefined)}
+        onOpenSecrets={vi.fn()}
+      />,
+    );
+
+    await waitFor(() => expect(savedSecretSelect.value).toBe('new'));
+  });
+
+  it('falls back to no saved secret when the selected certificate secret disappears', async () => {
+    const { rerender } = render(
+      <HostForm
+        host={createHost({ secretRef: 'secret-certificate', authType: 'certificate' })}
+        keychainEntries={reusableKeychainEntries}
+        groupOptions={groupOptions}
+        onSubmit={vi.fn().mockResolvedValue(undefined)}
+        onOpenSecrets={vi.fn()}
+      />,
+    );
+
+    const savedSecretSelect = screen.getByLabelText('Saved Secret') as HTMLSelectElement;
+    await waitFor(() => expect(savedSecretSelect.value).toBe('existing:secret-certificate'));
+
+    rerender(
+      <HostForm
+        host={createHost({ secretRef: 'secret-certificate', authType: 'certificate' })}
+        keychainEntries={reusableKeychainEntries.filter((entry) => entry.secretRef !== 'secret-certificate')}
+        groupOptions={groupOptions}
+        onSubmit={vi.fn().mockResolvedValue(undefined)}
+        onOpenSecrets={vi.fn()}
+      />,
+    );
+
+    await waitFor(() => expect(savedSecretSelect.value).toBe('new'));
+  });
+
+  it('stores imported private key material in the submission instead of persisting the path', async () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    pickPrivateKeyMock.mockResolvedValue({
+      path: '/Users/tester/.ssh/id_ed25519',
+      name: 'id_ed25519',
+      content: '-----BEGIN PRIVATE KEY-----\nabc\n-----END PRIVATE KEY-----\n',
+    });
+
+    render(
+      <HostForm
+        host={null}
+        keychainEntries={reusableKeychainEntries}
+        groupOptions={groupOptions}
+        onSubmit={onSubmit}
+      />,
+    );
+
+    fireEvent.change(screen.getByLabelText('Auth Type'), {
+      target: { value: 'privateKey' },
+    });
+    fireEvent.change(screen.getByLabelText('Hostname'), {
+      target: { value: 'prod.example.com' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Import' }));
+    await waitFor(() => expect(screen.getByLabelText('Private key file')).toHaveValue('/Users/tester/.ssh/id_ed25519'));
+
+    const form = screen.getByLabelText('Hostname').closest('form');
+    expect(form).not.toBeNull();
+    fireEvent.submit(form!);
+
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    expect(onSubmit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        privateKeyPath: '/Users/tester/.ssh/id_ed25519',
+        secretRef: null,
+      }),
+      expect.objectContaining({
+        privateKeyPem: '-----BEGIN PRIVATE KEY-----\nabc\n-----END PRIVATE KEY-----\n',
+      }),
+    );
   });
 
   it('does not render extra saved secret helper copy', () => {
@@ -320,8 +495,8 @@ describe('HostForm', () => {
     expect(authTypeField).not.toBeNull();
     expect(passwordField).not.toBeNull();
     expect(terminalThemeField).not.toBeNull();
-    expect(authTypeField?.compareDocumentPosition(passwordField as Node) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(passwordField?.compareDocumentPosition(savedSecretHeading) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(authTypeField!.compareDocumentPosition(passwordField!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(passwordField!.compareDocumentPosition(savedSecretHeading) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(connectionSection.compareDocumentPosition(preferencesSection) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 

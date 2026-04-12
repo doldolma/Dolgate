@@ -1,7 +1,8 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, type ReactNode } from 'react';
 import { getAwsEc2HostSshMetadataStatusLabel, isAwsEc2HostRecord, isAwsEcsHostRecord, isSshHostDraft, isSshHostRecord, isWarpgateSshHostRecord } from '@shared';
-import type { AwsProfileSummary, HostDraft, HostRecord, SecretMetadataRecord, TerminalThemeId } from '@shared';
+import type { AwsProfileSummary, HostDraft, HostRecord, HostSecretInput, SecretMetadataRecord, SshHostDraft, TerminalThemeId } from '@shared';
 import { useHostFormController } from '../controllers/useHostFormController';
+import { formatSavedSecretOptionLabel } from '../lib/secret-display';
 import { terminalThemePresets } from '../lib/terminal-presets';
 import { listAwsProfiles } from '../services/desktop/imports';
 import { Button, Input, SelectField, TagInputField } from '../ui';
@@ -15,6 +16,7 @@ const defaultDraft: HostDraft = {
   username: '',
   authType: 'password',
   privateKeyPath: '',
+  certificatePath: '',
   secretRef: null,
   groupName: '',
   terminalThemeId: null
@@ -55,6 +57,19 @@ function appendPendingTag(tags: string[], pendingInput: string): string[] {
   return dedupeTags([...tags, pendingInput]);
 }
 
+function deriveDefaultHostLabel(draft: HostDraft): string {
+  if (draft.kind === 'ssh') {
+    return draft.hostname.trim();
+  }
+  if (draft.kind === 'aws-ec2') {
+    return draft.awsInstanceName?.trim() || draft.awsInstanceId.trim();
+  }
+  if (draft.kind === 'aws-ecs') {
+    return draft.awsEcsClusterName.trim();
+  }
+  return draft.label.trim();
+}
+
 export interface HostFormActionState {
   saveInFlight: boolean;
   saveStatusText: string | null;
@@ -71,7 +86,7 @@ export interface HostFormProps {
   groupOptions: Array<{ value: string | null; label: string }>;
   defaultGroupPath?: string | null;
   hideTitle?: boolean;
-  onSubmit: (draft: HostDraft, secrets?: { password?: string; passphrase?: string }) => Promise<void>;
+  onSubmit: (draft: HostDraft, secrets?: HostSecretInput) => Promise<void>;
   onConnect?: (hostId: string) => Promise<void>;
   onEditExistingSecret?: (secretRef: string, credentialKind: 'password' | 'passphrase') => void;
   onOpenSecrets?: () => void;
@@ -82,10 +97,11 @@ type HostFormSaveStatus = 'idle' | 'saving' | 'saved' | 'error';
 
 interface HostFormSubmission {
   draft: HostDraft;
-  secrets?: {
-    password?: string;
-    passphrase?: string;
-  };
+  secrets?: HostSecretInput;
+}
+
+interface ImportedShellCredentialFile {
+  content: string;
 }
 
 interface AwsProfileSelectOption {
@@ -96,7 +112,7 @@ interface AwsProfileSelectOption {
 }
 
 function isHostDraftValid(draft: HostDraft): boolean {
-  if (!draft.label.trim()) {
+  if (!(draft.label.trim() || deriveDefaultHostLabel(draft))) {
     return false;
   }
 
@@ -122,23 +138,28 @@ function isHostDraftValid(draft: HostDraft): boolean {
 function buildHostFormSubmission(input: {
   draft: HostDraft;
   tags: string[];
-  credentialMode: 'new' | 'existing' | 'none';
+  credentialMode: 'new' | 'existing';
   selectedSecretRef: string;
   password: string;
   passphrase: string;
+  privateKeyPem?: string;
+  certificateText?: string;
 }): HostFormSubmission {
   const nextTags = dedupeTags(input.tags);
+  const nextLabel = input.draft.label.trim() || deriveDefaultHostLabel(input.draft);
   if (!isSshHostDraft(input.draft)) {
     return {
       draft: {
         ...input.draft,
+        label: nextLabel,
         tags: nextTags
       }
     };
   }
 
-  const nextDraft: HostDraft = {
+  const nextDraft: SshHostDraft = {
     ...input.draft,
+    label: nextLabel,
     tags: nextTags,
     secretRef: input.credentialMode === 'existing' ? input.selectedSecretRef || null : null
   };
@@ -151,12 +172,20 @@ function buildHostFormSubmission(input: {
 
   const nextSecrets = {
     password: input.password || undefined,
-    passphrase: input.passphrase || undefined
+    passphrase: input.passphrase || undefined,
+    privateKeyPem: input.privateKeyPem || undefined,
+    certificateText: input.certificateText || undefined
   };
 
   return {
     draft: nextDraft,
-    secrets: nextSecrets.password || nextSecrets.passphrase ? nextSecrets : undefined
+    secrets:
+      nextSecrets.password ||
+      nextSecrets.passphrase ||
+      nextSecrets.privateKeyPem ||
+      nextSecrets.certificateText
+        ? nextSecrets
+        : undefined
   };
 }
 
@@ -232,7 +261,10 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
   const fieldClassName = 'flex flex-col gap-[0.45rem] text-[var(--text)]';
   const fieldLabelClassName =
     'text-[0.82rem] font-semibold uppercase tracking-[0.12em] text-[var(--text-soft)]';
-  const { pickPrivateKey: pickPrivateKeyFile } = useHostFormController();
+  const {
+    pickPrivateKey: pickPrivateKeyFile,
+    pickSshCertificate: pickSshCertificateFile,
+  } = useHostFormController();
   const formRef = useRef<HTMLFormElement | null>(null);
   const saveTimerRef = useRef<number | null>(null);
   const lastHydratedHostIdRef = useRef<string | null>(null);
@@ -244,8 +276,10 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
   const [tagInput, setTagInput] = useState('');
   const [password, setPassword] = useState('');
   const [passphrase, setPassphrase] = useState('');
-  const [credentialMode, setCredentialMode] = useState<'new' | 'existing' | 'none'>('new');
+  const [credentialMode, setCredentialMode] = useState<'new' | 'existing'>('new');
   const [selectedSecretRef, setSelectedSecretRef] = useState('');
+  const [privateKeyFile, setPrivateKeyFile] = useState<ImportedShellCredentialFile | null>(null);
+  const [certificateFile, setCertificateFile] = useState<ImportedShellCredentialFile | null>(null);
   const [saveStatus, setSaveStatus] = useState<HostFormSaveStatus>('idle');
   const [lastSavedSubmissionKey, setLastSavedSubmissionKey] = useState<string | null>(null);
   const [saveInFlight, setSaveInFlight] = useState(false);
@@ -267,9 +301,20 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
         credentialMode,
         selectedSecretRef,
         password,
-        passphrase
+        passphrase,
+        privateKeyPem: privateKeyFile?.content,
+        certificateText: certificateFile?.content
       }),
-    [credentialMode, draft, passphrase, password, selectedSecretRef, tagTokens]
+    [
+      certificateFile?.content,
+      credentialMode,
+      draft,
+      passphrase,
+      password,
+      privateKeyFile?.content,
+      selectedSecretRef,
+      tagTokens,
+    ]
   );
   const currentSubmissionKey = useMemo(() => serializeHostFormSubmission(currentSubmission), [currentSubmission]);
   const isEditDirty = isEditMode && currentSubmissionKey !== lastSavedSubmissionKey;
@@ -277,9 +322,15 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
     if (!sshDraft) {
       return [];
     }
-    return keychainEntries.filter((entry) =>
-      sshDraft.authType === 'password' ? entry.hasPassword : entry.hasManagedPrivateKey || entry.hasPassphrase
-    );
+    return keychainEntries.filter((entry) => {
+      if (sshDraft.authType === 'password') {
+        return entry.hasPassword;
+      }
+      if (sshDraft.authType === 'certificate') {
+        return entry.hasManagedPrivateKey && entry.hasCertificate;
+      }
+      return entry.hasManagedPrivateKey;
+    });
   }, [keychainEntries, sshDraft]);
   const awsProfileOptions = useMemo<AwsProfileSelectOption[]>(() => {
     if (!isAwsDraft) {
@@ -326,6 +377,8 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
       setPassphrase('');
       setSelectedSecretRef('');
       setCredentialMode('new');
+      setPrivateKeyFile(null);
+      setCertificateFile(null);
       setTagTokens([]);
       setTagInput('');
       setSaveStatus('idle');
@@ -345,10 +398,12 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
     }
 
     let nextDraft: HostDraft;
-    let nextCredentialMode: 'new' | 'existing' | 'none';
+    let nextCredentialMode: 'new' | 'existing';
     let nextSelectedSecretRef = '';
     let nextPassword = '';
     let nextPassphrase = '';
+    let nextPrivateKeyFile: ImportedShellCredentialFile | null = null;
+    let nextCertificateFile: ImportedShellCredentialFile | null = null;
 
     if (isAwsEc2HostRecord(host)) {
       nextDraft = {
@@ -371,7 +426,7 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
         awsSshMetadataStatus: host.awsSshMetadataStatus ?? null,
         awsSshMetadataError: host.awsSshMetadataError ?? null
       };
-      nextCredentialMode = 'none';
+      nextCredentialMode = 'new';
     } else if (isAwsEcsHostRecord(host)) {
       nextDraft = {
         kind: 'aws-ecs',
@@ -385,7 +440,7 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
         awsEcsClusterArn: host.awsEcsClusterArn,
         awsEcsClusterName: host.awsEcsClusterName
       };
-      nextCredentialMode = 'none';
+      nextCredentialMode = 'new';
     } else if (isWarpgateSshHostRecord(host)) {
       nextDraft = {
         kind: 'warpgate-ssh',
@@ -400,7 +455,7 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
         warpgateTargetName: host.warpgateTargetName,
         warpgateUsername: host.warpgateUsername
       };
-      nextCredentialMode = 'none';
+      nextCredentialMode = 'new';
     } else {
       nextDraft = {
         kind: 'ssh',
@@ -411,12 +466,13 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
         username: host.username,
         authType: host.authType,
         privateKeyPath: host.privateKeyPath ?? '',
+        certificatePath: host.certificatePath ?? '',
         secretRef: host.secretRef,
         groupName: host.groupName ?? '',
         terminalThemeId: host.terminalThemeId ?? null
       };
       nextSelectedSecretRef = host.secretRef ?? '';
-      nextCredentialMode = host.secretRef ? 'existing' : host.authType === 'password' ? 'new' : 'none';
+      nextCredentialMode = host.secretRef ? 'existing' : 'new';
     }
 
     const nextTagTokens = dedupeTags(host.tags ?? []);
@@ -436,6 +492,8 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
     setPassphrase(nextPassphrase);
     setSelectedSecretRef(nextSelectedSecretRef);
     setCredentialMode(nextCredentialMode);
+    setPrivateKeyFile(nextPrivateKeyFile);
+    setCertificateFile(nextCertificateFile);
     setTagTokens(nextTagTokens);
     setTagInput('');
     setSaveStatus('idle');
@@ -450,13 +508,9 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
       return;
     }
 
-    if (sshDraft.authType === 'password' && credentialMode === 'none') {
-      setCredentialMode('new');
-    }
-
     if (credentialMode === 'existing' && selectedSecretRef && !reusableEntries.some((entry) => entry.secretRef === selectedSecretRef)) {
       setSelectedSecretRef('');
-      setCredentialMode(sshDraft.authType === 'password' ? 'new' : 'none');
+      setCredentialMode('new');
     }
   }, [credentialMode, reusableEntries, selectedSecretRef, sshDraft]);
 
@@ -523,7 +577,28 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
     if (!selected) {
       return;
     }
-    setDraft((current) => (isSshHostDraft(current) ? { ...current, privateKeyPath: selected } : current));
+    setPrivateKeyFile({ content: selected.content });
+    setDraft((current) =>
+      isSshHostDraft(current)
+        ? { ...current, privateKeyPath: selected.path }
+        : current,
+    );
+  }
+
+  async function pickCertificate(): Promise<void> {
+    if (!sshDraft) {
+      return;
+    }
+    const selected = await pickSshCertificateFile();
+    if (!selected) {
+      return;
+    }
+    setCertificateFile({ content: selected.content });
+    setDraft((current) =>
+      isSshHostDraft(current)
+        ? { ...current, certificatePath: selected.path }
+        : current,
+    );
   }
 
   function updateDraftTags(nextTags: string[]) {
@@ -551,6 +626,28 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
     });
   }
 
+  function handleSshHostnameChange(nextHostname: string) {
+    setDraft((current) => {
+      if (!isSshHostDraft(current)) {
+        return current;
+      }
+      const previousAutoLabel = deriveDefaultHostLabel(current);
+      const shouldSyncLabel =
+        !host &&
+        (current.label.trim() === '' || current.label.trim() === previousAutoLabel);
+      const nextDraft: HostDraft = {
+        ...current,
+        hostname: nextHostname
+      };
+      return shouldSyncLabel
+        ? {
+            ...nextDraft,
+            label: deriveDefaultHostLabel(nextDraft)
+          }
+        : nextDraft;
+    });
+  }
+
   function commitPendingTag(options?: { suppressNextBlur?: boolean }) {
     const nextTags = appendPendingTag(tagTokens, tagInput);
     if (options?.suppressNextBlur) {
@@ -572,13 +669,31 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
 
   const isFormValid = useCallback(
     (nextDraft: HostDraft) => {
+      const hasRequiredSshCredentials = (() => {
+        if (!isSshHostDraft(nextDraft)) {
+          return true;
+        }
+        if (credentialMode === 'existing') {
+          return Boolean(selectedSecretRef.trim());
+        }
+        if (nextDraft.authType === 'privateKey') {
+          return Boolean(privateKeyFile?.content || nextDraft.privateKeyPath?.trim());
+        }
+        if (nextDraft.authType === 'certificate') {
+          return Boolean(
+            (privateKeyFile?.content || nextDraft.privateKeyPath?.trim()) &&
+            (certificateFile?.content || nextDraft.certificatePath?.trim())
+          );
+        }
+        return true;
+      })();
       const browserValidity = formRef.current?.checkValidity();
       if (typeof browserValidity === 'boolean') {
-        return browserValidity && isHostDraftValid(nextDraft);
+        return browserValidity && isHostDraftValid(nextDraft) && hasRequiredSshCredentials;
       }
-      return isHostDraftValid(nextDraft);
+      return isHostDraftValid(nextDraft) && hasRequiredSshCredentials;
     },
-    []
+    [certificateFile?.content, credentialMode, privateKeyFile?.content, selectedSecretRef]
   );
 
   const persistChanges = useCallback(
@@ -603,7 +718,9 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
         credentialMode,
         selectedSecretRef,
         password,
-        passphrase
+        passphrase,
+        privateKeyPem: privateKeyFile?.content,
+        certificateText: certificateFile?.content
       });
       const submissionKey = serializeHostFormSubmission(submission);
       if (submissionKey === lastSavedSubmissionKey) {
@@ -645,6 +762,8 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
       onSubmit,
       passphrase,
       password,
+      certificateFile?.content,
+      privateKeyFile?.content,
       selectedSecretRef,
       tagInput,
       tagTokens
@@ -679,7 +798,7 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
     <>
       <label className={fieldClassName}>
         <span className={fieldLabelClassName}>Label</span>
-        <Input value={draft.label} onChange={(event) => setDraft({ ...draft, label: event.target.value })} placeholder="Production API" required />
+        <Input value={draft.label} onChange={(event) => setDraft({ ...draft, label: event.target.value })} placeholder="Production API" />
       </label>
       <label className={fieldClassName}>
         <span className={fieldLabelClassName}>Group</span>
@@ -775,7 +894,9 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
       credentialMode === 'new'
         ? {
             password: password || undefined,
-            passphrase: passphrase || undefined
+            passphrase: passphrase || undefined,
+            privateKeyPem: privateKeyFile?.content,
+            certificateText: certificateFile?.content
           }
         : undefined
     );
@@ -787,6 +908,8 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
     onSubmit,
     passphrase,
     password,
+    certificateFile?.content,
+    privateKeyFile?.content,
     reportCurrentValidity,
     selectedSecretRef,
     tagInput,
@@ -1018,7 +1141,7 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
               <span className={fieldLabelClassName}>Hostname</span>
               <Input
                 value={sshDraft.hostname}
-                onChange={(event) => setDraft({ ...sshDraft, hostname: event.target.value })}
+                onChange={(event) => handleSshHostnameChange(event.target.value)}
                 placeholder="prod.example.com"
                 required
               />
@@ -1049,15 +1172,38 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
               <span className={fieldLabelClassName}>Auth Type</span>
               <SelectField
                 value={sshDraft.authType}
-                onChange={(event) =>
+                onChange={(event) => {
+                  const nextAuthType =
+                    event.target.value === 'privateKey'
+                      ? 'privateKey'
+                      : event.target.value === 'certificate'
+                        ? 'certificate'
+                        : 'password';
                   setDraft({
                     ...sshDraft,
-                    authType: event.target.value === 'privateKey' ? 'privateKey' : 'password'
-                  })
-                }
+                    authType: nextAuthType,
+                    ...(nextAuthType === 'password'
+                      ? {
+                          privateKeyPath: '',
+                          certificatePath: '',
+                        }
+                      : nextAuthType === 'privateKey'
+                        ? {
+                            certificatePath: '',
+                          }
+                        : {})
+                  });
+                  if (nextAuthType === 'password') {
+                    setPrivateKeyFile(null);
+                    setCertificateFile(null);
+                  } else if (nextAuthType === 'privateKey') {
+                    setCertificateFile(null);
+                  }
+                }}
               >
                 <option value="password">Password</option>
                 <option value="privateKey">Private key</option>
+                <option value="certificate">Certificate</option>
               </SelectField>
             </label>
 
@@ -1068,7 +1214,7 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
               </label>
             ) : null}
 
-            {sshDraft.authType === 'privateKey' ? (
+            {credentialMode === 'new' && (sshDraft.authType === 'privateKey' || sshDraft.authType === 'certificate') ? (
               <>
                 <label className={fieldClassName}>
                   <span className={fieldLabelClassName}>Private key file</span>
@@ -1077,12 +1223,29 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
                       value={sshDraft.privateKeyPath ?? ''}
                       onChange={(event) => setDraft({ ...sshDraft, privateKeyPath: event.target.value })}
                       placeholder="/Users/.../.ssh/id_ed25519"
+                      required
                     />
                     <Button variant="secondary" onClick={pickPrivateKey}>
                       Import
                     </Button>
                   </div>
                 </label>
+                {sshDraft.authType === 'certificate' ? (
+                  <label className={fieldClassName}>
+                    <span className={fieldLabelClassName}>SSH certificate file</span>
+                    <div className="flex gap-[0.75rem]">
+                      <Input
+                        value={sshDraft.certificatePath ?? ''}
+                        onChange={(event) => setDraft({ ...sshDraft, certificatePath: event.target.value })}
+                        placeholder="/Users/.../.ssh/id_ed25519-cert.pub"
+                        required
+                      />
+                      <Button variant="secondary" onClick={pickCertificate}>
+                        Import
+                      </Button>
+                    </div>
+                  </label>
+                ) : null}
                 {credentialMode === 'new' ? (
                   <label className={fieldClassName}>
                     <span className={fieldLabelClassName}>Passphrase</span>
@@ -1115,8 +1278,8 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
                 value={credentialMode === 'existing' ? `existing:${selectedSecretRef}` : credentialMode}
                 onChange={(event) => {
                   const value = event.target.value;
-                  if (value === 'new' || value === 'none') {
-                    setCredentialMode(value);
+                  if (value === 'new') {
+                    setCredentialMode('new');
                     setSelectedSecretRef('');
                     return;
                   }
@@ -1126,11 +1289,10 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
                   }
                 }}
               >
-                {sshDraft.authType === 'privateKey' ? <option value="none">사용 안 함</option> : null}
                 <option value="new">새 secret 생성</option>
                 {reusableEntries.map((entry) => (
                   <option key={entry.secretRef} value={`existing:${entry.secretRef}`}>
-                    {entry.label} ({entry.linkedHostCount}개 호스트)
+                    {formatSavedSecretOptionLabel(entry)}
                   </option>
                 ))}
               </SelectField>
@@ -1138,7 +1300,7 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
 
             {credentialMode === 'existing' ? (
               <>
-                {host && isSshHostRecord(host) && selectedSecretRef && host.secretRef === selectedSecretRef && onEditExistingSecret ? (
+                {host && isSshHostRecord(host) && selectedSecretRef && host.secretRef === selectedSecretRef && onEditExistingSecret && sshDraft.authType !== 'certificate' ? (
                   <Button
                     variant="secondary"
                     onClick={() => onEditExistingSecret(selectedSecretRef, sshDraft.authType === 'password' ? 'password' : 'passphrase')}

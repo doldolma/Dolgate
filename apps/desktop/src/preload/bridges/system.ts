@@ -12,6 +12,8 @@ export function buildShellBridge(
 ): DesktopApi["shell"] {
   return {
     pickPrivateKey: () => ipcRenderer.invoke(ipcChannels.shell.pickPrivateKey),
+    pickSshCertificate: () =>
+      ipcRenderer.invoke(ipcChannels.shell.pickSshCertificate),
     pickOpenSshConfig: () =>
       ipcRenderer.invoke(ipcChannels.shell.pickOpenSshConfig),
     pickXshellSessionFolder: () =>

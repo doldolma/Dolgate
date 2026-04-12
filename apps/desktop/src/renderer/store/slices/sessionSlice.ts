@@ -3,6 +3,7 @@ import type { SessionSlice, WorkspaceTab } from "../types";
 import * as defaults from "../defaults";
 import * as utils from "../utils";
 import { createBootstrapSyncServices } from "../services/bootstrap-sync";
+import { updateStoredSshUsername } from "../services/credential-retry";
 import { createContainersServices } from "../services/containers";
 import { createSessionServices } from "../services/session";
 import { createSftpServices } from "../services/sftp";
@@ -180,6 +181,7 @@ export function createSessionSlice(deps: SliceDeps): SessionSlice {
     workspaces: [],
     tabStrip: [],
     pendingCredentialRetry: null,
+    activeCredentialRetryAttempt: null,
     pendingMissingUsernamePrompt: null,
     pendingInteractiveAuth: null,
     pendingConnectionAttempts: [],
@@ -930,52 +932,129 @@ export function createSessionSlice(deps: SliceDeps): SessionSlice {
             }
             set({ pendingCredentialRetry: null });
           },
-    submitCredentialRetry: async (secrets) => {
+    submitCredentialRetry: async (input) => {
             const pending = get().pendingCredentialRetry;
             if (!pending) {
               return;
             }
-    
-            set({ pendingCredentialRetry: null });
-            if (pending.source === "ssh") {
-              if (pending.sessionId) {
-                await get().retrySessionConnection(pending.sessionId, secrets);
-              } else {
-                await get().connectHost(pending.hostId, 120, 32, secrets);
-              }
-              return;
-            }
-    
-            if (!pending.paneId) {
-              return;
-            }
-    
+
             const host = get().hosts.find((item) => item.id === pending.hostId);
             if (!host || !isSshHostRecord(host)) {
               return;
             }
-    
-            const endpointId = globalThis.crypto.randomUUID();
-    
-            const trusted = await ensureTrustedHost(set, {
-              hostId: pending.hostId,
-              action: {
-                kind: "sftp",
+
+            const username = input.username.trim();
+            if (!username) {
+              throw new Error("사용자명을 입력해 주세요.");
+            }
+
+            const secrets = {
+              password:
+                input.password !== undefined && input.password.length > 0
+                  ? input.password
+                  : undefined,
+              passphrase:
+                input.passphrase !== undefined && input.passphrase.length > 0
+                  ? input.passphrase
+                  : undefined,
+              privateKeyPem:
+                input.privateKeyPem !== undefined &&
+                input.privateKeyPem.length > 0
+                  ? input.privateKeyPem
+                  : undefined,
+              certificateText:
+                input.certificateText !== undefined &&
+                input.certificateText.length > 0
+                  ? input.certificateText
+                  : undefined,
+            };
+
+            const usernameChanged = username !== host.username.trim();
+            if (usernameChanged) {
+              const nextHost = await updateStoredSshUsername(
+                { api, get, set },
+                host.id,
+                username,
+              );
+              if (!nextHost || !isSshHostRecord(nextHost)) {
+                throw new Error("사용자명을 업데이트하지 못했습니다.");
+              }
+            }
+
+            set({
+              activeCredentialRetryAttempt: {
+                hostId: pending.hostId,
+                source: pending.source,
+                sessionId: pending.sessionId ?? null,
+                paneId: pending.paneId,
+                originalUsername: host.username,
+                attemptedUsername: username,
+              },
+            });
+
+            try {
+              if (pending.source === "ssh") {
+                if (pending.sessionId) {
+                  await get().retrySessionConnection(pending.sessionId, secrets);
+                } else {
+                  await get().connectHost(pending.hostId, 120, 32, secrets);
+                }
+                set({ pendingCredentialRetry: null });
+                return;
+              }
+
+              if (!pending.paneId) {
+                return;
+              }
+
+              const endpointId = globalThis.crypto.randomUUID();
+
+              const trusted = await ensureTrustedHost(set, {
+                hostId: pending.hostId,
+                action: {
+                  kind: "sftp",
+                  paneId: pending.paneId,
+                  hostId: pending.hostId,
+                  endpointId,
+                  secrets,
+                },
+              });
+              if (!trusted) {
+                set({ activeCredentialRetryAttempt: null });
+                return;
+              }
+              const connected = await connectTrustedHostPane(set, get, {
                 paneId: pending.paneId,
                 hostId: pending.hostId,
                 endpointId,
                 secrets,
-              },
-            });
-            if (!trusted) {
-              return;
+              });
+              if (!connected) {
+                if (usernameChanged) {
+                  await updateStoredSshUsername(
+                    { api, get, set },
+                    host.id,
+                    host.username,
+                  );
+                }
+                set({ activeCredentialRetryAttempt: null });
+                return;
+              }
+              set({
+                pendingCredentialRetry: null,
+                activeCredentialRetryAttempt: null,
+              });
+            } catch (error) {
+              if (usernameChanged) {
+                await updateStoredSshUsername(
+                  { api, get, set },
+                  host.id,
+                  host.username,
+                ).catch(() => undefined);
+              }
+              set({ activeCredentialRetryAttempt: null });
+              throw error;
             }
-            await connectTrustedHostPane(set, get, {
-              paneId: pending.paneId,
-              hostId: pending.hostId,
-              endpointId,
-              secrets,
-            });
           },
     dismissPendingMissingUsernamePrompt: () =>
             set({ pendingMissingUsernamePrompt: null }),

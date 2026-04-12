@@ -253,6 +253,34 @@ describe('HostRepository', () => {
       awsEcsClusterArn: 'arn:aws:ecs:ap-northeast-2:123456789012:cluster/prod',
     });
   });
+
+  it('clears key paths when unlinking a secret-backed SSH host', async () => {
+    const { HostRepository } = await loadRepositories();
+    const hosts = new HostRepository();
+
+    hosts.create('ssh-host-1', {
+      kind: 'ssh',
+      label: 'Cert Host',
+      groupName: null,
+      tags: [],
+      terminalThemeId: null,
+      hostname: 'cert.example.com',
+      port: 22,
+      username: 'ubuntu',
+      authType: 'certificate',
+      privateKeyPath: '/Users/test/.ssh/id_ed25519',
+      certificatePath: '/Users/test/.ssh/id_ed25519-cert.pub',
+      secretRef: 'secret:cert',
+    }, 'secret:cert');
+
+    hosts.clearSecretRef('secret:cert');
+
+    expect(hosts.getById('ssh-host-1')).toMatchObject({
+      secretRef: null,
+      privateKeyPath: null,
+      certificatePath: null,
+    });
+  });
 });
 
 describe('GroupRepository.remove', () => {

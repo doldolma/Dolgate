@@ -109,6 +109,7 @@ export const ipcChannels = {
   },
   shell: {
     pickPrivateKey: 'shell:pick-private-key',
+    pickSshCertificate: 'shell:pick-ssh-certificate',
     pickOpenSshConfig: 'shell:pick-openssh-config',
     pickXshellSessionFolder: 'shell:pick-xshell-session-folder',
     openExternal: 'shell:open-external'

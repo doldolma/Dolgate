@@ -35,6 +35,23 @@ func generateTestKeyPair(t *testing.T) (ssh.Signer, []byte) {
 	return signer, privateKeyPEM
 }
 
+func generateTestCertificate(t *testing.T, userSigner ssh.Signer) string {
+	t.Helper()
+
+	caSigner, _ := generateTestKeyPair(t)
+	cert := &ssh.Certificate{
+		Key:             userSigner.PublicKey(),
+		Serial:          1,
+		CertType:        ssh.UserCert,
+		ValidPrincipals: []string{"test-user"},
+		ValidBefore:     ssh.CertTimeInfinity,
+	}
+	if err := cert.SignCert(rand.Reader, caSigner); err != nil {
+		t.Fatalf("cert.SignCert() error = %v", err)
+	}
+	return string(ssh.MarshalAuthorizedKey(cert))
+}
+
 func TestStrictHostKeyCallback(t *testing.T) {
 	trustedSigner, _ := generateTestKeyPair(t)
 	untrustedSigner, _ := generateTestKeyPair(t)
@@ -54,7 +71,8 @@ func TestStrictHostKeyCallback(t *testing.T) {
 }
 
 func TestResolveAuthMethods(t *testing.T) {
-	_, privateKeyPEM := generateTestKeyPair(t)
+	signer, privateKeyPEM := generateTestKeyPair(t)
+	certificateText := generateTestCertificate(t, signer)
 
 	passwordMethods, err := resolveAuthMethods(Target{
 		AuthType: "password",
@@ -78,6 +96,18 @@ func TestResolveAuthMethods(t *testing.T) {
 		t.Fatalf("len(privateKeyMethods) = %d, want 2", len(privateKeyMethods))
 	}
 
+	certificateMethods, err := resolveAuthMethods(Target{
+		AuthType:        "certificate",
+		PrivateKeyPEM:   string(privateKeyPEM),
+		CertificateText: certificateText,
+	}, nil)
+	if err != nil {
+		t.Fatalf("resolveAuthMethods(certificate) error = %v", err)
+	}
+	if len(certificateMethods) != 2 {
+		t.Fatalf("len(certificateMethods) = %d, want 2", len(certificateMethods))
+	}
+
 	keyboardMethods, err := resolveAuthMethods(Target{
 		AuthType: "keyboardInteractive",
 	}, nil)
@@ -90,10 +120,15 @@ func TestResolveAuthMethods(t *testing.T) {
 }
 
 func TestResolveAuthMethodsPrivateKeyPathAndErrors(t *testing.T) {
-	_, privateKeyPEM := generateTestKeyPair(t)
+	signer, privateKeyPEM := generateTestKeyPair(t)
 	keyPath := filepath.Join(t.TempDir(), "id_rsa")
 	if err := os.WriteFile(keyPath, privateKeyPEM, 0o600); err != nil {
 		t.Fatalf("os.WriteFile() error = %v", err)
+	}
+	certificateText := generateTestCertificate(t, signer)
+	certificatePath := filepath.Join(t.TempDir(), "id_rsa-cert.pub")
+	if err := os.WriteFile(certificatePath, []byte(certificateText), 0o600); err != nil {
+		t.Fatalf("os.WriteFile(certificatePath) error = %v", err)
 	}
 
 	if _, err := resolveAuthMethods(Target{
@@ -104,9 +139,32 @@ func TestResolveAuthMethodsPrivateKeyPathAndErrors(t *testing.T) {
 	}
 
 	if _, err := resolveAuthMethods(Target{
+		AuthType:        "certificate",
+		PrivateKeyPath:  keyPath,
+		CertificatePath: certificatePath,
+	}, nil); err != nil {
+		t.Fatalf("resolveAuthMethods(certificate path) error = %v", err)
+	}
+
+	if _, err := resolveAuthMethods(Target{
 		AuthType: "password",
 	}, nil); err == nil {
 		t.Fatal("resolveAuthMethods(password missing secret) error = nil, want non-nil")
+	}
+
+	if _, err := resolveAuthMethods(Target{
+		AuthType:      "certificate",
+		PrivateKeyPEM: string(privateKeyPEM),
+	}, nil); err == nil {
+		t.Fatal("resolveAuthMethods(certificate missing cert) error = nil, want non-nil")
+	}
+
+	if _, err := resolveAuthMethods(Target{
+		AuthType:        "certificate",
+		PrivateKeyPEM:   string(privateKeyPEM),
+		CertificateText: string(ssh.MarshalAuthorizedKey(signer.PublicKey())),
+	}, nil); err == nil {
+		t.Fatal("resolveAuthMethods(certificate invalid cert) error = nil, want non-nil")
 	}
 
 	if _, err := resolveAuthMethods(Target{

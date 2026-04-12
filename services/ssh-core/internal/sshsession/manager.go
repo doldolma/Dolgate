@@ -85,6 +85,8 @@ func (m *Manager) Connect(sessionID, requestID string, payload protocol.ConnectP
 		Password:             payload.Password,
 		PrivateKeyPEM:        payload.PrivateKeyPEM,
 		PrivateKeyPath:       payload.PrivateKeyPath,
+		CertificateText:      payload.CertificateText,
+		CertificatePath:      payload.CertificatePath,
 		Passphrase:           payload.Passphrase,
 		TrustedHostKeyBase64: payload.TrustedHostKeyBase64,
 	}, sshconn.Config{
