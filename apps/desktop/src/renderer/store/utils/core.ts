@@ -1158,7 +1158,8 @@ export function toHostDraft(record: HostRecord, label: string): HostDraft {
     port: record.port,
     username: record.username,
     authType: record.authType,
-    privateKeyPath: record.privateKeyPath ?? null,
+    privateKeyPath: null,
+    certificatePath: null,
     secretRef: record.secretRef ?? null,
     groupName: record.groupName ?? null,
     tags: record.tags ?? [],
@@ -2482,7 +2483,7 @@ export function resolveCredentialRetryKind(
       : null;
   }
 
-  return /passphrase|private key|certificate|unable to authenticate|authentication failed|ssh handshake failed|unexpected message type 51|parse private key/i.test(
+  return /passphrase|private key|certificate|인증서|valid after|expired on|not valid before|unable to authenticate|authentication failed|ssh handshake failed|unexpected message type 51|parse private key/i.test(
     message,
   )
     ? "auth"

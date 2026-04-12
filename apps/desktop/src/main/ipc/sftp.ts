@@ -169,6 +169,7 @@ export function registerSftpIpcHandlers(ctx: MainIpcContext): void {
       const username = ctx.requireConfiguredSshUsername(sshHost);
       const { secrets, shouldPersistHostSecret } =
         await ctx.resolveRuntimeSshSecrets(sshHost, input.secrets);
+      await ctx.ensureCertificateAuthReady(sshHost, secrets);
 
       const endpoint = await ctx.coreManager.sftpConnect({
         endpointId: input.endpointId,

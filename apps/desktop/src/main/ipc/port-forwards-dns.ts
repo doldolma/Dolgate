@@ -521,6 +521,7 @@ export function registerPortForwardAndDnsIpcHandlers(
       const username = ctx.requireConfiguredSshUsername(sshHost);
       const { secrets, shouldPersistHostSecret } =
         await ctx.resolveRuntimeSshSecrets(sshHost);
+      await ctx.ensureCertificateAuthReady(sshHost, secrets);
 
       const runtime = await ctx.coreManager.startPortForward({
         ruleId: rule.id,

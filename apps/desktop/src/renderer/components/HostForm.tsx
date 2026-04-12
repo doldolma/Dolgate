@@ -15,8 +15,6 @@ const defaultDraft: HostDraft = {
   port: 22,
   username: '',
   authType: 'password',
-  privateKeyPath: '',
-  certificatePath: '',
   secretRef: null,
   groupName: '',
   terminalThemeId: null
@@ -88,7 +86,7 @@ export interface HostFormProps {
   hideTitle?: boolean;
   onSubmit: (draft: HostDraft, secrets?: HostSecretInput) => Promise<void>;
   onConnect?: (hostId: string) => Promise<void>;
-  onEditExistingSecret?: (secretRef: string, credentialKind: 'password' | 'passphrase') => void;
+  onEditExistingSecret?: (secretRef: string) => void;
   onOpenSecrets?: () => void;
   onActionStateChange?: (state: HostFormActionState) => void;
 }
@@ -101,6 +99,7 @@ interface HostFormSubmission {
 }
 
 interface ImportedShellCredentialFile {
+  name: string;
   content: string;
 }
 
@@ -161,7 +160,9 @@ function buildHostFormSubmission(input: {
     ...input.draft,
     label: nextLabel,
     tags: nextTags,
-    secretRef: input.credentialMode === 'existing' ? input.selectedSecretRef || null : null
+    secretRef: input.credentialMode === 'existing' ? input.selectedSecretRef || null : null,
+    privateKeyPath: null,
+    certificatePath: null
   };
 
   if (input.credentialMode !== 'new') {
@@ -465,8 +466,6 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
         port: host.port,
         username: host.username,
         authType: host.authType,
-        privateKeyPath: host.privateKeyPath ?? '',
-        certificatePath: host.certificatePath ?? '',
         secretRef: host.secretRef,
         groupName: host.groupName ?? '',
         terminalThemeId: host.terminalThemeId ?? null
@@ -577,12 +576,7 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
     if (!selected) {
       return;
     }
-    setPrivateKeyFile({ content: selected.content });
-    setDraft((current) =>
-      isSshHostDraft(current)
-        ? { ...current, privateKeyPath: selected.path }
-        : current,
-    );
+    setPrivateKeyFile({ name: selected.name, content: selected.content });
   }
 
   async function pickCertificate(): Promise<void> {
@@ -593,12 +587,7 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
     if (!selected) {
       return;
     }
-    setCertificateFile({ content: selected.content });
-    setDraft((current) =>
-      isSshHostDraft(current)
-        ? { ...current, certificatePath: selected.path }
-        : current,
-    );
+    setCertificateFile({ name: selected.name, content: selected.content });
   }
 
   function updateDraftTags(nextTags: string[]) {
@@ -677,12 +666,12 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
           return Boolean(selectedSecretRef.trim());
         }
         if (nextDraft.authType === 'privateKey') {
-          return Boolean(privateKeyFile?.content || nextDraft.privateKeyPath?.trim());
+          return Boolean(privateKeyFile?.content);
         }
         if (nextDraft.authType === 'certificate') {
           return Boolean(
-            (privateKeyFile?.content || nextDraft.privateKeyPath?.trim()) &&
-            (certificateFile?.content || nextDraft.certificatePath?.trim())
+            privateKeyFile?.content &&
+            certificateFile?.content
           );
         }
         return true;
@@ -1182,16 +1171,8 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
                   setDraft({
                     ...sshDraft,
                     authType: nextAuthType,
-                    ...(nextAuthType === 'password'
-                      ? {
-                          privateKeyPath: '',
-                          certificatePath: '',
-                        }
-                      : nextAuthType === 'privateKey'
-                        ? {
-                            certificatePath: '',
-                          }
-                        : {})
+                    privateKeyPath: null,
+                    certificatePath: null
                   });
                   if (nextAuthType === 'password') {
                     setPrivateKeyFile(null);
@@ -1220,10 +1201,9 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
                   <span className={fieldLabelClassName}>Private key file</span>
                   <div className="flex gap-[0.75rem]">
                     <Input
-                      value={sshDraft.privateKeyPath ?? ''}
-                      onChange={(event) => setDraft({ ...sshDraft, privateKeyPath: event.target.value })}
+                      readOnly
+                      value={privateKeyFile?.name ?? ''}
                       placeholder="/Users/.../.ssh/id_ed25519"
-                      required
                     />
                     <Button variant="secondary" onClick={pickPrivateKey}>
                       Import
@@ -1235,10 +1215,9 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
                     <span className={fieldLabelClassName}>SSH certificate file</span>
                     <div className="flex gap-[0.75rem]">
                       <Input
-                        value={sshDraft.certificatePath ?? ''}
-                        onChange={(event) => setDraft({ ...sshDraft, certificatePath: event.target.value })}
+                        readOnly
+                        value={certificateFile?.name ?? ''}
                         placeholder="/Users/.../.ssh/id_ed25519-cert.pub"
-                        required
                       />
                       <Button variant="secondary" onClick={pickCertificate}>
                         Import
@@ -1262,19 +1241,19 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
 
             <div className="grid gap-[0.55rem]">
               <div className="flex items-center justify-between gap-3">
-                <span className={fieldLabelClassName}>Saved Secret</span>
+                <span className={fieldLabelClassName}>Saved Credentials</span>
                 {onOpenSecrets && keychainEntries.length > 0 ? (
                   <button
                     type="button"
                     className="border-0 bg-transparent p-0 text-[0.88rem] font-semibold text-[var(--accent-strong)]"
                     onClick={onOpenSecrets}
                   >
-                    Secrets 열기
+                    Manage
                   </button>
                 ) : null}
               </div>
               <SelectField
-                aria-label="Saved Secret"
+                aria-label="Saved Credentials"
                 value={credentialMode === 'existing' ? `existing:${selectedSecretRef}` : credentialMode}
                 onChange={(event) => {
                   const value = event.target.value;
@@ -1289,7 +1268,7 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
                   }
                 }}
               >
-                <option value="new">새 secret 생성</option>
+                <option value="new">새 인증 정보 저장</option>
                 {reusableEntries.map((entry) => (
                   <option key={entry.secretRef} value={`existing:${entry.secretRef}`}>
                     {formatSavedSecretOptionLabel(entry)}
@@ -1300,12 +1279,12 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
 
             {credentialMode === 'existing' ? (
               <>
-                {host && isSshHostRecord(host) && selectedSecretRef && host.secretRef === selectedSecretRef && onEditExistingSecret && sshDraft.authType !== 'certificate' ? (
+                {host && isSshHostRecord(host) && selectedSecretRef && onEditExistingSecret ? (
                   <Button
                     variant="secondary"
-                    onClick={() => onEditExistingSecret(selectedSecretRef, sshDraft.authType === 'password' ? 'password' : 'passphrase')}
+                    onClick={() => onEditExistingSecret(selectedSecretRef)}
                   >
-                    {sshDraft.authType === 'password' ? '비밀번호 변경' : 'Passphrase 변경'}
+                    편집
                   </Button>
                 ) : null}
               </>

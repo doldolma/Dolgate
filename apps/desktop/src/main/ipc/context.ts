@@ -17,6 +17,7 @@ import type {
   ManagedSecretPayload,
   PortForwardDraft,
   PortForwardRuntimeRecord,
+  SshCertificateInfo,
 } from "@shared";
 import type { BrowserWindow, WebContents } from "electron";
 import type { AuthService } from "../auth-service";
@@ -214,6 +215,15 @@ export interface MainIpcContext {
     nextSecrets: HostSecretInput | undefined,
     currentSecretRef: string | null,
   ) => Promise<string | undefined>;
+  inspectCertificate: (certificateText: string) => Promise<SshCertificateInfo>;
+  inspectStoredCertificate: (input: {
+    secretRef?: string | null;
+    certificateText?: string | undefined;
+  }) => Promise<SshCertificateInfo | null>;
+  ensureCertificateAuthReady: (
+    host: SshHostRecord,
+    secrets: HostSecretInput,
+  ) => Promise<SshCertificateInfo | null>;
   requireTrustedHostKey: (host: { hostname: string; port: number }) => string;
   requireConfiguredSshUsername: (host: SshHostRecord) => string;
   buildKnownSshDuplicateKeys: () => Set<string>;

@@ -29,7 +29,6 @@ const reusableKeychainEntries: SecretMetadataRecord[] = [
     hasPassphrase: false,
     hasManagedPrivateKey: false,
     hasCertificate: false,
-    source: 'local_keychain',
     linkedHostCount: 2,
     updatedAt: '2026-03-25T00:00:00.000Z',
   },
@@ -40,7 +39,6 @@ const reusableKeychainEntries: SecretMetadataRecord[] = [
     hasPassphrase: true,
     hasManagedPrivateKey: true,
     hasCertificate: false,
-    source: 'local_keychain',
     linkedHostCount: 1,
     updatedAt: '2026-03-25T00:00:00.000Z',
   },
@@ -51,7 +49,6 @@ const reusableKeychainEntries: SecretMetadataRecord[] = [
     hasPassphrase: true,
     hasManagedPrivateKey: true,
     hasCertificate: true,
-    source: 'local_keychain',
     linkedHostCount: 1,
     updatedAt: '2026-03-25T00:00:00.000Z',
   },
@@ -204,9 +201,9 @@ describe('HostForm', () => {
       />,
     );
 
-    expect(screen.getByText('Saved Secret')).toBeInTheDocument();
-    expect(screen.getByLabelText('Saved Secret')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Secrets 열기' })).toBeInTheDocument();
+    expect(screen.getByText('Saved Credentials')).toBeInTheDocument();
+    expect(screen.getByLabelText('Saved Credentials')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Manage' })).toBeInTheDocument();
   });
 
   it('shows certificate-specific fields and filters saved secrets for certificate auth', () => {
@@ -228,9 +225,9 @@ describe('HostForm', () => {
     expect(screen.getByLabelText('SSH certificate file')).toBeInTheDocument();
     expect(screen.getByLabelText('Passphrase')).toBeInTheDocument();
 
-    const select = screen.getByLabelText('Saved Secret');
+    const select = screen.getByLabelText('Saved Credentials');
     expect(within(select).queryByRole('option', { name: '사용 안 함' })).not.toBeInTheDocument();
-    expect(within(select).getByRole('option', { name: /Shared Certificate · Certificate \+ Passphrase/ })).toBeInTheDocument();
+    expect(within(select).getByRole('option', { name: /Shared Certificate · SSH certificate \+ Passphrase/ })).toBeInTheDocument();
     expect(within(select).queryByRole('option', { name: /Shared Key/ })).not.toBeInTheDocument();
     expect(within(select).queryByRole('option', { name: /Shared Password/ })).not.toBeInTheDocument();
   });
@@ -246,9 +243,33 @@ describe('HostForm', () => {
       />,
     );
 
-    const savedSecretSelect = screen.getByLabelText('Saved Secret') as HTMLSelectElement;
+    const savedSecretSelect = screen.getByLabelText('Saved Credentials') as HTMLSelectElement;
     await waitFor(() => expect(savedSecretSelect.value).toBe('existing:secret-password'));
-    expect(screen.getByRole('button', { name: 'Secrets 열기' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Manage' })).toBeInTheDocument();
+  });
+
+  it('allows opening the full editor for an attached certificate secret', async () => {
+    const onEditExistingSecret = vi.fn();
+
+    render(
+      <HostForm
+        host={createHost({ secretRef: 'secret-certificate', authType: 'certificate' })}
+        keychainEntries={reusableKeychainEntries}
+        groupOptions={groupOptions}
+        onSubmit={vi.fn().mockResolvedValue(undefined)}
+        onEditExistingSecret={onEditExistingSecret}
+      />,
+    );
+
+    await waitFor(() =>
+      expect((screen.getByLabelText('Saved Credentials') as HTMLSelectElement).value).toBe(
+        'existing:secret-certificate',
+      ),
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: '편집' }));
+
+    expect(onEditExistingSecret).toHaveBeenCalledWith('secret-certificate');
   });
 
   it('falls back to creating a new password secret when the selected saved secret disappears', async () => {
@@ -262,7 +283,7 @@ describe('HostForm', () => {
       />,
     );
 
-    const savedSecretSelect = screen.getByLabelText('Saved Secret') as HTMLSelectElement;
+    const savedSecretSelect = screen.getByLabelText('Saved Credentials') as HTMLSelectElement;
     await waitFor(() => expect(savedSecretSelect.value).toBe('existing:secret-password'));
 
     rerender(
@@ -289,7 +310,7 @@ describe('HostForm', () => {
       />,
     );
 
-    const savedSecretSelect = screen.getByLabelText('Saved Secret') as HTMLSelectElement;
+    const savedSecretSelect = screen.getByLabelText('Saved Credentials') as HTMLSelectElement;
     await waitFor(() => expect(savedSecretSelect.value).toBe('existing:secret-certificate'));
 
     rerender(
@@ -329,7 +350,7 @@ describe('HostForm', () => {
       target: { value: 'prod.example.com' },
     });
     fireEvent.click(screen.getByRole('button', { name: 'Import' }));
-    await waitFor(() => expect(screen.getByLabelText('Private key file')).toHaveValue('/Users/tester/.ssh/id_ed25519'));
+    await waitFor(() => expect(screen.getByLabelText('Private key file')).toHaveValue('id_ed25519'));
 
     const form = screen.getByLabelText('Hostname').closest('form');
     expect(form).not.toBeNull();
@@ -338,7 +359,7 @@ describe('HostForm', () => {
     await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
     expect(onSubmit).toHaveBeenCalledWith(
       expect.objectContaining({
-        privateKeyPath: '/Users/tester/.ssh/id_ed25519',
+        privateKeyPath: null,
         secretRef: null,
       }),
       expect.objectContaining({
@@ -461,7 +482,7 @@ describe('HostForm', () => {
     expect(within(connectionSection).getByLabelText('Hostname')).toBeInTheDocument();
     expect(within(connectionSection).getByText('Auth Type')).toBeInTheDocument();
     expect(within(connectionSection).getByLabelText('Password')).toBeInTheDocument();
-    expect(within(connectionSection).getByText('Saved Secret')).toBeInTheDocument();
+    expect(within(connectionSection).getByText('Saved Credentials')).toBeInTheDocument();
 
     expect(within(detailsSection).getByText('Details')).toBeInTheDocument();
     expect(within(detailsSection).getByLabelText('Label')).toBeInTheDocument();
@@ -489,7 +510,7 @@ describe('HostForm', () => {
     const preferencesSection = screen.getByTestId('hostform-section-preferences');
     const authTypeField = within(connectionSection).getByText('Auth Type').closest('label');
     const passwordField = within(connectionSection).getByLabelText('Password').closest('label');
-    const savedSecretHeading = within(connectionSection).getByText('Saved Secret');
+    const savedSecretHeading = within(connectionSection).getByText('Saved Credentials');
     const terminalThemeField = within(preferencesSection).getByText('Terminal Theme').closest('label');
 
     expect(authTypeField).not.toBeNull();

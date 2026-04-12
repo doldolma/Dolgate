@@ -694,7 +694,6 @@ export class SyncService {
       .filter((record) => !record.deleted_at)
       .map((record) => decodeEncryptedPayload<ManagedSecretPayload>(record.encrypted_payload, vaultKeyBase64));
 
-    const nextSecretRefs = new Set(secrets.map((secret) => secret.secretRef));
     const nextSecretMetadata: SecretMetadataRecord[] = secrets.map((secret) => ({
         secretRef: secret.secretRef,
         label: secret.label,
@@ -702,7 +701,6 @@ export class SyncService {
         hasPassphrase: Boolean(secret.passphrase),
         hasManagedPrivateKey: Boolean(secret.privateKeyPem),
         hasCertificate: Boolean(secret.certificateText),
-        source: 'server_managed',
         linkedHostCount: 0,
         updatedAt: secret.updatedAt
       }));
@@ -714,15 +712,6 @@ export class SyncService {
     );
 
     this.stateStorage.updateState((state) => {
-      const existingServerSecretRefs = new Set(
-        state.data.secretMetadata
-          .filter((record) => record.source === 'server_managed')
-          .map((record) => record.secretRef)
-      );
-      const remainingMetadata = state.data.secretMetadata.filter(
-        (record) => record.source !== 'server_managed'
-      );
-
       state.data.groups = groups;
       state.data.hosts = hosts;
       state.data.knownHosts = knownHosts;
@@ -740,16 +729,8 @@ export class SyncService {
         preferences[0]?.globalTerminalThemeId ?? 'dolssh-dark';
       state.terminal.globalThemeUpdatedAt =
         preferences[0]?.updatedAt ?? nowIso();
-      state.data.secretMetadata = [...remainingMetadata, ...nextSecretMetadata];
-
-      for (const secretRef of existingServerSecretRefs) {
-        if (!nextSecretRefs.has(secretRef)) {
-          delete state.secure.managedSecretsByRef[secretRef];
-        }
-      }
-      for (const [secretRef, storedSecret] of nextStoredSecrets) {
-        state.secure.managedSecretsByRef[secretRef] = storedSecret;
-      }
+      state.data.secretMetadata = nextSecretMetadata;
+      state.secure.managedSecretsByRef = Object.fromEntries(nextStoredSecrets);
       if (shouldSyncAwsProfiles) {
         const nextAwsProfileIds = new Set(awsProfiles.map((profile) => profile.id));
         for (const profileId of Object.keys(state.secure.managedAwsProfilesById)) {

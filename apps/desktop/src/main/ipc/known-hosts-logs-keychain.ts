@@ -3,11 +3,49 @@ import type {
   KeychainSecretUpdateInput,
   KnownHostProbeInput,
   KnownHostTrustInput,
+  LoadedManagedSecretPayload,
+  HostSecretInput,
   ManagedSecretPayload,
 } from "@shared";
 import { ipcMain } from "electron";
 import { ipcChannels } from "../../common/ipc-channels";
 import type { MainIpcContext, SshHostRecord } from "./context";
+
+function normalizeReplacementSecrets(secrets: HostSecretInput): HostSecretInput {
+  const privateKeyPem =
+    secrets.privateKeyPem && secrets.privateKeyPem.trim().length > 0
+      ? secrets.privateKeyPem
+      : undefined;
+  const certificateText =
+    secrets.certificateText && secrets.certificateText.trim().length > 0
+      ? secrets.certificateText
+      : undefined;
+
+  return {
+    password: secrets.password ? secrets.password : undefined,
+    passphrase: secrets.passphrase ? secrets.passphrase : undefined,
+    privateKeyPem,
+    certificateText,
+  };
+}
+
+function validateReplacementSecrets(secrets: HostSecretInput): string | null {
+  if (
+    !secrets.password &&
+    !secrets.passphrase &&
+    !secrets.privateKeyPem &&
+    !secrets.certificateText
+  ) {
+    return "저장할 인증 정보가 없습니다.";
+  }
+  if (secrets.certificateText && !secrets.privateKeyPem) {
+    return "SSH 인증서를 저장하려면 개인키도 함께 포함해야 합니다.";
+  }
+  if (secrets.passphrase && !secrets.privateKeyPem) {
+    return "패스프레이즈는 개인키와 함께만 저장할 수 있습니다.";
+  }
+  return null;
+}
 
 export function registerKnownHostsLogsKeychainIpcHandlers(
   ctx: MainIpcContext,
@@ -108,13 +146,17 @@ export function registerKnownHostsLogsKeychainIpcHandlers(
         return null;
       }
       const payload = JSON.parse(raw) as ManagedSecretPayload;
+      const certificateInfo =
+        payload.certificateText && payload.certificateText.trim().length > 0
+          ? await ctx.inspectCertificate(payload.certificateText)
+          : undefined;
       return {
         ...payload,
         secretRef,
         label: metadata.label,
-        source: metadata.source,
         updatedAt: payload.updatedAt ?? metadata.updatedAt,
-      } satisfies ManagedSecretPayload;
+        certificateInfo,
+      } satisfies LoadedManagedSecretPayload;
     },
   );
 
@@ -140,10 +182,10 @@ export function registerKnownHostsLogsKeychainIpcHandlers(
         throw new Error("Keychain secret not found");
       }
 
-      const currentSecrets = await ctx.loadSecrets(input.secretRef);
-      const mergedSecrets = ctx.mergeSecrets(currentSecrets, input.secrets);
-      if (!ctx.hasSecretValue(mergedSecrets)) {
-        throw new Error("업데이트할 secret 값이 없습니다.");
+      const replacementSecrets = normalizeReplacementSecrets(input.secrets);
+      const validationError = validateReplacementSecrets(replacementSecrets);
+      if (validationError) {
+        throw new Error(validationError);
       }
 
       await ctx.secretStore.save(
@@ -151,22 +193,20 @@ export function registerKnownHostsLogsKeychainIpcHandlers(
         JSON.stringify({
           secretRef: input.secretRef,
           label: currentMetadata.label,
-          password: mergedSecrets.password,
-          passphrase: mergedSecrets.passphrase,
-          privateKeyPem: mergedSecrets.privateKeyPem,
-          certificateText: mergedSecrets.certificateText,
-          source: currentMetadata.source,
+          password: replacementSecrets.password,
+          passphrase: replacementSecrets.passphrase,
+          privateKeyPem: replacementSecrets.privateKeyPem,
+          certificateText: replacementSecrets.certificateText,
           updatedAt: new Date().toISOString(),
         } satisfies ManagedSecretPayload),
       );
       ctx.secretMetadata.upsert({
         secretRef: input.secretRef,
         label: currentMetadata.label,
-        hasPassword: Boolean(mergedSecrets.password),
-        hasPassphrase: Boolean(mergedSecrets.passphrase),
-        hasManagedPrivateKey: Boolean(mergedSecrets.privateKeyPem),
-        hasCertificate: Boolean(mergedSecrets.certificateText),
-        source: currentMetadata.source,
+        hasPassword: Boolean(replacementSecrets.password),
+        hasPassphrase: Boolean(replacementSecrets.passphrase),
+        hasManagedPrivateKey: Boolean(replacementSecrets.privateKeyPem),
+        hasCertificate: Boolean(replacementSecrets.certificateText),
       });
 
       ctx.activityLogs.append("info", "audit", "공유 secret을 갱신했습니다.", {
@@ -186,15 +226,15 @@ export function registerKnownHostsLogsKeychainIpcHandlers(
         throw new Error("Host is not linked to the selected keychain secret");
       }
 
-      const currentSecrets = await ctx.loadSecrets(input.sourceSecretRef);
-      const mergedSecrets = ctx.mergeSecrets(currentSecrets, input.secrets);
-      if (!ctx.hasSecretValue(mergedSecrets)) {
-        throw new Error("복제할 secret 값이 없습니다.");
+      const replacementSecrets = normalizeReplacementSecrets(input.secrets);
+      const validationError = validateReplacementSecrets(replacementSecrets);
+      if (validationError) {
+        throw new Error(validationError);
       }
 
       const nextSecretRef = await ctx.persistSecret(
         ctx.describeHostLabel(sshHost),
-        mergedSecrets,
+        replacementSecrets,
       );
       if (!nextSecretRef) {
         throw new Error("새 secret을 생성하지 못했습니다.");

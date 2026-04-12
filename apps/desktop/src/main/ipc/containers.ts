@@ -346,6 +346,7 @@ export function registerContainersIpcHandlers(ctx: MainIpcContext): void {
       const username = ctx.requireConfiguredSshUsername(sshHost);
       const { secrets, shouldPersistHostSecret } =
         await ctx.resolveRuntimeSshSecrets(sshHost);
+      await ctx.ensureCertificateAuthReady(sshHost, secrets);
       const connection = await ctx.coreManager.connect({
         host: sshHost.hostname,
         port: sshHost.port,

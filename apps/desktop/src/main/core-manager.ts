@@ -24,6 +24,7 @@ import type {
   PortForwardRuntimeRecord,
   KeyboardInteractiveRespondInput,
   ControlSignalPayload,
+  ResolvedCertificateInspectPayload,
   ResolvedAwsConnectPayload,
   ResolvedContainersConnectPayload,
   ResolvedCoreConnectPayload,
@@ -41,6 +42,7 @@ import type {
   SftpMkdirInput,
   SftpRenameInput,
   SessionShareControlSignal,
+  SshCertificateInfo,
   TerminalTab,
   TransferJob,
   TransferJobEvent,
@@ -1376,6 +1378,39 @@ export class CoreManager {
       fingerprintSha256: String(response.fingerprintSha256 ?? ""),
       status: "untrusted",
       existing: null,
+    };
+  }
+
+  async inspectCertificate(
+    certificateText: string,
+  ): Promise<SshCertificateInfo> {
+    await this.start();
+    const response = await this.requestResponse<Record<string, unknown>>(
+      {
+        id: randomUUID(),
+        type: "inspectCertificate",
+        payload: {
+          certificateText,
+        } satisfies ResolvedCertificateInspectPayload,
+      },
+      ["certificateInspected"],
+    );
+    return {
+      status:
+        response.status === "expired" ||
+        response.status === "not_yet_valid" ||
+        response.status === "invalid"
+          ? response.status
+          : "valid",
+      validAfter:
+        typeof response.validAfter === "string" ? response.validAfter : null,
+      validBefore:
+        typeof response.validBefore === "string" ? response.validBefore : null,
+      principals: Array.isArray(response.principals)
+        ? response.principals.filter((value): value is string => typeof value === "string")
+        : [],
+      keyId: typeof response.keyId === "string" ? response.keyId : null,
+      serial: typeof response.serial === "string" ? response.serial : null,
     };
   }
 

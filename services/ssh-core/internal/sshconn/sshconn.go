@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"net"
-	"os"
 	"time"
 
 	"golang.org/x/crypto/ssh"
@@ -22,9 +21,7 @@ type Target struct {
 	AuthType             string
 	Password             string
 	PrivateKeyPEM        string
-	PrivateKeyPath       string
 	CertificateText      string
-	CertificatePath      string
 	Passphrase           string
 	TrustedHostKeyBase64 string
 }
@@ -38,6 +35,15 @@ type HostKeyProbeResult struct {
 	Algorithm         string
 	PublicKeyBase64   string
 	FingerprintSHA256 string
+}
+
+type CertificateInspection struct {
+	Status      string
+	ValidAfter  *time.Time
+	ValidBefore *time.Time
+	Principals  []string
+	KeyID       string
+	Serial      uint64
 }
 
 type InteractivePrompt struct {
@@ -146,6 +152,49 @@ func ProbeHostKey(host string, port int, config Config) (HostKeyProbeResult, err
 	return HostKeyProbeResult{}, fmt.Errorf("host key probe failed: empty result")
 }
 
+func InspectCertificate(certificateText string, now time.Time) CertificateInspection {
+	cert, err := resolveCertificate(Target{CertificateText: certificateText})
+	if err != nil {
+		return CertificateInspection{Status: "invalid"}
+	}
+
+	result := CertificateInspection{
+		Status:     "valid",
+		Principals: append([]string(nil), cert.ValidPrincipals...),
+		KeyID:      cert.KeyId,
+		Serial:     cert.Serial,
+	}
+
+	validAfter := certificateUnixTime(cert.ValidAfter)
+	result.ValidAfter = validAfter
+
+	if cert.ValidBefore != ssh.CertTimeInfinity {
+		result.ValidBefore = certificateUnixTime(cert.ValidBefore)
+	}
+
+	if validAfter != nil && now.Before(*validAfter) {
+		result.Status = "not_yet_valid"
+		return result
+	}
+
+	if result.ValidBefore != nil && !now.Before(*result.ValidBefore) {
+		result.Status = "expired"
+	}
+
+	return result
+}
+
+func certificateUnixTime(value uint64) *time.Time {
+	if value == 0 {
+		return nil
+	}
+	if value > uint64(^uint64(0)>>1) {
+		return nil
+	}
+	timestamp := time.Unix(int64(value), 0).UTC()
+	return &timestamp
+}
+
 func strictHostKeyCallback(trustedHostKeyBase64 string) (ssh.HostKeyCallback, error) {
 	if trustedHostKeyBase64 == "" {
 		return nil, fmt.Errorf("trusted host key is required")
@@ -235,14 +284,7 @@ func loadPrivateKeyBytes(target Target) ([]byte, error) {
 	if target.PrivateKeyPEM != "" {
 		return []byte(target.PrivateKeyPEM), nil
 	}
-	if target.PrivateKeyPath == "" {
-		return nil, fmt.Errorf("private key auth requires a privateKeyPem or privateKeyPath")
-	}
-	privateKey, err := os.ReadFile(target.PrivateKeyPath)
-	if err != nil {
-		return nil, fmt.Errorf("read private key: %w", err)
-	}
-	return privateKey, nil
+	return nil, fmt.Errorf("private key auth requires a privateKeyPem")
 }
 
 func resolvePrivateKeySigner(target Target) (ssh.Signer, error) {
@@ -269,14 +311,7 @@ func resolveCertificate(target Target) (*ssh.Certificate, error) {
 	if target.CertificateText != "" {
 		rawCertificate = target.CertificateText
 	} else {
-		if target.CertificatePath == "" {
-			return nil, fmt.Errorf("certificate auth requires a certificateText or certificatePath")
-		}
-		certificateBytes, err := os.ReadFile(target.CertificatePath)
-		if err != nil {
-			return nil, fmt.Errorf("read certificate: %w", err)
-		}
-		rawCertificate = string(certificateBytes)
+		return nil, fmt.Errorf("certificate auth requires a certificateText")
 	}
 
 	raw, _, _, _, err := ssh.ParseAuthorizedKey([]byte(rawCertificate))

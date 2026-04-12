@@ -29,6 +29,7 @@ import type {
   DesktopBootstrapSnapshot,
   DesktopSyncedWorkspaceSnapshot,
   KeyboardInteractiveChallenge,
+  LoadedManagedSecretPayload,
   ManagedSecretPayload,
   OpenSshSnapshotFileInput,
   OpenSshImportResult,
@@ -72,6 +73,7 @@ import type {
   SessionShareSnapshotInput,
   SessionShareStartInput,
   SessionShareState,
+  SshCertificateInfo,
   SftpConnectionProgressEvent,
   SftpEndpointSummary,
   SyncStatus,
@@ -101,6 +103,7 @@ export type CoreCommandType =
   | "resize"
   | "disconnect"
   | "probeHostKey"
+  | "inspectCertificate"
   | "keyboardInteractiveRespond"
   | "portForwardStart"
   | "ssmPortForwardStart"
@@ -133,6 +136,7 @@ export type CoreEventType =
   | "error"
   | "closed"
   | "hostKeyProbed"
+  | "certificateInspected"
   | "keyboardInteractiveChallenge"
   | "keyboardInteractiveResolved"
   | "portForwardStarted"
@@ -193,9 +197,7 @@ export interface ResolvedCoreConnectPayload {
   authType: AuthType;
   password?: string;
   privateKeyPem?: string;
-  privateKeyPath?: string;
   certificateText?: string;
-  certificatePath?: string;
   passphrase?: string;
   trustedHostKeyBase64: string;
   cols: number;
@@ -223,6 +225,13 @@ export interface ResolvedLocalConnectPayload {
   env?: Record<string, string>;
   workingDirectory?: string | null;
 }
+
+export interface ResolvedCertificateInspectPayload {
+  certificateText: string;
+}
+
+export interface ResolvedCertificateInspectResult
+  extends SshCertificateInfo {}
 
 export interface AwsEcsServiceLogsInput {
   hostId: string;
@@ -273,9 +282,7 @@ export interface ResolvedSftpConnectPayload {
   authType: AuthType;
   password?: string;
   privateKeyPem?: string;
-  privateKeyPath?: string;
   certificateText?: string;
-  certificatePath?: string;
   passphrase?: string;
   trustedHostKeyBase64: string;
 }
@@ -287,9 +294,7 @@ export interface ResolvedContainersConnectPayload {
   authType: AuthType;
   password?: string;
   privateKeyPem?: string;
-  privateKeyPath?: string;
   certificateText?: string;
-  certificatePath?: string;
   passphrase?: string;
   trustedHostKeyBase64: string;
 }
@@ -306,9 +311,7 @@ export interface ResolvedPortForwardStartPayload {
   authType: AuthType;
   password?: string;
   privateKeyPem?: string;
-  privateKeyPath?: string;
   certificateText?: string;
-  certificatePath?: string;
   passphrase?: string;
   trustedHostKeyBase64: string;
   mode: PortForwardMode;
@@ -701,9 +704,7 @@ export interface DesktopApi {
   };
   keychain: {
     list: () => Promise<SecretMetadataRecord[]>;
-    load: (
-      secretRef: string,
-    ) => Promise<ManagedSecretPayload | HostSecretInput | null>;
+    load: (secretRef: string) => Promise<LoadedManagedSecretPayload | null>;
     remove: (secretRef: string) => Promise<void>;
     update: (input: KeychainSecretUpdateInput) => Promise<void>;
     cloneForHost: (input: KeychainSecretCloneInput) => Promise<void>;

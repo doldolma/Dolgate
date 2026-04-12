@@ -148,6 +148,7 @@ describe("registerHostsGroupsIpcHandlers", () => {
         ...draft,
         privateKeyPath: null,
         certificatePath: null,
+        secretRef: "secret:generated",
       },
       "secret:generated",
     );

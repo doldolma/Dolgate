@@ -45,7 +45,6 @@ export type KnownHostTrustStatus = 'trusted' | 'untrusted' | 'mismatch';
 export type ActivityLogLevel = 'info' | 'warn' | 'error';
 export type ActivityLogCategory = 'session' | 'audit';
 export type ActivityLogKind = 'generic' | 'session-lifecycle' | 'port-forward-lifecycle';
-export type SecretSource = 'local_keychain' | 'server_managed';
 export type AuthStatus = 'loading' | 'unauthenticated' | 'authenticating' | 'authenticated' | 'offline-authenticated' | 'error';
 export type SyncBootstrapStatus = 'idle' | 'syncing' | 'ready' | 'paused' | 'error';
 export type AwsProfilesServerSupport = 'unknown' | 'supported' | 'unsupported';
@@ -1528,9 +1527,23 @@ export interface SecretMetadataRecord {
   hasPassphrase: boolean;
   hasManagedPrivateKey: boolean;
   hasCertificate: boolean;
-  source: SecretSource;
   linkedHostCount: number;
   updatedAt: string;
+}
+
+export type SshCertificateValidityStatus =
+  | 'valid'
+  | 'expired'
+  | 'not_yet_valid'
+  | 'invalid';
+
+export interface SshCertificateInfo {
+  status: SshCertificateValidityStatus;
+  validAfter?: string | null;
+  validBefore?: string | null;
+  principals?: string[];
+  keyId?: string | null;
+  serial?: string | null;
 }
 
 // ManagedSecretPayload는 서버 sync와 로컬 keychain이 공유하는 실제 secret 본문이다.
@@ -1542,8 +1555,11 @@ export interface ManagedSecretPayload {
   passphrase?: string;
   privateKeyPem?: string;
   certificateText?: string;
-  source: SecretSource;
   updatedAt: string;
+}
+
+export interface LoadedManagedSecretPayload extends ManagedSecretPayload {
+  certificateInfo?: SshCertificateInfo;
 }
 
 export interface LinkedHostSummary {

@@ -21,11 +21,13 @@ import {
   findSshHostMissingUsername,
   isAwsEc2HostRecord,
   isAwsEcsHostRecord,
+  isSshHostRecord,
   isPendingEcsShellAttempt,
   normalizeEcsExecShellPermissionMessage,
   replaceSessionReferencesInState,
   resolveAwaitingHostTrustProgress,
   resolveConnectingProgress,
+  resolveCredentialRetryKind,
   resolveErrorProgress,
   resolveHostKeyCheckProgress,
   resolveLocalStartingProgress,
@@ -487,6 +489,24 @@ export function createSessionServices(deps: SliceDeps) {
         error instanceof Error
           ? error.message
           : "호스트 연결을 시작하지 못했습니다.";
+      const shouldPromptCredentialRetry = resolveCredentialRetryKind(host, message);
+      if (shouldPromptCredentialRetry && isSshHostRecord(host)) {
+        set({
+          pendingCredentialRetry: {
+            sessionId,
+            hostId: host.id,
+            source: "ssh",
+            authType:
+              host.authType === "certificate"
+                ? "certificate"
+                : host.authType === "privateKey"
+                  ? "privateKey"
+                  : "password",
+            message,
+            initialUsername: host.username,
+          },
+        });
+      }
       markSessionError(set, sessionId, message);
     }
   };
