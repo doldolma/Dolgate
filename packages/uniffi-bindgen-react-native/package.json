@@ -1,0 +1,13 @@
+{
+  "name": "uniffi-bindgen-react-native",
+  "version": "0.31.0-2",
+  "description": "Uniffi bindings generator for calling Rust from React Native",
+  "license": "MPL-2.0",
+  "type": "module",
+  "main": "./typescript/dist/index.js",
+  "types": "./typescript/dist/index.d.ts",
+  "bin": {
+    "ubrn": "./bin/cli.cjs",
+    "uniffi-bindgen-react-native": "./bin/cli.cjs"
+  }
+}

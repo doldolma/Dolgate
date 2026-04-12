@@ -1,0 +1,34 @@
+[package]
+name = "uniffi-fixture-async-calls"
+version = "0.21.0"
+authors = ["jhugman"]
+edition = "2021"
+license = "MPL-2.0"
+publish = false
+
+[lib]
+name = "uniffi_async_calls"
+crate-type = ["lib", "cdylib"]
+
+[[bin]]
+name = "uniffi-fixture-async-calls"
+path = "src/bin.rs"
+
+[dependencies]
+async-trait = "0.1"
+futures = "0.3"
+thiserror = "1.0"
+once_cell = "1.18.0"
+ubrn_testing = { path = "../../crates/ubrn_testing" }
+uniffi = { workspace = true, features = ["tokio", "cli"] }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+tokio = { version = "1.24.1", features = ["time", "sync"] }
+
+[build-dependencies]
+uniffi = { workspace = true, features = ["build"] }
+
+[dev-dependencies]
+ubrn_macros = { workspace = true }
+ubrn_fixture_testing = { workspace = true }
+uniffi = { workspace = true, features = ["bindgen-tests"] }

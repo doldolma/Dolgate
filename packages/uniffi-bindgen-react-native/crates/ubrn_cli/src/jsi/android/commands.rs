@@ -1,0 +1,229 @@
+/*
+ * This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/
+ */
+use std::{collections::HashMap, process::Command};
+
+use anyhow::{Context, Result};
+use camino::{Utf8Path, Utf8PathBuf};
+use clap::Args;
+use ubrn_common::{cp_file, mk_dir, rm_dir, run_cmd, CrateMetadata};
+use uniffi_bindgen::bindings::{
+    generate as generate_native_kotlin_bindings, GenerateOptions, TargetLanguage,
+};
+
+use crate::{
+    commands::{building::CommonBuildArgs, ConfigArgs},
+    config::{rust_crate::CrateConfig, ExtraArgs, ProjectConfig},
+    jsi::android::config::Target,
+};
+
+#[derive(Args, Debug)]
+pub(crate) struct AndroidBuildArgs {
+    #[clap(flatten)]
+    config: ConfigArgs,
+
+    /// Comma separated list of targets, that override the values in the
+    /// `config.yaml` file.
+    ///
+    /// Android:
+    ///   aarch64-linux-android,armv7-linux-androideabi,x86_64-linux-android,i686-linux-android,
+    ///
+    /// Synonyms for:
+    ///   arm64-v8a,armeabi-v7a,x86_64,x86
+    #[clap(short, long, value_parser, num_args = 1.., value_delimiter = ',')]
+    pub(crate) targets: Vec<Target>,
+
+    #[clap(flatten)]
+    pub(crate) common_args: CommonBuildArgs,
+
+    /// Suppress the copying of the Rust library into the JNI library directories.
+    #[clap(long = "no-jniLibs")]
+    no_jni_libs: bool,
+
+    /// Generate native Kotlin Bindings together with the JNI libraries
+    #[clap(long, conflicts_with_all = ["no_jni_libs"], default_value = "false")]
+    pub(crate) native_bindings: bool,
+}
+
+impl AndroidBuildArgs {
+    pub(crate) fn build(&self) -> Result<Vec<Utf8PathBuf>> {
+        let config: ProjectConfig = self.project_config()?;
+        let android = &config.android;
+        let target_list = &android.targets;
+        let crate_ = &config.crate_;
+        let target_files = if self.common_args.no_cargo {
+            let files = self.find_existing(
+                &crate_.metadata()?,
+                target_list,
+                Some(android.use_shared_library),
+            );
+            if !files.is_empty() {
+                files
+            } else {
+                self.cargo_build_all(
+                    crate_,
+                    target_list,
+                    &android.cargo_extras,
+                    android.api_level,
+                    android.use_shared_library,
+                )?
+            }
+        } else {
+            self.cargo_build_all(
+                crate_,
+                target_list,
+                &android.cargo_extras,
+                android.api_level,
+                android.use_shared_library,
+            )?
+        };
+
+        if !self.no_jni_libs {
+            let project_root = config.project_root();
+            self.copy_into_jni_libs(
+                &crate_.metadata()?,
+                &android.jni_libs(project_root),
+                &target_files,
+                android.use_shared_library,
+            )?;
+            if self.native_bindings {
+                self.generate_native_bindings(&config, &target_files)?;
+            }
+        }
+
+        Ok(target_files.into_values().collect())
+    }
+
+    fn cargo_build_all(
+        &self,
+        crate_: &CrateConfig,
+        targets: &[Target],
+        cargo_extras: &ExtraArgs,
+        api_level: usize,
+        use_shared_library: bool,
+    ) -> Result<HashMap<Target, Utf8PathBuf>> {
+        let manifest_path = crate_.manifest_path()?;
+        let rust_dir = crate_.crate_dir()?;
+        let metadata = crate_.metadata()?;
+
+        let mut target_files = HashMap::new();
+        let profile = self.common_args.profile();
+        for target in targets {
+            let target =
+                self.cargo_build(target, &manifest_path, cargo_extras, api_level, &rust_dir)?;
+            let library =
+                metadata.library_path(Some(target.triple()), profile, Some(use_shared_library));
+            target_files.insert(target, library);
+        }
+        Ok(target_files)
+    }
+
+    fn cargo_build(
+        &self,
+        target: &Target,
+        manifest_path: &Utf8PathBuf,
+        cargo_extras: &ExtraArgs,
+        api_level: usize,
+        rust_dir: &Utf8PathBuf,
+    ) -> Result<Target> {
+        let mut cmd = Command::new("cargo");
+        cmd.arg("ndk")
+            .arg("--manifest-path")
+            .arg(manifest_path)
+            .arg("--target")
+            .arg(target.to_string())
+            .arg("--platform")
+            .arg(format!("{api_level}"));
+        let profile = self.common_args.profile();
+        cmd.arg("--").arg("build");
+        if profile != "debug" {
+            cmd.args(["--profile", profile]);
+        }
+        cmd.args(cargo_extras.clone());
+
+        // Set target-specific RUSTFLAGS for 16KB page alignment
+        let rustflags_env = format!(
+            "CARGO_TARGET_{}_RUSTFLAGS",
+            target.triple().to_uppercase().replace('-', "_")
+        );
+        cmd.env(rustflags_env, "-C link-arg=-Wl,-z,max-page-size=16384");
+
+        run_cmd(cmd.current_dir(rust_dir))?;
+        Ok(target.clone())
+    }
+
+    fn find_existing(
+        &self,
+        metadata: &CrateMetadata,
+        targets: &[Target],
+        use_shared_library: Option<bool>,
+    ) -> HashMap<Target, Utf8PathBuf> {
+        let profile = self.common_args.profile();
+        targets
+            .iter()
+            .filter_map(|target| {
+                let library =
+                    metadata.library_path(Some(target.triple()), profile, use_shared_library);
+                if library.exists() {
+                    Some((target.clone(), library))
+                } else {
+                    None
+                }
+            })
+            .collect()
+    }
+
+    fn copy_into_jni_libs(
+        &self,
+        metadata: &CrateMetadata,
+        jni_libs: &Utf8Path,
+        target_files: &HashMap<Target, Utf8PathBuf>,
+        use_shared_library: bool,
+    ) -> Result<()> {
+        println!("-- Copying into jniLibs directory");
+        println!("rm -Rf {jni_libs}");
+        rm_dir(jni_libs)?;
+        for (target, library) in target_files {
+            let dst_dir = jni_libs.join(target.to_string());
+            mk_dir(&dst_dir)?;
+
+            let dst_lib = dst_dir
+                .join(metadata.library_file(Some(target.triple()), Some(use_shared_library)));
+            println!("cp {library} {dst_lib}");
+            cp_file(library, &dst_lib)?;
+        }
+        Ok(())
+    }
+
+    fn generate_native_bindings(
+        &self,
+        config: &ProjectConfig,
+        libs: &HashMap<Target, Utf8PathBuf>,
+    ) -> Result<(), anyhow::Error> {
+        println!("-- Generating native Kotlin bindings");
+        let library_path = libs
+            .values()
+            .next()
+            .context("Need at least one library file to generate native Kotlin bindings")?;
+        let out_dir = config.android.src_main_java_dir(config.project_root());
+        generate_native_kotlin_bindings(GenerateOptions {
+            source: library_path.clone(),
+            languages: vec![TargetLanguage::Kotlin],
+            out_dir: out_dir.clone(),
+            format: false,
+            ..Default::default()
+        })?;
+        Ok(())
+    }
+
+    pub(crate) fn project_config(&self) -> Result<ProjectConfig> {
+        let mut config: ProjectConfig = self.config.clone().try_into()?;
+        let android = &mut config.android;
+        if !self.targets.is_empty() {
+            android.targets = self.targets.clone();
+        }
+        Ok(config)
+    }
+}

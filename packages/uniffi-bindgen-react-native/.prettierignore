@@ -1,0 +1,7 @@
+tsconfig.json
+templates/
+build/
+*.template.json
+*.md
+package.json
+*.js.inc

@@ -1,0 +1,8 @@
+hardcoded into template.
+module_cpp = {{ self.config.project.module_cpp() }}.
+
+list of modules = [
+{%- for m in self.config.modules %}'
+{{- m.cpp_module() }}'
+{%- if !loop.last %}, {% endif -%}
+{%- endfor %}]

@@ -1,0 +1,15 @@
+[package]
+name = "xtask"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[[bin]]
+name = "xtask"
+test = false
+
+[dependencies]
+anyhow = { workspace = true }
+camino = { workspace = true }
+clap = { workspace = true }
+ubrn_common = { path = "../crates/ubrn_common" }

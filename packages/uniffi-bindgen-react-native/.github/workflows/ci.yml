@@ -1,0 +1,94 @@
+name: CI
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  lint:
+    name: 🔍 Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install clang-format
+        run: sudo apt-get install -y clang-format
+
+      - name: Install yarn
+        run: cargo xtask bootstrap yarn
+
+      - name: Check Typescript format
+        run: cargo xtask fmt --check typescript
+
+      - name: Check Rust format
+        run: cargo xtask fmt --check rust
+
+  build:
+    name: 🏗️ Build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build
+        run: cargo build --verbose
+
+  unit-tests:
+    name: 🧪 Unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run tests
+        run: cargo test --verbose --workspace --exclude 'uniffi-example-*' --exclude 'uniffi-fixture-*' --exclude 'javascript-runtime-tests'
+
+      - name: Run tests for binaries
+        run: cargo test --bins
+
+  integration-tests-jsi-bindings:
+    name: 🧩 Integration tests (JSI bindings)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install tooling for building C++
+        run: sudo apt-get install -y cmake ninja-build
+
+      - name: Installing hermes and test-runner
+        run: |
+          cargo xtask bootstrap hermes --branch rn/0.77-stable
+          cargo xtask bootstrap
+
+      - name: Run tests of generated JSI bindings
+        run: "cargo test -- jsi::"
+
+  integration-tests-wasm-bindings:
+    name: 🧩 Integration tests (WASM bindings)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Installing
+        run: cargo xtask bootstrap yarn
+
+      - name: Installing WASM
+        run: rustup target add wasm32-unknown-unknown
+
+      - name: Installing wasm-bindgen
+        run: cargo install wasm-bindgen-cli --version 0.2.100 --locked
+
+      - name: Run tests of generated WASM bindings
+        run: "cargo test -- wasm::"
+
+  integration-tests-checkout:
+    name: 🧩 Integration tests (checkout)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run tests for checkout command
+        run: ./scripts/run-checkout-tests.sh
