@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { HostRecord, SecretMetadataRecord } from '@shared';
-import { getUnusedLocalSecretsAfterHostDeletion } from './host-secret-cleanup';
+import { getUnusedSavedCredentialsAfterHostDeletion } from './host-secret-cleanup';
 
 const keychainEntries: SecretMetadataRecord[] = [
   {
@@ -10,7 +10,6 @@ const keychainEntries: SecretMetadataRecord[] = [
     hasPassphrase: false,
     hasManagedPrivateKey: false,
     hasCertificate: false,
-    source: 'local_keychain',
     linkedHostCount: 2,
     updatedAt: '2025-01-01T00:00:00.000Z',
   },
@@ -21,7 +20,6 @@ const keychainEntries: SecretMetadataRecord[] = [
     hasPassphrase: false,
     hasManagedPrivateKey: false,
     hasCertificate: false,
-    source: 'local_keychain',
     linkedHostCount: 1,
     updatedAt: '2025-01-01T00:00:00.000Z',
   },
@@ -32,7 +30,6 @@ const keychainEntries: SecretMetadataRecord[] = [
     hasPassphrase: false,
     hasManagedPrivateKey: false,
     hasCertificate: false,
-    source: 'server_managed',
     linkedHostCount: 1,
     updatedAt: '2025-01-01T00:00:00.000Z',
   },
@@ -105,28 +102,28 @@ const hosts: HostRecord[] = [
   },
 ];
 
-describe('getUnusedLocalSecretsAfterHostDeletion', () => {
-  it('returns a local secret when the removed host was the last remaining usage', () => {
+describe('getUnusedSavedCredentialsAfterHostDeletion', () => {
+  it('returns a saved credential when the removed host was the last remaining usage', () => {
     expect(
-      getUnusedLocalSecretsAfterHostDeletion(hosts, keychainEntries, ['host-3']),
+      getUnusedSavedCredentialsAfterHostDeletion(hosts, keychainEntries, ['host-3']),
     ).toEqual(['secret:single']);
   });
 
   it('does not return a shared secret if another host still references it', () => {
     expect(
-      getUnusedLocalSecretsAfterHostDeletion(hosts, keychainEntries, ['host-1']),
+      getUnusedSavedCredentialsAfterHostDeletion(hosts, keychainEntries, ['host-1']),
     ).toEqual([]);
   });
 
   it('dedupes and returns a shared secret when all referencing hosts are deleted together', () => {
     expect(
-      getUnusedLocalSecretsAfterHostDeletion(hosts, keychainEntries, ['host-1', 'host-2']),
+      getUnusedSavedCredentialsAfterHostDeletion(hosts, keychainEntries, ['host-1', 'host-2']),
     ).toEqual(['secret:shared']);
   });
 
-  it('ignores non-local secrets even if the host is being deleted', () => {
+  it('also proposes credentials that used to be server-managed', () => {
     expect(
-      getUnusedLocalSecretsAfterHostDeletion(hosts, keychainEntries, ['host-4']),
-    ).toEqual([]);
+      getUnusedSavedCredentialsAfterHostDeletion(hosts, keychainEntries, ['host-4']),
+    ).toEqual(['secret:managed']);
   });
 });

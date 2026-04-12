@@ -14,7 +14,7 @@ interface HostDrawerProps {
   onClose: () => void;
   onSubmit: HostFormProps['onSubmit'];
   onConnect?: HostFormProps['onConnect'];
-  onEditExistingSecret?: (secretRef: string, credentialKind: 'password' | 'passphrase') => void;
+  onEditExistingSecret?: (secretRef: string) => void;
   onOpenSecrets?: () => void;
 }
 

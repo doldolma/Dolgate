@@ -51,7 +51,6 @@ import type {
   PortForwardDraft,
   PortForwardRuleRecord,
   SecretMetadataRecord,
-  SecretSource,
   SftpBrowserColumnWidths,
   SshHostDraft,
   SshHostRecord,
@@ -315,8 +314,8 @@ function normalizeIncomingHostRecord(record: HostRecord): HostRecord {
           : legacyRecord.authType === 'certificate'
             ? 'certificate'
             : 'password',
-      privateKeyPath: legacyRecord.privateKeyPath ?? null,
-      certificatePath: legacyRecord.certificatePath ?? null,
+      privateKeyPath: null,
+      certificatePath: null,
       secretRef: legacyRecord.secretRef ?? null,
       createdAt: legacyRecord.createdAt,
       updatedAt: legacyRecord.updatedAt
@@ -416,8 +415,8 @@ function toSshHostRecord(id: string, draft: SshHostDraft, secretRef: string | nu
     port: draft.port,
     username: draft.username,
     authType: draft.authType,
-    privateKeyPath: draft.privateKeyPath ?? null,
-    certificatePath: draft.certificatePath ?? null,
+    privateKeyPath: null,
+    certificatePath: null,
     secretRef: secretRef ?? draft.secretRef ?? null,
     groupName: normalizeGroupPath(draft.groupName),
     tags: normalizeTags(draft.tags),
@@ -616,8 +615,8 @@ export class HostRepository {
         nextRecord = {
           ...entry,
           secretRef,
-          privateKeyPath: secretRef ? null : entry.privateKeyPath ?? null,
-          certificatePath: secretRef ? null : entry.certificatePath ?? null,
+          privateKeyPath: null,
+          certificatePath: null,
           tags: normalizeTags(entry.tags),
           terminalThemeId: normalizeTerminalThemeId(entry.terminalThemeId),
           updatedAt: nowIso()
@@ -1482,7 +1481,6 @@ export class SecretMetadataRepository {
     hasPassphrase: boolean;
     hasManagedPrivateKey?: boolean;
     hasCertificate?: boolean;
-    source?: SecretSource;
   }): void {
     stateStorage.updateState((state) => {
       const timestamp = nowIso();
@@ -1493,7 +1491,6 @@ export class SecretMetadataRepository {
         hasPassphrase: input.hasPassphrase,
         hasManagedPrivateKey: input.hasManagedPrivateKey ?? false,
         hasCertificate: input.hasCertificate ?? false,
-        source: input.source ?? 'local_keychain',
         linkedHostCount: 0,
         updatedAt: timestamp
       };
@@ -1527,23 +1524,13 @@ export class SecretMetadataRepository {
     return state.data.secretMetadata.map((record) => withLinkedHostCount(record, state.data.hosts)).sort(compareLabels);
   }
 
-  listBySource(source: SecretSource): SecretMetadataRecord[] {
-    const state = stateStorage.getState();
-    return state.data.secretMetadata
-      .filter((record) => record.source === source)
-      .map((record) => withLinkedHostCount(record, state.data.hosts))
-      .sort(compareLabels);
-  }
-
-  replaceAll(records: SecretMetadataRecord[], source: SecretSource = 'server_managed'): void {
+  replaceAll(records: SecretMetadataRecord[]): void {
     stateStorage.updateState((state) => {
-      const remaining = state.data.secretMetadata.filter((record) => record.source !== source);
       const nextRecords = records.map((record) => ({
         ...record,
-        source,
         linkedHostCount: 0
       }));
-      state.data.secretMetadata = [...remaining, ...nextRecords];
+      state.data.secretMetadata = nextRecords;
     });
   }
 }

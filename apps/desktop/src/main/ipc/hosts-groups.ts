@@ -13,29 +13,11 @@ function normalizeSshDraftForPersistence(
     return draft;
   }
 
-  if (secretRef) {
-    return {
-      ...draft,
-      privateKeyPath: null,
-      certificatePath: null,
-    };
-  }
-
-  if (draft.authType === "privateKey") {
-    return {
-      ...draft,
-      certificatePath: null,
-    };
-  }
-
-  if (draft.authType === "certificate") {
-    return draft;
-  }
-
   return {
     ...draft,
     privateKeyPath: null,
     certificatePath: null,
+    secretRef,
   };
 }
 

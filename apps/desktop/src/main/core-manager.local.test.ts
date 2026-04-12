@@ -177,7 +177,6 @@ describe("CoreManager local shell sessions", () => {
       authType: "password",
       password: "secret",
       privateKeyPem: undefined,
-      privateKeyPath: undefined,
       passphrase: "",
       trustedHostKeyBase64: "",
     });
@@ -224,7 +223,6 @@ describe("CoreManager local shell sessions", () => {
       authType: "password",
       password: "secret",
       privateKeyPem: undefined,
-      privateKeyPath: undefined,
       passphrase: "",
       trustedHostKeyBase64: "",
     });
@@ -264,7 +262,6 @@ describe("CoreManager local shell sessions", () => {
       authType: "password",
       password: "secret",
       privateKeyPem: undefined,
-      privateKeyPath: undefined,
       passphrase: "",
       trustedHostKeyBase64: "",
       mode: "local",
@@ -334,7 +331,6 @@ describe("CoreManager local shell sessions", () => {
       authType: "password",
       password: "secret",
       privateKeyPem: undefined,
-      privateKeyPath: undefined,
       passphrase: "",
       trustedHostKeyBase64: "",
     });
@@ -427,7 +423,6 @@ describe("CoreManager local shell sessions", () => {
       authType: "password",
       password: "secret",
       privateKeyPem: undefined,
-      privateKeyPath: undefined,
       passphrase: "",
       trustedHostKeyBase64: "",
       mode: "local",
@@ -491,7 +486,6 @@ describe("CoreManager local shell sessions", () => {
       authType: "password",
       password: "secret",
       privateKeyPem: undefined,
-      privateKeyPath: undefined,
       passphrase: "",
       trustedHostKeyBase64: "",
       mode: "local",

@@ -4,7 +4,7 @@ export function describeSecretType(entry: SecretMetadataRecord): string {
   const labels: string[] = [];
 
   if (entry.hasManagedPrivateKey && entry.hasCertificate) {
-    labels.push('Certificate');
+    labels.push('SSH certificate');
   } else if (entry.hasManagedPrivateKey) {
     labels.push('Private key');
   }
@@ -18,7 +18,7 @@ export function describeSecretType(entry: SecretMetadataRecord): string {
   }
 
   if (labels.length === 0) {
-    return 'Saved secret';
+    return 'Saved credentials';
   }
 
   return labels.join(' + ');

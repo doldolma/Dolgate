@@ -42,7 +42,6 @@ const keychainEntries = [
   {
     secretRef: 'secret-1',
     label: 'Prod password',
-    source: 'local_keychain' as const,
     linkedHostCount: 2,
     hasPassword: true,
     hasPassphrase: false,
@@ -187,7 +186,7 @@ describe('SettingsPanel', () => {
     const { onSelectSection } = renderSettingsPanel();
 
     fireEvent.click(screen.getByRole('tab', { name: 'Security' }));
-    fireEvent.click(screen.getByRole('tab', { name: 'Secrets' }));
+    fireEvent.click(screen.getByRole('tab', { name: 'Saved Credentials' }));
     fireEvent.click(screen.getByRole('tab', { name: 'AWS Profiles' }));
 
     expect(onSelectSection).toHaveBeenCalledWith('security');
@@ -207,24 +206,23 @@ describe('SettingsPanel', () => {
   it('renders keychain entries inside the secrets section', () => {
     const { onEditSecret, onRemoveSecret } = renderSettingsPanel({ activeSection: 'secrets' });
 
-    expect(screen.getByRole('heading', { name: 'Secrets' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Saved Credentials' })).toBeInTheDocument();
     expect(screen.queryByText('local_keychain')).not.toBeInTheDocument();
     expect(screen.getByText('Password')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Edit password' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Delete secret' }));
+    fireEvent.click(screen.getByRole('button', { name: '편집' }));
+    fireEvent.click(screen.getByRole('button', { name: '삭제' }));
 
-    expect(onEditSecret).toHaveBeenCalledWith('secret-1', 'password');
+    expect(onEditSecret).toHaveBeenCalledWith('secret-1');
     expect(onRemoveSecret).toHaveBeenCalledWith('secret-1');
   });
 
-  it('shows certificate secrets without edit actions', () => {
+  it('shows a shared edit action for certificate secrets too', () => {
     const { onEditSecret, onRemoveSecret } = renderSettingsPanel({
       activeSection: 'secrets',
       keychainEntries: [
         {
           secretRef: 'secret-cert',
           label: 'Prod cert',
-          source: 'local_keychain' as const,
           linkedHostCount: 1,
           hasPassword: false,
           hasPassphrase: true,
@@ -235,13 +233,12 @@ describe('SettingsPanel', () => {
       ],
     });
 
-    expect(screen.getByText('Certificate + Passphrase')).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Edit password' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Edit passphrase' })).not.toBeInTheDocument();
+    expect(screen.getByText('SSH certificate + Passphrase')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '편집' }));
 
-    fireEvent.click(screen.getByRole('button', { name: 'Delete secret' }));
+    fireEvent.click(screen.getByRole('button', { name: '삭제' }));
 
-    expect(onEditSecret).not.toHaveBeenCalled();
+    expect(onEditSecret).toHaveBeenCalledWith('secret-cert');
     expect(onRemoveSecret).toHaveBeenCalledWith('secret-cert');
   });
 

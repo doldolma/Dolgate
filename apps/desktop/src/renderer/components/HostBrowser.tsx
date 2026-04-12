@@ -18,7 +18,7 @@ import {
   rebaseGroupPath
 } from '@shared';
 import type { GroupRecord, GroupRemoveMode, HostRecord, SecretMetadataRecord } from '@shared';
-import { getUnusedLocalSecretsAfterHostDeletion } from '../lib/host-secret-cleanup';
+import { getUnusedSavedCredentialsAfterHostDeletion } from '../lib/host-secret-cleanup';
 import { useResponsiveCardGrid } from '../lib/useResponsiveCardGrid';
 import { cn } from '../lib/cn';
 import { DialogBackdrop } from './DialogBackdrop';
@@ -385,7 +385,7 @@ export function HostBrowser({
   const hostDeleteUnusedLocalSecretRefs = useMemo(
     () =>
       hostDeleteTarget
-        ? getUnusedLocalSecretsAfterHostDeletion(hosts, keychainEntries, hostDeleteTarget.hostIds)
+        ? getUnusedSavedCredentialsAfterHostDeletion(hosts, keychainEntries, hostDeleteTarget.hostIds)
         : [],
     [hostDeleteTarget, hosts, keychainEntries],
   );

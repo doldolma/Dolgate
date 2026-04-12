@@ -15,7 +15,7 @@ import { describeSecretType } from '../lib/secret-display';
 interface KeychainPanelProps {
   entries: SecretMetadataRecord[];
   onRemoveSecret: (secretRef: string) => Promise<void>;
-  onEditSecret: (secretRef: string, credentialKind: 'password' | 'passphrase') => void;
+  onEditSecret: (secretRef: string) => void;
 }
 
 export function KeychainPanel({ entries, onRemoveSecret, onEditSecret }: KeychainPanelProps) {
@@ -23,10 +23,10 @@ export function KeychainPanel({ entries, onRemoveSecret, onEditSecret }: Keychai
     <div className="flex flex-col gap-[1.05rem]">
       <div className="flex items-end justify-between gap-4 px-0 pt-1 pb-2">
         <div>
-          <SectionLabel>Secrets</SectionLabel>
-          <h2 className="m-0">Secrets</h2>
+          <SectionLabel>Saved Credentials</SectionLabel>
+          <h2 className="m-0">Saved Credentials</h2>
           <p className="mt-2 max-w-[48rem] text-[var(--text-soft)]">
-            원문 비밀번호와 패스프레이즈는 표시하지 않고, 저장 여부와 삭제만 관리합니다.
+            호스트가 사용하는 비밀번호, 패스프레이즈, 개인키, SSH 인증서를 안전하게 저장하고 연결 상태를 관리합니다.
           </p>
         </div>
       </div>
@@ -34,8 +34,8 @@ export function KeychainPanel({ entries, onRemoveSecret, onEditSecret }: Keychai
       <PanelSection>
         {entries.length === 0 ? (
           <EmptyState
-            title="저장된 secret이 없습니다."
-            description="호스트 저장 시 새 secret을 만들거나 기존 secret을 연결하면 이 목록에 표시됩니다."
+            title="저장된 인증 정보가 없습니다."
+            description="호스트를 저장할 때 인증 정보를 저장하면 이 목록에 표시됩니다."
           />
         ) : (
           entries.map((entry) => (
@@ -51,18 +51,11 @@ export function KeychainPanel({ entries, onRemoveSecret, onEditSecret }: Keychai
                 </CardMeta>
               </CardMain>
               <CardActions>
-                {!entry.hasCertificate && entry.hasPassword ? (
-                  <Button variant="secondary" onClick={() => onEditSecret(entry.secretRef, 'password')}>
-                    Edit password
-                  </Button>
-                ) : null}
-                {!entry.hasCertificate && entry.hasPassphrase ? (
-                  <Button variant="secondary" onClick={() => onEditSecret(entry.secretRef, 'passphrase')}>
-                    Edit passphrase
-                  </Button>
-                ) : null}
+                <Button variant="secondary" onClick={() => onEditSecret(entry.secretRef)}>
+                  편집
+                </Button>
                 <Button variant="danger" onClick={() => void onRemoveSecret(entry.secretRef)}>
-                  Delete secret
+                  삭제
                 </Button>
               </CardActions>
             </Card>

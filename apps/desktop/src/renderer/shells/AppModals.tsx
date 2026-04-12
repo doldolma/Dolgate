@@ -21,7 +21,12 @@ interface AppModalsProps {
     mode: 'update-shared' | 'clone-for-host';
     secretRef: string;
     hostId: string | null;
-    secrets: { password?: string; passphrase?: string };
+    secrets: {
+      password?: string;
+      passphrase?: string;
+      privateKeyPem?: string;
+      certificateText?: string;
+    };
   }) => Promise<void>;
   isUpdateInstallConfirmOpen: boolean;
   onCloseUpdateInstallConfirm: () => void;
@@ -65,8 +70,7 @@ export function AppModals({
             ...pending,
             hostLabel: host.label,
             hasStoredSecret: Boolean(host.secretRef),
-            hasLegacyPrivateKeyPath: Boolean(host.privateKeyPath),
-            hasLegacyCertificatePath: Boolean(host.certificatePath),
+            secretRef: host.secretRef ?? null,
           };
         })()}
         onClose={modalViewModel.dismissPendingCredentialRetry}

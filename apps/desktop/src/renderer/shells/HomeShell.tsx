@@ -15,10 +15,7 @@ import { HostDrawer } from '../components/HostDrawer';
 import { LogsPanel } from '../components/LogsPanel';
 import { OpenSshImportDialog } from '../components/OpenSshImportDialog';
 import { PortForwardingPanel } from '../components/PortForwardingPanel';
-import type {
-  SecretCredentialKind,
-  SecretEditDialogRequest,
-} from '../components/SecretEditDialog';
+import type { SecretEditDialogRequest } from '../components/SecretEditDialog';
 import { SettingsPanel } from '../components/SettingsPanel';
 import { TermiusImportDialog } from '../components/TermiusImportDialog';
 import { WarpgateImportDialog } from '../components/WarpgateImportDialog';
@@ -146,10 +143,7 @@ export function HomeShell({
     homeViewModel.openEditHostDrawer(hostId);
   }
 
-  function openHostSecretEditor(
-    secretRef: string,
-    credentialKind: SecretCredentialKind,
-  ) {
+  function openHostSecretEditor(secretRef: string) {
     if (!currentHost || !isSshHostRecord(currentHost)) {
       return;
     }
@@ -160,7 +154,6 @@ export function HomeShell({
       source: 'host',
       secretRef,
       label: entry?.label ?? currentHost.label,
-      credentialKind,
       linkedHosts: homeViewModel.hosts
         .filter(isSshHostRecord)
         .filter((host) => getHostSecretRef(host) === secretRef)
@@ -170,10 +163,7 @@ export function HomeShell({
     });
   }
 
-  function openKeychainSecretEditor(
-    secretRef: string,
-    credentialKind: SecretCredentialKind,
-  ) {
+  function openKeychainSecretEditor(secretRef: string) {
     const entry = settingsViewModel.keychainEntries.find(
       (item) => item.secretRef === secretRef,
     );
@@ -184,7 +174,6 @@ export function HomeShell({
       source: 'keychain',
       secretRef,
       label: entry.label,
-      credentialKind,
       linkedHosts: homeViewModel.hosts
         .filter(isSshHostRecord)
         .filter((host) => getHostSecretRef(host) === secretRef)

@@ -128,7 +128,6 @@ function createRemoteSnapshotWithManagedSecrets(keyBase64: string, secretCount =
           secretRef: `secret:server-${index + 1}`,
           label: `Server Secret ${index + 1}`,
           password: `pw-${index + 1}`,
-          source: 'server_managed',
           updatedAt: `2026-03-22T00:00:${String(index % 60).padStart(2, '0')}.000Z`
         }),
         keyBase64
@@ -197,7 +196,6 @@ function createSyncService() {
         hasPassphrase: false,
         hasManagedPrivateKey: false,
         hasCertificate: false,
-        source: 'local_keychain',
         linkedHostCount: 1,
         updatedAt: '2026-03-22T00:00:00.000Z'
       },
@@ -208,12 +206,10 @@ function createSyncService() {
         hasPassphrase: true,
         hasManagedPrivateKey: true,
         hasCertificate: false,
-        source: 'server_managed',
         linkedHostCount: 2,
         updatedAt: '2026-03-22T00:00:00.000Z'
       }
     ]),
-    listBySource: vi.fn().mockReturnValue([]),
     remove: vi.fn(),
     replaceAll: vi.fn(),
     upsert: vi.fn()
@@ -538,7 +534,6 @@ describe('SyncService', () => {
           hasPassphrase: false,
           hasManagedPrivateKey: false,
           hasCertificate: false,
-          source: 'local_keychain',
           linkedHostCount: 0,
           updatedAt: '2026-03-21T00:00:00.000Z'
         },
@@ -549,7 +544,6 @@ describe('SyncService', () => {
           hasPassphrase: false,
           hasManagedPrivateKey: false,
           hasCertificate: false,
-          source: 'server_managed',
           linkedHostCount: 0,
           updatedAt: '2026-03-21T00:00:00.000Z'
         }
@@ -557,14 +551,14 @@ describe('SyncService', () => {
       state.secure.managedSecretsByRef['secret:local'] = {
         encrypted: false,
         value: Buffer.from(
-          '{"secretRef":"secret:local","label":"Local Secret","password":"local","source":"local_keychain","updatedAt":"2026-03-21T00:00:00.000Z"}',
+          '{"secretRef":"secret:local","label":"Local Secret","password":"local","updatedAt":"2026-03-21T00:00:00.000Z"}',
           'utf8'
         ).toString('base64')
       };
       state.secure.managedSecretsByRef['secret:server-stale'] = {
         encrypted: false,
         value: Buffer.from(
-          '{"secretRef":"secret:server-stale","label":"Old Server Secret","password":"stale","source":"server_managed","updatedAt":"2026-03-21T00:00:00.000Z"}',
+          '{"secretRef":"secret:server-stale","label":"Old Server Secret","password":"stale","updatedAt":"2026-03-21T00:00:00.000Z"}',
           'utf8'
         ).toString('base64')
       };
@@ -592,28 +586,24 @@ describe('SyncService', () => {
 
     const state = await service.bootstrap();
     const persistedState = stateStorage.getState();
-    const serverMetadata = persistedState.data.secretMetadata.filter(
-      (record) => record.source === 'server_managed'
-    );
-
     expect(state.status).toBe('ready');
     expect(updateStateSpy).toHaveBeenCalledTimes(4);
-    expect(serverMetadata).toHaveLength(220);
+    expect(persistedState.data.secretMetadata).toHaveLength(220);
     expect(
       persistedState.data.secretMetadata.some(
         (record) => record.secretRef === 'secret:local'
       )
-    ).toBe(true);
+    ).toBe(false);
     expect(
       persistedState.data.secretMetadata.some(
         (record) => record.secretRef === 'secret:server-stale'
       )
     ).toBe(false);
-    expect(persistedState.secure.managedSecretsByRef['secret:local']).toBeDefined();
+    expect(persistedState.secure.managedSecretsByRef['secret:local']).toBeUndefined();
     expect(
       persistedState.secure.managedSecretsByRef['secret:server-stale']
     ).toBeUndefined();
-    expect(Object.keys(persistedState.secure.managedSecretsByRef)).toHaveLength(221);
+    expect(Object.keys(persistedState.secure.managedSecretsByRef)).toHaveLength(220);
     expect(persistedState.data.hosts).toHaveLength(220);
     expect(persistedState.data.groups).toHaveLength(1);
     expect(persistedState.data.dnsOverrides).toHaveLength(0);

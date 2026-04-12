@@ -51,6 +51,7 @@ import type {
   KeyboardInteractiveRespondInput,
   ManagedSecretPayload,
   KnownHostProbeInput,
+  SshCertificateInfo,
   KnownHostTrustInput,
   HostContainersLogsInput,
   HostContainersEphemeralTunnelInput,
@@ -190,7 +191,6 @@ async function persistSecret(
       passphrase: secrets.passphrase,
       privateKeyPem: secrets.privateKeyPem,
       certificateText: secrets.certificateText,
-      source: "local_keychain",
       updatedAt,
     } satisfies ManagedSecretPayload),
   );
@@ -201,7 +201,6 @@ async function persistSecret(
     hasPassphrase: Boolean(secrets.passphrase),
     hasManagedPrivateKey: Boolean(secrets.privateKeyPem),
     hasCertificate: Boolean(secrets.certificateText),
-    source: "local_keychain",
   });
   return secretRef;
 }
@@ -232,8 +231,6 @@ async function loadSecrets(
       typeof parsed.certificateText === "string"
         ? parsed.certificateText
         : undefined,
-    source:
-      parsed.source === "server_managed" ? "server_managed" : "local_keychain",
     updatedAt:
       typeof parsed.updatedAt === "string"
         ? parsed.updatedAt
@@ -286,11 +283,6 @@ async function resolveManagedPrivateKeyPem(
     return nextSecrets.privateKeyPem;
   }
 
-  if (draft.privateKeyPath) {
-    const pem = await readFile(draft.privateKeyPath, "utf8");
-    return pem;
-  }
-
   if (currentSecretRef) {
     const currentSecrets = await loadSecrets(secretStore, currentSecretRef);
     if (currentSecrets.privateKeyPem) {
@@ -315,11 +307,6 @@ async function resolveManagedCertificateText(
     return nextSecrets.certificateText;
   }
 
-  if (draft.certificatePath) {
-    const certificateText = await readFile(draft.certificatePath, "utf8");
-    return certificateText.trim() || undefined;
-  }
-
   if (currentSecretRef) {
     const currentSecrets = await loadSecrets(secretStore, currentSecretRef);
     if (currentSecrets.certificateText) {
@@ -342,31 +329,94 @@ async function resolveRuntimeSshSecrets(
     await loadSecrets(secretStore, host.secretRef),
     secrets ?? {},
   );
-  let shouldPersistHostSecret = Boolean(secrets && hasSecretValue(secrets));
-
-  if (
-    (host.authType === "privateKey" || host.authType === "certificate") &&
-    !resolvedSecrets.privateKeyPem &&
-    host.privateKeyPath
-  ) {
-    resolvedSecrets.privateKeyPem = await readFile(host.privateKeyPath, "utf8");
-    shouldPersistHostSecret = true;
-  }
-
-  if (
-    host.authType === "certificate" &&
-    !resolvedSecrets.certificateText &&
-    host.certificatePath
-  ) {
-    const certificateText = await readFile(host.certificatePath, "utf8");
-    resolvedSecrets.certificateText = certificateText.trim() || undefined;
-    shouldPersistHostSecret = true;
-  }
+  const shouldPersistHostSecret = Boolean(secrets && hasSecretValue(secrets));
 
   return {
     secrets: resolvedSecrets,
     shouldPersistHostSecret,
   };
+}
+
+async function inspectStoredCertificate(
+  secretStore: SecretStore,
+  inspectCertificate: (certificateText: string) => Promise<SshCertificateInfo>,
+  input: {
+    secretRef?: string | null;
+    certificateText?: string | undefined;
+  },
+): Promise<SshCertificateInfo | null> {
+  try {
+    const directCertificateText =
+      input.certificateText && input.certificateText.trim().length > 0
+        ? input.certificateText
+        : undefined;
+    if (directCertificateText) {
+      return inspectCertificate(directCertificateText);
+    }
+
+    if (!input.secretRef) {
+      return null;
+    }
+
+    const storedSecrets = await loadSecrets(secretStore, input.secretRef);
+    const certificateText =
+      storedSecrets.certificateText &&
+      storedSecrets.certificateText.trim().length > 0
+        ? storedSecrets.certificateText
+        : undefined;
+    if (!certificateText) {
+      return null;
+    }
+
+    return inspectCertificate(certificateText);
+  } catch {
+    return null;
+  }
+}
+
+function buildCertificateAuthErrorMessage(
+  info: SshCertificateInfo,
+): string {
+  if (info.status === "expired") {
+    return "SSH 인증서가 만료되었습니다. 새 인증서를 가져와 다시 시도하세요.";
+  }
+  if (info.status === "not_yet_valid") {
+    return info.validAfter
+      ? `SSH 인증서가 아직 유효하지 않습니다. Valid after ${info.validAfter}`
+      : "SSH 인증서가 아직 유효하지 않습니다.";
+  }
+  if (info.status === "invalid") {
+    return "SSH 인증서를 해석할 수 없습니다. 인증서 내용을 확인해 주세요.";
+  }
+  return "SSH 인증서를 확인하지 못했습니다.";
+}
+
+async function ensureCertificateAuthReady(
+  secretStore: SecretStore,
+  inspectCertificate: (certificateText: string) => Promise<SshCertificateInfo>,
+  host: Extract<HostRecord, { kind: "ssh" }>,
+  secrets: HostSecretInput,
+): Promise<SshCertificateInfo | null> {
+  if (host.authType !== "certificate") {
+    return null;
+  }
+
+  const info = await inspectStoredCertificate(secretStore, inspectCertificate, {
+    secretRef: host.secretRef,
+    certificateText: secrets.certificateText,
+  });
+
+  if (!info) {
+    throw new Error(
+      "SSH 인증서를 찾을 수 없습니다. 새 인증서를 가져와 다시 시도하세요.",
+    );
+  }
+
+  if (info.status !== "valid") {
+    throw new Error(buildCertificateAuthErrorMessage(info));
+  }
+
+  return info;
 }
 
 function base64UrlToBuffer(value: string): Buffer {
@@ -1897,6 +1947,21 @@ export function registerIpcHandlers(
         nextSecrets,
         currentSecretRef,
         secretStore,
+      ),
+    inspectCertificate: (certificateText) =>
+      coreManager.inspectCertificate(certificateText),
+    inspectStoredCertificate: (input) =>
+      inspectStoredCertificate(
+        secretStore,
+        (certificateText) => coreManager.inspectCertificate(certificateText),
+        input,
+      ),
+    ensureCertificateAuthReady: (host, secrets) =>
+      ensureCertificateAuthReady(
+        secretStore,
+        (certificateText) => coreManager.inspectCertificate(certificateText),
+        host,
+        secrets,
       ),
     requireTrustedHostKey: (host) => requireTrustedHostKey(knownHosts, host),
     requireConfiguredSshUsername,

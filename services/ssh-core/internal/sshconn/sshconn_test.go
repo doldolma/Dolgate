@@ -7,9 +7,8 @@ import (
 	"encoding/base64"
 	"encoding/pem"
 	"net"
-	"os"
-	"path/filepath"
 	"testing"
+	"time"
 
 	"golang.org/x/crypto/ssh"
 )
@@ -35,7 +34,11 @@ func generateTestKeyPair(t *testing.T) (ssh.Signer, []byte) {
 	return signer, privateKeyPEM
 }
 
-func generateTestCertificate(t *testing.T, userSigner ssh.Signer) string {
+func generateTestCertificate(
+	t *testing.T,
+	userSigner ssh.Signer,
+	options ...func(*ssh.Certificate),
+) string {
 	t.Helper()
 
 	caSigner, _ := generateTestKeyPair(t)
@@ -45,6 +48,9 @@ func generateTestCertificate(t *testing.T, userSigner ssh.Signer) string {
 		CertType:        ssh.UserCert,
 		ValidPrincipals: []string{"test-user"},
 		ValidBefore:     ssh.CertTimeInfinity,
+	}
+	for _, option := range options {
+		option(cert)
 	}
 	if err := cert.SignCert(rand.Reader, caSigner); err != nil {
 		t.Fatalf("cert.SignCert() error = %v", err)
@@ -119,37 +125,19 @@ func TestResolveAuthMethods(t *testing.T) {
 	}
 }
 
-func TestResolveAuthMethodsPrivateKeyPathAndErrors(t *testing.T) {
+func TestResolveAuthMethodsErrors(t *testing.T) {
 	signer, privateKeyPEM := generateTestKeyPair(t)
-	keyPath := filepath.Join(t.TempDir(), "id_rsa")
-	if err := os.WriteFile(keyPath, privateKeyPEM, 0o600); err != nil {
-		t.Fatalf("os.WriteFile() error = %v", err)
-	}
-	certificateText := generateTestCertificate(t, signer)
-	certificatePath := filepath.Join(t.TempDir(), "id_rsa-cert.pub")
-	if err := os.WriteFile(certificatePath, []byte(certificateText), 0o600); err != nil {
-		t.Fatalf("os.WriteFile(certificatePath) error = %v", err)
-	}
-
-	if _, err := resolveAuthMethods(Target{
-		AuthType:       "privateKey",
-		PrivateKeyPath: keyPath,
-	}, nil); err != nil {
-		t.Fatalf("resolveAuthMethods(privateKey path) error = %v", err)
-	}
-
-	if _, err := resolveAuthMethods(Target{
-		AuthType:        "certificate",
-		PrivateKeyPath:  keyPath,
-		CertificatePath: certificatePath,
-	}, nil); err != nil {
-		t.Fatalf("resolveAuthMethods(certificate path) error = %v", err)
-	}
 
 	if _, err := resolveAuthMethods(Target{
 		AuthType: "password",
 	}, nil); err == nil {
 		t.Fatal("resolveAuthMethods(password missing secret) error = nil, want non-nil")
+	}
+
+	if _, err := resolveAuthMethods(Target{
+		AuthType: "privateKey",
+	}, nil); err == nil {
+		t.Fatal("resolveAuthMethods(privateKey missing key) error = nil, want non-nil")
 	}
 
 	if _, err := resolveAuthMethods(Target{
@@ -171,5 +159,58 @@ func TestResolveAuthMethodsPrivateKeyPathAndErrors(t *testing.T) {
 		AuthType: "unsupported",
 	}, nil); err == nil {
 		t.Fatal("resolveAuthMethods(unsupported) error = nil, want non-nil")
+	}
+}
+
+func TestInspectCertificate(t *testing.T) {
+	signer, _ := generateTestKeyPair(t)
+	now := time.Unix(1_700_000_000, 0).UTC()
+
+	validCertificate := generateTestCertificate(t, signer, func(cert *ssh.Certificate) {
+		cert.ValidAfter = uint64(now.Add(-time.Hour).Unix())
+		cert.ValidBefore = uint64(now.Add(time.Hour).Unix())
+		cert.KeyId = "valid-cert"
+		cert.Serial = 42
+	})
+	expiredCertificate := generateTestCertificate(t, signer, func(cert *ssh.Certificate) {
+		cert.ValidAfter = uint64(now.Add(-2 * time.Hour).Unix())
+		cert.ValidBefore = uint64(now.Add(-time.Minute).Unix())
+	})
+	futureCertificate := generateTestCertificate(t, signer, func(cert *ssh.Certificate) {
+		cert.ValidAfter = uint64(now.Add(time.Hour).Unix())
+		cert.ValidBefore = uint64(now.Add(2 * time.Hour).Unix())
+	})
+
+	valid := InspectCertificate(validCertificate, now)
+	if valid.Status != "valid" {
+		t.Fatalf("InspectCertificate(valid).Status = %q, want %q", valid.Status, "valid")
+	}
+	if valid.KeyID != "valid-cert" {
+		t.Fatalf("InspectCertificate(valid).KeyID = %q, want %q", valid.KeyID, "valid-cert")
+	}
+	if valid.Serial != 42 {
+		t.Fatalf("InspectCertificate(valid).Serial = %d, want %d", valid.Serial, 42)
+	}
+	if len(valid.Principals) != 1 || valid.Principals[0] != "test-user" {
+		t.Fatalf("InspectCertificate(valid).Principals = %#v, want [test-user]", valid.Principals)
+	}
+
+	expired := InspectCertificate(expiredCertificate, now)
+	if expired.Status != "expired" {
+		t.Fatalf("InspectCertificate(expired).Status = %q, want %q", expired.Status, "expired")
+	}
+
+	notYetValid := InspectCertificate(futureCertificate, now)
+	if notYetValid.Status != "not_yet_valid" {
+		t.Fatalf(
+			"InspectCertificate(future).Status = %q, want %q",
+			notYetValid.Status,
+			"not_yet_valid",
+		)
+	}
+
+	invalid := InspectCertificate("ssh-ed25519 AAAAB3NzaC1yc2EAAAADAQABAAABAQ== not-a-cert", now)
+	if invalid.Status != "invalid" {
+		t.Fatalf("InspectCertificate(invalid).Status = %q, want %q", invalid.Status, "invalid")
 	}
 }

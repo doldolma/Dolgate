@@ -41,7 +41,7 @@ interface SettingsPanelProps {
   onUpdateSettings: (input: Partial<AppSettings>) => Promise<void>;
   onRemoveKnownHost: (id: string) => Promise<void>;
   onRemoveSecret: (secretRef: string) => Promise<void>;
-  onEditSecret: (secretRef: string, credentialKind: 'password' | 'passphrase') => void;
+  onEditSecret: (secretRef: string) => void;
   onLogout: () => Promise<void>;
 }
 
@@ -69,7 +69,7 @@ const macOnlyTerminalFonts = new Set<TerminalFontFamilyId>(['sf-mono', 'menlo', 
 const settingsSections: Array<{ id: SettingsSection; title: string }> = [
   { id: 'general', title: 'General' },
   { id: 'security', title: 'Security' },
-  { id: 'secrets', title: 'Secrets' },
+  { id: 'secrets', title: 'Saved Credentials' },
   { id: 'aws-profiles', title: 'AWS Profiles' }
 ];
 

@@ -24,6 +24,7 @@ const (
 	CommandResize                     CommandType = "resize"
 	CommandDisconnect                 CommandType = "disconnect"
 	CommandProbeHostKey               CommandType = "probeHostKey"
+	CommandInspectCertificate         CommandType = "inspectCertificate"
 	CommandPortForwardStart           CommandType = "portForwardStart"
 	CommandSSMPortForwardStart        CommandType = "ssmPortForwardStart"
 	CommandPortForwardStop            CommandType = "portForwardStop"
@@ -58,6 +59,7 @@ const (
 	EventError                        EventType = "error"
 	EventClosed                       EventType = "closed"
 	EventHostKeyProbed                EventType = "hostKeyProbed"
+	EventCertificateInspected         EventType = "certificateInspected"
 	EventKeyboardInteractiveChallenge EventType = "keyboardInteractiveChallenge"
 	EventKeyboardInteractiveResolved  EventType = "keyboardInteractiveResolved"
 	EventPortForwardStarted           EventType = "portForwardStarted"
@@ -137,9 +139,7 @@ type ConnectPayload struct {
 	AuthType             string `json:"authType"`
 	Password             string `json:"password,omitempty"`
 	PrivateKeyPEM        string `json:"privateKeyPem,omitempty"`
-	PrivateKeyPath       string `json:"privateKeyPath,omitempty"`
 	CertificateText      string `json:"certificateText,omitempty"`
-	CertificatePath      string `json:"certificatePath,omitempty"`
 	Passphrase           string `json:"passphrase,omitempty"`
 	TrustedHostKeyBase64 string `json:"trustedHostKeyBase64"`
 	Cols                 int    `json:"cols"`
@@ -176,9 +176,7 @@ type SFTPConnectPayload struct {
 	AuthType             string `json:"authType"`
 	Password             string `json:"password,omitempty"`
 	PrivateKeyPEM        string `json:"privateKeyPem,omitempty"`
-	PrivateKeyPath       string `json:"privateKeyPath,omitempty"`
 	CertificateText      string `json:"certificateText,omitempty"`
-	CertificatePath      string `json:"certificatePath,omitempty"`
 	Passphrase           string `json:"passphrase,omitempty"`
 	TrustedHostKeyBase64 string `json:"trustedHostKeyBase64"`
 }
@@ -190,9 +188,7 @@ type ContainersConnectPayload struct {
 	AuthType             string `json:"authType"`
 	Password             string `json:"password,omitempty"`
 	PrivateKeyPEM        string `json:"privateKeyPem,omitempty"`
-	PrivateKeyPath       string `json:"privateKeyPath,omitempty"`
 	CertificateText      string `json:"certificateText,omitempty"`
-	CertificatePath      string `json:"certificatePath,omitempty"`
 	Passphrase           string `json:"passphrase,omitempty"`
 	TrustedHostKeyBase64 string `json:"trustedHostKeyBase64"`
 }
@@ -200,6 +196,19 @@ type ContainersConnectPayload struct {
 type HostKeyProbePayload struct {
 	Host string `json:"host"`
 	Port int    `json:"port"`
+}
+
+type CertificateInspectPayload struct {
+	CertificateText string `json:"certificateText"`
+}
+
+type CertificateInspectedPayload struct {
+	Status      string   `json:"status"`
+	ValidAfter  string   `json:"validAfter,omitempty"`
+	ValidBefore string   `json:"validBefore,omitempty"`
+	Principals  []string `json:"principals,omitempty"`
+	KeyID       string   `json:"keyId,omitempty"`
+	Serial      string   `json:"serial,omitempty"`
 }
 
 type KeyboardInteractivePrompt struct {
@@ -304,9 +313,7 @@ type PortForwardStartPayload struct {
 	AuthType             string `json:"authType"`
 	Password             string `json:"password,omitempty"`
 	PrivateKeyPEM        string `json:"privateKeyPem,omitempty"`
-	PrivateKeyPath       string `json:"privateKeyPath,omitempty"`
 	CertificateText      string `json:"certificateText,omitempty"`
-	CertificatePath      string `json:"certificatePath,omitempty"`
 	Passphrase           string `json:"passphrase,omitempty"`
 	TrustedHostKeyBase64 string `json:"trustedHostKeyBase64"`
 	Mode                 string `json:"mode"`

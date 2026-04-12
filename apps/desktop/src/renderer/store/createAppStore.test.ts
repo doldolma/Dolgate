@@ -1311,7 +1311,6 @@ describe("createAppStore", () => {
           hasPassphrase: false,
           hasManagedPrivateKey: false,
           hasCertificate: false,
-          source: "server_managed",
           linkedHostCount: 1,
           updatedAt: "2025-01-02T00:00:00.000Z",
         },
@@ -1784,7 +1783,7 @@ describe("createAppStore", () => {
         kind: "ssh",
         label: "Prod Copy 2",
         secretRef: "host:shared",
-        privateKeyPath: "C:/keys/prod",
+        privateKeyPath: null,
       }),
     );
     expect(api.hosts.create).toHaveBeenNthCalledWith(
@@ -1929,6 +1928,47 @@ describe("createAppStore", () => {
       source: "ssh",
       authType: "password",
       initialUsername: "ubuntu",
+    });
+  });
+
+  it("opens the retry dialog when certificate preflight fails before connect", async () => {
+    const api = createMockApi();
+    api.hosts.list = vi.fn().mockResolvedValue([
+      {
+        id: "host-1",
+        kind: "ssh",
+        label: "Prod",
+        hostname: "prod.example.com",
+        port: 22,
+        username: "ubuntu",
+        authType: "certificate",
+        privateKeyPath: null,
+        certificatePath: null,
+        secretRef: "secret-1",
+        groupName: "Servers",
+        terminalThemeId: null,
+        createdAt: "2025-01-01T00:00:00.000Z",
+        updatedAt: "2025-01-01T00:00:00.000Z",
+      },
+    ]);
+    api.ssh.connect = vi
+      .fn()
+      .mockRejectedValue(
+        new Error(
+          "SSH 인증서가 만료되었습니다. 새 인증서를 가져와 다시 시도하세요.",
+        ),
+      );
+    const store = createAppStore(api);
+
+    await store.getState().bootstrap();
+    await store.getState().connectHost("host-1", 120, 32);
+
+    expect(store.getState().pendingCredentialRetry).toMatchObject({
+      hostId: "host-1",
+      source: "ssh",
+      authType: "certificate",
+      initialUsername: "ubuntu",
+      message: "SSH 인증서가 만료되었습니다. 새 인증서를 가져와 다시 시도하세요.",
     });
   });
 
@@ -2649,7 +2689,6 @@ describe("createAppStore", () => {
         hasPassphrase: false,
         hasManagedPrivateKey: false,
         hasCertificate: false,
-        source: "local_keychain" as const,
         linkedHostCount: 1,
         updatedAt: "2025-01-01T00:00:00.000Z",
       },
@@ -2711,7 +2750,6 @@ describe("createAppStore", () => {
         hasPassphrase: true,
         hasManagedPrivateKey: true,
         hasCertificate: false,
-        source: "local_keychain" as const,
         linkedHostCount: 1,
         updatedAt: "2025-01-01T00:00:00.000Z",
       },
@@ -2734,7 +2772,6 @@ describe("createAppStore", () => {
           hasPassphrase: true,
           hasManagedPrivateKey: true,
           hasCertificate: false,
-          source: "local_keychain" as const,
           linkedHostCount: 1,
           updatedAt: "2025-01-02T00:00:00.000Z",
         },

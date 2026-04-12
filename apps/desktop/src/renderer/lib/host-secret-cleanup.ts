@@ -1,7 +1,7 @@
 import { getHostSecretRef } from '@shared';
 import type { HostRecord, SecretMetadataRecord } from '@shared';
 
-export function getUnusedLocalSecretsAfterHostDeletion(
+export function getUnusedSavedCredentialsAfterHostDeletion(
   hosts: HostRecord[],
   keychainEntries: SecretMetadataRecord[],
   hostIds: string[],
@@ -11,10 +11,8 @@ export function getUnusedLocalSecretsAfterHostDeletion(
   }
 
   const removedHostIds = new Set(hostIds);
-  const localKeychainSecretRefs = new Set(
-    keychainEntries
-      .filter((entry) => entry.source === 'local_keychain')
-      .map((entry) => entry.secretRef),
+  const availableSecretRefs = new Set(
+    keychainEntries.map((entry) => entry.secretRef),
   );
 
   const candidateSecretRefs = new Set<string>();
@@ -22,7 +20,7 @@ export function getUnusedLocalSecretsAfterHostDeletion(
 
   for (const host of hosts) {
     const secretRef = getHostSecretRef(host);
-    if (!secretRef || !localKeychainSecretRefs.has(secretRef)) {
+    if (!secretRef || !availableSecretRefs.has(secretRef)) {
       continue;
     }
 

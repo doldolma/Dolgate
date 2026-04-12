@@ -636,7 +636,6 @@ function normalizeSecretMetadataRecord(value: unknown): SecretMetadataRecord | n
     hasPassphrase: Boolean(value.hasPassphrase),
     hasManagedPrivateKey: Boolean(value.hasManagedPrivateKey),
     hasCertificate: Boolean(value.hasCertificate),
-    source: value.source === 'server_managed' ? 'server_managed' : 'local_keychain',
     linkedHostCount: typeof value.linkedHostCount === 'number' ? value.linkedHostCount : 0,
     updatedAt: typeof value.updatedAt === 'string' ? value.updatedAt : nowIso(),
   };

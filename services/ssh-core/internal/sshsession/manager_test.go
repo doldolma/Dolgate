@@ -106,7 +106,7 @@ func TestManagerPrivateKeyFlow(t *testing.T) {
 		Port:                 server.port(),
 		Username:             "tester",
 		AuthType:             "privateKey",
-		PrivateKeyPath:       keyPath,
+		PrivateKeyPEM:        string(privateKeyPEM),
 		TrustedHostKeyBase64: server.hostKeyBase64,
 		Cols:                 100,
 		Rows:                 30,

@@ -6,8 +6,10 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"dolssh/services/ssh-core/internal/awssession"
 	containersvc "dolssh/services/ssh-core/internal/containers"
@@ -234,6 +236,32 @@ func dispatch(
 				PublicKeyBase64:   result.PublicKeyBase64,
 				FingerprintSHA256: result.FingerprintSHA256,
 			},
+		})
+		return nil
+	case protocol.CommandInspectCertificate:
+		var payload protocol.CertificateInspectPayload
+		if err := json.Unmarshal(request.Payload, &payload); err != nil {
+			return err
+		}
+		result := sshconn.InspectCertificate(payload.CertificateText, time.Now().UTC())
+		inspectedPayload := protocol.CertificateInspectedPayload{
+			Status:     result.Status,
+			Principals: result.Principals,
+			KeyID:      result.KeyID,
+		}
+		if result.ValidAfter != nil {
+			inspectedPayload.ValidAfter = result.ValidAfter.Format(time.RFC3339)
+		}
+		if result.ValidBefore != nil {
+			inspectedPayload.ValidBefore = result.ValidBefore.Format(time.RFC3339)
+		}
+		if result.Serial != 0 {
+			inspectedPayload.Serial = strconv.FormatUint(result.Serial, 10)
+		}
+		writer.emit(protocol.Event{
+			Type:      protocol.EventCertificateInspected,
+			RequestID: request.ID,
+			Payload:   inspectedPayload,
 		})
 		return nil
 	case protocol.CommandControlSignal:

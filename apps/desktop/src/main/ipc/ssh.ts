@@ -83,6 +83,7 @@ export function registerSshIpcHandlers(ctx: MainIpcContext): void {
       const username = ctx.requireConfiguredSshUsername(sshHost);
       const { secrets, shouldPersistHostSecret } =
         await ctx.resolveRuntimeSshSecrets(sshHost, input.secrets);
+      await ctx.ensureCertificateAuthReady(sshHost, secrets);
       const title = input.title?.trim() || sshHost.label;
       const connection = await ctx.coreManager.connect({
         host: sshHost.hostname,

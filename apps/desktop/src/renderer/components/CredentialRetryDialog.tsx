@@ -1,6 +1,9 @@
 import { useEffect, useState } from "react";
+import type { SshCertificateInfo } from "@shared";
 import type { CredentialRetryInput } from "../store/types";
 import { useHostFormController } from "../controllers/useHostFormController";
+import { describeCertificateInfo } from "../lib/certificate-info";
+import { loadSavedCredential } from "../services/desktop/settings";
 import { DialogBackdrop } from "./DialogBackdrop";
 import {
   Button,
@@ -13,6 +16,25 @@ import {
   SectionLabel,
 } from "../ui";
 
+function normalizeRetryMessage(message: string): string {
+  return message
+    .replace(/^Error invoking remote method '[^']+':\s*/i, "")
+    .replace(/^Error:\s*/i, "")
+    .trim();
+}
+
+function shouldHideRetryMessageForCertificate(
+  message: string,
+  hasCertificateSummary: boolean,
+): boolean {
+  if (!hasCertificateSummary) {
+    return false;
+  }
+
+  const normalized = normalizeRetryMessage(message).toLowerCase();
+  return normalized.includes("인증서") || normalized.includes("certificate");
+}
+
 export interface CredentialRetryDialogRequest {
   hostId: string;
   hostLabel: string;
@@ -21,8 +43,7 @@ export interface CredentialRetryDialogRequest {
   message: string;
   initialUsername: string;
   hasStoredSecret: boolean;
-  hasLegacyPrivateKeyPath: boolean;
-  hasLegacyCertificatePath: boolean;
+  secretRef?: string | null;
 }
 
 interface ImportedRetryFile {
@@ -49,6 +70,8 @@ export function CredentialRetryDialog({
     useState<ImportedRetryFile | null>(null);
   const [certificateFile, setCertificateFile] =
     useState<ImportedRetryFile | null>(null);
+  const [certificateInfo, setCertificateInfo] =
+    useState<SshCertificateInfo | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -58,8 +81,38 @@ export function CredentialRetryDialog({
     setPassphrase("");
     setPrivateKeyFile(null);
     setCertificateFile(null);
+    setCertificateInfo(null);
     setSubmitting(false);
     setError(null);
+  }, [request]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function hydrateCertificateInfo() {
+      if (
+        !request ||
+        request.authType !== "certificate" ||
+        !request.secretRef
+      ) {
+        setCertificateInfo(null);
+        return;
+      }
+
+      const loaded = await loadSavedCredential(request.secretRef).catch(
+        () => null,
+      );
+      if (cancelled) {
+        return;
+      }
+      setCertificateInfo(loaded?.certificateInfo ?? null);
+    }
+
+    void hydrateCertificateInfo();
+
+    return () => {
+      cancelled = true;
+    };
   }, [request]);
 
   if (!request) {
@@ -69,6 +122,21 @@ export function CredentialRetryDialog({
   const requiresPrivateKey =
     request.authType === "privateKey" || request.authType === "certificate";
   const requiresCertificate = request.authType === "certificate";
+  const certificateSummary =
+    request.authType === "certificate"
+      ? describeCertificateInfo(certificateInfo)
+      : null;
+  const visibleCertificateSummary =
+    certificateSummary && certificateSummary.tone !== "neutral"
+      ? certificateSummary
+      : null;
+  const normalizedMessage = normalizeRetryMessage(request.message);
+  const displayMessage = shouldHideRetryMessageForCertificate(
+    request.message,
+    Boolean(visibleCertificateSummary),
+  )
+    ? null
+    : normalizedMessage;
 
   return (
     <DialogBackdrop dismissOnBackdrop={false}>
@@ -88,9 +156,27 @@ export function CredentialRetryDialog({
           </div>
         </ModalHeader>
         <ModalBody className="grid gap-4">
-          <p className="text-[0.95rem] leading-[1.6] text-[var(--text-soft)]">
-            {request.message}
-          </p>
+          {displayMessage ? (
+            <p className="text-[0.95rem] leading-[1.6] text-[var(--text-soft)]">
+              {displayMessage}
+            </p>
+          ) : null}
+          {visibleCertificateSummary ? (
+            <div
+              className={`rounded-[16px] border px-[1rem] py-[0.9rem] text-[0.95rem] leading-[1.6] ${
+                visibleCertificateSummary.tone === "danger"
+                  ? "border-[color-mix(in_srgb,var(--danger-text)_22%,var(--border))] bg-[var(--danger-bg)] text-[var(--danger-text)]"
+                  : visibleCertificateSummary.tone === "warning"
+                    ? "border-[color-mix(in_srgb,var(--accent)_22%,var(--border))] bg-[var(--selection-soft)] text-[var(--text-soft)]"
+                    : "border-[var(--border-subtle)] bg-[var(--surface-secondary)] text-[var(--text-soft)]"
+              }`}
+            >
+              <p className="font-semibold">{visibleCertificateSummary.title}</p>
+              {visibleCertificateSummary.detail ? (
+                <p>{visibleCertificateSummary.detail}</p>
+              ) : null}
+            </div>
+          ) : null}
           <FieldGroup label="Username">
             <Input
               autoFocus
@@ -164,6 +250,7 @@ export function CredentialRetryDialog({
                       name: selected.name,
                       content: selected.content,
                     });
+                    setCertificateInfo(null);
                     setError(null);
                   }}
                 >
@@ -214,7 +301,6 @@ export function CredentialRetryDialog({
               if (
                 request.authType === "privateKey" &&
                 !request.hasStoredSecret &&
-                !request.hasLegacyPrivateKeyPath &&
                 !privateKeyFile?.content
               ) {
                 setError("개인키를 가져오거나 기존 저장된 인증 정보를 사용해 주세요.");
@@ -223,7 +309,6 @@ export function CredentialRetryDialog({
               if (
                 request.authType === "certificate" &&
                 !request.hasStoredSecret &&
-                !request.hasLegacyPrivateKeyPath &&
                 !privateKeyFile?.content
               ) {
                 setError("개인키를 가져와 주세요.");
@@ -232,7 +317,6 @@ export function CredentialRetryDialog({
               if (
                 request.authType === "certificate" &&
                 !request.hasStoredSecret &&
-                !request.hasLegacyCertificatePath &&
                 !certificateFile?.content
               ) {
                 setError("SSH 인증서를 가져와 주세요.");
