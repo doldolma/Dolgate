@@ -19,6 +19,9 @@ apps/desktop/config/desktop.json
 services/sync-api/config/default.json
 services/sync-api/config/production.json
 services/sync-api/data
+packages/fressh-react-native-uniffi-russh/android/.cxx/
+packages/fressh-react-native-uniffi-russh/android/build/
+services/sync-api/=busy_timeout*
 *.db
 *.sqlite
 *.sqlite3
