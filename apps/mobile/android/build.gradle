@@ -18,4 +18,19 @@ buildscript {
     }
 }
 
+def asyncStorageLocalRepo =
+    file("../../../node_modules/@react-native-async-storage/async-storage/android/local_repo")
+
+allprojects {
+    repositories {
+        if (asyncStorageLocalRepo.exists()) {
+            maven {
+                url(asyncStorageLocalRepo)
+            }
+        }
+        google()
+        mavenCentral()
+    }
+}
+
 apply plugin: "com.facebook.react.rootproject"

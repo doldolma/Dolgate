@@ -354,6 +354,39 @@ func TestDesktopCallbackBridgeAppliesSecurityHeaders(t *testing.T) {
 	}
 }
 
+func TestMobileBrowserSignupBridgePreservesCustomSchemeCallbackURL(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := createTestRouter(t)
+
+	form := url.Values{
+		"email":        {"mobile-bridge@example.com"},
+		"password":     {"supersecure"},
+		"client":       {"dolgate-mobile"},
+		"redirect_uri": {"dolgate://auth/callback"},
+		"state":        {"mobile-state"},
+	}
+
+	request := httptest.NewRequest(http.MethodPost, "/signup", strings.NewReader(form.Encode()))
+	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected mobile bridge page, got %d: %s", recorder.Code, recorder.Body.String())
+	}
+
+	body := recorder.Body.String()
+	if !strings.Contains(body, `const target = "dolgate://auth/callback?`) {
+		t.Fatalf("expected custom scheme callback in bridge page script, got %s", body)
+	}
+	if strings.Contains(body, "#ZgotmplZ") {
+		t.Fatalf("expected bridge page to preserve custom scheme callback, got %s", body)
+	}
+	if !strings.Contains(body, "state=mobile-state") {
+		t.Fatalf("expected state parameter in bridge callback url, got %s", body)
+	}
+}
+
 func TestOIDCOnlyLoginRedirectsImmediately(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	oidcServer := createOIDCTestServer(t)

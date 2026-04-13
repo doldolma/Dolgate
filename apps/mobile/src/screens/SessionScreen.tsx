@@ -69,7 +69,7 @@ export function SessionScreen({
         Uint8Array.from(Buffer.from(session.lastViewportSnapshot, "utf8")),
       );
     }
-  }, [session?.id, session?.lastViewportSnapshot, session?.status, terminalReady]);
+  }, [session, session?.id, session?.lastViewportSnapshot, session?.status, terminalReady]);
 
   useEffect(() => {
     if (!terminalReady || !session || session.status !== "connected") {
@@ -97,6 +97,7 @@ export function SessionScreen({
 
     return unsubscribe;
   }, [
+    session,
     session?.id,
     session?.status,
     subscribeToSessionTerminal,

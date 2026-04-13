@@ -1,6 +1,7 @@
 import { Buffer } from "buffer";
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
+import { Linking } from "react-native";
 import { RnRussh } from "@fressh/react-native-uniffi-russh";
 import type {
   AuthSession,
@@ -45,6 +46,10 @@ import {
   loadStoredSecrets,
   ApiError,
 } from "../lib/mobile";
+import {
+  getAuthCallbackStateErrorMessage,
+  getSyncFailureMessage,
+} from "../lib/auth-flow";
 
 const MAX_TERMINAL_SNAPSHOT_CHARS = 16_000;
 interface PendingServerKeyPromptState {
@@ -280,6 +285,15 @@ function disconnectRuntimeSession(sessionId: string): void {
   } catch {}
 
   runtimeSessions.delete(sessionId);
+}
+
+async function disconnectAllRuntimeSessions(): Promise<void> {
+  for (const session of [...runtimeSessions.values()]) {
+    try {
+      await session.connection.disconnect();
+    } catch {}
+    disconnectRuntimeSession(session.recordId);
+  }
 }
 
 export const useMobileAppStore = create<MobileAppState>()(
@@ -650,7 +664,12 @@ export const useMobileAppStore = create<MobileAppState>()(
         }
       };
 
-      const syncWithSession = async (sessionOverride?: AuthSession | null) => {
+      const syncWithSession = async (
+        sessionOverride?: AuthSession | null,
+        options?: {
+          context?: "login" | "sync";
+        },
+      ) => {
         const activeSession = sessionOverride ?? get().auth.session ?? null;
         if (!activeSession) {
           set({
@@ -785,10 +804,10 @@ export const useMobileAppStore = create<MobileAppState>()(
               syncStatus: {
                 ...state.syncStatus,
                 status: "error",
-                errorMessage:
-                  error instanceof Error
-                    ? error.message
-                    : "동기화에 실패했습니다.",
+                errorMessage: getSyncFailureMessage(
+                  error,
+                  options?.context ?? "sync",
+                ),
               },
             }));
           } finally {
@@ -919,11 +938,15 @@ export const useMobileAppStore = create<MobileAppState>()(
           }
 
           const expectedState = get().pendingBrowserLoginState;
-          if (expectedState && payload.state && expectedState !== payload.state) {
+          const stateValidationMessage = getAuthCallbackStateErrorMessage(
+            expectedState,
+            payload.state,
+          );
+          if (stateValidationMessage) {
             set({
               auth: {
                 ...createUnauthenticatedState(),
-                errorMessage: "로그인 검증 상태가 일치하지 않습니다.",
+                errorMessage: stateValidationMessage,
               },
               pendingBrowserLoginState: null,
             });
@@ -953,7 +976,7 @@ export const useMobileAppStore = create<MobileAppState>()(
               },
               pendingBrowserLoginState: null,
             });
-            await syncWithSession(session);
+            await syncWithSession(session, { context: "login" });
           } catch (error) {
             set({
               auth: {
@@ -991,19 +1014,26 @@ export const useMobileAppStore = create<MobileAppState>()(
             },
           });
 
-          const { Linking } = await import("react-native");
-          await Linking.openURL(
-            buildBrowserLoginUrl(get().settings.serverUrl, stateToken),
-          );
+          try {
+            await Linking.openURL(
+              buildBrowserLoginUrl(get().settings.serverUrl, stateToken),
+            );
+          } catch (error) {
+            set({
+              pendingBrowserLoginState: null,
+              auth: {
+                ...createUnauthenticatedState(),
+                errorMessage:
+                  error instanceof Error
+                    ? error.message
+                    : "브라우저 로그인을 시작하지 못했습니다.",
+              },
+            });
+          }
         },
         logout: async () => {
           clearPrompts();
-          for (const session of [...runtimeSessions.values()]) {
-            try {
-              await session.connection.disconnect();
-            } catch {}
-            disconnectRuntimeSession(session.recordId);
-          }
+          await disconnectAllRuntimeSessions();
 
           try {
             await logoutRemoteSession(
@@ -1054,13 +1084,19 @@ export const useMobileAppStore = create<MobileAppState>()(
             typeof input.serverUrl === "string" &&
             input.serverUrl.trim() !== get().settings.serverUrl;
 
-          if (serverChanged && get().auth.session) {
+          if (serverChanged) {
+            await disconnectAllRuntimeSessions();
+          }
+
+          if (serverChanged) {
             await clearStoredAuthSession();
             await clearStoredSecrets();
             set({
               auth: {
                 ...createUnauthenticatedState(),
-                errorMessage: "서버 주소가 변경되어 다시 로그인해 주세요.",
+                errorMessage: get().auth.session
+                  ? "서버 주소가 변경되어 다시 로그인해 주세요."
+                  : null,
               },
               hosts: [],
               knownHosts: [],
@@ -1068,6 +1104,7 @@ export const useMobileAppStore = create<MobileAppState>()(
               secretsByRef: {},
               sessions: [],
               syncStatus: createDefaultSyncStatus(),
+              pendingBrowserLoginState: null,
             });
           }
 

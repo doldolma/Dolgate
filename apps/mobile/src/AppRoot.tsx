@@ -20,6 +20,7 @@ export function AppRoot(): React.JSX.Element {
   const systemScheme = useColorScheme();
   const hydrated = useMobileAppStore((state) => state.hydrated);
   const bootstrapping = useMobileAppStore((state) => state.bootstrapping);
+  const auth = useMobileAppStore((state) => state.auth);
   const initializeApp = useMobileAppStore((state) => state.initializeApp);
   const handleAuthCallbackUrl = useMobileAppStore(
     (state) => state.handleAuthCallbackUrl,
@@ -117,7 +118,7 @@ export function AppRoot(): React.JSX.Element {
             </Text>
           </View>
         ) : (
-          <RootNavigator />
+          <RootNavigator authState={auth} />
         )}
       </NavigationContainer>
       <ServerKeyPromptModal

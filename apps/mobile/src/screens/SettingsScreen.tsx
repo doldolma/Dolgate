@@ -29,6 +29,10 @@ export function SettingsScreen(): React.JSX.Element {
     setServerUrlDraft(settings.serverUrl);
   }, [settings.serverUrl]);
 
+  const hasAuthenticatedSession =
+    (auth.status === "authenticated" || auth.status === "offline-authenticated") &&
+    Boolean(auth.session);
+
   return (
     <ScrollView
       style={[
@@ -38,34 +42,38 @@ export function SettingsScreen(): React.JSX.Element {
         },
       ]}
       contentContainerStyle={styles.content}
-    >
-      <Text style={[styles.title, { color: palette.text }]}>Settings</Text>
-
-      <View
-        style={[
-          styles.section,
-          {
-            backgroundColor: palette.surface,
-            borderColor: palette.border,
-          },
-        ]}
       >
-        <Text style={[styles.sectionTitle, { color: palette.text }]}>
-          Account
-        </Text>
-        <Text style={[styles.body, { color: palette.mutedText }]}>
-          {auth.session?.user.email ?? "로그인되지 않음"}
-        </Text>
-        <Text style={[styles.body, { color: palette.mutedText }]}>
-          auth: {auth.status}
-        </Text>
-        {auth.errorMessage ? (
-          <Text style={[styles.errorText, { color: palette.danger }]}>
-            {auth.errorMessage}
+        <Text style={[styles.title, { color: palette.text }]}>Settings</Text>
+      {hasAuthenticatedSession ? (
+        <View
+          style={[
+            styles.section,
+            {
+              backgroundColor: palette.surface,
+              borderColor: palette.border,
+            },
+          ]}
+        >
+          <Text style={[styles.sectionTitle, { color: palette.text }]}>
+            Account
           </Text>
-        ) : null}
-        <View style={styles.row}>
-          {auth.session ? (
+          <Text style={[styles.body, { color: palette.mutedText }]}>
+            {auth.session?.user.email ?? "로그인되지 않음"}
+          </Text>
+          <Text style={[styles.body, { color: palette.mutedText }]}>
+            auth: {auth.status}
+          </Text>
+          {auth.status === "offline-authenticated" ? (
+            <Text style={[styles.infoText, { color: palette.warning }]}>
+              오프라인 캐시를 사용 중입니다. 다시 로그인하거나 동기화를 재시도할 수 있습니다.
+            </Text>
+          ) : null}
+          {auth.errorMessage ? (
+            <Text style={[styles.errorText, { color: palette.danger }]}>
+              {auth.errorMessage}
+            </Text>
+          ) : null}
+          <View style={styles.row}>
             <Pressable
               onPress={() => void logout()}
               style={[
@@ -80,35 +88,23 @@ export function SettingsScreen(): React.JSX.Element {
                 로그아웃
               </Text>
             </Pressable>
-          ) : (
             <Pressable
-              onPress={() => void startBrowserLogin()}
+              onPress={() => void syncNow()}
               style={[
-                styles.primaryButton,
+                styles.secondaryButton,
                 {
-                  backgroundColor: palette.accent,
+                  backgroundColor: palette.surfaceAlt,
+                  borderColor: palette.border,
                 },
               ]}
             >
-              <Text style={styles.primaryText}>로그인</Text>
+              <Text style={[styles.secondaryText, { color: palette.text }]}>
+                동기화
+              </Text>
             </Pressable>
-          )}
-          <Pressable
-            onPress={() => void syncNow()}
-            style={[
-              styles.secondaryButton,
-              {
-                backgroundColor: palette.surfaceAlt,
-                borderColor: palette.border,
-              },
-            ]}
-          >
-            <Text style={[styles.secondaryText, { color: palette.text }]}>
-              동기화
-            </Text>
-          </Pressable>
+          </View>
         </View>
-      </View>
+      ) : null}
 
       <View
         style={[
@@ -122,6 +118,11 @@ export function SettingsScreen(): React.JSX.Element {
         <Text style={[styles.sectionTitle, { color: palette.text }]}>
           Sync server
         </Text>
+        {!hasAuthenticatedSession ? (
+          <Text style={[styles.body, { color: palette.mutedText }]}>
+            로그인 전에는 서버 주소와 테마만 변경할 수 있습니다.
+          </Text>
+        ) : null}
         <TextInput
           value={serverUrlDraft}
           onChangeText={setServerUrlDraft}
@@ -159,10 +160,29 @@ export function SettingsScreen(): React.JSX.Element {
             ? ` • ${formatRelativeTime(syncStatus.lastSuccessfulSyncAt)}`
             : ""}
         </Text>
+        {auth.errorMessage && !hasAuthenticatedSession ? (
+          <Text style={[styles.errorText, { color: palette.danger }]}>
+            {auth.errorMessage}
+          </Text>
+        ) : null}
         {syncStatus.errorMessage ? (
           <Text style={[styles.errorText, { color: palette.danger }]}>
             {syncStatus.errorMessage}
           </Text>
+        ) : null}
+        {!hasAuthenticatedSession ? (
+          <Pressable
+            onPress={() => void startBrowserLogin()}
+            style={[
+              styles.primaryButton,
+              {
+                backgroundColor: palette.accent,
+                alignSelf: "flex-start",
+              },
+            ]}
+          >
+            <Text style={styles.primaryText}>로그인</Text>
+          </Pressable>
         ) : null}
       </View>
 
@@ -211,66 +231,70 @@ export function SettingsScreen(): React.JSX.Element {
         </View>
       </View>
 
-      <View
-        style={[
-          styles.section,
-          {
-            backgroundColor: palette.surface,
-            borderColor: palette.border,
-          },
-        ]}
-      >
-        <Text style={[styles.sectionTitle, { color: palette.text }]}>
-          Known hosts ({knownHosts.length})
-        </Text>
-        {knownHosts.slice(0, 8).map((record) => (
-          <View key={record.id} style={styles.listItem}>
-            <Text style={[styles.listTitle, { color: palette.text }]}>
-              {record.host}:{record.port}
-            </Text>
-            <Text style={[styles.listBody, { color: palette.mutedText }]}>
-              {record.algorithm} • {formatRelativeTime(record.updatedAt)}
-            </Text>
-          </View>
-        ))}
-        {knownHosts.length === 0 ? (
-          <Text style={[styles.body, { color: palette.mutedText }]}>
-            아직 신뢰된 호스트 키가 없습니다.
+      {hasAuthenticatedSession ? (
+        <View
+          style={[
+            styles.section,
+            {
+              backgroundColor: palette.surface,
+              borderColor: palette.border,
+            },
+          ]}
+        >
+          <Text style={[styles.sectionTitle, { color: palette.text }]}>
+            Known hosts ({knownHosts.length})
           </Text>
-        ) : null}
-      </View>
+          {knownHosts.slice(0, 8).map((record) => (
+            <View key={record.id} style={styles.listItem}>
+              <Text style={[styles.listTitle, { color: palette.text }]}>
+                {record.host}:{record.port}
+              </Text>
+              <Text style={[styles.listBody, { color: palette.mutedText }]}>
+                {record.algorithm} • {formatRelativeTime(record.updatedAt)}
+              </Text>
+            </View>
+          ))}
+          {knownHosts.length === 0 ? (
+            <Text style={[styles.body, { color: palette.mutedText }]}>
+              아직 신뢰된 호스트 키가 없습니다.
+            </Text>
+          ) : null}
+        </View>
+      ) : null}
 
-      <View
-        style={[
-          styles.section,
-          {
-            backgroundColor: palette.surface,
-            borderColor: palette.border,
-          },
-        ]}
-      >
-        <Text style={[styles.sectionTitle, { color: palette.text }]}>
-          Stored credentials ({secretMetadata.length})
-        </Text>
-        {secretMetadata.slice(0, 8).map((record) => (
-          <View key={record.secretRef} style={styles.listItem}>
-            <Text style={[styles.listTitle, { color: palette.text }]}>
-              {record.label}
-            </Text>
-            <Text style={[styles.listBody, { color: palette.mutedText }]}>
-              {record.hasPassword ? "password " : ""}
-              {record.hasManagedPrivateKey ? "private-key " : ""}
-              {record.hasPassphrase ? "passphrase " : ""}
-              • host {record.linkedHostCount}
-            </Text>
-          </View>
-        ))}
-        {secretMetadata.length === 0 ? (
-          <Text style={[styles.body, { color: palette.mutedText }]}>
-            아직 저장된 자격 증명이 없습니다.
+      {hasAuthenticatedSession ? (
+        <View
+          style={[
+            styles.section,
+            {
+              backgroundColor: palette.surface,
+              borderColor: palette.border,
+            },
+          ]}
+        >
+          <Text style={[styles.sectionTitle, { color: palette.text }]}>
+            Stored credentials ({secretMetadata.length})
           </Text>
-        ) : null}
-      </View>
+          {secretMetadata.slice(0, 8).map((record) => (
+            <View key={record.secretRef} style={styles.listItem}>
+              <Text style={[styles.listTitle, { color: palette.text }]}>
+                {record.label}
+              </Text>
+              <Text style={[styles.listBody, { color: palette.mutedText }]}>
+                {record.hasPassword ? "password " : ""}
+                {record.hasManagedPrivateKey ? "private-key " : ""}
+                {record.hasPassphrase ? "passphrase " : ""}
+                • host {record.linkedHostCount}
+              </Text>
+            </View>
+          ))}
+          {secretMetadata.length === 0 ? (
+            <Text style={[styles.body, { color: palette.mutedText }]}>
+              아직 저장된 자격 증명이 없습니다.
+            </Text>
+          ) : null}
+        </View>
+      ) : null}
     </ScrollView>
   );
 }
@@ -301,6 +325,11 @@ const styles = StyleSheet.create({
   body: {
     fontSize: 14,
     lineHeight: 20,
+  },
+  infoText: {
+    fontSize: 13,
+    lineHeight: 18,
+    fontWeight: "700",
   },
   errorText: {
     fontSize: 13,

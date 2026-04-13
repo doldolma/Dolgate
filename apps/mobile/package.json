@@ -3,8 +3,11 @@
   "version": "1.4.1",
   "private": true,
   "scripts": {
-    "android": "react-native run-android",
+    "android": "node ./scripts/run-android.cjs",
+    "mobile:android": "node ./scripts/run-android.cjs",
+    "dev:android": "node ./scripts/dev-android.cjs",
     "ios": "react-native run-ios",
+    "mobile:ios": "react-native run-ios",
     "lint": "eslint .",
     "start": "react-native start",
     "test": "jest",
@@ -29,6 +32,7 @@
     "react-native-keychain": "^10.0.0",
     "react-native-safe-area-context": "^5.5.2",
     "react-native-screens": "^4.24.0",
+    "react-native-vector-icons": "^10.3.0",
     "react-native-webview": "^13.16.1",
     "zustand": "^5.0.12"
   },
