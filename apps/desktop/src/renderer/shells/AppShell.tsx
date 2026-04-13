@@ -65,8 +65,11 @@ export function AppShell({
   const isContainersActive = homeViewModel.activeWorkspaceTab === 'containers';
   const isSessionViewActive =
     !isHomeActive && !isSftpActive && !isContainersActive;
-  const hasActiveTransfers = sftpViewModel.sftp.transfers.some(
-    (job) => job.status === 'queued' || job.status === 'running',
+  const hasActiveTransfers = sftpViewModel.transfers.some(
+    (job) =>
+      job.status === 'queued' ||
+      job.status === 'running' ||
+      job.status === 'cancelling',
   );
   const hasActivePortForwards = homeViewModel.portForwardRuntimes.some(
     (runtime) => runtime.status === 'starting' || runtime.status === 'running',

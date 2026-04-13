@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, memo, useEffect, useMemo, useRef, useState } from "react";
 import type {
   CSSProperties,
   DragEvent,
@@ -76,7 +76,11 @@ interface SftpWorkspaceProps {
   desktopPlatform: DesktopPlatform;
   hosts: HostRecord[];
   groups: GroupRecord[];
-  sftp: SftpState;
+  sftp: Pick<
+    SftpState,
+    "localHomePath" | "leftPane" | "rightPane" | "pendingConflictDialog"
+  >;
+  transfers: TransferJob[];
   settings: AppSettings;
   interactiveAuth: PendingSftpInteractiveAuth | null;
   onActivatePaneSource: (
@@ -2063,6 +2067,25 @@ function TransferBar({
     return null;
   }
 
+  const getTransferStatusLabel = (status: TransferJob["status"]): string => {
+    switch (status) {
+      case "queued":
+        return "대기 중";
+      case "running":
+        return "전송 중";
+      case "cancelling":
+        return "취소 중";
+      case "completed":
+        return "완료";
+      case "failed":
+        return "실패";
+      case "cancelled":
+        return "취소됨";
+      default:
+        return status;
+    }
+  };
+
   return (
     <div className="flex items-stretch gap-2 overflow-x-auto pb-[0.2rem]">
       {transfers.slice(0, 6).map((job) => {
@@ -2094,9 +2117,9 @@ function TransferBar({
               </strong>
               <span
                 className="min-w-0 justify-self-end whitespace-nowrap text-right"
-                title={job.status}
+                title={getTransferStatusLabel(job.status)}
               >
-                {job.status}
+                {getTransferStatusLabel(job.status)}
               </span>
             </div>
             <div className="mt-[0.35rem] grid grid-cols-[minmax(0,1fr)_auto] items-center gap-[0.75rem] text-[0.86rem] text-[var(--text-soft)]">
@@ -2133,6 +2156,11 @@ function TransferBar({
                     : ""}
                 </span>
               ) : null}
+              {job.status === "cancelling" ? (
+                <span className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap">
+                  취소 요청을 처리하는 중입니다.
+                </span>
+              ) : null}
               {job.status === "running" ? (
                 <Button
                   variant="secondary"
@@ -2141,6 +2169,16 @@ function TransferBar({
                   onClick={() => void onCancelTransfer(job.id)}
                 >
                   취소
+                </Button>
+              ) : null}
+              {job.status === "cancelling" ? (
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  className="col-start-2 row-span-2 row-start-1 justify-self-end rounded-[12px] whitespace-nowrap"
+                  disabled
+                >
+                  취소 중
                 </Button>
               ) : null}
               {job.status === "failed" ? (
@@ -2153,7 +2191,9 @@ function TransferBar({
                   재시도
                 </Button>
               ) : null}
-              {job.status !== "running" && job.status !== "queued" ? (
+              {job.status !== "running" &&
+              job.status !== "queued" &&
+              job.status !== "cancelling" ? (
                 <Button
                   variant="secondary"
                   size="sm"
@@ -2417,7 +2457,7 @@ function DeleteDialog({
   );
 }
 
-export function SftpWorkspace({
+const SftpWorkspacePanes = memo(function SftpWorkspacePanes({
   desktopPlatform,
   hosts,
   groups,
@@ -2448,16 +2488,14 @@ export function SftpWorkspace({
   onPrepareTransfer,
   onPrepareExternalTransfer,
   onTransferSelectionToPane,
-  onResolveConflict,
-  onDismissConflict,
-  onCancelTransfer,
-  onRetryTransfer,
-  onDismissTransfer,
   onRespondInteractiveAuth,
   onReopenInteractiveAuthUrl,
   onClearInteractiveAuth,
   onUpdateSettings,
-}: SftpWorkspaceProps) {
+}: Omit<
+  SftpWorkspaceProps,
+  "transfers" | "onResolveConflict" | "onDismissConflict" | "onCancelTransfer" | "onRetryTransfer" | "onDismissTransfer"
+>) {
   const [actionDialog, setActionDialog] = useState<ActionDialogState | null>(
     null,
   );
@@ -2611,7 +2649,7 @@ export function SftpWorkspace({
   };
 
   return (
-    <div className="flex h-full min-h-0 flex-col gap-4">
+    <>
       <div className="grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] gap-4 max-[1040px]:grid-cols-1">
         {panes.map((pane, index) => {
           const connectActions = {
@@ -2827,19 +2865,6 @@ export function SftpWorkspace({
         })}
       </div>
 
-      <TransferBar
-        transfers={sftp.transfers}
-        onCancelTransfer={onCancelTransfer}
-        onRetryTransfer={onRetryTransfer}
-        onDismissTransfer={onDismissTransfer}
-      />
-
-      <ConflictDialog
-        pendingConflictDialog={sftp.pendingConflictDialog}
-        onResolveConflict={onResolveConflict}
-        onDismissConflict={onDismissConflict}
-      />
-
       <ActionDialog
         dialog={actionDialog}
         onChange={(value) => {
@@ -2935,6 +2960,35 @@ export function SftpWorkspace({
           setDeleteDialog(null);
         }}
         onSubmit={handleConfirmDelete}
+      />
+    </>
+  );
+});
+
+export function SftpWorkspace({
+  transfers,
+  onResolveConflict,
+  onDismissConflict,
+  onCancelTransfer,
+  onRetryTransfer,
+  onDismissTransfer,
+  ...props
+}: SftpWorkspaceProps) {
+  return (
+    <div className="flex h-full min-h-0 flex-col gap-4">
+      <SftpWorkspacePanes {...props} />
+
+      <TransferBar
+        transfers={transfers}
+        onCancelTransfer={onCancelTransfer}
+        onRetryTransfer={onRetryTransfer}
+        onDismissTransfer={onDismissTransfer}
+      />
+
+      <ConflictDialog
+        pendingConflictDialog={props.sftp.pendingConflictDialog}
+        onResolveConflict={onResolveConflict}
+        onDismissConflict={onDismissConflict}
       />
     </div>
   );

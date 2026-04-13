@@ -2,6 +2,7 @@ package sftp
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -153,7 +154,12 @@ func (s *Service) Connect(endpointID, requestID string, payload protocol.SFTPCon
 		return err
 	}
 
-	sftpClient, err := sftppkg.NewClient(client)
+	sftpClient, err := sftppkg.NewClient(
+		client,
+		sftppkg.UseConcurrentReads(true),
+		sftppkg.UseConcurrentWrites(true),
+		sftppkg.MaxConcurrentRequestsPerFile(transferConcurrentRequestsPerFile),
+	)
 	if err != nil {
 		_ = client.Close()
 		return fmt.Errorf("sftp client creation failed: %w", err)
@@ -394,35 +400,53 @@ func (s *Service) runTransfer(ctx context.Context, jobID string, payload protoco
 		return
 	}
 
-	progress := &transferProgress{
-		startedAt: time.Now(),
-	}
+	progress := newTransferProgress(time.Now())
+	reporter := newTransferProgressReporter(
+		jobID,
+		progress,
+		s.emitTransferEvent,
+		time.Now,
+	)
 
 	for _, item := range payload.Items {
 		size, sizeErr := calculateTotalSize(ctx, sourceFS, item.Path)
 		if sizeErr != nil {
+			if errors.Is(sizeErr, context.Canceled) || errors.Is(sizeErr, context.DeadlineExceeded) {
+				reporter.emitTerminal(
+					protocol.EventSFTPTransferCancelled,
+					"cancelled",
+					item.Name,
+					"",
+				)
+				return
+			}
 			s.emitTransferFailed(jobID, sizeErr)
 			return
 		}
 		progress.bytesTotal += size
 	}
 
-	s.emitTransferEvent(protocol.Event{
-		Type:    protocol.EventSFTPTransferProgress,
-		JobID:   jobID,
-		Payload: progress.snapshot("running", "", ""),
-	})
+	reporter.emitRunning("", "", true)
 
 	for _, item := range payload.Items {
-		progress.activeItemName = item.Name
+		reporter.emitRunning(item.Name, "", true)
 		targetPath := targetFS.Join(payload.Target.Path, item.Name)
-		if err := s.copyPath(ctx, jobID, progress, sourceFS, targetFS, item.Path, targetPath, payload.ConflictResolution); err != nil {
-			if err == context.Canceled || err == context.DeadlineExceeded {
-				s.emitTransferEvent(protocol.Event{
-					Type:    protocol.EventSFTPTransferCancelled,
-					JobID:   jobID,
-					Payload: progress.snapshot("cancelled", item.Name, ""),
-				})
+		if err := s.copyPath(
+			ctx,
+			sourceFS,
+			targetFS,
+			item.Path,
+			targetPath,
+			payload.ConflictResolution,
+			reporter,
+		); err != nil {
+			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+				reporter.emitTerminal(
+					protocol.EventSFTPTransferCancelled,
+					"cancelled",
+					item.Name,
+					"",
+				)
 				return
 			}
 			s.emitTransferFailed(jobID, err)
@@ -430,22 +454,17 @@ func (s *Service) runTransfer(ctx context.Context, jobID string, payload protoco
 		}
 	}
 
-	s.emitTransferEvent(protocol.Event{
-		Type:    protocol.EventSFTPTransferCompleted,
-		JobID:   jobID,
-		Payload: progress.snapshot("completed", "", ""),
-	})
+	reporter.emitTerminal(protocol.EventSFTPTransferCompleted, "completed", "", "")
 }
 
 func (s *Service) copyPath(
 	ctx context.Context,
-	jobID string,
-	progress *transferProgress,
 	sourceFS filesystemAccessor,
 	targetFS filesystemAccessor,
 	sourcePath string,
 	targetPath string,
 	conflictResolution string,
+	reporter *transferProgressReporter,
 ) error {
 	select {
 	case <-ctx.Done():
@@ -479,13 +498,12 @@ func (s *Service) copyPath(
 		for _, entry := range entries {
 			if err := s.copyPath(
 				ctx,
-				jobID,
-				progress,
 				sourceFS,
 				targetFS,
 				sourceFS.Join(sourcePath, entry.Name()),
 				targetFS.Join(nextTargetPath, entry.Name()),
 				conflictResolution,
+				reporter,
 			); err != nil {
 				return err
 			}
@@ -493,7 +511,15 @@ func (s *Service) copyPath(
 		return nil
 	}
 
-	return copyFileWithProgress(ctx, jobID, progress, s.emitTransferEvent, sourceFS, targetFS, sourcePath, nextTargetPath)
+	reporter.emitRunning(sourceFS.Base(sourcePath), "", true)
+	return copyFileWithProgress(
+		ctx,
+		sourceFS,
+		targetFS,
+		sourcePath,
+		nextTargetPath,
+		reporter,
+	)
 }
 
 func (s *Service) emitTransferEvent(event protocol.Event) {

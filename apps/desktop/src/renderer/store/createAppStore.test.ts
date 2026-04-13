@@ -1175,6 +1175,36 @@ describe("upsertTransferJob", () => {
       "job-2",
     ]);
   });
+
+  it("marks running transfers as cancelling immediately when cancel is requested", async () => {
+    const api = createMockApi();
+    const store = createAppStore(api);
+    await store.getState().bootstrap();
+
+    store.getState().handleTransferEvent({
+      job: {
+        id: "job-1",
+        sourceLabel: "Local",
+        targetLabel: "nas",
+        itemCount: 1,
+        bytesTotal: 100,
+        bytesCompleted: 40,
+        status: "running",
+        startedAt: "2025-01-01T00:00:00.000Z",
+        updatedAt: "2025-01-01T00:00:10.000Z",
+        etaSeconds: 3,
+      },
+    });
+
+    await store.getState().cancelTransfer("job-1");
+
+    expect(api.sftp.cancelTransfer).toHaveBeenCalledWith("job-1");
+    expect(store.getState().sftp.transfers[0]).toMatchObject({
+      id: "job-1",
+      status: "cancelling",
+      etaSeconds: null,
+    });
+  });
 });
 
 describe("createAppStore", () => {

@@ -57,7 +57,8 @@ export function SftpShell({
           desktopPlatform={desktopPlatform}
           hosts={homeViewModel.hosts}
           groups={homeViewModel.groups}
-          sftp={sftpViewModel.sftp}
+          sftp={sftpViewModel.sftpState}
+          transfers={sftpViewModel.transfers}
           settings={settingsViewModel.settings}
           interactiveAuth={
             modalViewModel.pendingInteractiveAuth?.source === 'sftp'

@@ -1,13 +1,13 @@
 {
   "name": "dolssh",
-  "version": "1.4.0",
+  "version": "1.4.1",
   "private": true,
   "workspaces": [
     "apps/*",
     "packages/*"
   ],
   "scripts": {
-    "dev": "npm-run-all --parallel dev:desktop dev:api",
+    "dev": "npm-run-all --parallel --print-label --race dev:desktop dev:api",
     "dev:desktop": "npm run dev --workspace @dolssh/desktop",
     "dev:mobile": "npm run start --workspace @dolssh/mobile",
     "dev:api": "cd services/sync-api && go run ./cmd/api",

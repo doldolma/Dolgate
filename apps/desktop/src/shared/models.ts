@@ -1712,7 +1712,7 @@ export interface TransferJob {
   bytesCompleted: number;
   speedBytesPerSecond?: number | null;
   etaSeconds?: number | null;
-  status: 'queued' | 'running' | 'completed' | 'failed' | 'cancelled';
+  status: 'queued' | 'running' | 'cancelling' | 'completed' | 'failed' | 'cancelled';
   startedAt: string;
   activeItemName?: string | null;
   errorMessage?: string | null;

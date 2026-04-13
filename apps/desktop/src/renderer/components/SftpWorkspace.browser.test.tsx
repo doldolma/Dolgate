@@ -280,6 +280,10 @@ function createSftpState(): SftpState {
 function renderWorkspace(
   overrides: Partial<Parameters<typeof SftpWorkspace>[0]> = {},
 ) {
+  const sftp = overrides.sftp ?? createSftpState();
+  const transfers: SftpState["transfers"] =
+    overrides.transfers ??
+    ("transfers" in sftp ? (sftp as SftpState).transfers : []);
   const onUpdateSettings = vi.fn().mockResolvedValue(undefined);
   const onDisconnectPane = vi.fn().mockResolvedValue(undefined);
   const onSelectEntry = vi.fn();
@@ -293,7 +297,8 @@ function renderWorkspace(
       desktopPlatform="darwin"
       hosts={[]}
       groups={[]}
-      sftp={createSftpState()}
+      sftp={sftp}
+      transfers={transfers}
       settings={baseSettings}
       interactiveAuth={null}
       onActivatePaneSource={vi.fn().mockResolvedValue(undefined)}
@@ -429,6 +434,7 @@ describe("SftpWorkspace column resizing", () => {
         hosts={[]}
         groups={[]}
         sftp={createSftpState()}
+        transfers={[]}
         settings={{
           ...baseSettings,
           sftpBrowserColumnWidths: { ...DEFAULT_SFTP_BROWSER_COLUMN_WIDTHS },
@@ -1219,6 +1225,40 @@ describe("SftpWorkspace column resizing", () => {
     expect(onDismissTransfer).toHaveBeenCalledWith("transfer-failed");
     expect(onDismissTransfer).toHaveBeenCalledWith("transfer-complete");
     expect(container.querySelector(".transfer-card")).toBeNull();
+  });
+
+  it("shows cancelling transfers as disabled until the cancelled event arrives", () => {
+    const sftp = createSftpState();
+    sftp.transfers = [
+      {
+        id: "transfer-cancelling",
+        sourceLabel: "large.bin",
+        targetLabel: "/remote/large.bin",
+        itemCount: 1,
+        bytesCompleted: 512,
+        bytesTotal: 1024,
+        speedBytesPerSecond: 2048,
+        etaSeconds: 1,
+        status: "cancelling",
+        startedAt: "2026-03-26T10:00:00.000Z",
+        updatedAt: "2026-03-26T10:00:01.000Z",
+      },
+    ];
+    const onCancelTransfer = vi.fn().mockResolvedValue(undefined);
+    const onDismissTransfer = vi.fn();
+
+    renderWorkspace({
+      sftp,
+      onCancelTransfer,
+      onDismissTransfer,
+    });
+
+    expect(screen.getAllByText("취소 중")).toHaveLength(2);
+    expect(screen.getByText("취소 요청을 처리하는 중입니다.")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "취소 중" })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: "닫기" })).toBeNull();
+    expect(onCancelTransfer).not.toHaveBeenCalled();
+    expect(onDismissTransfer).not.toHaveBeenCalled();
   });
 
   it("shows the permissions dialog preview and applies the updated mode", async () => {

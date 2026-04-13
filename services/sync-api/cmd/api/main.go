@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"log"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -93,8 +94,13 @@ func main() {
 		log.Fatalf("create router: %v", err)
 	}
 
+	listener, err := net.Listen("tcp", ":"+cfg.Server.Port)
+	if err != nil {
+		log.Fatalf("listen on :%s: %v", cfg.Server.Port, err)
+	}
+
 	log.Printf("sync API listening on :%s (driver=%s)", cfg.Server.Port, cfg.Database.Driver)
-	if err := router.Run(":" + cfg.Server.Port); err != nil {
+	if err := router.RunListener(listener); err != nil {
 		log.Fatal(err)
 	}
 }

@@ -493,14 +493,17 @@ function toTransferJobEvent(
 ): TransferJobEvent {
   const payload = event.payload;
   const now = new Date().toISOString();
-  const nextStatus =
+  const terminalStatus =
     event.type === "sftpTransferCompleted"
       ? "completed"
       : event.type === "sftpTransferFailed"
         ? "failed"
         : event.type === "sftpTransferCancelled"
           ? "cancelled"
-          : "running";
+          : null;
+  const nextStatus =
+    terminalStatus ??
+    (existing?.status === "cancelling" ? "cancelling" : "running");
 
   return {
     job: {
@@ -1876,10 +1879,25 @@ export class CoreManager {
   }
 
   async cancelSftpTransfer(jobId: string): Promise<void> {
-    if (!this.transferJobs.has(jobId)) {
+    const existing = this.transferJobs.get(jobId);
+    if (!existing) {
       return;
     }
     await this.start();
+    if (
+      existing.status !== "completed" &&
+      existing.status !== "failed" &&
+      existing.status !== "cancelled"
+    ) {
+      const nextJob: TransferJob = {
+        ...existing,
+        status: "cancelling",
+        etaSeconds: null,
+        updatedAt: new Date().toISOString(),
+      };
+      this.transferJobs.set(jobId, nextJob);
+      this.broadcastTransferEvent({ job: nextJob });
+    }
     this.sendControl({
       id: randomUUID(),
       type: "sftpTransferCancel",
