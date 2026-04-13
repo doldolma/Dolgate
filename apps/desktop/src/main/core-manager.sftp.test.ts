@@ -101,6 +101,12 @@ function createFakeChildProcess() {
   };
 }
 
+function getTransferEventPayloads(sent: Array<{ channel: string; payload: unknown }>) {
+  return sent
+    .filter((entry) => entry.channel === ipcChannels.sftp.transferEvent)
+    .map((entry) => entry.payload as { job: { id: string; status: string; bytesCompleted?: number } });
+}
+
 async function waitForWriteCount(
   writes: Buffer[],
   expectedCount: number,
@@ -223,6 +229,75 @@ describe("CoreManager SFTP sessions", () => {
     expect(request.payload).toMatchObject({
       challengeId: "challenge-1",
       responses: ["ABCD-1234"],
+    });
+  });
+
+  it("broadcasts cancelling immediately and preserves it across progress updates", async () => {
+    const fakeProcess = createFakeChildProcess();
+    spawnMock.mockReturnValue(fakeProcess.child);
+
+    const manager = new CoreManager();
+    const fakeWindow = createFakeWindow();
+    manager.registerWindow(fakeWindow.window as never);
+
+    const job = await manager.startSftpTransfer({
+      source: { kind: "local", path: "/tmp/local" },
+      target: { kind: "remote", endpointId: "endpoint-1", path: "/tmp/remote" },
+      items: [
+        {
+          name: "large.bin",
+          path: "/tmp/local/large.bin",
+          isDirectory: false,
+          size: 1024,
+        },
+      ],
+      conflictResolution: "overwrite",
+    });
+
+    fakeWindow.sent.length = 0;
+    await manager.cancelSftpTransfer(job.id);
+
+    const transferEventsAfterCancel = getTransferEventPayloads(fakeWindow.sent);
+    expect(transferEventsAfterCancel.at(-1)?.job).toMatchObject({
+      id: job.id,
+      status: "cancelling",
+    });
+
+    const cancelRequest = decodeControlFrame(fakeProcess.writes.at(-1) as Buffer);
+    expect(cancelRequest.type).toBe("sftpTransferCancel");
+    expect(cancelRequest.jobId).toBe(job.id);
+
+    fakeProcess.emitControl({
+      type: "sftpTransferProgress",
+      jobId: job.id,
+      payload: {
+        bytesTotal: 1024,
+        bytesCompleted: 256,
+        speedBytesPerSecond: 512,
+        etaSeconds: 2,
+      },
+    });
+
+    const transferEventsAfterProgress = getTransferEventPayloads(fakeWindow.sent);
+    expect(transferEventsAfterProgress.at(-1)?.job).toMatchObject({
+      id: job.id,
+      status: "cancelling",
+      bytesCompleted: 256,
+    });
+
+    fakeProcess.emitControl({
+      type: "sftpTransferCancelled",
+      jobId: job.id,
+      payload: {
+        bytesTotal: 1024,
+        bytesCompleted: 256,
+      },
+    });
+
+    const transferEventsAfterCancelled = getTransferEventPayloads(fakeWindow.sent);
+    expect(transferEventsAfterCancelled.at(-1)?.job).toMatchObject({
+      id: job.id,
+      status: "cancelled",
     });
   });
 });

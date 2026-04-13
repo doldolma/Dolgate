@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import path from "node:path";
 import { readFile } from "node:fs/promises";
 import { app, dialog, ipcMain } from "electron";
 import { ipcChannels } from "../../common/ipc-channels";
@@ -68,6 +69,8 @@ function createContext() {
 }
 
 describe("registerWindowUpdaterSettingsFilesIpcHandlers", () => {
+  const expectedSshDirectory = path.join("/Users/tester", ".ssh");
+
   beforeEach(() => {
     vi.mocked(ipcMain.handle).mockReset();
     vi.mocked(dialog.showOpenDialog).mockReset();
@@ -94,7 +97,7 @@ describe("registerWindowUpdaterSettingsFilesIpcHandlers", () => {
     expect(app.getPath).toHaveBeenCalledWith("home");
     expect(dialog.showOpenDialog).toHaveBeenCalledWith(
       expect.objectContaining({
-        defaultPath: "/Users/tester/.ssh",
+        defaultPath: expectedSshDirectory,
         properties: ["openFile"],
       }),
     );
@@ -125,7 +128,7 @@ describe("registerWindowUpdaterSettingsFilesIpcHandlers", () => {
     expect(app.getPath).toHaveBeenCalledWith("home");
     expect(dialog.showOpenDialog).toHaveBeenCalledWith(
       expect.objectContaining({
-        defaultPath: "/Users/tester/.ssh",
+        defaultPath: expectedSshDirectory,
         properties: ["openFile"],
       }),
     );

@@ -9,11 +9,18 @@ import (
 	"path"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	sftppkg "github.com/pkg/sftp"
 
 	"dolssh/services/ssh-core/internal/protocol"
+)
+
+const (
+	transferConcurrentRequestsPerFile = 128
+	transferFallbackBufferSize        = 1024 * 1024
+	transferProgressEmitInterval      = 250 * time.Millisecond
 )
 
 type filesystemAccessor interface {
@@ -130,26 +137,70 @@ func (accessor remoteFilesystemAccessor) RemoveDirectory(targetPath string) erro
 }
 
 type transferProgress struct {
-	startedAt      time.Time
-	bytesTotal     int64
-	bytesCompleted int64
-	activeItemName string
+	mu                        sync.Mutex
+	startedAt                 time.Time
+	bytesTotal                int64
+	bytesCompleted            int64
+	activeItemName            string
+	lastEmittedAt             time.Time
+	lastEmittedBytesCompleted int64
+	lastEmittedItemName       string
 }
 
-func (progress *transferProgress) snapshot(status string, activeItemName string, message string) protocol.SFTPTransferProgressPayload {
+func newTransferProgress(now time.Time) *transferProgress {
+	return &transferProgress{
+		startedAt: now,
+	}
+}
+
+func (progress *transferProgress) addBytesCompleted(bytes int64) {
+	progress.mu.Lock()
+	progress.bytesCompleted += bytes
+	progress.mu.Unlock()
+}
+
+func (progress *transferProgress) nextSnapshot(
+	now time.Time,
+	status string,
+	activeItemName string,
+	message string,
+	force bool,
+) (protocol.SFTPTransferProgressPayload, bool) {
+	progress.mu.Lock()
+	defer progress.mu.Unlock()
+
+	if activeItemName == "" {
+		activeItemName = progress.activeItemName
+	} else {
+		progress.activeItemName = activeItemName
+	}
+
+	if status == "running" && !force && !progress.lastEmittedAt.IsZero() {
+		if now.Sub(progress.lastEmittedAt) < transferProgressEmitInterval &&
+			activeItemName == progress.lastEmittedItemName {
+			return protocol.SFTPTransferProgressPayload{}, false
+		}
+	}
+
 	speed := 0.0
 	etaSeconds := int64(0)
-	elapsedSeconds := time.Since(progress.startedAt).Seconds()
-	if elapsedSeconds > 0 {
-		speed = float64(progress.bytesCompleted) / elapsedSeconds
+	if !progress.lastEmittedAt.IsZero() {
+		elapsedSeconds := now.Sub(progress.lastEmittedAt).Seconds()
+		if elapsedSeconds > 0 {
+			deltaBytes := progress.bytesCompleted - progress.lastEmittedBytesCompleted
+			if deltaBytes < 0 {
+				deltaBytes = 0
+			}
+			speed = float64(deltaBytes) / elapsedSeconds
+		}
 	}
 	if speed > 0 && progress.bytesCompleted < progress.bytesTotal {
 		etaSeconds = int64(float64(progress.bytesTotal-progress.bytesCompleted) / speed)
 	}
 
-	if activeItemName == "" {
-		activeItemName = progress.activeItemName
-	}
+	progress.lastEmittedAt = now
+	progress.lastEmittedBytesCompleted = progress.bytesCompleted
+	progress.lastEmittedItemName = activeItemName
 
 	return protocol.SFTPTransferProgressPayload{
 		Status:              status,
@@ -159,6 +210,147 @@ func (progress *transferProgress) snapshot(status string, activeItemName string,
 		SpeedBytesPerSecond: speed,
 		ETASeconds:          etaSeconds,
 		Message:             message,
+	}, true
+}
+
+type transferProgressReporter struct {
+	jobID    string
+	progress *transferProgress
+	emit     func(protocol.Event)
+	now      func() time.Time
+}
+
+func newTransferProgressReporter(
+	jobID string,
+	progress *transferProgress,
+	emit func(protocol.Event),
+	now func() time.Time,
+) *transferProgressReporter {
+	return &transferProgressReporter{
+		jobID:    jobID,
+		progress: progress,
+		emit:     emit,
+		now:      now,
+	}
+}
+
+func (reporter *transferProgressReporter) emitRunning(
+	activeItemName string,
+	message string,
+	force bool,
+) {
+	payload, shouldEmit := reporter.progress.nextSnapshot(
+		reporter.now(),
+		"running",
+		activeItemName,
+		message,
+		force,
+	)
+	if !shouldEmit {
+		return
+	}
+	reporter.emit(protocol.Event{
+		Type:    protocol.EventSFTPTransferProgress,
+		JobID:   reporter.jobID,
+		Payload: payload,
+	})
+}
+
+func (reporter *transferProgressReporter) emitTerminal(
+	eventType protocol.EventType,
+	status string,
+	activeItemName string,
+	message string,
+) {
+	payload, _ := reporter.progress.nextSnapshot(
+		reporter.now(),
+		status,
+		activeItemName,
+		message,
+		true,
+	)
+	reporter.emit(protocol.Event{
+		Type:    eventType,
+		JobID:   reporter.jobID,
+		Payload: payload,
+	})
+}
+
+func (reporter *transferProgressReporter) recordTransferredBytes(bytes int64) {
+	if bytes <= 0 {
+		return
+	}
+	reporter.progress.addBytesCompleted(bytes)
+	reporter.emitRunning("", "", false)
+}
+
+type concurrentReaderFrom interface {
+	ReadFromWithConcurrency(r io.Reader, concurrency int) (int64, error)
+}
+
+type truncater interface {
+	Truncate(size int64) error
+}
+
+type countingReader struct {
+	reader io.Reader
+	onRead func(int64)
+}
+
+func (reader *countingReader) Read(buffer []byte) (int, error) {
+	readBytes, err := reader.reader.Read(buffer)
+	if readBytes > 0 && reader.onRead != nil {
+		reader.onRead(int64(readBytes))
+	}
+	return readBytes, err
+}
+
+type countingWriter struct {
+	writer  io.Writer
+	onWrite func(int64)
+}
+
+func (writer *countingWriter) Write(buffer []byte) (int, error) {
+	writtenBytes, err := writer.writer.Write(buffer)
+	if writtenBytes > 0 && writer.onWrite != nil {
+		writer.onWrite(int64(writtenBytes))
+	}
+	return writtenBytes, err
+}
+
+type transferStreamCloser struct {
+	once    sync.Once
+	closers []io.Closer
+}
+
+func newTransferStreamCloser(closers ...io.Closer) *transferStreamCloser {
+	return &transferStreamCloser{closers: closers}
+}
+
+func (closer *transferStreamCloser) Close() {
+	closer.once.Do(func() {
+		for _, handle := range closer.closers {
+			if handle != nil {
+				_ = handle.Close()
+			}
+		}
+	})
+}
+
+func watchTransferCancellation(
+	ctx context.Context,
+	closer *transferStreamCloser,
+) func() {
+	done := make(chan struct{})
+	go func() {
+		select {
+		case <-ctx.Done():
+			closer.Close()
+		case <-done:
+		}
+	}()
+	return func() {
+		close(done)
 	}
 }
 
@@ -279,13 +471,11 @@ func removePath(accessor filesystemAccessor, targetPath string) error {
 
 func copyFileWithProgress(
 	ctx context.Context,
-	jobID string,
-	progress *transferProgress,
-	emit func(protocol.Event),
 	sourceFS filesystemAccessor,
 	targetFS filesystemAccessor,
 	sourcePath string,
 	targetPath string,
+	reporter *transferProgressReporter,
 ) error {
 	if err := targetFS.MkdirAll(targetFS.Dir(targetPath)); err != nil {
 		return err
@@ -295,46 +485,69 @@ func copyFileWithProgress(
 	if err != nil {
 		return err
 	}
-	defer sourceFile.Close()
 
 	targetFile, err := targetFS.Create(targetPath)
 	if err != nil {
+		_ = sourceFile.Close()
 		return err
 	}
-	defer targetFile.Close()
 
-	buffer := make([]byte, 128*1024)
-	for {
-		select {
-		case <-ctx.Done():
+	closer := newTransferStreamCloser(sourceFile, targetFile)
+	defer closer.Close()
+
+	stopCancellationWatcher := watchTransferCancellation(ctx, closer)
+	defer stopCancellationWatcher()
+
+	if err := transferFileContents(sourceFile, targetFile, reporter); err != nil {
+		if ctx.Err() != nil {
 			return ctx.Err()
-		default:
 		}
+		return err
+	}
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	return nil
+}
 
-		readBytes, err := sourceFile.Read(buffer)
-		if readBytes > 0 {
-			writtenBytes, writeErr := targetFile.Write(buffer[:readBytes])
-			if writeErr != nil {
-				return writeErr
-			}
-			if writtenBytes != readBytes {
-				return io.ErrShortWrite
-			}
-
-			progress.bytesCompleted += int64(writtenBytes)
-			emit(protocol.Event{
-				Type:    protocol.EventSFTPTransferProgress,
-				JobID:   jobID,
-				Payload: progress.snapshot("running", sourceFS.Base(sourcePath), ""),
-			})
-		}
-		if errors.Is(err, io.EOF) {
-			return nil
-		}
+func transferFileContents(
+	sourceFile io.ReadCloser,
+	targetFile io.WriteCloser,
+	reporter *transferProgressReporter,
+) error {
+	if concurrentTarget, ok := targetFile.(concurrentReaderFrom); ok {
+		writtenBytes, err := concurrentTarget.ReadFromWithConcurrency(
+			&countingReader{
+				reader: sourceFile,
+				onRead: reporter.recordTransferredBytes,
+			},
+			transferConcurrentRequestsPerFile,
+		)
 		if err != nil {
+			if truncatableTarget, ok := targetFile.(truncater); ok && writtenBytes >= 0 {
+				_ = truncatableTarget.Truncate(writtenBytes)
+			}
 			return err
 		}
+		return nil
 	}
+
+	progressWriter := &countingWriter{
+		writer:  targetFile,
+		onWrite: reporter.recordTransferredBytes,
+	}
+
+	if writerToSource, ok := sourceFile.(io.WriterTo); ok {
+		_, err := writerToSource.WriteTo(progressWriter)
+		return err
+	}
+
+	_, err := io.CopyBuffer(
+		progressWriter,
+		sourceFile,
+		make([]byte, transferFallbackBufferSize),
+	)
+	return err
 }
 
 func isNotExist(err error) bool {

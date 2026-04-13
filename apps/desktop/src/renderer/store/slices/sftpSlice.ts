@@ -700,7 +700,39 @@ export function createSftpSlice(deps: SliceDeps): SftpSlice {
               },
             })),
     cancelTransfer: async (jobId) => {
-            await api.sftp.cancelTransfer(jobId);
+            const existing = get().sftp.transfers.find((job) => job.id === jobId);
+            if (!existing) {
+              return;
+            }
+            if (existing.status === "completed" || existing.status === "failed" || existing.status === "cancelled") {
+              return;
+            }
+
+            const nextJob = {
+              ...existing,
+              status: "cancelling" as const,
+              etaSeconds: null,
+              updatedAt: new Date().toISOString(),
+            };
+
+            set((state) => ({
+              sftp: {
+                ...state.sftp,
+                transfers: upsertTransferJob(state.sftp.transfers, nextJob),
+              },
+            }));
+
+            try {
+              await api.sftp.cancelTransfer(jobId);
+            } catch (error) {
+              set((state) => ({
+                sftp: {
+                  ...state.sftp,
+                  transfers: upsertTransferJob(state.sftp.transfers, existing),
+                },
+              }));
+              throw error;
+            }
           },
     retryTransfer: async (jobId) => {
             const job = get().sftp.transfers.find((item) => item.id === jobId);

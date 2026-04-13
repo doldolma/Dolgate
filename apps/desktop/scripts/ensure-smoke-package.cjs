@@ -235,14 +235,25 @@ function resolveElectronForgeCommand() {
 }
 
 function runCommand(command, args) {
+  const isWindowsShellCommand =
+    process.platform === "win32" && /\.(cmd|bat)$/i.test(command);
   const result = spawnSync(command, args, {
     cwd: desktopRoot,
     stdio: "inherit",
-    env: process.env,
+  env: process.env,
+    shell: isWindowsShellCommand,
   });
 
+  if (result.error) {
+    throw new Error(
+      `${path.basename(command)} ${args.join(" ")} failed: ${result.error.message}`,
+    );
+  }
+
   if (result.status !== 0) {
-    throw new Error(`${path.basename(command)} ${args.join(" ")} failed`);
+    throw new Error(
+      `${path.basename(command)} ${args.join(" ")} failed with exit code ${result.status}`,
+    );
   }
 }
 

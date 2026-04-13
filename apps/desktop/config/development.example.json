@@ -1,6 +1,6 @@
 {
   "sync": {
-    "serverUrl": "http://localhost:8080",
+    "serverUrl": "http://127.0.0.1:8080",
     "desktopClientId": "dolgate-desktop",
     "redirectUri": "dolgate://auth/callback"
   }

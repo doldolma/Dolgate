@@ -1,7 +1,13 @@
 import { useAppStore } from '../store/appStore';
 
 export function useSftpViewModel() {
-  const sftp = useAppStore((state) => state.sftp);
+  const localHomePath = useAppStore((state) => state.sftp.localHomePath);
+  const leftPane = useAppStore((state) => state.sftp.leftPane);
+  const rightPane = useAppStore((state) => state.sftp.rightPane);
+  const pendingConflictDialog = useAppStore(
+    (state) => state.sftp.pendingConflictDialog,
+  );
+  const transfers = useAppStore((state) => state.sftp.transfers);
   const activateSftp = useAppStore((state) => state.activateSftp);
   const setSftpPaneSource = useAppStore((state) => state.setSftpPaneSource);
   const disconnectSftpPane = useAppStore((state) => state.disconnectSftpPane);
@@ -42,7 +48,13 @@ export function useSftpViewModel() {
   const handleTransferEvent = useAppStore((state) => state.handleTransferEvent);
 
   return {
-    sftp,
+    sftpState: {
+      localHomePath,
+      leftPane,
+      rightPane,
+      pendingConflictDialog,
+    },
+    transfers,
     activateSftp,
     setSftpPaneSource,
     disconnectSftpPane,
