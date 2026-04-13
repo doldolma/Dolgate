@@ -1,8 +1,9 @@
 import React from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
-import { formatRelativeTime } from "../lib/mobile";
+import Ionicons from "react-native-vector-icons/Ionicons";
 import type { AuthStackParamList } from "../navigation/RootNavigator";
+import { useScreenPadding } from "../lib/screen-layout";
 import { useMobileAppStore } from "../store/useMobileAppStore";
 import { useMobilePalette } from "../theme";
 
@@ -10,12 +11,20 @@ type Props = NativeStackScreenProps<AuthStackParamList, "AuthLanding">;
 
 export function AuthLandingScreen({ navigation }: Props): React.JSX.Element {
   const palette = useMobilePalette();
+  const screenPadding = useScreenPadding({
+    horizontal: 22,
+    bottomOffset: 24,
+    bottomMin: 40,
+  });
   const auth = useMobileAppStore((state) => state.auth);
-  const settings = useMobileAppStore((state) => state.settings);
   const syncStatus = useMobileAppStore((state) => state.syncStatus);
   const startBrowserLogin = useMobileAppStore((state) => state.startBrowserLogin);
+  const cancelBrowserLogin = useMobileAppStore(
+    (state) => state.cancelBrowserLogin,
+  );
 
   const isAuthenticating = auth.status === "authenticating";
+  const inlineErrorMessage = auth.errorMessage ?? syncStatus.errorMessage;
 
   return (
     <View
@@ -23,6 +32,9 @@ export function AuthLandingScreen({ navigation }: Props): React.JSX.Element {
         styles.screen,
         {
           backgroundColor: palette.background,
+          paddingHorizontal: screenPadding.paddingHorizontal,
+          paddingTop: screenPadding.paddingTop,
+          paddingBottom: screenPadding.paddingBottom,
         },
       ]}
     >
@@ -35,39 +47,27 @@ export function AuthLandingScreen({ navigation }: Props): React.JSX.Element {
           },
         ]}
       >
-        <Text style={[styles.eyebrow, { color: palette.accent }]}>LOGIN</Text>
-        <Text style={[styles.title, { color: palette.text }]}>
-          로그인 후에만 동기화된 SSH 호스트와 세션을 사용할 수 있습니다.
-        </Text>
-        <Text style={[styles.subtitle, { color: palette.mutedText }]}>
-          데스크톱과 동일하게 로그인 전에는 메인 워크스페이스를 숨깁니다.
-          서버 주소를 확인한 뒤 브라우저 로그인을 진행하세요.
-        </Text>
-
-        <View
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="로그인 서버 설정 열기"
+          hitSlop={12}
+          onPress={() => navigation.navigate("AuthSettings")}
           style={[
-            styles.infoCard,
+            styles.settingsButton,
             {
               backgroundColor: palette.surfaceAlt,
               borderColor: palette.border,
             },
           ]}
         >
-          <Text style={[styles.infoLabel, { color: palette.mutedText }]}>
-            현재 서버
-          </Text>
-          <Text style={[styles.infoValue, { color: palette.text }]}>
-            {settings.serverUrl}
-          </Text>
-          <Text style={[styles.infoBody, { color: palette.mutedText }]}>
-            인증 상태: {auth.status}
-            {syncStatus.lastSuccessfulSyncAt
-              ? ` • 최근 동기화 ${formatRelativeTime(syncStatus.lastSuccessfulSyncAt)}`
-              : ""}
-          </Text>
+          <Ionicons name="settings-outline" size={18} color={palette.text} />
+        </Pressable>
+
+        <View style={styles.brandBlock}>
+          <Text style={[styles.wordmark, { color: palette.text }]}>Dolgate</Text>
         </View>
 
-        {auth.errorMessage ? (
+        {inlineErrorMessage ? (
           <View
             style={[
               styles.errorCard,
@@ -77,54 +77,35 @@ export function AuthLandingScreen({ navigation }: Props): React.JSX.Element {
               },
             ]}
           >
-            <Text style={[styles.errorTitle, { color: palette.danger }]}>
-              로그인 오류
-            </Text>
             <Text style={[styles.errorBody, { color: palette.text }]}>
-              {auth.errorMessage}
+              {inlineErrorMessage}
             </Text>
           </View>
         ) : null}
 
-        {syncStatus.errorMessage ? (
-          <View
-            style={[
-              styles.errorCard,
-              {
-                backgroundColor: palette.surfaceAlt,
-                borderColor: palette.warning,
-              },
-            ]}
-          >
-            <Text style={[styles.errorTitle, { color: palette.warning }]}>
-              동기화 오류
-            </Text>
-            <Text style={[styles.errorBody, { color: palette.text }]}>
-              {syncStatus.errorMessage}
-            </Text>
-          </View>
-        ) : null}
+        <Pressable
+          accessibilityRole="button"
+          disabled={isAuthenticating}
+          onPress={() => void startBrowserLogin()}
+          style={[
+            styles.primaryButton,
+            {
+              backgroundColor: isAuthenticating
+                ? palette.tabInactive
+                : palette.accent,
+              opacity: isAuthenticating ? 0.78 : 1,
+            },
+          ]}
+        >
+          <Text style={styles.primaryText}>
+            {isAuthenticating ? "브라우저 여는 중" : "로그인"}
+          </Text>
+        </Pressable>
 
-        <View style={styles.actions}>
+        {isAuthenticating ? (
           <Pressable
-            disabled={isAuthenticating}
-            onPress={() => void startBrowserLogin()}
-            style={[
-              styles.primaryButton,
-              {
-                backgroundColor: isAuthenticating
-                  ? palette.tabInactive
-                  : palette.accent,
-                opacity: isAuthenticating ? 0.7 : 1,
-              },
-            ]}
-          >
-            <Text style={styles.primaryText}>
-              {isAuthenticating ? "브라우저 여는 중" : "로그인"}
-            </Text>
-          </Pressable>
-          <Pressable
-            onPress={() => navigation.navigate("AuthSettings")}
+            accessibilityRole="button"
+            onPress={cancelBrowserLogin}
             style={[
               styles.secondaryButton,
               {
@@ -134,10 +115,10 @@ export function AuthLandingScreen({ navigation }: Props): React.JSX.Element {
             ]}
           >
             <Text style={[styles.secondaryText, { color: palette.text }]}>
-              서버 설정
+              취소
             </Text>
           </Pressable>
-        </View>
+        ) : null}
       </View>
     </View>
   );
@@ -146,89 +127,88 @@ export function AuthLandingScreen({ navigation }: Props): React.JSX.Element {
 const styles = StyleSheet.create({
   screen: {
     flex: 1,
-    paddingHorizontal: 18,
-    paddingTop: 16,
+    justifyContent: "center",
   },
   heroCard: {
+    width: "100%",
+    maxWidth: 420,
+    alignSelf: "center",
     borderWidth: 1,
-    borderRadius: 24,
-    padding: 18,
-    gap: 12,
+    borderRadius: 32,
+    paddingHorizontal: 22,
+    paddingTop: 22,
+    paddingBottom: 22,
+    gap: 16,
+    shadowColor: "#081320",
+    shadowOffset: {
+      width: 0,
+      height: 14,
+    },
+    shadowOpacity: 0.08,
+    shadowRadius: 30,
+    elevation: 6,
+    transform: [{ translateY: -56 }],
   },
-  eyebrow: {
-    fontSize: 12,
-    fontWeight: "800",
-    letterSpacing: 1.1,
-  },
-  title: {
-    fontSize: 24,
-    fontWeight: "900",
-    lineHeight: 30,
-  },
-  subtitle: {
-    fontSize: 14,
-    lineHeight: 20,
-  },
-  infoCard: {
+  settingsButton: {
+    position: "absolute",
+    top: 18,
+    right: 18,
+    width: 40,
+    height: 40,
     borderWidth: 1,
-    borderRadius: 18,
-    padding: 14,
-    gap: 4,
+    borderRadius: 14,
+    alignItems: "center",
+    justifyContent: "center",
   },
-  infoLabel: {
-    fontSize: 12,
-    fontWeight: "800",
-    letterSpacing: 0.6,
+  brandBlock: {
+    minHeight: 110,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingTop: 0,
+    paddingHorizontal: 18,
   },
-  infoValue: {
-    fontSize: 15,
+  wordmark: {
+    fontSize: 26,
     fontWeight: "700",
-  },
-  infoBody: {
-    fontSize: 13,
-    lineHeight: 18,
+    letterSpacing: -0.3,
+    marginTop: -12,
   },
   errorCard: {
     borderWidth: 1,
     borderRadius: 18,
-    padding: 14,
-    gap: 4,
-  },
-  errorTitle: {
-    fontSize: 13,
-    fontWeight: "800",
+    paddingHorizontal: 14,
+    paddingVertical: 12,
   },
   errorBody: {
-    fontSize: 14,
-    lineHeight: 20,
-  },
-  actions: {
-    flexDirection: "row",
-    gap: 10,
-    marginTop: 4,
+    fontSize: 13,
+    lineHeight: 18,
   },
   primaryButton: {
-    flex: 1,
-    borderRadius: 14,
+    minHeight: 62,
+    borderRadius: 22,
     paddingHorizontal: 18,
-    paddingVertical: 14,
+    paddingVertical: 16,
     alignItems: "center",
+    justifyContent: "center",
   },
   primaryText: {
-    color: "#04111A",
-    fontSize: 15,
+    color: "#F8FBFF",
+    fontSize: 16,
     fontWeight: "900",
+    letterSpacing: -0.2,
   },
   secondaryButton: {
+    minHeight: 52,
     borderWidth: 1,
-    borderRadius: 14,
+    borderRadius: 18,
     paddingHorizontal: 18,
-    paddingVertical: 14,
+    paddingVertical: 12,
     alignItems: "center",
     justifyContent: "center",
   },
   secondaryText: {
-    fontSize: 15,
+    fontSize: 14,
     fontWeight: "800",
+    letterSpacing: -0.1,
   },
 });

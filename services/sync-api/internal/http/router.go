@@ -806,8 +806,10 @@ func renderDesktopCallbackBridgePage(ctx *gin.Context, callbackURL string) {
 	applyAuthHTMLResponseHeaders(ctx)
 	ctx.Header("Content-Type", "text/html; charset=utf-8")
 	_ = desktopCallbackBridgeTemplate.Execute(ctx.Writer, struct {
+		CallbackURLAttr template.URL
 		CallbackURLJSON template.JS
 	}{
+		CallbackURLAttr: template.URL(callbackURL),
 		CallbackURLJSON: template.JS(strconv.Quote(callbackURL)),
 	})
 }
@@ -998,22 +1000,25 @@ var desktopCallbackBridgeTemplate = template.Must(template.New("desktop-callback
         <div class="eyebrow">Dolgate</div>
         <h1>앱으로 돌아가는 중</h1>
         <p>로그인은 완료되었습니다. Dolgate 앱이 자동으로 열리지 않으면 아래 버튼을 눌러 돌아가세요.</p>
-        <a id="open-app" class="button primary" href="#">Dolgate 열기 ↗</a>
+        <a id="open-app" class="button primary" href="{{ .CallbackURLAttr }}">Dolgate 열기 ↗</a>
         <div class="hint">앱이 이미 열려 있다면 이 탭은 닫아도 됩니다.</div>
       </div>
     </div>
     <script>
       const target = {{ .CallbackURLJSON }};
       const openAppButton = document.getElementById('open-app');
-      if (openAppButton && target) {
-        openAppButton.setAttribute('href', target);
-      }
       const openApp = () => {
         if (!target) {
           return;
         }
-        window.location.href = target;
+        window.location.assign(target);
       };
+      if (openAppButton && target) {
+        openAppButton.addEventListener('click', (event) => {
+          event.preventDefault();
+          openApp();
+        });
+      }
       window.addEventListener('load', () => {
         setTimeout(openApp, 80);
       });

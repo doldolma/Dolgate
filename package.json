@@ -17,6 +17,7 @@
     "dev:desktop": "npm run dev --workspace @dolssh/desktop",
     "dev:mobile": "npm run start --workspace @dolssh/mobile --",
     "dev:mobile:android": "npm run dev:android --workspace @dolssh/mobile --",
+    "dev:mobile:ios": "npm run dev:ios --workspace @dolssh/mobile --",
     "dev:api": "cd services/sync-api && go run ./cmd/api",
     "build": "npm run build --workspace @dolssh/desktop",
     "mobile:android": "npm run android --workspace @dolssh/mobile --",

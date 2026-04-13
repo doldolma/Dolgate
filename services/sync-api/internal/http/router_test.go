@@ -379,6 +379,12 @@ func TestMobileBrowserSignupBridgePreservesCustomSchemeCallbackURL(t *testing.T)
 	if !strings.Contains(body, `const target = "dolgate://auth/callback?`) {
 		t.Fatalf("expected custom scheme callback in bridge page script, got %s", body)
 	}
+	if !strings.Contains(body, `id="open-app" class="button primary" href="dolgate://auth/callback?`) {
+		t.Fatalf("expected open-app href to contain custom scheme callback, got %s", body)
+	}
+	if strings.Contains(body, `id="open-app" class="button primary" href="#"`) {
+		t.Fatalf("expected open-app href not to remain placeholder, got %s", body)
+	}
 	if strings.Contains(body, "#ZgotmplZ") {
 		t.Fatalf("expected bridge page to preserve custom scheme callback, got %s", body)
 	}
