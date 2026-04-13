@@ -27,8 +27,8 @@ export function HomeScreen(): React.JSX.Element {
   const sessions = useMobileAppStore((state) => state.sessions);
   const syncStatus = useMobileAppStore((state) => state.syncStatus);
   const connectToHost = useMobileAppStore((state) => state.connectToHost);
-  const startBrowserLogin = useMobileAppStore((state) => state.startBrowserLogin);
   const syncNow = useMobileAppStore((state) => state.syncNow);
+  const isSyncing = syncStatus.status === "syncing";
 
   const recentActivityByHostId = useMemo(() => {
     const map = new Map<string, string>();
@@ -92,34 +92,37 @@ export function HomeScreen(): React.JSX.Element {
         <Text style={[styles.subtitle, { color: palette.mutedText }]}>
           동기화된 SSH 연결만 표시합니다. 최근 세션이 있으면 우선 정렬됩니다.
         </Text>
+        {auth.status === "offline-authenticated" ? (
+          <View
+            style={[
+              styles.banner,
+              {
+                backgroundColor: palette.accentSoft,
+              },
+            ]}
+          >
+            <Text style={[styles.bannerText, { color: palette.accent }]}>
+              오프라인 캐시를 사용 중입니다. 네트워크가 복구되면 다시 동기화하세요.
+            </Text>
+          </View>
+        ) : null}
         <View style={styles.heroActions}>
           <Pressable
+            disabled={isSyncing}
             onPress={() => void syncNow()}
             style={[
               styles.secondaryButton,
               {
                 backgroundColor: palette.surfaceAlt,
                 borderColor: palette.border,
+                opacity: isSyncing ? 0.7 : 1,
               },
             ]}
           >
             <Text style={[styles.secondaryButtonText, { color: palette.text }]}>
-              지금 동기화
+              {isSyncing ? "동기화 중" : "지금 동기화"}
             </Text>
           </Pressable>
-          {auth.session ? null : (
-            <Pressable
-              onPress={() => void startBrowserLogin()}
-              style={[
-                styles.primaryButton,
-                {
-                  backgroundColor: palette.accent,
-                },
-              ]}
-            >
-              <Text style={styles.primaryButtonText}>로그인</Text>
-            </Pressable>
-          )}
         </View>
       </View>
 
@@ -142,6 +145,11 @@ export function HomeScreen(): React.JSX.Element {
             ? ` • ${formatRelativeTime(syncStatus.lastSuccessfulSyncAt)}`
             : ""}
         </Text>
+        {syncStatus.errorMessage ? (
+          <Text style={[styles.statusError, { color: palette.danger }]}>
+            {syncStatus.errorMessage}
+          </Text>
+        ) : null}
       </View>
 
       <TextInput
@@ -177,7 +185,7 @@ export function HomeScreen(): React.JSX.Element {
               표시할 SSH 호스트가 없습니다.
             </Text>
             <Text style={[styles.emptyBody, { color: palette.mutedText }]}>
-              로그인을 완료하고 동기화를 실행하면 known host와 자격 증명이 함께 내려옵니다.
+              동기화된 SSH 호스트가 아직 없습니다. 서버 연결 상태를 확인한 뒤 다시 동기화하세요.
             </Text>
           </View>
         }
@@ -259,6 +267,17 @@ const styles = StyleSheet.create({
     fontSize: 14,
     lineHeight: 20,
   },
+  banner: {
+    borderRadius: 14,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    marginTop: 4,
+  },
+  bannerText: {
+    fontSize: 13,
+    fontWeight: "700",
+    lineHeight: 18,
+  },
   heroActions: {
     flexDirection: "row",
     gap: 10,
@@ -297,6 +316,12 @@ const styles = StyleSheet.create({
   statusBody: {
     marginTop: 4,
     fontSize: 13,
+  },
+  statusError: {
+    marginTop: 8,
+    fontSize: 13,
+    lineHeight: 18,
+    fontWeight: "700",
   },
   searchInput: {
     borderWidth: 1,
