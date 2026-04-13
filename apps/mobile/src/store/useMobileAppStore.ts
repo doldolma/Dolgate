@@ -51,7 +51,9 @@ import {
   getSyncFailureMessage,
 } from "../lib/auth-flow";
 
-const MAX_TERMINAL_SNAPSHOT_CHARS = 16_000;
+const MAX_TERMINAL_SNAPSHOT_CHARS = 8_000;
+const MAX_PERSISTED_SESSIONS = 24;
+const SESSION_SNAPSHOT_FLUSH_MS = 750;
 interface PendingServerKeyPromptState {
   hostId: string;
   hostLabel: string;
@@ -100,6 +102,7 @@ interface MobileAppState {
   initializeApp: () => Promise<void>;
   handleAuthCallbackUrl: (url: string) => Promise<void>;
   startBrowserLogin: () => Promise<void>;
+  cancelBrowserLogin: () => void;
   logout: () => Promise<void>;
   syncNow: () => Promise<void>;
   updateSettings: (input: Partial<MobileSettings>) => Promise<void>;
@@ -118,6 +121,12 @@ interface MobileAppState {
 }
 
 const runtimeSessions = new Map<string, RuntimeSession>();
+const pendingSessionConnections = new Set<string>();
+const runtimeSessionSnapshots = new Map<string, string>();
+const runtimeSnapshotFlushTimers = new Map<
+  string,
+  ReturnType<typeof setTimeout>
+>();
 
 let initializePromise: Promise<void> | null = null;
 let syncPromise: Promise<void> | null = null;
@@ -199,6 +208,20 @@ function createSessionRecord(host: SshHostRecord): MobileSessionRecord {
   };
 }
 
+function compactPersistedSessions(
+  sessions: MobileSessionRecord[],
+): MobileSessionRecord[] {
+  return sortSessions(sessions)
+    .slice(0, MAX_PERSISTED_SESSIONS)
+    .map((session) => ({
+      ...session,
+      lastViewportSnapshot:
+        session.status === "closed" || session.status === "error"
+          ? trimSnapshot(session.lastViewportSnapshot)
+          : "",
+    }));
+}
+
 function buildOfflineState(session: AuthSession, reason: string) {
   return {
     expiresAt: session.offlineLease.expiresAt,
@@ -275,6 +298,13 @@ function getKnownHostStatus(
 function disconnectRuntimeSession(sessionId: string): void {
   const runtime = runtimeSessions.get(sessionId);
   if (!runtime) {
+    pendingSessionConnections.delete(sessionId);
+    runtimeSessionSnapshots.delete(sessionId);
+    const pendingFlush = runtimeSnapshotFlushTimers.get(sessionId);
+    if (pendingFlush) {
+      clearTimeout(pendingFlush);
+      runtimeSnapshotFlushTimers.delete(sessionId);
+    }
     return;
   }
 
@@ -285,6 +315,13 @@ function disconnectRuntimeSession(sessionId: string): void {
   } catch {}
 
   runtimeSessions.delete(sessionId);
+  pendingSessionConnections.delete(sessionId);
+  runtimeSessionSnapshots.delete(sessionId);
+  const pendingFlush = runtimeSnapshotFlushTimers.get(sessionId);
+  if (pendingFlush) {
+    clearTimeout(pendingFlush);
+    runtimeSnapshotFlushTimers.delete(sessionId);
+  }
 }
 
 async function disconnectAllRuntimeSessions(): Promise<void> {
@@ -501,6 +538,62 @@ export const useMobileAppStore = create<MobileAppState>()(
         return null;
       };
 
+      const flushSessionSnapshot = (
+        sessionId: string,
+        options?: {
+          markActivity?: boolean;
+        },
+      ) => {
+        const pendingFlush = runtimeSnapshotFlushTimers.get(sessionId);
+        if (pendingFlush) {
+          clearTimeout(pendingFlush);
+          runtimeSnapshotFlushTimers.delete(sessionId);
+        }
+
+        const snapshot = runtimeSessionSnapshots.get(sessionId);
+        if (snapshot == null) {
+          return;
+        }
+
+        set((state) => {
+          const current = state.sessions.find((session) => session.id === sessionId);
+          if (!current) {
+            return state;
+          }
+
+          const patch: Partial<MobileSessionRecord> = {};
+          if (snapshot !== current.lastViewportSnapshot) {
+            patch.lastViewportSnapshot = snapshot;
+          }
+          if (!current.hasReceivedOutput && snapshot.length > 0) {
+            patch.hasReceivedOutput = true;
+          }
+          if (options?.markActivity !== false) {
+            patch.lastEventAt = new Date().toISOString();
+          }
+
+          if (Object.keys(patch).length === 0) {
+            return state;
+          }
+
+          return {
+            sessions: patchSessionRecord(state.sessions, sessionId, patch),
+          };
+        });
+      };
+
+      const scheduleSessionSnapshotFlush = (sessionId: string) => {
+        if (runtimeSnapshotFlushTimers.has(sessionId)) {
+          return;
+        }
+
+        const timer = setTimeout(() => {
+          runtimeSnapshotFlushTimers.delete(sessionId);
+          flushSessionSnapshot(sessionId);
+        }, SESSION_SNAPSHOT_FLUSH_MS);
+        runtimeSnapshotFlushTimers.set(sessionId, timer);
+      };
+
       const markSessionState = (
         sessionId: string,
         status: MobileSessionRecord["status"],
@@ -523,69 +616,81 @@ export const useMobileAppStore = create<MobileAppState>()(
         sessionRecord: MobileSessionRecord,
         host: SshHostRecord,
       ) => {
-        if (host.authType !== "password" && host.authType !== "privateKey") {
-          markSessionState(
-            sessionRecord.id,
-            "error",
-            "이 인증 방식은 모바일 v1에서 아직 지원하지 않습니다.",
-          );
+        if (
+          runtimeSessions.has(sessionRecord.id) ||
+          pendingSessionConnections.has(sessionRecord.id)
+        ) {
           return;
         }
-
-        const credentials = await resolveHostCredentials(host);
-        if (!credentials) {
-          markSessionState(sessionRecord.id, "closed", "연결이 취소되었습니다.");
-          return;
-        }
-
-        const security =
-          host.authType === "password"
-            ? credentials.password
-              ? {
-                  type: "password" as const,
-                  password: credentials.password,
-                }
-              : null
-            : credentials.privateKeyPem
-              ? {
-                  type: "key" as const,
-                  privateKey: credentials.privateKeyPem,
-                }
-              : null;
-
-        if (!security) {
-          markSessionState(
-            sessionRecord.id,
-            "error",
-            host.authType === "password"
-              ? "비밀번호가 필요합니다."
-              : "개인키 PEM이 필요합니다.",
-          );
-          return;
-        }
-
-        if (security.type === "key") {
-          const validation = RnRussh.validatePrivateKey(security.privateKey);
-          if (!validation.valid) {
+        pendingSessionConnections.add(sessionRecord.id);
+        runtimeSessionSnapshots.set(
+          sessionRecord.id,
+          get().sessions.find((item) => item.id === sessionRecord.id)
+            ?.lastViewportSnapshot ?? sessionRecord.lastViewportSnapshot,
+        );
+        try {
+          if (host.authType !== "password" && host.authType !== "privateKey") {
             markSessionState(
               sessionRecord.id,
               "error",
-              "개인키 형식을 확인해 주세요. 암호화된 개인키는 아직 지원하지 않을 수 있습니다.",
+              "이 인증 방식은 모바일 v1에서 아직 지원하지 않습니다.",
             );
             return;
           }
-        }
 
-        const connectionStartedAt = new Date().toISOString();
-        set((state) => ({
-          sessions: patchSessionRecord(state.sessions, sessionRecord.id, {
-            status: "connecting",
-            errorMessage: null,
-            lastEventAt: connectionStartedAt,
-          }),
-        }));
+          const credentials = await resolveHostCredentials(host);
+          if (!credentials) {
+            markSessionState(sessionRecord.id, "closed", "연결이 취소되었습니다.");
+            return;
+          }
 
-        try {
+          const security =
+            host.authType === "password"
+              ? credentials.password
+                ? {
+                    type: "password" as const,
+                    password: credentials.password,
+                  }
+                : null
+              : credentials.privateKeyPem
+                ? {
+                    type: "key" as const,
+                    privateKey: credentials.privateKeyPem,
+                  }
+                : null;
+
+          if (!security) {
+            markSessionState(
+              sessionRecord.id,
+              "error",
+              host.authType === "password"
+                ? "비밀번호가 필요합니다."
+                : "개인키 PEM이 필요합니다.",
+            );
+            return;
+          }
+
+          if (security.type === "key") {
+            const validation = RnRussh.validatePrivateKey(security.privateKey);
+            if (!validation.valid) {
+              markSessionState(
+                sessionRecord.id,
+                "error",
+                "개인키 형식을 확인해 주세요. 암호화된 개인키는 아직 지원하지 않을 수 있습니다.",
+              );
+              return;
+            }
+          }
+
+          const connectionStartedAt = new Date().toISOString();
+          set((state) => ({
+            sessions: patchSessionRecord(state.sessions, sessionRecord.id, {
+              status: "connecting",
+              errorMessage: null,
+              lastEventAt: connectionStartedAt,
+            }),
+          }));
+
           const connection = await RnRussh.connect({
             host: host.hostname,
             port: host.port,
@@ -593,6 +698,9 @@ export const useMobileAppStore = create<MobileAppState>()(
             security,
             onServerKey: async (info) => resolveKnownHostTrust(host, info),
             onDisconnected: () => {
+              flushSessionSnapshot(sessionRecord.id, {
+                markActivity: false,
+              });
               disconnectRuntimeSession(sessionRecord.id);
               markSessionState(sessionRecord.id, "closed");
             },
@@ -600,6 +708,9 @@ export const useMobileAppStore = create<MobileAppState>()(
           const shell = await connection.startShell({
             term: "Xterm",
             onClosed: () => {
+              flushSessionSnapshot(sessionRecord.id, {
+                markActivity: false,
+              });
               disconnectRuntimeSession(sessionRecord.id);
               markSessionState(sessionRecord.id, "closed");
             },
@@ -611,25 +722,13 @@ export const useMobileAppStore = create<MobileAppState>()(
                 return;
               }
               const text = Buffer.from(event.bytes).toString("utf8");
-              const now = new Date().toISOString();
-              set((state) => {
-                const current = state.sessions.find(
-                  (session) => session.id === sessionRecord.id,
-                );
-                if (!current) {
-                  return state;
-                }
-
-                return {
-                  sessions: patchSessionRecord(state.sessions, sessionRecord.id, {
-                    hasReceivedOutput: true,
-                    lastEventAt: now,
-                    lastViewportSnapshot: trimSnapshot(
-                      `${current.lastViewportSnapshot}${text}`,
-                    ),
-                  }),
-                };
-              });
+              const currentSnapshot =
+                runtimeSessionSnapshots.get(sessionRecord.id) ?? "";
+              runtimeSessionSnapshots.set(
+                sessionRecord.id,
+                trimSnapshot(`${currentSnapshot}${text}`),
+              );
+              scheduleSessionSnapshotFlush(sessionRecord.id);
             },
             {
               cursor: { mode: "live" },
@@ -661,6 +760,8 @@ export const useMobileAppStore = create<MobileAppState>()(
             "error",
             error instanceof Error ? error.message : "SSH 연결에 실패했습니다.",
           );
+        } finally {
+          pendingSessionConnections.delete(sessionRecord.id);
         }
       };
 
@@ -938,6 +1039,9 @@ export const useMobileAppStore = create<MobileAppState>()(
           }
 
           const expectedState = get().pendingBrowserLoginState;
+          if (!expectedState) {
+            return;
+          }
           const stateValidationMessage = getAuthCallbackStateErrorMessage(
             expectedState,
             payload.state,
@@ -1030,6 +1134,12 @@ export const useMobileAppStore = create<MobileAppState>()(
               },
             });
           }
+        },
+        cancelBrowserLogin: () => {
+          set({
+            pendingBrowserLoginState: null,
+            auth: createUnauthenticatedState(),
+          });
         },
         logout: async () => {
           clearPrompts();
@@ -1146,7 +1256,12 @@ export const useMobileAppStore = create<MobileAppState>()(
             return null;
           }
 
-          if (runtimeSessions.has(session.id)) {
+          if (
+            runtimeSessions.has(session.id) ||
+            pendingSessionConnections.has(session.id) ||
+            session.status === "connecting" ||
+            session.status === "disconnecting"
+          ) {
             return session.id;
           }
 
@@ -1188,6 +1303,9 @@ export const useMobileAppStore = create<MobileAppState>()(
             await runtime.connection.disconnect();
           } catch {}
 
+          flushSessionSnapshot(sessionId, {
+            markActivity: false,
+          });
           disconnectRuntimeSession(sessionId);
           markSessionState(sessionId, "closed");
         },
@@ -1265,7 +1383,7 @@ export const useMobileAppStore = create<MobileAppState>()(
         hosts: state.hosts,
         knownHosts: state.knownHosts,
         secretMetadata: state.secretMetadata,
-        sessions: state.sessions,
+        sessions: compactPersistedSessions(state.sessions),
       }),
       onRehydrateStorage: () => () => {
         useMobileAppStore.setState({ hydrated: true });

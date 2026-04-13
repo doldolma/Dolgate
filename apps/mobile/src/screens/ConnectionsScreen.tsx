@@ -10,10 +10,11 @@ import { useNavigation } from "@react-navigation/native";
 import type { NavigationProp } from "@react-navigation/native";
 import { formatRelativeTime } from "../lib/mobile";
 import type { RootStackParamList } from "../navigation/RootNavigator";
+import { useScreenPadding } from "../lib/screen-layout";
 import { useMobileAppStore } from "../store/useMobileAppStore";
-import { useMobilePalette } from "../theme";
+import { type MobilePalette, useMobilePalette } from "../theme";
 
-function getStatusTone(status: string, palette: ReturnType<typeof useMobilePalette>) {
+function getStatusTone(status: string, palette: MobilePalette) {
   switch (status) {
     case "connected":
       return { background: palette.accentSoft, text: palette.success };
@@ -30,6 +31,7 @@ function getStatusTone(status: string, palette: ReturnType<typeof useMobilePalet
 
 export function ConnectionsScreen(): React.JSX.Element {
   const palette = useMobilePalette();
+  const screenPadding = useScreenPadding();
   const navigation = useNavigation<NavigationProp<RootStackParamList>>();
   const sessions = useMobileAppStore((state) => state.sessions);
   const hosts = useMobileAppStore((state) => state.hosts);
@@ -46,18 +48,28 @@ export function ConnectionsScreen(): React.JSX.Element {
         styles.screen,
         {
           backgroundColor: palette.background,
+          paddingHorizontal: screenPadding.paddingHorizontal,
+          paddingTop: screenPadding.paddingTop,
         },
       ]}
     >
       <Text style={[styles.title, { color: palette.text }]}>Connections</Text>
       <Text style={[styles.subtitle, { color: palette.mutedText }]}>
-        현재 세션과 최근 세션을 한 곳에서 이어서 사용할 수 있습니다.
+        현재 세션과 최근 세션
       </Text>
 
       <FlatList
+        style={styles.list}
         data={sessions}
         keyExtractor={(item) => item.id}
-        contentContainerStyle={styles.listContent}
+        initialNumToRender={10}
+        maxToRenderPerBatch={10}
+        windowSize={5}
+        removeClippedSubviews
+        contentContainerStyle={[
+          styles.listContent,
+          { paddingBottom: screenPadding.paddingBottom },
+        ]}
         ListEmptyComponent={
           <View
             style={[
@@ -72,12 +84,13 @@ export function ConnectionsScreen(): React.JSX.Element {
               아직 세션이 없습니다.
             </Text>
             <Text style={[styles.emptyBody, { color: palette.mutedText }]}>
-              Home에서 호스트를 열면 이 화면에 재사용 가능한 연결이 쌓입니다.
+              Home에서 호스트를 열면 여기에 표시됩니다.
             </Text>
           </View>
         }
         renderItem={({ item }) => {
           const tone = getStatusTone(item.status, palette);
+
           return (
             <Pressable
               onPress={async () => {
@@ -117,9 +130,9 @@ export function ConnectionsScreen(): React.JSX.Element {
               </Text>
               <Text style={[styles.meta, { color: palette.mutedText }]}>
                 {item.hasReceivedOutput
-                  ? "최근 출력 스냅샷 있음"
-                  : "최근 출력 스냅샷 없음"}
-                {item.isRestorable ? " • 다시 열기 가능" : ""}
+                  ? "출력 스냅샷 있음"
+                  : "출력 스냅샷 없음"}
+                {item.isRestorable ? " • 이어서 사용 가능" : ""}
               </Text>
               {item.errorMessage ? (
                 <Text style={[styles.errorText, { color: palette.danger }]}>
@@ -137,8 +150,6 @@ export function ConnectionsScreen(): React.JSX.Element {
 const styles = StyleSheet.create({
   screen: {
     flex: 1,
-    paddingHorizontal: 18,
-    paddingTop: 18,
   },
   title: {
     fontSize: 28,
@@ -149,9 +160,11 @@ const styles = StyleSheet.create({
     fontSize: 14,
     lineHeight: 20,
   },
+  list: {
+    flex: 1,
+    marginTop: 16,
+  },
   listContent: {
-    paddingTop: 18,
-    paddingBottom: 28,
     gap: 12,
   },
   sessionCard: {

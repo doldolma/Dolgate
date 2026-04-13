@@ -10,6 +10,8 @@ const metroStatusUrl = "http://127.0.0.1:8081/status";
 const metroReadyText = "packager-status:running";
 const metroTimeoutMs = 60_000;
 const deviceReadyTimeoutMs = 180_000;
+const defaultAndroidArgs =
+  process.env.DOLGATE_ANDROID_ALL_ARCHES === "1" ? [] : ["--active-arch-only"];
 
 let metroChild = null;
 let androidChild = null;
@@ -60,11 +62,15 @@ function spawnMetro() {
 
 function spawnAndroid(extraArgs) {
   const androidScript = path.join(__dirname, "run-android.cjs");
-  return spawn(nodeCommand, [androidScript, "--no-packager", ...extraArgs], {
+  return spawn(
+    nodeCommand,
+    [androidScript, "--no-packager", ...defaultAndroidArgs, ...extraArgs],
+    {
     cwd: appRoot,
     stdio: "inherit",
     shell: false,
-  });
+    },
+  );
 }
 
 function getToolPath(toolDir, toolName) {

@@ -13,6 +13,7 @@ import {
   type XtermWebViewHandle,
 } from "@fressh/react-native-xtermjs-webview";
 import { formatRelativeTime } from "../lib/mobile";
+import { useScreenPadding } from "../lib/screen-layout";
 import type { SessionScreenProps } from "../navigation/RootNavigator";
 import { useMobileAppStore } from "../store/useMobileAppStore";
 import { useMobilePalette } from "../theme";
@@ -29,8 +30,14 @@ export function SessionScreen({
 }: SessionScreenProps): React.JSX.Element {
   const { sessionId } = route.params;
   const palette = useMobilePalette();
+  const screenPadding = useScreenPadding({
+    horizontal: 16,
+    includeSafeTop: false,
+    topOffset: 14,
+  });
   const { width, height } = useWindowDimensions();
   const terminalRef = useRef<XtermWebViewHandle | null>(null);
+  const hasAttemptedInitialResumeRef = useRef(false);
   const [terminalReady, setTerminalReady] = useState(false);
   const session = useMobileAppStore((state) =>
     state.sessions.find((item) => item.id === sessionId),
@@ -50,8 +57,19 @@ export function SessionScreen({
   );
 
   useEffect(() => {
+    if (!session || hasAttemptedInitialResumeRef.current) {
+      return;
+    }
+    hasAttemptedInitialResumeRef.current = true;
+    if (
+      session.status === "connected" ||
+      session.status === "connecting" ||
+      session.status === "disconnecting"
+    ) {
+      return;
+    }
     void resumeSession(sessionId);
-  }, [resumeSession, sessionId]);
+  }, [resumeSession, session, sessionId]);
 
   useEffect(() => {
     if (!terminalReady || !session || session.status === "connected") {
@@ -131,6 +149,9 @@ export function SessionScreen({
         styles.screen,
         {
           backgroundColor: palette.background,
+          paddingHorizontal: screenPadding.paddingHorizontal,
+          paddingTop: screenPadding.paddingTop,
+          paddingBottom: screenPadding.paddingBottom,
         },
       ]}
     >
@@ -208,6 +229,7 @@ export function SessionScreen({
           size={terminalSize}
           xtermOptions={{
             fontSize: width > height ? 12 : 11,
+            scrollback: 2_000,
             theme: {
               background: "#020A10",
               foreground: "#E7F0F7",
@@ -258,7 +280,6 @@ export function SessionScreen({
 const styles = StyleSheet.create({
   screen: {
     flex: 1,
-    padding: 16,
     gap: 12,
   },
   centered: {

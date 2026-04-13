@@ -1,6 +1,7 @@
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
+const { spawnSync } = require("child_process");
 
 const appRoot = path.resolve(__dirname, "..");
 const androidRoot = path.join(appRoot, "android");
@@ -57,12 +58,43 @@ function listDirectories(parentDir) {
     .map((entry) => path.join(parentDir, entry.name));
 }
 
+function runJavaHome(args) {
+  if (process.platform !== "darwin") {
+    return null;
+  }
+
+  const result = spawnSync("/usr/libexec/java_home", args, {
+    encoding: "utf8",
+    timeout: 5_000,
+  });
+
+  if (result.status !== 0) {
+    return null;
+  }
+
+  const javaHome = (result.stdout || "").trim();
+  return javaHome || null;
+}
+
+function expandJavaHomeDirectory(parentDir) {
+  return listDirectories(parentDir)
+    .flatMap((candidateDir) => {
+      const contentsHome = path.join(candidateDir, "Contents", "Home");
+      if (hasJavaBinary(contentsHome)) {
+        return [contentsHome];
+      }
+      return hasJavaBinary(candidateDir) ? [candidateDir] : [];
+    })
+    .filter(Boolean);
+}
+
 function getJavaHomeCandidates() {
   const homeDir = os.homedir();
-  const candidates = [process.env.JAVA_HOME];
+  const preferredCandidates = [];
+  const fallbackCandidates = [process.env.JAVA_HOME];
 
   if (process.platform === "win32") {
-    candidates.push(
+    fallbackCandidates.push(
       path.join("C:\\", "Program Files", "Android", "Android Studio", "jbr"),
       ...listDirectories(path.join("C:\\", "Program Files", "Java")),
       ...listDirectories(path.join("C:\\", "Program Files", "Eclipse Adoptium")),
@@ -70,21 +102,26 @@ function getJavaHomeCandidates() {
   }
 
   if (process.platform === "darwin") {
-    candidates.push(
+    preferredCandidates.push(runJavaHome(["-v", "17"]));
+    preferredCandidates.push(runJavaHome(["-v", "21"]));
+
+    fallbackCandidates.push(
       path.join("/", "Applications", "Android Studio.app", "Contents", "jbr", "Contents", "Home"),
-      path.join("/", "Library", "Java", "JavaVirtualMachines"),
+      ...expandJavaHomeDirectory(path.join(homeDir, "Library", "Java", "JavaVirtualMachines")),
+      ...expandJavaHomeDirectory(path.join("/", "Library", "Java", "JavaVirtualMachines")),
+      runJavaHome([]),
     );
   }
 
   if (process.platform === "linux") {
-    candidates.push(
+    fallbackCandidates.push(
       path.join("/", "usr", "lib", "jvm", "default-java"),
       path.join("/", "usr", "lib", "jvm", "java-17-openjdk-amd64"),
       path.join("/", "usr", "lib", "jvm", "java-21-openjdk-amd64"),
     );
   }
 
-  return candidates.filter(Boolean);
+  return [...preferredCandidates, ...fallbackCandidates].filter(Boolean);
 }
 
 function hasJavaBinary(candidate) {
@@ -95,8 +132,41 @@ function hasJavaBinary(candidate) {
   return fs.existsSync(path.join(candidate, "bin", javaBinary));
 }
 
+function readJavaMajorVersion(candidate) {
+  if (!candidate) {
+    return null;
+  }
+
+  const releasePath = path.join(candidate, "release");
+  if (!fs.existsSync(releasePath)) {
+    return null;
+  }
+
+  const contents = fs.readFileSync(releasePath, "utf8");
+  const match = contents.match(/JAVA_VERSION="(\d+)(?:\.[^"]*)?"/);
+  return match ? Number.parseInt(match[1], 10) : null;
+}
+
+function scoreJavaHome(candidate) {
+  const majorVersion = readJavaMajorVersion(candidate);
+  if (majorVersion === 17) {
+    return 3;
+  }
+  if (majorVersion === 21) {
+    return 2;
+  }
+  if (majorVersion && majorVersion >= 17 && majorVersion < 24) {
+    return 1;
+  }
+  return 0;
+}
+
 function resolveJavaHome() {
-  return getJavaHomeCandidates().find((candidate) => hasJavaBinary(candidate)) ?? null;
+  const uniqueCandidates = Array.from(new Set(getJavaHomeCandidates()));
+  const supportedCandidate = uniqueCandidates
+    .filter((candidate) => hasJavaBinary(candidate))
+    .sort((left, right) => scoreJavaHome(right) - scoreJavaHome(left))[0];
+  return supportedCandidate ?? null;
 }
 
 function buildEnvForAndroid(baseEnv) {
@@ -117,9 +187,11 @@ function buildEnvForAndroid(baseEnv) {
     );
   }
 
-  const javaHome = resolveJavaHome();
+  const configuredJavaHome = hasJavaBinary(env.JAVA_HOME) ? env.JAVA_HOME : null;
+  const javaHome =
+    configuredJavaHome && scoreJavaHome(configuredJavaHome) > 0 ? configuredJavaHome : resolveJavaHome();
   if (javaHome) {
-    env.JAVA_HOME = env.JAVA_HOME || javaHome;
+    env.JAVA_HOME = javaHome;
     extraPaths.push(path.join(javaHome, "bin"));
   }
 

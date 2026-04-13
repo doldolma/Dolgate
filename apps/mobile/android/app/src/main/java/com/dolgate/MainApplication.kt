@@ -1,4 +1,4 @@
-package com.dolgate.mobile
+package com.dolgate
 
 import android.app.Application
 import com.facebook.react.PackageList

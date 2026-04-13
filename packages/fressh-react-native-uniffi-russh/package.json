@@ -1,5 +1,7 @@
 {
   "name": "@fressh/react-native-uniffi-russh",
+  "homepage": "https://github.com/EthanShoeDev/fressh",
+  "author": "EthanShoeDev",
   "license": "MIT",
   "description": "Uniffi bindings for russh",
   "version": "0.0.5",

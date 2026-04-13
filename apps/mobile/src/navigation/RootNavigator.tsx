@@ -11,7 +11,7 @@ import { AuthLandingScreen } from "../screens/AuthLandingScreen";
 import { ConnectionsScreen } from "../screens/ConnectionsScreen";
 import { HomeScreen } from "../screens/HomeScreen";
 import { SessionScreen } from "../screens/SessionScreen";
-import { SettingsScreen } from "../screens/SettingsScreen";
+import { AuthSettingsScreen, SettingsScreen } from "../screens/SettingsScreen";
 
 export type AuthStackParamList = {
   AuthLanding: undefined;
@@ -118,8 +118,8 @@ function UnauthenticatedNavigator(): React.JSX.Element {
       />
       <AuthStack.Screen
         name="AuthSettings"
-        component={SettingsScreen}
-        options={{ title: "Settings" }}
+        component={AuthSettingsScreen}
+        options={{ title: "서버 설정" }}
       />
     </AuthStack.Navigator>
   );

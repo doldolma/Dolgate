@@ -170,6 +170,46 @@ describe("useMobileAppStore auth and sync flows", () => {
     );
   });
 
+  it("cancels a pending browser login and clears the pending state", async () => {
+    await act(async () => {
+      resetStore({
+        auth: {
+          status: "authenticating",
+          session: null,
+          offline: null,
+          errorMessage: null,
+        },
+        pendingBrowserLoginState: "expected-state",
+      });
+    });
+
+    act(() => {
+      useMobileAppStore.getState().cancelBrowserLogin();
+    });
+
+    expect(useMobileAppStore.getState().auth.status).toBe("unauthenticated");
+    expect(useMobileAppStore.getState().pendingBrowserLoginState).toBeNull();
+    expect(useMobileAppStore.getState().auth.errorMessage).toBeNull();
+  });
+
+  it("ignores a late auth callback after browser login was cancelled", async () => {
+    await act(async () => {
+      resetStore();
+    });
+
+    await act(async () => {
+      await useMobileAppStore
+        .getState()
+        .handleAuthCallbackUrl(
+          "dolgate://auth/callback?code=exchange-code&state=late-state",
+        );
+    });
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(useMobileAppStore.getState().auth.status).toBe("unauthenticated");
+    expect(useMobileAppStore.getState().auth.errorMessage).toBeNull();
+  });
+
   it("rejects auth callbacks whose state does not match the pending login request", async () => {
     await act(async () => {
       resetStore({
@@ -350,5 +390,78 @@ describe("useMobileAppStore auth and sync flows", () => {
     expect(state.sessions).toHaveLength(0);
     expect(state.secretsByRef).toEqual({});
     expect(state.pendingBrowserLoginState).toBeNull();
+  });
+
+  it("does not open a duplicate SSH connection while a session is already connecting", async () => {
+    const host: SshHostRecord = {
+      id: "host-1",
+      kind: "ssh",
+      label: "Dev SSH",
+      hostname: "host.example.com",
+      port: 22,
+      username: "deploy",
+      authType: "password",
+      secretRef: "secret-1",
+      privateKeyPath: null,
+      certificatePath: null,
+      createdAt: "2026-04-13T00:00:00.000Z",
+      updatedAt: "2026-04-13T00:00:00.000Z",
+    };
+    const secret: LoadedManagedSecretPayload = {
+      secretRef: "secret-1",
+      label: "Dev SSH credentials",
+      password: "super-secret",
+      updatedAt: "2026-04-13T00:00:00.000Z",
+    };
+    const shell = {
+      addListener: jest.fn(() => 1n),
+      removeListener: jest.fn(),
+      sendData: jest.fn(async () => undefined),
+      readBuffer: jest.fn(() => ({ chunks: [], nextSeq: 0 })),
+    };
+    const connection = {
+      startShell: jest.fn(async () => shell),
+      disconnect: jest.fn(async () => undefined),
+    };
+
+    let resolveConnect: ((value: typeof connection) => void) | null = null;
+    (RnRussh.connect as jest.Mock).mockImplementation(
+      async () =>
+        await new Promise<typeof connection>((resolve) => {
+          resolveConnect = resolve;
+        }),
+    );
+
+    await act(async () => {
+      resetStore({
+        auth: createAuthenticatedState(),
+        hosts: [host],
+        secretsByRef: {
+          [secret.secretRef]: secret,
+        },
+      });
+    });
+
+    let sessionId: string | null = null;
+    await act(async () => {
+      sessionId = await useMobileAppStore.getState().connectToHost(host.id);
+    });
+
+    await act(async () => {
+      const resumedSessionId = await useMobileAppStore
+        .getState()
+        .resumeSession(sessionId as string);
+      expect(resumedSessionId).toBe(sessionId);
+    });
+
+    expect(RnRussh.connect).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      resolveConnect?.(connection);
+      await flushAsyncWork();
+    });
+
+    expect(connection.startShell).toHaveBeenCalledTimes(1);
+    expect(useMobileAppStore.getState().sessions[0]?.status).toBe("connected");
   });
 });

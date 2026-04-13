@@ -104,7 +104,7 @@ export function AppRoot(): React.JSX.Element {
                 },
               ]}
             >
-              Dolgate Mobile
+              Dolgate
             </Text>
             <Text
               style={[
@@ -114,7 +114,7 @@ export function AppRoot(): React.JSX.Element {
                 },
               ]}
             >
-              동기화 상태와 세션 런타임을 준비하고 있습니다.
+              앱을 준비하고 있습니다.
             </Text>
           </View>
         ) : (

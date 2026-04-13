@@ -8,9 +8,9 @@ Pod::Spec.new do |s|
   s.name         = "ReactNativeUniffiRussh"
   s.version      = package["version"]
   s.summary      = package["description"]
-  s.homepage     = package["homepage"]
+  s.homepage     = package["homepage"] || "https://github.com/EthanShoeDev/fressh"
   s.license      = package["license"]
-  s.authors      = package["author"]
+  s.authors      = package["author"] || "EthanShoeDev"
 
   s.platforms    = { :ios => min_ios_version_supported }
   s.source       = { :git => "https://github.com/EthanShoeDev/fressh.git", :tag => "#{s.version}" }
