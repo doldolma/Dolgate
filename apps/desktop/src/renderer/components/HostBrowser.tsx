@@ -1054,7 +1054,7 @@ export function HostBrowser({
                         <div className="flex flex-col items-end gap-[0.3rem]">
                           <button
                             type="button"
-                            className="inline-grid h-[1.9rem] w-[1.9rem] shrink-0 place-items-center rounded-[10px] border border-[var(--border)] bg-[color-mix(in_srgb,var(--surface-muted)_92%,transparent_8%)] text-[0.8rem] text-[var(--text-soft)] hover:border-[color-mix(in_srgb,var(--accent-strong)_28%,var(--border)_72%)] hover:text-[var(--text)]"
+                            className="inline-grid h-[1.75rem] w-[1.75rem] shrink-0 place-items-center rounded-[10px] border border-[var(--border)] bg-[color-mix(in_srgb,var(--surface-muted)_92%,transparent_8%)] text-[0.76rem] text-[var(--text-soft)] hover:border-[color-mix(in_srgb,var(--accent-strong)_28%,var(--border)_72%)] hover:text-[var(--text)]"
                             aria-label={`${host.label} 수정`}
                             onClick={(event) => {
                               event.stopPropagation();
@@ -1067,7 +1067,7 @@ export function HostBrowser({
                           {host.tags && host.tags.length > 0 ? (
                             <button
                               type="button"
-                              className="rounded-full border border-[var(--border)] bg-[color-mix(in_srgb,var(--surface-muted)_92%,transparent_8%)] px-[0.42rem] py-[0.24rem] text-[0.66rem] leading-[1.1] text-[var(--text-soft)] hover:border-[color-mix(in_srgb,var(--accent-strong)_28%,var(--border)_72%)] hover:text-[var(--text)]"
+                              className="rounded-full border border-[var(--border)] bg-[color-mix(in_srgb,var(--surface-muted)_92%,transparent_8%)] px-[0.4rem] py-[0.2rem] text-[0.66rem] leading-[1.1] text-[var(--text-soft)] hover:border-[color-mix(in_srgb,var(--accent-strong)_28%,var(--border)_72%)] hover:text-[var(--text)]"
                               aria-expanded={isTagsExpanded}
                               onClick={(event) => {
                                 event.stopPropagation();
