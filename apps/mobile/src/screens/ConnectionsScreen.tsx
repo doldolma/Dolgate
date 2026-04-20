@@ -8,6 +8,7 @@ import {
 } from "react-native";
 import { useNavigation } from "@react-navigation/native";
 import type { NavigationProp } from "@react-navigation/native";
+import Ionicons from "react-native-vector-icons/Ionicons";
 import { formatRelativeTime } from "../lib/mobile";
 import type { RootStackParamList } from "../navigation/RootNavigator";
 import { useScreenPadding } from "../lib/screen-layout";
@@ -29,6 +30,14 @@ function getStatusTone(status: string, palette: MobilePalette) {
   }
 }
 
+function canRemoveSession(status: string) {
+  return (
+    status !== "connected" &&
+    status !== "connecting" &&
+    status !== "disconnecting"
+  );
+}
+
 export function ConnectionsScreen(): React.JSX.Element {
   const palette = useMobilePalette();
   const screenPadding = useScreenPadding();
@@ -36,6 +45,7 @@ export function ConnectionsScreen(): React.JSX.Element {
   const sessions = useMobileAppStore((state) => state.sessions);
   const hosts = useMobileAppStore((state) => state.hosts);
   const resumeSession = useMobileAppStore((state) => state.resumeSession);
+  const removeSession = useMobileAppStore((state) => state.removeSession);
 
   const hostLabelById = useMemo(
     () => new Map(hosts.map((host) => [host.id, host.label])),
@@ -90,15 +100,16 @@ export function ConnectionsScreen(): React.JSX.Element {
         }
         renderItem={({ item }) => {
           const tone = getStatusTone(item.status, palette);
+          const removable = canRemoveSession(item.status);
+          const openSession = async () => {
+            const sessionId = await resumeSession(item.id);
+            if (sessionId) {
+              navigation.navigate("Session", { sessionId });
+            }
+          };
 
           return (
-            <Pressable
-              onPress={async () => {
-                const sessionId = await resumeSession(item.id);
-                if (sessionId) {
-                  navigation.navigate("Session", { sessionId });
-                }
-              }}
+            <View
               style={[
                 styles.sessionCard,
                 {
@@ -108,38 +119,79 @@ export function ConnectionsScreen(): React.JSX.Element {
               ]}
             >
               <View style={styles.row}>
-                <Text style={[styles.sessionTitle, { color: palette.text }]}>
-                  {item.title}
-                </Text>
-                <View
-                  style={[
-                    styles.statusBadge,
-                    {
-                      backgroundColor: tone.background,
-                    },
-                  ]}
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={`${item.title} 세션 열기`}
+                  onPress={openSession}
+                  style={styles.rowOpenArea}
                 >
-                  <Text style={[styles.statusBadgeText, { color: tone.text }]}>
-                    {item.status}
+                  <Text style={[styles.sessionTitle, { color: palette.text }]}>
+                    {item.title}
                   </Text>
+                  <View
+                    style={[
+                      styles.statusBadge,
+                      {
+                        backgroundColor: tone.background,
+                      },
+                    ]}
+                  >
+                    <Text style={[styles.statusBadgeText, { color: tone.text }]}>
+                      {item.status}
+                    </Text>
+                  </View>
+                </Pressable>
+                <View style={styles.rowActions}>
+                  {removable ? (
+                    <Pressable
+                      accessibilityRole="button"
+                      accessibilityLabel={`${item.title} 세션 삭제`}
+                      hitSlop={10}
+                      onPress={() => {
+                        void removeSession(item.id);
+                      }}
+                      style={[
+                        styles.removeButton,
+                        {
+                          backgroundColor: palette.surfaceAlt,
+                          borderColor: palette.border,
+                        },
+                      ]}
+                    >
+                      <Ionicons
+                        name="trash-outline"
+                        size={16}
+                        color={palette.danger}
+                      />
+                    </Pressable>
+                  ) : null}
                 </View>
               </View>
-              <Text style={[styles.meta, { color: palette.mutedText }]}>
-                {hostLabelById.get(item.hostId) ?? "삭제된 호스트"} •{" "}
-                {formatRelativeTime(item.lastEventAt)}
-              </Text>
-              <Text style={[styles.meta, { color: palette.mutedText }]}>
-                {item.hasReceivedOutput
-                  ? "출력 스냅샷 있음"
-                  : "출력 스냅샷 없음"}
-                {item.isRestorable ? " • 이어서 사용 가능" : ""}
-              </Text>
-              {item.errorMessage ? (
-                <Text style={[styles.errorText, { color: palette.danger }]}>
-                  {item.errorMessage}
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={`${item.title} 세션 본문 열기`}
+                onPress={async () => {
+                  await openSession();
+                }}
+                style={styles.cardBody}
+              >
+                <Text style={[styles.meta, { color: palette.mutedText }]}>
+                  {hostLabelById.get(item.hostId) ?? "삭제된 호스트"} •{" "}
+                  {formatRelativeTime(item.lastEventAt)}
                 </Text>
-              ) : null}
-            </Pressable>
+                <Text style={[styles.meta, { color: palette.mutedText }]}>
+                  {item.hasReceivedOutput
+                    ? "출력 스냅샷 있음"
+                    : "출력 스냅샷 없음"}
+                  {item.isRestorable ? " • 이어서 사용 가능" : ""}
+                </Text>
+                {item.errorMessage ? (
+                  <Text style={[styles.errorText, { color: palette.danger }]}>
+                    {item.errorMessage}
+                  </Text>
+                ) : null}
+              </Pressable>
+            </View>
           );
         }}
       />
@@ -179,6 +231,17 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: 12,
   },
+  rowOpenArea: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+  },
+  rowActions: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
   sessionTitle: {
     flex: 1,
     fontSize: 17,
@@ -193,6 +256,17 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: "800",
     textTransform: "uppercase",
+  },
+  removeButton: {
+    width: 34,
+    height: 34,
+    borderWidth: 1,
+    borderRadius: 12,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  cardBody: {
+    gap: 8,
   },
   meta: {
     fontSize: 13,
