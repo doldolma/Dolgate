@@ -12,6 +12,7 @@ import { ConnectionsScreen } from "../screens/ConnectionsScreen";
 import { HomeScreen } from "../screens/HomeScreen";
 import { SessionScreen } from "../screens/SessionScreen";
 import { AuthSettingsScreen, SettingsScreen } from "../screens/SettingsScreen";
+import { useMobilePalette } from "../theme";
 
 export type AuthStackParamList = {
   AuthLanding: undefined;
@@ -63,24 +64,31 @@ function getTabIconName(
 }
 
 function MainTabs(): React.JSX.Element {
-  const { colors } = useTheme();
+  const palette = useMobilePalette();
 
   return (
     <Tab.Navigator
       screenOptions={({ route }) => ({
         headerShown: false,
         tabBarStyle: {
-          backgroundColor: colors.card,
-          borderTopColor: colors.border,
-          height: 68,
-          paddingBottom: 10,
-          paddingTop: 8,
+          backgroundColor: palette.sessionToolbar,
+          borderTopColor: palette.sessionToolbarBorder,
+          borderTopWidth: 1,
+          height: 64,
+          paddingBottom: 8,
+          paddingTop: 6,
+          elevation: 0,
+          shadowOpacity: 0,
         },
-        tabBarActiveTintColor: colors.primary,
-        tabBarInactiveTintColor: colors.text,
+        tabBarActiveTintColor: palette.sessionToolbarActive,
+        tabBarInactiveTintColor: palette.sessionToolbarInactive,
         tabBarLabelStyle: {
           fontSize: 12,
           fontWeight: "700",
+          marginBottom: 1,
+        },
+        tabBarItemStyle: {
+          paddingVertical: 2,
         },
         tabBarIcon: ({ color, size, focused }) => (
           <Ionicons
@@ -136,8 +144,6 @@ function isAppAccessible(authState: AuthState): boolean {
 export function RootNavigator({
   authState,
 }: RootNavigatorProps): React.JSX.Element {
-  const { colors } = useTheme();
-
   if (!isAppAccessible(authState)) {
     return <UnauthenticatedNavigator />;
   }
@@ -153,12 +159,7 @@ export function RootNavigator({
         name="Session"
         component={SessionScreen}
         options={{
-          title: "Session",
-          headerStyle: {
-            backgroundColor: colors.card,
-          },
-          headerTintColor: colors.text,
-          headerShadowVisible: false,
+          headerShown: false,
         }}
       />
     </Stack.Navigator>

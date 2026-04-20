@@ -25,6 +25,21 @@ export interface MobilePalette {
   input: string;
   tabInactive: string;
   overlay: string;
+  sessionChrome: string;
+  sessionToolbar: string;
+  sessionToolbarBorder: string;
+  sessionToolbarActive: string;
+  sessionToolbarInactive: string;
+  sessionTerminalBg: string;
+  sessionTerminalFg: string;
+  sessionTerminalCursor: string;
+  sessionTerminalSelection: string;
+  sessionSurfaceBorder: string;
+  sessionMenuSurface: string;
+  sessionStatusConnected: string;
+  sessionStatusWarning: string;
+  sessionStatusError: string;
+  sessionStatusMuted: string;
 }
 
 const darkPalette: MobilePalette = {
@@ -42,6 +57,21 @@ const darkPalette: MobilePalette = {
   input: "#131C27",
   tabInactive: "#78889E",
   overlay: "rgba(5, 9, 16, 0.8)",
+  sessionChrome: "#0B1118",
+  sessionToolbar: "#141A26",
+  sessionToolbarBorder: "rgba(181, 194, 214, 0.08)",
+  sessionToolbarActive: "#F4F8FF",
+  sessionToolbarInactive: "#8E9AAF",
+  sessionTerminalBg: "#060B11",
+  sessionTerminalFg: "#E7F0F7",
+  sessionTerminalCursor: "#83AFFF",
+  sessionTerminalSelection: "#24364D",
+  sessionSurfaceBorder: "rgba(151, 166, 191, 0.14)",
+  sessionMenuSurface: "#151D29",
+  sessionStatusConnected: "#62D8A0",
+  sessionStatusWarning: "#F0BE67",
+  sessionStatusError: "#F17C87",
+  sessionStatusMuted: "#8FA0B5",
 };
 
 const lightPalette: MobilePalette = {
@@ -59,6 +89,21 @@ const lightPalette: MobilePalette = {
   input: "#FBFDFF",
   tabInactive: "#7A8B9F",
   overlay: "rgba(13, 18, 24, 0.18)",
+  sessionChrome: "#EEF1F6",
+  sessionToolbar: "#272A3B",
+  sessionToolbarBorder: "rgba(255, 255, 255, 0.08)",
+  sessionToolbarActive: "#FFFFFF",
+  sessionToolbarInactive: "#B0B7C9",
+  sessionTerminalBg: "#FEFEFF",
+  sessionTerminalFg: "#2E3344",
+  sessionTerminalCursor: "#90A0B7",
+  sessionTerminalSelection: "#D7DEE9",
+  sessionSurfaceBorder: "rgba(67, 81, 106, 0.12)",
+  sessionMenuSurface: "#FFFFFF",
+  sessionStatusConnected: "#21A46A",
+  sessionStatusWarning: "#B27A19",
+  sessionStatusError: "#C15263",
+  sessionStatusMuted: "#7B879B",
 };
 
 export function resolveAppTheme(

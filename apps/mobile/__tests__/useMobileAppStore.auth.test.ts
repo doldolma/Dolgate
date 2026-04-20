@@ -1,12 +1,19 @@
 import { Linking } from "react-native";
 import { act } from "react-test-renderer";
 import { RnRussh } from "@fressh/react-native-uniffi-russh";
+import { gcm } from "@noble/ciphers/aes.js";
+import { randomBytes } from "@noble/ciphers/utils.js";
 import type {
   AuthSession,
   AuthState,
+  GroupRecord,
   LoadedManagedSecretPayload,
   SshHostRecord,
+  SyncPayloadV2,
+  SyncRecord,
 } from "@dolssh/shared-core";
+import { fromByteArray, toByteArray } from "base64-js";
+import { Buffer } from "buffer";
 import {
   buildEmptySyncPayload,
   createDefaultMobileSettings,
@@ -92,6 +99,7 @@ function resetStore(
       | "auth"
       | "settings"
       | "syncStatus"
+      | "groups"
       | "hosts"
       | "knownHosts"
       | "secretMetadata"
@@ -109,6 +117,7 @@ function resetStore(
     auth: createUnauthenticatedState(),
     settings: createDefaultMobileSettings(),
     syncStatus: createDefaultSyncStatus(),
+    groups: [],
     hosts: [],
     knownHosts: [],
     secretMetadata: [],
@@ -125,6 +134,31 @@ async function flushAsyncWork(): Promise<void> {
   await Promise.resolve();
   await Promise.resolve();
   await Promise.resolve();
+}
+
+function createEncryptedRecord<T>(
+  id: string,
+  value: T,
+  keyBase64: string,
+  updatedAt = "2026-04-13T00:00:00.000Z",
+): SyncRecord {
+  const key = toByteArray(keyBase64);
+  const iv = randomBytes(12);
+  const plaintext = Buffer.from(JSON.stringify(value), "utf8");
+  const sealed = gcm(key, iv).encrypt(plaintext);
+  const tag = sealed.slice(sealed.length - 16);
+  const ciphertext = sealed.slice(0, sealed.length - 16);
+
+  return {
+    id,
+    encrypted_payload: JSON.stringify({
+      v: 1,
+      iv: fromByteArray(iv),
+      tag: fromByteArray(tag),
+      ciphertext: fromByteArray(ciphertext),
+    }),
+    updated_at: updatedAt,
+  };
 }
 
 describe("useMobileAppStore auth and sync flows", () => {
@@ -322,6 +356,80 @@ describe("useMobileAppStore auth and sync flows", () => {
     expect(state.syncStatus.status).toBe("ready");
     expect(fetchMock.mock.calls.map(([input]) => new URL(String(input)).pathname))
       .toEqual(["/sync", "/auth/refresh", "/sync"]);
+  });
+
+  it("hydrates groups from sync payloads and keeps them sorted by path", async () => {
+    const keyBase64 = Buffer.from(
+      "12345678901234567890123456789012",
+      "utf8",
+    ).toString("base64");
+    const session = createAuthSession({
+      vaultBootstrap: {
+        keyBase64,
+      },
+    });
+    const groups: GroupRecord[] = [
+      {
+        id: "group-nas",
+        path: "Servers/NAS",
+        name: "NAS",
+        createdAt: "2026-04-13T00:00:00.000Z",
+        updatedAt: "2026-04-13T00:00:00.000Z",
+      },
+      {
+        id: "group-servers",
+        path: "Servers",
+        name: "Servers",
+        createdAt: "2026-04-13T00:00:00.000Z",
+        updatedAt: "2026-04-13T00:00:00.000Z",
+      },
+    ];
+    const host: SshHostRecord = {
+      id: "host-nas",
+      kind: "ssh",
+      label: "NAS SSH",
+      hostname: "nas.example.com",
+      port: 22,
+      username: "admin",
+      authType: "password",
+      secretRef: null,
+      groupName: "Servers/NAS",
+      createdAt: "2026-04-13T00:00:00.000Z",
+      updatedAt: "2026-04-13T00:00:00.000Z",
+    };
+    const payload: SyncPayloadV2 = {
+      ...buildEmptySyncPayload(),
+      groups: groups.map((group) =>
+        createEncryptedRecord(group.id, group, keyBase64),
+      ),
+      hosts: [createEncryptedRecord(host.id, host, keyBase64)],
+    };
+
+    fetchMock.mockImplementation(async (input) => {
+      const path = new URL(String(input)).pathname;
+      if (path === "/sync") {
+        return createJsonResponse(payload);
+      }
+      throw new Error(`unexpected fetch path: ${path}`);
+    });
+
+    await act(async () => {
+      resetStore({
+        auth: createAuthenticatedState(session),
+      });
+    });
+
+    await act(async () => {
+      await useMobileAppStore.getState().syncNow();
+    });
+
+    const state = useMobileAppStore.getState();
+    expect(state.groups.map((group) => group.path)).toEqual([
+      "Servers",
+      "Servers/NAS",
+    ]);
+    expect(state.hosts[0]?.groupName).toBe("Servers/NAS");
+    expect(state.syncStatus.status).toBe("ready");
   });
 
   it("disconnects live runtime sessions and clears synced state when the server changes", async () => {

@@ -6,6 +6,7 @@ import * as Keychain from "react-native-keychain";
 import type {
   AuthSession,
   AuthState,
+  GroupRecord,
   HostRecord,
   KnownHostRecord,
   LoadedManagedSecretPayload,
@@ -293,6 +294,13 @@ export function decodeSshHosts(
   return decodeSyncRecords<HostRecord>(payload.hosts, keyBase64).filter(
     isSshHostRecord,
   );
+}
+
+export function decodeGroups(
+  payload: SyncPayloadV2,
+  keyBase64: string,
+): GroupRecord[] {
+  return decodeSyncRecords<GroupRecord>(payload.groups, keyBase64);
 }
 
 export function decodeKnownHosts(

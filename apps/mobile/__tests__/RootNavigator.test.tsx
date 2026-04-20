@@ -55,6 +55,7 @@ function resetStore(authState: AuthState): void {
     auth: authState,
     settings: createDefaultMobileSettings(),
     syncStatus: createDefaultSyncStatus(),
+    groups: [],
     hosts: [],
     knownHosts: [],
     secretMetadata: [],

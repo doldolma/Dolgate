@@ -6,6 +6,7 @@ import { RnRussh } from "@fressh/react-native-uniffi-russh";
 import type {
   AuthSession,
   AuthState,
+  GroupRecord,
   HostSecretInput,
   KnownHostRecord,
   LoadedManagedSecretPayload,
@@ -26,6 +27,7 @@ import {
   createLocalId,
   createRandomStateToken,
   createUnauthenticatedState,
+  decodeGroups,
   decodeKnownHosts,
   decodeManagedSecrets,
   decodeSshHosts,
@@ -91,6 +93,7 @@ interface MobileAppState {
   auth: AuthState;
   settings: MobileSettings;
   syncStatus: SyncStatus;
+  groups: GroupRecord[];
   hosts: SshHostRecord[];
   knownHosts: KnownHostRecord[];
   secretMetadata: SecretMetadataRecord[];
@@ -109,6 +112,7 @@ interface MobileAppState {
   connectToHost: (hostId: string) => Promise<string | null>;
   resumeSession: (sessionId: string) => Promise<string | null>;
   disconnectSession: (sessionId: string) => Promise<void>;
+  removeSession: (sessionId: string) => Promise<void>;
   writeToSession: (sessionId: string, data: string) => Promise<void>;
   subscribeToSessionTerminal: (
     sessionId: string,
@@ -137,6 +141,10 @@ let pendingCredentialResolver:
 
 function sortHosts(hosts: SshHostRecord[]): SshHostRecord[] {
   return [...hosts].sort((left, right) => left.label.localeCompare(right.label));
+}
+
+function sortGroups(groups: GroupRecord[]): GroupRecord[] {
+  return [...groups].sort((left, right) => left.path.localeCompare(right.path));
 }
 
 function sortKnownHosts(knownHosts: KnownHostRecord[]): KnownHostRecord[] {
@@ -775,6 +783,12 @@ export const useMobileAppStore = create<MobileAppState>()(
         if (!activeSession) {
           set({
             auth: createUnauthenticatedState(),
+            groups: [],
+            hosts: [],
+            knownHosts: [],
+            secretMetadata: [],
+            secretsByRef: {},
+            sessions: [],
             syncStatus: createDefaultSyncStatus(),
           });
           return;
@@ -828,6 +842,9 @@ export const useMobileAppStore = create<MobileAppState>()(
             const nextHosts = sortHosts(
               decodeSshHosts(payload, currentSession.vaultBootstrap.keyBase64),
             );
+            const nextGroups = sortGroups(
+              decodeGroups(payload, currentSession.vaultBootstrap.keyBase64),
+            );
             const nextKnownHosts = decodeKnownHosts(
               payload,
               currentSession.vaultBootstrap.keyBase64,
@@ -839,6 +856,7 @@ export const useMobileAppStore = create<MobileAppState>()(
 
             await updateSecretsState(nextSecretsByRef, nextHosts);
             set({
+              groups: nextGroups,
               hosts: nextHosts,
               knownHosts: sortKnownHosts(nextKnownHosts),
               auth: {
@@ -887,6 +905,7 @@ export const useMobileAppStore = create<MobileAppState>()(
                   ...createUnauthenticatedState(),
                   errorMessage: "세션이 만료되어 다시 로그인해야 합니다.",
                 },
+                groups: [],
                 hosts: [],
                 knownHosts: [],
                 secretMetadata: [],
@@ -936,6 +955,7 @@ export const useMobileAppStore = create<MobileAppState>()(
         auth: createUnauthenticatedState(),
         settings: createDefaultMobileSettings(),
         syncStatus: createDefaultSyncStatus(),
+        groups: [],
         hosts: [],
         knownHosts: [],
         secretMetadata: [],
@@ -978,6 +998,13 @@ export const useMobileAppStore = create<MobileAppState>()(
               if (!storedSession) {
                 set({
                   auth: createUnauthenticatedState(),
+                  groups: [],
+                  hosts: [],
+                  knownHosts: [],
+                  secretMetadata: [],
+                  secretsByRef: {},
+                  sessions: [],
+                  syncStatus: createDefaultSyncStatus(),
                 });
                 return;
               }
@@ -1022,6 +1049,13 @@ export const useMobileAppStore = create<MobileAppState>()(
                         ? error.message
                         : "로그인 세션을 복구하지 못했습니다.",
                   },
+                  groups: [],
+                  hosts: [],
+                  knownHosts: [],
+                  secretMetadata: [],
+                  secretsByRef: {},
+                  sessions: [],
+                  syncStatus: createDefaultSyncStatus(),
                 });
               }
             } finally {
@@ -1157,6 +1191,7 @@ export const useMobileAppStore = create<MobileAppState>()(
 
           set({
             auth: createUnauthenticatedState(),
+            groups: [],
             hosts: [],
             knownHosts: [],
             secretMetadata: [],
@@ -1208,6 +1243,7 @@ export const useMobileAppStore = create<MobileAppState>()(
                   ? "서버 주소가 변경되어 다시 로그인해 주세요."
                   : null,
               },
+              groups: [],
               hosts: [],
               knownHosts: [],
               secretMetadata: [],
@@ -1309,6 +1345,27 @@ export const useMobileAppStore = create<MobileAppState>()(
           disconnectRuntimeSession(sessionId);
           markSessionState(sessionId, "closed");
         },
+        removeSession: async (sessionId: string) => {
+          const runtime = runtimeSessions.get(sessionId);
+
+          set((state) => ({
+            sessions: sortSessions(
+              state.sessions.filter((session) => session.id !== sessionId),
+            ),
+          }));
+
+          if (!runtime) {
+            pendingSessionConnections.delete(sessionId);
+            disconnectRuntimeSession(sessionId);
+            return;
+          }
+
+          disconnectRuntimeSession(sessionId);
+
+          try {
+            await runtime.connection.disconnect();
+          } catch {}
+        },
         writeToSession: async (sessionId: string, data: string) => {
           const runtime = runtimeSessions.get(sessionId);
           if (!runtime) {
@@ -1380,6 +1437,7 @@ export const useMobileAppStore = create<MobileAppState>()(
       partialize: (state) => ({
         settings: state.settings,
         syncStatus: state.syncStatus,
+        groups: state.groups,
         hosts: state.hosts,
         knownHosts: state.knownHosts,
         secretMetadata: state.secretMetadata,
