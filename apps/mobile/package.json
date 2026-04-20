@@ -1,6 +1,6 @@
 {
   "name": "@dolssh/mobile",
-  "version": "1.4.1",
+  "version": "1.0.0",
   "private": true,
   "scripts": {
     "android": "node ./scripts/run-android.cjs",
