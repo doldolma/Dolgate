@@ -6,7 +6,7 @@ import { Buffer } from 'buffer';
  * @format
  */
 
-import { AppRegistry } from 'react-native';
+import { AppRegistry, LogBox } from 'react-native';
 import { ensureAwsRuntimeGlobals } from './src/lib/aws-runtime';
 import { name as appName } from './app.json';
 
@@ -15,6 +15,12 @@ if (typeof global.Buffer === 'undefined') {
 }
 
 ensureAwsRuntimeGlobals();
+
+LogBox.ignoreLogs([
+  'SafeAreaView has been deprecated',
+  'raiseSoftException(onWindowFocusChange',
+  'Tried to access onWindowFocusChange while context is not ready',
+]);
 
 const App = require('./App').default;
 

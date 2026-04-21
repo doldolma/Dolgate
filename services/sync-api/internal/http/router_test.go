@@ -229,8 +229,10 @@ func TestServerInfoEndpoint(t *testing.T) {
 		LocalSignupEnabled: true,
 		ServerVersion:      "2026.04.07-test",
 		AwsSsmRuntime: httpserver.AwsSsmRuntime{
-			Enabled: true,
+			Enabled:                    true,
+			AwsSsoBrowserFlowSupported: true,
 		},
+		AwsSsoBrowserFlow: true,
 	})
 
 	request := httptest.NewRequest(http.MethodGet, "/api/info", nil)
@@ -248,7 +250,8 @@ func TestServerInfoEndpoint(t *testing.T) {
 				AWSProfiles bool `json:"awsProfiles"`
 			} `json:"sync"`
 			Sessions struct {
-				AWSSsm bool `json:"awsSsm"`
+				AWSSsm            bool `json:"awsSsm"`
+				AWSSsoBrowserFlow bool `json:"awsSsoBrowserFlow"`
 			} `json:"sessions"`
 		} `json:"capabilities"`
 	}
@@ -263,6 +266,9 @@ func TestServerInfoEndpoint(t *testing.T) {
 	}
 	if !response.Capabilities.Sessions.AWSSsm {
 		t.Fatalf("expected awsSsm capability to be enabled")
+	}
+	if !response.Capabilities.Sessions.AWSSsoBrowserFlow {
+		t.Fatalf("expected awsSsoBrowserFlow capability to be enabled")
 	}
 }
 

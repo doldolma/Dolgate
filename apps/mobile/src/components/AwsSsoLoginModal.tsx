@@ -2,11 +2,11 @@ import React from "react";
 import {
   Modal,
   Pressable,
-  SafeAreaView,
   StyleSheet,
   Text,
   View,
 } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 import { WebView } from "react-native-webview";
 import { useMobilePalette } from "../theme";
 

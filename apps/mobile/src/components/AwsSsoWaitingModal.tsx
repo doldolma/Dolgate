@@ -3,11 +3,11 @@ import {
   ActivityIndicator,
   Modal,
   Pressable,
-  SafeAreaView,
   StyleSheet,
   Text,
   View,
 } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 import type { AwsSsoBrowserLoginPrompt } from "../lib/aws-session";
 import { useMobilePalette } from "../theme";
 
