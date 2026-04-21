@@ -1,5 +1,6 @@
 const path = require("path");
 const { spawnSync } = require("child_process");
+const { ensureMobileWorkspaceRuntime } = require("./prepare-runtime.cjs");
 
 const {
   appRoot,
@@ -19,6 +20,8 @@ const outputAppPath = path.join(
 );
 
 function main() {
+  ensureMobileWorkspaceRuntime();
+
   const iosEnv = buildEnvForIos(process.env);
 
   ensureXcodeAvailable(iosEnv);
