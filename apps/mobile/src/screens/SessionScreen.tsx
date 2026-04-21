@@ -1,14 +1,11 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Buffer } from "buffer";
 import {
-  NativeSyntheticEvent,
   Platform,
   Pressable,
   ScrollView,
   StyleSheet,
   Text,
-  TextInput,
-  TextInputKeyPressEventData,
   View,
   useWindowDimensions,
 } from "react-native";
@@ -17,66 +14,21 @@ import {
   XtermJsWebView,
   type XtermWebViewHandle,
 } from "@fressh/react-native-xtermjs-webview";
-import { formatRelativeTime } from "../lib/mobile";
+import { TerminalInputView } from "../components/TerminalInputView";
 import { useScreenPadding } from "../lib/screen-layout";
-import type { SessionScreenProps } from "../navigation/RootNavigator";
+import {
+  TERMINAL_SHORTCUTS,
+  translateTerminalInputEventToSequence,
+  type NativeTerminalInputEvent,
+} from "../lib/terminal-input";
+import { estimateTerminalGridSizeFromWindow } from "../lib/terminal-size";
 import { useMobileAppStore } from "../store/useMobileAppStore";
 import type { MobilePalette } from "../theme";
 import { useMobilePalette } from "../theme";
 
-const SESSION_SHORTCUTS = [
-  { label: "ESC", value: "\u001b" },
-  { label: "TAB", value: "\t" },
-  { label: "Ctrl+C", value: "\u0003" },
-  { label: "Up", value: "\u001b[A" },
-  { label: "Down", value: "\u001b[B" },
-  { label: "Left", value: "\u001b[D" },
-  { label: "Right", value: "\u001b[C" },
-  { label: "Enter", value: "\r" },
-] as const;
-
-const TERMINAL_BACKSPACE = "\u007f";
 const TERMINAL_RESET_BYTES = Uint8Array.from(
   Buffer.from("\u001b[3J\u001b[2J\u001b[H", "utf8"),
 );
-const NATIVE_SPECIAL_KEY_MAP: Record<string, string> = {
-  Tab: "\t",
-  Escape: "\u001b",
-  ArrowUp: "\u001b[A",
-  ArrowDown: "\u001b[B",
-  ArrowLeft: "\u001b[D",
-  ArrowRight: "\u001b[C",
-  UIKeyInputUpArrow: "\u001b[A",
-  UIKeyInputDownArrow: "\u001b[B",
-  UIKeyInputLeftArrow: "\u001b[D",
-  UIKeyInputRightArrow: "\u001b[C",
-};
-
-function buildTerminalSize(width: number, height: number) {
-  return {
-    cols: Math.max(32, Math.floor(width / 8)),
-    rows: Math.max(18, Math.floor(height / 18)),
-  };
-}
-
-function diffNativeInputValue(previousValue: string, nextValue: string) {
-  const previousChars = Array.from(previousValue);
-  const nextChars = Array.from(nextValue);
-  let prefixLength = 0;
-
-  while (
-    prefixLength < previousChars.length &&
-    prefixLength < nextChars.length &&
-    previousChars[prefixLength] === nextChars[prefixLength]
-  ) {
-    prefixLength += 1;
-  }
-
-  return {
-    deleteCount: previousChars.length - prefixLength,
-    insertText: nextChars.slice(prefixLength).join(""),
-  };
-}
 
 function resetTerminalViewport(terminal: XtermWebViewHandle) {
   terminal.write(TERMINAL_RESET_BYTES);
@@ -109,33 +61,30 @@ function getSessionStatusMeta(status: string, palette: MobilePalette) {
   }
 }
 
-export function SessionScreen({
-  navigation,
-  route,
-}: SessionScreenProps): React.JSX.Element {
-  const { sessionId } = route.params;
+function isLiveSession(status: string) {
+  return status !== "closed";
+}
+
+export function SessionScreen(): React.JSX.Element {
   const palette = useMobilePalette();
   const screenPadding = useScreenPadding({
     horizontal: 0,
-    topOffset: 8,
-    topMin: 18,
-    bottomOffset: 8,
-    bottomMin: 12,
+    topOffset: 4,
+    topMin: 12,
+    includeSafeBottom: false,
+    bottomOffset: 4,
+    bottomMin: 4,
   });
   const { width, height } = useWindowDimensions();
   const terminalRef = useRef<XtermWebViewHandle | null>(null);
-  const nativeInputRef = useRef<TextInput | null>(null);
-  const nativeInputValueRef = useRef("");
-  const hasAttemptedInitialResumeRef = useRef(false);
   const [terminalReady, setTerminalReady] = useState(false);
-  const [menuOpen, setMenuOpen] = useState(false);
-  const [nativeInputValue, setNativeInputValue] = useState("");
+  const [nativeInputFocusToken, setNativeInputFocusToken] = useState(0);
+  const [nativeInputClearToken, setNativeInputClearToken] = useState(0);
   const useNativeTerminalInput = Platform.OS === "ios";
-  const session = useMobileAppStore((state) =>
-    state.sessions.find((item) => item.id === sessionId),
-  );
-  const host = useMobileAppStore((state) =>
-    state.hosts.find((item) => item.id === session?.hostId),
+  const sessions = useMobileAppStore((state) => state.sessions);
+  const activeSessionTabId = useMobileAppStore((state) => state.activeSessionTabId);
+  const setActiveSessionTab = useMobileAppStore(
+    (state) => state.setActiveSessionTab,
   );
   const resumeSession = useMobileAppStore((state) => state.resumeSession);
   const disconnectSession = useMobileAppStore((state) => state.disconnectSession);
@@ -143,8 +92,30 @@ export function SessionScreen({
   const subscribeToSessionTerminal = useMobileAppStore(
     (state) => state.subscribeToSessionTerminal,
   );
+
+  const liveSessions = useMemo(
+    () => sessions.filter((session) => isLiveSession(session.status)),
+    [sessions],
+  );
+
+  useEffect(() => {
+    const nextActiveSessionId =
+      (activeSessionTabId &&
+      liveSessions.some((session) => session.id === activeSessionTabId)
+        ? activeSessionTabId
+        : liveSessions[0]?.id) ?? null;
+
+    if (nextActiveSessionId !== activeSessionTabId) {
+      setActiveSessionTab(nextActiveSessionId);
+    }
+  }, [activeSessionTabId, liveSessions, setActiveSessionTab]);
+
+  const activeSession =
+    liveSessions.find((session) => session.id === activeSessionTabId) ??
+    liveSessions[0] ??
+    null;
   const terminalSize = useMemo(
-    () => buildTerminalSize(width, height - 176),
+    () => estimateTerminalGridSizeFromWindow(width, height),
     [height, width],
   );
   const terminalLogger = useMemo(
@@ -163,60 +134,21 @@ export function SessionScreen({
   );
 
   useEffect(() => {
-    if (!session || hasAttemptedInitialResumeRef.current) {
-      return;
-    }
-    hasAttemptedInitialResumeRef.current = true;
-    if (
-      session.status === "connected" ||
-      session.status === "connecting" ||
-      session.status === "disconnecting"
-    ) {
-      return;
-    }
-    void resumeSession(sessionId);
-  }, [resumeSession, session, sessionId]);
-
-  useEffect(() => {
-    if (!terminalReady || !session || session.status === "connected") {
-      return;
-    }
-
-    const terminal = terminalRef.current;
-    if (!terminal) {
-      return;
-    }
-
-    resetTerminalViewport(terminal);
-    if (session.lastViewportSnapshot) {
-      terminal.write(
-        Uint8Array.from(Buffer.from(session.lastViewportSnapshot, "utf8")),
-      );
-    }
-  }, [
-    session,
-    session?.id,
-    session?.lastViewportSnapshot,
-    session?.status,
-    terminalReady,
-  ]);
-
-  useEffect(() => {
-    if (!useNativeTerminalInput) {
+    if (!useNativeTerminalInput || !activeSession) {
       return;
     }
 
     const timer = setTimeout(() => {
-      nativeInputRef.current?.focus();
+      setNativeInputFocusToken((value) => value + 1);
     }, 120);
 
     return () => {
       clearTimeout(timer);
     };
-  }, [sessionId, useNativeTerminalInput]);
+  }, [activeSession?.id, useNativeTerminalInput]);
 
   useEffect(() => {
-    if (!terminalReady || !session || session.status !== "connected") {
+    if (!terminalReady || !activeSession || activeSession.status === "connected") {
       return;
     }
 
@@ -226,14 +158,38 @@ export function SessionScreen({
     }
 
     resetTerminalViewport(terminal);
-    const unsubscribe = subscribeToSessionTerminal(session.id, {
+    if (activeSession.lastViewportSnapshot) {
+      terminal.write(
+        Uint8Array.from(Buffer.from(activeSession.lastViewportSnapshot, "utf8")),
+      );
+    }
+  }, [
+    activeSession,
+    activeSession?.id,
+    activeSession?.lastViewportSnapshot,
+    activeSession?.status,
+    terminalReady,
+  ]);
+
+  useEffect(() => {
+    if (!terminalReady || !activeSession || activeSession.status !== "connected") {
+      return;
+    }
+
+    const terminal = terminalRef.current;
+    if (!terminal) {
+      return;
+    }
+
+    resetTerminalViewport(terminal);
+    const unsubscribe = subscribeToSessionTerminal(activeSession.id, {
       onReplay: (chunks) => {
         resetTerminalViewport(terminal);
         if (chunks.length > 0) {
           terminal.writeMany(chunks);
         }
         if (useNativeTerminalInput) {
-          nativeInputRef.current?.focus();
+          setNativeInputFocusToken((value) => value + 1);
           return;
         }
         terminal.focus();
@@ -245,116 +201,98 @@ export function SessionScreen({
 
     return unsubscribe;
   }, [
-    session,
-    session?.id,
-    session?.status,
+    activeSession,
+    activeSession?.id,
+    activeSession?.status,
     subscribeToSessionTerminal,
     terminalReady,
     useNativeTerminalInput,
   ]);
 
-  if (!session) {
-    return (
-      <View
-        style={[
-          styles.centered,
-          {
-            backgroundColor: palette.sessionChrome,
-          },
-        ]}
-      >
-        <Text style={[styles.fallbackTitle, { color: palette.text }]}>
-          세션을 찾을 수 없습니다.
-        </Text>
-      </View>
-    );
-  }
+  useEffect(() => {
+    if (useNativeTerminalInput || !terminalReady || activeSession?.status !== "connected") {
+      return;
+    }
 
-  const statusMeta = getSessionStatusMeta(session.status, palette);
-  const hostConnectionDetails = host
-    ? `${host.username}@${host.hostname}:${host.port}`
-    : "연결 정보 없음";
+    terminalRef.current?.focus();
+  }, [
+    activeSession?.id,
+    activeSession?.status,
+    terminalReady,
+    useNativeTerminalInput,
+  ]);
 
   const focusNativeInput = () => {
     if (!useNativeTerminalInput) {
+      terminalRef.current?.focus();
       return;
     }
     requestAnimationFrame(() => {
-      nativeInputRef.current?.focus();
+      setNativeInputFocusToken((value) => value + 1);
     });
   };
 
   const resetNativeInputBuffer = () => {
-    nativeInputValueRef.current = "";
-    setNativeInputValue("");
-  };
-
-  const sendSessionInput = (value: string) => {
-    if (!value) {
-      return;
-    }
-    void writeToSession(session.id, value);
-  };
-
-  const sendShortcut = (value: string) => {
-    sendSessionInput(value);
-    if (useNativeTerminalInput) {
-      resetNativeInputBuffer();
-      focusNativeInput();
-    }
-  };
-
-  const handleNativeInputChange = (nextValue: string) => {
-    const normalizedValue = nextValue.replace(/[\r\n]/g, "");
-    const previousValue = nativeInputValueRef.current;
-    if (normalizedValue === previousValue) {
-      return;
-    }
-
-    const { deleteCount, insertText } = diffNativeInputValue(
-      previousValue,
-      normalizedValue,
-    );
-    nativeInputValueRef.current = normalizedValue;
-    setNativeInputValue(normalizedValue);
-
-    const payload = `${TERMINAL_BACKSPACE.repeat(deleteCount)}${insertText}`;
-    sendSessionInput(payload);
-  };
-
-  const handleNativeInputKeyPress = (
-    event: NativeSyntheticEvent<TextInputKeyPressEventData>,
-  ) => {
     if (!useNativeTerminalInput) {
       return;
     }
-
-    const { key } = event.nativeEvent;
-    const mappedKey = NATIVE_SPECIAL_KEY_MAP[key];
-    if (mappedKey) {
-      sendSessionInput(mappedKey);
-      return;
-    }
-
-    if (key === "Backspace" && nativeInputValueRef.current.length === 0) {
-      sendSessionInput(TERMINAL_BACKSPACE);
-      return;
-    }
+    setNativeInputClearToken((value) => value + 1);
   };
 
-  const handleNativeInputSubmit = () => {
-    sendSessionInput("\r");
+  const sendSessionInput = (value: string) => {
+    if (!value || !activeSession) {
+      return;
+    }
+    void writeToSession(activeSession.id, value);
+  };
+
+  const sendTranslatedInput = (event: NativeTerminalInputEvent) => {
+    const payload = translateTerminalInputEventToSequence(event);
+    if (!payload) {
+      return;
+    }
+    sendSessionInput(payload);
+  };
+
+  const sendShortcut = (event: NativeTerminalInputEvent) => {
+    sendTranslatedInput(event);
     resetNativeInputBuffer();
+    focusNativeInput();
   };
 
-  const handleGoBack = () => {
-    if (navigation.canGoBack()) {
-      navigation.goBack();
-      return;
-    }
-    navigation.replace("MainTabs");
-  };
-
+  if (!activeSession) {
+    return (
+      <View
+        style={[
+          styles.screen,
+          styles.centered,
+          {
+            backgroundColor: palette.sessionChrome,
+            paddingTop: screenPadding.paddingTop,
+            paddingBottom: screenPadding.paddingBottom,
+            paddingHorizontal: 14,
+          },
+        ]}
+      >
+        <View
+          style={[
+            styles.emptyCard,
+            {
+              backgroundColor: palette.surface,
+              borderColor: palette.sessionSurfaceBorder,
+            },
+          ]}
+        >
+          <Text style={[styles.emptyTitle, { color: palette.text }]}>
+            열린 세션이 없습니다.
+          </Text>
+          <Text style={[styles.emptyBody, { color: palette.mutedText }]}>
+            Home에서 호스트를 열면 여기에 현재 연결 탭이 표시됩니다.
+          </Text>
+        </View>
+      </View>
+    );
+  }
   return (
     <View
       style={[
@@ -365,157 +303,111 @@ export function SessionScreen({
         },
       ]}
     >
-      <View style={[styles.headerShell, { paddingHorizontal: 16 }]}>
-        <View
-          style={[
-            styles.headerRow,
-            {
-              backgroundColor: palette.surface,
-              borderColor: palette.sessionSurfaceBorder,
-            },
-          ]}
+      <View style={styles.tabStripShell}>
+        <ScrollView
+          horizontal
+          contentContainerStyle={styles.tabStrip}
+          showsHorizontalScrollIndicator={false}
         >
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="세션 뒤로가기"
-            hitSlop={10}
-            onPress={handleGoBack}
-            style={[
-              styles.iconButton,
-              {
-                backgroundColor: palette.surfaceAlt,
-                borderColor: palette.sessionSurfaceBorder,
-              },
-            ]}
-          >
-            <Ionicons name="chevron-back" size={20} color={palette.text} />
-          </Pressable>
-
-          <View style={styles.headerCenter}>
-            <Text
-              numberOfLines={1}
-              style={[styles.headerTitle, { color: palette.text }]}
-            >
-              {host?.label ?? session.title}
-            </Text>
-            <View style={styles.statusRow}>
-              <View
-                style={[
-                  styles.statusDot,
-                  {
-                    backgroundColor: statusMeta.color,
-                  },
-                ]}
-              />
-              <Text style={[styles.statusText, { color: palette.mutedText }]}>
-                {statusMeta.label} • {formatRelativeTime(session.lastEventAt)}
-              </Text>
-            </View>
-          </View>
-
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="세션 메뉴 열기"
-            hitSlop={10}
-            onPress={() => setMenuOpen((value) => !value)}
-            style={[
-              styles.iconButton,
-              {
-                backgroundColor: palette.surfaceAlt,
-                borderColor: palette.sessionSurfaceBorder,
-              },
-            ]}
-          >
-            <Ionicons
-              name={menuOpen ? "close-outline" : "ellipsis-horizontal"}
-              size={20}
-              color={palette.text}
-            />
-          </Pressable>
-        </View>
-
-        {menuOpen ? (
-          <View
-            style={[
-              styles.menuCard,
-              {
-                backgroundColor: palette.sessionMenuSurface,
-                borderColor: palette.sessionSurfaceBorder,
-              },
-            ]}
-          >
-            <Text style={[styles.menuTitle, { color: palette.text }]}>
-              {host?.label ?? session.title}
-            </Text>
-            <Text style={[styles.menuBody, { color: palette.mutedText }]}>
-              {hostConnectionDetails}
-            </Text>
-            <Text style={[styles.menuBody, { color: palette.mutedText }]}>
-              {statusMeta.label} • {formatRelativeTime(session.lastEventAt)}
-            </Text>
-            <View style={styles.menuActions}>
+          {liveSessions.map((session) => {
+            const tabStatus = getSessionStatusMeta(session.status, palette);
+            const isActive = session.id === activeSession.id;
+            return (
               <Pressable
+                key={session.id}
                 accessibilityRole="button"
-                accessibilityLabel="세션 재연결"
-                onPress={async () => {
-                  setMenuOpen(false);
-                  await resumeSession(session.id);
+                accessibilityLabel={`${session.title} ${tabStatus.label} 세션 탭`}
+                onPress={() => {
+                  setActiveSessionTab(session.id);
+                  focusNativeInput();
                 }}
                 style={[
-                  styles.menuActionButton,
+                  styles.sessionTab,
                   {
-                    backgroundColor: palette.surfaceAlt,
-                    borderColor: palette.sessionSurfaceBorder,
+                    backgroundColor: isActive
+                      ? palette.surface
+                      : palette.surfaceAlt,
+                    borderColor: isActive
+                      ? palette.sessionSurfaceBorder
+                      : palette.sessionToolbarBorder,
                   },
                 ]}
               >
-                <Text style={[styles.menuActionText, { color: palette.text }]}>
-                  재연결
-                </Text>
-              </Pressable>
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel="세션 연결 종료"
-                onPress={async () => {
-                  setMenuOpen(false);
-                  await disconnectSession(session.id);
-                }}
-                style={[
-                  styles.menuActionButton,
-                  {
-                    backgroundColor: palette.surfaceAlt,
-                    borderColor: palette.sessionSurfaceBorder,
-                  },
-                ]}
-              >
-                <Text
+                <View
                   style={[
-                    styles.menuActionText,
-                    { color: palette.sessionStatusError },
+                    styles.sessionTabStatusDot,
+                    { backgroundColor: tabStatus.color },
+                  ]}
+                />
+                <Text
+                  numberOfLines={1}
+                  style={[
+                    styles.sessionTabTitle,
+                    { color: isActive ? palette.text : palette.mutedText },
                   ]}
                 >
-                  연결 종료
+                  {session.title}
                 </Text>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={`${session.title} 세션 닫기`}
+                  hitSlop={8}
+                  onPress={async (event) => {
+                    event.stopPropagation();
+                    await disconnectSession(session.id);
+                  }}
+                  style={styles.sessionTabCloseButton}
+                >
+                  <Ionicons
+                    name="close"
+                    size={14}
+                    color={isActive ? palette.text : palette.mutedText}
+                  />
+                </Pressable>
               </Pressable>
-            </View>
-          </View>
-        ) : null}
+            );
+          })}
+        </ScrollView>
       </View>
 
-      {session.errorMessage ? (
+      {activeSession.errorMessage ? (
         <View
           style={[
             styles.inlineBanner,
             {
               backgroundColor: palette.surface,
               borderColor: palette.sessionStatusError,
-              marginHorizontal: 16,
+              marginHorizontal: 4,
             },
           ]}
         >
-          <Text style={[styles.inlineBannerText, { color: palette.text }]}>
-            {session.errorMessage}
-          </Text>
+          <View style={styles.inlineBannerCopy}>
+            <Text style={[styles.inlineBannerTitle, { color: palette.text }]}>
+              {activeSession.title}
+            </Text>
+            <Text style={[styles.inlineBannerText, { color: palette.mutedText }]}>
+              {activeSession.errorMessage}
+            </Text>
+          </View>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={`${activeSession.title} 세션 재연결`}
+            onPress={async () => {
+              await resumeSession(activeSession.id);
+              focusNativeInput();
+            }}
+            style={[
+              styles.inlineBannerButton,
+              {
+                backgroundColor: palette.surfaceAlt,
+                borderColor: palette.sessionSurfaceBorder,
+              },
+            ]}
+          >
+            <Text style={[styles.inlineBannerButtonText, { color: palette.text }]}>
+              재연결
+            </Text>
+          </Pressable>
         </View>
       ) : null}
 
@@ -525,13 +417,14 @@ export function SessionScreen({
           {
             backgroundColor: palette.sessionTerminalBg,
             borderColor: palette.sessionSurfaceBorder,
-            marginHorizontal: 12,
+            marginHorizontal: 2,
           },
         ]}
       >
         <XtermJsWebView
           ref={terminalRef}
           style={styles.terminal}
+          autoFit={false}
           logger={terminalLogger}
           webViewOptions={{
             hideKeyboardAccessoryView: true,
@@ -556,26 +449,17 @@ export function SessionScreen({
           }}
         />
         {useNativeTerminalInput ? (
-          <TextInput
-            ref={nativeInputRef}
-            value={nativeInputValue}
-            onChangeText={handleNativeInputChange}
-            onKeyPress={handleNativeInputKeyPress}
-            onFocus={() => setMenuOpen(false)}
-            autoCapitalize="none"
-            autoCorrect={false}
-            blurOnSubmit={false}
-            caretHidden
-            contextMenuHidden
-            multiline={false}
-            onSubmitEditing={handleNativeInputSubmit}
-            selection={{
-              start: nativeInputValue.length,
-              end: nativeInputValue.length,
+          <TerminalInputView
+            clearToken={nativeInputClearToken}
+            focusToken={nativeInputFocusToken}
+            focused
+            onTerminalInput={(event) => {
+              sendTranslatedInput(event.nativeEvent);
+              if (event.nativeEvent.kind === "special-key") {
+                resetNativeInputBuffer();
+              }
+              focusNativeInput();
             }}
-            selectionColor="transparent"
-            submitBehavior="submit"
-            spellCheck={false}
             style={styles.nativeTerminalInput}
           />
         ) : null}
@@ -597,10 +481,10 @@ export function SessionScreen({
           contentContainerStyle={styles.toolbar}
           showsHorizontalScrollIndicator={false}
         >
-          {SESSION_SHORTCUTS.map((item) => (
+          {TERMINAL_SHORTCUTS.map((item) => (
             <Pressable
               key={item.label}
-              onPress={() => sendShortcut(item.value)}
+              onPress={() => sendShortcut(item.event)}
               style={[
                 styles.toolbarButton,
                 {
@@ -609,12 +493,7 @@ export function SessionScreen({
                 },
               ]}
             >
-              <Text
-                style={[
-                  styles.toolbarButtonText,
-                  { color: palette.sessionToolbarActive },
-                ]}
-              >
+              <Text style={[styles.toolbarButtonText, { color: palette.text }]}>
                 {item.label}
               </Text>
             </Pressable>
@@ -630,121 +509,99 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   centered: {
-    flex: 1,
     justifyContent: "center",
     alignItems: "center",
   },
-  fallbackTitle: {
-    fontSize: 22,
-    fontWeight: "900",
-  },
-  headerShell: {
-    position: "relative",
-    zIndex: 20,
-  },
-  headerRow: {
-    minHeight: 58,
+  emptyCard: {
+    width: "100%",
     borderWidth: 1,
-    borderRadius: 22,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 12,
+    borderRadius: 18,
+    paddingHorizontal: 18,
+    paddingVertical: 16,
+    gap: 6,
   },
-  iconButton: {
-    width: 42,
-    height: 42,
+  emptyTitle: {
+    fontSize: 20,
+    fontWeight: "800",
+  },
+  emptyBody: {
+    fontSize: 14,
+    lineHeight: 20,
+  },
+  tabStripShell: {
+    paddingHorizontal: 4,
+  },
+  tabStrip: {
+    paddingHorizontal: 2,
+    gap: 8,
+  },
+  sessionTab: {
+    minWidth: 124,
+    maxWidth: 220,
     borderWidth: 1,
-    borderRadius: 16,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  headerCenter: {
-    flex: 1,
-    alignItems: "center",
-    gap: 3,
-  },
-  headerTitle: {
-    fontSize: 18,
-    fontWeight: "700",
-    letterSpacing: -0.2,
-  },
-  statusRow: {
+    borderRadius: 14,
+    paddingLeft: 10,
+    paddingRight: 6,
+    paddingVertical: 8,
     flexDirection: "row",
     alignItems: "center",
     gap: 7,
   },
-  statusDot: {
+  sessionTabStatusDot: {
     width: 7,
     height: 7,
     borderRadius: 999,
   },
-  statusText: {
-    fontSize: 12,
-    lineHeight: 16,
-    fontWeight: "600",
-  },
-  menuCard: {
-    position: "absolute",
-    top: 54,
-    right: 16,
-    width: 250,
-    borderWidth: 1,
-    borderRadius: 18,
-    padding: 14,
-    gap: 8,
-    shadowColor: "#061019",
-    shadowOffset: {
-      width: 0,
-      height: 12,
-    },
-    shadowOpacity: 0.14,
-    shadowRadius: 24,
-    elevation: 8,
-  },
-  menuTitle: {
-    fontSize: 16,
-    fontWeight: "700",
-  },
-  menuBody: {
-    fontSize: 13,
-    lineHeight: 18,
-  },
-  menuActions: {
-    flexDirection: "row",
-    gap: 8,
-    marginTop: 4,
-  },
-  menuActionButton: {
+  sessionTabTitle: {
     flex: 1,
-    borderWidth: 1,
-    borderRadius: 14,
-    paddingVertical: 11,
-    paddingHorizontal: 12,
-    alignItems: "center",
-  },
-  menuActionText: {
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: "700",
+    letterSpacing: -0.1,
+  },
+  sessionTabCloseButton: {
+    width: 22,
+    height: 22,
+    alignItems: "center",
+    justifyContent: "center",
   },
   inlineBanner: {
-    marginTop: 10,
+    marginTop: 6,
     borderWidth: 1,
-    borderRadius: 16,
-    paddingHorizontal: 14,
+    borderRadius: 14,
+    paddingHorizontal: 12,
     paddingVertical: 10,
+    marginBottom: 2,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+  },
+  inlineBannerCopy: {
+    flex: 1,
+    gap: 2,
+  },
+  inlineBannerTitle: {
+    fontSize: 13,
+    fontWeight: "700",
   },
   inlineBannerText: {
-    fontSize: 13,
-    lineHeight: 18,
-    fontWeight: "600",
+    fontSize: 12,
+    lineHeight: 16,
+  },
+  inlineBannerButton: {
+    borderWidth: 1,
+    borderRadius: 11,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  inlineBannerButtonText: {
+    fontSize: 12,
+    fontWeight: "700",
   },
   terminalCard: {
     flex: 1,
-    marginTop: 10,
+    marginTop: 4,
     borderWidth: 1,
-    borderRadius: 24,
+    borderRadius: 6,
     overflow: "hidden",
     minHeight: 240,
   },
@@ -753,33 +610,30 @@ const styles = StyleSheet.create({
   },
   nativeTerminalInput: {
     ...StyleSheet.absoluteFill,
-    backgroundColor: "transparent",
-    color: "transparent",
-    opacity: 0.015,
   },
   toolbarShell: {
-    marginTop: 12,
+    marginTop: 6,
     borderTopWidth: 1,
-    paddingTop: 10,
+    paddingTop: 5,
   },
   toolbarScroll: {
     flexGrow: 0,
   },
   toolbar: {
-    paddingHorizontal: 12,
-    gap: 8,
+    paddingHorizontal: 6,
+    gap: 6,
   },
   toolbarButton: {
-    minWidth: 58,
-    minHeight: 40,
-    borderRadius: 14,
+    minWidth: 52,
+    minHeight: 32,
+    borderRadius: 12,
     borderWidth: 1,
-    paddingHorizontal: 14,
+    paddingHorizontal: 12,
     alignItems: "center",
     justifyContent: "center",
   },
   toolbarButtonText: {
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: "700",
     letterSpacing: -0.1,
   },

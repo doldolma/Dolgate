@@ -57,11 +57,33 @@ func main() {
 	if err != nil {
 		log.Fatalf("create auth service: %v", err)
 	}
+	awsSsmRuntime := httpserver.DetectAwsSsmRuntime()
+	awsSsoBrowserFlowEnabled := strings.TrimSpace(awsSsmRuntime.AWSPath) != ""
+	var awsSessionBridge *httpserver.AwsSessionBridge
+	if awsSsmRuntime.Enabled {
+		awsSessionBridge = httpserver.NewAwsSessionBridge()
+		defer awsSessionBridge.Close()
+	}
+	var awsSsoMobileManager *httpserver.AwsSsoMobileManager
+	if awsSsoBrowserFlowEnabled {
+		awsSsoMobileManager = httpserver.NewAwsSsoMobileManager(awsSsmRuntime)
+	}
+	if awsSsmRuntime.Enabled {
+		log.Printf(
+			"AWS SSM runtime enabled (aws=%s, plugin=%s)",
+			awsSsmRuntime.AWSPath,
+			awsSsmRuntime.SessionManagerPluginPath,
+		)
+	} else {
+		log.Printf("AWS SSM runtime unavailable: %s", strings.Join(awsSsmRuntime.MissingTools, ", "))
+	}
 	router, err := httpserver.NewRouter(dbStore, authService, httpserver.RouterConfig{
 		LocalAuthEnabled:   cfg.Auth.Local.Enabled,
 		LocalSignupEnabled: cfg.Auth.Local.SignupEnabled,
 		TrustedProxies:     cfg.Server.TrustedProxies,
 		ServerVersion:      version,
+		AwsSsmRuntime:      awsSsmRuntime,
+		AwsSsoBrowserFlow:  awsSsoBrowserFlowEnabled,
 		RateLimit: httpserver.AuthRateLimitConfig{
 			Login: httpserver.RateLimitRuleConfig{
 				Limit:         cfg.Auth.RateLimit.Login.Limit,
@@ -89,6 +111,8 @@ func main() {
 			RedirectURL:  cfg.Auth.OIDC.RedirectURL,
 			Scopes:       cfg.Auth.OIDC.Scopes,
 		},
+		AwsSsoMobile:     awsSsoMobileManager,
+		AwsSessionBridge: awsSessionBridge,
 	})
 	if err != nil {
 		log.Fatalf("create router: %v", err)

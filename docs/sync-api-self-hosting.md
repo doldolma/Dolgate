@@ -87,7 +87,7 @@ volumes:
 예:
 
 ```yaml
-image: ghcr.io/doldolma/dolgate-sync-api:1.2.4
+image: ghcr.io/doldolma/dolgate-sync-api:X.Y.Z
 ```
 
 업데이트 절차:

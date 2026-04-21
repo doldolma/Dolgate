@@ -14,16 +14,16 @@ import {
   getHostSearchText,
   getHostSubtitle,
   getParentGroupPath,
+  type HostRecord,
   isDirectHostChild,
   normalizeGroupPath,
   type GroupCardView,
-  type SshHostRecord,
 } from "@dolssh/shared-core";
 import { useNavigation } from "@react-navigation/native";
 import type { NavigationProp } from "@react-navigation/native";
 import Ionicons from "react-native-vector-icons/Ionicons";
 import { formatRelativeTime } from "../lib/mobile";
-import type { RootStackParamList } from "../navigation/RootNavigator";
+import type { MainTabParamList } from "../navigation/RootNavigator";
 import { useScreenPadding } from "../lib/screen-layout";
 import { useMobileAppStore } from "../store/useMobileAppStore";
 import { useMobilePalette } from "../theme";
@@ -35,14 +35,14 @@ type HomeListItem =
     }
   | {
       kind: "host";
-      host: SshHostRecord;
+      host: HostRecord;
       showGroupMeta: boolean;
     };
 
 export function HomeScreen(): React.JSX.Element {
   const palette = useMobilePalette();
   const screenPadding = useScreenPadding();
-  const navigation = useNavigation<NavigationProp<RootStackParamList>>();
+  const navigation = useNavigation<NavigationProp<MainTabParamList>>();
   const [query, setQuery] = useState("");
   const [currentGroupPath, setCurrentGroupPath] = useState<string | null>(null);
   const groups = useMobileAppStore((state) => state.groups);
@@ -84,7 +84,7 @@ export function HomeScreen(): React.JSX.Element {
     }
   }, [availableGroupPaths, currentGroupPath]);
 
-  const sortHosts = (nextHosts: SshHostRecord[]) =>
+  const sortHosts = (nextHosts: HostRecord[]) =>
     [...nextHosts].sort((left, right) => {
       const leftRecent = recentActivityByHostId.get(left.id) ?? "";
       const rightRecent = recentActivityByHostId.get(right.id) ?? "";
@@ -166,12 +166,12 @@ export function HomeScreen(): React.JSX.Element {
       };
     }
     return {
-      title: "아직 SSH 호스트가 없습니다.",
+      title: "아직 호스트가 없습니다.",
       body: "여기에 접속 가능한 호스트 목록이 표시됩니다.",
     };
   }, [currentGroupPath, isSearching]);
 
-  const getSearchGroupMeta = (host: SshHostRecord): string | null => {
+  const getSearchGroupMeta = (host: HostRecord): string | null => {
     const groupPath = normalizeGroupPath(host.groupName);
     if (!groupPath) {
       return null;
@@ -183,13 +183,28 @@ export function HomeScreen(): React.JSX.Element {
     return groupPath;
   };
 
-  const getCompactHostMeta = (host: SshHostRecord): string => {
+  const getCompactHostMeta = (host: HostRecord): string => {
     const subtitle = getHostSubtitle(host);
     const recentActivity = recentActivityByHostId.get(host.id);
     const activityLabel = recentActivity
       ? `최근 사용 ${formatRelativeTime(recentActivity)}`
       : "세션 없음";
     return `${subtitle} • ${activityLabel}`;
+  };
+
+  const getHomeHostBadgeLabel = (host: HostRecord): string => {
+    switch (host.kind) {
+      case "aws-ec2":
+        return "AWS SSM";
+      case "aws-ecs":
+        return "ECS";
+      case "warpgate-ssh":
+        return "WARP";
+      case "serial":
+        return "SER";
+      default:
+        return "SSH";
+    }
   };
 
   return (
@@ -345,7 +360,7 @@ export function HomeScreen(): React.JSX.Element {
               onPress={async () => {
                 const sessionId = await connectToHost(item.host.id);
                 if (sessionId) {
-                  navigation.navigate("Session", { sessionId });
+                  navigation.navigate("Sessions");
                 }
               }}
               style={[
@@ -372,7 +387,7 @@ export function HomeScreen(): React.JSX.Element {
                   ]}
                 >
                   <Text style={[styles.badgeText, { color: palette.accent }]}>
-                    SSH
+                    {getHomeHostBadgeLabel(item.host)}
                   </Text>
                 </View>
               </View>
@@ -496,13 +511,18 @@ const styles = StyleSheet.create({
   },
   badge: {
     borderRadius: 999,
+    minWidth: 40,
     paddingHorizontal: 8,
     paddingVertical: 4,
+    flexShrink: 0,
+    alignItems: "center",
+    justifyContent: "center",
   },
   badgeText: {
     fontSize: 10,
     fontWeight: "700",
     letterSpacing: 0.2,
+    flexShrink: 0,
   },
   emptyCard: {
     borderWidth: 1,

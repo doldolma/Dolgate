@@ -129,6 +129,7 @@ describe("ConnectionsScreen", () => {
       knownHosts: [],
       secretMetadata: [],
       sessions,
+      activeSessionTabId: "session-live",
       secretsByRef: {},
       pendingBrowserLoginState: null,
       pendingServerKeyPrompt: null,
@@ -184,9 +185,7 @@ describe("ConnectionsScreen", () => {
     expect(useMobileAppStore.getState().resumeSession).toHaveBeenCalledWith(
       "session-live",
     );
-    expect(mockNavigate).toHaveBeenCalledWith("Session", {
-      sessionId: "session-live",
-    });
+    expect(mockNavigate).toHaveBeenCalledWith("Sessions");
 
     await act(async () => {
       tree!.unmount();

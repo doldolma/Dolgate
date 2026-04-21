@@ -60,6 +60,7 @@ function resetStore(authState: AuthState): void {
     knownHosts: [],
     secretMetadata: [],
     sessions: [],
+    activeSessionTabId: null,
     secretsByRef: {},
     pendingBrowserLoginState: null,
     pendingServerKeyPrompt: null,
@@ -97,7 +98,7 @@ describe("RootNavigator auth gating", () => {
     expect(text).not.toContain(
       "로그인 후에만 동기화된 SSH 호스트와 세션을 사용할 수 있습니다.",
     );
-    expect(text).not.toContain("Connections");
+    expect(text).not.toContain("Sessions");
     expect(
       tree!.root.findAll((node) => String(node.type) === "Ionicons"),
     ).toHaveLength(1);
@@ -149,9 +150,9 @@ describe("RootNavigator auth gating", () => {
 
     const text = collectText(tree!.toJSON());
     expect(text).toContain("Home");
-    expect(text).toContain("Connections");
+    expect(text).toContain("Sessions");
     expect(text).toContain("Settings");
-    expect(text).toContain("아직 SSH 호스트가 없습니다.");
+    expect(text).toContain("아직 호스트가 없습니다.");
     expect(text).not.toContain("Sync 상태");
     expect(text).not.toContain("지금 동기화");
     expect(

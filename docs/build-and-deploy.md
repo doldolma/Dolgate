@@ -1,64 +1,14 @@
 # Dolgate 빌드 및 배포 가이드
 
-복잡한 사용자 흐름은 [feature-flows](./feature-flows.md) 문서를 함께 참고하세요.
+이 문서는 저장소 공통 버전 정책과 빌드/배포 절차만 다룹니다.  
+앱별 기능과 로컬 사용법은 [desktop](./desktop.md), [mobile](./mobile.md) 문서를 참고하세요.
 
 ## 한눈에 보기
 
-- 데스크톱 앱과 `sync-api`는 별개로 배포합니다.
-- `ssh-core`는 앱 시작 시 항상 뜨지 않고, SSH/SFTP/포트 포워딩이 필요할 때 lazily 시작합니다.
-- 데스크톱 로그인은 외부 식별자 `dolgate://auth/callback`을 가지지만, 실제 브라우저 교환은 loopback callback을 사용할 수 있습니다.
-- 자동 업데이트는 공개 GitHub Releases `doldolma/dolgate`를 기준으로 동작합니다.
-- AWS SFTP를 쓰려면 `aws-cli`, `session-manager-plugin`, Linux 인스턴스, SSM managed 상태, EIC 가능 조건이 필요합니다.
-
-## 런타임 구성
-
-### 데스크톱 앱
-
-- Electron `main`, `preload`, `renderer`로 구성됩니다.
-- 로컬 상태와 로그는 파일 기반 저장소에 유지합니다.
-- `ssh-core`와는 stdio framed protocol로 통신합니다.
-- auto update는 `electron-updater`가 GitHub Releases를 조회하는 구조입니다.
-
-### ssh-core는 언제 실행되나
-
-현재 구현에서는 Electron 창이 뜬다고 곧바로 `ssh-core`를 띄우지 않습니다.
-
-다음과 같은 실제 작업이 필요할 때 child process를 lazily 시작합니다.
-
-- SSH 터미널 연결
-- SFTP endpoint 연결과 원격 파일 작업
-- 포트 포워딩 시작
-
-즉, 사용자가 별도로 `ssh-core`를 켤 필요는 없지만, 항상 메모리에 상주시켜 두는 구조도 아닙니다.
-
-### sync-api
-
-- 브라우저 로그인 페이지와 인증 API를 제공합니다.
-- 암호화된 동기화 payload 저장소 역할을 합니다.
-- session share viewer와 관련 WebSocket도 함께 제공합니다.
-
-## 인증과 리다이렉트
-
-- 데스크톱의 외부 식별자는 `dolgate://auth/callback`입니다.
-- 실제 브라우저 로그인 교환은 로컬 loopback callback `http://127.0.0.1:<port>/auth/callback`을 사용할 수 있습니다.
-- `sync-api`는 두 형태를 모두 검증하고, 성공 후 데스크톱 세션 교환 코드로 연결합니다.
-- 배포 문서나 OAuth 설정을 갱신할 때는 deep link만 보지 말고 loopback callback 허용도 함께 확인해야 합니다.
-
-## 개발 모드와 릴리즈 모드 차이
-
-개발 모드:
-
-- `npm run dev`
-- `CoreManager`가 `go run ./cmd/ssh-core`를 필요 시 실행
-- auto update 비활성
-
-릴리즈 모드:
-
-- `npm run release:dist:mac` 또는 `npm run release:dist:win`
-- 릴리즈 스크립트가 먼저 `ssh-core`를 타깃 플랫폼 바이너리로 빌드
-- Electron Forge가 prepackaged 앱을 만들고, electron-builder가 배포용 아티팩트와 업데이트 메타데이터를 생성
-- 패키지 앱은 `process.resourcesPath/bin/ssh-core(.exe)`를 실행
-- auto update 활성
+- 저장소 전체는 하나의 `vX.Y.Z` 버전으로 릴리즈합니다.
+- GitHub Release 하나에 데스크톱 아티팩트와 Android APK가 함께 올라갑니다.
+- `sync-api` 컨테이너도 같은 `vX.Y.Z` 태그를 기준으로 publish 됩니다.
+- 버전 source of truth는 루트 `package.json`입니다.
 
 ## 사전 요구 사항
 
@@ -76,25 +26,12 @@ npm install
 
 ## 로컬 개발 실행
 
-데스크톱 앱만:
-
-```bash
-npm run dev:desktop
-```
-
-sync API만:
-
-```bash
-npm run dev:api
-```
-
-- 로컬 기본 SQLite 경로는 `services/sync-api/data/dolgate_sync.db`입니다.
-- `npm run dev:api`는 필요한 `services/sync-api/data/` 디렉터리를 자동으로 생성합니다.
-
-둘 다 함께:
-
 ```bash
 npm run dev
+npm run dev:desktop
+npm run dev:mobile:ios
+npm run dev:mobile:android
+npm run dev:api
 ```
 
 ## 로컬 검증
@@ -115,111 +52,83 @@ npm run typecheck --workspace @dolssh/desktop
 (cd services/sync-api && go build ./...)
 ```
 
-## 데스크톱 앱 빌드
+## 저장소 공통 버전 관리
 
-로컬 패키징:
+릴리즈 버전의 source of truth는 루트 `package.json`입니다.
 
-```bash
-npm run build --workspace @dolssh/desktop
-```
+- 루트 `package.json`
+- `apps/desktop/package.json`
+- `apps/mobile/package.json`
+- Android `versionName`
+- iOS `MARKETING_VERSION`
 
-산출물:
+위 값들은 모두 같은 버전이어야 하고, `vX.Y.Z` 태그와도 일치해야 합니다.
 
-- macOS 기준 `apps/desktop/out/` 아래에 패키징 결과가 생성됩니다.
-
-현재 이 명령이 하는 일:
-
-- Electron main/preload/renderer 번들 빌드
-- `sync:runtime-deps`로 hoisted 런타임 의존성을 `apps/desktop/node_modules` 아래에 다시 맞춤
-- Electron Forge로 앱 패키징
-- 로컬 머신 기준으로 실행 가능한 앱 번들 생성
-
-아직 하지 않는 일:
-
-- 플랫폼별 installer 생성
-- 코드 서명
-- notarization
-
-즉, `npm run build --workspace @dolssh/desktop`은 개발용 패키지 검증에 가깝고, 실제 배포는 아래 릴리즈 명령을 사용합니다.
-
-## 릴리즈 빌드
-
-### macOS universal
+루트 버전 동기화 스크립트:
 
 ```bash
-npm run release:dist:mac
+npm run version:set -- 1.4.3
+npm run version:check
+npm run version:bump:patch
+npm run version:bump:minor
+npm run version:bump:major
 ```
 
-생성 흐름:
+수동 증가 항목:
 
-1. `ssh-core`를 `darwin/amd64`, `darwin/arm64`로 각각 빌드
-2. `lipo`로 universal `ssh-core` 생성
-3. Electron Forge가 universal prepackaged `.app` 생성
-4. electron-builder가 `dmg`, `zip`, 업데이트 메타데이터 생성
+- Android `defaultAndroidVersionCode`
+- iOS `CURRENT_PROJECT_VERSION`
 
-### Windows x64
+## 통합 GitHub Release
 
-```bash
-npm run release:dist:win
-```
+저장소 전체는 하나의 `vX.Y.Z` 태그와 하나의 GitHub Release로 배포합니다.
 
-생성 흐름:
+- 데스크톱 아티팩트
+- Android signed APK
+- `sync-api` 컨테이너 publish
 
-1. `ssh-core.exe`를 `windows/amd64`로 크로스 빌드
-2. Windows 대상 네이티브 모듈 재빌드 시도
-3. Electron Forge가 `win32/x64` prepackaged 앱 생성
-4. electron-builder가 `nsis`, `latest.yml` 생성
+이 세 가지가 모두 같은 `vX.Y.Z` 기준으로 동작합니다.
 
-Windows 설치 동작:
+Android 배포 산출물:
 
-- NSIS는 `current user` 전용 설치로 고정됩니다.
-- 설치 마법사는 `one-click` 모드로 동작합니다.
-- `all users` 설치는 지원하지 않습니다.
+- `apps/mobile/android/app/build/outputs/apk/release/app-release.apk`
+- GitHub Release 업로드 이름: `Dolgate-android-vX.Y.Z.apk`
 
-## GitHub Releases 업로드
+데스크톱 빌드/업로드 세부는 [desktop](./desktop.md), 모바일 빌드 세부는 [mobile](./mobile.md)를 따릅니다.
 
-브라우저 로그인 기반 publish를 쓰려면 GitHub OAuth App을 한 번 설정해야 합니다.
+### 공개 배포용 서명
 
-1. GitHub에서 OAuth App을 등록합니다.
-2. OAuth App 설정에서 `Device Flow`를 활성화합니다.
-3. [apps/desktop/scripts/github-oauth-config.cjs](../apps/desktop/scripts/github-oauth-config.cjs)의 `DEFAULT_GITHUB_OAUTH_CLIENT_ID` 값을 실제 client ID로 바꿉니다.
+`build:mobile:android`는 debug keystore가 아니라 전용 release keystore를 요구합니다.
 
-자동 업로드 명령:
+로컬 빌드:
 
-```bash
-npm run release:publish:mac
-npm run release:publish:win
-npm run release:all
-```
+- `apps/mobile/android/signing.local.properties`를 만들고
+- `apps/mobile/android/signing.local.properties.example` 형식을 따릅니다.
 
-업로드 흐름:
+CI/GitHub Actions:
 
-1. GitHub Device Flow로 브라우저 로그인을 시작합니다.
-2. 사용자가 브라우저에서 `https://github.com/login/device`에 코드 입력 후 승인을 완료합니다.
-3. `ssh-core`와 앱 아티팩트를 빌드합니다.
-4. 현재 버전의 `v<version>` git 태그를 만들고 원격에 push합니다.
-5. `doldolma/dolgate` GitHub Release를 현재 버전 기준으로 생성하거나 갱신합니다.
-6. 기존과 같은 이름의 asset은 교체하고, 새 아티팩트와 업데이트 메타데이터를 업로드합니다.
+- `ANDROID_RELEASE_KEYSTORE_BASE64`
+- `ANDROID_RELEASE_STORE_PASSWORD`
+- `ANDROID_RELEASE_KEY_ALIAS`
+- `ANDROID_RELEASE_KEY_PASSWORD`
 
-`sync-api` 컨테이너 배포도 이 릴리즈 태그를 기준으로 연결됩니다.
+workflow는 keystore를 임시 파일로 복원한 뒤 signed APK를 빌드하고, `apksigner verify`까지 통과해야 성공합니다.
 
-- `v1.2.4` 같은 태그가 push되면 GHCR에 `ghcr.io/doldolma/dolgate-sync-api:1.2.4`, `:1.2`, `:latest`가 함께 생성됩니다.
+### 배포 절차
+
+1. `npm run version:set -- X.Y.Z` 또는 `npm run version:bump:*`
+2. `apps/mobile/android/app/build.gradle`의 `defaultAndroidVersionCode`를 올립니다.
+3. `apps/mobile/ios/Dolgate.xcodeproj/project.pbxproj`의 `CURRENT_PROJECT_VERSION`를 올립니다.
+4. `npm run version:check`
+5. `git tag vX.Y.Z`
+6. `git push origin vX.Y.Z`
+
+GitHub Actions가 하나의 `vX.Y.Z` GitHub Release를 만들고, 데스크톱 아티팩트와 `Dolgate-android-vX.Y.Z.apk`를 함께 업로드합니다.
+
+`sync-api` 컨테이너 배포도 같은 `v*` 태그를 기준으로 연결됩니다.
+
+- `vX.Y.Z` 같은 태그가 push되면 GHCR에 `ghcr.io/doldolma/dolgate-sync-api:X.Y.Z`, `:X.Y`, `:latest`가 함께 생성됩니다.
 - `main` 브랜치 push만으로는 `sync-api` 운영 이미지를 새로 빌드하지 않습니다.
-
-## AWS / Warpgate 운영 전제
-
-### AWS Import / AWS SFTP
-
-- `aws-cli`가 설치되어 있어야 합니다.
-- AWS SFTP와 일부 inspection 경로에는 `session-manager-plugin`이 필요합니다.
-- AWS SFTP는 Linux 인스턴스만 지원합니다.
-- 인스턴스는 SSM managed 상태여야 하고, sshd/SFTP가 활성화되어 있어야 합니다.
-- EC2 Instance Connect 공개 키 주입이 가능해야 합니다.
-
-### Warpgate Import
-
-- 내부 브라우저 인증 창에서 로그인 후 target 목록을 가져옵니다.
-- 로그인 대기 중에는 import 다이얼로그에서 중단하고 다시 시도할 수 있습니다.
 
 ## sync-api 빌드
 
@@ -244,7 +153,7 @@ go build -o dist/sync-api ./cmd/api
 ### 배포 메모
 
 - 가장 단순한 self-host 시작은 공개 GHCR 이미지를 그대로 사용하는 것입니다.
-- 예제 compose는 빠른 시작용으로 `latest`를 사용하지만, 운영에서는 `ghcr.io/doldolma/dolgate-sync-api:1.2.4`처럼 명시 버전 태그 고정을 권장합니다.
+- 예제 compose는 빠른 시작용으로 `latest`를 사용하지만, 운영에서는 `ghcr.io/doldolma/dolgate-sync-api:X.Y.Z`처럼 명시 버전 태그 고정을 권장합니다.
 - `latest`를 계속 쓴다면 업데이트 시 아래 순서로 반영합니다.
 
 ```bash

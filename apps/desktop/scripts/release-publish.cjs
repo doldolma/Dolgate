@@ -6,8 +6,9 @@ const { loginWithGitHubDeviceFlow } = require('./github-device-login.cjs');
 const { assertGitHubOAuthConfig } = require('./github-oauth-config.cjs');
 
 const desktopRoot = path.join(__dirname, '..');
+const repoRoot = path.resolve(desktopRoot, "..", "..");
 const distDirectory = path.join(desktopRoot, 'release', 'dist');
-const desktopPackage = require(path.join(desktopRoot, 'package.json'));
+const rootPackage = require(path.join(repoRoot, 'package.json'));
 
 function parseTarget(value) {
   if (value === 'mac' || value === 'win' || value === 'all') {
@@ -150,6 +151,13 @@ async function ensureCleanReleaseState() {
   if (result.stdout.trim()) {
     throw new Error('릴리즈 전에 작업 트리가 깨끗해야 합니다. 변경 사항을 커밋하거나 정리한 뒤 다시 시도해 주세요.');
   }
+}
+
+async function ensureUnifiedVersionState() {
+  const npmCommand = getNpmCommand();
+  await runCommand(npmCommand, ['run', 'version:check'], {
+    cwd: repoRoot
+  });
 }
 
 async function ensureReleaseTag(version) {
@@ -356,9 +364,9 @@ async function buildArtifacts(target) {
 
 async function publishTarget(config, accessToken, target) {
   await buildArtifacts(target);
-  await ensureReleaseTag(desktopPackage.version);
+  await ensureReleaseTag(rootPackage.version);
   const files = await collectArtifacts();
-  const release = await ensureRelease(config, accessToken, desktopPackage.version);
+  const release = await ensureRelease(config, accessToken, rootPackage.version);
 
   console.log(`[${target}] GitHub Release ${release.tag_name} 에 ${files.length}개 파일을 동기화합니다.`);
   await syncReleaseAssets(config, accessToken, release, files);
@@ -376,6 +384,7 @@ async function main() {
   );
 
   await ensureCleanReleaseState();
+  await ensureUnifiedVersionState();
 
   for (const item of getTargets(target)) {
     await publishTarget(config, auth.accessToken, item);

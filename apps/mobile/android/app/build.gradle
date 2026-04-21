@@ -1,3 +1,6 @@
+import groovy.json.JsonSlurper
+import java.util.Properties
+
 apply plugin: "com.android.application"
 apply plugin: "org.jetbrains.kotlin.android"
 apply plugin: "com.facebook.react"
@@ -14,6 +17,12 @@ apply from: file("../../../../node_modules/react-native-vector-icons/fonts.gradl
  * By default you don't need to apply any configuration, just uncomment the lines you need.
  */
 react {
+    def osName = System.getProperty("os.name").toLowerCase(Locale.ROOT)
+    def hermesOsBin =
+        osName.contains("mac") ? "osx-bin" :
+        osName.contains("win") ? "win64-bin" :
+        "linux64-bin"
+
     /* Folders */
     // Monorepo layout:
     // - mobile app root: apps/mobile
@@ -51,7 +60,7 @@ react {
 
     /* Hermes Commands */
     //   The hermes compiler command to run. By default it is 'hermesc'
-    // hermesCommand = "$rootDir/my-custom-hermesc/bin/hermesc"
+    hermesCommand = file("../../../../node_modules/hermes-compiler/hermesc/${hermesOsBin}/hermesc").absolutePath
     //
     //   The list of flags to pass to the Hermes compiler. By default is "-O", "-output-source-map"
     // hermesFlags = ["-O", "-output-source-map"]
@@ -78,6 +87,49 @@ def enableProguardInReleaseBuilds = false
  */
 def jscFlavor = 'io.github.react-native-community:jsc-android:2026004.+'
 
+def rootPackage = new JsonSlurper().parseText(file("../../../../package.json").text)
+def rootVersionName = rootPackage.version
+def defaultAndroidVersionCode = 1
+def mobileVersionCode = (findProperty("dolgateVersionCode")
+    ?: System.getenv("DOLGATE_ANDROID_VERSION_CODE")
+    ?: "${defaultAndroidVersionCode}").toInteger()
+
+def signingProperties = new Properties()
+def signingPropertiesFile = rootProject.file("signing.local.properties")
+if (signingPropertiesFile.exists()) {
+    signingPropertiesFile.withInputStream { stream ->
+        signingProperties.load(stream)
+    }
+}
+
+def releaseStoreFileValue = System.getenv("DOLGATE_ANDROID_RELEASE_STORE_FILE")
+    ?: signingProperties.getProperty("storeFile")
+def releaseStorePassword = System.getenv("DOLGATE_ANDROID_RELEASE_STORE_PASSWORD")
+    ?: signingProperties.getProperty("storePassword")
+def releaseKeyAlias = System.getenv("DOLGATE_ANDROID_RELEASE_KEY_ALIAS")
+    ?: signingProperties.getProperty("keyAlias")
+def releaseKeyPassword = System.getenv("DOLGATE_ANDROID_RELEASE_KEY_PASSWORD")
+    ?: signingProperties.getProperty("keyPassword")
+def releaseStoreFile = releaseStoreFileValue
+    ? (new File(releaseStoreFileValue).isAbsolute()
+        ? file(releaseStoreFileValue)
+        : rootProject.file(releaseStoreFileValue))
+    : null
+def hasReleaseSigning = releaseStoreFile?.exists() && [
+    releaseStorePassword,
+    releaseKeyAlias,
+    releaseKeyPassword,
+].every { value -> value?.trim() }
+def releaseTaskRequested = gradle.startParameter.taskNames.any { taskName ->
+    taskName.toLowerCase(Locale.ROOT).contains("release")
+}
+
+if (releaseTaskRequested && !hasReleaseSigning) {
+    throw new GradleException(
+        "Release signing is not configured. Provide DOLGATE_ANDROID_RELEASE_* environment variables or apps/mobile/android/signing.local.properties.",
+    )
+}
+
 android {
     ndkVersion rootProject.ext.ndkVersion
     buildToolsVersion rootProject.ext.buildToolsVersion
@@ -88,8 +140,8 @@ android {
         applicationId "com.dolgate"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 1
-        versionName "1.0"
+        versionCode mobileVersionCode
+        versionName rootVersionName
     }
     signingConfigs {
         debug {
@@ -98,15 +150,21 @@ android {
             keyAlias 'androiddebugkey'
             keyPassword 'android'
         }
+        if (hasReleaseSigning) {
+            release {
+                storeFile releaseStoreFile
+                storePassword releaseStorePassword
+                keyAlias releaseKeyAlias
+                keyPassword releaseKeyPassword
+            }
+        }
     }
     buildTypes {
         debug {
             signingConfig signingConfigs.debug
         }
         release {
-            // Caution! In production, you need to generate your own keystore file.
-            // see https://reactnative.dev/docs/signed-apk-android.
-            signingConfig signingConfigs.debug
+            signingConfig hasReleaseSigning ? signingConfigs.release : signingConfigs.debug
             minifyEnabled enableProguardInReleaseBuilds
             proguardFiles getDefaultProguardFile("proguard-android.txt"), "proguard-rules.pro"
         }
@@ -116,6 +174,7 @@ android {
 dependencies {
     // The version of react-native is set by the React Native Gradle Plugin
     implementation("com.facebook.react:react-android")
+    implementation("androidx.browser:browser:1.8.0")
 
     if (hermesEnabled.toBoolean()) {
         implementation("com.facebook.react:hermes-android")

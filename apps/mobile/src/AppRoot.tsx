@@ -11,7 +11,9 @@ import {
 import { NavigationContainer } from "@react-navigation/native";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { CredentialPromptModal } from "./components/CredentialPromptModal";
+import { AwsSsoWaitingModal } from "./components/AwsSsoWaitingModal";
 import { ServerKeyPromptModal } from "./components/ServerKeyPromptModal";
+import { recordAwsSsoCallbackUrl } from "./lib/aws-session";
 import { RootNavigator } from "./navigation/RootNavigator";
 import { useMobileAppStore } from "./store/useMobileAppStore";
 import { createNavigationTheme, getPalette, resolveAppTheme } from "./theme";
@@ -28,6 +30,9 @@ export function AppRoot(): React.JSX.Element {
   const pendingServerKeyPrompt = useMobileAppStore(
     (state) => state.pendingServerKeyPrompt,
   );
+  const pendingAwsSsoLogin = useMobileAppStore(
+    (state) => state.pendingAwsSsoLogin,
+  );
   const pendingCredentialPrompt = useMobileAppStore(
     (state) => state.pendingCredentialPrompt,
   );
@@ -42,6 +47,12 @@ export function AppRoot(): React.JSX.Element {
   );
   const cancelCredentialPrompt = useMobileAppStore(
     (state) => state.cancelCredentialPrompt,
+  );
+  const cancelAwsSsoLogin = useMobileAppStore(
+    (state) => state.cancelAwsSsoLogin,
+  );
+  const reopenAwsSsoLogin = useMobileAppStore(
+    (state) => state.reopenAwsSsoLogin,
   );
   const settingsTheme = useMobileAppStore((state) => state.settings.theme);
 
@@ -58,11 +69,13 @@ export function AppRoot(): React.JSX.Element {
     }
 
     const subscription = Linking.addEventListener("url", ({ url }) => {
+      recordAwsSsoCallbackUrl(url);
       void handleAuthCallbackUrl(url);
     });
 
     void Linking.getInitialURL().then((url) => {
       if (url) {
+        recordAwsSsoCallbackUrl(url);
         void handleAuthCallbackUrl(url);
       }
     });
@@ -130,6 +143,11 @@ export function AppRoot(): React.JSX.Element {
         prompt={pendingCredentialPrompt}
         onCancel={cancelCredentialPrompt}
         onSubmit={(value) => void submitCredentialPrompt(value)}
+      />
+      <AwsSsoWaitingModal
+        prompt={pendingAwsSsoLogin}
+        onCancel={cancelAwsSsoLogin}
+        onReopen={() => void reopenAwsSsoLogin()}
       />
     </SafeAreaProvider>
   );

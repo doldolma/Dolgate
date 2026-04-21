@@ -2,13 +2,11 @@ import React from "react";
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
 import {
   createNativeStackNavigator,
-  type NativeStackScreenProps,
 } from "@react-navigation/native-stack";
 import { useTheme } from "@react-navigation/native";
 import Ionicons from "react-native-vector-icons/Ionicons";
 import type { AuthState } from "@dolssh/shared-core";
 import { AuthLandingScreen } from "../screens/AuthLandingScreen";
-import { ConnectionsScreen } from "../screens/ConnectionsScreen";
 import { HomeScreen } from "../screens/HomeScreen";
 import { SessionScreen } from "../screens/SessionScreen";
 import { AuthSettingsScreen, SettingsScreen } from "../screens/SettingsScreen";
@@ -21,23 +19,9 @@ export type AuthStackParamList = {
 
 export type MainTabParamList = {
   Home: undefined;
-  Connections: undefined;
+  Sessions: undefined;
   Settings: undefined;
 };
-
-export type AuthenticatedStackParamList = {
-  MainTabs: undefined;
-  Session: {
-    sessionId: string;
-  };
-};
-
-export type RootStackParamList = AuthenticatedStackParamList;
-
-export type SessionScreenProps = NativeStackScreenProps<
-  AuthenticatedStackParamList,
-  "Session"
->;
 
 interface RootNavigatorProps {
   authState: AuthState;
@@ -45,7 +29,6 @@ interface RootNavigatorProps {
 
 const AuthStack = createNativeStackNavigator<AuthStackParamList>();
 const Tab = createBottomTabNavigator<MainTabParamList>();
-const Stack = createNativeStackNavigator<AuthenticatedStackParamList>();
 
 function getTabIconName(
   routeName: keyof MainTabParamList,
@@ -54,7 +37,7 @@ function getTabIconName(
   switch (routeName) {
     case "Home":
       return focused ? "home" : "home-outline";
-    case "Connections":
+    case "Sessions":
       return focused ? "layers" : "layers-outline";
     case "Settings":
       return focused ? "settings" : "settings-outline";
@@ -74,9 +57,9 @@ function MainTabs(): React.JSX.Element {
           backgroundColor: palette.sessionToolbar,
           borderTopColor: palette.sessionToolbarBorder,
           borderTopWidth: 1,
-          height: 64,
-          paddingBottom: 8,
-          paddingTop: 6,
+          height: 58,
+          paddingBottom: 4,
+          paddingTop: 4,
           elevation: 0,
           shadowOpacity: 0,
         },
@@ -85,10 +68,10 @@ function MainTabs(): React.JSX.Element {
         tabBarLabelStyle: {
           fontSize: 12,
           fontWeight: "700",
-          marginBottom: 1,
+          marginBottom: 0,
         },
         tabBarItemStyle: {
-          paddingVertical: 2,
+          paddingVertical: 0,
         },
         tabBarIcon: ({ color, size, focused }) => (
           <Ionicons
@@ -100,7 +83,7 @@ function MainTabs(): React.JSX.Element {
       })}
     >
       <Tab.Screen name="Home" component={HomeScreen} />
-      <Tab.Screen name="Connections" component={ConnectionsScreen} />
+      <Tab.Screen name="Sessions" component={SessionScreen} />
       <Tab.Screen name="Settings" component={SettingsScreen} />
     </Tab.Navigator>
   );
@@ -148,20 +131,5 @@ export function RootNavigator({
     return <UnauthenticatedNavigator />;
   }
 
-  return (
-    <Stack.Navigator>
-      <Stack.Screen
-        name="MainTabs"
-        component={MainTabs}
-        options={{ headerShown: false }}
-      />
-      <Stack.Screen
-        name="Session"
-        component={SessionScreen}
-        options={{
-          headerShown: false,
-        }}
-      />
-    </Stack.Navigator>
-  );
+  return <MainTabs />;
 }

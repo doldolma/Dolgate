@@ -200,6 +200,7 @@ describe("HomeScreen group browsing", () => {
       knownHosts: [],
       secretMetadata: [],
       sessions,
+      activeSessionTabId: null,
       secretsByRef: {},
       pendingBrowserLoginState: null,
       pendingServerKeyPrompt: null,

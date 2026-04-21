@@ -1,6 +1,5 @@
 import React from "react";
 import renderer, { act } from "react-test-renderer";
-import { TextInput } from "react-native";
 import type {
   AuthState,
   MobileSessionRecord,
@@ -43,6 +42,9 @@ jest.mock("@react-native-async-storage/async-storage", () => ({
   setItem: jest.fn(async () => null),
   removeItem: jest.fn(async () => null),
   clear: jest.fn(async () => null),
+}));
+jest.mock("../src/components/TerminalInputView", () => ({
+  TerminalInputView: "TerminalInputView",
 }));
 jest.mock("../src/lib/screen-layout", () => ({
   useScreenPadding: () => ({
@@ -115,18 +117,47 @@ describe("SessionScreen", () => {
     errorMessage: null,
   };
 
-  const host: SshHostRecord = {
-    id: "host-1",
-    kind: "ssh",
-    label: "Synology",
-    hostname: "doldolma.com",
-    port: 2788,
-    username: "doyoung",
-    authType: "password",
-    secretRef: null,
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
+  const secondSession: MobileSessionRecord = {
+    id: "session-2",
+    sessionId: "session-2",
+    hostId: "host-2",
+    title: "Docker-ubuntu",
+    status: "connecting",
+    hasReceivedOutput: false,
+    isRestorable: true,
+    lastViewportSnapshot: "",
+    lastEventAt: new Date(Date.now() - 1_000).toISOString(),
+    lastConnectedAt: null,
+    lastDisconnectedAt: null,
+    errorMessage: null,
   };
+
+  const hosts: SshHostRecord[] = [
+    {
+      id: "host-1",
+      kind: "ssh",
+      label: "Synology",
+      hostname: "doldolma.com",
+      port: 2788,
+      username: "doyoung",
+      authType: "password",
+      secretRef: null,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    },
+    {
+      id: "host-2",
+      kind: "ssh",
+      label: "Docker-ubuntu",
+      hostname: "docker.example.com",
+      port: 22,
+      username: "ubuntu",
+      authType: "password",
+      secretRef: null,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    },
+  ];
 
   beforeEach(() => {
     capturedXtermProps = null;
@@ -137,10 +168,11 @@ describe("SessionScreen", () => {
       settings: createDefaultMobileSettings(),
       syncStatus: createDefaultSyncStatus(),
       groups: [],
-      hosts: [host],
+      hosts,
       knownHosts: [],
       secretMetadata: [],
-      sessions: [session],
+      sessions: [session, secondSession],
+      activeSessionTabId: "session-1",
       secretsByRef: {},
       pendingBrowserLoginState: null,
       pendingServerKeyPrompt: null,
@@ -149,165 +181,108 @@ describe("SessionScreen", () => {
       disconnectSession: jest.fn(async () => undefined),
       writeToSession: jest.fn(async () => undefined),
       subscribeToSessionTerminal: jest.fn(() => () => undefined),
+      setActiveSessionTab: jest.fn(),
     });
   });
 
-  it("renders a compact header and hides the old large action card by default", async () => {
-    const navigation = {
-      canGoBack: () => true,
-      goBack: jest.fn(),
-      replace: jest.fn(),
-    };
-
+  it("renders the live session tabs and hides the old detail header controls", async () => {
     let tree: renderer.ReactTestRenderer;
     await act(async () => {
-      tree = renderer.create(
-        <SessionScreen
-          navigation={navigation as never}
-          route={{
-            key: "Session-session-1",
-            name: "Session",
-            params: { sessionId: "session-1" },
-          }}
-        />,
-      );
+      tree = renderer.create(<SessionScreen />);
     });
 
     const text = collectText(tree!.toJSON());
     expect(text).toContain("Synology");
-    expect(text).toContain("Connected");
-    expect(text).not.toContain("doyoung@doldolma.com:2788");
-    expect(text).not.toContain("재연결");
-    expect(text).not.toContain("연결 종료");
+    expect(text).toContain("Docker-ubuntu");
+    expect(text).not.toContain("Connected");
+    expect(text).not.toContain("세션 뒤로가기");
+    expect(text).not.toContain("세션 메뉴 열기");
     expect(capturedXtermProps).not.toBeNull();
+    expect(capturedXtermProps?.autoFit).toBe(false);
     expect(capturedXtermProps?.webViewOptions).toMatchObject({
       hideKeyboardAccessoryView: true,
     });
-    expect(
-      (capturedXtermProps?.webViewOptions as Record<string, unknown>)
-        ?.injectedJavaScript,
-    ).toBeUndefined();
 
     await act(async () => {
       tree!.unmount();
     });
   });
 
-  it("reveals session actions inside the menu", async () => {
-    const resumeSession = jest.fn(async () => "session-1");
+  it("disconnects the tab when tapping the tab close button", async () => {
     const disconnectSession = jest.fn(async () => undefined);
     useMobileAppStore.setState({
-      resumeSession,
       disconnectSession,
     });
 
-    const navigation = {
-      canGoBack: () => true,
-      goBack: jest.fn(),
-      replace: jest.fn(),
-    };
-
     let tree: renderer.ReactTestRenderer;
     await act(async () => {
-      tree = renderer.create(
-        <SessionScreen
-          navigation={navigation as never}
-          route={{
-            key: "Session-session-1",
-            name: "Session",
-            params: { sessionId: "session-1" },
-          }}
-        />,
-      );
+      tree = renderer.create(<SessionScreen />);
     });
 
-    const menuButton = tree!.root.findByProps({
-      accessibilityLabel: "세션 메뉴 열기",
+    const closeButton = tree!.root.findByProps({
+      accessibilityLabel: "Synology 세션 닫기",
     });
 
     await act(async () => {
-      menuButton.props.onPress();
+      await closeButton.props.onPress({ stopPropagation: jest.fn() });
     });
 
-    const text = collectText(tree!.toJSON());
-    expect(text).toContain("doyoung@doldolma.com:2788");
-    expect(text).toContain("재연결");
-    expect(text).toContain("연결 종료");
-
-    const reconnectButton = tree!.root.findByProps({
-      accessibilityLabel: "세션 재연결",
-    });
-
-    await act(async () => {
-      await reconnectButton.props.onPress();
-    });
-
-    expect(resumeSession).toHaveBeenCalledWith("session-1");
+    expect(disconnectSession).toHaveBeenCalledWith("session-1");
 
     await act(async () => {
       tree!.unmount();
     });
   });
 
-  it("routes iOS native text input through composed terminal diffs", async () => {
+  it("routes iOS native input view events through composed terminal diffs", async () => {
     const writeToSession = jest.fn(async () => undefined);
     useMobileAppStore.setState({
       writeToSession,
     });
 
-    const navigation = {
-      canGoBack: () => true,
-      goBack: jest.fn(),
-      replace: jest.fn(),
-    };
-
     let tree: renderer.ReactTestRenderer;
     await act(async () => {
-      tree = renderer.create(
-        <SessionScreen
-          navigation={navigation as never}
-          route={{
-            key: "Session-session-1",
-            name: "Session",
-            params: { sessionId: "session-1" },
-          }}
-        />,
-      );
+      tree = renderer.create(<SessionScreen />);
     });
 
-    const nativeInput = tree!.root.findByType(TextInput);
+    const nativeInput = tree!.root.find(
+      (node) => (node.type as unknown) === "TerminalInputView",
+    );
 
     await act(async () => {
-      nativeInput.props.onChangeText("가");
+      nativeInput.props.onTerminalInput({
+        nativeEvent: {
+          kind: "text-delta",
+          deleteCount: 0,
+          insertText: "가",
+        },
+      });
     });
 
     expect(writeToSession).toHaveBeenLastCalledWith("session-1", "가");
 
     await act(async () => {
-      nativeInput.props.onChangeText("간");
+      nativeInput.props.onTerminalInput({
+        nativeEvent: {
+          kind: "text-delta",
+          deleteCount: 1,
+          insertText: "간",
+        },
+      });
     });
 
     expect(writeToSession).toHaveBeenLastCalledWith("session-1", "\u007f간");
 
     await act(async () => {
-      nativeInput.props.onChangeText("간다");
-    });
-
-    expect(writeToSession).toHaveBeenLastCalledWith("session-1", "다");
-
-    await act(async () => {
-      nativeInput.props.onSubmitEditing();
-    });
-
-    expect(writeToSession).toHaveBeenLastCalledWith("session-1", "\r");
-
-    await act(async () => {
-      nativeInput.props.onKeyPress({
-        nativeEvent: { key: "Backspace" },
+      nativeInput.props.onTerminalInput({
+        nativeEvent: {
+          kind: "special-key",
+          key: "enter",
+        },
       });
     });
 
-    expect(writeToSession).toHaveBeenLastCalledWith("session-1", "\u007f");
+    expect(writeToSession).toHaveBeenLastCalledWith("session-1", "\r");
 
     await act(async () => {
       tree!.unmount();

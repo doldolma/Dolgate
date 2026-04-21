@@ -4,20 +4,28 @@ import { createJSONStorage, persist } from "zustand/middleware";
 import { Linking } from "react-native";
 import { RnRussh } from "@fressh/react-native-uniffi-russh";
 import type {
+  AwsEc2HostRecord,
+  AwsSsmSessionClientMessage,
+  AwsSsmSessionServerMessage,
   AuthSession,
   AuthState,
   GroupRecord,
+  HostRecord,
   HostSecretInput,
   KnownHostRecord,
   LoadedManagedSecretPayload,
+  ManagedAwsProfilePayload,
   MobileSessionRecord,
   MobileSettings,
   SecretMetadataRecord,
   SshHostRecord,
   SyncStatus,
 } from "@dolssh/shared-core";
+import { isAwsEc2HostRecord, isSshHostRecord } from "@dolssh/shared-core";
 import {
   buildBrowserLoginUrl,
+  clearStoredAwsProfiles,
+  clearStoredAwsSsoTokens,
   buildKnownHostRecord,
   buildKnownHostsSyncPayload,
   clearStoredAuthSession,
@@ -27,14 +35,17 @@ import {
   createLocalId,
   createRandomStateToken,
   createUnauthenticatedState,
+  decodeAwsProfiles,
   decodeGroups,
   decodeKnownHosts,
   decodeManagedSecrets,
-  decodeSshHosts,
+  decodeSupportedHosts,
   deriveSecretMetadata,
   fetchExchangeSession,
+  fetchServerInfo,
   fetchSyncSnapshot,
   getSettingsValidationMessage,
+  loadStoredAwsProfiles,
   logoutRemoteSession,
   mergePromptedSecrets,
   MobileServerPublicKeyInfo,
@@ -42,6 +53,7 @@ import {
   refreshAuthSession,
   sanitizeTerminalSnapshot,
   saveStoredAuthSession,
+  saveStoredAwsProfiles,
   saveStoredSecrets,
   AsyncStorage,
   loadStoredAuthSession,
@@ -52,6 +64,15 @@ import {
   getAuthCallbackStateErrorMessage,
   getSyncFailureMessage,
 } from "../lib/auth-flow";
+import {
+  type AwsSsoBrowserLoginPrompt,
+  resolveAwsSessionForHost,
+} from "../lib/aws-session";
+import { openAwsSsoBrowser } from "../lib/aws-sso-bridge";
+import {
+  getCurrentWindowTerminalGridSize,
+  toRusshTerminalSize,
+} from "../lib/terminal-size";
 
 const MAX_TERMINAL_SNAPSHOT_CHARS = 8_000;
 const MAX_PERSISTED_SESSIONS = 24;
@@ -72,7 +93,10 @@ interface PendingCredentialPromptState {
   initialValue: HostSecretInput;
 }
 
-interface RuntimeSession {
+type PendingAwsSsoLoginState = AwsSsoBrowserLoginPrompt;
+
+interface SshRuntimeSession {
+  kind: "ssh";
   recordId: string;
   hostId: string;
   connection: Awaited<ReturnType<typeof RnRussh.connect>>;
@@ -81,6 +105,17 @@ interface RuntimeSession {
   >;
   backgroundListenerId: bigint | null;
 }
+
+interface AwsRuntimeSession {
+  kind: "aws-ssm";
+  recordId: string;
+  hostId: string;
+  socket: WebSocket;
+  replayChunks: Uint8Array[];
+  subscribers: Map<string, SessionTerminalSubscription>;
+}
+
+type RuntimeSession = SshRuntimeSession | AwsRuntimeSession;
 
 interface SessionTerminalSubscription {
   onReplay: (chunks: Uint8Array[]) => void;
@@ -94,22 +129,28 @@ interface MobileAppState {
   settings: MobileSettings;
   syncStatus: SyncStatus;
   groups: GroupRecord[];
-  hosts: SshHostRecord[];
+  hosts: HostRecord[];
+  awsProfiles: ManagedAwsProfilePayload[];
   knownHosts: KnownHostRecord[];
   secretMetadata: SecretMetadataRecord[];
   sessions: MobileSessionRecord[];
+  activeSessionTabId: string | null;
   secretsByRef: Record<string, LoadedManagedSecretPayload>;
   pendingBrowserLoginState: string | null;
+  pendingAwsSsoLogin: PendingAwsSsoLoginState | null;
   pendingServerKeyPrompt: PendingServerKeyPromptState | null;
   pendingCredentialPrompt: PendingCredentialPromptState | null;
   initializeApp: () => Promise<void>;
   handleAuthCallbackUrl: (url: string) => Promise<void>;
   startBrowserLogin: () => Promise<void>;
   cancelBrowserLogin: () => void;
+  cancelAwsSsoLogin: () => void;
+  reopenAwsSsoLogin: () => Promise<void>;
   logout: () => Promise<void>;
   syncNow: () => Promise<void>;
   updateSettings: (input: Partial<MobileSettings>) => Promise<void>;
   connectToHost: (hostId: string) => Promise<string | null>;
+  setActiveSessionTab: (sessionId: string | null) => void;
   resumeSession: (sessionId: string) => Promise<string | null>;
   disconnectSession: (sessionId: string) => Promise<void>;
   removeSession: (sessionId: string) => Promise<void>;
@@ -131,6 +172,7 @@ const runtimeSnapshotFlushTimers = new Map<
   string,
   ReturnType<typeof setTimeout>
 >();
+let runtimeSubscriptionCounter = 0;
 
 let initializePromise: Promise<void> | null = null;
 let syncPromise: Promise<void> | null = null;
@@ -138,8 +180,9 @@ let pendingServerKeyResolver: ((accepted: boolean) => void) | null = null;
 let pendingCredentialResolver:
   | ((value: HostSecretInput | null) => void)
   | null = null;
+let pendingAwsSsoCancelHandler: (() => void) | null = null;
 
-function sortHosts(hosts: SshHostRecord[]): SshHostRecord[] {
+function sortHosts(hosts: HostRecord[]): HostRecord[] {
   return [...hosts].sort((left, right) => left.label.localeCompare(right.label));
 }
 
@@ -161,6 +204,41 @@ function sortSessions(sessions: MobileSessionRecord[]): MobileSessionRecord[] {
   return [...sessions].sort((left, right) =>
     right.lastEventAt.localeCompare(left.lastEventAt),
   );
+}
+
+function isLiveSession(session: MobileSessionRecord): boolean {
+  return session.status !== "closed";
+}
+
+function getLiveSessions(sessions: MobileSessionRecord[]): MobileSessionRecord[] {
+  return sortSessions(sessions).filter(isLiveSession);
+}
+
+function resolveActiveSessionTabId(
+  sessions: MobileSessionRecord[],
+  currentActiveSessionTabId: string | null,
+  preferredSessionId?: string | null,
+): string | null {
+  const liveSessions = getLiveSessions(sessions);
+  if (preferredSessionId) {
+    const preferredSession = liveSessions.find(
+      (session) => session.id === preferredSessionId,
+    );
+    if (preferredSession) {
+      return preferredSession.id;
+    }
+  }
+
+  if (currentActiveSessionTabId) {
+    const currentSession = liveSessions.find(
+      (session) => session.id === currentActiveSessionTabId,
+    );
+    if (currentSession) {
+      return currentSession.id;
+    }
+  }
+
+  return liveSessions[0]?.id ?? null;
 }
 
 function trimSnapshot(value: string): string {
@@ -197,14 +275,25 @@ function upsertSessionRecord(
   return sortSessions(nextSessions);
 }
 
-function createSessionRecord(host: SshHostRecord): MobileSessionRecord {
+function createSessionRecord(host: HostRecord): MobileSessionRecord {
   const now = new Date().toISOString();
   const id = createLocalId("session");
+  const connectionKind = host.kind === "aws-ec2" ? "aws-ssm" : "ssh";
+  const connectionDetails =
+    host.kind === "aws-ec2"
+      ? [host.awsProfileName, host.awsRegion, host.awsInstanceId]
+          .filter(Boolean)
+          .join(" · ")
+      : isSshHostRecord(host)
+        ? `${host.username}@${host.hostname}:${host.port}`
+        : host.label;
   return {
     id,
     sessionId: id,
     hostId: host.id,
     title: host.label,
+    connectionKind,
+    connectionDetails,
     status: "connecting",
     hasReceivedOutput: false,
     isRestorable: true,
@@ -228,6 +317,27 @@ function compactPersistedSessions(
           ? trimSnapshot(session.lastViewportSnapshot)
           : "",
     }));
+}
+
+function normalizePersistedSessionsForColdStart(
+  sessions: MobileSessionRecord[],
+): MobileSessionRecord[] {
+  const now = new Date().toISOString();
+  return sortSessions(
+    sessions.map((session) => {
+      if (!isLiveSession(session)) {
+        return session;
+      }
+
+      return {
+        ...session,
+        status: "closed",
+        errorMessage: null,
+        lastEventAt: now,
+        lastDisconnectedAt: session.lastDisconnectedAt ?? now,
+      };
+    }),
+  );
 }
 
 function buildOfflineState(session: AuthSession, reason: string) {
@@ -316,11 +426,19 @@ function disconnectRuntimeSession(sessionId: string): void {
     return;
   }
 
-  try {
-    if (runtime.backgroundListenerId !== null) {
-      runtime.shell.removeListener(runtime.backgroundListenerId);
-    }
-  } catch {}
+  if (runtime.kind === "ssh") {
+    try {
+      if (runtime.backgroundListenerId !== null) {
+        runtime.shell.removeListener(runtime.backgroundListenerId);
+      }
+    } catch {}
+  } else {
+    try {
+      runtime.socket.close();
+    } catch {}
+    runtime.subscribers.clear();
+    runtime.replayChunks.length = 0;
+  }
 
   runtimeSessions.delete(sessionId);
   pendingSessionConnections.delete(sessionId);
@@ -334,9 +452,15 @@ function disconnectRuntimeSession(sessionId: string): void {
 
 async function disconnectAllRuntimeSessions(): Promise<void> {
   for (const session of [...runtimeSessions.values()]) {
-    try {
-      await session.connection.disconnect();
-    } catch {}
+    if (session.kind === "ssh") {
+      try {
+        await session.connection.disconnect();
+      } catch {}
+    } else {
+      try {
+        session.socket.close();
+      } catch {}
+    }
     disconnectRuntimeSession(session.recordId);
   }
 }
@@ -346,7 +470,7 @@ export const useMobileAppStore = create<MobileAppState>()(
     (set, get) => {
       const updateSecretsState = async (
         secretsByRef: Record<string, LoadedManagedSecretPayload>,
-        hostsOverride?: SshHostRecord[],
+        hostsOverride?: HostRecord[],
       ) => {
         await saveStoredSecrets(secretsByRef);
         const nextHosts = hostsOverride ?? get().hosts;
@@ -584,8 +708,13 @@ export const useMobileAppStore = create<MobileAppState>()(
             return state;
           }
 
+          const nextSessions = patchSessionRecord(state.sessions, sessionId, patch);
           return {
-            sessions: patchSessionRecord(state.sessions, sessionId, patch),
+            sessions: nextSessions,
+            activeSessionTabId: resolveActiveSessionTabId(
+              nextSessions,
+              state.activeSessionTabId,
+            ),
           };
         });
       };
@@ -608,21 +737,30 @@ export const useMobileAppStore = create<MobileAppState>()(
         errorMessage?: string | null,
       ) => {
         const now = new Date().toISOString();
-        set((state) => ({
-          sessions: patchSessionRecord(state.sessions, sessionId, {
+        set((state) => {
+          const nextSessions = patchSessionRecord(state.sessions, sessionId, {
             status,
             errorMessage: errorMessage ?? null,
             isRestorable: true,
             lastEventAt: now,
             lastDisconnectedAt:
               status === "closed" || status === "error" ? now : undefined,
-          }),
-        }));
+          });
+          return {
+            sessions: nextSessions,
+            activeSessionTabId: resolveActiveSessionTabId(
+              nextSessions,
+              state.activeSessionTabId === sessionId && status === "closed"
+                ? null
+                : state.activeSessionTabId,
+            ),
+          };
+        });
       };
 
       const connectSessionRecord = async (
         sessionRecord: MobileSessionRecord,
-        host: SshHostRecord,
+        host: HostRecord,
       ) => {
         if (
           runtimeSessions.has(sessionRecord.id) ||
@@ -636,6 +774,26 @@ export const useMobileAppStore = create<MobileAppState>()(
           get().sessions.find((item) => item.id === sessionRecord.id)
             ?.lastViewportSnapshot ?? sessionRecord.lastViewportSnapshot,
         );
+        if (isAwsEc2HostRecord(host)) {
+          void connectAwsSessionRecord(sessionRecord, host);
+          return;
+        }
+        if (isSshHostRecord(host)) {
+          void connectSshSessionRecord(sessionRecord, host);
+          return;
+        }
+        markSessionState(
+          sessionRecord.id,
+          "error",
+          "이 호스트 종류는 모바일에서 아직 지원하지 않습니다.",
+        );
+        pendingSessionConnections.delete(sessionRecord.id);
+      };
+
+      const connectSshSessionRecord = async (
+        sessionRecord: MobileSessionRecord,
+        host: SshHostRecord,
+      ) => {
         try {
           if (host.authType !== "password" && host.authType !== "privateKey") {
             markSessionState(
@@ -696,6 +854,8 @@ export const useMobileAppStore = create<MobileAppState>()(
               status: "connecting",
               errorMessage: null,
               lastEventAt: connectionStartedAt,
+              connectionKind: "ssh",
+              connectionDetails: `${host.username}@${host.hostname}:${host.port}`,
             }),
           }));
 
@@ -713,8 +873,10 @@ export const useMobileAppStore = create<MobileAppState>()(
               markSessionState(sessionRecord.id, "closed");
             },
           });
+          const terminalSize = getCurrentWindowTerminalGridSize();
           const shell = await connection.startShell({
             term: "Xterm",
+            terminalSize: toRusshTerminalSize(terminalSize),
             onClosed: () => {
               flushSessionSnapshot(sessionRecord.id, {
                 markActivity: false,
@@ -745,6 +907,7 @@ export const useMobileAppStore = create<MobileAppState>()(
           );
 
           runtimeSessions.set(sessionRecord.id, {
+            kind: "ssh",
             recordId: sessionRecord.id,
             hostId: host.id,
             connection,
@@ -759,6 +922,8 @@ export const useMobileAppStore = create<MobileAppState>()(
               lastEventAt: new Date().toISOString(),
               lastConnectedAt: new Date().toISOString(),
               title: host.label,
+              connectionKind: "ssh",
+              connectionDetails: `${host.username}@${host.hostname}:${host.port}`,
             }),
           }));
         } catch (error) {
@@ -767,6 +932,219 @@ export const useMobileAppStore = create<MobileAppState>()(
             sessionRecord.id,
             "error",
             error instanceof Error ? error.message : "SSH 연결에 실패했습니다.",
+          );
+        } finally {
+          pendingSessionConnections.delete(sessionRecord.id);
+        }
+      };
+
+      const connectAwsSessionRecord = async (
+        sessionRecord: MobileSessionRecord,
+        host: AwsEc2HostRecord,
+      ) => {
+        try {
+          const accessToken = get().auth.session?.tokens.accessToken;
+          if (!accessToken) {
+            markSessionState(
+              sessionRecord.id,
+              "error",
+              "AWS 세션을 시작하려면 다시 로그인해야 합니다.",
+            );
+            return;
+          }
+
+          let awsSsmServerSupport = get().syncStatus.awsSsmServerSupport;
+          if (awsSsmServerSupport === "unknown") {
+            try {
+              const serverInfo = await fetchServerInfo(get().settings.serverUrl);
+              awsSsmServerSupport = serverInfo.capabilities.sessions.awsSsm
+                ? "supported"
+                : "unsupported";
+              set((state) => ({
+                syncStatus: {
+                  ...state.syncStatus,
+                  awsProfilesServerSupport: serverInfo.capabilities.sync
+                    .awsProfiles
+                    ? "supported"
+                    : "unsupported",
+                  awsSsmServerSupport,
+                },
+              }));
+            } catch {}
+          }
+
+          if (awsSsmServerSupport === "unsupported") {
+            markSessionState(
+              sessionRecord.id,
+              "error",
+              "이 서버는 AWS SSM 세션을 지원하지 않습니다.",
+            );
+            return;
+          }
+
+          const resolvedSession = await resolveAwsSessionForHost({
+            host,
+            profiles: get().awsProfiles,
+            serverUrl: get().settings.serverUrl,
+            authAccessToken: accessToken,
+            presentLoginPrompt: (prompt) => {
+              pendingAwsSsoCancelHandler = prompt.onCancel;
+              set({ pendingAwsSsoLogin: prompt });
+            },
+            dismissLoginPrompt: () => {
+              pendingAwsSsoCancelHandler = null;
+              set({ pendingAwsSsoLogin: null });
+            },
+          });
+          const terminalSize = getCurrentWindowTerminalGridSize();
+          const wsUrl = new URL(
+            "/api/aws-sessions/ws",
+            get().settings.serverUrl,
+          );
+          const wsProtocol = wsUrl.protocol === "https:" ? "wss:" : "ws:";
+          const wsEndpoint = `${wsProtocol}//${wsUrl.host}${wsUrl.pathname}`;
+
+          const socket = new WebSocket(wsEndpoint, [], {
+            headers: {
+              Authorization: `Bearer ${accessToken}`,
+            },
+          });
+          const nextRuntime: AwsRuntimeSession = {
+            kind: "aws-ssm",
+            recordId: sessionRecord.id,
+            hostId: host.id,
+            socket,
+            replayChunks: [],
+            subscribers: new Map<string, SessionTerminalSubscription>(),
+          };
+          runtimeSessions.set(sessionRecord.id, nextRuntime);
+
+          set((state) => ({
+            sessions: patchSessionRecord(state.sessions, sessionRecord.id, {
+              status: "connecting",
+              errorMessage: null,
+              lastEventAt: new Date().toISOString(),
+              title: host.label,
+              connectionKind: "aws-ssm",
+              connectionDetails: resolvedSession.connectionDetails,
+            }),
+          }));
+
+          socket.onopen = () => {
+            const message: AwsSsmSessionClientMessage = {
+              type: "start",
+              payload: {
+                hostId: host.id,
+                label: host.label,
+                // Mobile sends resolved env credentials, so the server should not
+                // depend on a matching profile file being present in the container.
+                profileName: "",
+                region: resolvedSession.region,
+                instanceId: host.awsInstanceId,
+                cols: terminalSize.cols,
+                rows: terminalSize.rows,
+                env: resolvedSession.envSpec.env,
+                unsetEnv: resolvedSession.envSpec.unsetEnv,
+              },
+            };
+            socket.send(JSON.stringify(message));
+          };
+
+          socket.onmessage = (event) => {
+            const message = JSON.parse(
+              String(event.data),
+            ) as AwsSsmSessionServerMessage;
+            if (message.type === "ready") {
+              pendingSessionConnections.delete(sessionRecord.id);
+              set((state) => ({
+                sessions: patchSessionRecord(state.sessions, sessionRecord.id, {
+                  status: "connected",
+                  errorMessage: null,
+                  lastEventAt: new Date().toISOString(),
+                  lastConnectedAt: new Date().toISOString(),
+                  title: host.label,
+                  connectionKind: "aws-ssm",
+                  connectionDetails: resolvedSession.connectionDetails,
+                }),
+              }));
+              return;
+            }
+
+            if (message.type === "output" && message.dataBase64) {
+              const chunk = Uint8Array.from(
+                Buffer.from(message.dataBase64, "base64"),
+              );
+              const text = Buffer.from(chunk).toString("utf8");
+              const currentSnapshot =
+                runtimeSessionSnapshots.get(sessionRecord.id) ?? "";
+              runtimeSessionSnapshots.set(
+                sessionRecord.id,
+                trimSnapshot(`${currentSnapshot}${text}`),
+              );
+              scheduleSessionSnapshotFlush(sessionRecord.id);
+              nextRuntime.replayChunks.push(chunk);
+              for (const subscriber of nextRuntime.subscribers.values()) {
+                subscriber.onData(chunk);
+              }
+              return;
+            }
+
+            if (message.type === "error") {
+              pendingSessionConnections.delete(sessionRecord.id);
+              markSessionState(
+                sessionRecord.id,
+                "error",
+                message.message || "AWS SSM 연결에 실패했습니다.",
+              );
+              return;
+            }
+
+            if (message.type === "exit") {
+              flushSessionSnapshot(sessionRecord.id, {
+                markActivity: false,
+              });
+              disconnectRuntimeSession(sessionRecord.id);
+              markSessionState(
+                sessionRecord.id,
+                "closed",
+                message.message || null,
+              );
+            }
+          };
+
+          socket.onerror = () => {
+            pendingSessionConnections.delete(sessionRecord.id);
+            markSessionState(
+              sessionRecord.id,
+              "error",
+              "AWS SSM WebSocket 연결에 실패했습니다.",
+            );
+          };
+
+          socket.onclose = () => {
+            flushSessionSnapshot(sessionRecord.id, {
+              markActivity: false,
+            });
+            disconnectRuntimeSession(sessionRecord.id);
+            const currentSession = get().sessions.find(
+              (item) => item.id === sessionRecord.id,
+            );
+            if (
+              currentSession &&
+              currentSession.status !== "closed" &&
+              currentSession.status !== "error"
+            ) {
+              markSessionState(sessionRecord.id, "closed");
+            }
+          };
+        } catch (error) {
+          disconnectRuntimeSession(sessionRecord.id);
+          markSessionState(
+            sessionRecord.id,
+            "error",
+            error instanceof Error
+              ? error.message
+              : "AWS SSM 연결에 실패했습니다.",
           );
         } finally {
           pendingSessionConnections.delete(sessionRecord.id);
@@ -785,10 +1163,12 @@ export const useMobileAppStore = create<MobileAppState>()(
             auth: createUnauthenticatedState(),
             groups: [],
             hosts: [],
+            awsProfiles: [],
             knownHosts: [],
             secretMetadata: [],
             secretsByRef: {},
             sessions: [],
+            activeSessionTabId: null,
             syncStatus: createDefaultSyncStatus(),
           });
           return;
@@ -809,6 +1189,11 @@ export const useMobileAppStore = create<MobileAppState>()(
 
           let currentSession = activeSession;
           try {
+            let serverInfo = null;
+            try {
+              serverInfo = await fetchServerInfo(get().settings.serverUrl);
+            } catch {}
+
             let payload;
             try {
               payload = await fetchSyncSnapshot(
@@ -840,10 +1225,17 @@ export const useMobileAppStore = create<MobileAppState>()(
             }
 
             const nextHosts = sortHosts(
-              decodeSshHosts(payload, currentSession.vaultBootstrap.keyBase64),
+              decodeSupportedHosts(
+                payload,
+                currentSession.vaultBootstrap.keyBase64,
+              ),
             );
             const nextGroups = sortGroups(
               decodeGroups(payload, currentSession.vaultBootstrap.keyBase64),
+            );
+            const nextAwsProfiles = decodeAwsProfiles(
+              payload,
+              currentSession.vaultBootstrap.keyBase64,
             );
             const nextKnownHosts = decodeKnownHosts(
               payload,
@@ -855,9 +1247,11 @@ export const useMobileAppStore = create<MobileAppState>()(
             );
 
             await updateSecretsState(nextSecretsByRef, nextHosts);
+            await saveStoredAwsProfiles(nextAwsProfiles);
             set({
               groups: nextGroups,
               hosts: nextHosts,
+              awsProfiles: nextAwsProfiles,
               knownHosts: sortKnownHosts(nextKnownHosts),
               auth: {
                 status: "authenticated",
@@ -870,7 +1264,18 @@ export const useMobileAppStore = create<MobileAppState>()(
                 pendingPush: false,
                 errorMessage: null,
                 lastSuccessfulSyncAt: new Date().toISOString(),
-                awsProfilesServerSupport: "unknown",
+                awsProfilesServerSupport:
+                  serverInfo?.capabilities.sync.awsProfiles === true
+                    ? "supported"
+                    : serverInfo?.capabilities.sync.awsProfiles === false
+                      ? "unsupported"
+                      : "unknown",
+                awsSsmServerSupport:
+                  serverInfo?.capabilities.sessions.awsSsm === true
+                    ? "supported"
+                    : serverInfo?.capabilities.sessions.awsSsm === false
+                      ? "unsupported"
+                      : "unknown",
               },
             });
           } catch (error) {
@@ -900,6 +1305,8 @@ export const useMobileAppStore = create<MobileAppState>()(
             if (error instanceof ApiError && error.status === 401) {
               await clearStoredAuthSession();
               await clearStoredSecrets();
+              await clearStoredAwsProfiles();
+              await clearStoredAwsSsoTokens();
               set({
                 auth: {
                   ...createUnauthenticatedState(),
@@ -907,10 +1314,12 @@ export const useMobileAppStore = create<MobileAppState>()(
                 },
                 groups: [],
                 hosts: [],
+                awsProfiles: [],
                 knownHosts: [],
                 secretMetadata: [],
                 secretsByRef: {},
                 sessions: [],
+                activeSessionTabId: null,
                 syncStatus: {
                   ...createDefaultSyncStatus(),
                   status: "error",
@@ -943,7 +1352,10 @@ export const useMobileAppStore = create<MobileAppState>()(
         pendingServerKeyResolver = null;
         pendingCredentialResolver?.(null);
         pendingCredentialResolver = null;
+        pendingAwsSsoCancelHandler?.();
+        pendingAwsSsoCancelHandler = null;
         set({
+          pendingAwsSsoLogin: null,
           pendingServerKeyPrompt: null,
           pendingCredentialPrompt: null,
         });
@@ -957,11 +1369,14 @@ export const useMobileAppStore = create<MobileAppState>()(
         syncStatus: createDefaultSyncStatus(),
         groups: [],
         hosts: [],
+        awsProfiles: [],
         knownHosts: [],
         secretMetadata: [],
         sessions: [],
+        activeSessionTabId: null,
         secretsByRef: {},
         pendingBrowserLoginState: null,
+        pendingAwsSsoLogin: null,
         pendingServerKeyPrompt: null,
         pendingCredentialPrompt: null,
         initializeApp: async () => {
@@ -989,8 +1404,10 @@ export const useMobileAppStore = create<MobileAppState>()(
 
             try {
               const secretsByRef = await loadStoredSecrets();
+              const awsProfiles = await loadStoredAwsProfiles();
               set((state) => ({
                 secretsByRef,
+                awsProfiles,
                 secretMetadata: deriveSecretMetadata(state.hosts, secretsByRef),
               }));
 
@@ -1000,10 +1417,12 @@ export const useMobileAppStore = create<MobileAppState>()(
                   auth: createUnauthenticatedState(),
                   groups: [],
                   hosts: [],
+                  awsProfiles: [],
                   knownHosts: [],
                   secretMetadata: [],
                   secretsByRef: {},
                   sessions: [],
+                  activeSessionTabId: null,
                   syncStatus: createDefaultSyncStatus(),
                 });
                 return;
@@ -1051,10 +1470,12 @@ export const useMobileAppStore = create<MobileAppState>()(
                   },
                   groups: [],
                   hosts: [],
+                  awsProfiles: [],
                   knownHosts: [],
                   secretMetadata: [],
                   secretsByRef: {},
                   sessions: [],
+                  activeSessionTabId: null,
                   syncStatus: createDefaultSyncStatus(),
                 });
               }
@@ -1175,6 +1596,32 @@ export const useMobileAppStore = create<MobileAppState>()(
             auth: createUnauthenticatedState(),
           });
         },
+        cancelAwsSsoLogin: () => {
+          pendingAwsSsoCancelHandler?.();
+          pendingAwsSsoCancelHandler = null;
+          set({
+            pendingAwsSsoLogin: null,
+          });
+        },
+        reopenAwsSsoLogin: async () => {
+          const pending = get().pendingAwsSsoLogin;
+          if (!pending?.browserUrl) {
+            return;
+          }
+          try {
+            await openAwsSsoBrowser(pending.browserUrl);
+          } catch (error) {
+            set((state) => ({
+              auth: {
+                ...state.auth,
+                errorMessage:
+                  error instanceof Error
+                    ? error.message
+                    : "브라우저를 다시 열지 못했습니다.",
+              },
+            }));
+          }
+        },
         logout: async () => {
           clearPrompts();
           await disconnectAllRuntimeSessions();
@@ -1188,17 +1635,22 @@ export const useMobileAppStore = create<MobileAppState>()(
 
           await clearStoredAuthSession();
           await clearStoredSecrets();
+          await clearStoredAwsProfiles();
+          await clearStoredAwsSsoTokens();
 
           set({
             auth: createUnauthenticatedState(),
             groups: [],
             hosts: [],
+            awsProfiles: [],
             knownHosts: [],
             secretMetadata: [],
             secretsByRef: {},
             sessions: [],
+            activeSessionTabId: null,
             syncStatus: createDefaultSyncStatus(),
             pendingBrowserLoginState: null,
+            pendingAwsSsoLogin: null,
             pendingServerKeyPrompt: null,
             pendingCredentialPrompt: null,
           });
@@ -1236,6 +1688,8 @@ export const useMobileAppStore = create<MobileAppState>()(
           if (serverChanged) {
             await clearStoredAuthSession();
             await clearStoredSecrets();
+            await clearStoredAwsProfiles();
+            await clearStoredAwsSsoTokens();
             set({
               auth: {
                 ...createUnauthenticatedState(),
@@ -1245,12 +1699,15 @@ export const useMobileAppStore = create<MobileAppState>()(
               },
               groups: [],
               hosts: [],
+              awsProfiles: [],
               knownHosts: [],
               secretMetadata: [],
               secretsByRef: {},
               sessions: [],
+              activeSessionTabId: null,
               syncStatus: createDefaultSyncStatus(),
               pendingBrowserLoginState: null,
+              pendingAwsSsoLogin: null,
             });
           }
 
@@ -1265,32 +1722,52 @@ export const useMobileAppStore = create<MobileAppState>()(
           }
 
           const liveSession = get().sessions.find(
-            (session) =>
-              session.hostId === hostId && runtimeSessions.has(session.id),
+            (session) => session.hostId === hostId && isLiveSession(session),
           );
           if (liveSession) {
+            get().setActiveSessionTab(liveSession.id);
+            if (
+              !runtimeSessions.has(liveSession.id) &&
+              !pendingSessionConnections.has(liveSession.id) &&
+              liveSession.status !== "connecting" &&
+              liveSession.status !== "disconnecting"
+            ) {
+              void get().resumeSession(liveSession.id);
+            }
             return liveSession.id;
           }
 
-          const latestRestorable = get().sessions.find(
-            (session) => session.hostId === hostId && session.isRestorable,
-          );
-          if (latestRestorable) {
-            return get().resumeSession(latestRestorable.id);
-          }
-
           const nextSession = createSessionRecord(host);
-          set((state) => ({
-            sessions: upsertSessionRecord(state.sessions, nextSession),
-          }));
+          set((state) => {
+            const nextSessions = upsertSessionRecord(state.sessions, nextSession);
+            return {
+              sessions: nextSessions,
+              activeSessionTabId: resolveActiveSessionTabId(
+                nextSessions,
+                state.activeSessionTabId,
+                nextSession.id,
+              ),
+            };
+          });
           void connectSessionRecord(nextSession, host);
           return nextSession.id;
+        },
+        setActiveSessionTab: (sessionId: string | null) => {
+          set((state) => ({
+            activeSessionTabId: resolveActiveSessionTabId(
+              state.sessions,
+              state.activeSessionTabId,
+              sessionId,
+            ),
+          }));
         },
         resumeSession: async (sessionId: string) => {
           const session = get().sessions.find((item) => item.id === sessionId);
           if (!session) {
             return null;
           }
+
+          get().setActiveSessionTab(session.id);
 
           if (
             runtimeSessions.has(session.id) ||
@@ -1311,13 +1788,21 @@ export const useMobileAppStore = create<MobileAppState>()(
             return session.id;
           }
 
-          set((state) => ({
-            sessions: patchSessionRecord(state.sessions, session.id, {
+          set((state) => {
+            const nextSessions = patchSessionRecord(state.sessions, session.id, {
               status: "connecting",
               errorMessage: null,
               lastEventAt: new Date().toISOString(),
-            }),
-          }));
+            });
+            return {
+              sessions: nextSessions,
+              activeSessionTabId: resolveActiveSessionTabId(
+                nextSessions,
+                state.activeSessionTabId,
+                session.id,
+              ),
+            };
+          });
           void connectSessionRecord(session, host);
           return session.id;
         },
@@ -1335,9 +1820,15 @@ export const useMobileAppStore = create<MobileAppState>()(
             }),
           }));
 
-          try {
-            await runtime.connection.disconnect();
-          } catch {}
+          if (runtime.kind === "ssh") {
+            try {
+              await runtime.connection.disconnect();
+            } catch {}
+          } else {
+            try {
+              runtime.socket.close();
+            } catch {}
+          }
 
           flushSessionSnapshot(sessionId, {
             markActivity: false,
@@ -1348,11 +1839,20 @@ export const useMobileAppStore = create<MobileAppState>()(
         removeSession: async (sessionId: string) => {
           const runtime = runtimeSessions.get(sessionId);
 
-          set((state) => ({
-            sessions: sortSessions(
+          set((state) => {
+            const nextSessions = sortSessions(
               state.sessions.filter((session) => session.id !== sessionId),
-            ),
-          }));
+            );
+            return {
+              sessions: nextSessions,
+              activeSessionTabId: resolveActiveSessionTabId(
+                nextSessions,
+                state.activeSessionTabId === sessionId
+                  ? null
+                  : state.activeSessionTabId,
+              ),
+            };
+          });
 
           if (!runtime) {
             pendingSessionConnections.delete(sessionId);
@@ -1362,9 +1862,15 @@ export const useMobileAppStore = create<MobileAppState>()(
 
           disconnectRuntimeSession(sessionId);
 
-          try {
-            await runtime.connection.disconnect();
-          } catch {}
+          if (runtime.kind === "ssh") {
+            try {
+              await runtime.connection.disconnect();
+            } catch {}
+          } else {
+            try {
+              runtime.socket.close();
+            } catch {}
+          }
         },
         writeToSession: async (sessionId: string, data: string) => {
           const runtime = runtimeSessions.get(sessionId);
@@ -1372,12 +1878,21 @@ export const useMobileAppStore = create<MobileAppState>()(
             return;
           }
           const bytes = Buffer.from(data, "utf8");
-          await runtime.shell.sendData(
-            bytes.buffer.slice(
-              bytes.byteOffset,
-              bytes.byteOffset + bytes.byteLength,
-            ),
-          );
+          if (runtime.kind === "ssh") {
+            await runtime.shell.sendData(
+              bytes.buffer.slice(
+                bytes.byteOffset,
+                bytes.byteOffset + bytes.byteLength,
+              ),
+            );
+            return;
+          }
+
+          const message: AwsSsmSessionClientMessage = {
+            type: "input",
+            dataBase64: bytes.toString("base64"),
+          };
+          runtime.socket.send(JSON.stringify(message));
         },
         subscribeToSessionTerminal: (sessionId, handlers) => {
           const runtime = runtimeSessions.get(sessionId);
@@ -1385,28 +1900,51 @@ export const useMobileAppStore = create<MobileAppState>()(
             return () => {};
           }
 
-          const replay = runtime.shell.readBuffer({ mode: "head" });
+          if (runtime.kind === "ssh") {
+            const replay = runtime.shell.readBuffer({ mode: "head" });
+            handlers.onReplay(
+              replay.chunks.map((chunk) => new Uint8Array(chunk.bytes)),
+            );
+
+            const listenerId = runtime.shell.addListener(
+              (event) => {
+                if ("kind" in event) {
+                  return;
+                }
+                handlers.onData(new Uint8Array(event.bytes));
+              },
+              {
+                cursor: { mode: "seq", seq: replay.nextSeq },
+                coalesceMs: 16,
+              },
+            );
+
+            return () => {
+              try {
+                runtime.shell.removeListener(listenerId);
+              } catch {}
+            };
+          }
+
           handlers.onReplay(
-            replay.chunks.map((chunk) => new Uint8Array(chunk.bytes)),
+            runtime.replayChunks.length > 0
+              ? runtime.replayChunks
+              : sessionId
+                ? [
+                    Uint8Array.from(
+                      Buffer.from(
+                        get().sessions.find((item) => item.id === sessionId)
+                          ?.lastViewportSnapshot ?? "",
+                        "utf8",
+                      ),
+                    ),
+                  ]
+                : [],
           );
-
-          const listenerId = runtime.shell.addListener(
-            (event) => {
-              if ("kind" in event) {
-                return;
-              }
-              handlers.onData(new Uint8Array(event.bytes));
-            },
-            {
-              cursor: { mode: "seq", seq: replay.nextSeq },
-              coalesceMs: 16,
-            },
-          );
-
+          const subscriptionId = `aws-sub-${runtimeSubscriptionCounter++}`;
+          runtime.subscribers.set(subscriptionId, handlers);
           return () => {
-            try {
-              runtime.shell.removeListener(listenerId);
-            } catch {}
+            runtime.subscribers.delete(subscriptionId);
           };
         },
         acceptServerKeyPrompt: async () => {
@@ -1442,9 +1980,20 @@ export const useMobileAppStore = create<MobileAppState>()(
         knownHosts: state.knownHosts,
         secretMetadata: state.secretMetadata,
         sessions: compactPersistedSessions(state.sessions),
+        activeSessionTabId: resolveActiveSessionTabId(
+          state.sessions,
+          state.activeSessionTabId,
+        ),
       }),
       onRehydrateStorage: () => () => {
-        useMobileAppStore.setState({ hydrated: true });
+        const nextSessions = normalizePersistedSessionsForColdStart(
+          useMobileAppStore.getState().sessions,
+        );
+        useMobileAppStore.setState((state) => ({
+          hydrated: true,
+          sessions: nextSessions,
+          activeSessionTabId: resolveActiveSessionTabId(nextSessions, null),
+        }));
       },
     },
   ),

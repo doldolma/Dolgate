@@ -4,6 +4,7 @@ import type {
   HostRecord,
   KnownHostRecord,
   LoadedManagedSecretPayload,
+  SessionConnectionKind,
   SecretMetadataRecord,
   SshHostRecord,
   SyncStatus,
@@ -39,6 +40,8 @@ export interface MobileSessionRecord {
   hostId: string;
   title: string;
   status: TerminalTab["status"];
+  connectionKind?: SessionConnectionKind;
+  connectionDetails?: string | null;
   hasReceivedOutput: boolean;
   isRestorable: boolean;
   lastViewportSnapshot: string;
@@ -55,6 +58,61 @@ export interface ClientSshConnectInput {
   title?: string;
   secrets?: HostSecretInput;
 }
+
+export interface AwsSessionEnvSpec {
+  env: Record<string, string>;
+  unsetEnv: string[];
+}
+
+export interface ResolvedAwsConnectPayload {
+  profileName: string;
+  region: string;
+  instanceId: string;
+  cols: number;
+  rows: number;
+  env?: Record<string, string>;
+  unsetEnv?: string[];
+}
+
+export interface AwsSsmSessionStartRequest extends ResolvedAwsConnectPayload {
+  hostId: string;
+  label: string;
+}
+
+export type AwsSsmSessionClientMessage =
+  | {
+      type: "start";
+      payload: AwsSsmSessionStartRequest;
+    }
+  | {
+      type: "input";
+      dataBase64: string;
+    }
+  | {
+      type: "resize";
+      cols: number;
+      rows: number;
+    }
+  | {
+      type: "close";
+    };
+
+export type AwsSsmSessionServerMessage =
+  | {
+      type: "ready";
+    }
+  | {
+      type: "output";
+      dataBase64: string;
+    }
+  | {
+      type: "error";
+      message: string;
+    }
+  | {
+      type: "exit";
+      message?: string | null;
+    };
 
 export interface ClientApi {
   auth: {

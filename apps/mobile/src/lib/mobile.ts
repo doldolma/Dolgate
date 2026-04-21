@@ -6,6 +6,12 @@ import * as Keychain from "react-native-keychain";
 import type {
   AuthSession,
   AuthState,
+  AwsSsoMobileLoginHandoffRequest,
+  AwsSsoMobileHandoffResponse,
+  AwsSsoMobileLoginStartRequest,
+  AwsSsoMobileLoginStartResponse,
+  AwsEc2HostRecord,
+  ManagedAwsProfilePayload,
   GroupRecord,
   HostRecord,
   KnownHostRecord,
@@ -16,8 +22,10 @@ import type {
   SyncPayloadV2,
   SyncRecord,
   SyncStatus,
+  ServerInfoResponse,
 } from "@dolssh/shared-core";
 import {
+  isAwsEc2HostRecord,
   getServerUrlValidationMessage,
   isSshHostRecord,
   normalizeServerUrl,
@@ -29,9 +37,12 @@ import { fromByteArray, toByteArray } from "base64-js";
 export const DEFAULT_SERVER_URL = "https://ssh.doldolma.com";
 export const AUTH_REDIRECT_URI = "dolgate://auth/callback";
 export const AUTH_CLIENT_ID = "dolgate-mobile";
+export const AWS_SSO_APP_CALLBACK_URI = "dolgate://aws-sso/callback";
 
 const AUTH_SESSION_SERVICE = "dolgate.mobile.auth-session";
 const MANAGED_SECRETS_SERVICE = "dolgate.mobile.managed-secrets";
+const MANAGED_AWS_PROFILES_SERVICE = "dolgate.mobile.managed-aws-profiles";
+const AWS_SSO_TOKENS_SERVICE = "dolgate.mobile.aws-sso-tokens";
 
 export class ApiError extends Error {
   constructor(
@@ -51,6 +62,13 @@ interface SyncEnvelope {
 }
 
 type ManagedSecretsMap = Record<string, LoadedManagedSecretPayload>;
+
+export interface StoredAwsSsoTokenRecord {
+  profileId: string;
+  accessToken: string;
+  expiresAt: string;
+  refreshToken?: string;
+}
 
 export interface MobileServerPublicKeyInfo {
   host: string;
@@ -75,6 +93,7 @@ export function createDefaultSyncStatus(): SyncStatus {
     lastSuccessfulSyncAt: null,
     errorMessage: null,
     awsProfilesServerSupport: "unknown",
+    awsSsmServerSupport: "unknown",
   };
 }
 
@@ -94,6 +113,88 @@ export function buildBrowserLoginUrl(serverUrl: string, state: string): string {
   loginUrl.searchParams.set("redirect_uri", AUTH_REDIRECT_URI);
   loginUrl.searchParams.set("state", state);
   return loginUrl.toString();
+}
+
+export function buildAwsSsoRedirectUri(serverUrl: string): string {
+  const normalized = normalizeServerUrl(serverUrl);
+  const callbackUrl = new URL("/auth/aws-sso/callback", normalized);
+  return callbackUrl.toString();
+}
+
+export async function startAwsSsoBrowserLogin(
+  serverUrl: string,
+  accessToken: string,
+  payload: AwsSsoMobileLoginStartRequest,
+): Promise<AwsSsoMobileLoginStartResponse> {
+  return fetchJson<AwsSsoMobileLoginStartResponse>(
+    new URL("/api/aws-sso/mobile/start", normalizeServerUrl(serverUrl)).toString(),
+    {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${accessToken}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify(payload),
+    },
+  );
+}
+
+export async function fetchAwsSsoLoginHandoff(
+  serverUrl: string,
+  accessToken: string,
+  loginId: string,
+): Promise<AwsSsoMobileHandoffResponse> {
+  return fetchJson<AwsSsoMobileHandoffResponse>(
+    new URL(
+      `/api/aws-sso/mobile/handoff/${encodeURIComponent(loginId)}`,
+      normalizeServerUrl(serverUrl),
+    ).toString(),
+    {
+      headers: {
+        authorization: `Bearer ${accessToken}`,
+      },
+    },
+  );
+}
+
+export async function completeAwsSsoLoginHandoff(
+  serverUrl: string,
+  accessToken: string,
+  loginId: string,
+  payload: AwsSsoMobileLoginHandoffRequest,
+): Promise<AwsSsoMobileHandoffResponse> {
+  return fetchJson<AwsSsoMobileHandoffResponse>(
+    new URL(
+      `/api/aws-sso/mobile/handoff/${encodeURIComponent(loginId)}`,
+      normalizeServerUrl(serverUrl),
+    ).toString(),
+    {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${accessToken}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify(payload),
+    },
+  );
+}
+
+export async function cancelAwsSsoBrowserLogin(
+  serverUrl: string,
+  accessToken: string,
+  loginId: string,
+): Promise<void> {
+  await fetchEmpty(
+    new URL("/api/aws-sso/mobile/cancel", normalizeServerUrl(serverUrl)).toString(),
+    {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${accessToken}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ loginId }),
+    },
+  );
 }
 
 export function buildEmptySyncPayload(): SyncPayloadV2 {
@@ -205,6 +306,73 @@ export async function clearStoredSecrets(): Promise<void> {
   });
 }
 
+export async function loadStoredAwsProfiles(): Promise<
+  ManagedAwsProfilePayload[]
+> {
+  const credentials = await Keychain.getGenericPassword({
+    service: MANAGED_AWS_PROFILES_SERVICE,
+  });
+  if (!credentials) {
+    return [];
+  }
+
+  try {
+    return JSON.parse(credentials.password) as ManagedAwsProfilePayload[];
+  } catch {
+    return [];
+  }
+}
+
+export async function saveStoredAwsProfiles(
+  profiles: ManagedAwsProfilePayload[],
+): Promise<void> {
+  await Keychain.setGenericPassword("dolgate", JSON.stringify(profiles), {
+    service: MANAGED_AWS_PROFILES_SERVICE,
+    accessible: Keychain.ACCESSIBLE.WHEN_UNLOCKED_THIS_DEVICE_ONLY,
+  });
+}
+
+export async function clearStoredAwsProfiles(): Promise<void> {
+  await Keychain.resetGenericPassword({
+    service: MANAGED_AWS_PROFILES_SERVICE,
+  });
+}
+
+export async function loadStoredAwsSsoTokens(): Promise<
+  Record<string, StoredAwsSsoTokenRecord>
+> {
+  const credentials = await Keychain.getGenericPassword({
+    service: AWS_SSO_TOKENS_SERVICE,
+  });
+  if (!credentials) {
+    return {};
+  }
+
+  try {
+    return JSON.parse(credentials.password) as Record<
+      string,
+      StoredAwsSsoTokenRecord
+    >;
+  } catch {
+    return {};
+  }
+}
+
+export async function saveStoredAwsSsoTokens(
+  tokensByProfileId: Record<string, StoredAwsSsoTokenRecord>,
+): Promise<void> {
+  await Keychain.setGenericPassword("dolgate", JSON.stringify(tokensByProfileId), {
+    service: AWS_SSO_TOKENS_SERVICE,
+    accessible: Keychain.ACCESSIBLE.WHEN_UNLOCKED_THIS_DEVICE_ONLY,
+  });
+}
+
+export async function clearStoredAwsSsoTokens(): Promise<void> {
+  await Keychain.resetGenericPassword({
+    service: AWS_SSO_TOKENS_SERVICE,
+  });
+}
+
 export async function fetchExchangeSession(
   serverUrl: string,
   code: string,
@@ -263,6 +431,14 @@ export async function fetchSyncSnapshot(
   });
 }
 
+export async function fetchServerInfo(
+  serverUrl: string,
+): Promise<ServerInfoResponse> {
+  return fetchJson<ServerInfoResponse>(
+    new URL("/api/info", normalizeServerUrl(serverUrl)).toString(),
+  );
+}
+
 export async function postSyncSnapshot(
   serverUrl: string,
   accessToken: string,
@@ -296,6 +472,16 @@ export function decodeSshHosts(
   );
 }
 
+export function decodeSupportedHosts(
+  payload: SyncPayloadV2,
+  keyBase64: string,
+): Array<SshHostRecord | AwsEc2HostRecord> {
+  return decodeSyncRecords<HostRecord>(payload.hosts, keyBase64).filter(
+    (host): host is SshHostRecord | AwsEc2HostRecord =>
+      isSshHostRecord(host) || isAwsEc2HostRecord(host),
+  );
+}
+
 export function decodeGroups(
   payload: SyncPayloadV2,
   keyBase64: string,
@@ -322,6 +508,16 @@ export function decodeManagedSecrets(
     next[record.secretRef] = record;
   }
   return next;
+}
+
+export function decodeAwsProfiles(
+  payload: SyncPayloadV2,
+  keyBase64: string,
+): ManagedAwsProfilePayload[] {
+  return decodeSyncRecords<ManagedAwsProfilePayload>(
+    payload.awsProfiles,
+    keyBase64,
+  ).sort((left, right) => left.name.localeCompare(right.name));
 }
 
 export function buildKnownHostsSyncPayload(
@@ -357,7 +553,7 @@ export function buildKnownHostRecord(
 }
 
 export function deriveSecretMetadata(
-  hosts: SshHostRecord[],
+  hosts: HostRecord[],
   secretsByRef: ManagedSecretsMap,
 ): SecretMetadataRecord[] {
   return Object.values(secretsByRef)
@@ -368,8 +564,9 @@ export function deriveSecretMetadata(
       hasPassphrase: Boolean(record.passphrase),
       hasManagedPrivateKey: Boolean(record.privateKeyPem),
       hasCertificate: Boolean(record.certificateText),
-      linkedHostCount: hosts.filter((host) => host.secretRef === record.secretRef)
-        .length,
+      linkedHostCount: hosts.filter(
+        (host) => isSshHostRecord(host) && host.secretRef === record.secretRef,
+      ).length,
       updatedAt: record.updatedAt,
     }))
     .sort((left, right) => left.label.localeCompare(right.label));

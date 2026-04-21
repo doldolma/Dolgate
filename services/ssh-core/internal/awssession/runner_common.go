@@ -61,16 +61,17 @@ func normalizedSize(cols, rows int) (int, int) {
 }
 
 func buildAWSArgs(payload protocol.AWSConnectPayload) []string {
-	return []string{
+	args := []string{
 		"ssm",
 		"start-session",
 		"--target",
 		payload.InstanceID,
-		"--profile",
-		payload.ProfileName,
-		"--region",
-		payload.Region,
 	}
+	if strings.TrimSpace(payload.ProfileName) != "" {
+		args = append(args, "--profile", payload.ProfileName)
+	}
+	args = append(args, "--region", payload.Region)
+	return args
 }
 
 func normalizeControlSignal(signal string) (string, error) {
