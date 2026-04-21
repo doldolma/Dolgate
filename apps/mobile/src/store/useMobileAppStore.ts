@@ -1010,8 +1010,9 @@ export const useMobileAppStore = create<MobileAppState>()(
             "/api/aws-sessions/ws",
             get().settings.serverUrl,
           );
+          wsUrl.searchParams.set("access_token", accessToken);
           const wsProtocol = wsUrl.protocol === "https:" ? "wss:" : "ws:";
-          const wsEndpoint = `${wsProtocol}//${wsUrl.host}${wsUrl.pathname}`;
+          const wsEndpoint = `${wsProtocol}//${wsUrl.host}${wsUrl.pathname}${wsUrl.search}`;
 
           const socket = new (WebSocket as unknown as ReactNativeWebSocketConstructor)(
             wsEndpoint,
@@ -1022,6 +1023,8 @@ export const useMobileAppStore = create<MobileAppState>()(
               },
             },
           );
+          let socketOpened = false;
+          let receivedServerMessage = false;
           const nextRuntime: AwsRuntimeSession = {
             kind: "aws-ssm",
             recordId: sessionRecord.id,
@@ -1044,6 +1047,7 @@ export const useMobileAppStore = create<MobileAppState>()(
           }));
 
           socket.onopen = () => {
+            socketOpened = true;
             const message: AwsSsmSessionClientMessage = {
               type: "start",
               payload: {
@@ -1064,6 +1068,7 @@ export const useMobileAppStore = create<MobileAppState>()(
           };
 
           socket.onmessage = (event) => {
+            receivedServerMessage = true;
             const message = JSON.parse(
               String(event.data),
             ) as AwsSsmSessionServerMessage;
@@ -1117,6 +1122,27 @@ export const useMobileAppStore = create<MobileAppState>()(
                 markActivity: false,
               });
               disconnectRuntimeSession(sessionRecord.id);
+              const currentSession = get().sessions.find(
+                (item) => item.id === sessionRecord.id,
+              );
+              if (currentSession?.status === "error") {
+                return;
+              }
+
+              if (
+                currentSession &&
+                currentSession.status !== "disconnecting" &&
+                (currentSession.status === "connecting" ||
+                  !currentSession.hasReceivedOutput)
+              ) {
+                markSessionState(
+                  sessionRecord.id,
+                  "error",
+                  message.message || "AWS SSM 세션이 시작 직후 종료되었습니다.",
+                );
+                return;
+              }
+
               markSessionState(
                 sessionRecord.id,
                 "closed",
@@ -1127,6 +1153,9 @@ export const useMobileAppStore = create<MobileAppState>()(
 
           socket.onerror = () => {
             pendingSessionConnections.delete(sessionRecord.id);
+            if (socketOpened || receivedServerMessage) {
+              return;
+            }
             markSessionState(
               sessionRecord.id,
               "error",
@@ -1147,6 +1176,18 @@ export const useMobileAppStore = create<MobileAppState>()(
               currentSession.status !== "closed" &&
               currentSession.status !== "error"
             ) {
+              if (
+                currentSession.status !== "disconnecting" &&
+                (currentSession.status === "connecting" ||
+                  !currentSession.hasReceivedOutput)
+              ) {
+                markSessionState(
+                  sessionRecord.id,
+                  "error",
+                  "AWS SSM 세션이 예기치 않게 종료되었습니다.",
+                );
+                return;
+              }
               markSessionState(sessionRecord.id, "closed");
             }
           };

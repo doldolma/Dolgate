@@ -116,33 +116,41 @@ class AwsSsoBridgeModule(
         } catch (_: Exception) {
           return
         }
-      handleConnection(socket)
-      stopLoopbackInternal()
-      return
+      val shouldStop =
+        try {
+          handleConnection(socket)
+        } catch (_: Exception) {
+          false
+        }
+      if (shouldStop) {
+        stopLoopbackInternal()
+        return
+      }
     }
   }
 
-  private fun handleConnection(socket: Socket) {
+  private fun handleConnection(socket: Socket): Boolean {
     socket.use { currentSocket ->
       val requestLine =
         BufferedReader(InputStreamReader(currentSocket.getInputStream(), StandardCharsets.UTF_8))
           .readLine()
-          ?: return
+          ?: return false
 
       val target = parseRequestTarget(requestLine)
       if (target == null || target.path != "/oauth/callback") {
         writeResponse(currentSocket, 404, "<!doctype html><html><body>Not Found</body></html>")
-        return
+        return false
       }
 
       val deepLink = buildDeepLink(target)
       if (deepLink != null) {
         openApp(deepLink)
         writeResponse(currentSocket, 200, successHtml(deepLink))
-        return
+        return true
       }
 
       writeResponse(currentSocket, 400, "<!doctype html><html><body>Invalid callback</body></html>")
+      return false
     }
   }
 

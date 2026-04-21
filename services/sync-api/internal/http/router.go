@@ -564,7 +564,9 @@ func NewRouter(store store.Store, authService *auth.Service, config RouterConfig
 	})
 
 	awsSessionGroup := router.Group("/api/aws-sessions")
-	awsSessionGroup.Use(authMiddleware(authService))
+	awsSessionGroup.Use(authMiddlewareWithOptions(authService, authMiddlewareOptions{
+		AllowQueryAccessToken: true,
+	}))
 	awsSessionGroup.GET("/ws", func(ctx *gin.Context) {
 		if err := awsSessionHub.HandleWebSocket(ctx.Writer, ctx.Request); err != nil {
 			if ctx.Writer.Written() {
@@ -989,15 +991,22 @@ func resolveRequestOrigin(ctx *gin.Context) string {
 	return scheme + "://" + host
 }
 
+type authMiddlewareOptions struct {
+	AllowQueryAccessToken bool
+}
+
 func authMiddleware(authService *auth.Service) gin.HandlerFunc {
+	return authMiddlewareWithOptions(authService, authMiddlewareOptions{})
+}
+
+func authMiddlewareWithOptions(authService *auth.Service, options authMiddlewareOptions) gin.HandlerFunc {
 	return func(ctx *gin.Context) {
-		authorization := ctx.GetHeader("Authorization")
-		if !strings.HasPrefix(authorization, "Bearer ") {
+		token := extractBearerToken(ctx, options)
+		if strings.TrimSpace(token) == "" {
 			ctx.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "missing bearer token"})
 			return
 		}
 
-		token := strings.TrimPrefix(authorization, "Bearer ")
 		claims, err := authService.ParseAccessToken(token)
 		if err != nil {
 			ctx.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
@@ -1007,6 +1016,17 @@ func authMiddleware(authService *auth.Service) gin.HandlerFunc {
 		ctx.Set("userId", claims.UserID)
 		ctx.Next()
 	}
+}
+
+func extractBearerToken(ctx *gin.Context, options authMiddlewareOptions) string {
+	authorization := ctx.GetHeader("Authorization")
+	if strings.HasPrefix(authorization, "Bearer ") {
+		return strings.TrimSpace(strings.TrimPrefix(authorization, "Bearer "))
+	}
+	if options.AllowQueryAccessToken {
+		return strings.TrimSpace(ctx.Query("access_token"))
+	}
+	return ""
 }
 
 const tooManyAuthAttemptsMessage = "너무 많은 인증 시도가 감지되었습니다. 잠시 후 다시 시도해 주세요."

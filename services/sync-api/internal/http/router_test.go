@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/gorilla/websocket"
 
 	"dolssh/services/sync-api/internal/auth"
 	httpserver "dolssh/services/sync-api/internal/http"
@@ -270,6 +271,49 @@ func TestServerInfoEndpoint(t *testing.T) {
 	if !response.Capabilities.Sessions.AWSSsoBrowserFlow {
 		t.Fatalf("expected awsSsoBrowserFlow capability to be enabled")
 	}
+}
+
+func TestAwsSessionWebSocketAcceptsQueryAccessToken(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := createTestRouterWithConfig(t, httpserver.RouterConfig{
+		LocalAuthEnabled:   true,
+		LocalSignupEnabled: true,
+		AwsSsmRuntime: httpserver.AwsSsmRuntime{
+			Enabled: true,
+		},
+	})
+
+	signupBody := bytes.NewBufferString(`{"email":"ws-query@example.com","password":"supersecure"}`)
+	signupRequest := httptest.NewRequest(http.MethodPost, "/auth/signup", signupBody)
+	signupRequest.Header.Set("Content-Type", "application/json")
+	signupRecorder := httptest.NewRecorder()
+	router.ServeHTTP(signupRecorder, signupRequest)
+	if signupRecorder.Code != http.StatusCreated {
+		t.Fatalf("expected signup to succeed, got %d: %s", signupRecorder.Code, signupRecorder.Body.String())
+	}
+
+	var signupResponse struct {
+		Tokens struct {
+			AccessToken string `json:"accessToken"`
+		} `json:"tokens"`
+	}
+	if err := json.Unmarshal(signupRecorder.Body.Bytes(), &signupResponse); err != nil {
+		t.Fatalf("decode signup response: %v", err)
+	}
+
+	server := httptest.NewServer(router)
+	defer server.Close()
+
+	wsURL := "ws" + strings.TrimPrefix(server.URL, "http") +
+		"/api/aws-sessions/ws?access_token=" + url.QueryEscape(signupResponse.Tokens.AccessToken)
+	conn, response, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if err != nil {
+		if response != nil {
+			t.Fatalf("dial websocket with query access token: %v (status=%d)", err, response.StatusCode)
+		}
+		t.Fatalf("dial websocket with query access token: %v", err)
+	}
+	_ = conn.Close()
 }
 
 func TestSyncRequiresAuth(t *testing.T) {
