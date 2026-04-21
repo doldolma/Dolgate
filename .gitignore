@@ -30,3 +30,5 @@ services/sync-api/=busy_timeout*
 .tmp
 /tmp/
 /data.json
+!packages/fressh-react-native-xtermjs-webview/dist/
+!packages/fressh-react-native-xtermjs-webview/dist/**

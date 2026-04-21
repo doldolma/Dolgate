@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"io"
+	"sync"
 	"testing"
 	"time"
 
@@ -11,9 +12,11 @@ import (
 )
 
 type stubTransport struct {
+	mu         sync.Mutex
 	readChunks [][]byte
 	writeLog   bytes.Buffer
 	closed     bool
+	closedCh   chan struct{}
 }
 
 type stubControlTransport struct {
@@ -24,16 +27,34 @@ type stubControlTransport struct {
 }
 
 func (t *stubTransport) Read(buffer []byte) (int, error) {
-	if len(t.readChunks) == 0 {
+	t.ensureInitialized()
+
+	t.mu.Lock()
+	if len(t.readChunks) > 0 {
+		chunk := t.readChunks[0]
+		t.readChunks = t.readChunks[1:]
+		t.mu.Unlock()
+		copy(buffer, chunk)
+		return len(chunk), nil
+	}
+	closed := t.closed
+	closedCh := t.closedCh
+	t.mu.Unlock()
+
+	if closed {
 		return 0, io.EOF
 	}
-	chunk := t.readChunks[0]
-	t.readChunks = t.readChunks[1:]
-	copy(buffer, chunk)
-	return len(chunk), nil
+
+	<-closedCh
+	return 0, io.EOF
 }
 
 func (t *stubTransport) Write(data []byte) (int, error) {
+	t.ensureInitialized()
+
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
 	if t.closed {
 		return 0, errors.New("closed")
 	}
@@ -45,8 +66,26 @@ func (t *stubTransport) Resize(cols, rows int) error {
 }
 
 func (t *stubTransport) Close() error {
+	t.ensureInitialized()
+
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	if t.closed {
+		return nil
+	}
 	t.closed = true
+	close(t.closedCh)
 	return nil
+}
+
+func (t *stubTransport) ensureInitialized() {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	if t.closedCh == nil {
+		t.closedCh = make(chan struct{})
+	}
 }
 
 func (t *stubControlTransport) SendBreak(duration time.Duration) error {
@@ -121,6 +160,9 @@ func TestManagerLocalEchoAndLineEditing(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Connect returned error: %v", err)
 	}
+	t.Cleanup(func() {
+		_ = manager.Disconnect("session-1")
+	})
 
 	if err := manager.WriteBytes("session-1", []byte("abc")); err != nil {
 		t.Fatalf("WriteBytes returned error: %v", err)
@@ -170,6 +212,9 @@ func TestManagerAppliesTransmitLineEnding(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Connect returned error: %v", err)
 	}
+	t.Cleanup(func() {
+		_ = manager.Disconnect("session-1")
+	})
 
 	if err := manager.WriteBytes("session-1", []byte("ping\npong\r")); err != nil {
 		t.Fatalf("WriteBytes returned error: %v", err)
@@ -199,6 +244,9 @@ func TestManagerLocalLineEditingAppliesTransmitLineEnding(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Connect returned error: %v", err)
 	}
+	t.Cleanup(func() {
+		_ = manager.Disconnect("session-1")
+	})
 
 	if err := manager.WriteBytes("session-1", []byte("ok\r")); err != nil {
 		t.Fatalf("WriteBytes returned error: %v", err)
@@ -225,6 +273,9 @@ func TestManagerControlSignals(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Connect returned error: %v", err)
 	}
+	t.Cleanup(func() {
+		_ = manager.Disconnect("session-1")
+	})
 
 	if err := manager.Control("session-1", "break", nil); err != nil {
 		t.Fatalf("Control(break) returned error: %v", err)
@@ -264,6 +315,9 @@ func TestManagerControlUnsupportedForRawTCP(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Connect returned error: %v", err)
 	}
+	t.Cleanup(func() {
+		_ = manager.Disconnect("session-1")
+	})
 
 	if err := manager.Control("session-1", "set-rts", boolPtr(true)); err == nil {
 		t.Fatalf("expected unsupported control error")
