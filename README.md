@@ -1,11 +1,20 @@
 # Dolgate
 
-Dolgate는 macOS와 Windows를 위한 크로스 플랫폼 SSH 클라이언트입니다.
-멀티 세션 터미널, SFTP 파일 브라우저, 포트 포워딩, 세션 공유, 자체 호스팅 서버를 통한 동기화를 제공합니다.
+Dolgate는 데스크톱과 모바일에서 같은 호스트/세션 워크플로우를 공유하는 SSH 작업 환경입니다.  
+데스크톱 앱, 모바일 앱, 그리고 자체 호스팅 가능한 `sync-api` 서버를 함께 제공하며, 저장소 전체는 하나의 `vX.Y.Z` 버전으로 릴리즈됩니다.
 
 ![Dolgate 홈 화면](./docs/hosts-workspace.png)
 
-## 핵심 기능
+## 앱 구성
+
+- **Desktop**
+  Electron 기반 메인 앱입니다. 멀티 세션 터미널, SFTP, 포트 포워딩, session share, AWS/컨테이너 작업을 다룹니다.
+- **Mobile**
+  React Native 기반 iOS / Android 앱입니다. 동기화된 호스트/그룹과 세션 탭 워크스페이스를 중심으로 원격 세션에 접근합니다.
+- **sync-api**
+  브라우저 로그인, 동기화 저장소, session share viewer, AWS SSM 브로커를 담당하는 서버입니다.
+
+## 현재 핵심 기능
 
 - 다중 SSH 세션과 분할 Workspace
 - 듀얼 패널 SFTP 브라우저와 파일 전송
@@ -24,7 +33,8 @@ Dolgate는 macOS와 Windows를 위한 크로스 플랫폼 SSH 클라이언트입
 
 ### 다운로드
 
-- 최신 macOS / Windows 빌드는 [GitHub Releases](https://github.com/doldolma/dolgate/releases)에서 받을 수 있습니다.
+- 최신 데스크톱 빌드와 Android APK는 [GitHub Releases](https://github.com/doldolma/dolgate/releases)에서 받을 수 있습니다.
+- iOS는 현재 개발/내부 빌드 중심으로 관리합니다.
 
 macOS 빌드는 Apple 공증이 포함되지 않았습니다.
 앱을 `Applications`로 옮긴 뒤 실행이 막히면 아래 명령으로 quarantine 속성을 제거한 후 다시 실행해 주세요.
@@ -37,6 +47,15 @@ xattr -dr com.apple.quarantine /Applications/dolgate.app
 새 버전은 GitHub Releases에서 직접 다시 다운로드해 설치해야 합니다.
 
 개발 환경 구성, 로컬 실행, 릴리즈 빌드는 [빌드 및 배포 문서](./docs/build-and-deploy.md)를 참고해 주세요.
+
+### 로컬 개발 진입점
+
+```bash
+npm run dev:desktop
+npm run dev:mobile:ios
+npm run dev:mobile:android
+npm run dev:api
+```
 
 ## 자체 sync-api 호스팅
 
@@ -70,7 +89,7 @@ curl http://127.0.0.1:8080/healthz
 운영에서는 `latest` 대신 버전 태그 고정을 권장합니다.
 
 ```yaml
-image: ghcr.io/doldolma/dolgate-sync-api:1.2.4
+image: ghcr.io/doldolma/dolgate-sync-api:X.Y.Z
 ```
 
 데스크톱 앱에서는 로그인 화면의 톱니바퀴를 눌러 `Login Server`를 self-host 주소로 바꾸면 됩니다.
@@ -80,7 +99,7 @@ image: ghcr.io/doldolma/dolgate-sync-api:1.2.4
 
 ### AWS Import / AWS SSM 사용 전 확인
 
-Dolgate의 AWS 기능은 로컬에 설치된 `aws` CLI와 `session-manager-plugin`을 사용합니다.
+Dolgate의 AWS 관련 기능은 환경에 따라 로컬 `aws` CLI와 `session-manager-plugin`, 그리고 SSM managed 인스턴스 조건에 의존합니다.
 다음 기능들은 두 도구가 모두 PATH에서 실행 가능해야 정상 동작합니다.
 
 - AWS EC2 Import
@@ -261,6 +280,8 @@ ECS Exec는 **task role**이 올바르게 연결되어 있어야 합니다.
 
 ## 문서
 
+- [Desktop 문서](./docs/desktop.md)
+- [Mobile 문서](./docs/mobile.md)
 - [기능 흐름](./docs/feature-flows.md)
 - [아키텍처](./docs/architecture.md)
 - [빌드 및 배포](./docs/build-and-deploy.md)

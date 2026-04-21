@@ -1,0 +1,4 @@
+storeFile=/absolute/path/to/dolgate-upload.keystore
+storePassword=replace-me
+keyAlias=replace-me
+keyPassword=replace-me

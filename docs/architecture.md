@@ -1,10 +1,11 @@
 # Dolgate 아키텍처
 
-Dolgate는 세 개의 런타임 경계로 나뉩니다.
+Dolgate는 현재 네 개의 주요 런타임 경계로 나뉩니다.
 
-1. UX, 로컬 저장소, OS 연동을 담당하는 Electron 데스크톱 앱
-2. SSH 세션과 SFTP 런타임을 담당하는 Go `ssh-core` 프로세스
-3. 인증, 동기화, session share viewer를 담당하는 Go `sync-api`
+1. Electron 기반 데스크톱 앱
+2. React Native 기반 모바일 앱
+3. SSH/SFTP/포트 포워딩 기능을 제공하는 Go `ssh-core`
+4. 인증, 동기화, session share viewer, AWS SSM 브로커를 담당하는 Go `sync-api`
 
 복잡한 사용자 흐름은 [feature-flows](./feature-flows.md) 문서를 함께 참고하는 편이 좋습니다.
 
@@ -16,11 +17,19 @@ flowchart LR
     Renderer["renderer<br/>workspace UI / xterm.js / 상태관리"]
     Main --> Preload --> Renderer
   end
-  Main <-->|"stdio framed IPC"| Core["ssh-core<br/>SSH / SFTP / Port Forward"]
+  subgraph Mobile["React Native Mobile"]
+    MobileApp["app<br/>host/group browser / session tabs / auth"]
+    MobileSSH["uniffi-russh<br/>direct SSH runtime"]
+    MobileApp --> MobileSSH
+  end
+  Main <-->|"stdio framed IPC"| CoreCmd["cmd/ssh-core<br/>wire adapter"]
   Main <-->|"auth / sync / share"| Sync["sync-api<br/>browser login / sync records / viewer"]
+  MobileApp <-->|"auth / sync / AWS broker"| Sync
+  Sync -.-> CoreLib["ssh-core/pkg/runtime<br/>embedded AWS SSM bridge"]
   Sync --> DB["SQLite / MySQL"]
   Browser["External Browser"] <-->|"/login / callback"| Sync
   Main -. "open browser" .-> Browser
+  MobileApp -. "open browser" .-> Browser
 ```
 
 ## 데스크톱 앱
@@ -40,14 +49,23 @@ flowchart LR
 - `ssh-core`는 앱 시작 시 항상 떠 있지 않고, 실제 SSH/SFTP/포트 포워딩 경로가 필요할 때 lazily 시작합니다.
 - 로컬 파일 브라우징은 Electron main의 파일 서비스가 담당하고, 원격 SFTP 작업과 파일 전송은 Go 코어가 담당합니다.
 
+## 모바일 앱
+
+- React Native 기반 iOS / Android 앱입니다.
+- 동기화된 host / group / session 상태를 기반으로 현재 연결된 세션 탭 워크스페이스를 구성합니다.
+- SSH 세션은 모바일 런타임에서 직접 처리하고, 인증/동기화/AWS SSM 브로커 경로는 `sync-api`와 통신합니다.
+- 모바일은 데스크톱과 같은 저장소 버전을 따르지만, 별도 앱 런타임과 별도 build 체계를 가집니다.
+
 ## SSH 코어
 
-- Electron `main`이 단일 child process로 실행합니다.
-- Electron과는 stdio 위의 framed binary 프로토콜로 통신합니다.
+- `services/ssh-core/pkg/runtime`이 공개 런타임 façade 역할을 합니다.
+- 내부 구현은 여전히 `internal/awssession`, `internal/sshsession`, `internal/sftp`, `internal/containers`, `internal/forwarding`, `internal/ssmforward` 같은 세부 서비스에 남아 있습니다.
+- Electron 데스크톱은 여전히 `cmd/ssh-core` child process를 띄워 사용합니다.
+- `cmd/ssh-core`는 stdio framed protocol을 decode/encode하는 호환 어댑터이고, 실제 작업은 `pkg/runtime`에 위임합니다.
+- `sync-api`는 AWS SSM WebSocket 브로커에서 `pkg/runtime`를 직접 import해서 고루틴 기반으로 세션을 처리합니다.
 - control 명령은 metadata JSON frame으로, 터미널 입출력은 raw byte stream frame으로 주고받습니다.
 - SSH 터미널 세션은 `sessionId`, SFTP endpoint는 `endpointId`, 전송 작업은 `jobId`로 구분합니다.
-- 터미널 세션 매니저와 별도로 SFTP endpoint 매니저를 두어 브라우징과 전송을 독립적으로 처리합니다.
-- 개발 모드에서는 `go run ./cmd/ssh-core`, 패키지된 앱에서는 번들된 플랫폼별 바이너리를 사용합니다.
+- 개발 모드에서 desktop는 `go run ./cmd/ssh-core`를 필요 시 실행하고, 서버는 `sync-api` 프로세스 안에 embedded runtime을 직접 구성합니다.
 
 ## Sync API
 
@@ -58,32 +76,11 @@ flowchart LR
 - secrets는 비밀번호, passphrase, 관리형 private key PEM까지 포함하지만 서버에는 ciphertext만 저장합니다.
 - session share는 별도의 in-memory hub와 viewer asset으로 제공되며, 브라우저 viewer는 WebSocket으로 owner 세션을 구독합니다.
 - 저장소 계층은 GORM으로 구현하고, SQLite와 MySQL을 모두 지원합니다.
+- 모바일 AWS SSM 세션 브로커는 `sync-api` 안의 embedded `ssh-core/pkg/runtime`를 사용하며, 별도 `ssh-core` 바이너리를 실행하지 않습니다.
 
-## Session Share 서브시스템
+## 경계 요약
 
-- desktop `SessionShareService`가 owner 측 세션 공유 생명주기를 관리합니다.
-- `sync-api`는 session share 생성, owner/viewer WebSocket, viewer 정적 자산을 함께 제공합니다.
-- 브라우저 viewer는 터미널 스트림, 스냅샷, viewer 채팅, viewer count를 같은 공유 세션 범위 안에서 처리합니다.
-- owner는 데스크톱에서 우하단 토스트 알림을 받고, 필요하면 별도 `채팅 기록` 창으로 누적 메시지를 확인합니다.
-- 세션 종료 시 viewer 연결, 채팅 기록, owner 알림을 함께 정리합니다.
-
-## AWS Import / AWS SFTP
-
-- AWS import는 프로필 인증 확인, 리전 조회, EC2 목록 조회, `SSH 정보 확인` 단계를 통해 Host를 생성합니다.
-- 프로필 기본 리전이 있으면 자동 선택하고, 없으면 사용자가 리전을 고를 때까지 인스턴스 조회를 미룹니다.
-- Linux 인스턴스는 SSM 기반 inspection으로 SSH username/port 추천값을 불러오고, 사용자가 수정한 뒤 최종 등록할 수 있습니다.
-- AWS SFTP는 숨겨진 SSM loopback tunnel과 EC2 Instance Connect 공개 키 주입을 이용해 기존 SSH/SFTP 파이프라인을 재사용합니다.
-- 연결 과정에서는 preflight 결과를 endpoint 단위로 잠시 캐시해, host key 확인 뒤 실제 connect에서 같은 인증/메타데이터 확인을 반복하지 않습니다.
-
-## Warpgate Import
-
-- Warpgate import는 내부 브라우저 인증 창으로 로그인을 진행합니다.
-- 로그인 완료 후 target 목록을 받아 renderer에서 HostDraft로 변환합니다.
-- 인증 창은 import 다이얼로그와 분리되어 있으며, 대기 중에 중단하고 다시 시도할 수 있습니다.
-
-## 보안 기본값
-
-- renderer는 Node 권한을 직접 가지지 않습니다.
-- 호스트 자격 증명과 key passphrase는 Electron `safeStorage` 기반 encrypted local store에 캐시합니다.
-- 서버 복원 기준은 로그인 세션이 전달하는 vault bootstrap입니다.
-- backend는 HTTPS 전용 배포를 기준으로 설계했고, 평문 HTTP는 로컬 개발에만 허용합니다.
+- 데스크톱은 `cmd/ssh-core` child process를 사용합니다.
+- 모바일은 자체 모바일 런타임으로 SSH 세션을 처리하고, 서버와는 인증/동기화/AWS 경계에서 통신합니다.
+- `sync-api`는 브라우저 로그인, 암호화된 동기화 저장소, session share, AWS SSM 브로커를 한 프로세스에서 담당합니다.
+- `ssh-core/pkg/runtime`는 desktop과 server 양쪽에서 재사용되는 공용 코어 런타임입니다.

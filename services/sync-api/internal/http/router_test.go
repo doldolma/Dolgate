@@ -228,6 +228,9 @@ func TestServerInfoEndpoint(t *testing.T) {
 		LocalAuthEnabled:   true,
 		LocalSignupEnabled: true,
 		ServerVersion:      "2026.04.07-test",
+		AwsSsmRuntime: httpserver.AwsSsmRuntime{
+			Enabled: true,
+		},
 	})
 
 	request := httptest.NewRequest(http.MethodGet, "/api/info", nil)
@@ -244,6 +247,9 @@ func TestServerInfoEndpoint(t *testing.T) {
 			Sync struct {
 				AWSProfiles bool `json:"awsProfiles"`
 			} `json:"sync"`
+			Sessions struct {
+				AWSSsm bool `json:"awsSsm"`
+			} `json:"sessions"`
 		} `json:"capabilities"`
 	}
 	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
@@ -254,6 +260,9 @@ func TestServerInfoEndpoint(t *testing.T) {
 	}
 	if !response.Capabilities.Sync.AWSProfiles {
 		t.Fatalf("expected awsProfiles capability to be enabled")
+	}
+	if !response.Capabilities.Sessions.AWSSsm {
+		t.Fatalf("expected awsSsm capability to be enabled")
 	}
 }
 
@@ -390,6 +399,31 @@ func TestMobileBrowserSignupBridgePreservesCustomSchemeCallbackURL(t *testing.T)
 	}
 	if !strings.Contains(body, "state=mobile-state") {
 		t.Fatalf("expected state parameter in bridge callback url, got %s", body)
+	}
+}
+
+func TestAwsSsoCallbackBridgeRedirectsBackIntoMobileApp(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := createTestRouter(t)
+
+	request := httptest.NewRequest(
+		http.MethodGet,
+		"/auth/aws-sso/callback?code=auth-code&state=aws-state",
+		nil,
+	)
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected aws sso bridge page, got %d: %s", recorder.Code, recorder.Body.String())
+	}
+
+	body := recorder.Body.String()
+	if !strings.Contains(body, `const target = "dolgate://aws-sso/callback?code=auth-code&state=aws-state"`) {
+		t.Fatalf("expected aws sso bridge target in page script, got %s", body)
+	}
+	if !strings.Contains(body, `href="dolgate://aws-sso/callback?code=auth-code&amp;state=aws-state"`) {
+		t.Fatalf("expected aws sso bridge href in page markup, got %s", body)
 	}
 }
 

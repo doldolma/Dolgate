@@ -6,25 +6,57 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"strconv"
 	"strings"
 	"sync"
-	"time"
 
-	"dolssh/services/ssh-core/internal/awssession"
-	containersvc "dolssh/services/ssh-core/internal/containers"
-	"dolssh/services/ssh-core/internal/forwarding"
-	"dolssh/services/ssh-core/internal/localsession"
 	"dolssh/services/ssh-core/internal/protocol"
-	"dolssh/services/ssh-core/internal/serialsession"
-	coresftp "dolssh/services/ssh-core/internal/sftp"
-	"dolssh/services/ssh-core/internal/sshconn"
-	"dolssh/services/ssh-core/internal/sshsession"
-	"dolssh/services/ssh-core/internal/ssmforward"
+	coreruntime "dolssh/services/ssh-core/pkg/runtime"
 )
 
+type coreRuntime interface {
+	EmitReady()
+	Health(requestID string)
+	ConnectSSH(sessionID, requestID string, payload protocol.ConnectPayload) error
+	ConnectAWS(sessionID, requestID string, payload protocol.AWSConnectPayload) error
+	ConnectLocal(sessionID, requestID string, payload protocol.LocalConnectPayload) error
+	ConnectSerial(sessionID, requestID string, payload protocol.SerialConnectPayload) error
+	ListSerialPorts(requestID string, payload protocol.SerialListPortsPayload) error
+	ControlSerial(sessionID string, payload protocol.SerialControlPayload) error
+	SendSessionInput(sessionID string, data []byte) error
+	SendControlSignal(sessionID string, payload protocol.ControlSignalPayload) error
+	ResizeSession(sessionID string, payload protocol.ResizePayload) error
+	DisconnectSession(sessionID string) error
+	ProbeHostKey(requestID string, payload protocol.HostKeyProbePayload) error
+	InspectCertificate(requestID string, payload protocol.CertificateInspectPayload) error
+	RespondKeyboardInteractive(sessionID, endpointID string, payload protocol.KeyboardInteractiveRespondPayload) error
+	ConnectContainers(endpointID, requestID string, payload protocol.ContainersConnectPayload) error
+	DisconnectContainers(endpointID, requestID string) error
+	ListContainers(endpointID, requestID string) error
+	InspectContainer(endpointID, requestID string, payload protocol.ContainersInspectPayload) error
+	LogsContainers(endpointID, requestID string, payload protocol.ContainersLogsPayload) error
+	StartContainer(endpointID, requestID string, payload protocol.ContainersActionPayload) error
+	StopContainer(endpointID, requestID string, payload protocol.ContainersActionPayload) error
+	RestartContainer(endpointID, requestID string, payload protocol.ContainersActionPayload) error
+	RemoveContainer(endpointID, requestID string, payload protocol.ContainersActionPayload) error
+	StatsContainers(endpointID, requestID string, payload protocol.ContainersStatsPayload) error
+	SearchContainerLogs(endpointID, requestID string, payload protocol.ContainersSearchLogsPayload) error
+	StartPortForward(endpointID, requestID string, payload protocol.PortForwardStartPayload) error
+	StopPortForward(endpointID, requestID string) error
+	StartSSMPortForward(endpointID, requestID string, payload protocol.SSMPortForwardStartPayload) error
+	StopSSMPortForward(endpointID, requestID string) error
+	ConnectSFTP(endpointID, requestID string, payload protocol.SFTPConnectPayload) error
+	DisconnectSFTP(endpointID, requestID string) error
+	ListSFTP(endpointID, requestID string, payload protocol.SFTPListPayload) error
+	MkdirSFTP(endpointID, requestID string, payload protocol.SFTPMkdirPayload) error
+	RenameSFTP(endpointID, requestID string, payload protocol.SFTPRenamePayload) error
+	ChmodSFTP(endpointID, requestID string, payload protocol.SFTPChmodPayload) error
+	DeleteSFTP(endpointID, requestID string, payload protocol.SFTPDeletePayload) error
+	StartSFTPTransfer(jobID string, payload protocol.SFTPTransferStartPayload) error
+	CancelSFTPTransfer(jobID string) error
+	Shutdown()
+}
+
 type eventWriter struct {
-	// stdout에 여러 goroutine이 동시에 쓰지 않도록 직렬화한다.
 	mu sync.Mutex
 }
 
@@ -32,42 +64,26 @@ func newEventWriter() *eventWriter {
 	return &eventWriter{}
 }
 
-func (w *eventWriter) emit(event protocol.Event) {
-	w.mu.Lock()
-	defer w.mu.Unlock()
+func (writer *eventWriter) emit(event protocol.Event) {
+	writer.mu.Lock()
+	defer writer.mu.Unlock()
 	_ = protocol.WriteControlFrame(os.Stdout, event)
 }
 
-func (w *eventWriter) emitStream(metadata protocol.StreamFrame, payload []byte) {
-	w.mu.Lock()
-	defer w.mu.Unlock()
+func (writer *eventWriter) emitStream(metadata protocol.StreamFrame, payload []byte) {
+	writer.mu.Lock()
+	defer writer.mu.Unlock()
 	_ = protocol.WriteStreamFrame(os.Stdout, metadata, payload)
 }
 
 func main() {
-	// main은 "stdin에서 요청 읽기 -> SSH 세션 매니저 디스패치 -> stdout 이벤트 출력"만 담당한다.
 	writer := newEventWriter()
-	manager := sshsession.NewManager(writer.emit, writer.emitStream)
-	awsManager := awssession.NewManager(writer.emit, writer.emitStream)
-	localManager := localsession.NewManager(writer.emit, writer.emitStream)
-	serialManager := serialsession.NewManager(writer.emit, writer.emitStream)
-	sftpService := coresftp.New(writer.emit)
-	containersService := containersvc.New(writer.emit)
-	forwardingService := forwarding.New(writer.emit)
-	ssmForwardingService := ssmforward.New(writer.emit)
-	defer sftpService.Shutdown()
-	defer containersService.Shutdown()
-	defer forwardingService.Shutdown()
-	defer ssmForwardingService.Shutdown()
-
-	// 코어 기동 직후 ready 이벤트를 보내 Electron이 상태를 파악할 수 있게 한다.
-	writer.emit(protocol.Event{
-		Type: protocol.EventStatus,
-		Payload: protocol.StatusPayload{
-			Status:  "ready",
-			Message: "ssh core ready",
-		},
+	core := coreruntime.New(coreruntime.Options{
+		EmitEvent:  writer.emit,
+		EmitStream: writer.emitStream,
 	})
+	defer core.Shutdown()
+	core.EmitReady()
 
 	for {
 		frame, err := protocol.ReadFrame(os.Stdin)
@@ -75,7 +91,6 @@ func main() {
 			if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
 				return
 			}
-			// framing이 깨진 경우에는 복구가 어려우므로 프로세스 수준 오류를 남기고 종료한다.
 			writer.emit(protocol.Event{
 				Type: protocol.EventError,
 				Payload: protocol.ErrorPayload{
@@ -85,8 +100,7 @@ func main() {
 			return
 		}
 
-		if err := dispatchFrame(manager, awsManager, localManager, serialManager, sftpService, containersService, forwardingService, ssmForwardingService, writer, frame); err != nil {
-			// 명령 단위 오류는 requestId/sessionId를 포함해 상위 레이어가 추적하기 쉽게 한다.
+		if err := dispatchFrame(core, writer, frame); err != nil {
 			eventType := protocol.EventError
 			if isSFTPCommand(frame) {
 				eventType = protocol.EventSFTPError
@@ -109,18 +123,7 @@ func main() {
 	}
 }
 
-func dispatchFrame(
-	manager *sshsession.Manager,
-	awsManager *awssession.Manager,
-	localManager *localsession.Manager,
-	serialManager *serialsession.Manager,
-	sftpService *coresftp.Service,
-	containersService *containersvc.Service,
-	forwardingService *forwarding.Service,
-	ssmForwardingService *ssmforward.Service,
-	writer *eventWriter,
-	frame protocol.Frame,
-) error {
+func dispatchFrame(core coreRuntime, writer *eventWriter, frame protocol.Frame) error {
 	if frame.Kind == protocol.FrameKindStream {
 		var metadata protocol.StreamFrame
 		if err := protocol.DecodeStreamFrame(frame, &metadata); err != nil {
@@ -129,120 +132,56 @@ func dispatchFrame(
 		if metadata.Type != protocol.StreamTypeWrite {
 			return fmt.Errorf("unsupported stream type: %s", metadata.Type)
 		}
-		if awsManager.HasSession(metadata.SessionID) {
-			return awsManager.WriteBytes(metadata.SessionID, frame.Payload)
-		}
-		if localManager.HasSession(metadata.SessionID) {
-			return localManager.WriteBytes(metadata.SessionID, frame.Payload)
-		}
-		if serialManager.HasSession(metadata.SessionID) {
-			return serialManager.WriteBytes(metadata.SessionID, frame.Payload)
-		}
-		return manager.WriteBytes(metadata.SessionID, frame.Payload)
+		return core.SendSessionInput(metadata.SessionID, frame.Payload)
 	}
 
 	var request protocol.Request
 	if err := protocol.DecodeControlFrame(frame, &request); err != nil {
 		return fmt.Errorf("invalid control frame: %w", err)
 	}
-	return dispatch(manager, awsManager, localManager, serialManager, sftpService, containersService, forwardingService, ssmForwardingService, writer, request)
+	return dispatch(core, writer, request)
 }
 
-func dispatch(
-	manager *sshsession.Manager,
-	awsManager *awssession.Manager,
-	localManager *localsession.Manager,
-	serialManager *serialsession.Manager,
-	sftpService *coresftp.Service,
-	containersService *containersvc.Service,
-	forwardingService *forwarding.Service,
-	ssmForwardingService *ssmforward.Service,
-	writer *eventWriter,
-	request protocol.Request,
-) error {
-	// payload 타입이 명령마다 다르기 때문에 여기서 명령별로 역직렬화한다.
+func dispatch(core coreRuntime, writer *eventWriter, request protocol.Request) error {
 	switch request.Type {
 	case protocol.CommandHealth:
-		writer.emit(protocol.Event{
-			Type:      protocol.EventStatus,
-			RequestID: request.ID,
-			Payload: protocol.StatusPayload{
-				Status:  "ok",
-				Message: "ssh core healthy",
-			},
-		})
+		core.Health(request.ID)
 		return nil
 	case protocol.CommandConnect:
 		var payload protocol.ConnectPayload
 		if err := json.Unmarshal(request.Payload, &payload); err != nil {
 			return err
 		}
-		go func(requestID, sessionID string, payload protocol.ConnectPayload) {
-			if err := manager.Connect(sessionID, requestID, payload); err != nil {
-				writer.emit(protocol.Event{
-					Type:      protocol.EventError,
-					RequestID: requestID,
-					SessionID: sessionID,
-					Payload: protocol.ErrorPayload{
-						Message: err.Error(),
-					},
-				})
-			}
-		}(request.ID, request.SessionID, payload)
+		go emitAsyncError(writer, request.ID, request.SessionID, "", protocol.EventError, func() error {
+			return core.ConnectSSH(request.SessionID, request.ID, payload)
+		})()
 		return nil
 	case protocol.CommandAWSConnect:
 		var payload protocol.AWSConnectPayload
 		if err := json.Unmarshal(request.Payload, &payload); err != nil {
 			return err
 		}
-		go func(requestID, sessionID string, payload protocol.AWSConnectPayload) {
-			if err := awsManager.Connect(sessionID, requestID, payload); err != nil {
-				writer.emit(protocol.Event{
-					Type:      protocol.EventError,
-					RequestID: requestID,
-					SessionID: sessionID,
-					Payload: protocol.ErrorPayload{
-						Message: err.Error(),
-					},
-				})
-			}
-		}(request.ID, request.SessionID, payload)
+		go emitAsyncError(writer, request.ID, request.SessionID, "", protocol.EventError, func() error {
+			return core.ConnectAWS(request.SessionID, request.ID, payload)
+		})()
 		return nil
 	case protocol.CommandLocalConnect:
 		var payload protocol.LocalConnectPayload
 		if err := json.Unmarshal(request.Payload, &payload); err != nil {
 			return err
 		}
-		go func(requestID, sessionID string, payload protocol.LocalConnectPayload) {
-			if err := localManager.Connect(sessionID, requestID, payload); err != nil {
-				writer.emit(protocol.Event{
-					Type:      protocol.EventError,
-					RequestID: requestID,
-					SessionID: sessionID,
-					Payload: protocol.ErrorPayload{
-						Message: err.Error(),
-					},
-				})
-			}
-		}(request.ID, request.SessionID, payload)
+		go emitAsyncError(writer, request.ID, request.SessionID, "", protocol.EventError, func() error {
+			return core.ConnectLocal(request.SessionID, request.ID, payload)
+		})()
 		return nil
 	case protocol.CommandSerialConnect:
 		var payload protocol.SerialConnectPayload
 		if err := json.Unmarshal(request.Payload, &payload); err != nil {
 			return err
 		}
-		go func(requestID, sessionID string, payload protocol.SerialConnectPayload) {
-			if err := serialManager.Connect(sessionID, requestID, payload); err != nil {
-				writer.emit(protocol.Event{
-					Type:      protocol.EventError,
-					RequestID: requestID,
-					SessionID: sessionID,
-					Payload: protocol.ErrorPayload{
-						Message: err.Error(),
-					},
-				})
-			}
-		}(request.ID, request.SessionID, payload)
+		go emitAsyncError(writer, request.ID, request.SessionID, "", protocol.EventError, func() error {
+			return core.ConnectSerial(request.SessionID, request.ID, payload)
+		})()
 		return nil
 	case protocol.CommandSerialListPorts:
 		var payload protocol.SerialListPortsPayload
@@ -251,13 +190,13 @@ func dispatch(
 				return err
 			}
 		}
-		return serialManager.ListPorts(request.ID, payload)
+		return core.ListSerialPorts(request.ID, payload)
 	case protocol.CommandSerialControl:
 		var payload protocol.SerialControlPayload
 		if err := json.Unmarshal(request.Payload, &payload); err != nil {
 			return err
 		}
-		if err := serialManager.Control(request.SessionID, payload.Action, payload.Enabled); err != nil {
+		if err := core.ControlSerial(request.SessionID, payload); err != nil {
 			return err
 		}
 		writer.emit(protocol.Event{
@@ -275,254 +214,184 @@ func dispatch(
 		if err := json.Unmarshal(request.Payload, &payload); err != nil {
 			return err
 		}
-		result, err := sshconn.ProbeHostKey(payload.Host, payload.Port, sshconn.DefaultConfig)
-		if err != nil {
-			return err
-		}
-		writer.emit(protocol.Event{
-			Type:      protocol.EventHostKeyProbed,
-			RequestID: request.ID,
-			Payload: protocol.HostKeyProbedPayload{
-				Algorithm:         result.Algorithm,
-				PublicKeyBase64:   result.PublicKeyBase64,
-				FingerprintSHA256: result.FingerprintSHA256,
-			},
-		})
-		return nil
+		return core.ProbeHostKey(request.ID, payload)
 	case protocol.CommandInspectCertificate:
 		var payload protocol.CertificateInspectPayload
 		if err := json.Unmarshal(request.Payload, &payload); err != nil {
 			return err
 		}
-		result := sshconn.InspectCertificate(payload.CertificateText, time.Now().UTC())
-		inspectedPayload := protocol.CertificateInspectedPayload{
-			Status:     result.Status,
-			Principals: result.Principals,
-			KeyID:      result.KeyID,
-		}
-		if result.ValidAfter != nil {
-			inspectedPayload.ValidAfter = result.ValidAfter.Format(time.RFC3339)
-		}
-		if result.ValidBefore != nil {
-			inspectedPayload.ValidBefore = result.ValidBefore.Format(time.RFC3339)
-		}
-		if result.Serial != 0 {
-			inspectedPayload.Serial = strconv.FormatUint(result.Serial, 10)
-		}
-		writer.emit(protocol.Event{
-			Type:      protocol.EventCertificateInspected,
-			RequestID: request.ID,
-			Payload:   inspectedPayload,
-		})
-		return nil
+		return core.InspectCertificate(request.ID, payload)
 	case protocol.CommandControlSignal:
 		var payload protocol.ControlSignalPayload
 		if err := json.Unmarshal(request.Payload, &payload); err != nil {
 			return err
 		}
-		if awsManager.HasSession(request.SessionID) {
-			return awsManager.SendControlSignal(request.SessionID, payload.Signal)
-		}
-		return nil
+		return core.SendControlSignal(request.SessionID, payload)
 	case protocol.CommandResize:
 		var payload protocol.ResizePayload
 		if err := json.Unmarshal(request.Payload, &payload); err != nil {
 			return err
 		}
-		if awsManager.HasSession(request.SessionID) {
-			return awsManager.Resize(request.SessionID, payload.Cols, payload.Rows)
-		}
-		if localManager.HasSession(request.SessionID) {
-			return localManager.Resize(request.SessionID, payload.Cols, payload.Rows)
-		}
-		if serialManager.HasSession(request.SessionID) {
-			return serialManager.Resize(request.SessionID, payload.Cols, payload.Rows)
-		}
-		return manager.Resize(request.SessionID, payload.Cols, payload.Rows)
+		return core.ResizeSession(request.SessionID, payload)
 	case protocol.CommandDisconnect:
-		if awsManager.HasSession(request.SessionID) {
-			return awsManager.Disconnect(request.SessionID)
-		}
-		if localManager.HasSession(request.SessionID) {
-			return localManager.Disconnect(request.SessionID)
-		}
-		if serialManager.HasSession(request.SessionID) {
-			return serialManager.Disconnect(request.SessionID)
-		}
-		return manager.Disconnect(request.SessionID)
+		return core.DisconnectSession(request.SessionID)
 	case protocol.CommandKeyboardInteractiveRespond:
 		var payload protocol.KeyboardInteractiveRespondPayload
 		if err := json.Unmarshal(request.Payload, &payload); err != nil {
 			return err
 		}
-		if request.EndpointID != "" {
-			if strings.HasPrefix(request.EndpointID, "containers:") {
-				return containersService.RespondKeyboardInteractive(request.EndpointID, payload.ChallengeID, payload.Responses)
-			}
-			if err := forwardingService.RespondKeyboardInteractive(request.EndpointID, payload.ChallengeID, payload.Responses); err == nil {
-				return nil
-			}
-			return sftpService.RespondKeyboardInteractive(request.EndpointID, payload.ChallengeID, payload.Responses)
-		}
-		return manager.RespondKeyboardInteractive(request.SessionID, payload.ChallengeID, payload.Responses)
+		return core.RespondKeyboardInteractive(request.SessionID, request.EndpointID, payload)
 	case protocol.CommandContainersConnect:
 		var payload protocol.ContainersConnectPayload
 		if err := json.Unmarshal(request.Payload, &payload); err != nil {
 			return err
 		}
-		go func(endpointID, requestID string, connectPayload protocol.ContainersConnectPayload) {
-			if err := containersService.Connect(endpointID, requestID, connectPayload); err != nil {
-				writer.emit(protocol.Event{
-					Type:       protocol.EventContainersError,
-					RequestID:  requestID,
-					EndpointID: endpointID,
-					Payload: protocol.ErrorPayload{
-						Message: err.Error(),
-					},
-				})
-			}
-		}(request.EndpointID, request.ID, payload)
+		go emitAsyncError(writer, request.ID, "", request.EndpointID, protocol.EventContainersError, func() error {
+			return core.ConnectContainers(request.EndpointID, request.ID, payload)
+		})()
 		return nil
 	case protocol.CommandContainersDisconnect:
-		return containersService.Disconnect(request.EndpointID, request.ID)
+		return core.DisconnectContainers(request.EndpointID, request.ID)
 	case protocol.CommandContainersList:
-		return containersService.List(request.EndpointID, request.ID)
+		return core.ListContainers(request.EndpointID, request.ID)
 	case protocol.CommandContainersInspect:
 		var payload protocol.ContainersInspectPayload
 		if err := json.Unmarshal(request.Payload, &payload); err != nil {
 			return err
 		}
-		return containersService.Inspect(request.EndpointID, request.ID, payload)
+		return core.InspectContainer(request.EndpointID, request.ID, payload)
 	case protocol.CommandContainersLogs:
 		var payload protocol.ContainersLogsPayload
 		if err := json.Unmarshal(request.Payload, &payload); err != nil {
 			return err
 		}
-		return containersService.Logs(request.EndpointID, request.ID, payload)
+		return core.LogsContainers(request.EndpointID, request.ID, payload)
 	case protocol.CommandContainersStart:
 		var payload protocol.ContainersActionPayload
 		if err := json.Unmarshal(request.Payload, &payload); err != nil {
 			return err
 		}
-		return containersService.Start(request.EndpointID, request.ID, payload)
+		return core.StartContainer(request.EndpointID, request.ID, payload)
 	case protocol.CommandContainersStop:
 		var payload protocol.ContainersActionPayload
 		if err := json.Unmarshal(request.Payload, &payload); err != nil {
 			return err
 		}
-		return containersService.Stop(request.EndpointID, request.ID, payload)
+		return core.StopContainer(request.EndpointID, request.ID, payload)
 	case protocol.CommandContainersRestart:
 		var payload protocol.ContainersActionPayload
 		if err := json.Unmarshal(request.Payload, &payload); err != nil {
 			return err
 		}
-		return containersService.Restart(request.EndpointID, request.ID, payload)
+		return core.RestartContainer(request.EndpointID, request.ID, payload)
 	case protocol.CommandContainersRemove:
 		var payload protocol.ContainersActionPayload
 		if err := json.Unmarshal(request.Payload, &payload); err != nil {
 			return err
 		}
-		return containersService.Remove(request.EndpointID, request.ID, payload)
+		return core.RemoveContainer(request.EndpointID, request.ID, payload)
 	case protocol.CommandContainersStats:
 		var payload protocol.ContainersStatsPayload
 		if err := json.Unmarshal(request.Payload, &payload); err != nil {
 			return err
 		}
-		return containersService.Stats(request.EndpointID, request.ID, payload)
+		return core.StatsContainers(request.EndpointID, request.ID, payload)
 	case protocol.CommandContainersSearchLogs:
 		var payload protocol.ContainersSearchLogsPayload
 		if err := json.Unmarshal(request.Payload, &payload); err != nil {
 			return err
 		}
-		return containersService.SearchLogs(request.EndpointID, request.ID, payload)
+		return core.SearchContainerLogs(request.EndpointID, request.ID, payload)
 	case protocol.CommandPortForwardStart:
 		var payload protocol.PortForwardStartPayload
 		if err := json.Unmarshal(request.Payload, &payload); err != nil {
 			return err
 		}
-		if payload.SourceEndpointID != "" {
-			client, err := containersService.TakeClient(payload.SourceEndpointID)
-			if err != nil {
-				return err
-			}
-			return forwardingService.StartWithClient(
-				request.EndpointID,
-				request.ID,
-				payload,
-				client,
-			)
-		}
-		return forwardingService.Start(request.EndpointID, request.ID, payload)
+		return core.StartPortForward(request.EndpointID, request.ID, payload)
 	case protocol.CommandSSMPortForwardStart:
 		var payload protocol.SSMPortForwardStartPayload
 		if err := json.Unmarshal(request.Payload, &payload); err != nil {
 			return err
 		}
-		return ssmForwardingService.Start(request.EndpointID, request.ID, payload)
+		return core.StartSSMPortForward(request.EndpointID, request.ID, payload)
 	case protocol.CommandPortForwardStop:
-		return forwardingService.Stop(request.EndpointID, request.ID)
+		return core.StopPortForward(request.EndpointID, request.ID)
 	case protocol.CommandSSMPortForwardStop:
-		return ssmForwardingService.Stop(request.EndpointID, request.ID)
+		return core.StopSSMPortForward(request.EndpointID, request.ID)
 	case protocol.CommandSFTPConnect:
 		var payload protocol.SFTPConnectPayload
 		if err := json.Unmarshal(request.Payload, &payload); err != nil {
 			return err
 		}
-		go func(endpointID, requestID string, connectPayload protocol.SFTPConnectPayload) {
-			if err := sftpService.Connect(endpointID, requestID, connectPayload); err != nil {
-				writer.emit(protocol.Event{
-					Type:       protocol.EventSFTPError,
-					RequestID:  requestID,
-					EndpointID: endpointID,
-					Payload: protocol.ErrorPayload{
-						Message: err.Error(),
-					},
-				})
-			}
-		}(request.EndpointID, request.ID, payload)
+		go emitAsyncError(writer, request.ID, "", request.EndpointID, protocol.EventSFTPError, func() error {
+			return core.ConnectSFTP(request.EndpointID, request.ID, payload)
+		})()
 		return nil
 	case protocol.CommandSFTPDisconnect:
-		return sftpService.Disconnect(request.EndpointID, request.ID)
+		return core.DisconnectSFTP(request.EndpointID, request.ID)
 	case protocol.CommandSFTPList:
 		var payload protocol.SFTPListPayload
 		if err := json.Unmarshal(request.Payload, &payload); err != nil {
 			return err
 		}
-		return sftpService.List(request.EndpointID, request.ID, payload)
+		return core.ListSFTP(request.EndpointID, request.ID, payload)
 	case protocol.CommandSFTPMkdir:
 		var payload protocol.SFTPMkdirPayload
 		if err := json.Unmarshal(request.Payload, &payload); err != nil {
 			return err
 		}
-		return sftpService.Mkdir(request.EndpointID, request.ID, payload)
+		return core.MkdirSFTP(request.EndpointID, request.ID, payload)
 	case protocol.CommandSFTPRename:
 		var payload protocol.SFTPRenamePayload
 		if err := json.Unmarshal(request.Payload, &payload); err != nil {
 			return err
 		}
-		return sftpService.Rename(request.EndpointID, request.ID, payload)
+		return core.RenameSFTP(request.EndpointID, request.ID, payload)
 	case protocol.CommandSFTPChmod:
 		var payload protocol.SFTPChmodPayload
 		if err := json.Unmarshal(request.Payload, &payload); err != nil {
 			return err
 		}
-		return sftpService.Chmod(request.EndpointID, request.ID, payload)
+		return core.ChmodSFTP(request.EndpointID, request.ID, payload)
 	case protocol.CommandSFTPDelete:
 		var payload protocol.SFTPDeletePayload
 		if err := json.Unmarshal(request.Payload, &payload); err != nil {
 			return err
 		}
-		return sftpService.Delete(request.EndpointID, request.ID, payload)
+		return core.DeleteSFTP(request.EndpointID, request.ID, payload)
 	case protocol.CommandSFTPTransferStart:
 		var payload protocol.SFTPTransferStartPayload
 		if err := json.Unmarshal(request.Payload, &payload); err != nil {
 			return err
 		}
-		return sftpService.StartTransfer(request.JobID, payload)
+		return core.StartSFTPTransfer(request.JobID, payload)
 	case protocol.CommandSFTPTransferCancel:
-		return sftpService.CancelTransfer(request.JobID)
+		return core.CancelSFTPTransfer(request.JobID)
 	default:
 		return fmt.Errorf("unknown command type: %s", request.Type)
+	}
+}
+
+func emitAsyncError(
+	writer *eventWriter,
+	requestID string,
+	sessionID string,
+	endpointID string,
+	eventType protocol.EventType,
+	action func() error,
+) func() {
+	return func() {
+		if err := action(); err != nil {
+			writer.emit(protocol.Event{
+				Type:       eventType,
+				RequestID:  requestID,
+				SessionID:  sessionID,
+				EndpointID: endpointID,
+				Payload: protocol.ErrorPayload{
+					Message: err.Error(),
+				},
+			})
+		}
 	}
 }
 

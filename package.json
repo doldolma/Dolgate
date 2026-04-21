@@ -1,6 +1,6 @@
 {
   "name": "dolssh",
-  "version": "1.4.2",
+  "version": "1.4.3",
   "private": true,
   "workspaces": [
     "apps/*",
@@ -15,13 +15,18 @@
     "postinstall": "patch-package",
     "dev": "npm-run-all --parallel --print-label --race dev:desktop dev:api",
     "dev:desktop": "npm run dev --workspace @dolssh/desktop",
-    "dev:mobile": "npm run start --workspace @dolssh/mobile --",
     "dev:mobile:android": "npm run dev:android --workspace @dolssh/mobile --",
     "dev:mobile:ios": "npm run dev:ios --workspace @dolssh/mobile --",
+    "build:mobile:android": "npm run build:android --workspace @dolssh/mobile --",
+    "build:mobile:ios": "npm run build:ios --workspace @dolssh/mobile --",
+    "version:set": "node ./scripts/version.cjs set",
+    "version:check": "node ./scripts/version.cjs check",
+    "version:bump:patch": "node ./scripts/version.cjs bump patch",
+    "version:bump:minor": "node ./scripts/version.cjs bump minor",
+    "version:bump:major": "node ./scripts/version.cjs bump major",
     "dev:api": "cd services/sync-api && go run ./cmd/api",
+    "generate:icons": "node ./apps/desktop/scripts/generate-icons.cjs",
     "build": "npm run build --workspace @dolssh/desktop",
-    "mobile:android": "npm run android --workspace @dolssh/mobile --",
-    "mobile:ios": "npm run ios --workspace @dolssh/mobile --",
     "release:dist:mac": "npm run release:dist:mac --workspace @dolssh/desktop",
     "release:dist:win": "npm run release:dist:win --workspace @dolssh/desktop",
     "release:mac": "npm run release:publish:mac --workspace @dolssh/desktop",
@@ -33,7 +38,7 @@
     "test:desktop:main": "npm run test:desktop:main --workspace @dolssh/desktop",
     "test:desktop:renderer": "npm run test:desktop:renderer --workspace @dolssh/desktop",
     "test:desktop:smoke": "npm run test:desktop:smoke --workspace @dolssh/desktop",
-    "test:mobile": "npm run test --workspace @dolssh/mobile",
+    "test:mobile": "cd apps/mobile && jest",
     "test:ssh-core": "cd services/ssh-core && go test ./... -cover",
     "test:sync-api": "cd services/sync-api && go test ./... -cover",
     "test:services": "npm run test:ssh-core && npm run test:sync-api",
@@ -41,7 +46,7 @@
     "test:all": "npm run test:fast && npm run test:smoke",
     "typecheck": "npm-run-all --parallel typecheck:desktop typecheck:mobile",
     "typecheck:desktop": "npm run typecheck --workspace @dolssh/desktop",
-    "typecheck:mobile": "npm run typecheck --workspace @dolssh/mobile"
+    "typecheck:mobile": "cd apps/mobile && tsc --noEmit"
   },
   "devDependencies": {
     "react": "19.2.3",

@@ -1,4 +1,4 @@
-FROM --platform=$BUILDPLATFORM golang:1.25-alpine AS builder
+FROM --platform=$BUILDPLATFORM golang:1.25-bookworm AS builder
 
 ARG TARGETOS
 ARG TARGETARCH
@@ -6,19 +6,40 @@ ARG VERSION=dev
 
 WORKDIR /src
 
-COPY go.mod go.sum ./
-RUN go mod download
+COPY services/sync-api/go.mod services/sync-api/go.sum /src/services/sync-api/
+COPY services/ssh-core/go.mod services/ssh-core/go.sum /src/services/ssh-core/
 
-COPY . .
+RUN cd /src/services/sync-api && go mod download
+RUN cd /src/services/ssh-core && go mod download
 
-# sync-api는 pure Go SQLite 드라이버를 사용하므로 CGO 없이 정적 바이너리로 빌드한다.
-RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -ldflags="-s -w -X main.version=${VERSION}" -o /out/sync-api ./cmd/api
+COPY services/sync-api /src/services/sync-api
+COPY services/ssh-core /src/services/ssh-core
 
-FROM alpine:3.22
+RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH \
+  sh -c 'cd /src/services/sync-api && go build -trimpath -ldflags="-s -w -X main.version='"${VERSION}"'" -o /out/sync-api ./cmd/api'
 
+FROM debian:bookworm-slim
+
+ARG TARGETARCH
 WORKDIR /app
 
-RUN apk add --no-cache ca-certificates tzdata
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends \
+    awscli \
+    ca-certificates \
+    curl \
+    tzdata \
+    unzip \
+  && case "$TARGETARCH" in \
+    amd64) plugin_arch=ubuntu_64bit ;; \
+    arm64) plugin_arch=ubuntu_arm64 ;; \
+    *) echo "unsupported TARGETARCH: $TARGETARCH" >&2; exit 1 ;; \
+  esac \
+  && curl -fsSL "https://s3.amazonaws.com/session-manager-downloads/plugin/latest/${plugin_arch}/session-manager-plugin.deb" \
+    -o /tmp/session-manager-plugin.deb \
+  && apt-get install -y --no-install-recommends /tmp/session-manager-plugin.deb \
+  && rm -f /tmp/session-manager-plugin.deb \
+  && rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /out/sync-api /app/sync-api
 

@@ -1,74 +1,35 @@
-const http = require("http");
 const fs = require("fs");
 const path = require("path");
 const { spawn, spawnSync } = require("child_process");
 
-const { appRoot, buildEnvForAndroid, resolveSdkDir } = require("./android-env.cjs");
+const {
+  appRoot,
+  buildEnvForAndroid,
+  resolveSdkDir,
+} = require("./android-env.cjs");
+const {
+  delay,
+  runDevSession,
+  stopChild,
+  waitForChildExit,
+} = require("./dev-session.cjs");
+
 const nodeCommand = process.execPath;
 const reactNativeCli = require.resolve("react-native/cli.js", { paths: [appRoot] });
-const metroStatusUrl = "http://127.0.0.1:8081/status";
-const metroReadyText = "packager-status:running";
-const metroTimeoutMs = 60_000;
+const androidScript = path.join(__dirname, "run-android.cjs");
 const deviceReadyTimeoutMs = 180_000;
 const defaultAndroidArgs =
   process.env.DOLGATE_ANDROID_ALL_ARCHES === "1" ? [] : ["--active-arch-only"];
 
-let metroChild = null;
-let androidChild = null;
-let emulatorChild = null;
-let shuttingDown = false;
-
-function delay(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-function probeMetro() {
-  return new Promise((resolve) => {
-    const request = http.get(metroStatusUrl, (response) => {
-      const chunks = [];
-      response.on("data", (chunk) => chunks.push(chunk));
-      response.on("end", () => {
-        const body = Buffer.concat(chunks).toString("utf8").trim();
-        resolve(response.statusCode === 200 && body === metroReadyText);
-      });
-    });
-
-    request.on("error", () => resolve(false));
-    request.setTimeout(2_000, () => {
-      request.destroy();
-      resolve(false);
-    });
-  });
-}
-
-async function waitForMetroReady() {
-  const startedAt = Date.now();
-  while (Date.now() - startedAt < metroTimeoutMs) {
-    if (await probeMetro()) {
-      return;
-    }
-    await delay(1_000);
-  }
-  throw new Error("Metro did not become ready on http://127.0.0.1:8081 within 60 seconds.");
-}
-
-function spawnMetro() {
-  return spawn(nodeCommand, [reactNativeCli, "start", "--reset-cache"], {
-    cwd: appRoot,
-    stdio: "inherit",
-    shell: false,
-  });
-}
-
-function spawnAndroid(extraArgs) {
-  const androidScript = path.join(__dirname, "run-android.cjs");
+function spawnAndroid(extraArgs, androidEnv) {
   return spawn(
     nodeCommand,
     [androidScript, "--no-packager", ...defaultAndroidArgs, ...extraArgs],
     {
-    cwd: appRoot,
-    stdio: "inherit",
-    shell: false,
+      cwd: appRoot,
+      env: androidEnv,
+      stdio: "inherit",
+      shell: false,
     },
   );
 }
@@ -97,6 +58,7 @@ function listConnectedDevices(env) {
   if (result.error) {
     return [];
   }
+
   return (result.stdout || "")
     .split(/\r?\n/)
     .map((line) => line.trim())
@@ -115,6 +77,7 @@ function listAvds(env) {
   if (result.error) {
     return [];
   }
+
   return (result.stdout || "")
     .split(/\r?\n/)
     .map((line) => line.trim())
@@ -126,8 +89,8 @@ function startEmulator(avdName, env) {
   return spawn(emulatorPath, ["-avd", avdName], {
     cwd: appRoot,
     env,
-    detached: false,
     stdio: "ignore",
+    shell: false,
   });
 }
 
@@ -136,21 +99,31 @@ async function waitForDeviceReady(serial, env) {
   const startedAt = Date.now();
 
   while (Date.now() - startedAt < deviceReadyTimeoutMs) {
-    const bootCheck = runTool(adbPath, ["-s", serial, "shell", "getprop", "sys.boot_completed"], env);
+    const bootCheck = runTool(
+      adbPath,
+      ["-s", serial, "shell", "getprop", "sys.boot_completed"],
+      env,
+    );
     if ((bootCheck.stdout || "").trim() === "1") {
       return;
     }
     await delay(2_000);
   }
 
-  throw new Error(`Android device ${serial} did not finish booting within 180 seconds.`);
+  throw new Error(
+    `Android device ${serial} did not finish booting within 180 seconds.`,
+  );
 }
 
 async function ensureDeviceReady(env) {
   const existingDevices = listConnectedDevices(env);
   if (existingDevices.length > 0) {
     await waitForDeviceReady(existingDevices[0], env);
-    return existingDevices[0];
+    return {
+      deviceSerial: existingDevices[0],
+      emulatorChild: null,
+      startedEmulator: false,
+    };
   }
 
   const avds = listAvds(env);
@@ -158,14 +131,18 @@ async function ensureDeviceReady(env) {
     throw new Error("No Android device connected and no emulator AVDs are available.");
   }
 
-  emulatorChild = startEmulator(avds[0], env);
+  const emulatorChild = startEmulator(avds[0], env);
 
   const startedAt = Date.now();
   while (Date.now() - startedAt < deviceReadyTimeoutMs) {
     const devices = listConnectedDevices(env);
     if (devices.length > 0) {
       await waitForDeviceReady(devices[0], env);
-      return devices[0];
+      return {
+        deviceSerial: devices[0],
+        emulatorChild,
+        startedEmulator: true,
+      };
     }
     await delay(2_000);
   }
@@ -180,80 +157,53 @@ function adbReverse(serial, env) {
   }
 }
 
-function forwardSignal(signal) {
-  if (shuttingDown) {
-    return;
-  }
-  shuttingDown = true;
-
-  if (androidChild && !androidChild.killed) {
-    androidChild.kill(signal);
-  }
-  if (metroChild && !metroChild.killed) {
-    metroChild.kill(signal);
-  }
-  if (emulatorChild && !emulatorChild.killed) {
-    emulatorChild.kill(signal);
-  }
+function forceStopAndroidApp(serial, env) {
+  const adbPath = getToolPath("platform-tools", "adb");
+  runTool(adbPath, ["-s", serial, "shell", "am", "force-stop", "com.dolgate"], env);
 }
 
 async function main() {
   const extraArgs = process.argv.slice(2);
   const androidEnv = buildEnvForAndroid(process.env);
-  const metroAlreadyRunning = await probeMetro();
 
-  if (!metroAlreadyRunning) {
-    metroChild = spawnMetro();
-    metroChild.on("exit", (code, signal) => {
-      if (shuttingDown) {
-        return;
-      }
-      if (androidChild && !androidChild.killed) {
-        androidChild.kill("SIGTERM");
-      }
+  await runDevSession({
+    appRoot,
+    env: androidEnv,
+    nodeCommand,
+    reactNativeCli,
+    platformLabel: "Android",
+    launchPlatform: async () => {
+      const deviceState = await ensureDeviceReady(androidEnv);
+      adbReverse(deviceState.deviceSerial, androidEnv);
+
+      const child = spawnAndroid(extraArgs, androidEnv);
+      const { code, signal } = await waitForChildExit(child);
       if (signal) {
-        process.kill(process.pid, signal);
-        return;
+        throw new Error(`run-android exited with signal ${signal}.`);
       }
-      process.exit(code ?? 1);
-    });
-
-    await waitForMetroReady();
-  }
-
-  const deviceSerial = await ensureDeviceReady(androidEnv);
-  adbReverse(deviceSerial, androidEnv);
-
-  androidChild = spawnAndroid(extraArgs);
-  androidChild.on("exit", (code, signal) => {
-    if (signal) {
-      forwardSignal(signal);
-      return;
-    }
-    if ((code ?? 1) !== 0) {
-      if (metroChild && !metroChild.killed) {
-        metroChild.kill("SIGTERM");
+      if ((code ?? 1) !== 0) {
+        throw new Error(`run-android exited with code ${code ?? 1}.`);
       }
-      process.exit(code ?? 1);
-      return;
-    }
 
-    if (!metroChild) {
-      process.exit(0);
-      return;
-    }
+      return {
+        ...deviceState,
+        androidEnv,
+      };
+    },
+    cleanupPlatform: async (state) => {
+      if (state?.deviceSerial) {
+        forceStopAndroidApp(state.deviceSerial, state.androidEnv ?? androidEnv);
+      }
 
-    console.log("Android app installed. Metro is still running; press Ctrl+C to stop.");
+      if (state?.startedEmulator && state.emulatorChild) {
+        console.log("Stopping emulator...");
+        await stopChild(state.emulatorChild);
+      }
+    },
   });
 }
 
-process.on("SIGINT", () => forwardSignal("SIGINT"));
-process.on("SIGTERM", () => forwardSignal("SIGTERM"));
-
 main().catch((error) => {
-  console.error(error.message);
-  if (metroChild && !metroChild.killed) {
-    metroChild.kill("SIGTERM");
-  }
+  console.error(error instanceof Error ? error.message : String(error));
   process.exit(1);
 });

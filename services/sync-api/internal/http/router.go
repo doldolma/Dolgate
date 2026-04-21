@@ -26,6 +26,10 @@ type RouterConfig struct {
 	ServerVersion      string
 	RateLimit          AuthRateLimitConfig
 	OIDC               OIDCConfig
+	AwsSsmRuntime      AwsSsmRuntime
+	AwsSsoBrowserFlow  bool
+	AwsSessionBridge   *AwsSessionBridge
+	AwsSsoMobile       *AwsSsoMobileManager
 }
 
 type serverInfoResponse struct {
@@ -34,11 +38,17 @@ type serverInfoResponse struct {
 }
 
 type serverInfoCapabilities struct {
-	Sync serverInfoSyncCapabilities `json:"sync"`
+	Sync     serverInfoSyncCapabilities    `json:"sync"`
+	Sessions serverInfoSessionCapabilities `json:"sessions"`
 }
 
 type serverInfoSyncCapabilities struct {
 	AWSProfiles bool `json:"awsProfiles"`
+}
+
+type serverInfoSessionCapabilities struct {
+	AWSSsm            bool `json:"awsSsm"`
+	AWSSsoBrowserFlow bool `json:"awsSsoBrowserFlow"`
 }
 
 type OIDCConfig struct {
@@ -113,6 +123,11 @@ func NewRouter(store store.Store, authService *auth.Service, config RouterConfig
 	}
 	router.Use(gin.Logger(), gin.Recovery(), securityHeadersMiddleware())
 	shareHub := NewSessionShareHub()
+	var awsSessionFactory awsSessionRunnerFactory
+	if config.AwsSessionBridge != nil {
+		awsSessionFactory = config.AwsSessionBridge.RunnerFactory()
+	}
+	awsSessionHub := NewAwsSessionHub(config.AwsSsmRuntime, awsSessionFactory)
 	shareAssetHandler := http.StripPrefix("/share/assets/", http.FileServer(http.FS(mustShareAssetFS())))
 	authLimiters := newAuthRouteLimiters(config.RateLimit)
 
@@ -132,8 +147,24 @@ func NewRouter(store store.Store, authService *auth.Service, config RouterConfig
 				Sync: serverInfoSyncCapabilities{
 					AWSProfiles: true,
 				},
+				Sessions: serverInfoSessionCapabilities{
+					AWSSsm:            config.AwsSsmRuntime.Enabled,
+					AWSSsoBrowserFlow: config.AwsSsoBrowserFlow,
+				},
 			},
 		})
+	})
+
+	router.GET("/auth/aws-sso/callback", func(ctx *gin.Context) {
+		renderDesktopCallbackBridgePage(
+			ctx,
+			buildMobileAwsSsoCallbackURL(
+				ctx.Query("code"),
+				ctx.Query("state"),
+				ctx.Query("error"),
+				ctx.Query("error_description"),
+			),
+		)
 	})
 
 	router.GET("/login", func(ctx *gin.Context) {
@@ -523,6 +554,98 @@ func NewRouter(store store.Store, authService *auth.Service, config RouterConfig
 		response := shareHub.Create(userID, request, requestBaseURL(ctx.Request))
 		ctx.JSON(http.StatusCreated, response)
 	})
+
+	awsSessionGroup := router.Group("/api/aws-sessions")
+	awsSessionGroup.Use(authMiddleware(authService))
+	awsSessionGroup.GET("/ws", func(ctx *gin.Context) {
+		if err := awsSessionHub.HandleWebSocket(ctx.Writer, ctx.Request); err != nil {
+			if ctx.Writer.Written() {
+				return
+			}
+			ctx.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+		}
+	})
+
+	awsSsoGroup := router.Group("/api/aws-sso/mobile")
+	awsSsoGroup.Use(authMiddleware(authService))
+	awsSsoGroup.POST("/start", func(ctx *gin.Context) {
+		if config.AwsSsoMobile == nil {
+			ctx.JSON(http.StatusServiceUnavailable, gin.H{"error": "AWS SSO browser flow is unavailable on this server."})
+			return
+		}
+
+		var request awsSsoMobileLoginStartRequest
+		if err := ctx.ShouldBindJSON(&request); err != nil {
+			ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+
+		response, err := config.AwsSsoMobile.Start(ctx.Request.Context(), ctx.GetString("userId"), request)
+		if err != nil {
+			ctx.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+			return
+		}
+		ctx.JSON(http.StatusOK, response)
+	})
+	awsSsoGroup.GET("/handoff/:loginId", func(ctx *gin.Context) {
+		if config.AwsSsoMobile == nil {
+			ctx.JSON(http.StatusServiceUnavailable, gin.H{"error": "AWS SSO browser flow is unavailable on this server."})
+			return
+		}
+
+		response, err := config.AwsSsoMobile.Status(
+			ctx.GetString("userId"),
+			ctx.Param("loginId"),
+		)
+		if err != nil {
+			ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		ctx.JSON(http.StatusOK, response)
+	})
+	awsSsoGroup.POST("/handoff/:loginId", func(ctx *gin.Context) {
+		if config.AwsSsoMobile == nil {
+			ctx.JSON(http.StatusServiceUnavailable, gin.H{"error": "AWS SSO browser flow is unavailable on this server."})
+			return
+		}
+
+		var request awsSsoMobileLoginHandoffRequest
+		if err := ctx.ShouldBindJSON(&request); err != nil {
+			ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+
+		response, err := config.AwsSsoMobile.Complete(
+			ctx.Request.Context(),
+			ctx.GetString("userId"),
+			ctx.Param("loginId"),
+			request,
+		)
+		if err != nil {
+			ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		ctx.JSON(http.StatusOK, response)
+	})
+	awsSsoGroup.POST("/cancel", func(ctx *gin.Context) {
+		if config.AwsSsoMobile == nil {
+			ctx.Status(http.StatusNoContent)
+			return
+		}
+
+		var request struct {
+			LoginID string `json:"loginId" binding:"required"`
+		}
+		if err := ctx.ShouldBindJSON(&request); err != nil {
+			ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		if err := config.AwsSsoMobile.Cancel(ctx.GetString("userId"), request.LoginID); err != nil {
+			ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		ctx.Status(http.StatusNoContent)
+	})
 	sessionShareGroup.POST("/:shareId/input", func(ctx *gin.Context) {
 		var request struct {
 			InputEnabled bool `json:"inputEnabled"`
@@ -788,6 +911,30 @@ func buildDesktopCallbackURL(redirectURI string, code string, state string) stri
 	query.Set("code", code)
 	if state != "" {
 		query.Set("state", state)
+	}
+	parsed.RawQuery = query.Encode()
+	return parsed.String()
+}
+
+func buildMobileAwsSsoCallbackURL(
+	code string,
+	state string,
+	authError string,
+	errorDescription string,
+) string {
+	parsed, _ := url.Parse("dolgate://aws-sso/callback")
+	query := parsed.Query()
+	if code != "" {
+		query.Set("code", code)
+	}
+	if state != "" {
+		query.Set("state", state)
+	}
+	if authError != "" {
+		query.Set("error", authError)
+	}
+	if errorDescription != "" {
+		query.Set("error_description", errorDescription)
 	}
 	parsed.RawQuery = query.Encode()
 	return parsed.String()

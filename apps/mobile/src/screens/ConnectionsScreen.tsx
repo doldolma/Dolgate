@@ -10,7 +10,7 @@ import { useNavigation } from "@react-navigation/native";
 import type { NavigationProp } from "@react-navigation/native";
 import Ionicons from "react-native-vector-icons/Ionicons";
 import { formatRelativeTime } from "../lib/mobile";
-import type { RootStackParamList } from "../navigation/RootNavigator";
+import type { MainTabParamList } from "../navigation/RootNavigator";
 import { useScreenPadding } from "../lib/screen-layout";
 import { useMobileAppStore } from "../store/useMobileAppStore";
 import { type MobilePalette, useMobilePalette } from "../theme";
@@ -41,7 +41,7 @@ function canRemoveSession(status: string) {
 export function ConnectionsScreen(): React.JSX.Element {
   const palette = useMobilePalette();
   const screenPadding = useScreenPadding();
-  const navigation = useNavigation<NavigationProp<RootStackParamList>>();
+  const navigation = useNavigation<NavigationProp<MainTabParamList>>();
   const sessions = useMobileAppStore((state) => state.sessions);
   const hosts = useMobileAppStore((state) => state.hosts);
   const resumeSession = useMobileAppStore((state) => state.resumeSession);
@@ -104,7 +104,7 @@ export function ConnectionsScreen(): React.JSX.Element {
           const openSession = async () => {
             const sessionId = await resumeSession(item.id);
             if (sessionId) {
-              navigation.navigate("Session", { sessionId });
+              navigation.navigate("Sessions");
             }
           };
 

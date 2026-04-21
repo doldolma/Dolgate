@@ -5,17 +5,49 @@ on:
   push:
     tags:
       - "v*"
-    paths:
-      - "services/sync-api/**"
-      - ".github/workflows/sync-api-container.yml"
 
 permissions:
   contents: read
   packages: write
 
 jobs:
+  verify-version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Verify repository version matches tag
+        id: version
+        shell: bash
+        run: |
+          npm run version:check
+          node - <<'NODE'
+          const rootVersion = require('./package.json').version;
+          const tagName = process.env.GITHUB_REF_NAME;
+          const expectedTag = `v${rootVersion}`;
+          if (tagName !== expectedTag) {
+            console.error(`Repository version mismatch: expected ${expectedTag}, got ${tagName}`);
+            process.exit(1);
+          }
+          console.log(`Repository version ${rootVersion} matches ${tagName}`);
+          require('node:fs').appendFileSync(process.env.GITHUB_OUTPUT, `version=${rootVersion}\n`);
+          NODE
+
   test:
     runs-on: ubuntu-latest
+    needs: verify-version
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -29,9 +61,15 @@ jobs:
         working-directory: services/sync-api
         run: go test ./... -cover
 
+      - name: Run ssh-core AWS tests
+        working-directory: services/ssh-core
+        run: go test ./internal/awssession/... ./cmd/ssh-core/...
+
   publish:
     runs-on: ubuntu-latest
-    needs: test
+    needs:
+      - verify-version
+      - test
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -62,11 +100,11 @@ jobs:
       - name: Build and push multi-arch image
         uses: docker/build-push-action@v6
         with:
-          context: ./services/sync-api
+          context: .
           file: ./services/sync-api/Dockerfile
           platforms: linux/amd64,linux/arm64
           push: true
           build-args: |
-            VERSION=${{ github.ref_name }}
+            VERSION=${{ needs.verify-version.outputs.version }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}

@@ -28,6 +28,7 @@ build/
 .idea
 .gradle
 local.properties
+signing.local.properties
 *.iml
 *.hprof
 .cxx/

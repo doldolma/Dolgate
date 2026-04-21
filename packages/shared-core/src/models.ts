@@ -762,6 +762,7 @@ export interface SyncStatus {
   pendingPush: boolean;
   errorMessage?: string | null;
   awsProfilesServerSupport?: AwsProfilesServerSupport;
+  awsSsmServerSupport?: AwsProfilesServerSupport;
 }
 
 // UpdateReleaseInfo는 GitHub Releases에서 읽어온 배포 메타데이터를 정규화한 형태다.

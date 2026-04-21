@@ -5,104 +5,101 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+
+	"dolssh/services/ssh-core/pkg/coretypes"
 )
 
-// 프로토콜 상수는 Electron과 Go 코어가 동일한 문자열 계약을 공유하기 위한 기준점이다.
-type CommandType string
-type EventType string
+type CommandType = coretypes.CommandType
+type EventType = coretypes.EventType
+type StreamType = coretypes.StreamType
+
+const (
+	CommandHealth                     = coretypes.CommandHealth
+	CommandConnect                    = coretypes.CommandConnect
+	CommandAWSConnect                 = coretypes.CommandAWSConnect
+	CommandLocalConnect               = coretypes.CommandLocalConnect
+	CommandSerialConnect              = coretypes.CommandSerialConnect
+	CommandSerialListPorts            = coretypes.CommandSerialListPorts
+	CommandSerialControl              = coretypes.CommandSerialControl
+	CommandKeyboardInteractiveRespond = coretypes.CommandKeyboardInteractiveRespond
+	CommandControlSignal              = coretypes.CommandControlSignal
+	CommandResize                     = coretypes.CommandResize
+	CommandDisconnect                 = coretypes.CommandDisconnect
+	CommandProbeHostKey               = coretypes.CommandProbeHostKey
+	CommandInspectCertificate         = coretypes.CommandInspectCertificate
+	CommandPortForwardStart           = coretypes.CommandPortForwardStart
+	CommandSSMPortForwardStart        = coretypes.CommandSSMPortForwardStart
+	CommandPortForwardStop            = coretypes.CommandPortForwardStop
+	CommandSSMPortForwardStop         = coretypes.CommandSSMPortForwardStop
+	CommandSFTPConnect                = coretypes.CommandSFTPConnect
+	CommandSFTPDisconnect             = coretypes.CommandSFTPDisconnect
+	CommandSFTPList                   = coretypes.CommandSFTPList
+	CommandSFTPMkdir                  = coretypes.CommandSFTPMkdir
+	CommandSFTPRename                 = coretypes.CommandSFTPRename
+	CommandSFTPChmod                  = coretypes.CommandSFTPChmod
+	CommandSFTPDelete                 = coretypes.CommandSFTPDelete
+	CommandSFTPTransferStart          = coretypes.CommandSFTPTransferStart
+	CommandSFTPTransferCancel         = coretypes.CommandSFTPTransferCancel
+	CommandContainersConnect          = coretypes.CommandContainersConnect
+	CommandContainersDisconnect       = coretypes.CommandContainersDisconnect
+	CommandContainersList             = coretypes.CommandContainersList
+	CommandContainersInspect          = coretypes.CommandContainersInspect
+	CommandContainersLogs             = coretypes.CommandContainersLogs
+	CommandContainersStart            = coretypes.CommandContainersStart
+	CommandContainersStop             = coretypes.CommandContainersStop
+	CommandContainersRestart          = coretypes.CommandContainersRestart
+	CommandContainersRemove           = coretypes.CommandContainersRemove
+	CommandContainersStats            = coretypes.CommandContainersStats
+	CommandContainersSearchLogs       = coretypes.CommandContainersSearchLogs
+)
+
+const (
+	EventStatus                       = coretypes.EventStatus
+	EventConnected                    = coretypes.EventConnected
+	EventData                         = coretypes.EventData
+	EventError                        = coretypes.EventError
+	EventClosed                       = coretypes.EventClosed
+	EventSerialPortsListed            = coretypes.EventSerialPortsListed
+	EventSerialControlCompleted       = coretypes.EventSerialControlCompleted
+	EventHostKeyProbed                = coretypes.EventHostKeyProbed
+	EventCertificateInspected         = coretypes.EventCertificateInspected
+	EventKeyboardInteractiveChallenge = coretypes.EventKeyboardInteractiveChallenge
+	EventKeyboardInteractiveResolved  = coretypes.EventKeyboardInteractiveResolved
+	EventPortForwardStarted           = coretypes.EventPortForwardStarted
+	EventPortForwardStopped           = coretypes.EventPortForwardStopped
+	EventPortForwardError             = coretypes.EventPortForwardError
+	EventSFTPConnected                = coretypes.EventSFTPConnected
+	EventSFTPDisconnected             = coretypes.EventSFTPDisconnected
+	EventSFTPListed                   = coretypes.EventSFTPListed
+	EventSFTPAck                      = coretypes.EventSFTPAck
+	EventSFTPError                    = coretypes.EventSFTPError
+	EventSFTPTransferProgress         = coretypes.EventSFTPTransferProgress
+	EventSFTPTransferCompleted        = coretypes.EventSFTPTransferCompleted
+	EventSFTPTransferFailed           = coretypes.EventSFTPTransferFailed
+	EventSFTPTransferCancelled        = coretypes.EventSFTPTransferCancelled
+	EventContainersConnected          = coretypes.EventContainersConnected
+	EventContainersDisconnected       = coretypes.EventContainersDisconnected
+	EventContainersListed             = coretypes.EventContainersListed
+	EventContainersInspected          = coretypes.EventContainersInspected
+	EventContainersLogs               = coretypes.EventContainersLogs
+	EventContainersActionCompleted    = coretypes.EventContainersActionCompleted
+	EventContainersStats              = coretypes.EventContainersStats
+	EventContainersLogsSearched       = coretypes.EventContainersLogsSearched
+	EventContainersError              = coretypes.EventContainersError
+)
+
 type FrameKind byte
-type StreamType string
 
 const (
-	// health는 코어 생존 여부 확인용이고, 나머지는 SSH 세션 조작 명령이다.
-	CommandHealth                     CommandType = "health"
-	CommandConnect                    CommandType = "connect"
-	CommandAWSConnect                 CommandType = "awsConnect"
-	CommandLocalConnect               CommandType = "localConnect"
-	CommandSerialConnect              CommandType = "serialConnect"
-	CommandSerialListPorts            CommandType = "serialListPorts"
-	CommandSerialControl              CommandType = "serialControl"
-	CommandKeyboardInteractiveRespond CommandType = "keyboardInteractiveRespond"
-	CommandControlSignal              CommandType = "controlSignal"
-	CommandResize                     CommandType = "resize"
-	CommandDisconnect                 CommandType = "disconnect"
-	CommandProbeHostKey               CommandType = "probeHostKey"
-	CommandInspectCertificate         CommandType = "inspectCertificate"
-	CommandPortForwardStart           CommandType = "portForwardStart"
-	CommandSSMPortForwardStart        CommandType = "ssmPortForwardStart"
-	CommandPortForwardStop            CommandType = "portForwardStop"
-	CommandSSMPortForwardStop         CommandType = "ssmPortForwardStop"
-	CommandSFTPConnect                CommandType = "sftpConnect"
-	CommandSFTPDisconnect             CommandType = "sftpDisconnect"
-	CommandSFTPList                   CommandType = "sftpList"
-	CommandSFTPMkdir                  CommandType = "sftpMkdir"
-	CommandSFTPRename                 CommandType = "sftpRename"
-	CommandSFTPChmod                  CommandType = "sftpChmod"
-	CommandSFTPDelete                 CommandType = "sftpDelete"
-	CommandSFTPTransferStart          CommandType = "sftpTransferStart"
-	CommandSFTPTransferCancel         CommandType = "sftpTransferCancel"
-	CommandContainersConnect          CommandType = "containersConnect"
-	CommandContainersDisconnect       CommandType = "containersDisconnect"
-	CommandContainersList             CommandType = "containersList"
-	CommandContainersInspect          CommandType = "containersInspect"
-	CommandContainersLogs             CommandType = "containersLogs"
-	CommandContainersStart            CommandType = "containersStart"
-	CommandContainersStop             CommandType = "containersStop"
-	CommandContainersRestart          CommandType = "containersRestart"
-	CommandContainersRemove           CommandType = "containersRemove"
-	CommandContainersStats            CommandType = "containersStats"
-	CommandContainersSearchLogs       CommandType = "containersSearchLogs"
-)
-
-const (
-	// status는 프로세스 전체 상태, connected/data/error/closed는 세션 단위 이벤트다.
-	EventStatus                       EventType = "status"
-	EventConnected                    EventType = "connected"
-	EventData                         EventType = "data"
-	EventError                        EventType = "error"
-	EventClosed                       EventType = "closed"
-	EventSerialPortsListed            EventType = "serialPortsListed"
-	EventSerialControlCompleted       EventType = "serialControlCompleted"
-	EventHostKeyProbed                EventType = "hostKeyProbed"
-	EventCertificateInspected         EventType = "certificateInspected"
-	EventKeyboardInteractiveChallenge EventType = "keyboardInteractiveChallenge"
-	EventKeyboardInteractiveResolved  EventType = "keyboardInteractiveResolved"
-	EventPortForwardStarted           EventType = "portForwardStarted"
-	EventPortForwardStopped           EventType = "portForwardStopped"
-	EventPortForwardError             EventType = "portForwardError"
-	EventSFTPConnected                EventType = "sftpConnected"
-	EventSFTPDisconnected             EventType = "sftpDisconnected"
-	EventSFTPListed                   EventType = "sftpListed"
-	EventSFTPAck                      EventType = "sftpAck"
-	EventSFTPError                    EventType = "sftpError"
-	EventSFTPTransferProgress         EventType = "sftpTransferProgress"
-	EventSFTPTransferCompleted        EventType = "sftpTransferCompleted"
-	EventSFTPTransferFailed           EventType = "sftpTransferFailed"
-	EventSFTPTransferCancelled        EventType = "sftpTransferCancelled"
-	EventContainersConnected          EventType = "containersConnected"
-	EventContainersDisconnected       EventType = "containersDisconnected"
-	EventContainersListed             EventType = "containersListed"
-	EventContainersInspected          EventType = "containersInspected"
-	EventContainersLogs               EventType = "containersLogs"
-	EventContainersActionCompleted    EventType = "containersActionCompleted"
-	EventContainersStats              EventType = "containersStats"
-	EventContainersLogsSearched       EventType = "containersLogsSearched"
-	EventContainersError              EventType = "containersError"
-)
-
-const (
-	// control frame은 JSON 메타데이터만, stream frame은 raw payload까지 함께 가진다.
 	FrameKindControl FrameKind = 1
 	FrameKindStream  FrameKind = 2
 )
 
 const (
-	// write는 main -> core 입력 스트림, data는 core -> main 출력 스트림이다.
-	StreamTypeWrite StreamType = "write"
-	StreamTypeData  StreamType = "data"
+	StreamTypeWrite = coretypes.StreamTypeWrite
+	StreamTypeData  = coretypes.StreamTypeData
 )
 
-// Request는 control frame 안에 담겨 stdin으로 들어오는 제어 명령이다.
 type Request struct {
 	ID         string          `json:"id"`
 	Type       CommandType     `json:"type"`
@@ -112,444 +109,70 @@ type Request struct {
 	Payload    json.RawMessage `json:"payload"`
 }
 
-// Event는 control frame 안에 담겨 stdout으로 나가는 상태 이벤트다.
-type Event struct {
-	Type       EventType `json:"type"`
-	RequestID  string    `json:"requestId,omitempty"`
-	SessionID  string    `json:"sessionId,omitempty"`
-	EndpointID string    `json:"endpointId,omitempty"`
-	JobID      string    `json:"jobId,omitempty"`
-	Payload    any       `json:"payload,omitempty"`
-}
+type Event = coretypes.Event
+type StreamFrame = coretypes.StreamFrame
+type ConnectPayload = coretypes.ConnectPayload
+type AWSConnectPayload = coretypes.AWSConnectPayload
+type LocalConnectPayload = coretypes.LocalConnectPayload
+type SerialConnectPayload = coretypes.SerialConnectPayload
+type SerialListPortsPayload = coretypes.SerialListPortsPayload
+type SerialPortSummary = coretypes.SerialPortSummary
+type SerialPortsListedPayload = coretypes.SerialPortsListedPayload
+type SerialControlPayload = coretypes.SerialControlPayload
+type SerialControlCompletedPayload = coretypes.SerialControlCompletedPayload
+type SFTPConnectPayload = coretypes.SFTPConnectPayload
+type ContainersConnectPayload = coretypes.ContainersConnectPayload
+type HostKeyProbePayload = coretypes.HostKeyProbePayload
+type CertificateInspectPayload = coretypes.CertificateInspectPayload
+type CertificateInspectedPayload = coretypes.CertificateInspectedPayload
+type KeyboardInteractivePrompt = coretypes.KeyboardInteractivePrompt
+type KeyboardInteractiveChallengePayload = coretypes.KeyboardInteractiveChallengePayload
+type KeyboardInteractiveRespondPayload = coretypes.KeyboardInteractiveRespondPayload
+type ControlSignalPayload = coretypes.ControlSignalPayload
+type ResizePayload = coretypes.ResizePayload
+type SFTPListPayload = coretypes.SFTPListPayload
+type SFTPMkdirPayload = coretypes.SFTPMkdirPayload
+type SFTPRenamePayload = coretypes.SFTPRenamePayload
+type SFTPChmodPayload = coretypes.SFTPChmodPayload
+type SFTPDeletePayload = coretypes.SFTPDeletePayload
+type ContainersInspectPayload = coretypes.ContainersInspectPayload
+type ContainersLogsPayload = coretypes.ContainersLogsPayload
+type ContainersActionPayload = coretypes.ContainersActionPayload
+type ContainersStatsPayload = coretypes.ContainersStatsPayload
+type ContainersSearchLogsPayload = coretypes.ContainersSearchLogsPayload
+type TransferEndpointPayload = coretypes.TransferEndpointPayload
+type TransferItemPayload = coretypes.TransferItemPayload
+type SFTPTransferStartPayload = coretypes.SFTPTransferStartPayload
+type PortForwardStartPayload = coretypes.PortForwardStartPayload
+type SSMPortForwardStartPayload = coretypes.SSMPortForwardStartPayload
+type StatusPayload = coretypes.StatusPayload
+type ErrorPayload = coretypes.ErrorPayload
+type ClosedPayload = coretypes.ClosedPayload
+type SFTPConnectedPayload = coretypes.SFTPConnectedPayload
+type ContainersConnectedPayload = coretypes.ContainersConnectedPayload
+type HostKeyProbedPayload = coretypes.HostKeyProbedPayload
+type PortForwardStartedPayload = coretypes.PortForwardStartedPayload
+type AckPayload = coretypes.AckPayload
+type SFTPFileEntry = coretypes.SFTPFileEntry
+type SFTPListedPayload = coretypes.SFTPListedPayload
+type ContainerSummary = coretypes.ContainerSummary
+type ContainersListedPayload = coretypes.ContainersListedPayload
+type ContainerMountSummary = coretypes.ContainerMountSummary
+type ContainerNetworkSummary = coretypes.ContainerNetworkSummary
+type ContainerPortBinding = coretypes.ContainerPortBinding
+type ContainerPortSummary = coretypes.ContainerPortSummary
+type KeyValuePair = coretypes.KeyValuePair
+type ContainerDetailsPayload = coretypes.ContainerDetailsPayload
+type ContainersLogsResultPayload = coretypes.ContainersLogsResultPayload
+type ContainersActionCompletedPayload = coretypes.ContainersActionCompletedPayload
+type ContainersStatsPayloadResult = coretypes.ContainersStatsPayloadResult
+type ContainersSearchLogsResultPayload = coretypes.ContainersSearchLogsResultPayload
+type SFTPTransferProgressPayload = coretypes.SFTPTransferProgressPayload
 
-// StreamFrame은 raw 바이트를 다루는 hot path용 메타데이터다.
-type StreamFrame struct {
-	Type      StreamType `json:"type"`
-	SessionID string     `json:"sessionId"`
-	RequestID string     `json:"requestId,omitempty"`
-}
-
-// Frame은 stdio 위의 binary 프레임 한 개를 표현한다.
 type Frame struct {
 	Kind     FrameKind
 	Metadata json.RawMessage
 	Payload  []byte
-}
-
-// ConnectPayload는 main 프로세스가 비밀값을 해석한 뒤 코어에 넘기는 최종 접속 정보다.
-type ConnectPayload struct {
-	Host                 string `json:"host"`
-	Port                 int    `json:"port"`
-	Username             string `json:"username"`
-	AuthType             string `json:"authType"`
-	Password             string `json:"password,omitempty"`
-	PrivateKeyPEM        string `json:"privateKeyPem,omitempty"`
-	CertificateText      string `json:"certificateText,omitempty"`
-	Passphrase           string `json:"passphrase,omitempty"`
-	TrustedHostKeyBase64 string `json:"trustedHostKeyBase64"`
-	Cols                 int    `json:"cols"`
-	Rows                 int    `json:"rows"`
-	Command              string `json:"command,omitempty"`
-}
-
-type AWSConnectPayload struct {
-	ProfileName string            `json:"profileName"`
-	Region      string            `json:"region"`
-	InstanceID  string            `json:"instanceId"`
-	Cols        int               `json:"cols"`
-	Rows        int               `json:"rows"`
-	Env         map[string]string `json:"env,omitempty"`
-	UnsetEnv    []string          `json:"unsetEnv,omitempty"`
-}
-
-type LocalConnectPayload struct {
-	Cols             int               `json:"cols"`
-	Rows             int               `json:"rows"`
-	Title            string            `json:"title,omitempty"`
-	ShellKind        string            `json:"shellKind,omitempty"`
-	Executable       string            `json:"executable,omitempty"`
-	Args             []string          `json:"args,omitempty"`
-	Env              map[string]string `json:"env,omitempty"`
-	WorkingDirectory string            `json:"workingDirectory,omitempty"`
-}
-
-type SerialConnectPayload struct {
-	Transport          string  `json:"transport"`
-	Cols               int     `json:"cols"`
-	Rows               int     `json:"rows"`
-	Title              string  `json:"title,omitempty"`
-	DevicePath         string  `json:"devicePath,omitempty"`
-	Host               string  `json:"host,omitempty"`
-	Port               int     `json:"port,omitempty"`
-	BaudRate           int     `json:"baudRate"`
-	DataBits           int     `json:"dataBits"`
-	Parity             string  `json:"parity"`
-	StopBits           float64 `json:"stopBits"`
-	FlowControl        string  `json:"flowControl"`
-	TransmitLineEnding string  `json:"transmitLineEnding"`
-	LocalEcho          bool    `json:"localEcho"`
-	LocalLineEditing   bool    `json:"localLineEditing"`
-}
-
-type SerialListPortsPayload struct {
-	IncludeBusy bool `json:"includeBusy,omitempty"`
-}
-
-type SerialPortSummary struct {
-	Path         string `json:"path"`
-	DisplayName  string `json:"displayName,omitempty"`
-	Manufacturer string `json:"manufacturer,omitempty"`
-}
-
-type SerialPortsListedPayload struct {
-	Ports []SerialPortSummary `json:"ports"`
-}
-
-type SerialControlPayload struct {
-	Action  string `json:"action"`
-	Enabled *bool  `json:"enabled,omitempty"`
-}
-
-type SerialControlCompletedPayload struct {
-	Action  string `json:"action"`
-	Enabled *bool  `json:"enabled,omitempty"`
-}
-
-// SFTPConnectPayload는 원격 파일 브라우저 접속을 위한 인증 정보다.
-type SFTPConnectPayload struct {
-	Host                 string `json:"host"`
-	Port                 int    `json:"port"`
-	Username             string `json:"username"`
-	AuthType             string `json:"authType"`
-	Password             string `json:"password,omitempty"`
-	PrivateKeyPEM        string `json:"privateKeyPem,omitempty"`
-	CertificateText      string `json:"certificateText,omitempty"`
-	Passphrase           string `json:"passphrase,omitempty"`
-	TrustedHostKeyBase64 string `json:"trustedHostKeyBase64"`
-}
-
-type ContainersConnectPayload struct {
-	Host                 string `json:"host"`
-	Port                 int    `json:"port"`
-	Username             string `json:"username"`
-	AuthType             string `json:"authType"`
-	Password             string `json:"password,omitempty"`
-	PrivateKeyPEM        string `json:"privateKeyPem,omitempty"`
-	CertificateText      string `json:"certificateText,omitempty"`
-	Passphrase           string `json:"passphrase,omitempty"`
-	TrustedHostKeyBase64 string `json:"trustedHostKeyBase64"`
-}
-
-type HostKeyProbePayload struct {
-	Host string `json:"host"`
-	Port int    `json:"port"`
-}
-
-type CertificateInspectPayload struct {
-	CertificateText string `json:"certificateText"`
-}
-
-type CertificateInspectedPayload struct {
-	Status      string   `json:"status"`
-	ValidAfter  string   `json:"validAfter,omitempty"`
-	ValidBefore string   `json:"validBefore,omitempty"`
-	Principals  []string `json:"principals,omitempty"`
-	KeyID       string   `json:"keyId,omitempty"`
-	Serial      string   `json:"serial,omitempty"`
-}
-
-type KeyboardInteractivePrompt struct {
-	Label string `json:"label"`
-	Echo  bool   `json:"echo"`
-}
-
-type KeyboardInteractiveChallengePayload struct {
-	ChallengeID string                      `json:"challengeId"`
-	Attempt     int                         `json:"attempt"`
-	Name        string                      `json:"name,omitempty"`
-	Instruction string                      `json:"instruction"`
-	Prompts     []KeyboardInteractivePrompt `json:"prompts"`
-}
-
-type KeyboardInteractiveRespondPayload struct {
-	ChallengeID string   `json:"challengeId"`
-	Responses   []string `json:"responses"`
-}
-
-type ControlSignalPayload struct {
-	Signal string `json:"signal"`
-}
-
-// ResizePayload는 xterm 크기와 원격 PTY 크기를 맞추기 위한 요청이다.
-type ResizePayload struct {
-	Cols int `json:"cols"`
-	Rows int `json:"rows"`
-}
-
-type SFTPListPayload struct {
-	Path string `json:"path"`
-}
-
-type SFTPMkdirPayload struct {
-	Path string `json:"path"`
-	Name string `json:"name"`
-}
-
-type SFTPRenamePayload struct {
-	Path     string `json:"path"`
-	NextName string `json:"nextName"`
-}
-
-type SFTPChmodPayload struct {
-	Path string `json:"path"`
-	Mode int    `json:"mode"`
-}
-
-type SFTPDeletePayload struct {
-	Paths []string `json:"paths"`
-}
-
-type ContainersInspectPayload struct {
-	ContainerID string `json:"containerId"`
-}
-
-type ContainersLogsPayload struct {
-	ContainerID  string `json:"containerId"`
-	Tail         int    `json:"tail"`
-	FollowCursor string `json:"followCursor,omitempty"`
-}
-
-type ContainersActionPayload struct {
-	ContainerID string `json:"containerId"`
-}
-
-type ContainersStatsPayload struct {
-	ContainerID string `json:"containerId"`
-}
-
-type ContainersSearchLogsPayload struct {
-	ContainerID string `json:"containerId"`
-	Tail        int    `json:"tail"`
-	Query       string `json:"query"`
-}
-
-type TransferEndpointPayload struct {
-	Kind       string `json:"kind"`
-	EndpointID string `json:"endpointId,omitempty"`
-	Path       string `json:"path"`
-}
-
-type TransferItemPayload struct {
-	Name        string `json:"name"`
-	Path        string `json:"path"`
-	IsDirectory bool   `json:"isDirectory"`
-	Size        int64  `json:"size"`
-}
-
-type SFTPTransferStartPayload struct {
-	Source             TransferEndpointPayload `json:"source"`
-	Target             TransferEndpointPayload `json:"target"`
-	Items              []TransferItemPayload   `json:"items"`
-	ConflictResolution string                  `json:"conflictResolution"`
-}
-
-type PortForwardStartPayload struct {
-	Host                 string `json:"host"`
-	Port                 int    `json:"port"`
-	Username             string `json:"username"`
-	AuthType             string `json:"authType"`
-	Password             string `json:"password,omitempty"`
-	PrivateKeyPEM        string `json:"privateKeyPem,omitempty"`
-	CertificateText      string `json:"certificateText,omitempty"`
-	Passphrase           string `json:"passphrase,omitempty"`
-	TrustedHostKeyBase64 string `json:"trustedHostKeyBase64"`
-	Mode                 string `json:"mode"`
-	BindAddress          string `json:"bindAddress"`
-	BindPort             int    `json:"bindPort"`
-	TargetHost           string `json:"targetHost,omitempty"`
-	TargetPort           int    `json:"targetPort,omitempty"`
-	SourceEndpointID     string `json:"sourceEndpointId,omitempty"`
-}
-
-type SSMPortForwardStartPayload struct {
-	ProfileName string `json:"profileName"`
-	Region      string `json:"region"`
-	TargetType  string `json:"targetType"`
-	TargetID    string `json:"targetId"`
-	BindAddress string `json:"bindAddress"`
-	BindPort    int    `json:"bindPort"`
-	TargetKind  string `json:"targetKind"`
-	TargetPort  int    `json:"targetPort"`
-	RemoteHost  string `json:"remoteHost,omitempty"`
-}
-
-// StatusPayload는 프로세스/세션 상태를 짧은 문자열로 표현한다.
-type StatusPayload struct {
-	Status    string `json:"status"`
-	Message   string `json:"message,omitempty"`
-	ShellKind string `json:"shellKind,omitempty"`
-}
-
-// ErrorPayload는 사람이 바로 읽을 수 있는 진단 메시지를 담는다.
-type ErrorPayload struct {
-	Message string `json:"message"`
-}
-
-// ClosedPayload는 세션 종료 이유를 선택적으로 담는다.
-type ClosedPayload struct {
-	Message string `json:"message,omitempty"`
-}
-
-type SFTPConnectedPayload struct {
-	Path string `json:"path"`
-}
-
-type ContainersConnectedPayload struct {
-	Runtime           string `json:"runtime,omitempty"`
-	RuntimeCommand    string `json:"runtimeCommand,omitempty"`
-	UnsupportedReason string `json:"unsupportedReason,omitempty"`
-}
-
-type HostKeyProbedPayload struct {
-	Algorithm         string `json:"algorithm"`
-	PublicKeyBase64   string `json:"publicKeyBase64"`
-	FingerprintSHA256 string `json:"fingerprintSha256"`
-}
-
-type PortForwardStartedPayload struct {
-	Transport   string `json:"transport,omitempty"`
-	Status      string `json:"status"`
-	Mode        string `json:"mode"`
-	Method      string `json:"method,omitempty"`
-	BindAddress string `json:"bindAddress"`
-	BindPort    int    `json:"bindPort"`
-	Message     string `json:"message,omitempty"`
-}
-
-type AckPayload struct {
-	Message string `json:"message,omitempty"`
-}
-
-type SFTPFileEntry struct {
-	Name        string `json:"name"`
-	Path        string `json:"path"`
-	IsDirectory bool   `json:"isDirectory"`
-	Size        int64  `json:"size"`
-	Mtime       string `json:"mtime"`
-	Kind        string `json:"kind"`
-	Permissions string `json:"permissions,omitempty"`
-}
-
-type SFTPListedPayload struct {
-	Path    string          `json:"path"`
-	Entries []SFTPFileEntry `json:"entries"`
-}
-
-type ContainerSummary struct {
-	ID        string `json:"id"`
-	Name      string `json:"name"`
-	Runtime   string `json:"runtime"`
-	Image     string `json:"image"`
-	Status    string `json:"status"`
-	CreatedAt string `json:"createdAt"`
-	Ports     string `json:"ports"`
-}
-
-type ContainersListedPayload struct {
-	Runtime    string             `json:"runtime,omitempty"`
-	Containers []ContainerSummary `json:"containers"`
-}
-
-type ContainerMountSummary struct {
-	Type        string `json:"type"`
-	Source      string `json:"source"`
-	Destination string `json:"destination"`
-	Mode        string `json:"mode,omitempty"`
-	ReadOnly    bool   `json:"readOnly"`
-}
-
-type ContainerNetworkSummary struct {
-	Name      string   `json:"name"`
-	IPAddress string   `json:"ipAddress,omitempty"`
-	Aliases   []string `json:"aliases"`
-}
-
-type ContainerPortBinding struct {
-	HostIP   string `json:"hostIp,omitempty"`
-	HostPort int    `json:"hostPort,omitempty"`
-}
-
-type ContainerPortSummary struct {
-	ContainerPort     int                    `json:"containerPort"`
-	Protocol          string                 `json:"protocol"`
-	PublishedBindings []ContainerPortBinding `json:"publishedBindings"`
-}
-
-type KeyValuePair struct {
-	Key   string `json:"key"`
-	Value string `json:"value"`
-}
-
-type ContainerDetailsPayload struct {
-	ID          string                    `json:"id"`
-	Name        string                    `json:"name"`
-	Runtime     string                    `json:"runtime"`
-	Image       string                    `json:"image"`
-	Status      string                    `json:"status"`
-	CreatedAt   string                    `json:"createdAt"`
-	Command     string                    `json:"command"`
-	Entrypoint  string                    `json:"entrypoint"`
-	Mounts      []ContainerMountSummary   `json:"mounts"`
-	Networks    []ContainerNetworkSummary `json:"networks"`
-	Ports       []ContainerPortSummary    `json:"ports"`
-	Environment []KeyValuePair            `json:"environment"`
-	Labels      []KeyValuePair            `json:"labels"`
-}
-
-type ContainersLogsResultPayload struct {
-	Runtime     string   `json:"runtime"`
-	ContainerID string   `json:"containerId"`
-	Lines       []string `json:"lines"`
-	Cursor      string   `json:"cursor,omitempty"`
-}
-
-type ContainersActionCompletedPayload struct {
-	Runtime     string `json:"runtime"`
-	Action      string `json:"action"`
-	ContainerID string `json:"containerId"`
-	Message     string `json:"message,omitempty"`
-}
-
-type ContainersStatsPayloadResult struct {
-	Runtime          string  `json:"runtime"`
-	ContainerID      string  `json:"containerId"`
-	RecordedAt       string  `json:"recordedAt"`
-	CPUPercent       float64 `json:"cpuPercent"`
-	MemoryUsedBytes  int64   `json:"memoryUsedBytes"`
-	MemoryLimitBytes int64   `json:"memoryLimitBytes"`
-	MemoryPercent    float64 `json:"memoryPercent"`
-	NetworkRxBytes   int64   `json:"networkRxBytes"`
-	NetworkTxBytes   int64   `json:"networkTxBytes"`
-	BlockReadBytes   int64   `json:"blockReadBytes"`
-	BlockWriteBytes  int64   `json:"blockWriteBytes"`
-}
-
-type ContainersSearchLogsResultPayload struct {
-	Runtime     string   `json:"runtime"`
-	ContainerID string   `json:"containerId"`
-	Query       string   `json:"query"`
-	Lines       []string `json:"lines"`
-	MatchCount  int      `json:"matchCount"`
-}
-
-type SFTPTransferProgressPayload struct {
-	Status              string  `json:"status"`
-	BytesTotal          int64   `json:"bytesTotal"`
-	BytesCompleted      int64   `json:"bytesCompleted"`
-	ActiveItemName      string  `json:"activeItemName,omitempty"`
-	SpeedBytesPerSecond float64 `json:"speedBytesPerSecond,omitempty"`
-	ETASeconds          int64   `json:"etaSeconds,omitempty"`
-	Message             string  `json:"message,omitempty"`
 }
 
 const frameHeaderSize = 9

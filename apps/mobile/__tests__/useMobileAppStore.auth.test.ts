@@ -4,10 +4,13 @@ import { RnRussh } from "@fressh/react-native-uniffi-russh";
 import { gcm } from "@noble/ciphers/aes.js";
 import { randomBytes } from "@noble/ciphers/utils.js";
 import type {
+  AwsEc2HostRecord,
   AuthSession,
   AuthState,
   GroupRecord,
   LoadedManagedSecretPayload,
+  MobileSessionRecord,
+  ManagedAwsProfilePayload,
   SshHostRecord,
   SyncPayloadV2,
   SyncRecord,
@@ -20,6 +23,10 @@ import {
   createDefaultSyncStatus,
   createUnauthenticatedState,
 } from "../src/lib/mobile";
+import {
+  getCurrentWindowTerminalGridSize,
+  toRusshTerminalSize,
+} from "../src/lib/terminal-size";
 import { useMobileAppStore } from "../src/store/useMobileAppStore";
 
 jest.mock("@fressh/react-native-uniffi-russh", () => ({
@@ -101,6 +108,7 @@ function resetStore(
       | "syncStatus"
       | "groups"
       | "hosts"
+      | "awsProfiles"
       | "knownHosts"
       | "secretMetadata"
       | "sessions"
@@ -119,6 +127,7 @@ function resetStore(
     syncStatus: createDefaultSyncStatus(),
     groups: [],
     hosts: [],
+    awsProfiles: [],
     knownHosts: [],
     secretMetadata: [],
     sessions: [],
@@ -276,6 +285,19 @@ describe("useMobileAppStore auth and sync flows", () => {
     const session = createAuthSession();
     fetchMock.mockImplementation(async (input) => {
       const path = new URL(String(input)).pathname;
+      if (path === "/api/info") {
+        return createJsonResponse({
+          serverVersion: "test",
+          capabilities: {
+            sync: {
+              awsProfiles: true,
+            },
+            sessions: {
+              awsSsm: true,
+            },
+          },
+        });
+      }
       if (path === "/auth/exchange") {
         return createJsonResponse(session);
       }
@@ -311,7 +333,7 @@ describe("useMobileAppStore auth and sync flows", () => {
     expect(state.pendingBrowserLoginState).toBeNull();
     expect(state.syncStatus.status).toBe("ready");
     expect(fetchMock.mock.calls.map(([input]) => new URL(String(input)).pathname))
-      .toEqual(["/auth/exchange", "/sync"]);
+      .toEqual(["/auth/exchange", "/api/info", "/sync"]);
   });
 
   it("refreshes an expired access token and retries sync once", async () => {
@@ -327,6 +349,19 @@ describe("useMobileAppStore auth and sync flows", () => {
 
     fetchMock.mockImplementation(async (input) => {
       const path = new URL(String(input)).pathname;
+      if (path === "/api/info") {
+        return createJsonResponse({
+          serverVersion: "test",
+          capabilities: {
+            sync: {
+              awsProfiles: true,
+            },
+            sessions: {
+              awsSsm: true,
+            },
+          },
+        });
+      }
       if (path === "/sync") {
         syncAttemptCount += 1;
         if (syncAttemptCount === 1) {
@@ -355,7 +390,7 @@ describe("useMobileAppStore auth and sync flows", () => {
     expect(state.auth.session?.tokens.accessToken).toBe("fresh-access-token");
     expect(state.syncStatus.status).toBe("ready");
     expect(fetchMock.mock.calls.map(([input]) => new URL(String(input)).pathname))
-      .toEqual(["/sync", "/auth/refresh", "/sync"]);
+      .toEqual(["/api/info", "/sync", "/auth/refresh", "/sync"]);
   });
 
   it("hydrates groups from sync payloads and keeps them sorted by path", async () => {
@@ -407,6 +442,19 @@ describe("useMobileAppStore auth and sync flows", () => {
 
     fetchMock.mockImplementation(async (input) => {
       const path = new URL(String(input)).pathname;
+      if (path === "/api/info") {
+        return createJsonResponse({
+          serverVersion: "test",
+          capabilities: {
+            sync: {
+              awsProfiles: true,
+            },
+            sessions: {
+              awsSsm: true,
+            },
+          },
+        });
+      }
       if (path === "/sync") {
         return createJsonResponse(payload);
       }
@@ -430,6 +478,195 @@ describe("useMobileAppStore auth and sync flows", () => {
     ]);
     expect(state.hosts[0]?.groupName).toBe("Servers/NAS");
     expect(state.syncStatus.status).toBe("ready");
+  });
+
+  it("hydrates AWS profiles and aws-ec2 hosts from sync payloads", async () => {
+    const keyBase64 = Buffer.from(
+      "12345678901234567890123456789012",
+      "utf8",
+    ).toString("base64");
+    const session = createAuthSession({
+      vaultBootstrap: {
+        keyBase64,
+      },
+    });
+    const awsHost: AwsEc2HostRecord = {
+      id: "host-aws-1",
+      kind: "aws-ec2",
+      label: "Production EC2",
+      awsProfileId: "profile-prod",
+      awsProfileName: "prod",
+      awsRegion: "ap-northeast-2",
+      awsInstanceId: "i-0123456789",
+      awsInstanceName: "prod-web-1",
+      createdAt: "2026-04-13T00:00:00.000Z",
+      updatedAt: "2026-04-13T00:00:00.000Z",
+    };
+    const awsProfile: ManagedAwsProfilePayload = {
+      id: "profile-prod",
+      name: "prod",
+      kind: "static",
+      region: "ap-northeast-2",
+      accessKeyId: "AKIAPROD",
+      secretAccessKey: "prod-secret",
+      updatedAt: "2026-04-13T00:00:00.000Z",
+    };
+    const payload: SyncPayloadV2 = {
+      ...buildEmptySyncPayload(),
+      hosts: [createEncryptedRecord(awsHost.id, awsHost, keyBase64)],
+      awsProfiles: [
+        createEncryptedRecord(awsProfile.id, awsProfile, keyBase64),
+      ],
+    };
+
+    fetchMock.mockImplementation(async (input) => {
+      const path = new URL(String(input)).pathname;
+      if (path === "/api/info") {
+        return createJsonResponse({
+          serverVersion: "test",
+          capabilities: {
+            sync: {
+              awsProfiles: true,
+            },
+            sessions: {
+              awsSsm: true,
+            },
+          },
+        });
+      }
+      if (path === "/sync") {
+        return createJsonResponse(payload);
+      }
+      throw new Error(`unexpected fetch path: ${path}`);
+    });
+
+    await act(async () => {
+      resetStore({
+        auth: createAuthenticatedState(session),
+      });
+    });
+
+    await act(async () => {
+      await useMobileAppStore.getState().syncNow();
+    });
+
+    const state = useMobileAppStore.getState();
+    expect(state.hosts).toHaveLength(1);
+    expect(state.hosts[0]?.kind).toBe("aws-ec2");
+    expect(state.awsProfiles).toHaveLength(1);
+    expect(state.awsProfiles[0]?.name).toBe("prod");
+    expect(state.syncStatus.awsProfilesServerSupport).toBe("supported");
+    expect(state.syncStatus.awsSsmServerSupport).toBe("supported");
+  });
+
+  it("reconnects an existing live host tab instead of only focusing stale state", async () => {
+    const host: SshHostRecord = {
+      id: "host-synology",
+      kind: "ssh",
+      label: "Synology",
+      hostname: "doldolma.com",
+      port: 2788,
+      username: "doyoung",
+      authType: "password",
+      secretRef: null,
+      createdAt: "2026-04-13T00:00:00.000Z",
+      updatedAt: "2026-04-13T00:00:00.000Z",
+    };
+    const session: MobileSessionRecord = {
+      id: "session-synology",
+      sessionId: "session-synology",
+      hostId: host.id,
+      title: host.label,
+      status: "connected",
+      hasReceivedOutput: true,
+      isRestorable: true,
+      lastViewportSnapshot: "prompt",
+      lastEventAt: "2026-04-13T00:00:00.000Z",
+      lastConnectedAt: "2026-04-13T00:00:00.000Z",
+      lastDisconnectedAt: null,
+      errorMessage: null,
+    };
+    const resumeSession = jest.fn(async () => session.id);
+    const originalResumeSession = useMobileAppStore.getState().resumeSession;
+
+    try {
+      await act(async () => {
+        resetStore({
+          hosts: [host],
+          sessions: [session],
+        });
+        useMobileAppStore.setState({
+          resumeSession,
+        });
+      });
+
+      let connectedSessionId: string | null = null;
+      await act(async () => {
+        connectedSessionId = await useMobileAppStore
+          .getState()
+          .connectToHost(host.id);
+      });
+
+      expect(connectedSessionId).toBe(session.id);
+      expect(resumeSession).toHaveBeenCalledWith(session.id);
+      expect(useMobileAppStore.getState().activeSessionTabId).toBe(session.id);
+    } finally {
+      useMobileAppStore.setState({
+        resumeSession: originalResumeSession,
+      });
+    }
+  });
+
+  it("blocks AWS host connections when the server reports SSM support is unavailable", async () => {
+    const awsHost: AwsEc2HostRecord = {
+      id: "host-aws-1",
+      kind: "aws-ec2",
+      label: "Production EC2",
+      awsProfileId: "profile-prod",
+      awsProfileName: "prod",
+      awsRegion: "ap-northeast-2",
+      awsInstanceId: "i-0123456789",
+      awsInstanceName: "prod-web-1",
+      createdAt: "2026-04-13T00:00:00.000Z",
+      updatedAt: "2026-04-13T00:00:00.000Z",
+    };
+    const awsProfile: ManagedAwsProfilePayload = {
+      id: "profile-prod",
+      name: "prod",
+      kind: "static",
+      region: "ap-northeast-2",
+      accessKeyId: "AKIAPROD",
+      secretAccessKey: "prod-secret",
+      updatedAt: "2026-04-13T00:00:00.000Z",
+    };
+
+    await act(async () => {
+      resetStore({
+        auth: createAuthenticatedState(),
+        hosts: [awsHost],
+        awsProfiles: [awsProfile],
+        syncStatus: {
+          ...createDefaultSyncStatus(),
+          awsProfilesServerSupport: "supported",
+          awsSsmServerSupport: "unsupported",
+        },
+      });
+    });
+
+    let sessionId: string | null = null;
+    await act(async () => {
+      sessionId = await useMobileAppStore.getState().connectToHost(awsHost.id);
+      await flushAsyncWork();
+    });
+
+    expect(sessionId).not.toBeNull();
+    expect(fetchMock).not.toHaveBeenCalled();
+    const session = useMobileAppStore
+      .getState()
+      .sessions.find((item) => item.id === sessionId);
+    expect(session?.connectionKind).toBe("aws-ssm");
+    expect(session?.status).toBe("error");
+    expect(session?.errorMessage).toContain("지원하지 않습니다");
   });
 
   it("disconnects live runtime sessions and clears synced state when the server changes", async () => {
@@ -484,6 +721,12 @@ describe("useMobileAppStore auth and sync flows", () => {
 
     expect(RnRussh.connect).toHaveBeenCalledTimes(1);
     expect(connection.startShell).toHaveBeenCalledTimes(1);
+    expect(connection.startShell).toHaveBeenCalledWith(
+      expect.objectContaining({
+        term: "Xterm",
+        terminalSize: toRusshTerminalSize(getCurrentWindowTerminalGridSize()),
+      }),
+    );
 
     await act(async () => {
       await useMobileAppStore
@@ -570,6 +813,12 @@ describe("useMobileAppStore auth and sync flows", () => {
     });
 
     expect(connection.startShell).toHaveBeenCalledTimes(1);
+    expect(connection.startShell).toHaveBeenCalledWith(
+      expect.objectContaining({
+        term: "Xterm",
+        terminalSize: toRusshTerminalSize(getCurrentWindowTerminalGridSize()),
+      }),
+    );
     expect(useMobileAppStore.getState().sessions[0]?.status).toBe("connected");
   });
 });

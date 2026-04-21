@@ -74,5 +74,58 @@ export interface ServerInfoResponse {
     sync: {
       awsProfiles: boolean;
     };
+    sessions: {
+      awsSsm: boolean;
+      awsSsoBrowserFlow?: boolean;
+    };
   };
+}
+
+export interface AwsTemporaryCredentialPayload {
+  accessKeyId: string;
+  secretAccessKey: string;
+  sessionToken?: string;
+  expiresAt?: string | null;
+}
+
+export interface AwsSsoMobileLoginStartRequest {
+  targetProfileName: string;
+  sourceProfileName: string;
+  sourceProfileFingerprint: string;
+  ssoStartUrl: string;
+  ssoRegion: string;
+  ssoAccountId: string;
+  ssoRoleName: string;
+  redirectUri: string;
+}
+
+export interface AwsSsoMobileLoginHandoffRequest {
+  code?: string;
+  state?: string;
+  error?: string;
+  errorDescription?: string;
+}
+
+export type AwsSsoLoginState =
+  | "pending"
+  | "ready"
+  | "cancelled"
+  | "expired"
+  | "error";
+
+export interface AwsSsoMobileLoginStartResponse {
+  loginId: string;
+  status: AwsSsoLoginState;
+  browserUrl?: string | null;
+  expiresAt?: string | null;
+  message?: string | null;
+  credential?: AwsTemporaryCredentialPayload | null;
+}
+
+export interface AwsSsoMobileHandoffResponse {
+  loginId: string;
+  status: AwsSsoLoginState;
+  expiresAt?: string | null;
+  message?: string | null;
+  credential?: AwsTemporaryCredentialPayload | null;
 }
