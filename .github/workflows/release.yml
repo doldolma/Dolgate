@@ -1,4 +1,4 @@
-name: Build repository release
+name: Repository Release
 run-name: Repository Release • ${{ github.ref_name }}
 
 on:
@@ -126,11 +126,34 @@ jobs:
       - name: Run desktop tests
         run: npm run test:desktop
 
+  mobile-test:
+    runs-on: ubuntu-latest
+    needs: verify-version
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run mobile typecheck
+        run: npm run typecheck:mobile
+
+      - name: Run mobile tests
+        run: npm run test:mobile -- --runInBand
+
   build-mac:
     runs-on: macos-latest
     needs:
       - verify-version
       - desktop-test
+      - mobile-test
       - ssh-core-test
     env:
       CSC_IDENTITY_AUTO_DISCOVERY: "false"
@@ -167,6 +190,7 @@ jobs:
     needs:
       - verify-version
       - desktop-test
+      - mobile-test
       - ssh-core-test
     steps:
       - name: Check out repository
@@ -198,7 +222,9 @@ jobs:
 
   build-android:
     runs-on: ubuntu-latest
-    needs: verify-version
+    needs:
+      - verify-version
+      - mobile-test
     steps:
       - name: Check out repository
         uses: actions/checkout@v4

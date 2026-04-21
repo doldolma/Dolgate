@@ -22,11 +22,11 @@ const iosProjectPath = path.join(
   "Dolgate.xcodeproj",
   "project.pbxproj",
 );
-const desktopReleaseWorkflowPath = path.join(
+const releaseWorkflowPath = path.join(
   repoRoot,
   ".github",
   "workflows",
-  "desktop-release.yml",
+  "release.yml",
 );
 const syncApiWorkflowPath = path.join(
   repoRoot,
@@ -130,7 +130,7 @@ function checkVersion() {
   const lockfile = readJson(lockfilePath);
   const androidGradle = fs.readFileSync(androidGradlePath, "utf8");
   const iosProject = fs.readFileSync(iosProjectPath, "utf8");
-  const desktopReleaseWorkflow = fs.readFileSync(desktopReleaseWorkflowPath, "utf8");
+  const releaseWorkflow = fs.readFileSync(releaseWorkflowPath, "utf8");
   const syncApiWorkflow = fs.readFileSync(syncApiWorkflowPath, "utf8");
 
   const expectedVersion = rootPackage.version;
@@ -191,16 +191,16 @@ function checkVersion() {
     );
   }
 
-  if (!desktopReleaseWorkflow.includes("npm run version:check")) {
-    errors.push("Desktop release workflow is not invoking the root version check.");
+  if (!releaseWorkflow.includes("npm run version:check")) {
+    errors.push("Release workflow is not invoking the root version check.");
   }
 
-  if (!desktopReleaseWorkflow.includes("const rootVersion = require('./package.json').version;")) {
-    errors.push("Desktop release workflow is not validating the root package version.");
+  if (!releaseWorkflow.includes("const rootVersion = require('./package.json').version;")) {
+    errors.push("Release workflow is not validating the root package version.");
   }
 
-  if (!desktopReleaseWorkflow.includes("Dolgate-android-v${version}.apk")) {
-    errors.push("Desktop release workflow is not packaging the Android APK into the unified release.");
+  if (!releaseWorkflow.includes("Dolgate-android-v${version}.apk")) {
+    errors.push("Release workflow is not packaging the Android APK into the unified release.");
   }
 
   if (!syncApiWorkflow.includes("const rootVersion = require('./package.json').version;")) {

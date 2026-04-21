@@ -1,5 +1,5 @@
-name: Desktop tests
-run-name: Desktop Tests • ${{ github.event_name }} • ${{ github.ref_name }}
+name: Repository Test
+run-name: Repository Test • ${{ github.event_name }} • ${{ github.ref_name }}
 
 on:
   pull_request:
@@ -34,18 +34,15 @@ jobs:
         run: go test ./... -cover
 
       - name: Set up Node.js
-        if: matrix.os != 'ubuntu-latest'
         uses: actions/setup-node@v4
         with:
-          node-version: "22"
+          node-version: "24"
           cache: npm
 
       - name: Install dependencies
-        if: matrix.os != 'ubuntu-latest'
         run: npm ci
 
       - name: Prepare desktop dev ssh-core binaries
-        if: matrix.os != 'ubuntu-latest'
         run: npm run prepare:ssh-core:dev --workspace @dolssh/desktop
 
       - name: Verify macOS desktop helper binaries
@@ -72,7 +69,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: "22"
+          node-version: "24"
           cache: npm
 
       - name: Set up Go
@@ -85,3 +82,25 @@ jobs:
 
       - name: Run desktop tests
         run: npm run test:desktop
+
+  mobile-test:
+    name: mobile test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run mobile typecheck
+        run: npm run typecheck:mobile
+
+      - name: Run mobile tests
+        run: npm run test:mobile -- --runInBand
