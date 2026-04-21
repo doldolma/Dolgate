@@ -167,6 +167,8 @@ docker compose up -d
 ```
 
 - GitHub Actions는 `ghcr.io/doldolma/dolgate-sync-api`를 `linux/amd64`, `linux/arm64` multi-arch 이미지로 publish합니다.
+- Docker 이미지의 `sync-api`는 Debian `apt awscli` 대신 공식 AWS CLI v2 설치본을 포함합니다.
+- 모바일 AWS SSO browser flow는 컨테이너 안 `aws`가 `register-client` 옵션을 실제로 지원할 때만 자동 활성화됩니다.
 - `sync-api`는 pure Go SQLite 드라이버를 사용하므로 Docker 빌드는 `CGO_ENABLED=0` 기준입니다.
 - `main` 브랜치 push만으로는 운영 이미지를 새로 빌드하지 않고, 릴리즈 태그 기준으로만 publish합니다.
 - 실제 self-host 운영 절차, MySQL/OIDC 구성, signing key, reverse proxy 주의사항은 [sync-api 자체 호스팅 가이드](./sync-api-self-hosting.md)로 이동합니다.

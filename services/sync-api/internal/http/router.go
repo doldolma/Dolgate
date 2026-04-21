@@ -116,6 +116,14 @@ type loginPageData struct {
 	ShowSignupLink     bool
 }
 
+func awsSsoBrowserUnavailableMessage(runtime AwsSsmRuntime) string {
+	message := "AWS SSO browser flow is unavailable on this server."
+	if strings.TrimSpace(runtime.AwsSsoBrowserFlowReason) != "" {
+		return message + " " + runtime.AwsSsoBrowserFlowReason
+	}
+	return message
+}
+
 func NewRouter(store store.Store, authService *auth.Service, config RouterConfig) (*gin.Engine, error) {
 	router := gin.New()
 	if err := router.SetTrustedProxies(config.TrustedProxies); err != nil {
@@ -570,7 +578,7 @@ func NewRouter(store store.Store, authService *auth.Service, config RouterConfig
 	awsSsoGroup.Use(authMiddleware(authService))
 	awsSsoGroup.POST("/start", func(ctx *gin.Context) {
 		if config.AwsSsoMobile == nil {
-			ctx.JSON(http.StatusServiceUnavailable, gin.H{"error": "AWS SSO browser flow is unavailable on this server."})
+			ctx.JSON(http.StatusServiceUnavailable, gin.H{"error": awsSsoBrowserUnavailableMessage(config.AwsSsmRuntime)})
 			return
 		}
 
@@ -589,7 +597,7 @@ func NewRouter(store store.Store, authService *auth.Service, config RouterConfig
 	})
 	awsSsoGroup.GET("/handoff/:loginId", func(ctx *gin.Context) {
 		if config.AwsSsoMobile == nil {
-			ctx.JSON(http.StatusServiceUnavailable, gin.H{"error": "AWS SSO browser flow is unavailable on this server."})
+			ctx.JSON(http.StatusServiceUnavailable, gin.H{"error": awsSsoBrowserUnavailableMessage(config.AwsSsmRuntime)})
 			return
 		}
 
@@ -605,7 +613,7 @@ func NewRouter(store store.Store, authService *auth.Service, config RouterConfig
 	})
 	awsSsoGroup.POST("/handoff/:loginId", func(ctx *gin.Context) {
 		if config.AwsSsoMobile == nil {
-			ctx.JSON(http.StatusServiceUnavailable, gin.H{"error": "AWS SSO browser flow is unavailable on this server."})
+			ctx.JSON(http.StatusServiceUnavailable, gin.H{"error": awsSsoBrowserUnavailableMessage(config.AwsSsmRuntime)})
 			return
 		}
 

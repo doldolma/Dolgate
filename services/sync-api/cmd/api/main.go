@@ -58,7 +58,7 @@ func main() {
 		log.Fatalf("create auth service: %v", err)
 	}
 	awsSsmRuntime := httpserver.DetectAwsSsmRuntime()
-	awsSsoBrowserFlowEnabled := strings.TrimSpace(awsSsmRuntime.AWSPath) != ""
+	awsSsoBrowserFlowEnabled := awsSsmRuntime.AwsSsoBrowserFlowSupported
 	var awsSessionBridge *httpserver.AwsSessionBridge
 	if awsSsmRuntime.Enabled {
 		awsSessionBridge = httpserver.NewAwsSessionBridge()
@@ -76,6 +76,11 @@ func main() {
 		)
 	} else {
 		log.Printf("AWS SSM runtime unavailable: %s", strings.Join(awsSsmRuntime.MissingTools, ", "))
+	}
+	if awsSsoBrowserFlowEnabled {
+		log.Printf("AWS SSO browser flow enabled (aws=%s)", awsSsmRuntime.AWSPath)
+	} else if strings.TrimSpace(awsSsmRuntime.AwsSsoBrowserFlowReason) != "" {
+		log.Printf("AWS SSO browser flow unavailable: %s", awsSsmRuntime.AwsSsoBrowserFlowReason)
 	}
 	router, err := httpserver.NewRouter(dbStore, authService, httpserver.RouterConfig{
 		LocalAuthEnabled:   cfg.Auth.Local.Enabled,
