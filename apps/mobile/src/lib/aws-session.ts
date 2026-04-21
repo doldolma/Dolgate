@@ -200,7 +200,7 @@ function resolveStaticProfileCredentials(
   credentials: AwsCredentialSet;
   region: string;
 }> {
-  const region = resolveAwsRegion(profile.region, host.awsRegion);
+  const region = resolveAwsRegion(host.awsRegion, profile.region);
   const credentials: AwsCredentialSet = {
     accessKeyId: profile.accessKeyId,
     secretAccessKey: profile.secretAccessKey,
@@ -369,8 +369,8 @@ async function resolveRoleProfileCredentials(input: {
     targetProfileName: input.targetProfileName,
   });
   const region = resolveAwsRegion(
-    input.profile.region,
     input.host.awsRegion,
+    input.profile.region,
     source.region,
   );
   const stsClient = new STSClient({
@@ -416,7 +416,7 @@ async function finalizeSsoCredentialResult(
     throw new Error("AWS SSO role credential을 가져오지 못했습니다.");
   }
 
-  const region = resolveAwsRegion(profile.region, host.awsRegion, profile.ssoRegion);
+  const region = resolveAwsRegion(host.awsRegion, profile.region, profile.ssoRegion);
   const credentials: AwsCredentialSet = {
     accessKeyId: credential.accessKeyId,
     secretAccessKey: credential.secretAccessKey,
