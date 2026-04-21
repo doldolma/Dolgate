@@ -1,6 +1,6 @@
 {
   "name": "dolssh",
-  "version": "1.4.4",
+  "version": "1.4.5",
   "private": true,
   "workspaces": [
     "apps/*",
@@ -38,7 +38,7 @@
     "test:desktop:main": "npm run test:desktop:main --workspace @dolssh/desktop",
     "test:desktop:renderer": "npm run test:desktop:renderer --workspace @dolssh/desktop",
     "test:desktop:smoke": "npm run test:desktop:smoke --workspace @dolssh/desktop",
-    "test:mobile": "cd apps/mobile && jest",
+    "test:mobile": "node ./apps/mobile/scripts/prepare-runtime.cjs && cd apps/mobile && jest",
     "test:ssh-core": "cd services/ssh-core && go test ./... -cover",
     "test:sync-api": "cd services/sync-api && go test ./... -cover",
     "test:services": "npm run test:ssh-core && npm run test:sync-api",
@@ -46,7 +46,7 @@
     "test:all": "npm run test:fast && npm run test:smoke",
     "typecheck": "npm-run-all --parallel typecheck:desktop typecheck:mobile",
     "typecheck:desktop": "npm run typecheck --workspace @dolssh/desktop",
-    "typecheck:mobile": "cd apps/mobile && tsc --noEmit"
+    "typecheck:mobile": "node ./apps/mobile/scripts/prepare-runtime.cjs && cd apps/mobile && tsc --noEmit"
   },
   "devDependencies": {
     "react": "19.2.3",

@@ -3,6 +3,7 @@ const http = require("http");
 const os = require("os");
 const path = require("path");
 const { spawn, spawnSync } = require("child_process");
+const { ensureMobileWorkspaceRuntime } = require("./prepare-runtime.cjs");
 
 const metroPort = 8081;
 const metroStatusUrl = `http://127.0.0.1:${metroPort}/status`;
@@ -426,6 +427,8 @@ async function runDevSession({
   process.on("SIGTERM", handleSignal);
 
   try {
+    ensureMobileWorkspaceRuntime();
+
     const metroSession = await ensureSharedMetro({
       appRoot,
       env,

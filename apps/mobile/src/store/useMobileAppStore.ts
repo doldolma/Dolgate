@@ -95,6 +95,15 @@ interface PendingCredentialPromptState {
 
 type PendingAwsSsoLoginState = AwsSsoBrowserLoginPrompt;
 
+type ReactNativeWebSocketConstructor = new (
+  uri: string,
+  protocols?: string | string[] | null,
+  options?: {
+    headers: Record<string, string>;
+    [optionName: string]: unknown;
+  } | null,
+) => WebSocket;
+
 interface SshRuntimeSession {
   kind: "ssh";
   recordId: string;
@@ -1004,11 +1013,15 @@ export const useMobileAppStore = create<MobileAppState>()(
           const wsProtocol = wsUrl.protocol === "https:" ? "wss:" : "ws:";
           const wsEndpoint = `${wsProtocol}//${wsUrl.host}${wsUrl.pathname}`;
 
-          const socket = new WebSocket(wsEndpoint, [], {
-            headers: {
-              Authorization: `Bearer ${accessToken}`,
+          const socket = new (WebSocket as unknown as ReactNativeWebSocketConstructor)(
+            wsEndpoint,
+            [],
+            {
+              headers: {
+                Authorization: `Bearer ${accessToken}`,
+              },
             },
-          });
+          );
           const nextRuntime: AwsRuntimeSession = {
             kind: "aws-ssm",
             recordId: sessionRecord.id,

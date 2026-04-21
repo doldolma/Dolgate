@@ -1,6 +1,7 @@
 const path = require("path");
 const fs = require("fs");
 const { spawnSync } = require("child_process");
+const { ensureMobileWorkspaceRuntime } = require("./prepare-runtime.cjs");
 
 const { androidRoot, buildEnvForAndroid } = (() => {
   const env = require("./android-env.cjs");
@@ -69,6 +70,8 @@ function verifySignedApk(androidEnv) {
 }
 
 function main() {
+  ensureMobileWorkspaceRuntime();
+
   const androidEnv = buildEnvForAndroid(process.env);
   const gradlew = process.platform === "win32" ? "gradlew.bat" : "./gradlew";
   const releaseArchitectures =
