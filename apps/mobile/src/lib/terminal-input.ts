@@ -72,7 +72,26 @@ export function translateTerminalInputEventToSequence(
   return TERMINAL_SPECIAL_KEY_SEQUENCES[event.key] ?? "";
 }
 
-export const TERMINAL_SHORTCUTS = [
+export type TerminalShortcutItem = {
+  label: string;
+  event: NativeTerminalInputEvent;
+};
+
+function createTextShortcut(
+  label: string,
+  insertText: string,
+): TerminalShortcutItem {
+  return {
+    label,
+    event: {
+      kind: "text-delta",
+      deleteCount: 0,
+      insertText,
+    } satisfies NativeTerminalInputEvent,
+  };
+}
+
+export const TERMINAL_PRIMARY_SHORTCUTS: readonly TerminalShortcutItem[] = [
   {
     label: "ESC",
     event: { kind: "special-key", key: "escape" } satisfies NativeTerminalInputEvent,
@@ -90,20 +109,6 @@ export const TERMINAL_SHORTCUTS = [
     } satisfies NativeTerminalInputEvent,
   },
   {
-    label: "Up",
-    event: {
-      kind: "special-key",
-      key: "arrowUp",
-    } satisfies NativeTerminalInputEvent,
-  },
-  {
-    label: "Down",
-    event: {
-      kind: "special-key",
-      key: "arrowDown",
-    } satisfies NativeTerminalInputEvent,
-  },
-  {
     label: "Left",
     event: {
       kind: "special-key",
@@ -118,10 +123,97 @@ export const TERMINAL_SHORTCUTS = [
     } satisfies NativeTerminalInputEvent,
   },
   {
+    label: "Up",
+    event: {
+      kind: "special-key",
+      key: "arrowUp",
+    } satisfies NativeTerminalInputEvent,
+  },
+  {
+    label: "Down",
+    event: {
+      kind: "special-key",
+      key: "arrowDown",
+    } satisfies NativeTerminalInputEvent,
+  },
+  {
     label: "Enter",
     event: {
       kind: "special-key",
       key: "enter",
+    } satisfies NativeTerminalInputEvent,
+  },
+];
+
+export const TERMINAL_SECONDARY_SHORTCUTS: readonly TerminalShortcutItem[] = [
+  {
+    label: "Backspace",
+    event: {
+      kind: "special-key",
+      key: "backspace",
+    } satisfies NativeTerminalInputEvent,
+  },
+  {
+    label: "Delete",
+    event: {
+      kind: "special-key",
+      key: "delete",
+    } satisfies NativeTerminalInputEvent,
+  },
+  {
+    label: "Home",
+    event: {
+      kind: "special-key",
+      key: "home",
+    } satisfies NativeTerminalInputEvent,
+  },
+  {
+    label: "End",
+    event: {
+      kind: "special-key",
+      key: "end",
+    } satisfies NativeTerminalInputEvent,
+  },
+  {
+    label: "PageUp",
+    event: {
+      kind: "special-key",
+      key: "pageUp",
+    } satisfies NativeTerminalInputEvent,
+  },
+  {
+    label: "PageDown",
+    event: {
+      kind: "special-key",
+      key: "pageDown",
+    } satisfies NativeTerminalInputEvent,
+  },
+  createTextShortcut(":", ":"),
+  createTextShortcut("!", "!"),
+  createTextShortcut("/", "/"),
+  createTextShortcut("?", "?"),
+  {
+    label: "Ctrl+D",
+    event: {
+      kind: "special-key",
+      key: "d",
+      ctrl: true,
+    } satisfies NativeTerminalInputEvent,
+  },
+  {
+    label: "Ctrl+L",
+    event: {
+      kind: "special-key",
+      key: "l",
+      ctrl: true,
+    } satisfies NativeTerminalInputEvent,
+  },
+  {
+    label: "Ctrl+Z",
+    event: {
+      kind: "special-key",
+      key: "z",
+      ctrl: true,
     } satisfies NativeTerminalInputEvent,
   },
 ] as const;

@@ -27,7 +27,10 @@ import {
   getCurrentWindowTerminalGridSize,
   toRusshTerminalSize,
 } from "../src/lib/terminal-size";
-import { useMobileAppStore } from "../src/store/useMobileAppStore";
+import {
+  resetMobileStoreRuntimeForTests,
+  useMobileAppStore,
+} from "../src/store/useMobileAppStore";
 
 jest.mock("@fressh/react-native-uniffi-russh", () => ({
   RnRussh: {
@@ -195,6 +198,12 @@ async function flushAsyncWork(): Promise<void> {
   await Promise.resolve();
 }
 
+async function flushAsyncWorkDeep(): Promise<void> {
+  await flushAsyncWork();
+  await flushAsyncWork();
+  await flushAsyncWork();
+}
+
 function createEncryptedRecord<T>(
   id: string,
   value: T,
@@ -233,6 +242,7 @@ describe("useMobileAppStore auth and sync flows", () => {
   });
 
   beforeEach(async () => {
+    resetMobileStoreRuntimeForTests();
     fetchMock.mockReset();
     jest.clearAllMocks();
     keychainMock.getGenericPassword.mockResolvedValue(null);
@@ -244,6 +254,7 @@ describe("useMobileAppStore auth and sync flows", () => {
   });
 
   afterEach(async () => {
+    resetMobileStoreRuntimeForTests();
     await act(async () => {
       resetStore();
     });
@@ -666,8 +677,7 @@ describe("useMobileAppStore auth and sync flows", () => {
         const initializePromise = useMobileAppStore.getState().initializeApp();
         await jest.advanceTimersByTimeAsync(3_000);
         await initializePromise;
-        await flushAsyncWork();
-        await flushAsyncWork();
+        await flushAsyncWorkDeep();
       });
 
       const state = useMobileAppStore.getState();
@@ -678,6 +688,190 @@ describe("useMobileAppStore auth and sync flows", () => {
       expect(state.syncStatus.errorMessage).toBeNull();
       expect(fetchMock.mock.calls.map(([input]) => new URL(String(input)).pathname))
         .toEqual(["/auth/refresh", "/auth/refresh", "/api/info", "/sync"]);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it("keeps retrying startup offline recovery until the network comes back", async () => {
+    jest.useFakeTimers();
+    const storedSession = createAuthSession({
+      offlineLease: {
+        token: "offline-token",
+        issuedAt: new Date().toISOString(),
+        expiresAt: new Date(Date.now() + 60_000).toISOString(),
+        verificationPublicKeyPem: "public-key",
+      },
+    });
+    const refreshedSession = createAuthSession({
+      offlineLease: storedSession.offlineLease,
+      tokens: {
+        accessToken: "fresh-access-token",
+        refreshToken: "fresh-refresh-token",
+        expiresInSeconds: 900,
+      },
+    });
+    let refreshAttempt = 0;
+
+    mockStoredCredentials({
+      session: storedSession,
+    });
+
+    fetchMock.mockImplementation(async (input, init) => {
+      const path = new URL(String(input)).pathname;
+      if (path === "/auth/refresh") {
+        refreshAttempt += 1;
+        if (refreshAttempt === 1) {
+          return await new Promise<Response>((_resolve, reject) => {
+            const signal = init?.signal as AbortSignal | undefined;
+            signal?.addEventListener("abort", () => {
+              const error = Object.assign(new Error("aborted"), {
+                name: "AbortError",
+              });
+              reject(error);
+            });
+          });
+        }
+        if (refreshAttempt === 2) {
+          throw new Error("Network request failed");
+        }
+        return createJsonResponse(refreshedSession);
+      }
+      if (path === "/api/info") {
+        return createJsonResponse({
+          serverVersion: "test",
+          capabilities: {
+            sync: {
+              awsProfiles: true,
+            },
+            sessions: {
+              awsSsm: true,
+            },
+          },
+        });
+      }
+      if (path === "/sync") {
+        return createJsonResponse(buildEmptySyncPayload());
+      }
+      throw new Error(`unexpected fetch path: ${path}`);
+    });
+
+    try {
+      await act(async () => {
+        resetStore({
+          authGateResolved: false,
+          secureStateReady: false,
+        });
+        const initializePromise = useMobileAppStore.getState().initializeApp();
+        await jest.advanceTimersByTimeAsync(3_000);
+        await initializePromise;
+        await flushAsyncWorkDeep();
+      });
+
+      expect(useMobileAppStore.getState().auth.status).toBe(
+        "offline-authenticated",
+      );
+
+      await act(async () => {
+        await jest.advanceTimersByTimeAsync(2_000);
+        await flushAsyncWorkDeep();
+      });
+
+      const state = useMobileAppStore.getState();
+      expect(state.auth.status).toBe("authenticated");
+      expect(state.auth.session?.tokens.accessToken).toBe("fresh-access-token");
+      expect(state.syncStatus.status).toBe("ready");
+      expect(fetchMock.mock.calls.map(([input]) => new URL(String(input)).pathname))
+        .toEqual([
+          "/auth/refresh",
+          "/auth/refresh",
+          "/auth/refresh",
+          "/api/info",
+          "/sync",
+        ]);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it("returns from offline-authenticated to authenticated after a later recovery retry succeeds", async () => {
+    jest.useFakeTimers();
+    const session = createAuthSession({
+      offlineLease: {
+        token: "offline-token",
+        issuedAt: new Date().toISOString(),
+        expiresAt: new Date(Date.now() + 60_000).toISOString(),
+        verificationPublicKeyPem: "public-key",
+      },
+    });
+    const refreshedSession = createAuthSession({
+      offlineLease: session.offlineLease,
+      tokens: {
+        accessToken: "fresh-access-token",
+        refreshToken: "fresh-refresh-token",
+        expiresInSeconds: 900,
+      },
+    });
+    let syncAttempt = 0;
+
+    fetchMock.mockImplementation(async (input) => {
+      const path = new URL(String(input)).pathname;
+      if (path === "/auth/refresh") {
+        return createJsonResponse(refreshedSession);
+      }
+      if (path === "/api/info") {
+        return createJsonResponse({
+          serverVersion: "test",
+          capabilities: {
+            sync: {
+              awsProfiles: true,
+            },
+            sessions: {
+              awsSsm: true,
+            },
+          },
+        });
+      }
+      if (path === "/sync") {
+        syncAttempt += 1;
+        if (syncAttempt === 1) {
+          throw new Error("Network request failed");
+        }
+        return createJsonResponse(buildEmptySyncPayload());
+      }
+      throw new Error(`unexpected fetch path: ${path}`);
+    });
+
+    try {
+      await act(async () => {
+        resetStore({
+          auth: createAuthenticatedState(session),
+        });
+        await useMobileAppStore.getState().syncNow();
+        await flushAsyncWorkDeep();
+      });
+
+      expect(useMobileAppStore.getState().auth.status).toBe(
+        "offline-authenticated",
+      );
+
+      await act(async () => {
+        await jest.advanceTimersByTimeAsync(2_000);
+        await flushAsyncWorkDeep();
+      });
+
+      const state = useMobileAppStore.getState();
+      expect(state.auth.status).toBe("authenticated");
+      expect(state.auth.session?.tokens.accessToken).toBe("fresh-access-token");
+      expect(state.syncStatus.status).toBe("ready");
+      expect(fetchMock.mock.calls.map(([input]) => new URL(String(input)).pathname))
+        .toEqual([
+          "/api/info",
+          "/sync",
+          "/auth/refresh",
+          "/api/info",
+          "/sync",
+        ]);
     } finally {
       jest.useRealTimers();
     }

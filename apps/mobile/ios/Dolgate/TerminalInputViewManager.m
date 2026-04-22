@@ -7,6 +7,8 @@ RCT_REMAP_VIEW_PROPERTY(focused, isInputFocused, BOOL)
 RCT_EXPORT_VIEW_PROPERTY(focusToken, NSNumber)
 RCT_EXPORT_VIEW_PROPERTY(clearToken, NSNumber)
 RCT_EXPORT_VIEW_PROPERTY(onTerminalInput, RCTDirectEventBlock)
+RCT_EXTERN_METHOD(focus:(nonnull NSNumber *)reactTag)
+RCT_EXTERN_METHOD(blur:(nonnull NSNumber *)reactTag)
 
 @end
 

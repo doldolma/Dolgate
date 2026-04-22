@@ -14,6 +14,25 @@ describe("translateTerminalInputEventToSequence", () => {
     expect(payload).toBe("\u007f간");
   });
 
+  it("passes punctuation text shortcuts through unchanged", () => {
+    const cases: Array<[string, string]> = [
+      [":", ":"],
+      ["!", "!"],
+      ["/", "/"],
+      ["?", "?"],
+    ];
+
+    for (const [insertText, expected] of cases) {
+      expect(
+        translateTerminalInputEventToSequence({
+          kind: "text-delta",
+          deleteCount: 0,
+          insertText,
+        }),
+      ).toBe(expected);
+    }
+  });
+
   it("translates special keys into terminal control sequences", () => {
     const cases: Array<[NativeTerminalInputEvent, string]> = [
       [{ kind: "special-key", key: "escape" }, "\u001b"],

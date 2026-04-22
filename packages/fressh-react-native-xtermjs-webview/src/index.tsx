@@ -38,6 +38,7 @@ export type XtermWebViewHandle = {
 	flush: () => void; // force-flush outgoing writes
 	clear: () => void;
 	focus: () => void;
+	blur: () => void;
 	resize: (size: { cols: number; rows: number }) => void;
 	fit: () => void;
 };
@@ -77,7 +78,6 @@ type UserControllableWebViewProps = StrictOmit<
 >;
 
 export type XtermJsWebViewProps = {
-	ref: React.RefObject<XtermWebViewHandle | null>;
 	style?: WebViewOptions['style'];
 	webViewOptions?: UserControllableWebViewProps;
 	xtermOptions?: Partial<ITerminalOptions>;
@@ -115,18 +115,23 @@ function xTermOptionsEquals(
 	return true;
 }
 
-export function XtermJsWebView({
+export const XtermJsWebView = React.forwardRef<
+	XtermWebViewHandle,
+	XtermJsWebViewProps
+>(function XtermJsWebView(
+	{
+		style,
+		webViewOptions = defaultWebViewProps,
+		xtermOptions = defaultXtermOptions,
+		onInitialized,
+		onData,
+		coalescingThreshold = defaultCoalescingThreshold,
+		logger,
+		size,
+		autoFit = true,
+	},
 	ref,
-	style,
-	webViewOptions = defaultWebViewProps,
-	xtermOptions = defaultXtermOptions,
-	onInitialized,
-	onData,
-	coalescingThreshold = defaultCoalescingThreshold,
-	logger,
-	size,
-	autoFit = true,
-}: XtermJsWebViewProps) {
+) {
 	const webRef = useRef<WebView>(null);
 	const [initialized, setInitialized] = useState(false);
 
@@ -236,6 +241,16 @@ export function XtermJsWebView({
 		focus: () => {
 			sendToWebView({ type: 'focus' });
 			webRef.current?.requestFocus();
+		},
+		blur: () => {
+			sendToWebView({ type: 'blur' });
+			(
+				webRef.current as
+					| (WebView<{}> & {
+							blur?: () => void;
+					  })
+					| null
+			)?.blur?.();
 		},
 		resize: (size: { cols: number; rows: number }) => {
 			sendToWebView({ type: 'resize', cols: size.cols, rows: size.rows });
@@ -361,4 +376,6 @@ export function XtermJsWebView({
 			{...mergedWebViewOptions}
 		/>
 	);
-}
+});
+
+XtermJsWebView.displayName = 'XtermJsWebView';
