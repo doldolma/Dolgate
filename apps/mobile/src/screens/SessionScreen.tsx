@@ -317,6 +317,7 @@ export function SessionScreen(): React.JSX.Element {
                 key={session.id}
                 accessibilityRole="button"
                 accessibilityLabel={`${session.title} ${tabStatus.label} 세션 탭`}
+                accessibilityState={{ selected: isActive }}
                 onPress={() => {
                   setActiveSessionTab(session.id);
                   focusNativeInput();
@@ -325,11 +326,12 @@ export function SessionScreen(): React.JSX.Element {
                   styles.sessionTab,
                   {
                     backgroundColor: isActive
-                      ? palette.surface
+                      ? palette.accentSoft
                       : palette.surfaceAlt,
                     borderColor: isActive
-                      ? palette.sessionSurfaceBorder
+                      ? palette.accent
                       : palette.sessionToolbarBorder,
+                    borderWidth: isActive ? 2 : 1,
                   },
                 ]}
               >
@@ -343,7 +345,10 @@ export function SessionScreen(): React.JSX.Element {
                   numberOfLines={1}
                   style={[
                     styles.sessionTabTitle,
-                    { color: isActive ? palette.text : palette.mutedText },
+                    {
+                      color: isActive ? palette.text : palette.mutedText,
+                      fontWeight: isActive ? "800" : "700",
+                    },
                   ]}
                 >
                   {session.title}
@@ -361,7 +366,7 @@ export function SessionScreen(): React.JSX.Element {
                   <Ionicons
                     name="close"
                     size={14}
-                    color={isActive ? palette.text : palette.mutedText}
+                    color={isActive ? palette.accent : palette.mutedText}
                   />
                 </Pressable>
               </Pressable>

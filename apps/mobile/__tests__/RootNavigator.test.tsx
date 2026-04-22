@@ -52,6 +52,8 @@ function resetStore(authState: AuthState): void {
   useMobileAppStore.setState({
     hydrated: true,
     bootstrapping: false,
+    authGateResolved: true,
+    secureStateReady: true,
     auth: authState,
     settings: createDefaultMobileSettings(),
     syncStatus: createDefaultSyncStatus(),

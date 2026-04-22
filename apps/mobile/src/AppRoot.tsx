@@ -21,7 +21,9 @@ import { createNavigationTheme, getPalette, resolveAppTheme } from "./theme";
 export function AppRoot(): React.JSX.Element {
   const systemScheme = useColorScheme();
   const hydrated = useMobileAppStore((state) => state.hydrated);
-  const bootstrapping = useMobileAppStore((state) => state.bootstrapping);
+  const authGateResolved = useMobileAppStore(
+    (state) => state.authGateResolved,
+  );
   const auth = useMobileAppStore((state) => state.auth);
   const initializeApp = useMobileAppStore((state) => state.initializeApp);
   const handleAuthCallbackUrl = useMobileAppStore(
@@ -99,7 +101,7 @@ export function AppRoot(): React.JSX.Element {
         backgroundColor={palette.background}
       />
       <NavigationContainer theme={navigationTheme}>
-        {!hydrated || bootstrapping ? (
+        {!hydrated || !authGateResolved ? (
           <View
             style={[
               styles.loadingScreen,

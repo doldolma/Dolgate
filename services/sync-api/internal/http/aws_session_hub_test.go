@@ -16,11 +16,12 @@ import (
 type fakeAwsSessionRunner struct {
 	events chan awsSessionRuntimeEvent
 
-	mu          sync.Mutex
-	writes      [][]byte
-	resizeCalls [][2]int
-	closeCount  int
-	closeOnce   sync.Once
+	mu           sync.Mutex
+	writes       [][]byte
+	resizeCalls  [][2]int
+	closeCount   int
+	closeReasons []string
+	closeOnce    sync.Once
 }
 
 func newFakeAwsSessionRunner() *fakeAwsSessionRunner {
@@ -48,9 +49,14 @@ func (runner *fakeAwsSessionRunner) Resize(cols, rows int) error {
 }
 
 func (runner *fakeAwsSessionRunner) Close() error {
+	return runner.CloseWithReason("client_close")
+}
+
+func (runner *fakeAwsSessionRunner) CloseWithReason(reason string) error {
 	runner.closeOnce.Do(func() {
 		runner.mu.Lock()
 		runner.closeCount += 1
+		runner.closeReasons = append(runner.closeReasons, reason)
 		runner.mu.Unlock()
 		close(runner.events)
 	})
@@ -77,6 +83,12 @@ func (runner *fakeAwsSessionRunner) closedCount() int {
 	runner.mu.Lock()
 	defer runner.mu.Unlock()
 	return runner.closeCount
+}
+
+func (runner *fakeAwsSessionRunner) closeReasonsSnapshot() []string {
+	runner.mu.Lock()
+	defer runner.mu.Unlock()
+	return append([]string(nil), runner.closeReasons...)
 }
 
 func TestAwsSessionHubReturns503WhenRuntimeIsUnavailable(t *testing.T) {
@@ -212,6 +224,96 @@ func TestAwsSessionHubBridgesStartInputResizeAndOutput(t *testing.T) {
 	}
 	waitForCondition(t, func() bool {
 		return fakeRunner.closedCount() > 0
+	})
+}
+
+func TestAwsSessionHubClosesRunnerOnAbruptDisconnect(t *testing.T) {
+	fakeRunner := newFakeAwsSessionRunner()
+	hub := NewAwsSessionHub(AwsSsmRuntime{Enabled: true}, func(_ AwsSsmRuntime, request awsSessionStartRequest) (awsSessionRunner, error) {
+		return fakeRunner, nil
+	})
+
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if err := hub.HandleWebSocket(writer, request); err != nil {
+			t.Errorf("handle websocket: %v", err)
+		}
+	}))
+	defer server.Close()
+
+	wsURL := "ws" + strings.TrimPrefix(server.URL, "http")
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if err != nil {
+		t.Fatalf("dial websocket: %v", err)
+	}
+
+	if err := conn.WriteJSON(awsSessionClientMessage{
+		Type: "start",
+		Payload: &awsSessionStartRequest{
+			HostID:     "host-aws-1",
+			Label:      "Production EC2",
+			Region:     "ap-northeast-2",
+			InstanceID: "i-0123456789",
+		},
+	}); err != nil {
+		t.Fatalf("write start message: %v", err)
+	}
+
+	fakeRunner.events <- awsSessionRuntimeEvent{Type: "ready"}
+	var ready awsSessionServerMessage
+	if err := conn.ReadJSON(&ready); err != nil {
+		t.Fatalf("read ready message: %v", err)
+	}
+
+	_ = conn.UnderlyingConn().Close()
+	waitForCondition(t, func() bool {
+		return fakeRunner.closedCount() == 1
+	})
+}
+
+func TestAwsSessionHubTimesOutSilentConnections(t *testing.T) {
+	fakeRunner := newFakeAwsSessionRunner()
+	hub := NewAwsSessionHub(AwsSsmRuntime{Enabled: true}, func(_ AwsSsmRuntime, request awsSessionStartRequest) (awsSessionRunner, error) {
+		return fakeRunner, nil
+	})
+	hub.pingInterval = 20 * time.Millisecond
+	hub.pongWait = 60 * time.Millisecond
+	hub.writeWait = 20 * time.Millisecond
+
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if err := hub.HandleWebSocket(writer, request); err != nil {
+			t.Errorf("handle websocket: %v", err)
+		}
+	}))
+	defer server.Close()
+
+	wsURL := "ws" + strings.TrimPrefix(server.URL, "http")
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if err != nil {
+		t.Fatalf("dial websocket: %v", err)
+	}
+	defer conn.Close()
+
+	if err := conn.WriteJSON(awsSessionClientMessage{
+		Type: "start",
+		Payload: &awsSessionStartRequest{
+			HostID:     "host-aws-1",
+			Label:      "Production EC2",
+			Region:     "ap-northeast-2",
+			InstanceID: "i-0123456789",
+		},
+	}); err != nil {
+		t.Fatalf("write start message: %v", err)
+	}
+
+	fakeRunner.events <- awsSessionRuntimeEvent{Type: "ready"}
+	var ready awsSessionServerMessage
+	if err := conn.ReadJSON(&ready); err != nil {
+		t.Fatalf("read ready message: %v", err)
+	}
+
+	waitForCondition(t, func() bool {
+		reasons := fakeRunner.closeReasonsSnapshot()
+		return len(reasons) == 1 && reasons[0] == "transport_timeout"
 	})
 }
 

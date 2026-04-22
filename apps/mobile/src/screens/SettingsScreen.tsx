@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
+import { useNavigation } from "@react-navigation/native";
 import {
   Pressable,
   ScrollView,
@@ -17,9 +18,13 @@ import { useMobilePalette } from "../theme";
 
 interface SettingsContentProps {
   mode: "auth" | "full";
+  onServerUrlSaved?: () => void;
 }
 
-function SettingsContent({ mode }: SettingsContentProps): React.JSX.Element {
+function SettingsContent({
+  mode,
+  onServerUrlSaved,
+}: SettingsContentProps): React.JSX.Element {
   const palette = useMobilePalette();
   const screenPadding = useScreenPadding({
     includeSafeTop: mode !== "auth",
@@ -27,12 +32,14 @@ function SettingsContent({ mode }: SettingsContentProps): React.JSX.Element {
   });
   const auth = useMobileAppStore((state) => state.auth);
   const settings = useMobileAppStore((state) => state.settings);
+  const syncStatus = useMobileAppStore((state) => state.syncStatus);
   const knownHosts = useMobileAppStore((state) => state.knownHosts);
   const secretMetadata = useMobileAppStore((state) => state.secretMetadata);
   const logout = useMobileAppStore((state) => state.logout);
   const updateSettings = useMobileAppStore((state) => state.updateSettings);
 
   const [serverUrlDraft, setServerUrlDraft] = useState(settings.serverUrl);
+  const [savingServerUrl, setSavingServerUrl] = useState(false);
 
   useEffect(() => {
     setServerUrlDraft(settings.serverUrl);
@@ -48,7 +55,26 @@ function SettingsContent({ mode }: SettingsContentProps): React.JSX.Element {
       auth.status === "offline-authenticated") &&
     Boolean(auth.session);
   const showFullSettings = mode === "full" && hasAuthenticatedSession;
-  const canSaveServerUrl = !validationMessage;
+  const canSaveServerUrl = !validationMessage && !savingServerUrl;
+
+  const handleSaveServerUrl = async (): Promise<void> => {
+    if (!canSaveServerUrl) {
+      return;
+    }
+
+    let saved = false;
+    setSavingServerUrl(true);
+    try {
+      await updateSettings({ serverUrl: serverUrlDraft });
+      saved = true;
+    } finally {
+      setSavingServerUrl(false);
+    }
+
+    if (saved) {
+      onServerUrlSaved?.();
+    }
+  };
 
   return (
     <ScrollView
@@ -90,14 +116,27 @@ function SettingsContent({ mode }: SettingsContentProps): React.JSX.Element {
           <Text style={[styles.body, { color: palette.mutedText }]}>
             인증 상태: {auth.status}
           </Text>
+          <Text style={[styles.body, { color: palette.mutedText }]}>
+            동기화 상태: {syncStatus.status}
+          </Text>
           {auth.status === "offline-authenticated" ? (
             <Text style={[styles.infoText, { color: palette.warning }]}>
               오프라인 캐시로 사용 중입니다.
             </Text>
           ) : null}
+          {syncStatus.status === "syncing" ? (
+            <Text style={[styles.infoText, { color: palette.accent }]}>
+              저장된 캐시를 먼저 보여주고 최신 상태를 확인하는 중입니다.
+            </Text>
+          ) : null}
           {auth.errorMessage ? (
             <Text style={[styles.errorText, { color: palette.danger }]}>
               {auth.errorMessage}
+            </Text>
+          ) : null}
+          {!auth.errorMessage && syncStatus.errorMessage ? (
+            <Text style={[styles.errorText, { color: palette.danger }]}>
+              {syncStatus.errorMessage}
             </Text>
           ) : null}
           <Pressable
@@ -154,7 +193,7 @@ function SettingsContent({ mode }: SettingsContentProps): React.JSX.Element {
         <View style={styles.row}>
           <Pressable
             disabled={!canSaveServerUrl}
-            onPress={() => void updateSettings({ serverUrl: serverUrlDraft })}
+            onPress={() => void handleSaveServerUrl()}
             style={[
               styles.secondaryButton,
               {
@@ -310,7 +349,18 @@ export function SettingsScreen(): React.JSX.Element {
 }
 
 export function AuthSettingsScreen(): React.JSX.Element {
-  return <SettingsContent mode="auth" />;
+  const navigation = useNavigation();
+
+  return (
+    <SettingsContent
+      mode="auth"
+      onServerUrlSaved={() => {
+        if (navigation.canGoBack()) {
+          navigation.goBack();
+        }
+      }}
+    />
+  );
 }
 
 const styles = StyleSheet.create({

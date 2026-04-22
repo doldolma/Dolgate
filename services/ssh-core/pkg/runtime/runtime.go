@@ -38,6 +38,7 @@ type awsSessionManager interface {
 	SendControlSignal(sessionID, signal string) error
 	Resize(sessionID string, cols, rows int) error
 	Disconnect(sessionID string) error
+	Shutdown()
 }
 
 type localSessionManager interface {
@@ -434,6 +435,7 @@ func (runtime *Runtime) CancelSFTPTransfer(jobID string) error {
 }
 
 func (runtime *Runtime) Shutdown() {
+	runtime.aws.Shutdown()
 	runtime.sftp.Shutdown()
 	runtime.containers.Shutdown()
 	runtime.forwarding.Shutdown()

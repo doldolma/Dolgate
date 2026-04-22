@@ -121,6 +121,8 @@ describe("ConnectionsScreen", () => {
     useMobileAppStore.setState({
       hydrated: true,
       bootstrapping: false,
+      authGateResolved: true,
+      secureStateReady: true,
       auth: createAuthenticatedState(),
       settings: createDefaultMobileSettings(),
       syncStatus: createDefaultSyncStatus(),

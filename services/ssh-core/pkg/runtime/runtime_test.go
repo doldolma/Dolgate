@@ -56,6 +56,7 @@ type stubAWSManager struct {
 	resizeRows   int
 	disconnectID string
 	signal       string
+	shutdownCall int
 }
 
 func (stub *stubAWSManager) Connect(sessionID, requestID string, payload coretypes.AWSConnectPayload) error {
@@ -81,6 +82,7 @@ func (stub *stubAWSManager) Disconnect(sessionID string) error {
 	stub.disconnectID = sessionID
 	return nil
 }
+func (stub *stubAWSManager) Shutdown() { stub.shutdownCall++ }
 
 type stubLocalManager struct {
 	hasSession   bool
@@ -336,11 +338,12 @@ func TestRuntimeRoutesKeyboardInteractivePortForwardAndShutdown(t *testing.T) {
 	containers := &stubContainersService{}
 	forwarding := &stubForwardingService{respondErr: errors.New("not a forwarding endpoint")}
 	ssmForwarding := &stubSSMForwardingService{}
+	aws := &stubAWSManager{}
 	runtime := newRuntimeWithDeps(
 		func(coretypes.Event) {},
 		func(coretypes.StreamFrame, []byte) {},
 		&stubSSHManager{},
-		&stubAWSManager{},
+		aws,
 		&stubLocalManager{},
 		&stubSerialManager{},
 		sftp,
@@ -381,7 +384,7 @@ func TestRuntimeRoutesKeyboardInteractivePortForwardAndShutdown(t *testing.T) {
 	}
 
 	runtime.Shutdown()
-	if sftp.shutdownCall != 1 || containers.shutdownCall != 1 || forwarding.shutdownCall != 1 || ssmForwarding.shutdownCall != 1 {
-		t.Fatalf("expected shutdown on all services, got sftp=%d containers=%d forwarding=%d ssm=%d", sftp.shutdownCall, containers.shutdownCall, forwarding.shutdownCall, ssmForwarding.shutdownCall)
+	if aws.shutdownCall != 1 || sftp.shutdownCall != 1 || containers.shutdownCall != 1 || forwarding.shutdownCall != 1 || ssmForwarding.shutdownCall != 1 {
+		t.Fatalf("expected shutdown on all services, got aws=%d sftp=%d containers=%d forwarding=%d ssm=%d", aws.shutdownCall, sftp.shutdownCall, containers.shutdownCall, forwarding.shutdownCall, ssmForwarding.shutdownCall)
 	}
 }
