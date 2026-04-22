@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"sync"
+	"time"
 
 	"dolssh/services/ssh-core/internal/protocol"
 )
@@ -18,6 +19,7 @@ type sessionHandle struct {
 	streams             sync.WaitGroup
 	disconnectRequested bool
 	errorNotified       bool
+	done                chan struct{}
 }
 
 type Manager struct {
@@ -27,6 +29,8 @@ type Manager struct {
 	emitStream   StreamEmitter
 	createRunner runnerFactory
 }
+
+const shutdownDrainTimeout = 2 * time.Second
 
 func NewManager(emit EventEmitter, stream StreamEmitter) *Manager {
 	return NewManagerWithRunnerFactory(emit, stream, defaultRunnerFactory)
@@ -51,7 +55,10 @@ func (m *Manager) Connect(sessionID, requestID string, payload protocol.AWSConne
 		return err
 	}
 
-	handle := &sessionHandle{runner: runner}
+	handle := &sessionHandle{
+		runner: runner,
+		done:   make(chan struct{}),
+	}
 	m.mu.Lock()
 	m.sessions[sessionID] = handle
 	m.mu.Unlock()
@@ -118,6 +125,28 @@ func (m *Manager) Disconnect(sessionID string) error {
 	m.mu.Unlock()
 
 	return session.runner.Kill()
+}
+
+func (m *Manager) Shutdown() {
+	sessions := m.snapshotSessionsForShutdown()
+	if len(sessions) == 0 {
+		return
+	}
+
+	for _, session := range sessions {
+		_ = session.runner.Kill()
+	}
+
+	deadline := time.NewTimer(shutdownDrainTimeout)
+	defer deadline.Stop()
+
+	for _, session := range sessions {
+		select {
+		case <-session.done:
+		case <-deadline.C:
+			return
+		}
+	}
 }
 
 func (m *Manager) waitForSession(sessionID string) {
@@ -210,7 +239,20 @@ func (m *Manager) closeSession(sessionID string, message string) {
 	go func() {
 		session.streams.Wait()
 		_ = session.runner.Close()
+		close(session.done)
 	}()
+}
+
+func (m *Manager) snapshotSessionsForShutdown() []*sessionHandle {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	sessions := make([]*sessionHandle, 0, len(m.sessions))
+	for _, session := range m.sessions {
+		session.disconnectRequested = true
+		sessions = append(sessions, session)
+	}
+	return sessions
 }
 
 func (m *Manager) sessionFlags(sessionID string) (disconnectRequested bool, errorNotified bool) {

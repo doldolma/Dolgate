@@ -1,5 +1,6 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  BackHandler,
   FlatList,
   Pressable,
   StyleSheet,
@@ -13,13 +14,16 @@ import {
   getGroupLabel,
   getHostSearchText,
   getHostSubtitle,
-  getParentGroupPath,
   type HostRecord,
   isDirectHostChild,
   normalizeGroupPath,
   type GroupCardView,
 } from "@dolssh/shared-core";
-import { useNavigation } from "@react-navigation/native";
+import {
+  useFocusEffect,
+  useNavigation,
+  useScrollToTop,
+} from "@react-navigation/native";
 import type { NavigationProp } from "@react-navigation/native";
 import Ionicons from "react-native-vector-icons/Ionicons";
 import { formatRelativeTime } from "../lib/mobile";
@@ -43,13 +47,22 @@ export function HomeScreen(): React.JSX.Element {
   const palette = useMobilePalette();
   const screenPadding = useScreenPadding();
   const navigation = useNavigation<NavigationProp<MainTabParamList>>();
+  const listRef = useRef<FlatList<HomeListItem> | null>(null);
+  const searchInputRef = useRef<TextInput | null>(null);
+  const scrollToTopRef = useRef<{ scrollToTop: () => void }>({
+    scrollToTop: () => undefined,
+  });
   const [query, setQuery] = useState("");
   const [currentGroupPath, setCurrentGroupPath] = useState<string | null>(null);
+  const [groupHistory, setGroupHistory] = useState<Array<string | null>>([]);
+  const auth = useMobileAppStore((state) => state.auth);
   const groups = useMobileAppStore((state) => state.groups);
   const hosts = useMobileAppStore((state) => state.hosts);
   const sessions = useMobileAppStore((state) => state.sessions);
+  const syncStatus = useMobileAppStore((state) => state.syncStatus);
   const connectToHost = useMobileAppStore((state) => state.connectToHost);
   const isSearching = query.trim().length > 0;
+  useScrollToTop(scrollToTopRef);
 
   const recentActivityByHostId = useMemo(() => {
     const map = new Map<string, string>();
@@ -77,12 +90,83 @@ export function HomeScreen(): React.JSX.Element {
     () => collectGroupPaths(groups, hosts),
     [groups, hosts],
   );
+  const availableGroupPathSet = useMemo(
+    () => new Set(availableGroupPaths),
+    [availableGroupPaths],
+  );
 
   useEffect(() => {
-    if (currentGroupPath && !availableGroupPaths.includes(currentGroupPath)) {
-      setCurrentGroupPath(null);
+    const sanitizedHistory = groupHistory.filter(
+      (path) => path === null || availableGroupPathSet.has(path),
+    );
+    if (
+      sanitizedHistory.length !== groupHistory.length ||
+      sanitizedHistory.some((path, index) => path !== groupHistory[index])
+    ) {
+      setGroupHistory(sanitizedHistory);
     }
-  }, [availableGroupPaths, currentGroupPath]);
+
+    if (currentGroupPath && !availableGroupPathSet.has(currentGroupPath)) {
+      const nextGroupPath = sanitizedHistory.at(-1) ?? null;
+      setCurrentGroupPath(nextGroupPath);
+      setGroupHistory(sanitizedHistory.slice(0, -1));
+    }
+  }, [availableGroupPathSet, currentGroupPath, groupHistory]);
+
+  const scrollHomeListToTop = useCallback(() => {
+    requestAnimationFrame(() => {
+      listRef.current?.scrollToOffset({ offset: 0, animated: true });
+    });
+  }, []);
+
+  const resetHomeView = useCallback(() => {
+    searchInputRef.current?.blur();
+    setQuery("");
+    setCurrentGroupPath(null);
+    setGroupHistory([]);
+    scrollHomeListToTop();
+  }, [scrollHomeListToTop]);
+
+  scrollToTopRef.current.scrollToTop = resetHomeView;
+
+  const openGroup = useCallback(
+    (groupPath: string) => {
+      setGroupHistory((previous) => [...previous, currentGroupPath]);
+      setCurrentGroupPath(groupPath);
+      scrollHomeListToTop();
+    },
+    [currentGroupPath, scrollHomeListToTop],
+  );
+
+  const goBackInHome = useCallback(() => {
+    if (query.trim().length > 0) {
+      searchInputRef.current?.blur();
+      setQuery("");
+      return true;
+    }
+
+    const previousGroupPath = groupHistory.at(-1);
+    if (previousGroupPath === undefined) {
+      return false;
+    }
+
+    setGroupHistory((previous) => previous.slice(0, -1));
+    setCurrentGroupPath(previousGroupPath);
+    scrollHomeListToTop();
+    return true;
+  }, [groupHistory, query, scrollHomeListToTop]);
+
+  useFocusEffect(
+    useCallback(() => {
+      const subscription = BackHandler.addEventListener(
+        "hardwareBackPress",
+        () => goBackInHome(),
+      );
+      return () => {
+        subscription.remove();
+      };
+    }, [goBackInHome]),
+  );
 
   const sortHosts = (nextHosts: HostRecord[]) =>
     [...nextHosts].sort((left, right) => {
@@ -171,6 +255,36 @@ export function HomeScreen(): React.JSX.Element {
     };
   }, [currentGroupPath, isSearching]);
 
+  const statusBanner = useMemo(() => {
+    if (auth.status === "offline-authenticated") {
+      return {
+        title: "오프라인 캐시를 사용 중입니다.",
+        body:
+          syncStatus.errorMessage ??
+          "네트워크가 복구되면 최신 상태로 다시 확인합니다.",
+        borderColor: palette.warning,
+      };
+    }
+
+    if (syncStatus.status === "syncing") {
+      return {
+        title: "서버 내용을 확인하고 있습니다.",
+        body: "저장된 목록은 바로 볼 수 있고, 최신 변경사항은 곧 반영됩니다.",
+        borderColor: palette.accent,
+      };
+    }
+
+    if (syncStatus.status === "error" && syncStatus.errorMessage) {
+      return {
+        title: "최신 상태를 아직 확인하지 못했습니다.",
+        body: syncStatus.errorMessage,
+        borderColor: palette.danger,
+      };
+    }
+
+    return null;
+  }, [auth.status, palette.accent, palette.danger, palette.warning, syncStatus]);
+
   const getSearchGroupMeta = (host: HostRecord): string | null => {
     const groupPath = normalizeGroupPath(host.groupName);
     if (!groupPath) {
@@ -219,6 +333,7 @@ export function HomeScreen(): React.JSX.Element {
       ]}
     >
       <TextInput
+        ref={searchInputRef}
         value={query}
         onChangeText={setQuery}
         placeholder="호스트 검색"
@@ -233,14 +348,33 @@ export function HomeScreen(): React.JSX.Element {
         ]}
       />
 
+      {statusBanner ? (
+        <View
+          style={[
+            styles.statusCard,
+            {
+              backgroundColor: palette.surface,
+              borderColor: statusBanner.borderColor,
+            },
+          ]}
+        >
+          <Text style={[styles.statusTitle, { color: palette.text }]}>
+            {statusBanner.title}
+          </Text>
+          <Text style={[styles.statusBody, { color: palette.mutedText }]}>
+            {statusBanner.body}
+          </Text>
+        </View>
+      ) : null}
+
       {!isSearching ? (
         <View style={styles.groupHeader}>
-          {currentGroupPath ? (
+          {groupHistory.length > 0 ? (
             <Pressable
               accessibilityRole="button"
-              accessibilityLabel="상위 그룹으로 이동"
+              accessibilityLabel="이전 그룹으로 이동"
               onPress={() => {
-                setCurrentGroupPath(getParentGroupPath(currentGroupPath));
+                goBackInHome();
               }}
               style={[
                 styles.groupBackButton,
@@ -265,6 +399,7 @@ export function HomeScreen(): React.JSX.Element {
       ) : null}
 
       <FlatList
+        ref={listRef}
         style={styles.list}
         data={listData}
         keyExtractor={(item) =>
@@ -303,7 +438,7 @@ export function HomeScreen(): React.JSX.Element {
                 accessibilityRole="button"
                 accessibilityLabel={`${item.group.name} 그룹 열기`}
                 onPress={() => {
-                  setCurrentGroupPath(item.group.path);
+                  openGroup(item.group.path);
                 }}
                 style={[
                   styles.groupCard,
@@ -423,6 +558,22 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 13,
     fontSize: 15,
+  },
+  statusCard: {
+    marginTop: 14,
+    borderWidth: 1,
+    borderRadius: 18,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    gap: 4,
+  },
+  statusTitle: {
+    fontSize: 13,
+    fontWeight: "700",
+  },
+  statusBody: {
+    fontSize: 12,
+    lineHeight: 17,
   },
   groupHeader: {
     marginTop: 14,

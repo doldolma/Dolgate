@@ -1,7 +1,9 @@
 package http
 
 import (
+	"errors"
 	"fmt"
+	"log"
 	"sync"
 
 	"github.com/google/uuid"
@@ -11,49 +13,70 @@ import (
 )
 
 const (
-	sshCoreDefaultCols = 120
-	sshCoreDefaultRows = 32
+	sshCoreDefaultCols         = 120
+	sshCoreDefaultRows         = 32
+	awsSessionEventsBufferSize = 64
 )
 
-type AwsSessionBridge struct {
-	core *coreruntime.Runtime
+type awsSessionCoreRuntime interface {
+	ConnectAWS(sessionID, requestID string, payload coretypes.AWSConnectPayload) error
+	SendSessionInput(sessionID string, data []byte) error
+	ResizeSession(sessionID string, payload coretypes.ResizePayload) error
+	DisconnectSession(sessionID string) error
+	Shutdown()
+}
 
-	mu       sync.RWMutex
-	sessions map[string]*directAwsSession
+type AwsSessionBridge struct {
+	core awsSessionCoreRuntime
+
+	mu        sync.RWMutex
+	sessions  map[string]*directAwsSession
+	closing   bool
+	closeOnce sync.Once
 }
 
 type directAwsSession struct {
-	bridge          *AwsSessionBridge
-	sessionID       string
-	events          chan awsSessionRuntimeEvent
-	eventsCloseOnce sync.Once
-	shutdownOnce    sync.Once
+	bridge       *AwsSessionBridge
+	sessionID    string
+	events       chan awsSessionRuntimeEvent
+	shutdownOnce sync.Once
+	finalizeOnce sync.Once
+	done         chan struct{}
+
+	mu             sync.Mutex
+	finalized      bool
+	shutdownReason string
 }
 
 func NewAwsSessionBridge() *AwsSessionBridge {
+	return newAwsSessionBridgeWithCore(nil)
+}
+
+func newAwsSessionBridgeWithCore(core awsSessionCoreRuntime) *AwsSessionBridge {
 	bridge := &AwsSessionBridge{
 		sessions: make(map[string]*directAwsSession),
 	}
-	bridge.core = coreruntime.New(coreruntime.Options{
-		EmitEvent:  bridge.handleEvent,
-		EmitStream: bridge.handleStream,
-	})
+	if core == nil {
+		core = coreruntime.New(coreruntime.Options{
+			EmitEvent:  bridge.handleEvent,
+			EmitStream: bridge.handleStream,
+		})
+	}
+	bridge.core = core
 	return bridge
 }
 
 func (bridge *AwsSessionBridge) Close() {
-	bridge.mu.Lock()
-	sessions := make([]*directAwsSession, 0, len(bridge.sessions))
-	for _, session := range bridge.sessions {
-		sessions = append(sessions, session)
-	}
-	bridge.sessions = make(map[string]*directAwsSession)
-	bridge.mu.Unlock()
-
-	for _, session := range sessions {
-		_ = session.Close()
-	}
-	bridge.core.Shutdown()
+	bridge.closeOnce.Do(func() {
+		sessions := bridge.markClosing()
+		for _, session := range sessions {
+			_ = session.CloseWithReason("server_shutdown")
+		}
+		bridge.core.Shutdown()
+		for _, session := range bridge.snapshotSessions() {
+			session.finalize(nil)
+		}
+	})
 }
 
 func (bridge *AwsSessionBridge) RunnerFactory() awsSessionRunnerFactory {
@@ -66,12 +89,14 @@ func (bridge *AwsSessionBridge) NewRunner(request awsSessionStartRequest) (awsSe
 	session := &directAwsSession{
 		bridge:    bridge,
 		sessionID: uuid.NewString(),
-		events:    make(chan awsSessionRuntimeEvent, 64),
+		events:    make(chan awsSessionRuntimeEvent, awsSessionEventsBufferSize),
+		done:      make(chan struct{}),
 	}
 
-	bridge.mu.Lock()
-	bridge.sessions[session.sessionID] = session
-	bridge.mu.Unlock()
+	if !bridge.register(session) {
+		session.finalize(nil)
+		return nil, errors.New("AWS session runtime bridge is shutting down")
+	}
 
 	cols, rows := normalizeSshCoreSize(request.Cols, request.Rows)
 	if err := bridge.core.ConnectAWS(session.sessionID, uuid.NewString(), coretypes.AWSConnectPayload{
@@ -83,8 +108,7 @@ func (bridge *AwsSessionBridge) NewRunner(request awsSessionStartRequest) (awsSe
 		Env:         request.Env,
 		UnsetEnv:    request.UnsetEnv,
 	}); err != nil {
-		bridge.unregister(session.sessionID)
-		session.closeEvents()
+		session.finalize(nil)
 		return nil, fmt.Errorf("start AWS session: %w", err)
 	}
 
@@ -110,12 +134,10 @@ func (bridge *AwsSessionBridge) handleEvent(event coretypes.Event) {
 			Message: extractRuntimeMessage(event.Payload),
 		})
 	case coretypes.EventClosed:
-		session.emit(awsSessionRuntimeEvent{
+		session.finalize(&awsSessionRuntimeEvent{
 			Type:    "exit",
 			Message: extractRuntimeMessage(event.Payload),
 		})
-		bridge.unregister(event.SessionID)
-		session.closeEvents()
 	}
 }
 
@@ -133,6 +155,17 @@ func (bridge *AwsSessionBridge) handleStream(metadata coretypes.StreamFrame, pay
 	})
 }
 
+func (bridge *AwsSessionBridge) register(session *directAwsSession) bool {
+	bridge.mu.Lock()
+	defer bridge.mu.Unlock()
+
+	if bridge.closing {
+		return false
+	}
+	bridge.sessions[session.sessionID] = session
+	return true
+}
+
 func (bridge *AwsSessionBridge) lookup(sessionID string) *directAwsSession {
 	bridge.mu.RLock()
 	defer bridge.mu.RUnlock()
@@ -143,6 +176,29 @@ func (bridge *AwsSessionBridge) unregister(sessionID string) {
 	bridge.mu.Lock()
 	delete(bridge.sessions, sessionID)
 	bridge.mu.Unlock()
+}
+
+func (bridge *AwsSessionBridge) markClosing() []*directAwsSession {
+	bridge.mu.Lock()
+	defer bridge.mu.Unlock()
+
+	bridge.closing = true
+	sessions := make([]*directAwsSession, 0, len(bridge.sessions))
+	for _, session := range bridge.sessions {
+		sessions = append(sessions, session)
+	}
+	return sessions
+}
+
+func (bridge *AwsSessionBridge) snapshotSessions() []*directAwsSession {
+	bridge.mu.RLock()
+	defer bridge.mu.RUnlock()
+
+	sessions := make([]*directAwsSession, 0, len(bridge.sessions))
+	for _, session := range bridge.sessions {
+		sessions = append(sessions, session)
+	}
+	return sessions
 }
 
 func (session *directAwsSession) Events() <-chan awsSessionRuntimeEvent {
@@ -162,22 +218,71 @@ func (session *directAwsSession) Resize(cols, rows int) error {
 }
 
 func (session *directAwsSession) Close() error {
-	session.shutdownOnce.Do(func() {
-		session.bridge.unregister(session.sessionID)
-		_ = session.bridge.core.DisconnectSession(session.sessionID)
-		session.closeEvents()
-	})
+	return session.CloseWithReason("client_close")
+}
+
+func (session *directAwsSession) CloseWithReason(reason string) error {
+	session.requestShutdown(reason)
 	return nil
 }
 
-func (session *directAwsSession) emit(event awsSessionRuntimeEvent) {
-	session.events <- event
+func (session *directAwsSession) requestShutdown(reason string) {
+	session.shutdownOnce.Do(func() {
+		session.storeShutdownReason(reason)
+		if reason != "" {
+			log.Printf("aws session %s shutdown requested: reason=%s", session.sessionID, reason)
+		}
+		if err := session.bridge.core.DisconnectSession(session.sessionID); err != nil {
+			log.Printf("aws session %s disconnect failed: %v", session.sessionID, err)
+			session.finalize(nil)
+		}
+	})
 }
 
-func (session *directAwsSession) closeEvents() {
-	session.eventsCloseOnce.Do(func() {
+func (session *directAwsSession) emit(event awsSessionRuntimeEvent) bool {
+	session.mu.Lock()
+	if session.finalized {
+		session.mu.Unlock()
+		return false
+	}
+	select {
+	case session.events <- event:
+		session.mu.Unlock()
+		return true
+	default:
+		session.mu.Unlock()
+		session.requestShutdown("backpressure")
+		return false
+	}
+}
+
+func (session *directAwsSession) finalize(exitEvent *awsSessionRuntimeEvent) {
+	session.finalizeOnce.Do(func() {
+		session.bridge.unregister(session.sessionID)
+		session.mu.Lock()
+		if exitEvent != nil {
+			select {
+			case session.events <- *exitEvent:
+			default:
+			}
+		}
+		session.finalized = true
 		close(session.events)
+		session.mu.Unlock()
+		close(session.done)
 	})
+}
+
+func (session *directAwsSession) storeShutdownReason(reason string) {
+	if reason == "" {
+		return
+	}
+
+	session.mu.Lock()
+	defer session.mu.Unlock()
+	if session.shutdownReason == "" {
+		session.shutdownReason = reason
+	}
 }
 
 func normalizeSshCoreSize(cols, rows int) (int, int) {

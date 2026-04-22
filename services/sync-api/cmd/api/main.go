@@ -1,12 +1,17 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"log"
 	"net"
+	"net/http"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -128,9 +133,35 @@ func main() {
 		log.Fatalf("listen on :%s: %v", cfg.Server.Port, err)
 	}
 
+	server := &http.Server{Handler: router}
+	serveErrCh := make(chan error, 1)
+	go func() {
+		serveErrCh <- server.Serve(listener)
+	}()
+
 	log.Printf("sync API listening on :%s (driver=%s)", cfg.Server.Port, cfg.Database.Driver)
-	if err := router.RunListener(listener); err != nil {
-		log.Fatal(err)
+	shutdownSignals, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	select {
+	case err := <-serveErrCh:
+		if err != nil && !errors.Is(err, http.ErrServerClosed) {
+			log.Fatal(err)
+		}
+	case <-shutdownSignals.Done():
+		log.Printf("sync API shutdown signal received")
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+
+		if err := server.Shutdown(shutdownCtx); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			log.Printf("graceful shutdown failed: %v", err)
+		}
+		if awsSessionBridge != nil {
+			awsSessionBridge.Close()
+		}
+		if err := <-serveErrCh; err != nil && !errors.Is(err, http.ErrServerClosed) {
+			log.Fatal(err)
+		}
 	}
 }
 

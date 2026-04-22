@@ -1,5 +1,6 @@
 import React from "react";
 import renderer, { act } from "react-test-renderer";
+import { StyleSheet, Text } from "react-native";
 import type {
   AuthState,
   MobileSessionRecord,
@@ -11,6 +12,7 @@ import {
 } from "../src/lib/mobile";
 import { SessionScreen } from "../src/screens/SessionScreen";
 import { useMobileAppStore } from "../src/store/useMobileAppStore";
+import { getPalette } from "../src/theme";
 
 jest.mock("react-native-vector-icons/Ionicons", () => "Ionicons");
 jest.mock("@fressh/react-native-uniffi-russh", () => ({
@@ -164,8 +166,13 @@ describe("SessionScreen", () => {
     useMobileAppStore.setState({
       hydrated: true,
       bootstrapping: false,
+      authGateResolved: true,
+      secureStateReady: true,
       auth: createAuthenticatedState(),
-      settings: createDefaultMobileSettings(),
+      settings: {
+        ...createDefaultMobileSettings(),
+        theme: "dark",
+      },
       syncStatus: createDefaultSyncStatus(),
       groups: [],
       hosts,
@@ -202,6 +209,43 @@ describe("SessionScreen", () => {
     expect(capturedXtermProps?.webViewOptions).toMatchObject({
       hideKeyboardAccessoryView: true,
     });
+
+    await act(async () => {
+      tree!.unmount();
+    });
+  });
+
+  it("makes the selected tab visually distinct without reusing the session status color", async () => {
+    const palette = getPalette("dark", "dark");
+    let tree: renderer.ReactTestRenderer;
+
+    await act(async () => {
+      tree = renderer.create(<SessionScreen />);
+    });
+
+    const activeTab = tree!.root.findByProps({
+      accessibilityLabel: "Synology Connected 세션 탭",
+    });
+    const inactiveTab = tree!.root.findByProps({
+      accessibilityLabel: "Docker-ubuntu Connecting 세션 탭",
+    });
+
+    const activeTabStyle = StyleSheet.flatten(activeTab.props.style);
+    const inactiveTabStyle = StyleSheet.flatten(inactiveTab.props.style);
+
+    expect(activeTab.props.accessibilityState).toEqual({ selected: true });
+    expect(inactiveTab.props.accessibilityState).toEqual({ selected: false });
+    expect(activeTabStyle.backgroundColor).toBe(palette.accentSoft);
+    expect(activeTabStyle.borderColor).toBe(palette.accent);
+    expect(activeTabStyle.borderWidth).toBe(2);
+    expect(inactiveTabStyle.backgroundColor).toBe(palette.surfaceAlt);
+    expect(inactiveTabStyle.borderColor).toBe(palette.sessionToolbarBorder);
+    expect(inactiveTabStyle.borderWidth).toBe(1);
+
+    const activeTabTitle = activeTab.findByType(Text);
+    const activeTitleStyle = StyleSheet.flatten(activeTabTitle.props.style);
+    expect(activeTitleStyle.color).toBe(palette.text);
+    expect(activeTitleStyle.fontWeight).toBe("800");
 
     await act(async () => {
       tree!.unmount();

@@ -61,6 +61,11 @@ interface SyncEnvelope {
   ciphertext: string;
 }
 
+interface FetchRequestOptions {
+  timeoutMs?: number;
+  timeoutMessage?: string;
+}
+
 type ManagedSecretsMap = Record<string, LoadedManagedSecretPayload>;
 
 export interface StoredAwsSsoTokenRecord {
@@ -389,6 +394,7 @@ export async function fetchExchangeSession(
 export async function refreshAuthSession(
   serverUrl: string,
   session: AuthSession,
+  options?: FetchRequestOptions,
 ): Promise<AuthSession> {
   return fetchJson<AuthSession>(new URL("/auth/refresh", normalizeServerUrl(serverUrl)).toString(), {
     method: "POST",
@@ -398,7 +404,7 @@ export async function refreshAuthSession(
     body: JSON.stringify({
       refreshToken: session.tokens.refreshToken,
     }),
-  });
+  }, options);
 }
 
 export async function logoutRemoteSession(
@@ -626,18 +632,55 @@ function decodeEncryptedPayload<T>(payload: string, keyBase64: string): T {
   return JSON.parse(Buffer.from(plaintext).toString("utf8")) as T;
 }
 
-async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(url, init);
+async function fetchJson<T>(
+  url: string,
+  init?: RequestInit,
+  options?: FetchRequestOptions,
+): Promise<T> {
+  const response = await fetchWithOptions(url, init, options);
   if (!response.ok) {
     throw await toApiError(response);
   }
   return (await response.json()) as T;
 }
 
-async function fetchEmpty(url: string, init?: RequestInit): Promise<void> {
-  const response = await fetch(url, init);
+async function fetchEmpty(
+  url: string,
+  init?: RequestInit,
+  options?: FetchRequestOptions,
+): Promise<void> {
+  const response = await fetchWithOptions(url, init, options);
   if (!response.ok) {
     throw await toApiError(response);
+  }
+}
+
+async function fetchWithOptions(
+  url: string,
+  init?: RequestInit,
+  options?: FetchRequestOptions,
+): Promise<Response> {
+  if (!options?.timeoutMs || options.timeoutMs <= 0) {
+    return fetch(url, init);
+  }
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => {
+    controller.abort();
+  }, options.timeoutMs);
+
+  try {
+    return await fetch(url, {
+      ...init,
+      signal: controller.signal,
+    });
+  } catch (error) {
+    if (error instanceof Error && error.name === "AbortError") {
+      throw new Error(options.timeoutMessage ?? "요청 시간이 초과되었습니다.");
+    }
+    throw error;
+  } finally {
+    clearTimeout(timer);
   }
 }
 

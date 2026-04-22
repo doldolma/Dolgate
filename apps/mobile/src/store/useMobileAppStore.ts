@@ -77,6 +77,11 @@ import {
 const MAX_TERMINAL_SNAPSHOT_CHARS = 8_000;
 const MAX_PERSISTED_SESSIONS = 24;
 const SESSION_SNAPSHOT_FLUSH_MS = 750;
+const STARTUP_REFRESH_TIMEOUT_MS = 3_000;
+const STARTUP_REFRESH_TIMEOUT_MESSAGE =
+  "서버 응답이 지연되고 있습니다. 다시 시도해 주세요.";
+const SECURE_STATE_LOADING_MESSAGE =
+  "저장된 보안 정보를 복구하는 중입니다. 잠시 후 다시 시도해 주세요.";
 interface PendingServerKeyPromptState {
   hostId: string;
   hostLabel: string;
@@ -134,6 +139,8 @@ interface SessionTerminalSubscription {
 interface MobileAppState {
   hydrated: boolean;
   bootstrapping: boolean;
+  authGateResolved: boolean;
+  secureStateReady: boolean;
   auth: AuthState;
   settings: MobileSettings;
   syncStatus: SyncStatus;
@@ -185,6 +192,7 @@ let runtimeSubscriptionCounter = 0;
 
 let initializePromise: Promise<void> | null = null;
 let syncPromise: Promise<void> | null = null;
+let russhInitPromise: Promise<void> | null = null;
 let pendingServerKeyResolver: ((accepted: boolean) => void) | null = null;
 let pendingCredentialResolver:
   | ((value: HostSecretInput | null) => void)
@@ -368,6 +376,29 @@ function isLikelyNetworkError(error: unknown): boolean {
   return !(error instanceof ApiError) || typeof error.status !== "number";
 }
 
+function createEmptyProtectedState(): Pick<
+  MobileAppState,
+  | "groups"
+  | "hosts"
+  | "awsProfiles"
+  | "knownHosts"
+  | "secretMetadata"
+  | "secretsByRef"
+  | "sessions"
+  | "activeSessionTabId"
+> {
+  return {
+    groups: [],
+    hosts: [],
+    awsProfiles: [],
+    knownHosts: [],
+    secretMetadata: [],
+    secretsByRef: {},
+    sessions: [],
+    activeSessionTabId: null,
+  };
+}
+
 function parseAuthCallbackUrl(
   url: string,
 ): { code: string; state?: string | null } | null {
@@ -487,6 +518,131 @@ export const useMobileAppStore = create<MobileAppState>()(
           secretsByRef,
           secretMetadata: deriveSecretMetadata(nextHosts, secretsByRef),
         });
+      };
+
+      const clearPersistedSecureState = async (
+        options?: {
+          clearStoredAuthSession?: boolean;
+        },
+      ) => {
+        const tasks: Array<Promise<unknown>> = [
+          clearStoredSecrets(),
+          clearStoredAwsProfiles(),
+          clearStoredAwsSsoTokens(),
+        ];
+        if (options?.clearStoredAuthSession !== false) {
+          tasks.unshift(clearStoredAuthSession());
+        }
+        await Promise.allSettled(tasks);
+      };
+
+      const resolveAuthGate = (
+        nextState: Partial<
+          Pick<
+            MobileAppState,
+            | "auth"
+            | "syncStatus"
+            | "secretsByRef"
+            | "secretMetadata"
+            | "awsProfiles"
+            | "groups"
+            | "hosts"
+            | "knownHosts"
+            | "sessions"
+            | "activeSessionTabId"
+          >
+        >,
+      ) => {
+        set({
+          ...nextState,
+          bootstrapping: false,
+          authGateResolved: true,
+          secureStateReady: true,
+        });
+      };
+
+      const ensureRusshInitialized = async () => {
+        if (russhInitPromise) {
+          return russhInitPromise;
+        }
+
+        russhInitPromise = RnRussh.uniffiInitAsync().catch((error) => {
+          russhInitPromise = null;
+          throw error;
+        });
+        return russhInitPromise;
+      };
+
+      const retrySessionRecoveryInBackground = async (
+        session: AuthSession,
+        serverUrl: string,
+      ) => {
+        try {
+          const refreshed = await refreshAuthSession(serverUrl, session);
+          const currentSession = get().auth.session;
+          if (
+            !currentSession ||
+            currentSession.tokens.refreshToken !== session.tokens.refreshToken ||
+            get().settings.serverUrl !== serverUrl
+          ) {
+            return;
+          }
+
+          await saveStoredAuthSession(refreshed);
+          set((state) => ({
+            auth: {
+              status: "authenticated",
+              session: refreshed,
+              offline: null,
+              errorMessage: null,
+            },
+            syncStatus: {
+              ...state.syncStatus,
+              errorMessage: null,
+            },
+          }));
+          await syncWithSession(refreshed);
+        } catch (error) {
+          const currentSession = get().auth.session;
+          if (
+            !currentSession ||
+            currentSession.tokens.refreshToken !== session.tokens.refreshToken ||
+            get().settings.serverUrl !== serverUrl
+          ) {
+            return;
+          }
+
+          if (error instanceof ApiError && error.status === 401) {
+            await clearPersistedSecureState();
+            set({
+              auth: {
+                ...createUnauthenticatedState(),
+                errorMessage: "세션이 만료되어 다시 로그인해야 합니다.",
+              },
+              syncStatus: {
+                ...createDefaultSyncStatus(),
+                status: "error",
+                errorMessage: "세션이 만료되었습니다.",
+              },
+              ...createEmptyProtectedState(),
+              authGateResolved: true,
+              secureStateReady: true,
+              bootstrapping: false,
+            });
+            return;
+          }
+
+          set((state) => ({
+            syncStatus: {
+              ...state.syncStatus,
+              status: "paused",
+              errorMessage:
+                error instanceof Error
+                  ? error.message
+                  : "네트워크에 연결할 수 없습니다.",
+            },
+          }));
+        }
       };
 
       const pushKnownHosts = async (
@@ -809,10 +965,11 @@ export const useMobileAppStore = create<MobileAppState>()(
               sessionRecord.id,
               "error",
               "이 인증 방식은 모바일 v1에서 아직 지원하지 않습니다.",
-            );
-            return;
-          }
+              );
+              return;
+            }
 
+          await ensureRusshInitialized();
           const credentials = await resolveHostCredentials(host);
           if (!credentials) {
             markSessionState(sessionRecord.id, "closed", "연결이 취소되었습니다.");
@@ -1215,15 +1372,8 @@ export const useMobileAppStore = create<MobileAppState>()(
         if (!activeSession) {
           set({
             auth: createUnauthenticatedState(),
-            groups: [],
-            hosts: [],
-            awsProfiles: [],
-            knownHosts: [],
-            secretMetadata: [],
-            secretsByRef: {},
-            sessions: [],
-            activeSessionTabId: null,
             syncStatus: createDefaultSyncStatus(),
+            ...createEmptyProtectedState(),
           });
           return;
         }
@@ -1243,10 +1393,9 @@ export const useMobileAppStore = create<MobileAppState>()(
 
           let currentSession = activeSession;
           try {
-            let serverInfo = null;
-            try {
-              serverInfo = await fetchServerInfo(get().settings.serverUrl);
-            } catch {}
+            const serverInfoPromise = fetchServerInfo(
+              get().settings.serverUrl,
+            ).catch(() => null);
 
             let payload;
             try {
@@ -1277,6 +1426,7 @@ export const useMobileAppStore = create<MobileAppState>()(
                 throw error;
               }
             }
+            const serverInfo = await serverInfoPromise;
 
             const nextHosts = sortHosts(
               decodeSupportedHosts(
@@ -1357,28 +1507,18 @@ export const useMobileAppStore = create<MobileAppState>()(
             }
 
             if (error instanceof ApiError && error.status === 401) {
-              await clearStoredAuthSession();
-              await clearStoredSecrets();
-              await clearStoredAwsProfiles();
-              await clearStoredAwsSsoTokens();
+              await clearPersistedSecureState();
               set({
                 auth: {
                   ...createUnauthenticatedState(),
                   errorMessage: "세션이 만료되어 다시 로그인해야 합니다.",
                 },
-                groups: [],
-                hosts: [],
-                awsProfiles: [],
-                knownHosts: [],
-                secretMetadata: [],
-                secretsByRef: {},
-                sessions: [],
-                activeSessionTabId: null,
                 syncStatus: {
                   ...createDefaultSyncStatus(),
                   status: "error",
                   errorMessage: "세션이 만료되었습니다.",
                 },
+                ...createEmptyProtectedState(),
               });
               return;
             }
@@ -1418,6 +1558,8 @@ export const useMobileAppStore = create<MobileAppState>()(
       return {
         hydrated: false,
         bootstrapping: false,
+        authGateResolved: false,
+        secureStateReady: false,
         auth: createUnauthenticatedState(),
         settings: createDefaultMobileSettings(),
         syncStatus: createDefaultSyncStatus(),
@@ -1439,67 +1581,70 @@ export const useMobileAppStore = create<MobileAppState>()(
           }
 
           initializePromise = (async () => {
-            set({ bootstrapping: true });
+            set({
+              bootstrapping: true,
+              authGateResolved: false,
+              secureStateReady: false,
+            });
 
             try {
-              await RnRussh.uniffiInitAsync();
-            } catch (error) {
-              set((state) => ({
-                syncStatus: {
-                  ...state.syncStatus,
-                  status: "error",
-                  errorMessage:
-                    error instanceof Error
-                      ? error.message
-                      : "SSH 모듈 초기화에 실패했습니다.",
-                },
-              }));
-            }
-
-            try {
-              const secretsByRef = await loadStoredSecrets();
-              const awsProfiles = await loadStoredAwsProfiles();
-              set((state) => ({
-                secretsByRef,
-                awsProfiles,
-                secretMetadata: deriveSecretMetadata(state.hosts, secretsByRef),
-              }));
-
-              const storedSession = await loadStoredAuthSession();
-              if (!storedSession) {
+              const storedSessionPromise = loadStoredAuthSession();
+              const storedSecretsPromise = loadStoredSecrets().then((secretsByRef) => {
+                set((state) => ({
+                  secretsByRef,
+                  secretMetadata: deriveSecretMetadata(state.hosts, secretsByRef),
+                }));
+                return secretsByRef;
+              });
+              const storedAwsProfilesPromise = loadStoredAwsProfiles().then((awsProfiles) => {
                 set({
-                  auth: createUnauthenticatedState(),
-                  groups: [],
-                  hosts: [],
-                  awsProfiles: [],
-                  knownHosts: [],
-                  secretMetadata: [],
-                  secretsByRef: {},
-                  sessions: [],
-                  activeSessionTabId: null,
-                  syncStatus: createDefaultSyncStatus(),
+                  awsProfiles,
                 });
+                return awsProfiles;
+              });
+
+              const [storedSession] = await Promise.all([
+                storedSessionPromise,
+                storedSecretsPromise,
+                storedAwsProfilesPromise,
+              ]);
+              if (!storedSession) {
+                resolveAuthGate({
+                  auth: createUnauthenticatedState(),
+                  syncStatus: createDefaultSyncStatus(),
+                  ...createEmptyProtectedState(),
+                });
+                void clearPersistedSecureState();
                 return;
               }
 
+              const currentServerUrl = get().settings.serverUrl;
               try {
                 const refreshed = await refreshAuthSession(
-                  get().settings.serverUrl,
+                  currentServerUrl,
                   storedSession,
+                  {
+                    timeoutMs: STARTUP_REFRESH_TIMEOUT_MS,
+                    timeoutMessage: STARTUP_REFRESH_TIMEOUT_MESSAGE,
+                  },
                 );
-                await saveStoredAuthSession(refreshed);
-                set({
+                resolveAuthGate({
                   auth: {
                     status: "authenticated",
                     session: refreshed,
                     offline: null,
                     errorMessage: null,
                   },
+                  syncStatus: {
+                    ...get().syncStatus,
+                    errorMessage: null,
+                  },
                 });
-                await syncWithSession(refreshed);
+                void saveStoredAuthSession(refreshed);
+                void syncWithSession(refreshed);
               } catch (error) {
                 if (isLikelyNetworkError(error) && isOfflineLeaseActive(storedSession)) {
-                  set({
+                  resolveAuthGate({
                     auth: {
                       status: "offline-authenticated",
                       session: storedSession,
@@ -1509,12 +1654,25 @@ export const useMobileAppStore = create<MobileAppState>()(
                       ),
                       errorMessage: null,
                     },
+                    syncStatus: {
+                      ...get().syncStatus,
+                      status: "paused",
+                      errorMessage:
+                        error instanceof Error
+                          ? error.message
+                          : "네트워크에 연결할 수 없습니다.",
+                    },
                   });
+                  void retrySessionRecoveryInBackground(
+                    storedSession,
+                    currentServerUrl,
+                  );
                   return;
                 }
 
-                await clearStoredAuthSession();
-                set({
+                const shouldClearStoredAuthSession =
+                  error instanceof ApiError && error.status === 401;
+                resolveAuthGate({
                   auth: {
                     ...createUnauthenticatedState(),
                     errorMessage:
@@ -1522,15 +1680,11 @@ export const useMobileAppStore = create<MobileAppState>()(
                         ? error.message
                         : "로그인 세션을 복구하지 못했습니다.",
                   },
-                  groups: [],
-                  hosts: [],
-                  awsProfiles: [],
-                  knownHosts: [],
-                  secretMetadata: [],
-                  secretsByRef: {},
-                  sessions: [],
-                  activeSessionTabId: null,
                   syncStatus: createDefaultSyncStatus(),
+                  ...createEmptyProtectedState(),
+                });
+                void clearPersistedSecureState({
+                  clearStoredAuthSession: shouldClearStoredAuthSession,
                 });
               }
             } finally {
@@ -1770,6 +1924,16 @@ export const useMobileAppStore = create<MobileAppState>()(
           });
         },
         connectToHost: async (hostId: string) => {
+          if (!get().secureStateReady) {
+            set((state) => ({
+              syncStatus: {
+                ...state.syncStatus,
+                errorMessage: SECURE_STATE_LOADING_MESSAGE,
+              },
+            }));
+            return null;
+          }
+
           const host = get().hosts.find((item) => item.id === hostId);
           if (!host) {
             return null;

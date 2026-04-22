@@ -268,3 +268,35 @@ func TestManagerEmitsErrorBeforeClosedOnAbnormalExit(t *testing.T) {
 		t.Fatal("session should be removed after abnormal exit")
 	}
 }
+
+func TestManagerShutdownKillsActiveSessions(t *testing.T) {
+	events := make(chan protocol.Event, 16)
+	runner := newStubRunner()
+	manager := NewManagerWithRunnerFactory(func(event protocol.Event) {
+		events <- event
+	}, func(_ protocol.StreamFrame, _ []byte) {}, func(protocol.AWSConnectPayload) (sessionRunner, error) {
+		return runner, nil
+	})
+
+	if err := manager.Connect("session-4", "req-4", protocol.AWSConnectPayload{
+		ProfileName: "default",
+		Region:      "ap-northeast-2",
+		InstanceID:  "i-shutdown",
+	}); err != nil {
+		t.Fatalf("connect failed: %v", err)
+	}
+
+	waitForEvent(t, events, protocol.EventConnected)
+
+	manager.Shutdown()
+
+	if !runner.killed {
+		t.Fatal("runner should be killed on shutdown")
+	}
+
+	closed := waitForEvent(t, events, protocol.EventClosed)
+	payload := closed.Payload.(protocol.ClosedPayload)
+	if payload.Message != "client requested disconnect" {
+		t.Fatalf("closed message = %q", payload.Message)
+	}
+}

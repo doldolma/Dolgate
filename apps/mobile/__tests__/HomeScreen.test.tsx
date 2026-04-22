@@ -1,6 +1,6 @@
 import React from "react";
 import renderer, { act } from "react-test-renderer";
-import { TextInput } from "react-native";
+import { BackHandler, FlatList, TextInput } from "react-native";
 import type {
   AuthState,
   GroupRecord,
@@ -15,11 +15,23 @@ import { HomeScreen } from "../src/screens/HomeScreen";
 import { useMobileAppStore } from "../src/store/useMobileAppStore";
 
 const mockNavigate = jest.fn();
+const mockFlatListScrollToOffset = jest.fn();
+let mockScrollToTopRef: React.RefObject<{ scrollToTop: () => void }> | null = null;
+let mockHardwareBackHandler: (() => boolean) | null = null;
 
 jest.mock("@react-navigation/native", () => ({
   useNavigation: () => ({
     navigate: mockNavigate,
   }),
+  useFocusEffect: (callback: () => void | (() => void)) => {
+    const React = require("react") as typeof import("react");
+    React.useEffect(() => callback(), [callback]);
+  },
+  useScrollToTop: (
+    ref: React.RefObject<{ scrollToTop: () => void }>,
+  ) => {
+    mockScrollToTopRef = ref;
+  },
 }));
 jest.mock("react-native-vector-icons/Ionicons", () => "Ionicons");
 jest.mock("@fressh/react-native-uniffi-russh", () => ({
@@ -189,11 +201,38 @@ describe("HomeScreen group browsing", () => {
   beforeEach(() => {
     jest.useFakeTimers();
     mockNavigate.mockReset();
+    mockFlatListScrollToOffset.mockReset();
+    mockScrollToTopRef = null;
+    mockHardwareBackHandler = null;
+    jest
+      .spyOn(BackHandler, "addEventListener")
+      .mockImplementation((_eventName, handler) => {
+        mockHardwareBackHandler = () => handler() ?? false;
+        return {
+          remove: jest.fn(() => {
+            mockHardwareBackHandler = null;
+          }),
+        };
+      });
+    if (!FlatList.prototype.scrollToOffset) {
+      Object.defineProperty(FlatList.prototype, "scrollToOffset", {
+        configurable: true,
+        value: () => undefined,
+      });
+    }
+    jest
+      .spyOn(FlatList.prototype, "scrollToOffset")
+      .mockImplementation(mockFlatListScrollToOffset);
     useMobileAppStore.setState({
       hydrated: true,
       bootstrapping: false,
+      authGateResolved: true,
+      secureStateReady: true,
       auth: createAuthenticatedState(),
-      settings: createDefaultMobileSettings(),
+      settings: {
+        ...createDefaultMobileSettings(),
+        theme: "dark",
+      },
       syncStatus: createDefaultSyncStatus(),
       groups,
       hosts,
@@ -213,6 +252,9 @@ describe("HomeScreen group browsing", () => {
     act(() => {
       jest.runOnlyPendingTimers();
     });
+    jest.restoreAllMocks();
+    mockScrollToTopRef = null;
+    mockHardwareBackHandler = null;
     jest.useRealTimers();
   });
 
@@ -286,6 +328,145 @@ describe("HomeScreen group browsing", () => {
     expect(() =>
       tree!.root.findByProps({ accessibilityLabel: "NAS 그룹 열기" }),
     ).not.toThrow();
+
+    await act(async () => {
+      jest.runOnlyPendingTimers();
+      tree!.unmount();
+    });
+  });
+
+  it("uses visit history for the in-screen back button", async () => {
+    let tree: renderer.ReactTestRenderer;
+
+    await act(async () => {
+      tree = renderer.create(<HomeScreen />);
+    });
+
+    await act(async () => {
+      tree!.root.findByProps({
+        accessibilityLabel: "Servers 그룹 열기",
+      }).props.onPress();
+    });
+
+    await act(async () => {
+      tree!.root.findByProps({
+        accessibilityLabel: "NAS 그룹 열기",
+      }).props.onPress();
+    });
+
+    let text = collectText(tree!.toJSON());
+    expect(text).toContain("NAS");
+    expect(text).toContain("NAS Shell");
+
+    await act(async () => {
+      tree!.root.findByProps({
+        accessibilityLabel: "이전 그룹으로 이동",
+      }).props.onPress();
+    });
+
+    text = collectText(tree!.toJSON());
+    expect(text).toContain("Servers");
+    expect(text).toContain("Server Jump");
+    expect(text).toContain("NAS");
+
+    await act(async () => {
+      tree!.root.findByProps({
+        accessibilityLabel: "이전 그룹으로 이동",
+      }).props.onPress();
+    });
+
+    text = collectText(tree!.toJSON());
+    expect(text).toContain("All Hosts");
+    expect(text).toContain("Root Host");
+    expect(text).not.toContain("Server Jump");
+
+    await act(async () => {
+      jest.runOnlyPendingTimers();
+      tree!.unmount();
+    });
+  });
+
+  it("clears search first and then pops group history on Android back", async () => {
+    let tree: renderer.ReactTestRenderer;
+
+    await act(async () => {
+      tree = renderer.create(<HomeScreen />);
+    });
+
+    await act(async () => {
+      tree!.root.findByProps({
+        accessibilityLabel: "Servers 그룹 열기",
+      }).props.onPress();
+    });
+
+    const searchInput = tree!.root.findByType(TextInput);
+    await act(async () => {
+      searchInput.props.onChangeText("nas");
+    });
+
+    expect(mockHardwareBackHandler).not.toBeNull();
+
+    let handled = false;
+    await act(async () => {
+      handled = mockHardwareBackHandler?.() ?? false;
+    });
+
+    expect(handled).toBe(true);
+    let text = collectText(tree!.toJSON());
+    expect(text).toContain("Servers");
+    expect(text).toContain("Server Jump");
+    expect(searchInput.props.value).toBe("");
+
+    await act(async () => {
+      handled = mockHardwareBackHandler?.() ?? false;
+    });
+
+    expect(handled).toBe(true);
+    text = collectText(tree!.toJSON());
+    expect(text).toContain("All Hosts");
+    expect(text).toContain("Root Host");
+
+    expect(mockHardwareBackHandler?.()).toBe(false);
+
+    await act(async () => {
+      jest.runOnlyPendingTimers();
+      tree!.unmount();
+    });
+  });
+
+  it("resets to the root list and scrolls to the top when Home is reselected", async () => {
+    let tree: renderer.ReactTestRenderer;
+
+    await act(async () => {
+      tree = renderer.create(<HomeScreen />);
+    });
+
+    await act(async () => {
+      tree!.root.findByProps({
+        accessibilityLabel: "Servers 그룹 열기",
+      }).props.onPress();
+    });
+
+    const searchInput = tree!.root.findByType(TextInput);
+    await act(async () => {
+      searchInput.props.onChangeText("nas");
+    });
+
+    expect(mockScrollToTopRef?.current).toBeTruthy();
+
+    await act(async () => {
+      mockScrollToTopRef?.current?.scrollToTop();
+      jest.runOnlyPendingTimers();
+    });
+
+    const text = collectText(tree!.toJSON());
+    expect(text).toContain("All Hosts");
+    expect(text).toContain("Root Host");
+    expect(tree!.root.findByType(TextInput).props.value).toBe("");
+    expect(mockFlatListScrollToOffset).toHaveBeenCalledWith({
+      offset: 0,
+      animated: true,
+    });
 
     await act(async () => {
       jest.runOnlyPendingTimers();
