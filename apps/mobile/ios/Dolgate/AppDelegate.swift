@@ -370,6 +370,16 @@ final class TerminalInputContainerView: UIView, UITextViewDelegate {
     }
   }
 
+  fileprivate func focusInput() {
+    isInputFocused = true
+    syncFocus(force: true)
+  }
+
+  fileprivate func blurInput() {
+    isInputFocused = false
+    syncFocus(force: true)
+  }
+
   private func resetBuffer(keepFocus: Bool) {
     previousValue = ""
     if !textView.text.isEmpty {
@@ -418,6 +428,24 @@ final class TerminalInputViewManager: RCTViewManager {
 
   override func view() -> UIView! {
     TerminalInputContainerView()
+  }
+
+  @objc func focus(_ reactTag: NSNumber) {
+    bridge.uiManager.addUIBlock { _, viewRegistry in
+      guard let view = viewRegistry?[reactTag] as? TerminalInputContainerView else {
+        return
+      }
+      view.focusInput()
+    }
+  }
+
+  @objc func blur(_ reactTag: NSNumber) {
+    bridge.uiManager.addUIBlock { _, viewRegistry in
+      guard let view = viewRegistry?[reactTag] as? TerminalInputContainerView else {
+        return
+      }
+      view.blurInput()
+    }
   }
 }
 

@@ -18,7 +18,8 @@ export type BridgeOutboundMessage =
 			opts: Partial<Omit<ITerminalOptions, keyof ITerminalInitOnlyOptions>>;
 	  }
 	| { type: 'clear' }
-	| { type: 'focus' };
+	| { type: 'focus' }
+	| { type: 'blur' };
 
 export const binaryToBStr = (binary: Uint8Array): string =>
 	Base64.fromUint8Array(binary);

@@ -53,6 +53,7 @@ function MainTabs(): React.JSX.Element {
     <Tab.Navigator
       screenOptions={({ route }) => ({
         headerShown: false,
+        tabBarHideOnKeyboard: true,
         tabBarStyle: {
           backgroundColor: palette.sessionToolbar,
           borderTopColor: palette.sessionToolbarBorder,

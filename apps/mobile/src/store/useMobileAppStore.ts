@@ -80,6 +80,7 @@ const SESSION_SNAPSHOT_FLUSH_MS = 750;
 const STARTUP_REFRESH_TIMEOUT_MS = 3_000;
 const STARTUP_REFRESH_TIMEOUT_MESSAGE =
   "서버 응답이 지연되고 있습니다. 다시 시도해 주세요.";
+const OFFLINE_RECOVERY_RETRY_DELAYS_MS = [2_000, 5_000, 5_000, 5_000] as const;
 const SECURE_STATE_LOADING_MESSAGE =
   "저장된 보안 정보를 복구하는 중입니다. 잠시 후 다시 시도해 주세요.";
 interface PendingServerKeyPromptState {
@@ -193,6 +194,10 @@ let runtimeSubscriptionCounter = 0;
 let initializePromise: Promise<void> | null = null;
 let syncPromise: Promise<void> | null = null;
 let russhInitPromise: Promise<void> | null = null;
+let offlineRecoveryTimer: ReturnType<typeof setTimeout> | null = null;
+let offlineRecoveryAttempt = 0;
+let offlineRecoveryInFlight = false;
+let offlineRecoveryKey: string | null = null;
 let pendingServerKeyResolver: ((accepted: boolean) => void) | null = null;
 let pendingCredentialResolver:
   | ((value: HostSecretInput | null) => void)
@@ -376,6 +381,13 @@ function isLikelyNetworkError(error: unknown): boolean {
   return !(error instanceof ApiError) || typeof error.status !== "number";
 }
 
+function buildOfflineRecoveryKey(
+  session: AuthSession,
+  serverUrl: string,
+): string {
+  return `${serverUrl.trim()}::${session.tokens.refreshToken}`;
+}
+
 function createEmptyProtectedState(): Pick<
   MobileAppState,
   | "groups"
@@ -536,6 +548,16 @@ export const useMobileAppStore = create<MobileAppState>()(
         await Promise.allSettled(tasks);
       };
 
+      const clearOfflineRecoveryLoop = () => {
+        if (offlineRecoveryTimer) {
+          clearTimeout(offlineRecoveryTimer);
+          offlineRecoveryTimer = null;
+        }
+        offlineRecoveryAttempt = 0;
+        offlineRecoveryInFlight = false;
+        offlineRecoveryKey = null;
+      };
+
       const resolveAuthGate = (
         nextState: Partial<
           Pick<
@@ -576,7 +598,7 @@ export const useMobileAppStore = create<MobileAppState>()(
       const retrySessionRecoveryInBackground = async (
         session: AuthSession,
         serverUrl: string,
-      ) => {
+      ): Promise<"recovered" | "retry" | "stop"> => {
         try {
           const refreshed = await refreshAuthSession(serverUrl, session);
           const currentSession = get().auth.session;
@@ -585,7 +607,7 @@ export const useMobileAppStore = create<MobileAppState>()(
             currentSession.tokens.refreshToken !== session.tokens.refreshToken ||
             get().settings.serverUrl !== serverUrl
           ) {
-            return;
+            return "stop";
           }
 
           await saveStoredAuthSession(refreshed);
@@ -602,6 +624,19 @@ export const useMobileAppStore = create<MobileAppState>()(
             },
           }));
           await syncWithSession(refreshed);
+          const postRecoveryAuth = get().auth;
+          if (
+            !postRecoveryAuth.session ||
+            get().settings.serverUrl !== serverUrl
+          ) {
+            return "stop";
+          }
+          if (postRecoveryAuth.status === "offline-authenticated") {
+            return "retry";
+          }
+          return postRecoveryAuth.status === "authenticated"
+            ? "recovered"
+            : "stop";
         } catch (error) {
           const currentSession = get().auth.session;
           if (
@@ -609,11 +644,12 @@ export const useMobileAppStore = create<MobileAppState>()(
             currentSession.tokens.refreshToken !== session.tokens.refreshToken ||
             get().settings.serverUrl !== serverUrl
           ) {
-            return;
+            return "stop";
           }
 
           if (error instanceof ApiError && error.status === 401) {
             await clearPersistedSecureState();
+            clearOfflineRecoveryLoop();
             set({
               auth: {
                 ...createUnauthenticatedState(),
@@ -629,7 +665,7 @@ export const useMobileAppStore = create<MobileAppState>()(
               secureStateReady: true,
               bootstrapping: false,
             });
-            return;
+            return "stop";
           }
 
           set((state) => ({
@@ -642,7 +678,103 @@ export const useMobileAppStore = create<MobileAppState>()(
                   : "네트워크에 연결할 수 없습니다.",
             },
           }));
+          return "retry";
         }
+      };
+
+      const scheduleOfflineRecoveryRetry = (
+        session: AuthSession,
+        serverUrl: string,
+        options?: {
+          immediate?: boolean;
+          reset?: boolean;
+        },
+      ) => {
+        const recoveryKey = buildOfflineRecoveryKey(session, serverUrl);
+        if (options?.reset || offlineRecoveryKey !== recoveryKey) {
+          if (offlineRecoveryTimer) {
+            clearTimeout(offlineRecoveryTimer);
+            offlineRecoveryTimer = null;
+          }
+          offlineRecoveryAttempt = 0;
+          offlineRecoveryKey = recoveryKey;
+        }
+
+        const runAttempt = async () => {
+          if (offlineRecoveryInFlight || offlineRecoveryKey !== recoveryKey) {
+            return;
+          }
+          const activeSession = get().auth.session;
+          if (
+            !activeSession ||
+            get().settings.serverUrl !== serverUrl ||
+            buildOfflineRecoveryKey(activeSession, serverUrl) !== recoveryKey
+          ) {
+            if (offlineRecoveryKey === recoveryKey) {
+              clearOfflineRecoveryLoop();
+            }
+            return;
+          }
+
+          offlineRecoveryInFlight = true;
+          try {
+            const result = await retrySessionRecoveryInBackground(
+              activeSession,
+              serverUrl,
+            );
+            if (result === "recovered" || result === "stop") {
+              clearOfflineRecoveryLoop();
+              return;
+            }
+
+            offlineRecoveryAttempt += 1;
+          } finally {
+            offlineRecoveryInFlight = false;
+          }
+
+          const currentSession = get().auth.session;
+          if (
+            !currentSession ||
+            get().settings.serverUrl !== serverUrl ||
+            buildOfflineRecoveryKey(currentSession, serverUrl) !== recoveryKey
+          ) {
+            clearOfflineRecoveryLoop();
+            return;
+          }
+
+          const nextDelay =
+            OFFLINE_RECOVERY_RETRY_DELAYS_MS[
+              Math.min(
+                offlineRecoveryAttempt - 1,
+                OFFLINE_RECOVERY_RETRY_DELAYS_MS.length - 1,
+              )
+            ];
+          offlineRecoveryTimer = setTimeout(() => {
+            offlineRecoveryTimer = null;
+            void runAttempt();
+          }, nextDelay);
+        };
+
+        if (options?.immediate) {
+          void runAttempt();
+          return;
+        }
+
+        if (offlineRecoveryTimer || offlineRecoveryInFlight) {
+          return;
+        }
+
+        const nextDelay =
+          OFFLINE_RECOVERY_RETRY_DELAYS_MS[
+            Math.min(
+              offlineRecoveryAttempt,
+              OFFLINE_RECOVERY_RETRY_DELAYS_MS.length - 1,
+            )
+          ];
+        offlineRecoveryTimer = setTimeout(() => {
+          offlineRecoveryTimer = null;
+          void runAttempt();
+        }, nextDelay);
       };
 
       const pushKnownHosts = async (
@@ -1370,6 +1502,7 @@ export const useMobileAppStore = create<MobileAppState>()(
       ) => {
         const activeSession = sessionOverride ?? get().auth.session ?? null;
         if (!activeSession) {
+          clearOfflineRecoveryLoop();
           set({
             auth: createUnauthenticatedState(),
             syncStatus: createDefaultSyncStatus(),
@@ -1452,6 +1585,7 @@ export const useMobileAppStore = create<MobileAppState>()(
 
             await updateSecretsState(nextSecretsByRef, nextHosts);
             await saveStoredAwsProfiles(nextAwsProfiles);
+            clearOfflineRecoveryLoop();
             set({
               groups: nextGroups,
               hosts: nextHosts,
@@ -1503,11 +1637,15 @@ export const useMobileAppStore = create<MobileAppState>()(
                       : "네트워크에 연결할 수 없습니다.",
                 },
               });
+              scheduleOfflineRecoveryRetry(currentSession, get().settings.serverUrl, {
+                reset: true,
+              });
               return;
             }
 
             if (error instanceof ApiError && error.status === 401) {
               await clearPersistedSecureState();
+              clearOfflineRecoveryLoop();
               set({
                 auth: {
                   ...createUnauthenticatedState(),
@@ -1609,6 +1747,7 @@ export const useMobileAppStore = create<MobileAppState>()(
                 storedAwsProfilesPromise,
               ]);
               if (!storedSession) {
+                clearOfflineRecoveryLoop();
                 resolveAuthGate({
                   auth: createUnauthenticatedState(),
                   syncStatus: createDefaultSyncStatus(),
@@ -1628,6 +1767,7 @@ export const useMobileAppStore = create<MobileAppState>()(
                     timeoutMessage: STARTUP_REFRESH_TIMEOUT_MESSAGE,
                   },
                 );
+                clearOfflineRecoveryLoop();
                 resolveAuthGate({
                   auth: {
                     status: "authenticated",
@@ -1663,15 +1803,20 @@ export const useMobileAppStore = create<MobileAppState>()(
                           : "네트워크에 연결할 수 없습니다.",
                     },
                   });
-                  void retrySessionRecoveryInBackground(
+                  scheduleOfflineRecoveryRetry(
                     storedSession,
                     currentServerUrl,
+                    {
+                      immediate: true,
+                      reset: true,
+                    },
                   );
                   return;
                 }
 
                 const shouldClearStoredAuthSession =
                   error instanceof ApiError && error.status === 401;
+                clearOfflineRecoveryLoop();
                 resolveAuthGate({
                   auth: {
                     ...createUnauthenticatedState(),
@@ -1734,6 +1879,7 @@ export const useMobileAppStore = create<MobileAppState>()(
               payload.code,
             );
             await saveStoredAuthSession(session);
+            clearOfflineRecoveryLoop();
             set({
               auth: {
                 status: "authenticated",
@@ -1831,6 +1977,7 @@ export const useMobileAppStore = create<MobileAppState>()(
           }
         },
         logout: async () => {
+          clearOfflineRecoveryLoop();
           clearPrompts();
           await disconnectAllRuntimeSessions();
 
@@ -1890,6 +2037,7 @@ export const useMobileAppStore = create<MobileAppState>()(
             input.serverUrl.trim() !== get().settings.serverUrl;
 
           if (serverChanged) {
+            clearOfflineRecoveryLoop();
             await disconnectAllRuntimeSessions();
           }
 
@@ -2216,5 +2364,37 @@ export const useMobileAppStore = create<MobileAppState>()(
     },
   ),
 );
+
+export function resetMobileStoreRuntimeForTests(): void {
+  initializePromise = null;
+  syncPromise = null;
+  russhInitPromise = null;
+  if (offlineRecoveryTimer) {
+    clearTimeout(offlineRecoveryTimer);
+    offlineRecoveryTimer = null;
+  }
+  offlineRecoveryAttempt = 0;
+  offlineRecoveryInFlight = false;
+  offlineRecoveryKey = null;
+  pendingServerKeyResolver = null;
+  pendingCredentialResolver = null;
+  pendingAwsSsoCancelHandler = null;
+  for (const runtime of runtimeSessions.values()) {
+    try {
+      if (runtime.kind === "ssh") {
+        void runtime.connection.disconnect();
+      } else {
+        runtime.socket.close();
+      }
+    } catch {}
+  }
+  runtimeSessions.clear();
+  pendingSessionConnections.clear();
+  runtimeSessionSnapshots.clear();
+  for (const timer of runtimeSnapshotFlushTimers.values()) {
+    clearTimeout(timer);
+  }
+  runtimeSnapshotFlushTimers.clear();
+}
 
 export type { MobileAppState, PendingCredentialPromptState, PendingServerKeyPromptState };

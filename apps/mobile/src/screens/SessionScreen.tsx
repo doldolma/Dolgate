@@ -1,6 +1,8 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Buffer } from "buffer";
 import {
+  ActivityIndicator,
+  Keyboard,
   Platform,
   Pressable,
   ScrollView,
@@ -9,18 +11,24 @@ import {
   View,
   useWindowDimensions,
 } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Ionicons from "react-native-vector-icons/Ionicons";
 import {
   XtermJsWebView,
   type XtermWebViewHandle,
 } from "@fressh/react-native-xtermjs-webview";
-import { TerminalInputView } from "../components/TerminalInputView";
+import {
+  TerminalInputView,
+  type TerminalInputViewHandle,
+} from "../components/TerminalInputView";
 import { useScreenPadding } from "../lib/screen-layout";
 import {
-  TERMINAL_SHORTCUTS,
+  TERMINAL_PRIMARY_SHORTCUTS,
+  TERMINAL_SECONDARY_SHORTCUTS,
   translateTerminalInputEventToSequence,
   type NativeTerminalInputEvent,
 } from "../lib/terminal-input";
+import { getKeyboardDockInset } from "../lib/keyboard-layout";
 import { estimateTerminalGridSizeFromWindow } from "../lib/terminal-size";
 import { useMobileAppStore } from "../store/useMobileAppStore";
 import type { MobilePalette } from "../theme";
@@ -32,6 +40,18 @@ const TERMINAL_RESET_BYTES = Uint8Array.from(
 
 function resetTerminalViewport(terminal: XtermWebViewHandle) {
   terminal.write(TERMINAL_RESET_BYTES);
+}
+
+function restoreTerminalSnapshot(
+  terminal: XtermWebViewHandle,
+  snapshot: string | null | undefined,
+) {
+  resetTerminalViewport(terminal);
+  if (!snapshot) {
+    return;
+  }
+
+  terminal.write(Uint8Array.from(Buffer.from(snapshot, "utf8")));
 }
 
 function getSessionStatusMeta(status: string, palette: MobilePalette) {
@@ -67,6 +87,7 @@ function isLiveSession(status: string) {
 
 export function SessionScreen(): React.JSX.Element {
   const palette = useMobilePalette();
+  const safeAreaInsets = useSafeAreaInsets();
   const screenPadding = useScreenPadding({
     horizontal: 0,
     topOffset: 4,
@@ -77,10 +98,31 @@ export function SessionScreen(): React.JSX.Element {
   });
   const { width, height } = useWindowDimensions();
   const terminalRef = useRef<XtermWebViewHandle | null>(null);
+  const nativeTerminalInputRef = useRef<TerminalInputViewHandle | null>(null);
   const [terminalReady, setTerminalReady] = useState(false);
   const [nativeInputFocusToken, setNativeInputFocusToken] = useState(0);
   const [nativeInputClearToken, setNativeInputClearToken] = useState(0);
-  const useNativeTerminalInput = Platform.OS === "ios";
+  const [inputFocused, setInputFocused] = useState(true);
+  const [keyboardRequestedVisible, setKeyboardRequestedVisible] = useState(
+    Platform.OS === "ios",
+  );
+  const [keyboardVisible, setKeyboardVisible] = useState(false);
+  const [keyboardInset, setKeyboardInset] = useState(0);
+  const [showMoreShortcuts, setShowMoreShortcuts] = useState(false);
+  const [toolbarHeight, setToolbarHeight] = useState(56);
+  const isAndroid = Platform.OS === "android";
+  const useTerminalInputOverlay = Platform.OS === "ios" || isAndroid;
+  const keyboardClosedViewportHeightRef = useRef(height);
+  const restoredConnectedSnapshotSessionIdRef = useRef<string | null>(null);
+  const ignoreKeyboardHideUntilRef = useRef(0);
+  const keyboardRetryTimeoutsRef = useRef<ReturnType<typeof setTimeout>[]>([]);
+  const previousActiveSessionRef = useRef<{
+    id: string | null;
+    status: string | null;
+  }>({
+    id: null,
+    status: null,
+  });
   const sessions = useMobileAppStore((state) => state.sessions);
   const activeSessionTabId = useMobileAppStore((state) => state.activeSessionTabId);
   const setActiveSessionTab = useMobileAppStore(
@@ -132,23 +174,262 @@ export function SessionScreen(): React.JSX.Element {
         : undefined,
     [],
   );
+  const keyboardToggleActive = isAndroid
+    ? keyboardVisible || keyboardRequestedVisible
+    : keyboardVisible;
+  const toolbarKeyboardInset = getKeyboardDockInset({
+    keyboardVisible,
+    keyboardInset:
+      keyboardInset + (isAndroid ? safeAreaInsets.bottom : 0),
+    currentViewportHeight: height,
+    keyboardClosedViewportHeight: keyboardClosedViewportHeightRef.current,
+    minimumVisibleInset: isAndroid ? safeAreaInsets.bottom + 12 : 0,
+  });
 
   useEffect(() => {
-    if (!useNativeTerminalInput || !activeSession) {
+    if (!keyboardVisible || height >= keyboardClosedViewportHeightRef.current) {
+      keyboardClosedViewportHeightRef.current = height;
+    }
+  }, [height, keyboardVisible]);
+
+  const clearKeyboardFocusRetries = useCallback(() => {
+    for (const timeoutId of keyboardRetryTimeoutsRef.current) {
+      clearTimeout(timeoutId);
+    }
+    keyboardRetryTimeoutsRef.current = [];
+  }, []);
+
+  const focusRequestedTerminalInput = useCallback(
+    (force = false) => {
+      if (!force && !inputFocused) {
+        return;
+      }
+
+      requestAnimationFrame(() => {
+        if (useTerminalInputOverlay) {
+          setNativeInputFocusToken((value) => value + 1);
+          nativeTerminalInputRef.current?.focus();
+          return;
+        }
+        if (!terminalReady) {
+          return;
+        }
+        terminalRef.current?.focus();
+      });
+    },
+    [inputFocused, terminalReady, useTerminalInputOverlay],
+  );
+
+  const queueKeyboardFocusRetries = useCallback(
+    (delays: readonly number[] = [60, 180]) => {
+      keyboardRetryTimeoutsRef.current = delays.map((delay) =>
+        setTimeout(() => {
+          focusRequestedTerminalInput(true);
+        }, delay),
+      );
+    },
+    [focusRequestedTerminalInput],
+  );
+
+  const openKeyboard = useCallback(() => {
+    ignoreKeyboardHideUntilRef.current = Date.now() + 300;
+    setInputFocused(true);
+    setKeyboardRequestedVisible(true);
+    clearKeyboardFocusRetries();
+    focusRequestedTerminalInput(true);
+    queueKeyboardFocusRetries();
+  }, [clearKeyboardFocusRetries, focusRequestedTerminalInput, queueKeyboardFocusRetries]);
+
+  const closeKeyboard = useCallback(() => {
+    ignoreKeyboardHideUntilRef.current = 0;
+    clearKeyboardFocusRetries();
+    setKeyboardVisible(false);
+    setKeyboardInset(0);
+    if (isAndroid) {
+      setInputFocused(true);
+      setKeyboardRequestedVisible(false);
+      focusRequestedTerminalInput(true);
+      queueKeyboardFocusRetries([60]);
       return;
     }
 
+    setInputFocused(false);
+    setKeyboardRequestedVisible(false);
+    if (useTerminalInputOverlay) {
+      nativeTerminalInputRef.current?.blur();
+      return;
+    }
+
+    requestAnimationFrame(() => {
+      terminalRef.current?.blur();
+    });
+  }, [
+    clearKeyboardFocusRetries,
+    focusRequestedTerminalInput,
+    isAndroid,
+    queueKeyboardFocusRetries,
+    useTerminalInputOverlay,
+  ]);
+
+  const toggleKeyboard = useCallback(() => {
+    if (keyboardToggleActive) {
+      closeKeyboard();
+      return;
+    }
+
+    openKeyboard();
+  }, [closeKeyboard, keyboardToggleActive, openKeyboard]);
+
+  const focusHardwareKeyboardInput = useCallback(() => {
+    if (!isAndroid) {
+      openKeyboard();
+      return;
+    }
+
+    clearKeyboardFocusRetries();
+    setInputFocused(true);
+    setKeyboardRequestedVisible(false);
+    focusRequestedTerminalInput(true);
+    queueKeyboardFocusRetries([60]);
+  }, [
+    clearKeyboardFocusRetries,
+    focusRequestedTerminalInput,
+    isAndroid,
+    openKeyboard,
+    queueKeyboardFocusRetries,
+  ]);
+
+  const refocusTerminalAfterTouch = useCallback(() => {
+    if (!isAndroid) {
+      return;
+    }
+
+    if (keyboardToggleActive) {
+      clearKeyboardFocusRetries();
+      focusRequestedTerminalInput(true);
+      queueKeyboardFocusRetries([60]);
+      return;
+    }
+
+    focusHardwareKeyboardInput();
+  }, [
+    clearKeyboardFocusRetries,
+    focusHardwareKeyboardInput,
+    focusRequestedTerminalInput,
+    isAndroid,
+    keyboardToggleActive,
+    queueKeyboardFocusRetries,
+  ]);
+
+  useEffect(() => {
+    const syncKeyboardShown = (event?: { endCoordinates?: { height?: number } }) => {
+      setKeyboardVisible(true);
+      setKeyboardInset(event?.endCoordinates?.height ?? 0);
+      setInputFocused(true);
+      setKeyboardRequestedVisible(true);
+    };
+    const syncKeyboardHidden = () => {
+      setKeyboardVisible(false);
+      setKeyboardInset(0);
+      if (Date.now() > ignoreKeyboardHideUntilRef.current) {
+        if (!isAndroid) {
+          setInputFocused(false);
+        }
+        setKeyboardRequestedVisible(false);
+      }
+    };
+    const subscriptions =
+      Platform.OS === "ios"
+        ? [
+            Keyboard.addListener("keyboardWillShow", syncKeyboardShown),
+            Keyboard.addListener("keyboardDidShow", syncKeyboardShown),
+            Keyboard.addListener("keyboardWillHide", syncKeyboardHidden),
+            Keyboard.addListener("keyboardDidHide", syncKeyboardHidden),
+          ]
+        : [
+            Keyboard.addListener("keyboardDidShow", syncKeyboardShown),
+            Keyboard.addListener("keyboardDidHide", syncKeyboardHidden),
+          ];
+
+    return () => {
+      clearKeyboardFocusRetries();
+      for (const subscription of subscriptions) {
+        subscription.remove();
+      }
+    };
+  }, [clearKeyboardFocusRetries, isAndroid]);
+
+  useEffect(() => {
+    if (!activeSession) {
+      previousActiveSessionRef.current = {
+        id: null,
+        status: null,
+      };
+      restoredConnectedSnapshotSessionIdRef.current = null;
+      return;
+    }
+
+    const previousActiveSession = previousActiveSessionRef.current;
+    const shouldAutoOpenKeyboard =
+      previousActiveSession.id !== activeSession.id ||
+      (previousActiveSession.id === activeSession.id &&
+        previousActiveSession.status !== "connected" &&
+        activeSession.status === "connected");
+
+    previousActiveSessionRef.current = {
+      id: activeSession.id,
+      status: activeSession.status,
+    };
+
+    if (!shouldAutoOpenKeyboard) {
+      return;
+    }
+
+    setKeyboardRequestedVisible(true);
+    setInputFocused(true);
+    setKeyboardRequestedVisible(!isAndroid);
     const timer = setTimeout(() => {
-      setNativeInputFocusToken((value) => value + 1);
+      if (isAndroid) {
+        focusHardwareKeyboardInput();
+        return;
+      }
+      openKeyboard();
     }, 120);
 
     return () => {
       clearTimeout(timer);
     };
-  }, [activeSession?.id, useNativeTerminalInput]);
+  }, [activeSession, focusHardwareKeyboardInput, isAndroid, openKeyboard]);
 
   useEffect(() => {
     if (!terminalReady || !activeSession || activeSession.status === "connected") {
+      return;
+    }
+
+    if (restoredConnectedSnapshotSessionIdRef.current === activeSession.id) {
+      restoredConnectedSnapshotSessionIdRef.current = null;
+    }
+
+    const terminal = terminalRef.current;
+    if (!terminal) {
+      return;
+    }
+
+    restoreTerminalSnapshot(terminal, activeSession.lastViewportSnapshot);
+  }, [
+    activeSession,
+    activeSession?.id,
+    activeSession?.lastViewportSnapshot,
+    activeSession?.status,
+    terminalReady,
+  ]);
+
+  useEffect(() => {
+    if (!terminalReady || !activeSession || activeSession.status !== "connected") {
+      return;
+    }
+
+    if (restoredConnectedSnapshotSessionIdRef.current === activeSession.id) {
       return;
     }
 
@@ -157,12 +438,8 @@ export function SessionScreen(): React.JSX.Element {
       return;
     }
 
-    resetTerminalViewport(terminal);
-    if (activeSession.lastViewportSnapshot) {
-      terminal.write(
-        Uint8Array.from(Buffer.from(activeSession.lastViewportSnapshot, "utf8")),
-      );
-    }
+    restoredConnectedSnapshotSessionIdRef.current = activeSession.id;
+    restoreTerminalSnapshot(terminal, activeSession.lastViewportSnapshot);
   }, [
     activeSession,
     activeSession?.id,
@@ -188,11 +465,7 @@ export function SessionScreen(): React.JSX.Element {
         if (chunks.length > 0) {
           terminal.writeMany(chunks);
         }
-        if (useNativeTerminalInput) {
-          setNativeInputFocusToken((value) => value + 1);
-          return;
-        }
-        terminal.focus();
+        focusRequestedTerminalInput();
       },
       onData: (chunk) => {
         terminal.write(chunk);
@@ -206,34 +479,29 @@ export function SessionScreen(): React.JSX.Element {
     activeSession?.status,
     subscribeToSessionTerminal,
     terminalReady,
-    useNativeTerminalInput,
+    focusRequestedTerminalInput,
   ]);
 
   useEffect(() => {
-    if (useNativeTerminalInput || !terminalReady || activeSession?.status !== "connected") {
+    if (
+      useTerminalInputOverlay ||
+      !terminalReady ||
+      activeSession?.status !== "connected"
+    ) {
       return;
     }
 
-    terminalRef.current?.focus();
+    focusRequestedTerminalInput();
   }, [
     activeSession?.id,
     activeSession?.status,
+    focusRequestedTerminalInput,
     terminalReady,
-    useNativeTerminalInput,
+    useTerminalInputOverlay,
   ]);
 
-  const focusNativeInput = () => {
-    if (!useNativeTerminalInput) {
-      terminalRef.current?.focus();
-      return;
-    }
-    requestAnimationFrame(() => {
-      setNativeInputFocusToken((value) => value + 1);
-    });
-  };
-
   const resetNativeInputBuffer = () => {
-    if (!useNativeTerminalInput) {
+    if (!useTerminalInputOverlay) {
       return;
     }
     setNativeInputClearToken((value) => value + 1);
@@ -257,7 +525,11 @@ export function SessionScreen(): React.JSX.Element {
   const sendShortcut = (event: NativeTerminalInputEvent) => {
     sendTranslatedInput(event);
     resetNativeInputBuffer();
-    focusNativeInput();
+    if (isAndroid) {
+      focusHardwareKeyboardInput();
+      return;
+    }
+    openKeyboard();
   };
 
   if (!activeSession) {
@@ -320,7 +592,11 @@ export function SessionScreen(): React.JSX.Element {
                 accessibilityState={{ selected: isActive }}
                 onPress={() => {
                   setActiveSessionTab(session.id);
-                  focusNativeInput();
+                  if (isAndroid) {
+                    focusHardwareKeyboardInput();
+                    return;
+                  }
+                  openKeyboard();
                 }}
                 style={[
                   styles.sessionTab,
@@ -399,7 +675,11 @@ export function SessionScreen(): React.JSX.Element {
             accessibilityLabel={`${activeSession.title} 세션 재연결`}
             onPress={async () => {
               await resumeSession(activeSession.id);
-              focusNativeInput();
+              if (isAndroid) {
+                focusHardwareKeyboardInput();
+                return;
+              }
+              openKeyboard();
             }}
             style={[
               styles.inlineBannerButton,
@@ -417,93 +697,237 @@ export function SessionScreen(): React.JSX.Element {
       ) : null}
 
       <View
+        testID="session-screen-body"
         style={[
-          styles.terminalCard,
+          styles.screenBody,
           {
-            backgroundColor: palette.sessionTerminalBg,
-            borderColor: palette.sessionSurfaceBorder,
-            marginHorizontal: 2,
+            paddingBottom: toolbarHeight + toolbarKeyboardInset,
           },
         ]}
       >
-        <XtermJsWebView
-          ref={terminalRef}
-          style={styles.terminal}
-          autoFit={false}
-          logger={terminalLogger}
-          webViewOptions={{
-            hideKeyboardAccessoryView: true,
-          }}
-          onInitialized={() => setTerminalReady(true)}
-          onData={(data) => {
-            if (useNativeTerminalInput) {
-              return;
-            }
-            sendSessionInput(data);
-          }}
-          size={terminalSize}
-          xtermOptions={{
-            fontSize: width > height ? 12 : 11,
-            scrollback: 2_000,
-            theme: {
-              background: palette.sessionTerminalBg,
-              foreground: palette.sessionTerminalFg,
-              cursor: palette.sessionTerminalCursor,
-              selectionBackground: palette.sessionTerminalSelection,
+        <View
+          testID="session-terminal-card"
+          style={[
+            styles.terminalCard,
+            {
+              backgroundColor: palette.sessionTerminalBg,
+              borderColor: palette.sessionSurfaceBorder,
+              marginHorizontal: 2,
             },
-          }}
-        />
-        {useNativeTerminalInput ? (
-          <TerminalInputView
-            clearToken={nativeInputClearToken}
-            focusToken={nativeInputFocusToken}
-            focused
-            onTerminalInput={(event) => {
-              sendTranslatedInput(event.nativeEvent);
-              if (event.nativeEvent.kind === "special-key") {
-                resetNativeInputBuffer();
-              }
-              focusNativeInput();
-            }}
-            style={styles.nativeTerminalInput}
-          />
-        ) : null}
-      </View>
-
-      <View
-        style={[
-          styles.toolbarShell,
-          {
-            backgroundColor: palette.sessionToolbar,
-            borderTopColor: palette.sessionToolbarBorder,
-            paddingBottom: screenPadding.paddingBottom,
-          },
-        ]}
-      >
-        <ScrollView
-          horizontal
-          style={styles.toolbarScroll}
-          contentContainerStyle={styles.toolbar}
-          showsHorizontalScrollIndicator={false}
+          ]}
+          onTouchEnd={isAndroid ? refocusTerminalAfterTouch : undefined}
         >
-          {TERMINAL_SHORTCUTS.map((item) => (
-            <Pressable
-              key={item.label}
-              onPress={() => sendShortcut(item.event)}
+          <XtermJsWebView
+            ref={terminalRef}
+            style={styles.terminal}
+            autoFit={false}
+            logger={terminalLogger}
+            webViewOptions={{
+              hideKeyboardAccessoryView: true,
+            }}
+            onInitialized={() => setTerminalReady(true)}
+            onData={(data) => {
+              if (useTerminalInputOverlay) {
+                return;
+              }
+              sendSessionInput(data);
+            }}
+            size={terminalSize}
+            xtermOptions={{
+              fontSize: width > height ? 12 : 11,
+              scrollback: 2_000,
+              theme: {
+                background: palette.sessionTerminalBg,
+                foreground: palette.sessionTerminalFg,
+                cursor: palette.sessionTerminalCursor,
+                selectionBackground: palette.sessionTerminalSelection,
+              },
+            }}
+          />
+          {!terminalReady ? (
+            <View
+              pointerEvents="none"
               style={[
-                styles.toolbarButton,
+                styles.terminalLoadingOverlay,
+                { backgroundColor: palette.sessionTerminalBg },
+              ]}
+            >
+              <ActivityIndicator size="small" color={palette.accent} />
+              <Text style={[styles.terminalLoadingTitle, { color: palette.text }]}>
+                터미널 준비 중
+              </Text>
+              <Text
+                style={[styles.terminalLoadingBody, { color: palette.mutedText }]}
+              >
+                연결 화면을 불러오고 있습니다.
+              </Text>
+            </View>
+          ) : null}
+          {useTerminalInputOverlay ? (
+            <View pointerEvents="none" style={styles.nativeTerminalInputShell}>
+              <TerminalInputView
+                ref={nativeTerminalInputRef}
+                clearToken={nativeInputClearToken}
+                focusToken={nativeInputFocusToken}
+                focused={inputFocused}
+                softKeyboardEnabled={isAndroid ? keyboardRequestedVisible : undefined}
+                onTerminalInput={(event) => {
+                  sendTranslatedInput(event.nativeEvent);
+                  if (event.nativeEvent.kind === "special-key") {
+                    resetNativeInputBuffer();
+                  }
+                  focusRequestedTerminalInput(true);
+                }}
+                style={styles.nativeTerminalInput}
+              />
+            </View>
+          ) : null}
+        </View>
+
+        <View
+          testID="session-toolbar-shell"
+          onLayout={(event) => {
+            const nextHeight = Math.ceil(event.nativeEvent.layout.height);
+            if (nextHeight > 0 && nextHeight !== toolbarHeight) {
+              setToolbarHeight(nextHeight);
+            }
+          }}
+          style={[
+            styles.toolbarShell,
+            {
+              backgroundColor: palette.sessionToolbar,
+              borderTopColor: palette.sessionToolbarBorder,
+              paddingBottom: screenPadding.paddingBottom,
+              bottom: toolbarKeyboardInset,
+            },
+          ]}
+        >
+          {showMoreShortcuts ? (
+            <View
+              style={[
+                styles.toolbarSecondaryShell,
                 {
-                  backgroundColor: palette.surfaceAlt,
-                  borderColor: palette.sessionToolbarBorder,
+                  borderBottomColor: palette.sessionToolbarBorder,
                 },
               ]}
             >
-              <Text style={[styles.toolbarButtonText, { color: palette.text }]}>
-                {item.label}
-              </Text>
-            </Pressable>
-          ))}
-        </ScrollView>
+              <ScrollView
+                horizontal
+                style={styles.toolbarScroll}
+                contentContainerStyle={[styles.toolbar, styles.toolbarSecondaryContent]}
+                showsHorizontalScrollIndicator={false}
+              >
+                {TERMINAL_SECONDARY_SHORTCUTS.map((item) => (
+                  <Pressable
+                    key={item.label}
+                    accessibilityRole="button"
+                    accessibilityLabel={`${item.label} 제어키`}
+                    onPress={() => sendShortcut(item.event)}
+                    style={[
+                      styles.toolbarButton,
+                      {
+                        backgroundColor: palette.surfaceAlt,
+                        borderColor: palette.sessionToolbarBorder,
+                      },
+                    ]}
+                  >
+                    <Text style={[styles.toolbarButtonText, { color: palette.text }]}>
+                      {item.label}
+                    </Text>
+                  </Pressable>
+                ))}
+              </ScrollView>
+            </View>
+          ) : null}
+          <View style={styles.toolbarPrimaryRow}>
+            <ScrollView
+              horizontal
+              style={styles.toolbarPrimaryScroll}
+              contentContainerStyle={styles.toolbar}
+              showsHorizontalScrollIndicator={false}
+            >
+              {TERMINAL_PRIMARY_SHORTCUTS.map((item) => (
+                <Pressable
+                  key={item.label}
+                  accessibilityRole="button"
+                  accessibilityLabel={`${item.label} 제어키`}
+                  onPress={() => sendShortcut(item.event)}
+                  style={[
+                    styles.toolbarButton,
+                    {
+                      backgroundColor: palette.surfaceAlt,
+                      borderColor: palette.sessionToolbarBorder,
+                    },
+                  ]}
+                >
+                  <Text style={[styles.toolbarButtonText, { color: palette.text }]}>
+                    {item.label}
+                  </Text>
+                </Pressable>
+              ))}
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={
+                  showMoreShortcuts ? "추가 제어키 숨기기" : "추가 제어키 표시"
+                }
+                onPress={() => setShowMoreShortcuts((value) => !value)}
+                style={[
+                  styles.toolbarButton,
+                  styles.toolbarActionButton,
+                  {
+                    backgroundColor: showMoreShortcuts
+                      ? palette.accentSoft
+                      : palette.surfaceAlt,
+                    borderColor: showMoreShortcuts
+                      ? palette.accent
+                      : palette.sessionToolbarBorder,
+                  },
+                ]}
+              >
+                <Ionicons
+                  name={showMoreShortcuts ? "chevron-down" : "ellipsis-horizontal"}
+                  size={14}
+                  color={showMoreShortcuts ? palette.accent : palette.mutedText}
+                />
+                <Text
+                  style={[
+                    styles.toolbarButtonText,
+                    {
+                      color: palette.text,
+                      fontWeight: showMoreShortcuts ? "800" : "700",
+                    },
+                  ]}
+                >
+                  더보기
+                </Text>
+              </Pressable>
+            </ScrollView>
+            <View style={styles.toolbarKeyboardDock}>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={keyboardToggleActive ? "키보드 닫기" : "키보드 열기"}
+                onPress={toggleKeyboard}
+                style={[
+                  styles.toolbarKeyboardButton,
+                  {
+                    backgroundColor: keyboardToggleActive
+                      ? palette.accentSoft
+                      : palette.surfaceAlt,
+                    borderColor: keyboardToggleActive
+                      ? palette.accent
+                      : palette.sessionToolbarBorder,
+                  },
+                ]}
+              >
+                <Ionicons
+                  name="keypad-outline"
+                  size={18}
+                  color={keyboardToggleActive ? palette.accent : palette.mutedText}
+                />
+              </Pressable>
+            </View>
+          </View>
+        </View>
       </View>
     </View>
   );
@@ -602,6 +1026,9 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: "700",
   },
+  screenBody: {
+    flex: 1,
+  },
   terminalCard: {
     flex: 1,
     marginTop: 4,
@@ -613,27 +1040,81 @@ const styles = StyleSheet.create({
   terminal: {
     flex: 1,
   },
+  terminalLoadingOverlay: {
+    ...StyleSheet.absoluteFill,
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    paddingHorizontal: 24,
+  },
+  terminalLoadingTitle: {
+    fontSize: 13,
+    fontWeight: "700",
+  },
+  terminalLoadingBody: {
+    fontSize: 12,
+    lineHeight: 18,
+    textAlign: "center",
+  },
   nativeTerminalInput: {
     ...StyleSheet.absoluteFill,
   },
+  nativeTerminalInputShell: {
+    ...StyleSheet.absoluteFill,
+  },
   toolbarShell: {
-    marginTop: 6,
+    position: "absolute",
+    left: 0,
+    right: 0,
+    zIndex: 10,
     borderTopWidth: 1,
     paddingTop: 5,
+  },
+  toolbarSecondaryShell: {
+    borderBottomWidth: 1,
+    marginBottom: 6,
+    paddingBottom: 6,
   },
   toolbarScroll: {
     flexGrow: 0,
   },
-  toolbar: {
+  toolbarPrimaryRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
     paddingHorizontal: 6,
+  },
+  toolbarPrimaryScroll: {
+    flex: 1,
+  },
+  toolbar: {
     gap: 6,
   },
+  toolbarSecondaryContent: {
+    paddingHorizontal: 6,
+  },
   toolbarButton: {
-    minWidth: 52,
-    minHeight: 32,
+    minWidth: 54,
+    minHeight: 38,
     borderRadius: 12,
     borderWidth: 1,
     paddingHorizontal: 12,
+    paddingVertical: 8,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  toolbarActionButton: {
+    flexDirection: "row",
+    gap: 6,
+  },
+  toolbarKeyboardDock: {
+    paddingRight: 2,
+  },
+  toolbarKeyboardButton: {
+    width: 46,
+    height: 38,
+    borderRadius: 12,
+    borderWidth: 1,
     alignItems: "center",
     justifyContent: "center",
   },
