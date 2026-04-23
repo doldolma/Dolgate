@@ -1,8 +1,10 @@
 package com.dolgate
 
 import android.view.KeyEvent
+import android.view.inputmethod.EditorInfo
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class TerminalInputViewLogicTest {
@@ -66,5 +68,28 @@ class TerminalInputViewLogicTest {
   fun `mapSpecialKey leaves text input keys untouched`() {
     assertNull(TerminalInputViewLogic.mapSpecialKey(KeyEvent.KEYCODE_A, false))
     assertNull(TerminalInputViewLogic.mapSpecialKey(KeyEvent.KEYCODE_SPACE, false))
+  }
+
+  @Test
+  fun `isEnterEditorAction handles soft keyboard enter actions`() {
+    assertTrue(
+      TerminalInputViewLogic.isEnterEditorAction(EditorInfo.IME_ACTION_DONE, null),
+    )
+    assertTrue(
+      TerminalInputViewLogic.isEnterEditorAction(EditorInfo.IME_ACTION_UNSPECIFIED, null),
+    )
+    assertTrue(
+      TerminalInputViewLogic.isEnterEditorAction(EditorInfo.IME_NULL, null),
+    )
+  }
+
+  @Test
+  fun `isEnterEditorAction ignores hardware key events`() {
+    val hardwareEvent = KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_ENTER)
+
+    assertEquals(
+      false,
+      TerminalInputViewLogic.isEnterEditorAction(EditorInfo.IME_ACTION_DONE, hardwareEvent),
+    )
   }
 }

@@ -283,6 +283,34 @@ describe("HomeScreen group browsing", () => {
     });
   });
 
+  it("does not show a banner while startup sync is only running in the background", async () => {
+    act(() => {
+      useMobileAppStore.setState({
+        syncStatus: {
+          ...createDefaultSyncStatus(),
+          status: "syncing",
+        },
+      });
+    });
+
+    let tree: renderer.ReactTestRenderer;
+
+    await act(async () => {
+      tree = renderer.create(<HomeScreen />);
+    });
+
+    const text = collectText(tree!.toJSON());
+    expect(text).not.toContain("서버 내용을 확인하고 있습니다.");
+    expect(text).not.toContain(
+      "저장된 목록은 바로 볼 수 있고, 최신 변경사항은 곧 반영됩니다.",
+    );
+
+    await act(async () => {
+      jest.runOnlyPendingTimers();
+      tree!.unmount();
+    });
+  });
+
   it("enters a group and returns to the same group after clearing search", async () => {
     let tree: renderer.ReactTestRenderer;
 

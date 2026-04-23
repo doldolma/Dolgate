@@ -1,6 +1,7 @@
 package com.dolgate
 
 import android.view.KeyEvent
+import android.view.inputmethod.EditorInfo
 
 data class TerminalInputTextDelta(
   val deleteCount: Int,
@@ -60,6 +61,27 @@ object TerminalInputViewLogic {
       KeyEvent.KEYCODE_PAGE_UP -> TerminalInputSpecialKeyPayload(key = "pageUp")
       KeyEvent.KEYCODE_PAGE_DOWN -> TerminalInputSpecialKeyPayload(key = "pageDown")
       else -> null
+    }
+  }
+
+  fun isEnterEditorAction(
+    actionId: Int,
+    event: KeyEvent?,
+  ): Boolean {
+    if (event != null) {
+      return false
+    }
+
+    return when (actionId) {
+      EditorInfo.IME_NULL,
+      EditorInfo.IME_ACTION_DONE,
+      EditorInfo.IME_ACTION_GO,
+      EditorInfo.IME_ACTION_NEXT,
+      EditorInfo.IME_ACTION_SEARCH,
+      EditorInfo.IME_ACTION_SEND,
+      EditorInfo.IME_ACTION_UNSPECIFIED,
+      -> true
+      else -> false
     }
   }
 }

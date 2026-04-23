@@ -145,11 +145,22 @@ class TerminalInputEditText(
     }
     inputType =
       InputType.TYPE_CLASS_TEXT or
-        InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS or
-        InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD
-    imeOptions = EditorInfo.IME_FLAG_NO_EXTRACT_UI or EditorInfo.IME_FLAG_NO_FULLSCREEN
-    setSingleLine(true)
+        InputType.TYPE_TEXT_FLAG_MULTI_LINE
+    imeOptions =
+      EditorInfo.IME_FLAG_NO_EXTRACT_UI or
+        EditorInfo.IME_FLAG_NO_FULLSCREEN or
+        EditorInfo.IME_FLAG_NO_ENTER_ACTION
+    setSingleLine(false)
+    setHorizontallyScrolling(false)
     addTextChangedListener(terminalTextWatcher)
+    setOnEditorActionListener { _, actionId, event ->
+      if (!TerminalInputViewLogic.isEnterEditorAction(actionId, event)) {
+        return@setOnEditorActionListener false
+      }
+
+      emitSpecialKey(TerminalInputSpecialKeyPayload(key = "enter"))
+      true
+    }
   }
 
   override fun isSuggestionsEnabled(): Boolean = false
@@ -172,14 +183,13 @@ class TerminalInputEditText(
   }
 
   override fun onCreateInputConnection(outAttrs: EditorInfo): InputConnection {
-    outAttrs.imeOptions = EditorInfo.IME_FLAG_NO_EXTRACT_UI or EditorInfo.IME_FLAG_NO_FULLSCREEN
+    outAttrs.imeOptions = imeOptions
     outAttrs.inputType = inputType
     val baseConnection = super.onCreateInputConnection(outAttrs)
     return object : InputConnectionWrapper(baseConnection, true) {
       override fun deleteSurroundingText(beforeLength: Int, afterLength: Int): Boolean {
         if (beforeLength > 0 && afterLength == 0 && previousValue.isEmpty()) {
           emitSpecialKey(TerminalInputSpecialKeyPayload(key = "backspace"))
-          syncFocus(force = true)
           return true
         }
 
@@ -201,7 +211,6 @@ class TerminalInputEditText(
               emitSpecialKey(TerminalInputSpecialKeyPayload(key = "enter"))
             }
           }
-          syncFocus(force = true)
           return true
         }
 
@@ -270,13 +279,11 @@ class TerminalInputEditText(
     val specialKey = TerminalInputViewLogic.mapSpecialKey(keyCode, event.isCtrlPressed)
     if (specialKey != null) {
       emitSpecialKey(specialKey)
-      syncFocus(force = true)
       return true
     }
 
     if (keyCode == KeyEvent.KEYCODE_DEL && previousValue.isEmpty()) {
       emitSpecialKey(TerminalInputSpecialKeyPayload(key = "backspace"))
-      syncFocus(force = true)
       return true
     }
 
@@ -290,11 +297,7 @@ class TerminalInputEditText(
           requestFocus()
         }
         moveCaretToEnd()
-        if (softKeyboardEnabled) {
-          showKeyboard()
-        } else {
-          hideKeyboard()
-        }
+        updateKeyboardVisibility()
       } else {
         if (hasFocus()) {
           clearFocus()
@@ -304,47 +307,25 @@ class TerminalInputEditText(
     }
   }
 
+  private fun updateKeyboardVisibility() {
+    if (softKeyboardEnabled) {
+      showKeyboard()
+      return
+    }
+    hideKeyboard()
+  }
+
   private fun showKeyboard() {
     post {
       showSoftInputOnFocus = true
-      if (hasFocus()) {
-        clearFocus()
+      if (!hasFocus()) {
+        requestFocus()
       }
-      requestFocus()
-      requestFocusFromTouch()
       moveCaretToEnd()
-      inputMethodManager.restartInput(this)
-      inputMethodManager.viewClicked(this)
       if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
         windowInsetsController?.show(WindowInsets.Type.ime())
       }
-      val shown = inputMethodManager.showSoftInput(this, InputMethodManager.SHOW_FORCED)
-      if (!shown) {
-        inputMethodManager.toggleSoftInput(InputMethodManager.SHOW_FORCED, 0)
-      }
-      if (!shown) {
-        postDelayed(
-          {
-            if (hasFocus()) {
-              clearFocus()
-            }
-            requestFocus()
-            requestFocusFromTouch()
-            moveCaretToEnd()
-            inputMethodManager.restartInput(this)
-            inputMethodManager.viewClicked(this)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-              windowInsetsController?.show(WindowInsets.Type.ime())
-            }
-            val retriedShown =
-              inputMethodManager.showSoftInput(this, InputMethodManager.SHOW_FORCED)
-            if (!retriedShown) {
-              inputMethodManager.toggleSoftInput(InputMethodManager.SHOW_FORCED, 0)
-            }
-          },
-          80,
-        )
-      }
+      inputMethodManager.showSoftInput(this, InputMethodManager.SHOW_IMPLICIT)
     }
   }
 

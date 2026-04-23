@@ -8,6 +8,7 @@ import {
   TextInput,
   View,
 } from "react-native";
+import { APP_VERSION } from "../lib/app-metadata";
 import {
   DEFAULT_SERVER_URL,
   getSettingsValidationMessage,
@@ -55,6 +56,7 @@ function SettingsContent({
       auth.status === "offline-authenticated") &&
     Boolean(auth.session);
   const showFullSettings = mode === "full" && hasAuthenticatedSession;
+  const showSyncStatus = syncStatus.status !== "syncing";
   const canSaveServerUrl = !validationMessage && !savingServerUrl;
 
   const handleSaveServerUrl = async (): Promise<void> => {
@@ -116,17 +118,14 @@ function SettingsContent({
           <Text style={[styles.body, { color: palette.mutedText }]}>
             인증 상태: {auth.status}
           </Text>
-          <Text style={[styles.body, { color: palette.mutedText }]}>
-            동기화 상태: {syncStatus.status}
-          </Text>
+          {showSyncStatus ? (
+            <Text style={[styles.body, { color: palette.mutedText }]}>
+              동기화 상태: {syncStatus.status}
+            </Text>
+          ) : null}
           {auth.status === "offline-authenticated" ? (
             <Text style={[styles.infoText, { color: palette.warning }]}>
               오프라인 캐시로 사용 중입니다.
-            </Text>
-          ) : null}
-          {syncStatus.status === "syncing" ? (
-            <Text style={[styles.infoText, { color: palette.accent }]}>
-              저장된 캐시를 먼저 보여주고 최신 상태를 확인하는 중입니다.
             </Text>
           ) : null}
           {auth.errorMessage ? (
@@ -340,6 +339,23 @@ function SettingsContent({
           )}
         </View>
       ) : null}
+
+      <View
+        style={[
+          styles.section,
+          {
+            backgroundColor: palette.surface,
+            borderColor: palette.border,
+          },
+        ]}
+      >
+        <Text style={[styles.sectionTitle, { color: palette.text }]}>
+          App
+        </Text>
+        <Text style={[styles.body, { color: palette.mutedText }]}>
+          Version {APP_VERSION}
+        </Text>
+      </View>
     </ScrollView>
   );
 }
