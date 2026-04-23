@@ -401,16 +401,72 @@ describe("SessionScreen", () => {
     });
   });
 
-  it("toggles the iOS keyboard through TerminalInputView focus state", async () => {
+  it("does not render the native terminal input overlay on iOS", async () => {
     let tree: renderer.ReactTestRenderer;
     await act(async () => {
       tree = renderer.create(<SessionScreen />);
     });
 
-    let nativeInput = tree!.root.find(
+    const nativeInputs = tree!.root.findAll(
       (node) => (node.type as unknown) === "TerminalInputView",
     );
-    expect(nativeInput.props.focused).toBe(true);
+    expect(nativeInputs).toHaveLength(0);
+
+    await act(async () => {
+      tree!.unmount();
+    });
+  });
+
+  it("routes iOS terminal input directly from the xterm webview", async () => {
+    const writeToSession = jest.fn(async () => undefined);
+    act(() => {
+      useMobileAppStore.setState({
+        writeToSession,
+      });
+    });
+
+    let tree: renderer.ReactTestRenderer;
+    await act(async () => {
+      tree = renderer.create(<SessionScreen />);
+    });
+
+    await act(async () => {
+      (mockCapturedXtermProps?.onData as ((data: string) => void) | undefined)?.("ls");
+    });
+
+    expect(writeToSession).toHaveBeenLastCalledWith("session-1", "ls");
+    expect(mockNativeTerminalInputHandle!.focus).not.toHaveBeenCalled();
+    expect(mockNativeTerminalInputHandle!.blur).not.toHaveBeenCalled();
+
+    await act(async () => {
+      tree!.unmount();
+    });
+  });
+
+  it("toggles the iOS keyboard through terminal focus and blur only", async () => {
+    const dismissKeyboard = jest
+      .spyOn(Keyboard, "dismiss")
+      .mockImplementation(() => undefined);
+    let tree: renderer.ReactTestRenderer;
+    await act(async () => {
+      tree = renderer.create(<SessionScreen />);
+    });
+
+    mockTerminalHandle!.focus.mockClear();
+
+    const openKeyboardButton = tree!.root.findByProps({
+      accessibilityLabel: "키보드 열기",
+    });
+
+    await act(async () => {
+      openKeyboardButton.props.onPress();
+      jest.runOnlyPendingTimers();
+    });
+
+    expect(mockTerminalHandle!.focus).toHaveBeenCalled();
+    expect(mockNativeTerminalInputHandle!.focus).not.toHaveBeenCalled();
+
+    mockTerminalHandle!.blur.mockClear();
 
     await act(async () => {
       emitKeyboardEvent("keyboardDidShow", {
@@ -427,38 +483,23 @@ describe("SessionScreen", () => {
       jest.runOnlyPendingTimers();
     });
 
-    expect(mockNativeTerminalInputHandle!.blur).toHaveBeenCalled();
-    nativeInput = tree!.root.find((node) => (node.type as unknown) === "TerminalInputView");
-    expect(nativeInput.props.focused).toBe(false);
-
-    const openKeyboardButton = tree!.root.findByProps({
-      accessibilityLabel: "키보드 열기",
-    });
-
-    await act(async () => {
-      openKeyboardButton.props.onPress();
-      jest.runOnlyPendingTimers();
-    });
-
-    expect(mockNativeTerminalInputHandle!.focus).toHaveBeenCalled();
-    nativeInput = tree!.root.find((node) => (node.type as unknown) === "TerminalInputView");
-    expect(nativeInput.props.focused).toBe(true);
+    expect(mockTerminalHandle!.blur).toHaveBeenCalled();
+    expect(dismissKeyboard).toHaveBeenCalled();
+    expect(mockNativeTerminalInputHandle!.blur).not.toHaveBeenCalled();
 
     await act(async () => {
       tree!.unmount();
     });
   });
 
-  it("reopens the iOS keyboard after a system dismiss event", async () => {
+  it("does not try to reopen the iOS keyboard after a system dismiss event", async () => {
     let tree: renderer.ReactTestRenderer;
     await act(async () => {
       tree = renderer.create(<SessionScreen />);
+      jest.runOnlyPendingTimers();
     });
 
-    let nativeInput = tree!.root.find(
-      (node) => (node.type as unknown) === "TerminalInputView",
-    );
-    expect(nativeInput.props.focused).toBe(true);
+    mockTerminalHandle!.focus.mockClear();
 
     await act(async () => {
       emitKeyboardEvent("keyboardDidShow", {
@@ -467,27 +508,27 @@ describe("SessionScreen", () => {
       emitKeyboardEvent("keyboardDidHide");
     });
 
-    nativeInput = tree!.root.find((node) => (node.type as unknown) === "TerminalInputView");
-    expect(nativeInput.props.focused).toBe(false);
+    expect(mockTerminalHandle!.focus).not.toHaveBeenCalled();
+    expect(mockNativeTerminalInputHandle!.focus).not.toHaveBeenCalled();
 
     const openKeyboardButton = tree!.root.findByProps({
       accessibilityLabel: "키보드 열기",
     });
-
-    await act(async () => {
-      openKeyboardButton.props.onPress();
-      jest.runOnlyPendingTimers();
-    });
-
-    nativeInput = tree!.root.find((node) => (node.type as unknown) === "TerminalInputView");
-    expect(nativeInput.props.focused).toBe(true);
+    expect(openKeyboardButton).toBeDefined();
 
     await act(async () => {
       tree!.unmount();
     });
   });
 
-  it("keeps the manual open request alive when a late keyboard hide event arrives", async () => {
+  it("focuses the iOS terminal when switching tabs after a manual close", async () => {
+    const setActiveSessionTab = jest.fn();
+    act(() => {
+      useMobileAppStore.setState({
+        setActiveSessionTab,
+      });
+    });
+
     let tree: renderer.ReactTestRenderer;
     await act(async () => {
       tree = renderer.create(<SessionScreen />);
@@ -508,21 +549,76 @@ describe("SessionScreen", () => {
       jest.runOnlyPendingTimers();
     });
 
-    const openKeyboardButton = tree!.root.findByProps({
-      accessibilityLabel: "키보드 열기",
+    mockTerminalHandle!.focus.mockClear();
+
+    const secondTab = tree!.root.findByProps({
+      accessibilityLabel: "Docker-ubuntu Connecting 세션 탭",
     });
 
     await act(async () => {
-      openKeyboardButton.props.onPress();
-      emitKeyboardEvent("keyboardDidHide");
+      secondTab.props.onPress();
       jest.runOnlyPendingTimers();
     });
 
-    expect(mockNativeTerminalInputHandle!.focus).toHaveBeenCalled();
-    const nativeInput = tree!.root.find(
-      (node) => (node.type as unknown) === "TerminalInputView",
-    );
-    expect(nativeInput.props.focused).toBe(true);
+    expect(setActiveSessionTab).toHaveBeenCalledWith("session-2");
+    expect(mockTerminalHandle!.focus).toHaveBeenCalled();
+    expect(mockNativeTerminalInputHandle!.focus).not.toHaveBeenCalled();
+
+    await act(async () => {
+      tree!.unmount();
+    });
+  });
+
+  it("focuses the iOS terminal when retrying a failed session after a manual close", async () => {
+    const resumeSession = jest.fn(async () => "session-1");
+    act(() => {
+      useMobileAppStore.setState({
+        sessions: [
+          {
+            ...session,
+            status: "error",
+            errorMessage: "세션이 종료되었습니다.",
+          },
+          secondSession,
+        ],
+        resumeSession,
+      });
+    });
+
+    let tree: renderer.ReactTestRenderer;
+    await act(async () => {
+      tree = renderer.create(<SessionScreen />);
+    });
+
+    await act(async () => {
+      emitKeyboardEvent("keyboardDidShow", {
+        endCoordinates: { height: 280 },
+      });
+    });
+
+    const closeKeyboardButton = tree!.root.findByProps({
+      accessibilityLabel: "키보드 닫기",
+    });
+
+    await act(async () => {
+      closeKeyboardButton.props.onPress();
+      jest.runOnlyPendingTimers();
+    });
+
+    mockTerminalHandle!.focus.mockClear();
+
+    const reconnectButton = tree!.root.findByProps({
+      accessibilityLabel: "Synology 세션 재연결",
+    });
+
+    await act(async () => {
+      await reconnectButton.props.onPress();
+      jest.runOnlyPendingTimers();
+    });
+
+    expect(resumeSession).toHaveBeenCalledWith("session-1");
+    expect(mockTerminalHandle!.focus).toHaveBeenCalled();
+    expect(mockNativeTerminalInputHandle!.focus).not.toHaveBeenCalled();
 
     await act(async () => {
       tree!.unmount();
@@ -747,7 +843,8 @@ describe("SessionScreen", () => {
     });
   });
 
-  it("routes iOS native input view events through composed terminal diffs", async () => {
+  it("accepts Android hardware keyboard input from the xterm webview when the soft keyboard is closed", async () => {
+    setPlatformOs("android");
     const writeToSession = jest.fn(async () => undefined);
     act(() => {
       useMobileAppStore.setState({
@@ -758,46 +855,51 @@ describe("SessionScreen", () => {
     let tree: renderer.ReactTestRenderer;
     await act(async () => {
       tree = renderer.create(<SessionScreen />);
+      jest.runOnlyPendingTimers();
     });
 
-    const nativeInput = tree!.root.find(
-      (node) => (node.type as unknown) === "TerminalInputView",
-    );
+    await act(async () => {
+      (mockCapturedXtermProps?.onData as ((data: string) => void) | undefined)?.("ls");
+    });
+
+    expect(writeToSession).toHaveBeenLastCalledWith("session-1", "ls");
 
     await act(async () => {
-      nativeInput.props.onTerminalInput({
-        nativeEvent: {
-          kind: "text-delta",
-          deleteCount: 0,
-          insertText: "가",
-        },
+      tree!.unmount();
+    });
+  });
+
+  it("ignores Android xterm webview input while the soft keyboard is open", async () => {
+    setPlatformOs("android");
+    const writeToSession = jest.fn(async () => undefined);
+    act(() => {
+      useMobileAppStore.setState({
+        writeToSession,
       });
     });
 
-    expect(writeToSession).toHaveBeenLastCalledWith("session-1", "가");
-
+    let tree: renderer.ReactTestRenderer;
     await act(async () => {
-      nativeInput.props.onTerminalInput({
-        nativeEvent: {
-          kind: "text-delta",
-          deleteCount: 1,
-          insertText: "간",
-        },
-      });
+      tree = renderer.create(<SessionScreen />);
+      jest.runOnlyPendingTimers();
     });
 
-    expect(writeToSession).toHaveBeenLastCalledWith("session-1", "\u007f간");
-
-    await act(async () => {
-      nativeInput.props.onTerminalInput({
-        nativeEvent: {
-          kind: "special-key",
-          key: "enter",
-        },
-      });
+    const openKeyboardButton = tree!.root.findByProps({
+      accessibilityLabel: "키보드 열기",
     });
 
-    expect(writeToSession).toHaveBeenLastCalledWith("session-1", "\r");
+    await act(async () => {
+      openKeyboardButton.props.onPress();
+      jest.runOnlyPendingTimers();
+    });
+
+    writeToSession.mockClear();
+
+    await act(async () => {
+      (mockCapturedXtermProps?.onData as ((data: string) => void) | undefined)?.("pwd");
+    });
+
+    expect(writeToSession).not.toHaveBeenCalled();
 
     await act(async () => {
       tree!.unmount();
