@@ -102,22 +102,19 @@ export function SessionScreen(): React.JSX.Element {
   const [nativeInputFocusToken, setNativeInputFocusToken] = useState(0);
   const [nativeInputClearToken, setNativeInputClearToken] = useState(0);
   const [inputFocused, setInputFocused] = useState(true);
-  const [keyboardRequestedVisible, setKeyboardRequestedVisible] = useState(
-    Platform.OS === "ios",
-  );
+  const [keyboardRequestedVisible, setKeyboardRequestedVisible] = useState(false);
   const [keyboardVisible, setKeyboardVisible] = useState(false);
   const [keyboardInset, setKeyboardInset] = useState(0);
   const [showMoreShortcuts, setShowMoreShortcuts] = useState(false);
   const [toolbarHeight, setToolbarHeight] = useState(56);
   const isAndroid = Platform.OS === "android";
-  const useTerminalInputOverlay = Platform.OS === "ios" || isAndroid;
+  const useTerminalInputOverlay = isAndroid;
   const keyboardClosedViewportHeightRef = useRef(height);
   const terminalViewportSizeRef = useRef<{
     width: number;
     height: number;
   } | null>(null);
   const restoredConnectedSnapshotSessionIdRef = useRef<string | null>(null);
-  const ignoreKeyboardHideUntilRef = useRef(0);
   const previousActiveSessionRef = useRef<{
     id: string | null;
     status: string | null;
@@ -175,6 +172,7 @@ export function SessionScreen(): React.JSX.Element {
   const keyboardToggleActive = isAndroid
     ? keyboardVisible || keyboardRequestedVisible
     : keyboardVisible;
+  const allowDirectTerminalInput = !isAndroid || !keyboardRequestedVisible;
   const toolbarKeyboardInset = getKeyboardDockInset({
     keyboardVisible,
     keyboardInset:
@@ -197,43 +195,68 @@ export function SessionScreen(): React.JSX.Element {
     terminalRef.current?.fit();
   }, [terminalReady]);
 
+  const focusTerminal = useCallback(() => {
+    requestAnimationFrame(() => {
+      terminalRef.current?.focus();
+    });
+  }, []);
+
+  const blurTerminal = useCallback(() => {
+    requestAnimationFrame(() => {
+      terminalRef.current?.blur();
+    });
+  }, []);
+
   const focusRequestedTerminalInput = useCallback(
     (force = false) => {
+      if (!useTerminalInputOverlay) {
+        focusTerminal();
+        return;
+      }
+
       if (!force && !inputFocused) {
         return;
       }
 
       requestAnimationFrame(() => {
-        if (useTerminalInputOverlay) {
-          if (isAndroid && !force) {
-            return;
-          }
-          if (force) {
-            setNativeInputFocusToken((value) => value + 1);
-          }
-          nativeTerminalInputRef.current?.focus();
+        if (isAndroid && !force) {
           return;
         }
-        if (!terminalReady) {
-          return;
+        if (force) {
+          setNativeInputFocusToken((value) => value + 1);
         }
-        terminalRef.current?.focus();
+        nativeTerminalInputRef.current?.focus();
       });
     },
-    [inputFocused, isAndroid, terminalReady, useTerminalInputOverlay],
+    [focusTerminal, inputFocused, isAndroid, useTerminalInputOverlay],
   );
 
-  const openKeyboard = useCallback(() => {
-    if (!isAndroid) {
-      ignoreKeyboardHideUntilRef.current = Date.now() + 300;
+  useEffect(() => {
+    if (!isAndroid || !useTerminalInputOverlay || !terminalReady || !activeSession) {
+      return;
     }
-    setInputFocused(true);
-    setKeyboardRequestedVisible(true);
+
     focusRequestedTerminalInput(true);
-  }, [focusRequestedTerminalInput, isAndroid]);
+  }, [
+    activeSession,
+    focusRequestedTerminalInput,
+    isAndroid,
+    terminalReady,
+    useTerminalInputOverlay,
+  ]);
+
+  const openKeyboard = useCallback(() => {
+    if (isAndroid) {
+      setInputFocused(true);
+      setKeyboardRequestedVisible(true);
+      focusRequestedTerminalInput(true);
+      return;
+    }
+
+    focusTerminal();
+  }, [focusRequestedTerminalInput, focusTerminal, isAndroid]);
 
   const closeKeyboard = useCallback(() => {
-    ignoreKeyboardHideUntilRef.current = 0;
     setKeyboardVisible(false);
     setKeyboardInset(0);
     if (isAndroid) {
@@ -243,20 +266,12 @@ export function SessionScreen(): React.JSX.Element {
       return;
     }
 
-    setInputFocused(false);
-    setKeyboardRequestedVisible(false);
-    if (useTerminalInputOverlay) {
-      nativeTerminalInputRef.current?.blur();
-      return;
-    }
-
-    requestAnimationFrame(() => {
-      terminalRef.current?.blur();
-    });
+    Keyboard.dismiss();
+    blurTerminal();
   }, [
+    blurTerminal,
     focusRequestedTerminalInput,
     isAndroid,
-    useTerminalInputOverlay,
   ]);
 
   const toggleKeyboard = useCallback(() => {
@@ -272,16 +287,15 @@ export function SessionScreen(): React.JSX.Element {
     const syncKeyboardShown = (event?: { endCoordinates?: { height?: number } }) => {
       setKeyboardVisible(true);
       setKeyboardInset(event?.endCoordinates?.height ?? 0);
-      setInputFocused(true);
-      setKeyboardRequestedVisible(true);
+      if (isAndroid) {
+        setInputFocused(true);
+        setKeyboardRequestedVisible(true);
+      }
     };
     const syncKeyboardHidden = () => {
       setKeyboardVisible(false);
       setKeyboardInset(0);
-      if (Date.now() > ignoreKeyboardHideUntilRef.current) {
-        if (!isAndroid) {
-          setInputFocused(false);
-        }
+      if (isAndroid) {
         setKeyboardRequestedVisible(false);
       }
     };
@@ -331,21 +345,14 @@ export function SessionScreen(): React.JSX.Element {
       return;
     }
 
-    setInputFocused(true);
     if (isAndroid) {
+      setInputFocused(true);
       focusRequestedTerminalInput(true);
       return;
     }
 
-    setKeyboardRequestedVisible(true);
-    const timer = setTimeout(() => {
-      openKeyboard();
-    }, 120);
-
-    return () => {
-      clearTimeout(timer);
-    };
-  }, [activeSession, focusRequestedTerminalInput, isAndroid, openKeyboard]);
+    focusTerminal();
+  }, [activeSession, focusRequestedTerminalInput, focusTerminal, isAndroid]);
 
   useEffect(() => {
     if (!terminalReady || !activeSession || activeSession.status === "connected") {
@@ -411,7 +418,11 @@ export function SessionScreen(): React.JSX.Element {
         if (chunks.length > 0) {
           terminal.writeMany(chunks);
         }
-        focusRequestedTerminalInput(isAndroid);
+        if (isAndroid) {
+          focusRequestedTerminalInput(true);
+          return;
+        }
+        focusTerminal();
       },
       onData: (chunk) => {
         terminal.write(chunk);
@@ -426,6 +437,7 @@ export function SessionScreen(): React.JSX.Element {
     isAndroid,
     subscribeToSessionTerminal,
     terminalReady,
+    focusTerminal,
     focusRequestedTerminalInput,
   ]);
 
@@ -438,17 +450,17 @@ export function SessionScreen(): React.JSX.Element {
       return;
     }
 
-    focusRequestedTerminalInput();
+    focusTerminal();
   }, [
     activeSession?.id,
     activeSession?.status,
-    focusRequestedTerminalInput,
+    focusTerminal,
     terminalReady,
     useTerminalInputOverlay,
   ]);
 
   const resetNativeInputBuffer = () => {
-    if (!useTerminalInputOverlay) {
+    if (!isAndroid) {
       return;
     }
     setNativeInputClearToken((value) => value + 1);
@@ -476,7 +488,7 @@ export function SessionScreen(): React.JSX.Element {
       focusRequestedTerminalInput(true);
       return;
     }
-    openKeyboard();
+    focusTerminal();
   };
 
   if (!activeSession) {
@@ -543,7 +555,7 @@ export function SessionScreen(): React.JSX.Element {
                     focusRequestedTerminalInput(true);
                     return;
                   }
-                  openKeyboard();
+                  focusTerminal();
                 }}
                 style={[
                   styles.sessionTab,
@@ -626,7 +638,7 @@ export function SessionScreen(): React.JSX.Element {
                 focusRequestedTerminalInput(true);
                 return;
               }
-              openKeyboard();
+              focusTerminal();
             }}
             style={[
               styles.inlineBannerButton,
@@ -692,7 +704,7 @@ export function SessionScreen(): React.JSX.Element {
             }}
             onInitialized={() => setTerminalReady(true)}
             onData={(data) => {
-              if (useTerminalInputOverlay) {
+              if (!allowDirectTerminalInput) {
                 return;
               }
               sendSessionInput(data);
@@ -739,9 +751,6 @@ export function SessionScreen(): React.JSX.Element {
                   sendTranslatedInput(event.nativeEvent);
                   if (event.nativeEvent.kind === "special-key") {
                     resetNativeInputBuffer();
-                  }
-                  if (!isAndroid) {
-                    focusRequestedTerminalInput(true);
                   }
                 }}
                 style={styles.nativeTerminalInput}
