@@ -117,21 +117,15 @@ func writeFakeAWSCLI(t *testing.T) string {
 cmd1="$1"
 cmd2="$2"
 if [ "$cmd1" = "sso-oidc" ] && [ "$cmd2" = "register-client" ]; then
-  cat <<'JSON'
-{"clientId":"client-1","clientSecret":"secret-1"}
-JSON
+  echo '{"clientId":"client-1","clientSecret":"secret-1"}'
   exit 0
 fi
 if [ "$cmd1" = "sso-oidc" ] && [ "$cmd2" = "create-token" ]; then
-  cat <<'JSON'
-{"accessToken":"access-token-1","refreshToken":"refresh-token-1","expiresIn":3600}
-JSON
+  echo '{"accessToken":"access-token-1","refreshToken":"refresh-token-1","expiresIn":3600}'
   exit 0
 fi
 if [ "$cmd1" = "sso" ] && [ "$cmd2" = "get-role-credentials" ]; then
-  cat <<'JSON'
-{"roleCredentials":{"accessKeyId":"AKIASSO","secretAccessKey":"sso-secret","sessionToken":"sso-token","expiration":4102444800000}}
-JSON
+  echo '{"roleCredentials":{"accessKeyId":"AKIASSO","secretAccessKey":"sso-secret","sessionToken":"sso-token","expiration":4102444800000}}'
   exit 0
 fi
 echo "unexpected command: $*" >&2
