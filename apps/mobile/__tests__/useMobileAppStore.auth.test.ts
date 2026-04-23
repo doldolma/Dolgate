@@ -59,6 +59,14 @@ const keychainMock = jest.requireMock("react-native-keychain") as {
   setGenericPassword: jest.Mock;
   resetGenericPassword: jest.Mock;
 };
+const asyncStorageMock = jest.requireMock(
+  "@react-native-async-storage/async-storage",
+) as {
+  getItem: jest.Mock;
+  setItem: jest.Mock;
+  removeItem: jest.Mock;
+  clear: jest.Mock;
+};
 
 function createAuthSession(
   overrides?: Partial<AuthSession>,
@@ -245,6 +253,7 @@ describe("useMobileAppStore auth and sync flows", () => {
     resetMobileStoreRuntimeForTests();
     fetchMock.mockReset();
     jest.clearAllMocks();
+    asyncStorageMock.setItem.mockClear();
     keychainMock.getGenericPassword.mockResolvedValue(null);
     keychainMock.setGenericPassword.mockResolvedValue(true);
     keychainMock.resetGenericPassword.mockResolvedValue(true);
@@ -457,7 +466,7 @@ describe("useMobileAppStore auth and sync flows", () => {
       .toEqual(["/api/info", "/sync", "/auth/refresh", "/sync"]);
   });
 
-  it("resolves startup auth gating without waiting for sync to finish", async () => {
+  it("resolves startup auth gating without waiting for refresh to finish", async () => {
     const storedSession = createAuthSession({
       offlineLease: {
         token: "offline-token",
@@ -474,35 +483,68 @@ describe("useMobileAppStore auth and sync flows", () => {
         expiresInSeconds: 900,
       },
     });
-
-    mockStoredCredentials({
-      session: storedSession,
-      secretsByRef: {
-        "secret-1": {
-          secretRef: "secret-1",
-          label: "Stored SSH secret",
-          password: "super-secret",
-          updatedAt: "2026-04-13T00:00:00.000Z",
-        },
+    const storedSecrets = {
+      "secret-1": {
+        secretRef: "secret-1",
+        label: "Stored SSH secret",
+        password: "super-secret",
+        updatedAt: "2026-04-13T00:00:00.000Z",
       },
-      awsProfiles: [
-        {
-          id: "profile-prod",
-          name: "prod",
-          kind: "static",
-          region: "ap-northeast-2",
-          accessKeyId: "AKIAPROD",
-          secretAccessKey: "prod-secret",
-          updatedAt: "2026-04-13T00:00:00.000Z",
-        },
-      ],
-    });
+    } satisfies Record<string, LoadedManagedSecretPayload>;
+    const storedAwsProfiles: ManagedAwsProfilePayload[] = [
+      {
+        id: "profile-prod",
+        name: "prod",
+        kind: "static",
+        region: "ap-northeast-2",
+        accessKeyId: "AKIAPROD",
+        secretAccessKey: "prod-secret",
+        updatedAt: "2026-04-13T00:00:00.000Z",
+      },
+    ];
+    let resolveStoredSecrets: (
+      value: {
+        username: string;
+        password: string;
+      } | null,
+    ) => void = () => undefined;
+    let resolveStoredAwsProfiles: (
+      value: {
+        username: string;
+        password: string;
+      } | null,
+    ) => void = () => undefined;
+
+    keychainMock.getGenericPassword.mockImplementation(
+      async ({ service }: { service: string }) => {
+        if (service === "dolgate.mobile.auth-session") {
+          return {
+            username: "dolgate",
+            password: JSON.stringify(storedSession),
+          };
+        }
+        if (service === "dolgate.mobile.managed-secrets") {
+          return await new Promise((resolve) => {
+            resolveStoredSecrets = resolve;
+          });
+        }
+        if (service === "dolgate.mobile.managed-aws-profiles") {
+          return await new Promise((resolve) => {
+            resolveStoredAwsProfiles = resolve;
+          });
+        }
+        return null;
+      },
+    );
+    let resolveRefresh: ((response: Response) => void) | null = null;
     let resolveSyncSnapshot: ((response: Response) => void) | null = null;
 
     fetchMock.mockImplementation(async (input) => {
       const path = new URL(String(input)).pathname;
       if (path === "/auth/refresh") {
-        return createJsonResponse(refreshedSession);
+        return await new Promise<Response>((resolve) => {
+          resolveRefresh = resolve;
+        });
       }
       if (path === "/api/info") {
         return createJsonResponse({
@@ -536,13 +578,42 @@ describe("useMobileAppStore auth and sync flows", () => {
 
     const state = useMobileAppStore.getState();
     expect(state.auth.status).toBe("authenticated");
-    expect(state.auth.session?.tokens.accessToken).toBe("fresh-access-token");
+    expect(state.auth.session?.tokens.accessToken).toBe("access-token");
     expect(state.authGateResolved).toBe(true);
-    expect(state.secureStateReady).toBe(true);
+    expect(state.secureStateReady).toBe(false);
     expect(state.syncStatus.status).toBe("syncing");
-    expect(state.awsProfiles[0]?.name).toBe("prod");
-    expect(state.secretsByRef["secret-1"]?.password).toBe("super-secret");
+    expect(state.awsProfiles).toEqual([]);
+    expect(state.secretsByRef).toEqual({});
     expect(RnRussh.uniffiInitAsync).not.toHaveBeenCalled();
+    expect(fetchMock.mock.calls.map(([input]) => new URL(String(input)).pathname))
+      .toEqual(["/auth/refresh"]);
+
+    await act(async () => {
+      resolveStoredSecrets({
+        username: "dolgate",
+        password: JSON.stringify(storedSecrets),
+      });
+      resolveStoredAwsProfiles({
+        username: "dolgate",
+        password: JSON.stringify(storedAwsProfiles),
+      });
+      await flushAsyncWorkDeep();
+    });
+
+    expect(useMobileAppStore.getState().secureStateReady).toBe(true);
+    expect(useMobileAppStore.getState().awsProfiles[0]?.name).toBe("prod");
+    expect(
+      useMobileAppStore.getState().secretsByRef["secret-1"]?.password,
+    ).toBe("super-secret");
+
+    await act(async () => {
+      resolveRefresh?.(createJsonResponse(refreshedSession));
+      await flushAsyncWorkDeep();
+    });
+
+    expect(useMobileAppStore.getState().auth.session?.tokens.accessToken).toBe(
+      "fresh-access-token",
+    );
     expect(fetchMock.mock.calls.map(([input]) => new URL(String(input)).pathname))
       .toEqual(["/auth/refresh", "/api/info", "/sync"]);
 
@@ -550,6 +621,41 @@ describe("useMobileAppStore auth and sync flows", () => {
       resolveSyncSnapshot?.(createJsonResponse(buildEmptySyncPayload()));
       await flushAsyncWork();
     });
+  });
+
+  it("blocks host connections until secure state restore finishes", async () => {
+    const host: SshHostRecord = {
+      id: "host-1",
+      kind: "ssh",
+      label: "Delayed SSH",
+      hostname: "host.example.com",
+      port: 22,
+      username: "deploy",
+      authType: "password",
+      secretRef: null,
+      createdAt: "2026-04-13T00:00:00.000Z",
+      updatedAt: "2026-04-13T00:00:00.000Z",
+    };
+
+    await act(async () => {
+      resetStore({
+        auth: createAuthenticatedState(),
+        secureStateReady: false,
+        hosts: [host],
+      });
+    });
+
+    let sessionId: string | null = "placeholder";
+    await act(async () => {
+      sessionId = await useMobileAppStore.getState().connectToHost(host.id);
+      await flushAsyncWork();
+    });
+
+    expect(sessionId).toBeNull();
+    expect(useMobileAppStore.getState().sessions).toHaveLength(0);
+    expect(useMobileAppStore.getState().syncStatus.errorMessage).toContain(
+      "저장된 보안 정보를 복구하는 중입니다.",
+    );
   });
 
   it("falls back to offline mode when startup refresh times out and the offline lease is still valid", async () => {
@@ -590,16 +696,24 @@ describe("useMobileAppStore auth and sync flows", () => {
           authGateResolved: false,
           secureStateReady: false,
         });
-        const initializePromise = useMobileAppStore.getState().initializeApp();
-        await jest.advanceTimersByTimeAsync(3_000);
-        await initializePromise;
+        await useMobileAppStore.getState().initializeApp();
+        await flushAsyncWork();
       });
 
-      const state = useMobileAppStore.getState();
-      expect(state.auth.status).toBe("offline-authenticated");
+      let state = useMobileAppStore.getState();
+      expect(state.auth.status).toBe("authenticated");
       expect(state.auth.session?.tokens.accessToken).toBe("access-token");
       expect(state.authGateResolved).toBe(true);
       expect(state.secureStateReady).toBe(true);
+      expect(state.syncStatus.status).toBe("syncing");
+
+      await act(async () => {
+        await jest.advanceTimersByTimeAsync(3_000);
+        await flushAsyncWorkDeep();
+      });
+
+      state = useMobileAppStore.getState();
+      expect(state.auth.status).toBe("offline-authenticated");
       expect(state.syncStatus.status).toBe("paused");
       expect(state.syncStatus.errorMessage).toContain("지연");
     } finally {
@@ -674,9 +788,14 @@ describe("useMobileAppStore auth and sync flows", () => {
           authGateResolved: false,
           secureStateReady: false,
         });
-        const initializePromise = useMobileAppStore.getState().initializeApp();
+        await useMobileAppStore.getState().initializeApp();
+        await flushAsyncWork();
+      });
+
+      expect(useMobileAppStore.getState().auth.status).toBe("authenticated");
+
+      await act(async () => {
         await jest.advanceTimersByTimeAsync(3_000);
-        await initializePromise;
         await flushAsyncWorkDeep();
       });
 
@@ -762,9 +881,14 @@ describe("useMobileAppStore auth and sync flows", () => {
           authGateResolved: false,
           secureStateReady: false,
         });
-        const initializePromise = useMobileAppStore.getState().initializeApp();
+        await useMobileAppStore.getState().initializeApp();
+        await flushAsyncWork();
+      });
+
+      expect(useMobileAppStore.getState().auth.status).toBe("authenticated");
+
+      await act(async () => {
         await jest.advanceTimersByTimeAsync(3_000);
-        await initializePromise;
         await flushAsyncWorkDeep();
       });
 
@@ -975,6 +1099,55 @@ describe("useMobileAppStore auth and sync flows", () => {
     expect(state.secretsByRef).toEqual({});
     expect(state.sessions).toHaveLength(0);
     expect(keychainMock.resetGenericPassword).toHaveBeenCalled();
+  });
+
+  it("persists lightweight startup cache without secret metadata or terminal snapshots", async () => {
+    await act(async () => {
+      resetStore({
+        secretMetadata: [
+          {
+            secretRef: "secret-1",
+            label: "Stored SSH secret",
+            hasPassword: true,
+            hasManagedPrivateKey: false,
+            hasPassphrase: false,
+            hasCertificate: false,
+            linkedHostCount: 1,
+            updatedAt: "2026-04-13T00:00:00.000Z",
+          },
+        ],
+        sessions: [
+          {
+            id: "session-1",
+            sessionId: "session-1",
+            hostId: "host-1",
+            title: "Persisted Session",
+            status: "closed",
+            hasReceivedOutput: true,
+            isRestorable: true,
+            lastViewportSnapshot: "user@host:~$ prompt",
+            lastEventAt: "2026-04-13T00:00:00.000Z",
+            lastConnectedAt: "2026-04-13T00:00:00.000Z",
+            lastDisconnectedAt: "2026-04-13T00:00:00.000Z",
+            errorMessage: null,
+          },
+        ],
+      });
+      await flushAsyncWorkDeep();
+    });
+
+    const lastPersistCall = asyncStorageMock.setItem.mock.calls.at(-1);
+    expect(lastPersistCall).toBeDefined();
+
+    const persistedPayload = JSON.parse(lastPersistCall?.[1] as string) as {
+      state: {
+        secretMetadata?: unknown;
+        sessions: Array<{ lastViewportSnapshot: string }>;
+      };
+    };
+
+    expect(persistedPayload.state.secretMetadata).toBeUndefined();
+    expect(persistedPayload.state.sessions[0]?.lastViewportSnapshot).toBe("");
   });
 
   it("hydrates groups from sync payloads and keeps them sorted by path", async () => {

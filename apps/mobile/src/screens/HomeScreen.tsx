@@ -266,14 +266,6 @@ export function HomeScreen(): React.JSX.Element {
       };
     }
 
-    if (syncStatus.status === "syncing") {
-      return {
-        title: "서버 내용을 확인하고 있습니다.",
-        body: "저장된 목록은 바로 볼 수 있고, 최신 변경사항은 곧 반영됩니다.",
-        borderColor: palette.accent,
-      };
-    }
-
     if (syncStatus.status === "error" && syncStatus.errorMessage) {
       return {
         title: "최신 상태를 아직 확인하지 못했습니다.",
@@ -283,7 +275,7 @@ export function HomeScreen(): React.JSX.Element {
     }
 
     return null;
-  }, [auth.status, palette.accent, palette.danger, palette.warning, syncStatus]);
+  }, [auth.status, palette.danger, palette.warning, syncStatus]);
 
   const getSearchGroupMeta = (host: HostRecord): string | null => {
     const groupPath = normalizeGroupPath(host.groupName);

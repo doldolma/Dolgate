@@ -316,7 +316,6 @@ describe("SessionScreen", () => {
     expect(text).not.toContain("세션 뒤로가기");
     expect(text).not.toContain("세션 메뉴 열기");
     expect(mockCapturedXtermProps).not.toBeNull();
-    expect(mockCapturedXtermProps?.autoFit).toBe(false);
     expect(mockCapturedXtermProps?.webViewOptions).toMatchObject({
       hideKeyboardAccessoryView: true,
     });
@@ -583,6 +582,47 @@ describe("SessionScreen", () => {
     });
   });
 
+  it("fits the terminal to the measured terminal viewport", async () => {
+    let tree: renderer.ReactTestRenderer;
+    await act(async () => {
+      tree = renderer.create(<SessionScreen />);
+    });
+
+    const terminalCard = tree!.root.findByProps({
+      testID: "session-terminal-card",
+    });
+
+    await act(async () => {
+      terminalCard.props.onLayout({
+        nativeEvent: {
+          layout: {
+            width: 360,
+            height: 240,
+          },
+        },
+      });
+    });
+
+    expect(mockTerminalHandle!.fit).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      terminalCard.props.onLayout({
+        nativeEvent: {
+          layout: {
+            width: 360,
+            height: 180,
+          },
+        },
+      });
+    });
+
+    expect(mockTerminalHandle!.fit).toHaveBeenCalledTimes(2);
+
+    await act(async () => {
+      tree!.unmount();
+    });
+  });
+
   it("disconnects the tab when tapping the tab close button", async () => {
     const disconnectSession = jest.fn(async () => undefined);
     act(() => {
@@ -764,8 +804,46 @@ describe("SessionScreen", () => {
     });
   });
 
-  it("keeps Android terminal taps in hardware-focus mode without opening the soft keyboard", async () => {
+  it("refocuses the Android input overlay when the terminal is touched", async () => {
     setPlatformOs("android");
+    let tree: renderer.ReactTestRenderer;
+    await act(async () => {
+      tree = renderer.create(<SessionScreen />);
+      jest.runOnlyPendingTimers();
+    });
+
+    const terminalCard = tree!.root.findByProps({ testID: "session-terminal-card" });
+    expect(typeof terminalCard.props.onTouchEnd).toBe("function");
+
+    const initialFocusCalls = mockNativeTerminalInputHandle!.focus.mock.calls.length;
+
+    await act(async () => {
+      terminalCard.props.onTouchEnd();
+      jest.runOnlyPendingTimers();
+    });
+
+    const nativeInput = tree!.root.find(
+      (node) => (node.type as unknown) === "TerminalInputView",
+    );
+    expect(nativeInput.props.softKeyboardEnabled).toBe(false);
+    expect(mockNativeTerminalInputHandle!.focus.mock.calls.length).toBeGreaterThan(
+      initialFocusCalls,
+    );
+
+    await act(async () => {
+      tree!.unmount();
+    });
+  });
+
+  it("does not refocus the Android input overlay after each typed event", async () => {
+    setPlatformOs("android");
+    const writeToSession = jest.fn(async () => undefined);
+    act(() => {
+      useMobileAppStore.setState({
+        writeToSession,
+      });
+    });
+
     let tree: renderer.ReactTestRenderer;
     await act(async () => {
       tree = renderer.create(<SessionScreen />);
@@ -779,18 +857,19 @@ describe("SessionScreen", () => {
     expect(nativeInput.props.softKeyboardEnabled).toBe(false);
 
     const initialFocusCalls = mockNativeTerminalInputHandle!.focus.mock.calls.length;
-    const terminalCard = tree!.root.findByProps({ testID: "session-terminal-card" });
 
     await act(async () => {
-      terminalCard.props.onTouchEnd();
-      jest.runOnlyPendingTimers();
+      nativeInput.props.onTerminalInput({
+        nativeEvent: {
+          kind: "text-delta",
+          deleteCount: 0,
+          insertText: "a",
+        },
+      });
     });
 
-    const updatedNativeInput = tree!.root.find(
-      (node) => (node.type as unknown) === "TerminalInputView",
-    );
-    expect(updatedNativeInput.props.softKeyboardEnabled).toBe(false);
-    expect(mockNativeTerminalInputHandle!.focus.mock.calls.length).toBeGreaterThan(
+    expect(writeToSession).toHaveBeenLastCalledWith("session-1", "a");
+    expect(mockNativeTerminalInputHandle!.focus.mock.calls.length).toBe(
       initialFocusCalls,
     );
     expect(mockNativeTerminalInputHandle!.blur).not.toHaveBeenCalled();

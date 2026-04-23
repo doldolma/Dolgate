@@ -1,6 +1,8 @@
 import React from "react";
 import renderer, { act } from "react-test-renderer";
 import { TextInput } from "react-native";
+import type { AuthState } from "@dolssh/shared-core";
+import { APP_VERSION } from "../src/lib/app-metadata";
 import {
   createDefaultMobileSettings,
   createDefaultSyncStatus,
@@ -99,6 +101,35 @@ function resetStore(): void {
   });
 }
 
+function createAuthenticatedState(): AuthState {
+  return {
+    status: "authenticated",
+    session: {
+      user: {
+        id: "user-1",
+        email: "mobile@example.com",
+      },
+      tokens: {
+        accessToken: "access-token",
+        refreshToken: "refresh-token",
+        expiresInSeconds: 900,
+      },
+      vaultBootstrap: {
+        keyBase64: "a2V5",
+      },
+      offlineLease: {
+        token: "offline-token",
+        issuedAt: new Date().toISOString(),
+        expiresAt: new Date(Date.now() + 60_000).toISOString(),
+        verificationPublicKeyPem: "public-key",
+      },
+      syncServerTime: new Date().toISOString(),
+    },
+    offline: null,
+    errorMessage: null,
+  };
+}
+
 describe("SettingsScreen server save navigation", () => {
   beforeEach(() => {
     mockGoBack.mockReset();
@@ -158,6 +189,32 @@ describe("SettingsScreen server save navigation", () => {
       "https://ssh.full-settings.com",
     );
     expect(mockGoBack).not.toHaveBeenCalled();
+
+    await act(async () => {
+      tree!.unmount();
+    });
+  });
+
+  it("shows the app version and hides startup syncing-only copy", async () => {
+    useMobileAppStore.setState({
+      auth: createAuthenticatedState(),
+      syncStatus: {
+        ...createDefaultSyncStatus(),
+        status: "syncing",
+      },
+    });
+
+    let tree: renderer.ReactTestRenderer;
+    await act(async () => {
+      tree = renderer.create(<SettingsScreen />);
+    });
+
+    const text = collectText(tree!.root);
+    expect(text).toContain(`Version ${APP_VERSION}`);
+    expect(text).not.toContain("동기화 상태: syncing");
+    expect(text).not.toContain(
+      "저장된 캐시를 먼저 보여주고 최신 상태를 확인하는 중입니다.",
+    );
 
     await act(async () => {
       tree!.unmount();

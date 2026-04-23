@@ -6,8 +6,10 @@ export interface TerminalGridSize {
 }
 
 const MOBILE_TERMINAL_RESERVED_HEIGHT = 176;
-const TERMINAL_CELL_WIDTH = 8;
-const TERMINAL_CELL_HEIGHT = 18;
+// Tuned against the mobile xterm render metrics so the terminal fills the card
+// more closely on real Android devices without clipping under the keyboard.
+const TERMINAL_CELL_WIDTH = 7.2;
+const TERMINAL_CELL_HEIGHT = 16.4;
 
 export function estimateTerminalGridSize(
   width: number,
