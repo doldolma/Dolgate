@@ -172,4 +172,24 @@ jobs:
         run: npm run mobile:russh:regenerate -- --platform android
 
       - name: Verify generated artifacts are committed
-        run: git diff --exit-code
+        shell: bash
+        run: |
+          # Android static archives are not byte-for-byte stable across host
+          # toolchains, and generated C++ formatting depends on whether
+          # clang-format is installed on the runner. The JS/type outputs are
+          # deterministic and carry the UniFFI contract, so use them as the
+          # freshness gate here while release builds still regenerate native
+          # artifacts on the runner.
+          git diff --exit-code -- \
+            packages/fressh-react-native-uniffi-russh/src/generated \
+            packages/fressh-react-native-uniffi-russh/lib/module \
+            packages/fressh-react-native-uniffi-russh/lib/typescript
+
+          if ! git diff --quiet -- \
+            packages/fressh-react-native-uniffi-russh/cpp/generated \
+            packages/fressh-react-native-uniffi-russh/android/src/main/jniLibs; then
+            echo "::notice::Native binary/C++ outputs changed after regeneration; ignored because they are runner-toolchain dependent."
+            git diff --name-only -- \
+              packages/fressh-react-native-uniffi-russh/cpp/generated \
+              packages/fressh-react-native-uniffi-russh/android/src/main/jniLibs
+          fi

@@ -157,6 +157,65 @@ function stripGeneratedWhitespace() {
   ].forEach(stripTrailingWhitespace);
 }
 
+function toPosixPath(filePath) {
+  return filePath.split(path.sep).join(path.posix.sep);
+}
+
+function isInsideDirectory(parentDir, filePath) {
+  const relative = path.relative(parentDir, filePath);
+  return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
+}
+
+function normalizeSourceMapFile(filePath) {
+  const sourceMap = JSON.parse(fs.readFileSync(filePath, "utf8"));
+  if (!Array.isArray(sourceMap.sources)) {
+    return;
+  }
+
+  const packageSourceMarker = `/${path.basename(packageRoot)}/`;
+  const sourceMapDir = path.dirname(filePath);
+  sourceMap.sources = sourceMap.sources.map((source) => {
+    if (typeof source !== "string" || source.includes("://")) {
+      return source;
+    }
+
+    const normalizedSource = source.split(path.win32.sep).join(path.posix.sep);
+    const packageMarkerIndex = normalizedSource.lastIndexOf(packageSourceMarker);
+    const resolvedSource =
+      packageMarkerIndex === -1
+        ? path.resolve(sourceMapDir, source)
+        : path.join(
+            packageRoot,
+            ...normalizedSource
+              .slice(packageMarkerIndex + packageSourceMarker.length)
+              .split(path.posix.sep),
+          );
+    if (!isInsideDirectory(packageRoot, resolvedSource)) {
+      return source;
+    }
+
+    return toPosixPath(path.relative(sourceMapDir, resolvedSource));
+  });
+
+  fs.writeFileSync(filePath, JSON.stringify(sourceMap));
+}
+
+function normalizeSourceMaps(dir) {
+  if (!fs.existsSync(dir)) {
+    return;
+  }
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    const fullPath = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      normalizeSourceMaps(fullPath);
+      continue;
+    }
+    if (entry.isFile() && entry.name.endsWith(".map")) {
+      normalizeSourceMapFile(fullPath);
+    }
+  }
+}
+
 function addJsExtensionToRelativeImports(content) {
   return content.replace(
     /((?:from|import)\s*\(?\s*["'])(\.{1,2}\/[^"']+)(["']\)?)/g,
@@ -246,6 +305,8 @@ function buildJsOutputs() {
     path.join(typesTarget, "package.json"),
     JSON.stringify({ type: "module" }) + "\n",
   );
+  normalizeSourceMaps(moduleTarget);
+  normalizeSourceMaps(typesTarget);
   stripGeneratedWhitespace();
 }
 
