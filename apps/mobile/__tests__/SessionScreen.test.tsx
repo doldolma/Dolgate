@@ -161,6 +161,14 @@ function collectText(
   });
 }
 
+function formatExpectedModifiedTime(value: number): string {
+  const date = new Date(value);
+  const pad = (part: number) => String(part).padStart(2, '0');
+  return `${date.getFullYear()}.${pad(date.getMonth() + 1)}.${pad(
+    date.getDate(),
+  )} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
 function createAuthenticatedState(): AuthState {
   return {
     status: 'authenticated',
@@ -1108,7 +1116,7 @@ describe('SessionScreen', () => {
 
     const initialText = collectText(tree!.toJSON());
     expect(initialText).toEqual(
-      expect.arrayContaining(['drwxr-xr-x', '1970.01.01 09:00']),
+      expect.arrayContaining(['drwxr-xr-x', formatExpectedModifiedTime(0)]),
     );
     expect(initialText.some(value => value.includes('-rw-r--r--'))).toBe(true);
 
