@@ -6,6 +6,13 @@ const { spawnSync } = require("child_process");
 const repoRoot = path.resolve(__dirname, "../../..");
 const nodeCommand = process.execPath;
 const npmCommand = process.platform === "win32" ? "npm.cmd" : "npm";
+const russhEnsureScriptPath = path.join(
+  repoRoot,
+  "packages",
+  "fressh-react-native-uniffi-russh",
+  "scripts",
+  "ensure-native.cjs",
+);
 
 const uniffiRoot = path.join(
   repoRoot,
@@ -207,9 +214,17 @@ function ensureXtermRuntime() {
   }
 }
 
-function ensureMobileWorkspaceRuntime() {
+function ensureRusshRuntime() {
+  const { ensureRusshNative } = require(russhEnsureScriptPath);
+  ensureRusshNative({ jsOnly: true });
+}
+
+function ensureMobileWorkspaceRuntime(options = {}) {
   ensureUniffiRuntime();
   ensureXtermRuntime();
+  if (!options.skipRussh) {
+    ensureRusshRuntime();
+  }
 }
 
 if (require.main === module) {

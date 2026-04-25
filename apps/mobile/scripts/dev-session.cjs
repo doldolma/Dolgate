@@ -357,6 +357,7 @@ async function runDevSession({
   platformLabel,
   launchPlatform,
   cleanupPlatform,
+  prepareRuntimeOptions = {},
 }) {
   const sessionState = {
     cleanupStarted: false,
@@ -427,7 +428,7 @@ async function runDevSession({
   process.on("SIGTERM", handleSignal);
 
   try {
-    ensureMobileWorkspaceRuntime();
+    ensureMobileWorkspaceRuntime(prepareRuntimeOptions);
 
     const metroSession = await ensureSharedMetro({
       appRoot,

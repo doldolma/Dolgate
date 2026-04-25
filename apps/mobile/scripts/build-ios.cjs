@@ -1,6 +1,7 @@
 const path = require("path");
 const { spawnSync } = require("child_process");
 const { ensureMobileWorkspaceRuntime } = require("./prepare-runtime.cjs");
+const { ensureRusshNative } = require("../../../packages/fressh-react-native-uniffi-russh/scripts/ensure-native.cjs");
 
 const {
   appRoot,
@@ -20,11 +21,12 @@ const outputAppPath = path.join(
 );
 
 function main() {
-  ensureMobileWorkspaceRuntime();
+  ensureMobileWorkspaceRuntime({ skipRussh: true });
 
   const iosEnv = buildEnvForIos(process.env);
 
   ensureXcodeAvailable(iosEnv);
+  ensureRusshNative({ platform: "ios" });
   ensurePodsInstalled(iosEnv);
 
   const result = spawnSync(

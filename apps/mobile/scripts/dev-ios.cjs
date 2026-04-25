@@ -7,6 +7,7 @@ const {
   ensurePodsInstalled,
   ensureXcodeAvailable,
 } = require("./ios-env.cjs");
+const { ensureRusshNative } = require("../../../packages/fressh-react-native-uniffi-russh/scripts/ensure-native.cjs");
 const { runDevSession, waitForChildExit } = require("./dev-session.cjs");
 
 const nodeCommand = process.execPath;
@@ -37,6 +38,7 @@ async function main() {
   const iosEnv = buildEnvForIos(process.env);
 
   ensureXcodeAvailable(iosEnv);
+  ensureRusshNative({ platform: "ios" });
   ensurePodsInstalled(iosEnv);
 
   await runDevSession({
@@ -45,6 +47,7 @@ async function main() {
     nodeCommand,
     reactNativeCli,
     platformLabel: "iOS",
+    prepareRuntimeOptions: { skipRussh: true },
     launchPlatform: async () => {
       const child = spawnIos(extraArgs, iosEnv);
       const { code, signal } = await waitForChildExit(child);

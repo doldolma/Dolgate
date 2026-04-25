@@ -11,17 +11,17 @@
  * Then in this api wrapper we can smooth over those rough edges.
  * See: - https://jhugman.github.io/uniffi-bindgen-react-native/idioms/callback-interfaces.html
  */
-import * as GeneratedRussh from './index';
-export type TerminalType = 'Vanilla' | 'Vt100' | 'Vt102' | 'Vt220' | 'Ansi' | 'Xterm' | 'Xterm256';
+import * as GeneratedRussh from "./index";
+export type TerminalType = "Vanilla" | "Vt100" | "Vt102" | "Vt220" | "Ansi" | "Xterm" | "Xterm256";
 export type ConnectionDetails = {
     host: string;
     port: number;
     username: string;
     security: {
-        type: 'password';
+        type: "password";
         password: string;
     } | {
-        type: 'key';
+        type: "key";
         privateKey: string;
     };
 };
@@ -31,7 +31,7 @@ export type ConnectionDetails = {
  *
  * It is no longer relevant after the connect() promise is resolved.
  */
-export type SshConnectionProgress = 'tcpConnected' | 'sshHandshake';
+export type SshConnectionProgress = "tcpConnected" | "sshHandshake";
 export type ConnectOptions = ConnectionDetails & {
     onConnectionProgress?: (status: SshConnectionProgress) => void;
     onDisconnected?: (connectionId: string) => void;
@@ -46,7 +46,7 @@ export type StartShellOptions = {
     onClosed?: (shellId: number) => void;
     abortSignal?: AbortSignal;
 };
-export type StreamKind = 'stdout' | 'stderr';
+export type StreamKind = "stdout" | "stderr";
 export type TerminalChunk = {
     seq: bigint;
     /** Milliseconds since UNIX epoch (double). */
@@ -55,24 +55,24 @@ export type TerminalChunk = {
     bytes: ArrayBuffer;
 };
 export type DropNotice = {
-    kind: 'dropped';
+    kind: "dropped";
     fromSeq: bigint;
     toSeq: bigint;
 };
 export type ListenerEvent = TerminalChunk | DropNotice;
 export type Cursor = {
-    mode: 'head';
+    mode: "head";
 } | {
-    mode: 'tailBytes';
+    mode: "tailBytes";
     bytes: bigint;
 } | {
-    mode: 'seq';
+    mode: "seq";
     seq: bigint;
 } | {
-    mode: 'time';
+    mode: "time";
     tMs: number;
 } | {
-    mode: 'live';
+    mode: "live";
 };
 export type ListenerOptions = {
     cursor: Cursor;
@@ -119,8 +119,64 @@ export type SshShell = {
     addListener: (cb: (ev: ListenerEvent) => void, opts: ListenerOptions) => bigint;
     removeListener: (id: bigint) => void;
 };
+export type SftpEntryKind = "file" | "directory" | "symlink" | "unknown";
+export type SftpEntry = {
+    name: string;
+    path: string;
+    isDirectory: boolean;
+    size: number;
+    mtime?: string | null;
+    kind: SftpEntryKind;
+    permissions?: string | null;
+};
+export type SftpListing = {
+    path: string;
+    entries: SftpEntry[];
+};
+export type SftpReadChunk = {
+    bytes: ArrayBuffer;
+    bytesRead: number;
+    eof: boolean;
+};
+export type ConnectSftpOptions = ConnectionDetails & {
+    onConnectionProgress?: (status: SshConnectionProgress) => void;
+    onDisconnected?: (connectionId: string) => void;
+    onServerKey: (serverKeyInfo: GeneratedRussh.ServerPublicKeyInfo, signal?: AbortSignal) => Promise<boolean>;
+    abortSignal?: AbortSignal;
+};
+export type SftpConnection = {
+    readonly connectionId: string;
+    readonly createdAtMs: number;
+    readonly connectedAtMs: number;
+    readonly connectionDetails: ConnectionDetails;
+    listDirectory: (path: string, opts?: {
+        signal?: AbortSignal;
+    }) => Promise<SftpListing>;
+    readFileChunk: (path: string, offset: number, length: number, opts?: {
+        signal?: AbortSignal;
+    }) => Promise<SftpReadChunk>;
+    writeFileChunk: (path: string, offset: number, data: ArrayBuffer, opts?: {
+        signal?: AbortSignal;
+    }) => Promise<void>;
+    mkdir: (path: string, opts?: {
+        signal?: AbortSignal;
+    }) => Promise<void>;
+    rename: (sourcePath: string, targetPath: string, opts?: {
+        signal?: AbortSignal;
+    }) => Promise<void>;
+    chmod: (path: string, permissions: number, opts?: {
+        signal?: AbortSignal;
+    }) => Promise<void>;
+    delete: (path: string, opts?: {
+        signal?: AbortSignal;
+    }) => Promise<void>;
+    close: (opts?: {
+        signal?: AbortSignal;
+    }) => Promise<void>;
+};
 declare function connect({ onServerKey, onConnectionProgress, onDisconnected, ...options }: ConnectOptions): Promise<SshConnection>;
-declare function generateKeyPair(type: 'rsa' | 'ecdsa' | 'ed25519'): Promise<string>;
+declare function connectSftp({ onServerKey, onConnectionProgress, onDisconnected, ...options }: ConnectSftpOptions): Promise<SftpConnection>;
+declare function generateKeyPair(type: "rsa" | "ecdsa" | "ed25519"): Promise<string>;
 declare function validatePrivateKey(key: string): {
     valid: true;
     error?: never;
@@ -128,10 +184,11 @@ declare function validatePrivateKey(key: string): {
     valid: false;
     error: GeneratedRussh.SshError;
 };
-export { SshError, SshError_Tags } from './generated/uniffi_russh';
+export { SshError, SshError_Tags } from "./generated/uniffi_russh";
 export declare const RnRussh: {
     uniffiInitAsync: typeof GeneratedRussh.uniffiInitAsync;
     connect: typeof connect;
+    connectSftp: typeof connectSftp;
     generateKeyPair: typeof generateKeyPair;
     validatePrivateKey: typeof validatePrivateKey;
 };

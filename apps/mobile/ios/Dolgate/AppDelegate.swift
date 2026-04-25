@@ -1,6 +1,7 @@
 import UIKit
 import SafariServices
 import Network
+import UniformTypeIdentifiers
 import React
 import React_RCTAppDelegate
 import ReactAppDependencyProvider
@@ -726,5 +727,326 @@ final class AwsSsoBridgeModule: NSObject, SFSafariViewControllerDelegate {
       return topViewController(base: presented)
     }
     return root
+  }
+}
+
+@objc(DolsshFileTransferModule)
+final class DolsshFileTransferModule: NSObject, UIDocumentPickerDelegate {
+  private var pendingDownloadResolve: RCTPromiseResolveBlock?
+  private var pendingDownloadReject: RCTPromiseRejectBlock?
+  private var pendingDownloadFileName: String?
+  private var pendingDownloadKind: PendingDownloadKind?
+
+  @objc static func requiresMainQueueSetup() -> Bool {
+    true
+  }
+
+  @objc(pickDownloadDestination:resolver:rejecter:)
+  func pickDownloadDestination(
+    fileName: String,
+    resolver resolve: @escaping RCTPromiseResolveBlock,
+    rejecter reject: @escaping RCTPromiseRejectBlock
+  ) {
+    DispatchQueue.main.async {
+      guard self.pendingDownloadResolve == nil else {
+        reject("download_destination_busy", "이미 저장 위치를 선택하는 중입니다.", nil)
+        return
+      }
+      guard let presenter = DolsshFileTransferModule.topViewController() else {
+        reject("download_destination_unavailable", "저장 위치를 열 화면을 찾지 못했습니다.", nil)
+        return
+      }
+
+      self.pendingDownloadResolve = resolve
+      self.pendingDownloadReject = reject
+      self.pendingDownloadFileName = fileName
+      self.pendingDownloadKind = .file
+
+      let tempUrl = FileManager.default.temporaryDirectory.appendingPathComponent(fileName)
+      try? Data().write(to: tempUrl, options: [.atomic])
+      let controller = UIDocumentPickerViewController(forExporting: [tempUrl], asCopy: true)
+      controller.delegate = self
+      controller.allowsMultipleSelection = false
+      presenter.present(controller, animated: true)
+    }
+  }
+
+  @objc(pickDownloadDirectory:resolver:rejecter:)
+  func pickDownloadDirectory(
+    directoryName: String,
+    resolver resolve: @escaping RCTPromiseResolveBlock,
+    rejecter reject: @escaping RCTPromiseRejectBlock
+  ) {
+    DispatchQueue.main.async {
+      guard self.pendingDownloadResolve == nil else {
+        reject("download_directory_busy", "이미 저장 폴더를 선택하는 중입니다.", nil)
+        return
+      }
+      guard let presenter = DolsshFileTransferModule.topViewController() else {
+        reject("download_directory_unavailable", "저장 폴더를 열 화면을 찾지 못했습니다.", nil)
+        return
+      }
+
+      self.pendingDownloadResolve = resolve
+      self.pendingDownloadReject = reject
+      self.pendingDownloadFileName = directoryName
+      self.pendingDownloadKind = .directory
+
+      let controller = UIDocumentPickerViewController(
+        forOpeningContentTypes: [.folder],
+        asCopy: false
+      )
+      controller.delegate = self
+      controller.allowsMultipleSelection = false
+      presenter.present(controller, animated: true)
+    }
+  }
+
+  @objc(createDownloadDirectory:directoryName:resolver:rejecter:)
+  func createDownloadDirectory(
+    parentUri: String,
+    directoryName: String,
+    resolver resolve: RCTPromiseResolveBlock,
+    rejecter reject: RCTPromiseRejectBlock
+  ) {
+    do {
+      let directoryUrl = try createChildDocument(
+        parentUri: parentUri,
+        requestedName: directoryName,
+        isDirectory: true
+      )
+      resolve([
+        "uri": directoryUrl.absoluteString,
+        "name": directoryUrl.lastPathComponent,
+      ])
+    } catch {
+      reject("download_directory_create_failed", error.localizedDescription, error)
+    }
+  }
+
+  @objc(createDownloadFile:fileName:resolver:rejecter:)
+  func createDownloadFile(
+    parentUri: String,
+    fileName: String,
+    resolver resolve: RCTPromiseResolveBlock,
+    rejecter reject: RCTPromiseRejectBlock
+  ) {
+    do {
+      let fileUrl = try createChildDocument(
+        parentUri: parentUri,
+        requestedName: fileName,
+        isDirectory: false
+      )
+      resolve([
+        "uri": fileUrl.absoluteString,
+        "name": fileUrl.lastPathComponent,
+      ])
+    } catch {
+      reject("download_file_create_failed", error.localizedDescription, error)
+    }
+  }
+
+  @objc(writeDownloadChunk:base64Chunk:append:resolver:rejecter:)
+  func writeDownloadChunk(
+    destinationUri: String,
+    base64Chunk: String,
+    append: Bool,
+    resolver resolve: RCTPromiseResolveBlock,
+    rejecter reject: RCTPromiseRejectBlock
+  ) {
+    do {
+      guard let url = URL(string: destinationUri) else {
+        reject("download_write_failed", "저장 파일 경로가 올바르지 않습니다.", nil)
+        return
+      }
+      let bytes = Data(base64Encoded: base64Chunk) ?? Data()
+      let didStartAccess = url.startAccessingSecurityScopedResource()
+      defer {
+        if didStartAccess {
+          url.stopAccessingSecurityScopedResource()
+        }
+      }
+
+      if append, FileManager.default.fileExists(atPath: url.path) {
+        let handle = try FileHandle(forWritingTo: url)
+        defer {
+          try? handle.close()
+        }
+        try handle.seekToEnd()
+        try handle.write(contentsOf: bytes)
+      } else {
+        try bytes.write(to: url, options: [.atomic])
+      }
+      resolve(nil)
+    } catch {
+      reject("download_write_failed", error.localizedDescription, error)
+    }
+  }
+
+  @objc(deleteDocument:resolver:rejecter:)
+  func deleteDocument(
+    destinationUri: String,
+    resolver resolve: RCTPromiseResolveBlock,
+    rejecter reject: RCTPromiseRejectBlock
+  ) {
+    do {
+      guard let url = URL(string: destinationUri) else {
+        resolve(false)
+        return
+      }
+      if FileManager.default.fileExists(atPath: url.path) {
+        try FileManager.default.removeItem(at: url)
+      }
+      resolve(true)
+    } catch {
+      reject("document_delete_failed", error.localizedDescription, error)
+    }
+  }
+
+  @objc(readLocalFileChunk:offset:length:resolver:rejecter:)
+  func readLocalFileChunk(
+    sourceUri: String,
+    offset: NSNumber,
+    length: NSNumber,
+    resolver resolve: RCTPromiseResolveBlock,
+    rejecter reject: RCTPromiseRejectBlock
+  ) {
+    do {
+      guard let url = URL(string: sourceUri) else {
+        reject("upload_read_failed", "업로드 파일 경로가 올바르지 않습니다.", nil)
+        return
+      }
+      let handle = try FileHandle(forReadingFrom: url)
+      defer {
+        try? handle.close()
+      }
+      try handle.seek(toOffset: offset.uint64Value)
+      let data = try handle.read(upToCount: length.intValue) ?? Data()
+      resolve([
+        "base64": data.base64EncodedString(),
+        "bytesRead": data.count,
+      ])
+    } catch {
+      reject("upload_read_failed", error.localizedDescription, error)
+    }
+  }
+
+  func documentPickerWasCancelled(_ controller: UIDocumentPickerViewController) {
+    pendingDownloadReject?(
+      "DOCUMENT_PICKER_CANCELED",
+      "저장 위치 선택이 취소되었습니다.",
+      nil
+    )
+    clearPendingDownload()
+  }
+
+  func documentPicker(
+    _ controller: UIDocumentPickerViewController,
+    didPickDocumentsAt urls: [URL]
+  ) {
+    guard let destinationUrl = urls.first else {
+      pendingDownloadReject?(
+        "DOCUMENT_PICKER_CANCELED",
+        "저장 위치 선택이 취소되었습니다.",
+        nil
+      )
+      clearPendingDownload()
+      return
+    }
+
+    let fileName = pendingDownloadFileName ?? "download"
+    let kind = pendingDownloadKind ?? .file
+    pendingDownloadResolve?([
+      "uri": destinationUrl.absoluteString,
+      "name": kind == .directory ? destinationUrl.lastPathComponent : fileName,
+    ])
+    clearPendingDownload()
+  }
+
+  private func clearPendingDownload() {
+    pendingDownloadResolve = nil
+    pendingDownloadReject = nil
+    pendingDownloadFileName = nil
+    pendingDownloadKind = nil
+  }
+
+  private func createChildDocument(
+    parentUri: String,
+    requestedName: String,
+    isDirectory: Bool
+  ) throws -> URL {
+    guard let parentUrl = URL(string: parentUri) else {
+      throw NSError(
+        domain: "DolsshFileTransferModule",
+        code: 1,
+        userInfo: [NSLocalizedDescriptionKey: "저장 폴더 경로가 올바르지 않습니다."]
+      )
+    }
+
+    let didStartAccess = parentUrl.startAccessingSecurityScopedResource()
+    defer {
+      if didStartAccess {
+        parentUrl.stopAccessingSecurityScopedResource()
+      }
+    }
+
+    let safeName = requestedName.isEmpty ? "download" : requestedName
+    let targetName = uniqueChildName(parentUrl: parentUrl, requestedName: safeName)
+    let targetUrl = parentUrl.appendingPathComponent(targetName)
+    if isDirectory {
+      try FileManager.default.createDirectory(
+        at: targetUrl,
+        withIntermediateDirectories: false
+      )
+    } else {
+      FileManager.default.createFile(atPath: targetUrl.path, contents: nil)
+    }
+    return targetUrl
+  }
+
+  private func uniqueChildName(parentUrl: URL, requestedName: String) -> String {
+    let existingNames =
+      (try? FileManager.default.contentsOfDirectory(atPath: parentUrl.path))
+      .map { Set($0) } ?? Set<String>()
+    if !existingNames.contains(requestedName) {
+      return requestedName
+    }
+
+    let url = URL(fileURLWithPath: requestedName)
+    let stem = url.deletingPathExtension().lastPathComponent
+    let ext = url.pathExtension.isEmpty ? "" : ".\(url.pathExtension)"
+    var index = 1
+    while true {
+      let suffix = index == 1 ? " copy" : " copy \(index)"
+      let candidate = "\(stem)\(suffix)\(ext)"
+      if !existingNames.contains(candidate) {
+        return candidate
+      }
+      index += 1
+    }
+  }
+
+  private static func topViewController(base: UIViewController? = nil) -> UIViewController? {
+    let root = base ?? UIApplication.shared.connectedScenes
+      .compactMap { $0 as? UIWindowScene }
+      .flatMap(\.windows)
+      .first(where: \.isKeyWindow)?
+      .rootViewController
+
+    if let navigationController = root as? UINavigationController {
+      return topViewController(base: navigationController.visibleViewController)
+    }
+    if let tabBarController = root as? UITabBarController {
+      return topViewController(base: tabBarController.selectedViewController)
+    }
+    if let presented = root?.presentedViewController {
+      return topViewController(base: presented)
+    }
+    return root
+  }
+
+  private enum PendingDownloadKind {
+    case file
+    case directory
   }
 }
