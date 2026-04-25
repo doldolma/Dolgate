@@ -47,15 +47,50 @@ const sftpEntryKindEnumToLiteral = {
     [GeneratedRussh.SftpEntryKind.Unknown]: "unknown",
 };
 function generatedConnDetailsToIdeal(details) {
-    const security = details.security instanceof GeneratedRussh.Security.Password
-        ? { type: "password", password: details.security.inner.password }
-        : { type: "key", privateKey: details.security.inner.privateKeyContent };
+    let security;
+    if (details.security instanceof GeneratedRussh.Security.Password) {
+        security = { type: "password", password: details.security.inner.password };
+    }
+    else if (details.security instanceof GeneratedRussh.Security.Key) {
+        security = {
+            type: "key",
+            privateKey: details.security.inner.privateKeyContent,
+            passphrase: details.security.inner.passphrase ?? undefined,
+        };
+    }
+    else {
+        security = {
+            type: "certificate",
+            privateKey: details.security.inner.privateKeyContent,
+            certificate: details.security.inner.certificateText,
+            passphrase: details.security.inner.passphrase ?? undefined,
+        };
+    }
     return {
         host: details.host,
         port: details.port,
         username: details.username,
         security,
     };
+}
+function securityToGenerated(security) {
+    switch (security.type) {
+        case "password":
+            return new GeneratedRussh.Security.Password({
+                password: security.password,
+            });
+        case "key":
+            return new GeneratedRussh.Security.Key({
+                privateKeyContent: security.privateKey,
+                passphrase: security.passphrase,
+            });
+        case "certificate":
+            return new GeneratedRussh.Security.Certificate({
+                privateKeyContent: security.privateKey,
+                certificateText: security.certificate,
+                passphrase: security.passphrase,
+            });
+    }
 }
 function cursorToGenerated(cursor) {
     switch (cursor.mode) {
@@ -196,13 +231,7 @@ function wrapSftpConnection(conn) {
     };
 }
 async function connect({ onServerKey, onConnectionProgress, onDisconnected, ...options }) {
-    const security = options.security.type === "password"
-        ? new GeneratedRussh.Security.Password({
-            password: options.security.password,
-        })
-        : new GeneratedRussh.Security.Key({
-            privateKeyContent: options.security.privateKey,
-        });
+    const security = securityToGenerated(options.security);
     const sshConnection = await GeneratedRussh.connect({
         connectionDetails: {
             host: options.host,
@@ -231,13 +260,7 @@ async function connectSftp({ onServerKey, onConnectionProgress, onDisconnected, 
     if (!generated.connectSftp) {
         throw new Error("SFTP native bridge is not available.");
     }
-    const security = options.security.type === "password"
-        ? new GeneratedRussh.Security.Password({
-            password: options.security.password,
-        })
-        : new GeneratedRussh.Security.Key({
-            privateKeyContent: options.security.privateKey,
-        });
+    const security = securityToGenerated(options.security);
     const sftpConnection = await generated.connectSftp({
         connectionDetails: {
             host: options.host,
@@ -269,9 +292,18 @@ async function generateKeyPair(type) {
     };
     return GeneratedRussh.generateKeyPair(map[type]);
 }
-function validatePrivateKey(key) {
+function validatePrivateKey(key, passphrase) {
     try {
-        GeneratedRussh.validatePrivateKey(key);
+        GeneratedRussh.validatePrivateKey(key, passphrase);
+        return { valid: true };
+    }
+    catch (e) {
+        return { valid: false, error: e };
+    }
+}
+function validateCertificate(certificate) {
+    try {
+        GeneratedRussh.validateCertificate(certificate);
         return { valid: true };
     }
     catch (e) {
@@ -286,5 +318,6 @@ export const RnRussh = {
     connectSftp,
     generateKeyPair,
     validatePrivateKey,
+    validateCertificate,
 };
 //# sourceMappingURL=api.js.map

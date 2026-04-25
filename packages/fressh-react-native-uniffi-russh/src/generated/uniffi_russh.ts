@@ -176,8 +176,27 @@ export function generateKeyPair(keyType: KeyType): string /*throws*/ {
     ),
   );
 }
+export function validateCertificate(
+  certificateText: string,
+): string /*throws*/ {
+  return FfiConverterString.lift(
+    uniffiCaller.rustCallWithError(
+      /*liftError:*/ FfiConverterTypeSshError.lift.bind(
+        FfiConverterTypeSshError,
+      ),
+      /*caller:*/ (callStatus) => {
+        return nativeModule().ubrn_uniffi_uniffi_russh_fn_func_validate_certificate(
+          FfiConverterString.lower(certificateText),
+          callStatus,
+        );
+      },
+      /*liftString:*/ FfiConverterString.lift,
+    ),
+  );
+}
 export function validatePrivateKey(
   privateKeyContent: string,
+  passphrase: string | undefined,
 ): string /*throws*/ {
   return FfiConverterString.lift(
     uniffiCaller.rustCallWithError(
@@ -187,6 +206,7 @@ export function validatePrivateKey(
       /*caller:*/ (callStatus) => {
         return nativeModule().ubrn_uniffi_uniffi_russh_fn_func_validate_private_key(
           FfiConverterString.lower(privateKeyContent),
+          FfiConverterOptionalString.lower(passphrase),
           callStatus,
         );
       },
@@ -1786,6 +1806,7 @@ const FfiConverterTypeKeyType = (() => {
 export enum Security_Tags {
   Password = 'Password',
   Key = 'Key',
+  Certificate = 'Certificate',
 }
 export const Security = (() => {
   type Password__interface = {
@@ -1817,7 +1838,10 @@ export const Security = (() => {
 
   type Key__interface = {
     tag: Security_Tags.Key;
-    inner: Readonly<{ privateKeyContent: string }>;
+    inner: Readonly<{
+      privateKeyContent: string;
+      passphrase: string | undefined;
+    }>;
   };
 
   class Key_ extends UniffiEnum implements Key__interface {
@@ -1827,18 +1851,70 @@ export const Security = (() => {
      */
     readonly [uniffiTypeNameSymbol] = 'Security';
     readonly tag = Security_Tags.Key;
-    readonly inner: Readonly<{ privateKeyContent: string }>;
-    constructor(inner: { privateKeyContent: string }) {
+    readonly inner: Readonly<{
+      privateKeyContent: string;
+      passphrase: string | undefined;
+    }>;
+    constructor(inner: {
+      privateKeyContent: string;
+      passphrase: string | undefined;
+    }) {
       super('Security', 'Key');
       this.inner = Object.freeze(inner);
     }
 
-    static new(inner: { privateKeyContent: string }): Key_ {
+    static new(inner: {
+      privateKeyContent: string;
+      passphrase: string | undefined;
+    }): Key_ {
       return new Key_(inner);
     }
 
     static instanceOf(obj: any): obj is Key_ {
       return obj.tag === Security_Tags.Key;
+    }
+  }
+
+  type Certificate__interface = {
+    tag: Security_Tags.Certificate;
+    inner: Readonly<{
+      privateKeyContent: string;
+      certificateText: string;
+      passphrase: string | undefined;
+    }>;
+  };
+
+  class Certificate_ extends UniffiEnum implements Certificate__interface {
+    /**
+     * @private
+     * This field is private and should not be used, use `tag` instead.
+     */
+    readonly [uniffiTypeNameSymbol] = 'Security';
+    readonly tag = Security_Tags.Certificate;
+    readonly inner: Readonly<{
+      privateKeyContent: string;
+      certificateText: string;
+      passphrase: string | undefined;
+    }>;
+    constructor(inner: {
+      privateKeyContent: string;
+      certificateText: string;
+      passphrase: string | undefined;
+    }) {
+      super('Security', 'Certificate');
+      this.inner = Object.freeze(inner);
+    }
+
+    static new(inner: {
+      privateKeyContent: string;
+      certificateText: string;
+      passphrase: string | undefined;
+    }): Certificate_ {
+      return new Certificate_(inner);
+    }
+
+    static instanceOf(obj: any): obj is Certificate_ {
+      return obj.tag === Security_Tags.Certificate;
     }
   }
 
@@ -1850,6 +1926,7 @@ export const Security = (() => {
     instanceOf,
     Password: Password_,
     Key: Key_,
+    Certificate: Certificate_,
   });
 })();
 
@@ -1871,6 +1948,13 @@ const FfiConverterTypeSecurity = (() => {
         case 2:
           return new Security.Key({
             privateKeyContent: FfiConverterString.read(from),
+            passphrase: FfiConverterOptionalString.read(from),
+          });
+        case 3:
+          return new Security.Certificate({
+            privateKeyContent: FfiConverterString.read(from),
+            certificateText: FfiConverterString.read(from),
+            passphrase: FfiConverterOptionalString.read(from),
           });
         default:
           throw new UniffiInternalError.UnexpectedEnumCase();
@@ -1888,6 +1972,15 @@ const FfiConverterTypeSecurity = (() => {
           ordinalConverter.write(2, into);
           const inner = value.inner;
           FfiConverterString.write(inner.privateKeyContent, into);
+          FfiConverterOptionalString.write(inner.passphrase, into);
+          return;
+        }
+        case Security_Tags.Certificate: {
+          ordinalConverter.write(3, into);
+          const inner = value.inner;
+          FfiConverterString.write(inner.privateKeyContent, into);
+          FfiConverterString.write(inner.certificateText, into);
+          FfiConverterOptionalString.write(inner.passphrase, into);
           return;
         }
         default:
@@ -1907,6 +2000,15 @@ const FfiConverterTypeSecurity = (() => {
           const inner = value.inner;
           let size = ordinalConverter.allocationSize(2);
           size += FfiConverterString.allocationSize(inner.privateKeyContent);
+          size += FfiConverterOptionalString.allocationSize(inner.passphrase);
+          return size;
+        }
+        case Security_Tags.Certificate: {
+          const inner = value.inner;
+          let size = ordinalConverter.allocationSize(3);
+          size += FfiConverterString.allocationSize(inner.privateKeyContent);
+          size += FfiConverterString.allocationSize(inner.certificateText);
+          size += FfiConverterOptionalString.allocationSize(inner.passphrase);
           return size;
         }
         default:
@@ -4516,8 +4618,16 @@ function uniffiEnsureInitialized() {
     );
   }
   if (
+    nativeModule().ubrn_uniffi_uniffi_russh_checksum_func_validate_certificate() !==
+    17620
+  ) {
+    throw new UniffiInternalError.ApiChecksumMismatch(
+      'uniffi_uniffi_russh_checksum_func_validate_certificate',
+    );
+  }
+  if (
     nativeModule().ubrn_uniffi_uniffi_russh_checksum_func_validate_private_key() !==
-    49309
+    48895
   ) {
     throw new UniffiInternalError.ApiChecksumMismatch(
       'uniffi_uniffi_russh_checksum_func_validate_private_key',

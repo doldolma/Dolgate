@@ -34,6 +34,11 @@ impl From<russh_keys::Error> for SshError {
         SshError::RusshKeys(e.to_string())
     }
 }
+impl From<russh::keys::Error> for SshError {
+    fn from(e: russh::keys::Error) -> Self {
+        SshError::RusshKeys(e.to_string())
+    }
+}
 impl From<russh_keys::ssh_key::Error> for SshError {
     fn from(e: russh_keys::ssh_key::Error) -> Self {
         SshError::RusshKeys(e.to_string())

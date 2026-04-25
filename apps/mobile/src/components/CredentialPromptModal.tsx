@@ -25,7 +25,7 @@ interface CredentialPromptModalProps {
 async function readPickedFileText(uri: string): Promise<string> {
   const response = await fetch(uri);
   if (!response.ok) {
-    throw new Error("개인키 파일을 읽지 못했습니다.");
+    throw new Error("파일을 읽지 못했습니다.");
   }
   return response.text();
 }
@@ -38,12 +38,14 @@ export function CredentialPromptModal({
   const palette = useMobilePalette();
   const [password, setPassword] = useState("");
   const [privateKeyPem, setPrivateKeyPem] = useState("");
+  const [certificateText, setCertificateText] = useState("");
   const [passphrase, setPassphrase] = useState("");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   useEffect(() => {
     setPassword(prompt?.initialValue.password ?? "");
     setPrivateKeyPem(prompt?.initialValue.privateKeyPem ?? "");
+    setCertificateText(prompt?.initialValue.certificateText ?? "");
     setPassphrase(prompt?.initialValue.passphrase ?? "");
     setErrorMessage(null);
   }, [prompt]);
@@ -54,7 +56,9 @@ export function CredentialPromptModal({
         type: [DocumentPicker.types.plainText, DocumentPicker.types.allFiles],
         copyTo: "cachesDirectory",
       });
-      const nextText = await readPickedFileText(result.fileCopyUri ?? result.uri);
+      const nextText = await readPickedFileText(
+        result.fileCopyUri ?? result.uri,
+      );
       setPrivateKeyPem(nextText.trim());
       setErrorMessage(null);
     } catch (error) {
@@ -70,6 +74,28 @@ export function CredentialPromptModal({
     }
   };
 
+  const handleImportCertificate = async () => {
+    try {
+      const result = await DocumentPicker.pickSingle({
+        type: [DocumentPicker.types.plainText, DocumentPicker.types.allFiles],
+        copyTo: "cachesDirectory",
+      });
+      const nextText = await readPickedFileText(result.fileCopyUri ?? result.uri);
+      setCertificateText(nextText.trim());
+      setErrorMessage(null);
+    } catch (error) {
+      if (DocumentPicker.isCancel(error)) {
+        return;
+      }
+      const message =
+        error instanceof Error
+          ? error.message
+          : "SSH 인증서 파일을 가져오지 못했습니다.";
+      setErrorMessage(message);
+      Alert.alert("가져오기 실패", message);
+    }
+  };
+
   const submit = () => {
     if (!prompt) {
       return;
@@ -80,14 +106,23 @@ export function CredentialPromptModal({
       return;
     }
 
-    if (prompt.authType === "privateKey" && !privateKeyPem.trim()) {
+    if (
+      (prompt.authType === "privateKey" || prompt.authType === "certificate") &&
+      !privateKeyPem.trim()
+    ) {
       setErrorMessage("개인키 PEM을 입력하거나 가져와 주세요.");
+      return;
+    }
+
+    if (prompt.authType === "certificate" && !certificateText.trim()) {
+      setErrorMessage("SSH 인증서를 입력하거나 가져와 주세요.");
       return;
     }
 
     onSubmit({
       password: password.trim() || undefined,
       privateKeyPem: privateKeyPem.trim() || undefined,
+      certificateText: certificateText.trim() || undefined,
       passphrase: passphrase.trim() || undefined,
     });
   };
@@ -186,6 +221,52 @@ export function CredentialPromptModal({
                     파일에서 가져오기
                   </Text>
                 </Pressable>
+                {prompt?.authType === "certificate" ? (
+                  <>
+                    <View style={styles.fieldGroup}>
+                      <Text style={[styles.fieldLabel, { color: palette.text }]}>
+                        SSH certificate
+                      </Text>
+                      <TextInput
+                        value={certificateText}
+                        onChangeText={setCertificateText}
+                        autoCapitalize="none"
+                        autoCorrect={false}
+                        multiline
+                        textAlignVertical="top"
+                        placeholder="ssh-ed25519-cert-v01@openssh.com AAAA..."
+                        placeholderTextColor={palette.mutedText}
+                        style={[
+                          styles.textArea,
+                          {
+                            color: palette.text,
+                            borderColor: palette.border,
+                            backgroundColor: palette.input,
+                          },
+                        ]}
+                      />
+                    </View>
+                    <Pressable
+                      onPress={() => void handleImportCertificate()}
+                      style={[
+                        styles.secondaryButton,
+                        {
+                          backgroundColor: palette.surfaceAlt,
+                          borderColor: palette.border,
+                        },
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.secondaryButtonText,
+                          { color: palette.text },
+                        ]}
+                      >
+                        인증서 파일에서 가져오기
+                      </Text>
+                    </Pressable>
+                  </>
+                ) : null}
                 <View style={styles.fieldGroup}>
                   <Text style={[styles.fieldLabel, { color: palette.text }]}>
                     Passphrase
@@ -209,7 +290,7 @@ export function CredentialPromptModal({
                   />
                 </View>
                 <Text style={[styles.caption, { color: palette.mutedText }]}>
-                  암호화된 개인키는 네이티브 SSH 브리지 제약으로 일부 형식에서 실패할 수 있습니다.
+                  Passphrase가 있는 개인키라면 함께 입력해 주세요.
                 </Text>
               </>
             )}

@@ -2,7 +2,10 @@ import { Buffer } from 'buffer';
 import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
 import { Linking } from 'react-native';
-import { RnRussh } from '@fressh/react-native-uniffi-russh';
+import {
+  RnRussh,
+  type ConnectionDetails as RusshConnectionDetails,
+} from '@fressh/react-native-uniffi-russh';
 import type {
   AwsEc2HostRecord,
   AwsSsmSessionClientMessage,
@@ -136,7 +139,7 @@ interface PendingServerKeyPromptState {
 interface PendingCredentialPromptState {
   hostId: string;
   hostLabel: string;
-  authType: 'password' | 'privateKey';
+  authType: 'password' | 'privateKey' | 'certificate';
   message?: string | null;
   initialValue: HostSecretInput;
 }
@@ -175,6 +178,95 @@ interface AwsRuntimeSession {
 }
 
 type RuntimeSession = SshRuntimeSession | AwsRuntimeSession;
+
+type RusshSecurity = RusshConnectionDetails['security'];
+
+function hasCredentialText(value?: string | null): value is string {
+  return typeof value === 'string' && value.trim().length > 0;
+}
+
+function optionalCredentialText(value?: string | null): string | undefined {
+  return hasCredentialText(value) ? value.trim() : undefined;
+}
+
+function getMobileCredentialPromptAuthType(
+  host: SshHostRecord,
+): PendingCredentialPromptState['authType'] {
+  if (host.authType === 'certificate') {
+    return 'certificate';
+  }
+  if (host.authType === 'privateKey') {
+    return 'privateKey';
+  }
+  return 'password';
+}
+
+function buildRusshSecurity(
+  host: SshHostRecord,
+  credentials: HostSecretInput,
+): RusshSecurity | null {
+  if (host.authType === 'password') {
+    const password = optionalCredentialText(credentials.password);
+    return password ? { type: 'password', password } : null;
+  }
+
+  if (host.authType === 'privateKey') {
+    const privateKey = optionalCredentialText(credentials.privateKeyPem);
+    return privateKey
+      ? {
+          type: 'key',
+          privateKey,
+          passphrase: optionalCredentialText(credentials.passphrase),
+        }
+      : null;
+  }
+
+  if (host.authType === 'certificate') {
+    const privateKey = optionalCredentialText(credentials.privateKeyPem);
+    const certificate = optionalCredentialText(credentials.certificateText);
+    return privateKey && certificate
+      ? {
+          type: 'certificate',
+          privateKey,
+          certificate,
+          passphrase: optionalCredentialText(credentials.passphrase),
+        }
+      : null;
+  }
+
+  return null;
+}
+
+function getMissingCredentialMessage(host: SshHostRecord): string {
+  if (host.authType === 'password') {
+    return '비밀번호가 필요합니다.';
+  }
+  if (host.authType === 'certificate') {
+    return '개인키 PEM과 SSH 인증서가 필요합니다.';
+  }
+  return '개인키 PEM이 필요합니다.';
+}
+
+function validateRusshSecurity(security: RusshSecurity): string | null {
+  if (security.type === 'key' || security.type === 'certificate') {
+    const validation = RnRussh.validatePrivateKey(
+      security.privateKey,
+      security.passphrase,
+    );
+    if (!validation.valid) {
+      return '개인키 형식 또는 passphrase를 확인해 주세요.';
+    }
+  }
+
+  if (security.type === 'certificate') {
+    const validation = RnRussh.validateCertificate(security.certificate);
+    if (!validation.valid) {
+      return 'SSH 인증서 형식을 확인해 주세요.';
+    }
+  }
+
+  return null;
+}
 
 interface SftpRuntimeSession {
   recordId: string;
@@ -1540,8 +1632,7 @@ export const useMobileAppStore = create<MobileAppState>()(
             pendingCredentialPrompt: {
               hostId: host.id,
               hostLabel: host.label,
-              authType:
-                host.authType === 'privateKey' ? 'privateKey' : 'password',
+              authType: getMobileCredentialPromptAuthType(host),
               message,
               initialValue,
             },
@@ -1589,16 +1680,44 @@ export const useMobileAppStore = create<MobileAppState>()(
         }
 
         if (host.authType === 'privateKey') {
-          if (promptBase.privateKeyPem) {
+          if (hasCredentialText(promptBase.privateKeyPem)) {
             return promptBase;
           }
 
           const prompted = await promptForCredentials(
             host,
             promptBase,
-            host.privateKeyPath
-              ? '데스크톱 파일 경로 대신 PEM 개인키를 붙여넣거나 가져와 주세요.'
-              : '개인키 PEM을 입력하거나 파일에서 가져와 주세요.',
+            '개인키 PEM을 입력하거나 파일에서 가져와 주세요.',
+          );
+          if (!prompted) {
+            return null;
+          }
+
+          if (host.secretRef) {
+            const merged = mergePromptedSecrets(existing, host, prompted);
+            if (merged) {
+              await updateSecretsState({
+                ...get().secretsByRef,
+                [merged.secretRef]: merged,
+              });
+            }
+          }
+
+          return { ...promptBase, ...prompted };
+        }
+
+        if (host.authType === 'certificate') {
+          if (
+            hasCredentialText(promptBase.privateKeyPem) &&
+            hasCredentialText(promptBase.certificateText)
+          ) {
+            return promptBase;
+          }
+
+          const prompted = await promptForCredentials(
+            host,
+            promptBase,
+            '개인키 PEM과 SSH 인증서를 입력하거나 파일에서 가져와 주세요.',
           );
           if (!prompted) {
             return null;
@@ -1815,11 +1934,15 @@ export const useMobileAppStore = create<MobileAppState>()(
         pendingSftpConnections.add(sftpSessionRecord.id);
 
         try {
-          if (host.authType !== 'password' && host.authType !== 'privateKey') {
+          if (
+            host.authType !== 'password' &&
+            host.authType !== 'privateKey' &&
+            host.authType !== 'certificate'
+          ) {
             markSftpSessionState(
               sftpSessionRecord.id,
               'error',
-              'SFTP는 모바일 v1에서 비밀번호 또는 개인키 인증만 지원합니다.',
+              'SFTP는 모바일 v1에서 비밀번호, 개인키, 인증서 인증만 지원합니다.',
             );
             return;
           }
@@ -1835,42 +1958,21 @@ export const useMobileAppStore = create<MobileAppState>()(
             return;
           }
 
-          const security =
-            host.authType === 'password'
-              ? credentials.password
-                ? {
-                    type: 'password' as const,
-                    password: credentials.password,
-                  }
-                : null
-              : credentials.privateKeyPem
-                ? {
-                    type: 'key' as const,
-                    privateKey: credentials.privateKeyPem,
-                  }
-                : null;
+          const security = buildRusshSecurity(host, credentials);
 
           if (!security) {
             markSftpSessionState(
               sftpSessionRecord.id,
               'error',
-              host.authType === 'password'
-                ? '비밀번호가 필요합니다.'
-                : '개인키 PEM이 필요합니다.',
+              getMissingCredentialMessage(host),
             );
             return;
           }
 
-          if (security.type === 'key') {
-            const validation = RnRussh.validatePrivateKey(security.privateKey);
-            if (!validation.valid) {
-              markSftpSessionState(
-                sftpSessionRecord.id,
-                'error',
-                '개인키 형식을 확인해 주세요. 암호화된 개인키는 아직 지원하지 않을 수 있습니다.',
-              );
-              return;
-            }
+          const validationMessage = validateRusshSecurity(security);
+          if (validationMessage) {
+            markSftpSessionState(sftpSessionRecord.id, 'error', validationMessage);
+            return;
           }
 
           set(state => ({
@@ -1975,7 +2077,11 @@ export const useMobileAppStore = create<MobileAppState>()(
         host: SshHostRecord,
       ) => {
         try {
-          if (host.authType !== 'password' && host.authType !== 'privateKey') {
+          if (
+            host.authType !== 'password' &&
+            host.authType !== 'privateKey' &&
+            host.authType !== 'certificate'
+          ) {
             markSessionState(
               sessionRecord.id,
               'error',
@@ -1995,42 +2101,21 @@ export const useMobileAppStore = create<MobileAppState>()(
             return;
           }
 
-          const security =
-            host.authType === 'password'
-              ? credentials.password
-                ? {
-                    type: 'password' as const,
-                    password: credentials.password,
-                  }
-                : null
-              : credentials.privateKeyPem
-                ? {
-                    type: 'key' as const,
-                    privateKey: credentials.privateKeyPem,
-                  }
-                : null;
+          const security = buildRusshSecurity(host, credentials);
 
           if (!security) {
             markSessionState(
               sessionRecord.id,
               'error',
-              host.authType === 'password'
-                ? '비밀번호가 필요합니다.'
-                : '개인키 PEM이 필요합니다.',
+              getMissingCredentialMessage(host),
             );
             return;
           }
 
-          if (security.type === 'key') {
-            const validation = RnRussh.validatePrivateKey(security.privateKey);
-            if (!validation.valid) {
-              markSessionState(
-                sessionRecord.id,
-                'error',
-                '개인키 형식을 확인해 주세요. 암호화된 개인키는 아직 지원하지 않을 수 있습니다.',
-              );
-              return;
-            }
+          const validationMessage = validateRusshSecurity(security);
+          if (validationMessage) {
+            markSessionState(sessionRecord.id, 'error', validationMessage);
+            return;
           }
 
           const connectionStartedAt = new Date().toISOString();

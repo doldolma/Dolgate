@@ -27,6 +27,7 @@ jest.mock('@fressh/react-native-uniffi-russh', () => ({
     connect: jest.fn(),
     connectSftp: jest.fn(),
     validatePrivateKey: jest.fn(() => ({ valid: true })),
+    validateCertificate: jest.fn(() => ({ valid: true })),
   },
 }));
 jest.mock('react-native-document-picker', () => ({

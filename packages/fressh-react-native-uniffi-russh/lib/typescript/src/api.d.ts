@@ -23,6 +23,12 @@ export type ConnectionDetails = {
     } | {
         type: "key";
         privateKey: string;
+        passphrase?: string;
+    } | {
+        type: "certificate";
+        privateKey: string;
+        certificate: string;
+        passphrase?: string;
     };
 };
 /**
@@ -177,7 +183,14 @@ export type SftpConnection = {
 declare function connect({ onServerKey, onConnectionProgress, onDisconnected, ...options }: ConnectOptions): Promise<SshConnection>;
 declare function connectSftp({ onServerKey, onConnectionProgress, onDisconnected, ...options }: ConnectSftpOptions): Promise<SftpConnection>;
 declare function generateKeyPair(type: "rsa" | "ecdsa" | "ed25519"): Promise<string>;
-declare function validatePrivateKey(key: string): {
+declare function validatePrivateKey(key: string, passphrase?: string): {
+    valid: true;
+    error?: never;
+} | {
+    valid: false;
+    error: GeneratedRussh.SshError;
+};
+declare function validateCertificate(certificate: string): {
     valid: true;
     error?: never;
 } | {
@@ -191,5 +204,6 @@ export declare const RnRussh: {
     connectSftp: typeof connectSftp;
     generateKeyPair: typeof generateKeyPair;
     validatePrivateKey: typeof validatePrivateKey;
+    validateCertificate: typeof validateCertificate;
 };
 //# sourceMappingURL=api.d.ts.map

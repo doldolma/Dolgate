@@ -34,7 +34,13 @@ export type ConnectionDetails = {
   username: string;
   security:
     | { type: "password"; password: string }
-    | { type: "key"; privateKey: string };
+    | { type: "key"; privateKey: string; passphrase?: string }
+    | {
+        type: "certificate";
+        privateKey: string;
+        certificate: string;
+        passphrase?: string;
+      };
 };
 
 /**
@@ -231,6 +237,12 @@ type RusshApi = {
   ) => Promise<string>;
   validatePrivateKey: (
     key: string,
+    passphrase?: string,
+  ) =>
+    | { valid: true; error?: never }
+    | { valid: false; error: GeneratedRussh.SshError };
+  validateCertificate: (
+    certificate: string,
   ) =>
     | { valid: true; error?: never }
     | { valid: false; error: GeneratedRussh.SshError };
@@ -286,16 +298,51 @@ const sftpEntryKindEnumToLiteral = {
 function generatedConnDetailsToIdeal(
   details: GeneratedRussh.ConnectionDetails,
 ): ConnectionDetails {
-  const security: ConnectionDetails["security"] =
-    details.security instanceof GeneratedRussh.Security.Password
-      ? { type: "password", password: details.security.inner.password }
-      : { type: "key", privateKey: details.security.inner.privateKeyContent };
+  let security: ConnectionDetails["security"];
+  if (details.security instanceof GeneratedRussh.Security.Password) {
+    security = { type: "password", password: details.security.inner.password };
+  } else if (details.security instanceof GeneratedRussh.Security.Key) {
+    security = {
+      type: "key",
+      privateKey: details.security.inner.privateKeyContent,
+      passphrase: details.security.inner.passphrase ?? undefined,
+    };
+  } else {
+    security = {
+      type: "certificate",
+      privateKey: details.security.inner.privateKeyContent,
+      certificate: details.security.inner.certificateText,
+      passphrase: details.security.inner.passphrase ?? undefined,
+    };
+  }
   return {
     host: details.host,
     port: details.port,
     username: details.username,
     security,
   };
+}
+
+function securityToGenerated(
+  security: ConnectionDetails["security"],
+): GeneratedRussh.Security {
+  switch (security.type) {
+    case "password":
+      return new GeneratedRussh.Security.Password({
+        password: security.password,
+      });
+    case "key":
+      return new GeneratedRussh.Security.Key({
+        privateKeyContent: security.privateKey,
+        passphrase: security.passphrase,
+      });
+    case "certificate":
+      return new GeneratedRussh.Security.Certificate({
+        privateKeyContent: security.privateKey,
+        certificateText: security.certificate,
+        passphrase: security.passphrase,
+      });
+  }
 }
 
 function cursorToGenerated(cursor: Cursor): GeneratedRussh.Cursor {
@@ -523,14 +570,7 @@ async function connect({
   onDisconnected,
   ...options
 }: ConnectOptions): Promise<SshConnection> {
-  const security =
-    options.security.type === "password"
-      ? new GeneratedRussh.Security.Password({
-          password: options.security.password,
-        })
-      : new GeneratedRussh.Security.Key({
-          privateKeyContent: options.security.privateKey,
-        });
+  const security = securityToGenerated(options.security);
   const sshConnection = await GeneratedRussh.connect(
     {
       connectionDetails: {
@@ -570,14 +610,7 @@ async function connectSftp({
   if (!generated.connectSftp) {
     throw new Error("SFTP native bridge is not available.");
   }
-  const security =
-    options.security.type === "password"
-      ? new GeneratedRussh.Security.Password({
-          password: options.security.password,
-        })
-      : new GeneratedRussh.Security.Key({
-          privateKeyContent: options.security.privateKey,
-        });
+  const security = securityToGenerated(options.security);
   const sftpConnection = await generated.connectSftp(
     {
       connectionDetails: {
@@ -618,11 +651,25 @@ async function generateKeyPair(type: "rsa" | "ecdsa" | "ed25519") {
 
 function validatePrivateKey(
   key: string,
+  passphrase?: string,
 ):
   | { valid: true; error?: never }
   | { valid: false; error: GeneratedRussh.SshError } {
   try {
-    GeneratedRussh.validatePrivateKey(key);
+    GeneratedRussh.validatePrivateKey(key, passphrase);
+    return { valid: true };
+  } catch (e) {
+    return { valid: false, error: e as GeneratedRussh.SshError };
+  }
+}
+
+function validateCertificate(
+  certificate: string,
+):
+  | { valid: true; error?: never }
+  | { valid: false; error: GeneratedRussh.SshError } {
+  try {
+    GeneratedRussh.validateCertificate(certificate);
     return { valid: true };
   } catch (e) {
     return { valid: false, error: e as GeneratedRussh.SshError };
@@ -639,4 +686,5 @@ export const RnRussh = {
   connectSftp,
   generateKeyPair,
   validatePrivateKey,
+  validateCertificate,
 } satisfies RusshApi;

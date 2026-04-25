@@ -6,7 +6,8 @@ export declare function connectSftp(options: ConnectOptions, asyncOpts_?: {
     signal: AbortSignal;
 }): Promise<SftpConnectionInterface>;
 export declare function generateKeyPair(keyType: KeyType): string;
-export declare function validatePrivateKey(privateKeyContent: string): string;
+export declare function validateCertificate(certificateText: string): string;
+export declare function validatePrivateKey(privateKeyContent: string, passphrase: string | undefined): string;
 export type BufferReadResult = {
     chunks: Array<TerminalChunk>;
     nextSeq: bigint;
@@ -667,7 +668,8 @@ export declare enum KeyType {
 }
 export declare enum Security_Tags {
     Password = "Password",
-    Key = "Key"
+    Key = "Key",
+    Certificate = "Certificate"
 }
 export declare const Security: Readonly<{
     instanceOf: (obj: any) => obj is Security;
@@ -713,10 +715,12 @@ export declare const Security: Readonly<{
     Key: {
         new (inner: {
             privateKeyContent: string;
+            passphrase: string | undefined;
         }): {
             readonly tag: Security_Tags.Key;
             readonly inner: Readonly<{
                 privateKeyContent: string;
+                passphrase: string | undefined;
             }>;
             /**
              * @private
@@ -726,10 +730,12 @@ export declare const Security: Readonly<{
         };
         "new"(inner: {
             privateKeyContent: string;
+            passphrase: string | undefined;
         }): {
             readonly tag: Security_Tags.Key;
             readonly inner: Readonly<{
                 privateKeyContent: string;
+                passphrase: string | undefined;
             }>;
             /**
              * @private
@@ -741,6 +747,56 @@ export declare const Security: Readonly<{
             readonly tag: Security_Tags.Key;
             readonly inner: Readonly<{
                 privateKeyContent: string;
+                passphrase: string | undefined;
+            }>;
+            /**
+             * @private
+             * This field is private and should not be used, use `tag` instead.
+             */
+            readonly [uniffiTypeNameSymbol]: "Security";
+        };
+    };
+    Certificate: {
+        new (inner: {
+            privateKeyContent: string;
+            certificateText: string;
+            passphrase: string | undefined;
+        }): {
+            readonly tag: Security_Tags.Certificate;
+            readonly inner: Readonly<{
+                privateKeyContent: string;
+                certificateText: string;
+                passphrase: string | undefined;
+            }>;
+            /**
+             * @private
+             * This field is private and should not be used, use `tag` instead.
+             */
+            readonly [uniffiTypeNameSymbol]: "Security";
+        };
+        "new"(inner: {
+            privateKeyContent: string;
+            certificateText: string;
+            passphrase: string | undefined;
+        }): {
+            readonly tag: Security_Tags.Certificate;
+            readonly inner: Readonly<{
+                privateKeyContent: string;
+                certificateText: string;
+                passphrase: string | undefined;
+            }>;
+            /**
+             * @private
+             * This field is private and should not be used, use `tag` instead.
+             */
+            readonly [uniffiTypeNameSymbol]: "Security";
+        };
+        instanceOf(obj: any): obj is {
+            readonly tag: Security_Tags.Certificate;
+            readonly inner: Readonly<{
+                privateKeyContent: string;
+                certificateText: string;
+                passphrase: string | undefined;
             }>;
             /**
              * @private

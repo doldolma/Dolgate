@@ -18,10 +18,19 @@ pub enum KeyType {
 }
 
 #[uniffi::export]
-pub fn validate_private_key(private_key_content: String) -> Result<String, SshError> {
+pub fn validate_private_key(
+    private_key_content: String,
+    passphrase: Option<String>,
+) -> Result<String, SshError> {
     // Normalize and parse once; return canonical OpenSSH string.
-    let (canonical, _parsed) = normalize_openssh_ed25519_seed_key(&private_key_content)?;
+    let (canonical, _parsed) = parse_private_key(&private_key_content, passphrase.as_deref())?;
     Ok(canonical)
+}
+
+#[uniffi::export]
+pub fn validate_certificate(certificate_text: String) -> Result<String, SshError> {
+    let cert = russh::keys::Certificate::from_openssh(&certificate_text)?;
+    Ok(cert.to_openssh()?)
 }
 
 #[uniffi::export]
@@ -171,6 +180,25 @@ pub(crate) fn normalize_openssh_ed25519_seed_key(
     Ok((canonical, parsed))
 }
 
+pub(crate) fn parse_private_key(
+    input: &str,
+    passphrase: Option<&str>,
+) -> Result<(String, russh::keys::PrivateKey), SshError> {
+    let passphrase = passphrase.filter(|value| !value.is_empty());
+    match russh::keys::decode_secret_key(input, passphrase) {
+        Ok(parsed) => {
+            let canonical = parsed
+                .to_openssh(russh::keys::ssh_key::LineEnding::LF)?
+                .to_string();
+            Ok((canonical, parsed))
+        }
+        Err(_) if passphrase.is_none() => {
+            normalize_openssh_ed25519_seed_key(input).map_err(SshError::from)
+        }
+        Err(error) => Err(error.into()),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -178,8 +206,15 @@ mod tests {
     #[test]
     fn validate_private_key_rejects_invalid_constant() {
         let invalid_key = "this is not a private key".to_string();
-        let result = validate_private_key(invalid_key);
+        let result = validate_private_key(invalid_key, None);
         assert!(result.is_err(), "Expected Err for invalid key content");
+    }
+
+    #[test]
+    fn validate_certificate_rejects_invalid_constant() {
+        let invalid_certificate = "this is not a certificate".to_string();
+        let result = validate_certificate(invalid_certificate);
+        assert!(result.is_err(), "Expected Err for invalid certificate content");
     }
 
     #[test]
@@ -194,7 +229,7 @@ viCQKMmFp2+9/5MOVEEnAAAAF3Rlc3QtZWQyNTUxOUBmcmVzc2guY29tAQIDBAUG
 -----END OPENSSH PRIVATE KEY-----
 "
         .to_string();
-        let result = validate_private_key(valid_key);
+        let result = validate_private_key(valid_key, None);
         assert!(result.is_ok(), "Expected Ok for valid key content");
     }
     #[test]
@@ -209,7 +244,7 @@ yBLQgBonGVgvnJ645o0yAAAADmV0aGFuQEV0aGFuLVBDAQIDBAUGBw==
 -----END OPENSSH PRIVATE KEY-----
 "
         .to_string();
-        let result = validate_private_key(valid_key);
+        let result = validate_private_key(valid_key, None);
         assert!(result.is_ok(), "Expected Ok for valid key content");
     }
     #[test]
@@ -224,7 +259,7 @@ FZYRr/AT/8hRct4v1h68AAAAAAECAwQF
 -----END OPENSSH PRIVATE KEY-----
 "
         .to_string();
-        let result = validate_private_key(valid_key);
+        let result = validate_private_key(valid_key, None);
         assert!(result.is_ok(), "Expected Ok for valid key content");
     }
     #[test]
@@ -234,7 +269,7 @@ FZYRr/AT/8hRct4v1h68AAAAAAECAwQF
 b3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAAAMwAAAAtzc2gtZWQyNTUxOQAAACCh5IbLI9ypdFzNW8WvezgBrzJT/2mT9BKSdZScB4EYoQAAAJB8YyoafGMqGgAAAAtzc2gtZWQyNTUxOQAAACCh5IbLI9ypdFzNW8WvezgBrzJT/2mT9BKSdZScB4EYoQAAAECpYzHTSiKC2iehjck1n8GAp5mdGuB2J5vV+9U3MAvthKHkhssj3Kl0XM1bxa97OAGvMlP/aZP0EpJ1lJwHgRihAAAAAAECAwQFBgcICQoLDA0=
 -----END OPENSSH PRIVATE KEY-----
 ".to_string();
-        let result = validate_private_key(valid_key);
+        let result = validate_private_key(valid_key, None);
         assert!(result.is_ok(), "Expected Ok for valid key content");
     }
 }
