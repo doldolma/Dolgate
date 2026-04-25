@@ -732,10 +732,10 @@ final class AwsSsoBridgeModule: NSObject, SFSafariViewControllerDelegate {
 
 @objc(DolsshFileTransferModule)
 final class DolsshFileTransferModule: NSObject, UIDocumentPickerDelegate {
-  private var pendingDownloadResolve: RCTPromiseResolveBlock?
-  private var pendingDownloadReject: RCTPromiseRejectBlock?
-  private var pendingDownloadFileName: String?
-  private var pendingDownloadKind: PendingDownloadKind?
+  private var pendingExportResolve: RCTPromiseResolveBlock?
+  private var pendingExportReject: RCTPromiseRejectBlock?
+  private var pendingExportUrl: URL?
+  private var pendingExportName: String?
 
   @objc static func requiresMainQueueSetup() -> Bool {
     true
@@ -748,26 +748,19 @@ final class DolsshFileTransferModule: NSObject, UIDocumentPickerDelegate {
     rejecter reject: @escaping RCTPromiseRejectBlock
   ) {
     DispatchQueue.main.async {
-      guard self.pendingDownloadResolve == nil else {
-        reject("download_destination_busy", "이미 저장 위치를 선택하는 중입니다.", nil)
-        return
+      do {
+        let stagedUrl = try self.createStagedDownloadTarget(
+          requestedName: fileName,
+          isDirectory: false
+        )
+        resolve([
+          "uri": stagedUrl.absoluteString,
+          "name": stagedUrl.lastPathComponent,
+          "requiresExport": true,
+        ])
+      } catch {
+        reject("download_destination_failed", error.localizedDescription, error)
       }
-      guard let presenter = DolsshFileTransferModule.topViewController() else {
-        reject("download_destination_unavailable", "저장 위치를 열 화면을 찾지 못했습니다.", nil)
-        return
-      }
-
-      self.pendingDownloadResolve = resolve
-      self.pendingDownloadReject = reject
-      self.pendingDownloadFileName = fileName
-      self.pendingDownloadKind = .file
-
-      let tempUrl = FileManager.default.temporaryDirectory.appendingPathComponent(fileName)
-      try? Data().write(to: tempUrl, options: [.atomic])
-      let controller = UIDocumentPickerViewController(forExporting: [tempUrl], asCopy: true)
-      controller.delegate = self
-      controller.allowsMultipleSelection = false
-      presenter.present(controller, animated: true)
     }
   }
 
@@ -778,27 +771,60 @@ final class DolsshFileTransferModule: NSObject, UIDocumentPickerDelegate {
     rejecter reject: @escaping RCTPromiseRejectBlock
   ) {
     DispatchQueue.main.async {
-      guard self.pendingDownloadResolve == nil else {
-        reject("download_directory_busy", "이미 저장 폴더를 선택하는 중입니다.", nil)
+      do {
+        let stagedUrl = try self.createStagedDownloadTarget(
+          requestedName: directoryName,
+          isDirectory: true
+        )
+        resolve([
+          "uri": stagedUrl.absoluteString,
+          "name": stagedUrl.lastPathComponent,
+          "requiresExport": true,
+        ])
+      } catch {
+        reject("download_directory_failed", error.localizedDescription, error)
+      }
+    }
+  }
+
+  @objc(finalizeDownloadDestination:name:resolver:rejecter:)
+  func finalizeDownloadDestination(
+    destinationUri: String,
+    name: String,
+    resolver resolve: @escaping RCTPromiseResolveBlock,
+    rejecter reject: @escaping RCTPromiseRejectBlock
+  ) {
+    DispatchQueue.main.async {
+      guard self.pendingExportResolve == nil else {
+        reject("download_export_busy", "이미 저장 위치를 선택하는 중입니다.", nil)
+        return
+      }
+      guard let exportUrl = URL(string: destinationUri) else {
+        reject("download_export_failed", "저장 파일 경로가 올바르지 않습니다.", nil)
+        return
+      }
+      guard FileManager.default.fileExists(atPath: exportUrl.path) else {
+        reject("download_export_failed", "저장할 파일을 찾지 못했습니다.", nil)
         return
       }
       guard let presenter = DolsshFileTransferModule.topViewController() else {
-        reject("download_directory_unavailable", "저장 폴더를 열 화면을 찾지 못했습니다.", nil)
+        reject("download_export_unavailable", "저장 위치를 열 화면을 찾지 못했습니다.", nil)
         return
       }
 
-      self.pendingDownloadResolve = resolve
-      self.pendingDownloadReject = reject
-      self.pendingDownloadFileName = directoryName
-      self.pendingDownloadKind = .directory
+      self.pendingExportResolve = resolve
+      self.pendingExportReject = reject
+      self.pendingExportUrl = exportUrl
+      self.pendingExportName = name.isEmpty ? exportUrl.lastPathComponent : name
 
       let controller = UIDocumentPickerViewController(
-        forOpeningContentTypes: [.folder],
-        asCopy: false
+        forExporting: [exportUrl],
+        asCopy: true
       )
       controller.delegate = self
       controller.allowsMultipleSelection = false
       presenter.present(controller, animated: true)
+      self.clearPendingExportIfPickerDidNotPresent(controller)
     }
   }
 
@@ -932,42 +958,116 @@ final class DolsshFileTransferModule: NSObject, UIDocumentPickerDelegate {
   }
 
   func documentPickerWasCancelled(_ controller: UIDocumentPickerViewController) {
-    pendingDownloadReject?(
+    pendingExportReject?(
       "DOCUMENT_PICKER_CANCELED",
-      "저장 위치 선택이 취소되었습니다.",
+      "저장이 취소되었습니다.",
       nil
     )
-    clearPendingDownload()
+    cleanupPendingExport()
   }
 
   func documentPicker(
     _ controller: UIDocumentPickerViewController,
     didPickDocumentsAt urls: [URL]
   ) {
-    guard let destinationUrl = urls.first else {
-      pendingDownloadReject?(
+    guard let exportedUrl = urls.first else {
+      pendingExportReject?(
         "DOCUMENT_PICKER_CANCELED",
-        "저장 위치 선택이 취소되었습니다.",
+        "저장이 취소되었습니다.",
         nil
       )
-      clearPendingDownload()
+      cleanupPendingExport()
       return
     }
 
-    let fileName = pendingDownloadFileName ?? "download"
-    let kind = pendingDownloadKind ?? .file
-    pendingDownloadResolve?([
-      "uri": destinationUrl.absoluteString,
-      "name": kind == .directory ? destinationUrl.lastPathComponent : fileName,
+    let exportedName =
+      exportedUrl.lastPathComponent.isEmpty
+        ? (pendingExportName ?? "download")
+        : exportedUrl.lastPathComponent
+    pendingExportResolve?([
+      "uri": exportedUrl.absoluteString,
+      "name": exportedName,
     ])
-    clearPendingDownload()
+    cleanupPendingExport()
   }
 
-  private func clearPendingDownload() {
-    pendingDownloadResolve = nil
-    pendingDownloadReject = nil
-    pendingDownloadFileName = nil
-    pendingDownloadKind = nil
+  private func clearPendingExport() {
+    pendingExportResolve = nil
+    pendingExportReject = nil
+    pendingExportUrl = nil
+    pendingExportName = nil
+  }
+
+  private func cleanupPendingExport() {
+    let stagedUrl = pendingExportUrl
+    clearPendingExport()
+    if let stagedUrl = stagedUrl {
+      try? FileManager.default.removeItem(at: stagedUrl)
+      let parentUrl = stagedUrl.deletingLastPathComponent()
+      if parentUrl.lastPathComponent.hasPrefix("dolgate-download-") {
+        try? FileManager.default.removeItem(at: parentUrl)
+      }
+    }
+  }
+
+  private func clearPendingExportIfPickerDidNotPresent(
+    _ controller: UIDocumentPickerViewController
+  ) {
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.75) { [weak self, weak controller] in
+      guard let self = self else {
+        return
+      }
+      guard self.pendingExportResolve != nil else {
+        return
+      }
+      guard let controller = controller else {
+        self.pendingExportReject?(
+          "download_picker_failed",
+          "저장 위치 선택기를 열지 못했습니다.",
+          nil
+        )
+        self.cleanupPendingExport()
+        return
+      }
+      if controller.presentingViewController == nil && controller.view.window == nil {
+        self.pendingExportReject?(
+          "download_picker_failed",
+          "저장 위치 선택기를 열지 못했습니다.",
+          nil
+        )
+        self.cleanupPendingExport()
+      }
+    }
+  }
+
+  private func createStagedDownloadTarget(
+    requestedName: String,
+    isDirectory: Bool
+  ) throws -> URL {
+    let safeName = sanitizedDownloadName(requestedName, fallback: "download")
+    let containerUrl = FileManager.default.temporaryDirectory
+      .appendingPathComponent("dolgate-download-\(UUID().uuidString)", isDirectory: true)
+    try FileManager.default.createDirectory(
+      at: containerUrl,
+      withIntermediateDirectories: true
+    )
+    let targetUrl = containerUrl.appendingPathComponent(safeName, isDirectory: isDirectory)
+    if isDirectory {
+      try FileManager.default.createDirectory(
+        at: targetUrl,
+        withIntermediateDirectories: false
+      )
+    } else {
+      FileManager.default.createFile(atPath: targetUrl.path, contents: nil)
+    }
+    return targetUrl
+  }
+
+  private func sanitizedDownloadName(_ input: String, fallback: String) -> String {
+    let trimmed = input.trimmingCharacters(in: .whitespacesAndNewlines)
+    let candidate = trimmed.isEmpty ? fallback : trimmed
+    let fileName = URL(fileURLWithPath: candidate).lastPathComponent
+    return fileName.isEmpty ? fallback : fileName
   }
 
   private func createChildDocument(
@@ -1045,8 +1145,4 @@ final class DolsshFileTransferModule: NSObject, UIDocumentPickerDelegate {
     return root
   }
 
-  private enum PendingDownloadKind {
-    case file
-    case directory
-  }
 }

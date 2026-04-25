@@ -38,6 +38,11 @@ RCT_EXTERN_METHOD(writeDownloadChunk:(NSString *)destinationUri
                   resolver:(RCTPromiseResolveBlock)resolve
                   rejecter:(RCTPromiseRejectBlock)reject)
 
+RCT_EXTERN_METHOD(finalizeDownloadDestination:(NSString *)destinationUri
+                  name:(NSString *)name
+                  resolver:(RCTPromiseResolveBlock)resolve
+                  rejecter:(RCTPromiseRejectBlock)reject)
+
 RCT_EXTERN_METHOD(deleteDocument:(NSString *)destinationUri
                   resolver:(RCTPromiseResolveBlock)resolve
                   rejecter:(RCTPromiseRejectBlock)reject)

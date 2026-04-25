@@ -94,6 +94,7 @@ import {
 } from '../lib/terminal-size';
 import {
   deleteDownloadDestination,
+  finalizeDownloadDestination,
   createDownloadDirectory,
   createDownloadFile,
   pickDownloadDestination,
@@ -3948,6 +3949,12 @@ export const useMobileAppStore = create<MobileAppState>()(
                 break;
               }
             }
+            const finalDestination = destination.requiresExport
+              ? await finalizeDownloadDestination(
+                  destination.uri,
+                  destination.name,
+                )
+              : destination;
             set(state => ({
               sftpTransfers: patchSftpTransferRecord(
                 state.sftpTransfers,
@@ -3955,6 +3962,7 @@ export const useMobileAppStore = create<MobileAppState>()(
                 {
                   status: 'completed',
                   bytesTransferred: offset,
+                  localName: finalDestination.name,
                 },
               ),
             }));
@@ -4006,6 +4014,11 @@ export const useMobileAppStore = create<MobileAppState>()(
             return;
           }
 
+          const pendingExportCompletions: Array<{
+            transferId: string;
+            bytesTransferred: number;
+          }> = [];
+
           for (const remotePath of remotePaths) {
             const entry = await resolveRemoteEntry(
               runtime.connection,
@@ -4050,16 +4063,23 @@ export const useMobileAppStore = create<MobileAppState>()(
                   }));
                 },
               );
-              set(state => ({
-                sftpTransfers: patchSftpTransferRecord(
-                  state.sftpTransfers,
+              if (destinationDirectory.requiresExport) {
+                pendingExportCompletions.push({
                   transferId,
-                  {
-                    status: 'completed',
-                    bytesTransferred,
-                  },
-                ),
-              }));
+                  bytesTransferred,
+                });
+              } else {
+                set(state => ({
+                  sftpTransfers: patchSftpTransferRecord(
+                    state.sftpTransfers,
+                    transferId,
+                    {
+                      status: 'completed',
+                      bytesTransferred,
+                    },
+                  ),
+                }));
+              }
             } catch (error) {
               const message =
                 error instanceof Error
@@ -4073,6 +4093,53 @@ export const useMobileAppStore = create<MobileAppState>()(
                     status: 'error',
                     errorMessage: message,
                   },
+                ),
+                sftpSessions: patchSftpSessionRecord(
+                  state.sftpSessions,
+                  sftpSessionId,
+                  {
+                    errorMessage: message,
+                    lastEventAt: new Date().toISOString(),
+                  },
+                ),
+              }));
+            }
+          }
+
+          if (
+            destinationDirectory.requiresExport &&
+            pendingExportCompletions.length > 0
+          ) {
+            try {
+              await finalizeDownloadDestination(
+                destinationDirectory.uri,
+                destinationDirectory.name,
+              );
+              set(state => ({
+                sftpTransfers: pendingExportCompletions.reduce(
+                  (nextTransfers, completion) =>
+                    patchSftpTransferRecord(nextTransfers, completion.transferId, {
+                      status: 'completed',
+                      bytesTransferred: completion.bytesTransferred,
+                    }),
+                  state.sftpTransfers,
+                ),
+              }));
+            } catch (error) {
+              try {
+                await deleteDownloadDestination(destinationDirectory.uri);
+              } catch {}
+              const message =
+                error instanceof Error ? error.message : '저장에 실패했습니다.';
+              set(state => ({
+                sftpTransfers: pendingExportCompletions.reduce(
+                  (nextTransfers, completion) =>
+                    patchSftpTransferRecord(nextTransfers, completion.transferId, {
+                      status: 'error',
+                      errorMessage: message,
+                      bytesTransferred: completion.bytesTransferred,
+                    }),
+                  state.sftpTransfers,
                 ),
                 sftpSessions: patchSftpSessionRecord(
                   state.sftpSessions,

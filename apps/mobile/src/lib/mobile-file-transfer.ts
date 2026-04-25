@@ -9,11 +9,13 @@ export interface PickedUploadFile {
 export interface DownloadDestination {
   uri: string;
   name: string;
+  requiresExport?: boolean;
 }
 
 export interface DownloadDirectory {
   uri: string;
   name: string;
+  requiresExport?: boolean;
 }
 
 interface NativeFileTransferModule {
@@ -32,6 +34,10 @@ interface NativeFileTransferModule {
     base64Chunk: string,
     append: boolean,
   ): Promise<void>;
+  finalizeDownloadDestination(
+    destinationUri: string,
+    name: string,
+  ): Promise<DownloadDestination>;
   deleteDocument(destinationUri: string): Promise<void>;
   readLocalFileChunk(
     sourceUri: string,
@@ -137,6 +143,23 @@ export async function writeDownloadChunk(
   );
 }
 
+export async function finalizeDownloadDestination(
+  destinationUri: string,
+  name: string,
+): Promise<DownloadDestination> {
+  try {
+    return await getNativeFileTransfer().finalizeDownloadDestination(
+      destinationUri,
+      name,
+    );
+  } catch (error) {
+    if (isNativeCancelError(error)) {
+      throw new Error('저장이 취소되었습니다.');
+    }
+    throw error;
+  }
+}
+
 export async function deleteDownloadDestination(
   destinationUri: string,
 ): Promise<void> {
@@ -160,5 +183,10 @@ function isNativeCancelError(error: unknown): boolean {
   }
   const code = 'code' in error ? String(error.code) : '';
   const message = 'message' in error ? String(error.message) : '';
-  return code === 'DOCUMENT_PICKER_CANCELED' || /cancel/i.test(message);
+  return (
+    code === 'DOCUMENT_PICKER_CANCELED' ||
+    code === 'download_destination_busy' ||
+    code === 'download_directory_busy' ||
+    /cancel/i.test(message)
+  );
 }

@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -67,6 +67,7 @@ export function SftpBrowserView({
   const [actionEntry, setActionEntry] = useState<FileEntry | null>(null);
   const [prompt, setPrompt] = useState<PromptState | null>(null);
   const [selectedPaths, setSelectedPaths] = useState<string[]>([]);
+  const pendingActionAfterModalDismiss = useRef<(() => void) | null>(null);
 
   const entries = useMemo(() => {
     const listingEntries = session.listing?.entries ?? [];
@@ -119,6 +120,21 @@ export function SftpBrowserView({
   };
 
   const clearSelection = () => setSelectedPaths([]);
+
+  const flushActionAfterModalDismiss = useCallback(() => {
+    const action = pendingActionAfterModalDismiss.current;
+    if (!action) {
+      return;
+    }
+    pendingActionAfterModalDismiss.current = null;
+    setTimeout(action, 0);
+  }, []);
+
+  const runAfterActionModalClose = (action: () => void) => {
+    pendingActionAfterModalDismiss.current = action;
+    setActionEntry(null);
+    setTimeout(flushActionAfterModalDismiss, 700);
+  };
 
   const runSelectedAction = async (
     key: string,
@@ -436,33 +452,38 @@ export function SftpBrowserView({
         palette={palette}
         entry={actionEntry}
         onClose={() => setActionEntry(null)}
+        onDismiss={flushActionAfterModalDismiss}
         onDownload={entry => {
-          setActionEntry(null);
-          void runAction('download', () =>
-            entry.isDirectory
-              ? onDownloadEntries([entry.path])
-              : onDownload(entry.path),
+          runAfterActionModalClose(() =>
+            void runAction('download', () =>
+              entry.isDirectory
+                ? onDownloadEntries([entry.path])
+                : onDownload(entry.path),
+            ),
           );
         }}
         onRename={entry => {
-          setActionEntry(null);
-          setPrompt({ kind: 'rename', entry, value: entry.name });
+          runAfterActionModalClose(() =>
+            setPrompt({ kind: 'rename', entry, value: entry.name }),
+          );
         }}
         onChmod={entry => {
-          setActionEntry(null);
-          setPrompt({ kind: 'chmod', entry, value: '0644' });
+          runAfterActionModalClose(() =>
+            setPrompt({ kind: 'chmod', entry, value: '0644' }),
+          );
         }}
         onDelete={entry => {
-          setActionEntry(null);
-          Alert.alert('삭제', `${entry.name} 항목을 삭제할까요?`, [
-            { text: '취소', style: 'cancel' },
-            {
-              text: '삭제',
-              style: 'destructive',
-              onPress: () =>
-                void runAction('delete', () => onDelete([entry.path])),
-            },
-          ]);
+          runAfterActionModalClose(() =>
+            Alert.alert('삭제', `${entry.name} 항목을 삭제할까요?`, [
+              { text: '취소', style: 'cancel' },
+              {
+                text: '삭제',
+                style: 'destructive',
+                onPress: () =>
+                  void runAction('delete', () => onDelete([entry.path])),
+              },
+            ]),
+          );
         }}
       />
 
@@ -556,6 +577,7 @@ function EntryActionModal({
   palette,
   entry,
   onClose,
+  onDismiss,
   onDownload,
   onRename,
   onChmod,
@@ -564,6 +586,7 @@ function EntryActionModal({
   palette: MobilePalette;
   entry: FileEntry | null;
   onClose: () => void;
+  onDismiss: () => void;
   onDownload: (entry: FileEntry) => void;
   onRename: (entry: FileEntry) => void;
   onChmod: (entry: FileEntry) => void;
@@ -573,7 +596,13 @@ function EntryActionModal({
     return null;
   }
   return (
-    <Modal transparent animationType="fade" visible onRequestClose={onClose}>
+    <Modal
+      transparent
+      animationType="fade"
+      visible
+      onDismiss={onDismiss}
+      onRequestClose={onClose}
+    >
       <Pressable
         style={[styles.modalOverlay, { backgroundColor: palette.overlay }]}
         onPress={onClose}
