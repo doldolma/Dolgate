@@ -3,7 +3,11 @@ import renderer, { act } from "react-test-renderer";
 import { NavigationContainer } from "@react-navigation/native";
 import type { AuthState } from "@dolssh/shared-core";
 import { createDefaultMobileSettings, createDefaultSyncStatus, createUnauthenticatedState } from "../src/lib/mobile";
-import { RootNavigator } from "../src/navigation/RootNavigator";
+import {
+  MAIN_TAB_BACK_BEHAVIOR,
+  MAIN_TAB_INITIAL_ROUTE,
+  RootNavigator,
+} from "../src/navigation/RootNavigator";
 import { useMobileAppStore } from "../src/store/useMobileAppStore";
 
 jest.mock("react-native-vector-icons/Ionicons", () => "Ionicons");
@@ -164,5 +168,10 @@ describe("RootNavigator auth gating", () => {
     await act(async () => {
       tree!.unmount();
     });
+  });
+
+  it("keeps the main tabs on Home with full visit-history back behavior", () => {
+    expect(MAIN_TAB_INITIAL_ROUTE).toBe("Home");
+    expect(MAIN_TAB_BACK_BEHAVIOR).toBe("fullHistory");
   });
 });

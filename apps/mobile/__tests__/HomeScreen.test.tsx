@@ -1,6 +1,6 @@
 import React from "react";
 import renderer, { act } from "react-test-renderer";
-import { BackHandler, FlatList, TextInput } from "react-native";
+import { BackHandler, FlatList, Platform, TextInput } from "react-native";
 import type {
   AuthState,
   GroupRecord,
@@ -18,6 +18,14 @@ const mockNavigate = jest.fn();
 const mockFlatListScrollToOffset = jest.fn();
 let mockScrollToTopRef: React.RefObject<{ scrollToTop: () => void }> | null = null;
 let mockHardwareBackHandler: (() => boolean) | null = null;
+const platformOsDescriptor = Object.getOwnPropertyDescriptor(Platform, "OS");
+
+function setPlatformOs(os: "ios" | "android") {
+  Object.defineProperty(Platform, "OS", {
+    configurable: true,
+    get: () => os,
+  });
+}
 
 jest.mock("@react-navigation/native", () => ({
   useNavigation: () => ({
@@ -258,6 +266,12 @@ describe("HomeScreen group browsing", () => {
     jest.useRealTimers();
   });
 
+  afterAll(() => {
+    if (platformOsDescriptor) {
+      Object.defineProperty(Platform, "OS", platformOsDescriptor);
+    }
+  });
+
   it("shows root folders first and only ungrouped hosts at the root", async () => {
     let tree: renderer.ReactTestRenderer;
 
@@ -356,6 +370,62 @@ describe("HomeScreen group browsing", () => {
     expect(() =>
       tree!.root.findByProps({ accessibilityLabel: "NAS 그룹 열기" }),
     ).not.toThrow();
+
+    await act(async () => {
+      jest.runOnlyPendingTimers();
+      tree!.unmount();
+    });
+  });
+
+  it("uses iOS edge-swipe to clear search before popping group history", async () => {
+    setPlatformOs("ios");
+    let tree: renderer.ReactTestRenderer;
+
+    await act(async () => {
+      tree = renderer.create(<HomeScreen />);
+    });
+
+    await act(async () => {
+      tree!.root.findByProps({
+        accessibilityLabel: "Servers 그룹 열기",
+      }).props.onPress();
+    });
+
+    const searchInput = tree!.root.findByType(TextInput);
+    await act(async () => {
+      searchInput.props.onChangeText("nas");
+    });
+
+    await act(async () => {
+      tree!.root
+        .findByProps({ testID: "ios-edge-swipe-back" })
+        .props.onTouchEnd();
+    });
+
+    expect(tree!.root.findByType(TextInput).props.value).toBe("");
+    let text = collectText(tree!.toJSON());
+    expect(text).toContain("Servers");
+    expect(text).toContain("Server Jump");
+    expect(text).not.toContain("Root Host");
+
+    await act(async () => {
+      tree!.root
+        .findByProps({ testID: "ios-edge-swipe-back" })
+        .props.onTouchEnd();
+    });
+
+    text = collectText(tree!.toJSON());
+    expect(text).toContain("All Hosts");
+    expect(text).toContain("Root Host");
+    expect(text).not.toContain("Server Jump");
+
+    await act(async () => {
+      tree!.root
+        .findByProps({ testID: "ios-edge-swipe-back" })
+        .props.onTouchEnd();
+    });
+
+    expect(mockNavigate).not.toHaveBeenCalled();
 
     await act(async () => {
       jest.runOnlyPendingTimers();

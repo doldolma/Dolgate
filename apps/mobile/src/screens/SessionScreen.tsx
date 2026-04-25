@@ -18,6 +18,7 @@ import {
   View,
   useWindowDimensions,
 } from 'react-native';
+import { useNavigation, type NavigationProp } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Ionicons from 'react-native-vector-icons/Ionicons';
 import { isAwsEc2HostRecord, isSshHostRecord } from '@dolssh/shared-core';
@@ -25,6 +26,7 @@ import {
   XtermJsWebView,
   type XtermWebViewHandle,
 } from '@fressh/react-native-xtermjs-webview';
+import { IosEdgeSwipeBack } from '../components/IosEdgeSwipeBack';
 import {
   TerminalInputView,
   type TerminalInputViewHandle,
@@ -38,6 +40,7 @@ import {
   type NativeTerminalInputEvent,
 } from '../lib/terminal-input';
 import { getKeyboardDockInset } from '../lib/keyboard-layout';
+import type { MainTabParamList } from '../navigation/RootNavigator';
 import { useMobileAppStore } from '../store/useMobileAppStore';
 import type { MobilePalette } from '../theme';
 import { useMobilePalette } from '../theme';
@@ -95,6 +98,7 @@ function isLiveSession(status: string) {
 
 export function SessionScreen(): React.JSX.Element {
   const palette = useMobilePalette();
+  const navigation = useNavigation<NavigationProp<MainTabParamList>>();
   const safeAreaInsets = useSafeAreaInsets();
   const screenPadding = useScreenPadding({
     horizontal: 0,
@@ -180,6 +184,15 @@ export function SessionScreen(): React.JSX.Element {
   const subscribeToSessionTerminal = useMobileAppStore(
     state => state.subscribeToSessionTerminal,
   );
+
+  const goBackToPreviousMainTab = useCallback(() => {
+    if (navigation.canGoBack()) {
+      navigation.goBack();
+      return;
+    }
+
+    navigation.navigate('Home');
+  }, [navigation]);
 
   const liveSessions = useMemo(
     () => sessions.filter(session => isLiveSession(session.status)),
@@ -618,47 +631,50 @@ export function SessionScreen(): React.JSX.Element {
 
   if (!activeTab) {
     return (
-      <View
-        style={[
-          styles.screen,
-          styles.centered,
-          {
-            backgroundColor: palette.sessionChrome,
-            paddingTop: screenPadding.paddingTop,
-            paddingBottom: screenPadding.paddingBottom,
-            paddingHorizontal: 14,
-          },
-        ]}
-      >
+      <IosEdgeSwipeBack onBack={goBackToPreviousMainTab}>
         <View
           style={[
-            styles.emptyCard,
+            styles.screen,
+            styles.centered,
             {
-              backgroundColor: palette.surface,
-              borderColor: palette.sessionSurfaceBorder,
+              backgroundColor: palette.sessionChrome,
+              paddingTop: screenPadding.paddingTop,
+              paddingBottom: screenPadding.paddingBottom,
+              paddingHorizontal: 14,
             },
           ]}
         >
-          <Text style={[styles.emptyTitle, { color: palette.text }]}>
-            열린 세션이 없습니다.
-          </Text>
-          <Text style={[styles.emptyBody, { color: palette.mutedText }]}>
-            Home에서 호스트를 열면 여기에 현재 연결 탭이 표시됩니다.
-          </Text>
+          <View
+            style={[
+              styles.emptyCard,
+              {
+                backgroundColor: palette.surface,
+                borderColor: palette.sessionSurfaceBorder,
+              },
+            ]}
+          >
+            <Text style={[styles.emptyTitle, { color: palette.text }]}>
+              열린 세션이 없습니다.
+            </Text>
+            <Text style={[styles.emptyBody, { color: palette.mutedText }]}>
+              Home에서 호스트를 열면 여기에 현재 연결 탭이 표시됩니다.
+            </Text>
+          </View>
         </View>
-      </View>
+      </IosEdgeSwipeBack>
     );
   }
   return (
-    <View
-      style={[
-        styles.screen,
-        {
-          backgroundColor: palette.sessionChrome,
-          paddingTop: screenPadding.paddingTop,
-        },
-      ]}
-    >
+    <IosEdgeSwipeBack onBack={goBackToPreviousMainTab}>
+      <View
+        style={[
+          styles.screen,
+          {
+            backgroundColor: palette.sessionChrome,
+            paddingTop: screenPadding.paddingTop,
+          },
+        ]}
+      >
       <View style={styles.tabStripShell}>
         <ScrollView
           horizontal
@@ -1209,7 +1225,8 @@ export function SessionScreen(): React.JSX.Element {
           </View>
         ) : null}
       </View>
-    </View>
+      </View>
+    </IosEdgeSwipeBack>
   );
 }
 

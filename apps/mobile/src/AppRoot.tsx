@@ -9,6 +9,7 @@ import {
   useColorScheme,
 } from "react-native";
 import { NavigationContainer } from "@react-navigation/native";
+import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { CredentialPromptModal } from "./components/CredentialPromptModal";
 import { AwsSsoWaitingModal } from "./components/AwsSsoWaitingModal";
@@ -95,69 +96,71 @@ export function AppRoot(): React.JSX.Element {
       : "light-content";
 
   return (
-    <SafeAreaProvider>
-      <StatusBar
-        barStyle={barStyle}
-        backgroundColor={palette.background}
-      />
-      <NavigationContainer theme={navigationTheme}>
-        {!hydrated || !authGateResolved ? (
-          <View
-            style={[
-              styles.loadingScreen,
-              {
-                backgroundColor: palette.background,
-              },
-            ]}
-          >
-            <ActivityIndicator size="large" color={palette.accent} />
-            <Text
+    <GestureHandlerRootView style={styles.gestureRoot}>
+      <SafeAreaProvider>
+        <StatusBar barStyle={barStyle} backgroundColor={palette.background} />
+        <NavigationContainer theme={navigationTheme}>
+          {!hydrated || !authGateResolved ? (
+            <View
               style={[
-                styles.loadingTitle,
+                styles.loadingScreen,
                 {
-                  color: palette.text,
+                  backgroundColor: palette.background,
                 },
               ]}
             >
-              Dolgate
-            </Text>
-            <Text
-              style={[
-                styles.loadingBody,
-                {
-                  color: palette.mutedText,
-                },
-              ]}
-            >
-              앱을 준비하고 있습니다.
-            </Text>
-          </View>
-        ) : (
-          <RootNavigator authState={auth} />
-        )}
-      </NavigationContainer>
-      <ServerKeyPromptModal
-        prompt={pendingServerKeyPrompt}
-        onAccept={() => void acceptServerKeyPrompt()}
-        onReject={() => void rejectServerKeyPrompt()}
-      />
-      <CredentialPromptModal
-        prompt={pendingCredentialPrompt}
-        onCancel={cancelCredentialPrompt}
-        onSubmit={(value) => void submitCredentialPrompt(value)}
-      />
-      <AwsSsoWaitingModal
-        prompt={pendingAwsSsoLogin}
-        onCancel={cancelAwsSsoLogin}
-        onReopen={() => void reopenAwsSsoLogin()}
-      />
-    </SafeAreaProvider>
+              <ActivityIndicator size="large" color={palette.accent} />
+              <Text
+                style={[
+                  styles.loadingTitle,
+                  {
+                    color: palette.text,
+                  },
+                ]}
+              >
+                Dolgate
+              </Text>
+              <Text
+                style={[
+                  styles.loadingBody,
+                  {
+                    color: palette.mutedText,
+                  },
+                ]}
+              >
+                앱을 준비하고 있습니다.
+              </Text>
+            </View>
+          ) : (
+            <RootNavigator authState={auth} />
+          )}
+        </NavigationContainer>
+        <ServerKeyPromptModal
+          prompt={pendingServerKeyPrompt}
+          onAccept={() => void acceptServerKeyPrompt()}
+          onReject={() => void rejectServerKeyPrompt()}
+        />
+        <CredentialPromptModal
+          prompt={pendingCredentialPrompt}
+          onCancel={cancelCredentialPrompt}
+          onSubmit={(value) => void submitCredentialPrompt(value)}
+        />
+        <AwsSsoWaitingModal
+          prompt={pendingAwsSsoLogin}
+          onCancel={cancelAwsSsoLogin}
+          onReopen={() => void reopenAwsSsoLogin()}
+        />
+      </SafeAreaProvider>
+    </GestureHandlerRootView>
   );
 }
 
 export default AppRoot;
 
 const styles = StyleSheet.create({
+  gestureRoot: {
+    flex: 1,
+  },
   loadingScreen: {
     flex: 1,
     alignItems: "center",

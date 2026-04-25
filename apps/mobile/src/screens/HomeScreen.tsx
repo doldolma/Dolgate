@@ -26,6 +26,7 @@ import {
 } from "@react-navigation/native";
 import type { NavigationProp } from "@react-navigation/native";
 import Ionicons from "react-native-vector-icons/Ionicons";
+import { IosEdgeSwipeBack } from "../components/IosEdgeSwipeBack";
 import { formatRelativeTime } from "../lib/mobile";
 import type { MainTabParamList } from "../navigation/RootNavigator";
 import { useScreenPadding } from "../lib/screen-layout";
@@ -314,229 +315,234 @@ export function HomeScreen(): React.JSX.Element {
   };
 
   return (
-    <View
-      style={[
-        styles.screen,
-        {
-          backgroundColor: palette.background,
-          paddingHorizontal: screenPadding.paddingHorizontal,
-          paddingTop: screenPadding.paddingTop,
-        },
-      ]}
-    >
-      <TextInput
-        ref={searchInputRef}
-        value={query}
-        onChangeText={setQuery}
-        placeholder="호스트 검색"
-        placeholderTextColor={palette.mutedText}
+    <IosEdgeSwipeBack onBack={() => void goBackInHome()}>
+      <View
         style={[
-          styles.searchInput,
+          styles.screen,
           {
-            color: palette.text,
-            borderColor: palette.border,
-            backgroundColor: palette.input,
+            backgroundColor: palette.background,
+            paddingHorizontal: screenPadding.paddingHorizontal,
+            paddingTop: screenPadding.paddingTop,
           },
         ]}
-      />
-
-      {statusBanner ? (
-        <View
+      >
+        <TextInput
+          ref={searchInputRef}
+          value={query}
+          onChangeText={setQuery}
+          placeholder="호스트 검색"
+          placeholderTextColor={palette.mutedText}
           style={[
-            styles.statusCard,
+            styles.searchInput,
             {
-              backgroundColor: palette.surface,
-              borderColor: statusBanner.borderColor,
+              color: palette.text,
+              borderColor: palette.border,
+              backgroundColor: palette.input,
             },
           ]}
-        >
-          <Text style={[styles.statusTitle, { color: palette.text }]}>
-            {statusBanner.title}
-          </Text>
-          <Text style={[styles.statusBody, { color: palette.mutedText }]}>
-            {statusBanner.body}
-          </Text>
-        </View>
-      ) : null}
+        />
 
-      {!isSearching ? (
-        <View style={styles.groupHeader}>
-          {groupHistory.length > 0 ? (
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="이전 그룹으로 이동"
-              onPress={() => {
-                goBackInHome();
-              }}
-              style={[
-                styles.groupBackButton,
-                {
-                  borderColor: palette.border,
-                  backgroundColor: palette.surface,
-                },
-              ]}
-            >
-              <Ionicons name="chevron-back" size={18} color={palette.text} />
-            </Pressable>
-          ) : null}
-          <View style={styles.groupHeaderCopy}>
-            <Text style={[styles.groupTitle, { color: palette.text }]}>
-              {currentGroupTitle}
-            </Text>
-            <Text style={[styles.groupSubtitle, { color: palette.mutedText }]}>
-              {currentGroupSubtitle}
-            </Text>
-          </View>
-        </View>
-      ) : null}
-
-      <FlatList
-        ref={listRef}
-        style={styles.list}
-        data={listData}
-        keyExtractor={(item) =>
-          item.kind === "group" ? `group:${item.group.path}` : `host:${item.host.id}`
-        }
-        initialNumToRender={12}
-        maxToRenderPerBatch={12}
-        windowSize={5}
-        removeClippedSubviews
-        contentContainerStyle={[
-          styles.listContent,
-          { paddingBottom: screenPadding.paddingBottom },
-        ]}
-        ListEmptyComponent={
+        {statusBanner ? (
           <View
             style={[
-              styles.emptyCard,
+              styles.statusCard,
               {
                 backgroundColor: palette.surface,
-                borderColor: palette.border,
+                borderColor: statusBanner.borderColor,
               },
             ]}
           >
-            <Text style={[styles.emptyTitle, { color: palette.text }]}>
-              {emptyState.title}
+            <Text style={[styles.statusTitle, { color: palette.text }]}>
+              {statusBanner.title}
             </Text>
-            <Text style={[styles.emptyBody, { color: palette.mutedText }]}>
-              {emptyState.body}
+            <Text style={[styles.statusBody, { color: palette.mutedText }]}>
+              {statusBanner.body}
             </Text>
           </View>
-        }
-        renderItem={({ item }) => {
-          if (item.kind === "group") {
-            return (
+        ) : null}
+
+        {!isSearching ? (
+          <View style={styles.groupHeader}>
+            {groupHistory.length > 0 ? (
               <Pressable
                 accessibilityRole="button"
-                accessibilityLabel={`${item.group.name} 그룹 열기`}
-                onPress={() => {
-                  openGroup(item.group.path);
+                accessibilityLabel="이전 그룹으로 이동"
+                onPress={() => void goBackInHome()}
+                style={[
+                  styles.groupBackButton,
+                  {
+                    borderColor: palette.border,
+                    backgroundColor: palette.surface,
+                  },
+                ]}
+              >
+                <Ionicons name="chevron-back" size={18} color={palette.text} />
+              </Pressable>
+            ) : null}
+            <View style={styles.groupHeaderCopy}>
+              <Text style={[styles.groupTitle, { color: palette.text }]}>
+                {currentGroupTitle}
+              </Text>
+              <Text
+                style={[styles.groupSubtitle, { color: palette.mutedText }]}
+              >
+                {currentGroupSubtitle}
+              </Text>
+            </View>
+          </View>
+        ) : null}
+
+        <FlatList
+          ref={listRef}
+          style={styles.list}
+          data={listData}
+          keyExtractor={(item) =>
+            item.kind === "group"
+              ? `group:${item.group.path}`
+              : `host:${item.host.id}`
+          }
+          initialNumToRender={12}
+          maxToRenderPerBatch={12}
+          windowSize={5}
+          removeClippedSubviews
+          contentContainerStyle={[
+            styles.listContent,
+            { paddingBottom: screenPadding.paddingBottom },
+          ]}
+          ListEmptyComponent={
+            <View
+              style={[
+                styles.emptyCard,
+                {
+                  backgroundColor: palette.surface,
+                  borderColor: palette.border,
+                },
+              ]}
+            >
+              <Text style={[styles.emptyTitle, { color: palette.text }]}>
+                {emptyState.title}
+              </Text>
+              <Text style={[styles.emptyBody, { color: palette.mutedText }]}>
+                {emptyState.body}
+              </Text>
+            </View>
+          }
+          renderItem={({ item }) => {
+            if (item.kind === "group") {
+              return (
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={`${item.group.name} 그룹 열기`}
+                  onPress={() => {
+                    openGroup(item.group.path);
+                  }}
+                  style={[
+                    styles.groupCard,
+                    {
+                      backgroundColor: palette.surface,
+                      borderColor: palette.border,
+                    },
+                  ]}
+                >
+                  <View
+                    style={[
+                      styles.groupIcon,
+                      {
+                        backgroundColor: palette.accentSoft,
+                      },
+                    ]}
+                  >
+                    <Ionicons
+                      name="folder-open-outline"
+                      size={18}
+                      color={palette.accent}
+                    />
+                  </View>
+                  <View style={styles.groupCardCopy}>
+                    <Text
+                      style={[styles.groupCardTitle, { color: palette.text }]}
+                    >
+                      {item.group.name}
+                    </Text>
+                    <Text
+                      style={[
+                        styles.groupCardMeta,
+                        { color: palette.mutedText },
+                      ]}
+                    >
+                      {item.group.hostCount}개 호스트
+                    </Text>
+                  </View>
+                  <Ionicons
+                    name="chevron-forward"
+                    size={18}
+                    color={palette.mutedText}
+                  />
+                </Pressable>
+              );
+            }
+
+            const searchGroupMeta = item.showGroupMeta
+              ? getSearchGroupMeta(item.host)
+              : null;
+            const compactMeta = getCompactHostMeta(item.host);
+
+            return (
+              <Pressable
+                onPress={async () => {
+                  const sessionId = await connectToHost(item.host.id);
+                  if (sessionId) {
+                    navigation.navigate("Sessions");
+                  }
                 }}
                 style={[
-                  styles.groupCard,
+                  styles.hostCard,
                   {
                     backgroundColor: palette.surface,
                     borderColor: palette.border,
                   },
                 ]}
               >
-                <View
-                  style={[
-                    styles.groupIcon,
-                    {
-                      backgroundColor: palette.accentSoft,
-                    },
-                  ]}
-                >
-                  <Ionicons
-                    name="folder-open-outline"
-                    size={18}
-                    color={palette.accent}
-                  />
-                </View>
-                <View style={styles.groupCardCopy}>
-                  <Text style={[styles.groupCardTitle, { color: palette.text }]}>
-                    {item.group.name}
-                  </Text>
+                <View style={styles.hostRow}>
                   <Text
+                    numberOfLines={1}
+                    style={[styles.hostTitle, { color: palette.text }]}
+                  >
+                    {item.host.label}
+                  </Text>
+                  <View
                     style={[
-                      styles.groupCardMeta,
-                      { color: palette.mutedText },
+                      styles.badge,
+                      {
+                        backgroundColor: palette.accentSoft,
+                      },
                     ]}
                   >
-                    {item.group.hostCount}개 호스트
-                  </Text>
+                    <Text style={[styles.badgeText, { color: palette.accent }]}>
+                      {getHomeHostBadgeLabel(item.host)}
+                    </Text>
+                  </View>
                 </View>
-                <Ionicons
-                  name="chevron-forward"
-                  size={18}
-                  color={palette.mutedText}
-                />
+                {searchGroupMeta ? (
+                  <Text
+                    numberOfLines={1}
+                    style={[styles.hostGroupMeta, { color: palette.mutedText }]}
+                  >
+                    그룹 {searchGroupMeta}
+                  </Text>
+                ) : null}
+                <Text
+                  numberOfLines={1}
+                  style={[styles.hostMeta, { color: palette.mutedText }]}
+                >
+                  {compactMeta}
+                </Text>
               </Pressable>
             );
-          }
-
-          const recentActivity = recentActivityByHostId.get(item.host.id);
-          const searchGroupMeta = item.showGroupMeta
-            ? getSearchGroupMeta(item.host)
-            : null;
-          const compactMeta = getCompactHostMeta(item.host);
-
-          return (
-            <Pressable
-              onPress={async () => {
-                const sessionId = await connectToHost(item.host.id);
-                if (sessionId) {
-                  navigation.navigate("Sessions");
-                }
-              }}
-              style={[
-                styles.hostCard,
-                {
-                  backgroundColor: palette.surface,
-                  borderColor: palette.border,
-                },
-              ]}
-            >
-              <View style={styles.hostRow}>
-                <Text
-                  numberOfLines={1}
-                  style={[styles.hostTitle, { color: palette.text }]}
-                >
-                  {item.host.label}
-                </Text>
-                <View
-                  style={[
-                    styles.badge,
-                    {
-                      backgroundColor: palette.accentSoft,
-                    },
-                  ]}
-                >
-                  <Text style={[styles.badgeText, { color: palette.accent }]}>
-                    {getHomeHostBadgeLabel(item.host)}
-                  </Text>
-                </View>
-              </View>
-              {searchGroupMeta ? (
-                <Text
-                  numberOfLines={1}
-                  style={[styles.hostGroupMeta, { color: palette.mutedText }]}
-                >
-                  그룹 {searchGroupMeta}
-                </Text>
-              ) : null}
-              <Text
-                numberOfLines={1}
-                style={[styles.hostMeta, { color: palette.mutedText }]}
-              >
-                {compactMeta}
-              </Text>
-            </Pressable>
-          );
-        }}
-      />
-    </View>
+          }}
+        />
+      </View>
+    </IosEdgeSwipeBack>
   );
 }
 

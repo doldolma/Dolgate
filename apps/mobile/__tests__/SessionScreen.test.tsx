@@ -21,6 +21,17 @@ import { SessionScreen } from '../src/screens/SessionScreen';
 import { useMobileAppStore } from '../src/store/useMobileAppStore';
 import { getPalette } from '../src/theme';
 
+const mockNavigationGoBack = jest.fn();
+const mockNavigationCanGoBack = jest.fn(() => true);
+const mockNavigationNavigate = jest.fn();
+
+jest.mock('@react-navigation/native', () => ({
+  useNavigation: () => ({
+    goBack: mockNavigationGoBack,
+    canGoBack: mockNavigationCanGoBack,
+    navigate: mockNavigationNavigate,
+  }),
+}));
 jest.mock('react-native-vector-icons/Ionicons', () => 'Ionicons');
 jest.mock('@fressh/react-native-uniffi-russh', () => ({
   RnRussh: {
@@ -259,6 +270,10 @@ describe('SessionScreen', () => {
   beforeEach(() => {
     jest.useFakeTimers();
     setPlatformOs('ios');
+    mockNavigationGoBack.mockReset();
+    mockNavigationCanGoBack.mockReset();
+    mockNavigationCanGoBack.mockReturnValue(true);
+    mockNavigationNavigate.mockReset();
     keyboardListeners.clear();
     jest
       .spyOn(Keyboard, 'addListener')
@@ -378,6 +393,54 @@ describe('SessionScreen', () => {
     ).toBeDefined();
 
     await act(async () => {
+      tree!.unmount();
+    });
+  });
+
+  it('uses iOS edge-swipe to return to the previous tab without closing sessions', async () => {
+    let tree: renderer.ReactTestRenderer;
+    await act(async () => {
+      tree = renderer.create(<SessionScreen />);
+    });
+
+    const { disconnectSession, disconnectSftpSession } =
+      useMobileAppStore.getState();
+    await act(async () => {
+      tree!.root
+        .findByProps({ testID: 'ios-edge-swipe-back' })
+        .props.onTouchEnd();
+    });
+
+    expect(mockNavigationCanGoBack).toHaveBeenCalled();
+    expect(mockNavigationGoBack).toHaveBeenCalledTimes(1);
+    expect(mockNavigationNavigate).not.toHaveBeenCalled();
+    expect(disconnectSession).not.toHaveBeenCalled();
+    expect(disconnectSftpSession).not.toHaveBeenCalled();
+
+    await act(async () => {
+      jest.runOnlyPendingTimers();
+      tree!.unmount();
+    });
+  });
+
+  it('falls back to Home when iOS edge-swipe has no tab history', async () => {
+    mockNavigationCanGoBack.mockReturnValue(false);
+    let tree: renderer.ReactTestRenderer;
+    await act(async () => {
+      tree = renderer.create(<SessionScreen />);
+    });
+
+    await act(async () => {
+      tree!.root
+        .findByProps({ testID: 'ios-edge-swipe-back' })
+        .props.onTouchEnd();
+    });
+
+    expect(mockNavigationGoBack).not.toHaveBeenCalled();
+    expect(mockNavigationNavigate).toHaveBeenCalledWith('Home');
+
+    await act(async () => {
+      jest.runOnlyPendingTimers();
       tree!.unmount();
     });
   });
@@ -1450,6 +1513,8 @@ describe('SessionScreen', () => {
     const openKeyboardButton = tree!.root.findByProps({
       accessibilityLabel: '키보드 열기',
     });
+    const terminalFocusCallsBeforeOpen =
+      mockTerminalHandle!.focus.mock.calls.length;
 
     await act(async () => {
       openKeyboardButton.props.onPress();
@@ -1463,7 +1528,9 @@ describe('SessionScreen', () => {
     expect(
       mockNativeTerminalInputHandle!.focus.mock.calls.length,
     ).toBeGreaterThan(0);
-    expect(mockTerminalHandle!.focus).not.toHaveBeenCalled();
+    expect(mockTerminalHandle!.focus.mock.calls.length).toBe(
+      terminalFocusCallsBeforeOpen,
+    );
 
     await act(async () => {
       emitKeyboardEvent('keyboardDidShow', {
