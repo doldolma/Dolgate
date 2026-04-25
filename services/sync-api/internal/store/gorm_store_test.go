@@ -142,3 +142,92 @@ func TestGormStoreSyncRecordsPreferNewestPayload(t *testing.T) {
 		t.Fatalf("records[1] = %+v, want preserved newer payload", records[1])
 	}
 }
+
+func TestGormStoreUserClientObservationsUpsertByInstallation(t *testing.T) {
+	ctx := context.Background()
+	store := openTestStore(t)
+
+	firstSeenAt := time.Date(2026, time.April, 26, 10, 0, 0, 0, time.UTC)
+	secondSeenAt := firstSeenAt.Add(15 * time.Minute)
+
+	if err := store.UpsertUserClientObservation(ctx, UserClientObservation{
+		UserID:               "user-1",
+		ClientName:           "mobile",
+		ClientVersion:        "1.6.1",
+		Platform:             "ios",
+		ClientInstallationID: "install-1",
+		LastAuthEvent:        "exchange",
+		LastIP:               "203.0.113.10",
+		LastUserAgent:        "DolgateMobile/1.6.1",
+		ObservedAt:           firstSeenAt,
+	}); err != nil {
+		t.Fatalf("UpsertUserClientObservation() initial error = %v", err)
+	}
+
+	if err := store.UpsertUserClientObservation(ctx, UserClientObservation{
+		UserID:               "user-1",
+		ClientName:           "mobile",
+		ClientVersion:        "1.7.0",
+		Platform:             "android",
+		ClientInstallationID: "install-1",
+		LastAuthEvent:        "refresh",
+		LastIP:               "203.0.113.11",
+		LastUserAgent:        "DolgateMobile/1.7.0",
+		ObservedAt:           secondSeenAt,
+	}); err != nil {
+		t.Fatalf("UpsertUserClientObservation() update error = %v", err)
+	}
+
+	var rows []userClientObservationRow
+	if err := store.db.WithContext(ctx).Find(&rows).Error; err != nil {
+		t.Fatalf("query observations: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("len(rows) = %d, want 1", len(rows))
+	}
+	if rows[0].FirstSeenAt.UTC() != firstSeenAt {
+		t.Fatalf("FirstSeenAt = %s, want %s", rows[0].FirstSeenAt.UTC(), firstSeenAt)
+	}
+	if rows[0].LastSeenAt.UTC() != secondSeenAt {
+		t.Fatalf("LastSeenAt = %s, want %s", rows[0].LastSeenAt.UTC(), secondSeenAt)
+	}
+	if rows[0].ClientVersion != "1.7.0" {
+		t.Fatalf("ClientVersion = %q, want updated version", rows[0].ClientVersion)
+	}
+	if rows[0].Platform != "android" {
+		t.Fatalf("Platform = %q, want updated platform", rows[0].Platform)
+	}
+	if rows[0].LastAuthEvent != "refresh" {
+		t.Fatalf("LastAuthEvent = %q, want refresh", rows[0].LastAuthEvent)
+	}
+}
+
+func TestGormStoreUserClientObservationsAllowUnknownClientMetadata(t *testing.T) {
+	ctx := context.Background()
+	store := openTestStore(t)
+
+	if err := store.UpsertUserClientObservation(ctx, UserClientObservation{
+		UserID:               "user-1",
+		ClientName:           "unknown",
+		ClientVersion:        "unknown",
+		Platform:             "unknown",
+		ClientInstallationID: "unknown",
+		LastAuthEvent:        "refresh",
+		LastIP:               "192.0.2.1",
+		LastUserAgent:        "LegacyClient/0.9",
+		ObservedAt:           time.Date(2026, time.April, 26, 11, 0, 0, 0, time.UTC),
+	}); err != nil {
+		t.Fatalf("UpsertUserClientObservation() error = %v", err)
+	}
+
+	var row userClientObservationRow
+	if err := store.db.WithContext(ctx).Take(&row).Error; err != nil {
+		t.Fatalf("query observation: %v", err)
+	}
+	if row.ClientName != "unknown" || row.ClientVersion != "unknown" || row.Platform != "unknown" || row.ClientInstallationID != "unknown" {
+		t.Fatalf("unexpected unknown observation row: %+v", row)
+	}
+	if row.LastUserAgent != "LegacyClient/0.9" {
+		t.Fatalf("LastUserAgent = %q, want LegacyClient/0.9", row.LastUserAgent)
+	}
+}

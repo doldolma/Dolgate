@@ -87,6 +87,14 @@ type exchangeRequest struct {
 	Code string `json:"code" binding:"required"`
 }
 
+const (
+	clientHeaderName               = "X-Dolgate-Client"
+	clientVersionHeaderName        = "X-Dolgate-Client-Version"
+	clientPlatformHeaderName       = "X-Dolgate-Platform"
+	clientInstallationIDHeaderName = "X-Dolgate-Client-Installation-Id"
+	unknownClientObservationValue  = "unknown"
+)
+
 type browserLoginForm struct {
 	Email       string `form:"email"`
 	Password    string `form:"password"`
@@ -116,6 +124,28 @@ type loginPageData struct {
 	OIDCEnabled        bool
 	OIDCDisplayName    string
 	ShowSignupLink     bool
+}
+
+func normalizeClientObservationValue(value string) string {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return unknownClientObservationValue
+	}
+	return trimmed
+}
+
+func recordAuthClientObservation(ctx *gin.Context, dbStore store.Store, userID string, authEvent string) error {
+	return dbStore.UpsertUserClientObservation(ctx.Request.Context(), store.UserClientObservation{
+		UserID:               userID,
+		ClientName:           normalizeClientObservationValue(ctx.GetHeader(clientHeaderName)),
+		ClientVersion:        normalizeClientObservationValue(ctx.GetHeader(clientVersionHeaderName)),
+		Platform:             normalizeClientObservationValue(ctx.GetHeader(clientPlatformHeaderName)),
+		ClientInstallationID: normalizeClientObservationValue(ctx.GetHeader(clientInstallationIDHeaderName)),
+		LastAuthEvent:        authEvent,
+		LastIP:               strings.TrimSpace(ctx.ClientIP()),
+		LastUserAgent:        strings.TrimSpace(ctx.Request.UserAgent()),
+		ObservedAt:           time.Now().UTC(),
+	})
 }
 
 func awsSsoBrowserUnavailableMessage(runtime AwsSsmRuntime) string {
@@ -473,6 +503,9 @@ func NewRouter(store store.Store, authService *auth.Service, config RouterConfig
 			ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
+		if err := recordAuthClientObservation(ctx, store, session.User.ID, "signup"); err != nil {
+			_ = ctx.Error(err)
+		}
 		ctx.JSON(http.StatusCreated, session)
 	})
 
@@ -496,6 +529,9 @@ func NewRouter(store store.Store, authService *auth.Service, config RouterConfig
 			ctx.JSON(status, gin.H{"error": err.Error()})
 			return
 		}
+		if err := recordAuthClientObservation(ctx, store, session.User.ID, "login"); err != nil {
+			_ = ctx.Error(err)
+		}
 		ctx.JSON(http.StatusOK, session)
 	})
 
@@ -514,6 +550,9 @@ func NewRouter(store store.Store, authService *auth.Service, config RouterConfig
 			ctx.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
 			return
 		}
+		if err := recordAuthClientObservation(ctx, store, session.User.ID, "exchange"); err != nil {
+			_ = ctx.Error(err)
+		}
 		ctx.JSON(http.StatusOK, session)
 	})
 
@@ -531,6 +570,9 @@ func NewRouter(store store.Store, authService *auth.Service, config RouterConfig
 		if err != nil {
 			ctx.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
 			return
+		}
+		if err := recordAuthClientObservation(ctx, store, session.User.ID, "refresh"); err != nil {
+			_ = ctx.Error(err)
 		}
 		ctx.JSON(http.StatusOK, session)
 	})

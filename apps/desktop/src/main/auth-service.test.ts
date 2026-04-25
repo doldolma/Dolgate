@@ -12,6 +12,7 @@ vi.mock("electron", () => ({
     getPath: vi.fn((name: string) =>
       name === "userData" ? tempDir : os.tmpdir(),
     ),
+    getVersion: vi.fn(() => "1.6.1-test"),
     isPackaged: false,
   },
   shell: {
@@ -85,6 +86,19 @@ function createSession(serverUrl: string, userId = "user-1"): AuthSession {
     ),
     syncServerTime: new Date().toISOString(),
   };
+}
+
+function expectedDesktopPlatform(): string {
+  switch (process.platform) {
+    case "darwin":
+      return "macos";
+    case "win32":
+      return "windows";
+    case "linux":
+      return "linux";
+    default:
+      return "unknown";
+  }
 }
 
 async function createService(serverUrl = "https://ssh.doldolma.com") {
@@ -313,9 +327,7 @@ describe("AuthService offline bootstrap", () => {
     const state = await refreshPromise;
 
     expect(state.status).toBe("authenticated");
-    expect(state.session?.tokens.accessToken).toBe(
-      session.tokens.accessToken,
-    );
+    expect(state.session?.tokens.accessToken).toBe(session.tokens.accessToken);
   });
 
   it("rejects stale offline cache when the configured server URL changed", async () => {
@@ -374,6 +386,64 @@ describe("AuthService offline bootstrap", () => {
     expect(state.errorMessage).toContain("안전한 저장소");
     await expect(secretStore.load("auth:refresh-token")).resolves.toBeNull();
   });
+
+  it("adds client observation headers and reuses one installation id across auth requests", async () => {
+    const serverUrl = "https://ssh.doldolma.com";
+    const { service, secretStore } = await createService(serverUrl);
+    const session = createSession(serverUrl);
+    const stateStorageModule = await import("./state-storage");
+
+    await secretStore.save("auth:refresh-token", session.tokens.refreshToken);
+
+    const fetchMock = vi.fn().mockImplementation(
+      async () =>
+        new Response(JSON.stringify(session), {
+          status: 200,
+          headers: {
+            "content-type": "application/json",
+          },
+        }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await service.bootstrap();
+    await (
+      service as unknown as {
+        requestSessionWithClassification: (
+          pathname: string,
+          payload: Record<string, unknown>,
+        ) => Promise<AuthSession>;
+      }
+    ).requestSessionWithClassification("/auth/exchange", {
+      code: "exchange-code",
+    });
+
+    const refreshHeaders = fetchMock.mock.calls[0]?.[1]?.headers as Record<
+      string,
+      string
+    >;
+    const exchangeHeaders = fetchMock.mock.calls[1]?.[1]?.headers as Record<
+      string,
+      string
+    >;
+    const installationId = refreshHeaders["X-Dolgate-Client-Installation-Id"];
+
+    expect(refreshHeaders["X-Dolgate-Client"]).toBe("desktop");
+    expect(refreshHeaders["X-Dolgate-Client-Version"]).toBe("1.6.1-test");
+    expect(refreshHeaders["X-Dolgate-Platform"]).toBe(
+      expectedDesktopPlatform(),
+    );
+    expect(installationId).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+    );
+    expect(exchangeHeaders["X-Dolgate-Client-Installation-Id"]).toBe(
+      installationId,
+    );
+    expect(
+      stateStorageModule.getDesktopStateStorage().getState().client
+        .installationId,
+    ).toBe(installationId);
+  });
 });
 
 describe("AuthService browser login recovery", () => {
@@ -397,9 +467,9 @@ describe("AuthService browser login recovery", () => {
   it("cancels the pending browser login and returns to unauthenticated", async () => {
     const { service } = await createService();
     const electron = await import("electron");
-    vi.mocked(electron.shell.openExternal).mockReset().mockResolvedValue(
-      undefined,
-    );
+    vi.mocked(electron.shell.openExternal)
+      .mockReset()
+      .mockResolvedValue(undefined);
 
     await service.beginBrowserLogin();
     await service.cancelBrowserLogin();

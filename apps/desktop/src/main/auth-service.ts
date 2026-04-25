@@ -25,6 +25,23 @@ const OFFLINE_SESSION_CACHE_ACCOUNT = "auth:offline-session-cache";
 const LOOPBACK_CALLBACK_HOST = "127.0.0.1";
 const OFFLINE_RETRY_INITIAL_DELAY_MS = 30_000;
 const OFFLINE_RETRY_MAX_DELAY_MS = 15 * 60_000;
+const CLIENT_HEADER_NAME = "X-Dolgate-Client";
+const CLIENT_VERSION_HEADER_NAME = "X-Dolgate-Client-Version";
+const CLIENT_PLATFORM_HEADER_NAME = "X-Dolgate-Platform";
+const CLIENT_INSTALLATION_ID_HEADER_NAME = "X-Dolgate-Client-Installation-Id";
+
+function resolveDesktopClientPlatform(): string {
+  switch (process.platform) {
+    case "darwin":
+      return "macos";
+    case "win32":
+      return "windows";
+    case "linux":
+      return "linux";
+    default:
+      return "unknown";
+  }
+}
 
 function createDefaultAuthState(): AuthState {
   return {
@@ -214,6 +231,7 @@ export class AuthService {
     | ((context: SessionInvalidationContext) => Promise<void> | void)
     | null = null;
   private loopbackCallbackServer: Server | null = null;
+  private clientInstallationId: string | null = null;
 
   constructor(
     private readonly secretStore: SecretStore,
@@ -239,6 +257,27 @@ export class AuthService {
 
   getRedirectUri(): string {
     return this.configService.getConfig().sync.redirectUri;
+  }
+
+  private getClientInstallationId(): string {
+    if (!this.clientInstallationId) {
+      this.clientInstallationId =
+        this.stateStorage.getOrCreateClientInstallationId(randomUUID);
+    }
+    return this.clientInstallationId;
+  }
+
+  private buildAuthHeaders(): Record<string, string> {
+    const version =
+      typeof app.getVersion === "function" ? app.getVersion().trim() : "";
+
+    return {
+      "Content-Type": "application/json",
+      [CLIENT_HEADER_NAME]: "desktop",
+      [CLIENT_VERSION_HEADER_NAME]: version || "unknown",
+      [CLIENT_PLATFORM_HEADER_NAME]: resolveDesktopClientPlatform(),
+      [CLIENT_INSTALLATION_ID_HEADER_NAME]: this.getClientInstallationId(),
+    };
   }
 
   getState(): AuthState {
@@ -353,7 +392,8 @@ export class AuthService {
         {
           status: "unauthenticated",
           errorMessage:
-            normalizedAuthErrorMessage ?? toErrorMessage(error, fallbackMessage),
+            normalizedAuthErrorMessage ??
+            toErrorMessage(error, fallbackMessage),
         },
         {
           reason: "auth-invalid",
@@ -580,9 +620,7 @@ export class AuthService {
     try {
       response = await fetch(new URL(pathname, this.getServerUrl()), {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
+        headers: this.buildAuthHeaders(),
         body: JSON.stringify(payload),
       });
     } catch (error) {
@@ -613,9 +651,7 @@ export class AuthService {
     try {
       response = await fetch(new URL(pathname, this.getServerUrl()), {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
+        headers: this.buildAuthHeaders(),
         body: JSON.stringify(payload),
       });
     } catch (error) {
