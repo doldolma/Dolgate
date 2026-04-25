@@ -70,6 +70,7 @@ class NativeUniffiRussh : public jsi::HostObject {
     jsi::Value cpp_uniffi_uniffi_russh_fn_func_connect(jsi::Runtime& rt, const jsi::Value& thisVal, const jsi::Value* args, size_t count);
     jsi::Value cpp_uniffi_uniffi_russh_fn_func_connect_sftp(jsi::Runtime& rt, const jsi::Value& thisVal, const jsi::Value* args, size_t count);
     jsi::Value cpp_uniffi_uniffi_russh_fn_func_generate_key_pair(jsi::Runtime& rt, const jsi::Value& thisVal, const jsi::Value* args, size_t count);
+    jsi::Value cpp_uniffi_uniffi_russh_fn_func_validate_certificate(jsi::Runtime& rt, const jsi::Value& thisVal, const jsi::Value* args, size_t count);
     jsi::Value cpp_uniffi_uniffi_russh_fn_func_validate_private_key(jsi::Runtime& rt, const jsi::Value& thisVal, const jsi::Value* args, size_t count);
     jsi::Value cpp_ffi_uniffi_russh_rust_future_poll_u8(jsi::Runtime& rt, const jsi::Value& thisVal, const jsi::Value* args, size_t count);
     jsi::Value cpp_ffi_uniffi_russh_rust_future_cancel_u8(jsi::Runtime& rt, const jsi::Value& thisVal, const jsi::Value* args, size_t count);
@@ -126,6 +127,7 @@ class NativeUniffiRussh : public jsi::HostObject {
     jsi::Value cpp_uniffi_uniffi_russh_checksum_func_connect(jsi::Runtime& rt, const jsi::Value& thisVal, const jsi::Value* args, size_t count);
     jsi::Value cpp_uniffi_uniffi_russh_checksum_func_connect_sftp(jsi::Runtime& rt, const jsi::Value& thisVal, const jsi::Value* args, size_t count);
     jsi::Value cpp_uniffi_uniffi_russh_checksum_func_generate_key_pair(jsi::Runtime& rt, const jsi::Value& thisVal, const jsi::Value* args, size_t count);
+    jsi::Value cpp_uniffi_uniffi_russh_checksum_func_validate_certificate(jsi::Runtime& rt, const jsi::Value& thisVal, const jsi::Value* args, size_t count);
     jsi::Value cpp_uniffi_uniffi_russh_checksum_func_validate_private_key(jsi::Runtime& rt, const jsi::Value& thisVal, const jsi::Value* args, size_t count);
     jsi::Value cpp_uniffi_uniffi_russh_checksum_method_connectprogresscallback_on_change(jsi::Runtime& rt, const jsi::Value& thisVal, const jsi::Value* args, size_t count);
     jsi::Value cpp_uniffi_uniffi_russh_checksum_method_connectiondisconnectedcallback_on_change(jsi::Runtime& rt, const jsi::Value& thisVal, const jsi::Value* args, size_t count);

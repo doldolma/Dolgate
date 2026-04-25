@@ -75,11 +75,19 @@ export function generateKeyPair(keyType) {
     },
     /*liftString:*/ FfiConverterString.lift));
 }
-export function validatePrivateKey(privateKeyContent) {
+export function validateCertificate(certificateText) {
     return FfiConverterString.lift(uniffiCaller.rustCallWithError(
     /*liftError:*/ FfiConverterTypeSshError.lift.bind(FfiConverterTypeSshError),
     /*caller:*/ (callStatus) => {
-        return nativeModule().ubrn_uniffi_uniffi_russh_fn_func_validate_private_key(FfiConverterString.lower(privateKeyContent), callStatus);
+        return nativeModule().ubrn_uniffi_uniffi_russh_fn_func_validate_certificate(FfiConverterString.lower(certificateText), callStatus);
+    },
+    /*liftString:*/ FfiConverterString.lift));
+}
+export function validatePrivateKey(privateKeyContent, passphrase) {
+    return FfiConverterString.lift(uniffiCaller.rustCallWithError(
+    /*liftError:*/ FfiConverterTypeSshError.lift.bind(FfiConverterTypeSshError),
+    /*caller:*/ (callStatus) => {
+        return nativeModule().ubrn_uniffi_uniffi_russh_fn_func_validate_private_key(FfiConverterString.lower(privateKeyContent), FfiConverterOptionalString.lower(passphrase), callStatus);
     },
     /*liftString:*/ FfiConverterString.lift));
 }
@@ -1267,6 +1275,7 @@ export var Security_Tags;
 (function (Security_Tags) {
     Security_Tags["Password"] = "Password";
     Security_Tags["Key"] = "Key";
+    Security_Tags["Certificate"] = "Certificate";
 })(Security_Tags || (Security_Tags = {}));
 export const Security = (() => {
     class Password_ extends UniffiEnum {
@@ -1307,6 +1316,25 @@ export const Security = (() => {
             return obj.tag === Security_Tags.Key;
         }
     }
+    class Certificate_ extends UniffiEnum {
+        /**
+         * @private
+         * This field is private and should not be used, use `tag` instead.
+         */
+        [uniffiTypeNameSymbol] = 'Security';
+        tag = Security_Tags.Certificate;
+        inner;
+        constructor(inner) {
+            super('Security', 'Certificate');
+            this.inner = Object.freeze(inner);
+        }
+        static new(inner) {
+            return new Certificate_(inner);
+        }
+        static instanceOf(obj) {
+            return obj.tag === Security_Tags.Certificate;
+        }
+    }
     function instanceOf(obj) {
         return obj[uniffiTypeNameSymbol] === 'Security';
     }
@@ -1314,6 +1342,7 @@ export const Security = (() => {
         instanceOf,
         Password: Password_,
         Key: Key_,
+        Certificate: Certificate_,
     });
 })();
 // FfiConverter for enum Security
@@ -1329,6 +1358,13 @@ const FfiConverterTypeSecurity = (() => {
                 case 2:
                     return new Security.Key({
                         privateKeyContent: FfiConverterString.read(from),
+                        passphrase: FfiConverterOptionalString.read(from),
+                    });
+                case 3:
+                    return new Security.Certificate({
+                        privateKeyContent: FfiConverterString.read(from),
+                        certificateText: FfiConverterString.read(from),
+                        passphrase: FfiConverterOptionalString.read(from),
                     });
                 default:
                     throw new UniffiInternalError.UnexpectedEnumCase();
@@ -1346,6 +1382,15 @@ const FfiConverterTypeSecurity = (() => {
                     ordinalConverter.write(2, into);
                     const inner = value.inner;
                     FfiConverterString.write(inner.privateKeyContent, into);
+                    FfiConverterOptionalString.write(inner.passphrase, into);
+                    return;
+                }
+                case Security_Tags.Certificate: {
+                    ordinalConverter.write(3, into);
+                    const inner = value.inner;
+                    FfiConverterString.write(inner.privateKeyContent, into);
+                    FfiConverterString.write(inner.certificateText, into);
+                    FfiConverterOptionalString.write(inner.passphrase, into);
                     return;
                 }
                 default:
@@ -1365,6 +1410,15 @@ const FfiConverterTypeSecurity = (() => {
                     const inner = value.inner;
                     let size = ordinalConverter.allocationSize(2);
                     size += FfiConverterString.allocationSize(inner.privateKeyContent);
+                    size += FfiConverterOptionalString.allocationSize(inner.passphrase);
+                    return size;
+                }
+                case Security_Tags.Certificate: {
+                    const inner = value.inner;
+                    let size = ordinalConverter.allocationSize(3);
+                    size += FfiConverterString.allocationSize(inner.privateKeyContent);
+                    size += FfiConverterString.allocationSize(inner.certificateText);
+                    size += FfiConverterOptionalString.allocationSize(inner.passphrase);
                     return size;
                 }
                 default:
@@ -3149,8 +3203,12 @@ function uniffiEnsureInitialized() {
         37501) {
         throw new UniffiInternalError.ApiChecksumMismatch('uniffi_uniffi_russh_checksum_func_generate_key_pair');
     }
+    if (nativeModule().ubrn_uniffi_uniffi_russh_checksum_func_validate_certificate() !==
+        17620) {
+        throw new UniffiInternalError.ApiChecksumMismatch('uniffi_uniffi_russh_checksum_func_validate_certificate');
+    }
     if (nativeModule().ubrn_uniffi_uniffi_russh_checksum_func_validate_private_key() !==
-        49309) {
+        48895) {
         throw new UniffiInternalError.ApiChecksumMismatch('uniffi_uniffi_russh_checksum_func_validate_private_key');
     }
     if (nativeModule().ubrn_uniffi_uniffi_russh_checksum_method_connectprogresscallback_on_change() !==

@@ -4,10 +4,10 @@ use std::sync::{Arc, Weak};
 use tokio::sync::{broadcast, Mutex as AsyncMutex};
 
 use russh::client::{Config, Handle as ClientHandle};
-use russh::keys::PrivateKeyWithHashAlg;
+use russh::keys::{Certificate, PrivateKeyWithHashAlg};
 use russh::{self, client, ChannelMsg, Disconnect};
 
-use crate::private_key::normalize_openssh_ed25519_seed_key;
+use crate::private_key::parse_private_key;
 use crate::ssh_shell::{
     append_and_broadcast, Chunk, ShellSession, ShellSessionInfo, StartShellOptions, StreamKind,
     DEFAULT_BROADCAST_CHUNK_CAPACITY, DEFAULT_MAX_CHUNK_SIZE, DEFAULT_SHELL_RING_BUFFER_CAPACITY,
@@ -51,7 +51,15 @@ fn server_public_key_to_info(
 #[derive(Debug, Clone, PartialEq, uniffi::Enum)]
 pub enum Security {
     Password { password: String },
-    Key { private_key_content: String }, // (key-based auth can be wired later)
+    Key {
+        private_key_content: String,
+        passphrase: Option<String>,
+    },
+    Certificate {
+        private_key_content: String,
+        certificate_text: String,
+        passphrase: Option<String>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, uniffi::Record)]
@@ -410,12 +418,28 @@ pub async fn connect(options: ConnectOptions) -> Result<Arc<SshConnection>, SshE
         }
         Security::Key {
             private_key_content,
+            passphrase,
         } => {
-            // Normalize and parse using shared helper so RN-validated keys match runtime parsing.
-            let (_canonical, parsed) = normalize_openssh_ed25519_seed_key(private_key_content)?;
-            let pk_with_hash = PrivateKeyWithHashAlg::new(Arc::new(parsed), None);
+            let (_canonical, parsed) =
+                parse_private_key(private_key_content, passphrase.as_deref())?;
+            let pk_with_hash = PrivateKeyWithHashAlg::new(
+                Arc::new(parsed),
+                handle.best_supported_rsa_hash().await?.flatten(),
+            );
             handle
                 .authenticate_publickey(details.username.clone(), pk_with_hash)
+                .await?
+        }
+        Security::Certificate {
+            private_key_content,
+            certificate_text,
+            passphrase,
+        } => {
+            let (_canonical, parsed) =
+                parse_private_key(private_key_content, passphrase.as_deref())?;
+            let cert = Certificate::from_openssh(certificate_text)?;
+            handle
+                .authenticate_openssh_cert(details.username.clone(), Arc::new(parsed), cert)
                 .await?
         }
     };

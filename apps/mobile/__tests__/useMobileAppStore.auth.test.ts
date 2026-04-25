@@ -36,7 +36,9 @@ jest.mock("@fressh/react-native-uniffi-russh", () => ({
   RnRussh: {
     uniffiInitAsync: jest.fn(async () => undefined),
     connect: jest.fn(),
+    connectSftp: jest.fn(),
     validatePrivateKey: jest.fn(() => ({ valid: true })),
+    validateCertificate: jest.fn(() => ({ valid: true })),
   },
 }));
 jest.mock("@react-native-async-storage/async-storage", () => ({
@@ -131,6 +133,10 @@ function resetStore(
       | "knownHosts"
       | "secretMetadata"
       | "sessions"
+      | "sftpSessions"
+      | "sftpTransfers"
+      | "sftpCopyBuffer"
+      | "activeConnectionTab"
       | "secretsByRef"
       | "pendingBrowserLoginState"
       | "pendingServerKeyPrompt"
@@ -152,6 +158,10 @@ function resetStore(
     knownHosts: [],
     secretMetadata: [],
     sessions: [],
+    sftpSessions: [],
+    sftpTransfers: [],
+    sftpCopyBuffer: null,
+    activeConnectionTab: null,
     secretsByRef: {},
     pendingBrowserLoginState: null,
     pendingServerKeyPrompt: null,
@@ -1424,6 +1434,236 @@ describe("useMobileAppStore auth and sync flows", () => {
     expect(session?.connectionKind).toBe("aws-ssm");
     expect(session?.status).toBe("error");
     expect(session?.errorMessage).toContain("지원하지 않습니다");
+  });
+
+  it("connects private key SSH hosts with passphrase-backed saved credentials", async () => {
+    const host: SshHostRecord = {
+      id: "host-key",
+      kind: "ssh",
+      label: "Key SSH",
+      hostname: "host.example.com",
+      port: 22,
+      username: "deploy",
+      authType: "privateKey",
+      secretRef: "secret-key",
+      privateKeyPath: null,
+      certificatePath: null,
+      createdAt: "2026-04-13T00:00:00.000Z",
+      updatedAt: "2026-04-13T00:00:00.000Z",
+    };
+    const secret: LoadedManagedSecretPayload = {
+      secretRef: "secret-key",
+      label: "Key SSH credentials",
+      privateKeyPem: "PRIVATE KEY",
+      passphrase: "key-passphrase",
+      updatedAt: "2026-04-13T00:00:00.000Z",
+    };
+    const shell = {
+      addListener: jest.fn(() => 1n),
+      removeListener: jest.fn(),
+      sendData: jest.fn(async () => undefined),
+      readBuffer: jest.fn(() => ({ chunks: [], nextSeq: 0 })),
+    };
+    const connection = {
+      startShell: jest.fn(async () => shell),
+      disconnect: jest.fn(async () => undefined),
+    };
+
+    (RnRussh.connect as jest.Mock).mockResolvedValue(connection);
+
+    await act(async () => {
+      resetStore({
+        auth: createAuthenticatedState(),
+        hosts: [host],
+        secretsByRef: {
+          [secret.secretRef]: secret,
+        },
+      });
+    });
+
+    let sessionId: string | null = null;
+    await act(async () => {
+      sessionId = await useMobileAppStore.getState().connectToHost(host.id);
+      await flushAsyncWork();
+    });
+
+    expect(sessionId).not.toBeNull();
+    expect(RnRussh.validatePrivateKey).toHaveBeenCalledWith(
+      "PRIVATE KEY",
+      "key-passphrase",
+    );
+    expect(RnRussh.connect).toHaveBeenCalledWith(
+      expect.objectContaining({
+        host: host.hostname,
+        port: host.port,
+        username: host.username,
+        security: {
+          type: "key",
+          privateKey: "PRIVATE KEY",
+          passphrase: "key-passphrase",
+        },
+      }),
+    );
+    expect(connection.startShell).toHaveBeenCalledTimes(1);
+  });
+
+  it("connects certificate SSH hosts with synced private key and certificate", async () => {
+    const host: SshHostRecord = {
+      id: "host-cert",
+      kind: "ssh",
+      label: "Cert SSH",
+      hostname: "host.example.com",
+      port: 22,
+      username: "deploy",
+      authType: "certificate",
+      secretRef: "secret-cert",
+      privateKeyPath: null,
+      certificatePath: null,
+      createdAt: "2026-04-13T00:00:00.000Z",
+      updatedAt: "2026-04-13T00:00:00.000Z",
+    };
+    const secret: LoadedManagedSecretPayload = {
+      secretRef: "secret-cert",
+      label: "Cert SSH credentials",
+      privateKeyPem: "PRIVATE KEY",
+      certificateText: "SSH CERTIFICATE",
+      passphrase: "cert-passphrase",
+      updatedAt: "2026-04-13T00:00:00.000Z",
+    };
+    const shell = {
+      addListener: jest.fn(() => 1n),
+      removeListener: jest.fn(),
+      sendData: jest.fn(async () => undefined),
+      readBuffer: jest.fn(() => ({ chunks: [], nextSeq: 0 })),
+    };
+    const connection = {
+      startShell: jest.fn(async () => shell),
+      disconnect: jest.fn(async () => undefined),
+    };
+
+    (RnRussh.connect as jest.Mock).mockResolvedValue(connection);
+
+    await act(async () => {
+      resetStore({
+        auth: createAuthenticatedState(),
+        hosts: [host],
+        secretsByRef: {
+          [secret.secretRef]: secret,
+        },
+      });
+    });
+
+    let sessionId: string | null = null;
+    await act(async () => {
+      sessionId = await useMobileAppStore.getState().connectToHost(host.id);
+      await flushAsyncWork();
+    });
+
+    expect(sessionId).not.toBeNull();
+    expect(RnRussh.validatePrivateKey).toHaveBeenCalledWith(
+      "PRIVATE KEY",
+      "cert-passphrase",
+    );
+    expect(RnRussh.validateCertificate).toHaveBeenCalledWith(
+      "SSH CERTIFICATE",
+    );
+    expect(RnRussh.connect).toHaveBeenCalledWith(
+      expect.objectContaining({
+        host: host.hostname,
+        port: host.port,
+        username: host.username,
+        security: {
+          type: "certificate",
+          privateKey: "PRIVATE KEY",
+          certificate: "SSH CERTIFICATE",
+          passphrase: "cert-passphrase",
+        },
+      }),
+    );
+    expect(connection.startShell).toHaveBeenCalledTimes(1);
+  });
+
+  it("connects certificate SFTP tabs with the same SSH credential material", async () => {
+    const host: SshHostRecord = {
+      id: "host-cert-sftp",
+      kind: "ssh",
+      label: "Cert SFTP",
+      hostname: "host.example.com",
+      port: 22,
+      username: "deploy",
+      authType: "certificate",
+      secretRef: "secret-cert-sftp",
+      privateKeyPath: null,
+      certificatePath: null,
+      createdAt: "2026-04-13T00:00:00.000Z",
+      updatedAt: "2026-04-13T00:00:00.000Z",
+    };
+    const secret: LoadedManagedSecretPayload = {
+      secretRef: "secret-cert-sftp",
+      label: "Cert SFTP credentials",
+      privateKeyPem: "PRIVATE KEY",
+      certificateText: "SSH CERTIFICATE",
+      passphrase: "cert-passphrase",
+      updatedAt: "2026-04-13T00:00:00.000Z",
+    };
+    const session: MobileSessionRecord = {
+      id: "session-cert-sftp",
+      sessionId: "session-cert-sftp",
+      hostId: host.id,
+      title: host.label,
+      status: "connected",
+      hasReceivedOutput: true,
+      isRestorable: true,
+      lastViewportSnapshot: "",
+      lastEventAt: "2026-04-13T00:00:00.000Z",
+      lastConnectedAt: "2026-04-13T00:00:00.000Z",
+      lastDisconnectedAt: null,
+      errorMessage: null,
+    };
+    const sftpConnection = {
+      listDirectory: jest.fn(async () => ({
+        path: ".",
+        entries: [],
+      })),
+      close: jest.fn(async () => undefined),
+    };
+
+    (RnRussh.connectSftp as jest.Mock).mockResolvedValue(sftpConnection);
+
+    await act(async () => {
+      resetStore({
+        auth: createAuthenticatedState(),
+        hosts: [host],
+        sessions: [session],
+        secretsByRef: {
+          [secret.secretRef]: secret,
+        },
+      });
+    });
+
+    let sftpSessionId: string | null = null;
+    await act(async () => {
+      sftpSessionId = await useMobileAppStore
+        .getState()
+        .openSftpForSession(session.id);
+      await flushAsyncWorkDeep();
+    });
+
+    expect(sftpSessionId).not.toBeNull();
+    expect(RnRussh.connectSftp).toHaveBeenCalledWith(
+      expect.objectContaining({
+        host: host.hostname,
+        port: host.port,
+        username: host.username,
+        security: {
+          type: "certificate",
+          privateKey: "PRIVATE KEY",
+          certificate: "SSH CERTIFICATE",
+          passphrase: "cert-passphrase",
+        },
+      }),
+    );
+    expect(sftpConnection.listDirectory).toHaveBeenCalledWith(".");
   });
 
   it("disconnects live runtime sessions and clears synced state when the server changes", async () => {

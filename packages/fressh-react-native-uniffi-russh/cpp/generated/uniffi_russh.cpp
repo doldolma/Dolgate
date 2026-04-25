@@ -381,8 +381,13 @@ extern "C" {
         RustBuffer key_type,
         RustCallStatus *uniffi_out_err
     );
+    RustBuffer uniffi_uniffi_russh_fn_func_validate_certificate(
+        RustBuffer certificate_text,
+        RustCallStatus *uniffi_out_err
+    );
     RustBuffer uniffi_uniffi_russh_fn_func_validate_private_key(
         RustBuffer private_key_content,
+        RustBuffer passphrase,
         RustCallStatus *uniffi_out_err
     );
     RustBuffer ffi_uniffi_russh_rustbuffer_alloc(
@@ -602,6 +607,8 @@ extern "C" {
     uint16_t uniffi_uniffi_russh_checksum_func_connect_sftp(
     );
     uint16_t uniffi_uniffi_russh_checksum_func_generate_key_pair(
+    );
+    uint16_t uniffi_uniffi_russh_checksum_func_validate_certificate(
     );
     uint16_t uniffi_uniffi_russh_checksum_func_validate_private_key(
     );
@@ -3993,10 +4000,18 @@ NativeUniffiRussh::NativeUniffiRussh(
             return this->cpp_uniffi_uniffi_russh_fn_func_generate_key_pair(rt, thisVal, args, count);
         }
     );
+    props["ubrn_uniffi_uniffi_russh_fn_func_validate_certificate"] = jsi::Function::createFromHostFunction(
+        rt,
+        jsi::PropNameID::forAscii(rt, "ubrn_uniffi_uniffi_russh_fn_func_validate_certificate"),
+        1,
+        [this](jsi::Runtime &rt, const jsi::Value &thisVal, const jsi::Value *args, size_t count) -> jsi::Value {
+            return this->cpp_uniffi_uniffi_russh_fn_func_validate_certificate(rt, thisVal, args, count);
+        }
+    );
     props["ubrn_uniffi_uniffi_russh_fn_func_validate_private_key"] = jsi::Function::createFromHostFunction(
         rt,
         jsi::PropNameID::forAscii(rt, "ubrn_uniffi_uniffi_russh_fn_func_validate_private_key"),
-        1,
+        2,
         [this](jsi::Runtime &rt, const jsi::Value &thisVal, const jsi::Value *args, size_t count) -> jsi::Value {
             return this->cpp_uniffi_uniffi_russh_fn_func_validate_private_key(rt, thisVal, args, count);
         }
@@ -4439,6 +4454,14 @@ NativeUniffiRussh::NativeUniffiRussh(
         0,
         [this](jsi::Runtime &rt, const jsi::Value &thisVal, const jsi::Value *args, size_t count) -> jsi::Value {
             return this->cpp_uniffi_uniffi_russh_checksum_func_generate_key_pair(rt, thisVal, args, count);
+        }
+    );
+    props["ubrn_uniffi_uniffi_russh_checksum_func_validate_certificate"] = jsi::Function::createFromHostFunction(
+        rt,
+        jsi::PropNameID::forAscii(rt, "ubrn_uniffi_uniffi_russh_checksum_func_validate_certificate"),
+        0,
+        [this](jsi::Runtime &rt, const jsi::Value &thisVal, const jsi::Value *args, size_t count) -> jsi::Value {
+            return this->cpp_uniffi_uniffi_russh_checksum_func_validate_certificate(rt, thisVal, args, count);
         }
     );
     props["ubrn_uniffi_uniffi_russh_checksum_func_validate_private_key"] = jsi::Function::createFromHostFunction(
@@ -5346,9 +5369,19 @@ jsi::Value NativeUniffiRussh::cpp_uniffi_uniffi_russh_fn_func_generate_key_pair(
 
         return uniffi::uniffi_russh::Bridging<RustBuffer>::toJs(rt, callInvoker, value);
 }
+jsi::Value NativeUniffiRussh::cpp_uniffi_uniffi_russh_fn_func_validate_certificate(jsi::Runtime& rt, const jsi::Value& thisVal, const jsi::Value* args, size_t count) {
+        RustCallStatus status = uniffi::uniffi_russh::Bridging<RustCallStatus>::rustSuccess(rt);
+        auto value = uniffi_uniffi_russh_fn_func_validate_certificate(uniffi::uniffi_russh::Bridging<RustBuffer>::fromJs(rt, callInvoker, args[0]),
+            &status
+        );
+        uniffi::uniffi_russh::Bridging<RustCallStatus>::copyIntoJs(rt, callInvoker, status, args[count - 1]);
+
+
+        return uniffi::uniffi_russh::Bridging<RustBuffer>::toJs(rt, callInvoker, value);
+}
 jsi::Value NativeUniffiRussh::cpp_uniffi_uniffi_russh_fn_func_validate_private_key(jsi::Runtime& rt, const jsi::Value& thisVal, const jsi::Value* args, size_t count) {
         RustCallStatus status = uniffi::uniffi_russh::Bridging<RustCallStatus>::rustSuccess(rt);
-        auto value = uniffi_uniffi_russh_fn_func_validate_private_key(uniffi::uniffi_russh::Bridging<RustBuffer>::fromJs(rt, callInvoker, args[0]),
+        auto value = uniffi_uniffi_russh_fn_func_validate_private_key(uniffi::uniffi_russh::Bridging<RustBuffer>::fromJs(rt, callInvoker, args[0]), uniffi::uniffi_russh::Bridging<RustBuffer>::fromJs(rt, callInvoker, args[1]),
             &status
         );
         uniffi::uniffi_russh::Bridging<RustCallStatus>::copyIntoJs(rt, callInvoker, status, args[count - 1]);
@@ -5775,6 +5808,13 @@ jsi::Value NativeUniffiRussh::cpp_uniffi_uniffi_russh_checksum_func_connect_sftp
 }
 jsi::Value NativeUniffiRussh::cpp_uniffi_uniffi_russh_checksum_func_generate_key_pair(jsi::Runtime& rt, const jsi::Value& thisVal, const jsi::Value* args, size_t count) {
         auto value = uniffi_uniffi_russh_checksum_func_generate_key_pair(
+        );
+
+
+        return uniffi_jsi::Bridging<uint16_t>::toJs(rt, callInvoker, value);
+}
+jsi::Value NativeUniffiRussh::cpp_uniffi_uniffi_russh_checksum_func_validate_certificate(jsi::Runtime& rt, const jsi::Value& thisVal, const jsi::Value* args, size_t count) {
+        auto value = uniffi_uniffi_russh_checksum_func_validate_certificate(
         );
 
 
