@@ -10,6 +10,11 @@ on:
 permissions:
   contents: read
 
+env:
+  MOBILE_RUSSH_ANDROID_TARGETS: aarch64-linux-android,armv7-linux-androideabi,x86_64-linux-android,i686-linux-android
+  MOBILE_RUSSH_CARGO_NDK_VERSION: "4.1.2"
+  MOBILE_RUSSH_NDK_VERSION: "27.1.12297006"
+
 jobs:
   ssh-core-test:
     name: ssh-core test (${{ matrix.os }})
@@ -104,3 +109,67 @@ jobs:
 
       - name: Run mobile tests
         run: npm run test:mobile -- --runInBand
+
+  mobile-native-check:
+    name: mobile native artifact check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android NDK
+        shell: bash
+        run: |
+          sdkmanager "ndk;${MOBILE_RUSSH_NDK_VERSION}"
+          echo "ANDROID_NDK_HOME=${ANDROID_HOME}/ndk/${MOBILE_RUSSH_NDK_VERSION}" >> "${GITHUB_ENV}"
+          echo "ANDROID_NDK_ROOT=${ANDROID_HOME}/ndk/${MOBILE_RUSSH_NDK_VERSION}" >> "${GITHUB_ENV}"
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ env.MOBILE_RUSSH_ANDROID_TARGETS }}
+
+      - name: Cache mobile russh Cargo build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/cargo-ndk
+            ~/.cargo/registry
+            ~/.cargo/git
+            packages/fressh-react-native-uniffi-russh/rust/target
+          key: mobile-russh-cargo-${{ runner.os }}-${{ env.MOBILE_RUSSH_CARGO_NDK_VERSION }}-${{ env.MOBILE_RUSSH_NDK_VERSION }}-${{ hashFiles('packages/fressh-react-native-uniffi-russh/rust/Cargo.lock', 'packages/fressh-react-native-uniffi-russh/rust/rust-toolchain.toml', 'package-lock.json') }}
+          restore-keys: |
+            mobile-russh-cargo-${{ runner.os }}-${{ env.MOBILE_RUSSH_CARGO_NDK_VERSION }}-${{ env.MOBILE_RUSSH_NDK_VERSION }}-
+            mobile-russh-cargo-${{ runner.os }}-
+
+      - name: Install cargo-ndk
+        shell: bash
+        run: |
+          if ! cargo ndk --version 2>/dev/null | grep -q "cargo-ndk ${MOBILE_RUSSH_CARGO_NDK_VERSION}"; then
+            cargo install cargo-ndk --version "${MOBILE_RUSSH_CARGO_NDK_VERSION}" --locked --force
+          fi
+          cargo ndk --version
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Regenerate mobile russh Android artifacts
+        run: npm run mobile:russh:regenerate -- --platform android
+
+      - name: Verify generated artifacts are committed
+        run: git diff --exit-code
