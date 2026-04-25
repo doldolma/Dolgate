@@ -91,6 +91,10 @@ export interface DesktopStateFile {
     status: 'unknown' | 'authenticated' | 'offline-authenticated' | 'unauthenticated';
     updatedAt: string;
   };
+  client: {
+    installationId: string | null;
+    updatedAt: string;
+  };
   sync: {
     lastSuccessfulSyncAt: string | null;
     pendingPush: boolean;
@@ -448,6 +452,10 @@ function createDefaultStateFile(): DesktopStateFile {
       status: 'unknown',
       updatedAt: timestamp
     },
+    client: {
+      installationId: null,
+      updatedAt: timestamp
+    },
     sync: {
       lastSuccessfulSyncAt: null,
       pendingPush: false,
@@ -710,6 +718,7 @@ function normalizeStateFile(value: unknown): DesktopStateFile {
   const terminal = isObject(value.terminal) ? value.terminal : {};
   const updater = isObject(value.updater) ? value.updater : {};
   const auth = isObject(value.auth) ? value.auth : {};
+  const client = isObject(value.client) ? value.client : {};
   const sync = isObject(value.sync) ? value.sync : {};
   const data = isObject(value.data) ? value.data : {};
   const secure = isObject(value.secure) ? value.secure : {};
@@ -768,6 +777,11 @@ function normalizeStateFile(value: unknown): DesktopStateFile {
           ? auth.status
           : 'unknown',
       updatedAt: typeof auth.updatedAt === 'string' ? auth.updatedAt : fallback.auth.updatedAt
+    },
+    client: {
+      installationId:
+        typeof client.installationId === 'string' && client.installationId.trim() ? client.installationId.trim() : null,
+      updatedAt: typeof client.updatedAt === 'string' ? client.updatedAt : fallback.client.updatedAt
     },
     sync: {
       lastSuccessfulSyncAt: typeof sync.lastSuccessfulSyncAt === 'string' ? sync.lastSuccessfulSyncAt : null,
@@ -957,6 +971,29 @@ class DesktopStateStorage {
       draft.auth.status = status;
       draft.auth.updatedAt = nowIso();
     });
+  }
+
+  getClientInstallationId(): string | null {
+    this.ensureLoaded();
+    return this.state.client.installationId;
+  }
+
+  getOrCreateClientInstallationId(factory: () => string): string {
+    this.ensureLoaded();
+    if (this.state.client.installationId) {
+      return this.state.client.installationId;
+    }
+
+    const installationId = factory().trim();
+    if (!installationId) {
+      throw new Error('client installation id must not be empty');
+    }
+
+    this.updateState((draft) => {
+      draft.client.installationId = installationId;
+      draft.client.updatedAt = nowIso();
+    });
+    return installationId;
   }
 
   updateSyncState(snapshot: {

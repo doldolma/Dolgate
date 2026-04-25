@@ -1,8 +1,9 @@
-import { gcm } from "@noble/ciphers/aes.js";
-import { randomBytes } from "@noble/ciphers/utils.js";
-import AsyncStorage from "@react-native-async-storage/async-storage";
-import { Buffer } from "buffer";
-import * as Keychain from "react-native-keychain";
+import { gcm } from '@noble/ciphers/aes.js';
+import { randomBytes } from '@noble/ciphers/utils.js';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { Buffer } from 'buffer';
+import * as Keychain from 'react-native-keychain';
+import { Platform } from 'react-native';
 import type {
   AuthSession,
   AuthState,
@@ -23,7 +24,7 @@ import type {
   SyncRecord,
   SyncStatus,
   ServerInfoResponse,
-} from "@dolssh/shared-core";
+} from '@dolssh/shared-core';
 import {
   isAwsEc2HostRecord,
   getServerUrlValidationMessage,
@@ -31,18 +32,25 @@ import {
   normalizeServerUrl,
   type HostSecretInput,
   type MobileSettings,
-} from "@dolssh/shared-core";
-import { fromByteArray, toByteArray } from "base64-js";
+} from '@dolssh/shared-core';
+import { fromByteArray, toByteArray } from 'base64-js';
+import { APP_VERSION } from './app-metadata';
 
-export const DEFAULT_SERVER_URL = "https://ssh.doldolma.com";
-export const AUTH_REDIRECT_URI = "dolgate://auth/callback";
-export const AUTH_CLIENT_ID = "dolgate-mobile";
-export const AWS_SSO_APP_CALLBACK_URI = "dolgate://aws-sso/callback";
+export const DEFAULT_SERVER_URL = 'https://ssh.doldolma.com';
+export const AUTH_REDIRECT_URI = 'dolgate://auth/callback';
+export const AUTH_CLIENT_ID = 'dolgate-mobile';
+export const AWS_SSO_APP_CALLBACK_URI = 'dolgate://aws-sso/callback';
 
-const AUTH_SESSION_SERVICE = "dolgate.mobile.auth-session";
-const MANAGED_SECRETS_SERVICE = "dolgate.mobile.managed-secrets";
-const MANAGED_AWS_PROFILES_SERVICE = "dolgate.mobile.managed-aws-profiles";
-const AWS_SSO_TOKENS_SERVICE = "dolgate.mobile.aws-sso-tokens";
+const AUTH_SESSION_SERVICE = 'dolgate.mobile.auth-session';
+const MANAGED_SECRETS_SERVICE = 'dolgate.mobile.managed-secrets';
+const MANAGED_AWS_PROFILES_SERVICE = 'dolgate.mobile.managed-aws-profiles';
+const AWS_SSO_TOKENS_SERVICE = 'dolgate.mobile.aws-sso-tokens';
+const CLIENT_INSTALLATION_ID_SERVICE = 'dolgate.mobile.client-installation-id';
+
+const CLIENT_HEADER_NAME = 'X-Dolgate-Client';
+const CLIENT_VERSION_HEADER_NAME = 'X-Dolgate-Client-Version';
+const CLIENT_PLATFORM_HEADER_NAME = 'X-Dolgate-Platform';
+const CLIENT_INSTALLATION_ID_HEADER_NAME = 'X-Dolgate-Client-Installation-Id';
 
 export class ApiError extends Error {
   constructor(
@@ -50,7 +58,7 @@ export class ApiError extends Error {
     readonly status?: number,
   ) {
     super(message);
-    this.name = "ApiError";
+    this.name = 'ApiError';
   }
 }
 
@@ -87,25 +95,25 @@ export interface MobileServerPublicKeyInfo {
 export function createDefaultMobileSettings(): MobileSettings {
   return {
     serverUrl: DEFAULT_SERVER_URL,
-    theme: "system",
+    theme: 'system',
   };
 }
 
 export function createDefaultSyncStatus(): SyncStatus {
   return {
-    status: "idle",
+    status: 'idle',
     pendingPush: false,
     lastSuccessfulSyncAt: null,
     errorMessage: null,
-    awsProfilesServerSupport: "unknown",
-    awsSsmServerSupport: "unknown",
-    awsSftpServerSupport: "unknown",
+    awsProfilesServerSupport: 'unknown',
+    awsSsmServerSupport: 'unknown',
+    awsSftpServerSupport: 'unknown',
   };
 }
 
 export function createUnauthenticatedState(): AuthState {
   return {
-    status: "unauthenticated",
+    status: 'unauthenticated',
     session: null,
     offline: null,
     errorMessage: null,
@@ -114,16 +122,16 @@ export function createUnauthenticatedState(): AuthState {
 
 export function buildBrowserLoginUrl(serverUrl: string, state: string): string {
   const normalized = normalizeServerUrl(serverUrl);
-  const loginUrl = new URL("/login", normalized);
-  loginUrl.searchParams.set("client", AUTH_CLIENT_ID);
-  loginUrl.searchParams.set("redirect_uri", AUTH_REDIRECT_URI);
-  loginUrl.searchParams.set("state", state);
+  const loginUrl = new URL('/login', normalized);
+  loginUrl.searchParams.set('client', AUTH_CLIENT_ID);
+  loginUrl.searchParams.set('redirect_uri', AUTH_REDIRECT_URI);
+  loginUrl.searchParams.set('state', state);
   return loginUrl.toString();
 }
 
 export function buildAwsSsoRedirectUri(serverUrl: string): string {
   const normalized = normalizeServerUrl(serverUrl);
-  const callbackUrl = new URL("/auth/aws-sso/callback", normalized);
+  const callbackUrl = new URL('/auth/aws-sso/callback', normalized);
   return callbackUrl.toString();
 }
 
@@ -133,12 +141,15 @@ export async function startAwsSsoBrowserLogin(
   payload: AwsSsoMobileLoginStartRequest,
 ): Promise<AwsSsoMobileLoginStartResponse> {
   return fetchJson<AwsSsoMobileLoginStartResponse>(
-    new URL("/api/aws-sso/mobile/start", normalizeServerUrl(serverUrl)).toString(),
+    new URL(
+      '/api/aws-sso/mobile/start',
+      normalizeServerUrl(serverUrl),
+    ).toString(),
     {
-      method: "POST",
+      method: 'POST',
       headers: {
         authorization: `Bearer ${accessToken}`,
-        "content-type": "application/json",
+        'content-type': 'application/json',
       },
       body: JSON.stringify(payload),
     },
@@ -175,10 +186,10 @@ export async function completeAwsSsoLoginHandoff(
       normalizeServerUrl(serverUrl),
     ).toString(),
     {
-      method: "POST",
+      method: 'POST',
       headers: {
         authorization: `Bearer ${accessToken}`,
-        "content-type": "application/json",
+        'content-type': 'application/json',
       },
       body: JSON.stringify(payload),
     },
@@ -191,12 +202,15 @@ export async function cancelAwsSsoBrowserLogin(
   loginId: string,
 ): Promise<void> {
   await fetchEmpty(
-    new URL("/api/aws-sso/mobile/cancel", normalizeServerUrl(serverUrl)).toString(),
+    new URL(
+      '/api/aws-sso/mobile/cancel',
+      normalizeServerUrl(serverUrl),
+    ).toString(),
     {
-      method: "POST",
+      method: 'POST',
       headers: {
         authorization: `Bearer ${accessToken}`,
-        "content-type": "application/json",
+        'content-type': 'application/json',
       },
       body: JSON.stringify({ loginId }),
     },
@@ -224,20 +238,43 @@ export function createLocalId(prefix: string): string {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
+function createInstallationId(): string {
+  const bytes = randomBytes(16);
+  bytes[6] = (bytes[6] & 0x0f) | 0x40;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  const hex = Array.from(bytes, value =>
+    value.toString(16).padStart(2, '0'),
+  ).join('');
+  return [
+    hex.slice(0, 8),
+    hex.slice(8, 12),
+    hex.slice(12, 16),
+    hex.slice(16, 20),
+    hex.slice(20),
+  ].join('-');
+}
+
+function resolveMobileClientPlatform(): string {
+  if (Platform.OS === 'ios' || Platform.OS === 'android') {
+    return Platform.OS;
+  }
+  return 'unknown';
+}
+
 export function formatRelativeTime(input: string | null | undefined): string {
   if (!input) {
-    return "방금";
+    return '방금';
   }
 
   const value = new Date(input).getTime();
   if (Number.isNaN(value)) {
-    return "방금";
+    return '방금';
   }
 
   const diffMs = Date.now() - value;
   const diffMinutes = Math.floor(diffMs / 60_000);
   if (diffMinutes <= 0) {
-    return "방금";
+    return '방금';
   }
   if (diffMinutes < 60) {
     return `${diffMinutes}분 전`;
@@ -269,8 +306,10 @@ export async function loadStoredAuthSession(): Promise<AuthSession | null> {
   }
 }
 
-export async function saveStoredAuthSession(session: AuthSession): Promise<void> {
-  await Keychain.setGenericPassword("dolgate", JSON.stringify(session), {
+export async function saveStoredAuthSession(
+  session: AuthSession,
+): Promise<void> {
+  await Keychain.setGenericPassword('dolgate', JSON.stringify(session), {
     service: AUTH_SESSION_SERVICE,
     accessible: Keychain.ACCESSIBLE.WHEN_UNLOCKED_THIS_DEVICE_ONLY,
   });
@@ -300,7 +339,7 @@ export async function loadStoredSecrets(): Promise<ManagedSecretsMap> {
 export async function saveStoredSecrets(
   secretsByRef: ManagedSecretsMap,
 ): Promise<void> {
-  await Keychain.setGenericPassword("dolgate", JSON.stringify(secretsByRef), {
+  await Keychain.setGenericPassword('dolgate', JSON.stringify(secretsByRef), {
     service: MANAGED_SECRETS_SERVICE,
     accessible: Keychain.ACCESSIBLE.WHEN_UNLOCKED_THIS_DEVICE_ONLY,
   });
@@ -332,7 +371,7 @@ export async function loadStoredAwsProfiles(): Promise<
 export async function saveStoredAwsProfiles(
   profiles: ManagedAwsProfilePayload[],
 ): Promise<void> {
-  await Keychain.setGenericPassword("dolgate", JSON.stringify(profiles), {
+  await Keychain.setGenericPassword('dolgate', JSON.stringify(profiles), {
     service: MANAGED_AWS_PROFILES_SERVICE,
     accessible: Keychain.ACCESSIBLE.WHEN_UNLOCKED_THIS_DEVICE_ONLY,
   });
@@ -367,10 +406,14 @@ export async function loadStoredAwsSsoTokens(): Promise<
 export async function saveStoredAwsSsoTokens(
   tokensByProfileId: Record<string, StoredAwsSsoTokenRecord>,
 ): Promise<void> {
-  await Keychain.setGenericPassword("dolgate", JSON.stringify(tokensByProfileId), {
-    service: AWS_SSO_TOKENS_SERVICE,
-    accessible: Keychain.ACCESSIBLE.WHEN_UNLOCKED_THIS_DEVICE_ONLY,
-  });
+  await Keychain.setGenericPassword(
+    'dolgate',
+    JSON.stringify(tokensByProfileId),
+    {
+      service: AWS_SSO_TOKENS_SERVICE,
+      accessible: Keychain.ACCESSIBLE.WHEN_UNLOCKED_THIS_DEVICE_ONLY,
+    },
+  );
 }
 
 export async function clearStoredAwsSsoTokens(): Promise<void> {
@@ -379,17 +422,61 @@ export async function clearStoredAwsSsoTokens(): Promise<void> {
   });
 }
 
+export async function loadStoredClientInstallationId(): Promise<string | null> {
+  const credentials = await Keychain.getGenericPassword({
+    service: CLIENT_INSTALLATION_ID_SERVICE,
+  });
+  if (!credentials) {
+    return null;
+  }
+
+  const installationId = credentials.password.trim();
+  return installationId || null;
+}
+
+export async function saveStoredClientInstallationId(
+  installationId: string,
+): Promise<void> {
+  await Keychain.setGenericPassword('dolgate', installationId, {
+    service: CLIENT_INSTALLATION_ID_SERVICE,
+    accessible: Keychain.ACCESSIBLE.WHEN_UNLOCKED_THIS_DEVICE_ONLY,
+  });
+}
+
+export async function getOrCreateClientInstallationId(): Promise<string> {
+  const storedInstallationId = await loadStoredClientInstallationId();
+  if (storedInstallationId) {
+    return storedInstallationId;
+  }
+
+  const installationId = createInstallationId();
+  await saveStoredClientInstallationId(installationId);
+  return installationId;
+}
+
+async function buildAuthRequestHeaders(): Promise<Record<string, string>> {
+  return {
+    'content-type': 'application/json',
+    [CLIENT_HEADER_NAME]: 'mobile',
+    [CLIENT_VERSION_HEADER_NAME]: APP_VERSION,
+    [CLIENT_PLATFORM_HEADER_NAME]: resolveMobileClientPlatform(),
+    [CLIENT_INSTALLATION_ID_HEADER_NAME]:
+      await getOrCreateClientInstallationId(),
+  };
+}
+
 export async function fetchExchangeSession(
   serverUrl: string,
   code: string,
 ): Promise<AuthSession> {
-  return fetchJson<AuthSession>(new URL("/auth/exchange", normalizeServerUrl(serverUrl)).toString(), {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
+  return fetchJson<AuthSession>(
+    new URL('/auth/exchange', normalizeServerUrl(serverUrl)).toString(),
+    {
+      method: 'POST',
+      headers: await buildAuthRequestHeaders(),
+      body: JSON.stringify({ code }),
     },
-    body: JSON.stringify({ code }),
-  });
+  );
 }
 
 export async function refreshAuthSession(
@@ -397,15 +484,17 @@ export async function refreshAuthSession(
   session: AuthSession,
   options?: FetchRequestOptions,
 ): Promise<AuthSession> {
-  return fetchJson<AuthSession>(new URL("/auth/refresh", normalizeServerUrl(serverUrl)).toString(), {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
+  return fetchJson<AuthSession>(
+    new URL('/auth/refresh', normalizeServerUrl(serverUrl)).toString(),
+    {
+      method: 'POST',
+      headers: await buildAuthRequestHeaders(),
+      body: JSON.stringify({
+        refreshToken: session.tokens.refreshToken,
+      }),
     },
-    body: JSON.stringify({
-      refreshToken: session.tokens.refreshToken,
-    }),
-  }, options);
+    options,
+  );
 }
 
 export async function logoutRemoteSession(
@@ -416,33 +505,39 @@ export async function logoutRemoteSession(
     return;
   }
 
-  await fetchEmpty(new URL("/auth/logout", normalizeServerUrl(serverUrl)).toString(), {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
+  await fetchEmpty(
+    new URL('/auth/logout', normalizeServerUrl(serverUrl)).toString(),
+    {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        refreshToken: session.tokens.refreshToken,
+      }),
     },
-    body: JSON.stringify({
-      refreshToken: session.tokens.refreshToken,
-    }),
-  });
+  );
 }
 
 export async function fetchSyncSnapshot(
   serverUrl: string,
   accessToken: string,
 ): Promise<SyncPayloadV2> {
-  return fetchJson<SyncPayloadV2>(new URL("/sync", normalizeServerUrl(serverUrl)).toString(), {
-    headers: {
-      authorization: `Bearer ${accessToken}`,
+  return fetchJson<SyncPayloadV2>(
+    new URL('/sync', normalizeServerUrl(serverUrl)).toString(),
+    {
+      headers: {
+        authorization: `Bearer ${accessToken}`,
+      },
     },
-  });
+  );
 }
 
 export async function fetchServerInfo(
   serverUrl: string,
 ): Promise<ServerInfoResponse> {
   return fetchJson<ServerInfoResponse>(
-    new URL("/api/info", normalizeServerUrl(serverUrl)).toString(),
+    new URL('/api/info', normalizeServerUrl(serverUrl)).toString(),
   );
 }
 
@@ -451,11 +546,11 @@ export async function postSyncSnapshot(
   accessToken: string,
   payload: SyncPayloadV2,
 ): Promise<void> {
-  await fetchEmpty(new URL("/sync", normalizeServerUrl(serverUrl)).toString(), {
-    method: "POST",
+  await fetchEmpty(new URL('/sync', normalizeServerUrl(serverUrl)).toString(), {
+    method: 'POST',
     headers: {
       authorization: `Bearer ${accessToken}`,
-      "content-type": "application/json",
+      'content-type': 'application/json',
     },
     body: JSON.stringify(payload),
   });
@@ -466,8 +561,10 @@ export function decodeSyncRecords<T>(
   keyBase64: string,
 ): T[] {
   return records
-    .filter((record) => !record.deleted_at)
-    .map((record) => decodeEncryptedPayload<T>(record.encrypted_payload, keyBase64));
+    .filter(record => !record.deleted_at)
+    .map(record =>
+      decodeEncryptedPayload<T>(record.encrypted_payload, keyBase64),
+    );
 }
 
 export function decodeSshHosts(
@@ -533,7 +630,7 @@ export function buildKnownHostsSyncPayload(
 ): SyncPayloadV2 {
   return {
     ...buildEmptySyncPayload(),
-    knownHosts: knownHosts.map((record) => ({
+    knownHosts: knownHosts.map(record => ({
       id: record.id,
       encrypted_payload: encodeEncryptedPayload(record, keyBase64),
       updated_at: record.updatedAt,
@@ -547,7 +644,7 @@ export function buildKnownHostRecord(
 ): KnownHostRecord {
   const now = new Date().toISOString();
   return {
-    id: existing?.id ?? createLocalId("known-host"),
+    id: existing?.id ?? createLocalId('known-host'),
     host: info.host,
     port: info.port,
     algorithm: info.algorithm,
@@ -564,7 +661,7 @@ export function deriveSecretMetadata(
   secretsByRef: ManagedSecretsMap,
 ): SecretMetadataRecord[] {
   return Object.values(secretsByRef)
-    .map((record) => ({
+    .map(record => ({
       secretRef: record.secretRef,
       label: record.label,
       hasPassword: Boolean(record.password),
@@ -572,7 +669,7 @@ export function deriveSecretMetadata(
       hasManagedPrivateKey: Boolean(record.privateKeyPem),
       hasCertificate: Boolean(record.certificateText),
       linkedHostCount: hosts.filter(
-        (host) => isSshHostRecord(host) && host.secretRef === record.secretRef,
+        host => isSshHostRecord(host) && host.secretRef === record.secretRef,
       ).length,
       updatedAt: record.updatedAt,
     }))
@@ -601,13 +698,13 @@ export function mergePromptedSecrets(
 }
 
 export function sanitizeTerminalSnapshot(input: string): string {
-  return input.replace(/\u0000/g, "").replace(/\r/g, "");
+  return input.replace(/\u0000/g, '').replace(/\r/g, '');
 }
 
 function encodeEncryptedPayload<T>(value: T, keyBase64: string): string {
   const key = toByteArray(keyBase64);
   const iv = randomBytes(12);
-  const plaintext = Buffer.from(JSON.stringify(value), "utf8");
+  const plaintext = Buffer.from(JSON.stringify(value), 'utf8');
   const sealed = gcm(key, iv).encrypt(plaintext);
   const tag = sealed.slice(sealed.length - 16);
   const ciphertext = sealed.slice(0, sealed.length - 16);
@@ -630,7 +727,7 @@ function decodeEncryptedPayload<T>(payload: string, keyBase64: string): T {
   sealed.set(ciphertext);
   sealed.set(tag, ciphertext.length);
   const plaintext = gcm(key, iv).decrypt(sealed);
-  return JSON.parse(Buffer.from(plaintext).toString("utf8")) as T;
+  return JSON.parse(Buffer.from(plaintext).toString('utf8')) as T;
 }
 
 async function fetchJson<T>(
@@ -676,8 +773,8 @@ async function fetchWithOptions(
       signal: controller.signal,
     });
   } catch (error) {
-    if (error instanceof Error && error.name === "AbortError") {
-      throw new Error(options.timeoutMessage ?? "요청 시간이 초과되었습니다.");
+    if (error instanceof Error && error.name === 'AbortError') {
+      throw new Error(options.timeoutMessage ?? '요청 시간이 초과되었습니다.');
     }
     throw error;
   } finally {
@@ -701,7 +798,7 @@ function extractApiErrorMessage(raw: string): string | null {
 
   try {
     const parsed = JSON.parse(raw) as { error?: unknown };
-    if (typeof parsed.error === "string" && parsed.error.trim()) {
+    if (typeof parsed.error === 'string' && parsed.error.trim()) {
       return parsed.error.trim();
     }
   } catch {
@@ -711,7 +808,4 @@ function extractApiErrorMessage(raw: string): string | null {
   return raw;
 }
 
-export {
-  AsyncStorage,
-  Keychain,
-};
+export { AsyncStorage, Keychain };

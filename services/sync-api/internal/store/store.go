@@ -41,6 +41,18 @@ type UserVaultKey struct {
 	KeyBase64 string
 }
 
+type UserClientObservation struct {
+	UserID               string
+	ClientName           string
+	ClientVersion        string
+	Platform             string
+	ClientInstallationID string
+	LastAuthEvent        string
+	LastIP               string
+	LastUserAgent        string
+	ObservedAt           time.Time
+}
+
 type Store interface {
 	CreateUser(ctx context.Context, email string, passwordHash string) (User, error)
 	GetUserByEmail(ctx context.Context, email string) (User, error)
@@ -57,6 +69,7 @@ type Store interface {
 	ConsumeExchangeCode(ctx context.Context, codeHash string) (ExchangeCode, error)
 
 	GetOrCreateUserVaultKey(ctx context.Context, userID string) (UserVaultKey, error)
+	UpsertUserClientObservation(ctx context.Context, observation UserClientObservation) error
 
 	ListSyncRecords(ctx context.Context, userID string, kind syncmodel.Kind) ([]syncmodel.Record, error)
 	UpsertSyncRecords(ctx context.Context, userID string, kind syncmodel.Kind, records []syncmodel.Record) error

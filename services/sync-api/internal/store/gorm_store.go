@@ -73,6 +73,23 @@ func (userVaultKeyRow) TableName() string {
 	return "user_vault_keys"
 }
 
+type userClientObservationRow struct {
+	UserID               string    `gorm:"column:user_id;not null;type:varchar(191);index;uniqueIndex:idx_user_client_installation"`
+	ClientName           string    `gorm:"column:client_name;not null;type:varchar(64);uniqueIndex:idx_user_client_installation"`
+	ClientVersion        string    `gorm:"column:client_version;not null;type:varchar(64)"`
+	Platform             string    `gorm:"column:platform;not null;type:varchar(32)"`
+	ClientInstallationID string    `gorm:"column:client_installation_id;not null;type:varchar(191);uniqueIndex:idx_user_client_installation"`
+	FirstSeenAt          time.Time `gorm:"column:first_seen_at;not null"`
+	LastSeenAt           time.Time `gorm:"column:last_seen_at;not null;index"`
+	LastAuthEvent        string    `gorm:"column:last_auth_event;not null;type:varchar(32)"`
+	LastIP               string    `gorm:"column:last_ip;not null;type:varchar(255)"`
+	LastUserAgent        string    `gorm:"column:last_user_agent;not null;type:text"`
+}
+
+func (userClientObservationRow) TableName() string {
+	return "user_client_observations"
+}
+
 type syncRecordRow struct {
 	ID               string     `gorm:"column:id;primaryKey;type:varchar(191)"`
 	UserID           string     `gorm:"column:user_id;primaryKey;index;type:varchar(191)"`
@@ -167,6 +184,7 @@ func (s *GormStore) migrate() error {
 		&refreshTokenRow{},
 		&exchangeCodeRow{},
 		&userVaultKeyRow{},
+		&userClientObservationRow{},
 		&syncRecordRow{},
 	)
 }
@@ -355,6 +373,45 @@ func (s *GormStore) GetOrCreateUserVaultKey(ctx context.Context, userID string) 
 		UserID:    row.UserID,
 		KeyBase64: row.KeyBase64,
 	}, nil
+}
+
+func (s *GormStore) UpsertUserClientObservation(ctx context.Context, observation UserClientObservation) error {
+	observedAt := observation.ObservedAt
+	if observedAt.IsZero() {
+		observedAt = time.Now()
+	}
+	observedAt = observedAt.UTC()
+
+	row := userClientObservationRow{
+		UserID:               observation.UserID,
+		ClientName:           observation.ClientName,
+		ClientVersion:        observation.ClientVersion,
+		Platform:             observation.Platform,
+		ClientInstallationID: observation.ClientInstallationID,
+		FirstSeenAt:          observedAt,
+		LastSeenAt:           observedAt,
+		LastAuthEvent:        observation.LastAuthEvent,
+		LastIP:               observation.LastIP,
+		LastUserAgent:        observation.LastUserAgent,
+	}
+
+	return s.db.WithContext(ctx).
+		Clauses(clause.OnConflict{
+			Columns: []clause.Column{
+				{Name: "user_id"},
+				{Name: "client_name"},
+				{Name: "client_installation_id"},
+			},
+			DoUpdates: clause.Assignments(map[string]any{
+				"client_version":  row.ClientVersion,
+				"platform":        row.Platform,
+				"last_seen_at":    row.LastSeenAt,
+				"last_auth_event": row.LastAuthEvent,
+				"last_ip":         row.LastIP,
+				"last_user_agent": row.LastUserAgent,
+			}),
+		}).
+		Create(&row).Error
 }
 
 func (s *GormStore) ListSyncRecords(ctx context.Context, userID string, kind syncmodel.Kind) ([]syncmodel.Record, error) {

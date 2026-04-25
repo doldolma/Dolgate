@@ -2,6 +2,7 @@ package http_test
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -20,6 +21,16 @@ import (
 	syncmodel "dolssh/services/sync-api/internal/sync"
 )
 
+type observingStore struct {
+	*store.GormStore
+	observations []store.UserClientObservation
+}
+
+func (s *observingStore) UpsertUserClientObservation(ctx context.Context, observation store.UserClientObservation) error {
+	s.observations = append(s.observations, observation)
+	return s.GormStore.UpsertUserClientObservation(ctx, observation)
+}
+
 func createTestRouter(t *testing.T) *gin.Engine {
 	return createTestRouterWithConfig(t, httpserver.RouterConfig{
 		LocalAuthEnabled:   true,
@@ -28,6 +39,14 @@ func createTestRouter(t *testing.T) *gin.Engine {
 }
 
 func createTestRouterWithConfig(t *testing.T, config httpserver.RouterConfig) *gin.Engine {
+	router, _, _ := createObservedTestRouterWithConfig(t, config)
+	return router
+}
+
+func createObservedTestRouterWithConfig(
+	t *testing.T,
+	config httpserver.RouterConfig,
+) (*gin.Engine, *observingStore, *auth.Service) {
 	t.Helper()
 
 	sqliteStore, err := store.OpenSQLite("file:dolssh_sync_test?mode=memory&cache=shared")
@@ -39,8 +58,9 @@ func createTestRouterWithConfig(t *testing.T, config httpserver.RouterConfig) *g
 			t.Fatalf("close sqlite: %v", err)
 		}
 	})
+	observedStore := &observingStore{GormStore: sqliteStore}
 	authService, err := auth.NewService(
-		sqliteStore,
+		observedStore,
 		"",
 		filepath.Join(t.TempDir(), "auth-signing-private.pem"),
 		15*time.Minute,
@@ -51,11 +71,11 @@ func createTestRouterWithConfig(t *testing.T, config httpserver.RouterConfig) *g
 	if err != nil {
 		t.Fatalf("new auth service: %v", err)
 	}
-	router, err := httpserver.NewRouter(sqliteStore, authService, config)
+	router, err := httpserver.NewRouter(observedStore, authService, config)
 	if err != nil {
 		t.Fatalf("new router: %v", err)
 	}
-	return router
+	return router, observedStore, authService
 }
 
 func assertCommonSecurityHeaders(t *testing.T, response *httptest.ResponseRecorder) {
@@ -220,6 +240,155 @@ func TestAuthRefreshAndSyncFlow(t *testing.T) {
 	router.ServeHTTP(oldRefreshRecorder, oldRefreshRequest)
 	if oldRefreshRecorder.Code != http.StatusOK {
 		t.Fatalf("expected old refresh token to succeed during handoff, got %d", oldRefreshRecorder.Code)
+	}
+}
+
+func TestAuthJSONEndpointsRecordClientObservationsOnSuccess(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router, observedStore, authService := createObservedTestRouterWithConfig(t, httpserver.RouterConfig{
+		LocalAuthEnabled:   true,
+		LocalSignupEnabled: true,
+	})
+
+	setClientHeaders := func(request *http.Request) {
+		request.Header.Set("Content-Type", "application/json")
+		request.Header.Set("User-Agent", "DolgateTest/1.6.1")
+		request.Header.Set("X-Dolgate-Client", "desktop")
+		request.Header.Set("X-Dolgate-Client-Version", "1.6.1")
+		request.Header.Set("X-Dolgate-Platform", "macos")
+		request.Header.Set("X-Dolgate-Client-Installation-Id", "install-test-1")
+	}
+
+	signupRequest := httptest.NewRequest(http.MethodPost, "/auth/signup", bytes.NewBufferString(`{"email":"observe@example.com","password":"supersecure"}`))
+	setClientHeaders(signupRequest)
+	signupRecorder := httptest.NewRecorder()
+	router.ServeHTTP(signupRecorder, signupRequest)
+	if signupRecorder.Code != http.StatusCreated {
+		t.Fatalf("expected signup to succeed, got %d: %s", signupRecorder.Code, signupRecorder.Body.String())
+	}
+
+	var signupResponse struct {
+		Tokens struct {
+			RefreshToken string `json:"refreshToken"`
+		} `json:"tokens"`
+	}
+	if err := json.Unmarshal(signupRecorder.Body.Bytes(), &signupResponse); err != nil {
+		t.Fatalf("decode signup response: %v", err)
+	}
+
+	loginRequest := httptest.NewRequest(http.MethodPost, "/auth/login", bytes.NewBufferString(`{"email":"observe@example.com","password":"supersecure"}`))
+	setClientHeaders(loginRequest)
+	loginRecorder := httptest.NewRecorder()
+	router.ServeHTTP(loginRecorder, loginRequest)
+	if loginRecorder.Code != http.StatusOK {
+		t.Fatalf("expected login to succeed, got %d: %s", loginRecorder.Code, loginRecorder.Body.String())
+	}
+
+	user, err := observedStore.GetUserByEmail(context.Background(), "observe@example.com")
+	if err != nil {
+		t.Fatalf("GetUserByEmail() error = %v", err)
+	}
+	exchangeCode, err := authService.IssueExchangeCode(context.Background(), user)
+	if err != nil {
+		t.Fatalf("IssueExchangeCode() error = %v", err)
+	}
+
+	exchangeRequest := httptest.NewRequest(http.MethodPost, "/auth/exchange", bytes.NewBufferString(`{"code":"`+exchangeCode+`"}`))
+	setClientHeaders(exchangeRequest)
+	exchangeRecorder := httptest.NewRecorder()
+	router.ServeHTTP(exchangeRecorder, exchangeRequest)
+	if exchangeRecorder.Code != http.StatusOK {
+		t.Fatalf("expected exchange to succeed, got %d: %s", exchangeRecorder.Code, exchangeRecorder.Body.String())
+	}
+
+	refreshRequest := httptest.NewRequest(http.MethodPost, "/auth/refresh", bytes.NewBufferString(`{"refreshToken":"`+signupResponse.Tokens.RefreshToken+`"}`))
+	setClientHeaders(refreshRequest)
+	refreshRecorder := httptest.NewRecorder()
+	router.ServeHTTP(refreshRecorder, refreshRequest)
+	if refreshRecorder.Code != http.StatusOK {
+		t.Fatalf("expected refresh to succeed, got %d: %s", refreshRecorder.Code, refreshRecorder.Body.String())
+	}
+
+	if len(observedStore.observations) != 4 {
+		t.Fatalf("len(observations) = %d, want 4", len(observedStore.observations))
+	}
+
+	wantEvents := []string{"signup", "login", "exchange", "refresh"}
+	for index, event := range wantEvents {
+		observation := observedStore.observations[index]
+		if observation.LastAuthEvent != event {
+			t.Fatalf("observations[%d].LastAuthEvent = %q, want %q", index, observation.LastAuthEvent, event)
+		}
+		if observation.ClientName != "desktop" || observation.ClientVersion != "1.6.1" || observation.Platform != "macos" {
+			t.Fatalf("unexpected client metadata: %+v", observation)
+		}
+		if observation.ClientInstallationID != "install-test-1" {
+			t.Fatalf("ClientInstallationID = %q, want install-test-1", observation.ClientInstallationID)
+		}
+		if observation.LastIP == "" {
+			t.Fatalf("expected LastIP to be populated")
+		}
+		if observation.LastUserAgent != "DolgateTest/1.6.1" {
+			t.Fatalf("LastUserAgent = %q, want DolgateTest/1.6.1", observation.LastUserAgent)
+		}
+	}
+}
+
+func TestAuthJSONEndpointsSkipObservationOnFailureAndUseUnknownFallbacks(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router, observedStore, _ := createObservedTestRouterWithConfig(t, httpserver.RouterConfig{
+		LocalAuthEnabled:   true,
+		LocalSignupEnabled: true,
+	})
+
+	loginRequest := httptest.NewRequest(http.MethodPost, "/auth/login", bytes.NewBufferString(`{"email":"missing@example.com","password":"supersecure"}`))
+	loginRequest.Header.Set("Content-Type", "application/json")
+	loginRecorder := httptest.NewRecorder()
+	router.ServeHTTP(loginRecorder, loginRequest)
+	if loginRecorder.Code != http.StatusUnauthorized {
+		t.Fatalf("expected login to fail, got %d: %s", loginRecorder.Code, loginRecorder.Body.String())
+	}
+	if len(observedStore.observations) != 0 {
+		t.Fatalf("expected no observations after failed login, got %d", len(observedStore.observations))
+	}
+
+	signupRequest := httptest.NewRequest(http.MethodPost, "/auth/signup", bytes.NewBufferString(`{"email":"unknown@example.com","password":"supersecure"}`))
+	signupRequest.Header.Set("Content-Type", "application/json")
+	signupRecorder := httptest.NewRecorder()
+	router.ServeHTTP(signupRecorder, signupRequest)
+	if signupRecorder.Code != http.StatusCreated {
+		t.Fatalf("expected signup to succeed, got %d: %s", signupRecorder.Code, signupRecorder.Body.String())
+	}
+
+	var signupResponse struct {
+		Tokens struct {
+			RefreshToken string `json:"refreshToken"`
+		} `json:"tokens"`
+	}
+	if err := json.Unmarshal(signupRecorder.Body.Bytes(), &signupResponse); err != nil {
+		t.Fatalf("decode signup response: %v", err)
+	}
+
+	observedStore.observations = nil
+
+	refreshRequest := httptest.NewRequest(http.MethodPost, "/auth/refresh", bytes.NewBufferString(`{"refreshToken":"`+signupResponse.Tokens.RefreshToken+`"}`))
+	refreshRequest.Header.Set("Content-Type", "application/json")
+	refreshRecorder := httptest.NewRecorder()
+	router.ServeHTTP(refreshRecorder, refreshRequest)
+	if refreshRecorder.Code != http.StatusOK {
+		t.Fatalf("expected refresh to succeed, got %d: %s", refreshRecorder.Code, refreshRecorder.Body.String())
+	}
+
+	if len(observedStore.observations) != 1 {
+		t.Fatalf("len(observations) = %d, want 1", len(observedStore.observations))
+	}
+
+	observation := observedStore.observations[0]
+	if observation.ClientName != "unknown" || observation.ClientVersion != "unknown" || observation.Platform != "unknown" || observation.ClientInstallationID != "unknown" {
+		t.Fatalf("unexpected fallback observation: %+v", observation)
+	}
+	if observation.LastAuthEvent != "refresh" {
+		t.Fatalf("LastAuthEvent = %q, want refresh", observation.LastAuthEvent)
 	}
 }
 
