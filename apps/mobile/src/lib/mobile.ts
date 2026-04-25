@@ -99,6 +99,7 @@ export function createDefaultSyncStatus(): SyncStatus {
     errorMessage: null,
     awsProfilesServerSupport: "unknown",
     awsSsmServerSupport: "unknown",
+    awsSftpServerSupport: "unknown",
   };
 }
 

@@ -225,15 +225,19 @@ func TestAuthRefreshAndSyncFlow(t *testing.T) {
 
 func TestServerInfoEndpoint(t *testing.T) {
 	gin.SetMode(gin.TestMode)
+	awsRuntime := httpserver.AwsSsmRuntime{
+		Enabled:                    true,
+		AwsSsoBrowserFlowSupported: true,
+	}
+	awsSftpBridge := httpserver.NewAwsSftpBridge(awsRuntime)
+	t.Cleanup(awsSftpBridge.Close)
 	router := createTestRouterWithConfig(t, httpserver.RouterConfig{
 		LocalAuthEnabled:   true,
 		LocalSignupEnabled: true,
 		ServerVersion:      "2026.04.07-test",
-		AwsSsmRuntime: httpserver.AwsSsmRuntime{
-			Enabled:                    true,
-			AwsSsoBrowserFlowSupported: true,
-		},
-		AwsSsoBrowserFlow: true,
+		AwsSsmRuntime:      awsRuntime,
+		AwsSsoBrowserFlow:  true,
+		AwsSftpBridge:      awsSftpBridge,
 	})
 
 	request := httptest.NewRequest(http.MethodGet, "/api/info", nil)
@@ -252,6 +256,7 @@ func TestServerInfoEndpoint(t *testing.T) {
 			} `json:"sync"`
 			Sessions struct {
 				AWSSsm            bool `json:"awsSsm"`
+				AWSSftp           bool `json:"awsSftp"`
 				AWSSsoBrowserFlow bool `json:"awsSsoBrowserFlow"`
 			} `json:"sessions"`
 		} `json:"capabilities"`
@@ -267,6 +272,9 @@ func TestServerInfoEndpoint(t *testing.T) {
 	}
 	if !response.Capabilities.Sessions.AWSSsm {
 		t.Fatalf("expected awsSsm capability to be enabled")
+	}
+	if !response.Capabilities.Sessions.AWSSftp {
+		t.Fatalf("expected awsSftp capability to be enabled")
 	}
 	if !response.Capabilities.Sessions.AWSSsoBrowserFlow {
 		t.Fatalf("expected awsSsoBrowserFlow capability to be enabled")

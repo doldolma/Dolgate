@@ -41,6 +41,18 @@ jest.mock("@fressh/react-native-uniffi-russh", () => ({
     validateCertificate: jest.fn(() => ({ valid: true })),
   },
 }));
+jest.mock("@aws-sdk/client-sts", () => ({
+  STSClient: jest.fn().mockImplementation(() => ({
+    send: jest.fn(async () => ({
+      Account: "123456789012",
+      Arn: "arn:aws:iam::123456789012:user/test",
+      UserId: "test",
+    })),
+    destroy: jest.fn(),
+  })),
+  GetCallerIdentityCommand: jest.fn(),
+  AssumeRoleCommand: jest.fn(),
+}));
 jest.mock("@react-native-async-storage/async-storage", () => ({
   getItem: jest.fn(async () => null),
   setItem: jest.fn(async () => null),
@@ -1664,6 +1676,227 @@ describe("useMobileAppStore auth and sync flows", () => {
       }),
     );
     expect(sftpConnection.listDirectory).toHaveBeenCalledWith(".");
+  });
+
+  it("opens AWS EC2 SFTP tabs through the sync-api proxy", async () => {
+    const host: AwsEc2HostRecord = {
+      id: "host-aws-sftp",
+      kind: "aws-ec2",
+      label: "AWS SFTP",
+      awsProfileId: "profile-prod",
+      awsProfileName: "prod",
+      awsRegion: "ap-northeast-2",
+      awsInstanceId: "i-0123456789abcdef0",
+      awsAvailabilityZone: "ap-northeast-2a",
+      awsSshUsername: "ec2-user",
+      awsSshPort: 22,
+      createdAt: "2026-04-13T00:00:00.000Z",
+      updatedAt: "2026-04-13T00:00:00.000Z",
+    };
+    const profile: ManagedAwsProfilePayload = {
+      id: "profile-prod",
+      name: "prod",
+      kind: "static",
+      region: "ap-northeast-2",
+      accessKeyId: "AKIAPROD",
+      secretAccessKey: "prod-secret",
+      updatedAt: "2026-04-13T00:00:00.000Z",
+    };
+    const session: MobileSessionRecord = {
+      id: "session-aws-sftp",
+      sessionId: "session-aws-sftp",
+      hostId: host.id,
+      title: host.label,
+      connectionKind: "aws-ssm",
+      status: "connected",
+      hasReceivedOutput: true,
+      isRestorable: true,
+      lastViewportSnapshot: "",
+      lastEventAt: "2026-04-13T00:00:00.000Z",
+      lastConnectedAt: "2026-04-13T00:00:00.000Z",
+      lastDisconnectedAt: null,
+      errorMessage: null,
+    };
+
+    fetchMock.mockImplementation(async (input, init) => {
+      const url = new URL(String(input));
+      if (
+        url.pathname === "/api/aws-sftp/sessions" &&
+        init?.method === "POST"
+      ) {
+        return createJsonResponse(
+          {
+            sessionId: "aws-sftp-session-1",
+            path: "/home/ec2-user",
+            connectedAt: "2026-04-13T00:00:01.000Z",
+          },
+          201,
+        );
+      }
+      if (
+        url.pathname === "/api/aws-sftp/sessions/aws-sftp-session-1/list"
+      ) {
+        return createJsonResponse({
+          path: "/home/ec2-user",
+          entries: [
+            {
+              name: "app.log",
+              path: "/home/ec2-user/app.log",
+              isDirectory: false,
+              size: 12,
+              mtime: "2026-04-13T00:00:00Z",
+              kind: "file",
+              permissions: "-rw-r--r--",
+            },
+          ],
+        });
+      }
+      if (
+        url.pathname === "/api/aws-sftp/sessions/aws-sftp-session-1" &&
+        init?.method === "DELETE"
+      ) {
+        return createJsonResponse({}, 204);
+      }
+      throw new Error(`unexpected fetch path: ${url.pathname}`);
+    });
+
+    await act(async () => {
+      resetStore({
+        auth: createAuthenticatedState(),
+        hosts: [host],
+        awsProfiles: [profile],
+        sessions: [session],
+        syncStatus: {
+          ...createDefaultSyncStatus(),
+          awsProfilesServerSupport: "supported",
+          awsSsmServerSupport: "supported",
+          awsSftpServerSupport: "supported",
+        },
+      });
+    });
+
+    let sftpSessionId: string | null = null;
+    await act(async () => {
+      sftpSessionId = await useMobileAppStore
+        .getState()
+        .openSftpForSession(session.id);
+      await flushAsyncWorkDeep();
+    });
+
+    expect(sftpSessionId).not.toBeNull();
+    const createCall = fetchMock.mock.calls.find(
+      ([input, init]) =>
+        new URL(String(input)).pathname === "/api/aws-sftp/sessions" &&
+        init?.method === "POST",
+    );
+    expect(createCall).toBeTruthy();
+    expect(JSON.parse(String(createCall?.[1]?.body))).toEqual(
+      expect.objectContaining({
+        hostId: host.id,
+        profileName: "prod",
+        region: "ap-northeast-2",
+        instanceId: host.awsInstanceId,
+        availabilityZone: "ap-northeast-2a",
+        sshUsername: "ec2-user",
+        sshPort: 22,
+        env: expect.objectContaining({
+          AWS_ACCESS_KEY_ID: "AKIAPROD",
+          AWS_SECRET_ACCESS_KEY: "prod-secret",
+        }),
+      }),
+    );
+    const sftpSession = useMobileAppStore
+      .getState()
+      .sftpSessions.find((item) => item.id === sftpSessionId);
+    expect(sftpSession?.status).toBe("connected");
+    expect(sftpSession?.listing?.entries[0]?.name).toBe("app.log");
+  });
+
+  it("returns to login when AWS SFTP token refresh is expired", async () => {
+    const host: AwsEc2HostRecord = {
+      id: "host-aws-sftp-expired",
+      kind: "aws-ec2",
+      label: "Expired AWS SFTP",
+      awsProfileId: "profile-prod",
+      awsProfileName: "prod",
+      awsRegion: "ap-northeast-2",
+      awsInstanceId: "i-0123456789abcdef0",
+      awsAvailabilityZone: "ap-northeast-2a",
+      awsSshUsername: "ec2-user",
+      awsSshPort: 22,
+      createdAt: "2026-04-13T00:00:00.000Z",
+      updatedAt: "2026-04-13T00:00:00.000Z",
+    };
+    const profile: ManagedAwsProfilePayload = {
+      id: "profile-prod",
+      name: "prod",
+      kind: "static",
+      region: "ap-northeast-2",
+      accessKeyId: "AKIAPROD",
+      secretAccessKey: "prod-secret",
+      updatedAt: "2026-04-13T00:00:00.000Z",
+    };
+    const session: MobileSessionRecord = {
+      id: "session-aws-sftp-expired",
+      sessionId: "session-aws-sftp-expired",
+      hostId: host.id,
+      title: host.label,
+      connectionKind: "aws-ssm",
+      status: "connected",
+      hasReceivedOutput: true,
+      isRestorable: true,
+      lastViewportSnapshot: "",
+      lastEventAt: "2026-04-13T00:00:00.000Z",
+      lastConnectedAt: "2026-04-13T00:00:00.000Z",
+      lastDisconnectedAt: null,
+      errorMessage: null,
+    };
+
+    fetchMock.mockImplementation(async (input, init) => {
+      const url = new URL(String(input));
+      if (
+        url.pathname === "/api/aws-sftp/sessions" &&
+        init?.method === "POST"
+      ) {
+        return createJsonResponse(
+          { error: "token has invalid claims: token is expired" },
+          401,
+        );
+      }
+      if (url.pathname === "/auth/refresh") {
+        return createJsonResponse({ error: "refresh token is expired" }, 401);
+      }
+      throw new Error(`unexpected fetch path: ${url.pathname}`);
+    });
+
+    await act(async () => {
+      resetStore({
+        auth: createAuthenticatedState(),
+        hosts: [host],
+        awsProfiles: [profile],
+        sessions: [session],
+        syncStatus: {
+          ...createDefaultSyncStatus(),
+          awsProfilesServerSupport: "supported",
+          awsSsmServerSupport: "supported",
+          awsSftpServerSupport: "supported",
+        },
+      });
+    });
+
+    await act(async () => {
+      await useMobileAppStore.getState().openSftpForSession(session.id);
+      await flushAsyncWorkDeep();
+    });
+
+    const state = useMobileAppStore.getState();
+    expect(state.auth.status).toBe("unauthenticated");
+    expect(state.auth.errorMessage).toContain("세션이 만료");
+    expect(state.hosts).toEqual([]);
+    expect(state.sessions).toEqual([]);
+    expect(state.sftpSessions).toEqual([]);
+    expect(fetchMock.mock.calls.map(([input]) => new URL(String(input)).pathname))
+      .toEqual(["/api/aws-sftp/sessions", "/auth/refresh"]);
   });
 
   it("disconnects live runtime sessions and clears synced state when the server changes", async () => {

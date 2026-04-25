@@ -76,9 +76,76 @@ export interface ServerInfoResponse {
     };
     sessions: {
       awsSsm: boolean;
+      awsSftp?: boolean;
       awsSsoBrowserFlow?: boolean;
     };
   };
+}
+
+export interface AwsSftpHostKeyInfo {
+  host: string;
+  port: number;
+  remoteIp?: string | null;
+  algorithm: string;
+  fingerprintSha256: string;
+  keyBase64: string;
+}
+
+export interface AwsSftpCreateSessionRequest {
+  hostId: string;
+  label: string;
+  profileName: string;
+  region: string;
+  instanceId: string;
+  availabilityZone: string;
+  sshUsername: string;
+  sshPort: number;
+  env: Record<string, string>;
+  unsetEnv?: string[];
+  trustedHostKeyBase64?: string | null;
+}
+
+export interface AwsSftpSessionResponse {
+  sessionId: string;
+  path: string;
+  connectedAt: string;
+}
+
+export interface AwsSftpHostKeyChallengeResponse {
+  code: 'host_key_required' | 'host_key_mismatch';
+  message: string;
+  info: AwsSftpHostKeyInfo;
+}
+
+export interface AwsSftpDirectoryListResponse {
+  path: string;
+  entries: Array<{
+    name: string;
+    path: string;
+    isDirectory: boolean;
+    size: number;
+    mtime: string;
+    kind: 'folder' | 'file' | 'symlink' | 'unknown';
+    permissions?: string;
+  }>;
+}
+
+export interface AwsSftpReadChunkRequest {
+  path: string;
+  offset: number;
+  length: number;
+}
+
+export interface AwsSftpReadChunkResponse {
+  bytesBase64: string;
+  bytesRead: number;
+  eof: boolean;
+}
+
+export interface AwsSftpWriteChunkRequest {
+  path: string;
+  offset: number;
+  bytesBase64: string;
 }
 
 export interface AwsTemporaryCredentialPayload {

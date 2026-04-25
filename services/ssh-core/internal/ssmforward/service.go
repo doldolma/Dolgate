@@ -357,7 +357,11 @@ func defaultRunnerFactory(payload protocol.SSMPortForwardStartPayload) (runtimeR
 	}
 
 	cmd := exec.CommandContext(context.Background(), awsPath, args...)
-	cmd.Env = mergeChildEnv(buildRuntimePathValue(filepath.Dir(awsPath), filepath.Dir(pluginPath)))
+	cmd.Env = mergeChildEnv(
+		buildRuntimePathValue(filepath.Dir(awsPath), filepath.Dir(pluginPath)),
+		payload.Env,
+		payload.UnsetEnv,
+	)
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -647,27 +651,69 @@ func buildRuntimePathValue(preferredDirs ...string) string {
 	return strings.Join(entries, string(os.PathListSeparator))
 }
 
-func mergeChildEnv(pathValue string) []string {
+func mergeChildEnv(pathValue string, overrides map[string]string, unsetKeys []string) []string {
 	env := os.Environ()
 	env = append(env, "AWS_PAGER=")
-	if pathValue == "" {
-		return env
+	unset := make(map[string]struct{}, len(unsetKeys))
+	for _, key := range unsetKeys {
+		key = strings.TrimSpace(key)
+		if key == "" {
+			continue
+		}
+		unset[envKeyLookup(key)] = struct{}{}
 	}
-	replaced := false
-	for index, entry := range env {
+
+	overrideLookup := make(map[string]string, len(overrides))
+	for key, value := range overrides {
+		key = strings.TrimSpace(key)
+		if key == "" {
+			continue
+		}
+		overrideLookup[envKeyLookup(key)] = key + "=" + value
+	}
+
+	pathReplaced := false
+	next := make([]string, 0, len(env)+len(overrides)+1)
+	for _, entry := range env {
 		key, _, found := strings.Cut(entry, "=")
 		if !found {
+			next = append(next, entry)
+			continue
+		}
+		lookupKey := envKeyLookup(key)
+		if _, shouldUnset := unset[lookupKey]; shouldUnset {
+			continue
+		}
+		if override, shouldOverride := overrideLookup[lookupKey]; shouldOverride {
+			next = append(next, override)
+			delete(overrideLookup, lookupKey)
 			continue
 		}
 		if pathKeyMatches(key) {
-			env[index] = fmt.Sprintf("%s=%s", key, pathValue)
-			replaced = true
+			if pathValue != "" {
+				next = append(next, fmt.Sprintf("%s=%s", key, pathValue))
+				pathReplaced = true
+			} else {
+				next = append(next, entry)
+			}
+			continue
 		}
+		next = append(next, entry)
 	}
-	if !replaced {
-		env = append(env, fmt.Sprintf("PATH=%s", pathValue))
+	if pathValue != "" && !pathReplaced {
+		next = append(next, fmt.Sprintf("PATH=%s", pathValue))
 	}
-	return env
+	for _, override := range overrideLookup {
+		next = append(next, override)
+	}
+	return next
+}
+
+func envKeyLookup(key string) string {
+	if processPlatformIsWindows() {
+		return strings.ToUpper(key)
+	}
+	return key
 }
 
 func pathKeyMatches(key string) bool {
