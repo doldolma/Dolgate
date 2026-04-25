@@ -2,6 +2,7 @@ package ssmforward
 
 import (
 	"errors"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -120,6 +121,40 @@ func TestBuildStartArgsForEcsTaskRemoteHost(t *testing.T) {
 	}
 	if !strings.Contains(joined, "AWS-StartPortForwardingSessionToRemoteHost") {
 		t.Fatalf("args = %v, want remote-host document", args)
+	}
+}
+
+func TestMergeChildEnvAppliesOverridesAndUnsetKeys(t *testing.T) {
+	t.Setenv("AWS_ACCESS_KEY_ID", "old")
+	t.Setenv("AWS_PROFILE", "server-profile")
+	t.Setenv("DOLSSH_KEEP", "yes")
+
+	env := mergeChildEnv("/tmp/dolssh-bin", map[string]string{
+		"AWS_ACCESS_KEY_ID":     "new",
+		"AWS_SECRET_ACCESS_KEY": "secret",
+	}, []string{"AWS_PROFILE"})
+
+	lookup := map[string]string{}
+	for _, entry := range env {
+		key, value, ok := strings.Cut(entry, "=")
+		if ok {
+			lookup[key] = value
+		}
+	}
+	if lookup["AWS_ACCESS_KEY_ID"] != "new" {
+		t.Fatalf("AWS_ACCESS_KEY_ID = %q, want new", lookup["AWS_ACCESS_KEY_ID"])
+	}
+	if lookup["AWS_SECRET_ACCESS_KEY"] != "secret" {
+		t.Fatalf("AWS_SECRET_ACCESS_KEY = %q, want secret", lookup["AWS_SECRET_ACCESS_KEY"])
+	}
+	if _, ok := lookup["AWS_PROFILE"]; ok {
+		t.Fatalf("AWS_PROFILE should be unset, env contains %q", lookup["AWS_PROFILE"])
+	}
+	if lookup["DOLSSH_KEEP"] != "yes" {
+		t.Fatalf("DOLSSH_KEEP = %q, want yes", lookup["DOLSSH_KEEP"])
+	}
+	if lookup["PATH"] == "" && lookup["Path"] == "" && lookup["path"] == "" && os.Getenv("PATH") != "" {
+		t.Fatalf("PATH was not preserved or replaced")
 	}
 }
 

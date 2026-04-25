@@ -65,9 +65,12 @@ func main() {
 	awsSsmRuntime := httpserver.DetectAwsSsmRuntime()
 	awsSsoBrowserFlowEnabled := awsSsmRuntime.AwsSsoBrowserFlowSupported
 	var awsSessionBridge *httpserver.AwsSessionBridge
+	var awsSftpBridge *httpserver.AwsSftpBridge
 	if awsSsmRuntime.Enabled {
 		awsSessionBridge = httpserver.NewAwsSessionBridge()
 		defer awsSessionBridge.Close()
+		awsSftpBridge = httpserver.NewAwsSftpBridge(awsSsmRuntime)
+		defer awsSftpBridge.Close()
 	}
 	var awsSsoMobileManager *httpserver.AwsSsoMobileManager
 	if awsSsoBrowserFlowEnabled {
@@ -123,6 +126,7 @@ func main() {
 		},
 		AwsSsoMobile:     awsSsoMobileManager,
 		AwsSessionBridge: awsSessionBridge,
+		AwsSftpBridge:    awsSftpBridge,
 	})
 	if err != nil {
 		log.Fatalf("create router: %v", err)
@@ -158,6 +162,9 @@ func main() {
 		}
 		if awsSessionBridge != nil {
 			awsSessionBridge.Close()
+		}
+		if awsSftpBridge != nil {
+			awsSftpBridge.Close()
 		}
 		if err := <-serveErrCh; err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Fatal(err)

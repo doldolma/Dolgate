@@ -29,6 +29,7 @@ type RouterConfig struct {
 	AwsSsmRuntime      AwsSsmRuntime
 	AwsSsoBrowserFlow  bool
 	AwsSessionBridge   *AwsSessionBridge
+	AwsSftpBridge      *AwsSftpBridge
 	AwsSsoMobile       *AwsSsoMobileManager
 }
 
@@ -48,6 +49,7 @@ type serverInfoSyncCapabilities struct {
 
 type serverInfoSessionCapabilities struct {
 	AWSSsm            bool `json:"awsSsm"`
+	AWSSftp           bool `json:"awsSftp"`
 	AWSSsoBrowserFlow bool `json:"awsSsoBrowserFlow"`
 }
 
@@ -157,6 +159,7 @@ func NewRouter(store store.Store, authService *auth.Service, config RouterConfig
 				},
 				Sessions: serverInfoSessionCapabilities{
 					AWSSsm:            config.AwsSsmRuntime.Enabled,
+					AWSSftp:           config.AwsSftpBridge != nil && config.AwsSsmRuntime.Enabled,
 					AWSSsoBrowserFlow: config.AwsSsoBrowserFlow,
 				},
 			},
@@ -574,6 +577,151 @@ func NewRouter(store store.Store, authService *auth.Service, config RouterConfig
 			}
 			ctx.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
 		}
+	})
+
+	awsSftpGroup := router.Group("/api/aws-sftp")
+	awsSftpGroup.Use(authMiddleware(authService))
+	awsSftpGroup.POST("/sessions", func(ctx *gin.Context) {
+		if config.AwsSftpBridge == nil {
+			ctx.JSON(http.StatusServiceUnavailable, gin.H{"error": "AWS SFTP runtime is unavailable on this server."})
+			return
+		}
+		var request awsSftpCreateSessionRequest
+		if err := ctx.ShouldBindJSON(&request); err != nil {
+			ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		response, err := config.AwsSftpBridge.CreateSession(ctx.Request.Context(), ctx.GetString("userId"), request)
+		if err != nil {
+			var challenge *awsSftpHostKeyChallengeError
+			if errors.As(err, &challenge) {
+				ctx.JSON(http.StatusConflict, challenge.response)
+				return
+			}
+			ctx.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+			return
+		}
+		ctx.JSON(http.StatusCreated, response)
+	})
+	awsSftpGroup.DELETE("/sessions/:sessionId", func(ctx *gin.Context) {
+		if config.AwsSftpBridge == nil {
+			ctx.JSON(http.StatusServiceUnavailable, gin.H{"error": "AWS SFTP runtime is unavailable on this server."})
+			return
+		}
+		if err := config.AwsSftpBridge.CloseSession(ctx.GetString("userId"), ctx.Param("sessionId")); err != nil {
+			ctx.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+			return
+		}
+		ctx.Status(http.StatusNoContent)
+	})
+	awsSftpGroup.GET("/sessions/:sessionId/list", func(ctx *gin.Context) {
+		if config.AwsSftpBridge == nil {
+			ctx.JSON(http.StatusServiceUnavailable, gin.H{"error": "AWS SFTP runtime is unavailable on this server."})
+			return
+		}
+		response, err := config.AwsSftpBridge.List(ctx.GetString("userId"), ctx.Param("sessionId"), ctx.Query("path"))
+		if err != nil {
+			ctx.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+			return
+		}
+		ctx.JSON(http.StatusOK, response)
+	})
+	awsSftpGroup.POST("/sessions/:sessionId/read", func(ctx *gin.Context) {
+		if config.AwsSftpBridge == nil {
+			ctx.JSON(http.StatusServiceUnavailable, gin.H{"error": "AWS SFTP runtime is unavailable on this server."})
+			return
+		}
+		var request awsSftpReadRequest
+		if err := ctx.ShouldBindJSON(&request); err != nil {
+			ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		response, err := config.AwsSftpBridge.Read(ctx.GetString("userId"), ctx.Param("sessionId"), request)
+		if err != nil {
+			ctx.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+			return
+		}
+		ctx.JSON(http.StatusOK, response)
+	})
+	awsSftpGroup.POST("/sessions/:sessionId/write", func(ctx *gin.Context) {
+		if config.AwsSftpBridge == nil {
+			ctx.JSON(http.StatusServiceUnavailable, gin.H{"error": "AWS SFTP runtime is unavailable on this server."})
+			return
+		}
+		var request awsSftpWriteRequest
+		if err := ctx.ShouldBindJSON(&request); err != nil {
+			ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		if err := config.AwsSftpBridge.Write(ctx.GetString("userId"), ctx.Param("sessionId"), request); err != nil {
+			ctx.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+			return
+		}
+		ctx.Status(http.StatusNoContent)
+	})
+	awsSftpGroup.POST("/sessions/:sessionId/mkdir", func(ctx *gin.Context) {
+		if config.AwsSftpBridge == nil {
+			ctx.JSON(http.StatusServiceUnavailable, gin.H{"error": "AWS SFTP runtime is unavailable on this server."})
+			return
+		}
+		var request awsSftpPathRequest
+		if err := ctx.ShouldBindJSON(&request); err != nil {
+			ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		if err := config.AwsSftpBridge.Mkdir(ctx.GetString("userId"), ctx.Param("sessionId"), request.Path); err != nil {
+			ctx.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+			return
+		}
+		ctx.Status(http.StatusNoContent)
+	})
+	awsSftpGroup.POST("/sessions/:sessionId/rename", func(ctx *gin.Context) {
+		if config.AwsSftpBridge == nil {
+			ctx.JSON(http.StatusServiceUnavailable, gin.H{"error": "AWS SFTP runtime is unavailable on this server."})
+			return
+		}
+		var request awsSftpRenameRequest
+		if err := ctx.ShouldBindJSON(&request); err != nil {
+			ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		if err := config.AwsSftpBridge.Rename(ctx.GetString("userId"), ctx.Param("sessionId"), request.SourcePath, request.TargetPath); err != nil {
+			ctx.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+			return
+		}
+		ctx.Status(http.StatusNoContent)
+	})
+	awsSftpGroup.POST("/sessions/:sessionId/chmod", func(ctx *gin.Context) {
+		if config.AwsSftpBridge == nil {
+			ctx.JSON(http.StatusServiceUnavailable, gin.H{"error": "AWS SFTP runtime is unavailable on this server."})
+			return
+		}
+		var request awsSftpChmodRequest
+		if err := ctx.ShouldBindJSON(&request); err != nil {
+			ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		if err := config.AwsSftpBridge.Chmod(ctx.GetString("userId"), ctx.Param("sessionId"), request.Path, request.Permissions); err != nil {
+			ctx.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+			return
+		}
+		ctx.Status(http.StatusNoContent)
+	})
+	awsSftpGroup.POST("/sessions/:sessionId/delete", func(ctx *gin.Context) {
+		if config.AwsSftpBridge == nil {
+			ctx.JSON(http.StatusServiceUnavailable, gin.H{"error": "AWS SFTP runtime is unavailable on this server."})
+			return
+		}
+		var request awsSftpPathRequest
+		if err := ctx.ShouldBindJSON(&request); err != nil {
+			ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		if err := config.AwsSftpBridge.Delete(ctx.GetString("userId"), ctx.Param("sessionId"), request.Path); err != nil {
+			ctx.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+			return
+		}
+		ctx.Status(http.StatusNoContent)
 	})
 
 	awsSsoGroup := router.Group("/api/aws-sso/mobile")

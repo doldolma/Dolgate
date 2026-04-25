@@ -20,7 +20,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Ionicons from 'react-native-vector-icons/Ionicons';
-import { isSshHostRecord } from '@dolssh/shared-core';
+import { isAwsEc2HostRecord, isSshHostRecord } from '@dolssh/shared-core';
 import {
   XtermJsWebView,
   type XtermWebViewHandle,
@@ -261,7 +261,9 @@ export function SessionScreen(): React.JSX.Element {
   const menuHost = menuSession
     ? (hosts.find(host => host.id === menuSession.hostId) ?? null)
     : null;
-  const canOpenSftpFromMenu = Boolean(menuHost && isSshHostRecord(menuHost));
+  const canOpenSftpFromMenu = Boolean(
+    menuHost && (isSshHostRecord(menuHost) || isAwsEc2HostRecord(menuHost)),
+  );
   const terminalLogger = useMemo(
     () =>
       __DEV__

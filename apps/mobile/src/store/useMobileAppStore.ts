@@ -7,6 +7,7 @@ import {
   type ConnectionDetails as RusshConnectionDetails,
 } from '@fressh/react-native-uniffi-russh';
 import type {
+  AwsSftpCreateSessionRequest,
   AwsEc2HostRecord,
   AwsSsmSessionClientMessage,
   AwsSsmSessionServerMessage,
@@ -29,7 +30,13 @@ import type {
   SshHostRecord,
   SyncStatus,
 } from '@dolssh/shared-core';
-import { isAwsEc2HostRecord, isSshHostRecord } from '@dolssh/shared-core';
+import {
+  buildAwsSsmKnownHostIdentity,
+  getAwsEc2HostSftpDisabledReason,
+  getAwsEc2HostSshPort,
+  isAwsEc2HostRecord,
+  isSshHostRecord,
+} from '@dolssh/shared-core';
 import {
   buildBrowserLoginUrl,
   clearStoredAwsProfiles,
@@ -76,6 +83,10 @@ import {
   type AwsSsoBrowserLoginPrompt,
   resolveAwsSessionForHost,
 } from '../lib/aws-session';
+import {
+  AwsSftpHostKeyChallengeError,
+  connectAwsSftp,
+} from '../lib/aws-sftp';
 import { openAwsSsoBrowser } from '../lib/aws-sso-bridge';
 import {
   getCurrentWindowTerminalGridSize,
@@ -155,7 +166,34 @@ type ReactNativeWebSocketConstructor = new (
   } | null,
 ) => WebSocket;
 
-type SftpConnectionHandle = Awaited<ReturnType<typeof RnRussh.connectSftp>>;
+interface MobileSftpReadChunk {
+  bytes: ArrayBuffer;
+  bytesRead: number;
+  eof: boolean;
+}
+
+interface MobileSftpConnection {
+  listDirectory: (path: string) => Promise<DirectoryListing>;
+  readFileChunk: (
+    path: string,
+    offset: number,
+    length: number,
+  ) => Promise<MobileSftpReadChunk>;
+  writeFileChunk: (
+    path: string,
+    offset: number,
+    data: ArrayBuffer,
+  ) => Promise<void>;
+  mkdir: (path: string) => Promise<void>;
+  rename: (sourcePath: string, targetPath: string) => Promise<void>;
+  chmod: (path: string, permissions: number) => Promise<void>;
+  delete: (path: string) => Promise<void>;
+  close: () => Promise<void>;
+}
+
+type NativeSftpConnectionHandle = Awaited<
+  ReturnType<typeof RnRussh.connectSftp>
+>;
 
 interface SshRuntimeSession {
   kind: 'ssh';
@@ -271,7 +309,7 @@ function validateRusshSecurity(security: RusshSecurity): string | null {
 interface SftpRuntimeSession {
   recordId: string;
   hostId: string;
-  connection: SftpConnectionHandle;
+  connection: MobileSftpConnection;
 }
 
 interface SftpCopyBufferEntry {
@@ -624,7 +662,7 @@ function createSessionRecord(host: HostRecord): MobileSessionRecord {
 
 function createSftpSessionRecord(
   sourceSession: MobileSessionRecord,
-  host: SshHostRecord,
+  host: SshHostRecord | AwsEc2HostRecord,
 ): MobileSftpSessionRecord {
   const now = new Date().toISOString();
   return {
@@ -644,7 +682,7 @@ function createSftpSessionRecord(
 
 function toDirectoryListing(
   listing: Awaited<
-    ReturnType<Awaited<ReturnType<typeof RnRussh.connectSftp>>['listDirectory']>
+    ReturnType<NativeSftpConnectionHandle['listDirectory']>
   >,
 ): DirectoryListing {
   return {
@@ -663,6 +701,25 @@ function toDirectoryListing(
             : 'unknown',
       permissions: entry.permissions ?? undefined,
     })),
+  };
+}
+
+function wrapNativeSftpConnection(
+  connection: NativeSftpConnectionHandle,
+): MobileSftpConnection {
+  return {
+    listDirectory: async path =>
+      toDirectoryListing(await connection.listDirectory(path)),
+    readFileChunk: (path, offset, length) =>
+      connection.readFileChunk(path, offset, length),
+    writeFileChunk: (path, offset, data) =>
+      connection.writeFileChunk(path, offset, data),
+    mkdir: path => connection.mkdir(path),
+    rename: (sourcePath, targetPath) =>
+      connection.rename(sourcePath, targetPath),
+    chmod: (path, permissions) => connection.chmod(path, permissions),
+    delete: path => connection.delete(path),
+    close: () => connection.close(),
   };
 }
 
@@ -727,14 +784,14 @@ function resolveUniqueName(existingNames: Set<string>, requestedName: string) {
 }
 
 async function listRemoteDirectory(
-  connection: SftpConnectionHandle,
+  connection: MobileSftpConnection,
   path: string,
 ): Promise<DirectoryListing> {
-  return toDirectoryListing(await connection.listDirectory(path));
+  return connection.listDirectory(path);
 }
 
 async function resolveRemoteEntry(
-  connection: SftpConnectionHandle,
+  connection: MobileSftpConnection,
   path: string,
   currentListing?: DirectoryListing | null,
 ): Promise<FileEntry> {
@@ -763,7 +820,7 @@ async function resolveRemoteEntry(
 }
 
 async function streamRemoteFileToLocalDocument(
-  connection: SftpConnectionHandle,
+  connection: MobileSftpConnection,
   remotePath: string,
   destinationUri: string,
   onProgress: (bytesTransferred: number) => void,
@@ -791,7 +848,7 @@ async function streamRemoteFileToLocalDocument(
 }
 
 async function copyRemoteFile(
-  connection: SftpConnectionHandle,
+  connection: MobileSftpConnection,
   sourcePath: string,
   targetPath: string,
   onProgress: (bytesTransferred: number) => void,
@@ -823,7 +880,7 @@ async function copyRemoteFile(
 }
 
 async function downloadRemoteEntryToDirectory(
-  connection: SftpConnectionHandle,
+  connection: MobileSftpConnection,
   entry: FileEntry,
   parentDirectoryUri: string,
   onProgress: (bytesTransferred: number) => void,
@@ -857,7 +914,7 @@ async function downloadRemoteEntryToDirectory(
 }
 
 async function resolveUniqueRemotePath(
-  connection: SftpConnectionHandle,
+  connection: MobileSftpConnection,
   parentPath: string,
   requestedName: string,
 ): Promise<string> {
@@ -870,7 +927,7 @@ async function resolveUniqueRemotePath(
 }
 
 async function copyRemoteEntryToPath(
-  connection: SftpConnectionHandle,
+  connection: MobileSftpConnection,
   entry: SftpCopyBufferEntry | FileEntry,
   targetPath: string,
   onProgress: (bytesTransferred: number) => void,
@@ -895,7 +952,7 @@ async function copyRemoteEntryToPath(
 }
 
 async function deleteRemoteEntryRecursive(
-  connection: SftpConnectionHandle,
+  connection: MobileSftpConnection,
   entry: FileEntry,
 ): Promise<void> {
   if (entry.isDirectory) {
@@ -974,6 +1031,38 @@ function isOfflineLeaseActive(
 
 function isLikelyNetworkError(error: unknown): boolean {
   return !(error instanceof ApiError) || typeof error.status !== 'number';
+}
+
+function getUnknownErrorMessage(error: unknown): string {
+  if (typeof error === 'string') {
+    return error;
+  }
+  if (error instanceof Error) {
+    return error.message;
+  }
+  if (
+    error &&
+    typeof error === 'object' &&
+    'message' in error &&
+    typeof (error as { message?: unknown }).message === 'string'
+  ) {
+    return (error as { message: string }).message;
+  }
+  return '';
+}
+
+function isAuthExpiredError(error: unknown): boolean {
+  if (error instanceof ApiError && error.status === 401) {
+    return true;
+  }
+
+  const message = getUnknownErrorMessage(error).toLowerCase();
+  return (
+    message.includes('token has invalid claims') ||
+    message.includes('invalid claims') ||
+    (message.includes('jwt') && message.includes('expired')) ||
+    message.includes('세션이 만료')
+  );
 }
 
 function buildOfflineRecoveryKey(
@@ -1168,6 +1257,81 @@ export const useMobileAppStore = create<MobileAppState>()(
         offlineRecoveryAttempt = 0;
         offlineRecoveryInFlight = false;
         offlineRecoveryKey = null;
+      };
+
+      const clearPromptState = () => {
+        pendingServerKeyResolver?.(false);
+        pendingServerKeyResolver = null;
+        pendingCredentialResolver?.(null);
+        pendingCredentialResolver = null;
+        pendingAwsSsoCancelHandler?.();
+        pendingAwsSsoCancelHandler = null;
+        set({
+          pendingAwsSsoLogin: null,
+          pendingServerKeyPrompt: null,
+          pendingCredentialPrompt: null,
+        });
+      };
+
+      const expireAuthSession = async (
+        errorMessage = '세션이 만료되어 다시 로그인해야 합니다.',
+      ) => {
+        clearOfflineRecoveryLoop();
+        secureStateRestoreVersion += 1;
+        clearPromptState();
+        await disconnectAllRuntimeSessions();
+        await clearPersistedSecureState();
+        set({
+          auth: {
+            ...createUnauthenticatedState(),
+            errorMessage,
+          },
+          syncStatus: {
+            ...createDefaultSyncStatus(),
+            status: 'error',
+            errorMessage: '세션이 만료되었습니다.',
+          },
+          ...createEmptyProtectedState(),
+          authGateResolved: true,
+          secureStateReady: true,
+          bootstrapping: false,
+          pendingBrowserLoginState: null,
+          pendingAwsSsoLogin: null,
+          pendingServerKeyPrompt: null,
+          pendingCredentialPrompt: null,
+        });
+      };
+
+      const refreshAuthForConnection = async (): Promise<AuthSession | null> => {
+        const currentSession = get().auth.session;
+        if (!currentSession) {
+          await expireAuthSession();
+          return null;
+        }
+
+        try {
+          const refreshed = await refreshAuthSession(
+            get().settings.serverUrl,
+            currentSession,
+          );
+          await saveStoredAuthSession(refreshed);
+          clearOfflineRecoveryLoop();
+          set({
+            auth: {
+              status: 'authenticated',
+              session: refreshed,
+              offline: null,
+              errorMessage: null,
+            },
+          });
+          return refreshed;
+        } catch (error) {
+          if (isAuthExpiredError(error)) {
+            await expireAuthSession();
+            return null;
+          }
+          throw error;
+        }
       };
 
       const resolveAuthGate = (
@@ -1568,7 +1732,7 @@ export const useMobileAppStore = create<MobileAppState>()(
       };
 
       const resolveKnownHostTrust = async (
-        host: SshHostRecord,
+        host: Pick<HostRecord, 'id' | 'label'>,
         info: MobileServerPublicKeyInfo,
       ): Promise<boolean> => {
         const { status, existing } = getKnownHostStatus(get().knownHosts, info);
@@ -1894,9 +2058,7 @@ export const useMobileAppStore = create<MobileAppState>()(
         );
         const nextPath = path ?? currentRecord?.currentPath ?? '.';
         try {
-          const listing = toDirectoryListing(
-            await runtime.connection.listDirectory(nextPath),
-          );
+          const listing = await runtime.connection.listDirectory(nextPath);
           set(state => ({
             sftpSessions: patchSftpSessionRecord(
               state.sftpSessions,
@@ -1923,7 +2085,7 @@ export const useMobileAppStore = create<MobileAppState>()(
 
       const connectSftpSessionRecord = async (
         sftpSessionRecord: MobileSftpSessionRecord,
-        host: SshHostRecord,
+        host: SshHostRecord | AwsEc2HostRecord,
       ) => {
         if (
           runtimeSftpSessions.has(sftpSessionRecord.id) ||
@@ -1934,6 +2096,11 @@ export const useMobileAppStore = create<MobileAppState>()(
         pendingSftpConnections.add(sftpSessionRecord.id);
 
         try {
+          if (isAwsEc2HostRecord(host)) {
+            await connectAwsSftpSessionRecord(sftpSessionRecord, host);
+            return;
+          }
+
           if (
             host.authType !== 'password' &&
             host.authType !== 'privateKey' &&
@@ -1987,7 +2154,7 @@ export const useMobileAppStore = create<MobileAppState>()(
             ),
           }));
 
-          const connection = await RnRussh.connectSftp({
+          const nativeConnection = await RnRussh.connectSftp({
             host: host.hostname,
             port: host.port,
             username: host.username,
@@ -1998,6 +2165,7 @@ export const useMobileAppStore = create<MobileAppState>()(
               markSftpSessionState(sftpSessionRecord.id, 'closed');
             },
           });
+          const connection = wrapNativeSftpConnection(nativeConnection);
 
           runtimeSftpSessions.set(sftpSessionRecord.id, {
             recordId: sftpSessionRecord.id,
@@ -2005,10 +2173,8 @@ export const useMobileAppStore = create<MobileAppState>()(
             connection,
           });
 
-          const listing = toDirectoryListing(
-            await connection.listDirectory(
-              sftpSessionRecord.currentPath || '.',
-            ),
+          const listing = await connection.listDirectory(
+            sftpSessionRecord.currentPath || '.',
           );
           const now = new Date().toISOString();
           set(state => ({
@@ -2028,6 +2194,10 @@ export const useMobileAppStore = create<MobileAppState>()(
           }));
         } catch (error) {
           disconnectRuntimeSftpSession(sftpSessionRecord.id);
+          if (isAuthExpiredError(error)) {
+            await expireAuthSession();
+            return;
+          }
           markSftpSessionState(
             sftpSessionRecord.id,
             'error',
@@ -2038,6 +2208,223 @@ export const useMobileAppStore = create<MobileAppState>()(
         } finally {
           pendingSftpConnections.delete(sftpSessionRecord.id);
         }
+      };
+
+      const connectAwsSftpSessionRecord = async (
+        sftpSessionRecord: MobileSftpSessionRecord,
+        host: AwsEc2HostRecord,
+      ) => {
+        let accessToken = get().auth.session?.tokens.accessToken;
+        if (!accessToken) {
+          await expireAuthSession();
+          return;
+        }
+
+        const disabledReason = getAwsEc2HostSftpDisabledReason(host);
+        if (disabledReason) {
+          markSftpSessionState(sftpSessionRecord.id, 'error', disabledReason);
+          return;
+        }
+
+        let awsSftpServerSupport = get().syncStatus.awsSftpServerSupport;
+        if (awsSftpServerSupport === 'unknown') {
+          try {
+            const serverInfo = await fetchServerInfo(get().settings.serverUrl);
+            awsSftpServerSupport = serverInfo.capabilities.sessions.awsSftp
+              ? 'supported'
+              : 'unsupported';
+            set(state => ({
+              syncStatus: {
+                ...state.syncStatus,
+                awsProfilesServerSupport: serverInfo.capabilities.sync
+                  .awsProfiles
+                  ? 'supported'
+                  : 'unsupported',
+                awsSsmServerSupport: serverInfo.capabilities.sessions.awsSsm
+                  ? 'supported'
+                  : 'unsupported',
+                awsSftpServerSupport,
+              },
+            }));
+          } catch {}
+        }
+
+        if (awsSftpServerSupport === 'unsupported') {
+          markSftpSessionState(
+            sftpSessionRecord.id,
+            'error',
+            '이 서버는 AWS SFTP를 지원하지 않습니다.',
+          );
+          return;
+        }
+
+        const sshUsername = host.awsSshUsername?.trim();
+        if (!sshUsername) {
+          markSftpSessionState(
+            sftpSessionRecord.id,
+            'error',
+            host.awsSshMetadataError ||
+              'AWS SFTP에 사용할 SSH 사용자명이 필요합니다.',
+          );
+          return;
+        }
+        const availabilityZone = host.awsAvailabilityZone?.trim();
+        if (!availabilityZone) {
+          markSftpSessionState(
+            sftpSessionRecord.id,
+            'error',
+            'AWS SFTP에 사용할 Availability Zone 정보가 필요합니다.',
+          );
+          return;
+        }
+
+        set(state => ({
+          sftpSessions: patchSftpSessionRecord(
+            state.sftpSessions,
+            sftpSessionRecord.id,
+            {
+              status: 'connecting',
+              errorMessage: null,
+              lastEventAt: new Date().toISOString(),
+            },
+          ),
+        }));
+
+        let resolvedSession = null as Awaited<
+          ReturnType<typeof resolveAwsSessionForHost>
+        > | null;
+        let retriedAuth = false;
+        while (!resolvedSession) {
+          try {
+            resolvedSession = await resolveAwsSessionForHost({
+              host,
+              profiles: get().awsProfiles,
+              serverUrl: get().settings.serverUrl,
+              authAccessToken: accessToken,
+              presentLoginPrompt: prompt => {
+                pendingAwsSsoCancelHandler = prompt.onCancel;
+                set({ pendingAwsSsoLogin: prompt });
+              },
+              dismissLoginPrompt: () => {
+                pendingAwsSsoCancelHandler = null;
+                set({ pendingAwsSsoLogin: null });
+              },
+            });
+          } catch (error) {
+            if (isAuthExpiredError(error) && !retriedAuth) {
+              const refreshed = await refreshAuthForConnection();
+              if (!refreshed) {
+                return;
+              }
+              accessToken = refreshed.tokens.accessToken;
+              retriedAuth = true;
+              continue;
+            }
+            if (isAuthExpiredError(error)) {
+              await expireAuthSession();
+              return;
+            }
+            throw error;
+          }
+        }
+
+        const sshPort = getAwsEc2HostSshPort(host);
+        const knownHostName = buildAwsSsmKnownHostIdentity({
+          profileName: resolvedSession.profileName,
+          region: resolvedSession.region,
+          instanceId: host.awsInstanceId,
+        });
+        let trustedHostKeyBase64 =
+          get().knownHosts.find(
+            record =>
+              record.host === knownHostName && record.port === sshPort,
+          )?.publicKeyBase64 ?? null;
+
+        let hostKeyAttempts = 0;
+        while (hostKeyAttempts < 2) {
+          const payload: AwsSftpCreateSessionRequest = {
+            hostId: host.id,
+            label: host.label,
+            profileName: resolvedSession.profileName,
+            region: resolvedSession.region,
+            instanceId: host.awsInstanceId,
+            availabilityZone,
+            sshUsername,
+            sshPort,
+            env: resolvedSession.envSpec.env,
+            unsetEnv: resolvedSession.envSpec.unsetEnv,
+            trustedHostKeyBase64,
+          };
+
+          try {
+            const connection = await connectAwsSftp({
+              serverUrl: get().settings.serverUrl,
+              accessToken,
+              payload,
+            });
+            runtimeSftpSessions.set(sftpSessionRecord.id, {
+              recordId: sftpSessionRecord.id,
+              hostId: host.id,
+              connection,
+            });
+
+            const listing = await connection.listDirectory(
+              sftpSessionRecord.currentPath || '.',
+            );
+            const now = new Date().toISOString();
+            set(state => ({
+              sftpSessions: patchSftpSessionRecord(
+                state.sftpSessions,
+                sftpSessionRecord.id,
+                {
+                  status: 'connected',
+                  currentPath: listing.path,
+                  listing,
+                  errorMessage: null,
+                  lastEventAt: now,
+                  lastConnectedAt: now,
+                  title: `${host.label} SFTP`,
+                },
+              ),
+            }));
+            return;
+          } catch (error) {
+            if (error instanceof AwsSftpHostKeyChallengeError) {
+              const accepted = await resolveKnownHostTrust(host, error.info);
+              if (!accepted) {
+                markSftpSessionState(
+                  sftpSessionRecord.id,
+                  'closed',
+                  'SFTP 연결이 취소되었습니다.',
+                );
+                return;
+              }
+              trustedHostKeyBase64 = error.info.keyBase64;
+              hostKeyAttempts += 1;
+              continue;
+            }
+            if (isAuthExpiredError(error) && !retriedAuth) {
+              const refreshed = await refreshAuthForConnection();
+              if (!refreshed) {
+                return;
+              }
+              accessToken = refreshed.tokens.accessToken;
+              retriedAuth = true;
+              continue;
+            }
+            if (isAuthExpiredError(error)) {
+              await expireAuthSession();
+              return;
+            }
+            throw error;
+          }
+        }
+
+        markSftpSessionState(
+          sftpSessionRecord.id,
+          'error',
+          'AWS SFTP 호스트 키를 확인하지 못했습니다.',
+        );
       };
 
       const connectSessionRecord = async (
@@ -2211,15 +2598,14 @@ export const useMobileAppStore = create<MobileAppState>()(
       const connectAwsSessionRecord = async (
         sessionRecord: MobileSessionRecord,
         host: AwsEc2HostRecord,
+        options?: {
+          retriedAuth?: boolean;
+        },
       ) => {
         try {
-          const accessToken = get().auth.session?.tokens.accessToken;
+          let accessToken = get().auth.session?.tokens.accessToken;
           if (!accessToken) {
-            markSessionState(
-              sessionRecord.id,
-              'error',
-              'AWS 세션을 시작하려면 다시 로그인해야 합니다.',
-            );
+            await expireAuthSession();
             return;
           }
 
@@ -2240,6 +2626,9 @@ export const useMobileAppStore = create<MobileAppState>()(
                     ? 'supported'
                     : 'unsupported',
                   awsSsmServerSupport,
+                  awsSftpServerSupport: serverInfo.capabilities.sessions.awsSftp
+                    ? 'supported'
+                    : 'unsupported',
                 },
               }));
             } catch {}
@@ -2254,20 +2643,43 @@ export const useMobileAppStore = create<MobileAppState>()(
             return;
           }
 
-          const resolvedSession = await resolveAwsSessionForHost({
-            host,
-            profiles: get().awsProfiles,
-            serverUrl: get().settings.serverUrl,
-            authAccessToken: accessToken,
-            presentLoginPrompt: prompt => {
-              pendingAwsSsoCancelHandler = prompt.onCancel;
-              set({ pendingAwsSsoLogin: prompt });
-            },
-            dismissLoginPrompt: () => {
-              pendingAwsSsoCancelHandler = null;
-              set({ pendingAwsSsoLogin: null });
-            },
-          });
+          let resolvedSession = null as Awaited<
+            ReturnType<typeof resolveAwsSessionForHost>
+          > | null;
+          let retriedAuth = options?.retriedAuth === true;
+          while (!resolvedSession) {
+            try {
+              resolvedSession = await resolveAwsSessionForHost({
+                host,
+                profiles: get().awsProfiles,
+                serverUrl: get().settings.serverUrl,
+                authAccessToken: accessToken,
+                presentLoginPrompt: prompt => {
+                  pendingAwsSsoCancelHandler = prompt.onCancel;
+                  set({ pendingAwsSsoLogin: prompt });
+                },
+                dismissLoginPrompt: () => {
+                  pendingAwsSsoCancelHandler = null;
+                  set({ pendingAwsSsoLogin: null });
+                },
+              });
+            } catch (error) {
+              if (isAuthExpiredError(error) && !retriedAuth) {
+                const refreshed = await refreshAuthForConnection();
+                if (!refreshed) {
+                  return;
+                }
+                accessToken = refreshed.tokens.accessToken;
+                retriedAuth = true;
+                continue;
+              }
+              if (isAuthExpiredError(error)) {
+                await expireAuthSession();
+                return;
+              }
+              throw error;
+            }
+          }
           const terminalSize = getCurrentWindowTerminalGridSize();
           const wsUrl = new URL(
             '/api/aws-sessions/ws',
@@ -2373,6 +2785,29 @@ export const useMobileAppStore = create<MobileAppState>()(
 
             if (message.type === 'error') {
               pendingSessionConnections.delete(sessionRecord.id);
+              if (isAuthExpiredError(message.message)) {
+                void (async () => {
+                  disconnectRuntimeSession(sessionRecord.id);
+                  if (retriedAuth) {
+                    await expireAuthSession();
+                    return;
+                  }
+                  const refreshed = await refreshAuthForConnection();
+                  if (!refreshed) {
+                    return;
+                  }
+                  const currentSessionRecord = get().sessions.find(
+                    item => item.id === sessionRecord.id,
+                  );
+                  if (!currentSessionRecord) {
+                    return;
+                  }
+                  void connectAwsSessionRecord(currentSessionRecord, host, {
+                    retriedAuth: true,
+                  });
+                })();
+                return;
+              }
               markSessionState(
                 sessionRecord.id,
                 'error',
@@ -2415,8 +2850,31 @@ export const useMobileAppStore = create<MobileAppState>()(
             }
           };
 
-          socket.onerror = () => {
+          socket.onerror = event => {
             pendingSessionConnections.delete(sessionRecord.id);
+            if (isAuthExpiredError(event)) {
+              void (async () => {
+                disconnectRuntimeSession(sessionRecord.id);
+                if (retriedAuth) {
+                  await expireAuthSession();
+                  return;
+                }
+                const refreshed = await refreshAuthForConnection();
+                if (!refreshed) {
+                  return;
+                }
+                const currentSessionRecord = get().sessions.find(
+                  item => item.id === sessionRecord.id,
+                );
+                if (!currentSessionRecord) {
+                  return;
+                }
+                void connectAwsSessionRecord(currentSessionRecord, host, {
+                  retriedAuth: true,
+                });
+              })();
+              return;
+            }
             if (socketOpened || receivedServerMessage) {
               return;
             }
@@ -2457,6 +2915,10 @@ export const useMobileAppStore = create<MobileAppState>()(
           };
         } catch (error) {
           disconnectRuntimeSession(sessionRecord.id);
+          if (isAuthExpiredError(error)) {
+            await expireAuthSession();
+            return;
+          }
           markSessionState(
             sessionRecord.id,
             'error',
@@ -2590,6 +3052,12 @@ export const useMobileAppStore = create<MobileAppState>()(
                     : serverInfo?.capabilities.sessions.awsSsm === false
                       ? 'unsupported'
                       : 'unknown',
+                awsSftpServerSupport:
+                  serverInfo?.capabilities.sessions.awsSftp === true
+                    ? 'supported'
+                    : serverInfo?.capabilities.sessions.awsSftp === false
+                      ? 'unsupported'
+                      : 'unknown',
               },
             });
           } catch (error) {
@@ -2662,19 +3130,7 @@ export const useMobileAppStore = create<MobileAppState>()(
         return syncPromise;
       };
 
-      const clearPrompts = () => {
-        pendingServerKeyResolver?.(false);
-        pendingServerKeyResolver = null;
-        pendingCredentialResolver?.(null);
-        pendingCredentialResolver = null;
-        pendingAwsSsoCancelHandler?.();
-        pendingAwsSsoCancelHandler = null;
-        set({
-          pendingAwsSsoLogin: null,
-          pendingServerKeyPrompt: null,
-          pendingCredentialPrompt: null,
-        });
-      };
+      const clearPrompts = clearPromptState;
 
       return {
         hydrated: false,
@@ -3356,7 +3812,10 @@ export const useMobileAppStore = create<MobileAppState>()(
           const host = get().hosts.find(
             item => item.id === sourceSession.hostId,
           );
-          if (!host || !isSshHostRecord(host)) {
+          if (
+            !host ||
+            (!isSshHostRecord(host) && !isAwsEc2HostRecord(host))
+          ) {
             return null;
           }
 

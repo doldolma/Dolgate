@@ -336,15 +336,17 @@ type PortForwardStartPayload struct {
 }
 
 type SSMPortForwardStartPayload struct {
-	ProfileName string `json:"profileName"`
-	Region      string `json:"region"`
-	TargetType  string `json:"targetType"`
-	TargetID    string `json:"targetId"`
-	BindAddress string `json:"bindAddress"`
-	BindPort    int    `json:"bindPort"`
-	TargetKind  string `json:"targetKind"`
-	TargetPort  int    `json:"targetPort"`
-	RemoteHost  string `json:"remoteHost,omitempty"`
+	ProfileName string            `json:"profileName"`
+	Region      string            `json:"region"`
+	TargetType  string            `json:"targetType"`
+	TargetID    string            `json:"targetId"`
+	BindAddress string            `json:"bindAddress"`
+	BindPort    int               `json:"bindPort"`
+	TargetKind  string            `json:"targetKind"`
+	TargetPort  int               `json:"targetPort"`
+	RemoteHost  string            `json:"remoteHost,omitempty"`
+	Env         map[string]string `json:"env,omitempty"`
+	UnsetEnv    []string          `json:"unsetEnv,omitempty"`
 }
 
 type StatusPayload struct {

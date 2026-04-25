@@ -3,6 +3,7 @@ import { Buffer } from 'buffer';
 import renderer, { act } from 'react-test-renderer';
 import { Keyboard, Platform, StyleSheet, Text } from 'react-native';
 import type {
+  AwsEc2HostRecord,
   AuthState,
   MobileSessionRecord,
   MobileSftpSessionRecord,
@@ -921,6 +922,64 @@ describe('SessionScreen', () => {
     });
 
     expect(openSftpForSession).toHaveBeenCalledWith('session-1');
+
+    await act(async () => {
+      tree!.unmount();
+    });
+  });
+
+  it('opens AWS SFTP from an AWS terminal tab menu', async () => {
+    const awsHost: AwsEc2HostRecord = {
+      id: 'host-aws',
+      kind: 'aws-ec2',
+      label: 'AWS EC2',
+      awsProfileName: 'prod',
+      awsRegion: 'ap-northeast-2',
+      awsInstanceId: 'i-0123456789abcdef0',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    const awsSession: MobileSessionRecord = {
+      ...session,
+      id: 'session-aws',
+      sessionId: 'session-aws',
+      hostId: awsHost.id,
+      title: awsHost.label,
+      connectionKind: 'aws-ssm',
+    };
+    const openSftpForSession = jest.fn(async () => 'sftp-aws');
+    act(() => {
+      useMobileAppStore.setState({
+        hosts: [awsHost],
+        sessions: [awsSession],
+        activeSessionTabId: awsSession.id,
+        activeConnectionTab: { kind: 'terminal', id: awsSession.id },
+        openSftpForSession,
+      });
+    });
+
+    let tree: renderer.ReactTestRenderer;
+    await act(async () => {
+      tree = renderer.create(<SessionScreen />);
+    });
+
+    const menuButton = tree!.root.findByProps({
+      accessibilityLabel: 'AWS EC2 세션 메뉴',
+    });
+
+    await act(async () => {
+      menuButton.props.onPress({ stopPropagation: jest.fn() });
+    });
+
+    const sftpItem = tree!.root.findByProps({
+      accessibilityLabel: 'Connect via SFTP',
+    });
+
+    await act(async () => {
+      await sftpItem.props.onPress();
+    });
+
+    expect(openSftpForSession).toHaveBeenCalledWith('session-aws');
 
     await act(async () => {
       tree!.unmount();

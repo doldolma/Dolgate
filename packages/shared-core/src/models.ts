@@ -763,6 +763,7 @@ export interface SyncStatus {
   errorMessage?: string | null;
   awsProfilesServerSupport?: AwsProfilesServerSupport;
   awsSsmServerSupport?: AwsProfilesServerSupport;
+  awsSftpServerSupport?: AwsProfilesServerSupport;
 }
 
 // UpdateReleaseInfo는 GitHub Releases에서 읽어온 배포 메타데이터를 정규화한 형태다.
