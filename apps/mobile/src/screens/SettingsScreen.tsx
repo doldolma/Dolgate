@@ -1,5 +1,6 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigation } from "@react-navigation/native";
+import type { NavigationProp } from "@react-navigation/native";
 import {
   Pressable,
   ScrollView,
@@ -9,10 +10,12 @@ import {
   View,
 } from "react-native";
 import { APP_VERSION } from "../lib/app-metadata";
+import { IosEdgeSwipeBack } from "../components/IosEdgeSwipeBack";
 import {
   DEFAULT_SERVER_URL,
   getSettingsValidationMessage,
 } from "../lib/mobile";
+import type { MainTabParamList } from "../navigation/RootNavigator";
 import { useScreenPadding } from "../lib/screen-layout";
 import { useMobileAppStore } from "../store/useMobileAppStore";
 import { useMobilePalette } from "../theme";
@@ -361,7 +364,22 @@ function SettingsContent({
 }
 
 export function SettingsScreen(): React.JSX.Element {
-  return <SettingsContent mode="full" />;
+  const navigation = useNavigation<NavigationProp<MainTabParamList>>();
+
+  const goBackToPreviousMainTab = useCallback(() => {
+    if (navigation.canGoBack()) {
+      navigation.goBack();
+      return;
+    }
+
+    navigation.navigate("Home");
+  }, [navigation]);
+
+  return (
+    <IosEdgeSwipeBack onBack={goBackToPreviousMainTab}>
+      <SettingsContent mode="full" />
+    </IosEdgeSwipeBack>
+  );
 }
 
 export function AuthSettingsScreen(): React.JSX.Element {

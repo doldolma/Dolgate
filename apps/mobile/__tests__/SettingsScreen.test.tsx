@@ -1,6 +1,6 @@
 import React from "react";
 import renderer, { act } from "react-test-renderer";
-import { TextInput } from "react-native";
+import { Platform, TextInput } from "react-native";
 import type { AuthState } from "@dolssh/shared-core";
 import { APP_VERSION } from "../src/lib/app-metadata";
 import {
@@ -16,11 +16,21 @@ import { useMobileAppStore } from "../src/store/useMobileAppStore";
 
 const mockGoBack = jest.fn();
 const mockCanGoBack = jest.fn(() => true);
+const mockNavigate = jest.fn();
+const platformOsDescriptor = Object.getOwnPropertyDescriptor(Platform, "OS");
+
+function setPlatformOs(os: "ios" | "android") {
+  Object.defineProperty(Platform, "OS", {
+    configurable: true,
+    get: () => os,
+  });
+}
 
 jest.mock("@react-navigation/native", () => ({
   useNavigation: () => ({
     goBack: mockGoBack,
     canGoBack: mockCanGoBack,
+    navigate: mockNavigate,
   }),
 }));
 jest.mock("@fressh/react-native-uniffi-russh", () => ({
@@ -132,14 +142,22 @@ function createAuthenticatedState(): AuthState {
 
 describe("SettingsScreen server save navigation", () => {
   beforeEach(() => {
+    setPlatformOs("ios");
     mockGoBack.mockReset();
     mockCanGoBack.mockReset();
     mockCanGoBack.mockReturnValue(true);
+    mockNavigate.mockReset();
     resetStore();
   });
 
   afterEach(() => {
     resetStore();
+  });
+
+  afterAll(() => {
+    if (platformOsDescriptor) {
+      Object.defineProperty(Platform, "OS", platformOsDescriptor);
+    }
   });
 
   it("goes back after saving from the auth settings screen", async () => {
@@ -189,6 +207,48 @@ describe("SettingsScreen server save navigation", () => {
       "https://ssh.full-settings.com",
     );
     expect(mockGoBack).not.toHaveBeenCalled();
+
+    await act(async () => {
+      tree!.unmount();
+    });
+  });
+
+  it("uses iOS edge-swipe to return to the previous bottom tab", async () => {
+    let tree: renderer.ReactTestRenderer;
+    await act(async () => {
+      tree = renderer.create(<SettingsScreen />);
+    });
+
+    await act(async () => {
+      tree!.root
+        .findByProps({ testID: "ios-edge-swipe-back" })
+        .props.onTouchEnd();
+    });
+
+    expect(mockCanGoBack).toHaveBeenCalled();
+    expect(mockGoBack).toHaveBeenCalledTimes(1);
+    expect(mockNavigate).not.toHaveBeenCalled();
+
+    await act(async () => {
+      tree!.unmount();
+    });
+  });
+
+  it("falls back to Home when settings edge-swipe has no tab history", async () => {
+    mockCanGoBack.mockReturnValue(false);
+    let tree: renderer.ReactTestRenderer;
+    await act(async () => {
+      tree = renderer.create(<SettingsScreen />);
+    });
+
+    await act(async () => {
+      tree!.root
+        .findByProps({ testID: "ios-edge-swipe-back" })
+        .props.onTouchEnd();
+    });
+
+    expect(mockGoBack).not.toHaveBeenCalled();
+    expect(mockNavigate).toHaveBeenCalledWith("Home");
 
     await act(async () => {
       tree!.unmount();

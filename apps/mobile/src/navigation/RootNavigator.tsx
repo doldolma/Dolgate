@@ -29,6 +29,8 @@ interface RootNavigatorProps {
 
 const AuthStack = createNativeStackNavigator<AuthStackParamList>();
 const Tab = createBottomTabNavigator<MainTabParamList>();
+export const MAIN_TAB_INITIAL_ROUTE = "Home";
+export const MAIN_TAB_BACK_BEHAVIOR = "fullHistory";
 
 function getTabIconName(
   routeName: keyof MainTabParamList,
@@ -51,6 +53,8 @@ function MainTabs(): React.JSX.Element {
 
   return (
     <Tab.Navigator
+      initialRouteName={MAIN_TAB_INITIAL_ROUTE}
+      backBehavior={MAIN_TAB_BACK_BEHAVIOR}
       screenOptions={({ route }) => ({
         headerShown: false,
         tabBarHideOnKeyboard: true,
