@@ -7,7 +7,10 @@ import com.facebook.react.uimanager.ViewManager
 
 class AwsSsoBridgePackage : ReactPackage {
   override fun createNativeModules(reactContext: ReactApplicationContext): List<NativeModule> =
-    listOf(AwsSsoBridgeModule(reactContext))
+    listOf(
+      AwsSsoBridgeModule(reactContext),
+      DolsshFileTransferModule(reactContext),
+    )
 
   override fun createViewManagers(
     reactContext: ReactApplicationContext,

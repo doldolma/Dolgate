@@ -1,6 +1,11 @@
 {
   "name": "@fressh/react-native-uniffi-russh",
   "homepage": "https://github.com/EthanShoeDev/fressh",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/EthanShoeDev/fressh.git",
+    "directory": "packages/react-native-uniffi-russh"
+  },
   "author": "EthanShoeDev",
   "license": "MIT",
   "description": "Uniffi bindings for russh",
@@ -8,6 +13,12 @@
   "type": "module",
   "main": "./lib/module/api.js",
   "types": "./lib/typescript/src/api.d.ts",
+  "scripts": {
+    "ensure:native": "node ./scripts/ensure-native.cjs",
+    "check:native": "node ./scripts/ensure-native.cjs --check",
+    "regenerate:native": "node ./scripts/ensure-native.cjs --fresh",
+    "regenerate:native:raw": "node ./scripts/regenerate-native.cjs"
+  },
   "exports": {
     ".": {
       "types": "./lib/typescript/src/api.d.ts",
@@ -16,7 +27,7 @@
     "./package.json": "./package.json"
   },
   "dependencies": {
-    "uniffi-bindgen-react-native": "*"
+    "uniffi-bindgen-react-native": "0.29.3-1"
   },
   "peerDependencies": {
     "react": ">=19.1.0",

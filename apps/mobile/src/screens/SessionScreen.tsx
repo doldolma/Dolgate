@@ -1,8 +1,15 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Buffer } from "buffer";
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
+import { Buffer } from 'buffer';
 import {
   ActivityIndicator,
   Keyboard,
+  Modal,
   Platform,
   Pressable,
   ScrollView,
@@ -10,31 +17,33 @@ import {
   Text,
   View,
   useWindowDimensions,
-} from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
-import Ionicons from "react-native-vector-icons/Ionicons";
+} from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import Ionicons from 'react-native-vector-icons/Ionicons';
+import { isSshHostRecord } from '@dolssh/shared-core';
 import {
   XtermJsWebView,
   type XtermWebViewHandle,
-} from "@fressh/react-native-xtermjs-webview";
+} from '@fressh/react-native-xtermjs-webview';
 import {
   TerminalInputView,
   type TerminalInputViewHandle,
-} from "../components/TerminalInputView";
-import { useScreenPadding } from "../lib/screen-layout";
+} from '../components/TerminalInputView';
+import { SftpBrowserView } from '../components/SftpBrowserView';
+import { useScreenPadding } from '../lib/screen-layout';
 import {
   TERMINAL_PRIMARY_SHORTCUTS,
   TERMINAL_SECONDARY_SHORTCUTS,
   translateTerminalInputEventToSequence,
   type NativeTerminalInputEvent,
-} from "../lib/terminal-input";
-import { getKeyboardDockInset } from "../lib/keyboard-layout";
-import { useMobileAppStore } from "../store/useMobileAppStore";
-import type { MobilePalette } from "../theme";
-import { useMobilePalette } from "../theme";
+} from '../lib/terminal-input';
+import { getKeyboardDockInset } from '../lib/keyboard-layout';
+import { useMobileAppStore } from '../store/useMobileAppStore';
+import type { MobilePalette } from '../theme';
+import { useMobilePalette } from '../theme';
 
 const TERMINAL_RESET_BYTES = Uint8Array.from(
-  Buffer.from("\u001b[3J\u001b[2J\u001b[H", "utf8"),
+  Buffer.from('\u001b[3J\u001b[2J\u001b[H', 'utf8'),
 );
 
 function resetTerminalViewport(terminal: XtermWebViewHandle) {
@@ -50,38 +59,38 @@ function restoreTerminalSnapshot(
     return;
   }
 
-  terminal.write(Uint8Array.from(Buffer.from(snapshot, "utf8")));
+  terminal.write(Uint8Array.from(Buffer.from(snapshot, 'utf8')));
 }
 
 function getSessionStatusMeta(status: string, palette: MobilePalette) {
   switch (status) {
-    case "connected":
+    case 'connected':
       return {
-        label: "Connected",
+        label: 'Connected',
         color: palette.sessionStatusConnected,
       };
-    case "connecting":
-    case "pending":
-    case "disconnecting":
+    case 'connecting':
+    case 'pending':
+    case 'disconnecting':
       return {
-        label: "Connecting",
+        label: 'Connecting',
         color: palette.sessionStatusWarning,
       };
-    case "error":
+    case 'error':
       return {
-        label: "Error",
+        label: 'Error',
         color: palette.sessionStatusError,
       };
     default:
       return {
-        label: "Closed",
+        label: 'Closed',
         color: palette.sessionStatusMuted,
       };
   }
 }
 
 function isLiveSession(status: string) {
-  return status !== "closed";
+  return status !== 'closed';
 }
 
 export function SessionScreen(): React.JSX.Element {
@@ -102,12 +111,14 @@ export function SessionScreen(): React.JSX.Element {
   const [nativeInputFocusToken, setNativeInputFocusToken] = useState(0);
   const [nativeInputClearToken, setNativeInputClearToken] = useState(0);
   const [inputFocused, setInputFocused] = useState(true);
-  const [keyboardRequestedVisible, setKeyboardRequestedVisible] = useState(false);
+  const [keyboardRequestedVisible, setKeyboardRequestedVisible] =
+    useState(false);
   const [keyboardVisible, setKeyboardVisible] = useState(false);
   const [keyboardInset, setKeyboardInset] = useState(0);
   const [showMoreShortcuts, setShowMoreShortcuts] = useState(false);
+  const [menuSessionId, setMenuSessionId] = useState<string | null>(null);
   const [toolbarHeight, setToolbarHeight] = useState(56);
-  const isAndroid = Platform.OS === "android";
+  const isAndroid = Platform.OS === 'android';
   const useTerminalInputOverlay = isAndroid;
   const keyboardClosedViewportHeightRef = useRef(height);
   const terminalViewportSizeRef = useRef<{
@@ -122,49 +133,147 @@ export function SessionScreen(): React.JSX.Element {
     id: null,
     status: null,
   });
-  const sessions = useMobileAppStore((state) => state.sessions);
-  const activeSessionTabId = useMobileAppStore((state) => state.activeSessionTabId);
-  const setActiveSessionTab = useMobileAppStore(
-    (state) => state.setActiveSessionTab,
+  const sessions = useMobileAppStore(state => state.sessions);
+  const hosts = useMobileAppStore(state => state.hosts);
+  const sftpSessions = useMobileAppStore(state => state.sftpSessions);
+  const sftpTransfers = useMobileAppStore(state => state.sftpTransfers);
+  const activeSessionTabId = useMobileAppStore(
+    state => state.activeSessionTabId,
   );
-  const resumeSession = useMobileAppStore((state) => state.resumeSession);
-  const disconnectSession = useMobileAppStore((state) => state.disconnectSession);
-  const writeToSession = useMobileAppStore((state) => state.writeToSession);
+  const activeConnectionTab = useMobileAppStore(
+    state => state.activeConnectionTab,
+  );
+  const setActiveConnectionTab = useMobileAppStore(
+    state => state.setActiveConnectionTab,
+  );
+  const setActiveSessionTab = useMobileAppStore(
+    state => state.setActiveSessionTab,
+  );
+  const resumeSession = useMobileAppStore(state => state.resumeSession);
+  const disconnectSession = useMobileAppStore(state => state.disconnectSession);
+  const duplicateSession = useMobileAppStore(state => state.duplicateSession);
+  const openSftpForSession = useMobileAppStore(
+    state => state.openSftpForSession,
+  );
+  const disconnectSftpSession = useMobileAppStore(
+    state => state.disconnectSftpSession,
+  );
+  const listSftpDirectory = useMobileAppStore(state => state.listSftpDirectory);
+  const sftpCopyBuffer = useMobileAppStore(state => state.sftpCopyBuffer);
+  const downloadSftpFile = useMobileAppStore(state => state.downloadSftpFile);
+  const downloadSftpEntries = useMobileAppStore(
+    state => state.downloadSftpEntries,
+  );
+  const uploadSftpFile = useMobileAppStore(state => state.uploadSftpFile);
+  const createSftpDirectory = useMobileAppStore(
+    state => state.createSftpDirectory,
+  );
+  const renameSftpEntry = useMobileAppStore(state => state.renameSftpEntry);
+  const chmodSftpEntry = useMobileAppStore(state => state.chmodSftpEntry);
+  const deleteSftpEntries = useMobileAppStore(state => state.deleteSftpEntries);
+  const copySftpEntries = useMobileAppStore(state => state.copySftpEntries);
+  const pasteSftpEntries = useMobileAppStore(state => state.pasteSftpEntries);
+  const clearSftpCopyBuffer = useMobileAppStore(
+    state => state.clearSftpCopyBuffer,
+  );
+  const writeToSession = useMobileAppStore(state => state.writeToSession);
   const subscribeToSessionTerminal = useMobileAppStore(
-    (state) => state.subscribeToSessionTerminal,
+    state => state.subscribeToSessionTerminal,
   );
 
   const liveSessions = useMemo(
-    () => sessions.filter((session) => isLiveSession(session.status)),
+    () => sessions.filter(session => isLiveSession(session.status)),
     [sessions],
+  );
+  const liveSftpSessions = useMemo(
+    () => sftpSessions.filter(session => session.status !== 'closed'),
+    [sftpSessions],
+  );
+
+  const connectionTabs = useMemo(
+    () => [
+      ...liveSessions.map(session => ({
+        kind: 'terminal' as const,
+        id: session.id,
+        session,
+      })),
+      ...liveSftpSessions.map(session => ({
+        kind: 'sftp' as const,
+        id: session.id,
+        session,
+      })),
+    ],
+    [liveSessions, liveSftpSessions],
   );
 
   useEffect(() => {
-    const nextActiveSessionId =
-      (activeSessionTabId &&
-      liveSessions.some((session) => session.id === activeSessionTabId)
-        ? activeSessionTabId
-        : liveSessions[0]?.id) ?? null;
-
-    if (nextActiveSessionId !== activeSessionTabId) {
-      setActiveSessionTab(nextActiveSessionId);
+    const tabStillExists =
+      activeConnectionTab?.kind === 'terminal'
+        ? liveSessions.some(session => session.id === activeConnectionTab.id)
+        : activeConnectionTab?.kind === 'sftp'
+          ? liveSftpSessions.some(
+              session => session.id === activeConnectionTab.id,
+            )
+          : false;
+    if (tabStillExists) {
+      return;
     }
-  }, [activeSessionTabId, liveSessions, setActiveSessionTab]);
+    const fallbackTerminalId =
+      activeSessionTabId &&
+      liveSessions.some(session => session.id === activeSessionTabId)
+        ? activeSessionTabId
+        : liveSessions[0]?.id;
+    const nextTab = fallbackTerminalId
+      ? { kind: 'terminal' as const, id: fallbackTerminalId }
+      : liveSftpSessions[0]
+        ? { kind: 'sftp' as const, id: liveSftpSessions[0].id }
+        : null;
+    setActiveConnectionTab(nextTab);
+  }, [
+    activeConnectionTab,
+    activeSessionTabId,
+    liveSessions,
+    liveSftpSessions,
+    setActiveConnectionTab,
+  ]);
 
+  const activeTab =
+    activeConnectionTab &&
+    connectionTabs.some(
+      tab =>
+        tab.kind === activeConnectionTab.kind &&
+        tab.id === activeConnectionTab.id,
+    )
+      ? activeConnectionTab
+      : connectionTabs[0]
+        ? { kind: connectionTabs[0].kind, id: connectionTabs[0].id }
+        : null;
   const activeSession =
-    liveSessions.find((session) => session.id === activeSessionTabId) ??
-    liveSessions[0] ??
-    null;
+    activeTab?.kind === 'terminal'
+      ? (liveSessions.find(session => session.id === activeTab.id) ?? null)
+      : null;
+  const activeSftpSession =
+    activeTab?.kind === 'sftp'
+      ? (liveSftpSessions.find(session => session.id === activeTab.id) ?? null)
+      : null;
+  const menuSession =
+    liveSessions.find(session => session.id === menuSessionId) ?? null;
+  const menuHost = menuSession
+    ? (hosts.find(host => host.id === menuSession.hostId) ?? null)
+    : null;
+  const canOpenSftpFromMenu = Boolean(menuHost && isSshHostRecord(menuHost));
   const terminalLogger = useMemo(
     () =>
       __DEV__
         ? {
-            debug: (...args: unknown[]) => console.log("[xterm-webview]", ...args),
-            log: (...args: unknown[]) => console.log("[xterm-webview]", ...args),
+            debug: (...args: unknown[]) =>
+              console.log('[xterm-webview]', ...args),
+            log: (...args: unknown[]) =>
+              console.log('[xterm-webview]', ...args),
             warn: (...args: unknown[]) =>
-              console.warn("[xterm-webview]", ...args),
+              console.warn('[xterm-webview]', ...args),
             error: (...args: unknown[]) =>
-              console.error("[xterm-webview]", ...args),
+              console.error('[xterm-webview]', ...args),
           }
         : undefined,
     [],
@@ -175,8 +284,7 @@ export function SessionScreen(): React.JSX.Element {
   const allowDirectTerminalInput = !isAndroid || !keyboardRequestedVisible;
   const toolbarKeyboardInset = getKeyboardDockInset({
     keyboardVisible,
-    keyboardInset:
-      keyboardInset + (isAndroid ? safeAreaInsets.bottom : 0),
+    keyboardInset: keyboardInset + (isAndroid ? safeAreaInsets.bottom : 0),
     currentViewportHeight: height,
     keyboardClosedViewportHeight: keyboardClosedViewportHeightRef.current,
     minimumVisibleInset: isAndroid ? safeAreaInsets.bottom + 12 : 0,
@@ -223,7 +331,7 @@ export function SessionScreen(): React.JSX.Element {
           return;
         }
         if (force) {
-          setNativeInputFocusToken((value) => value + 1);
+          setNativeInputFocusToken(value => value + 1);
         }
         nativeTerminalInputRef.current?.focus();
       });
@@ -232,7 +340,12 @@ export function SessionScreen(): React.JSX.Element {
   );
 
   useEffect(() => {
-    if (!isAndroid || !useTerminalInputOverlay || !terminalReady || !activeSession) {
+    if (
+      !isAndroid ||
+      !useTerminalInputOverlay ||
+      !terminalReady ||
+      !activeSession
+    ) {
       return;
     }
 
@@ -268,11 +381,7 @@ export function SessionScreen(): React.JSX.Element {
 
     Keyboard.dismiss();
     blurTerminal();
-  }, [
-    blurTerminal,
-    focusRequestedTerminalInput,
-    isAndroid,
-  ]);
+  }, [blurTerminal, focusRequestedTerminalInput, isAndroid]);
 
   const toggleKeyboard = useCallback(() => {
     if (keyboardToggleActive) {
@@ -284,7 +393,9 @@ export function SessionScreen(): React.JSX.Element {
   }, [closeKeyboard, keyboardToggleActive, openKeyboard]);
 
   useEffect(() => {
-    const syncKeyboardShown = (event?: { endCoordinates?: { height?: number } }) => {
+    const syncKeyboardShown = (event?: {
+      endCoordinates?: { height?: number };
+    }) => {
       setKeyboardVisible(true);
       setKeyboardInset(event?.endCoordinates?.height ?? 0);
       if (isAndroid) {
@@ -300,16 +411,16 @@ export function SessionScreen(): React.JSX.Element {
       }
     };
     const subscriptions =
-      Platform.OS === "ios"
+      Platform.OS === 'ios'
         ? [
-            Keyboard.addListener("keyboardWillShow", syncKeyboardShown),
-            Keyboard.addListener("keyboardDidShow", syncKeyboardShown),
-            Keyboard.addListener("keyboardWillHide", syncKeyboardHidden),
-            Keyboard.addListener("keyboardDidHide", syncKeyboardHidden),
+            Keyboard.addListener('keyboardWillShow', syncKeyboardShown),
+            Keyboard.addListener('keyboardDidShow', syncKeyboardShown),
+            Keyboard.addListener('keyboardWillHide', syncKeyboardHidden),
+            Keyboard.addListener('keyboardDidHide', syncKeyboardHidden),
           ]
         : [
-            Keyboard.addListener("keyboardDidShow", syncKeyboardShown),
-            Keyboard.addListener("keyboardDidHide", syncKeyboardHidden),
+            Keyboard.addListener('keyboardDidShow', syncKeyboardShown),
+            Keyboard.addListener('keyboardDidHide', syncKeyboardHidden),
           ];
 
     return () => {
@@ -333,8 +444,8 @@ export function SessionScreen(): React.JSX.Element {
     const shouldAutoOpenKeyboard =
       previousActiveSession.id !== activeSession.id ||
       (previousActiveSession.id === activeSession.id &&
-        previousActiveSession.status !== "connected" &&
-        activeSession.status === "connected");
+        previousActiveSession.status !== 'connected' &&
+        activeSession.status === 'connected');
 
     previousActiveSessionRef.current = {
       id: activeSession.id,
@@ -355,7 +466,11 @@ export function SessionScreen(): React.JSX.Element {
   }, [activeSession, focusRequestedTerminalInput, focusTerminal, isAndroid]);
 
   useEffect(() => {
-    if (!terminalReady || !activeSession || activeSession.status === "connected") {
+    if (
+      !terminalReady ||
+      !activeSession ||
+      activeSession.status === 'connected'
+    ) {
       return;
     }
 
@@ -378,7 +493,11 @@ export function SessionScreen(): React.JSX.Element {
   ]);
 
   useEffect(() => {
-    if (!terminalReady || !activeSession || activeSession.status !== "connected") {
+    if (
+      !terminalReady ||
+      !activeSession ||
+      activeSession.status !== 'connected'
+    ) {
       return;
     }
 
@@ -402,7 +521,11 @@ export function SessionScreen(): React.JSX.Element {
   ]);
 
   useEffect(() => {
-    if (!terminalReady || !activeSession || activeSession.status !== "connected") {
+    if (
+      !terminalReady ||
+      !activeSession ||
+      activeSession.status !== 'connected'
+    ) {
       return;
     }
 
@@ -413,7 +536,7 @@ export function SessionScreen(): React.JSX.Element {
 
     resetTerminalViewport(terminal);
     const unsubscribe = subscribeToSessionTerminal(activeSession.id, {
-      onReplay: (chunks) => {
+      onReplay: chunks => {
         resetTerminalViewport(terminal);
         if (chunks.length > 0) {
           terminal.writeMany(chunks);
@@ -424,7 +547,7 @@ export function SessionScreen(): React.JSX.Element {
         }
         focusTerminal();
       },
-      onData: (chunk) => {
+      onData: chunk => {
         terminal.write(chunk);
       },
     });
@@ -445,7 +568,7 @@ export function SessionScreen(): React.JSX.Element {
     if (
       useTerminalInputOverlay ||
       !terminalReady ||
-      activeSession?.status !== "connected"
+      activeSession?.status !== 'connected'
     ) {
       return;
     }
@@ -463,7 +586,7 @@ export function SessionScreen(): React.JSX.Element {
     if (!isAndroid) {
       return;
     }
-    setNativeInputClearToken((value) => value + 1);
+    setNativeInputClearToken(value => value + 1);
   };
 
   const sendSessionInput = (value: string) => {
@@ -491,7 +614,7 @@ export function SessionScreen(): React.JSX.Element {
     focusTerminal();
   };
 
-  if (!activeSession) {
+  if (!activeTab) {
     return (
       <View
         style={[
@@ -540,22 +663,32 @@ export function SessionScreen(): React.JSX.Element {
           contentContainerStyle={styles.tabStrip}
           showsHorizontalScrollIndicator={false}
         >
-          {liveSessions.map((session) => {
+          {connectionTabs.map(tab => {
+            const isTerminal = tab.kind === 'terminal';
+            const session = tab.session;
             const tabStatus = getSessionStatusMeta(session.status, palette);
-            const isActive = session.id === activeSession.id;
+            const isActive =
+              activeTab.kind === tab.kind && activeTab.id === tab.id;
+            const title = isTerminal ? session.title : session.title;
             return (
               <Pressable
-                key={session.id}
+                key={`${tab.kind}:${session.id}`}
                 accessibilityRole="button"
-                accessibilityLabel={`${session.title} ${tabStatus.label} 세션 탭`}
+                accessibilityLabel={`${title} ${tabStatus.label} 세션 탭`}
                 accessibilityState={{ selected: isActive }}
                 onPress={() => {
-                  setActiveSessionTab(session.id);
-                  if (isAndroid) {
+                  if (isTerminal) {
+                    setActiveSessionTab(session.id);
+                  } else {
+                    setActiveConnectionTab({ kind: tab.kind, id: session.id });
+                  }
+                  if (isTerminal && isAndroid) {
                     focusRequestedTerminalInput(true);
                     return;
                   }
-                  focusTerminal();
+                  if (isTerminal) {
+                    focusTerminal();
+                  }
                 }}
                 style={[
                   styles.sessionTab,
@@ -576,30 +709,45 @@ export function SessionScreen(): React.JSX.Element {
                     { backgroundColor: tabStatus.color },
                   ]}
                 />
+                {!isTerminal ? (
+                  <Ionicons
+                    name="folder"
+                    size={15}
+                    color={isActive ? palette.accent : palette.mutedText}
+                  />
+                ) : null}
                 <Text
                   numberOfLines={1}
                   style={[
                     styles.sessionTabTitle,
                     {
                       color: isActive ? palette.text : palette.mutedText,
-                      fontWeight: isActive ? "800" : "700",
+                      fontWeight: isActive ? '800' : '700',
                     },
                   ]}
                 >
-                  {session.title}
+                  {title}
                 </Text>
                 <Pressable
                   accessibilityRole="button"
-                  accessibilityLabel={`${session.title} 세션 닫기`}
+                  accessibilityLabel={
+                    isTerminal
+                      ? `${session.title} 세션 메뉴`
+                      : `${session.title} 닫기`
+                  }
                   hitSlop={8}
-                  onPress={async (event) => {
+                  onPress={async event => {
                     event.stopPropagation();
-                    await disconnectSession(session.id);
+                    if (isTerminal) {
+                      setMenuSessionId(session.id);
+                      return;
+                    }
+                    await disconnectSftpSession(session.id);
                   }}
                   style={styles.sessionTabCloseButton}
                 >
                   <Ionicons
-                    name="close"
+                    name={isTerminal ? 'ellipsis-vertical' : 'close'}
                     size={14}
                     color={isActive ? palette.accent : palette.mutedText}
                   />
@@ -610,7 +758,84 @@ export function SessionScreen(): React.JSX.Element {
         </ScrollView>
       </View>
 
-      {activeSession.errorMessage ? (
+      <Modal
+        transparent
+        animationType="fade"
+        visible={Boolean(menuSession)}
+        onRequestClose={() => setMenuSessionId(null)}
+      >
+        <Pressable
+          style={[
+            styles.sessionMenuOverlay,
+            { backgroundColor: palette.overlay },
+          ]}
+          onPress={() => setMenuSessionId(null)}
+        >
+          <View
+            style={[
+              styles.sessionMenuCard,
+              {
+                backgroundColor: palette.sessionMenuSurface,
+                borderColor: palette.sessionSurfaceBorder,
+              },
+            ]}
+          >
+            {menuSession ? (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={`${menuSession.title} 세션 복제`}
+                onPress={async () => {
+                  const sessionId = menuSession.id;
+                  setMenuSessionId(null);
+                  await duplicateSession(sessionId);
+                }}
+                style={styles.sessionMenuItem}
+              >
+                <Ionicons name="copy" size={22} color={palette.mutedText} />
+                <Text style={[styles.sessionMenuText, { color: palette.text }]}>
+                  Duplicate
+                </Text>
+              </Pressable>
+            ) : null}
+            {menuSession && canOpenSftpFromMenu ? (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Connect via SFTP"
+                onPress={async () => {
+                  const sessionId = menuSession.id;
+                  setMenuSessionId(null);
+                  await openSftpForSession(sessionId);
+                }}
+                style={styles.sessionMenuItem}
+              >
+                <Ionicons name="folder" size={22} color={palette.mutedText} />
+                <Text style={[styles.sessionMenuText, { color: palette.text }]}>
+                  Connect via SFTP
+                </Text>
+              </Pressable>
+            ) : null}
+            {menuSession ? (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={`${menuSession.title} 세션 닫기`}
+                onPress={async () => {
+                  const sessionId = menuSession.id;
+                  setMenuSessionId(null);
+                  await disconnectSession(sessionId);
+                }}
+                style={styles.sessionMenuItem}
+              >
+                <Ionicons name="close" size={22} color={palette.mutedText} />
+                <Text style={[styles.sessionMenuText, { color: palette.text }]}>
+                  Close
+                </Text>
+              </Pressable>
+            ) : null}
+          </View>
+        </Pressable>
+      </Modal>
+
+      {activeSession?.errorMessage ? (
         <View
           style={[
             styles.inlineBanner,
@@ -625,7 +850,9 @@ export function SessionScreen(): React.JSX.Element {
             <Text style={[styles.inlineBannerTitle, { color: palette.text }]}>
               {activeSession.title}
             </Text>
-            <Text style={[styles.inlineBannerText, { color: palette.mutedText }]}>
+            <Text
+              style={[styles.inlineBannerText, { color: palette.mutedText }]}
+            >
               {activeSession.errorMessage}
             </Text>
           </View>
@@ -648,7 +875,9 @@ export function SessionScreen(): React.JSX.Element {
               },
             ]}
           >
-            <Text style={[styles.inlineBannerButtonText, { color: palette.text }]}>
+            <Text
+              style={[styles.inlineBannerButtonText, { color: palette.text }]}
+            >
               재연결
             </Text>
           </Pressable>
@@ -660,139 +889,226 @@ export function SessionScreen(): React.JSX.Element {
         style={[
           styles.screenBody,
           {
-            paddingBottom: toolbarHeight + toolbarKeyboardInset,
+            paddingBottom:
+              activeTab.kind === 'terminal'
+                ? toolbarHeight + toolbarKeyboardInset
+                : screenPadding.paddingBottom,
           },
         ]}
       >
-        <View
-          testID="session-terminal-card"
-          onLayout={(event) => {
-            const nextWidth = Math.ceil(event.nativeEvent.layout.width);
-            const nextHeight = Math.ceil(event.nativeEvent.layout.height);
-            if (nextWidth <= 0 || nextHeight <= 0) {
-              return;
+        {activeSftpSession ? (
+          <SftpBrowserView
+            palette={palette}
+            session={activeSftpSession}
+            transfers={sftpTransfers}
+            onNavigate={path => listSftpDirectory(activeSftpSession.id, path)}
+            onRefresh={() => listSftpDirectory(activeSftpSession.id)}
+            onUpload={() => uploadSftpFile(activeSftpSession.id)}
+            onDownload={path => downloadSftpFile(activeSftpSession.id, path)}
+            onDownloadEntries={paths =>
+              downloadSftpEntries(activeSftpSession.id, paths)
             }
-            const current = terminalViewportSizeRef.current;
-            if (current?.width === nextWidth && current?.height === nextHeight) {
-              return;
+            onMkdir={name => createSftpDirectory(activeSftpSession.id, name)}
+            onRename={(sourcePath, nextName) =>
+              renameSftpEntry(activeSftpSession.id, sourcePath, nextName)
             }
-            terminalViewportSizeRef.current = {
-              width: nextWidth,
-              height: nextHeight,
-            };
-            if (!terminalReady) {
-              return;
+            onChmod={(path, mode) =>
+              chmodSftpEntry(activeSftpSession.id, path, mode)
             }
-            terminalRef.current?.fit();
-          }}
-          style={[
-            styles.terminalCard,
-            {
-              backgroundColor: palette.sessionTerminalBg,
-              borderColor: palette.sessionSurfaceBorder,
-              marginHorizontal: 2,
-            },
-          ]}
-          onTouchEnd={isAndroid ? () => focusRequestedTerminalInput(true) : undefined}
-        >
-          <XtermJsWebView
-            ref={terminalRef}
-            style={styles.terminal}
-            logger={terminalLogger}
-            webViewOptions={{
-              hideKeyboardAccessoryView: true,
-            }}
-            onInitialized={() => setTerminalReady(true)}
-            onData={(data) => {
-              if (!allowDirectTerminalInput) {
+            onDelete={paths => deleteSftpEntries(activeSftpSession.id, paths)}
+            copyBufferCount={
+              sftpCopyBuffer?.sftpSessionId === activeSftpSession.id
+                ? sftpCopyBuffer.entries.length
+                : 0
+            }
+            onCopy={paths => copySftpEntries(activeSftpSession.id, paths)}
+            onPaste={() => pasteSftpEntries(activeSftpSession.id)}
+            onClearCopy={clearSftpCopyBuffer}
+          />
+        ) : (
+          <View
+            testID="session-terminal-card"
+            onLayout={event => {
+              const nextWidth = Math.ceil(event.nativeEvent.layout.width);
+              const nextHeight = Math.ceil(event.nativeEvent.layout.height);
+              if (nextWidth <= 0 || nextHeight <= 0) {
                 return;
               }
-              sendSessionInput(data);
+              const current = terminalViewportSizeRef.current;
+              if (
+                current?.width === nextWidth &&
+                current?.height === nextHeight
+              ) {
+                return;
+              }
+              terminalViewportSizeRef.current = {
+                width: nextWidth,
+                height: nextHeight,
+              };
+              if (!terminalReady) {
+                return;
+              }
+              terminalRef.current?.fit();
             }}
-            xtermOptions={{
-              fontSize: width > height ? 12 : 11,
-              scrollback: 2_000,
-              theme: {
-                background: palette.sessionTerminalBg,
-                foreground: palette.sessionTerminalFg,
-                cursor: palette.sessionTerminalCursor,
-                selectionBackground: palette.sessionTerminalSelection,
+            style={[
+              styles.terminalCard,
+              {
+                backgroundColor: palette.sessionTerminalBg,
+                borderColor: palette.sessionSurfaceBorder,
+                marginHorizontal: 2,
               },
-            }}
-          />
-          {!terminalReady ? (
-            <View
-              pointerEvents="none"
-              style={[
-                styles.terminalLoadingOverlay,
-                { backgroundColor: palette.sessionTerminalBg },
-              ]}
-            >
-              <ActivityIndicator size="small" color={palette.accent} />
-              <Text style={[styles.terminalLoadingTitle, { color: palette.text }]}>
-                터미널 준비 중
-              </Text>
-              <Text
-                style={[styles.terminalLoadingBody, { color: palette.mutedText }]}
-              >
-                연결 화면을 불러오고 있습니다.
-              </Text>
-            </View>
-          ) : null}
-          {useTerminalInputOverlay ? (
-            <View pointerEvents="none" style={styles.nativeTerminalInputShell}>
-              <TerminalInputView
-                ref={nativeTerminalInputRef}
-                clearToken={nativeInputClearToken}
-                focusToken={nativeInputFocusToken}
-                focused={inputFocused}
-                softKeyboardEnabled={isAndroid ? keyboardRequestedVisible : undefined}
-                onTerminalInput={(event) => {
-                  sendTranslatedInput(event.nativeEvent);
-                  if (event.nativeEvent.kind === "special-key") {
-                    resetNativeInputBuffer();
-                  }
-                }}
-                style={styles.nativeTerminalInput}
-              />
-            </View>
-          ) : null}
-        </View>
-
-        <View
-          testID="session-toolbar-shell"
-          onLayout={(event) => {
-            const nextHeight = Math.ceil(event.nativeEvent.layout.height);
-            if (nextHeight > 0 && nextHeight !== toolbarHeight) {
-              setToolbarHeight(nextHeight);
+            ]}
+            onTouchEnd={
+              isAndroid ? () => focusRequestedTerminalInput(true) : undefined
             }
-          }}
-          style={[
-            styles.toolbarShell,
-            {
-              backgroundColor: palette.sessionToolbar,
-              borderTopColor: palette.sessionToolbarBorder,
-              paddingBottom: screenPadding.paddingBottom,
-              bottom: toolbarKeyboardInset,
-            },
-          ]}
-        >
-          {showMoreShortcuts ? (
-            <View
-              style={[
-                styles.toolbarSecondaryShell,
-                {
-                  borderBottomColor: palette.sessionToolbarBorder,
+          >
+            <XtermJsWebView
+              ref={terminalRef}
+              style={styles.terminal}
+              logger={terminalLogger}
+              webViewOptions={{
+                hideKeyboardAccessoryView: true,
+              }}
+              onInitialized={() => setTerminalReady(true)}
+              onData={data => {
+                if (!allowDirectTerminalInput) {
+                  return;
+                }
+                sendSessionInput(data);
+              }}
+              xtermOptions={{
+                fontSize: width > height ? 12 : 11,
+                scrollback: 2_000,
+                theme: {
+                  background: palette.sessionTerminalBg,
+                  foreground: palette.sessionTerminalFg,
+                  cursor: palette.sessionTerminalCursor,
+                  selectionBackground: palette.sessionTerminalSelection,
                 },
-              ]}
-            >
+              }}
+            />
+            {!terminalReady ? (
+              <View
+                pointerEvents="none"
+                style={[
+                  styles.terminalLoadingOverlay,
+                  { backgroundColor: palette.sessionTerminalBg },
+                ]}
+              >
+                <ActivityIndicator size="small" color={palette.accent} />
+                <Text
+                  style={[styles.terminalLoadingTitle, { color: palette.text }]}
+                >
+                  터미널 준비 중
+                </Text>
+                <Text
+                  style={[
+                    styles.terminalLoadingBody,
+                    { color: palette.mutedText },
+                  ]}
+                >
+                  연결 화면을 불러오고 있습니다.
+                </Text>
+              </View>
+            ) : null}
+            {useTerminalInputOverlay ? (
+              <View
+                pointerEvents="none"
+                style={styles.nativeTerminalInputShell}
+              >
+                <TerminalInputView
+                  ref={nativeTerminalInputRef}
+                  clearToken={nativeInputClearToken}
+                  focusToken={nativeInputFocusToken}
+                  focused={inputFocused}
+                  softKeyboardEnabled={
+                    isAndroid ? keyboardRequestedVisible : undefined
+                  }
+                  onTerminalInput={event => {
+                    sendTranslatedInput(event.nativeEvent);
+                    if (event.nativeEvent.kind === 'special-key') {
+                      resetNativeInputBuffer();
+                    }
+                  }}
+                  style={styles.nativeTerminalInput}
+                />
+              </View>
+            ) : null}
+          </View>
+        )}
+
+        {activeSession ? (
+          <View
+            testID="session-toolbar-shell"
+            onLayout={event => {
+              const nextHeight = Math.ceil(event.nativeEvent.layout.height);
+              if (nextHeight > 0 && nextHeight !== toolbarHeight) {
+                setToolbarHeight(nextHeight);
+              }
+            }}
+            style={[
+              styles.toolbarShell,
+              {
+                backgroundColor: palette.sessionToolbar,
+                borderTopColor: palette.sessionToolbarBorder,
+                paddingBottom: screenPadding.paddingBottom,
+                bottom: toolbarKeyboardInset,
+              },
+            ]}
+          >
+            {showMoreShortcuts ? (
+              <View
+                style={[
+                  styles.toolbarSecondaryShell,
+                  {
+                    borderBottomColor: palette.sessionToolbarBorder,
+                  },
+                ]}
+              >
+                <ScrollView
+                  horizontal
+                  style={styles.toolbarScroll}
+                  contentContainerStyle={[
+                    styles.toolbar,
+                    styles.toolbarSecondaryContent,
+                  ]}
+                  showsHorizontalScrollIndicator={false}
+                >
+                  {TERMINAL_SECONDARY_SHORTCUTS.map(item => (
+                    <Pressable
+                      key={item.label}
+                      accessibilityRole="button"
+                      accessibilityLabel={`${item.label} 제어키`}
+                      onPress={() => sendShortcut(item.event)}
+                      style={[
+                        styles.toolbarButton,
+                        {
+                          backgroundColor: palette.surfaceAlt,
+                          borderColor: palette.sessionToolbarBorder,
+                        },
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.toolbarButtonText,
+                          { color: palette.text },
+                        ]}
+                      >
+                        {item.label}
+                      </Text>
+                    </Pressable>
+                  ))}
+                </ScrollView>
+              </View>
+            ) : null}
+            <View style={styles.toolbarPrimaryRow}>
               <ScrollView
                 horizontal
-                style={styles.toolbarScroll}
-                contentContainerStyle={[styles.toolbar, styles.toolbarSecondaryContent]}
+                style={styles.toolbarPrimaryScroll}
+                contentContainerStyle={styles.toolbar}
                 showsHorizontalScrollIndicator={false}
               >
-                {TERMINAL_SECONDARY_SHORTCUTS.map((item) => (
+                {TERMINAL_PRIMARY_SHORTCUTS.map(item => (
                   <Pressable
                     key={item.label}
                     accessibilityRole="button"
@@ -806,103 +1122,90 @@ export function SessionScreen(): React.JSX.Element {
                       },
                     ]}
                   >
-                    <Text style={[styles.toolbarButtonText, { color: palette.text }]}>
+                    <Text
+                      style={[
+                        styles.toolbarButtonText,
+                        { color: palette.text },
+                      ]}
+                    >
                       {item.label}
                     </Text>
                   </Pressable>
                 ))}
-              </ScrollView>
-            </View>
-          ) : null}
-          <View style={styles.toolbarPrimaryRow}>
-            <ScrollView
-              horizontal
-              style={styles.toolbarPrimaryScroll}
-              contentContainerStyle={styles.toolbar}
-              showsHorizontalScrollIndicator={false}
-            >
-              {TERMINAL_PRIMARY_SHORTCUTS.map((item) => (
                 <Pressable
-                  key={item.label}
                   accessibilityRole="button"
-                  accessibilityLabel={`${item.label} 제어키`}
-                  onPress={() => sendShortcut(item.event)}
+                  accessibilityLabel={
+                    showMoreShortcuts
+                      ? '추가 제어키 숨기기'
+                      : '추가 제어키 표시'
+                  }
+                  onPress={() => setShowMoreShortcuts(value => !value)}
                   style={[
                     styles.toolbarButton,
+                    styles.toolbarActionButton,
                     {
-                      backgroundColor: palette.surfaceAlt,
-                      borderColor: palette.sessionToolbarBorder,
+                      backgroundColor: showMoreShortcuts
+                        ? palette.accentSoft
+                        : palette.surfaceAlt,
+                      borderColor: showMoreShortcuts
+                        ? palette.accent
+                        : palette.sessionToolbarBorder,
                     },
                   ]}
                 >
-                  <Text style={[styles.toolbarButtonText, { color: palette.text }]}>
-                    {item.label}
+                  <Ionicons
+                    name={
+                      showMoreShortcuts ? 'chevron-down' : 'ellipsis-horizontal'
+                    }
+                    size={14}
+                    color={
+                      showMoreShortcuts ? palette.accent : palette.mutedText
+                    }
+                  />
+                  <Text
+                    style={[
+                      styles.toolbarButtonText,
+                      {
+                        color: palette.text,
+                        fontWeight: showMoreShortcuts ? '800' : '700',
+                      },
+                    ]}
+                  >
+                    더보기
                   </Text>
                 </Pressable>
-              ))}
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel={
-                  showMoreShortcuts ? "추가 제어키 숨기기" : "추가 제어키 표시"
-                }
-                onPress={() => setShowMoreShortcuts((value) => !value)}
-                style={[
-                  styles.toolbarButton,
-                  styles.toolbarActionButton,
-                  {
-                    backgroundColor: showMoreShortcuts
-                      ? palette.accentSoft
-                      : palette.surfaceAlt,
-                    borderColor: showMoreShortcuts
-                      ? palette.accent
-                      : palette.sessionToolbarBorder,
-                  },
-                ]}
-              >
-                <Ionicons
-                  name={showMoreShortcuts ? "chevron-down" : "ellipsis-horizontal"}
-                  size={14}
-                  color={showMoreShortcuts ? palette.accent : palette.mutedText}
-                />
-                <Text
+              </ScrollView>
+              <View style={styles.toolbarKeyboardDock}>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={
+                    keyboardToggleActive ? '키보드 닫기' : '키보드 열기'
+                  }
+                  onPress={toggleKeyboard}
                   style={[
-                    styles.toolbarButtonText,
+                    styles.toolbarKeyboardButton,
                     {
-                      color: palette.text,
-                      fontWeight: showMoreShortcuts ? "800" : "700",
+                      backgroundColor: keyboardToggleActive
+                        ? palette.accentSoft
+                        : palette.surfaceAlt,
+                      borderColor: keyboardToggleActive
+                        ? palette.accent
+                        : palette.sessionToolbarBorder,
                     },
                   ]}
                 >
-                  더보기
-                </Text>
-              </Pressable>
-            </ScrollView>
-            <View style={styles.toolbarKeyboardDock}>
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel={keyboardToggleActive ? "키보드 닫기" : "키보드 열기"}
-                onPress={toggleKeyboard}
-                style={[
-                  styles.toolbarKeyboardButton,
-                  {
-                    backgroundColor: keyboardToggleActive
-                      ? palette.accentSoft
-                      : palette.surfaceAlt,
-                    borderColor: keyboardToggleActive
-                      ? palette.accent
-                      : palette.sessionToolbarBorder,
-                  },
-                ]}
-              >
-                <Ionicons
-                  name="keypad-outline"
-                  size={18}
-                  color={keyboardToggleActive ? palette.accent : palette.mutedText}
-                />
-              </Pressable>
+                  <Ionicons
+                    name="keypad-outline"
+                    size={18}
+                    color={
+                      keyboardToggleActive ? palette.accent : palette.mutedText
+                    }
+                  />
+                </Pressable>
+              </View>
             </View>
           </View>
-        </View>
+        ) : null}
       </View>
     </View>
   );
@@ -913,11 +1216,11 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   centered: {
-    justifyContent: "center",
-    alignItems: "center",
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   emptyCard: {
-    width: "100%",
+    width: '100%',
     borderWidth: 1,
     borderRadius: 18,
     paddingHorizontal: 18,
@@ -926,7 +1229,7 @@ const styles = StyleSheet.create({
   },
   emptyTitle: {
     fontSize: 20,
-    fontWeight: "800",
+    fontWeight: '800',
   },
   emptyBody: {
     fontSize: 14,
@@ -947,8 +1250,8 @@ const styles = StyleSheet.create({
     paddingLeft: 10,
     paddingRight: 6,
     paddingVertical: 8,
-    flexDirection: "row",
-    alignItems: "center",
+    flexDirection: 'row',
+    alignItems: 'center',
     gap: 7,
   },
   sessionTabStatusDot: {
@@ -959,14 +1262,40 @@ const styles = StyleSheet.create({
   sessionTabTitle: {
     flex: 1,
     fontSize: 13,
-    fontWeight: "700",
+    fontWeight: '700',
     letterSpacing: -0.1,
   },
   sessionTabCloseButton: {
     width: 22,
     height: 22,
-    alignItems: "center",
-    justifyContent: "center",
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  sessionMenuOverlay: {
+    flex: 1,
+    justifyContent: 'flex-start',
+    alignItems: 'flex-end',
+    paddingTop: 62,
+    paddingRight: 14,
+  },
+  sessionMenuCard: {
+    minWidth: 240,
+    borderWidth: 1,
+    borderRadius: 22,
+    paddingVertical: 12,
+    paddingHorizontal: 12,
+    gap: 4,
+  },
+  sessionMenuItem: {
+    minHeight: 52,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+    paddingHorizontal: 10,
+  },
+  sessionMenuText: {
+    fontSize: 17,
+    fontWeight: '800',
   },
   inlineBanner: {
     marginTop: 6,
@@ -975,8 +1304,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 10,
     marginBottom: 2,
-    flexDirection: "row",
-    alignItems: "center",
+    flexDirection: 'row',
+    alignItems: 'center',
     gap: 10,
   },
   inlineBannerCopy: {
@@ -985,7 +1314,7 @@ const styles = StyleSheet.create({
   },
   inlineBannerTitle: {
     fontSize: 13,
-    fontWeight: "700",
+    fontWeight: '700',
   },
   inlineBannerText: {
     fontSize: 12,
@@ -999,7 +1328,7 @@ const styles = StyleSheet.create({
   },
   inlineBannerButtonText: {
     fontSize: 12,
-    fontWeight: "700",
+    fontWeight: '700',
   },
   screenBody: {
     flex: 1,
@@ -1009,7 +1338,7 @@ const styles = StyleSheet.create({
     marginTop: 4,
     borderWidth: 1,
     borderRadius: 6,
-    overflow: "hidden",
+    overflow: 'hidden',
     minHeight: 240,
   },
   terminal: {
@@ -1017,19 +1346,19 @@ const styles = StyleSheet.create({
   },
   terminalLoadingOverlay: {
     ...StyleSheet.absoluteFill,
-    alignItems: "center",
-    justifyContent: "center",
+    alignItems: 'center',
+    justifyContent: 'center',
     gap: 8,
     paddingHorizontal: 24,
   },
   terminalLoadingTitle: {
     fontSize: 13,
-    fontWeight: "700",
+    fontWeight: '700',
   },
   terminalLoadingBody: {
     fontSize: 12,
     lineHeight: 18,
-    textAlign: "center",
+    textAlign: 'center',
   },
   nativeTerminalInput: {
     ...StyleSheet.absoluteFill,
@@ -1038,7 +1367,7 @@ const styles = StyleSheet.create({
     ...StyleSheet.absoluteFill,
   },
   toolbarShell: {
-    position: "absolute",
+    position: 'absolute',
     left: 0,
     right: 0,
     zIndex: 10,
@@ -1054,8 +1383,8 @@ const styles = StyleSheet.create({
     flexGrow: 0,
   },
   toolbarPrimaryRow: {
-    flexDirection: "row",
-    alignItems: "center",
+    flexDirection: 'row',
+    alignItems: 'center',
     gap: 8,
     paddingHorizontal: 6,
   },
@@ -1075,11 +1404,11 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     paddingHorizontal: 12,
     paddingVertical: 8,
-    alignItems: "center",
-    justifyContent: "center",
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   toolbarActionButton: {
-    flexDirection: "row",
+    flexDirection: 'row',
     gap: 6,
   },
   toolbarKeyboardDock: {
@@ -1090,12 +1419,12 @@ const styles = StyleSheet.create({
     height: 38,
     borderRadius: 12,
     borderWidth: 1,
-    alignItems: "center",
-    justifyContent: "center",
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   toolbarButtonText: {
     fontSize: 12,
-    fontWeight: "700",
+    fontWeight: '700',
     letterSpacing: -0.1,
   },
 });

@@ -2,6 +2,9 @@ import { type UniffiByteArray, type UniffiRustArcPtr, type UnsafeMutableRawPoint
 export declare function connect(options: ConnectOptions, asyncOpts_?: {
     signal: AbortSignal;
 }): Promise<SshConnectionInterface>;
+export declare function connectSftp(options: ConnectOptions, asyncOpts_?: {
+    signal: AbortSignal;
+}): Promise<SftpConnectionInterface>;
 export declare function generateKeyPair(keyType: KeyType): string;
 export declare function validatePrivateKey(privateKeyContent: string): string;
 export type BufferReadResult = {
@@ -177,6 +180,106 @@ export declare const ServerPublicKeyInfo: Readonly<{
      * Defaults specified in the {@link uniffi_russh} crate.
      */
     defaults: () => Partial<ServerPublicKeyInfo>;
+}>;
+export type SftpConnectionInfo = {
+    connectionId: string;
+    connectionDetails: ConnectionDetails;
+    createdAtMs: number;
+    connectedAtMs: number;
+};
+/**
+ * Generated factory for {@link SftpConnectionInfo} record objects.
+ */
+export declare const SftpConnectionInfo: Readonly<{
+    /**
+     * Create a frozen instance of {@link SftpConnectionInfo}, with defaults specified
+     * in Rust, in the {@link uniffi_russh} crate.
+     */
+    create: (partial: Partial<SftpConnectionInfo> & Required<Omit<SftpConnectionInfo, never>>) => SftpConnectionInfo;
+    /**
+     * Create a frozen instance of {@link SftpConnectionInfo}, with defaults specified
+     * in Rust, in the {@link uniffi_russh} crate.
+     */
+    new: (partial: Partial<SftpConnectionInfo> & Required<Omit<SftpConnectionInfo, never>>) => SftpConnectionInfo;
+    /**
+     * Defaults specified in the {@link uniffi_russh} crate.
+     */
+    defaults: () => Partial<SftpConnectionInfo>;
+}>;
+export type SftpEntry = {
+    name: string;
+    path: string;
+    isDirectory: boolean;
+    size: number;
+    mtime: string | undefined;
+    kind: SftpEntryKind;
+    permissions: string | undefined;
+};
+/**
+ * Generated factory for {@link SftpEntry} record objects.
+ */
+export declare const SftpEntry: Readonly<{
+    /**
+     * Create a frozen instance of {@link SftpEntry}, with defaults specified
+     * in Rust, in the {@link uniffi_russh} crate.
+     */
+    create: (partial: Partial<SftpEntry> & Required<Omit<SftpEntry, never>>) => SftpEntry;
+    /**
+     * Create a frozen instance of {@link SftpEntry}, with defaults specified
+     * in Rust, in the {@link uniffi_russh} crate.
+     */
+    new: (partial: Partial<SftpEntry> & Required<Omit<SftpEntry, never>>) => SftpEntry;
+    /**
+     * Defaults specified in the {@link uniffi_russh} crate.
+     */
+    defaults: () => Partial<SftpEntry>;
+}>;
+export type SftpListing = {
+    path: string;
+    entries: Array<SftpEntry>;
+};
+/**
+ * Generated factory for {@link SftpListing} record objects.
+ */
+export declare const SftpListing: Readonly<{
+    /**
+     * Create a frozen instance of {@link SftpListing}, with defaults specified
+     * in Rust, in the {@link uniffi_russh} crate.
+     */
+    create: (partial: Partial<SftpListing> & Required<Omit<SftpListing, never>>) => SftpListing;
+    /**
+     * Create a frozen instance of {@link SftpListing}, with defaults specified
+     * in Rust, in the {@link uniffi_russh} crate.
+     */
+    new: (partial: Partial<SftpListing> & Required<Omit<SftpListing, never>>) => SftpListing;
+    /**
+     * Defaults specified in the {@link uniffi_russh} crate.
+     */
+    defaults: () => Partial<SftpListing>;
+}>;
+export type SftpReadChunk = {
+    bytes: ArrayBuffer;
+    bytesRead: number;
+    eof: boolean;
+};
+/**
+ * Generated factory for {@link SftpReadChunk} record objects.
+ */
+export declare const SftpReadChunk: Readonly<{
+    /**
+     * Create a frozen instance of {@link SftpReadChunk}, with defaults specified
+     * in Rust, in the {@link uniffi_russh} crate.
+     */
+    create: (partial: Partial<SftpReadChunk> & Required<Omit<SftpReadChunk, never>>) => SftpReadChunk;
+    /**
+     * Create a frozen instance of {@link SftpReadChunk}, with defaults specified
+     * in Rust, in the {@link uniffi_russh} crate.
+     */
+    new: (partial: Partial<SftpReadChunk> & Required<Omit<SftpReadChunk, never>>) => SftpReadChunk;
+    /**
+     * Defaults specified in the {@link uniffi_russh} crate.
+     */
+    defaults: () => Partial<SftpReadChunk>;
 }>;
 /**
  * Snapshot of shell session info for property-like access in TS.
@@ -648,6 +751,12 @@ export declare const Security: Readonly<{
     };
 }>;
 export type Security = InstanceType<(typeof Security)[keyof Omit<typeof Security, 'instanceOf'>]>;
+export declare enum SftpEntryKind {
+    File = 0,
+    Directory = 1,
+    Symlink = 2,
+    Unknown = 3
+}
 export declare enum ShellEvent_Tags {
     Chunk = "Chunk",
     Dropped = "Dropped"
@@ -1182,6 +1291,69 @@ export declare class ServerKeyCallbackImpl extends UniffiAbstractObject implemen
     uniffiDestroy(): void;
     static instanceOf(obj: any): obj is ServerKeyCallbackImpl;
 }
+export interface SftpConnectionInterface {
+    chmod(path: string, permissions: number, asyncOpts_?: {
+        signal: AbortSignal;
+    }): Promise<void>;
+    close(asyncOpts_?: {
+        signal: AbortSignal;
+    }): Promise<void>;
+    delete_(path: string, asyncOpts_?: {
+        signal: AbortSignal;
+    }): Promise<void>;
+    getInfo(): SftpConnectionInfo;
+    listDirectory(path: string, asyncOpts_?: {
+        signal: AbortSignal;
+    }): Promise<SftpListing>;
+    mkdir(path: string, asyncOpts_?: {
+        signal: AbortSignal;
+    }): Promise<void>;
+    readFileChunk(path: string, offset: number, length: number, asyncOpts_?: {
+        signal: AbortSignal;
+    }): Promise<SftpReadChunk>;
+    rename(sourcePath: string, targetPath: string, asyncOpts_?: {
+        signal: AbortSignal;
+    }): Promise<void>;
+    writeFileChunk(path: string, offset: number, data: ArrayBuffer, asyncOpts_?: {
+        signal: AbortSignal;
+    }): Promise<void>;
+}
+export declare class SftpConnection extends UniffiAbstractObject implements SftpConnectionInterface {
+    readonly [uniffiTypeNameSymbol] = "SftpConnection";
+    readonly [destructorGuardSymbol]: UniffiRustArcPtr;
+    readonly [pointerLiteralSymbol]: UnsafeMutableRawPointer;
+    private constructor();
+    chmod(path: string, permissions: number, asyncOpts_?: {
+        signal: AbortSignal;
+    }): Promise<void>;
+    close(asyncOpts_?: {
+        signal: AbortSignal;
+    }): Promise<void>;
+    delete_(path: string, asyncOpts_?: {
+        signal: AbortSignal;
+    }): Promise<void>;
+    getInfo(): SftpConnectionInfo;
+    listDirectory(path: string, asyncOpts_?: {
+        signal: AbortSignal;
+    }): Promise<SftpListing>;
+    mkdir(path: string, asyncOpts_?: {
+        signal: AbortSignal;
+    }): Promise<void>;
+    readFileChunk(path: string, offset: number, length: number, asyncOpts_?: {
+        signal: AbortSignal;
+    }): Promise<SftpReadChunk>;
+    rename(sourcePath: string, targetPath: string, asyncOpts_?: {
+        signal: AbortSignal;
+    }): Promise<void>;
+    writeFileChunk(path: string, offset: number, data: ArrayBuffer, asyncOpts_?: {
+        signal: AbortSignal;
+    }): Promise<void>;
+    /**
+     * {@inheritDoc uniffi-bindgen-react-native#UniffiAbstractObject.uniffiDestroy}
+     */
+    uniffiDestroy(): void;
+    static instanceOf(obj: any): obj is SftpConnection;
+}
 export interface ShellClosedCallback {
     onChange(channelId: number): void;
 }
@@ -1404,6 +1576,42 @@ declare const _default: Readonly<{
             allocationSize(value: ServerPublicKeyInfo): number;
             lift(value: UniffiByteArray): ServerPublicKeyInfo;
             lower(value: ServerPublicKeyInfo): UniffiByteArray;
+        };
+        FfiConverterTypeSftpConnection: FfiConverterObject<SftpConnectionInterface>;
+        FfiConverterTypeSftpConnectionInfo: {
+            read(from: RustBuffer): SftpConnectionInfo;
+            write(value: SftpConnectionInfo, into: RustBuffer): void;
+            allocationSize(value: SftpConnectionInfo): number;
+            lift(value: UniffiByteArray): SftpConnectionInfo;
+            lower(value: SftpConnectionInfo): UniffiByteArray;
+        };
+        FfiConverterTypeSftpEntry: {
+            read(from: RustBuffer): SftpEntry;
+            write(value: SftpEntry, into: RustBuffer): void;
+            allocationSize(value: SftpEntry): number;
+            lift(value: UniffiByteArray): SftpEntry;
+            lower(value: SftpEntry): UniffiByteArray;
+        };
+        FfiConverterTypeSftpEntryKind: {
+            read(from: RustBuffer): SftpEntryKind;
+            write(value: SftpEntryKind, into: RustBuffer): void;
+            allocationSize(value: SftpEntryKind): number;
+            lift(value: UniffiByteArray): SftpEntryKind;
+            lower(value: SftpEntryKind): UniffiByteArray;
+        };
+        FfiConverterTypeSftpListing: {
+            read(from: RustBuffer): SftpListing;
+            write(value: SftpListing, into: RustBuffer): void;
+            allocationSize(value: SftpListing): number;
+            lift(value: UniffiByteArray): SftpListing;
+            lower(value: SftpListing): UniffiByteArray;
+        };
+        FfiConverterTypeSftpReadChunk: {
+            read(from: RustBuffer): SftpReadChunk;
+            write(value: SftpReadChunk, into: RustBuffer): void;
+            allocationSize(value: SftpReadChunk): number;
+            lift(value: UniffiByteArray): SftpReadChunk;
+            lower(value: SftpReadChunk): UniffiByteArray;
         };
         FfiConverterTypeShellClosedCallback: FfiConverterObjectWithCallbacks<ShellClosedCallback>;
         FfiConverterTypeShellEvent: {

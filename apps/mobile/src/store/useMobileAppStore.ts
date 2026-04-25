@@ -1,27 +1,32 @@
-import { Buffer } from "buffer";
-import { create } from "zustand";
-import { createJSONStorage, persist } from "zustand/middleware";
-import { Linking } from "react-native";
-import { RnRussh } from "@fressh/react-native-uniffi-russh";
+import { Buffer } from 'buffer';
+import { create } from 'zustand';
+import { createJSONStorage, persist } from 'zustand/middleware';
+import { Linking } from 'react-native';
+import { RnRussh } from '@fressh/react-native-uniffi-russh';
 import type {
   AwsEc2HostRecord,
   AwsSsmSessionClientMessage,
   AwsSsmSessionServerMessage,
   AuthSession,
   AuthState,
+  DirectoryListing,
+  FileEntry,
   GroupRecord,
   HostRecord,
   HostSecretInput,
   KnownHostRecord,
   LoadedManagedSecretPayload,
+  MobileConnectionTabRef,
   ManagedAwsProfilePayload,
   MobileSessionRecord,
   MobileSettings,
+  MobileSftpSessionRecord,
+  MobileSftpTransferRecord,
   SecretMetadataRecord,
   SshHostRecord,
   SyncStatus,
-} from "@dolssh/shared-core";
-import { isAwsEc2HostRecord, isSshHostRecord } from "@dolssh/shared-core";
+} from '@dolssh/shared-core';
+import { isAwsEc2HostRecord, isSshHostRecord } from '@dolssh/shared-core';
 import {
   buildBrowserLoginUrl,
   clearStoredAwsProfiles,
@@ -59,38 +64,49 @@ import {
   loadStoredAuthSession,
   loadStoredSecrets,
   ApiError,
-} from "../lib/mobile";
+} from '../lib/mobile';
 import {
   getAuthCallbackStateErrorMessage,
   getSyncFailureMessage,
-} from "../lib/auth-flow";
+} from '../lib/auth-flow';
 import {
   type AwsSsoBrowserLoginPrompt,
   resolveAwsSessionForHost,
-} from "../lib/aws-session";
-import { openAwsSsoBrowser } from "../lib/aws-sso-bridge";
+} from '../lib/aws-session';
+import { openAwsSsoBrowser } from '../lib/aws-sso-bridge';
 import {
   getCurrentWindowTerminalGridSize,
   toRusshTerminalSize,
-} from "../lib/terminal-size";
+} from '../lib/terminal-size';
+import {
+  deleteDownloadDestination,
+  createDownloadDirectory,
+  createDownloadFile,
+  pickDownloadDestination,
+  pickDownloadDirectory,
+  pickUploadFile,
+  readLocalFileChunk,
+  writeDownloadChunk,
+} from '../lib/mobile-file-transfer';
 
 const MAX_TERMINAL_SNAPSHOT_CHARS = 8_000;
 const MAX_PERSISTED_SESSIONS = 24;
+const SFTP_TRANSFER_CHUNK_SIZE = 256 * 1024;
 const SESSION_SNAPSHOT_FLUSH_MS = 750;
 const STARTUP_REFRESH_TIMEOUT_MS = 3_000;
 const STARTUP_REFRESH_TIMEOUT_MESSAGE =
-  "서버 응답이 지연되고 있습니다. 다시 시도해 주세요.";
+  '서버 응답이 지연되고 있습니다. 다시 시도해 주세요.';
 const OFFLINE_RECOVERY_RETRY_DELAYS_MS = [2_000, 5_000, 5_000, 5_000] as const;
 const SECURE_STATE_LOADING_MESSAGE =
-  "저장된 보안 정보를 복구하는 중입니다. 잠시 후 다시 시도해 주세요.";
+  '저장된 보안 정보를 복구하는 중입니다. 잠시 후 다시 시도해 주세요.';
 
 function isStartupTimingLoggingEnabled(): boolean {
-  return typeof __DEV__ !== "undefined" && __DEV__;
+  return typeof __DEV__ !== 'undefined' && __DEV__;
 }
 
 function getStartupTimingNow(): number {
   const performanceNow =
-    typeof globalThis.performance?.now === "function"
+    typeof globalThis.performance?.now === 'function'
       ? globalThis.performance.now.bind(globalThis.performance)
       : null;
   return performanceNow ? performanceNow() : Date.now();
@@ -103,7 +119,8 @@ function beginStartupTiming(label: string): (() => void) | null {
 
   const startedAt = getStartupTimingNow();
   return () => {
-    const durationMs = Math.round((getStartupTimingNow() - startedAt) * 10) / 10;
+    const durationMs =
+      Math.round((getStartupTimingNow() - startedAt) * 10) / 10;
     console.info(`[mobile-startup] ${label}: ${durationMs}ms`);
   };
 }
@@ -111,7 +128,7 @@ function beginStartupTiming(label: string): (() => void) | null {
 interface PendingServerKeyPromptState {
   hostId: string;
   hostLabel: string;
-  status: "untrusted" | "mismatch";
+  status: 'untrusted' | 'mismatch';
   info: MobileServerPublicKeyInfo;
   existing?: KnownHostRecord | null;
 }
@@ -119,7 +136,7 @@ interface PendingServerKeyPromptState {
 interface PendingCredentialPromptState {
   hostId: string;
   hostLabel: string;
-  authType: "password" | "privateKey";
+  authType: 'password' | 'privateKey';
   message?: string | null;
   initialValue: HostSecretInput;
 }
@@ -135,19 +152,21 @@ type ReactNativeWebSocketConstructor = new (
   } | null,
 ) => WebSocket;
 
+type SftpConnectionHandle = Awaited<ReturnType<typeof RnRussh.connectSftp>>;
+
 interface SshRuntimeSession {
-  kind: "ssh";
+  kind: 'ssh';
   recordId: string;
   hostId: string;
   connection: Awaited<ReturnType<typeof RnRussh.connect>>;
   shell: Awaited<
-    ReturnType<Awaited<ReturnType<typeof RnRussh.connect>>["startShell"]>
+    ReturnType<Awaited<ReturnType<typeof RnRussh.connect>>['startShell']>
   >;
   backgroundListenerId: bigint | null;
 }
 
 interface AwsRuntimeSession {
-  kind: "aws-ssm";
+  kind: 'aws-ssm';
   recordId: string;
   hostId: string;
   socket: WebSocket;
@@ -156,6 +175,26 @@ interface AwsRuntimeSession {
 }
 
 type RuntimeSession = SshRuntimeSession | AwsRuntimeSession;
+
+interface SftpRuntimeSession {
+  recordId: string;
+  hostId: string;
+  connection: SftpConnectionHandle;
+}
+
+interface SftpCopyBufferEntry {
+  path: string;
+  name: string;
+  isDirectory: boolean;
+  kind: FileEntry['kind'];
+}
+
+interface SftpCopyBuffer {
+  sftpSessionId: string;
+  hostId: string;
+  entries: SftpCopyBufferEntry[];
+  createdAt: string;
+}
 
 interface SessionTerminalSubscription {
   onReplay: (chunks: Uint8Array[]) => void;
@@ -176,7 +215,11 @@ interface MobileAppState {
   knownHosts: KnownHostRecord[];
   secretMetadata: SecretMetadataRecord[];
   sessions: MobileSessionRecord[];
+  sftpSessions: MobileSftpSessionRecord[];
+  sftpTransfers: MobileSftpTransferRecord[];
+  sftpCopyBuffer: SftpCopyBuffer | null;
   activeSessionTabId: string | null;
+  activeConnectionTab: MobileConnectionTabRef | null;
   secretsByRef: Record<string, LoadedManagedSecretPayload>;
   pendingBrowserLoginState: string | null;
   pendingAwsSsoLogin: PendingAwsSsoLoginState | null;
@@ -192,6 +235,8 @@ interface MobileAppState {
   syncNow: () => Promise<void>;
   updateSettings: (input: Partial<MobileSettings>) => Promise<void>;
   connectToHost: (hostId: string) => Promise<string | null>;
+  duplicateSession: (sessionId: string) => Promise<string | null>;
+  setActiveConnectionTab: (tab: MobileConnectionTabRef | null) => void;
   setActiveSessionTab: (sessionId: string | null) => void;
   resumeSession: (sessionId: string) => Promise<string | null>;
   disconnectSession: (sessionId: string) => Promise<void>;
@@ -205,10 +250,39 @@ interface MobileAppState {
   rejectServerKeyPrompt: () => Promise<void>;
   submitCredentialPrompt: (input: HostSecretInput) => Promise<void>;
   cancelCredentialPrompt: () => void;
+  openSftpForSession: (sessionId: string) => Promise<string | null>;
+  disconnectSftpSession: (sftpSessionId: string) => Promise<void>;
+  listSftpDirectory: (sftpSessionId: string, path?: string) => Promise<void>;
+  downloadSftpFile: (
+    sftpSessionId: string,
+    remotePath: string,
+  ) => Promise<void>;
+  downloadSftpEntries: (
+    sftpSessionId: string,
+    remotePaths: string[],
+  ) => Promise<void>;
+  uploadSftpFile: (sftpSessionId: string) => Promise<void>;
+  createSftpDirectory: (sftpSessionId: string, name: string) => Promise<void>;
+  renameSftpEntry: (
+    sftpSessionId: string,
+    sourcePath: string,
+    nextName: string,
+  ) => Promise<void>;
+  chmodSftpEntry: (
+    sftpSessionId: string,
+    remotePath: string,
+    mode: string,
+  ) => Promise<void>;
+  deleteSftpEntries: (sftpSessionId: string, paths: string[]) => Promise<void>;
+  copySftpEntries: (sftpSessionId: string, paths: string[]) => void;
+  pasteSftpEntries: (sftpSessionId: string) => Promise<void>;
+  clearSftpCopyBuffer: () => void;
 }
 
 const runtimeSessions = new Map<string, RuntimeSession>();
+const runtimeSftpSessions = new Map<string, SftpRuntimeSession>();
 const pendingSessionConnections = new Set<string>();
+const pendingSftpConnections = new Set<string>();
 const runtimeSessionSnapshots = new Map<string, string>();
 const runtimeSnapshotFlushTimers = new Map<
   string,
@@ -231,7 +305,9 @@ let pendingCredentialResolver:
 let pendingAwsSsoCancelHandler: (() => void) | null = null;
 
 function sortHosts(hosts: HostRecord[]): HostRecord[] {
-  return [...hosts].sort((left, right) => left.label.localeCompare(right.label));
+  return [...hosts].sort((left, right) =>
+    left.label.localeCompare(right.label),
+  );
 }
 
 function sortGroups(groups: GroupRecord[]): GroupRecord[] {
@@ -255,11 +331,66 @@ function sortSessions(sessions: MobileSessionRecord[]): MobileSessionRecord[] {
 }
 
 function isLiveSession(session: MobileSessionRecord): boolean {
-  return session.status !== "closed";
+  return session.status !== 'closed';
 }
 
-function getLiveSessions(sessions: MobileSessionRecord[]): MobileSessionRecord[] {
+function getLiveSessions(
+  sessions: MobileSessionRecord[],
+): MobileSessionRecord[] {
   return sortSessions(sessions).filter(isLiveSession);
+}
+
+function sortSftpSessions(
+  sftpSessions: MobileSftpSessionRecord[],
+): MobileSftpSessionRecord[] {
+  return [...sftpSessions].sort((left, right) =>
+    right.lastEventAt.localeCompare(left.lastEventAt),
+  );
+}
+
+function isLiveSftpSession(session: MobileSftpSessionRecord): boolean {
+  return session.status !== 'closed';
+}
+
+function getLiveSftpSessions(
+  sftpSessions: MobileSftpSessionRecord[],
+): MobileSftpSessionRecord[] {
+  return sortSftpSessions(sftpSessions).filter(isLiveSftpSession);
+}
+
+function normalizeActiveConnectionTab(
+  sessions: MobileSessionRecord[],
+  sftpSessions: MobileSftpSessionRecord[],
+  currentTab: MobileConnectionTabRef | null,
+  preferredTab?: MobileConnectionTabRef | null,
+): MobileConnectionTabRef | null {
+  const liveSessions = getLiveSessions(sessions);
+  const liveSftpSessions = getLiveSftpSessions(sftpSessions);
+  const isValidTab = (tab: MobileConnectionTabRef | null | undefined) => {
+    if (!tab) {
+      return false;
+    }
+    if (tab.kind === 'terminal') {
+      return liveSessions.some(session => session.id === tab.id);
+    }
+    return liveSftpSessions.some(session => session.id === tab.id);
+  };
+
+  if (isValidTab(preferredTab)) {
+    return preferredTab ?? null;
+  }
+  if (isValidTab(currentTab)) {
+    return currentTab;
+  }
+  const firstTerminal = liveSessions[0];
+  if (firstTerminal) {
+    return { kind: 'terminal', id: firstTerminal.id };
+  }
+  const firstSftp = liveSftpSessions[0];
+  if (firstSftp) {
+    return { kind: 'sftp', id: firstSftp.id };
+  }
+  return null;
 }
 
 function resolveActiveSessionTabId(
@@ -270,7 +401,7 @@ function resolveActiveSessionTabId(
   const liveSessions = getLiveSessions(sessions);
   if (preferredSessionId) {
     const preferredSession = liveSessions.find(
-      (session) => session.id === preferredSessionId,
+      session => session.id === preferredSessionId,
     );
     if (preferredSession) {
       return preferredSession.id;
@@ -279,7 +410,7 @@ function resolveActiveSessionTabId(
 
   if (currentActiveSessionTabId) {
     const currentSession = liveSessions.find(
-      (session) => session.id === currentActiveSessionTabId,
+      session => session.id === currentActiveSessionTabId,
     );
     if (currentSession) {
       return currentSession.id;
@@ -287,6 +418,50 @@ function resolveActiveSessionTabId(
   }
 
   return liveSessions[0]?.id ?? null;
+}
+
+function patchSftpSessionRecord(
+  sftpSessions: MobileSftpSessionRecord[],
+  sessionId: string,
+  patch: Partial<MobileSftpSessionRecord>,
+): MobileSftpSessionRecord[] {
+  return sortSftpSessions(
+    sftpSessions.map(session =>
+      session.id === sessionId ? { ...session, ...patch } : session,
+    ),
+  );
+}
+
+function upsertSftpSessionRecord(
+  sftpSessions: MobileSftpSessionRecord[],
+  nextRecord: MobileSftpSessionRecord,
+): MobileSftpSessionRecord[] {
+  const existingIndex = sftpSessions.findIndex(
+    session => session.id === nextRecord.id,
+  );
+  if (existingIndex === -1) {
+    return sortSftpSessions([nextRecord, ...sftpSessions]);
+  }
+
+  const nextSessions = [...sftpSessions];
+  nextSessions[existingIndex] = nextRecord;
+  return sortSftpSessions(nextSessions);
+}
+
+function patchSftpTransferRecord(
+  transfers: MobileSftpTransferRecord[],
+  transferId: string,
+  patch: Partial<MobileSftpTransferRecord>,
+): MobileSftpTransferRecord[] {
+  return transfers.map(transfer =>
+    transfer.id === transferId
+      ? {
+          ...transfer,
+          ...patch,
+          updatedAt: patch.updatedAt ?? new Date().toISOString(),
+        }
+      : transfer,
+  );
 }
 
 function trimSnapshot(value: string): string {
@@ -303,7 +478,7 @@ function patchSessionRecord(
   patch: Partial<MobileSessionRecord>,
 ): MobileSessionRecord[] {
   return sortSessions(
-    sessions.map((session) =>
+    sessions.map(session =>
       session.id === sessionId ? { ...session, ...patch } : session,
     ),
   );
@@ -313,7 +488,9 @@ function upsertSessionRecord(
   sessions: MobileSessionRecord[],
   nextRecord: MobileSessionRecord,
 ): MobileSessionRecord[] {
-  const existingIndex = sessions.findIndex((session) => session.id === nextRecord.id);
+  const existingIndex = sessions.findIndex(
+    session => session.id === nextRecord.id,
+  );
   if (existingIndex === -1) {
     return sortSessions([nextRecord, ...sessions]);
   }
@@ -325,13 +502,13 @@ function upsertSessionRecord(
 
 function createSessionRecord(host: HostRecord): MobileSessionRecord {
   const now = new Date().toISOString();
-  const id = createLocalId("session");
-  const connectionKind = host.kind === "aws-ec2" ? "aws-ssm" : "ssh";
+  const id = createLocalId('session');
+  const connectionKind = host.kind === 'aws-ec2' ? 'aws-ssm' : 'ssh';
   const connectionDetails =
-    host.kind === "aws-ec2"
+    host.kind === 'aws-ec2'
       ? [host.awsProfileName, host.awsRegion, host.awsInstanceId]
           .filter(Boolean)
-          .join(" · ")
+          .join(' · ')
       : isSshHostRecord(host)
         ? `${host.username}@${host.hostname}:${host.port}`
         : host.label;
@@ -342,10 +519,10 @@ function createSessionRecord(host: HostRecord): MobileSessionRecord {
     title: host.label,
     connectionKind,
     connectionDetails,
-    status: "connecting",
+    status: 'connecting',
     hasReceivedOutput: false,
     isRestorable: true,
-    lastViewportSnapshot: "",
+    lastViewportSnapshot: '',
     lastEventAt: now,
     lastConnectedAt: null,
     lastDisconnectedAt: null,
@@ -353,14 +530,299 @@ function createSessionRecord(host: HostRecord): MobileSessionRecord {
   };
 }
 
+function createSftpSessionRecord(
+  sourceSession: MobileSessionRecord,
+  host: SshHostRecord,
+): MobileSftpSessionRecord {
+  const now = new Date().toISOString();
+  return {
+    id: createLocalId('sftp'),
+    hostId: host.id,
+    sourceSessionId: sourceSession.id,
+    title: `${host.label} SFTP`,
+    status: 'connecting',
+    currentPath: '.',
+    listing: null,
+    errorMessage: null,
+    lastEventAt: now,
+    lastConnectedAt: null,
+    lastDisconnectedAt: null,
+  };
+}
+
+function toDirectoryListing(
+  listing: Awaited<
+    ReturnType<Awaited<ReturnType<typeof RnRussh.connectSftp>>['listDirectory']>
+  >,
+): DirectoryListing {
+  return {
+    path: listing.path,
+    entries: listing.entries.map(entry => ({
+      name: entry.name,
+      path: entry.path,
+      isDirectory: entry.isDirectory,
+      size: entry.size,
+      mtime: entry.mtime ?? '',
+      kind:
+        entry.kind === 'directory'
+          ? 'folder'
+          : entry.kind === 'file' || entry.kind === 'symlink'
+            ? entry.kind
+            : 'unknown',
+      permissions: entry.permissions ?? undefined,
+    })),
+  };
+}
+
+function joinRemotePath(parent: string, name: string): string {
+  const cleanName = name.trim().replace(/^\/+/, '');
+  if (!cleanName) {
+    return parent || '.';
+  }
+  if (!parent || parent === '.') {
+    return cleanName;
+  }
+  if (parent === '/') {
+    return `/${cleanName}`;
+  }
+  return `${parent.replace(/\/+$/, '')}/${cleanName}`;
+}
+
+function parentRemotePath(path: string): string {
+  const normalized = path.replace(/\/+$/, '');
+  const slashIndex = normalized.lastIndexOf('/');
+  if (slashIndex <= 0) {
+    return normalized.startsWith('/') ? '/' : '.';
+  }
+  return normalized.slice(0, slashIndex);
+}
+
+function remoteBasename(path: string): string {
+  const normalized = path.replace(/\/+$/, '');
+  const slashIndex = normalized.lastIndexOf('/');
+  return slashIndex === -1 ? normalized : normalized.slice(slashIndex + 1);
+}
+
+function parseUnixMode(value: string): number {
+  const trimmed = value.trim();
+  if (!/^[0-7]{3,4}$/.test(trimmed)) {
+    throw new Error('권한은 644 또는 0755 같은 8진수로 입력해 주세요.');
+  }
+  return Number.parseInt(trimmed, 8);
+}
+
+function makeCopyName(requestedName: string, index: number): string {
+  const dotIndex = requestedName.lastIndexOf('.');
+  const hasExtension = dotIndex > 0 && dotIndex < requestedName.length - 1;
+  const stem = hasExtension ? requestedName.slice(0, dotIndex) : requestedName;
+  const extension = hasExtension ? requestedName.slice(dotIndex) : '';
+  const suffix = index === 1 ? ' copy' : ` copy ${index}`;
+  return `${stem}${suffix}${extension}`;
+}
+
+function resolveUniqueName(existingNames: Set<string>, requestedName: string) {
+  if (!existingNames.has(requestedName)) {
+    return requestedName;
+  }
+  let index = 1;
+  for (;;) {
+    const candidate = makeCopyName(requestedName, index);
+    if (!existingNames.has(candidate)) {
+      return candidate;
+    }
+    index += 1;
+  }
+}
+
+async function listRemoteDirectory(
+  connection: SftpConnectionHandle,
+  path: string,
+): Promise<DirectoryListing> {
+  return toDirectoryListing(await connection.listDirectory(path));
+}
+
+async function resolveRemoteEntry(
+  connection: SftpConnectionHandle,
+  path: string,
+  currentListing?: DirectoryListing | null,
+): Promise<FileEntry> {
+  const currentEntry = currentListing?.entries.find(entry => entry.path === path);
+  if (currentEntry) {
+    return currentEntry;
+  }
+
+  const parentListing = await listRemoteDirectory(
+    connection,
+    parentRemotePath(path),
+  );
+  const parentEntry = parentListing.entries.find(entry => entry.path === path);
+  if (parentEntry) {
+    return parentEntry;
+  }
+
+  return {
+    name: remoteBasename(path) || path,
+    path,
+    isDirectory: false,
+    size: 0,
+    mtime: '',
+    kind: 'unknown',
+  };
+}
+
+async function streamRemoteFileToLocalDocument(
+  connection: SftpConnectionHandle,
+  remotePath: string,
+  destinationUri: string,
+  onProgress: (bytesTransferred: number) => void,
+): Promise<number> {
+  let offset = 0;
+  for (;;) {
+    const chunk = await connection.readFileChunk(
+      remotePath,
+      offset,
+      SFTP_TRANSFER_CHUNK_SIZE,
+    );
+    const bytes = Buffer.from(new Uint8Array(chunk.bytes));
+    const bytesRead = chunk.bytesRead || bytes.byteLength;
+    if (bytesRead <= 0) {
+      break;
+    }
+    await writeDownloadChunk(destinationUri, bytes.toString('base64'), offset > 0);
+    offset += bytesRead;
+    onProgress(offset);
+    if (chunk.eof || bytesRead < SFTP_TRANSFER_CHUNK_SIZE) {
+      break;
+    }
+  }
+  return offset;
+}
+
+async function copyRemoteFile(
+  connection: SftpConnectionHandle,
+  sourcePath: string,
+  targetPath: string,
+  onProgress: (bytesTransferred: number) => void,
+): Promise<number> {
+  let offset = 0;
+  for (;;) {
+    const chunk = await connection.readFileChunk(
+      sourcePath,
+      offset,
+      SFTP_TRANSFER_CHUNK_SIZE,
+    );
+    const bytes = Buffer.from(new Uint8Array(chunk.bytes));
+    const bytesRead = chunk.bytesRead || bytes.byteLength;
+    if (bytesRead <= 0) {
+      break;
+    }
+    await connection.writeFileChunk(
+      targetPath,
+      offset,
+      bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength),
+    );
+    offset += bytesRead;
+    onProgress(offset);
+    if (chunk.eof || bytesRead < SFTP_TRANSFER_CHUNK_SIZE) {
+      break;
+    }
+  }
+  return offset;
+}
+
+async function downloadRemoteEntryToDirectory(
+  connection: SftpConnectionHandle,
+  entry: FileEntry,
+  parentDirectoryUri: string,
+  onProgress: (bytesTransferred: number) => void,
+): Promise<number> {
+  if (entry.isDirectory) {
+    const childDirectory = await createDownloadDirectory(
+      parentDirectoryUri,
+      entry.name,
+    );
+    const listing = await listRemoteDirectory(connection, entry.path);
+    let totalBytes = 0;
+    for (const child of listing.entries) {
+      totalBytes += await downloadRemoteEntryToDirectory(
+        connection,
+        child,
+        childDirectory.uri,
+        bytesTransferred => onProgress(totalBytes + bytesTransferred),
+      );
+      onProgress(totalBytes);
+    }
+    return totalBytes;
+  }
+
+  const destination = await createDownloadFile(parentDirectoryUri, entry.name);
+  return streamRemoteFileToLocalDocument(
+    connection,
+    entry.path,
+    destination.uri,
+    onProgress,
+  );
+}
+
+async function resolveUniqueRemotePath(
+  connection: SftpConnectionHandle,
+  parentPath: string,
+  requestedName: string,
+): Promise<string> {
+  const listing = await listRemoteDirectory(connection, parentPath);
+  const uniqueName = resolveUniqueName(
+    new Set(listing.entries.map(entry => entry.name)),
+    requestedName,
+  );
+  return joinRemotePath(parentPath, uniqueName);
+}
+
+async function copyRemoteEntryToPath(
+  connection: SftpConnectionHandle,
+  entry: SftpCopyBufferEntry | FileEntry,
+  targetPath: string,
+  onProgress: (bytesTransferred: number) => void,
+): Promise<number> {
+  if (entry.isDirectory) {
+    await connection.mkdir(targetPath);
+    const listing = await listRemoteDirectory(connection, entry.path);
+    let totalBytes = 0;
+    for (const child of listing.entries) {
+      totalBytes += await copyRemoteEntryToPath(
+        connection,
+        child,
+        joinRemotePath(targetPath, child.name),
+        bytesTransferred => onProgress(totalBytes + bytesTransferred),
+      );
+      onProgress(totalBytes);
+    }
+    return totalBytes;
+  }
+
+  return copyRemoteFile(connection, entry.path, targetPath, onProgress);
+}
+
+async function deleteRemoteEntryRecursive(
+  connection: SftpConnectionHandle,
+  entry: FileEntry,
+): Promise<void> {
+  if (entry.isDirectory) {
+    const listing = await listRemoteDirectory(connection, entry.path);
+    for (const child of listing.entries) {
+      await deleteRemoteEntryRecursive(connection, child);
+    }
+  }
+  await connection.delete(entry.path);
+}
+
 function compactPersistedSessions(
   sessions: MobileSessionRecord[],
 ): MobileSessionRecord[] {
   return sortSessions(sessions)
     .slice(0, MAX_PERSISTED_SESSIONS)
-    .map((session) => ({
+    .map(session => ({
       ...session,
-      lastViewportSnapshot: "",
+      lastViewportSnapshot: '',
     }));
 }
 
@@ -369,12 +831,12 @@ function normalizePersistedSessionsForColdStart(
 ): MobileSessionRecord[] {
   const now = new Date().toISOString();
   return sortSessions(
-    sessions.map((session) => {
+    sessions.map(session => {
       const normalizedSession: MobileSessionRecord = !isLiveSession(session)
         ? session
         : {
             ...session,
-            status: "closed",
+            status: 'closed',
             errorMessage: null,
             lastEventAt: now,
             lastDisconnectedAt: session.lastDisconnectedAt ?? now,
@@ -382,7 +844,7 @@ function normalizePersistedSessionsForColdStart(
 
       return {
         ...normalizedSession,
-        lastViewportSnapshot: "",
+        lastViewportSnapshot: '',
       };
     }),
   );
@@ -409,7 +871,9 @@ function buildOfflineState(session: AuthSession, reason: string) {
   };
 }
 
-function isOfflineLeaseActive(session: AuthSession | null | undefined): boolean {
+function isOfflineLeaseActive(
+  session: AuthSession | null | undefined,
+): boolean {
   if (!session?.offlineLease.expiresAt) {
     return false;
   }
@@ -417,7 +881,7 @@ function isOfflineLeaseActive(session: AuthSession | null | undefined): boolean 
 }
 
 function isLikelyNetworkError(error: unknown): boolean {
-  return !(error instanceof ApiError) || typeof error.status !== "number";
+  return !(error instanceof ApiError) || typeof error.status !== 'number';
 }
 
 function buildOfflineRecoveryKey(
@@ -429,14 +893,18 @@ function buildOfflineRecoveryKey(
 
 function createEmptyProtectedState(): Pick<
   MobileAppState,
-  | "groups"
-  | "hosts"
-  | "awsProfiles"
-  | "knownHosts"
-  | "secretMetadata"
-  | "secretsByRef"
-  | "sessions"
-  | "activeSessionTabId"
+  | 'groups'
+  | 'hosts'
+  | 'awsProfiles'
+  | 'knownHosts'
+  | 'secretMetadata'
+  | 'secretsByRef'
+  | 'sessions'
+  | 'sftpSessions'
+  | 'sftpTransfers'
+  | 'sftpCopyBuffer'
+  | 'activeSessionTabId'
+  | 'activeConnectionTab'
 > {
   return {
     groups: [],
@@ -446,32 +914,36 @@ function createEmptyProtectedState(): Pick<
     secretMetadata: [],
     secretsByRef: {},
     sessions: [],
+    sftpSessions: [],
+    sftpTransfers: [],
+    sftpCopyBuffer: null,
     activeSessionTabId: null,
+    activeConnectionTab: null,
   };
 }
 
 function parseAuthCallbackUrl(
   url: string,
 ): { code: string; state?: string | null } | null {
-  if (!url.startsWith("dolgate://auth/callback")) {
+  if (!url.startsWith('dolgate://auth/callback')) {
     return null;
   }
 
-  const queryIndex = url.indexOf("?");
+  const queryIndex = url.indexOf('?');
   if (queryIndex === -1) {
     return null;
   }
 
   const rawQuery = url.slice(queryIndex + 1);
   const searchParams = new URLSearchParams(rawQuery);
-  const code = searchParams.get("code");
+  const code = searchParams.get('code');
   if (!code) {
     return null;
   }
 
   return {
     code,
-    state: searchParams.get("state"),
+    state: searchParams.get('state'),
   };
 }
 
@@ -479,29 +951,29 @@ function getKnownHostStatus(
   knownHosts: KnownHostRecord[],
   info: MobileServerPublicKeyInfo,
 ): {
-  status: "trusted" | "untrusted" | "mismatch";
+  status: 'trusted' | 'untrusted' | 'mismatch';
   existing: KnownHostRecord | null;
 } {
   const exactMatch =
     knownHosts.find(
-      (record) =>
+      record =>
         record.host === info.host &&
         record.port === info.port &&
         record.publicKeyBase64 === info.keyBase64,
     ) ?? null;
   if (exactMatch) {
-    return { status: "trusted", existing: exactMatch };
+    return { status: 'trusted', existing: exactMatch };
   }
 
   const sameTarget =
     knownHosts.find(
-      (record) => record.host === info.host && record.port === info.port,
+      record => record.host === info.host && record.port === info.port,
     ) ?? null;
   if (sameTarget) {
-    return { status: "mismatch", existing: sameTarget };
+    return { status: 'mismatch', existing: sameTarget };
   }
 
-  return { status: "untrusted", existing: null };
+  return { status: 'untrusted', existing: null };
 }
 
 function disconnectRuntimeSession(sessionId: string): void {
@@ -517,7 +989,7 @@ function disconnectRuntimeSession(sessionId: string): void {
     return;
   }
 
-  if (runtime.kind === "ssh") {
+  if (runtime.kind === 'ssh') {
     try {
       if (runtime.backgroundListenerId !== null) {
         runtime.shell.removeListener(runtime.backgroundListenerId);
@@ -541,9 +1013,14 @@ function disconnectRuntimeSession(sessionId: string): void {
   }
 }
 
+function disconnectRuntimeSftpSession(sessionId: string): void {
+  runtimeSftpSessions.delete(sessionId);
+  pendingSftpConnections.delete(sessionId);
+}
+
 async function disconnectAllRuntimeSessions(): Promise<void> {
   for (const session of [...runtimeSessions.values()]) {
-    if (session.kind === "ssh") {
+    if (session.kind === 'ssh') {
       try {
         await session.connection.disconnect();
       } catch {}
@@ -553,6 +1030,12 @@ async function disconnectAllRuntimeSessions(): Promise<void> {
       } catch {}
     }
     disconnectRuntimeSession(session.recordId);
+  }
+  for (const session of [...runtimeSftpSessions.values()]) {
+    try {
+      await session.connection.close();
+    } catch {}
+    disconnectRuntimeSftpSession(session.recordId);
   }
 }
 
@@ -571,11 +1054,9 @@ export const useMobileAppStore = create<MobileAppState>()(
         });
       };
 
-      const clearPersistedSecureState = async (
-        options?: {
-          clearStoredAuthSession?: boolean;
-        },
-      ) => {
+      const clearPersistedSecureState = async (options?: {
+        clearStoredAuthSession?: boolean;
+      }) => {
         const tasks: Array<Promise<unknown>> = [
           clearStoredSecrets(),
           clearStoredAwsProfiles(),
@@ -601,16 +1082,19 @@ export const useMobileAppStore = create<MobileAppState>()(
         nextState: Partial<
           Pick<
             MobileAppState,
-            | "auth"
-            | "syncStatus"
-            | "secretsByRef"
-            | "secretMetadata"
-            | "awsProfiles"
-            | "groups"
-            | "hosts"
-            | "knownHosts"
-            | "sessions"
-            | "activeSessionTabId"
+            | 'auth'
+            | 'syncStatus'
+            | 'secretsByRef'
+            | 'secretMetadata'
+            | 'awsProfiles'
+            | 'groups'
+            | 'hosts'
+            | 'knownHosts'
+            | 'sessions'
+            | 'sftpSessions'
+            | 'sftpTransfers'
+            | 'activeSessionTabId'
+            | 'activeConnectionTab'
           >
         >,
         options?: {
@@ -630,7 +1114,7 @@ export const useMobileAppStore = create<MobileAppState>()(
           return russhInitPromise;
         }
 
-        russhInitPromise = RnRussh.uniffiInitAsync().catch((error) => {
+        russhInitPromise = RnRussh.uniffiInitAsync().catch(error => {
           russhInitPromise = null;
           throw error;
         });
@@ -653,25 +1137,22 @@ export const useMobileAppStore = create<MobileAppState>()(
         session: AuthSession,
         serverUrl: string,
       ): Promise<void> => {
-        const finishStartupRefreshTiming = beginStartupTiming("startup refresh");
+        const finishStartupRefreshTiming =
+          beginStartupTiming('startup refresh');
         try {
-          const refreshed = await refreshAuthSession(
-            serverUrl,
-            session,
-            {
-              timeoutMs: STARTUP_REFRESH_TIMEOUT_MS,
-              timeoutMessage: STARTUP_REFRESH_TIMEOUT_MESSAGE,
-            },
-          );
+          const refreshed = await refreshAuthSession(serverUrl, session, {
+            timeoutMs: STARTUP_REFRESH_TIMEOUT_MS,
+            timeoutMessage: STARTUP_REFRESH_TIMEOUT_MESSAGE,
+          });
           if (!isSessionRecoveryContextCurrent(session, serverUrl)) {
             return;
           }
 
           clearOfflineRecoveryLoop();
           await saveStoredAuthSession(refreshed);
-          set((state) => ({
+          set(state => ({
             auth: {
-              status: "authenticated",
+              status: 'authenticated',
               session: refreshed,
               offline: null,
               errorMessage: null,
@@ -690,31 +1171,27 @@ export const useMobileAppStore = create<MobileAppState>()(
           if (isLikelyNetworkError(error) && isOfflineLeaseActive(session)) {
             set({
               auth: {
-                status: "offline-authenticated",
+                status: 'offline-authenticated',
                 session,
                 offline: buildOfflineState(
                   session,
-                  "네트워크 없이 저장된 세션을 복구했습니다.",
+                  '네트워크 없이 저장된 세션을 복구했습니다.',
                 ),
                 errorMessage: null,
               },
               syncStatus: {
                 ...get().syncStatus,
-                status: "paused",
+                status: 'paused',
                 errorMessage:
                   error instanceof Error
                     ? error.message
-                    : "네트워크에 연결할 수 없습니다.",
+                    : '네트워크에 연결할 수 없습니다.',
               },
             });
-            scheduleOfflineRecoveryRetry(
-              session,
-              serverUrl,
-              {
-                immediate: true,
-                reset: true,
-              },
-            );
+            scheduleOfflineRecoveryRetry(session, serverUrl, {
+              immediate: true,
+              reset: true,
+            });
             return;
           }
 
@@ -728,7 +1205,7 @@ export const useMobileAppStore = create<MobileAppState>()(
               errorMessage:
                 error instanceof Error
                   ? error.message
-                  : "로그인 세션을 복구하지 못했습니다.",
+                  : '로그인 세션을 복구하지 못했습니다.',
             },
             syncStatus: createDefaultSyncStatus(),
             ...createEmptyProtectedState(),
@@ -748,7 +1225,7 @@ export const useMobileAppStore = create<MobileAppState>()(
         serverUrl: string,
         currentRestoreVersion: number,
       ): Promise<void> => {
-        const finishSecureRestoreTiming = beginStartupTiming("secure restore");
+        const finishSecureRestoreTiming = beginStartupTiming('secure restore');
         try {
           const [secretsByRef, awsProfiles] = await Promise.all([
             loadStoredSecrets(),
@@ -766,7 +1243,7 @@ export const useMobileAppStore = create<MobileAppState>()(
             return;
           }
 
-          set((state) => ({
+          set(state => ({
             awsProfiles,
             secretsByRef,
             secretMetadata: deriveSecretMetadata(state.hosts, secretsByRef),
@@ -780,17 +1257,17 @@ export const useMobileAppStore = create<MobileAppState>()(
       const retrySessionRecoveryInBackground = async (
         session: AuthSession,
         serverUrl: string,
-      ): Promise<"recovered" | "retry" | "stop"> => {
+      ): Promise<'recovered' | 'retry' | 'stop'> => {
         try {
           const refreshed = await refreshAuthSession(serverUrl, session);
           if (!isSessionRecoveryContextCurrent(session, serverUrl)) {
-            return "stop";
+            return 'stop';
           }
 
           await saveStoredAuthSession(refreshed);
-          set((state) => ({
+          set(state => ({
             auth: {
-              status: "authenticated",
+              status: 'authenticated',
               session: refreshed,
               offline: null,
               errorMessage: null,
@@ -806,17 +1283,17 @@ export const useMobileAppStore = create<MobileAppState>()(
             !postRecoveryAuth.session ||
             get().settings.serverUrl !== serverUrl
           ) {
-            return "stop";
+            return 'stop';
           }
-          if (postRecoveryAuth.status === "offline-authenticated") {
-            return "retry";
+          if (postRecoveryAuth.status === 'offline-authenticated') {
+            return 'retry';
           }
-          return postRecoveryAuth.status === "authenticated"
-            ? "recovered"
-            : "stop";
+          return postRecoveryAuth.status === 'authenticated'
+            ? 'recovered'
+            : 'stop';
         } catch (error) {
           if (!isSessionRecoveryContextCurrent(session, serverUrl)) {
-            return "stop";
+            return 'stop';
           }
 
           if (error instanceof ApiError && error.status === 401) {
@@ -826,32 +1303,32 @@ export const useMobileAppStore = create<MobileAppState>()(
             set({
               auth: {
                 ...createUnauthenticatedState(),
-                errorMessage: "세션이 만료되어 다시 로그인해야 합니다.",
+                errorMessage: '세션이 만료되어 다시 로그인해야 합니다.',
               },
               syncStatus: {
                 ...createDefaultSyncStatus(),
-                status: "error",
-                errorMessage: "세션이 만료되었습니다.",
+                status: 'error',
+                errorMessage: '세션이 만료되었습니다.',
               },
               ...createEmptyProtectedState(),
               authGateResolved: true,
               secureStateReady: true,
               bootstrapping: false,
             });
-            return "stop";
+            return 'stop';
           }
 
-          set((state) => ({
+          set(state => ({
             syncStatus: {
               ...state.syncStatus,
-              status: "paused",
+              status: 'paused',
               errorMessage:
                 error instanceof Error
                   ? error.message
-                  : "네트워크에 연결할 수 없습니다.",
+                  : '네트워크에 연결할 수 없습니다.',
             },
           }));
-          return "retry";
+          return 'retry';
         }
       };
 
@@ -895,7 +1372,7 @@ export const useMobileAppStore = create<MobileAppState>()(
               activeSession,
               serverUrl,
             );
-            if (result === "recovered" || result === "stop") {
+            if (result === 'recovered' || result === 'stop') {
               clearOfflineRecoveryLoop();
               return;
             }
@@ -956,7 +1433,7 @@ export const useMobileAppStore = create<MobileAppState>()(
       ) => {
         const session = sessionOverride ?? get().auth.session ?? null;
         if (!session) {
-          set((state) => ({
+          set(state => ({
             syncStatus: {
               ...state.syncStatus,
               pendingPush: true,
@@ -974,25 +1451,25 @@ export const useMobileAppStore = create<MobileAppState>()(
               session.vaultBootstrap.keyBase64,
             ),
           );
-          set((state) => ({
+          set(state => ({
             syncStatus: {
               ...state.syncStatus,
               pendingPush: false,
               errorMessage: null,
-              status: "ready",
+              status: 'ready',
               lastSuccessfulSyncAt: new Date().toISOString(),
             },
           }));
         } catch (error) {
-          set((state) => ({
+          set(state => ({
             syncStatus: {
               ...state.syncStatus,
               pendingPush: true,
-              status: "error",
+              status: 'error',
               errorMessage:
                 error instanceof Error
                   ? error.message
-                  : "known host 동기화에 실패했습니다.",
+                  : 'known host 동기화에 실패했습니다.',
             },
           }));
         }
@@ -1003,11 +1480,11 @@ export const useMobileAppStore = create<MobileAppState>()(
         info: MobileServerPublicKeyInfo,
       ): Promise<boolean> => {
         const { status, existing } = getKnownHostStatus(get().knownHosts, info);
-        if (status === "trusted") {
+        if (status === 'trusted') {
           const refreshedRecord = buildKnownHostRecord(info, existing);
-          set((state) => ({
+          set(state => ({
             knownHosts: sortKnownHosts(
-              state.knownHosts.map((record) =>
+              state.knownHosts.map(record =>
                 record.id === refreshedRecord.id ? refreshedRecord : record,
               ),
             ),
@@ -1015,7 +1492,7 @@ export const useMobileAppStore = create<MobileAppState>()(
           return true;
         }
 
-        const accepted = await new Promise<boolean>((resolve) => {
+        const accepted = await new Promise<boolean>(resolve => {
           pendingServerKeyResolver = resolve;
           set({
             pendingServerKeyPrompt: {
@@ -1034,14 +1511,14 @@ export const useMobileAppStore = create<MobileAppState>()(
 
         const trustedRecord = buildKnownHostRecord(info, existing);
         const nextKnownHosts = sortKnownHosts(
-          get().knownHosts.filter((record) => record.id !== trustedRecord.id),
+          get().knownHosts.filter(record => record.id !== trustedRecord.id),
         );
         const mergedKnownHosts = sortKnownHosts([
           ...nextKnownHosts,
           trustedRecord,
         ]);
 
-        set((state) => ({
+        set(state => ({
           knownHosts: mergedKnownHosts,
           syncStatus: {
             ...state.syncStatus,
@@ -1057,13 +1534,14 @@ export const useMobileAppStore = create<MobileAppState>()(
         initialValue: HostSecretInput,
         message?: string | null,
       ) =>
-        new Promise<HostSecretInput | null>((resolve) => {
+        new Promise<HostSecretInput | null>(resolve => {
           pendingCredentialResolver = resolve;
           set({
             pendingCredentialPrompt: {
               hostId: host.id,
               hostLabel: host.label,
-              authType: host.authType === "privateKey" ? "privateKey" : "password",
+              authType:
+                host.authType === 'privateKey' ? 'privateKey' : 'password',
               message,
               initialValue,
             },
@@ -1073,7 +1551,9 @@ export const useMobileAppStore = create<MobileAppState>()(
       const resolveHostCredentials = async (
         host: SshHostRecord,
       ): Promise<HostSecretInput | null> => {
-        const existing = host.secretRef ? get().secretsByRef[host.secretRef] : undefined;
+        const existing = host.secretRef
+          ? get().secretsByRef[host.secretRef]
+          : undefined;
         const promptBase: HostSecretInput = {
           password: existing?.password,
           passphrase: existing?.passphrase,
@@ -1081,7 +1561,7 @@ export const useMobileAppStore = create<MobileAppState>()(
           certificateText: existing?.certificateText,
         };
 
-        if (host.authType === "password") {
+        if (host.authType === 'password') {
           if (promptBase.password) {
             return promptBase;
           }
@@ -1089,7 +1569,7 @@ export const useMobileAppStore = create<MobileAppState>()(
           const prompted = await promptForCredentials(
             host,
             promptBase,
-            "비밀번호를 입력해 주세요.",
+            '비밀번호를 입력해 주세요.',
           );
           if (!prompted) {
             return null;
@@ -1108,7 +1588,7 @@ export const useMobileAppStore = create<MobileAppState>()(
           return { ...promptBase, ...prompted };
         }
 
-        if (host.authType === "privateKey") {
+        if (host.authType === 'privateKey') {
           if (promptBase.privateKeyPem) {
             return promptBase;
           }
@@ -1117,8 +1597,8 @@ export const useMobileAppStore = create<MobileAppState>()(
             host,
             promptBase,
             host.privateKeyPath
-              ? "데스크톱 파일 경로 대신 PEM 개인키를 붙여넣거나 가져와 주세요."
-              : "개인키 PEM을 입력하거나 파일에서 가져와 주세요.",
+              ? '데스크톱 파일 경로 대신 PEM 개인키를 붙여넣거나 가져와 주세요.'
+              : '개인키 PEM을 입력하거나 파일에서 가져와 주세요.',
           );
           if (!prompted) {
             return null;
@@ -1157,8 +1637,10 @@ export const useMobileAppStore = create<MobileAppState>()(
           return;
         }
 
-        set((state) => {
-          const current = state.sessions.find((session) => session.id === sessionId);
+        set(state => {
+          const current = state.sessions.find(
+            session => session.id === sessionId,
+          );
           if (!current) {
             return state;
           }
@@ -1178,7 +1660,11 @@ export const useMobileAppStore = create<MobileAppState>()(
             return state;
           }
 
-          const nextSessions = patchSessionRecord(state.sessions, sessionId, patch);
+          const nextSessions = patchSessionRecord(
+            state.sessions,
+            sessionId,
+            patch,
+          );
           return {
             sessions: nextSessions,
             activeSessionTabId: resolveActiveSessionTabId(
@@ -1203,29 +1689,253 @@ export const useMobileAppStore = create<MobileAppState>()(
 
       const markSessionState = (
         sessionId: string,
-        status: MobileSessionRecord["status"],
+        status: MobileSessionRecord['status'],
         errorMessage?: string | null,
       ) => {
         const now = new Date().toISOString();
-        set((state) => {
+        set(state => {
           const nextSessions = patchSessionRecord(state.sessions, sessionId, {
             status,
             errorMessage: errorMessage ?? null,
             isRestorable: true,
             lastEventAt: now,
             lastDisconnectedAt:
-              status === "closed" || status === "error" ? now : undefined,
+              status === 'closed' || status === 'error' ? now : undefined,
           });
           return {
             sessions: nextSessions,
             activeSessionTabId: resolveActiveSessionTabId(
               nextSessions,
-              state.activeSessionTabId === sessionId && status === "closed"
+              state.activeSessionTabId === sessionId && status === 'closed'
                 ? null
                 : state.activeSessionTabId,
             ),
+            activeConnectionTab: normalizeActiveConnectionTab(
+              nextSessions,
+              state.sftpSessions,
+              state.activeConnectionTab?.kind === 'terminal' &&
+                state.activeConnectionTab.id === sessionId &&
+                status === 'closed'
+                ? null
+                : state.activeConnectionTab,
+            ),
           };
         });
+      };
+
+      const markSftpSessionState = (
+        sessionId: string,
+        status: MobileSftpSessionRecord['status'],
+        errorMessage?: string | null,
+      ) => {
+        const now = new Date().toISOString();
+        set(state => {
+          const nextSftpSessions = patchSftpSessionRecord(
+            state.sftpSessions,
+            sessionId,
+            {
+              status,
+              errorMessage: errorMessage ?? null,
+              lastEventAt: now,
+              lastDisconnectedAt:
+                status === 'closed' || status === 'error' ? now : undefined,
+            },
+          );
+          return {
+            sftpSessions: nextSftpSessions,
+            activeConnectionTab: normalizeActiveConnectionTab(
+              state.sessions,
+              nextSftpSessions,
+              state.activeConnectionTab?.kind === 'sftp' &&
+                state.activeConnectionTab.id === sessionId &&
+                status === 'closed'
+                ? null
+                : state.activeConnectionTab,
+            ),
+          };
+        });
+      };
+
+      const refreshSftpDirectory = async (
+        sessionId: string,
+        path?: string,
+      ): Promise<void> => {
+        const runtime = runtimeSftpSessions.get(sessionId);
+        if (!runtime) {
+          markSftpSessionState(
+            sessionId,
+            'error',
+            'SFTP 연결을 찾지 못했습니다.',
+          );
+          return;
+        }
+
+        const currentRecord = get().sftpSessions.find(
+          session => session.id === sessionId,
+        );
+        const nextPath = path ?? currentRecord?.currentPath ?? '.';
+        try {
+          const listing = toDirectoryListing(
+            await runtime.connection.listDirectory(nextPath),
+          );
+          set(state => ({
+            sftpSessions: patchSftpSessionRecord(
+              state.sftpSessions,
+              sessionId,
+              {
+                status: 'connected',
+                currentPath: listing.path,
+                listing,
+                errorMessage: null,
+                lastEventAt: new Date().toISOString(),
+              },
+            ),
+          }));
+        } catch (error) {
+          markSftpSessionState(
+            sessionId,
+            'error',
+            error instanceof Error
+              ? error.message
+              : 'SFTP 폴더 목록을 불러오지 못했습니다.',
+          );
+        }
+      };
+
+      const connectSftpSessionRecord = async (
+        sftpSessionRecord: MobileSftpSessionRecord,
+        host: SshHostRecord,
+      ) => {
+        if (
+          runtimeSftpSessions.has(sftpSessionRecord.id) ||
+          pendingSftpConnections.has(sftpSessionRecord.id)
+        ) {
+          return;
+        }
+        pendingSftpConnections.add(sftpSessionRecord.id);
+
+        try {
+          if (host.authType !== 'password' && host.authType !== 'privateKey') {
+            markSftpSessionState(
+              sftpSessionRecord.id,
+              'error',
+              'SFTP는 모바일 v1에서 비밀번호 또는 개인키 인증만 지원합니다.',
+            );
+            return;
+          }
+
+          await ensureRusshInitialized();
+          const credentials = await resolveHostCredentials(host);
+          if (!credentials) {
+            markSftpSessionState(
+              sftpSessionRecord.id,
+              'closed',
+              'SFTP 연결이 취소되었습니다.',
+            );
+            return;
+          }
+
+          const security =
+            host.authType === 'password'
+              ? credentials.password
+                ? {
+                    type: 'password' as const,
+                    password: credentials.password,
+                  }
+                : null
+              : credentials.privateKeyPem
+                ? {
+                    type: 'key' as const,
+                    privateKey: credentials.privateKeyPem,
+                  }
+                : null;
+
+          if (!security) {
+            markSftpSessionState(
+              sftpSessionRecord.id,
+              'error',
+              host.authType === 'password'
+                ? '비밀번호가 필요합니다.'
+                : '개인키 PEM이 필요합니다.',
+            );
+            return;
+          }
+
+          if (security.type === 'key') {
+            const validation = RnRussh.validatePrivateKey(security.privateKey);
+            if (!validation.valid) {
+              markSftpSessionState(
+                sftpSessionRecord.id,
+                'error',
+                '개인키 형식을 확인해 주세요. 암호화된 개인키는 아직 지원하지 않을 수 있습니다.',
+              );
+              return;
+            }
+          }
+
+          set(state => ({
+            sftpSessions: patchSftpSessionRecord(
+              state.sftpSessions,
+              sftpSessionRecord.id,
+              {
+                status: 'connecting',
+                errorMessage: null,
+                lastEventAt: new Date().toISOString(),
+              },
+            ),
+          }));
+
+          const connection = await RnRussh.connectSftp({
+            host: host.hostname,
+            port: host.port,
+            username: host.username,
+            security,
+            onServerKey: async info => resolveKnownHostTrust(host, info),
+            onDisconnected: () => {
+              disconnectRuntimeSftpSession(sftpSessionRecord.id);
+              markSftpSessionState(sftpSessionRecord.id, 'closed');
+            },
+          });
+
+          runtimeSftpSessions.set(sftpSessionRecord.id, {
+            recordId: sftpSessionRecord.id,
+            hostId: host.id,
+            connection,
+          });
+
+          const listing = toDirectoryListing(
+            await connection.listDirectory(
+              sftpSessionRecord.currentPath || '.',
+            ),
+          );
+          const now = new Date().toISOString();
+          set(state => ({
+            sftpSessions: patchSftpSessionRecord(
+              state.sftpSessions,
+              sftpSessionRecord.id,
+              {
+                status: 'connected',
+                currentPath: listing.path,
+                listing,
+                errorMessage: null,
+                lastEventAt: now,
+                lastConnectedAt: now,
+                title: `${host.label} SFTP`,
+              },
+            ),
+          }));
+        } catch (error) {
+          disconnectRuntimeSftpSession(sftpSessionRecord.id);
+          markSftpSessionState(
+            sftpSessionRecord.id,
+            'error',
+            error instanceof Error
+              ? error.message
+              : 'SFTP 연결에 실패했습니다.',
+          );
+        } finally {
+          pendingSftpConnections.delete(sftpSessionRecord.id);
+        }
       };
 
       const connectSessionRecord = async (
@@ -1241,7 +1951,7 @@ export const useMobileAppStore = create<MobileAppState>()(
         pendingSessionConnections.add(sessionRecord.id);
         runtimeSessionSnapshots.set(
           sessionRecord.id,
-          get().sessions.find((item) => item.id === sessionRecord.id)
+          get().sessions.find(item => item.id === sessionRecord.id)
             ?.lastViewportSnapshot ?? sessionRecord.lastViewportSnapshot,
         );
         if (isAwsEc2HostRecord(host)) {
@@ -1254,8 +1964,8 @@ export const useMobileAppStore = create<MobileAppState>()(
         }
         markSessionState(
           sessionRecord.id,
-          "error",
-          "이 호스트 종류는 모바일에서 아직 지원하지 않습니다.",
+          'error',
+          '이 호스트 종류는 모바일에서 아직 지원하지 않습니다.',
         );
         pendingSessionConnections.delete(sessionRecord.id);
       };
@@ -1265,33 +1975,37 @@ export const useMobileAppStore = create<MobileAppState>()(
         host: SshHostRecord,
       ) => {
         try {
-          if (host.authType !== "password" && host.authType !== "privateKey") {
+          if (host.authType !== 'password' && host.authType !== 'privateKey') {
             markSessionState(
               sessionRecord.id,
-              "error",
-              "이 인증 방식은 모바일 v1에서 아직 지원하지 않습니다.",
-              );
-              return;
-            }
+              'error',
+              '이 인증 방식은 모바일 v1에서 아직 지원하지 않습니다.',
+            );
+            return;
+          }
 
           await ensureRusshInitialized();
           const credentials = await resolveHostCredentials(host);
           if (!credentials) {
-            markSessionState(sessionRecord.id, "closed", "연결이 취소되었습니다.");
+            markSessionState(
+              sessionRecord.id,
+              'closed',
+              '연결이 취소되었습니다.',
+            );
             return;
           }
 
           const security =
-            host.authType === "password"
+            host.authType === 'password'
               ? credentials.password
                 ? {
-                    type: "password" as const,
+                    type: 'password' as const,
                     password: credentials.password,
                   }
                 : null
               : credentials.privateKeyPem
                 ? {
-                    type: "key" as const,
+                    type: 'key' as const,
                     privateKey: credentials.privateKeyPem,
                   }
                 : null;
@@ -1299,33 +2013,33 @@ export const useMobileAppStore = create<MobileAppState>()(
           if (!security) {
             markSessionState(
               sessionRecord.id,
-              "error",
-              host.authType === "password"
-                ? "비밀번호가 필요합니다."
-                : "개인키 PEM이 필요합니다.",
+              'error',
+              host.authType === 'password'
+                ? '비밀번호가 필요합니다.'
+                : '개인키 PEM이 필요합니다.',
             );
             return;
           }
 
-          if (security.type === "key") {
+          if (security.type === 'key') {
             const validation = RnRussh.validatePrivateKey(security.privateKey);
             if (!validation.valid) {
               markSessionState(
                 sessionRecord.id,
-                "error",
-                "개인키 형식을 확인해 주세요. 암호화된 개인키는 아직 지원하지 않을 수 있습니다.",
+                'error',
+                '개인키 형식을 확인해 주세요. 암호화된 개인키는 아직 지원하지 않을 수 있습니다.',
               );
               return;
             }
           }
 
           const connectionStartedAt = new Date().toISOString();
-          set((state) => ({
+          set(state => ({
             sessions: patchSessionRecord(state.sessions, sessionRecord.id, {
-              status: "connecting",
+              status: 'connecting',
               errorMessage: null,
               lastEventAt: connectionStartedAt,
-              connectionKind: "ssh",
+              connectionKind: 'ssh',
               connectionDetails: `${host.username}@${host.hostname}:${host.port}`,
             }),
           }));
@@ -1335,36 +2049,36 @@ export const useMobileAppStore = create<MobileAppState>()(
             port: host.port,
             username: host.username,
             security,
-            onServerKey: async (info) => resolveKnownHostTrust(host, info),
+            onServerKey: async info => resolveKnownHostTrust(host, info),
             onDisconnected: () => {
               flushSessionSnapshot(sessionRecord.id, {
                 markActivity: false,
               });
               disconnectRuntimeSession(sessionRecord.id);
-              markSessionState(sessionRecord.id, "closed");
+              markSessionState(sessionRecord.id, 'closed');
             },
           });
           const terminalSize = getCurrentWindowTerminalGridSize();
           const shell = await connection.startShell({
-            term: "Xterm",
+            term: 'Xterm',
             terminalSize: toRusshTerminalSize(terminalSize),
             onClosed: () => {
               flushSessionSnapshot(sessionRecord.id, {
                 markActivity: false,
               });
               disconnectRuntimeSession(sessionRecord.id);
-              markSessionState(sessionRecord.id, "closed");
+              markSessionState(sessionRecord.id, 'closed');
             },
           });
 
           const backgroundListenerId = shell.addListener(
-            (event) => {
-              if ("kind" in event) {
+            event => {
+              if ('kind' in event) {
                 return;
               }
-              const text = Buffer.from(event.bytes).toString("utf8");
+              const text = Buffer.from(event.bytes).toString('utf8');
               const currentSnapshot =
-                runtimeSessionSnapshots.get(sessionRecord.id) ?? "";
+                runtimeSessionSnapshots.get(sessionRecord.id) ?? '';
               runtimeSessionSnapshots.set(
                 sessionRecord.id,
                 trimSnapshot(`${currentSnapshot}${text}`),
@@ -1372,13 +2086,13 @@ export const useMobileAppStore = create<MobileAppState>()(
               scheduleSessionSnapshotFlush(sessionRecord.id);
             },
             {
-              cursor: { mode: "live" },
+              cursor: { mode: 'live' },
               coalesceMs: 20,
             },
           );
 
           runtimeSessions.set(sessionRecord.id, {
-            kind: "ssh",
+            kind: 'ssh',
             recordId: sessionRecord.id,
             hostId: host.id,
             connection,
@@ -1386,14 +2100,14 @@ export const useMobileAppStore = create<MobileAppState>()(
             backgroundListenerId,
           });
 
-          set((state) => ({
+          set(state => ({
             sessions: patchSessionRecord(state.sessions, sessionRecord.id, {
-              status: "connected",
+              status: 'connected',
               errorMessage: null,
               lastEventAt: new Date().toISOString(),
               lastConnectedAt: new Date().toISOString(),
               title: host.label,
-              connectionKind: "ssh",
+              connectionKind: 'ssh',
               connectionDetails: `${host.username}@${host.hostname}:${host.port}`,
             }),
           }));
@@ -1401,8 +2115,8 @@ export const useMobileAppStore = create<MobileAppState>()(
           disconnectRuntimeSession(sessionRecord.id);
           markSessionState(
             sessionRecord.id,
-            "error",
-            error instanceof Error ? error.message : "SSH 연결에 실패했습니다.",
+            'error',
+            error instanceof Error ? error.message : 'SSH 연결에 실패했습니다.',
           );
         } finally {
           pendingSessionConnections.delete(sessionRecord.id);
@@ -1418,37 +2132,39 @@ export const useMobileAppStore = create<MobileAppState>()(
           if (!accessToken) {
             markSessionState(
               sessionRecord.id,
-              "error",
-              "AWS 세션을 시작하려면 다시 로그인해야 합니다.",
+              'error',
+              'AWS 세션을 시작하려면 다시 로그인해야 합니다.',
             );
             return;
           }
 
           let awsSsmServerSupport = get().syncStatus.awsSsmServerSupport;
-          if (awsSsmServerSupport === "unknown") {
+          if (awsSsmServerSupport === 'unknown') {
             try {
-              const serverInfo = await fetchServerInfo(get().settings.serverUrl);
+              const serverInfo = await fetchServerInfo(
+                get().settings.serverUrl,
+              );
               awsSsmServerSupport = serverInfo.capabilities.sessions.awsSsm
-                ? "supported"
-                : "unsupported";
-              set((state) => ({
+                ? 'supported'
+                : 'unsupported';
+              set(state => ({
                 syncStatus: {
                   ...state.syncStatus,
                   awsProfilesServerSupport: serverInfo.capabilities.sync
                     .awsProfiles
-                    ? "supported"
-                    : "unsupported",
+                    ? 'supported'
+                    : 'unsupported',
                   awsSsmServerSupport,
                 },
               }));
             } catch {}
           }
 
-          if (awsSsmServerSupport === "unsupported") {
+          if (awsSsmServerSupport === 'unsupported') {
             markSessionState(
               sessionRecord.id,
-              "error",
-              "이 서버는 AWS SSM 세션을 지원하지 않습니다.",
+              'error',
+              '이 서버는 AWS SSM 세션을 지원하지 않습니다.',
             );
             return;
           }
@@ -1458,7 +2174,7 @@ export const useMobileAppStore = create<MobileAppState>()(
             profiles: get().awsProfiles,
             serverUrl: get().settings.serverUrl,
             authAccessToken: accessToken,
-            presentLoginPrompt: (prompt) => {
+            presentLoginPrompt: prompt => {
               pendingAwsSsoCancelHandler = prompt.onCancel;
               set({ pendingAwsSsoLogin: prompt });
             },
@@ -1469,26 +2185,27 @@ export const useMobileAppStore = create<MobileAppState>()(
           });
           const terminalSize = getCurrentWindowTerminalGridSize();
           const wsUrl = new URL(
-            "/api/aws-sessions/ws",
+            '/api/aws-sessions/ws',
             get().settings.serverUrl,
           );
-          wsUrl.searchParams.set("access_token", accessToken);
-          const wsProtocol = wsUrl.protocol === "https:" ? "wss:" : "ws:";
+          wsUrl.searchParams.set('access_token', accessToken);
+          const wsProtocol = wsUrl.protocol === 'https:' ? 'wss:' : 'ws:';
           const wsEndpoint = `${wsProtocol}//${wsUrl.host}${wsUrl.pathname}${wsUrl.search}`;
 
-          const socket = new (WebSocket as unknown as ReactNativeWebSocketConstructor)(
-            wsEndpoint,
-            [],
-            {
-              headers: {
-                Authorization: `Bearer ${accessToken}`,
+          const socket =
+            new (WebSocket as unknown as ReactNativeWebSocketConstructor)(
+              wsEndpoint,
+              [],
+              {
+                headers: {
+                  Authorization: `Bearer ${accessToken}`,
+                },
               },
-            },
-          );
+            );
           let socketOpened = false;
           let receivedServerMessage = false;
           const nextRuntime: AwsRuntimeSession = {
-            kind: "aws-ssm",
+            kind: 'aws-ssm',
             recordId: sessionRecord.id,
             hostId: host.id,
             socket,
@@ -1497,13 +2214,13 @@ export const useMobileAppStore = create<MobileAppState>()(
           };
           runtimeSessions.set(sessionRecord.id, nextRuntime);
 
-          set((state) => ({
+          set(state => ({
             sessions: patchSessionRecord(state.sessions, sessionRecord.id, {
-              status: "connecting",
+              status: 'connecting',
               errorMessage: null,
               lastEventAt: new Date().toISOString(),
               title: host.label,
-              connectionKind: "aws-ssm",
+              connectionKind: 'aws-ssm',
               connectionDetails: resolvedSession.connectionDetails,
             }),
           }));
@@ -1511,13 +2228,13 @@ export const useMobileAppStore = create<MobileAppState>()(
           socket.onopen = () => {
             socketOpened = true;
             const message: AwsSsmSessionClientMessage = {
-              type: "start",
+              type: 'start',
               payload: {
                 hostId: host.id,
                 label: host.label,
                 // Mobile sends resolved env credentials, so the server should not
                 // depend on a matching profile file being present in the container.
-                profileName: "",
+                profileName: '',
                 region: resolvedSession.region,
                 instanceId: host.awsInstanceId,
                 cols: terminalSize.cols,
@@ -1529,34 +2246,34 @@ export const useMobileAppStore = create<MobileAppState>()(
             socket.send(JSON.stringify(message));
           };
 
-          socket.onmessage = (event) => {
+          socket.onmessage = event => {
             receivedServerMessage = true;
             const message = JSON.parse(
               String(event.data),
             ) as AwsSsmSessionServerMessage;
-            if (message.type === "ready") {
+            if (message.type === 'ready') {
               pendingSessionConnections.delete(sessionRecord.id);
-              set((state) => ({
+              set(state => ({
                 sessions: patchSessionRecord(state.sessions, sessionRecord.id, {
-                  status: "connected",
+                  status: 'connected',
                   errorMessage: null,
                   lastEventAt: new Date().toISOString(),
                   lastConnectedAt: new Date().toISOString(),
                   title: host.label,
-                  connectionKind: "aws-ssm",
+                  connectionKind: 'aws-ssm',
                   connectionDetails: resolvedSession.connectionDetails,
                 }),
               }));
               return;
             }
 
-            if (message.type === "output" && message.dataBase64) {
+            if (message.type === 'output' && message.dataBase64) {
               const chunk = Uint8Array.from(
-                Buffer.from(message.dataBase64, "base64"),
+                Buffer.from(message.dataBase64, 'base64'),
               );
-              const text = Buffer.from(chunk).toString("utf8");
+              const text = Buffer.from(chunk).toString('utf8');
               const currentSnapshot =
-                runtimeSessionSnapshots.get(sessionRecord.id) ?? "";
+                runtimeSessionSnapshots.get(sessionRecord.id) ?? '';
               runtimeSessionSnapshots.set(
                 sessionRecord.id,
                 trimSnapshot(`${currentSnapshot}${text}`),
@@ -1569,45 +2286,45 @@ export const useMobileAppStore = create<MobileAppState>()(
               return;
             }
 
-            if (message.type === "error") {
+            if (message.type === 'error') {
               pendingSessionConnections.delete(sessionRecord.id);
               markSessionState(
                 sessionRecord.id,
-                "error",
-                message.message || "AWS SSM 연결에 실패했습니다.",
+                'error',
+                message.message || 'AWS SSM 연결에 실패했습니다.',
               );
               return;
             }
 
-            if (message.type === "exit") {
+            if (message.type === 'exit') {
               flushSessionSnapshot(sessionRecord.id, {
                 markActivity: false,
               });
               disconnectRuntimeSession(sessionRecord.id);
               const currentSession = get().sessions.find(
-                (item) => item.id === sessionRecord.id,
+                item => item.id === sessionRecord.id,
               );
-              if (currentSession?.status === "error") {
+              if (currentSession?.status === 'error') {
                 return;
               }
 
               if (
                 currentSession &&
-                currentSession.status !== "disconnecting" &&
-                (currentSession.status === "connecting" ||
+                currentSession.status !== 'disconnecting' &&
+                (currentSession.status === 'connecting' ||
                   !currentSession.hasReceivedOutput)
               ) {
                 markSessionState(
                   sessionRecord.id,
-                  "error",
-                  message.message || "AWS SSM 세션이 시작 직후 종료되었습니다.",
+                  'error',
+                  message.message || 'AWS SSM 세션이 시작 직후 종료되었습니다.',
                 );
                 return;
               }
 
               markSessionState(
                 sessionRecord.id,
-                "closed",
+                'closed',
                 message.message || null,
               );
             }
@@ -1620,8 +2337,8 @@ export const useMobileAppStore = create<MobileAppState>()(
             }
             markSessionState(
               sessionRecord.id,
-              "error",
-              "AWS SSM WebSocket 연결에 실패했습니다.",
+              'error',
+              'AWS SSM WebSocket 연결에 실패했습니다.',
             );
           };
 
@@ -1631,36 +2348,36 @@ export const useMobileAppStore = create<MobileAppState>()(
             });
             disconnectRuntimeSession(sessionRecord.id);
             const currentSession = get().sessions.find(
-              (item) => item.id === sessionRecord.id,
+              item => item.id === sessionRecord.id,
             );
             if (
               currentSession &&
-              currentSession.status !== "closed" &&
-              currentSession.status !== "error"
+              currentSession.status !== 'closed' &&
+              currentSession.status !== 'error'
             ) {
               if (
-                currentSession.status !== "disconnecting" &&
-                (currentSession.status === "connecting" ||
+                currentSession.status !== 'disconnecting' &&
+                (currentSession.status === 'connecting' ||
                   !currentSession.hasReceivedOutput)
               ) {
                 markSessionState(
                   sessionRecord.id,
-                  "error",
-                  "AWS SSM 세션이 예기치 않게 종료되었습니다.",
+                  'error',
+                  'AWS SSM 세션이 예기치 않게 종료되었습니다.',
                 );
                 return;
               }
-              markSessionState(sessionRecord.id, "closed");
+              markSessionState(sessionRecord.id, 'closed');
             }
           };
         } catch (error) {
           disconnectRuntimeSession(sessionRecord.id);
           markSessionState(
             sessionRecord.id,
-            "error",
+            'error',
             error instanceof Error
               ? error.message
-              : "AWS SSM 연결에 실패했습니다.",
+              : 'AWS SSM 연결에 실패했습니다.',
           );
         } finally {
           pendingSessionConnections.delete(sessionRecord.id);
@@ -1670,7 +2387,7 @@ export const useMobileAppStore = create<MobileAppState>()(
       const syncWithSession = async (
         sessionOverride?: AuthSession | null,
         options?: {
-          context?: "login" | "sync";
+          context?: 'login' | 'sync';
         },
       ) => {
         const activeSession = sessionOverride ?? get().auth.session ?? null;
@@ -1689,10 +2406,10 @@ export const useMobileAppStore = create<MobileAppState>()(
         }
 
         syncPromise = (async () => {
-          set((state) => ({
+          set(state => ({
             syncStatus: {
               ...state.syncStatus,
-              status: "syncing",
+              status: 'syncing',
               errorMessage: null,
             },
           }));
@@ -1718,7 +2435,7 @@ export const useMobileAppStore = create<MobileAppState>()(
                 await saveStoredAuthSession(currentSession);
                 set({
                   auth: {
-                    status: "authenticated",
+                    status: 'authenticated',
                     session: currentSession,
                     offline: null,
                     errorMessage: null,
@@ -1766,54 +2483,61 @@ export const useMobileAppStore = create<MobileAppState>()(
               knownHosts: sortKnownHosts(nextKnownHosts),
               secureStateReady: true,
               auth: {
-                status: "authenticated",
+                status: 'authenticated',
                 session: currentSession,
                 offline: null,
                 errorMessage: null,
               },
               syncStatus: {
-                status: "ready",
+                status: 'ready',
                 pendingPush: false,
                 errorMessage: null,
                 lastSuccessfulSyncAt: new Date().toISOString(),
                 awsProfilesServerSupport:
                   serverInfo?.capabilities.sync.awsProfiles === true
-                    ? "supported"
+                    ? 'supported'
                     : serverInfo?.capabilities.sync.awsProfiles === false
-                      ? "unsupported"
-                      : "unknown",
+                      ? 'unsupported'
+                      : 'unknown',
                 awsSsmServerSupport:
                   serverInfo?.capabilities.sessions.awsSsm === true
-                    ? "supported"
+                    ? 'supported'
                     : serverInfo?.capabilities.sessions.awsSsm === false
-                      ? "unsupported"
-                      : "unknown",
+                      ? 'unsupported'
+                      : 'unknown',
               },
             });
           } catch (error) {
-            if (isLikelyNetworkError(error) && isOfflineLeaseActive(currentSession)) {
+            if (
+              isLikelyNetworkError(error) &&
+              isOfflineLeaseActive(currentSession)
+            ) {
               set({
                 auth: {
-                  status: "offline-authenticated",
+                  status: 'offline-authenticated',
                   session: currentSession,
                   offline: buildOfflineState(
                     currentSession,
-                    "네트워크 없이 캐시된 데이터를 사용하고 있습니다.",
+                    '네트워크 없이 캐시된 데이터를 사용하고 있습니다.',
                   ),
                   errorMessage: null,
                 },
                 syncStatus: {
                   ...get().syncStatus,
-                  status: "paused",
+                  status: 'paused',
                   errorMessage:
                     error instanceof Error
                       ? error.message
-                      : "네트워크에 연결할 수 없습니다.",
+                      : '네트워크에 연결할 수 없습니다.',
                 },
               });
-              scheduleOfflineRecoveryRetry(currentSession, get().settings.serverUrl, {
-                reset: true,
-              });
+              scheduleOfflineRecoveryRetry(
+                currentSession,
+                get().settings.serverUrl,
+                {
+                  reset: true,
+                },
+              );
               return;
             }
 
@@ -1823,25 +2547,25 @@ export const useMobileAppStore = create<MobileAppState>()(
               set({
                 auth: {
                   ...createUnauthenticatedState(),
-                  errorMessage: "세션이 만료되어 다시 로그인해야 합니다.",
+                  errorMessage: '세션이 만료되어 다시 로그인해야 합니다.',
                 },
                 syncStatus: {
                   ...createDefaultSyncStatus(),
-                  status: "error",
-                  errorMessage: "세션이 만료되었습니다.",
+                  status: 'error',
+                  errorMessage: '세션이 만료되었습니다.',
                 },
                 ...createEmptyProtectedState(),
               });
               return;
             }
 
-            set((state) => ({
+            set(state => ({
               syncStatus: {
                 ...state.syncStatus,
-                status: "error",
+                status: 'error',
                 errorMessage: getSyncFailureMessage(
                   error,
-                  options?.context ?? "sync",
+                  options?.context ?? 'sync',
                 ),
               },
             }));
@@ -1881,7 +2605,11 @@ export const useMobileAppStore = create<MobileAppState>()(
         knownHosts: [],
         secretMetadata: [],
         sessions: [],
+        sftpSessions: [],
+        sftpTransfers: [],
+        sftpCopyBuffer: null,
         activeSessionTabId: null,
+        activeConnectionTab: null,
         secretsByRef: {},
         pendingBrowserLoginState: null,
         pendingAwsSsoLogin: null,
@@ -1900,9 +2628,8 @@ export const useMobileAppStore = create<MobileAppState>()(
             });
 
             try {
-              const finishStoredAuthLoadTiming = beginStartupTiming(
-                "stored auth load",
-              );
+              const finishStoredAuthLoadTiming =
+                beginStartupTiming('stored auth load');
               const storedSession = await loadStoredAuthSession();
               finishStoredAuthLoadTiming?.();
               if (!storedSession) {
@@ -1921,21 +2648,24 @@ export const useMobileAppStore = create<MobileAppState>()(
               const currentRestoreVersion = secureStateRestoreVersion + 1;
               secureStateRestoreVersion = currentRestoreVersion;
               clearOfflineRecoveryLoop();
-              resolveAuthGate({
-                auth: {
-                  status: "authenticated",
-                  session: storedSession,
-                  offline: null,
-                  errorMessage: null,
+              resolveAuthGate(
+                {
+                  auth: {
+                    status: 'authenticated',
+                    session: storedSession,
+                    offline: null,
+                    errorMessage: null,
+                  },
+                  syncStatus: {
+                    ...get().syncStatus,
+                    status: 'syncing',
+                    errorMessage: null,
+                  },
                 },
-                syncStatus: {
-                  ...get().syncStatus,
-                  status: "syncing",
-                  errorMessage: null,
+                {
+                  secureStateReady: false,
                 },
-              }, {
-                secureStateReady: false,
-              });
+              );
               void restoreStoredSecureStateInBackground(
                 currentServerUrl,
                 currentRestoreVersion,
@@ -1977,10 +2707,10 @@ export const useMobileAppStore = create<MobileAppState>()(
             return;
           }
 
-          set((state) => ({
+          set(state => ({
             auth: {
               ...state.auth,
-              status: "authenticating",
+              status: 'authenticating',
               errorMessage: null,
             },
           }));
@@ -1994,14 +2724,14 @@ export const useMobileAppStore = create<MobileAppState>()(
             clearOfflineRecoveryLoop();
             set({
               auth: {
-                status: "authenticated",
+                status: 'authenticated',
                 session,
                 offline: null,
                 errorMessage: null,
               },
               pendingBrowserLoginState: null,
             });
-            await syncWithSession(session, { context: "login" });
+            await syncWithSession(session, { context: 'login' });
           } catch (error) {
             set({
               auth: {
@@ -2009,7 +2739,7 @@ export const useMobileAppStore = create<MobileAppState>()(
                 errorMessage:
                   error instanceof Error
                     ? error.message
-                    : "로그인 교환에 실패했습니다.",
+                    : '로그인 교환에 실패했습니다.',
               },
               pendingBrowserLoginState: null,
             });
@@ -2034,7 +2764,7 @@ export const useMobileAppStore = create<MobileAppState>()(
             pendingBrowserLoginState: stateToken,
             auth: {
               ...get().auth,
-              status: "authenticating",
+              status: 'authenticating',
               errorMessage: null,
             },
           });
@@ -2051,7 +2781,7 @@ export const useMobileAppStore = create<MobileAppState>()(
                 errorMessage:
                   error instanceof Error
                     ? error.message
-                    : "브라우저 로그인을 시작하지 못했습니다.",
+                    : '브라우저 로그인을 시작하지 못했습니다.',
               },
             });
           }
@@ -2077,13 +2807,13 @@ export const useMobileAppStore = create<MobileAppState>()(
           try {
             await openAwsSsoBrowser(pending.browserUrl);
           } catch (error) {
-            set((state) => ({
+            set(state => ({
               auth: {
                 ...state.auth,
                 errorMessage:
                   error instanceof Error
                     ? error.message
-                    : "브라우저를 다시 열지 못했습니다.",
+                    : '브라우저를 다시 열지 못했습니다.',
               },
             }));
           }
@@ -2115,7 +2845,11 @@ export const useMobileAppStore = create<MobileAppState>()(
             secretMetadata: [],
             secretsByRef: {},
             sessions: [],
+            sftpSessions: [],
+            sftpTransfers: [],
+            sftpCopyBuffer: null,
             activeSessionTabId: null,
+            activeConnectionTab: null,
             syncStatus: createDefaultSyncStatus(),
             pendingBrowserLoginState: null,
             pendingAwsSsoLogin: null,
@@ -2132,10 +2866,12 @@ export const useMobileAppStore = create<MobileAppState>()(
             ...input,
           };
 
-          if (typeof input.serverUrl === "string") {
-            const validationMessage = getSettingsValidationMessage(input.serverUrl);
+          if (typeof input.serverUrl === 'string') {
+            const validationMessage = getSettingsValidationMessage(
+              input.serverUrl,
+            );
             if (validationMessage) {
-              set((state) => ({
+              set(state => ({
                 auth: {
                   ...state.auth,
                   errorMessage: validationMessage,
@@ -2146,7 +2882,7 @@ export const useMobileAppStore = create<MobileAppState>()(
           }
 
           const serverChanged =
-            typeof input.serverUrl === "string" &&
+            typeof input.serverUrl === 'string' &&
             input.serverUrl.trim() !== get().settings.serverUrl;
 
           if (serverChanged) {
@@ -2164,7 +2900,7 @@ export const useMobileAppStore = create<MobileAppState>()(
               auth: {
                 ...createUnauthenticatedState(),
                 errorMessage: get().auth.session
-                  ? "서버 주소가 변경되어 다시 로그인해 주세요."
+                  ? '서버 주소가 변경되어 다시 로그인해 주세요.'
                   : null,
               },
               groups: [],
@@ -2174,7 +2910,11 @@ export const useMobileAppStore = create<MobileAppState>()(
               secretMetadata: [],
               secretsByRef: {},
               sessions: [],
+              sftpSessions: [],
+              sftpTransfers: [],
+              sftpCopyBuffer: null,
               activeSessionTabId: null,
+              activeConnectionTab: null,
               syncStatus: createDefaultSyncStatus(),
               pendingBrowserLoginState: null,
               pendingAwsSsoLogin: null,
@@ -2187,7 +2927,7 @@ export const useMobileAppStore = create<MobileAppState>()(
         },
         connectToHost: async (hostId: string) => {
           if (!get().secureStateReady) {
-            set((state) => ({
+            set(state => ({
               syncStatus: {
                 ...state.syncStatus,
                 errorMessage: SECURE_STATE_LOADING_MESSAGE,
@@ -2196,21 +2936,21 @@ export const useMobileAppStore = create<MobileAppState>()(
             return null;
           }
 
-          const host = get().hosts.find((item) => item.id === hostId);
+          const host = get().hosts.find(item => item.id === hostId);
           if (!host) {
             return null;
           }
 
           const liveSession = get().sessions.find(
-            (session) => session.hostId === hostId && isLiveSession(session),
+            session => session.hostId === hostId && isLiveSession(session),
           );
           if (liveSession) {
             get().setActiveSessionTab(liveSession.id);
             if (
               !runtimeSessions.has(liveSession.id) &&
               !pendingSessionConnections.has(liveSession.id) &&
-              liveSession.status !== "connecting" &&
-              liveSession.status !== "disconnecting"
+              liveSession.status !== 'connecting' &&
+              liveSession.status !== 'disconnecting'
             ) {
               void get().resumeSession(liveSession.id);
             }
@@ -2218,8 +2958,11 @@ export const useMobileAppStore = create<MobileAppState>()(
           }
 
           const nextSession = createSessionRecord(host);
-          set((state) => {
-            const nextSessions = upsertSessionRecord(state.sessions, nextSession);
+          set(state => {
+            const nextSessions = upsertSessionRecord(
+              state.sessions,
+              nextSession,
+            );
             return {
               sessions: nextSessions,
               activeSessionTabId: resolveActiveSessionTabId(
@@ -2227,22 +2970,100 @@ export const useMobileAppStore = create<MobileAppState>()(
                 state.activeSessionTabId,
                 nextSession.id,
               ),
+              activeConnectionTab: normalizeActiveConnectionTab(
+                nextSessions,
+                state.sftpSessions,
+                state.activeConnectionTab,
+                { kind: 'terminal', id: nextSession.id },
+              ),
             };
           });
           void connectSessionRecord(nextSession, host);
           return nextSession.id;
         },
+        duplicateSession: async (sessionId: string) => {
+          if (!get().secureStateReady) {
+            set(state => ({
+              syncStatus: {
+                ...state.syncStatus,
+                errorMessage: SECURE_STATE_LOADING_MESSAGE,
+              },
+            }));
+            return null;
+          }
+
+          const sourceSession = get().sessions.find(
+            session => session.id === sessionId,
+          );
+          if (!sourceSession) {
+            return null;
+          }
+
+          const host = get().hosts.find(
+            item => item.id === sourceSession.hostId,
+          );
+          if (!host) {
+            return null;
+          }
+
+          const nextSession = createSessionRecord(host);
+          set(state => {
+            const nextSessions = upsertSessionRecord(
+              state.sessions,
+              nextSession,
+            );
+            return {
+              sessions: nextSessions,
+              activeSessionTabId: resolveActiveSessionTabId(
+                nextSessions,
+                state.activeSessionTabId,
+                nextSession.id,
+              ),
+              activeConnectionTab: normalizeActiveConnectionTab(
+                nextSessions,
+                state.sftpSessions,
+                state.activeConnectionTab,
+                { kind: 'terminal', id: nextSession.id },
+              ),
+            };
+          });
+          void connectSessionRecord(nextSession, host);
+          return nextSession.id;
+        },
+        setActiveConnectionTab: (tab: MobileConnectionTabRef | null) => {
+          set(state => {
+            const nextTab = normalizeActiveConnectionTab(
+              state.sessions,
+              state.sftpSessions,
+              state.activeConnectionTab,
+              tab,
+            );
+            return {
+              activeConnectionTab: nextTab,
+              activeSessionTabId:
+                nextTab?.kind === 'terminal'
+                  ? nextTab.id
+                  : state.activeSessionTabId,
+            };
+          });
+        },
         setActiveSessionTab: (sessionId: string | null) => {
-          set((state) => ({
+          set(state => ({
             activeSessionTabId: resolveActiveSessionTabId(
               state.sessions,
               state.activeSessionTabId,
               sessionId,
             ),
+            activeConnectionTab: normalizeActiveConnectionTab(
+              state.sessions,
+              state.sftpSessions,
+              state.activeConnectionTab,
+              sessionId ? { kind: 'terminal', id: sessionId } : null,
+            ),
           }));
         },
         resumeSession: async (sessionId: string) => {
-          const session = get().sessions.find((item) => item.id === sessionId);
+          const session = get().sessions.find(item => item.id === sessionId);
           if (!session) {
             return null;
           }
@@ -2252,28 +3073,32 @@ export const useMobileAppStore = create<MobileAppState>()(
           if (
             runtimeSessions.has(session.id) ||
             pendingSessionConnections.has(session.id) ||
-            session.status === "connecting" ||
-            session.status === "disconnecting"
+            session.status === 'connecting' ||
+            session.status === 'disconnecting'
           ) {
             return session.id;
           }
 
-          const host = get().hosts.find((item) => item.id === session.hostId);
+          const host = get().hosts.find(item => item.id === session.hostId);
           if (!host) {
             markSessionState(
               session.id,
-              "error",
-              "이 세션의 호스트 정보를 찾을 수 없습니다.",
+              'error',
+              '이 세션의 호스트 정보를 찾을 수 없습니다.',
             );
             return session.id;
           }
 
-          set((state) => {
-            const nextSessions = patchSessionRecord(state.sessions, session.id, {
-              status: "connecting",
-              errorMessage: null,
-              lastEventAt: new Date().toISOString(),
-            });
+          set(state => {
+            const nextSessions = patchSessionRecord(
+              state.sessions,
+              session.id,
+              {
+                status: 'connecting',
+                errorMessage: null,
+                lastEventAt: new Date().toISOString(),
+              },
+            );
             return {
               sessions: nextSessions,
               activeSessionTabId: resolveActiveSessionTabId(
@@ -2289,18 +3114,18 @@ export const useMobileAppStore = create<MobileAppState>()(
         disconnectSession: async (sessionId: string) => {
           const runtime = runtimeSessions.get(sessionId);
           if (!runtime) {
-            markSessionState(sessionId, "closed");
+            markSessionState(sessionId, 'closed');
             return;
           }
 
-          set((state) => ({
+          set(state => ({
             sessions: patchSessionRecord(state.sessions, sessionId, {
-              status: "disconnecting",
+              status: 'disconnecting',
               lastEventAt: new Date().toISOString(),
             }),
           }));
 
-          if (runtime.kind === "ssh") {
+          if (runtime.kind === 'ssh') {
             try {
               await runtime.connection.disconnect();
             } catch {}
@@ -2314,14 +3139,14 @@ export const useMobileAppStore = create<MobileAppState>()(
             markActivity: false,
           });
           disconnectRuntimeSession(sessionId);
-          markSessionState(sessionId, "closed");
+          markSessionState(sessionId, 'closed');
         },
         removeSession: async (sessionId: string) => {
           const runtime = runtimeSessions.get(sessionId);
 
-          set((state) => {
+          set(state => {
             const nextSessions = sortSessions(
-              state.sessions.filter((session) => session.id !== sessionId),
+              state.sessions.filter(session => session.id !== sessionId),
             );
             return {
               sessions: nextSessions,
@@ -2330,6 +3155,14 @@ export const useMobileAppStore = create<MobileAppState>()(
                 state.activeSessionTabId === sessionId
                   ? null
                   : state.activeSessionTabId,
+              ),
+              activeConnectionTab: normalizeActiveConnectionTab(
+                nextSessions,
+                state.sftpSessions,
+                state.activeConnectionTab?.kind === 'terminal' &&
+                  state.activeConnectionTab.id === sessionId
+                  ? null
+                  : state.activeConnectionTab,
               ),
             };
           });
@@ -2342,7 +3175,7 @@ export const useMobileAppStore = create<MobileAppState>()(
 
           disconnectRuntimeSession(sessionId);
 
-          if (runtime.kind === "ssh") {
+          if (runtime.kind === 'ssh') {
             try {
               await runtime.connection.disconnect();
             } catch {}
@@ -2357,8 +3190,8 @@ export const useMobileAppStore = create<MobileAppState>()(
           if (!runtime) {
             return;
           }
-          const bytes = Buffer.from(data, "utf8");
-          if (runtime.kind === "ssh") {
+          const bytes = Buffer.from(data, 'utf8');
+          if (runtime.kind === 'ssh') {
             await runtime.shell.sendData(
               bytes.buffer.slice(
                 bytes.byteOffset,
@@ -2369,8 +3202,8 @@ export const useMobileAppStore = create<MobileAppState>()(
           }
 
           const message: AwsSsmSessionClientMessage = {
-            type: "input",
-            dataBase64: bytes.toString("base64"),
+            type: 'input',
+            dataBase64: bytes.toString('base64'),
           };
           runtime.socket.send(JSON.stringify(message));
         },
@@ -2380,21 +3213,21 @@ export const useMobileAppStore = create<MobileAppState>()(
             return () => {};
           }
 
-          if (runtime.kind === "ssh") {
-            const replay = runtime.shell.readBuffer({ mode: "head" });
+          if (runtime.kind === 'ssh') {
+            const replay = runtime.shell.readBuffer({ mode: 'head' });
             handlers.onReplay(
-              replay.chunks.map((chunk) => new Uint8Array(chunk.bytes)),
+              replay.chunks.map(chunk => new Uint8Array(chunk.bytes)),
             );
 
             const listenerId = runtime.shell.addListener(
-              (event) => {
-                if ("kind" in event) {
+              event => {
+                if ('kind' in event) {
                   return;
                 }
                 handlers.onData(new Uint8Array(event.bytes));
               },
               {
-                cursor: { mode: "seq", seq: replay.nextSeq },
+                cursor: { mode: 'seq', seq: replay.nextSeq },
                 coalesceMs: 16,
               },
             );
@@ -2413,9 +3246,9 @@ export const useMobileAppStore = create<MobileAppState>()(
                 ? [
                     Uint8Array.from(
                       Buffer.from(
-                        get().sessions.find((item) => item.id === sessionId)
-                          ?.lastViewportSnapshot ?? "",
-                        "utf8",
+                        get().sessions.find(item => item.id === sessionId)
+                          ?.lastViewportSnapshot ?? '',
+                        'utf8',
                       ),
                     ),
                   ]
@@ -2426,6 +3259,603 @@ export const useMobileAppStore = create<MobileAppState>()(
           return () => {
             runtime.subscribers.delete(subscriptionId);
           };
+        },
+        openSftpForSession: async (sessionId: string) => {
+          const sourceSession = get().sessions.find(
+            session => session.id === sessionId && isLiveSession(session),
+          );
+          if (!sourceSession) {
+            return null;
+          }
+
+          const host = get().hosts.find(
+            item => item.id === sourceSession.hostId,
+          );
+          if (!host || !isSshHostRecord(host)) {
+            return null;
+          }
+
+          const existing = get().sftpSessions.find(
+            session => session.hostId === host.id && isLiveSftpSession(session),
+          );
+          if (existing) {
+            get().setActiveConnectionTab({ kind: 'sftp', id: existing.id });
+            if (
+              existing.status === 'error' &&
+              !runtimeSftpSessions.has(existing.id) &&
+              !pendingSftpConnections.has(existing.id)
+            ) {
+              void connectSftpSessionRecord(existing, host);
+            }
+            return existing.id;
+          }
+
+          const nextSftpSession = createSftpSessionRecord(sourceSession, host);
+          set(state => {
+            const nextSftpSessions = upsertSftpSessionRecord(
+              state.sftpSessions,
+              nextSftpSession,
+            );
+            return {
+              sftpSessions: nextSftpSessions,
+              activeConnectionTab: normalizeActiveConnectionTab(
+                state.sessions,
+                nextSftpSessions,
+                state.activeConnectionTab,
+                { kind: 'sftp', id: nextSftpSession.id },
+              ),
+            };
+          });
+          void connectSftpSessionRecord(nextSftpSession, host);
+          return nextSftpSession.id;
+        },
+        disconnectSftpSession: async (sftpSessionId: string) => {
+          const runtime = runtimeSftpSessions.get(sftpSessionId);
+          set(state => ({
+            sftpSessions: patchSftpSessionRecord(
+              state.sftpSessions,
+              sftpSessionId,
+              {
+                status: 'disconnecting',
+                lastEventAt: new Date().toISOString(),
+              },
+            ),
+          }));
+
+          if (runtime) {
+            try {
+              await runtime.connection.close();
+            } catch {}
+          }
+          disconnectRuntimeSftpSession(sftpSessionId);
+          markSftpSessionState(sftpSessionId, 'closed');
+        },
+        listSftpDirectory: async (sftpSessionId: string, path?: string) => {
+          await refreshSftpDirectory(sftpSessionId, path);
+        },
+        downloadSftpFile: async (sftpSessionId: string, remotePath: string) => {
+          const runtime = runtimeSftpSessions.get(sftpSessionId);
+          const sftpSession = get().sftpSessions.find(
+            session => session.id === sftpSessionId,
+          );
+          if (!runtime || !sftpSession) {
+            return;
+          }
+
+          const fileName = remoteBasename(remotePath) || 'download';
+          const destination = await pickDownloadDestination(fileName);
+          if (!destination) {
+            return;
+          }
+
+          const listingEntry = sftpSession.listing?.entries.find(
+            entry => entry.path === remotePath,
+          );
+          const now = new Date().toISOString();
+          const transferId = createLocalId('sftp-transfer');
+          set(state => ({
+            sftpTransfers: [
+              ...state.sftpTransfers,
+              {
+                id: transferId,
+                sftpSessionId,
+                direction: 'download',
+                remotePath,
+                localName: destination.name,
+                status: 'running',
+                bytesTransferred: 0,
+                totalBytes: listingEntry?.size ?? null,
+                createdAt: now,
+                updatedAt: now,
+              },
+            ],
+          }));
+
+          let offset = 0;
+          try {
+            for (;;) {
+              const chunk = await runtime.connection.readFileChunk(
+                remotePath,
+                offset,
+                SFTP_TRANSFER_CHUNK_SIZE,
+              );
+              const bytes = Buffer.from(new Uint8Array(chunk.bytes));
+              const bytesRead = chunk.bytesRead || bytes.byteLength;
+              if (bytesRead <= 0) {
+                break;
+              }
+              await writeDownloadChunk(
+                destination.uri,
+                bytes.toString('base64'),
+                offset > 0,
+              );
+              offset += bytesRead;
+              set(state => ({
+                sftpTransfers: patchSftpTransferRecord(
+                  state.sftpTransfers,
+                  transferId,
+                  {
+                    bytesTransferred: offset,
+                    status: 'running',
+                  },
+                ),
+              }));
+              if (chunk.eof || bytesRead < SFTP_TRANSFER_CHUNK_SIZE) {
+                break;
+              }
+            }
+            set(state => ({
+              sftpTransfers: patchSftpTransferRecord(
+                state.sftpTransfers,
+                transferId,
+                {
+                  status: 'completed',
+                  bytesTransferred: offset,
+                },
+              ),
+            }));
+          } catch (error) {
+            try {
+              await deleteDownloadDestination(destination.uri);
+            } catch {}
+            const message =
+              error instanceof Error
+                ? error.message
+                : '파일 다운로드에 실패했습니다.';
+            set(state => ({
+              sftpTransfers: patchSftpTransferRecord(
+                state.sftpTransfers,
+                transferId,
+                {
+                  status: 'error',
+                  errorMessage: message,
+                  bytesTransferred: offset,
+                },
+              ),
+              sftpSessions: patchSftpSessionRecord(
+                state.sftpSessions,
+                sftpSessionId,
+                {
+                  errorMessage: message,
+                  lastEventAt: new Date().toISOString(),
+                },
+              ),
+            }));
+          }
+        },
+        downloadSftpEntries: async (
+          sftpSessionId: string,
+          remotePaths: string[],
+        ) => {
+          const runtime = runtimeSftpSessions.get(sftpSessionId);
+          const sftpSession = get().sftpSessions.find(
+            session => session.id === sftpSessionId,
+          );
+          if (!runtime || !sftpSession || remotePaths.length === 0) {
+            return;
+          }
+
+          const destinationDirectory = await pickDownloadDirectory(
+            sftpSession.title || 'SFTP Downloads',
+          );
+          if (!destinationDirectory) {
+            return;
+          }
+
+          for (const remotePath of remotePaths) {
+            const entry = await resolveRemoteEntry(
+              runtime.connection,
+              remotePath,
+              sftpSession.listing,
+            );
+            const now = new Date().toISOString();
+            const transferId = createLocalId('sftp-transfer');
+            set(state => ({
+              sftpTransfers: [
+                ...state.sftpTransfers,
+                {
+                  id: transferId,
+                  sftpSessionId,
+                  direction: 'download',
+                  remotePath: entry.path,
+                  localName: entry.name,
+                  status: 'running',
+                  bytesTransferred: 0,
+                  totalBytes: entry.isDirectory ? null : entry.size,
+                  createdAt: now,
+                  updatedAt: now,
+                },
+              ],
+            }));
+
+            try {
+              const bytesTransferred = await downloadRemoteEntryToDirectory(
+                runtime.connection,
+                entry,
+                destinationDirectory.uri,
+                nextBytesTransferred => {
+                  set(state => ({
+                    sftpTransfers: patchSftpTransferRecord(
+                      state.sftpTransfers,
+                      transferId,
+                      {
+                        bytesTransferred: nextBytesTransferred,
+                        status: 'running',
+                      },
+                    ),
+                  }));
+                },
+              );
+              set(state => ({
+                sftpTransfers: patchSftpTransferRecord(
+                  state.sftpTransfers,
+                  transferId,
+                  {
+                    status: 'completed',
+                    bytesTransferred,
+                  },
+                ),
+              }));
+            } catch (error) {
+              const message =
+                error instanceof Error
+                  ? error.message
+                  : '파일 다운로드에 실패했습니다.';
+              set(state => ({
+                sftpTransfers: patchSftpTransferRecord(
+                  state.sftpTransfers,
+                  transferId,
+                  {
+                    status: 'error',
+                    errorMessage: message,
+                  },
+                ),
+                sftpSessions: patchSftpSessionRecord(
+                  state.sftpSessions,
+                  sftpSessionId,
+                  {
+                    errorMessage: message,
+                    lastEventAt: new Date().toISOString(),
+                  },
+                ),
+              }));
+            }
+          }
+        },
+        uploadSftpFile: async (sftpSessionId: string) => {
+          const runtime = runtimeSftpSessions.get(sftpSessionId);
+          const sftpSession = get().sftpSessions.find(
+            session => session.id === sftpSessionId,
+          );
+          if (!runtime || !sftpSession) {
+            return;
+          }
+
+          const pickedFile = await pickUploadFile();
+          if (!pickedFile) {
+            return;
+          }
+
+          const remotePath = joinRemotePath(
+            sftpSession.currentPath,
+            pickedFile.name,
+          );
+          const now = new Date().toISOString();
+          const transferId = createLocalId('sftp-transfer');
+          set(state => ({
+            sftpTransfers: [
+              ...state.sftpTransfers,
+              {
+                id: transferId,
+                sftpSessionId,
+                direction: 'upload',
+                remotePath,
+                localName: pickedFile.name,
+                status: 'running',
+                bytesTransferred: 0,
+                totalBytes: pickedFile.size ?? null,
+                createdAt: now,
+                updatedAt: now,
+              },
+            ],
+          }));
+
+          let offset = 0;
+          try {
+            for (;;) {
+              const chunk = await readLocalFileChunk(
+                pickedFile.uri,
+                offset,
+                SFTP_TRANSFER_CHUNK_SIZE,
+              );
+              if (chunk.bytesRead <= 0) {
+                break;
+              }
+              const bytes = Buffer.from(chunk.base64, 'base64');
+              await runtime.connection.writeFileChunk(
+                remotePath,
+                offset,
+                bytes.buffer.slice(
+                  bytes.byteOffset,
+                  bytes.byteOffset + bytes.byteLength,
+                ),
+              );
+              offset += chunk.bytesRead;
+              set(state => ({
+                sftpTransfers: patchSftpTransferRecord(
+                  state.sftpTransfers,
+                  transferId,
+                  {
+                    bytesTransferred: offset,
+                    status: 'running',
+                  },
+                ),
+              }));
+              if (chunk.bytesRead < SFTP_TRANSFER_CHUNK_SIZE) {
+                break;
+              }
+            }
+            set(state => ({
+              sftpTransfers: patchSftpTransferRecord(
+                state.sftpTransfers,
+                transferId,
+                {
+                  status: 'completed',
+                  bytesTransferred: offset,
+                },
+              ),
+            }));
+            await refreshSftpDirectory(sftpSessionId, sftpSession.currentPath);
+          } catch (error) {
+            const message =
+              error instanceof Error
+                ? error.message
+                : '파일 업로드에 실패했습니다.';
+            set(state => ({
+              sftpTransfers: patchSftpTransferRecord(
+                state.sftpTransfers,
+                transferId,
+                {
+                  status: 'error',
+                  errorMessage: message,
+                  bytesTransferred: offset,
+                },
+              ),
+              sftpSessions: patchSftpSessionRecord(
+                state.sftpSessions,
+                sftpSessionId,
+                {
+                  errorMessage: message,
+                  lastEventAt: new Date().toISOString(),
+                },
+              ),
+            }));
+          }
+        },
+        createSftpDirectory: async (sftpSessionId: string, name: string) => {
+          const runtime = runtimeSftpSessions.get(sftpSessionId);
+          const sftpSession = get().sftpSessions.find(
+            session => session.id === sftpSessionId,
+          );
+          if (!runtime || !sftpSession || !name.trim()) {
+            return;
+          }
+          const path = joinRemotePath(sftpSession.currentPath, name);
+          await runtime.connection.mkdir(path);
+          await refreshSftpDirectory(sftpSessionId, sftpSession.currentPath);
+        },
+        renameSftpEntry: async (
+          sftpSessionId: string,
+          sourcePath: string,
+          nextName: string,
+        ) => {
+          const runtime = runtimeSftpSessions.get(sftpSessionId);
+          const sftpSession = get().sftpSessions.find(
+            session => session.id === sftpSessionId,
+          );
+          if (!runtime || !sftpSession || !nextName.trim()) {
+            return;
+          }
+          const targetPath = joinRemotePath(
+            parentRemotePath(sourcePath),
+            nextName,
+          );
+          await runtime.connection.rename(sourcePath, targetPath);
+          await refreshSftpDirectory(sftpSessionId, sftpSession.currentPath);
+        },
+        chmodSftpEntry: async (
+          sftpSessionId: string,
+          remotePath: string,
+          mode: string,
+        ) => {
+          const runtime = runtimeSftpSessions.get(sftpSessionId);
+          const sftpSession = get().sftpSessions.find(
+            session => session.id === sftpSessionId,
+          );
+          if (!runtime || !sftpSession) {
+            return;
+          }
+          await runtime.connection.chmod(remotePath, parseUnixMode(mode));
+          await refreshSftpDirectory(sftpSessionId, sftpSession.currentPath);
+        },
+        deleteSftpEntries: async (sftpSessionId: string, paths: string[]) => {
+          const runtime = runtimeSftpSessions.get(sftpSessionId);
+          const sftpSession = get().sftpSessions.find(
+            session => session.id === sftpSessionId,
+          );
+          if (!runtime || !sftpSession || paths.length === 0) {
+            return;
+          }
+          try {
+            for (const path of paths) {
+              const entry = await resolveRemoteEntry(
+                runtime.connection,
+                path,
+                sftpSession.listing,
+              );
+              await deleteRemoteEntryRecursive(runtime.connection, entry);
+            }
+            await refreshSftpDirectory(sftpSessionId, sftpSession.currentPath);
+          } catch (error) {
+            const message =
+              error instanceof Error ? error.message : '삭제에 실패했습니다.';
+            set(state => ({
+              sftpSessions: patchSftpSessionRecord(
+                state.sftpSessions,
+                sftpSessionId,
+                {
+                  errorMessage: message,
+                  lastEventAt: new Date().toISOString(),
+                },
+              ),
+            }));
+            throw error;
+          }
+        },
+        copySftpEntries: (sftpSessionId: string, paths: string[]) => {
+          const sftpSession = get().sftpSessions.find(
+            session => session.id === sftpSessionId,
+          );
+          if (!sftpSession || paths.length === 0) {
+            return;
+          }
+          const entries = paths.map(path => {
+            const entry = sftpSession.listing?.entries.find(
+              candidate => candidate.path === path,
+            );
+            return {
+              path,
+              name: entry?.name ?? remoteBasename(path) ?? path,
+              isDirectory: entry?.isDirectory ?? false,
+              kind: entry?.kind ?? 'unknown',
+            };
+          });
+          set({
+            sftpCopyBuffer: {
+              sftpSessionId,
+              hostId: sftpSession.hostId,
+              entries,
+              createdAt: new Date().toISOString(),
+            },
+          });
+        },
+        pasteSftpEntries: async (sftpSessionId: string) => {
+          const runtime = runtimeSftpSessions.get(sftpSessionId);
+          const sftpSession = get().sftpSessions.find(
+            session => session.id === sftpSessionId,
+          );
+          const copyBuffer = get().sftpCopyBuffer;
+          if (
+            !runtime ||
+            !sftpSession ||
+            !copyBuffer ||
+            copyBuffer.sftpSessionId !== sftpSessionId ||
+            copyBuffer.entries.length === 0
+          ) {
+            return;
+          }
+
+          for (const entry of copyBuffer.entries) {
+            const targetPath = await resolveUniqueRemotePath(
+              runtime.connection,
+              sftpSession.currentPath,
+              entry.name,
+            );
+            const now = new Date().toISOString();
+            const transferId = createLocalId('sftp-transfer');
+            set(state => ({
+              sftpTransfers: [
+                ...state.sftpTransfers,
+                {
+                  id: transferId,
+                  sftpSessionId,
+                  direction: 'copy',
+                  remotePath: entry.path,
+                  localName: remoteBasename(targetPath) || entry.name,
+                  status: 'running',
+                  bytesTransferred: 0,
+                  totalBytes: null,
+                  createdAt: now,
+                  updatedAt: now,
+                },
+              ],
+            }));
+
+            try {
+              const bytesTransferred = await copyRemoteEntryToPath(
+                runtime.connection,
+                entry,
+                targetPath,
+                nextBytesTransferred => {
+                  set(state => ({
+                    sftpTransfers: patchSftpTransferRecord(
+                      state.sftpTransfers,
+                      transferId,
+                      {
+                        bytesTransferred: nextBytesTransferred,
+                        status: 'running',
+                      },
+                    ),
+                  }));
+                },
+              );
+              set(state => ({
+                sftpTransfers: patchSftpTransferRecord(
+                  state.sftpTransfers,
+                  transferId,
+                  {
+                    status: 'completed',
+                    bytesTransferred,
+                  },
+                ),
+              }));
+            } catch (error) {
+              const message =
+                error instanceof Error ? error.message : '복사에 실패했습니다.';
+              set(state => ({
+                sftpTransfers: patchSftpTransferRecord(
+                  state.sftpTransfers,
+                  transferId,
+                  {
+                    status: 'error',
+                    errorMessage: message,
+                  },
+                ),
+                sftpSessions: patchSftpSessionRecord(
+                  state.sftpSessions,
+                  sftpSessionId,
+                  {
+                    errorMessage: message,
+                    lastEventAt: new Date().toISOString(),
+                  },
+                ),
+              }));
+            }
+          }
+          await refreshSftpDirectory(sftpSessionId, sftpSession.currentPath);
+        },
+        clearSftpCopyBuffer: () => {
+          set({ sftpCopyBuffer: null });
         },
         acceptServerKeyPrompt: async () => {
           pendingServerKeyResolver?.(true);
@@ -2450,9 +3880,9 @@ export const useMobileAppStore = create<MobileAppState>()(
       };
     },
     {
-      name: "dolgate-mobile-store",
+      name: 'dolgate-mobile-store',
       storage: createJSONStorage(() => AsyncStorage),
-      partialize: (state) => ({
+      partialize: state => ({
         settings: state.settings,
         syncStatus: state.syncStatus,
         groups: state.groups,
@@ -2465,16 +3895,25 @@ export const useMobileAppStore = create<MobileAppState>()(
         ),
       }),
       onRehydrateStorage: () => {
-        const finishPersistHydrateTiming = beginStartupTiming("persist hydrate");
+        const finishPersistHydrateTiming =
+          beginStartupTiming('persist hydrate');
         return () => {
           finishPersistHydrateTiming?.();
           const nextSessions = normalizePersistedSessionsForColdStart(
             useMobileAppStore.getState().sessions,
           );
-          useMobileAppStore.setState((state) => ({
+          useMobileAppStore.setState(state => ({
             hydrated: true,
             sessions: nextSessions,
+            sftpSessions: [],
+            sftpTransfers: [],
+            sftpCopyBuffer: null,
             activeSessionTabId: resolveActiveSessionTabId(nextSessions, null),
+            activeConnectionTab: normalizeActiveConnectionTab(
+              nextSessions,
+              [],
+              null,
+            ),
           }));
         };
       },
@@ -2499,7 +3938,7 @@ export function resetMobileStoreRuntimeForTests(): void {
   pendingAwsSsoCancelHandler = null;
   for (const runtime of runtimeSessions.values()) {
     try {
-      if (runtime.kind === "ssh") {
+      if (runtime.kind === 'ssh') {
         void runtime.connection.disconnect();
       } else {
         runtime.socket.close();
@@ -2507,7 +3946,14 @@ export function resetMobileStoreRuntimeForTests(): void {
     } catch {}
   }
   runtimeSessions.clear();
+  for (const runtime of runtimeSftpSessions.values()) {
+    try {
+      void runtime.connection.close();
+    } catch {}
+  }
+  runtimeSftpSessions.clear();
   pendingSessionConnections.clear();
+  pendingSftpConnections.clear();
   runtimeSessionSnapshots.clear();
   for (const timer of runtimeSnapshotFlushTimers.values()) {
     clearTimeout(timer);
@@ -2515,4 +3961,8 @@ export function resetMobileStoreRuntimeForTests(): void {
   runtimeSnapshotFlushTimers.clear();
 }
 
-export type { MobileAppState, PendingCredentialPromptState, PendingServerKeyPromptState };
+export type {
+  MobileAppState,
+  PendingCredentialPromptState,
+  PendingServerKeyPromptState,
+};

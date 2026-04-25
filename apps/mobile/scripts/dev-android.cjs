@@ -7,6 +7,7 @@ const {
   buildEnvForAndroid,
   resolveSdkDir,
 } = require("./android-env.cjs");
+const { ensureRusshNative } = require("../../../packages/fressh-react-native-uniffi-russh/scripts/ensure-native.cjs");
 const {
   delay,
   runDevSession,
@@ -165,6 +166,7 @@ function forceStopAndroidApp(serial, env) {
 async function main() {
   const extraArgs = process.argv.slice(2);
   const androidEnv = buildEnvForAndroid(process.env);
+  ensureRusshNative({ platform: "android" });
 
   await runDevSession({
     appRoot,
@@ -172,6 +174,7 @@ async function main() {
     nodeCommand,
     reactNativeCli,
     platformLabel: "Android",
+    prepareRuntimeOptions: { skipRussh: true },
     launchPlatform: async () => {
       const deviceState = await ensureDeviceReady(androidEnv);
       adbReverse(deviceState.deviceSerial, androidEnv);

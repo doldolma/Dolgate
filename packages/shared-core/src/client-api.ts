@@ -4,6 +4,7 @@ import type {
   HostRecord,
   KnownHostRecord,
   LoadedManagedSecretPayload,
+  DirectoryListing,
   SessionConnectionKind,
   SecretMetadataRecord,
   SshHostRecord,
@@ -49,6 +50,58 @@ export interface MobileSessionRecord {
   lastConnectedAt?: string | null;
   lastDisconnectedAt?: string | null;
   errorMessage?: string | null;
+}
+
+export type MobileConnectionTabRef =
+  | {
+      kind: "terminal";
+      id: string;
+    }
+  | {
+      kind: "sftp";
+      id: string;
+    };
+
+export type MobileSftpSessionStatus =
+  | "connecting"
+  | "connected"
+  | "error"
+  | "disconnecting"
+  | "closed";
+
+export interface MobileSftpSessionRecord {
+  id: string;
+  hostId: string;
+  sourceSessionId: string;
+  title: string;
+  status: MobileSftpSessionStatus;
+  currentPath: string;
+  listing?: DirectoryListing | null;
+  errorMessage?: string | null;
+  lastEventAt: string;
+  lastConnectedAt?: string | null;
+  lastDisconnectedAt?: string | null;
+}
+
+export type MobileSftpTransferDirection = "download" | "upload" | "copy";
+export type MobileSftpTransferStatus =
+  | "pending"
+  | "running"
+  | "completed"
+  | "error";
+
+export interface MobileSftpTransferRecord {
+  id: string;
+  sftpSessionId: string;
+  direction: MobileSftpTransferDirection;
+  remotePath: string;
+  localName: string;
+  status: MobileSftpTransferStatus;
+  bytesTransferred: number;
+  totalBytes?: number | null;
+  errorMessage?: string | null;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface ClientSshConnectInput {
