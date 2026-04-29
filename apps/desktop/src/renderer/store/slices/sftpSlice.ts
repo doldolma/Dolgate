@@ -577,14 +577,14 @@ export function createSftpSlice(deps: SliceDeps): SftpSlice {
             if (
               sourcePane.sourceKind !== "host" ||
               !sourcePane.endpoint ||
-              sourcePane.selectedPaths.length !== 1
+              sourcePane.selectedPaths.length === 0
             ) {
               return;
             }
-            const selectedItem = sourcePane.entries.find(
-              (entry) => entry.path === sourcePane.selectedPaths[0],
+            const selectedItems = sourcePane.entries.filter((entry) =>
+              sourcePane.selectedPaths.includes(entry.path),
             );
-            if (!selectedItem || selectedItem.isDirectory) {
+            if (selectedItems.length === 0) {
               return;
             }
             const downloadsPath = await api.files.getDownloadsDirectory();
@@ -598,7 +598,7 @@ export function createSftpSlice(deps: SliceDeps): SftpSlice {
               sourcePane,
               targetPane,
               targetPath: downloadsPath,
-              items: [selectedItem],
+              items: selectedItems,
             });
           },
     prepareSftpTransfer: async (

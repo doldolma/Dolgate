@@ -504,6 +504,23 @@ function toTransferJobEvent(
   const nextStatus =
     terminalStatus ??
     (existing?.status === "cancelling" ? "cancelling" : "running");
+  const payloadMessage =
+    typeof payload.message === "string" ? payload.message : undefined;
+  const detailMessage =
+    typeof payload.detailMessage === "string"
+      ? payload.detailMessage
+      : payloadMessage;
+  const errorCode = normalizeTransferErrorCode(payload.errorCode);
+  const errorOperation =
+    typeof payload.errorOperation === "string"
+      ? payload.errorOperation
+      : undefined;
+  const errorPath =
+    typeof payload.errorPath === "string" ? payload.errorPath : undefined;
+  const errorItemName =
+    typeof payload.errorItemName === "string"
+      ? payload.errorItemName
+      : undefined;
 
   return {
     job: {
@@ -529,12 +546,63 @@ function toTransferJobEvent(
       activeItemName: payload.activeItemName
         ? String(payload.activeItemName)
         : existing?.activeItemName,
-      errorMessage: payload.message
-        ? String(payload.message)
-        : existing?.errorMessage,
+      errorMessage:
+        event.type === "sftpTransferFailed"
+          ? getTransferFailureSummary({
+              errorCode,
+              errorOperation,
+              fallbackMessage: payloadMessage ?? existing?.errorMessage,
+            })
+          : payloadMessage
+            ? payloadMessage
+            : existing?.errorMessage,
+      errorCode: errorCode ?? existing?.errorCode,
+      errorOperation: errorOperation ?? existing?.errorOperation,
+      errorPath: errorPath ?? existing?.errorPath,
+      errorItemName: errorItemName ?? existing?.errorItemName,
+      detailMessage: detailMessage ?? existing?.detailMessage,
       request: existing?.request,
     },
   };
+}
+
+function normalizeTransferErrorCode(
+  value: unknown,
+): TransferJob["errorCode"] | undefined {
+  switch (value) {
+    case "permission_denied":
+    case "not_found":
+    case "operation_unsupported":
+    case "connection_lost":
+    case "unknown":
+      return value;
+    default:
+      return undefined;
+  }
+}
+
+function getTransferFailureSummary(input: {
+  errorCode?: TransferJob["errorCode"];
+  errorOperation?: string;
+  fallbackMessage?: string | null;
+}): string {
+  if (input.errorCode === "permission_denied") {
+    if (input.errorOperation?.startsWith("source")) {
+      return "원본 파일을 읽을 권한이 없습니다.";
+    }
+    if (
+      input.errorOperation?.includes("remove") ||
+      input.errorOperation?.includes("overwrite")
+    ) {
+      return "기존 항목을 덮어쓰거나 삭제할 권한이 없습니다.";
+    }
+    if (input.errorOperation?.startsWith("target")) {
+      return "대상 폴더에 쓸 권한이 없습니다.";
+    }
+    return "파일을 전송할 권한이 없습니다.";
+  }
+
+  return input.fallbackMessage ?? "전송에 실패했습니다.";
 }
 
 export class CoreManager {

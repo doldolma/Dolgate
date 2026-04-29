@@ -901,6 +901,7 @@ function createMockApi(): DesktopApi {
       getDownloadsDirectory: vi
         .fn()
         .mockResolvedValue("/Users/tester/Downloads"),
+      getPathForDroppedFile: vi.fn().mockReturnValue(null),
       listRoots: vi.fn().mockResolvedValue([{ label: "/", path: "/" }]),
       getParentPath: vi.fn().mockImplementation(async (targetPath: string) => {
         if (targetPath === "/Users/tester") {
@@ -3186,6 +3187,141 @@ describe("createAppStore", () => {
       connectInput?.endpointId,
     );
     expect(store.getState().sftp.rightPane.currentPath).toBe("/home/ubuntu");
+  });
+
+  it("downloads selected remote folders and files into Downloads", async () => {
+    const api = createMockApi();
+    api.sftp.list = vi.fn().mockResolvedValue({
+      path: "/home/ubuntu",
+      entries: [
+        {
+          name: "logs",
+          path: "/home/ubuntu/logs",
+          isDirectory: true,
+          size: 0,
+          mtime: "2025-01-01T00:00:00.000Z",
+          kind: "folder",
+          permissions: "rwxr-xr-x",
+        },
+        {
+          name: "report.txt",
+          path: "/home/ubuntu/report.txt",
+          isDirectory: false,
+          size: 42,
+          mtime: "2025-01-01T00:00:00.000Z",
+          kind: "file",
+          permissions: "rw-r--r--",
+        },
+      ],
+    });
+    api.files.list = vi.fn().mockResolvedValue({
+      path: "/Users/tester/Downloads",
+      entries: [],
+    });
+    const store = createAppStore(api);
+
+    await store.getState().bootstrap();
+    store.getState().activateSftp();
+    await store.getState().connectSftpHost("right", "host-1");
+    store.setState((state) => ({
+      sftp: {
+        ...state.sftp,
+        rightPane: {
+          ...state.sftp.rightPane,
+          selectedPaths: ["/home/ubuntu/logs", "/home/ubuntu/report.txt"],
+          selectionAnchorPath: "/home/ubuntu/logs",
+        },
+      },
+    }));
+
+    await store.getState().downloadSftpSelection("right");
+
+    expect(api.files.getDownloadsDirectory).toHaveBeenCalled();
+    expect(api.files.list).toHaveBeenCalledWith("/Users/tester/Downloads");
+    expect(api.sftp.startTransfer).toHaveBeenCalledWith(
+      expect.objectContaining({
+        source: expect.objectContaining({
+          kind: "remote",
+          path: "/home/ubuntu",
+        }),
+        target: {
+          kind: "local",
+          path: "/Users/tester/Downloads",
+        },
+        items: [
+          expect.objectContaining({
+            name: "logs",
+            path: "/home/ubuntu/logs",
+            isDirectory: true,
+          }),
+          expect.objectContaining({
+            name: "report.txt",
+            path: "/home/ubuntu/report.txt",
+            isDirectory: false,
+          }),
+        ],
+      }),
+    );
+  });
+
+  it("opens the existing conflict dialog when a folder download collides in Downloads", async () => {
+    const api = createMockApi();
+    api.sftp.list = vi.fn().mockResolvedValue({
+      path: "/home/ubuntu",
+      entries: [
+        {
+          name: "logs",
+          path: "/home/ubuntu/logs",
+          isDirectory: true,
+          size: 0,
+          mtime: "2025-01-01T00:00:00.000Z",
+          kind: "folder",
+          permissions: "rwxr-xr-x",
+        },
+      ],
+    });
+    api.files.list = vi.fn().mockResolvedValue({
+      path: "/Users/tester/Downloads",
+      entries: [
+        {
+          name: "logs",
+          path: "/Users/tester/Downloads/logs",
+          isDirectory: true,
+          size: 0,
+          mtime: "2025-01-01T00:00:00.000Z",
+          kind: "folder",
+          permissions: "rwxr-xr-x",
+        },
+      ],
+    });
+    const store = createAppStore(api);
+
+    await store.getState().bootstrap();
+    store.getState().activateSftp();
+    await store.getState().connectSftpHost("right", "host-1");
+    store.setState((state) => ({
+      sftp: {
+        ...state.sftp,
+        rightPane: {
+          ...state.sftp.rightPane,
+          selectedPaths: ["/home/ubuntu/logs"],
+          selectionAnchorPath: "/home/ubuntu/logs",
+        },
+      },
+    }));
+
+    await store.getState().downloadSftpSelection("right");
+
+    expect(api.sftp.startTransfer).not.toHaveBeenCalled();
+    expect(store.getState().sftp.pendingConflictDialog).toMatchObject({
+      names: ["logs"],
+      input: {
+        target: {
+          kind: "local",
+          path: "/Users/tester/Downloads",
+        },
+      },
+    });
   });
 
   it("prompts for a missing SSH username before starting an SFTP connection", async () => {

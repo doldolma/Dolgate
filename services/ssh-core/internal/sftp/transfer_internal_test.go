@@ -9,6 +9,8 @@ import (
 	"testing"
 	"time"
 
+	sftppkg "github.com/pkg/sftp"
+
 	"dolssh/services/ssh-core/internal/protocol"
 )
 
@@ -87,6 +89,8 @@ func TestTransferFileContentsUsesConcurrentRemoteWritePath(t *testing.T) {
 		&simpleReadCloser{Reader: bytes.NewBufferString("hello over sftp")},
 		target,
 		reporter,
+		"/source.txt",
+		"/target.txt",
 	); err != nil {
 		t.Fatalf("transferFileContents returned error: %v", err)
 	}
@@ -114,7 +118,7 @@ func TestTransferFileContentsUsesWriterToDownloadPath(t *testing.T) {
 	source := &writerToReadCloser{content: []byte("download me")}
 	target := &bufferWriteCloser{}
 
-	if err := transferFileContents(source, target, reporter); err != nil {
+	if err := transferFileContents(source, target, reporter, "/remote/download.txt", "/local/download.txt"); err != nil {
 		t.Fatalf("transferFileContents returned error: %v", err)
 	}
 
@@ -123,6 +127,74 @@ func TestTransferFileContentsUsesWriterToDownloadPath(t *testing.T) {
 	}
 	if target.buffer.String() != "download me" {
 		t.Fatalf("unexpected transferred content: %q", target.buffer.String())
+	}
+}
+
+func TestTransferFileContentsAnnotatesSourceReadPermissionDenied(t *testing.T) {
+	reporter := newTransferProgressReporter(
+		"job-1",
+		newTransferProgress(time.Unix(0, 0)),
+		func(protocol.Event) {},
+		time.Now,
+	)
+
+	err := transferFileContents(
+		&errorReadCloser{err: os.ErrPermission},
+		&bufferWriteCloser{},
+		reporter,
+		"/private/source.txt",
+		"/target/source.txt",
+	)
+	if err == nil {
+		t.Fatal("expected permission error")
+	}
+
+	var transferErr *transferError
+	if !errors.As(err, &transferErr) {
+		t.Fatalf("expected transferError, got %T: %v", err, err)
+	}
+	if transferErr.Code != transferErrorPermissionDenied {
+		t.Fatalf("expected permission denied code, got %q", transferErr.Code)
+	}
+	if transferErr.Operation != "source_read" {
+		t.Fatalf("expected source_read operation, got %q", transferErr.Operation)
+	}
+	if transferErr.Path != "/private/source.txt" {
+		t.Fatalf("expected source path, got %q", transferErr.Path)
+	}
+}
+
+func TestTransferFileContentsAnnotatesTargetWritePermissionDenied(t *testing.T) {
+	reporter := newTransferProgressReporter(
+		"job-1",
+		newTransferProgress(time.Unix(0, 0)),
+		func(protocol.Event) {},
+		time.Now,
+	)
+
+	err := transferFileContents(
+		&simpleReadCloser{Reader: bytes.NewBufferString("payload")},
+		&errorWriteCloser{err: os.ErrPermission},
+		reporter,
+		"/source/payload.txt",
+		"/restricted/payload.txt",
+	)
+	if err == nil {
+		t.Fatal("expected permission error")
+	}
+
+	var transferErr *transferError
+	if !errors.As(err, &transferErr) {
+		t.Fatalf("expected transferError, got %T: %v", err, err)
+	}
+	if transferErr.Code != transferErrorPermissionDenied {
+		t.Fatalf("expected permission denied code, got %q", transferErr.Code)
+	}
+	if transferErr.Operation != "target_write" {
+		t.Fatalf("expected target_write operation, got %q", transferErr.Operation)
+	}
+	if transferErr.Path != "/restricted/payload.txt" {
+		t.Fatalf("expected target path, got %q", transferErr.Path)
 	}
 }
 
@@ -176,6 +248,117 @@ func TestCopyFileWithProgressCancelsBlockedTransfer(t *testing.T) {
 	}
 	if !source.closed {
 		t.Fatal("expected source file handle to be closed on cancellation")
+	}
+}
+
+func TestCopyFileWithProgressAnnotatesRemoteTargetPermissionDenied(t *testing.T) {
+	reporter := newTransferProgressReporter(
+		"job-1",
+		newTransferProgress(time.Unix(0, 0)),
+		func(protocol.Event) {},
+		time.Now,
+	)
+	sourceFS := fakeFilesystemAccessor{
+		openFile: &simpleReadCloser{Reader: bytes.NewBufferString("payload")},
+	}
+	targetFS := fakeFilesystemAccessor{
+		createErr: &sftppkg.StatusError{Code: 3},
+	}
+
+	err := copyFileWithProgress(
+		context.Background(),
+		sourceFS,
+		targetFS,
+		"/source/payload.txt",
+		"/restricted/payload.txt",
+		reporter,
+	)
+	if err == nil {
+		t.Fatal("expected permission error")
+	}
+
+	var transferErr *transferError
+	if !errors.As(err, &transferErr) {
+		t.Fatalf("expected transferError, got %T: %v", err, err)
+	}
+	if transferErr.Code != transferErrorPermissionDenied {
+		t.Fatalf("expected permission denied code, got %q", transferErr.Code)
+	}
+	if transferErr.Operation != "target_create" {
+		t.Fatalf("expected target_create operation, got %q", transferErr.Operation)
+	}
+	if transferErr.Path != "/restricted/payload.txt" {
+		t.Fatalf("expected target path, got %q", transferErr.Path)
+	}
+}
+
+func TestCopyFileWithProgressAnnotatesLocalSourcePermissionDenied(t *testing.T) {
+	reporter := newTransferProgressReporter(
+		"job-1",
+		newTransferProgress(time.Unix(0, 0)),
+		func(protocol.Event) {},
+		time.Now,
+	)
+	sourceFS := fakeFilesystemAccessor{
+		openErr: os.ErrPermission,
+	}
+	targetFS := fakeFilesystemAccessor{}
+
+	err := copyFileWithProgress(
+		context.Background(),
+		sourceFS,
+		targetFS,
+		"/private/source.txt",
+		"/target/source.txt",
+		reporter,
+	)
+	if err == nil {
+		t.Fatal("expected permission error")
+	}
+
+	var transferErr *transferError
+	if !errors.As(err, &transferErr) {
+		t.Fatalf("expected transferError, got %T: %v", err, err)
+	}
+	if transferErr.Code != transferErrorPermissionDenied {
+		t.Fatalf("expected permission denied code, got %q", transferErr.Code)
+	}
+	if transferErr.Operation != "source_open" {
+		t.Fatalf("expected source_open operation, got %q", transferErr.Operation)
+	}
+	if transferErr.Path != "/private/source.txt" {
+		t.Fatalf("expected source path, got %q", transferErr.Path)
+	}
+}
+
+func TestPrepareDestinationAnnotatesOverwritePermissionDenied(t *testing.T) {
+	targetFS := fakeFilesystemAccessor{
+		statInfo:  fakeFileInfo{name: "existing.txt"},
+		removeErr: os.ErrPermission,
+	}
+
+	_, _, _, err := prepareDestination(
+		targetFS,
+		fakeFileInfo{name: "source.txt"},
+		"/restricted/existing.txt",
+		"overwrite",
+	)
+	if err == nil {
+		t.Fatal("expected permission error")
+	}
+
+	var transferErr *transferError
+	if !errors.As(err, &transferErr) {
+		t.Fatalf("expected transferError, got %T: %v", err, err)
+	}
+	if transferErr.Code != transferErrorPermissionDenied {
+		t.Fatalf("expected permission denied code, got %q", transferErr.Code)
+	}
+	if transferErr.Operation != "target_remove" {
+		t.Fatalf("expected target_remove operation, got %q", transferErr.Operation)
+	}
+	if transferErr.Path != "/restricted/existing.txt" {
+		t.Fatalf("expected overwrite target path, got %q", transferErr.Path)
 	}
 }
 
@@ -241,6 +424,30 @@ func (writer *bufferWriteCloser) Close() error {
 	return nil
 }
 
+type errorReadCloser struct {
+	err error
+}
+
+func (reader *errorReadCloser) Read([]byte) (int, error) {
+	return 0, reader.err
+}
+
+func (reader *errorReadCloser) Close() error {
+	return nil
+}
+
+type errorWriteCloser struct {
+	err error
+}
+
+func (writer *errorWriteCloser) Write([]byte) (int, error) {
+	return 0, writer.err
+}
+
+func (writer *errorWriteCloser) Close() error {
+	return nil
+}
+
 type blockingReadCloser struct {
 	reader *bytes.Buffer
 	closed bool
@@ -281,7 +488,14 @@ func (writer *blockingWriteCloser) Close() error {
 
 type fakeFilesystemAccessor struct {
 	openFile   io.ReadCloser
+	openErr    error
 	createFile io.WriteCloser
+	createErr  error
+	statInfo   os.FileInfo
+	statErr    error
+	readDirErr error
+	mkdirErr   error
+	removeErr  error
 }
 
 func (accessor fakeFilesystemAccessor) Join(base string, elem ...string) string {
@@ -297,29 +511,77 @@ func (accessor fakeFilesystemAccessor) Base(targetPath string) string {
 }
 
 func (accessor fakeFilesystemAccessor) Stat(string) (os.FileInfo, error) {
+	if accessor.statErr != nil {
+		return nil, accessor.statErr
+	}
+	if accessor.statInfo != nil {
+		return accessor.statInfo, nil
+	}
 	return nil, os.ErrNotExist
 }
 
 func (accessor fakeFilesystemAccessor) ReadDir(string) ([]os.FileInfo, error) {
+	if accessor.readDirErr != nil {
+		return nil, accessor.readDirErr
+	}
 	return nil, nil
 }
 
 func (accessor fakeFilesystemAccessor) Open(string) (io.ReadCloser, error) {
+	if accessor.openErr != nil {
+		return nil, accessor.openErr
+	}
 	return accessor.openFile, nil
 }
 
 func (accessor fakeFilesystemAccessor) Create(string) (io.WriteCloser, error) {
+	if accessor.createErr != nil {
+		return nil, accessor.createErr
+	}
 	return accessor.createFile, nil
 }
 
 func (accessor fakeFilesystemAccessor) MkdirAll(string) error {
-	return nil
+	return accessor.mkdirErr
 }
 
 func (accessor fakeFilesystemAccessor) Remove(string) error {
-	return nil
+	return accessor.removeErr
 }
 
 func (accessor fakeFilesystemAccessor) RemoveDirectory(string) error {
+	return accessor.removeErr
+}
+
+type fakeFileInfo struct {
+	name  string
+	size  int64
+	isDir bool
+}
+
+func (info fakeFileInfo) Name() string {
+	return info.name
+}
+
+func (info fakeFileInfo) Size() int64 {
+	return info.size
+}
+
+func (info fakeFileInfo) Mode() os.FileMode {
+	if info.isDir {
+		return os.ModeDir | 0o755
+	}
+	return 0o644
+}
+
+func (info fakeFileInfo) ModTime() time.Time {
+	return time.Unix(0, 0)
+}
+
+func (info fakeFileInfo) IsDir() bool {
+	return info.isDir
+}
+
+func (info fakeFileInfo) Sys() any {
 	return nil
 }

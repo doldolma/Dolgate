@@ -513,6 +513,11 @@ type SFTPTransferProgressPayload struct {
 	SpeedBytesPerSecond float64 `json:"speedBytesPerSecond,omitempty"`
 	ETASeconds          int64   `json:"etaSeconds,omitempty"`
 	Message             string  `json:"message,omitempty"`
+	ErrorCode           string  `json:"errorCode,omitempty"`
+	ErrorOperation      string  `json:"errorOperation,omitempty"`
+	ErrorPath           string  `json:"errorPath,omitempty"`
+	ErrorItemName       string  `json:"errorItemName,omitempty"`
+	DetailMessage       string  `json:"detailMessage,omitempty"`
 }
 
 type RawPayload = json.RawMessage

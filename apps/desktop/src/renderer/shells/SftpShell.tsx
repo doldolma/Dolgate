@@ -2,7 +2,7 @@ import type { AuthState } from '@shared';
 import { SftpWorkspace } from '../components/SftpWorkspace';
 import type { useLoginController } from '../controllers/useLoginController';
 import { cn } from '../lib/cn';
-import { listLocalRoots } from '../services/desktop/files';
+import { getPathForDroppedFile, listLocalRoots } from '../services/desktop/files';
 import type {
   useAppModalViewModel,
   useAppSettingsViewModel,
@@ -80,6 +80,7 @@ export function SftpShell({
           onNavigateParent={sftpViewModel.navigateSftpParent}
           onNavigateBreadcrumb={sftpViewModel.navigateSftpBreadcrumb}
           onListLocalRoots={listLocalRoots}
+          onGetPathForDroppedFile={getPathForDroppedFile}
           onSelectEntry={sftpViewModel.selectSftpEntry}
           onCreateDirectory={sftpViewModel.createSftpDirectory}
           onRenameSelection={sftpViewModel.renameSftpSelection}

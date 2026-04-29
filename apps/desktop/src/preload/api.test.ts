@@ -1,8 +1,19 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+const electronMocks = vi.hoisted(() => ({
+  getPathForFile: vi.fn(),
+}));
+
+vi.mock("electron", () => ({
+  webUtils: {
+    getPathForFile: electronMocks.getPathForFile,
+  },
+}));
+
 describe("createDesktopApi", () => {
   beforeEach(() => {
     vi.resetModules();
+    electronMocks.getPathForFile.mockReset();
   });
 
   it("maps DesktopApi invoke calls to the expected IPC channels", async () => {
@@ -22,6 +33,7 @@ describe("createDesktopApi", () => {
     await api.sftp.startTransfer({} as any);
     await api.serial.listPorts();
     await api.serial.control({ sessionId: "session-1", action: "break" });
+    api.files.getPathForDroppedFile({ name: "upload.txt" } as File);
     await api.groups.move("Servers/Nested", "Clients");
     await api.groups.rename("Servers/Nested", "API");
 
@@ -70,6 +82,24 @@ describe("createDesktopApi", () => {
       "Servers/Nested",
       "API",
     );
+  });
+
+  it("resolves dropped file paths through Electron webUtils without IPC", async () => {
+    const { createDesktopApi } = await import("./api");
+    const ipcRenderer = {
+      invoke: vi.fn().mockResolvedValue(undefined),
+      on: vi.fn(),
+    } as any;
+    electronMocks.getPathForFile.mockReturnValue("/Users/tester/upload.txt");
+
+    const api = createDesktopApi(ipcRenderer);
+    const file = { name: "upload.txt" } as File;
+
+    expect(api.files.getPathForDroppedFile(file)).toBe(
+      "/Users/tester/upload.txt",
+    );
+    expect(electronMocks.getPathForFile).toHaveBeenCalledWith(file);
+    expect(ipcRenderer.invoke).not.toHaveBeenCalled();
   });
 
   it("fans preload events out to bridge subscribers and unsubscribes cleanly", async () => {
