@@ -101,6 +101,7 @@ interface SftpWorkspaceProps {
   onNavigateParent: (paneId: SftpPaneId) => Promise<void>;
   onNavigateBreadcrumb: (paneId: SftpPaneId, nextPath: string) => Promise<void>;
   onListLocalRoots: () => Promise<FileSystemRoot[]>;
+  onGetPathForDroppedFile: (file: File) => string | null;
   onSelectEntry: (paneId: SftpPaneId, input: SftpEntrySelectionInput) => void;
   onCreateDirectory: (paneId: SftpPaneId, name: string) => Promise<void>;
   onRenameSelection: (paneId: SftpPaneId, nextName: string) => Promise<void>;
@@ -834,6 +835,26 @@ export function buildTransferCardTitle(job: TransferJob): string {
   return buildTransferDirection(job);
 }
 
+export function getTransferFailureDisplayMessage(job: TransferJob): string {
+  return job.errorMessage?.trim() || "전송에 실패했습니다.";
+}
+
+export function buildTransferFailureDetailLines(job: TransferJob): string[] {
+  const lines: string[] = [];
+  if (job.errorItemName?.trim()) {
+    lines.push(`항목: ${job.errorItemName.trim()}`);
+  }
+  if (job.errorPath?.trim()) {
+    lines.push(`경로: ${job.errorPath.trim()}`);
+  }
+  if (job.detailMessage?.trim()) {
+    lines.push(`원본 오류: ${job.detailMessage.trim()}`);
+  } else if (job.errorMessage?.trim()) {
+    lines.push(`오류: ${job.errorMessage.trim()}`);
+  }
+  return lines;
+}
+
 function isBrowsablePane(pane: SftpPaneState): boolean {
   return (
     pane.sourceKind === "local" ||
@@ -858,10 +879,21 @@ export function isSftpTransferArrowDisabled(
   );
 }
 
-function extractDroppedAbsolutePaths(dataTransfer: DataTransfer): string[] {
-  return Array.from(dataTransfer.files)
-    .map((file) => (file as File & { path?: string }).path)
-    .filter((value): value is string => Boolean(value));
+export async function extractDroppedAbsolutePaths(
+  files: Iterable<File>,
+  getPathForDroppedFile: (file: File) => string | null,
+): Promise<string[]> {
+  const paths = await Promise.all(
+    Array.from(files).map(async (file) => {
+      try {
+        const filePath = getPathForDroppedFile(file);
+        return filePath?.trim() ? filePath : null;
+      } catch {
+        return null;
+      }
+    }),
+  );
+  return paths.filter((value): value is string => Boolean(value));
 }
 
 interface InternalTransferPayload {
@@ -910,6 +942,13 @@ export function hasInternalTransferData(
   );
 }
 
+export function hasExternalFileDrop(
+  dataTransfer: Pick<DataTransfer, "files" | "types">,
+): boolean {
+  const types = Array.from(dataTransfer.types ?? []);
+  return types.includes("Files") || dataTransfer.files.length > 0;
+}
+
 const SFTP_BROWSER_COLUMNS: Array<{
   key: SftpBrowserColumnKey;
   label: string;
@@ -954,6 +993,7 @@ interface PaneBrowserProps {
   onNavigateParent: () => Promise<void>;
   onNavigateBreadcrumb: (nextPath: string) => Promise<void>;
   onListLocalRoots: () => Promise<FileSystemRoot[]>;
+  onGetPathForDroppedFile: (file: File) => string | null;
   onRefresh: () => Promise<void>;
   onSelectEntry: (input: SftpEntrySelectionInput) => void;
   onOpenEntry: (entryPath: string) => Promise<void>;
@@ -986,6 +1026,7 @@ function PaneBrowser({
   onNavigateParent,
   onNavigateBreadcrumb,
   onListLocalRoots,
+  onGetPathForDroppedFile,
   onRefresh,
   onSelectEntry,
   onOpenEntry,
@@ -1086,8 +1127,7 @@ function PaneBrowser({
   const canDownloadSelection =
     pane.sourceKind === "host" &&
     Boolean(pane.endpoint) &&
-    Boolean(selectedEntry) &&
-    !selectedEntry?.isDirectory;
+    pane.selectedPaths.length > 0;
   const contextMenuStyle = contextMenu
     ? {
         left: `${Math.max(12, Math.min(contextMenu.x, window.innerWidth - 196))}px`,
@@ -1111,8 +1151,14 @@ function PaneBrowser({
     if (pane.sourceKind !== "host" || !pane.endpoint) {
       return false;
     }
-    const droppedPaths = extractDroppedAbsolutePaths(event.dataTransfer);
-    void onPrepareExternalTransfer(targetPath, droppedPaths);
+    const droppedFiles = Array.from(event.dataTransfer.files);
+    void (async () => {
+      const droppedPaths = await extractDroppedAbsolutePaths(
+        droppedFiles,
+        onGetPathForDroppedFile,
+      );
+      await onPrepareExternalTransfer(targetPath, droppedPaths);
+    })();
     return true;
   };
 
@@ -1367,7 +1413,7 @@ function PaneBrowser({
         onDragOver={(event) => {
           const hasInternal = hasInternalTransferData(event.dataTransfer);
           const hasExternalFiles =
-            event.dataTransfer.files.length > 0 &&
+            hasExternalFileDrop(event.dataTransfer) &&
             pane.sourceKind === "host" &&
             Boolean(pane.endpoint);
           if (!hasInternal && !hasExternalFiles) {
@@ -1502,7 +1548,7 @@ function PaneBrowser({
                     event.dataTransfer,
                   );
                   const hasExternalFiles =
-                    event.dataTransfer.files.length > 0 &&
+                    hasExternalFileDrop(event.dataTransfer) &&
                     pane.sourceKind === "host" &&
                     Boolean(pane.endpoint);
                   if (
@@ -2063,6 +2109,10 @@ function TransferBar({
   onRetryTransfer: (jobId: string) => Promise<void>;
   onDismissTransfer: (jobId: string) => void;
 }) {
+  const [expandedFailureDetails, setExpandedFailureDetails] = useState<
+    Record<string, boolean>
+  >({});
+
   if (transfers.length === 0) {
     return null;
   }
@@ -2096,6 +2146,8 @@ function TransferBar({
                 Math.round((job.bytesCompleted / job.bytesTotal) * 100),
               )
             : 0;
+        const failureDetailLines = buildTransferFailureDetailLines(job);
+        const isFailureDetailOpen = Boolean(expandedFailureDetails[job.id]);
         return (
           <Card
             key={job.id}
@@ -2143,6 +2195,50 @@ function TransferBar({
                 }}
               />
             </div>
+            {job.status === "failed" ? (
+              <div className="mt-[0.35rem] rounded-[14px] border border-[color-mix(in_srgb,var(--danger-text)_24%,var(--border)_76%)] bg-[color-mix(in_srgb,var(--danger-text)_7%,transparent_93%)] px-[0.75rem] py-[0.62rem] text-[0.86rem]">
+                <p className="m-0 font-semibold text-[var(--danger-text)]">
+                  {getTransferFailureDisplayMessage(job)}
+                </p>
+                {job.errorItemName || job.errorPath ? (
+                  <p className="m-0 mt-[0.28rem] overflow-hidden text-ellipsis whitespace-nowrap text-[var(--text-soft)]">
+                    {[job.errorItemName, job.errorPath]
+                      .filter(Boolean)
+                      .join(" · ")}
+                  </p>
+                ) : null}
+                {failureDetailLines.length > 0 ? (
+                  <div className="mt-[0.42rem]">
+                    <button
+                      type="button"
+                      className="rounded-[8px] text-[0.8rem] font-semibold text-[var(--text-secondary)] underline-offset-2 hover:text-[var(--text-primary)] hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-strong)]"
+                      aria-expanded={isFailureDetailOpen}
+                      onClick={() =>
+                        setExpandedFailureDetails((current) => ({
+                          ...current,
+                          [job.id]: !current[job.id],
+                        }))
+                      }
+                    >
+                      {isFailureDetailOpen ? "Details 숨기기" : "Details"}
+                    </button>
+                    {isFailureDetailOpen ? (
+                      <div className="mt-[0.35rem] grid gap-[0.2rem] rounded-[10px] bg-[color-mix(in_srgb,var(--surface-muted)_72%,transparent_28%)] px-[0.55rem] py-[0.45rem] text-[0.78rem] leading-[1.45] text-[var(--text-soft)]">
+                        {failureDetailLines.map((line) => (
+                          <span
+                            key={line}
+                            className="overflow-hidden text-ellipsis whitespace-nowrap"
+                            title={line}
+                          >
+                            {line}
+                          </span>
+                        ))}
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
             <div className="mt-[0.35rem] grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-[0.85rem] gap-y-[0.35rem] text-[0.86rem] text-[var(--text-soft)]">
               <span className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap">
                 {formatSize(job.bytesCompleted)} / {formatSize(job.bytesTotal)}
@@ -2479,6 +2575,7 @@ const SftpWorkspacePanes = memo(function SftpWorkspacePanes({
   onNavigateParent,
   onNavigateBreadcrumb,
   onListLocalRoots,
+  onGetPathForDroppedFile,
   onSelectEntry,
   onCreateDirectory,
   onRenameSelection,
@@ -2729,6 +2826,7 @@ const SftpWorkspacePanes = memo(function SftpWorkspacePanes({
                     onNavigateBreadcrumb(pane.id, nextPath)
                   }
                   onListLocalRoots={onListLocalRoots}
+                  onGetPathForDroppedFile={onGetPathForDroppedFile}
                   onRefresh={() => onRefreshPane(pane.id)}
                   onSelectEntry={(input) => onSelectEntry(pane.id, input)}
                   onOpenEntry={(entryPath) => onOpenEntry(pane.id, entryPath)}

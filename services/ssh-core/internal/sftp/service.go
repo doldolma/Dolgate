@@ -420,7 +420,7 @@ func (s *Service) runTransfer(ctx context.Context, jobID string, payload protoco
 				)
 				return
 			}
-			s.emitTransferFailed(jobID, sizeErr)
+			s.emitTransferFailed(jobID, annotateTransferItem(sizeErr, item.Name))
 			return
 		}
 		progress.bytesTotal += size
@@ -449,7 +449,7 @@ func (s *Service) runTransfer(ctx context.Context, jobID string, payload protoco
 				)
 				return
 			}
-			s.emitTransferFailed(jobID, err)
+			s.emitTransferFailed(jobID, annotateTransferItem(err, item.Name))
 			return
 		}
 	}
@@ -474,7 +474,7 @@ func (s *Service) copyPath(
 
 	sourceInfo, err := sourceFS.Stat(sourcePath)
 	if err != nil {
-		return err
+		return annotateTransferError("source_stat", sourcePath, err)
 	}
 
 	nextTargetPath, skip, mergeIntoExistingDir, err := prepareDestination(targetFS, sourceInfo, targetPath, conflictResolution)
@@ -488,12 +488,12 @@ func (s *Service) copyPath(
 	if sourceInfo.IsDir() {
 		if !mergeIntoExistingDir {
 			if err := targetFS.MkdirAll(nextTargetPath); err != nil {
-				return err
+				return annotateTransferError("target_mkdir", nextTargetPath, err)
 			}
 		}
 		entries, err := sourceFS.ReadDir(sourcePath)
 		if err != nil {
-			return err
+			return annotateTransferError("source_list", sourcePath, err)
 		}
 		for _, entry := range entries {
 			if err := s.copyPath(
@@ -527,13 +527,27 @@ func (s *Service) emitTransferEvent(event protocol.Event) {
 }
 
 func (s *Service) emitTransferFailed(jobID string, err error) {
+	payload := protocol.SFTPTransferProgressPayload{
+		Status:        "failed",
+		Message:       err.Error(),
+		DetailMessage: err.Error(),
+		ErrorCode:     classifyTransferError(err),
+	}
+	var transferErr *transferError
+	if errors.As(err, &transferErr) {
+		payload.ErrorCode = transferErr.Code
+		payload.ErrorOperation = transferErr.Operation
+		payload.ErrorPath = transferErr.Path
+		payload.ErrorItemName = transferErr.ItemName
+		if transferErr.Detail != "" {
+			payload.DetailMessage = transferErr.Detail
+			payload.Message = transferErr.Detail
+		}
+	}
 	s.emitTransferEvent(protocol.Event{
-		Type:  protocol.EventSFTPTransferFailed,
-		JobID: jobID,
-		Payload: protocol.SFTPTransferProgressPayload{
-			Status:  "failed",
-			Message: err.Error(),
-		},
+		Type:    protocol.EventSFTPTransferFailed,
+		JobID:   jobID,
+		Payload: payload,
 	})
 }
 

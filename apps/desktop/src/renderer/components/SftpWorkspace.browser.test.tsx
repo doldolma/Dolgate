@@ -292,6 +292,10 @@ function renderWorkspace(
   const onListLocalRoots = vi
     .fn()
     .mockResolvedValue([{ label: "/", path: "/" }]);
+  const onGetPathForDroppedFile = vi
+    .fn()
+    .mockImplementation((file: File) => `/Users/tester/Drop/${file.name}`);
+  const onPrepareExternalTransfer = vi.fn().mockResolvedValue(undefined);
   const result = render(
     <SftpWorkspace
       desktopPlatform="darwin"
@@ -315,6 +319,7 @@ function renderWorkspace(
       onNavigateParent={vi.fn().mockResolvedValue(undefined)}
       onNavigateBreadcrumb={onNavigateBreadcrumb}
       onListLocalRoots={onListLocalRoots}
+      onGetPathForDroppedFile={onGetPathForDroppedFile}
       onSelectEntry={onSelectEntry}
       onCreateDirectory={vi.fn().mockResolvedValue(undefined)}
       onRenameSelection={vi.fn().mockResolvedValue(undefined)}
@@ -322,7 +327,7 @@ function renderWorkspace(
       onDeleteSelection={onDeleteSelection}
       onDownloadSelection={vi.fn().mockResolvedValue(undefined)}
       onPrepareTransfer={vi.fn().mockResolvedValue(undefined)}
-      onPrepareExternalTransfer={vi.fn().mockResolvedValue(undefined)}
+      onPrepareExternalTransfer={onPrepareExternalTransfer}
       onTransferSelectionToPane={vi.fn().mockResolvedValue(undefined)}
       onResolveConflict={vi.fn().mockResolvedValue(undefined)}
       onDismissConflict={vi.fn()}
@@ -345,6 +350,8 @@ function renderWorkspace(
     onUpdateSettings,
     onSelectEntry,
     onDeleteSelection,
+    onGetPathForDroppedFile,
+    onPrepareExternalTransfer,
   };
 }
 
@@ -454,6 +461,7 @@ describe("SftpWorkspace column resizing", () => {
         onNavigateParent={vi.fn().mockResolvedValue(undefined)}
         onNavigateBreadcrumb={vi.fn().mockResolvedValue(undefined)}
         onListLocalRoots={vi.fn().mockResolvedValue([{ label: "/", path: "/" }])}
+        onGetPathForDroppedFile={vi.fn().mockReturnValue(null)}
         onSelectEntry={vi.fn()}
         onCreateDirectory={vi.fn().mockResolvedValue(undefined)}
         onRenameSelection={vi.fn().mockResolvedValue(undefined)}
@@ -495,6 +503,121 @@ describe("SftpWorkspace column resizing", () => {
       toggle: false,
       range: false,
     });
+  });
+
+  it("uploads Finder-style dropped files to the connected host pane", async () => {
+    const sftp = createSftpState();
+    sftp.rightPane = createHostPickerPane({
+      sourceKind: "host",
+      endpoint: {
+        id: "endpoint-1",
+        kind: "remote",
+        hostId: "ssh-1",
+        title: "Prod SSH",
+        path: "/remote",
+        connectedAt: "2026-03-26T10:00:00.000Z",
+      },
+      currentPath: "/remote",
+      history: ["/remote"],
+      historyIndex: 0,
+      entries: [],
+      selectedHostId: "ssh-1",
+    });
+    const uploadFile = new File(["payload"], "upload.txt");
+    const { container, onGetPathForDroppedFile, onPrepareExternalTransfer } =
+      renderWorkspace({ sftp });
+    const rightPane = container.querySelector(
+      '[data-pane-id="right"]',
+    ) as HTMLElement;
+    const dataTransfer = {
+      types: ["Files"],
+      files: [uploadFile],
+      getData: vi.fn().mockReturnValue(""),
+      dropEffect: "none",
+    };
+
+    fireEvent.dragOver(rightPane, { dataTransfer });
+    fireEvent.drop(rightPane, { dataTransfer });
+
+    await waitFor(() => {
+      expect(onGetPathForDroppedFile).toHaveBeenCalledWith(uploadFile);
+      expect(onPrepareExternalTransfer).toHaveBeenCalledWith("right", "/remote", [
+        "/Users/tester/Drop/upload.txt",
+      ]);
+    });
+  });
+
+  it("enables downloads for remote folders and multiple selected entries", () => {
+    const sftp = createSftpState();
+    sftp.rightPane = {
+      ...createPane("right", createEntry("report.txt", "/remote")),
+      sourceKind: "host",
+      endpoint: {
+        id: "endpoint-1",
+        kind: "remote",
+        hostId: "ssh-1",
+        title: "Prod SSH",
+        path: "/remote",
+        connectedAt: "2026-03-26T10:00:00.000Z",
+      },
+      currentPath: "/remote",
+      history: ["/remote"],
+      entries: [
+        {
+          name: "logs",
+          path: "/remote/logs",
+          isDirectory: true,
+          size: 0,
+          mtime: "2026-03-26T10:00:00.000Z",
+          kind: "folder",
+          permissions: "rwxr-xr-x",
+        },
+        {
+          name: "report.txt",
+          path: "/remote/report.txt",
+          isDirectory: false,
+          size: 128,
+          mtime: "2026-03-26T10:00:00.000Z",
+          kind: "file",
+          permissions: "rw-r--r--",
+        },
+      ],
+      selectedPaths: ["/remote/logs", "/remote/report.txt"],
+    };
+
+    renderWorkspace({ sftp });
+
+    fireEvent.contextMenu(screen.getByText("logs"), {
+      clientX: 120,
+      clientY: 160,
+    });
+
+    expect(screen.getByRole("button", { name: "다운로드" })).not.toBeDisabled();
+  });
+
+  it("keeps download disabled for local pane selections", () => {
+    const sftp = createSftpState();
+    sftp.leftPane.entries = [
+      {
+        name: "local-folder",
+        path: "/left/local-folder",
+        isDirectory: true,
+        size: 0,
+        mtime: "2026-03-26T10:00:00.000Z",
+        kind: "folder",
+        permissions: "rwxr-xr-x",
+      },
+    ];
+    sftp.leftPane.selectedPaths = ["/left/local-folder"];
+
+    renderWorkspace({ sftp });
+
+    fireEvent.contextMenu(screen.getByText("local-folder"), {
+      clientX: 120,
+      clientY: 160,
+    });
+
+    expect(screen.getByRole("button", { name: "다운로드" })).toBeDisabled();
   });
 
   it("replaces D/F badges with file icons and readable kind labels in both panes", () => {

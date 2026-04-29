@@ -1,4 +1,4 @@
-import type { IpcRenderer } from "electron";
+import { webUtils, type IpcRenderer } from "electron";
 import type { DesktopApi } from "@shared";
 import { ipcChannels } from "../../common/ipc-channels";
 import {
@@ -158,6 +158,14 @@ export function buildFilesBridge(
       ipcRenderer.invoke(ipcChannels.files.getHomeDirectory),
     getDownloadsDirectory: () =>
       ipcRenderer.invoke(ipcChannels.files.getDownloadsDirectory),
+    getPathForDroppedFile: (file: File) => {
+      try {
+        const filePath = webUtils.getPathForFile(file);
+        return filePath || null;
+      } catch {
+        return null;
+      }
+    },
     listRoots: () => ipcRenderer.invoke(ipcChannels.files.listRoots),
     getParentPath: (targetPath: string) =>
       ipcRenderer.invoke(ipcChannels.files.getParentPath, targetPath),

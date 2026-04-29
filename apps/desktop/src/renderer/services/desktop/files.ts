@@ -7,6 +7,12 @@ export function listLocalRoots() {
   return desktopApi.files.listRoots();
 }
 
+export function getPathForDroppedFile(
+  file: Parameters<FilesApi["getPathForDroppedFile"]>[0],
+) {
+  return desktopApi.files.getPathForDroppedFile(file);
+}
+
 export function getLocalParentPath(
   targetPath: Parameters<FilesApi["getParentPath"]>[0],
 ) {

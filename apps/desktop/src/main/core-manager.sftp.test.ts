@@ -104,7 +104,22 @@ function createFakeChildProcess() {
 function getTransferEventPayloads(sent: Array<{ channel: string; payload: unknown }>) {
   return sent
     .filter((entry) => entry.channel === ipcChannels.sftp.transferEvent)
-    .map((entry) => entry.payload as { job: { id: string; status: string; bytesCompleted?: number } });
+    .map(
+      (entry) =>
+        entry.payload as {
+          job: {
+            id: string;
+            status: string;
+            bytesCompleted?: number;
+            errorCode?: string;
+            errorOperation?: string;
+            errorPath?: string;
+            errorItemName?: string;
+            errorMessage?: string;
+            detailMessage?: string;
+          };
+        },
+    );
 }
 
 async function waitForWriteCount(
@@ -298,6 +313,55 @@ describe("CoreManager SFTP sessions", () => {
     expect(transferEventsAfterCancelled.at(-1)?.job).toMatchObject({
       id: job.id,
       status: "cancelled",
+    });
+  });
+
+  it("preserves transfer failure diagnostics and normalizes permission copy", async () => {
+    const fakeProcess = createFakeChildProcess();
+    spawnMock.mockReturnValue(fakeProcess.child);
+
+    const manager = new CoreManager();
+    const fakeWindow = createFakeWindow();
+    manager.registerWindow(fakeWindow.window as never);
+
+    const job = await manager.startSftpTransfer({
+      source: { kind: "local", path: "/Users/tester" },
+      target: { kind: "remote", endpointId: "endpoint-1", path: "/srv/app" },
+      items: [
+        {
+          name: "secret.txt",
+          path: "/Users/tester/secret.txt",
+          isDirectory: false,
+          size: 128,
+        },
+      ],
+      conflictResolution: "overwrite",
+    });
+
+    fakeWindow.sent.length = 0;
+    fakeProcess.emitControl({
+      type: "sftpTransferFailed",
+      jobId: job.id,
+      payload: {
+        message: 'sftp: "permission denied" (SSH_FX_PERMISSION_DENIED)',
+        detailMessage: 'sftp: "permission denied" (SSH_FX_PERMISSION_DENIED)',
+        errorCode: "permission_denied",
+        errorOperation: "target_create",
+        errorPath: "/srv/app/secret.txt",
+        errorItemName: "secret.txt",
+      },
+    });
+
+    const transferEvents = getTransferEventPayloads(fakeWindow.sent);
+    expect(transferEvents.at(-1)?.job).toMatchObject({
+      id: job.id,
+      status: "failed",
+      errorCode: "permission_denied",
+      errorOperation: "target_create",
+      errorPath: "/srv/app/secret.txt",
+      errorItemName: "secret.txt",
+      errorMessage: "대상 폴더에 쓸 권한이 없습니다.",
+      detailMessage: 'sftp: "permission denied" (SSH_FX_PERMISSION_DENIED)',
     });
   });
 });

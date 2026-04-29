@@ -4,14 +4,18 @@ import type { SftpPaneState } from '../store/createAppStore';
 import {
   breadcrumbParts,
   buildTransferCardTitle,
+  buildTransferFailureDetailLines,
   canTransferBetweenSftpPanes,
   encodeInternalTransferPayload,
+  extractDroppedAbsolutePaths,
   formatEta,
   formatTransferSpeed,
   getFileEntryKindLabel,
   getFileEntryVisualKind,
   getSftpPaneTitle,
+  getTransferFailureDisplayMessage,
   groupHosts,
+  hasExternalFileDrop,
   hasInternalTransferData,
   hostPickerBreadcrumbs,
   isSftpTransferArrowDisabled,
@@ -323,6 +327,33 @@ describe('SftpWorkspace helpers', () => {
     ).toBe(false);
   });
 
+  it('recognizes Finder-style file drags when files are not yet enumerable', () => {
+    expect(
+      hasExternalFileDrop({
+        types: ['Files'],
+        files: [] as unknown as FileList
+      })
+    ).toBe(true);
+
+    expect(
+      hasExternalFileDrop({
+        types: [],
+        files: [] as unknown as FileList
+      })
+    ).toBe(false);
+  });
+
+  it('resolves dropped file paths through the preload file bridge', async () => {
+    const first = new File(['alpha'], 'alpha.txt');
+    const second = new File(['beta'], 'beta.txt');
+    const getPathForDroppedFile = (file: File) =>
+      file.name === 'alpha.txt' ? '/Users/tester/alpha.txt' : null;
+
+    await expect(
+      extractDroppedAbsolutePaths([first, second], getPathForDroppedFile)
+    ).resolves.toEqual(['/Users/tester/alpha.txt']);
+  });
+
   it('builds a stable summary title for multi-file transfers', () => {
     expect(
       buildTransferCardTitle({
@@ -348,5 +379,34 @@ describe('SftpWorkspace helpers', () => {
         }
       })
     ).toBe('first.txt 외 2개');
+  });
+
+  it('builds readable transfer failure messages and details', () => {
+    const failedJob = {
+      id: 'job-1',
+      sourceLabel: 'Local',
+      targetLabel: 'nas',
+      itemCount: 1,
+      bytesTotal: 100,
+      bytesCompleted: 0,
+      status: 'failed',
+      startedAt: '2025-01-01T00:00:00.000Z',
+      updatedAt: '2025-01-01T00:00:01.000Z',
+      errorMessage: '대상 폴더에 쓸 권한이 없습니다.',
+      errorCode: 'permission_denied',
+      errorOperation: 'target_create',
+      errorPath: '/srv/app/secret.txt',
+      errorItemName: 'secret.txt',
+      detailMessage: 'sftp: "permission denied" (SSH_FX_PERMISSION_DENIED)'
+    } as const;
+
+    expect(getTransferFailureDisplayMessage(failedJob)).toBe(
+      '대상 폴더에 쓸 권한이 없습니다.'
+    );
+    expect(buildTransferFailureDetailLines(failedJob)).toEqual([
+      '항목: secret.txt',
+      '경로: /srv/app/secret.txt',
+      '원본 오류: sftp: "permission denied" (SSH_FX_PERMISSION_DENIED)'
+    ]);
   });
 });

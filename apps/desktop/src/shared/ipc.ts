@@ -827,6 +827,7 @@ export interface DesktopApi {
   files: {
     getHomeDirectory: () => Promise<string>;
     getDownloadsDirectory: () => Promise<string>;
+    getPathForDroppedFile: (file: File) => string | null;
     listRoots: () => Promise<FileSystemRoot[]>;
     getParentPath: (targetPath: string) => Promise<string>;
     list: (path: string) => Promise<DirectoryListing>;

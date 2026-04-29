@@ -23,6 +23,14 @@ const (
 	transferProgressEmitInterval      = 250 * time.Millisecond
 )
 
+const (
+	transferErrorPermissionDenied     = "permission_denied"
+	transferErrorNotFound             = "not_found"
+	transferErrorOperationUnsupported = "operation_unsupported"
+	transferErrorConnectionLost       = "connection_lost"
+	transferErrorUnknown              = "unknown"
+)
+
 type filesystemAccessor interface {
 	Join(base string, elem ...string) string
 	Dir(targetPath string) string
@@ -145,6 +153,134 @@ type transferProgress struct {
 	lastEmittedAt             time.Time
 	lastEmittedBytesCompleted int64
 	lastEmittedItemName       string
+}
+
+type transferError struct {
+	Code      string
+	Operation string
+	Path      string
+	ItemName  string
+	Detail    string
+	Cause     error
+}
+
+func (err *transferError) Error() string {
+	if err.Detail != "" {
+		return err.Detail
+	}
+	if err.Cause != nil {
+		return err.Cause.Error()
+	}
+	return "sftp transfer failed"
+}
+
+func (err *transferError) Unwrap() error {
+	return err.Cause
+}
+
+func annotateTransferError(operation string, targetPath string, err error) error {
+	if err == nil {
+		return nil
+	}
+	var existing *transferError
+	if errors.As(err, &existing) {
+		next := *existing
+		if next.Operation == "" {
+			next.Operation = operation
+		}
+		if next.Path == "" {
+			next.Path = targetPath
+		}
+		if next.Code == "" {
+			next.Code = classifyTransferError(err)
+		}
+		if next.Detail == "" {
+			next.Detail = err.Error()
+		}
+		return &next
+	}
+	return &transferError{
+		Code:      classifyTransferError(err),
+		Operation: operation,
+		Path:      targetPath,
+		Detail:    err.Error(),
+		Cause:     err,
+	}
+}
+
+func annotateTransferItem(err error, itemName string) error {
+	if err == nil || itemName == "" {
+		return err
+	}
+	var existing *transferError
+	if errors.As(err, &existing) {
+		next := *existing
+		if next.ItemName == "" {
+			next.ItemName = itemName
+		}
+		return &next
+	}
+	return &transferError{
+		Code:     classifyTransferError(err),
+		ItemName: itemName,
+		Detail:   err.Error(),
+		Cause:    err,
+	}
+}
+
+func classifyTransferError(err error) string {
+	if err == nil {
+		return transferErrorUnknown
+	}
+	var existing *transferError
+	if errors.As(err, &existing) && existing.Code != "" {
+		return existing.Code
+	}
+	var statusErr *sftppkg.StatusError
+	if errors.As(err, &statusErr) {
+		switch statusErr.Code {
+		case 2:
+			return transferErrorNotFound
+		case 3:
+			return transferErrorPermissionDenied
+		case 6, 7:
+			return transferErrorConnectionLost
+		case 8:
+			return transferErrorOperationUnsupported
+		default:
+			return transferErrorUnknown
+		}
+	}
+	if errors.Is(err, os.ErrPermission) || os.IsPermission(err) {
+		return transferErrorPermissionDenied
+	}
+	if errors.Is(err, os.ErrNotExist) || os.IsNotExist(err) {
+		return transferErrorNotFound
+	}
+
+	message := strings.ToLower(err.Error())
+	switch {
+	case strings.Contains(message, "permission denied") ||
+		strings.Contains(message, "eacces") ||
+		strings.Contains(message, "eperm") ||
+		strings.Contains(message, "ssh_fx_permission_denied"):
+		return transferErrorPermissionDenied
+	case strings.Contains(message, "no such file") ||
+		strings.Contains(message, "not found") ||
+		strings.Contains(message, "ssh_fx_no_such_file"):
+		return transferErrorNotFound
+	case strings.Contains(message, "operation unsupported") ||
+		strings.Contains(message, "unsupported") ||
+		strings.Contains(message, "ssh_fx_op_unsupported"):
+		return transferErrorOperationUnsupported
+	case strings.Contains(message, "connection lost") ||
+		strings.Contains(message, "no connection") ||
+		strings.Contains(message, "connection reset") ||
+		strings.Contains(message, "use of closed network connection"):
+		return transferErrorConnectionLost
+	default:
+		return transferErrorUnknown
+	}
 }
 
 func newTransferProgress(now time.Time) *transferProgress {
@@ -293,8 +429,10 @@ type truncater interface {
 }
 
 type countingReader struct {
-	reader io.Reader
-	onRead func(int64)
+	reader         io.Reader
+	onRead         func(int64)
+	errorOperation string
+	errorPath      string
 }
 
 func (reader *countingReader) Read(buffer []byte) (int, error) {
@@ -302,18 +440,26 @@ func (reader *countingReader) Read(buffer []byte) (int, error) {
 	if readBytes > 0 && reader.onRead != nil {
 		reader.onRead(int64(readBytes))
 	}
+	if err != nil && !errors.Is(err, io.EOF) && reader.errorOperation != "" {
+		return readBytes, annotateTransferError(reader.errorOperation, reader.errorPath, err)
+	}
 	return readBytes, err
 }
 
 type countingWriter struct {
-	writer  io.Writer
-	onWrite func(int64)
+	writer         io.Writer
+	onWrite        func(int64)
+	errorOperation string
+	errorPath      string
 }
 
 func (writer *countingWriter) Write(buffer []byte) (int, error) {
 	writtenBytes, err := writer.writer.Write(buffer)
 	if writtenBytes > 0 && writer.onWrite != nil {
 		writer.onWrite(int64(writtenBytes))
+	}
+	if err != nil && writer.errorOperation != "" {
+		return writtenBytes, annotateTransferError(writer.errorOperation, writer.errorPath, err)
 	}
 	return writtenBytes, err
 }
@@ -363,7 +509,7 @@ func calculateTotalSize(ctx context.Context, accessor filesystemAccessor, target
 
 	info, err := accessor.Stat(targetPath)
 	if err != nil {
-		return 0, err
+		return 0, annotateTransferError("source_stat", targetPath, err)
 	}
 	if !info.IsDir() {
 		return info.Size(), nil
@@ -371,7 +517,7 @@ func calculateTotalSize(ctx context.Context, accessor filesystemAccessor, target
 
 	entries, err := accessor.ReadDir(targetPath)
 	if err != nil {
-		return 0, err
+		return 0, annotateTransferError("source_list", targetPath, err)
 	}
 
 	total := int64(0)
@@ -396,7 +542,7 @@ func prepareDestination(
 		if isNotExist(err) {
 			return targetPath, false, false, nil
 		}
-		return "", false, false, err
+		return "", false, false, annotateTransferError("target_stat", targetPath, err)
 	}
 
 	switch conflictResolution {
@@ -404,13 +550,16 @@ func prepareDestination(
 		return targetPath, true, false, nil
 	case "keepBoth":
 		uniquePath, err := nextUniquePath(targetFS, targetPath)
-		return uniquePath, false, false, err
+		if err != nil {
+			return "", false, false, annotateTransferError("target_stat", targetPath, err)
+		}
+		return uniquePath, false, false, nil
 	case "overwrite", "":
 		if sourceInfo.IsDir() && existing.IsDir() {
 			return targetPath, false, true, nil
 		}
 		if err := removePath(targetFS, targetPath); err != nil {
-			return "", false, false, err
+			return "", false, false, annotateTransferError("target_remove", targetPath, err)
 		}
 		return targetPath, false, false, nil
 	default:
@@ -478,18 +627,18 @@ func copyFileWithProgress(
 	reporter *transferProgressReporter,
 ) error {
 	if err := targetFS.MkdirAll(targetFS.Dir(targetPath)); err != nil {
-		return err
+		return annotateTransferError("target_mkdir", targetFS.Dir(targetPath), err)
 	}
 
 	sourceFile, err := sourceFS.Open(sourcePath)
 	if err != nil {
-		return err
+		return annotateTransferError("source_open", sourcePath, err)
 	}
 
 	targetFile, err := targetFS.Create(targetPath)
 	if err != nil {
 		_ = sourceFile.Close()
-		return err
+		return annotateTransferError("target_create", targetPath, err)
 	}
 
 	closer := newTransferStreamCloser(sourceFile, targetFile)
@@ -498,11 +647,11 @@ func copyFileWithProgress(
 	stopCancellationWatcher := watchTransferCancellation(ctx, closer)
 	defer stopCancellationWatcher()
 
-	if err := transferFileContents(sourceFile, targetFile, reporter); err != nil {
+	if err := transferFileContents(sourceFile, targetFile, reporter, sourcePath, targetPath); err != nil {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
-		return err
+		return annotateTransferError("target_write", targetPath, err)
 	}
 	if ctx.Err() != nil {
 		return ctx.Err()
@@ -514,12 +663,16 @@ func transferFileContents(
 	sourceFile io.ReadCloser,
 	targetFile io.WriteCloser,
 	reporter *transferProgressReporter,
+	sourcePath string,
+	targetPath string,
 ) error {
 	if concurrentTarget, ok := targetFile.(concurrentReaderFrom); ok {
 		writtenBytes, err := concurrentTarget.ReadFromWithConcurrency(
 			&countingReader{
-				reader: sourceFile,
-				onRead: reporter.recordTransferredBytes,
+				reader:         sourceFile,
+				onRead:         reporter.recordTransferredBytes,
+				errorOperation: "source_read",
+				errorPath:      sourcePath,
 			},
 			transferConcurrentRequestsPerFile,
 		)
@@ -533,18 +686,26 @@ func transferFileContents(
 	}
 
 	progressWriter := &countingWriter{
-		writer:  targetFile,
-		onWrite: reporter.recordTransferredBytes,
+		writer:         targetFile,
+		onWrite:        reporter.recordTransferredBytes,
+		errorOperation: "target_write",
+		errorPath:      targetPath,
 	}
 
 	if writerToSource, ok := sourceFile.(io.WriterTo); ok {
 		_, err := writerToSource.WriteTo(progressWriter)
-		return err
+		return annotateTransferError("source_read", sourcePath, err)
+	}
+
+	progressReader := &countingReader{
+		reader:         sourceFile,
+		errorOperation: "source_read",
+		errorPath:      sourcePath,
 	}
 
 	_, err := io.CopyBuffer(
 		progressWriter,
-		sourceFile,
+		progressReader,
 		make([]byte, transferFallbackBufferSize),
 	)
 	return err

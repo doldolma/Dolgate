@@ -1718,6 +1718,11 @@ export interface TransferJob {
   startedAt: string;
   activeItemName?: string | null;
   errorMessage?: string | null;
+  errorCode?: 'permission_denied' | 'not_found' | 'operation_unsupported' | 'connection_lost' | 'unknown';
+  errorOperation?: string | null;
+  errorPath?: string | null;
+  errorItemName?: string | null;
+  detailMessage?: string | null;
   updatedAt: string;
   request?: TransferStartInput;
 }
