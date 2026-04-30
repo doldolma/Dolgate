@@ -4,8 +4,23 @@ const { spawnSync } = require("child_process");
 
 const appRoot = path.resolve(__dirname, "..");
 const iosRoot = path.join(appRoot, "ios");
+const repoRoot = path.resolve(appRoot, "..", "..");
 const xcodeWorkspaceName = "Dolgate.xcworkspace";
 const legacyIosBundleIds = ["com.dolgate.mobile"];
+const russhXcframeworkInfoPlist = path.join(
+  repoRoot,
+  "packages",
+  "fressh-react-native-uniffi-russh",
+  "FresshReactNativeUniffiRusshFramework.xcframework",
+  "Info.plist",
+);
+const russhXcframeworkScript = path.join(
+  iosRoot,
+  "Pods",
+  "Target Support Files",
+  "ReactNativeUniffiRussh",
+  "ReactNativeUniffiRussh-xcframeworks.sh",
+);
 
 function hasExecutable(candidatePath) {
   return Boolean(candidatePath && fs.existsSync(candidatePath));
@@ -85,6 +100,39 @@ function readFileIfExists(filePath) {
   return fs.readFileSync(filePath, "utf8");
 }
 
+function getXcframeworkLibraryIdentifiers(infoPlistContent) {
+  return Array.from(
+    infoPlistContent.matchAll(
+      /<key>LibraryIdentifier<\/key>\s*<string>([^<]+)<\/string>/g,
+    ),
+    (match) => match[1],
+  );
+}
+
+function shouldRefreshRusshPodSupportFiles() {
+  if (!fs.existsSync(russhXcframeworkInfoPlist)) {
+    return false;
+  }
+
+  if (!fs.existsSync(russhXcframeworkScript)) {
+    return true;
+  }
+
+  const infoStats = fs.statSync(russhXcframeworkInfoPlist);
+  const scriptStats = fs.statSync(russhXcframeworkScript);
+  if (infoStats.mtimeMs > scriptStats.mtimeMs) {
+    return true;
+  }
+
+  const infoPlistContent = readFileIfExists(russhXcframeworkInfoPlist) ?? "";
+  const scriptContent = readFileIfExists(russhXcframeworkScript) ?? "";
+  const libraryIdentifiers = getXcframeworkLibraryIdentifiers(infoPlistContent);
+
+  return libraryIdentifiers.some(
+    (libraryIdentifier) => !scriptContent.includes(libraryIdentifier),
+  );
+}
+
 function shouldInstallPods() {
   const workspacePath = path.join(iosRoot, xcodeWorkspaceName);
   const podfilePath = path.join(iosRoot, "Podfile");
@@ -98,6 +146,10 @@ function shouldInstallPods() {
   const podfileStats = fs.statSync(podfilePath);
   const podfileLockStats = fs.statSync(podfileLockPath);
   if (podfileStats.mtimeMs > podfileLockStats.mtimeMs) {
+    return true;
+  }
+
+  if (shouldRefreshRusshPodSupportFiles()) {
     return true;
   }
 

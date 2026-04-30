@@ -5,6 +5,8 @@ const { spawn, spawnSync } = require("child_process");
 const {
   appRoot,
   buildEnvForAndroid,
+  readRequiredNdkVersion,
+  resolveNdkDir,
   resolveSdkDir,
 } = require("./android-env.cjs");
 const { ensureRusshNative } = require("../../../packages/fressh-react-native-uniffi-russh/scripts/ensure-native.cjs");
@@ -158,6 +160,24 @@ function adbReverse(serial, env) {
   }
 }
 
+function ensureAndroidNdkAvailable(env) {
+  const sdkDir = resolveSdkDir();
+  const ndkDir = resolveNdkDir(sdkDir, env);
+  if (ndkDir) {
+    return;
+  }
+
+  const requiredNdkVersion = readRequiredNdkVersion() ?? "the Android Gradle NDK version";
+  const sdkMessage = sdkDir ? `SDK: ${sdkDir}` : "Android SDK was not found.";
+  throw new Error(
+    [
+      `Android NDK ${requiredNdkVersion} is required to build russh native artifacts.`,
+      sdkMessage,
+      "Install it from Android Studio > Settings > Languages & Frameworks > Android SDK > SDK Tools > NDK (Side by side), then try again.",
+    ].join("\n"),
+  );
+}
+
 function forceStopAndroidApp(serial, env) {
   const adbPath = getToolPath("platform-tools", "adb");
   runTool(adbPath, ["-s", serial, "shell", "am", "force-stop", "com.dolgate"], env);
@@ -166,7 +186,8 @@ function forceStopAndroidApp(serial, env) {
 async function main() {
   const extraArgs = process.argv.slice(2);
   const androidEnv = buildEnvForAndroid(process.env);
-  ensureRusshNative({ platform: "android" });
+  ensureAndroidNdkAvailable(androidEnv);
+  ensureRusshNative({ platform: "android", env: androidEnv });
 
   await runDevSession({
     appRoot,

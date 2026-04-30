@@ -20,6 +20,7 @@ services/sync-api/config/default.json
 services/sync-api/config/production.json
 services/sync-api/data
 packages/fressh-react-native-uniffi-russh/android/.cxx/
+packages/fressh-react-native-uniffi-russh/android/.gradle/
 packages/fressh-react-native-uniffi-russh/android/build/
 packages/fressh-react-native-uniffi-russh/rust/target/
 packages/uniffi-bindgen-react-native/target/
