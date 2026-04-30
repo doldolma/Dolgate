@@ -163,6 +163,12 @@ func (stub *stubSFTPService) Rename(endpointID, requestID string, payload corety
 func (stub *stubSFTPService) Chmod(endpointID, requestID string, payload coretypes.SFTPChmodPayload) error {
 	return nil
 }
+func (stub *stubSFTPService) Chown(endpointID, requestID string, payload coretypes.SFTPChownPayload) error {
+	return nil
+}
+func (stub *stubSFTPService) ListPrincipals(endpointID, requestID string, payload coretypes.SFTPListPrincipalsPayload) error {
+	return nil
+}
 func (stub *stubSFTPService) Delete(endpointID, requestID string, payload coretypes.SFTPDeletePayload) error {
 	return nil
 }

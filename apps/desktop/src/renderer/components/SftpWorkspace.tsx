@@ -29,6 +29,7 @@ import type {
   SftpBrowserColumnKey,
   SftpBrowserColumnWidths,
   SftpPaneId,
+  SftpPrincipal,
   TransferJob,
 } from "@shared";
 import type {
@@ -109,6 +110,22 @@ interface SftpWorkspaceProps {
     paneId: SftpPaneId,
     mode: number,
   ) => Promise<void>;
+  onChangeSelectionOwner?: (
+    paneId: SftpPaneId,
+    input: {
+      owner?: string;
+      group?: string;
+      uid?: number;
+      gid?: number;
+      recursive?: boolean;
+      sudoPassword?: string;
+    },
+  ) => Promise<void>;
+  onListPrincipals?: (
+    paneId: SftpPaneId,
+    kind: "user" | "group",
+    query?: string,
+  ) => Promise<SftpPrincipal[]>;
   onDeleteSelection: (paneId: SftpPaneId) => Promise<void>;
   onDownloadSelection: (paneId: SftpPaneId) => Promise<void>;
   onPrepareTransfer: (
@@ -182,6 +199,26 @@ interface PermissionDialogState {
   name: string;
   matrix: PermissionMatrixState;
   isSubmitting: boolean;
+}
+
+interface OwnerDialogState {
+  paneId: SftpPaneId;
+  path: string;
+  name: string;
+  owner: string;
+  group: string;
+  recursive: boolean;
+  sudoPassword: string;
+  requiresPassword: boolean;
+  allowManualEntry: boolean;
+  userQuery: string;
+  groupQuery: string;
+  users: SftpPrincipal[];
+  groups: SftpPrincipal[];
+  isLoadingUsers: boolean;
+  isLoadingGroups: boolean;
+  isSubmitting: boolean;
+  errorMessage: string | null;
 }
 
 interface ContextMenuState {
@@ -1000,6 +1037,7 @@ interface PaneBrowserProps {
   onOpenCreateDirectoryDialog: () => void;
   onOpenRenameDialog: () => void;
   onOpenPermissionsDialog: () => void;
+  onOpenOwnerDialog: () => void;
   onDeleteSelection: () => void;
   onDownloadSelection: () => Promise<void>;
   onPrepareTransfer: (
@@ -1033,6 +1071,7 @@ function PaneBrowser({
   onOpenCreateDirectoryDialog,
   onOpenRenameDialog,
   onOpenPermissionsDialog,
+  onOpenOwnerDialog,
   onDeleteSelection,
   onDownloadSelection,
   onPrepareTransfer,
@@ -1128,6 +1167,13 @@ function PaneBrowser({
     pane.sourceKind === "host" &&
     Boolean(pane.endpoint) &&
     pane.selectedPaths.length > 0;
+  const canChangeOwner =
+    pane.sourceKind === "host" &&
+    Boolean(pane.endpoint) &&
+    pane.selectedPaths.length === 1 &&
+    (pane.endpoint?.sudoStatus === "root" ||
+      pane.endpoint?.sudoStatus === "passwordless" ||
+      pane.endpoint?.sudoStatus === "passwordRequired");
   const contextMenuStyle = contextMenu
     ? {
         left: `${Math.max(12, Math.min(contextMenu.x, window.innerWidth - 196))}px`,
@@ -1651,6 +1697,17 @@ function PaneBrowser({
                 }}
               >
                 권한 수정
+              </button>
+              <button
+                type="button"
+                className="flex w-full items-center rounded-[12px] px-[0.8rem] py-[0.75rem] text-left text-[var(--text)] transition-colors duration-150 hover:bg-[color-mix(in_srgb,var(--surface-muted)_92%,transparent_8%)] disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:bg-transparent"
+                disabled={!canChangeOwner}
+                onClick={() => {
+                  setContextMenu(null);
+                  onOpenOwnerDialog();
+                }}
+              >
+                소유권 변경
               </button>
               <button
                 type="button"
@@ -2490,6 +2547,186 @@ function PermissionDialog({
   );
 }
 
+function formatPrincipalLabel(principal: SftpPrincipal): string {
+  const display = principal.displayName ? ` · ${principal.displayName}` : "";
+  return `${principal.name} (${principal.id})${display}`;
+}
+
+function PrincipalPicker({
+  label,
+  value,
+  query,
+  principals,
+  isLoading,
+  allowManualEntry,
+  onQueryChange,
+  onValueChange,
+}: {
+  label: string;
+  value: string;
+  query: string;
+  principals: SftpPrincipal[];
+  isLoading: boolean;
+  allowManualEntry: boolean;
+  onQueryChange: (value: string) => void;
+  onValueChange: (value: string) => void;
+}) {
+  return (
+    <div className="grid gap-[0.55rem]">
+      <label className="text-[0.86rem] font-medium text-[var(--text-soft)]">
+        {label}
+      </label>
+      <Input
+        value={query}
+        onChange={(event) => onQueryChange(event.target.value)}
+        placeholder={`${label} 검색`}
+      />
+      {allowManualEntry ? (
+        <Input
+          value={value}
+          onChange={(event) => onValueChange(event.target.value)}
+          placeholder={`${label} 직접 입력`}
+        />
+      ) : null}
+      <div className="max-h-[9.5rem] overflow-auto rounded-[14px] border border-[var(--border)] bg-[var(--surface-strong)] p-[0.3rem]">
+        {isLoading ? (
+          <div className="px-[0.55rem] py-[0.45rem] text-[0.84rem] text-[var(--text-muted)]">
+            불러오는 중...
+          </div>
+        ) : principals.length > 0 ? (
+          <div className="grid gap-[0.15rem]">
+            {principals.map((principal) => (
+              <button
+                key={`${principal.kind}:${principal.id}:${principal.name}`}
+                type="button"
+                className={cn(
+                  "rounded-[10px] px-[0.55rem] py-[0.45rem] text-left text-[0.88rem] transition-colors duration-150",
+                  value === principal.name || value === String(principal.id)
+                    ? "bg-[color-mix(in_srgb,var(--accent-strong)_14%,var(--surface-elevated)_86%)] font-medium text-[var(--accent-strong)]"
+                    : "text-[var(--text-secondary)] hover:bg-[color-mix(in_srgb,var(--surface-muted)_82%,transparent_18%)] hover:text-[var(--text-primary)]",
+                )}
+                onClick={() => onValueChange(principal.name)}
+              >
+                {formatPrincipalLabel(principal)}
+              </button>
+            ))}
+          </div>
+        ) : (
+          <div className="px-[0.55rem] py-[0.45rem] text-[0.84rem] text-[var(--text-muted)]">
+            결과가 없습니다.
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function OwnerDialog({
+  dialog,
+  onChange,
+  onClose,
+  onSubmit,
+}: {
+  dialog: OwnerDialogState | null;
+  onChange: (patch: Partial<OwnerDialogState>) => void;
+  onClose: () => void;
+  onSubmit: () => Promise<void>;
+}) {
+  if (!dialog) {
+    return null;
+  }
+
+  return (
+    <DialogBackdrop onDismiss={onClose} dismissDisabled={dialog.isSubmitting}>
+      <ModalShell size="md">
+        <ModalHeader>
+          <div>
+            <SectionLabel>Ownership</SectionLabel>
+            <h3 className="m-0">{dialog.name} 소유권 변경</h3>
+          </div>
+        </ModalHeader>
+        <ModalBody>
+          <div className="grid gap-[0.9rem]">
+            <PrincipalPicker
+              label="사용자"
+              value={dialog.owner}
+              query={dialog.userQuery}
+              principals={dialog.users}
+              isLoading={dialog.isLoadingUsers}
+              allowManualEntry={dialog.allowManualEntry}
+              onQueryChange={(userQuery) => onChange({ userQuery })}
+              onValueChange={(owner) => onChange({ owner })}
+            />
+            <PrincipalPicker
+              label="그룹"
+              value={dialog.group}
+              query={dialog.groupQuery}
+              principals={dialog.groups}
+              isLoading={dialog.isLoadingGroups}
+              allowManualEntry={dialog.allowManualEntry}
+              onQueryChange={(groupQuery) => onChange({ groupQuery })}
+              onValueChange={(group) => onChange({ group })}
+            />
+            {dialog.requiresPassword ? (
+              <Input
+                type="password"
+                value={dialog.sudoPassword}
+                onChange={(event) =>
+                  onChange({ sudoPassword: event.target.value })
+                }
+                placeholder="sudo password"
+                disabled={dialog.isSubmitting}
+              />
+            ) : null}
+            <label className="flex items-start gap-[0.65rem] rounded-[14px] border border-[var(--border)] bg-[color-mix(in_srgb,var(--surface-muted)_68%,transparent_32%)] px-[0.75rem] py-[0.65rem] text-[0.9rem] text-[var(--text-secondary)]">
+              <input
+                type="checkbox"
+                className="mt-[0.2rem] h-4 w-4"
+                checked={dialog.recursive}
+                onChange={(event) =>
+                  onChange({ recursive: event.target.checked })
+                }
+                disabled={dialog.isSubmitting}
+              />
+              <span>
+                하위 항목까지 적용
+                <span className="mt-[0.15rem] block text-[0.82rem] text-[var(--text-muted)]">
+                  폴더를 선택한 경우 내부 파일과 하위 폴더의 소유권도 함께 변경합니다.
+                </span>
+              </span>
+            </label>
+            {dialog.errorMessage ? (
+              <p className="m-0 text-[0.9rem] text-[var(--danger-text)]">
+                {dialog.errorMessage}
+              </p>
+            ) : null}
+          </div>
+        </ModalBody>
+        <ModalFooter>
+          <Button
+            variant="secondary"
+            onClick={onClose}
+            disabled={dialog.isSubmitting}
+          >
+            취소
+          </Button>
+          <Button
+            variant="primary"
+            onClick={() => void onSubmit()}
+            disabled={
+              dialog.isSubmitting ||
+              (!dialog.owner.trim() && !dialog.group.trim()) ||
+              (dialog.requiresPassword && !dialog.sudoPassword)
+            }
+          >
+            적용
+          </Button>
+        </ModalFooter>
+      </ModalShell>
+    </DialogBackdrop>
+  );
+}
+
 function DeleteDialog({
   dialog,
   onClose,
@@ -2580,6 +2817,8 @@ const SftpWorkspacePanes = memo(function SftpWorkspacePanes({
   onCreateDirectory,
   onRenameSelection,
   onChangeSelectionPermissions,
+  onChangeSelectionOwner = async () => undefined,
+  onListPrincipals = async () => [],
   onDeleteSelection,
   onDownloadSelection,
   onPrepareTransfer,
@@ -2598,6 +2837,7 @@ const SftpWorkspacePanes = memo(function SftpWorkspacePanes({
   );
   const [permissionDialog, setPermissionDialog] =
     useState<PermissionDialogState | null>(null);
+  const [ownerDialog, setOwnerDialog] = useState<OwnerDialogState | null>(null);
   const [deleteDialog, setDeleteDialog] = useState<DeleteDialogState | null>(
     null,
   );
@@ -2619,6 +2859,80 @@ const SftpWorkspacePanes = memo(function SftpWorkspacePanes({
       ),
     [hosts],
   );
+
+  useEffect(() => {
+    if (!ownerDialog) {
+      return;
+    }
+    let cancelled = false;
+    const load = async (kind: "user" | "group", query: string) => {
+      setOwnerDialog((current) =>
+        current && current.path === ownerDialog.path
+          ? {
+              ...current,
+              isLoadingUsers: kind === "user" ? true : current.isLoadingUsers,
+              isLoadingGroups:
+                kind === "group" ? true : current.isLoadingGroups,
+              errorMessage: null,
+            }
+          : current,
+      );
+      try {
+        const principals = await onListPrincipals(
+          ownerDialog.paneId,
+          kind,
+          query,
+        );
+        if (cancelled) {
+          return;
+        }
+        setOwnerDialog((current) =>
+          current && current.path === ownerDialog.path
+            ? {
+                ...current,
+                users: kind === "user" ? principals : current.users,
+                groups: kind === "group" ? principals : current.groups,
+                isLoadingUsers:
+                  kind === "user" ? false : current.isLoadingUsers,
+                isLoadingGroups:
+                  kind === "group" ? false : current.isLoadingGroups,
+              }
+            : current,
+        );
+      } catch (error) {
+        if (cancelled) {
+          return;
+        }
+        setOwnerDialog((current) =>
+          current && current.path === ownerDialog.path
+            ? {
+                ...current,
+                allowManualEntry: true,
+                isLoadingUsers:
+                  kind === "user" ? false : current.isLoadingUsers,
+                isLoadingGroups:
+                  kind === "group" ? false : current.isLoadingGroups,
+                errorMessage:
+                  error instanceof Error
+                    ? error.message
+                    : "사용자/그룹 목록을 불러오지 못했습니다.",
+              }
+            : current,
+        );
+      }
+    };
+    void load("user", ownerDialog.userQuery);
+    void load("group", ownerDialog.groupQuery);
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    ownerDialog?.paneId,
+    ownerDialog?.path,
+    ownerDialog?.userQuery,
+    ownerDialog?.groupQuery,
+    onListPrincipals,
+  ]);
   const leftPane = sftp.leftPane;
   const rightPane = sftp.rightPane;
   const canTransferBetweenPanes = canTransferBetweenSftpPanes(
@@ -2739,6 +3053,46 @@ const SftpWorkspacePanes = memo(function SftpWorkspacePanes({
                 error instanceof Error
                   ? error.message
                   : "선택한 항목을 삭제하지 못했습니다.",
+            }
+          : current,
+      );
+    }
+  };
+
+  const handleConfirmOwnerChange = async () => {
+    if (!ownerDialog || ownerDialog.isSubmitting) {
+      return;
+    }
+
+    setOwnerDialog((current) =>
+      current
+        ? {
+            ...current,
+            isSubmitting: true,
+            errorMessage: null,
+          }
+        : current,
+    );
+
+    try {
+      await onChangeSelectionOwner(ownerDialog.paneId, {
+        owner: ownerDialog.owner.trim() || undefined,
+        group: ownerDialog.group.trim() || undefined,
+        recursive: ownerDialog.recursive,
+        sudoPassword: ownerDialog.sudoPassword || undefined,
+      });
+      setOwnerDialog(null);
+    } catch (error) {
+      setOwnerDialog((current) =>
+        current
+          ? {
+              ...current,
+              isSubmitting: false,
+              requiresPassword: true,
+              errorMessage:
+                error instanceof Error
+                  ? error.message
+                  : "소유권을 변경하지 못했습니다.",
             }
           : current,
       );
@@ -2871,6 +3225,42 @@ const SftpWorkspacePanes = memo(function SftpWorkspacePanes({
                       name: selected.name,
                       matrix: permissionMatrixFromString(selected.permissions),
                       isSubmitting: false,
+                    });
+                  }}
+                  onOpenOwnerDialog={() => {
+                    const selected = pane.entries.find((entry) =>
+                      pane.selectedPaths.includes(entry.path),
+                    );
+                    if (!selected || !pane.endpoint) {
+                      return;
+                    }
+                    setOwnerDialog({
+                      paneId: pane.id,
+                      path: selected.path,
+                      name: selected.name,
+                      owner:
+                        selected.owner ??
+                        (typeof selected.uid === "number"
+                          ? String(selected.uid)
+                          : ""),
+                      group:
+                        selected.group ??
+                        (typeof selected.gid === "number"
+                          ? String(selected.gid)
+                          : ""),
+                      recursive: false,
+                      sudoPassword: "",
+                      requiresPassword:
+                        pane.endpoint.sudoStatus === "passwordRequired",
+                      allowManualEntry: false,
+                      userQuery: "",
+                      groupQuery: "",
+                      users: [],
+                      groups: [],
+                      isLoadingUsers: true,
+                      isLoadingGroups: true,
+                      isSubmitting: false,
+                      errorMessage: null,
                     });
                   }}
                   onDeleteSelection={async () => {
@@ -3047,6 +3437,21 @@ const SftpWorkspacePanes = memo(function SftpWorkspacePanes({
             throw error;
           }
         }}
+      />
+
+      <OwnerDialog
+        dialog={ownerDialog}
+        onChange={(patch) =>
+          setOwnerDialog((current) =>
+            current ? { ...current, ...patch } : current,
+          )
+        }
+        onClose={() => {
+          setOwnerDialog((current) =>
+            current?.isSubmitting ? current : null,
+          );
+        }}
+        onSubmit={handleConfirmOwnerChange}
       />
 
       <DeleteDialog

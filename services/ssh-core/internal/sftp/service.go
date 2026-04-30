@@ -4,16 +4,19 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"path"
 	"sort"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
 	sftppkg "github.com/pkg/sftp"
+	"golang.org/x/crypto/ssh"
 
 	"dolssh/services/ssh-core/internal/protocol"
+	"dolssh/services/ssh-core/internal/sshcmd"
 	"dolssh/services/ssh-core/internal/sshconn"
 )
 
@@ -21,10 +24,12 @@ import (
 type EventEmitter func(protocol.Event)
 
 type endpointHandle struct {
-	client   io.Closer
-	sftp     *sftppkg.Client
-	rootPath string
-	closer   sync.Once
+	client       *ssh.Client
+	sftp         *sftppkg.Client
+	rootPath     string
+	sudoStatus   string
+	sudoPassword string
+	closer       sync.Once
 }
 
 type transferHandle struct {
@@ -171,9 +176,10 @@ func (s *Service) Connect(endpointID, requestID string, payload protocol.SFTPCon
 	}
 
 	handle := &endpointHandle{
-		client:   client,
-		sftp:     sftpClient,
-		rootPath: rootPath,
+		client:     client,
+		sftp:       sftpClient,
+		rootPath:   rootPath,
+		sudoStatus: "probing",
 	}
 
 	s.mu.Lock()
@@ -185,9 +191,12 @@ func (s *Service) Connect(endpointID, requestID string, payload protocol.SFTPCon
 		RequestID:  requestID,
 		EndpointID: endpointID,
 		Payload: protocol.SFTPConnectedPayload{
-			Path: rootPath,
+			Path:       rootPath,
+			SudoStatus: "probing",
 		},
 	})
+
+	go s.probeSudo(endpointID, payload.AuthType, payload.Password)
 
 	return nil
 }
@@ -251,9 +260,10 @@ func (s *Service) List(endpointID, requestID string, payload protocol.SFTPListPa
 		return err
 	}
 
+	ownerNames, groupNames := s.resolveEntryPrincipalNames(handle, items)
 	entries := make([]protocol.SFTPFileEntry, 0, len(items))
 	for _, item := range items {
-		entries = append(entries, toFileEntry(targetPath, item))
+		entries = append(entries, toFileEntry(targetPath, item, ownerNames, groupNames))
 	}
 
 	sort.Slice(entries, func(i, j int) bool {
@@ -336,6 +346,99 @@ func (s *Service) Chmod(endpointID, requestID string, payload protocol.SFTPChmod
 		EndpointID: endpointID,
 		Payload: protocol.AckPayload{
 			Message: "path permissions updated",
+		},
+	})
+	return nil
+}
+
+func (s *Service) Chown(endpointID, requestID string, payload protocol.SFTPChownPayload) error {
+	handle, err := s.getEndpoint(endpointID)
+	if err != nil {
+		return err
+	}
+
+	spec, err := buildChownOwnerSpec(payload)
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(payload.Path) == "" {
+		return fmt.Errorf("path is required")
+	}
+
+	stdin := []byte(nil)
+	command := ""
+	status := s.getSudoStatus(endpointID)
+	switch status {
+	case "root":
+		command = buildChownCommand("", spec, payload.Path, payload.Recursive)
+	case "passwordless":
+		password := strings.TrimRight(payload.SudoPassword, "\r\n")
+		if password == "" {
+			password = handle.sudoPassword
+		}
+		if password != "" {
+			command = buildChownCommand("sudo -S -p ''", spec, payload.Path, payload.Recursive)
+			stdin = []byte(password + "\n")
+		} else {
+			command = buildChownCommand("sudo -n", spec, payload.Path, payload.Recursive)
+		}
+	default:
+		password := strings.TrimRight(payload.SudoPassword, "\r\n")
+		if password == "" {
+			password = handle.sudoPassword
+		}
+		if password == "" {
+			return fmt.Errorf("sudo password is required")
+		}
+		command = buildChownCommand("sudo -S -p ''", spec, payload.Path, payload.Recursive)
+		stdin = []byte(password + "\n")
+	}
+
+	if _, stderr, err := sshcmd.RunWithInputWithTimeout(handle.client, command, stdin, 20*time.Second); err != nil {
+		return formatRemoteCommandError(err, stderr)
+	}
+
+	if payload.SudoPassword != "" {
+		s.setSudoStatus(endpointID, "passwordless", "sudo password accepted", strings.TrimRight(payload.SudoPassword, "\r\n"))
+	}
+
+	s.emit(protocol.Event{
+		Type:       protocol.EventSFTPAck,
+		RequestID:  requestID,
+		EndpointID: endpointID,
+		Payload: protocol.AckPayload{
+			Message: "path owner updated",
+		},
+	})
+	return nil
+}
+
+func (s *Service) ListPrincipals(endpointID, requestID string, payload protocol.SFTPListPrincipalsPayload) error {
+	handle, err := s.getEndpoint(endpointID)
+	if err != nil {
+		return err
+	}
+	kind := normalizePrincipalKind(payload.Kind)
+	if kind == "" {
+		return fmt.Errorf("principal kind must be user or group")
+	}
+	limit := payload.Limit
+	if limit <= 0 || limit > 500 {
+		limit = 100
+	}
+	principals, err := listRemotePrincipals(handle.client, kind, payload.Query, limit)
+	if err != nil {
+		return err
+	}
+
+	s.emit(protocol.Event{
+		Type:       protocol.EventSFTPPrincipalsListed,
+		RequestID:  requestID,
+		EndpointID: endpointID,
+		Payload: protocol.SFTPPrincipalsListedPayload{
+			Kind:       kind,
+			Query:      payload.Query,
+			Principals: principals,
 		},
 	})
 	return nil
@@ -614,7 +717,12 @@ func (handle *endpointHandle) close() {
 	})
 }
 
-func toFileEntry(parentPath string, item os.FileInfo) protocol.SFTPFileEntry {
+func toFileEntry(
+	parentPath string,
+	item os.FileInfo,
+	ownerNames map[int]string,
+	groupNames map[int]string,
+) protocol.SFTPFileEntry {
 	kind := "unknown"
 	switch {
 	case item.IsDir():
@@ -625,6 +733,27 @@ func toFileEntry(parentPath string, item os.FileInfo) protocol.SFTPFileEntry {
 		kind = "file"
 	}
 
+	uid, gid := fileInfoIDs(item)
+	var uidPtr *int
+	var gidPtr *int
+	if uid != nil {
+		value := *uid
+		uidPtr = &value
+	}
+	if gid != nil {
+		value := *gid
+		gidPtr = &value
+	}
+
+	owner := ""
+	if uid != nil {
+		owner = ownerNames[*uid]
+	}
+	group := ""
+	if gid != nil {
+		group = groupNames[*gid]
+	}
+
 	return protocol.SFTPFileEntry{
 		Name:        item.Name(),
 		Path:        path.Join(parentPath, item.Name()),
@@ -633,7 +762,320 @@ func toFileEntry(parentPath string, item os.FileInfo) protocol.SFTPFileEntry {
 		Mtime:       item.ModTime().UTC().Format(time.RFC3339),
 		Kind:        kind,
 		Permissions: item.Mode().String(),
+		UID:         uidPtr,
+		GID:         gidPtr,
+		Owner:       owner,
+		Group:       group,
 	}
+}
+
+func fileInfoIDs(item os.FileInfo) (*int, *int) {
+	stat, ok := item.Sys().(*sftppkg.FileStat)
+	if !ok || stat == nil {
+		return nil, nil
+	}
+	uid := int(stat.UID)
+	gid := int(stat.GID)
+	return &uid, &gid
+}
+
+func (s *Service) resolveEntryPrincipalNames(
+	handle *endpointHandle,
+	items []os.FileInfo,
+) (map[int]string, map[int]string) {
+	userIDs := make(map[int]struct{})
+	groupIDs := make(map[int]struct{})
+	for _, item := range items {
+		uid, gid := fileInfoIDs(item)
+		if uid != nil {
+			userIDs[*uid] = struct{}{}
+		}
+		if gid != nil {
+			groupIDs[*gid] = struct{}{}
+		}
+	}
+	return resolveRemotePrincipalNames(handle.client, "user", userIDs),
+		resolveRemotePrincipalNames(handle.client, "group", groupIDs)
+}
+
+func resolveRemotePrincipalNames(
+	client *ssh.Client,
+	kind string,
+	ids map[int]struct{},
+) map[int]string {
+	result := make(map[int]string)
+	if len(ids) == 0 {
+		return result
+	}
+	idValues := make([]int, 0, len(ids))
+	for id := range ids {
+		idValues = append(idValues, id)
+	}
+	sort.Ints(idValues)
+	parts := make([]string, 0, len(idValues))
+	for _, id := range idValues {
+		parts = append(parts, strconv.Itoa(id))
+	}
+
+	stdout, _, err := sshcmd.RunWithTimeout(
+		client,
+		buildPrincipalLookupCommand(kind, parts),
+		10*time.Second,
+	)
+	if err != nil {
+		return result
+	}
+	for _, line := range strings.Split(string(stdout), "\n") {
+		principal, ok := parsePrincipalLine(kind, line)
+		if !ok {
+			continue
+		}
+		result[principal.ID] = principal.Name
+	}
+	return result
+}
+
+func (s *Service) probeSudo(endpointID, authType, loginPassword string) {
+	handle, err := s.getEndpoint(endpointID)
+	if err != nil {
+		return
+	}
+
+	stdout, stderr, err := sshcmd.RunWithTimeout(handle.client, "id -u", 10*time.Second)
+	if err != nil {
+		s.setSudoStatus(endpointID, "unavailable", formatRemoteCommandError(err, stderr).Error(), "")
+		return
+	}
+	if strings.TrimSpace(string(stdout)) == "0" {
+		s.setSudoStatus(endpointID, "root", "connected user is root", "")
+		return
+	}
+
+	if _, stderr, err := sshcmd.RunWithTimeout(handle.client, "sudo -n -v", 10*time.Second); err == nil {
+		s.setSudoStatus(endpointID, "passwordless", "passwordless sudo is available", "")
+		return
+	} else if classifySudoFailure(stderr) == "unavailable" {
+		s.setSudoStatus(endpointID, "unavailable", strings.TrimSpace(string(stderr)), "")
+		return
+	}
+
+	if authType == "password" && loginPassword != "" {
+		if _, stderr, err := sshcmd.RunWithInputWithTimeout(
+			handle.client,
+			"sudo -S -p '' -v",
+			[]byte(loginPassword+"\n"),
+			10*time.Second,
+		); err == nil {
+			s.setSudoStatus(endpointID, "passwordless", "login password accepted for sudo", loginPassword)
+			return
+		} else if classifySudoFailure(stderr) == "unavailable" {
+			s.setSudoStatus(endpointID, "unavailable", strings.TrimSpace(string(stderr)), "")
+			return
+		}
+	}
+
+	s.setSudoStatus(endpointID, "passwordRequired", "sudo password is required", "")
+}
+
+func (s *Service) getSudoStatus(endpointID string) string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	handle, ok := s.endpoints[endpointID]
+	if !ok || handle.sudoStatus == "" {
+		return "unknown"
+	}
+	return handle.sudoStatus
+}
+
+func (s *Service) setSudoStatus(endpointID, status, message, sudoPassword string) {
+	s.mu.Lock()
+	handle, ok := s.endpoints[endpointID]
+	if ok {
+		handle.sudoStatus = status
+		if sudoPassword != "" {
+			handle.sudoPassword = sudoPassword
+		}
+	}
+	s.mu.Unlock()
+	if !ok {
+		return
+	}
+	s.emit(protocol.Event{
+		Type:       protocol.EventSFTPSudoStatus,
+		EndpointID: endpointID,
+		Payload: protocol.SFTPSudoStatusPayload{
+			Status:  status,
+			Message: message,
+		},
+	})
+}
+
+func classifySudoFailure(stderr []byte) string {
+	text := strings.ToLower(strings.TrimSpace(string(stderr)))
+	switch {
+	case strings.Contains(text, "not in the sudoers"),
+		strings.Contains(text, "may not run sudo"),
+		strings.Contains(text, "a terminal is required"),
+		strings.Contains(text, "must have a tty"):
+		return "unavailable"
+	case strings.Contains(text, "password"),
+		strings.Contains(text, "try again"):
+		return "passwordRequired"
+	default:
+		return "passwordRequired"
+	}
+}
+
+func buildChownOwnerSpec(payload protocol.SFTPChownPayload) (string, error) {
+	owner := strings.TrimSpace(payload.Owner)
+	group := strings.TrimSpace(payload.Group)
+	if payload.UID != nil {
+		if *payload.UID < 0 {
+			return "", fmt.Errorf("uid must be greater than or equal to 0")
+		}
+		owner = strconv.Itoa(*payload.UID)
+	}
+	if payload.GID != nil {
+		if *payload.GID < 0 {
+			return "", fmt.Errorf("gid must be greater than or equal to 0")
+		}
+		group = strconv.Itoa(*payload.GID)
+	}
+	if strings.Contains(owner, ":") || strings.Contains(group, ":") {
+		return "", fmt.Errorf("owner and group must not contain ':'")
+	}
+	switch {
+	case owner != "" && group != "":
+		return owner + ":" + group, nil
+	case owner != "":
+		return owner, nil
+	case group != "":
+		return ":" + group, nil
+	default:
+		return "", fmt.Errorf("owner or group is required")
+	}
+}
+
+func buildChownCommand(prefix, ownerSpec, targetPath string, recursive bool) string {
+	parts := []string{}
+	if strings.TrimSpace(prefix) != "" {
+		parts = append(parts, prefix)
+	}
+	parts = append(parts, "chown")
+	if recursive {
+		parts = append(parts, "-R")
+	}
+	parts = append(parts, "--", sshcmd.QuotePosix(ownerSpec), sshcmd.QuotePosix(targetPath))
+	return strings.Join(parts, " ")
+}
+
+func formatRemoteCommandError(err error, stderr []byte) error {
+	detail := strings.TrimSpace(string(stderr))
+	if detail == "" {
+		return err
+	}
+	return fmt.Errorf("%w: %s", err, detail)
+}
+
+func normalizePrincipalKind(kind string) string {
+	switch strings.TrimSpace(strings.ToLower(kind)) {
+	case "user":
+		return "user"
+	case "group":
+		return "group"
+	default:
+		return ""
+	}
+}
+
+func listRemotePrincipals(
+	client *ssh.Client,
+	kind string,
+	query string,
+	limit int,
+) ([]protocol.SFTPPrincipal, error) {
+	stdout, stderr, err := sshcmd.RunWithTimeout(
+		client,
+		buildPrincipalListCommand(kind, query, limit),
+		10*time.Second,
+	)
+	if err != nil {
+		return nil, formatRemoteCommandError(err, stderr)
+	}
+	principals := make([]protocol.SFTPPrincipal, 0)
+	seen := make(map[int]struct{})
+	for _, line := range strings.Split(string(stdout), "\n") {
+		principal, ok := parsePrincipalLine(kind, line)
+		if !ok {
+			continue
+		}
+		if _, exists := seen[principal.ID]; exists {
+			continue
+		}
+		seen[principal.ID] = struct{}{}
+		principals = append(principals, principal)
+		if len(principals) >= limit {
+			break
+		}
+	}
+	return principals, nil
+}
+
+func buildPrincipalListCommand(kind string, query string, limit int) string {
+	database := "passwd"
+	fallbackFile := "/etc/passwd"
+	if kind == "group" {
+		database = "group"
+		fallbackFile = "/etc/group"
+	}
+	script := fmt.Sprintf(
+		`q=%s; limit=%s; if command -v getent >/dev/null 2>&1; then getent %s; elif [ -r %s ]; then cat %s; else exit 127; fi | awk -F: -v q="$q" -v limit="$limit" 'BEGIN { q=tolower(q); count=0 } { hay=tolower($1 " " $3 " " $5); if (q == "" || index(hay, q) > 0) { print; count++; if (count >= limit) exit } }'`,
+		sshcmd.QuotePosix(query),
+		sshcmd.QuotePosix(strconv.Itoa(limit)),
+		database,
+		sshcmd.QuotePosix(fallbackFile),
+		sshcmd.QuotePosix(fallbackFile),
+	)
+	return "sh -lc " + sshcmd.QuotePosix(script)
+}
+
+func buildPrincipalLookupCommand(kind string, ids []string) string {
+	database := "passwd"
+	fallbackFile := "/etc/passwd"
+	if kind == "group" {
+		database = "group"
+		fallbackFile = "/etc/group"
+	}
+	idText := strings.Join(ids, " ")
+	script := fmt.Sprintf(
+		`ids=%s; if command -v getent >/dev/null 2>&1; then for id in $ids; do getent %s "$id"; done; elif [ -r %s ]; then awk -F: -v ids=" $ids " 'index(ids, " " $3 " ") > 0 { print }' %s; fi`,
+		sshcmd.QuotePosix(idText),
+		database,
+		sshcmd.QuotePosix(fallbackFile),
+		sshcmd.QuotePosix(fallbackFile),
+	)
+	return "sh -lc " + sshcmd.QuotePosix(script)
+}
+
+func parsePrincipalLine(kind string, line string) (protocol.SFTPPrincipal, bool) {
+	parts := strings.Split(strings.TrimSpace(line), ":")
+	if len(parts) < 3 || parts[0] == "" {
+		return protocol.SFTPPrincipal{}, false
+	}
+	id, err := strconv.Atoi(parts[2])
+	if err != nil || id < 0 {
+		return protocol.SFTPPrincipal{}, false
+	}
+	displayName := ""
+	if kind == "user" && len(parts) >= 5 {
+		displayName = strings.TrimSpace(strings.Split(parts[4], ",")[0])
+	}
+	return protocol.SFTPPrincipal{
+		Kind:        kind,
+		Name:        parts[0],
+		ID:          id,
+		DisplayName: displayName,
+	}, true
 }
 
 func removeRemotePath(client *sftppkg.Client, targetPath string) error {

@@ -130,6 +130,9 @@ export function buildSftpBridge(
     mkdir: (input) => ipcRenderer.invoke(ipcChannels.sftp.mkdir, input),
     rename: (input) => ipcRenderer.invoke(ipcChannels.sftp.rename, input),
     chmod: (input) => ipcRenderer.invoke(ipcChannels.sftp.chmod, input),
+    chown: (input) => ipcRenderer.invoke(ipcChannels.sftp.chown, input),
+    listPrincipals: (input) =>
+      ipcRenderer.invoke(ipcChannels.sftp.listPrincipals, input),
     delete: (input) => ipcRenderer.invoke(ipcChannels.sftp.delete, input),
     startTransfer: (input) =>
       ipcRenderer.invoke(ipcChannels.sftp.startTransfer, input),

@@ -87,6 +87,8 @@ export function SftpShell({
           onChangeSelectionPermissions={
             sftpViewModel.changeSftpSelectionPermissions
           }
+          onChangeSelectionOwner={sftpViewModel.changeSftpSelectionOwner}
+          onListPrincipals={sftpViewModel.listSftpPrincipals}
           onDeleteSelection={sftpViewModel.deleteSftpSelection}
           onDownloadSelection={sftpViewModel.downloadSftpSelection}
           onPrepareTransfer={sftpViewModel.prepareSftpTransfer}

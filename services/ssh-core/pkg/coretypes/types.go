@@ -32,6 +32,8 @@ const (
 	CommandSFTPMkdir                  CommandType = "sftpMkdir"
 	CommandSFTPRename                 CommandType = "sftpRename"
 	CommandSFTPChmod                  CommandType = "sftpChmod"
+	CommandSFTPChown                  CommandType = "sftpChown"
+	CommandSFTPListPrincipals         CommandType = "sftpListPrincipals"
 	CommandSFTPDelete                 CommandType = "sftpDelete"
 	CommandSFTPTransferStart          CommandType = "sftpTransferStart"
 	CommandSFTPTransferCancel         CommandType = "sftpTransferCancel"
@@ -68,6 +70,8 @@ const (
 	EventSFTPListed                   EventType = "sftpListed"
 	EventSFTPAck                      EventType = "sftpAck"
 	EventSFTPError                    EventType = "sftpError"
+	EventSFTPSudoStatus               EventType = "sftpSudoStatus"
+	EventSFTPPrincipalsListed         EventType = "sftpPrincipalsListed"
 	EventSFTPTransferProgress         EventType = "sftpTransferProgress"
 	EventSFTPTransferCompleted        EventType = "sftpTransferCompleted"
 	EventSFTPTransferFailed           EventType = "sftpTransferFailed"
@@ -269,6 +273,22 @@ type SFTPChmodPayload struct {
 	Mode int    `json:"mode"`
 }
 
+type SFTPChownPayload struct {
+	Path         string `json:"path"`
+	Owner        string `json:"owner,omitempty"`
+	Group        string `json:"group,omitempty"`
+	UID          *int   `json:"uid,omitempty"`
+	GID          *int   `json:"gid,omitempty"`
+	Recursive    bool   `json:"recursive,omitempty"`
+	SudoPassword string `json:"sudoPassword,omitempty"`
+}
+
+type SFTPListPrincipalsPayload struct {
+	Kind  string `json:"kind"`
+	Query string `json:"query,omitempty"`
+	Limit int    `json:"limit,omitempty"`
+}
+
 type SFTPDeletePayload struct {
 	Paths []string `json:"paths"`
 }
@@ -364,7 +384,8 @@ type ClosedPayload struct {
 }
 
 type SFTPConnectedPayload struct {
-	Path string `json:"path"`
+	Path       string `json:"path"`
+	SudoStatus string `json:"sudoStatus,omitempty"`
 }
 
 type ContainersConnectedPayload struct {
@@ -401,11 +422,33 @@ type SFTPFileEntry struct {
 	Mtime       string `json:"mtime"`
 	Kind        string `json:"kind"`
 	Permissions string `json:"permissions,omitempty"`
+	UID         *int   `json:"uid,omitempty"`
+	GID         *int   `json:"gid,omitempty"`
+	Owner       string `json:"owner,omitempty"`
+	Group       string `json:"group,omitempty"`
 }
 
 type SFTPListedPayload struct {
 	Path    string          `json:"path"`
 	Entries []SFTPFileEntry `json:"entries"`
+}
+
+type SFTPPrincipal struct {
+	Kind        string `json:"kind"`
+	Name        string `json:"name"`
+	ID          int    `json:"id"`
+	DisplayName string `json:"displayName,omitempty"`
+}
+
+type SFTPPrincipalsListedPayload struct {
+	Kind       string          `json:"kind"`
+	Query      string          `json:"query,omitempty"`
+	Principals []SFTPPrincipal `json:"principals"`
+}
+
+type SFTPSudoStatusPayload struct {
+	Status  string `json:"status"`
+	Message string `json:"message,omitempty"`
 }
 
 type ContainerSummary struct {

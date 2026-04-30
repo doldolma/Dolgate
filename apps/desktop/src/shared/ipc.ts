@@ -85,6 +85,7 @@ import type {
   SshCertificateInfo,
   SftpConnectionProgressEvent,
   SftpEndpointSummary,
+  SftpPrincipal,
   SyncStatus,
   TerminalTab,
   TermiusImportResult,
@@ -127,6 +128,8 @@ export type CoreCommandType =
   | "sftpMkdir"
   | "sftpRename"
   | "sftpChmod"
+  | "sftpChown"
+  | "sftpListPrincipals"
   | "sftpDelete"
   | "sftpTransferStart"
   | "sftpTransferCancel"
@@ -161,6 +164,8 @@ export type CoreEventType =
   | "sftpListed"
   | "sftpAck"
   | "sftpError"
+  | "sftpSudoStatus"
+  | "sftpPrincipalsListed"
   | "sftpTransferProgress"
   | "sftpTransferCompleted"
   | "sftpTransferFailed"
@@ -423,6 +428,24 @@ export interface SftpChmodInput {
   endpointId: string;
   path: string;
   mode: number;
+}
+
+export interface SftpChownInput {
+  endpointId: string;
+  path: string;
+  owner?: string;
+  group?: string;
+  uid?: number;
+  gid?: number;
+  recursive?: boolean;
+  sudoPassword?: string;
+}
+
+export interface SftpListPrincipalsInput {
+  endpointId: string;
+  kind: "user" | "group";
+  query?: string;
+  limit?: number;
 }
 
 export interface HostContainersLogsInput {
@@ -814,6 +837,10 @@ export interface DesktopApi {
     mkdir: (input: SftpMkdirInput) => Promise<void>;
     rename: (input: SftpRenameInput) => Promise<void>;
     chmod: (input: SftpChmodInput) => Promise<void>;
+    chown: (input: SftpChownInput) => Promise<void>;
+    listPrincipals: (
+      input: SftpListPrincipalsInput,
+    ) => Promise<SftpPrincipal[]>;
     delete: (input: SftpDeleteInput) => Promise<void>;
     startTransfer: (input: TransferStartInput) => Promise<TransferJob>;
     cancelTransfer: (jobId: string) => Promise<void>;

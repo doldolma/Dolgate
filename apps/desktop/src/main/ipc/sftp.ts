@@ -5,7 +5,9 @@ import {
   isWarpgateSshHostRecord,
   type DesktopSftpConnectInput,
   type SftpChmodInput,
+  type SftpChownInput,
   type SftpDeleteInput,
+  type SftpListPrincipalsInput,
   type SftpListInput,
   type SftpMkdirInput,
   type SftpRenameInput,
@@ -228,6 +230,19 @@ export function registerSftpIpcHandlers(ctx: MainIpcContext): void {
     async (_event, input: SftpChmodInput) => {
       await ctx.coreManager.sftpChmod(input);
     },
+  );
+
+  ipcMain.handle(
+    ipcChannels.sftp.chown,
+    async (_event, input: SftpChownInput) => {
+      await ctx.coreManager.sftpChown(input);
+    },
+  );
+
+  ipcMain.handle(
+    ipcChannels.sftp.listPrincipals,
+    async (_event, input: SftpListPrincipalsInput) =>
+      ctx.coreManager.sftpListPrincipals(input),
   );
 
   ipcMain.handle(

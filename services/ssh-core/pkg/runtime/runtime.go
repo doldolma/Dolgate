@@ -67,6 +67,8 @@ type sftpService interface {
 	Mkdir(endpointID, requestID string, payload coretypes.SFTPMkdirPayload) error
 	Rename(endpointID, requestID string, payload coretypes.SFTPRenamePayload) error
 	Chmod(endpointID, requestID string, payload coretypes.SFTPChmodPayload) error
+	Chown(endpointID, requestID string, payload coretypes.SFTPChownPayload) error
+	ListPrincipals(endpointID, requestID string, payload coretypes.SFTPListPrincipalsPayload) error
 	Delete(endpointID, requestID string, payload coretypes.SFTPDeletePayload) error
 	StartTransfer(jobID string, payload coretypes.SFTPTransferStartPayload) error
 	CancelTransfer(jobID string) error
@@ -420,6 +422,14 @@ func (runtime *Runtime) RenameSFTP(endpointID, requestID string, payload coretyp
 
 func (runtime *Runtime) ChmodSFTP(endpointID, requestID string, payload coretypes.SFTPChmodPayload) error {
 	return runtime.sftp.Chmod(endpointID, requestID, payload)
+}
+
+func (runtime *Runtime) ChownSFTP(endpointID, requestID string, payload coretypes.SFTPChownPayload) error {
+	return runtime.sftp.Chown(endpointID, requestID, payload)
+}
+
+func (runtime *Runtime) ListSFTPPrincipals(endpointID, requestID string, payload coretypes.SFTPListPrincipalsPayload) error {
+	return runtime.sftp.ListPrincipals(endpointID, requestID, payload)
 }
 
 func (runtime *Runtime) DeleteSFTP(endpointID, requestID string, payload coretypes.SFTPDeletePayload) error {

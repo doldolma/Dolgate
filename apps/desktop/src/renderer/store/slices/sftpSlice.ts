@@ -556,6 +556,36 @@ export function createSftpSlice(deps: SliceDeps): SftpSlice {
             }
             await get().refreshSftpPane(paneId);
           },
+    changeSftpSelectionOwner: async (paneId, input) => {
+            const pane = getPane(get(), paneId);
+            const targetPath = pane.selectedPaths[0];
+            if (
+              !targetPath ||
+              pane.selectedPaths.length !== 1 ||
+              pane.sourceKind !== "host" ||
+              !pane.endpoint
+            ) {
+              return;
+            }
+            await api.sftp.chown({
+              endpointId: pane.endpoint.id,
+              path: targetPath,
+              ...input,
+            });
+            await get().refreshSftpPane(paneId);
+          },
+    listSftpPrincipals: async (paneId, kind, query) => {
+            const pane = getPane(get(), paneId);
+            if (pane.sourceKind !== "host" || !pane.endpoint) {
+              return [];
+            }
+            return api.sftp.listPrincipals({
+              endpointId: pane.endpoint.id,
+              kind,
+              query,
+              limit: 100,
+            });
+          },
     deleteSftpSelection: async (paneId) => {
             const pane = getPane(get(), paneId);
             if (pane.selectedPaths.length === 0) {

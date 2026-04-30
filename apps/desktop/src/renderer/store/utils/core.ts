@@ -60,6 +60,7 @@ import type {
   SftpConnectionProgressEvent,
   SftpEndpointSummary,
   SftpPaneId,
+  SftpPrincipal,
   SecretMetadataRecord,
   TerminalConnectionProgress,
   TerminalFontFamilyId,
@@ -443,6 +444,15 @@ export interface SftpEntrySelectionInput {
   visibleEntryPaths?: string[];
   toggle?: boolean;
   range?: boolean;
+}
+
+export interface SftpOwnershipChangeInput {
+  owner?: string;
+  group?: string;
+  uid?: number;
+  gid?: number;
+  recursive?: boolean;
+  sudoPassword?: string;
 }
 
 export interface PendingConflictDialog {
@@ -854,6 +864,15 @@ export interface AppState {
     paneId: SftpPaneId,
     mode: number,
   ) => Promise<void>;
+  changeSftpSelectionOwner: (
+    paneId: SftpPaneId,
+    input: SftpOwnershipChangeInput,
+  ) => Promise<void>;
+  listSftpPrincipals: (
+    paneId: SftpPaneId,
+    kind: "user" | "group",
+    query?: string,
+  ) => Promise<SftpPrincipal[]>;
   deleteSftpSelection: (paneId: SftpPaneId) => Promise<void>;
   downloadSftpSelection: (paneId: SftpPaneId) => Promise<void>;
   prepareSftpTransfer: (
