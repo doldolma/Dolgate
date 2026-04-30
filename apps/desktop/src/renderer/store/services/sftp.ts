@@ -18,6 +18,7 @@ import {
   isAwsEc2HostRecord,
   isSshHostRecord,
   pushHistory,
+  resolveAwsSftpFailureDiagnostic,
   resolveCredentialRetryKind,
   shouldPromptAwsSftpConfigRetry,
   updatePaneState,
@@ -117,6 +118,7 @@ export function createSftpServices(deps: SliceDeps) {
           connectingHostId: null,
           connectingEndpointId: null,
           connectionProgress: null,
+          connectionDiagnostic: null,
           errorMessage: undefined,
           warningMessages: listing.warnings ?? [],
           ...historyPatch,
@@ -141,6 +143,7 @@ export function createSftpServices(deps: SliceDeps) {
           connectingHostId: null,
           connectingEndpointId: null,
           connectionProgress: null,
+          connectionDiagnostic: null,
           errorMessage:
             error instanceof Error
               ? error.message
@@ -333,6 +336,7 @@ export function createSftpServices(deps: SliceDeps) {
         endpoint: null,
         connectingHostId: input.hostId,
         connectingEndpointId: input.endpointId,
+        connectionDiagnostic: null,
         entries: [],
         isLoading: true,
         errorMessage: undefined,
@@ -355,6 +359,7 @@ export function createSftpServices(deps: SliceDeps) {
           connectingHostId: input.hostId,
           connectingEndpointId: input.endpointId,
           connectionProgress: getPane(state, input.paneId).connectionProgress,
+          connectionDiagnostic: null,
           currentPath: endpoint.path,
           history: [endpoint.path],
           historyIndex: 0,
@@ -404,23 +409,33 @@ export function createSftpServices(deps: SliceDeps) {
           },
         });
       }
-      set((state) => ({
-        sftp: updatePaneState(state, input.paneId, {
-          ...getPane(state, input.paneId),
-          sourceKind: "host",
-          endpoint: null,
-          connectingHostId: null,
-          connectingEndpointId: null,
-          connectionProgress: null,
-          entries: [],
-          isLoading: false,
-          errorMessage:
-            shouldPromptCredentialRetry || shouldPromptAwsConfig
-              ? undefined
-              : message,
-          warningMessages: [],
-        }),
-      }));
+      set((state) => {
+        const currentPane = getPane(state, input.paneId);
+        const diagnostic = resolveAwsSftpFailureDiagnostic({
+          host,
+          pane: currentPane,
+          endpointId: input.endpointId,
+          message,
+        });
+        return {
+          sftp: updatePaneState(state, input.paneId, {
+            ...currentPane,
+            sourceKind: "host",
+            endpoint: null,
+            connectingHostId: null,
+            connectingEndpointId: null,
+            connectionProgress: null,
+            connectionDiagnostic: diagnostic,
+            entries: [],
+            isLoading: false,
+            errorMessage:
+              shouldPromptCredentialRetry || shouldPromptAwsConfig
+                ? undefined
+                : message,
+            warningMessages: [],
+          }),
+        };
+      });
       return false;
     }
   };

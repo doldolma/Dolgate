@@ -4,13 +4,18 @@ import type { CoreEvent, CoreRequest } from "@shared";
 import { ipcChannels } from "../common/ipc-channels";
 import { encodeControlFrame } from "./core-framing";
 
-const { spawnMock } = vi.hoisted(() => ({
-  spawnMock: vi.fn(),
-}));
+const { appGetPathMock, existsSyncMock, spawnMock, writeFileSyncMock } =
+  vi.hoisted(() => ({
+    appGetPathMock: vi.fn(() => "/tmp/dolgate-test-user-data"),
+    existsSyncMock: vi.fn(() => true),
+    spawnMock: vi.fn(),
+    writeFileSyncMock: vi.fn(),
+  }));
 
 vi.mock("electron", () => ({
   app: {
     getAppPath: () => "/tmp/dolssh",
+    getPath: appGetPathMock,
     isPackaged: false,
   },
   BrowserWindow: class {},
@@ -20,7 +25,8 @@ vi.mock("node:fs", async () => {
   const actual = await vi.importActual<typeof import("node:fs")>("node:fs");
   return {
     ...actual,
-    existsSync: vi.fn(() => true),
+    existsSync: existsSyncMock,
+    writeFileSync: writeFileSyncMock,
   };
 });
 
@@ -122,6 +128,21 @@ function getTransferEventPayloads(sent: Array<{ channel: string; payload: unknow
     );
 }
 
+function expectSerializedNotToContain(value: unknown, secrets: string[]) {
+  const serialized = JSON.stringify(value);
+  for (const secret of secrets) {
+    expect(serialized).not.toContain(secret);
+  }
+}
+
+function getLatestPartialCleanupQueueWrite() {
+  const call = [...writeFileSyncMock.mock.calls]
+    .reverse()
+    .find(([filePath]) => String(filePath).endsWith("sftp-partial-cleanup.json"));
+  expect(call).toBeTruthy();
+  return JSON.parse(String(call?.[1])) as Array<Record<string, unknown>>;
+}
+
 async function waitForWriteCount(
   writes: Buffer[],
   expectedCount: number,
@@ -137,6 +158,8 @@ async function waitForWriteCount(
 describe("CoreManager SFTP sessions", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    appGetPathMock.mockReturnValue("/tmp/dolgate-test-user-data");
+    existsSyncMock.mockReturnValue(true);
   });
 
   it("uses the caller-provided endpoint id for sftpConnect", async () => {
@@ -363,5 +386,150 @@ describe("CoreManager SFTP sessions", () => {
       errorMessage: "대상 폴더에 쓸 권한이 없습니다.",
       detailMessage: 'sftp: "permission denied" (SSH_FX_PERMISSION_DENIED)',
     });
+  });
+
+  it("keeps SFTP connection and sudo secrets out of logs and runtime summaries", async () => {
+    const fakeProcess = createFakeChildProcess();
+    spawnMock.mockReturnValue(fakeProcess.child);
+    const logs: unknown[] = [];
+    const manager = new CoreManager((entry) => {
+      logs.push(entry);
+    });
+    const fakeWindow = createFakeWindow();
+    manager.registerWindow(fakeWindow.window as never);
+    const secrets = ["ssh-login-secret", "key-passphrase-secret", "sudo-secret"];
+
+    const connectPromise = manager.sftpConnect({
+      endpointId: "endpoint-secure",
+      host: "prod.example.com",
+      port: 22,
+      username: "ubuntu",
+      authType: "password",
+      password: "ssh-login-secret",
+      passphrase: "key-passphrase-secret",
+      trustedHostKeyBase64: "AAAATEST",
+      hostId: "host-secure",
+      title: "Prod Secure",
+    });
+
+    await waitForWriteCount(fakeProcess.writes, 1);
+    const connectRequest = decodeControlFrame(fakeProcess.writes[0]);
+    expect(JSON.stringify(connectRequest.payload)).toContain("ssh-login-secret");
+    fakeProcess.emitControl({
+      type: "sftpConnected",
+      requestId: connectRequest.id,
+      endpointId: "endpoint-secure",
+      payload: {
+        path: "/home/ubuntu",
+        sudoStatus: "passwordRequired",
+      },
+    });
+    const summary = await connectPromise;
+
+    const chownPromise = manager.sftpChown({
+      endpointId: "endpoint-secure",
+      path: "/srv/app.txt",
+      owner: "root",
+      group: "root",
+      sudoPassword: "sudo-secret",
+    });
+    await waitForWriteCount(fakeProcess.writes, 2);
+    const chownRequest = decodeControlFrame(fakeProcess.writes[1]);
+    expect(JSON.stringify(chownRequest.payload)).toContain("sudo-secret");
+    fakeProcess.emitControl({
+      type: "sftpAck",
+      requestId: chownRequest.id,
+      endpointId: "endpoint-secure",
+      payload: {
+        message: "path owner updated",
+      },
+    });
+    await chownPromise;
+
+    const job = await manager.startSftpTransfer({
+      source: { kind: "local", path: "/Users/tester" },
+      target: { kind: "remote", endpointId: "endpoint-secure", path: "/srv" },
+      items: [
+        {
+          name: "app.txt",
+          path: "/Users/tester/app.txt",
+          isDirectory: false,
+          size: 128,
+        },
+      ],
+      conflictResolution: "overwrite",
+    });
+    fakeProcess.emitControl({
+      type: "sftpTransferProgress",
+      jobId: job.id,
+      payload: {
+        status: "running",
+        bytesTotal: 128,
+        bytesCompleted: 64,
+        partialPath: "/srv/.app.txt.dolgate-partial.job-secure",
+      },
+    });
+
+    const cleanupQueue = getLatestPartialCleanupQueueWrite();
+    expect(cleanupQueue).toHaveLength(1);
+    expect(Object.keys(cleanupQueue[0]).sort()).toEqual([
+      "createdAt",
+      "hostId",
+      "id",
+      "jobId",
+      "path",
+    ]);
+    expect(cleanupQueue[0]).toMatchObject({
+      hostId: "host-secure",
+      jobId: job.id,
+      path: "/srv/.app.txt.dolgate-partial.job-secure",
+    });
+    expectSerializedNotToContain(
+      {
+        summary,
+        logs,
+        rendererEvents: fakeWindow.sent,
+        cleanupQueue,
+      },
+      secrets,
+    );
+  });
+
+  it("does not copy SFTP connection secrets into connection failure logs", async () => {
+    const fakeProcess = createFakeChildProcess();
+    spawnMock.mockReturnValue(fakeProcess.child);
+    const logs: unknown[] = [];
+    const manager = new CoreManager((entry) => {
+      logs.push(entry);
+    });
+    const secrets = ["ssh-login-secret", "key-passphrase-secret"];
+
+    const connectPromise = manager.sftpConnect({
+      endpointId: "endpoint-failed",
+      host: "prod.example.com",
+      port: 22,
+      username: "ubuntu",
+      authType: "privateKey",
+      privateKeyPem: "PRIVATE KEY",
+      passphrase: "key-passphrase-secret",
+      password: "ssh-login-secret",
+      trustedHostKeyBase64: "AAAATEST",
+      hostId: "host-failed",
+      title: "Prod Failed",
+    });
+
+    await waitForWriteCount(fakeProcess.writes, 1);
+    const request = decodeControlFrame(fakeProcess.writes[0]);
+    fakeProcess.emitControl({
+      type: "sftpError",
+      requestId: request.id,
+      endpointId: "endpoint-failed",
+      payload: {
+        message: "authentication failed",
+      },
+    });
+
+    await expect(connectPromise).rejects.toThrow("authentication failed");
+    expectSerializedNotToContain(logs, secrets);
   });
 });

@@ -1202,6 +1202,58 @@ describe("SftpWorkspace column resizing", () => {
     ).toBeTruthy();
   });
 
+  it("renders an AWS SFTP diagnostic card and copies sanitized diagnostics", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(window.navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    });
+    const onConnectHost = vi.fn().mockResolvedValue(undefined);
+    const onOpenHostSettings = vi.fn();
+    const sftp = createSftpState();
+    sftp.rightPane = createHostPickerPane({
+      selectedHostId: "aws-1",
+      connectionDiagnostic: {
+        endpointId: "endpoint-aws",
+        hostId: "aws-1",
+        stage: "sending-public-key",
+        message: "AccessDeniedException: not authorized",
+        reasonCode: "eic-access-denied",
+        diagnosticId: "diag-aws",
+        details: {
+          profileName: "default",
+          password: "must-not-copy",
+        },
+      },
+    });
+
+    renderWorkspace({
+      hosts: [...connectableHosts, createAwsHost()],
+      groups: hostGroups,
+      sftp,
+      onConnectHost,
+      onOpenHostSettings,
+    });
+
+    expect(screen.getByText("Instance Connect 권한이 부족합니다.")).toBeTruthy();
+    expect(
+      screen.getByText(
+        "IAM 권한에 ec2-instance-connect:SendSSHPublicKey가 허용되어 있는지 확인하세요.",
+      ),
+    ).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "진단 정보 복사" }));
+    await waitFor(() => expect(writeText).toHaveBeenCalledTimes(1));
+    const payload = writeText.mock.calls[0]?.[0] as string;
+    expect(payload).toContain('"reasonCode": "eic-access-denied"');
+    expect(payload).toContain('"profileName": "default"');
+    expect(payload).not.toContain("must-not-copy");
+
+    fireEvent.click(screen.getByRole("button", { name: "다시 시도" }));
+    expect(onConnectHost).toHaveBeenCalledWith("right", "aws-1");
+    expect(onOpenHostSettings).not.toHaveBeenCalled();
+  });
+
   it("renders browser warnings, errors, and loading state without legacy table wrappers", () => {
     const sftp = createSftpState();
     sftp.leftPane.warningMessages = ["권한이 제한된 항목은 숨겨집니다."];

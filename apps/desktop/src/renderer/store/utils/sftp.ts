@@ -1,4 +1,11 @@
-import type { SftpConnectionProgressEvent } from "@shared";
+import {
+  inferAwsSftpDiagnosticReasonCode,
+  isAwsEc2HostRecord,
+} from "@shared";
+import type {
+  HostRecord,
+  SftpConnectionProgressEvent,
+} from "@shared";
 import type {
   AppState,
   SftpEntrySelectionInput,
@@ -33,6 +40,7 @@ export function createEmptyPane(id: "left" | "right"): SftpPaneState {
     connectingHostId: null,
     connectingEndpointId: null,
     connectionProgress: null,
+    connectionDiagnostic: null,
     hostGroupPath: null,
     currentPath: "",
     lastLocalPath: "",
@@ -57,6 +65,7 @@ export function buildSftpHostPickerPane(pane: SftpPaneState): SftpPaneState {
     connectingHostId: null,
     connectingEndpointId: null,
     connectionProgress: null,
+    connectionDiagnostic: null,
     currentPath: "",
     history: [],
     historyIndex: -1,
@@ -182,5 +191,41 @@ export function setPaneConnectionProgress(
   return updatePaneState(state, paneId, {
     ...getPane(state, paneId),
     connectionProgress: progress,
+    connectionDiagnostic: progress?.reasonCode
+      ? progress
+      : getPane(state, paneId).connectionDiagnostic,
   });
+}
+
+export function resolveAwsSftpFailureDiagnostic(input: {
+  host: HostRecord | undefined;
+  pane: SftpPaneState;
+  endpointId?: string | null;
+  message: string;
+}): SftpConnectionProgressEvent | null {
+  if (!input.host || !isAwsEc2HostRecord(input.host)) {
+    return null;
+  }
+  const progress = input.pane.connectionProgress;
+  const stage = progress?.stage ?? "connecting-sftp";
+  const message = progress?.reasonCode ? progress.message : input.message;
+  const reasonCode =
+    progress?.reasonCode ??
+    inferAwsSftpDiagnosticReasonCode(stage, input.message);
+  return {
+    endpointId:
+      progress?.endpointId ??
+      input.endpointId ??
+      input.pane.connectingEndpointId ??
+      input.pane.endpoint?.id ??
+      "",
+    hostId: input.host.id,
+    stage,
+    message,
+    reasonCode,
+    diagnosticId:
+      progress?.diagnosticId ??
+      `aws-sftp-renderer-${Date.now().toString(36)}`,
+    details: progress?.details,
+  };
 }

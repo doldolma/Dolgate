@@ -140,6 +140,7 @@ export function createSftpSlice(deps: SliceDeps): SftpSlice {
     resolveNextSftpSelection,
     resolveTransferItemsFromPane,
     isBrowsableSftpPane,
+    resolveAwsSftpFailureDiagnostic,
     pushHistory,
     getPane,
     updatePaneState,
@@ -213,6 +214,7 @@ export function createSftpSlice(deps: SliceDeps): SftpSlice {
               connectingHostId: null,
               connectingEndpointId: null,
               connectionProgress: null,
+              connectionDiagnostic: null,
               hostGroupPath: null,
               currentPath:
                 sourceKind === "local"
@@ -288,6 +290,7 @@ export function createSftpSlice(deps: SliceDeps): SftpSlice {
                 connectingHostId: null,
                 connectingEndpointId: null,
                 connectionProgress: null,
+                connectionDiagnostic: null,
               }),
             })),
     selectSftpHost: (paneId, hostId) =>
@@ -295,6 +298,7 @@ export function createSftpSlice(deps: SliceDeps): SftpSlice {
               sftp: updatePaneState(state, paneId, {
                 ...getPane(state, paneId),
                 selectedHostId: hostId,
+                connectionDiagnostic: null,
               }),
             })),
     connectSftpHost: async (paneId, hostId) => {
@@ -324,6 +328,7 @@ export function createSftpSlice(deps: SliceDeps): SftpSlice {
                     connectingHostId: null,
                     connectingEndpointId: null,
                     connectionProgress: null,
+                    connectionDiagnostic: null,
                     selectedHostId: hostId,
                     isLoading: false,
                     errorMessage: disabledReason,
@@ -352,6 +357,7 @@ export function createSftpSlice(deps: SliceDeps): SftpSlice {
                 connectingHostId: hostId,
                 connectingEndpointId: endpointId,
                 connectionProgress: initialConnectionProgress,
+                connectionDiagnostic: null,
                 selectedHostId: hostId,
                 isLoading: true,
                 errorMessage: undefined,
@@ -376,6 +382,7 @@ export function createSftpSlice(deps: SliceDeps): SftpSlice {
                     connectingHostId: null,
                     connectingEndpointId: null,
                     connectionProgress: null,
+                    connectionDiagnostic: null,
                     selectedHostId: hostId,
                     isLoading: false,
                     errorMessage: undefined,
@@ -406,21 +413,32 @@ export function createSftpSlice(deps: SliceDeps): SftpSlice {
                   },
                 });
               }
-              set((state) => ({
-                sftp: updatePaneState(state, paneId, {
-                  ...getPane(state, paneId),
-                  sourceKind: "host",
-                  endpoint: null,
-                  connectingHostId: null,
-                  connectingEndpointId: null,
-                  connectionProgress: null,
-                  selectedHostId: hostId,
-                  isLoading: false,
-                  errorMessage:
-                    shouldPromptAwsSftpConfigRetry(host, message) ? undefined : message,
-                  warningMessages: [],
-                }),
-              }));
+              set((state) => {
+                const currentPane = getPane(state, paneId);
+                const diagnostic = resolveAwsSftpFailureDiagnostic({
+                  host,
+                  pane: currentPane,
+                  endpointId,
+                  message,
+                });
+                return {
+                  sftp: updatePaneState(state, paneId, {
+                    ...currentPane,
+                    sourceKind: "host",
+                    endpoint: null,
+                    connectingHostId: null,
+                    connectingEndpointId: null,
+                    connectionProgress: null,
+                    connectionDiagnostic: diagnostic,
+                    selectedHostId: hostId,
+                    isLoading: false,
+                    errorMessage: shouldPromptAwsSftpConfigRetry(host, message)
+                      ? undefined
+                      : message,
+                    warningMessages: [],
+                  }),
+                };
+              });
             }
           },
     openSftpEntry: async (paneId, entryPath) => {

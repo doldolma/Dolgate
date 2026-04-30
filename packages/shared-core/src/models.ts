@@ -71,6 +71,23 @@ export type SftpConnectionStage =
   | 'sending-public-key'
   | 'opening-tunnel'
   | 'connecting-sftp';
+export type AwsSftpDiagnosticReasonCode =
+  | 'missing-username'
+  | 'missing-availability-zone'
+  | 'host-key-missing'
+  | 'ssm-plugin-missing'
+  | 'not-managed-instance'
+  | 'eic-access-denied'
+  | 'eic-invalid-os-user'
+  | 'eic-az-mismatch'
+  | 'tunnel-open-failed'
+  | 'ssh-auth-failed'
+  | 'sftp-subsystem-failed'
+  | 'unknown';
+export type AwsSftpDiagnosticDetails = Record<
+  string,
+  string | number | boolean | null
+>;
 export type ConnectionProgressStage =
   | SftpConnectionStage
   | 'connecting-containers';
@@ -424,6 +441,181 @@ export function getAwsEc2HostSshMetadataStatusLabel(status?: AwsSshMetadataStatu
       return 'SSH 설정 확인 실패';
     default:
       return null;
+  }
+}
+
+export const AWS_SFTP_DIAGNOSTIC_REASON_CODES: readonly AwsSftpDiagnosticReasonCode[] = [
+  'missing-username',
+  'missing-availability-zone',
+  'host-key-missing',
+  'ssm-plugin-missing',
+  'not-managed-instance',
+  'eic-access-denied',
+  'eic-invalid-os-user',
+  'eic-az-mismatch',
+  'tunnel-open-failed',
+  'ssh-auth-failed',
+  'sftp-subsystem-failed',
+  'unknown',
+];
+
+export function isAwsSftpDiagnosticReasonCode(
+  value: unknown,
+): value is AwsSftpDiagnosticReasonCode {
+  return (
+    typeof value === 'string' &&
+    AWS_SFTP_DIAGNOSTIC_REASON_CODES.includes(
+      value as AwsSftpDiagnosticReasonCode,
+    )
+  );
+}
+
+export function inferAwsSftpDiagnosticReasonCode(
+  stage: SftpConnectionStage | null | undefined,
+  message: string,
+): AwsSftpDiagnosticReasonCode {
+  const normalized = message.toLowerCase();
+  if (/session manager plugin|session-manager-plugin/.test(normalized)) {
+    return 'ssm-plugin-missing';
+  }
+  if (/host key is not trusted|host key.+trusted|호스트 키/.test(normalized)) {
+    return 'host-key-missing';
+  }
+  if (/managed instance|ssm managed|ssm 관리/.test(normalized)) {
+    return 'not-managed-instance';
+  }
+  if (/availability zone|\baz\b/.test(normalized)) {
+    return 'missing-availability-zone';
+  }
+  if (
+    /instanceosuser|instance os user|os user|ssh username|사용자명|username/.test(
+      normalized,
+    )
+  ) {
+    return stage === 'sending-public-key'
+      ? 'eic-invalid-os-user'
+      : 'missing-username';
+  }
+  if (
+    /accessdenied|unauthorizedoperation|not authorized|is not authorized|권한|거부/.test(
+      normalized,
+    )
+  ) {
+    return stage === 'sending-public-key' ? 'eic-access-denied' : 'unknown';
+  }
+  if (/availability zone.+match|az.+match|zone.+mismatch/.test(normalized)) {
+    return 'eic-az-mismatch';
+  }
+  if (stage === 'opening-tunnel') {
+    return 'tunnel-open-failed';
+  }
+  if (
+    stage === 'connecting-sftp' &&
+    /subsystem|sftp server|filexfer|sftp subsystem/.test(normalized)
+  ) {
+    return 'sftp-subsystem-failed';
+  }
+  if (
+    stage === 'connecting-sftp' &&
+    /authentication failed|unable to authenticate|permission denied|ssh handshake|unexpected message type 51|connection refused|timed out/.test(
+      normalized,
+    )
+  ) {
+    return 'ssh-auth-failed';
+  }
+  return 'unknown';
+}
+
+export function getAwsSftpDiagnosticTitle(
+  reasonCode?: AwsSftpDiagnosticReasonCode | null,
+): string {
+  switch (reasonCode) {
+    case 'missing-username':
+      return 'SSH 사용자명을 확인하지 못했습니다.';
+    case 'missing-availability-zone':
+      return 'Availability Zone을 확인하지 못했습니다.';
+    case 'host-key-missing':
+      return '호스트 키 확인이 필요합니다.';
+    case 'ssm-plugin-missing':
+      return 'Session Manager Plugin이 필요합니다.';
+    case 'not-managed-instance':
+      return 'SSM managed instance가 아닙니다.';
+    case 'eic-access-denied':
+      return 'Instance Connect 권한이 부족합니다.';
+    case 'eic-invalid-os-user':
+      return 'Instance Connect 사용자명이 맞지 않습니다.';
+    case 'eic-az-mismatch':
+      return 'Instance Connect AZ 정보가 맞지 않습니다.';
+    case 'tunnel-open-failed':
+      return 'SSM 터널을 열지 못했습니다.';
+    case 'ssh-auth-failed':
+      return 'SSH 인증에 실패했습니다.';
+    case 'sftp-subsystem-failed':
+      return 'SFTP subsystem을 시작하지 못했습니다.';
+    default:
+      return 'AWS SFTP 연결을 완료하지 못했습니다.';
+  }
+}
+
+export function getAwsSftpDiagnosticMessage(
+  reasonCode?: AwsSftpDiagnosticReasonCode | null,
+): string {
+  switch (reasonCode) {
+    case 'missing-username':
+      return '인스턴스에 접속할 SSH 사용자명을 자동으로 찾지 못했습니다.';
+    case 'missing-availability-zone':
+      return 'Instance Connect 요청에 필요한 Availability Zone 정보가 없습니다.';
+    case 'host-key-missing':
+      return '이 AWS SSM 대상의 SSH 호스트 키가 아직 신뢰되지 않았습니다.';
+    case 'ssm-plugin-missing':
+      return '로컬 환경에서 AWS Session Manager Plugin을 실행할 수 없습니다.';
+    case 'not-managed-instance':
+      return '선택한 EC2 인스턴스가 현재 SSM managed instance로 확인되지 않습니다.';
+    case 'eic-access-denied':
+      return 'EC2 Instance Connect 공개 키 전송 요청이 권한 문제로 거부되었습니다.';
+    case 'eic-invalid-os-user':
+      return 'EC2 Instance Connect가 현재 SSH 사용자명을 대상 OS 사용자로 받아들이지 않았습니다.';
+    case 'eic-az-mismatch':
+      return 'EC2 Instance Connect 요청의 Availability Zone 정보가 인스턴스와 맞지 않습니다.';
+    case 'tunnel-open-failed':
+      return 'SFTP용 AWS SSM 내부 터널을 열지 못했습니다.';
+    case 'ssh-auth-failed':
+      return 'SSM 터널은 열렸지만 SSH 인증을 완료하지 못했습니다.';
+    case 'sftp-subsystem-failed':
+      return 'SSH 연결 후 SFTP subsystem을 시작하지 못했습니다.';
+    default:
+      return 'AWS SFTP 연결 중 확인되지 않은 오류가 발생했습니다.';
+  }
+}
+
+export function getAwsSftpDiagnosticAction(
+  reasonCode?: AwsSftpDiagnosticReasonCode | null,
+): string {
+  switch (reasonCode) {
+    case 'missing-username':
+      return '이 인스턴스의 SSH 사용자명을 입력한 뒤 다시 시도하세요.';
+    case 'missing-availability-zone':
+      return 'EC2 인스턴스 정보를 새로 확인하거나 호스트를 다시 가져온 뒤 다시 시도하세요.';
+    case 'host-key-missing':
+      return '호스트 키를 신뢰 목록에 추가한 뒤 SFTP 연결을 다시 시도하세요.';
+    case 'ssm-plugin-missing':
+      return 'AWS Session Manager Plugin 설치를 확인한 뒤 다시 시도하세요.';
+    case 'not-managed-instance':
+      return 'SSM Agent, 인스턴스 IAM role, 온라인 상태를 확인한 뒤 다시 시도하세요.';
+    case 'eic-access-denied':
+      return 'IAM 권한에 ec2-instance-connect:SendSSHPublicKey가 허용되어 있는지 확인하세요.';
+    case 'eic-invalid-os-user':
+      return 'ubuntu, ec2-user 같은 실제 OS 사용자명으로 SSH 설정을 수정하세요.';
+    case 'eic-az-mismatch':
+      return 'EC2 metadata를 새로고침해서 현재 Availability Zone을 다시 저장하세요.';
+    case 'tunnel-open-failed':
+      return 'SSM 연결 상태와 로컬 Session Manager Plugin 실행 가능 여부를 확인하세요.';
+    case 'ssh-auth-failed':
+      return 'SSH username, port, EC2 Instance Connect 지원 여부를 확인하세요.';
+    case 'sftp-subsystem-failed':
+      return '원격 SSH 서버의 SFTP subsystem 설정을 확인하세요.';
+    default:
+      return 'AWS 프로필, SSM 상태, SSH 설정을 확인한 뒤 다시 시도하세요.';
   }
 }
 
@@ -1771,6 +1963,9 @@ export interface SftpConnectionProgressEvent {
   hostId: string;
   stage: SftpConnectionStage;
   message: string;
+  reasonCode?: AwsSftpDiagnosticReasonCode;
+  diagnosticId?: string;
+  details?: AwsSftpDiagnosticDetails;
 }
 
 export interface ContainerConnectionProgressEvent {
