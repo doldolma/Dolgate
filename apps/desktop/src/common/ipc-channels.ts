@@ -214,6 +214,8 @@ export const ipcChannels = {
     mkdir: 'sftp:mkdir',
     rename: 'sftp:rename',
     chmod: 'sftp:chmod',
+    chown: 'sftp:chown',
+    listPrincipals: 'sftp:list-principals',
     delete: 'sftp:delete',
     startTransfer: 'sftp:start-transfer',
     cancelTransfer: 'sftp:cancel-transfer',

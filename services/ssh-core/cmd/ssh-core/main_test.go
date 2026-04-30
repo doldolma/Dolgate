@@ -115,6 +115,12 @@ func (stub *stubCoreRuntime) RenameSFTP(endpointID, requestID string, payload pr
 func (stub *stubCoreRuntime) ChmodSFTP(endpointID, requestID string, payload protocol.SFTPChmodPayload) error {
 	return nil
 }
+func (stub *stubCoreRuntime) ChownSFTP(endpointID, requestID string, payload protocol.SFTPChownPayload) error {
+	return nil
+}
+func (stub *stubCoreRuntime) ListSFTPPrincipals(endpointID, requestID string, payload protocol.SFTPListPrincipalsPayload) error {
+	return nil
+}
 func (stub *stubCoreRuntime) DeleteSFTP(endpointID, requestID string, payload protocol.SFTPDeletePayload) error {
 	return nil
 }

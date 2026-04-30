@@ -1661,6 +1661,10 @@ export interface FileEntry {
   mtime: string;
   kind: FileEntryKind;
   permissions?: string;
+  uid?: number;
+  gid?: number;
+  owner?: string;
+  group?: string;
 }
 
 // DirectoryListing은 특정 경로의 목록 응답을 표현한다.
@@ -1683,6 +1687,22 @@ export interface SftpEndpointSummary {
   title: string;
   path: string;
   connectedAt: string;
+  sudoStatus?: SftpSudoStatus;
+}
+
+export type SftpSudoStatus =
+  | 'unknown'
+  | 'probing'
+  | 'root'
+  | 'passwordless'
+  | 'passwordRequired'
+  | 'unavailable';
+
+export interface SftpPrincipal {
+  kind: 'user' | 'group';
+  name: string;
+  id: number;
+  displayName?: string;
 }
 
 export interface SftpHostSelectionState {

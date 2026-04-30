@@ -563,7 +563,8 @@ export function createRuntimeEventSlice(deps: SliceDeps): RuntimeEventSlice {
               if (
                 event.type === "sftpConnected" ||
                 event.type === "sftpDisconnected" ||
-                event.type === "sftpError"
+                event.type === "sftpError" ||
+                event.type === "sftpSudoStatus"
               ) {
                 set((state) => {
                   const paneId = resolveSftpPaneIdByEndpoint(state, endpointId);
@@ -576,6 +577,16 @@ export function createRuntimeEventSlice(deps: SliceDeps): RuntimeEventSlice {
                           : state.pendingInteractiveAuth,
                     };
                   }
+                  const pane = getPane(state, paneId);
+                  const sudoStatus =
+                    typeof event.payload.status === "string" &&
+                    (event.payload.status === "probing" ||
+                      event.payload.status === "root" ||
+                      event.payload.status === "passwordless" ||
+                      event.payload.status === "passwordRequired" ||
+                      event.payload.status === "unavailable")
+                      ? event.payload.status
+                      : "unknown";
                   return {
                     pendingInteractiveAuth:
                       isPendingSftpInteractiveAuth(state.pendingInteractiveAuth) &&
@@ -583,11 +594,18 @@ export function createRuntimeEventSlice(deps: SliceDeps): RuntimeEventSlice {
                         ? null
                         : state.pendingInteractiveAuth,
                     sftp: updatePaneState(state, paneId, {
-                      ...getPane(state, paneId),
+                      ...pane,
+                      endpoint:
+                        event.type === "sftpSudoStatus" && pane.endpoint
+                          ? {
+                              ...pane.endpoint,
+                              sudoStatus,
+                            }
+                          : pane.endpoint,
                       connectionProgress:
                         event.type === "sftpError" || event.type === "sftpDisconnected"
                           ? null
-                          : getPane(state, paneId).connectionProgress,
+                          : pane.connectionProgress,
                     }),
                   };
                 });

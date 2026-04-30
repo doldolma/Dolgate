@@ -28,6 +28,10 @@ export function useSftpViewModel() {
   const changeSftpSelectionPermissions = useAppStore(
     (state) => state.changeSftpSelectionPermissions,
   );
+  const changeSftpSelectionOwner = useAppStore(
+    (state) => state.changeSftpSelectionOwner,
+  );
+  const listSftpPrincipals = useAppStore((state) => state.listSftpPrincipals);
   const deleteSftpSelection = useAppStore((state) => state.deleteSftpSelection);
   const downloadSftpSelection = useAppStore((state) => state.downloadSftpSelection);
   const prepareSftpTransfer = useAppStore((state) => state.prepareSftpTransfer);
@@ -73,6 +77,8 @@ export function useSftpViewModel() {
     createSftpDirectory,
     renameSftpSelection,
     changeSftpSelectionPermissions,
+    changeSftpSelectionOwner,
+    listSftpPrincipals,
     deleteSftpSelection,
     downloadSftpSelection,
     prepareSftpTransfer,

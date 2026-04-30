@@ -50,6 +50,8 @@ type coreRuntime interface {
 	MkdirSFTP(endpointID, requestID string, payload protocol.SFTPMkdirPayload) error
 	RenameSFTP(endpointID, requestID string, payload protocol.SFTPRenamePayload) error
 	ChmodSFTP(endpointID, requestID string, payload protocol.SFTPChmodPayload) error
+	ChownSFTP(endpointID, requestID string, payload protocol.SFTPChownPayload) error
+	ListSFTPPrincipals(endpointID, requestID string, payload protocol.SFTPListPrincipalsPayload) error
 	DeleteSFTP(endpointID, requestID string, payload protocol.SFTPDeletePayload) error
 	StartSFTPTransfer(jobID string, payload protocol.SFTPTransferStartPayload) error
 	CancelSFTPTransfer(jobID string) error
@@ -353,6 +355,18 @@ func dispatch(core coreRuntime, writer *eventWriter, request protocol.Request) e
 			return err
 		}
 		return core.ChmodSFTP(request.EndpointID, request.ID, payload)
+	case protocol.CommandSFTPChown:
+		var payload protocol.SFTPChownPayload
+		if err := json.Unmarshal(request.Payload, &payload); err != nil {
+			return err
+		}
+		return core.ChownSFTP(request.EndpointID, request.ID, payload)
+	case protocol.CommandSFTPListPrincipals:
+		var payload protocol.SFTPListPrincipalsPayload
+		if err := json.Unmarshal(request.Payload, &payload); err != nil {
+			return err
+		}
+		return core.ListSFTPPrincipals(request.EndpointID, request.ID, payload)
 	case protocol.CommandSFTPDelete:
 		var payload protocol.SFTPDeletePayload
 		if err := json.Unmarshal(request.Payload, &payload); err != nil {
@@ -464,6 +478,8 @@ func isSFTPCommand(frame protocol.Frame) bool {
 		protocol.CommandSFTPMkdir,
 		protocol.CommandSFTPRename,
 		protocol.CommandSFTPChmod,
+		protocol.CommandSFTPChown,
+		protocol.CommandSFTPListPrincipals,
 		protocol.CommandSFTPDelete,
 		protocol.CommandSFTPTransferStart,
 		protocol.CommandSFTPTransferCancel:

@@ -41,10 +41,13 @@ import type {
   SessionLifecycleLogMetadata,
   SerialPortSummary,
   SftpChmodInput,
+  SftpChownInput,
   SftpDeleteInput,
   SftpEndpointSummary,
+  SftpListPrincipalsInput,
   SftpListInput,
   SftpMkdirInput,
+  SftpPrincipal,
   SftpRenameInput,
   SessionShareControlSignal,
   SshCertificateInfo,
@@ -481,10 +484,52 @@ function toDirectoryListing(
             permissions: candidate.permissions
               ? String(candidate.permissions)
               : undefined,
+            uid: typeof candidate.uid === "number" ? candidate.uid : undefined,
+            gid: typeof candidate.gid === "number" ? candidate.gid : undefined,
+            owner:
+              typeof candidate.owner === "string" && candidate.owner
+                ? candidate.owner
+                : undefined,
+            group:
+              typeof candidate.group === "string" && candidate.group
+                ? candidate.group
+                : undefined,
           } satisfies FileEntry;
         })
       : [],
   };
+}
+
+function toSftpPrincipals(payload: Record<string, unknown>): SftpPrincipal[] {
+  const principals = Array.isArray(payload.principals)
+    ? payload.principals
+    : [];
+  return principals
+    .map((principal) => {
+      const candidate = principal as Record<string, unknown>;
+      const kind = candidate.kind === "group" ? "group" : "user";
+      const id = Number(candidate.id);
+      return {
+        kind,
+        name: String(candidate.name ?? ""),
+        id,
+        displayName:
+          typeof candidate.displayName === "string" && candidate.displayName
+            ? candidate.displayName
+            : undefined,
+      } satisfies SftpPrincipal;
+    })
+    .filter((principal) => principal.name && Number.isFinite(principal.id));
+}
+
+function normalizeSftpSudoStatus(value: string): SftpEndpointSummary["sudoStatus"] {
+  return value === "probing" ||
+    value === "root" ||
+    value === "passwordless" ||
+    value === "passwordRequired" ||
+    value === "unavailable"
+    ? value
+    : "unknown";
 }
 
 function toTransferJobEvent(
@@ -1761,7 +1806,10 @@ export class CoreManager {
     const { endpointId, ...connectPayload } = payload;
     try {
       const requestId = randomUUID();
-      const response = await this.requestResponse<{ path: string }>(
+      const response = await this.requestResponse<{
+        path: string;
+        sudoStatus?: string;
+      }>(
         {
           id: requestId,
           type: "sftpConnect",
@@ -1778,6 +1826,10 @@ export class CoreManager {
         title: payload.title,
         path: String(response.path ?? "/"),
         connectedAt: new Date().toISOString(),
+        sudoStatus:
+          typeof response.sudoStatus === "string"
+            ? normalizeSftpSudoStatus(response.sudoStatus)
+            : "unknown",
       };
       this.sftpEndpoints.set(endpointId, summary);
       this.log({
@@ -1904,6 +1956,35 @@ export class CoreManager {
       },
       ["sftpAck"],
     );
+  }
+
+  async sftpChown(input: SftpChownInput): Promise<void> {
+    await this.start();
+    await this.requestResponse(
+      {
+        id: randomUUID(),
+        type: "sftpChown",
+        endpointId: input.endpointId,
+        payload: input,
+      },
+      ["sftpAck"],
+    );
+  }
+
+  async sftpListPrincipals(
+    input: SftpListPrincipalsInput,
+  ): Promise<SftpPrincipal[]> {
+    await this.start();
+    const response = await this.requestResponse(
+      {
+        id: randomUUID(),
+        type: "sftpListPrincipals",
+        endpointId: input.endpointId,
+        payload: input,
+      },
+      ["sftpPrincipalsListed"],
+    );
+    return toSftpPrincipals(response);
   }
 
   async sftpDelete(input: SftpDeleteInput): Promise<void> {
@@ -2195,6 +2276,20 @@ export class CoreManager {
     }
 
     if (event.endpointId) {
+      if (event.type === "sftpSudoStatus") {
+        const endpoint = this.sftpEndpoints.get(event.endpointId);
+        if (endpoint) {
+          const status = normalizeSftpSudoStatus(
+            String(event.payload.status ?? "unknown"),
+          );
+          this.sftpEndpoints.set(event.endpointId, {
+            ...endpoint,
+            sudoStatus: status,
+          });
+        }
+        this.broadcastTerminalEvent(event);
+        return;
+      }
       if (
         event.type === "containersConnected" ||
         event.type === "containersDisconnected" ||
