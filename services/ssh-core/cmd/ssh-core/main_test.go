@@ -128,6 +128,8 @@ func (stub *stubCoreRuntime) StartSFTPTransfer(jobID string, payload protocol.SF
 	return nil
 }
 func (stub *stubCoreRuntime) CancelSFTPTransfer(jobID string) error { return nil }
+func (stub *stubCoreRuntime) PauseSFTPTransfer(jobID string) error  { return nil }
+func (stub *stubCoreRuntime) ResumeSFTPTransfer(jobID string) error { return nil }
 func (stub *stubCoreRuntime) Shutdown()                             {}
 
 func TestDispatchFrameRoutesStreamInputThroughRuntime(t *testing.T) {

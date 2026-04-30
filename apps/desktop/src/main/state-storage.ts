@@ -28,6 +28,7 @@ import type {
   KnownHostRecord,
   PortForwardRuleRecord,
   SftpBrowserColumnWidths,
+  SftpConflictPolicy,
   SshPortForwardRuleRecord,
   SecretMetadataRecord,
   TerminalFontFamilyId,
@@ -66,6 +67,9 @@ export interface DesktopStateFile {
   settings: {
     theme: AppTheme;
     sftpBrowserColumnWidths: SftpBrowserColumnWidths;
+    sftpConflictPolicy: SftpConflictPolicy;
+    sftpPreserveMtime: boolean;
+    sftpPreservePermissions: boolean;
     sessionReplayRetentionCount: number;
     serverUrlOverride: string | null;
     updatedAt: string;
@@ -251,6 +255,12 @@ function normalizeTerminalWebglEnabled(value: unknown): boolean {
   return typeof value === 'boolean' ? value : resolveDefaultTerminalWebglEnabled();
 }
 
+function normalizeSftpConflictPolicy(value: unknown): SftpConflictPolicy {
+  return value === 'overwrite' || value === 'skip' || value === 'keepBoth' || value === 'ask'
+    ? value
+    : 'ask';
+}
+
 function normalizeSessionReplayRetentionCount(value: unknown): number {
   if (typeof value !== 'number' || !Number.isFinite(value)) {
     return DEFAULT_SESSION_REPLAY_RETENTION_COUNT;
@@ -427,6 +437,9 @@ function createDefaultStateFile(): DesktopStateFile {
     settings: {
       theme: 'system',
       sftpBrowserColumnWidths: { ...DEFAULT_SFTP_BROWSER_COLUMN_WIDTHS },
+      sftpConflictPolicy: 'ask',
+      sftpPreserveMtime: true,
+      sftpPreservePermissions: false,
       sessionReplayRetentionCount: DEFAULT_SESSION_REPLAY_RETENTION_COUNT,
       serverUrlOverride: null,
       updatedAt: timestamp
@@ -749,6 +762,11 @@ function normalizeStateFile(value: unknown): DesktopStateFile {
       sftpBrowserColumnWidths: normalizeSftpBrowserColumnWidths(
         isObject(settings.sftpBrowserColumnWidths) ? settings.sftpBrowserColumnWidths : null
       ),
+      sftpConflictPolicy: normalizeSftpConflictPolicy(settings.sftpConflictPolicy),
+      sftpPreserveMtime:
+        typeof settings.sftpPreserveMtime === 'boolean' ? settings.sftpPreserveMtime : true,
+      sftpPreservePermissions:
+        typeof settings.sftpPreservePermissions === 'boolean' ? settings.sftpPreservePermissions : false,
       sessionReplayRetentionCount: normalizeSessionReplayRetentionCount(settings.sessionReplayRetentionCount),
       serverUrlOverride: typeof settings.serverUrlOverride === 'string' && settings.serverUrlOverride.trim() ? settings.serverUrlOverride.trim() : null,
       updatedAt: typeof settings.updatedAt === 'string' ? settings.updatedAt : fallback.settings.updatedAt

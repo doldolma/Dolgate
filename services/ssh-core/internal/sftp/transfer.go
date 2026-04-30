@@ -42,6 +42,9 @@ type filesystemAccessor interface {
 	MkdirAll(targetPath string) error
 	Remove(targetPath string) error
 	RemoveDirectory(targetPath string) error
+	Rename(oldPath string, newPath string) error
+	Chtimes(targetPath string, atime time.Time, mtime time.Time) error
+	Chmod(targetPath string, mode os.FileMode) error
 }
 
 type localFilesystemAccessor struct{}
@@ -99,6 +102,18 @@ func (localFilesystemAccessor) RemoveDirectory(targetPath string) error {
 	return os.Remove(targetPath)
 }
 
+func (localFilesystemAccessor) Rename(oldPath string, newPath string) error {
+	return os.Rename(oldPath, newPath)
+}
+
+func (localFilesystemAccessor) Chtimes(targetPath string, atime time.Time, mtime time.Time) error {
+	return os.Chtimes(targetPath, atime, mtime)
+}
+
+func (localFilesystemAccessor) Chmod(targetPath string, mode os.FileMode) error {
+	return os.Chmod(targetPath, mode)
+}
+
 type remoteFilesystemAccessor struct {
 	client *sftppkg.Client
 }
@@ -144,6 +159,18 @@ func (accessor remoteFilesystemAccessor) RemoveDirectory(targetPath string) erro
 	return accessor.client.RemoveDirectory(targetPath)
 }
 
+func (accessor remoteFilesystemAccessor) Rename(oldPath string, newPath string) error {
+	return accessor.client.Rename(oldPath, newPath)
+}
+
+func (accessor remoteFilesystemAccessor) Chtimes(targetPath string, atime time.Time, mtime time.Time) error {
+	return accessor.client.Chtimes(targetPath, atime, mtime)
+}
+
+func (accessor remoteFilesystemAccessor) Chmod(targetPath string, mode os.FileMode) error {
+	return accessor.client.Chmod(targetPath, mode)
+}
+
 type transferProgress struct {
 	mu                        sync.Mutex
 	startedAt                 time.Time
@@ -153,6 +180,102 @@ type transferProgress struct {
 	lastEmittedAt             time.Time
 	lastEmittedBytesCompleted int64
 	lastEmittedItemName       string
+}
+
+type transferMetadataOptions struct {
+	preserveMtime       bool
+	preservePermissions bool
+}
+
+type transferPauseController struct {
+	mu       sync.Mutex
+	paused   bool
+	resumeCh chan struct{}
+}
+
+func newTransferPauseController() *transferPauseController {
+	return &transferPauseController{}
+}
+
+func (controller *transferPauseController) Pause() {
+	controller.mu.Lock()
+	defer controller.mu.Unlock()
+	if controller.paused {
+		return
+	}
+	controller.paused = true
+	controller.resumeCh = make(chan struct{})
+}
+
+func (controller *transferPauseController) Resume() {
+	controller.mu.Lock()
+	defer controller.mu.Unlock()
+	if !controller.paused {
+		return
+	}
+	close(controller.resumeCh)
+	controller.paused = false
+	controller.resumeCh = nil
+}
+
+func (controller *transferPauseController) Wait(ctx context.Context) error {
+	for {
+		controller.mu.Lock()
+		if !controller.paused {
+			controller.mu.Unlock()
+			return nil
+		}
+		resumeCh := controller.resumeCh
+		controller.mu.Unlock()
+
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-resumeCh:
+		}
+	}
+}
+
+type transferCleanupTracker struct {
+	mu      sync.Mutex
+	paths   map[string]string
+	cleanup func(string)
+}
+
+func newTransferCleanupTracker(cleanup func(string)) *transferCleanupTracker {
+	return &transferCleanupTracker{
+		paths:   make(map[string]string),
+		cleanup: cleanup,
+	}
+}
+
+func (tracker *transferCleanupTracker) Add(targetPath string) {
+	if targetPath == "" {
+		return
+	}
+	tracker.mu.Lock()
+	tracker.paths[targetPath] = targetPath
+	tracker.mu.Unlock()
+}
+
+func (tracker *transferCleanupTracker) Remove(targetPath string) {
+	tracker.mu.Lock()
+	delete(tracker.paths, targetPath)
+	tracker.mu.Unlock()
+}
+
+func (tracker *transferCleanupTracker) CleanupAll() {
+	tracker.mu.Lock()
+	paths := make([]string, 0, len(tracker.paths))
+	for targetPath := range tracker.paths {
+		paths = append(paths, targetPath)
+	}
+	tracker.paths = make(map[string]string)
+	tracker.mu.Unlock()
+
+	for _, targetPath := range paths {
+		tracker.cleanup(targetPath)
+	}
 }
 
 type transferError struct {
@@ -392,6 +515,43 @@ func (reporter *transferProgressReporter) emitRunning(
 	})
 }
 
+func (reporter *transferProgressReporter) emitPaused(
+	activeItemName string,
+	message string,
+) {
+	payload, _ := reporter.progress.nextSnapshot(
+		reporter.now(),
+		"paused",
+		activeItemName,
+		message,
+		true,
+	)
+	reporter.emit(protocol.Event{
+		Type:    protocol.EventSFTPTransferProgress,
+		JobID:   reporter.jobID,
+		Payload: payload,
+	})
+}
+
+func (reporter *transferProgressReporter) emitPartialPath(
+	activeItemName string,
+	partialPath string,
+) {
+	payload, _ := reporter.progress.nextSnapshot(
+		reporter.now(),
+		"running",
+		activeItemName,
+		"",
+		true,
+	)
+	payload.PartialPath = partialPath
+	reporter.emit(protocol.Event{
+		Type:    protocol.EventSFTPTransferProgress,
+		JobID:   reporter.jobID,
+		Payload: payload,
+	})
+}
+
 func (reporter *transferProgressReporter) emitTerminal(
 	eventType protocol.EventType,
 	status string,
@@ -536,34 +696,37 @@ func prepareDestination(
 	sourceInfo os.FileInfo,
 	targetPath string,
 	conflictResolution string,
-) (string, bool, bool, error) {
+) (string, bool, bool, bool, error) {
 	existing, err := targetFS.Stat(targetPath)
 	if err != nil {
 		if isNotExist(err) {
-			return targetPath, false, false, nil
+			return targetPath, false, false, false, nil
 		}
-		return "", false, false, annotateTransferError("target_stat", targetPath, err)
+		return "", false, false, false, annotateTransferError("target_stat", targetPath, err)
 	}
 
 	switch conflictResolution {
 	case "skip":
-		return targetPath, true, false, nil
+		return targetPath, true, false, false, nil
 	case "keepBoth":
 		uniquePath, err := nextUniquePath(targetFS, targetPath)
 		if err != nil {
-			return "", false, false, annotateTransferError("target_stat", targetPath, err)
+			return "", false, false, false, annotateTransferError("target_stat", targetPath, err)
 		}
-		return uniquePath, false, false, nil
+		return uniquePath, false, false, false, nil
 	case "overwrite", "":
 		if sourceInfo.IsDir() && existing.IsDir() {
-			return targetPath, false, true, nil
+			return targetPath, false, true, false, nil
+		}
+		if !sourceInfo.IsDir() {
+			return targetPath, false, false, true, nil
 		}
 		if err := removePath(targetFS, targetPath); err != nil {
-			return "", false, false, annotateTransferError("target_remove", targetPath, err)
+			return "", false, false, false, annotateTransferError("target_remove", targetPath, err)
 		}
-		return targetPath, false, false, nil
+		return targetPath, false, false, false, nil
 	default:
-		return "", false, false, fmt.Errorf("unsupported conflict resolution: %s", conflictResolution)
+		return "", false, false, false, fmt.Errorf("unsupported conflict resolution: %s", conflictResolution)
 	}
 }
 
@@ -624,10 +787,19 @@ func copyFileWithProgress(
 	targetFS filesystemAccessor,
 	sourcePath string,
 	targetPath string,
+	jobID string,
+	pauseController *transferPauseController,
+	metadata transferMetadataOptions,
+	sourceInfo os.FileInfo,
+	replaceExisting bool,
+	cleanupTracker *transferCleanupTracker,
 	reporter *transferProgressReporter,
 ) error {
 	if err := targetFS.MkdirAll(targetFS.Dir(targetPath)); err != nil {
 		return annotateTransferError("target_mkdir", targetFS.Dir(targetPath), err)
+	}
+	if err := pauseController.Wait(ctx); err != nil {
+		return err
 	}
 
 	sourceFile, err := sourceFS.Open(sourcePath)
@@ -635,10 +807,20 @@ func copyFileWithProgress(
 		return annotateTransferError("source_open", sourcePath, err)
 	}
 
-	targetFile, err := targetFS.Create(targetPath)
+	partialPath := buildPartialTransferPath(targetFS, targetPath, jobID)
+	if partialPath == "" || partialPath == targetPath {
+		partialPath = targetPath
+	}
+	if partialPath != targetPath {
+		_ = targetFS.Remove(partialPath)
+		cleanupTracker.Add(partialPath)
+		reporter.emitPartialPath(sourceFS.Base(sourcePath), partialPath)
+	}
+
+	targetFile, err := targetFS.Create(partialPath)
 	if err != nil {
 		_ = sourceFile.Close()
-		return annotateTransferError("target_create", targetPath, err)
+		return annotateTransferError("target_create", partialPath, err)
 	}
 
 	closer := newTransferStreamCloser(sourceFile, targetFile)
@@ -647,16 +829,134 @@ func copyFileWithProgress(
 	stopCancellationWatcher := watchTransferCancellation(ctx, closer)
 	defer stopCancellationWatcher()
 
-	if err := transferFileContents(sourceFile, targetFile, reporter, sourcePath, targetPath); err != nil {
+	if err := transferFileContentsWithControl(
+		ctx,
+		sourceFile,
+		targetFile,
+		pauseController,
+		reporter,
+		sourcePath,
+		partialPath,
+	); err != nil {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
-		return annotateTransferError("target_write", targetPath, err)
+		if partialPath != targetPath {
+			_ = targetFS.Remove(partialPath)
+			cleanupTracker.Remove(partialPath)
+		}
+		return annotateTransferError("target_write", partialPath, err)
 	}
 	if ctx.Err() != nil {
+		if partialPath != targetPath {
+			_ = targetFS.Remove(partialPath)
+			cleanupTracker.Remove(partialPath)
+		}
 		return ctx.Err()
 	}
+	closer.Close()
+
+	metadataErr := applyTransferMetadata(targetFS, partialPath, sourceInfo, metadata)
+	if metadataErr != nil && metadata.preservePermissions {
+		// Metadata preservation is best-effort. Keep the transferred file and
+		// surface the path in the detail message if a future caller wants it.
+		_ = metadataErr
+	}
+
+	if partialPath == targetPath {
+		return nil
+	}
+	if replaceExisting {
+		if err := removePath(targetFS, targetPath); err != nil {
+			return annotateTransferError("target_remove", targetPath, err)
+		}
+	}
+	if err := targetFS.Rename(partialPath, targetPath); err != nil {
+		return annotateTransferError("target_rename", targetPath, err)
+	}
+	cleanupTracker.Remove(partialPath)
 	return nil
+}
+
+func buildPartialTransferPath(targetFS filesystemAccessor, targetPath string, jobID string) string {
+	baseName := targetFS.Base(targetPath)
+	if baseName == "" || baseName == "." || baseName == "/" {
+		return ""
+	}
+	suffix := sanitizePartialTransferID(jobID)
+	if suffix == "" {
+		suffix = "unknown"
+	}
+	return targetFS.Join(targetFS.Dir(targetPath), "."+baseName+".dolgate-partial."+suffix)
+}
+
+func sanitizePartialTransferID(value string) string {
+	var builder strings.Builder
+	for _, r := range value {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '-' || r == '_' {
+			builder.WriteRune(r)
+		}
+	}
+	return builder.String()
+}
+
+func applyTransferMetadata(
+	targetFS filesystemAccessor,
+	targetPath string,
+	sourceInfo os.FileInfo,
+	options transferMetadataOptions,
+) error {
+	if options.preservePermissions {
+		if err := targetFS.Chmod(targetPath, sourceInfo.Mode().Perm()); err != nil {
+			return annotateTransferError("target_chmod", targetPath, err)
+		}
+	}
+	if options.preserveMtime {
+		modTime := sourceInfo.ModTime()
+		if err := targetFS.Chtimes(targetPath, modTime, modTime); err != nil {
+			return annotateTransferError("target_chtime", targetPath, err)
+		}
+	}
+	return nil
+}
+
+func transferFileContentsWithControl(
+	ctx context.Context,
+	sourceFile io.ReadCloser,
+	targetFile io.WriteCloser,
+	pauseController *transferPauseController,
+	reporter *transferProgressReporter,
+	sourcePath string,
+	targetPath string,
+) error {
+	buffer := make([]byte, transferFallbackBufferSize)
+	for {
+		if err := pauseController.Wait(ctx); err != nil {
+			return err
+		}
+		readBytes, readErr := sourceFile.Read(buffer)
+		if readBytes > 0 {
+			if err := pauseController.Wait(ctx); err != nil {
+				return err
+			}
+			writtenBytes, writeErr := targetFile.Write(buffer[:readBytes])
+			if writtenBytes > 0 {
+				reporter.recordTransferredBytes(int64(writtenBytes))
+			}
+			if writeErr != nil {
+				return annotateTransferError("target_write", targetPath, writeErr)
+			}
+			if writtenBytes != readBytes {
+				return annotateTransferError("target_write", targetPath, io.ErrShortWrite)
+			}
+		}
+		if readErr != nil {
+			if errors.Is(readErr, io.EOF) {
+				return nil
+			}
+			return annotateTransferError("source_read", sourcePath, readErr)
+		}
+	}
 }
 
 func transferFileContents(

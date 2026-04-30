@@ -33,7 +33,11 @@ type endpointHandle struct {
 }
 
 type transferHandle struct {
-	cancel context.CancelFunc
+	cancel          context.CancelFunc
+	pauseController *transferPauseController
+	progress        *transferProgress
+	reporter        *transferProgressReporter
+	cleanup         *transferCleanupTracker
 }
 
 type pendingChallenge struct {
@@ -469,12 +473,33 @@ func (s *Service) Delete(endpointID, requestID string, payload protocol.SFTPDele
 
 func (s *Service) StartTransfer(jobID string, payload protocol.SFTPTransferStartPayload) error {
 	ctx, cancel := context.WithCancel(context.Background())
+	progress := newTransferProgress(time.Now())
+	pauseController := newTransferPauseController()
+	reporter := newTransferProgressReporter(
+		jobID,
+		progress,
+		s.emitTransferEvent,
+		time.Now,
+	)
+	cleanupTracker := newTransferCleanupTracker(func(targetPath string) {
+		targetFS, err := s.resolveAccessor(payload.Target)
+		if err != nil {
+			return
+		}
+		_ = targetFS.Remove(targetPath)
+	})
 
 	s.mu.Lock()
-	s.transfers[jobID] = &transferHandle{cancel: cancel}
+	s.transfers[jobID] = &transferHandle{
+		cancel:          cancel,
+		pauseController: pauseController,
+		progress:        progress,
+		reporter:        reporter,
+		cleanup:         cleanupTracker,
+	}
 	s.mu.Unlock()
 
-	go s.runTransfer(ctx, jobID, payload)
+	go s.runTransfer(ctx, jobID, payload, pauseController, progress, reporter, cleanupTracker)
 	return nil
 }
 
@@ -488,8 +513,41 @@ func (s *Service) CancelTransfer(jobID string) error {
 	return nil
 }
 
-func (s *Service) runTransfer(ctx context.Context, jobID string, payload protocol.SFTPTransferStartPayload) {
+func (s *Service) PauseTransfer(jobID string) error {
+	s.mu.RLock()
+	handle, ok := s.transfers[jobID]
+	s.mu.RUnlock()
+	if !ok {
+		return nil
+	}
+	handle.pauseController.Pause()
+	handle.reporter.emitPaused("", "transfer paused")
+	return nil
+}
+
+func (s *Service) ResumeTransfer(jobID string) error {
+	s.mu.RLock()
+	handle, ok := s.transfers[jobID]
+	s.mu.RUnlock()
+	if !ok {
+		return nil
+	}
+	handle.pauseController.Resume()
+	handle.reporter.emitRunning("", "transfer resumed", true)
+	return nil
+}
+
+func (s *Service) runTransfer(
+	ctx context.Context,
+	jobID string,
+	payload protocol.SFTPTransferStartPayload,
+	pauseController *transferPauseController,
+	progress *transferProgress,
+	reporter *transferProgressReporter,
+	cleanupTracker *transferCleanupTracker,
+) {
 	defer s.removeTransfer(jobID)
+	defer cleanupTracker.CleanupAll()
 
 	sourceFS, err := s.resolveAccessor(payload.Source)
 	if err != nil {
@@ -503,14 +561,9 @@ func (s *Service) runTransfer(ctx context.Context, jobID string, payload protoco
 		return
 	}
 
-	progress := newTransferProgress(time.Now())
-	reporter := newTransferProgressReporter(
-		jobID,
-		progress,
-		s.emitTransferEvent,
-		time.Now,
-	)
-
+	metadataOptions := resolveTransferMetadataOptions(payload.PreserveMetadata)
+	failedItems := make([]protocol.TransferFailedItemPayload, 0)
+	completedItems := 0
 	for _, item := range payload.Items {
 		size, sizeErr := calculateTotalSize(ctx, sourceFS, item.Path)
 		if sizeErr != nil {
@@ -523,8 +576,8 @@ func (s *Service) runTransfer(ctx context.Context, jobID string, payload protoco
 				)
 				return
 			}
-			s.emitTransferFailed(jobID, annotateTransferItem(sizeErr, item.Name))
-			return
+			failedItems = append(failedItems, toTransferFailedItem(item, annotateTransferItem(sizeErr, item.Name)))
+			continue
 		}
 		progress.bytesTotal += size
 	}
@@ -532,6 +585,18 @@ func (s *Service) runTransfer(ctx context.Context, jobID string, payload protoco
 	reporter.emitRunning("", "", true)
 
 	for _, item := range payload.Items {
+		if containsFailedTransferItem(failedItems, item) {
+			continue
+		}
+		if err := pauseController.Wait(ctx); err != nil {
+			reporter.emitTerminal(
+				protocol.EventSFTPTransferCancelled,
+				"cancelled",
+				item.Name,
+				"",
+			)
+			return
+		}
 		reporter.emitRunning(item.Name, "", true)
 		targetPath := targetFS.Join(payload.Target.Path, item.Name)
 		if err := s.copyPath(
@@ -541,6 +606,10 @@ func (s *Service) runTransfer(ctx context.Context, jobID string, payload protoco
 			item.Path,
 			targetPath,
 			payload.ConflictResolution,
+			jobID,
+			pauseController,
+			metadataOptions,
+			cleanupTracker,
 			reporter,
 		); err != nil {
 			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
@@ -552,11 +621,17 @@ func (s *Service) runTransfer(ctx context.Context, jobID string, payload protoco
 				)
 				return
 			}
-			s.emitTransferFailed(jobID, annotateTransferItem(err, item.Name))
-			return
+			failedItems = append(failedItems, toTransferFailedItem(item, annotateTransferItem(err, item.Name)))
+			continue
 		}
+		completedItems += 1
 	}
 
+	if len(failedItems) > 0 {
+		cleanupTracker.CleanupAll()
+		s.emitTransferFailedItems(jobID, failedItems, completedItems)
+		return
+	}
 	reporter.emitTerminal(protocol.EventSFTPTransferCompleted, "completed", "", "")
 }
 
@@ -567,8 +642,15 @@ func (s *Service) copyPath(
 	sourcePath string,
 	targetPath string,
 	conflictResolution string,
+	jobID string,
+	pauseController *transferPauseController,
+	metadataOptions transferMetadataOptions,
+	cleanupTracker *transferCleanupTracker,
 	reporter *transferProgressReporter,
 ) error {
+	if err := pauseController.Wait(ctx); err != nil {
+		return err
+	}
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
@@ -580,7 +662,7 @@ func (s *Service) copyPath(
 		return annotateTransferError("source_stat", sourcePath, err)
 	}
 
-	nextTargetPath, skip, mergeIntoExistingDir, err := prepareDestination(targetFS, sourceInfo, targetPath, conflictResolution)
+	nextTargetPath, skip, mergeIntoExistingDir, replaceExisting, err := prepareDestination(targetFS, sourceInfo, targetPath, conflictResolution)
 	if err != nil {
 		return err
 	}
@@ -606,11 +688,16 @@ func (s *Service) copyPath(
 				sourceFS.Join(sourcePath, entry.Name()),
 				targetFS.Join(nextTargetPath, entry.Name()),
 				conflictResolution,
+				jobID,
+				pauseController,
+				metadataOptions,
+				cleanupTracker,
 				reporter,
 			); err != nil {
 				return err
 			}
 		}
+		_ = applyTransferMetadata(targetFS, nextTargetPath, sourceInfo, metadataOptions)
 		return nil
 	}
 
@@ -621,6 +708,12 @@ func (s *Service) copyPath(
 		targetFS,
 		sourcePath,
 		nextTargetPath,
+		jobID,
+		pauseController,
+		metadataOptions,
+		sourceInfo,
+		replaceExisting,
+		cleanupTracker,
 		reporter,
 	)
 }
@@ -652,6 +745,78 @@ func (s *Service) emitTransferFailed(jobID string, err error) {
 		JobID:   jobID,
 		Payload: payload,
 	})
+}
+
+func (s *Service) emitTransferFailedItems(
+	jobID string,
+	failedItems []protocol.TransferFailedItemPayload,
+	completedItems int,
+) {
+	message := fmt.Sprintf("%d transfer item(s) failed", len(failedItems))
+	payload := protocol.SFTPTransferProgressPayload{
+		Status:             "failed",
+		Message:            message,
+		DetailMessage:      message,
+		ErrorCode:          transferErrorUnknown,
+		CompletedItemCount: completedItems,
+		FailedItemCount:    len(failedItems),
+		FailedItems:        failedItems,
+	}
+	if len(failedItems) > 0 {
+		first := failedItems[0]
+		payload.Message = first.ErrorMessage
+		payload.DetailMessage = first.ErrorMessage
+		payload.ErrorCode = first.ErrorCode
+		payload.ErrorOperation = first.ErrorOperation
+		payload.ErrorPath = first.ErrorPath
+		payload.ErrorItemName = first.Item.Name
+	}
+	s.emitTransferEvent(protocol.Event{
+		Type:    protocol.EventSFTPTransferFailed,
+		JobID:   jobID,
+		Payload: payload,
+	})
+}
+
+func resolveTransferMetadataOptions(payload protocol.TransferMetadataPayload) transferMetadataOptions {
+	options := transferMetadataOptions{
+		preserveMtime:       true,
+		preservePermissions: false,
+	}
+	if payload.Mtime != nil {
+		options.preserveMtime = *payload.Mtime
+	}
+	if payload.Permissions != nil {
+		options.preservePermissions = *payload.Permissions
+	}
+	return options
+}
+
+func toTransferFailedItem(item protocol.TransferItemPayload, err error) protocol.TransferFailedItemPayload {
+	failed := protocol.TransferFailedItemPayload{
+		Item:         item,
+		ErrorMessage: err.Error(),
+		ErrorCode:    classifyTransferError(err),
+	}
+	var transferErr *transferError
+	if errors.As(err, &transferErr) {
+		failed.ErrorCode = transferErr.Code
+		failed.ErrorOperation = transferErr.Operation
+		failed.ErrorPath = transferErr.Path
+		if transferErr.Detail != "" {
+			failed.ErrorMessage = transferErr.Detail
+		}
+	}
+	return failed
+}
+
+func containsFailedTransferItem(items []protocol.TransferFailedItemPayload, item protocol.TransferItemPayload) bool {
+	for _, failed := range items {
+		if failed.Item.Path == item.Path && failed.Item.Name == item.Name {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *Service) resolveAccessor(endpoint protocol.TransferEndpointPayload) (filesystemAccessor, error) {

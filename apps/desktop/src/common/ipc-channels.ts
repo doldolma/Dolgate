@@ -219,6 +219,8 @@ export const ipcChannels = {
     delete: 'sftp:delete',
     startTransfer: 'sftp:start-transfer',
     cancelTransfer: 'sftp:cancel-transfer',
+    pauseTransfer: 'sftp:pause-transfer',
+    resumeTransfer: 'sftp:resume-transfer',
     connectionProgress: 'sftp:connection-progress',
     transferEvent: 'sftp:transfer-event'
   }

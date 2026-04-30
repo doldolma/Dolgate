@@ -44,6 +44,8 @@ export function useSftpViewModel() {
   const resolveSftpConflict = useAppStore((state) => state.resolveSftpConflict);
   const dismissSftpConflict = useAppStore((state) => state.dismissSftpConflict);
   const cancelTransfer = useAppStore((state) => state.cancelTransfer);
+  const pauseTransfer = useAppStore((state) => state.pauseTransfer);
+  const resumeTransfer = useAppStore((state) => state.resumeTransfer);
   const retryTransfer = useAppStore((state) => state.retryTransfer);
   const dismissTransfer = useAppStore((state) => state.dismissTransfer);
   const handleSftpConnectionProgressEvent = useAppStore(
@@ -87,6 +89,8 @@ export function useSftpViewModel() {
     resolveSftpConflict,
     dismissSftpConflict,
     cancelTransfer,
+    pauseTransfer,
+    resumeTransfer,
     retryTransfer,
     dismissTransfer,
     handleSftpConnectionProgressEvent,

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -227,6 +228,12 @@ func TestCopyFileWithProgressCancelsBlockedTransfer(t *testing.T) {
 			targetFS,
 			"/source.bin",
 			"/target.bin",
+			"job-1",
+			newTransferPauseController(),
+			transferMetadataOptions{},
+			fakeFileInfo{name: "source.bin", size: 1024},
+			false,
+			newTransferCleanupTracker(func(string) {}),
 			reporter,
 		)
 	}()
@@ -271,6 +278,12 @@ func TestCopyFileWithProgressAnnotatesRemoteTargetPermissionDenied(t *testing.T)
 		targetFS,
 		"/source/payload.txt",
 		"/restricted/payload.txt",
+		"job-1",
+		newTransferPauseController(),
+		transferMetadataOptions{},
+		fakeFileInfo{name: "payload.txt", size: int64(len("payload"))},
+		false,
+		newTransferCleanupTracker(func(string) {}),
 		reporter,
 	)
 	if err == nil {
@@ -310,6 +323,12 @@ func TestCopyFileWithProgressAnnotatesLocalSourcePermissionDenied(t *testing.T) 
 		targetFS,
 		"/private/source.txt",
 		"/target/source.txt",
+		"job-1",
+		newTransferPauseController(),
+		transferMetadataOptions{},
+		fakeFileInfo{name: "source.txt", size: 0},
+		false,
+		newTransferCleanupTracker(func(string) {}),
 		reporter,
 	)
 	if err == nil {
@@ -331,15 +350,175 @@ func TestCopyFileWithProgressAnnotatesLocalSourcePermissionDenied(t *testing.T) 
 	}
 }
 
+func TestCopyFileWithProgressUsesPartialFileThenRenames(t *testing.T) {
+	sourceDir := t.TempDir()
+	targetDir := t.TempDir()
+	sourcePath := filepath.Join(sourceDir, "payload.txt")
+	targetPath := filepath.Join(targetDir, "payload.txt")
+	sourceMtime := time.Unix(1_700_000_000, 0)
+
+	if err := os.WriteFile(sourcePath, []byte("new payload"), 0o600); err != nil {
+		t.Fatalf("write source: %v", err)
+	}
+	if err := os.Chtimes(sourcePath, sourceMtime, sourceMtime); err != nil {
+		t.Fatalf("set source mtime: %v", err)
+	}
+	if err := os.WriteFile(targetPath, []byte("old payload"), 0o644); err != nil {
+		t.Fatalf("write existing target: %v", err)
+	}
+	sourceInfo, err := os.Stat(sourcePath)
+	if err != nil {
+		t.Fatalf("stat source: %v", err)
+	}
+
+	reporter := newTransferProgressReporter(
+		"job-1",
+		newTransferProgress(time.Unix(0, 0)),
+		func(protocol.Event) {},
+		time.Now,
+	)
+	cleanup := newTransferCleanupTracker(func(targetPath string) {
+		_ = os.Remove(targetPath)
+	})
+
+	if err := copyFileWithProgress(
+		context.Background(),
+		localFilesystemAccessor{},
+		localFilesystemAccessor{},
+		sourcePath,
+		targetPath,
+		"job-1",
+		newTransferPauseController(),
+		transferMetadataOptions{preserveMtime: true, preservePermissions: true},
+		sourceInfo,
+		true,
+		cleanup,
+		reporter,
+	); err != nil {
+		t.Fatalf("copy with partial file failed: %v", err)
+	}
+
+	content, err := os.ReadFile(targetPath)
+	if err != nil {
+		t.Fatalf("read target: %v", err)
+	}
+	if string(content) != "new payload" {
+		t.Fatalf("unexpected target content: %q", content)
+	}
+	partialPath := filepath.Join(targetDir, ".payload.txt.dolgate-partial.job-1")
+	if _, err := os.Stat(partialPath); !os.IsNotExist(err) {
+		t.Fatalf("expected partial file to be removed, stat err=%v", err)
+	}
+	targetInfo, err := os.Stat(targetPath)
+	if err != nil {
+		t.Fatalf("stat target: %v", err)
+	}
+	if !targetInfo.ModTime().Equal(sourceMtime) {
+		t.Fatalf("expected mtime %s, got %s", sourceMtime, targetInfo.ModTime())
+	}
+}
+
+func TestTransferPauseControllerBlocksUntilResume(t *testing.T) {
+	controller := newTransferPauseController()
+	controller.Pause()
+
+	resultCh := make(chan error, 1)
+	go func() {
+		resultCh <- controller.Wait(context.Background())
+	}()
+
+	select {
+	case err := <-resultCh:
+		t.Fatalf("wait returned before resume: %v", err)
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	controller.Resume()
+	select {
+	case err := <-resultCh:
+		if err != nil {
+			t.Fatalf("wait returned error: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for resume")
+	}
+}
+
+func TestRunTransferCollectsFailedItemsAndContinues(t *testing.T) {
+	sourceDir := t.TempDir()
+	targetDir := t.TempDir()
+	okPath := filepath.Join(sourceDir, "ok.txt")
+	missingPath := filepath.Join(sourceDir, "missing.txt")
+	if err := os.WriteFile(okPath, []byte("ok"), 0o644); err != nil {
+		t.Fatalf("write ok source: %v", err)
+	}
+
+	events := make(chan protocol.Event, 16)
+	service := New(func(event protocol.Event) {
+		events <- event
+	})
+	defer service.Shutdown()
+
+	if err := service.StartTransfer("job-1", protocol.SFTPTransferStartPayload{
+		Source: protocol.TransferEndpointPayload{
+			Kind: "local",
+			Path: sourceDir,
+		},
+		Target: protocol.TransferEndpointPayload{
+			Kind: "local",
+			Path: targetDir,
+		},
+		Items: []protocol.TransferItemPayload{
+			{Name: "ok.txt", Path: okPath, Size: 2},
+			{Name: "missing.txt", Path: missingPath},
+		},
+		ConflictResolution: "overwrite",
+	}); err != nil {
+		t.Fatalf("start transfer: %v", err)
+	}
+
+	var failed protocol.Event
+	deadline := time.After(2 * time.Second)
+	for {
+		select {
+		case failed = <-events:
+			if failed.Type == protocol.EventSFTPTransferFailed {
+				goto gotFailedEvent
+			}
+		case <-deadline:
+			t.Fatal("timed out waiting for failed transfer event")
+		}
+	}
+
+gotFailedEvent:
+
+	if _, err := os.Stat(filepath.Join(targetDir, "ok.txt")); err != nil {
+		t.Fatalf("expected successful item to be copied: %v", err)
+	}
+	payload, ok := failed.Payload.(protocol.SFTPTransferProgressPayload)
+	if !ok {
+		t.Fatalf("expected transfer progress payload, got %#v", failed.Payload)
+	}
+	if payload.CompletedItemCount != 1 {
+		t.Fatalf("expected one completed item, got %d", payload.CompletedItemCount)
+	}
+	if payload.FailedItemCount != 1 || len(payload.FailedItems) != 1 {
+		t.Fatalf("expected one failed item, got count=%d items=%#v", payload.FailedItemCount, payload.FailedItems)
+	}
+	if payload.FailedItems[0].Item.Name != "missing.txt" {
+		t.Fatalf("unexpected failed item: %#v", payload.FailedItems[0])
+	}
+}
+
 func TestPrepareDestinationAnnotatesOverwritePermissionDenied(t *testing.T) {
 	targetFS := fakeFilesystemAccessor{
 		statInfo:  fakeFileInfo{name: "existing.txt"},
 		removeErr: os.ErrPermission,
 	}
 
-	_, _, _, err := prepareDestination(
+	_, _, _, _, err := prepareDestination(
 		targetFS,
-		fakeFileInfo{name: "source.txt"},
+		fakeFileInfo{name: "source", isDir: true},
 		"/restricted/existing.txt",
 		"overwrite",
 	)
@@ -496,6 +675,9 @@ type fakeFilesystemAccessor struct {
 	readDirErr error
 	mkdirErr   error
 	removeErr  error
+	renameErr  error
+	chtimeErr  error
+	chmodErr   error
 }
 
 func (accessor fakeFilesystemAccessor) Join(base string, elem ...string) string {
@@ -551,6 +733,18 @@ func (accessor fakeFilesystemAccessor) Remove(string) error {
 
 func (accessor fakeFilesystemAccessor) RemoveDirectory(string) error {
 	return accessor.removeErr
+}
+
+func (accessor fakeFilesystemAccessor) Rename(string, string) error {
+	return accessor.renameErr
+}
+
+func (accessor fakeFilesystemAccessor) Chtimes(string, time.Time, time.Time) error {
+	return accessor.chtimeErr
+}
+
+func (accessor fakeFilesystemAccessor) Chmod(string, os.FileMode) error {
+	return accessor.chmodErr
 }
 
 type fakeFileInfo struct {

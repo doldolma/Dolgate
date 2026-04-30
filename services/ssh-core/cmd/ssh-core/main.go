@@ -55,6 +55,8 @@ type coreRuntime interface {
 	DeleteSFTP(endpointID, requestID string, payload protocol.SFTPDeletePayload) error
 	StartSFTPTransfer(jobID string, payload protocol.SFTPTransferStartPayload) error
 	CancelSFTPTransfer(jobID string) error
+	PauseSFTPTransfer(jobID string) error
+	ResumeSFTPTransfer(jobID string) error
 	Shutdown()
 }
 
@@ -381,6 +383,10 @@ func dispatch(core coreRuntime, writer *eventWriter, request protocol.Request) e
 		return core.StartSFTPTransfer(request.JobID, payload)
 	case protocol.CommandSFTPTransferCancel:
 		return core.CancelSFTPTransfer(request.JobID)
+	case protocol.CommandSFTPTransferPause:
+		return core.PauseSFTPTransfer(request.JobID)
+	case protocol.CommandSFTPTransferResume:
+		return core.ResumeSFTPTransfer(request.JobID)
 	default:
 		return fmt.Errorf("unknown command type: %s", request.Type)
 	}
@@ -482,7 +488,9 @@ func isSFTPCommand(frame protocol.Frame) bool {
 		protocol.CommandSFTPListPrincipals,
 		protocol.CommandSFTPDelete,
 		protocol.CommandSFTPTransferStart,
-		protocol.CommandSFTPTransferCancel:
+		protocol.CommandSFTPTransferCancel,
+		protocol.CommandSFTPTransferPause,
+		protocol.CommandSFTPTransferResume:
 		return true
 	default:
 		return false

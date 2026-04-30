@@ -704,17 +704,28 @@ export function createSftpSlice(deps: SliceDeps): SftpSlice {
               items,
             });
           },
-    resolveSftpConflict: async (resolution) => {
+    resolveSftpConflict: async (resolution, remember = false) => {
             const pending = get().sftp.pendingConflictDialog;
             if (!pending) {
               return;
             }
+            let nextSettings = get().settings;
+            if (remember) {
+              nextSettings = await api.settings.update({
+                sftpConflictPolicy: resolution,
+              });
+            }
             const job = await api.sftp.startTransfer({
               ...pending.input,
               conflictResolution: resolution,
+              preserveMetadata: {
+                mtime: nextSettings.sftpPreserveMtime ?? true,
+                permissions: nextSettings.sftpPreservePermissions ?? false,
+              },
             });
             set((state) => ({
               activeWorkspaceTab: "sftp",
+              settings: remember ? nextSettings : state.settings,
               sftp: {
                 ...state.sftp,
                 pendingConflictDialog: null,
@@ -729,6 +740,63 @@ export function createSftpSlice(deps: SliceDeps): SftpSlice {
                 pendingConflictDialog: null,
               },
             })),
+    pauseTransfer: async (jobId) => {
+            const existing = get().sftp.transfers.find((job) => job.id === jobId);
+            if (!existing || existing.status !== "running") {
+              return;
+            }
+            const nextJob = {
+              ...existing,
+              status: "paused" as const,
+              etaSeconds: null,
+              updatedAt: new Date().toISOString(),
+            };
+            set((state) => ({
+              sftp: {
+                ...state.sftp,
+                transfers: upsertTransferJob(state.sftp.transfers, nextJob),
+              },
+            }));
+            try {
+              await api.sftp.pauseTransfer(jobId);
+            } catch (error) {
+              set((state) => ({
+                sftp: {
+                  ...state.sftp,
+                  transfers: upsertTransferJob(state.sftp.transfers, existing),
+                },
+              }));
+              throw error;
+            }
+          },
+    resumeTransfer: async (jobId) => {
+            const existing = get().sftp.transfers.find((job) => job.id === jobId);
+            if (!existing || existing.status !== "paused") {
+              return;
+            }
+            const nextJob = {
+              ...existing,
+              status: "running" as const,
+              updatedAt: new Date().toISOString(),
+            };
+            set((state) => ({
+              sftp: {
+                ...state.sftp,
+                transfers: upsertTransferJob(state.sftp.transfers, nextJob),
+              },
+            }));
+            try {
+              await api.sftp.resumeTransfer(jobId);
+            } catch (error) {
+              set((state) => ({
+                sftp: {
+                  ...state.sftp,
+                  transfers: upsertTransferJob(state.sftp.transfers, existing),
+                },
+              }));
+              throw error;
+            }
+          },
     cancelTransfer: async (jobId) => {
             const existing = get().sftp.transfers.find((job) => job.id === jobId);
             if (!existing) {
@@ -769,7 +837,15 @@ export function createSftpSlice(deps: SliceDeps): SftpSlice {
             if (!job?.request) {
               return;
             }
-            const nextJob = await api.sftp.startTransfer(job.request);
+            const retryItems =
+              job.failedItems && job.failedItems.length > 0
+                ? job.failedItems.map((failed) => failed.item)
+                : job.request.items;
+            const nextJob = await api.sftp.startTransfer({
+              ...job.request,
+              items: retryItems,
+              retryOfJobId: job.id,
+            });
             set((state) => ({
               sftp: {
                 ...state.sftp,

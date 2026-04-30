@@ -332,6 +332,8 @@ function renderWorkspace(
       onResolveConflict={vi.fn().mockResolvedValue(undefined)}
       onDismissConflict={vi.fn()}
       onCancelTransfer={vi.fn().mockResolvedValue(undefined)}
+      onPauseTransfer={vi.fn().mockResolvedValue(undefined)}
+      onResumeTransfer={vi.fn().mockResolvedValue(undefined)}
       onRetryTransfer={vi.fn().mockResolvedValue(undefined)}
       onDismissTransfer={vi.fn()}
       onRespondInteractiveAuth={vi.fn().mockResolvedValue(undefined)}
@@ -474,6 +476,8 @@ describe("SftpWorkspace column resizing", () => {
         onResolveConflict={vi.fn().mockResolvedValue(undefined)}
         onDismissConflict={vi.fn()}
         onCancelTransfer={vi.fn().mockResolvedValue(undefined)}
+        onPauseTransfer={vi.fn().mockResolvedValue(undefined)}
+        onResumeTransfer={vi.fn().mockResolvedValue(undefined)}
         onRetryTransfer={vi.fn().mockResolvedValue(undefined)}
         onDismissTransfer={vi.fn()}
         onRespondInteractiveAuth={vi.fn().mockResolvedValue(undefined)}
