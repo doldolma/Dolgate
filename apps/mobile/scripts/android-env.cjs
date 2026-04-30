@@ -6,6 +6,7 @@ const { spawnSync } = require("child_process");
 const appRoot = path.resolve(__dirname, "..");
 const androidRoot = path.join(appRoot, "android");
 const localPropertiesPath = path.join(androidRoot, "local.properties");
+const androidBuildGradlePath = path.join(androidRoot, "build.gradle");
 
 function decodeLocalPropertiesPath(rawValue) {
   return rawValue.replace(/\\:/g, ":").replace(/\\\\/g, "\\");
@@ -47,6 +48,16 @@ function resolveSdkDir() {
   return getSdkCandidates().find((candidate) => fs.existsSync(candidate)) ?? null;
 }
 
+function readRequiredNdkVersion() {
+  if (!fs.existsSync(androidBuildGradlePath)) {
+    return null;
+  }
+
+  const contents = fs.readFileSync(androidBuildGradlePath, "utf8");
+  const match = contents.match(/ndkVersion\s*=\s*"([^"]+)"/);
+  return match ? match[1] : null;
+}
+
 function listDirectories(parentDir) {
   if (!parentDir || !fs.existsSync(parentDir)) {
     return [];
@@ -56,6 +67,45 @@ function listDirectories(parentDir) {
     .readdirSync(parentDir, { withFileTypes: true })
     .filter((entry) => entry.isDirectory())
     .map((entry) => path.join(parentDir, entry.name));
+}
+
+function compareVersionish(left, right) {
+  const leftParts = left.split(".").map((part) => Number.parseInt(part, 10) || 0);
+  const rightParts = right.split(".").map((part) => Number.parseInt(part, 10) || 0);
+  const length = Math.max(leftParts.length, rightParts.length);
+  for (let index = 0; index < length; index += 1) {
+    const diff = (leftParts[index] ?? 0) - (rightParts[index] ?? 0);
+    if (diff !== 0) {
+      return diff;
+    }
+  }
+  return 0;
+}
+
+function isNdkDir(candidate) {
+  return Boolean(candidate && fs.existsSync(path.join(candidate, "source.properties")));
+}
+
+function resolveNdkDir(sdkDir = resolveSdkDir(), env = process.env) {
+  const explicitNdk = [env.ANDROID_NDK_HOME, env.ANDROID_NDK_ROOT].find(isNdkDir);
+  if (explicitNdk) {
+    return explicitNdk;
+  }
+
+  const requiredNdkVersion = readRequiredNdkVersion();
+  const ndkRoot = sdkDir ? path.join(sdkDir, "ndk") : null;
+  if (!ndkRoot || !fs.existsSync(ndkRoot)) {
+    return null;
+  }
+
+  const requiredNdkDir = requiredNdkVersion ? path.join(ndkRoot, requiredNdkVersion) : null;
+  if (isNdkDir(requiredNdkDir)) {
+    return requiredNdkDir;
+  }
+
+  return listDirectories(ndkRoot)
+    .sort((left, right) => compareVersionish(path.basename(right), path.basename(left)))
+    .find(isNdkDir) ?? null;
 }
 
 function runJavaHome(args) {
@@ -180,6 +230,11 @@ function buildEnvForAndroid(baseEnv) {
   if (sdkDir) {
     env.ANDROID_HOME = env.ANDROID_HOME || sdkDir;
     env.ANDROID_SDK_ROOT = env.ANDROID_SDK_ROOT || sdkDir;
+    const ndkDir = resolveNdkDir(sdkDir, env);
+    if (ndkDir) {
+      env.ANDROID_NDK_HOME = env.ANDROID_NDK_HOME || ndkDir;
+      env.ANDROID_NDK_ROOT = env.ANDROID_NDK_ROOT || ndkDir;
+    }
     extraPaths.push(
       ...[path.join(sdkDir, "platform-tools"), path.join(sdkDir, "emulator")].filter((toolDir) =>
         fs.existsSync(toolDir),
@@ -202,5 +257,7 @@ function buildEnvForAndroid(baseEnv) {
 module.exports = {
   appRoot,
   buildEnvForAndroid,
+  readRequiredNdkVersion,
+  resolveNdkDir,
   resolveSdkDir,
 };

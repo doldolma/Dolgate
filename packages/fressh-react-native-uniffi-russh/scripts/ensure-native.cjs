@@ -13,14 +13,6 @@ const lockDir = path.join(markerRoot, ".lock");
 const regenerateScript = path.join(__dirname, "regenerate-native.cjs");
 const expectedGeneratorVersion = "0.29.3-1";
 
-const rustPathEnv = [
-  "/opt/homebrew/opt/rustup/bin",
-  path.join(os.homedir(), ".cargo", "bin"),
-  process.env.PATH,
-]
-  .filter(Boolean)
-  .join(path.delimiter);
-
 function toPosixPath(filePath) {
   return filePath.split(path.sep).join("/");
 }
@@ -37,10 +29,88 @@ function readJson(filePath) {
   return JSON.parse(fs.readFileSync(filePath, "utf8"));
 }
 
+function listDirectories(parentDir) {
+  if (!parentDir || !fs.existsSync(parentDir)) {
+    return [];
+  }
+
+  return fs
+    .readdirSync(parentDir, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => path.join(parentDir, entry.name));
+}
+
+function compareVersionish(left, right) {
+  const leftParts = left.split(".").map((part) => Number.parseInt(part, 10) || 0);
+  const rightParts = right.split(".").map((part) => Number.parseInt(part, 10) || 0);
+  const length = Math.max(leftParts.length, rightParts.length);
+  for (let index = 0; index < length; index += 1) {
+    const diff = (leftParts[index] ?? 0) - (rightParts[index] ?? 0);
+    if (diff !== 0) {
+      return diff;
+    }
+  }
+  return 0;
+}
+
+function resolveDefaultAndroidSdkDir(env) {
+  const homeDir = os.homedir();
+  const candidates = [
+    env.ANDROID_HOME,
+    env.ANDROID_SDK_ROOT,
+    process.platform === "win32"
+      ? path.join(homeDir, "AppData", "Local", "Android", "Sdk")
+      : null,
+    process.platform === "darwin" ? path.join(homeDir, "Library", "Android", "sdk") : null,
+    process.platform === "linux" ? path.join(homeDir, "Android", "Sdk") : null,
+  ].filter(Boolean);
+
+  return candidates.find((candidate) => fs.existsSync(candidate)) ?? null;
+}
+
+function resolveDefaultAndroidNdkDir(env, sdkDir) {
+  const explicitNdk = [env.ANDROID_NDK_HOME, env.ANDROID_NDK_ROOT].find(
+    (candidate) => candidate && fs.existsSync(candidate),
+  );
+  if (explicitNdk) {
+    return explicitNdk;
+  }
+
+  const ndkRoot = sdkDir ? path.join(sdkDir, "ndk") : null;
+  return listDirectories(ndkRoot)
+    .sort((left, right) => compareVersionish(path.basename(right), path.basename(left)))
+    .find((candidate) => fs.existsSync(path.join(candidate, "source.properties"))) ?? null;
+}
+
+function buildRustEnv(extraEnv = {}) {
+  const env = { ...process.env, ...extraEnv };
+  const sdkDir = resolveDefaultAndroidSdkDir(env);
+  if (sdkDir) {
+    env.ANDROID_HOME = env.ANDROID_HOME || sdkDir;
+    env.ANDROID_SDK_ROOT = env.ANDROID_SDK_ROOT || sdkDir;
+  }
+
+  const ndkDir = resolveDefaultAndroidNdkDir(env, sdkDir);
+  if (ndkDir) {
+    env.ANDROID_NDK_HOME = env.ANDROID_NDK_HOME || ndkDir;
+    env.ANDROID_NDK_ROOT = env.ANDROID_NDK_ROOT || ndkDir;
+  }
+
+  env.PATH = [
+    "/opt/homebrew/opt/rustup/bin",
+    path.join(os.homedir(), ".cargo", "bin"),
+    env.PATH,
+  ]
+    .filter(Boolean)
+    .join(path.delimiter);
+
+  return env;
+}
+
 function run(command, args, options = {}) {
   const result = spawnSync(command, args, {
     cwd: options.cwd ?? packageRoot,
-    env: options.env ?? { ...process.env, PATH: rustPathEnv },
+    env: buildRustEnv(options.env),
     stdio: options.stdio ?? "inherit",
     encoding: options.encoding,
     shell: options.shell ?? false,
@@ -58,7 +128,7 @@ function run(command, args, options = {}) {
 function runQuiet(command, args, options = {}) {
   const result = spawnSync(command, args, {
     cwd: options.cwd ?? packageRoot,
-    env: options.env ?? { ...process.env, PATH: rustPathEnv },
+    env: buildRustEnv(options.env),
     encoding: "utf8",
     stdio: ["ignore", "pipe", "pipe"],
     shell: options.shell ?? false,
@@ -136,7 +206,7 @@ function localGeneratorPackagePath() {
   return candidate;
 }
 
-function readToolVersions(target) {
+function readToolVersions(target, options = {}) {
   const packageJson = readJson(path.join(packageRoot, "package.json"));
   const dependencyVersion = packageJson.dependencies?.["uniffi-bindgen-react-native"];
   const localGenerator = readJson(localGeneratorPackagePath());
@@ -171,14 +241,14 @@ function readToolVersions(target) {
     localGeneratorVersion: localGenerator.version,
     rootGeneratorVersion,
     rustUniffiVersion,
-    cargoVersion: runQuiet("cargo", ["--version"]),
+    cargoVersion: runQuiet("cargo", ["--version"], { env: options.env }),
   };
 
   if (target === "android") {
-    versions.cargoNdkVersion = runQuiet("cargo", ["ndk", "--version"]);
+    versions.cargoNdkVersion = runQuiet("cargo", ["ndk", "--version"], { env: options.env });
   }
   if (target === "ios") {
-    versions.xcodebuildVersion = runQuiet("xcodebuild", ["-version"]);
+    versions.xcodebuildVersion = runQuiet("xcodebuild", ["-version"], { env: options.env });
   }
 
   return versions;
@@ -407,16 +477,16 @@ function nativeFingerprint(target, toolVersions) {
   });
 }
 
-function runRegenerate(args) {
+function runRegenerate(args, options = {}) {
   run(process.execPath, [regenerateScript, ...args], {
     cwd: packageRoot,
-    env: { ...process.env, PATH: rustPathEnv },
+    env: options.env,
   });
 }
 
 function ensureJs(options = {}) {
   const target = "js";
-  const toolVersions = readToolVersions(target);
+  const toolVersions = readToolVersions(target, options);
   const fingerprint = jsFingerprint(toolVersions);
   const outputs = outputFilesForTarget(target);
   const marker = readMarker(target);
@@ -435,7 +505,7 @@ function ensureJs(options = {}) {
   }
 
   console.log("Preparing generated russh JS bindings...");
-  runRegenerate(["--js-only"]);
+  runRegenerate(["--js-only"], options);
 
   const missing = missingFiles(outputs);
   if (missing.length > 0) {
@@ -445,7 +515,7 @@ function ensureJs(options = {}) {
 }
 
 function ensurePlatform(target, options = {}) {
-  const toolVersions = readToolVersions(target);
+  const toolVersions = readToolVersions(target, options);
   const fingerprint = nativeFingerprint(target, toolVersions);
   const outputs = outputFilesForTarget(target);
   const marker = readMarker(target);
@@ -465,7 +535,7 @@ function ensurePlatform(target, options = {}) {
   }
 
   console.log(`Preparing generated russh ${target} native artifacts...`);
-  runRegenerate(target === "android" ? ["--android-only"] : ["--ios-only"]);
+  runRegenerate(target === "android" ? ["--android-only"] : ["--ios-only"], options);
 
   const missing = missingFiles(outputs);
   if (missing.length > 0) {
@@ -473,7 +543,7 @@ function ensurePlatform(target, options = {}) {
   }
   writeMarker(target, buildMarker(target, fingerprint, toolVersions, outputs));
 
-  const jsToolVersions = readToolVersions("js");
+  const jsToolVersions = readToolVersions("js", options);
   writeMarker(
     "js",
     buildMarker("js", jsFingerprint(jsToolVersions), jsToolVersions, outputFilesForTarget("js")),
@@ -518,6 +588,7 @@ function normalizeOptions(options = {}) {
     jsOnly,
     check: Boolean(options.check),
     fresh: Boolean(options.fresh),
+    env: options.env,
   };
 }
 
