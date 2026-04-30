@@ -7,6 +7,8 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
+	"strings"
 	"testing"
 	"time"
 
@@ -418,6 +420,128 @@ func TestCopyFileWithProgressUsesPartialFileThenRenames(t *testing.T) {
 	}
 }
 
+func TestBuildPartialTransferPathPreservesEdgeNamesAndSanitizesJobID(t *testing.T) {
+	jobID := "job:1/../bad id!_"
+	wantSuffix := ".dolgate-partial.job1badid_"
+	names := []string{
+		"[붙임2] 전력시장운영규칙전문(260318)_PDF.pdf",
+		" leading space.txt",
+		"trailing space .txt ",
+		"quote's;glob*.txt",
+		"line\nbreak.txt",
+		"-rf.txt",
+	}
+
+	for _, name := range names {
+		t.Run(strings.ReplaceAll(name, "\n", "\\n"), func(t *testing.T) {
+			targetPath := filepath.Join("target", name)
+			partialPath := buildPartialTransferPath(localFilesystemAccessor{}, targetPath, jobID)
+			expected := filepath.Join("target", "."+name+wantSuffix)
+			if partialPath != expected {
+				t.Fatalf("partial path = %q, want %q", partialPath, expected)
+			}
+		})
+	}
+}
+
+func TestCopyFileWithProgressKeepsFinalPathUntouchedUntilPartialRenameForEdgeNames(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("edge-case filename corpus includes POSIX-only names")
+	}
+	names := []string{
+		"[붙임2] 전력시장운영규칙전문(260318)_PDF.pdf",
+		" leading space.txt",
+		"trailing space .txt ",
+		"quote's;glob*.txt",
+		"line\nbreak.txt",
+		"-rf.txt",
+	}
+
+	for _, name := range names {
+		t.Run(strings.ReplaceAll(name, "\n", "\\n"), func(t *testing.T) {
+			sourceDir := t.TempDir()
+			targetDir := t.TempDir()
+			sourcePath := filepath.Join(sourceDir, name)
+			targetPath := filepath.Join(targetDir, name)
+			if err := os.WriteFile(sourcePath, []byte("new payload"), 0o600); err != nil {
+				t.Fatalf("write source: %v", err)
+			}
+			if err := os.WriteFile(targetPath, []byte("old payload"), 0o644); err != nil {
+				t.Fatalf("write existing target: %v", err)
+			}
+			sourceInfo, err := os.Stat(sourcePath)
+			if err != nil {
+				t.Fatalf("stat source: %v", err)
+			}
+
+			beforeRenameCalled := false
+			targetFS := recordingFilesystemAccessor{
+				beforeRename: func(partialPath string, finalPath string) {
+					beforeRenameCalled = true
+					if finalPath != targetPath {
+						t.Fatalf("rename final path = %q, want %q", finalPath, targetPath)
+					}
+					content, err := os.ReadFile(targetPath)
+					if err != nil && !os.IsNotExist(err) {
+						t.Fatalf("read target before rename: %v", err)
+					}
+					if err == nil && string(content) != "old payload" {
+						t.Fatalf("final path changed before rename: %q", content)
+					}
+					if _, err := os.Stat(partialPath); err != nil {
+						t.Fatalf("partial path should exist before rename: %v", err)
+					}
+					expectedPartial := filepath.Join(targetDir, "."+name+".dolgate-partial.job1badid_")
+					if partialPath != expectedPartial {
+						t.Fatalf("partial path = %q, want %q", partialPath, expectedPartial)
+					}
+				},
+			}
+
+			reporter := newTransferProgressReporter(
+				"job:1/../bad id!_",
+				newTransferProgress(time.Unix(0, 0)),
+				func(protocol.Event) {},
+				time.Now,
+			)
+			cleanup := newTransferCleanupTracker(func(targetPath string) {
+				_ = os.Remove(targetPath)
+			})
+
+			if err := copyFileWithProgress(
+				context.Background(),
+				localFilesystemAccessor{},
+				targetFS,
+				sourcePath,
+				targetPath,
+				"job:1/../bad id!_",
+				newTransferPauseController(),
+				transferMetadataOptions{preserveMtime: true},
+				sourceInfo,
+				true,
+				cleanup,
+				reporter,
+			); err != nil {
+				t.Fatalf("copy with partial file failed: %v", err)
+			}
+			if !beforeRenameCalled {
+				t.Fatal("expected rename hook to run")
+			}
+			content, err := os.ReadFile(targetPath)
+			if err != nil {
+				t.Fatalf("read final target: %v", err)
+			}
+			if string(content) != "new payload" {
+				t.Fatalf("unexpected final content: %q", content)
+			}
+			partialPath := filepath.Join(targetDir, "."+name+".dolgate-partial.job1badid_")
+			if _, err := os.Stat(partialPath); !os.IsNotExist(err) {
+				t.Fatalf("expected partial file to be removed, stat err=%v", err)
+			}
+		})
+	}
+}
+
 func TestTransferPauseControllerBlocksUntilResume(t *testing.T) {
 	controller := newTransferPauseController()
 	controller.Pause()
@@ -745,6 +869,18 @@ func (accessor fakeFilesystemAccessor) Chtimes(string, time.Time, time.Time) err
 
 func (accessor fakeFilesystemAccessor) Chmod(string, os.FileMode) error {
 	return accessor.chmodErr
+}
+
+type recordingFilesystemAccessor struct {
+	localFilesystemAccessor
+	beforeRename func(oldPath string, newPath string)
+}
+
+func (accessor recordingFilesystemAccessor) Rename(oldPath string, newPath string) error {
+	if accessor.beforeRename != nil {
+		accessor.beforeRename(oldPath, newPath)
+	}
+	return accessor.localFilesystemAccessor.Rename(oldPath, newPath)
 }
 
 type fakeFileInfo struct {

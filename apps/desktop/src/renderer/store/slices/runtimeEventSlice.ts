@@ -1211,6 +1211,9 @@ export function createRuntimeEventSlice(deps: SliceDeps): RuntimeEventSlice {
                 sftp: updatePaneState(state, paneId, {
                   ...pane,
                   connectionProgress: event,
+                  connectionDiagnostic: event.reasonCode
+                    ? event
+                    : pane.connectionDiagnostic,
                 }),
               };
             });

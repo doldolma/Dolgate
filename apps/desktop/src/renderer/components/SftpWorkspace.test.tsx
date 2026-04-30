@@ -346,12 +346,18 @@ describe('SftpWorkspace helpers', () => {
   it('resolves dropped file paths through the preload file bridge', async () => {
     const first = new File(['alpha'], 'alpha.txt');
     const second = new File(['beta'], 'beta.txt');
+    const spaced = new File(['gamma'], ' leading space .txt ');
+    const spacedPath = '/Users/tester/ leading space .txt ';
     const getPathForDroppedFile = (file: File) =>
-      file.name === 'alpha.txt' ? '/Users/tester/alpha.txt' : null;
+      file.name === 'alpha.txt'
+        ? '/Users/tester/alpha.txt'
+        : file.name === ' leading space .txt '
+          ? spacedPath
+          : null;
 
     await expect(
-      extractDroppedAbsolutePaths([first, second], getPathForDroppedFile)
-    ).resolves.toEqual(['/Users/tester/alpha.txt']);
+      extractDroppedAbsolutePaths([first, second, spaced], getPathForDroppedFile)
+    ).resolves.toEqual(['/Users/tester/alpha.txt', spacedPath]);
   });
 
   it('builds a stable summary title for multi-file transfers', () => {

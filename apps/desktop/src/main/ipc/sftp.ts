@@ -45,30 +45,47 @@ export function registerSftpIpcHandlers(ctx: MainIpcContext): void {
             hydratedHost.awsProfileId,
             hydratedHost.awsProfileName,
           ) ?? hydratedHost.awsProfileName;
-        const trustedHostKeyBase64 = ctx.requireTrustedHostKey({
-          hostname: buildAwsSsmKnownHostIdentity({
-            profileName,
-            region: hydratedHost.awsRegion,
-            instanceId: hydratedHost.awsInstanceId,
-          }),
-          port: sshPort,
-        });
+        let trustedHostKeyBase64: string;
+        try {
+          trustedHostKeyBase64 = ctx.requireTrustedHostKey({
+            hostname: buildAwsSsmKnownHostIdentity({
+              profileName,
+              region: hydratedHost.awsRegion,
+              instanceId: hydratedHost.awsInstanceId,
+            }),
+            port: sshPort,
+          });
+        } catch (error) {
+          throw ctx.emitSftpConnectionFailureProgress({
+            endpointId,
+            host: hydratedHost,
+            stage: "probing-host-key",
+            error,
+            reasonCode: "host-key-missing",
+          });
+        }
         const sshUsername = hydratedHost.awsSshUsername?.trim();
         if (!sshUsername) {
-          throw ctx.formatSftpStageError(
-            "loading-instance-metadata",
-            new Error(
+          throw ctx.emitSftpConnectionFailureProgress({
+            endpointId,
+            host: hydratedHost,
+            stage: "loading-instance-metadata",
+            error: new Error(
               hydratedHost.awsSshMetadataError ||
                 "자동으로 SSH 사용자명을 확인하지 못했습니다.",
             ),
-          );
+            reasonCode: "missing-username",
+          });
         }
         const availabilityZone = hydratedHost.awsAvailabilityZone?.trim();
         if (!availabilityZone) {
-          throw ctx.formatSftpStageError(
-            "checking-ssm",
-            new Error("Availability Zone을 확인하지 못했습니다."),
-          );
+          throw ctx.emitSftpConnectionFailureProgress({
+            endpointId,
+            host: hydratedHost,
+            stage: "checking-ssm",
+            error: new Error("Availability Zone을 확인하지 못했습니다."),
+            reasonCode: "missing-availability-zone",
+          });
         }
 
         ctx.emitSftpConnectionProgress({
@@ -95,7 +112,12 @@ export function registerSftpIpcHandlers(ctx: MainIpcContext): void {
             publicKey,
           });
         } catch (error) {
-          throw ctx.formatSftpStageError("sending-public-key", error);
+          throw ctx.emitSftpConnectionFailureProgress({
+            endpointId,
+            host: hydratedHost,
+            stage: "sending-public-key",
+            error,
+          });
         }
 
         ctx.emitSftpConnectionProgress({
@@ -145,7 +167,12 @@ export function registerSftpIpcHandlers(ctx: MainIpcContext): void {
           if (error instanceof Error && /^\[/.test(error.message)) {
             throw error;
           }
-          throw ctx.formatSftpStageError("connecting-sftp", error);
+          throw ctx.emitSftpConnectionFailureProgress({
+            endpointId,
+            host: hydratedHost,
+            stage: tunnelRuntimeId ? "connecting-sftp" : "opening-tunnel",
+            error,
+          });
         }
       }
 

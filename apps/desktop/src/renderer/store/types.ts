@@ -246,6 +246,7 @@ export interface SftpPaneState {
   connectingHostId?: string | null;
   connectingEndpointId?: string | null;
   connectionProgress?: SftpConnectionProgressEvent | null;
+  connectionDiagnostic?: SftpConnectionProgressEvent | null;
   hostGroupPath: string | null;
   currentPath: string;
   lastLocalPath: string;

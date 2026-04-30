@@ -1,5 +1,7 @@
 import type {
   AppSettings,
+  AwsSftpDiagnosticDetails,
+  AwsSftpDiagnosticReasonCode,
   DesktopBootstrapSnapshot,
   DesktopConnectInput,
   DesktopLocalConnectInput,
@@ -76,6 +78,9 @@ export type AwsConnectionProgressEmitter = (event: {
   hostId: string;
   stage: AwsConnectionProgressStage;
   message: string;
+  reasonCode?: AwsSftpDiagnosticReasonCode;
+  diagnosticId?: string;
+  details?: AwsSftpDiagnosticDetails;
 }) => void;
 
 export interface MainIpcContext {
@@ -113,6 +118,15 @@ export interface MainIpcContext {
   };
   listResolvedDnsOverrides: () => any[];
   emitSftpConnectionProgress: AwsConnectionProgressEmitter;
+  emitSftpConnectionFailureProgress: (input: {
+    endpointId: string;
+    host: AwsEc2HostRecord;
+    stage: AwsSftpProgressStage;
+    error: unknown;
+    reasonCode?: AwsSftpDiagnosticReasonCode;
+    details?: AwsSftpDiagnosticDetails;
+    emitProgress?: AwsConnectionProgressEmitter;
+  }) => Error;
   emitContainersConnectionProgress: AwsConnectionProgressEmitter;
   pendingSessionSecrets: Map<
     string,
@@ -257,6 +271,11 @@ export interface MainIpcContext {
   formatSftpStageError: (
     stage: AwsSftpProgressStage,
     error: unknown,
+    options?: {
+      reasonCode?: AwsSftpDiagnosticReasonCode;
+      diagnosticId?: string;
+      details?: AwsSftpDiagnosticDetails;
+    },
   ) => Error;
 }
 

@@ -10,6 +10,8 @@ import {
   filterHostsInGroupTree,
   getAwsEc2HostSftpDisabledReason,
   getAwsEc2HostSshMetadataStatusLabel,
+  getAwsSftpDiagnosticAction,
+  getAwsSftpDiagnosticTitle,
   getHostBadgeLabel,
   getHostSearchText,
   getHostSubtitle,
@@ -28,6 +30,7 @@ import type {
   HostRecord,
   SftpBrowserColumnKey,
   SftpBrowserColumnWidths,
+  SftpConnectionProgressEvent,
   SftpPaneId,
   SftpPrincipal,
   TransferJob,
@@ -268,6 +271,52 @@ export function hostPickerBreadcrumbs(
       path: segments.slice(0, index + 1).join("/"),
     })),
   ];
+}
+
+function sanitizeDiagnosticDetails(
+  details: SftpConnectionProgressEvent["details"] | undefined,
+): Record<string, string | number | boolean | null> {
+  if (!details) {
+    return {};
+  }
+  const sanitized: Record<string, string | number | boolean | null> = {};
+  for (const [key, value] of Object.entries(details)) {
+    if (/password|passphrase|secret|token|credential|privatekey|private_key/i.test(key)) {
+      continue;
+    }
+    if (
+      typeof value === "string" &&
+      /-----BEGIN|aws_secret_access_key|sessionToken|accessToken/i.test(value)
+    ) {
+      continue;
+    }
+    sanitized[key] = value;
+  }
+  return sanitized;
+}
+
+function buildAwsSftpDiagnosticCopyText(input: {
+  host: Extract<HostRecord, { kind: "aws-ec2" }>;
+  diagnostic: SftpConnectionProgressEvent;
+}): string {
+  return JSON.stringify(
+    {
+      source: "dolgate-aws-sftp",
+      timestamp: new Date().toISOString(),
+      hostLabel: input.host.label,
+      hostId: input.host.id,
+      instanceId: input.host.awsInstanceId,
+      region: input.host.awsRegion,
+      profileName: input.host.awsProfileName,
+      stage: input.diagnostic.stage,
+      reasonCode: input.diagnostic.reasonCode ?? "unknown",
+      message: input.diagnostic.message,
+      diagnosticId: input.diagnostic.diagnosticId ?? null,
+      details: sanitizeDiagnosticDetails(input.diagnostic.details),
+    },
+    null,
+    2,
+  );
 }
 
 export function visibleHostPickerHosts(
@@ -1777,6 +1826,102 @@ interface HostPickerProps {
   onClearInteractiveAuth: () => void;
 }
 
+function AwsSftpFailureDiagnosticCard({
+  host,
+  diagnostic,
+  onRetry,
+  onOpenHostSettings,
+}: {
+  host: Extract<HostRecord, { kind: "aws-ec2" }>;
+  diagnostic: SftpConnectionProgressEvent;
+  onRetry: () => Promise<void>;
+  onOpenHostSettings?: () => void;
+}) {
+  const [copyState, setCopyState] = useState<"idle" | "copied" | "error">(
+    "idle",
+  );
+  const title = getAwsSftpDiagnosticTitle(diagnostic.reasonCode);
+  const action = getAwsSftpDiagnosticAction(diagnostic.reasonCode);
+  const canOpenSettings =
+    diagnostic.reasonCode === "missing-username" ||
+    diagnostic.reasonCode === "ssh-auth-failed" ||
+    diagnostic.reasonCode === "eic-invalid-os-user";
+
+  return (
+    <NoticeCard
+      tone="danger"
+      className="grid gap-[0.7rem] rounded-[16px] px-[0.95rem] py-[0.8rem] shadow-none"
+      role="alert"
+    >
+      <div className="grid gap-[0.25rem]">
+        <div className="flex flex-wrap items-center gap-x-[0.6rem] gap-y-[0.25rem]">
+          <strong className="text-[0.95rem] text-[var(--text)]">
+            {title}
+          </strong>
+          <span className="rounded-[999px] border border-[color-mix(in_srgb,var(--danger-text)_24%,var(--border)_76%)] px-[0.45rem] py-[0.12rem] text-[0.74rem] font-semibold uppercase text-[var(--danger-text)]">
+            {diagnostic.reasonCode ?? "unknown"}
+          </span>
+        </div>
+        <span className="text-[0.86rem] font-semibold text-[var(--text)]">
+          {formatConnectionProgressStageLabel(diagnostic.stage)}
+        </span>
+        <span className="text-[0.9rem] leading-[1.5] text-[var(--text-soft)]">
+          {diagnostic.message}
+        </span>
+        <span className="text-[0.9rem] leading-[1.5] text-[var(--text-soft)]">
+          {action}
+        </span>
+      </div>
+      <div className="flex flex-wrap gap-[0.5rem]">
+        <Button
+          type="button"
+          variant="primary"
+          size="sm"
+          onClick={() => void onRetry()}
+        >
+          다시 시도
+        </Button>
+        {canOpenSettings && onOpenHostSettings ? (
+          <Button
+            type="button"
+            variant="secondary"
+            size="sm"
+            onClick={onOpenHostSettings}
+          >
+            SSH 설정 수정
+          </Button>
+        ) : null}
+        <Button
+          type="button"
+          variant="secondary"
+          size="sm"
+          onClick={async () => {
+            try {
+              await navigator.clipboard.writeText(
+                buildAwsSftpDiagnosticCopyText({ host, diagnostic }),
+              );
+              setCopyState("copied");
+            } catch {
+              setCopyState("error");
+            }
+          }}
+        >
+          진단 정보 복사
+        </Button>
+      </div>
+      {copyState === "copied" ? (
+        <span className="text-[0.82rem] text-[var(--text-soft)]">
+          진단 정보를 클립보드에 복사했습니다.
+        </span>
+      ) : copyState === "error" ? (
+        <span className="text-[0.82rem] text-[var(--danger-text)]">
+          진단 정보를 복사하지 못했습니다.
+        </span>
+      ) : null}
+    </NoticeCard>
+  );
+}
+
 function HostPicker({
   pane,
   groups,
@@ -1829,6 +1974,15 @@ function HostPicker({
   const selectedHost = selectedHostId
     ? (hosts.find((host) => host.id === selectedHostId) ?? null)
     : null;
+  const awsFailureDiagnostic =
+    pane.connectionDiagnostic &&
+    selectedHost &&
+    isAwsEc2HostRecord(selectedHost)
+      ? {
+          host: selectedHost,
+          diagnostic: pane.connectionDiagnostic,
+        }
+      : null;
   const isEmpty = visibleGroups.length === 0 && visibleHosts.length === 0;
   const shouldShowConnectingOverlay =
     isConnecting &&
@@ -1945,7 +2099,18 @@ function HostPicker({
         </nav>
       ) : null}
 
-      {pane.errorMessage ? (
+      {awsFailureDiagnostic ? (
+        <AwsSftpFailureDiagnosticCard
+          host={awsFailureDiagnostic.host}
+          diagnostic={awsFailureDiagnostic.diagnostic}
+          onRetry={() => onConnectHost(awsFailureDiagnostic.host.id)}
+          onOpenHostSettings={
+            onOpenHostSettings
+              ? () => onOpenHostSettings(awsFailureDiagnostic.host.id)
+              : undefined
+          }
+        />
+      ) : pane.errorMessage ? (
         <NoticeCard
           tone="danger"
           className="rounded-[16px] px-[0.9rem] py-[0.58rem] shadow-none"

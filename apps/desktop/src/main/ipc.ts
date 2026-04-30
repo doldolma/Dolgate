@@ -17,7 +17,9 @@ import {
   getAwsEc2HostSftpDisabledReason,
   getAwsEc2HostSshPort,
   buildAwsSsmKnownHostIdentity,
+  getAwsSftpDiagnosticMessage,
   getParentGroupPath,
+  inferAwsSftpDiagnosticReasonCode,
   isAwsEc2HostRecord,
   isAwsEcsHostRecord,
   isWarpgateSshHostRecord,
@@ -28,6 +30,8 @@ import {
 import type {
   AuthState,
   AppSettings,
+  AwsSftpDiagnosticDetails,
+  AwsSftpDiagnosticReasonCode,
   DesktopBootstrapSnapshot,
   DesktopConnectInput,
   DesktopSyncedWorkspaceSnapshot,
@@ -540,6 +544,9 @@ type AwsConnectionProgressEvent = {
   hostId: string;
   stage: AwsSftpProgressStage | "connecting-containers";
   message: string;
+  reasonCode?: AwsSftpDiagnosticReasonCode;
+  diagnosticId?: string;
+  details?: AwsSftpDiagnosticDetails;
 };
 
 type AwsConnectionProgressEmitter = (
@@ -571,13 +578,66 @@ function getSftpStageLabel(stage: AwsSftpProgressStage): string {
   }
 }
 
+type AwsSftpStageErrorOptions = {
+  reasonCode?: AwsSftpDiagnosticReasonCode;
+  diagnosticId?: string;
+  details?: AwsSftpDiagnosticDetails;
+};
+
+type AwsSftpStageErrorDiagnostic = Required<
+  Pick<AwsSftpStageErrorOptions, "reasonCode" | "diagnosticId">
+> & {
+  stage: AwsSftpProgressStage;
+  message: string;
+  details: AwsSftpDiagnosticDetails;
+};
+
+function errorMessageOf(error: unknown): string {
+  return error instanceof Error
+    ? error.message
+    : "알 수 없는 오류가 발생했습니다.";
+}
+
+function sanitizeAwsSftpDiagnosticDetails(
+  details: AwsSftpDiagnosticDetails = {},
+): AwsSftpDiagnosticDetails {
+  const sanitized: AwsSftpDiagnosticDetails = {};
+  for (const [key, value] of Object.entries(details)) {
+    if (/password|passphrase|secret|token|credential|privatekey|private_key/i.test(key)) {
+      continue;
+    }
+    if (
+      typeof value === "string" &&
+      /-----BEGIN|aws_secret_access_key|sessionToken|accessToken/i.test(value)
+    ) {
+      continue;
+    }
+    sanitized[key] = value;
+  }
+  return sanitized;
+}
+
 function formatSftpStageError(
   stage: AwsSftpProgressStage,
   error: unknown,
+  options: AwsSftpStageErrorOptions = {},
 ): Error {
-  const message =
-    error instanceof Error ? error.message : "알 수 없는 오류가 발생했습니다.";
-  return new Error(`[${getSftpStageLabel(stage)}] ${message}`);
+  const message = errorMessageOf(error);
+  const reasonCode =
+    options.reasonCode ?? inferAwsSftpDiagnosticReasonCode(stage, message);
+  const diagnosticId = options.diagnosticId ?? `aws-sftp-${randomUUID()}`;
+  const details = sanitizeAwsSftpDiagnosticDetails(options.details);
+  const formatted = new Error(`[${getSftpStageLabel(stage)}] ${message}`);
+  Object.assign(formatted, {
+    awsSftpDiagnostic: {
+      stage,
+      reasonCode,
+      diagnosticId,
+      message,
+      details,
+    } satisfies AwsSftpStageErrorDiagnostic,
+  });
+  return formatted;
 }
 
 const AWS_SFTP_PREFLIGHT_CACHE_TTL_MS = 2 * 60_000;
@@ -861,7 +921,43 @@ async function buildHostKeyProbeResult(
       if (error instanceof Error && /^\[/.test(error.message)) {
         throw error;
       }
-      throw formatSftpStageError(currentStage, error);
+      const formatted = formatSftpStageError(currentStage, error, {
+        reasonCode:
+          currentStage === "probing-host-key"
+            ? "host-key-missing"
+            : currentStage === "opening-tunnel"
+              ? "tunnel-open-failed"
+              : undefined,
+        details: sanitizeAwsSftpDiagnosticDetails({
+          hostId: host.id,
+          hostLabel: host.label,
+          profileName:
+            awsService.resolveManagedProfileNameOrFallback(
+              host.awsProfileId,
+              host.awsProfileName,
+            ) ?? host.awsProfileName,
+          region: host.awsRegion,
+          instanceId: host.awsInstanceId,
+          availabilityZone: host.awsAvailabilityZone ?? null,
+          sshUsername: host.awsSshUsername ?? null,
+          sshPort: getAwsEc2HostSshPort(host),
+        }),
+      });
+      const diagnostic = (formatted as Error & {
+        awsSftpDiagnostic?: AwsSftpStageErrorDiagnostic;
+      }).awsSftpDiagnostic;
+      if (endpointId) {
+        emitConnectionProgress({
+          endpointId,
+          hostId: host.id,
+          stage: currentStage,
+          message: getAwsSftpDiagnosticMessage(diagnostic?.reasonCode),
+          reasonCode: diagnostic?.reasonCode ?? "unknown",
+          diagnosticId: diagnostic?.diagnosticId,
+          details: diagnostic?.details,
+        });
+      }
+      throw formatted;
     }
   }
 
@@ -1212,6 +1308,53 @@ export function registerIpcHandlers(
   const emitSftpConnectionProgress: AwsConnectionProgressEmitter = (event) => {
     sendToAllWindows(ipcChannels.sftp.connectionProgress, event);
   };
+  const buildAwsSftpDiagnosticDetails = (
+    host: Extract<HostRecord, { kind: "aws-ec2" }>,
+    extra: AwsSftpDiagnosticDetails = {},
+  ): AwsSftpDiagnosticDetails =>
+    sanitizeAwsSftpDiagnosticDetails({
+      hostId: host.id,
+      hostLabel: host.label,
+      profileName:
+        awsService.resolveManagedProfileNameOrFallback(
+          host.awsProfileId,
+          host.awsProfileName,
+        ) ?? host.awsProfileName,
+      region: host.awsRegion,
+      instanceId: host.awsInstanceId,
+      availabilityZone: host.awsAvailabilityZone ?? null,
+      sshUsername: host.awsSshUsername ?? null,
+      sshPort: getAwsEc2HostSshPort(host),
+      ...extra,
+    });
+  const emitSftpConnectionFailureProgress = (input: {
+    endpointId: string;
+    host: Extract<HostRecord, { kind: "aws-ec2" }>;
+    stage: AwsSftpProgressStage;
+    error: unknown;
+    reasonCode?: AwsSftpDiagnosticReasonCode;
+    details?: AwsSftpDiagnosticDetails;
+    emitProgress?: AwsConnectionProgressEmitter;
+  }): Error => {
+    const formatted = formatSftpStageError(input.stage, input.error, {
+      reasonCode: input.reasonCode,
+      details: buildAwsSftpDiagnosticDetails(input.host, input.details),
+    });
+    const diagnostic = (formatted as Error & {
+      awsSftpDiagnostic?: AwsSftpStageErrorDiagnostic;
+    }).awsSftpDiagnostic;
+    const emitProgress = input.emitProgress ?? emitSftpConnectionProgress;
+    emitProgress({
+      endpointId: input.endpointId,
+      hostId: input.host.id,
+      stage: input.stage,
+      message: getAwsSftpDiagnosticMessage(diagnostic?.reasonCode),
+      reasonCode: diagnostic?.reasonCode ?? "unknown",
+      diagnosticId: diagnostic?.diagnosticId,
+      details: diagnostic?.details,
+    });
+    return formatted;
+  };
 
   const emitContainersConnectionProgress = (event: {
     endpointId: string;
@@ -1499,7 +1642,13 @@ export function registerIpcHandlers(
       if (error instanceof Error && /^\[/.test(error.message)) {
         throw error;
       }
-      throw formatSftpStageError(currentStage, error);
+      throw emitSftpConnectionFailureProgress({
+        endpointId,
+        host,
+        stage: currentStage,
+        error,
+        emitProgress,
+      });
     }
   }
 
@@ -1939,6 +2088,7 @@ export function registerIpcHandlers(
     listPortForwardSnapshot,
     listResolvedDnsOverrides,
     emitSftpConnectionProgress,
+    emitSftpConnectionFailureProgress,
     emitContainersConnectionProgress,
     pendingSessionSecrets,
     trackAwsSftpTunnelRuntime: (endpointId, runtimeId) => {

@@ -423,6 +423,7 @@ export interface SftpPaneState {
   connectingHostId?: string | null;
   connectingEndpointId?: string | null;
   connectionProgress?: SftpConnectionProgressEvent | null;
+  connectionDiagnostic?: SftpConnectionProgressEvent | null;
   hostGroupPath: string | null;
   currentPath: string;
   lastLocalPath: string;
@@ -999,6 +1000,7 @@ export function createEmptyPane(id: SftpPaneId): SftpPaneState {
     connectingHostId: null,
     connectingEndpointId: null,
     connectionProgress: null,
+    connectionDiagnostic: null,
     hostGroupPath: null,
     currentPath: "",
     lastLocalPath: "",
@@ -1091,6 +1093,7 @@ export function buildSftpHostPickerPane(pane: SftpPaneState): SftpPaneState {
     connectingHostId: null,
     connectingEndpointId: null,
     connectionProgress: null,
+    connectionDiagnostic: null,
     currentPath: "",
     history: [],
     historyIndex: -1,

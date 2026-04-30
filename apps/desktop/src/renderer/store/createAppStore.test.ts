@@ -1030,6 +1030,8 @@ function createMockApi(): DesktopApi {
       mkdir: vi.fn().mockResolvedValue(undefined),
       rename: vi.fn().mockResolvedValue(undefined),
       chmod: vi.fn().mockResolvedValue(undefined),
+      chown: vi.fn().mockResolvedValue(undefined),
+      listPrincipals: vi.fn().mockResolvedValue([]),
       delete: vi.fn().mockResolvedValue(undefined),
       startTransfer: vi.fn().mockResolvedValue({
         id: "job-1",
@@ -3549,6 +3551,140 @@ describe("createAppStore", () => {
     );
   });
 
+  it("keeps dropped local file paths exact when resolving external SFTP transfers", async () => {
+    const api = createMockApi();
+    const fileName = " leading space .txt ";
+    const droppedPath = `/Users/tester/Drop/${fileName}`;
+    api.files.getParentPath = vi.fn().mockImplementation(async (targetPath: string) => {
+      expect(targetPath).toBe(droppedPath);
+      return "/Users/tester/Drop";
+    });
+    api.files.list = vi.fn().mockResolvedValue({
+      path: "/Users/tester/Drop",
+      entries: [
+        {
+          name: fileName,
+          path: droppedPath,
+          isDirectory: false,
+          size: 42,
+          mtime: "2025-01-01T00:00:00.000Z",
+          kind: "file",
+          permissions: "rw-r--r--",
+        },
+      ],
+    });
+    const store = createAppStore(api);
+
+    await store.getState().bootstrap();
+    store.setState((state) => ({
+      sftp: {
+        ...state.sftp,
+        rightPane: {
+          ...state.sftp.rightPane,
+          sourceKind: "host",
+          endpoint: {
+            id: "endpoint-1",
+            kind: "remote",
+            hostId: "host-1",
+            title: "Prod",
+            path: "/remote",
+            connectedAt: "2025-01-01T00:00:00.000Z",
+          },
+          currentPath: "/remote",
+          history: ["/remote"],
+          historyIndex: 0,
+        },
+      },
+    }));
+
+    await store
+      .getState()
+      .prepareSftpExternalTransfer("right", "/remote", [droppedPath]);
+
+    expect(api.sftp.startTransfer).toHaveBeenCalledWith(
+      expect.objectContaining({
+        items: [
+          expect.objectContaining({
+            name: fileName,
+            path: droppedPath,
+          }),
+        ],
+      }),
+    );
+  });
+
+  it("does not persist sudo password from SFTP owner changes into store state", async () => {
+    const api = createMockApi();
+    api.sftp.list = vi.fn().mockResolvedValue({
+      path: "/home/ubuntu",
+      entries: [
+        {
+          name: "app.txt",
+          path: "/home/ubuntu/app.txt",
+          isDirectory: false,
+          size: 42,
+          mtime: "2025-01-01T00:00:00.000Z",
+          kind: "file",
+          permissions: "rw-r--r--",
+          owner: "ubuntu",
+          group: "ubuntu",
+        },
+      ],
+    });
+    const store = createAppStore(api);
+
+    await store.getState().bootstrap();
+    store.setState((state) => ({
+      sftp: {
+        ...state.sftp,
+        rightPane: {
+          ...state.sftp.rightPane,
+          sourceKind: "host",
+          endpoint: {
+            id: "endpoint-1",
+            kind: "remote",
+            hostId: "host-1",
+            title: "Prod",
+            path: "/home/ubuntu",
+            connectedAt: "2025-01-01T00:00:00.000Z",
+            sudoStatus: "passwordRequired",
+          },
+          currentPath: "/home/ubuntu",
+          entries: [
+            {
+              name: "app.txt",
+              path: "/home/ubuntu/app.txt",
+              isDirectory: false,
+              size: 42,
+              mtime: "2025-01-01T00:00:00.000Z",
+              kind: "file",
+              permissions: "rw-r--r--",
+              owner: "ubuntu",
+              group: "ubuntu",
+            },
+          ],
+          selectedPaths: ["/home/ubuntu/app.txt"],
+          selectionAnchorPath: "/home/ubuntu/app.txt",
+        },
+      },
+    }));
+
+    await store.getState().changeSftpSelectionOwner("right", {
+      owner: "root",
+      group: "root",
+      sudoPassword: "sudo-secret",
+    });
+
+    expect(api.sftp.chown).toHaveBeenCalledWith({
+      endpointId: "endpoint-1",
+      path: "/home/ubuntu/app.txt",
+      owner: "root",
+      group: "root",
+      sudoPassword: "sudo-secret",
+    });
+    expect(JSON.stringify(store.getState())).not.toContain("sudo-secret");
+  });
+
   it("prompts for a missing SSH username before starting an SFTP connection", async () => {
     const api = createMockApi();
     api.hosts.list = vi.fn().mockResolvedValue([
@@ -3845,6 +3981,88 @@ describe("createAppStore", () => {
       hostId: "aws-host-1",
       stage: "browser-login",
       message: "釉뚮씪?곗??먯꽌 default AWS 濡쒓렇?몄쓣 吏꾪뻾?섎뒗 以묒엯?덈떎.",
+    });
+  });
+
+  it("keeps endpoint-scoped AWS SFTP diagnostics on the pane", async () => {
+    const store = createAppStore(createMockApi());
+    await store.getState().bootstrap();
+    store.getState().activateSftp();
+
+    store.setState((state) => ({
+      sftp: {
+        ...state.sftp,
+        rightPane: {
+          ...state.sftp.rightPane,
+          sourceKind: "host",
+          connectingHostId: "aws-host-1",
+          connectingEndpointId: "endpoint-aws",
+          isLoading: true,
+        },
+      },
+    }));
+
+    store.getState().handleSftpConnectionProgressEvent({
+      endpointId: "endpoint-aws",
+      hostId: "aws-host-1",
+      stage: "sending-public-key",
+      message: "AccessDeniedException: not authorized",
+      reasonCode: "eic-access-denied",
+      diagnosticId: "diag-aws",
+      details: {
+        profileName: "default",
+        region: "ap-northeast-2",
+      },
+    });
+
+    expect(store.getState().sftp.rightPane.connectionDiagnostic).toEqual(
+      expect.objectContaining({
+        reasonCode: "eic-access-denied",
+        diagnosticId: "diag-aws",
+      }),
+    );
+  });
+
+  it("preserves the final AWS SFTP diagnostic after connect rejects", async () => {
+    const api = createMockApi();
+    api.hosts.list = vi.fn().mockResolvedValue([createAwsEc2Host()]);
+    api.knownHosts.probeHost = vi.fn().mockResolvedValue({
+      hostId: "aws-host-1",
+      hostLabel: "AWS Linux",
+      host: "aws-ssm:default:ap-northeast-2:i-aws",
+      port: 22,
+      algorithm: "ssh-ed25519",
+      publicKeyBase64: "AAAATEST",
+      fingerprintSha256: "SHA256:test",
+      status: "trusted",
+      existing: null,
+    });
+    const store = createAppStore(api);
+    api.sftp.connect = vi.fn().mockImplementation(async (input) => {
+      store.getState().handleSftpConnectionProgressEvent({
+        endpointId: input.endpointId,
+        hostId: input.hostId,
+        stage: "connecting-sftp",
+        message: "unable to authenticate",
+        reasonCode: "ssh-auth-failed",
+        diagnosticId: "diag-auth",
+        details: {
+          password: "must-not-copy",
+          profileName: "default",
+        },
+      });
+      throw new Error("[SFTP 연결] unable to authenticate");
+    });
+
+    await store.getState().bootstrap();
+    store.getState().activateSftp();
+    await store.getState().connectSftpHost("right", "aws-host-1");
+
+    expect(store.getState().sftp.rightPane.connectionProgress).toBeNull();
+    expect(store.getState().sftp.rightPane.connectionDiagnostic).toMatchObject({
+      reasonCode: "ssh-auth-failed",
+      diagnosticId: "diag-auth",
+      message: "unable to authenticate",
     });
   });
 
