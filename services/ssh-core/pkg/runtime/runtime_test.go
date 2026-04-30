@@ -176,6 +176,8 @@ func (stub *stubSFTPService) StartTransfer(jobID string, payload coretypes.SFTPT
 	return nil
 }
 func (stub *stubSFTPService) CancelTransfer(jobID string) error { return nil }
+func (stub *stubSFTPService) PauseTransfer(jobID string) error  { return nil }
+func (stub *stubSFTPService) ResumeTransfer(jobID string) error { return nil }
 func (stub *stubSFTPService) Shutdown()                         { stub.shutdownCall++ }
 
 type stubContainersService struct {

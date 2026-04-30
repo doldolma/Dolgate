@@ -43,6 +43,7 @@ export type HostContainerRuntime = 'docker' | 'podman';
 export type HostContainerAction = 'start' | 'stop' | 'restart' | 'remove';
 export type SftpBrowserColumnKey = 'name' | 'dateModified' | 'size' | 'kind';
 export type ConflictResolution = 'overwrite' | 'skip' | 'keepBoth';
+export type SftpConflictPolicy = 'ask' | ConflictResolution;
 export type PortForwardMode = 'local' | 'remote' | 'dynamic';
 export type PortForwardTransport = 'ssh' | 'aws-ssm' | 'ecs-task' | 'container';
 export type AwsSsmPortForwardTargetKind = 'instance-port' | 'remote-host';
@@ -706,6 +707,9 @@ export function normalizeSftpBrowserColumnWidths(
 export interface AppSettings extends TerminalAppearanceSettings {
   theme: AppTheme;
   sftpBrowserColumnWidths: SftpBrowserColumnWidths;
+  sftpConflictPolicy?: SftpConflictPolicy;
+  sftpPreserveMtime?: boolean;
+  sftpPreservePermissions?: boolean;
   sessionReplayRetentionCount: number;
   serverUrl: string;
   serverUrlOverride?: string | null;
@@ -1732,7 +1736,7 @@ export interface TransferJob {
   bytesCompleted: number;
   speedBytesPerSecond?: number | null;
   etaSeconds?: number | null;
-  status: 'queued' | 'running' | 'cancelling' | 'completed' | 'failed' | 'cancelled';
+  status: 'queued' | 'running' | 'paused' | 'cancelling' | 'completed' | 'failed' | 'cancelled';
   startedAt: string;
   activeItemName?: string | null;
   errorMessage?: string | null;
@@ -1741,8 +1745,19 @@ export interface TransferJob {
   errorPath?: string | null;
   errorItemName?: string | null;
   detailMessage?: string | null;
+  completedItemCount?: number;
+  failedItemCount?: number;
+  failedItems?: TransferFailedItem[];
   updatedAt: string;
   request?: TransferStartInput;
+}
+
+export interface TransferFailedItem {
+  item: TransferItemInput;
+  errorMessage: string;
+  errorCode?: TransferJob['errorCode'];
+  errorOperation?: string | null;
+  errorPath?: string | null;
 }
 
 export interface TransferJobEvent {
@@ -1882,6 +1897,11 @@ export interface TransferStartInput {
   target: TransferEndpointRef;
   items: TransferItemInput[];
   conflictResolution: ConflictResolution;
+  preserveMetadata?: {
+    mtime?: boolean;
+    permissions?: boolean;
+  };
+  retryOfJobId?: string;
 }
 
 export type TerminalConnectionStage =

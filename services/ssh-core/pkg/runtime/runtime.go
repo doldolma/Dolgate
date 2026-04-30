@@ -72,6 +72,8 @@ type sftpService interface {
 	Delete(endpointID, requestID string, payload coretypes.SFTPDeletePayload) error
 	StartTransfer(jobID string, payload coretypes.SFTPTransferStartPayload) error
 	CancelTransfer(jobID string) error
+	PauseTransfer(jobID string) error
+	ResumeTransfer(jobID string) error
 	Shutdown()
 }
 
@@ -442,6 +444,14 @@ func (runtime *Runtime) StartSFTPTransfer(jobID string, payload coretypes.SFTPTr
 
 func (runtime *Runtime) CancelSFTPTransfer(jobID string) error {
 	return runtime.sftp.CancelTransfer(jobID)
+}
+
+func (runtime *Runtime) PauseSFTPTransfer(jobID string) error {
+	return runtime.sftp.PauseTransfer(jobID)
+}
+
+func (runtime *Runtime) ResumeSFTPTransfer(jobID string) error {
+	return runtime.sftp.ResumeTransfer(jobID)
 }
 
 func (runtime *Runtime) Shutdown() {

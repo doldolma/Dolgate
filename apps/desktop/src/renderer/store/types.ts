@@ -55,7 +55,7 @@ export type WorkspaceTabId =
   | SessionWorkspaceTabId
   | SplitWorkspaceTabId;
 export type HomeSection = "hosts" | "portForwarding" | "logs" | "settings";
-export type SettingsSection = "general" | "security" | "secrets" | "aws-profiles";
+export type SettingsSection = "general" | "sftp" | "security" | "secrets" | "aws-profiles";
 export type SftpSourceKind = "local" | "host";
 export type WorkspaceDropDirection = "left" | "right" | "top" | "bottom";
 export type HostDrawerState =
@@ -725,9 +725,12 @@ interface AppStateParts {
   ) => Promise<void>;
   resolveSftpConflict: (
     resolution: "overwrite" | "skip" | "keepBoth",
+    remember?: boolean,
   ) => Promise<void>;
   dismissSftpConflict: () => void;
   cancelTransfer: (jobId: string) => Promise<void>;
+  pauseTransfer: (jobId: string) => Promise<void>;
+  resumeTransfer: (jobId: string) => Promise<void>;
   retryTransfer: (jobId: string) => Promise<void>;
   dismissTransfer: (jobId: string) => void;
 }
@@ -875,6 +878,8 @@ export type SftpSlice = Pick<
   | "resolveSftpConflict"
   | "dismissSftpConflict"
   | "cancelTransfer"
+  | "pauseTransfer"
+  | "resumeTransfer"
   | "retryTransfer"
   | "dismissTransfer"
 >;

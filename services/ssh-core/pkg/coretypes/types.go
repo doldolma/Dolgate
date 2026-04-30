@@ -37,6 +37,8 @@ const (
 	CommandSFTPDelete                 CommandType = "sftpDelete"
 	CommandSFTPTransferStart          CommandType = "sftpTransferStart"
 	CommandSFTPTransferCancel         CommandType = "sftpTransferCancel"
+	CommandSFTPTransferPause          CommandType = "sftpTransferPause"
+	CommandSFTPTransferResume         CommandType = "sftpTransferResume"
 	CommandContainersConnect          CommandType = "containersConnect"
 	CommandContainersDisconnect       CommandType = "containersDisconnect"
 	CommandContainersList             CommandType = "containersList"
@@ -335,6 +337,21 @@ type SFTPTransferStartPayload struct {
 	Target             TransferEndpointPayload `json:"target"`
 	Items              []TransferItemPayload   `json:"items"`
 	ConflictResolution string                  `json:"conflictResolution"`
+	PreserveMetadata   TransferMetadataPayload `json:"preserveMetadata,omitempty"`
+	RetryOfJobID       string                  `json:"retryOfJobId,omitempty"`
+}
+
+type TransferMetadataPayload struct {
+	Mtime       *bool `json:"mtime,omitempty"`
+	Permissions *bool `json:"permissions,omitempty"`
+}
+
+type TransferFailedItemPayload struct {
+	Item           TransferItemPayload `json:"item"`
+	ErrorMessage   string              `json:"errorMessage"`
+	ErrorCode      string              `json:"errorCode,omitempty"`
+	ErrorOperation string              `json:"errorOperation,omitempty"`
+	ErrorPath      string              `json:"errorPath,omitempty"`
 }
 
 type PortForwardStartPayload struct {
@@ -549,18 +566,22 @@ type ContainersSearchLogsResultPayload struct {
 }
 
 type SFTPTransferProgressPayload struct {
-	Status              string  `json:"status"`
-	BytesTotal          int64   `json:"bytesTotal"`
-	BytesCompleted      int64   `json:"bytesCompleted"`
-	ActiveItemName      string  `json:"activeItemName,omitempty"`
-	SpeedBytesPerSecond float64 `json:"speedBytesPerSecond,omitempty"`
-	ETASeconds          int64   `json:"etaSeconds,omitempty"`
-	Message             string  `json:"message,omitempty"`
-	ErrorCode           string  `json:"errorCode,omitempty"`
-	ErrorOperation      string  `json:"errorOperation,omitempty"`
-	ErrorPath           string  `json:"errorPath,omitempty"`
-	ErrorItemName       string  `json:"errorItemName,omitempty"`
-	DetailMessage       string  `json:"detailMessage,omitempty"`
+	Status              string                      `json:"status"`
+	BytesTotal          int64                       `json:"bytesTotal"`
+	BytesCompleted      int64                       `json:"bytesCompleted"`
+	CompletedItemCount  int                         `json:"completedItemCount,omitempty"`
+	FailedItemCount     int                         `json:"failedItemCount,omitempty"`
+	ActiveItemName      string                      `json:"activeItemName,omitempty"`
+	SpeedBytesPerSecond float64                     `json:"speedBytesPerSecond,omitempty"`
+	ETASeconds          int64                       `json:"etaSeconds,omitempty"`
+	Message             string                      `json:"message,omitempty"`
+	ErrorCode           string                      `json:"errorCode,omitempty"`
+	ErrorOperation      string                      `json:"errorOperation,omitempty"`
+	ErrorPath           string                      `json:"errorPath,omitempty"`
+	ErrorItemName       string                      `json:"errorItemName,omitempty"`
+	DetailMessage       string                      `json:"detailMessage,omitempty"`
+	PartialPath         string                      `json:"partialPath,omitempty"`
+	FailedItems         []TransferFailedItemPayload `json:"failedItems,omitempty"`
 }
 
 type RawPayload = json.RawMessage

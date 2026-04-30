@@ -794,6 +794,10 @@ function createMockApi(): DesktopApi {
         terminalMinimumContrastRatio: 1,
         terminalAltIsMeta: false,
         terminalWebglEnabled: true,
+        sftpBrowserColumnWidths: { ...DEFAULT_SFTP_BROWSER_COLUMN_WIDTHS },
+        sftpConflictPolicy: "ask",
+        sftpPreserveMtime: true,
+        sftpPreservePermissions: false,
         serverUrl: "https://ssh.doldolma.com",
         serverUrlOverride: null,
         dismissedUpdateVersion: null,
@@ -811,6 +815,11 @@ function createMockApi(): DesktopApi {
         terminalMinimumContrastRatio: input.terminalMinimumContrastRatio ?? 1,
         terminalAltIsMeta: input.terminalAltIsMeta ?? false,
         terminalWebglEnabled: input.terminalWebglEnabled ?? true,
+        sftpBrowserColumnWidths:
+          input.sftpBrowserColumnWidths ?? { ...DEFAULT_SFTP_BROWSER_COLUMN_WIDTHS },
+        sftpConflictPolicy: input.sftpConflictPolicy ?? "ask",
+        sftpPreserveMtime: input.sftpPreserveMtime ?? true,
+        sftpPreservePermissions: input.sftpPreservePermissions ?? false,
         serverUrl:
           typeof input.serverUrlOverride === "string" &&
           input.serverUrlOverride.trim()
@@ -1034,6 +1043,8 @@ function createMockApi(): DesktopApi {
         updatedAt: "2025-01-01T00:00:00.000Z",
       }),
       cancelTransfer: vi.fn().mockResolvedValue(undefined),
+      pauseTransfer: vi.fn().mockResolvedValue(undefined),
+      resumeTransfer: vi.fn().mockResolvedValue(undefined),
       onConnectionProgress: vi.fn(() => () => undefined),
       onTransferEvent: vi.fn(),
     },
@@ -1205,6 +1216,91 @@ describe("upsertTransferJob", () => {
       status: "cancelling",
       etaSeconds: null,
     });
+  });
+
+  it("pauses and resumes running transfers optimistically", async () => {
+    const api = createMockApi();
+    const store = createAppStore(api);
+    await store.getState().bootstrap();
+
+    store.getState().handleTransferEvent({
+      job: {
+        id: "job-1",
+        sourceLabel: "Local",
+        targetLabel: "nas",
+        itemCount: 1,
+        bytesTotal: 100,
+        bytesCompleted: 40,
+        status: "running",
+        startedAt: "2025-01-01T00:00:00.000Z",
+        updatedAt: "2025-01-01T00:00:10.000Z",
+        etaSeconds: 3,
+      },
+    });
+
+    await store.getState().pauseTransfer("job-1");
+
+    expect(api.sftp.pauseTransfer).toHaveBeenCalledWith("job-1");
+    expect(store.getState().sftp.transfers[0]).toMatchObject({
+      id: "job-1",
+      status: "paused",
+      etaSeconds: null,
+    });
+
+    await store.getState().resumeTransfer("job-1");
+
+    expect(api.sftp.resumeTransfer).toHaveBeenCalledWith("job-1");
+    expect(store.getState().sftp.transfers[0]).toMatchObject({
+      id: "job-1",
+      status: "running",
+    });
+  });
+
+  it("retries only failed transfer items when failed item details are available", async () => {
+    const api = createMockApi();
+    const store = createAppStore(api);
+    await store.getState().bootstrap();
+
+    store.getState().handleTransferEvent({
+      job: {
+        id: "job-1",
+        sourceLabel: "Local",
+        targetLabel: "nas",
+        itemCount: 2,
+        bytesTotal: 100,
+        bytesCompleted: 50,
+        status: "failed",
+        startedAt: "2025-01-01T00:00:00.000Z",
+        updatedAt: "2025-01-01T00:00:10.000Z",
+        request: {
+          source: { kind: "local", path: "/source" },
+          target: { kind: "remote", endpointId: "endpoint-1", path: "/target" },
+          items: [
+            { name: "ok.txt", path: "/source/ok.txt", isDirectory: false, size: 2 },
+            { name: "bad.txt", path: "/source/bad.txt", isDirectory: false, size: 3 },
+          ],
+          conflictResolution: "overwrite",
+        },
+        failedItems: [
+          {
+            item: { name: "bad.txt", path: "/source/bad.txt", isDirectory: false, size: 3 },
+            errorMessage: "permission denied",
+            errorCode: "permission_denied",
+          },
+        ],
+      },
+    });
+
+    await store.getState().retryTransfer("job-1");
+
+    expect(api.sftp.startTransfer).toHaveBeenCalledWith(
+      expect.objectContaining({
+        retryOfJobId: "job-1",
+        items: [
+          { name: "bad.txt", path: "/source/bad.txt", isDirectory: false, size: 3 },
+        ],
+      }),
+    );
   });
 });
 
@@ -3322,6 +3418,135 @@ describe("createAppStore", () => {
         },
       },
     });
+  });
+
+  it("uses the saved SFTP conflict policy without opening the conflict dialog", async () => {
+    const api = createMockApi();
+    api.sftp.list = vi.fn().mockResolvedValue({
+      path: "/home/ubuntu",
+      entries: [
+        {
+          name: "logs",
+          path: "/home/ubuntu/logs",
+          isDirectory: true,
+          size: 0,
+          mtime: "2025-01-01T00:00:00.000Z",
+          kind: "folder",
+          permissions: "rwxr-xr-x",
+        },
+      ],
+    });
+    api.files.list = vi.fn().mockResolvedValue({
+      path: "/Users/tester/Downloads",
+      entries: [
+        {
+          name: "logs",
+          path: "/Users/tester/Downloads/logs",
+          isDirectory: true,
+          size: 0,
+          mtime: "2025-01-01T00:00:00.000Z",
+          kind: "folder",
+          permissions: "rwxr-xr-x",
+        },
+      ],
+    });
+    const store = createAppStore(api);
+
+    await store.getState().bootstrap();
+    store.setState((state) => ({
+      settings: {
+        ...state.settings,
+        sftpConflictPolicy: "keepBoth",
+      },
+    }));
+    store.getState().activateSftp();
+    await store.getState().connectSftpHost("right", "host-1");
+    store.setState((state) => ({
+      sftp: {
+        ...state.sftp,
+        rightPane: {
+          ...state.sftp.rightPane,
+          selectedPaths: ["/home/ubuntu/logs"],
+          selectionAnchorPath: "/home/ubuntu/logs",
+        },
+      },
+    }));
+
+    await store.getState().downloadSftpSelection("right");
+
+    expect(store.getState().sftp.pendingConflictDialog).toBeNull();
+    expect(api.sftp.startTransfer).toHaveBeenCalledWith(
+      expect.objectContaining({
+        conflictResolution: "keepBoth",
+        preserveMetadata: {
+          mtime: true,
+          permissions: false,
+        },
+      }),
+    );
+  });
+
+  it("matches dropped local files when macOS normalizes Korean filenames differently", async () => {
+    const api = createMockApi();
+    const fileName =
+      "[붙임2] 전력시장운영규칙전문(260318)_PDF.pdf";
+    const listedPath = `/Users/tester/Drop/${fileName}`;
+    const droppedPath = `/Users/tester/Drop/${fileName.normalize("NFD")}`;
+    api.files.getParentPath = vi
+      .fn()
+      .mockResolvedValue("/Users/tester/Drop");
+    api.files.list = vi.fn().mockResolvedValue({
+      path: "/Users/tester/Drop",
+      entries: [
+        {
+          name: fileName,
+          path: listedPath,
+          isDirectory: false,
+          size: 42,
+          mtime: "2025-01-01T00:00:00.000Z",
+          kind: "file",
+          permissions: "rw-r--r--",
+        },
+      ],
+    });
+    const store = createAppStore(api);
+
+    await store.getState().bootstrap();
+    store.setState((state) => ({
+      sftp: {
+        ...state.sftp,
+        rightPane: {
+          ...state.sftp.rightPane,
+          sourceKind: "host",
+          endpoint: {
+            id: "endpoint-1",
+            kind: "remote",
+            hostId: "host-1",
+            title: "Prod",
+            path: "/remote",
+            connectedAt: "2025-01-01T00:00:00.000Z",
+          },
+          currentPath: "/remote",
+          history: ["/remote"],
+          historyIndex: 0,
+        },
+      },
+    }));
+
+    await store
+      .getState()
+      .prepareSftpExternalTransfer("right", "/remote", [droppedPath]);
+
+    expect(api.sftp.startTransfer).toHaveBeenCalledWith(
+      expect.objectContaining({
+        items: [
+          expect.objectContaining({
+            name: fileName,
+            path: listedPath,
+          }),
+        ],
+      }),
+    );
   });
 
   it("prompts for a missing SSH username before starting an SFTP connection", async () => {

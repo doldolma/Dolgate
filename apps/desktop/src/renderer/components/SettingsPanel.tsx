@@ -5,6 +5,7 @@ import type {
   HostRecord,
   KnownHostRecord,
   SecretMetadataRecord,
+  SftpConflictPolicy,
   TerminalFontFamilyId,
 } from '@shared';
 import {
@@ -68,6 +69,7 @@ const macOnlyTerminalFonts = new Set<TerminalFontFamilyId>(['sf-mono', 'menlo', 
 
 const settingsSections: Array<{ id: SettingsSection; title: string }> = [
   { id: 'general', title: 'General' },
+  { id: 'sftp', title: 'SFTP' },
   { id: 'security', title: 'Security' },
   { id: 'secrets', title: 'Saved Credentials' },
   { id: 'aws-profiles', title: 'AWS Profiles' }
@@ -215,6 +217,12 @@ export function SettingsPanel({
     sessionReplayRetentionCount: number,
   ) {
     await onUpdateSettings({ sessionReplayRetentionCount });
+  }
+
+  async function handleChangeSftpConflictPolicy(
+    sftpConflictPolicy: SftpConflictPolicy,
+  ) {
+    await onUpdateSettings({ sftpConflictPolicy });
   }
 
   return (
@@ -468,6 +476,60 @@ export function SettingsPanel({
             </Button>
           </section>
         </>
+      ) : null}
+
+      {activeSection === 'sftp' ? (
+        <section className="rounded-[28px] border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[var(--surface-elevated)] p-[1.55rem] shadow-[var(--shadow-soft)]">
+          <div className="mb-4">
+            <div>
+              <SectionLabel>SFTP</SectionLabel>
+              <h3>Transfer Defaults</h3>
+            </div>
+          </div>
+          <div className="grid items-start grid-cols-[repeat(2,minmax(0,1fr))] gap-[0.9rem] max-[760px]:grid-cols-1">
+            <FieldGroup label="Conflict Policy">
+              <SelectField
+                value={settings.sftpConflictPolicy ?? 'ask'}
+                onChange={async (event) =>
+                  handleChangeSftpConflictPolicy(
+                    event.target.value as SftpConflictPolicy,
+                  )
+                }
+              >
+                <option value="ask">Ask every time</option>
+                <option value="overwrite">Overwrite</option>
+                <option value="skip">Skip</option>
+                <option value="keepBoth">Keep both</option>
+              </SelectField>
+            </FieldGroup>
+
+            <ToggleSwitch
+              checked={settings.sftpPreserveMtime ?? true}
+              aria-label="Preserve modified time"
+              label="Preserve modified time"
+              description="전송 완료 후 원본 수정 시간을 대상 파일에 적용합니다."
+              className="min-h-[72px] flex-row-reverse justify-between rounded-[20px] px-4 py-4"
+              onClick={() => {
+                void onUpdateSettings({
+                  sftpPreserveMtime: !(settings.sftpPreserveMtime ?? true),
+                });
+              }}
+            />
+
+            <ToggleSwitch
+              checked={settings.sftpPreservePermissions ?? false}
+              aria-label="Preserve permissions"
+              label="Preserve permissions"
+              description="가능한 경우 원본 권한 비트를 대상 파일에 적용합니다."
+              className="min-h-[72px] flex-row-reverse justify-between rounded-[20px] px-4 py-4"
+              onClick={() => {
+                void onUpdateSettings({
+                  sftpPreservePermissions: !(settings.sftpPreservePermissions ?? false),
+                });
+              }}
+            />
+          </div>
+        </section>
       ) : null}
 
       {activeSection === 'security' ? <KnownHostsPanel records={knownHosts} onRemove={onRemoveKnownHost} /> : null}

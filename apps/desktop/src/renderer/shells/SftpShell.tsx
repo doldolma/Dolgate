@@ -97,6 +97,8 @@ export function SftpShell({
           onResolveConflict={sftpViewModel.resolveSftpConflict}
           onDismissConflict={sftpViewModel.dismissSftpConflict}
           onCancelTransfer={sftpViewModel.cancelTransfer}
+          onPauseTransfer={sftpViewModel.pauseTransfer}
+          onResumeTransfer={sftpViewModel.resumeTransfer}
           onRetryTransfer={sftpViewModel.retryTransfer}
           onDismissTransfer={sftpViewModel.dismissTransfer}
           onRespondInteractiveAuth={modalViewModel.respondInteractiveAuth}

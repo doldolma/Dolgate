@@ -29,8 +29,22 @@ type StoreGetter = SliceDeps["get"];
 
 export { upsertTransferJob } from "../utils";
 
+function normalizeDroppedPathForComparison(targetPath: string): string {
+  return targetPath.replace(/[\\/]+$/, "").normalize("NFC");
+}
+
+function pathsReferToSameDroppedItem(left: string, right: string): boolean {
+  if (left === right) {
+    return true;
+  }
+  return (
+    normalizeDroppedPathForComparison(left) ===
+    normalizeDroppedPathForComparison(right)
+  );
+}
+
 export function createSftpServices(deps: SliceDeps) {
-  const { api } = deps;
+  const { api, get } = deps;
   const { refreshHostAndKeychainState } = createBootstrapSyncServices(deps);
   const { promptForMissingUsername } = createSessionServices(deps);
   const { ensureTrustedHost } = createTrustAuthServices(deps);
@@ -221,6 +235,12 @@ export function createSftpServices(deps: SliceDeps) {
         destinationListing.entries.some((entry) => entry.name === item.name),
       )
       .map((item) => item.name);
+    const settings = get().settings;
+    const conflictPolicy = settings.sftpConflictPolicy ?? "ask";
+    const conflictResolution =
+      conflicts.length > 0 && conflictPolicy !== "ask"
+        ? conflictPolicy
+        : "overwrite";
 
     const transferInput: TransferStartInput = {
       source,
@@ -229,12 +249,16 @@ export function createSftpServices(deps: SliceDeps) {
         name: item.name,
         path: item.path,
         isDirectory: item.isDirectory,
-        size: item.size,
-      })),
-      conflictResolution: conflicts.length > 0 ? "skip" : "overwrite",
+          size: item.size,
+        })),
+      conflictResolution,
+      preserveMetadata: {
+        mtime: settings.sftpPreserveMtime ?? true,
+        permissions: settings.sftpPreservePermissions ?? false,
+      },
     };
 
-    if (conflicts.length > 0) {
+    if (conflicts.length > 0 && conflictPolicy === "ask") {
       set((state) => ({
         activeWorkspaceTab: "sftp",
         sftp: {
@@ -260,7 +284,7 @@ export function createSftpServices(deps: SliceDeps) {
 
   const resolveLocalTransferItemsFromPaths = async (paths: string[]) => {
     const uniquePaths = Array.from(
-      new Set(paths.map((targetPath) => targetPath.trim()).filter(Boolean)),
+      new Set(paths.filter((targetPath) => targetPath.length > 0)),
     );
     const listingCache = new Map<string, DirectoryListing>();
     const items: FileEntry[] = [];
@@ -274,8 +298,8 @@ export function createSftpServices(deps: SliceDeps) {
         listing = await api.files.list(parent);
         listingCache.set(cacheKey, listing);
       }
-      const matched = listing.entries.find(
-        (entry) => entry.path === targetPath,
+      const matched = listing.entries.find((entry) =>
+        pathsReferToSameDroppedItem(entry.path, targetPath),
       );
       if (!matched) {
         warnings.push(`${basenameFromPath(targetPath)} 항목을 읽지 못했습니다.`);

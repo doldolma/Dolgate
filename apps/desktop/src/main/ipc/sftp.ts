@@ -264,4 +264,18 @@ export function registerSftpIpcHandlers(ctx: MainIpcContext): void {
       await ctx.coreManager.cancelSftpTransfer(jobId);
     },
   );
+
+  ipcMain.handle(
+    ipcChannels.sftp.pauseTransfer,
+    async (_event, jobId: string) => {
+      await ctx.coreManager.pauseSftpTransfer(jobId);
+    },
+  );
+
+  ipcMain.handle(
+    ipcChannels.sftp.resumeTransfer,
+    async (_event, jobId: string) => {
+      await ctx.coreManager.resumeSftpTransfer(jobId);
+    },
+  );
 }

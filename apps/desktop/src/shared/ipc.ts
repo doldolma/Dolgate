@@ -133,6 +133,8 @@ export type CoreCommandType =
   | "sftpDelete"
   | "sftpTransferStart"
   | "sftpTransferCancel"
+  | "sftpTransferPause"
+  | "sftpTransferResume"
   | "containersConnect"
   | "containersDisconnect"
   | "containersList"
@@ -844,6 +846,8 @@ export interface DesktopApi {
     delete: (input: SftpDeleteInput) => Promise<void>;
     startTransfer: (input: TransferStartInput) => Promise<TransferJob>;
     cancelTransfer: (jobId: string) => Promise<void>;
+    pauseTransfer: (jobId: string) => Promise<void>;
+    resumeTransfer: (jobId: string) => Promise<void>;
     onConnectionProgress: (
       listener: (event: SftpConnectionProgressEvent) => void,
     ) => () => void;

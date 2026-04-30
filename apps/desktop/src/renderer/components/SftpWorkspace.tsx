@@ -145,9 +145,12 @@ interface SftpWorkspaceProps {
   ) => Promise<void>;
   onResolveConflict: (
     resolution: "overwrite" | "skip" | "keepBoth",
+    remember?: boolean,
   ) => Promise<void>;
   onDismissConflict: () => void;
   onCancelTransfer: (jobId: string) => Promise<void>;
+  onPauseTransfer: (jobId: string) => Promise<void>;
+  onResumeTransfer: (jobId: string) => Promise<void>;
   onRetryTransfer: (jobId: string) => Promise<void>;
   onDismissTransfer: (jobId: string) => void;
   onRespondInteractiveAuth: (
@@ -873,11 +876,27 @@ export function buildTransferCardTitle(job: TransferJob): string {
 }
 
 export function getTransferFailureDisplayMessage(job: TransferJob): string {
+  if (job.failedItemCount && job.failedItemCount > 0) {
+    return `${job.failedItemCount}개 항목 전송에 실패했습니다.`;
+  }
   return job.errorMessage?.trim() || "전송에 실패했습니다.";
 }
 
 export function buildTransferFailureDetailLines(job: TransferJob): string[] {
   const lines: string[] = [];
+  if (job.failedItems && job.failedItems.length > 0) {
+    for (const failed of job.failedItems.slice(0, 5)) {
+      lines.push(
+        `${failed.item.name}: ${failed.errorMessage}${
+          failed.errorPath ? ` (${failed.errorPath})` : ""
+        }`,
+      );
+    }
+    if (job.failedItems.length > 5) {
+      lines.push(`외 ${job.failedItems.length - 5}개`);
+    }
+    return lines;
+  }
   if (job.errorItemName?.trim()) {
     lines.push(`항목: ${job.errorItemName.trim()}`);
   }
@@ -924,7 +943,7 @@ export async function extractDroppedAbsolutePaths(
     Array.from(files).map(async (file) => {
       try {
         const filePath = getPathForDroppedFile(file);
-        return filePath?.trim() ? filePath : null;
+        return filePath && filePath.length > 0 ? filePath : null;
       } catch {
         return null;
       }
@@ -2158,11 +2177,15 @@ function HostPicker({
 function TransferBar({
   transfers,
   onCancelTransfer,
+  onPauseTransfer,
+  onResumeTransfer,
   onRetryTransfer,
   onDismissTransfer,
 }: {
   transfers: TransferJob[];
   onCancelTransfer: (jobId: string) => Promise<void>;
+  onPauseTransfer: (jobId: string) => Promise<void>;
+  onResumeTransfer: (jobId: string) => Promise<void>;
   onRetryTransfer: (jobId: string) => Promise<void>;
   onDismissTransfer: (jobId: string) => void;
 }) {
@@ -2180,6 +2203,8 @@ function TransferBar({
         return "대기 중";
       case "running":
         return "전송 중";
+      case "paused":
+        return "일시정지";
       case "cancelling":
         return "취소 중";
       case "completed":
@@ -2314,15 +2339,50 @@ function TransferBar({
                   취소 요청을 처리하는 중입니다.
                 </span>
               ) : null}
+              {job.status === "paused" ? (
+                <span className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap">
+                  전송이 일시정지되었습니다.
+                </span>
+              ) : null}
               {job.status === "running" ? (
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  className="col-start-2 row-span-2 row-start-1 justify-self-end rounded-[12px] whitespace-nowrap"
-                  onClick={() => void onCancelTransfer(job.id)}
-                >
-                  취소
-                </Button>
+                <div className="col-start-2 row-span-2 row-start-1 inline-flex justify-self-end gap-2">
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    className="rounded-[12px] whitespace-nowrap"
+                    onClick={() => void onPauseTransfer(job.id)}
+                  >
+                    일시정지
+                  </Button>
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    className="rounded-[12px] whitespace-nowrap"
+                    onClick={() => void onCancelTransfer(job.id)}
+                  >
+                    취소
+                  </Button>
+                </div>
+              ) : null}
+              {job.status === "paused" ? (
+                <div className="col-start-2 row-span-2 row-start-1 inline-flex justify-self-end gap-2">
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    className="rounded-[12px] whitespace-nowrap"
+                    onClick={() => void onResumeTransfer(job.id)}
+                  >
+                    재개
+                  </Button>
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    className="rounded-[12px] whitespace-nowrap"
+                    onClick={() => void onCancelTransfer(job.id)}
+                  >
+                    취소
+                  </Button>
+                </div>
               ) : null}
               {job.status === "cancelling" ? (
                 <Button
@@ -2341,10 +2401,13 @@ function TransferBar({
                   className="col-start-2 row-span-2 row-start-1 justify-self-end rounded-[12px] whitespace-nowrap"
                   onClick={() => void onRetryTransfer(job.id)}
                 >
-                  재시도
+                  {job.failedItems && job.failedItems.length > 0
+                    ? "실패 항목 재시도"
+                    : "재시도"}
                 </Button>
               ) : null}
               {job.status !== "running" &&
+              job.status !== "paused" &&
               job.status !== "queued" &&
               job.status !== "cancelling" ? (
                 <Button
@@ -2372,9 +2435,12 @@ function ConflictDialog({
   pendingConflictDialog: PendingConflictDialog | null;
   onResolveConflict: (
     resolution: "overwrite" | "skip" | "keepBoth",
+    remember?: boolean,
   ) => Promise<void>;
   onDismissConflict: () => void;
 }) {
+  const [rememberChoice, setRememberChoice] = useState(false);
+
   if (!pendingConflictDialog) {
     return null;
   }
@@ -2390,18 +2456,26 @@ function ConflictDialog({
         </ModalHeader>
         <ModalBody>
           <p>{pendingConflictDialog.names.join(", ")}</p>
+          <label className="mt-3 inline-flex items-center gap-2 text-[0.86rem] text-[var(--text-soft)]">
+            <input
+              type="checkbox"
+              checked={rememberChoice}
+              onChange={(event) => setRememberChoice(event.target.checked)}
+            />
+            이 선택 기억
+          </label>
         </ModalBody>
         <ModalFooter>
           <Button variant="secondary" onClick={onDismissConflict}>
             취소
           </Button>
-          <Button variant="secondary" onClick={() => void onResolveConflict("skip")}>
+          <Button variant="secondary" onClick={() => void onResolveConflict("skip", rememberChoice)}>
             건너뛰기
           </Button>
-          <Button variant="secondary" onClick={() => void onResolveConflict("keepBoth")}>
+          <Button variant="secondary" onClick={() => void onResolveConflict("keepBoth", rememberChoice)}>
             이름 바꿔 저장
           </Button>
-          <Button variant="primary" onClick={() => void onResolveConflict("overwrite")}>
+          <Button variant="primary" onClick={() => void onResolveConflict("overwrite", rememberChoice)}>
             덮어쓰기
           </Button>
         </ModalFooter>
@@ -2830,7 +2904,7 @@ const SftpWorkspacePanes = memo(function SftpWorkspacePanes({
   onUpdateSettings,
 }: Omit<
   SftpWorkspaceProps,
-  "transfers" | "onResolveConflict" | "onDismissConflict" | "onCancelTransfer" | "onRetryTransfer" | "onDismissTransfer"
+  "transfers" | "onResolveConflict" | "onDismissConflict" | "onCancelTransfer" | "onPauseTransfer" | "onResumeTransfer" | "onRetryTransfer" | "onDismissTransfer"
 >) {
   const [actionDialog, setActionDialog] = useState<ActionDialogState | null>(
     null,
@@ -3473,6 +3547,8 @@ export function SftpWorkspace({
   onResolveConflict,
   onDismissConflict,
   onCancelTransfer,
+  onPauseTransfer,
+  onResumeTransfer,
   onRetryTransfer,
   onDismissTransfer,
   ...props
@@ -3484,6 +3560,8 @@ export function SftpWorkspace({
       <TransferBar
         transfers={transfers}
         onCancelTransfer={onCancelTransfer}
+        onPauseTransfer={onPauseTransfer}
+        onResumeTransfer={onResumeTransfer}
         onRetryTransfer={onRetryTransfer}
         onDismissTransfer={onDismissTransfer}
       />

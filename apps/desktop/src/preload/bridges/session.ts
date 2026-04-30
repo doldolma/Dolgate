@@ -138,6 +138,10 @@ export function buildSftpBridge(
       ipcRenderer.invoke(ipcChannels.sftp.startTransfer, input),
     cancelTransfer: (jobId: string) =>
       ipcRenderer.invoke(ipcChannels.sftp.cancelTransfer, jobId),
+    pauseTransfer: (jobId: string) =>
+      ipcRenderer.invoke(ipcChannels.sftp.pauseTransfer, jobId),
+    resumeTransfer: (jobId: string) =>
+      ipcRenderer.invoke(ipcChannels.sftp.resumeTransfer, jobId),
     onConnectionProgress: (listener) =>
       subscribeSftpConnectionProgress(listener),
     onTransferEvent: (listener) => subscribeTransferEvent(listener),

@@ -1090,6 +1090,9 @@ export class SettingsRepository {
       terminalAltIsMeta: state.terminal.altIsMeta,
       terminalWebglEnabled: state.terminal.webglEnabled,
       sftpBrowserColumnWidths: { ...state.settings.sftpBrowserColumnWidths },
+      sftpConflictPolicy: state.settings.sftpConflictPolicy,
+      sftpPreserveMtime: state.settings.sftpPreserveMtime,
+      sftpPreservePermissions: state.settings.sftpPreservePermissions,
       sessionReplayRetentionCount:
         state.settings.sessionReplayRetentionCount ??
         DEFAULT_SESSION_REPLAY_RETENTION_COUNT,
@@ -1129,6 +1132,9 @@ export class SettingsRepository {
     const current = this.get();
     stateStorage.updateState((state) => {
       const hasSftpBrowserColumnWidthsInput = Object.prototype.hasOwnProperty.call(input, 'sftpBrowserColumnWidths');
+      const hasSftpConflictPolicyInput = Object.prototype.hasOwnProperty.call(input, 'sftpConflictPolicy');
+      const hasSftpPreserveMtimeInput = Object.prototype.hasOwnProperty.call(input, 'sftpPreserveMtime');
+      const hasSftpPreservePermissionsInput = Object.prototype.hasOwnProperty.call(input, 'sftpPreservePermissions');
 
       if (input.theme === 'light' || input.theme === 'dark' || input.theme === 'system') {
         state.settings.theme = input.theme;
@@ -1139,6 +1145,27 @@ export class SettingsRepository {
         state.settings.sftpBrowserColumnWidths = normalizeSftpBrowserColumnWidths(
           input.sftpBrowserColumnWidths as Partial<Record<keyof SftpBrowserColumnWidths, unknown>> | null | undefined
         );
+        state.settings.updatedAt = nowIso();
+      }
+
+      if (
+        hasSftpConflictPolicyInput &&
+        (input.sftpConflictPolicy === 'ask' ||
+          input.sftpConflictPolicy === 'overwrite' ||
+          input.sftpConflictPolicy === 'skip' ||
+          input.sftpConflictPolicy === 'keepBoth')
+      ) {
+        state.settings.sftpConflictPolicy = input.sftpConflictPolicy;
+        state.settings.updatedAt = nowIso();
+      }
+
+      if (hasSftpPreserveMtimeInput && typeof input.sftpPreserveMtime === 'boolean') {
+        state.settings.sftpPreserveMtime = input.sftpPreserveMtime;
+        state.settings.updatedAt = nowIso();
+      }
+
+      if (hasSftpPreservePermissionsInput && typeof input.sftpPreservePermissions === 'boolean') {
+        state.settings.sftpPreservePermissions = input.sftpPreservePermissions;
         state.settings.updatedAt = nowIso();
       }
 
@@ -1219,6 +1246,9 @@ export class SettingsRepository {
         !Object.prototype.hasOwnProperty.call(input, 'dismissedUpdateVersion') &&
         !Object.prototype.hasOwnProperty.call(input, 'serverUrlOverride') &&
         !hasSftpBrowserColumnWidthsInput &&
+        !hasSftpConflictPolicyInput &&
+        !hasSftpPreserveMtimeInput &&
+        !hasSftpPreservePermissionsInput &&
         input.sessionReplayRetentionCount == null &&
         input.theme == null &&
         input.globalTerminalThemeId == null &&
@@ -1233,6 +1263,9 @@ export class SettingsRepository {
       ) {
         state.settings.theme = current.theme as AppTheme;
         state.settings.sftpBrowserColumnWidths = { ...current.sftpBrowserColumnWidths };
+        state.settings.sftpConflictPolicy = current.sftpConflictPolicy ?? 'ask';
+        state.settings.sftpPreserveMtime = current.sftpPreserveMtime ?? true;
+        state.settings.sftpPreservePermissions = current.sftpPreservePermissions ?? false;
         state.settings.sessionReplayRetentionCount =
           current.sessionReplayRetentionCount ??
           DEFAULT_SESSION_REPLAY_RETENTION_COUNT;

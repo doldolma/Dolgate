@@ -42,6 +42,8 @@ const (
 	CommandSFTPDelete                 = coretypes.CommandSFTPDelete
 	CommandSFTPTransferStart          = coretypes.CommandSFTPTransferStart
 	CommandSFTPTransferCancel         = coretypes.CommandSFTPTransferCancel
+	CommandSFTPTransferPause          = coretypes.CommandSFTPTransferPause
+	CommandSFTPTransferResume         = coretypes.CommandSFTPTransferResume
 	CommandContainersConnect          = coretypes.CommandContainersConnect
 	CommandContainersDisconnect       = coretypes.CommandContainersDisconnect
 	CommandContainersList             = coretypes.CommandContainersList
@@ -149,6 +151,8 @@ type ContainersSearchLogsPayload = coretypes.ContainersSearchLogsPayload
 type TransferEndpointPayload = coretypes.TransferEndpointPayload
 type TransferItemPayload = coretypes.TransferItemPayload
 type SFTPTransferStartPayload = coretypes.SFTPTransferStartPayload
+type TransferMetadataPayload = coretypes.TransferMetadataPayload
+type TransferFailedItemPayload = coretypes.TransferFailedItemPayload
 type PortForwardStartPayload = coretypes.PortForwardStartPayload
 type SSMPortForwardStartPayload = coretypes.SSMPortForwardStartPayload
 type StatusPayload = coretypes.StatusPayload

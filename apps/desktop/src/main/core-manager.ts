@@ -1,7 +1,7 @@
 import { BrowserWindow, app } from "electron";
 import { randomUUID } from "node:crypto";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import type {
   ActivityLogRecord,
@@ -52,6 +52,7 @@ import type {
   SessionShareControlSignal,
   SshCertificateInfo,
   TerminalTab,
+  TransferFailedItem,
   TransferJob,
   TransferJobEvent,
   TransferStartInput,
@@ -97,6 +98,14 @@ interface PortForwardDefinition {
 
 interface CoreManagerShutdownOptions {
   finalizePortForwardsAsStopped?: boolean;
+}
+
+interface SftpPartialCleanupRecord {
+  id: string;
+  jobId: string;
+  hostId: string;
+  path: string;
+  createdAt: string;
 }
 
 interface ContainersEndpointRuntime {
@@ -546,9 +555,13 @@ function toTransferJobEvent(
         : event.type === "sftpTransferCancelled"
           ? "cancelled"
           : null;
+  const payloadStatus =
+    payload.status === "paused" || payload.status === "running"
+      ? payload.status
+      : undefined;
   const nextStatus =
     terminalStatus ??
-    (existing?.status === "cancelling" ? "cancelling" : "running");
+    (existing?.status === "cancelling" ? "cancelling" : payloadStatus ?? "running");
   const payloadMessage =
     typeof payload.message === "string" ? payload.message : undefined;
   const detailMessage =
@@ -566,6 +579,11 @@ function toTransferJobEvent(
     typeof payload.errorItemName === "string"
       ? payload.errorItemName
       : undefined;
+  const failedItems = Array.isArray(payload.failedItems)
+    ? payload.failedItems
+        .map((item) => normalizeTransferFailedItem(item))
+        .filter((item): item is TransferFailedItem => Boolean(item))
+    : existing?.failedItems;
 
   return {
     job: {
@@ -606,8 +624,51 @@ function toTransferJobEvent(
       errorPath: errorPath ?? existing?.errorPath,
       errorItemName: errorItemName ?? existing?.errorItemName,
       detailMessage: detailMessage ?? existing?.detailMessage,
+      completedItemCount:
+        typeof payload.completedItemCount === "number"
+          ? payload.completedItemCount
+          : existing?.completedItemCount,
+      failedItemCount:
+        typeof payload.failedItemCount === "number"
+          ? payload.failedItemCount
+          : existing?.failedItemCount,
+      failedItems,
       request: existing?.request,
     },
+  };
+}
+
+function normalizeTransferFailedItem(value: unknown): TransferFailedItem | null {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+  const record = value as Record<string, unknown>;
+  const item = record.item;
+  if (!item || typeof item !== "object") {
+    return null;
+  }
+  const itemRecord = item as Record<string, unknown>;
+  if (typeof itemRecord.name !== "string" || typeof itemRecord.path !== "string") {
+    return null;
+  }
+  return {
+    item: {
+      name: itemRecord.name,
+      path: itemRecord.path,
+      isDirectory: Boolean(itemRecord.isDirectory),
+      size: typeof itemRecord.size === "number" ? itemRecord.size : 0,
+    },
+    errorMessage:
+      typeof record.errorMessage === "string"
+        ? record.errorMessage
+        : "전송에 실패했습니다.",
+    errorCode: normalizeTransferErrorCode(record.errorCode),
+    errorOperation:
+      typeof record.errorOperation === "string"
+        ? record.errorOperation
+        : undefined,
+    errorPath:
+      typeof record.errorPath === "string" ? record.errorPath : undefined,
   };
 }
 
@@ -665,6 +726,11 @@ export class CoreManager {
   private readonly windows = new Set<BrowserWindow>();
   private readonly tabs = new Map<string, TerminalTab>();
   private readonly sftpEndpoints = new Map<string, SftpEndpointSummary>();
+  private readonly sftpPartialCleanupRecords = new Map<
+    string,
+    SftpPartialCleanupRecord
+  >();
+  private sftpPartialCleanupLoaded = false;
   private readonly containerEndpoints = new Map<
     string,
     ContainersEndpointRuntime
@@ -707,6 +773,139 @@ export class CoreManager {
   ) => void | Promise<void>;
   // 바이너리 frame은 청크 경계를 보장하지 않으므로 별도 parser가 필요하다.
   private readonly parser = new CoreFrameParser();
+
+  private getSftpPartialCleanupPath(): string {
+    const userDataPath =
+      typeof app?.getPath === "function"
+        ? app.getPath("userData")
+        : path.join(process.cwd(), ".tmp", "dolgate-sftp-cleanup");
+    return path.join(userDataPath, "sftp-partial-cleanup.json");
+  }
+
+  private ensureSftpPartialCleanupLoaded(): void {
+    if (this.sftpPartialCleanupLoaded) {
+      return;
+    }
+    this.sftpPartialCleanupLoaded = true;
+    const filePath = this.getSftpPartialCleanupPath();
+    if (!existsSync(filePath)) {
+      return;
+    }
+    try {
+      const raw = JSON.parse(readFileSync(filePath, "utf8")) as unknown;
+      if (!Array.isArray(raw)) {
+        return;
+      }
+      for (const item of raw) {
+        if (!item || typeof item !== "object") {
+          continue;
+        }
+        const record = item as Record<string, unknown>;
+        if (
+          typeof record.id !== "string" ||
+          typeof record.jobId !== "string" ||
+          typeof record.hostId !== "string" ||
+          typeof record.path !== "string" ||
+          typeof record.createdAt !== "string"
+        ) {
+          continue;
+        }
+        this.sftpPartialCleanupRecords.set(record.id, {
+          id: record.id,
+          jobId: record.jobId,
+          hostId: record.hostId,
+          path: record.path,
+          createdAt: record.createdAt,
+        });
+      }
+    } catch {
+      this.sftpPartialCleanupRecords.clear();
+    }
+  }
+
+  private persistSftpPartialCleanupRecords(): void {
+    this.ensureSftpPartialCleanupLoaded();
+    const filePath = this.getSftpPartialCleanupPath();
+    mkdirSync(path.dirname(filePath), { recursive: true });
+    writeFileSync(
+      filePath,
+      JSON.stringify(Array.from(this.sftpPartialCleanupRecords.values()), null, 2),
+    );
+  }
+
+  private recordSftpPartialPath(jobId: string, partialPath: string): void {
+    if (!jobId || !partialPath) {
+      return;
+    }
+    const job = this.transferJobs.get(jobId);
+    const target = job?.request?.target;
+    if (!target || target.kind !== "remote") {
+      return;
+    }
+    const endpoint = this.sftpEndpoints.get(target.endpointId);
+    if (!endpoint) {
+      return;
+    }
+    this.ensureSftpPartialCleanupLoaded();
+    const id = `${endpoint.hostId}:${partialPath}`;
+    this.sftpPartialCleanupRecords.set(id, {
+      id,
+      jobId,
+      hostId: endpoint.hostId,
+      path: partialPath,
+      createdAt: new Date().toISOString(),
+    });
+    this.persistSftpPartialCleanupRecords();
+  }
+
+  private clearSftpPartialRecordsForJob(jobId: string): void {
+    this.ensureSftpPartialCleanupLoaded();
+    let changed = false;
+    for (const [id, record] of this.sftpPartialCleanupRecords) {
+      if (record.jobId !== jobId) {
+        continue;
+      }
+      this.sftpPartialCleanupRecords.delete(id);
+      changed = true;
+    }
+    if (changed) {
+      this.persistSftpPartialCleanupRecords();
+    }
+  }
+
+  private async cleanupSftpPartialRecordsForHost(
+    hostId: string,
+    endpointId: string,
+  ): Promise<void> {
+    this.ensureSftpPartialCleanupLoaded();
+    const records = Array.from(this.sftpPartialCleanupRecords.values()).filter(
+      (record) => record.hostId === hostId,
+    );
+    if (records.length === 0) {
+      return;
+    }
+    try {
+      await this.sftpDelete({
+        endpointId,
+        paths: records.map((record) => record.path),
+      });
+      for (const record of records) {
+        this.sftpPartialCleanupRecords.delete(record.id);
+      }
+      this.persistSftpPartialCleanupRecords();
+    } catch (error) {
+      this.log({
+        level: "warn",
+        category: "session",
+        message: "이전 SFTP partial 파일 정리에 실패했습니다.",
+        metadata: {
+          endpointId,
+          hostId,
+          message: error instanceof Error ? error.message : "unknown error",
+        },
+      });
+    }
+  }
 
   setTerminalEventHandler(
     handler:
@@ -1842,6 +2041,7 @@ export class CoreManager {
           title: payload.title,
         },
       });
+      void this.cleanupSftpPartialRecordsForHost(payload.hostId, endpointId);
       return summary;
     } catch (error) {
       this.log({
@@ -2055,6 +2255,49 @@ export class CoreManager {
     });
   }
 
+  async pauseSftpTransfer(jobId: string): Promise<void> {
+    const existing = this.transferJobs.get(jobId);
+    if (!existing || existing.status !== "running") {
+      return;
+    }
+    await this.start();
+    const nextJob: TransferJob = {
+      ...existing,
+      status: "paused",
+      etaSeconds: null,
+      updatedAt: new Date().toISOString(),
+    };
+    this.transferJobs.set(jobId, nextJob);
+    this.broadcastTransferEvent({ job: nextJob });
+    this.sendControl({
+      id: randomUUID(),
+      type: "sftpTransferPause",
+      jobId,
+      payload: {},
+    });
+  }
+
+  async resumeSftpTransfer(jobId: string): Promise<void> {
+    const existing = this.transferJobs.get(jobId);
+    if (!existing || existing.status !== "paused") {
+      return;
+    }
+    await this.start();
+    const nextJob: TransferJob = {
+      ...existing,
+      status: "running",
+      updatedAt: new Date().toISOString(),
+    };
+    this.transferJobs.set(jobId, nextJob);
+    this.broadcastTransferEvent({ job: nextJob });
+    this.sendControl({
+      id: randomUUID(),
+      type: "sftpTransferResume",
+      jobId,
+      payload: {},
+    });
+  }
+
   write(sessionId: string, data: string): void {
     const tab = this.tabs.get(sessionId);
     // 아직 연결이 성립되지 않은 탭의 입력은 코어로 보내지 않아 "session not found" 오류를 막는다.
@@ -2242,6 +2485,13 @@ export class CoreManager {
         : undefined;
       const next = toTransferJobEvent(existing, event);
       this.transferJobs.set(next.job.id, next.job);
+      if (
+        event.jobId &&
+        typeof event.payload.partialPath === "string" &&
+        event.payload.partialPath
+      ) {
+        this.recordSftpPartialPath(event.jobId, event.payload.partialPath);
+      }
       this.broadcastTransferEvent(next);
       if (
         next.job.status === "completed" ||
@@ -2249,6 +2499,7 @@ export class CoreManager {
         next.job.status === "cancelled"
       ) {
         this.transferJobs.set(next.job.id, next.job);
+        this.clearSftpPartialRecordsForJob(next.job.id);
       }
       return;
     }

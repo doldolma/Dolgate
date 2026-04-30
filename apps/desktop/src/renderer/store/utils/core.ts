@@ -98,7 +98,7 @@ export type WorkspaceTabId =
   | SessionWorkspaceTabId
   | SplitWorkspaceTabId;
 export type HomeSection = "hosts" | "portForwarding" | "logs" | "settings";
-export type SettingsSection = "general" | "security" | "secrets" | "aws-profiles";
+export type SettingsSection = "general" | "sftp" | "security" | "secrets" | "aws-profiles";
 export type SftpSourceKind = "local" | "host";
 export type WorkspaceDropDirection = "left" | "right" | "top" | "bottom";
 export type HostDrawerState =
@@ -892,9 +892,12 @@ export interface AppState {
   ) => Promise<void>;
   resolveSftpConflict: (
     resolution: "overwrite" | "skip" | "keepBoth",
+    remember?: boolean,
   ) => Promise<void>;
   dismissSftpConflict: () => void;
   cancelTransfer: (jobId: string) => Promise<void>;
+  pauseTransfer: (jobId: string) => Promise<void>;
+  resumeTransfer: (jobId: string) => Promise<void>;
   retryTransfer: (jobId: string) => Promise<void>;
   dismissTransfer: (jobId: string) => void;
 }
@@ -978,6 +981,9 @@ export const defaultSettings: AppSettings = {
   terminalAltIsMeta: false,
   terminalWebglEnabled: true,
   sftpBrowserColumnWidths: { ...DEFAULT_SFTP_BROWSER_COLUMN_WIDTHS },
+  sftpConflictPolicy: "ask",
+  sftpPreserveMtime: true,
+  sftpPreservePermissions: false,
   sessionReplayRetentionCount: 100,
   serverUrl: "https://ssh.doldolma.com",
   serverUrlOverride: null,
