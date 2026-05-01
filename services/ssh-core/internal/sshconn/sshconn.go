@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"strings"
 	"time"
 
 	"golang.org/x/crypto/ssh"
@@ -15,15 +16,16 @@ var errHostKeyProbed = errors.New("host key probed")
 
 // Target는 SSH, SFTP, 포트 포워딩이 공통으로 쓰는 접속 대상 정보다.
 type Target struct {
-	Host                 string
-	Port                 int
-	Username             string
-	AuthType             string
-	Password             string
-	PrivateKeyPEM        string
-	CertificateText      string
-	Passphrase           string
-	TrustedHostKeyBase64 string
+	Host                  string
+	Port                  int
+	Username              string
+	AuthType              string
+	Password              string
+	PrivateKeyPEM         string
+	CertificateText       string
+	Passphrase            string
+	TrustedHostKeyBase64  string
+	TrustedHostKeysBase64 []string
 }
 
 type Config struct {
@@ -77,7 +79,7 @@ func DialClient(target Target, config Config, responder InteractiveResponder) (*
 		return nil, err
 	}
 
-	hostKeyCallback, err := strictHostKeyCallback(target.TrustedHostKeyBase64)
+	hostKeyCallback, err := strictHostKeyCallback(target.TrustedHostKeyBase64, target.TrustedHostKeysBase64)
 	if err != nil {
 		return nil, err
 	}
@@ -195,21 +197,38 @@ func certificateUnixTime(value uint64) *time.Time {
 	return &timestamp
 }
 
-func strictHostKeyCallback(trustedHostKeyBase64 string) (ssh.HostKeyCallback, error) {
-	if trustedHostKeyBase64 == "" {
+func strictHostKeyCallback(trustedHostKeyBase64 string, trustedHostKeysBase64 []string) (ssh.HostKeyCallback, error) {
+	candidates := make([]string, 0, len(trustedHostKeysBase64)+1)
+	for _, value := range trustedHostKeysBase64 {
+		value = strings.TrimSpace(value)
+		if value != "" {
+			candidates = append(candidates, value)
+		}
+	}
+	if len(candidates) == 0 && strings.TrimSpace(trustedHostKeyBase64) != "" {
+		candidates = append(candidates, strings.TrimSpace(trustedHostKeyBase64))
+	}
+	if len(candidates) == 0 {
 		return nil, fmt.Errorf("trusted host key is required")
 	}
 
-	expected, err := base64.StdEncoding.DecodeString(trustedHostKeyBase64)
-	if err != nil {
-		return nil, fmt.Errorf("decode trusted host key: %w", err)
+	expectedKeys := make([][]byte, 0, len(candidates))
+	for _, candidate := range candidates {
+		expected, err := base64.StdEncoding.DecodeString(candidate)
+		if err != nil {
+			return nil, fmt.Errorf("decode trusted host key: %w", err)
+		}
+		expectedKeys = append(expectedKeys, expected)
 	}
 
 	return func(_ string, _ net.Addr, key ssh.PublicKey) error {
-		if !bytes.Equal(key.Marshal(), expected) {
-			return fmt.Errorf("host key mismatch")
+		actual := key.Marshal()
+		for _, expected := range expectedKeys {
+			if bytes.Equal(actual, expected) {
+				return nil
+			}
 		}
-		return nil
+		return fmt.Errorf("host key mismatch")
 	}, nil
 }
 

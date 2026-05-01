@@ -83,6 +83,7 @@ describe("registerContainersIpcHandlers", () => {
         sendSshPublicKey,
       },
       requireTrustedHostKey: vi.fn().mockReturnValue("AAAATEST"),
+      requireTrustedHostKeys: vi.fn().mockReturnValue(["AAAATEST"]),
       createEphemeralAwsSftpKeyPair: vi.fn().mockReturnValue({
         privateKeyPem: "PRIVATE KEY",
         publicKey: "PUBLIC KEY",
@@ -166,6 +167,7 @@ describe("registerContainersIpcHandlers", () => {
         sendSshPublicKey: vi.fn().mockResolvedValue(undefined),
       },
       requireTrustedHostKey: vi.fn().mockReturnValue("AAAATEST"),
+      requireTrustedHostKeys: vi.fn().mockReturnValue(["AAAATEST"]),
       createEphemeralAwsSftpKeyPair: vi.fn().mockReturnValue({
         privateKeyPem: "PRIVATE KEY",
         publicKey: "PUBLIC KEY",

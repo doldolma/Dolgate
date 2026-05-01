@@ -92,15 +92,16 @@ func (s *Service) Shutdown() {
 
 func (s *Service) Connect(endpointID, requestID string, payload protocol.ContainersConnectPayload) error {
 	target := sshconn.Target{
-		Host:                 payload.Host,
-		Port:                 payload.Port,
-		Username:             payload.Username,
-		AuthType:             payload.AuthType,
-		Password:             payload.Password,
-		PrivateKeyPEM:        payload.PrivateKeyPEM,
-		CertificateText:      payload.CertificateText,
-		Passphrase:           payload.Passphrase,
-		TrustedHostKeyBase64: payload.TrustedHostKeyBase64,
+		Host:                  payload.Host,
+		Port:                  payload.Port,
+		Username:              payload.Username,
+		AuthType:              payload.AuthType,
+		Password:              payload.Password,
+		PrivateKeyPEM:         payload.PrivateKeyPEM,
+		CertificateText:       payload.CertificateText,
+		Passphrase:            payload.Passphrase,
+		TrustedHostKeyBase64:  payload.TrustedHostKeyBase64,
+		TrustedHostKeysBase64: payload.TrustedHostKeysBase64,
 	}
 	client, err := s.dialTarget(endpointID, requestID, target)
 	if err != nil {

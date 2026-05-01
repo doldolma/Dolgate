@@ -103,6 +103,7 @@ export interface AwsSftpCreateSessionRequest {
   env: Record<string, string>;
   unsetEnv?: string[];
   trustedHostKeyBase64?: string | null;
+  trustedHostKeysBase64?: string[] | null;
 }
 
 export interface AwsSftpSessionResponse {

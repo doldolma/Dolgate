@@ -12,6 +12,7 @@ async function loadRepositories(): Promise<{
   GroupRepository: DatabaseModule['GroupRepository'];
   PortForwardRepository: DatabaseModule['PortForwardRepository'];
   DnsOverrideRepository: DatabaseModule['DnsOverrideRepository'];
+  KnownHostRepository: DatabaseModule['KnownHostRepository'];
   SettingsRepository: DatabaseModule['SettingsRepository'];
   ActivityLogRepository: DatabaseModule['ActivityLogRepository'];
 }> {
@@ -29,6 +30,7 @@ async function loadRepositories(): Promise<{
     GroupRepository: databaseModule.GroupRepository,
     PortForwardRepository: databaseModule.PortForwardRepository,
     DnsOverrideRepository: databaseModule.DnsOverrideRepository,
+    KnownHostRepository: databaseModule.KnownHostRepository,
     SettingsRepository: databaseModule.SettingsRepository,
     ActivityLogRepository: databaseModule.ActivityLogRepository
   };
@@ -956,6 +958,82 @@ describe('ActivityLogRepository', () => {
         }),
       ]),
     );
+  });
+});
+
+describe('KnownHostRepository', () => {
+  it('stores trusted host keys by host, port, and algorithm', async () => {
+    const { KnownHostRepository } = await loadRepositories();
+    const knownHosts = new KnownHostRepository();
+
+    const ed25519 = knownHosts.trust({
+      hostId: 'host-1',
+      hostLabel: 'Prod',
+      host: 'example.com',
+      port: 22,
+      algorithm: 'ssh-ed25519',
+      publicKeyBase64: 'AAAED25519',
+      fingerprintSha256: 'SHA256:ed25519',
+    });
+    const ecdsa = knownHosts.trust({
+      hostId: 'host-1',
+      hostLabel: 'Prod',
+      host: 'example.com',
+      port: 22,
+      algorithm: 'ecdsa-sha2-nistp256',
+      publicKeyBase64: 'AAAECDSA',
+      fingerprintSha256: 'SHA256:ecdsa',
+    });
+
+    expect(knownHosts.listByHostPort('example.com', 22).map((record) => record.id)).toEqual([
+      ecdsa.id,
+      ed25519.id,
+    ]);
+    expect(knownHosts.getByHostPortAlgorithm('example.com', 22, 'ssh-ed25519')?.publicKeyBase64).toBe(
+      'AAAED25519',
+    );
+    expect(knownHosts.getByHostPortAlgorithm('example.com', 22, 'ecdsa-sha2-nistp256')?.publicKeyBase64).toBe(
+      'AAAECDSA',
+    );
+  });
+
+  it('updates only the matching algorithm record when trust changes', async () => {
+    const { KnownHostRepository } = await loadRepositories();
+    const knownHosts = new KnownHostRepository();
+
+    const ed25519 = knownHosts.trust({
+      hostId: 'host-1',
+      hostLabel: 'Prod',
+      host: 'example.com',
+      port: 22,
+      algorithm: 'ssh-ed25519',
+      publicKeyBase64: 'AAAOLD',
+      fingerprintSha256: 'SHA256:old',
+    });
+    const ecdsa = knownHosts.trust({
+      hostId: 'host-1',
+      hostLabel: 'Prod',
+      host: 'example.com',
+      port: 22,
+      algorithm: 'ecdsa-sha2-nistp256',
+      publicKeyBase64: 'AAAECDSA',
+      fingerprintSha256: 'SHA256:ecdsa',
+    });
+
+    const replaced = knownHosts.trust({
+      hostId: 'host-1',
+      hostLabel: 'Prod',
+      host: 'example.com',
+      port: 22,
+      algorithm: 'ssh-ed25519',
+      publicKeyBase64: 'AAANEW',
+      fingerprintSha256: 'SHA256:new',
+    });
+
+    expect(replaced.id).toBe(ed25519.id);
+    expect(knownHosts.listByHostPort('example.com', 22)).toHaveLength(2);
+    expect(knownHosts.getByHostPortAlgorithm('example.com', 22, 'ssh-ed25519')?.publicKeyBase64).toBe('AAANEW');
+    expect(knownHosts.getByHostPortAlgorithm('example.com', 22, 'ecdsa-sha2-nistp256')?.id).toBe(ecdsa.id);
   });
 });
 

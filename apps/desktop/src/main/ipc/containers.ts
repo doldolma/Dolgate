@@ -259,7 +259,7 @@ export function registerContainersIpcHandlers(ctx: MainIpcContext): void {
             hydratedHost.awsProfileName,
           ) ?? hydratedHost.awsProfileName;
         const sshPort = getAwsEc2HostSshPort(hydratedHost);
-        const trustedHostKeyBase64 = ctx.requireTrustedHostKey({
+        const trustedHostKeysBase64 = ctx.requireTrustedHostKeys({
           hostname: buildAwsSsmKnownHostIdentity({
             profileName,
             region: hydratedHost.awsRegion,
@@ -304,7 +304,8 @@ export function registerContainersIpcHandlers(ctx: MainIpcContext): void {
             username: sshUsername,
             authType: "privateKey",
             privateKeyPem,
-            trustedHostKeyBase64,
+            trustedHostKeyBase64: trustedHostKeysBase64[0],
+            trustedHostKeysBase64,
             cols: 120,
             rows: 32,
             command,
@@ -325,7 +326,7 @@ export function registerContainersIpcHandlers(ctx: MainIpcContext): void {
       }
 
       if (isWarpgateSshHostRecord(typedHost)) {
-        const trustedHostKeyBase64 = ctx.requireTrustedHostKey({
+        const trustedHostKeysBase64 = ctx.requireTrustedHostKeys({
           hostname: typedHost.warpgateSshHost,
           port: typedHost.warpgateSshPort,
         });
@@ -334,7 +335,8 @@ export function registerContainersIpcHandlers(ctx: MainIpcContext): void {
           port: typedHost.warpgateSshPort,
           username: `${typedHost.warpgateUsername}:${typedHost.warpgateTargetName}`,
           authType: "keyboardInteractive",
-          trustedHostKeyBase64,
+          trustedHostKeyBase64: trustedHostKeysBase64[0],
+          trustedHostKeysBase64,
           cols: 120,
           rows: 32,
           command,
@@ -346,7 +348,7 @@ export function registerContainersIpcHandlers(ctx: MainIpcContext): void {
       }
 
       const sshHost = typedHost as SshHostRecord;
-      const trustedHostKeyBase64 = ctx.requireTrustedHostKey(sshHost);
+      const trustedHostKeysBase64 = ctx.requireTrustedHostKeys(sshHost);
       const username = ctx.requireConfiguredSshUsername(sshHost);
       const { secrets, shouldPersistHostSecret } =
         await ctx.resolveRuntimeSshSecrets(sshHost);
@@ -360,7 +362,8 @@ export function registerContainersIpcHandlers(ctx: MainIpcContext): void {
         privateKeyPem: secrets.privateKeyPem,
         certificateText: secrets.certificateText,
         passphrase: secrets.passphrase,
-        trustedHostKeyBase64,
+        trustedHostKeyBase64: trustedHostKeysBase64[0],
+        trustedHostKeysBase64,
         cols: 120,
         rows: 32,
         command,

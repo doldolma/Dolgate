@@ -1517,7 +1517,11 @@ export class KnownHostRepository {
         if (hostCompare !== 0) {
           return hostCompare;
         }
-        return left.port - right.port;
+        const portCompare = left.port - right.port;
+        if (portCompare !== 0) {
+          return portCompare;
+        }
+        return left.algorithm.localeCompare(right.algorithm);
       });
   }
 
@@ -1525,8 +1529,25 @@ export class KnownHostRepository {
     return stateStorage.getState().data.knownHosts.find((record) => record.host === host && record.port === port) ?? null;
   }
 
+  getByHostPortAlgorithm(host: string, port: number, algorithm: string): KnownHostRecord | null {
+    return (
+      stateStorage
+        .getState()
+        .data.knownHosts.find(
+          (record) => record.host === host && record.port === port && record.algorithm === algorithm
+        ) ?? null
+    );
+  }
+
+  listByHostPort(host: string, port: number): KnownHostRecord[] {
+    return stateStorage
+      .getState()
+      .data.knownHosts.filter((record) => record.host === host && record.port === port)
+      .sort((left, right) => left.algorithm.localeCompare(right.algorithm));
+  }
+
   trust(input: KnownHostTrustInput): KnownHostRecord {
-    const current = this.getByHostPort(input.host, input.port);
+    const current = this.getByHostPortAlgorithm(input.host, input.port, input.algorithm);
     const timestamp = nowIso();
     const record: KnownHostRecord = {
       id: current?.id ?? randomUUID(),
@@ -1550,11 +1571,11 @@ export class KnownHostRepository {
     return record;
   }
 
-  touch(host: string, port: number): void {
+  touch(host: string, port: number, algorithm?: string): void {
     const timestamp = nowIso();
     stateStorage.updateState((state) => {
       state.data.knownHosts = state.data.knownHosts.map((entry) => {
-        if (entry.host !== host || entry.port !== port) {
+        if (entry.host !== host || entry.port !== port || (algorithm && entry.algorithm !== algorithm)) {
           return entry;
         }
         return {

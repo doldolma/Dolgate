@@ -34,6 +34,7 @@ function createContext() {
     },
     assertSshHost: vi.fn(),
     requireTrustedHostKey: vi.fn(),
+    requireTrustedHostKeys: vi.fn(),
     requireConfiguredSshUsername: vi.fn(),
     resolveRuntimeSshSecrets: vi.fn(),
     ensureCertificateAuthReady: vi.fn(),
@@ -59,6 +60,7 @@ describe("registerSshIpcHandlers", () => {
       secretRef: "secret-1",
     });
     ctx.requireTrustedHostKey.mockReturnValue("trusted");
+    ctx.requireTrustedHostKeys.mockReturnValue(["trusted"]);
     ctx.requireConfiguredSshUsername.mockReturnValue("ubuntu");
     ctx.resolveRuntimeSshSecrets.mockResolvedValue({
       secrets: {

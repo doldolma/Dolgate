@@ -110,18 +110,19 @@ type StreamFrame struct {
 }
 
 type ConnectPayload struct {
-	Host                 string `json:"host"`
-	Port                 int    `json:"port"`
-	Username             string `json:"username"`
-	AuthType             string `json:"authType"`
-	Password             string `json:"password,omitempty"`
-	PrivateKeyPEM        string `json:"privateKeyPem,omitempty"`
-	CertificateText      string `json:"certificateText,omitempty"`
-	Passphrase           string `json:"passphrase,omitempty"`
-	TrustedHostKeyBase64 string `json:"trustedHostKeyBase64"`
-	Cols                 int    `json:"cols"`
-	Rows                 int    `json:"rows"`
-	Command              string `json:"command,omitempty"`
+	Host                  string   `json:"host"`
+	Port                  int      `json:"port"`
+	Username              string   `json:"username"`
+	AuthType              string   `json:"authType"`
+	Password              string   `json:"password,omitempty"`
+	PrivateKeyPEM         string   `json:"privateKeyPem,omitempty"`
+	CertificateText       string   `json:"certificateText,omitempty"`
+	Passphrase            string   `json:"passphrase,omitempty"`
+	TrustedHostKeyBase64  string   `json:"trustedHostKeyBase64"`
+	TrustedHostKeysBase64 []string `json:"trustedHostKeysBase64,omitempty"`
+	Cols                  int      `json:"cols"`
+	Rows                  int      `json:"rows"`
+	Command               string   `json:"command,omitempty"`
 }
 
 type AWSConnectPayload struct {
@@ -188,27 +189,29 @@ type SerialControlCompletedPayload struct {
 }
 
 type SFTPConnectPayload struct {
-	Host                 string `json:"host"`
-	Port                 int    `json:"port"`
-	Username             string `json:"username"`
-	AuthType             string `json:"authType"`
-	Password             string `json:"password,omitempty"`
-	PrivateKeyPEM        string `json:"privateKeyPem,omitempty"`
-	CertificateText      string `json:"certificateText,omitempty"`
-	Passphrase           string `json:"passphrase,omitempty"`
-	TrustedHostKeyBase64 string `json:"trustedHostKeyBase64"`
+	Host                  string   `json:"host"`
+	Port                  int      `json:"port"`
+	Username              string   `json:"username"`
+	AuthType              string   `json:"authType"`
+	Password              string   `json:"password,omitempty"`
+	PrivateKeyPEM         string   `json:"privateKeyPem,omitempty"`
+	CertificateText       string   `json:"certificateText,omitempty"`
+	Passphrase            string   `json:"passphrase,omitempty"`
+	TrustedHostKeyBase64  string   `json:"trustedHostKeyBase64"`
+	TrustedHostKeysBase64 []string `json:"trustedHostKeysBase64,omitempty"`
 }
 
 type ContainersConnectPayload struct {
-	Host                 string `json:"host"`
-	Port                 int    `json:"port"`
-	Username             string `json:"username"`
-	AuthType             string `json:"authType"`
-	Password             string `json:"password,omitempty"`
-	PrivateKeyPEM        string `json:"privateKeyPem,omitempty"`
-	CertificateText      string `json:"certificateText,omitempty"`
-	Passphrase           string `json:"passphrase,omitempty"`
-	TrustedHostKeyBase64 string `json:"trustedHostKeyBase64"`
+	Host                  string   `json:"host"`
+	Port                  int      `json:"port"`
+	Username              string   `json:"username"`
+	AuthType              string   `json:"authType"`
+	Password              string   `json:"password,omitempty"`
+	PrivateKeyPEM         string   `json:"privateKeyPem,omitempty"`
+	CertificateText       string   `json:"certificateText,omitempty"`
+	Passphrase            string   `json:"passphrase,omitempty"`
+	TrustedHostKeyBase64  string   `json:"trustedHostKeyBase64"`
+	TrustedHostKeysBase64 []string `json:"trustedHostKeysBase64,omitempty"`
 }
 
 type HostKeyProbePayload struct {
@@ -359,21 +362,22 @@ type TransferFailedItemPayload struct {
 }
 
 type PortForwardStartPayload struct {
-	Host                 string `json:"host"`
-	Port                 int    `json:"port"`
-	Username             string `json:"username"`
-	AuthType             string `json:"authType"`
-	Password             string `json:"password,omitempty"`
-	PrivateKeyPEM        string `json:"privateKeyPem,omitempty"`
-	CertificateText      string `json:"certificateText,omitempty"`
-	Passphrase           string `json:"passphrase,omitempty"`
-	TrustedHostKeyBase64 string `json:"trustedHostKeyBase64"`
-	Mode                 string `json:"mode"`
-	BindAddress          string `json:"bindAddress"`
-	BindPort             int    `json:"bindPort"`
-	TargetHost           string `json:"targetHost,omitempty"`
-	TargetPort           int    `json:"targetPort,omitempty"`
-	SourceEndpointID     string `json:"sourceEndpointId,omitempty"`
+	Host                  string   `json:"host"`
+	Port                  int      `json:"port"`
+	Username              string   `json:"username"`
+	AuthType              string   `json:"authType"`
+	Password              string   `json:"password,omitempty"`
+	PrivateKeyPEM         string   `json:"privateKeyPem,omitempty"`
+	CertificateText       string   `json:"certificateText,omitempty"`
+	Passphrase            string   `json:"passphrase,omitempty"`
+	TrustedHostKeyBase64  string   `json:"trustedHostKeyBase64"`
+	TrustedHostKeysBase64 []string `json:"trustedHostKeysBase64,omitempty"`
+	Mode                  string   `json:"mode"`
+	BindAddress           string   `json:"bindAddress"`
+	BindPort              int      `json:"bindPort"`
+	TargetHost            string   `json:"targetHost,omitempty"`
+	TargetPort            int      `json:"targetPort,omitempty"`
+	SourceEndpointID      string   `json:"sourceEndpointId,omitempty"`
 }
 
 type SSMPortForwardStartPayload struct {

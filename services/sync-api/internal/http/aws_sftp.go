@@ -60,17 +60,18 @@ type awsSftpSession struct {
 }
 
 type awsSftpCreateSessionRequest struct {
-	HostID               string            `json:"hostId"`
-	Label                string            `json:"label"`
-	ProfileName          string            `json:"profileName"`
-	Region               string            `json:"region"`
-	InstanceID           string            `json:"instanceId"`
-	AvailabilityZone     string            `json:"availabilityZone"`
-	SSHUsername          string            `json:"sshUsername"`
-	SSHPort              int               `json:"sshPort"`
-	Env                  map[string]string `json:"env"`
-	UnsetEnv             []string          `json:"unsetEnv,omitempty"`
-	TrustedHostKeyBase64 string            `json:"trustedHostKeyBase64,omitempty"`
+	HostID                string            `json:"hostId"`
+	Label                 string            `json:"label"`
+	ProfileName           string            `json:"profileName"`
+	Region                string            `json:"region"`
+	InstanceID            string            `json:"instanceId"`
+	AvailabilityZone      string            `json:"availabilityZone"`
+	SSHUsername           string            `json:"sshUsername"`
+	SSHPort               int               `json:"sshPort"`
+	Env                   map[string]string `json:"env"`
+	UnsetEnv              []string          `json:"unsetEnv,omitempty"`
+	TrustedHostKeyBase64  string            `json:"trustedHostKeyBase64,omitempty"`
+	TrustedHostKeysBase64 []string          `json:"trustedHostKeysBase64,omitempty"`
 }
 
 type awsSftpSessionResponse struct {
@@ -233,7 +234,7 @@ func (bridge *AwsSftpBridge) CreateSession(ctx context.Context, userID string, r
 	}
 	hostKey.Host = knownHostName
 	hostKey.Port = request.SSHPort
-	if err := validateTrustedAwsSftpHostKey(hostKey, request.TrustedHostKeyBase64); err != nil {
+	if err := validateTrustedAwsSftpHostKey(hostKey, request.TrustedHostKeyBase64, request.TrustedHostKeysBase64); err != nil {
 		return awsSftpSessionResponse{}, err
 	}
 
@@ -562,25 +563,45 @@ func probeHostKey(ctx context.Context, host string, port int) (awsSftpHostKeyInf
 	return awsSftpHostKeyInfo{}, errors.New("probe host key: empty result")
 }
 
-func validateTrustedAwsSftpHostKey(info awsSftpHostKeyInfo, trustedHostKeyBase64 string) error {
-	trustedHostKeyBase64 = strings.TrimSpace(trustedHostKeyBase64)
-	if trustedHostKeyBase64 == "" {
+func validateTrustedAwsSftpHostKey(info awsSftpHostKeyInfo, trustedHostKeyBase64 string, trustedHostKeysBase64 []string) error {
+	candidates := make([]string, 0, len(trustedHostKeysBase64)+1)
+	for _, value := range trustedHostKeysBase64 {
+		value = strings.TrimSpace(value)
+		if value != "" {
+			candidates = append(candidates, value)
+		}
+	}
+	if len(candidates) == 0 && strings.TrimSpace(trustedHostKeyBase64) != "" {
+		candidates = append(candidates, strings.TrimSpace(trustedHostKeyBase64))
+	}
+	if len(candidates) == 0 {
 		return &awsSftpHostKeyChallengeError{response: awsSftpHostKeyChallengeResponse{
 			Code:    "host_key_required",
 			Message: "Host key trust is required.",
 			Info:    info,
 		}}
 	}
-	expected, err := base64.StdEncoding.DecodeString(trustedHostKeyBase64)
 	actual, actualErr := base64.StdEncoding.DecodeString(info.KeyBase64)
-	if err != nil || actualErr != nil || !bytes.Equal(expected, actual) {
+	if actualErr == nil {
+		for _, candidate := range candidates {
+			expected, err := base64.StdEncoding.DecodeString(candidate)
+			if err == nil && bytes.Equal(expected, actual) {
+				return nil
+			}
+		}
+	}
+	if actualErr != nil {
 		return &awsSftpHostKeyChallengeError{response: awsSftpHostKeyChallengeResponse{
 			Code:    "host_key_mismatch",
 			Message: "Host key changed.",
 			Info:    info,
 		}}
 	}
-	return nil
+	return &awsSftpHostKeyChallengeError{response: awsSftpHostKeyChallengeResponse{
+		Code:    "host_key_mismatch",
+		Message: "Host key changed.",
+		Info:    info,
+	}}
 }
 
 func createAwsSftpEphemeralSigner() (ssh.Signer, string, error) {

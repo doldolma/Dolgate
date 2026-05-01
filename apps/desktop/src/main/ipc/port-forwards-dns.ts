@@ -517,7 +517,7 @@ export function registerPortForwardAndDnsIpcHandlers(
 
       ctx.assertSshHost(host);
       const sshHost = host as SshHostRecord;
-      const trustedHostKeyBase64 = ctx.requireTrustedHostKey(sshHost);
+      const trustedHostKeysBase64 = ctx.requireTrustedHostKeys(sshHost);
       const username = ctx.requireConfiguredSshUsername(sshHost);
       const { secrets, shouldPersistHostSecret } =
         await ctx.resolveRuntimeSshSecrets(sshHost);
@@ -534,7 +534,8 @@ export function registerPortForwardAndDnsIpcHandlers(
         privateKeyPem: secrets.privateKeyPem,
         certificateText: secrets.certificateText,
         passphrase: secrets.passphrase,
-        trustedHostKeyBase64,
+        trustedHostKeyBase64: trustedHostKeysBase64[0],
+        trustedHostKeysBase64,
         mode: rule.mode,
         bindAddress: rule.bindAddress,
         bindPort: rule.bindPort,

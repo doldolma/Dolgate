@@ -50,7 +50,7 @@ export function registerSshIpcHandlers(ctx: MainIpcContext): void {
       }
 
       if (isWarpgateSshHostRecord(host)) {
-        const trustedHostKeyBase64 = ctx.requireTrustedHostKey({
+        const trustedHostKeysBase64 = ctx.requireTrustedHostKeys({
           hostname: host.warpgateSshHost,
           port: host.warpgateSshPort,
         });
@@ -60,7 +60,8 @@ export function registerSshIpcHandlers(ctx: MainIpcContext): void {
           port: host.warpgateSshPort,
           username: `${host.warpgateUsername}:${host.warpgateTargetName}`,
           authType: "keyboardInteractive",
-          trustedHostKeyBase64,
+          trustedHostKeyBase64: trustedHostKeysBase64[0],
+          trustedHostKeysBase64,
           cols: input.cols,
           rows: input.rows,
           command: input.command?.trim() || undefined,
@@ -79,7 +80,7 @@ export function registerSshIpcHandlers(ctx: MainIpcContext): void {
 
       ctx.assertSshHost(host);
       const sshHost = host as SshHostRecord;
-      const trustedHostKeyBase64 = ctx.requireTrustedHostKey(sshHost);
+      const trustedHostKeysBase64 = ctx.requireTrustedHostKeys(sshHost);
       const username = ctx.requireConfiguredSshUsername(sshHost);
       const { secrets, shouldPersistHostSecret } =
         await ctx.resolveRuntimeSshSecrets(sshHost, input.secrets);
@@ -94,7 +95,8 @@ export function registerSshIpcHandlers(ctx: MainIpcContext): void {
         privateKeyPem: secrets.privateKeyPem,
         certificateText: secrets.certificateText,
         passphrase: secrets.passphrase,
-        trustedHostKeyBase64,
+        trustedHostKeyBase64: trustedHostKeysBase64[0],
+        trustedHostKeysBase64,
         cols: input.cols,
         rows: input.rows,
         command: input.command?.trim() || undefined,

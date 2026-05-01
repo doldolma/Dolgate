@@ -78,15 +78,16 @@ func NewManagerWithConfig(emit EventEmitter, stream StreamEmitter, config Manage
 func (m *Manager) Connect(sessionID, requestID string, payload protocol.ConnectPayload) error {
 	attempt := 0
 	client, err := sshconn.DialClient(sshconn.Target{
-		Host:                 payload.Host,
-		Port:                 payload.Port,
-		Username:             payload.Username,
-		AuthType:             payload.AuthType,
-		Password:             payload.Password,
-		PrivateKeyPEM:        payload.PrivateKeyPEM,
-		CertificateText:      payload.CertificateText,
-		Passphrase:           payload.Passphrase,
-		TrustedHostKeyBase64: payload.TrustedHostKeyBase64,
+		Host:                  payload.Host,
+		Port:                  payload.Port,
+		Username:              payload.Username,
+		AuthType:              payload.AuthType,
+		Password:              payload.Password,
+		PrivateKeyPEM:         payload.PrivateKeyPEM,
+		CertificateText:       payload.CertificateText,
+		Passphrase:            payload.Passphrase,
+		TrustedHostKeyBase64:  payload.TrustedHostKeyBase64,
+		TrustedHostKeysBase64: payload.TrustedHostKeysBase64,
 	}, sshconn.Config{
 		TCPDialTimeout:       m.config.TCPDialTimeout,
 		TCPKeepAliveInterval: m.config.TCPKeepAliveInterval,
