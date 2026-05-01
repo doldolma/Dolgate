@@ -559,37 +559,42 @@ export function createSftpSlice(deps: SliceDeps): SftpSlice {
           },
     changeSftpSelectionPermissions: async (paneId, mode) => {
             const pane = getPane(get(), paneId);
-            const targetPath = pane.selectedPaths[0];
-            if (!targetPath || pane.selectedPaths.length !== 1) {
+            const targetPaths = pane.selectedPaths;
+            if (targetPaths.length === 0) {
               return;
             }
             if (pane.sourceKind === "local") {
-              await api.files.chmod(targetPath, mode);
+              for (const targetPath of targetPaths) {
+                await api.files.chmod(targetPath, mode);
+              }
             } else if (pane.endpoint) {
-              await api.sftp.chmod({
-                endpointId: pane.endpoint.id,
-                path: targetPath,
-                mode,
-              });
+              for (const targetPath of targetPaths) {
+                await api.sftp.chmod({
+                  endpointId: pane.endpoint.id,
+                  path: targetPath,
+                  mode,
+                });
+              }
             }
             await get().refreshSftpPane(paneId);
           },
     changeSftpSelectionOwner: async (paneId, input) => {
             const pane = getPane(get(), paneId);
-            const targetPath = pane.selectedPaths[0];
+            const targetPaths = pane.selectedPaths;
             if (
-              !targetPath ||
-              pane.selectedPaths.length !== 1 ||
+              targetPaths.length === 0 ||
               pane.sourceKind !== "host" ||
               !pane.endpoint
             ) {
               return;
             }
-            await api.sftp.chown({
-              endpointId: pane.endpoint.id,
-              path: targetPath,
-              ...input,
-            });
+            for (const targetPath of targetPaths) {
+              await api.sftp.chown({
+                endpointId: pane.endpoint.id,
+                path: targetPath,
+                ...input,
+              });
+            }
             await get().refreshSftpPane(paneId);
           },
     listSftpPrincipals: async (paneId, kind, query) => {

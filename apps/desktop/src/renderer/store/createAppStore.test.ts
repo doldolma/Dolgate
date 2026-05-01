@@ -3692,6 +3692,182 @@ describe("createAppStore", () => {
     expect(JSON.stringify(store.getState())).not.toContain("sudo-secret");
   });
 
+  it("applies permission changes to every selected local SFTP path", async () => {
+    const api = createMockApi();
+    const store = createAppStore(api);
+
+    await store.getState().bootstrap();
+    store.setState((state) => ({
+      sftp: {
+        ...state.sftp,
+        leftPane: {
+          ...state.sftp.leftPane,
+          sourceKind: "local",
+          selectedPaths: [
+            "/Users/tester/app.log",
+            "/Users/tester/scripts/deploy.sh",
+          ],
+          selectionAnchorPath: "/Users/tester/app.log",
+        },
+      },
+    }));
+
+    await store.getState().changeSftpSelectionPermissions("left", 0o744);
+
+    expect(api.files.chmod).toHaveBeenNthCalledWith(
+      1,
+      "/Users/tester/app.log",
+      0o744,
+    );
+    expect(api.files.chmod).toHaveBeenNthCalledWith(
+      2,
+      "/Users/tester/scripts/deploy.sh",
+      0o744,
+    );
+  });
+
+  it("applies permission changes to every selected remote SFTP path", async () => {
+    const api = createMockApi();
+    const store = createAppStore(api);
+
+    await store.getState().bootstrap();
+    store.setState((state) => ({
+      sftp: {
+        ...state.sftp,
+        rightPane: {
+          ...state.sftp.rightPane,
+          sourceKind: "host",
+          endpoint: {
+            id: "endpoint-1",
+            kind: "remote",
+            hostId: "host-1",
+            title: "Prod",
+            path: "/home/ubuntu",
+            connectedAt: "2025-01-01T00:00:00.000Z",
+          },
+          selectedPaths: [
+            "/home/ubuntu/app.log",
+            "/home/ubuntu/scripts/deploy.sh",
+          ],
+          selectionAnchorPath: "/home/ubuntu/app.log",
+        },
+      },
+    }));
+
+    await store.getState().changeSftpSelectionPermissions("right", 0o640);
+
+    expect(api.sftp.chmod).toHaveBeenNthCalledWith(1, {
+      endpointId: "endpoint-1",
+      path: "/home/ubuntu/app.log",
+      mode: 0o640,
+    });
+    expect(api.sftp.chmod).toHaveBeenNthCalledWith(2, {
+      endpointId: "endpoint-1",
+      path: "/home/ubuntu/scripts/deploy.sh",
+      mode: 0o640,
+    });
+  });
+
+  it("applies owner changes to every selected remote SFTP path without storing sudo password", async () => {
+    const api = createMockApi();
+    const store = createAppStore(api);
+
+    await store.getState().bootstrap();
+    store.setState((state) => ({
+      sftp: {
+        ...state.sftp,
+        rightPane: {
+          ...state.sftp.rightPane,
+          sourceKind: "host",
+          endpoint: {
+            id: "endpoint-1",
+            kind: "remote",
+            hostId: "host-1",
+            title: "Prod",
+            path: "/home/ubuntu",
+            connectedAt: "2025-01-01T00:00:00.000Z",
+            sudoStatus: "passwordRequired",
+          },
+          selectedPaths: ["/home/ubuntu/app.log", "/home/ubuntu/logs"],
+          selectionAnchorPath: "/home/ubuntu/app.log",
+        },
+      },
+    }));
+
+    await store.getState().changeSftpSelectionOwner("right", {
+      owner: "root",
+      group: "adm",
+      recursive: true,
+      sudoPassword: "sudo-secret",
+    });
+
+    expect(api.sftp.chown).toHaveBeenNthCalledWith(1, {
+      endpointId: "endpoint-1",
+      path: "/home/ubuntu/app.log",
+      owner: "root",
+      group: "adm",
+      recursive: true,
+      sudoPassword: "sudo-secret",
+    });
+    expect(api.sftp.chown).toHaveBeenNthCalledWith(2, {
+      endpointId: "endpoint-1",
+      path: "/home/ubuntu/logs",
+      owner: "root",
+      group: "adm",
+      recursive: true,
+      sudoPassword: "sudo-secret",
+    });
+    expect(JSON.stringify(store.getState())).not.toContain("sudo-secret");
+  });
+
+  it("stops multi-owner changes on the first failure and skips refresh", async () => {
+    const api = createMockApi();
+    api.sftp.chown = vi.fn().mockRejectedValueOnce(new Error("denied"));
+    const store = createAppStore(api);
+
+    await store.getState().bootstrap();
+    store.setState((state) => ({
+      sftp: {
+        ...state.sftp,
+        rightPane: {
+          ...state.sftp.rightPane,
+          sourceKind: "host",
+          endpoint: {
+            id: "endpoint-1",
+            kind: "remote",
+            hostId: "host-1",
+            title: "Prod",
+            path: "/home/ubuntu",
+            connectedAt: "2025-01-01T00:00:00.000Z",
+            sudoStatus: "passwordRequired",
+          },
+          selectedPaths: ["/home/ubuntu/app.log", "/home/ubuntu/logs"],
+          selectionAnchorPath: "/home/ubuntu/app.log",
+        },
+      },
+    }));
+    const listCallsBefore = vi.mocked(api.sftp.list).mock.calls.length;
+
+    await expect(
+      store.getState().changeSftpSelectionOwner("right", {
+        owner: "root",
+        group: "adm",
+        sudoPassword: "sudo-secret",
+      }),
+    ).rejects.toThrow("denied");
+
+    expect(api.sftp.chown).toHaveBeenCalledTimes(1);
+    expect(api.sftp.chown).toHaveBeenCalledWith({
+      endpointId: "endpoint-1",
+      path: "/home/ubuntu/app.log",
+      owner: "root",
+      group: "adm",
+      sudoPassword: "sudo-secret",
+    });
+    expect(api.sftp.list).toHaveBeenCalledTimes(listCallsBefore);
+    expect(JSON.stringify(store.getState())).not.toContain("sudo-secret");
+  });
+
   it("prompts for a missing SSH username before starting an SFTP connection", async () => {
     const api = createMockApi();
     api.hosts.list = vi.fn().mockResolvedValue([
@@ -5420,6 +5596,7 @@ describe("createAppStore", () => {
     });
 
     expect(store.getState().tabs[0]?.status).toBe("connected");
+    expect(store.getState().tabs[0]?.connectionProgress).toBeNull();
     expect(store.getState().pendingConnectionAttempts).toEqual([
       expect.objectContaining({
         sessionId: "session-container-1",
@@ -5431,6 +5608,40 @@ describe("createAppStore", () => {
 
     expect(store.getState().tabs[0]?.hasReceivedOutput).toBe(true);
     expect(store.getState().pendingConnectionAttempts).toEqual([]);
+  });
+
+  it("clears stale containers overlay after opening a container shell", async () => {
+    const api = createMockApi();
+    const store = createAppStore(api);
+
+    await store.getState().bootstrap();
+    await store.getState().openHostContainersTab("host-1");
+    store.setState((state) => ({
+      containerTabs: state.containerTabs.map((tab) =>
+        tab.hostId === "host-1"
+          ? {
+              ...tab,
+              isLoading: true,
+              connectionProgress: {
+                endpointId: "containers:host-1",
+                hostId: "host-1",
+                stage: "connecting-containers",
+                message: "Prod 컨테이너 런타임 연결을 준비하는 중입니다.",
+              },
+            }
+          : tab,
+      ),
+    }));
+
+    await store.getState().openHostContainerShell("host-1", "container-1");
+
+    const containerTab = store
+      .getState()
+      .containerTabs.find((tab) => tab.hostId === "host-1");
+
+    expect(store.getState().tabs[0]?.sessionId).toBe("session-container-1");
+    expect(containerTab?.isLoading).toBe(false);
+    expect(containerTab?.connectionProgress).toBeNull();
   });
 
   it("keeps an immediate-closing container shell session open as a close-only error overlay", async () => {

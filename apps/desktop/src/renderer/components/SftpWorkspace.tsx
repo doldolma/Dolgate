@@ -203,6 +203,7 @@ interface PermissionDialogState {
   paneId: SftpPaneId;
   path: string;
   name: string;
+  selectedCount: number;
   matrix: PermissionMatrixState;
   isSubmitting: boolean;
 }
@@ -211,6 +212,7 @@ interface OwnerDialogState {
   paneId: SftpPaneId;
   path: string;
   name: string;
+  selectedCount: number;
   owner: string;
   group: string;
   recursive: boolean;
@@ -1238,7 +1240,7 @@ function PaneBrowser({
   const canChangeOwner =
     pane.sourceKind === "host" &&
     Boolean(pane.endpoint) &&
-    pane.selectedPaths.length === 1 &&
+    pane.selectedPaths.length > 0 &&
     (pane.endpoint?.sudoStatus === "root" ||
       pane.endpoint?.sudoStatus === "passwordless" ||
       pane.endpoint?.sudoStatus === "passwordRequired");
@@ -1758,7 +1760,7 @@ function PaneBrowser({
               <button
                 type="button"
                 className="flex w-full items-center rounded-[12px] px-[0.8rem] py-[0.75rem] text-left text-[var(--text)] transition-colors duration-150 hover:bg-[color-mix(in_srgb,var(--surface-muted)_92%,transparent_8%)] disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:bg-transparent"
-                disabled={pane.selectedPaths.length !== 1}
+                disabled={pane.selectedPaths.length === 0}
                 onClick={() => {
                   setContextMenu(null);
                   onOpenPermissionsDialog();
@@ -2727,6 +2729,10 @@ function PermissionDialog({
     { key: "write", label: "Write" },
     { key: "execute", label: "Execute" },
   ];
+  const title =
+    dialog.selectedCount > 1
+      ? `선택한 ${dialog.selectedCount}개 항목 권한 수정`
+      : `${dialog.name} 권한 수정`;
 
   return (
     <DialogBackdrop onDismiss={onClose} dismissDisabled={dialog.isSubmitting}>
@@ -2734,7 +2740,7 @@ function PermissionDialog({
         <ModalHeader>
           <div>
             <SectionLabel>Permissions</SectionLabel>
-            <h3 className="m-0">{dialog.name} 권한 수정</h3>
+            <h3 className="m-0">{title}</h3>
           </div>
         </ModalHeader>
         <ModalBody>
@@ -2874,6 +2880,10 @@ function OwnerDialog({
   if (!dialog) {
     return null;
   }
+  const title =
+    dialog.selectedCount > 1
+      ? `선택한 ${dialog.selectedCount}개 항목 소유권 변경`
+      : `${dialog.name} 소유권 변경`;
 
   return (
     <DialogBackdrop onDismiss={onClose} dismissDisabled={dialog.isSubmitting}>
@@ -2881,7 +2891,7 @@ function OwnerDialog({
         <ModalHeader>
           <div>
             <SectionLabel>Ownership</SectionLabel>
-            <h3 className="m-0">{dialog.name} 소유권 변경</h3>
+            <h3 className="m-0">{title}</h3>
           </div>
         </ModalHeader>
         <ModalBody>
@@ -3462,6 +3472,7 @@ const SftpWorkspacePanes = memo(function SftpWorkspacePanes({
                       paneId: pane.id,
                       path: selected.path,
                       name: selected.name,
+                      selectedCount: pane.selectedPaths.length,
                       matrix: permissionMatrixFromString(selected.permissions),
                       isSubmitting: false,
                     });
@@ -3477,6 +3488,7 @@ const SftpWorkspacePanes = memo(function SftpWorkspacePanes({
                       paneId: pane.id,
                       path: selected.path,
                       name: selected.name,
+                      selectedCount: pane.selectedPaths.length,
                       owner:
                         selected.owner ??
                         (typeof selected.uid === "number"

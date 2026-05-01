@@ -907,7 +907,9 @@ export function createRuntimeEventSlice(deps: SliceDeps): RuntimeEventSlice {
                   : null;
               const nextProgress =
                 event.type === "connected"
-                  ? (resolvedShellKind ?? currentTab.shellKind) === "aws-ecs-exec"
+                  ? currentAttempt?.source === "container-shell"
+                    ? null
+                    : (resolvedShellKind ?? currentTab.shellKind) === "aws-ecs-exec"
                     ? null
                     : currentTab.source === "local"
                     ? resolveLocalWaitingShellProgress()
