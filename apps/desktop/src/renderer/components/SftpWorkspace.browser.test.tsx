@@ -288,6 +288,7 @@ function renderWorkspace(
   const onDisconnectPane = vi.fn().mockResolvedValue(undefined);
   const onSelectEntry = vi.fn();
   const onDeleteSelection = vi.fn().mockResolvedValue(undefined);
+  const onChangeSelectionOwner = vi.fn().mockResolvedValue(undefined);
   const onNavigateBreadcrumb = vi.fn().mockResolvedValue(undefined);
   const onListLocalRoots = vi
     .fn()
@@ -324,6 +325,7 @@ function renderWorkspace(
       onCreateDirectory={vi.fn().mockResolvedValue(undefined)}
       onRenameSelection={vi.fn().mockResolvedValue(undefined)}
       onChangeSelectionPermissions={vi.fn().mockResolvedValue(undefined)}
+      onChangeSelectionOwner={onChangeSelectionOwner}
       onDeleteSelection={onDeleteSelection}
       onDownloadSelection={vi.fn().mockResolvedValue(undefined)}
       onPrepareTransfer={vi.fn().mockResolvedValue(undefined)}
@@ -352,6 +354,7 @@ function renderWorkspace(
     onUpdateSettings,
     onSelectEntry,
     onDeleteSelection,
+    onChangeSelectionOwner,
     onGetPathForDroppedFile,
     onPrepareExternalTransfer,
   };
@@ -1468,6 +1471,112 @@ describe("SftpWorkspace column resizing", () => {
     await waitFor(() =>
       expect(onChangeSelectionPermissions).toHaveBeenCalledWith("left", 0o744),
     );
+  });
+
+  it("enables permission changes for multiple selected entries", () => {
+    const sftp = createSftpState();
+    sftp.leftPane.entries = [
+      createEntry("left-alpha.txt", "/left"),
+      createEntry("left-beta.txt", "/left"),
+    ];
+    sftp.leftPane.selectedPaths = [
+      "/left/left-alpha.txt",
+      "/left/left-beta.txt",
+    ];
+    sftp.rightPane = createHostPickerPane();
+
+    renderWorkspace({ sftp });
+
+    const contextMenu = openEntryContextMenu("left-alpha.txt");
+    fireEvent.click(
+      within(contextMenu).getByRole("button", { name: "권한 수정" }),
+    );
+
+    expect(screen.getByText("선택한 2개 항목 권한 수정")).toBeTruthy();
+  });
+
+  it("enables owner changes for multiple remote entries only when sudo is available", () => {
+    const sftp = createSftpState();
+    sftp.rightPane = createHostPickerPane({
+      sourceKind: "host",
+      endpoint: {
+        id: "endpoint-1",
+        kind: "remote",
+        hostId: "ssh-1",
+        title: "Prod SSH",
+        path: "/remote",
+        connectedAt: "2026-03-26T10:00:00.000Z",
+        sudoStatus: "passwordless",
+      },
+      currentPath: "/remote",
+      history: ["/remote"],
+      historyIndex: 0,
+      entries: [
+        {
+          name: "app.txt",
+          path: "/remote/app.txt",
+          isDirectory: false,
+          size: 128,
+          mtime: "2026-03-26T10:00:00.000Z",
+          kind: "file",
+          permissions: "rw-r--r--",
+          owner: "ubuntu",
+          group: "ubuntu",
+        },
+        {
+          name: "logs",
+          path: "/remote/logs",
+          isDirectory: true,
+          size: 0,
+          mtime: "2026-03-26T10:00:00.000Z",
+          kind: "folder",
+          permissions: "rwxr-xr-x",
+          owner: "ubuntu",
+          group: "ubuntu",
+        },
+      ],
+      selectedPaths: ["/remote/app.txt", "/remote/logs"],
+    });
+
+    renderWorkspace({ sftp });
+
+    const contextMenu = openEntryContextMenu("app.txt");
+
+    expect(
+      within(contextMenu).getByRole("button", { name: "소유권 변경" }),
+    ).not.toBeDisabled();
+  });
+
+  it("keeps owner changes disabled for multiple remote entries without sudo", () => {
+    const sftp = createSftpState();
+    sftp.rightPane = createHostPickerPane({
+      sourceKind: "host",
+      endpoint: {
+        id: "endpoint-1",
+        kind: "remote",
+        hostId: "ssh-1",
+        title: "Prod SSH",
+        path: "/remote",
+        connectedAt: "2026-03-26T10:00:00.000Z",
+        sudoStatus: "unavailable",
+      },
+      currentPath: "/remote",
+      history: ["/remote"],
+      historyIndex: 0,
+      entries: [
+        createEntry("app.txt", "/remote"),
+        createEntry("logs", "/remote"),
+      ],
+      selectedPaths: ["/remote/app.txt", "/remote/logs"],
+    });
+
+    renderWorkspace({ sftp });
+
+    const contextMenu = openEntryContextMenu("app.txt");
+
+    expect(
+      within(contextMenu).getByRole("button", { name: "소유권 변경" }),
+    ).toBeDisabled();
   });
 
   it("opens a styled delete dialog and waits for confirmation before deleting", async () => {

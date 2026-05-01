@@ -151,6 +151,56 @@ func TestBuildContainerActionCommandUsesExpectedDockerVerb(t *testing.T) {
 	}
 }
 
+func TestBuildExitStatusWrappedCommandEmitsActionStatusMarker(t *testing.T) {
+	command := buildExitStatusWrappedCommand("'/usr/bin/docker' restart 'container-1'")
+
+	expectedSnippets := []string{
+		"sh -lc ",
+		"/usr/bin/docker",
+		"restart",
+		"container-1",
+		containerActionExitMarker,
+		"exit 0",
+	}
+	for _, snippet := range expectedSnippets {
+		if !strings.Contains(command, snippet) {
+			t.Fatalf("expected wrapped command to include %q, got %q", snippet, command)
+		}
+	}
+}
+
+func TestParseExitStatusWrappedOutputReturnsCommandBodyAndExitCode(t *testing.T) {
+	body, exitCode, ok := parseExitStatusWrappedOutput(
+		"container-1\n" + containerActionExitMarker + "0\n",
+	)
+
+	if !ok {
+		t.Fatalf("expected wrapped output to include an exit code")
+	}
+	if exitCode != 0 {
+		t.Fatalf("expected exit code 0, got %d", exitCode)
+	}
+	if body != "container-1" {
+		t.Fatalf("expected body to be trimmed command output, got %q", body)
+	}
+}
+
+func TestParseExitStatusWrappedOutputReturnsFailureCode(t *testing.T) {
+	body, exitCode, ok := parseExitStatusWrappedOutput(
+		"permission denied\n" + containerActionExitMarker + "126\n",
+	)
+
+	if !ok {
+		t.Fatalf("expected wrapped output to include an exit code")
+	}
+	if exitCode != 126 {
+		t.Fatalf("expected exit code 126, got %d", exitCode)
+	}
+	if body != "permission denied" {
+		t.Fatalf("expected failure body to be preserved, got %q", body)
+	}
+}
+
 func TestBuildStatsCommandIncludesNoStreamAndFormat(t *testing.T) {
 	command := buildStatsCommand("/usr/bin/docker", "container-1")
 	expectedSnippets := []string{

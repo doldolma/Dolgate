@@ -20,6 +20,11 @@ import (
 
 type EventEmitter func(protocol.Event)
 
+const (
+	containerActionExitMarker = "__DOLSSH_CONTAINER_ACTION_EXIT__="
+	containerActionTimeout    = 60 * time.Second
+)
+
 type endpointHandle struct {
 	client         *ssh.Client
 	target         sshconn.Target
@@ -606,7 +611,7 @@ func (s *Service) runContainerAction(endpointID, requestID, action, containerID 
 	}
 
 	command := buildContainerActionCommand(handle.runtimeCommand, action, containerID)
-	if _, err := s.runEndpointCommand(handle, command); err != nil {
+	if _, err := s.runEndpointActionCommand(handle, command); err != nil {
 		return err
 	}
 
@@ -701,6 +706,71 @@ func (s *Service) runEndpointCommand(
 	}
 	stdout, err := runRemoteCommand(handle.client, command)
 	if err != nil {
+		return nil, fmt.Errorf(
+			"%s 명령 실행에 실패했습니다. runtime=%s path=%s: %w",
+			handle.runtime,
+			handle.runtime,
+			handle.runtimeCommand,
+			err,
+		)
+	}
+	return stdout, nil
+}
+
+func (s *Service) runEndpointActionCommand(
+	handle *endpointHandle,
+	command string,
+) ([]byte, error) {
+	if handle.client == nil {
+		return nil, fmt.Errorf("containers endpoint client is not connected")
+	}
+	stdout, stderr, err := sshcmd.RunWithTimeout(
+		handle.client,
+		buildExitStatusWrappedCommand(command),
+		containerActionTimeout,
+	)
+	stdoutText, exitCode, hasExitCode := parseExitStatusWrappedOutput(string(stdout))
+	if hasExitCode {
+		if exitCode == 0 {
+			return []byte(stdoutText), nil
+		}
+		detail := strings.TrimSpace(string(stderr))
+		if detail == "" {
+			detail = strings.TrimSpace(stdoutText)
+		}
+		if detail != "" {
+			return nil, fmt.Errorf(
+				"%s 명령 실행에 실패했습니다. runtime=%s path=%s: exit status %d: %s",
+				handle.runtime,
+				handle.runtime,
+				handle.runtimeCommand,
+				exitCode,
+				detail,
+			)
+		}
+		return nil, fmt.Errorf(
+			"%s 명령 실행에 실패했습니다. runtime=%s path=%s: exit status %d",
+			handle.runtime,
+			handle.runtime,
+			handle.runtimeCommand,
+			exitCode,
+		)
+	}
+	if err != nil {
+		detail := strings.TrimSpace(string(stderr))
+		if detail == "" {
+			detail = strings.TrimSpace(string(stdout))
+		}
+		if detail != "" {
+			return nil, fmt.Errorf(
+				"%s 명령 실행에 실패했습니다. runtime=%s path=%s: %w: %s",
+				handle.runtime,
+				handle.runtime,
+				handle.runtimeCommand,
+				err,
+				detail,
+			)
+		}
 		return nil, fmt.Errorf(
 			"%s 명령 실행에 실패했습니다. runtime=%s path=%s: %w",
 			handle.runtime,
@@ -988,6 +1058,32 @@ func buildContainerActionCommand(runtimeCommand, action, containerID string) str
 	}
 	command.WriteString(sshcmd.QuotePosix(containerID))
 	return command.String()
+}
+
+func buildExitStatusWrappedCommand(command string) string {
+	var script strings.Builder
+	script.WriteString(command)
+	script.WriteString("\n__dolssh_action_status=$?\nprintf '\\n")
+	script.WriteString(containerActionExitMarker)
+	script.WriteString("%s\\n' \"$__dolssh_action_status\"\nexit 0")
+	return "sh -lc " + sshcmd.QuotePosix(script.String())
+}
+
+func parseExitStatusWrappedOutput(output string) (string, int, bool) {
+	markerIndex := strings.LastIndex(output, containerActionExitMarker)
+	if markerIndex < 0 {
+		return output, 0, false
+	}
+	statusText := strings.TrimSpace(output[markerIndex+len(containerActionExitMarker):])
+	fields := strings.Fields(statusText)
+	if len(fields) == 0 {
+		return output, 0, false
+	}
+	exitCode, err := strconv.Atoi(fields[0])
+	if err != nil {
+		return output, 0, false
+	}
+	return strings.TrimRight(output[:markerIndex], "\r\n"), exitCode, true
 }
 
 func buildStatsCommand(runtimeCommand string, containerID string) string {

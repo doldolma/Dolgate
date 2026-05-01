@@ -212,6 +212,8 @@ export function createContainersServices(deps: SliceDeps) {
             ? error.message
             : "컨테이너 셸을 열지 못했습니다.";
         sessionServices.markSessionError(set, sessionId, message);
+      } finally {
+        clearContainerTabConnectionOverlay(set, hostId);
       }
     },
     startPendingEcsExecShellConnect: async (
