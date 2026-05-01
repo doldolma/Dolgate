@@ -46,6 +46,13 @@ import {
   type MetricChartSeriesDefinition,
 } from "./UPlotMetricChart";
 import { TerminalInteractiveAuthOverlay } from "./terminal-workspace/TerminalInteractiveAuthOverlay";
+import {
+  countLocalFindMatches,
+  LogLocalFindBar,
+  renderLocalFindHighlightedText,
+  shouldOpenLogLocalFind,
+  type LocalFindHighlightOptions,
+} from "./LogLocalFind";
 
 interface ContainersWorkspaceProps {
   host: HostRecord;
@@ -376,13 +383,43 @@ export function parseContainerLogLine(line: string): ParsedContainerLogLine {
   };
 }
 
-function renderAnsiStyledMessage(value: string) {
+function countAnsiStyledLocalFindMatches(value: string, query: string): number {
   const segments = parseAnsiStyledSegments(value);
   if (segments.length === 0) {
-    return stripAnsiControlSequences(value) || "\u00A0";
+    return countLocalFindMatches(stripAnsiControlSequences(value), query);
+  }
+  return segments.reduce(
+    (sum, segment) => sum + countLocalFindMatches(segment.text, query),
+    0,
+  );
+}
+
+function renderAnsiStyledMessage(
+  value: string,
+  localFindQuery = "",
+  localFind?: LocalFindHighlightOptions,
+) {
+  const segments = parseAnsiStyledSegments(value);
+  if (segments.length === 0) {
+    const cleaned = stripAnsiControlSequences(value) || "\u00A0";
+    if (!localFind || !localFindQuery.trim()) {
+      return cleaned;
+    }
+    return renderLocalFindHighlightedText(cleaned, localFindQuery, localFind).nodes;
   }
 
+  let matchIndexOffset = localFind?.matchIndexOffset ?? 0;
   return segments.map((segment, index) => {
+    const highlighted =
+      localFind && localFindQuery.trim()
+        ? renderLocalFindHighlightedText(segment.text, localFindQuery, {
+            ...localFind,
+            matchIndexOffset,
+            keyPrefix: `${localFind.keyPrefix ?? "container"}:${index}`,
+          })
+        : null;
+    matchIndexOffset += highlighted?.matchCount ?? 0;
+
     return (
       <span
         key={`${index}:${segment.text}:${segment.foreground ?? "plain"}:${segment.bold ? "bold" : "normal"}`}
@@ -393,7 +430,7 @@ function renderAnsiStyledMessage(value: string) {
         data-ansi-tone={segment.foreground ?? undefined}
         data-ansi-bold={segment.bold ? "true" : undefined}
       >
-        {segment.text}
+        {highlighted?.nodes ?? segment.text}
       </span>
     );
   });
@@ -1322,11 +1359,16 @@ export function ContainersWorkspace({
   const [tunnelState, setTunnelState] = useState<ContainerTunnelTabState>(
     createEmptyContainerTunnelState,
   );
+  const [localFindOpen, setLocalFindOpen] = useState(false);
+  const [localFindQuery, setLocalFindQuery] = useState("");
+  const [activeLocalFindMatchIndex, setActiveLocalFindMatchIndex] = useState(0);
   const tunnelStateRef = useRef<ContainerTunnelTabState>(
     createEmptyContainerTunnelState(),
   );
   const logsOutputRef = useRef<HTMLDivElement | null>(null);
   const logsBottomRef = useRef<HTMLDivElement | null>(null);
+  const localFindInputRef = useRef<HTMLInputElement | null>(null);
+  const localFindMatchRefs = useRef<Map<number, HTMLElement>>(new Map());
   const previousPanelRef = useRef<ContainersWorkspacePanel>(tab.activePanel);
   const previousLogsContainerIdRef = useRef<string | null>(
     tab.selectedContainerId,
@@ -1392,6 +1434,35 @@ export function ContainersWorkspace({
     !!tab.selectedContainerId &&
     !tab.logsSearchLoading &&
     trimmedLogsSearchQuery.length > 0;
+  const trimmedLocalFindQuery = localFindOpen ? localFindQuery.trim() : "";
+  const containerLocalFind = useMemo(() => {
+    let nextMatchIndex = 0;
+    const rows = effectiveLogLines.map((line, index) => {
+      const parsedLine = parseContainerLogLine(line);
+      const timestampText = parsedLine.timestampLabel ?? "";
+      const timestampMatchCount =
+        timestampText && trimmedLocalFindQuery
+          ? countLocalFindMatches(timestampText, trimmedLocalFindQuery)
+          : 0;
+      const messageMatchCount = trimmedLocalFindQuery
+        ? countAnsiStyledLocalFindMatches(parsedLine.message, trimmedLocalFindQuery)
+        : 0;
+      const matchIndexOffset = nextMatchIndex;
+      nextMatchIndex += timestampMatchCount + messageMatchCount;
+      return {
+        key: `${index}:${parsedLine.raw}`,
+        line,
+        parsedLine,
+        timestampMatchCount,
+        messageMatchCount,
+        matchIndexOffset,
+      };
+    });
+    return {
+      rows,
+      matchCount: nextMatchIndex,
+    };
+  }, [effectiveLogLines, trimmedLocalFindQuery]);
   const canStart = selectedContainer
     ? canStartContainer(selectedContainer.status)
     : false;
@@ -1411,6 +1482,91 @@ export function ContainersWorkspace({
   useEffect(() => {
     tunnelStateRef.current = tunnelState;
   }, [tunnelState]);
+
+  const registerLocalFindMatchRef = useCallback(
+    (matchIndex: number) => (node: HTMLElement | null) => {
+      if (node) {
+        localFindMatchRefs.current.set(matchIndex, node);
+        return;
+      }
+      localFindMatchRefs.current.delete(matchIndex);
+    },
+    [],
+  );
+
+  const closeLocalFind = useCallback(() => {
+    setLocalFindOpen(false);
+    setLocalFindQuery("");
+    setActiveLocalFindMatchIndex(0);
+    localFindMatchRefs.current.clear();
+  }, []);
+
+  const moveLocalFindMatch = useCallback(
+    (direction: 1 | -1) => {
+      if (containerLocalFind.matchCount === 0) {
+        return;
+      }
+      setActiveLocalFindMatchIndex((current) => {
+        const next = current + direction;
+        if (next < 0) {
+          return containerLocalFind.matchCount - 1;
+        }
+        return next % containerLocalFind.matchCount;
+      });
+    },
+    [containerLocalFind.matchCount],
+  );
+
+  useEffect(() => {
+    if (!localFindOpen) {
+      return;
+    }
+    const frame = window.requestAnimationFrame(() => {
+      localFindInputRef.current?.focus();
+      localFindInputRef.current?.select();
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [localFindOpen]);
+
+  useEffect(() => {
+    if (!isActive || tab.activePanel !== "logs") {
+      closeLocalFind();
+    }
+  }, [closeLocalFind, isActive, tab.activePanel]);
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (
+        !shouldOpenLogLocalFind({
+          active: isActive,
+          visible: tab.activePanel === "logs",
+          key: event.key,
+          ctrlKey: event.ctrlKey,
+          metaKey: event.metaKey,
+          altKey: event.altKey,
+          defaultPrevented: event.defaultPrevented,
+        })
+      ) {
+        return;
+      }
+      event.preventDefault();
+      setLocalFindOpen(true);
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [isActive, tab.activePanel]);
+
+  useEffect(() => {
+    setActiveLocalFindMatchIndex((current) => {
+      if (containerLocalFind.matchCount === 0) {
+        return 0;
+      }
+      return Math.min(current, containerLocalFind.matchCount - 1);
+    });
+  }, [containerLocalFind.matchCount]);
 
   useEffect(() => {
     if (!selectedContainer) {
@@ -1653,6 +1809,37 @@ export function ContainersWorkspace({
     effectiveLogLines.length,
     tab.logsFollowEnabled,
     tab.logsSearchMode,
+  ]);
+
+  useLayoutEffect(() => {
+    if (
+      !localFindOpen ||
+      !trimmedLocalFindQuery ||
+      containerLocalFind.matchCount === 0
+    ) {
+      return;
+    }
+    const matchNode = localFindMatchRefs.current.get(activeLocalFindMatchIndex);
+    if (!matchNode || typeof matchNode.scrollIntoView !== "function") {
+      return;
+    }
+    suppressFollowScrollRef.current = true;
+    if (releaseFollowScrollFrameRef.current !== null) {
+      window.cancelAnimationFrame(releaseFollowScrollFrameRef.current);
+    }
+    matchNode.scrollIntoView({
+      block: "center",
+      inline: "nearest",
+    });
+    releaseFollowScrollFrameRef.current = window.requestAnimationFrame(() => {
+      suppressFollowScrollRef.current = false;
+      releaseFollowScrollFrameRef.current = null;
+    });
+  }, [
+    activeLocalFindMatchIndex,
+    containerLocalFind.matchCount,
+    localFindOpen,
+    trimmedLocalFindQuery,
   ]);
 
   function handleLogsScroll() {
@@ -2138,6 +2325,21 @@ export function ContainersWorkspace({
                     {tab.logsError}
                   </NoticeCard>
                 ) : null}
+                {localFindOpen ? (
+                  <LogLocalFindBar
+                    inputRef={localFindInputRef}
+                    query={localFindQuery}
+                    matchCount={containerLocalFind.matchCount}
+                    activeMatchIndex={activeLocalFindMatchIndex}
+                    onQueryChange={(query) => {
+                      setLocalFindQuery(query);
+                      setActiveLocalFindMatchIndex(0);
+                    }}
+                    onPrevious={() => moveLocalFindMatch(-1)}
+                    onNext={() => moveLocalFindMatch(1)}
+                    onClose={closeLocalFind}
+                  />
+                ) : null}
                 <div
                   ref={logsOutputRef}
                   className={logsOutputClass}
@@ -2161,16 +2363,16 @@ export function ContainersWorkspace({
                     <div className={emptyDetailClass}>
                       다시 불러오기를 시도해 주세요.
                     </div>
-                  ) : effectiveLogLines.length ? (
-                    effectiveLogLines.map((line, index) => {
-                      const parsedLine = parseContainerLogLine(line);
+                  ) : containerLocalFind.rows.length ? (
+                    containerLocalFind.rows.map((row) => {
+                      const parsedLine = row.parsedLine;
                       const isMatch =
                         !!trimmedLogsSearchQuery &&
-                        matchesContainerLogQuery(line, trimmedLogsSearchQuery);
+                        matchesContainerLogQuery(row.line, trimmedLogsSearchQuery);
                       if (!parsedLine.timestampRaw || !parsedLine.timestampLabel) {
                         return (
                           <div
-                            key={`${index}:${parsedLine.raw}`}
+                            key={row.key}
                             className={cn(
                               "grid grid-cols-[minmax(0,1fr)] items-start gap-[0.9rem]",
                               isMatch
@@ -2180,7 +2382,16 @@ export function ContainersWorkspace({
                             data-log-match={isMatch ? "true" : undefined}
                           >
                             <span className="min-w-0 break-words whitespace-pre-wrap">
-                              {renderAnsiStyledMessage(parsedLine.message)}
+                              {renderAnsiStyledMessage(
+                                parsedLine.message,
+                                trimmedLocalFindQuery,
+                                {
+                                  activeMatchIndex: activeLocalFindMatchIndex,
+                                  matchIndexOffset: row.matchIndexOffset,
+                                  registerMatchRef: registerLocalFindMatchRef,
+                                  keyPrefix: `container-log:${row.key}:message`,
+                                },
+                              )}
                             </span>
                           </div>
                         );
@@ -2188,7 +2399,7 @@ export function ContainersWorkspace({
 
                       return (
                         <div
-                          key={`${index}:${parsedLine.raw}`}
+                          key={row.key}
                           className={cn(
                             "grid grid-cols-[max-content_minmax(0,1fr)] items-start gap-[0.9rem]",
                             isMatch
@@ -2201,10 +2412,31 @@ export function ContainersWorkspace({
                             className="whitespace-nowrap text-[rgba(163,181,214,0.82)]"
                             title={parsedLine.timestampRaw}
                           >
-                            {parsedLine.timestampLabel}
+                            {
+                              renderLocalFindHighlightedText(
+                                parsedLine.timestampLabel,
+                                trimmedLocalFindQuery,
+                                {
+                                  activeMatchIndex: activeLocalFindMatchIndex,
+                                  matchIndexOffset: row.matchIndexOffset,
+                                  registerMatchRef: registerLocalFindMatchRef,
+                                  keyPrefix: `container-log:${row.key}:timestamp`,
+                                },
+                              ).nodes
+                            }
                           </span>
                           <span className="min-w-0 break-words whitespace-pre-wrap">
-                            {renderAnsiStyledMessage(parsedLine.message)}
+                            {renderAnsiStyledMessage(
+                              parsedLine.message,
+                              trimmedLocalFindQuery,
+                              {
+                                activeMatchIndex: activeLocalFindMatchIndex,
+                                matchIndexOffset:
+                                  row.matchIndexOffset + row.timestampMatchCount,
+                                registerMatchRef: registerLocalFindMatchRef,
+                                keyPrefix: `container-log:${row.key}:message`,
+                              },
+                            )}
                           </span>
                         </div>
                       );
