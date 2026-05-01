@@ -577,6 +577,70 @@ describe("AwsEcsWorkspace", () => {
     expect(await screen.findByText("hello from task-1")).toBeInTheDocument();
   });
 
+  it("opens local Ctrl+F find over rendered ECS logs without changing the log filter", async () => {
+    const { container } = render(
+      <AwsEcsWorkspace
+        host={createHost()}
+        tab={createTab(createSnapshot(), {
+          ecsActivePanel: "logs",
+          ecsLogsByServiceName: {
+            worker: {
+              ...createEmptyEcsServiceLogsState(),
+              snapshot: createLogsSnapshot({
+                entries: [
+                  {
+                    id: "log-1",
+                    timestamp: "2026-03-29T00:11:00.000Z",
+                    message: "worker completed",
+                    taskId: "task-1",
+                    containerName: "worker",
+                  },
+                ],
+              }),
+            },
+          },
+        })}
+        isActive={true}
+        onRefresh={vi.fn().mockResolvedValue(undefined)}
+        onRefreshUtilization={vi.fn().mockResolvedValue(undefined)}
+        onOpenEcsExecShell={vi.fn().mockResolvedValue(undefined)}
+      />,
+    );
+
+    fireEvent.keyDown(window, { key: "f", ctrlKey: true });
+
+    const localFindInput = await screen.findByLabelText("현재 로그에서 찾기");
+    await waitFor(() => {
+      expect(localFindInput).toHaveFocus();
+    });
+    fireEvent.change(localFindInput, { target: { value: "worker" } });
+
+    expect(screen.getByLabelText("로그 검색")).toHaveValue("");
+    expect(screen.getByText("1/2")).toBeInTheDocument();
+    const marks = container.querySelectorAll('[data-local-find-match="true"]');
+    expect(marks).toHaveLength(2);
+    expect(marks[0]).toHaveTextContent("worker");
+    expect(container.querySelector('[data-local-find-active="true"]')).toHaveTextContent(
+      "worker",
+    );
+
+    fireEvent.keyDown(localFindInput, { key: "Enter" });
+
+    await waitFor(() => {
+      expect(screen.getByText("2/2")).toBeInTheDocument();
+    });
+
+    fireEvent.keyDown(localFindInput, { key: "Enter", shiftKey: true });
+
+    await waitFor(() => {
+      expect(screen.getByText("1/2")).toBeInTheDocument();
+    });
+
+    fireEvent.keyDown(localFindInput, { key: "Escape" });
+
+    expect(screen.queryByLabelText("현재 로그에서 찾기")).not.toBeInTheDocument();
+  });
+
   it("shows a generic empty-state message when the selected range has no logs", async () => {
     awsApi.loadEcsServiceLogs.mockResolvedValueOnce(
       createLogsSnapshot({

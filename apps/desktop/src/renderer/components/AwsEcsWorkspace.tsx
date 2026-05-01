@@ -64,6 +64,12 @@ import {
   UPlotMetricChart,
   type MetricChartSeriesDefinition,
 } from "./UPlotMetricChart";
+import {
+  countLocalFindMatches,
+  LogLocalFindBar,
+  renderLocalFindHighlightedText,
+  shouldOpenLogLocalFind,
+} from "./LogLocalFind";
 
 interface AwsEcsWorkspaceProps {
   host: HostRecord;
@@ -612,6 +618,10 @@ function getLogEntrySearchText(entry: AwsEcsServiceLogEntry): string {
     .filter(Boolean)
     .join(" ")
     .toLowerCase();
+}
+
+function getLogEntryRenderedPrefix(entry: AwsEcsServiceLogEntry): string {
+  return [entry.containerName, entry.taskId].filter(Boolean).join(" · ");
 }
 
 function buildTunnelStateFromContext(
@@ -1298,6 +1308,9 @@ export function AwsEcsWorkspace({
   const [shellPickerState, setShellPickerState] = useState<ShellPickerState>(
     createEmptyShellPickerState,
   );
+  const [localFindOpen, setLocalFindOpen] = useState(false);
+  const [localFindQuery, setLocalFindQuery] = useState("");
+  const [activeLocalFindMatchIndex, setActiveLocalFindMatchIndex] = useState(0);
   const tunnelStatesRef = useRef<Record<string, TunnelPanelState>>({});
   const serviceContextsRef = useRef<Record<string, ServiceActionContextState>>({});
   const inFlightContextRequestsRef = useRef<
@@ -1312,6 +1325,8 @@ export function AwsEcsWorkspace({
   const latestLogsRequestIdRef = useRef<Record<string, number>>({});
   const logsOutputRef = useRef<HTMLDivElement | null>(null);
   const logsBottomRef = useRef<HTMLDivElement | null>(null);
+  const localFindInputRef = useRef<HTMLInputElement | null>(null);
+  const localFindMatchRefs = useRef<Map<number, HTMLElement>>(new Map());
   const previousPanelRef = useRef<EcsDetailPanel>(tab.ecsActivePanel);
   const previousLogsTargetRef = useRef<string | null>(null);
   const logsAutoLoadKeyRef = useRef<string | null>(null);
@@ -1336,6 +1351,10 @@ export function AwsEcsWorkspace({
     logsAutoLoadKeyRef.current = null;
     previousLogsTargetRef.current = null;
     hasInitializedLogsViewRef.current = false;
+    setLocalFindOpen(false);
+    setLocalFindQuery("");
+    setActiveLocalFindMatchIndex(0);
+    localFindMatchRefs.current.clear();
     setTunnelState(createEmptyTunnelState());
     setShellPickerState(createEmptyShellPickerState());
   }, [host.id]);
@@ -1448,6 +1467,22 @@ export function AwsEcsWorkspace({
         ...(ecsLogsByServiceName[selectedService.serviceName] ?? {}),
       }
     : createEmptyLogsState();
+  const registerLocalFindMatchRef = useCallback(
+    (matchIndex: number) => (node: HTMLElement | null) => {
+      if (node) {
+        localFindMatchRefs.current.set(matchIndex, node);
+        return;
+      }
+      localFindMatchRefs.current.delete(matchIndex);
+    },
+    [],
+  );
+  const closeLocalFind = useCallback(() => {
+    setLocalFindOpen(false);
+    setLocalFindQuery("");
+    setActiveLocalFindMatchIndex(0);
+    localFindMatchRefs.current.clear();
+  }, []);
   const logsRangeMode = logsState.rangeMode;
   const logsRelativeRange = logsState.relativeRange;
   const logsAbsoluteRange = logsState.absoluteRange;
@@ -1876,6 +1911,107 @@ export function AwsEcsWorkspace({
   }, [logsState.query, logsState.snapshot?.entries]);
   const trimmedLogsSearchQuery = logsState.query.trim();
   const logMatchCount = filteredLogs.length;
+  const trimmedLocalFindQuery = localFindOpen ? localFindQuery.trim() : "";
+  const ecsLocalFind = useMemo(() => {
+    let nextMatchIndex = 0;
+    const rows = filteredLogs.map((entry) => {
+      const timestampText = formatLoadedAt(entry.timestamp);
+      const prefixText = getLogEntryRenderedPrefix(entry);
+      const timestampMatchCount = trimmedLocalFindQuery
+        ? countLocalFindMatches(timestampText, trimmedLocalFindQuery)
+        : 0;
+      const prefixMatchCount =
+        prefixText && trimmedLocalFindQuery
+          ? countLocalFindMatches(prefixText, trimmedLocalFindQuery)
+          : 0;
+      const messageMatchCount = trimmedLocalFindQuery
+        ? countLocalFindMatches(entry.message, trimmedLocalFindQuery)
+        : 0;
+      const matchIndexOffset = nextMatchIndex;
+      nextMatchIndex +=
+        timestampMatchCount + prefixMatchCount + messageMatchCount;
+      return {
+        entry,
+        timestampText,
+        prefixText,
+        timestampMatchCount,
+        prefixMatchCount,
+        messageMatchCount,
+        matchIndexOffset,
+      };
+    });
+    return {
+      rows,
+      matchCount: nextMatchIndex,
+    };
+  }, [filteredLogs, trimmedLocalFindQuery]);
+
+  const moveLocalFindMatch = useCallback(
+    (direction: 1 | -1) => {
+      if (ecsLocalFind.matchCount === 0) {
+        return;
+      }
+      setActiveLocalFindMatchIndex((current) => {
+        const next = current + direction;
+        if (next < 0) {
+          return ecsLocalFind.matchCount - 1;
+        }
+        return next % ecsLocalFind.matchCount;
+      });
+    },
+    [ecsLocalFind.matchCount],
+  );
+
+  useEffect(() => {
+    if (!localFindOpen) {
+      return;
+    }
+    const frame = window.requestAnimationFrame(() => {
+      localFindInputRef.current?.focus();
+      localFindInputRef.current?.select();
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [localFindOpen]);
+
+  useEffect(() => {
+    if (!isActive || activePanel !== "logs") {
+      closeLocalFind();
+    }
+  }, [activePanel, closeLocalFind, isActive]);
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (
+        !shouldOpenLogLocalFind({
+          active: isActive,
+          visible: activePanel === "logs",
+          key: event.key,
+          ctrlKey: event.ctrlKey,
+          metaKey: event.metaKey,
+          altKey: event.altKey,
+          defaultPrevented: event.defaultPrevented,
+        })
+      ) {
+        return;
+      }
+      event.preventDefault();
+      setLocalFindOpen(true);
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [activePanel, isActive]);
+
+  useEffect(() => {
+    setActiveLocalFindMatchIndex((current) => {
+      if (ecsLocalFind.matchCount === 0) {
+        return 0;
+      }
+      return Math.min(current, ecsLocalFind.matchCount - 1);
+    });
+  }, [ecsLocalFind.matchCount]);
 
   useLayoutEffect(() => {
     if (!isActive || activePanel !== "logs") {
@@ -1931,6 +2067,37 @@ export function AwsEcsWorkspace({
     logsState.follow,
     logsState.taskArn,
     selectedService,
+  ]);
+
+  useLayoutEffect(() => {
+    if (
+      !localFindOpen ||
+      !trimmedLocalFindQuery ||
+      ecsLocalFind.matchCount === 0
+    ) {
+      return;
+    }
+    const matchNode = localFindMatchRefs.current.get(activeLocalFindMatchIndex);
+    if (!matchNode || typeof matchNode.scrollIntoView !== "function") {
+      return;
+    }
+    suppressLogsScrollRef.current = true;
+    if (releaseLogsScrollFrameRef.current !== null) {
+      window.cancelAnimationFrame(releaseLogsScrollFrameRef.current);
+    }
+    matchNode.scrollIntoView({
+      block: "center",
+      inline: "nearest",
+    });
+    releaseLogsScrollFrameRef.current = window.requestAnimationFrame(() => {
+      suppressLogsScrollRef.current = false;
+      releaseLogsScrollFrameRef.current = null;
+    });
+  }, [
+    activeLocalFindMatchIndex,
+    ecsLocalFind.matchCount,
+    localFindOpen,
+    trimmedLocalFindQuery,
   ]);
 
   function handleLogsScroll() {
@@ -2739,6 +2906,21 @@ export function AwsEcsWorkspace({
                               <span>{logsRangeLabel}</span>
                               <span>{filteredLogs.length} lines</span>
                             </CardMeta>
+                            {localFindOpen ? (
+                              <LogLocalFindBar
+                                inputRef={localFindInputRef}
+                                query={localFindQuery}
+                                matchCount={ecsLocalFind.matchCount}
+                                activeMatchIndex={activeLocalFindMatchIndex}
+                                onQueryChange={(query) => {
+                                  setLocalFindQuery(query);
+                                  setActiveLocalFindMatchIndex(0);
+                                }}
+                                onPrevious={() => moveLocalFindMatch(-1)}
+                                onNext={() => moveLocalFindMatch(1)}
+                                onClose={closeLocalFind}
+                              />
+                            ) : null}
                             <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
                               {logsState.refreshing ? (
                                 <div
@@ -2762,26 +2944,69 @@ export function AwsEcsWorkspace({
                                       : "표시할 로그가 없습니다."}
                                   </div>
                                 ) : (
-                                  filteredLogs.map((entry) => (
+                                  ecsLocalFind.rows.map((row) => (
                                     <div
-                                      key={entry.id}
+                                      key={row.entry.id}
                                       className="grid grid-cols-[max-content_minmax(0,1fr)] items-start gap-[0.9rem]"
                                     >
                                       <span
                                         className="whitespace-nowrap text-[rgba(163,181,214,0.82)]"
-                                        title={entry.timestamp}
+                                        title={row.entry.timestamp}
                                       >
-                                        {formatLoadedAt(entry.timestamp)}
+                                        {
+                                          renderLocalFindHighlightedText(
+                                            row.timestampText,
+                                            trimmedLocalFindQuery,
+                                            {
+                                              activeMatchIndex:
+                                                activeLocalFindMatchIndex,
+                                              matchIndexOffset:
+                                                row.matchIndexOffset,
+                                              registerMatchRef:
+                                                registerLocalFindMatchRef,
+                                              keyPrefix: `ecs-log:${row.entry.id}:timestamp`,
+                                            },
+                                          ).nodes
+                                        }
                                       </span>
                                       <span className="min-w-0 break-words whitespace-pre-wrap">
-                                        {entry.containerName || entry.taskId ? (
+                                        {row.prefixText ? (
                                           <span className="text-[rgba(163,181,214,0.82)]">
-                                            {[entry.containerName, entry.taskId]
-                                              .filter(Boolean)
-                                              .join(" · ")}{" "}
+                                            {
+                                              renderLocalFindHighlightedText(
+                                                row.prefixText,
+                                                trimmedLocalFindQuery,
+                                                {
+                                                  activeMatchIndex:
+                                                    activeLocalFindMatchIndex,
+                                                  matchIndexOffset:
+                                                    row.matchIndexOffset +
+                                                    row.timestampMatchCount,
+                                                  registerMatchRef:
+                                                    registerLocalFindMatchRef,
+                                                  keyPrefix: `ecs-log:${row.entry.id}:prefix`,
+                                                },
+                                              ).nodes
+                                            }{" "}
                                           </span>
                                         ) : null}
-                                        {entry.message}
+                                        {
+                                          renderLocalFindHighlightedText(
+                                            row.entry.message,
+                                            trimmedLocalFindQuery,
+                                            {
+                                              activeMatchIndex:
+                                                activeLocalFindMatchIndex,
+                                              matchIndexOffset:
+                                                row.matchIndexOffset +
+                                                row.timestampMatchCount +
+                                                row.prefixMatchCount,
+                                              registerMatchRef:
+                                                registerLocalFindMatchRef,
+                                              keyPrefix: `ecs-log:${row.entry.id}:message`,
+                                            },
+                                          ).nodes
+                                        }
                                       </span>
                                     </div>
                                   ))

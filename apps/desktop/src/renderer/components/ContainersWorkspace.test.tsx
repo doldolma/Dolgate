@@ -635,6 +635,70 @@ describe("ContainersWorkspace", () => {
     expect(screen.getByText("remote error")).toBeInTheDocument();
   });
 
+  it("opens local Ctrl+F find over the rendered log buffer without changing log filters", async () => {
+    const host = createHost();
+    const onSetLogsSearchQuery = vi.fn();
+    const tab = {
+      ...createTab(),
+      activePanel: "logs" as const,
+      logs: {
+        hostId: "host-1",
+        containerId: "container-1",
+        runtime: "docker" as const,
+        lines: [
+          "2026-03-28T09:00:54.613802395Z error \u001b[32mINFO\u001b[0m visible info",
+          "2026-03-28T09:00:55.613802395Z \u001b[32mINFO\u001b[0m hidden",
+        ],
+        cursor: "2026-03-28T09:00:55.613802395Z",
+      },
+      logsState: "ready" as const,
+      logsSearchQuery: "error",
+      logsSearchMode: "local" as const,
+    };
+
+    const { container } = render(
+      <ContainersWorkspace
+        {...createProps(tab)}
+        host={host}
+        onSetLogsSearchQuery={onSetLogsSearchQuery}
+      />,
+    );
+
+    fireEvent.keyDown(window, { key: "f", ctrlKey: true });
+
+    const localFindInput = await screen.findByLabelText("현재 로그에서 찾기");
+    await waitFor(() => {
+      expect(localFindInput).toHaveFocus();
+    });
+    fireEvent.change(localFindInput, { target: { value: "info" } });
+
+    expect(onSetLogsSearchQuery).not.toHaveBeenCalled();
+    expect(screen.getByText("1/2")).toBeInTheDocument();
+    expect(screen.getByText("visible")).toBeInTheDocument();
+    expect(screen.queryByText("hidden")).not.toBeInTheDocument();
+
+    const marks = container.querySelectorAll('[data-local-find-match="true"]');
+    expect(marks).toHaveLength(2);
+    expect(marks[0]).toHaveTextContent("INFO");
+    expect(marks[0].closest('[data-ansi-tone="green"]')).not.toBeNull();
+    expect(container.querySelector('[data-local-find-active="true"]')).toHaveTextContent(
+      "INFO",
+    );
+
+    fireEvent.keyDown(localFindInput, { key: "Enter" });
+
+    await waitFor(() => {
+      expect(screen.getByText("2/2")).toBeInTheDocument();
+    });
+    expect(container.querySelector('[data-local-find-active="true"]')).toHaveTextContent(
+      "info",
+    );
+
+    fireEvent.keyDown(localFindInput, { key: "Escape" });
+
+    expect(screen.queryByLabelText("현재 로그에서 찾기")).not.toBeInTheDocument();
+  });
+
   it("calls load more and disables it when remote search is active or the tail cap is reached", () => {
     const onLoadMoreLogs = vi.fn().mockResolvedValue(undefined);
     const logsTab = {
