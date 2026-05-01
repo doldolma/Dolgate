@@ -1,5 +1,14 @@
 import type { TerminalConnectionProgress } from "@shared";
+import {
+  createDefaultLogsRelativeRange,
+  normalizeLogsAbsoluteRange,
+  normalizeLogsRelativeRange,
+} from "../../lib/log-range";
 import type { SliceDeps } from "./context";
+import type {
+  HostContainerLogsRefreshOptions,
+  HostContainersTabState,
+} from "../types";
 import {
   DEFAULT_CONTAINER_LOGS_TAIL_WINDOW,
   createEmptyContainersTabState,
@@ -32,6 +41,76 @@ import {
 
 type StoreSetter = SliceDeps["set"];
 type StoreGetter = SliceDeps["get"];
+
+function resolveContainerLogsRange(
+  tab: Pick<
+    HostContainersTabState,
+    "logsRangeMode" | "logsRelativeRange" | "logsAbsoluteRange"
+  >,
+): { startTime: string | null; endTime: string | null } {
+  const normalizedRange =
+    tab.logsRangeMode === "absolute"
+      ? normalizeLogsAbsoluteRange(tab.logsAbsoluteRange)
+      : normalizeLogsRelativeRange(tab.logsRelativeRange);
+  return {
+    startTime: normalizedRange?.startTime ?? null,
+    endTime: normalizedRange?.endTime ?? null,
+  };
+}
+
+function resolveContainerLogsRequestRange(
+  tab: HostContainersTabState,
+  options?: HostContainerLogsRefreshOptions,
+): { startTime: string | null; endTime: string | null } {
+  if (options?.followCursor) {
+    return { startTime: null, endTime: null };
+  }
+  if (options?.startTime !== undefined || options?.endTime !== undefined) {
+    return {
+      startTime: options.startTime ?? null,
+      endTime: options.endTime ?? null,
+    };
+  }
+  if (options?.rangeMode === "absolute") {
+    const normalizedRange = normalizeLogsAbsoluteRange(options.absoluteRange ?? null);
+    return {
+      startTime: normalizedRange?.startTime ?? null,
+      endTime: normalizedRange?.endTime ?? null,
+    };
+  }
+  if (options?.rangeMode === "recent") {
+    const normalizedRange = normalizeLogsRelativeRange(
+      options.relativeRange ?? createDefaultLogsRelativeRange(),
+    );
+    return {
+      startTime: normalizedRange?.startTime ?? null,
+      endTime: normalizedRange?.endTime ?? null,
+    };
+  }
+  if (tab.logsFollowEnabled) {
+    return { startTime: null, endTime: null };
+  }
+  return resolveContainerLogsRange(tab);
+}
+
+function applyContainerLogsRangeOptions(
+  tab: HostContainersTabState,
+  options?: HostContainerLogsRefreshOptions,
+): HostContainersTabState {
+  if (!options?.rangeMode) {
+    return tab;
+  }
+  return {
+    ...tab,
+    logsFollowEnabled: false,
+    logsRangeMode: options.rangeMode,
+    logsRelativeRange:
+      options.rangeMode === "recent"
+        ? options.relativeRange ?? createDefaultLogsRelativeRange()
+        : createDefaultLogsRelativeRange(),
+    logsAbsoluteRange: options.rangeMode === "absolute" ? options.absoluteRange ?? null : null,
+  };
+}
 
 export function createContainersServices(deps: SliceDeps) {
   const { api } = deps;
@@ -674,13 +753,14 @@ export function createContainersServices(deps: SliceDeps) {
     set: StoreSetter,
     get: StoreGetter,
     hostId: string,
-    options?: { tail?: number; followCursor?: string | null },
+    options?: HostContainerLogsRefreshOptions,
   ) => {
     const currentTab = findContainersTab(get(), hostId);
     const containerId = currentTab?.selectedContainerId ?? null;
     if (!currentTab || !containerId) {
       return;
     }
+    const requestRange = resolveContainerLogsRequestRange(currentTab, options);
 
     set((state) => {
       const nextTab = findContainersTab(state, hostId);
@@ -695,7 +775,7 @@ export function createContainersServices(deps: SliceDeps) {
       );
       return {
         containerTabs: upsertContainersTab(state.containerTabs, {
-          ...nextTab,
+          ...applyContainerLogsRangeOptions(nextTab, options),
           logsState: shouldPreserveVisibleLogs ? nextTab.logsState : "loading",
           logsLoading: true,
           logsError: undefined,
@@ -714,6 +794,8 @@ export function createContainersServices(deps: SliceDeps) {
         containerId,
         tail: options?.tail ?? currentTab.logsTailWindow,
         followCursor: options?.followCursor ?? null,
+        startTime: requestRange.startTime,
+        endTime: requestRange.endTime,
       });
       set((state) => {
         const nextTab = findContainersTab(state, hostId);
@@ -726,7 +808,7 @@ export function createContainersServices(deps: SliceDeps) {
             : logs.lines;
         return {
           containerTabs: upsertContainersTab(state.containerTabs, {
-            ...nextTab,
+            ...applyContainerLogsRangeOptions(nextTab, options),
             runtime: logs.runtime,
             logs: {
               ...logs,
@@ -845,6 +927,7 @@ export function createContainersServices(deps: SliceDeps) {
     if (!currentTab || !containerId || !query) {
       return;
     }
+    const requestRange = resolveContainerLogsRange(currentTab);
 
     set((state) => {
       const nextTab = findContainersTab(state, hostId);
@@ -868,6 +951,8 @@ export function createContainersServices(deps: SliceDeps) {
         containerId,
         tail: currentTab.logsTailWindow,
         query,
+        startTime: requestRange.startTime,
+        endTime: requestRange.endTime,
       });
       set((state) => {
         const nextTab = findContainersTab(state, hostId);

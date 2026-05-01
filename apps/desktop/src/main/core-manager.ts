@@ -1427,6 +1427,8 @@ export class CoreManager {
     containerId: string,
     tail: number,
     followCursor?: string | null,
+    startTime?: string | null,
+    endTime?: string | null,
   ): Promise<HostContainerLogsSnapshot> {
     await this.start();
     const response = await this.requestResponse<Record<string, unknown>>(
@@ -1438,6 +1440,8 @@ export class CoreManager {
           containerId,
           tail,
           followCursor: followCursor ?? null,
+          startTime: startTime ?? null,
+          endTime: endTime ?? null,
         },
       },
       ["containersLogs"],
@@ -1543,6 +1547,8 @@ export class CoreManager {
     containerId: string,
     tail: number,
     query: string,
+    startTime?: string | null,
+    endTime?: string | null,
   ): Promise<HostContainerLogSearchResult> {
     await this.start();
     const response = await this.requestResponse<Record<string, unknown>>(
@@ -1550,7 +1556,13 @@ export class CoreManager {
         id: randomUUID(),
         type: "containersSearchLogs",
         endpointId,
-        payload: { containerId, tail, query },
+        payload: {
+          containerId,
+          tail,
+          query,
+          startTime: startTime ?? null,
+          endTime: endTime ?? null,
+        },
       },
       ["containersLogsSearched"],
       { timeoutMs: 25000 },

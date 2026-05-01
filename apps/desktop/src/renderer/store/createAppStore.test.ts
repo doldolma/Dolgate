@@ -86,6 +86,13 @@ function createContainerTab(
     logsLoading: false,
     logsFollowEnabled: false,
     logsTailWindow: 200,
+    logsRangeMode: "recent",
+    logsRelativeRange: {
+      presetKey: "30m",
+      amount: "30",
+      unit: "minute",
+    },
+    logsAbsoluteRange: null,
     logsSearchQuery: "",
     logsSearchMode: null,
     logsSearchLoading: false,
@@ -5769,11 +5776,113 @@ describe("createAppStore", () => {
       containerId: "container-1",
       tail: 1200,
       followCursor: null,
+      startTime: expect.any(String),
+      endTime: expect.any(String),
     });
     expect(
       store.getState().containerTabs.find((tab) => tab.hostId === "host-1")
         ?.logsTailWindow,
     ).toBe(1200);
+  });
+
+  it("applies container log ranges and disables follow for bounded refreshes", async () => {
+    const api = createMockApi();
+    const store = createAppStore(api);
+    await store.getState().bootstrap();
+    await store.getState().openHostContainersTab("host-1");
+
+    store.setState((state) => ({
+      containerTabs: state.containerTabs.map((tab) =>
+        tab.hostId === "host-1"
+          ? {
+              ...tab,
+              selectedContainerId: "container-1",
+              activePanel: "logs",
+              logsFollowEnabled: true,
+            }
+          : tab,
+      ),
+    }));
+
+    await store.getState().refreshHostContainerLogs("host-1", {
+      tail: 500,
+      rangeMode: "absolute",
+      absoluteRange: {
+        startDate: "2026-03-01",
+        startTime: "00:00:00",
+        endDate: "2026-03-02",
+        endTime: "12:30:00",
+      },
+    });
+
+    expect(api.containers.logs).toHaveBeenCalledWith({
+      hostId: "host-1",
+      containerId: "container-1",
+      tail: 500,
+      followCursor: null,
+      startTime: new Date(2026, 2, 1, 0, 0, 0).toISOString(),
+      endTime: new Date(2026, 2, 2, 12, 30, 0).toISOString(),
+    });
+    const nextTab = store
+      .getState()
+      .containerTabs.find((tab) => tab.hostId === "host-1");
+    expect(nextTab?.logsFollowEnabled).toBe(false);
+    expect(nextTab?.logsRangeMode).toBe("absolute");
+    expect(nextTab?.logsAbsoluteRange).toEqual({
+      startDate: "2026-03-01",
+      startTime: "00:00:00",
+      endDate: "2026-03-02",
+      endTime: "12:30:00",
+    });
+  });
+
+  it("resets container log range when follow is re-enabled", async () => {
+    const api = createMockApi();
+    const store = createAppStore(api);
+    await store.getState().bootstrap();
+    await store.getState().openHostContainersTab("host-1");
+
+    store.setState((state) => ({
+      containerTabs: state.containerTabs.map((tab) =>
+        tab.hostId === "host-1"
+          ? {
+              ...tab,
+              selectedContainerId: "container-1",
+              activePanel: "logs",
+              logsRangeMode: "absolute",
+              logsAbsoluteRange: {
+                startDate: "2026-03-01",
+                startTime: "00:00:00",
+                endDate: "2026-03-02",
+                endTime: "12:30:00",
+              },
+            }
+          : tab,
+      ),
+    }));
+
+    store.getState().setHostContainerLogsFollow("host-1", true);
+    await store.getState().refreshHostContainerLogs("host-1");
+
+    expect(api.containers.logs).toHaveBeenCalledWith({
+      hostId: "host-1",
+      containerId: "container-1",
+      tail: 200,
+      followCursor: null,
+      startTime: null,
+      endTime: null,
+    });
+    const nextTab = store
+      .getState()
+      .containerTabs.find((tab) => tab.hostId === "host-1");
+    expect(nextTab?.logsFollowEnabled).toBe(true);
+    expect(nextTab?.logsRangeMode).toBe("recent");
+    expect(nextTab?.logsRelativeRange).toEqual({
+      presetKey: "30m",
+      amount: "30",
+      unit: "minute",
+    });
+    expect(nextTab?.logsAbsoluteRange).toBeNull();
   });
 
   it("stores remote container log search results and metrics samples", async () => {
@@ -5806,6 +5915,8 @@ describe("createAppStore", () => {
       containerId: "container-1",
       tail: 200,
       query: "error",
+      startTime: expect.any(String),
+      endTime: expect.any(String),
     });
     expect(nextTab?.logsSearchMode).toBe("remote");
     expect(nextTab?.metricsState).toBe("ready");

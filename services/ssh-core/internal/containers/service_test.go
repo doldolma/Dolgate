@@ -69,6 +69,8 @@ func TestBuildLogsCommandIncludesSinceCursorWhenPresent(t *testing.T) {
 		"container-1",
 		200,
 		"2026-03-28T09:00:54.613802395Z",
+		"",
+		"",
 	)
 
 	expectedSnippets := []string{
@@ -80,6 +82,47 @@ func TestBuildLogsCommandIncludesSinceCursorWhenPresent(t *testing.T) {
 		if !strings.Contains(command, snippet) {
 			t.Fatalf("expected logs command to include %q, got %q", snippet, command)
 		}
+	}
+}
+
+func TestBuildLogsCommandIncludesAbsoluteRangeWhenPresent(t *testing.T) {
+	command := buildLogsCommand(
+		"/usr/local/bin/docker",
+		"container-1",
+		200,
+		"",
+		"2026-03-28T09:00:00Z",
+		"2026-03-28T09:30:00Z",
+	)
+
+	expectedSnippets := []string{
+		"'/usr/local/bin/docker' logs --timestamps --tail 200",
+		"--since '2026-03-28T09:00:00Z'",
+		"--until '2026-03-28T09:30:00Z'",
+		"'container-1'",
+	}
+	for _, snippet := range expectedSnippets {
+		if !strings.Contains(command, snippet) {
+			t.Fatalf("expected logs command to include %q, got %q", snippet, command)
+		}
+	}
+}
+
+func TestBuildLogsCommandFollowCursorTakesPrecedenceOverAbsoluteRange(t *testing.T) {
+	command := buildLogsCommand(
+		"/usr/local/bin/docker",
+		"container-1",
+		200,
+		"2026-03-28T09:15:00Z",
+		"2026-03-28T09:00:00Z",
+		"2026-03-28T09:30:00Z",
+	)
+
+	if !strings.Contains(command, "--since '2026-03-28T09:15:00Z'") {
+		t.Fatalf("expected follow cursor to be used as since, got %q", command)
+	}
+	if strings.Contains(command, "--until") {
+		t.Fatalf("expected follow command to omit absolute until, got %q", command)
 	}
 }
 
@@ -124,9 +167,18 @@ func TestBuildStatsCommandIncludesNoStreamAndFormat(t *testing.T) {
 }
 
 func TestBuildSearchLogsCommandUsesCaseInsensitiveFixedStringGrep(t *testing.T) {
-	command := buildSearchLogsCommand("/usr/bin/docker", "container-1", 1200, "error text")
+	command := buildSearchLogsCommand(
+		"/usr/bin/docker",
+		"container-1",
+		1200,
+		"error text",
+		"2026-03-28T09:00:00Z",
+		"2026-03-28T09:30:00Z",
+	)
 	expectedSnippets := []string{
 		"logs --timestamps --tail 1200",
+		"--since '2026-03-28T09:00:00Z'",
+		"--until '2026-03-28T09:30:00Z'",
 		"LC_ALL=C grep -iF -- 'error text'",
 		"'container-1'",
 	}

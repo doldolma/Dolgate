@@ -77,6 +77,8 @@ export function registerContainersIpcHandlers(ctx: MainIpcContext): void {
         input.containerId,
         input.tail,
         input.followCursor ?? null,
+        input.startTime ?? null,
+        input.endTime ?? null,
       );
     },
   );
@@ -208,6 +210,8 @@ export function registerContainersIpcHandlers(ctx: MainIpcContext): void {
         input.containerId,
         input.tail,
         input.query,
+        input.startTime ?? null,
+        input.endTime ?? null,
       );
     },
   );
