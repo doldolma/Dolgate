@@ -16,6 +16,7 @@ import {
   rebaseGroupPath,
   stripRemovedGroupSegment,
 } from "@shared";
+import { createDefaultLogsRelativeRange } from "../../lib/log-range";
 import type {
   ActivityLogRecord,
   AppSettings,
@@ -238,6 +239,16 @@ export interface LogsRelativeRangeValue {
   unit: LogsRelativeUnit;
 }
 
+export interface HostContainerLogsRefreshOptions {
+  tail?: number;
+  followCursor?: string | null;
+  startTime?: string | null;
+  endTime?: string | null;
+  rangeMode?: LogsRangeMode;
+  relativeRange?: LogsRelativeRangeValue | null;
+  absoluteRange?: LogsAbsoluteRangeValue | null;
+}
+
 export interface EcsServiceUtilizationHistoryState {
   cpuHistory: AwsMetricHistoryPoint[];
   memoryHistory: AwsMetricHistoryPoint[];
@@ -390,6 +401,9 @@ export interface HostContainersTabState {
   logsError?: string;
   logsFollowEnabled: boolean;
   logsTailWindow: number;
+  logsRangeMode: LogsRangeMode;
+  logsRelativeRange: LogsRelativeRangeValue;
+  logsAbsoluteRange: LogsAbsoluteRangeValue | null;
   logsSearchQuery: string;
   logsSearchMode: ContainerLogsSearchMode;
   logsSearchLoading: boolean;
@@ -732,7 +746,7 @@ export interface AppState {
   ) => void;
   refreshHostContainerLogs: (
     hostId: string,
-    options?: { tail?: number; followCursor?: string | null },
+    options?: HostContainerLogsRefreshOptions,
   ) => Promise<void>;
   loadMoreHostContainerLogs: (hostId: string) => Promise<void>;
   setHostContainerLogsFollow: (hostId: string, enabled: boolean) => void;
@@ -1493,6 +1507,9 @@ export function createEmptyContainersTabState(host: HostRecord): HostContainersT
     logsError: undefined,
     logsFollowEnabled: false,
     logsTailWindow: DEFAULT_CONTAINER_LOGS_TAIL_WINDOW,
+    logsRangeMode: "recent",
+    logsRelativeRange: createDefaultLogsRelativeRange(),
+    logsAbsoluteRange: null,
     logsSearchQuery: "",
     logsSearchMode: null,
     logsSearchLoading: false,
@@ -1528,11 +1545,7 @@ export function createEmptyEcsServiceLogsViewState(): EcsServiceLogsViewState {
     taskArn: null,
     containerName: null,
     rangeMode: "recent",
-    relativeRange: {
-      presetKey: "30m",
-      amount: "30",
-      unit: "minute",
-    },
+    relativeRange: createDefaultLogsRelativeRange(),
     absoluteRange: null,
   };
 }

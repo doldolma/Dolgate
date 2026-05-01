@@ -28,9 +28,7 @@ import type {
   HostContainersTabState,
   LogsAbsoluteRangeValue,
   LogsRangeMode,
-  LogsRelativePresetKey,
   LogsRelativeRangeValue,
-  LogsRelativeUnit,
 } from "../store/createAppStore";
 import { useAwsEcsWorkspaceController } from "../controllers/useAwsEcsWorkspaceController";
 import {
@@ -44,7 +42,6 @@ import {
   EmptyState,
   FieldGroup,
   FilterRow,
-  IconButton,
   Input,
   ModalBody,
   ModalFooter,
@@ -70,6 +67,13 @@ import {
   renderLocalFindHighlightedText,
   shouldOpenLogLocalFind,
 } from "./LogLocalFind";
+import { LogsRangePickerDialog } from "./LogsRangePickerDialog";
+import {
+  createDefaultLogsRelativeRange,
+  formatLogsRangeLabel,
+  normalizeLogsAbsoluteRange,
+  normalizeLogsRelativeRange,
+} from "../lib/log-range";
 
 interface AwsEcsWorkspaceProps {
   host: HostRecord;
@@ -128,33 +132,6 @@ interface ShellPickerState {
   submitting: boolean;
 }
 
-const RANGE_WEEKDAY_LABELS = ["일", "월", "화", "수", "목", "금", "토"];
-const RELATIVE_RANGE_PRESET_OPTIONS: Array<{
-  key: LogsRelativePresetKey;
-  label: string;
-  amount: number;
-  unit: LogsRelativeUnit;
-}> = [
-  { key: "30m", label: "30분 전부터", amount: 30, unit: "minute" },
-  { key: "1h", label: "1시간 전부터", amount: 1, unit: "hour" },
-  { key: "6h", label: "6시간 전부터", amount: 6, unit: "hour" },
-  { key: "1d", label: "1일 전부터", amount: 1, unit: "day" },
-  { key: "3d", label: "3일 전부터", amount: 3, unit: "day" },
-  { key: "1w", label: "1주 전부터", amount: 1, unit: "week" },
-];
-const RELATIVE_RANGE_UNIT_OPTIONS: Array<{
-  value: LogsRelativeUnit;
-  label: string;
-}> = [
-  { value: "second", label: "초" },
-  { value: "minute", label: "분" },
-  { value: "hour", label: "시간" },
-  { value: "day", label: "일" },
-  { value: "week", label: "주" },
-  { value: "month", label: "월" },
-  { value: "year", label: "년" },
-];
-
 const ecsSummaryCardClass =
   "grid gap-[0.35rem] rounded-[18px] border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[color-mix(in_srgb,var(--surface-strong)_90%,transparent_10%)] px-[1rem] py-[0.95rem]";
 const ecsSectionCardClass =
@@ -190,174 +167,6 @@ const ecsDetailTabButtonActiveClass =
   "border-[var(--selection-border)] bg-[var(--selection-tint)] text-[var(--accent-strong)] shadow-none";
 const ecsDetailTabButtonInactiveClass =
   "hover:border-[color-mix(in_srgb,var(--border)_80%,white_20%)] hover:bg-[color-mix(in_srgb,var(--surface)_56%,transparent_44%)] hover:text-[var(--text)]";
-
-function padRangeValue(value: number): string {
-  return String(value).padStart(2, "0");
-}
-
-function formatLocalDateInputValue(date: Date): string {
-  return `${date.getFullYear()}-${padRangeValue(date.getMonth() + 1)}-${padRangeValue(date.getDate())}`;
-}
-
-function formatLocalTimeInputValue(date: Date): string {
-  return `${padRangeValue(date.getHours())}:${padRangeValue(date.getMinutes())}:${padRangeValue(date.getSeconds())}`;
-}
-
-function parseLocalDateTime(
-  dateValue: string,
-  timeValue: string,
-): Date | null {
-  const dateMatch = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dateValue.trim());
-  if (!dateMatch) {
-    return null;
-  }
-  const timeMatch = /^(\d{2}):(\d{2})(?::(\d{2}))?$/.exec(timeValue.trim());
-  if (!timeMatch) {
-    return null;
-  }
-
-  const parsed = new Date(
-    Number(dateMatch[1]),
-    Number(dateMatch[2]) - 1,
-    Number(dateMatch[3]),
-    Number(timeMatch[1]),
-    Number(timeMatch[2]),
-    Number(timeMatch[3] ?? "0"),
-    0,
-  );
-  return Number.isNaN(parsed.getTime()) ? null : parsed;
-}
-
-function createDefaultLogsAbsoluteRange(): LogsAbsoluteRangeValue {
-  const end = new Date();
-  const start = new Date(end.getTime() - 30 * 60 * 1000);
-  return {
-    startDate: formatLocalDateInputValue(start),
-    startTime: formatLocalTimeInputValue(start),
-    endDate: formatLocalDateInputValue(end),
-    endTime: formatLocalTimeInputValue(end),
-  };
-}
-
-function createDefaultLogsRelativeRange(): LogsRelativeRangeValue {
-  return {
-    presetKey: "30m",
-    amount: "30",
-    unit: "minute",
-  };
-}
-
-function subtractLogsRelativeRange(
-  end: Date,
-  amount: number,
-  unit: LogsRelativeUnit,
-): Date {
-  const start = new Date(end);
-  if (unit === "second") {
-    start.setSeconds(start.getSeconds() - amount);
-  } else if (unit === "minute") {
-    start.setMinutes(start.getMinutes() - amount);
-  } else if (unit === "hour") {
-    start.setHours(start.getHours() - amount);
-  } else if (unit === "day") {
-    start.setDate(start.getDate() - amount);
-  } else if (unit === "week") {
-    start.setDate(start.getDate() - amount * 7);
-  } else if (unit === "month") {
-    start.setMonth(start.getMonth() - amount);
-  } else if (unit === "year") {
-    start.setFullYear(start.getFullYear() - amount);
-  }
-  return start;
-}
-
-function normalizeLogsRelativeRange(
-  value: LogsRelativeRangeValue | null,
-  now = new Date(),
-): { startTime: string; endTime: string } | null {
-  if (!value) {
-    return null;
-  }
-  const preset = RELATIVE_RANGE_PRESET_OPTIONS.find(
-    (option) => option.key === value.presetKey,
-  );
-  const resolvedAmount =
-    value.presetKey === "custom"
-      ? Number(value.amount)
-      : preset?.amount ?? Number.NaN;
-  const resolvedUnit =
-    value.presetKey === "custom" ? value.unit : preset?.unit ?? value.unit;
-  if (!Number.isFinite(resolvedAmount) || resolvedAmount <= 0) {
-    return null;
-  }
-  const end = new Date(now);
-  const start = subtractLogsRelativeRange(end, resolvedAmount, resolvedUnit);
-  return {
-    startTime: start.toISOString(),
-    endTime: end.toISOString(),
-  };
-}
-
-function normalizeLogsAbsoluteRange(
-  value: LogsAbsoluteRangeValue | null,
-): { startTime: string; endTime: string } | null {
-  if (!value) {
-    return null;
-  }
-  const start = parseLocalDateTime(value.startDate, value.startTime);
-  const end = parseLocalDateTime(value.endDate, value.endTime);
-  if (!start || !end || end.getTime() < start.getTime()) {
-    return null;
-  }
-  return {
-    startTime: start.toISOString(),
-    endTime: end.toISOString(),
-  };
-}
-
-function formatLogsRangeLabel(
-  mode: LogsRangeMode,
-  absoluteValue: LogsAbsoluteRangeValue | null,
-  relativeValue: LogsRelativeRangeValue | null,
-): string {
-  if (mode === "absolute" && absoluteValue) {
-    return `${absoluteValue.startDate.replace(/-/g, "/")} ${absoluteValue.startTime.slice(0, 5)} - ${absoluteValue.endDate.replace(/-/g, "/")} ${absoluteValue.endTime.slice(0, 5)}`;
-  }
-  const preset = RELATIVE_RANGE_PRESET_OPTIONS.find(
-    (option) => option.key === relativeValue?.presetKey,
-  );
-  if (relativeValue?.presetKey === "custom") {
-    return `최근 ${relativeValue.amount || "0"}${RELATIVE_RANGE_UNIT_OPTIONS.find((option) => option.value === relativeValue.unit)?.label ?? ""}`;
-  }
-  return preset ? `최근 ${preset.label.replace(" 전부터", "")}` : "최근 30분";
-}
-
-function startOfRangeMonth(date: Date): Date {
-  return new Date(date.getFullYear(), date.getMonth(), 1);
-}
-
-function addRangeMonths(date: Date, months: number): Date {
-  return new Date(date.getFullYear(), date.getMonth() + months, 1);
-}
-
-function buildRangeCalendarDays(month: Date): Date[] {
-  const firstDay = startOfRangeMonth(month);
-  const gridStart = new Date(firstDay);
-  gridStart.setDate(firstDay.getDate() - firstDay.getDay());
-  return Array.from({ length: 42 }, (_, index) => {
-    const next = new Date(gridStart);
-    next.setDate(gridStart.getDate() + index);
-    return next;
-  });
-}
-
-function formatRangeMonthLabel(date: Date): string {
-  return `${date.getFullYear()}년 ${date.getMonth() + 1}월`;
-}
-
-function formatRangeDayValue(date: Date): string {
-  return formatLocalDateInputValue(date);
-}
 
 function formatLoadedAt(value: string): string {
   const parsed = new Date(value);
@@ -788,401 +597,6 @@ function buildShellPickerStateFromContext(
   };
 }
 
-function LogsRangePickerDialog({
-  open,
-  mode,
-  absoluteValue,
-  relativeValue,
-  onClose,
-  onApply,
-}: {
-  open: boolean;
-  mode: LogsRangeMode;
-  absoluteValue: LogsAbsoluteRangeValue | null;
-  relativeValue: LogsRelativeRangeValue | null;
-  onClose: () => void;
-  onApply: (
-    nextMode: LogsRangeMode,
-    nextAbsoluteValue: LogsAbsoluteRangeValue | null,
-    nextRelativeValue: LogsRelativeRangeValue | null,
-  ) => void;
-}) {
-  const [draftMode, setDraftMode] = useState<LogsRangeMode>(mode);
-  const [draftAbsoluteValue, setDraftAbsoluteValue] = useState<LogsAbsoluteRangeValue>(
-    absoluteValue ?? createDefaultLogsAbsoluteRange(),
-  );
-  const [draftRelativeValue, setDraftRelativeValue] = useState<LogsRelativeRangeValue>(
-    relativeValue ?? createDefaultLogsRelativeRange(),
-  );
-  const [anchorMonth, setAnchorMonth] = useState<Date>(() => {
-    const baseDate =
-      parseLocalDateTime(
-        (absoluteValue ?? createDefaultLogsAbsoluteRange()).startDate,
-        "00:00:00",
-      ) ?? new Date();
-    return startOfRangeMonth(baseDate);
-  });
-  const [selectionCursor, setSelectionCursor] = useState<"start" | "end">(
-    "start",
-  );
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (!open) {
-      return;
-    }
-    const nextAbsoluteValue = absoluteValue ?? createDefaultLogsAbsoluteRange();
-    setDraftMode(mode);
-    setDraftAbsoluteValue(nextAbsoluteValue);
-    setDraftRelativeValue(relativeValue ?? createDefaultLogsRelativeRange());
-    setAnchorMonth(
-      startOfRangeMonth(
-        parseLocalDateTime(nextAbsoluteValue.startDate, "00:00:00") ?? new Date(),
-      ),
-    );
-    setSelectionCursor("start");
-    setError(null);
-  }, [absoluteValue, mode, open, relativeValue]);
-
-  const normalizedDraftAbsolute = normalizeLogsAbsoluteRange(draftAbsoluteValue);
-  const startDateValue = draftAbsoluteValue.startDate;
-  const endDateValue = draftAbsoluteValue.endDate;
-
-  const handleSelectDay = useCallback((dateValue: string) => {
-    setDraftMode("absolute");
-    setError(null);
-    setDraftAbsoluteValue((previous) => {
-      if (selectionCursor === "start") {
-        return {
-          ...previous,
-          startDate: dateValue,
-          endDate: previous.endDate < dateValue ? dateValue : previous.endDate,
-        };
-      }
-      if (dateValue < previous.startDate) {
-        return {
-          ...previous,
-          startDate: dateValue,
-          endDate: previous.startDate,
-        };
-      }
-      return {
-        ...previous,
-        endDate: dateValue,
-      };
-    });
-    setSelectionCursor((previous) => (previous === "start" ? "end" : "start"));
-  }, [selectionCursor]);
-
-  if (!open) {
-    return null;
-  }
-
-  return (
-    <div
-      className="fixed inset-0 z-[8] grid place-items-center bg-[rgba(12,20,32,0.32)]"
-      role="presentation"
-      onClick={() => {
-        onClose();
-      }}
-    >
-      <ModalShell
-        size="lg"
-        role="dialog"
-        aria-modal="true"
-        aria-label="로그 범위 선택"
-        onClick={(event) => {
-          event.stopPropagation();
-        }}
-      >
-        <ModalHeader>
-          <Tabs role="tablist" aria-label="로그 범위 모드">
-            <TabButton
-              role="tab"
-              active={draftMode === "recent"}
-              aria-selected={draftMode === "recent"}
-              onClick={() => {
-                setDraftMode("recent");
-                setError(null);
-              }}
-            >
-              상대 범위
-            </TabButton>
-            <TabButton
-              role="tab"
-              active={draftMode === "absolute"}
-              aria-selected={draftMode === "absolute"}
-              onClick={() => {
-                setDraftMode("absolute");
-                setError(null);
-              }}
-            >
-              절대 범위
-            </TabButton>
-          </Tabs>
-        </ModalHeader>
-
-        {draftMode === "absolute" ? (
-          <ModalBody className="w-[min(1040px,100%)]">
-            <div className="grid items-start gap-[0.9rem] lg:grid-cols-[auto_minmax(0,1fr)_auto]">
-              <IconButton
-                size="sm"
-                aria-label="이전 달"
-                onClick={() => {
-                  setAnchorMonth((previous) => addRangeMonths(previous, -1));
-                }}
-              >
-                {"<"}
-              </IconButton>
-              <div className="grid gap-4 lg:grid-cols-2">
-                {[anchorMonth, addRangeMonths(anchorMonth, 1)].map((month) => {
-                  const monthKey = `${month.getFullYear()}-${month.getMonth()}`;
-                  const monthValue = month.getMonth();
-                  return (
-                    <section
-                      key={monthKey}
-                      className="grid gap-3"
-                    >
-                      <header className="flex min-h-8 items-center justify-center">
-                        <strong>{formatRangeMonthLabel(month)}</strong>
-                      </header>
-                      <div className="grid grid-cols-7 gap-[0.35rem] text-center text-[0.82rem] font-semibold text-[var(--text-soft)]">
-                        {RANGE_WEEKDAY_LABELS.map((label) => (
-                          <span key={`${monthKey}:${label}`}>{label}</span>
-                        ))}
-                      </div>
-                      <div className="grid grid-cols-7 gap-[0.28rem]">
-                        {buildRangeCalendarDays(month).map((day) => {
-                          const dayValue = formatRangeDayValue(day);
-                          const isCurrentMonth = day.getMonth() === monthValue;
-                          const isStart = dayValue === startDateValue;
-                          const isEnd = dayValue === endDateValue;
-                          const isInRange =
-                            dayValue >= startDateValue && dayValue <= endDateValue;
-                          return (
-                            <button
-                              key={`${monthKey}:${dayValue}`}
-                              type="button"
-                              className={cn(
-                                "min-h-[2.6rem] rounded-[12px] border border-transparent bg-transparent font-semibold text-[var(--text)] transition-[background,border-color,color] duration-150 hover:border-[color-mix(in_srgb,var(--accent-strong)_30%,var(--border)_70%)] hover:bg-[color-mix(in_srgb,var(--accent-strong)_10%,transparent_90%)]",
-                                !isCurrentMonth
-                                  ? "text-[color-mix(in_srgb,var(--text-soft)_78%,transparent_22%)]"
-                                  : "",
-                                isInRange
-                                  ? "border-[color-mix(in_srgb,var(--accent-strong)_36%,var(--border)_64%)] bg-[color-mix(in_srgb,var(--accent-strong)_12%,transparent_88%)]"
-                                  : "",
-                                isStart || isEnd
-                                  ? "border-[color-mix(in_srgb,var(--accent-strong)_68%,var(--border)_32%)] bg-[var(--accent-strong)] text-white"
-                                  : "",
-                              )}
-                              onClick={() => {
-                                handleSelectDay(dayValue);
-                              }}
-                            >
-                              {day.getDate()}
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </section>
-                  );
-                })}
-              </div>
-              <IconButton
-                size="sm"
-                aria-label="다음 달"
-                onClick={() => {
-                  setAnchorMonth((previous) => addRangeMonths(previous, 1));
-                }}
-              >
-                {">"}
-              </IconButton>
-            </div>
-
-            <div className="mt-4 grid gap-[0.85rem_0.9rem] md:grid-cols-2 xl:grid-cols-4">
-              <FieldGroup label="시작 날짜">
-                <Input
-                  type="date"
-                  value={draftAbsoluteValue.startDate}
-                  onChange={(event) => {
-                    setDraftAbsoluteValue((previous) => ({
-                      ...previous,
-                      startDate: event.target.value,
-                    }));
-                  }}
-                />
-              </FieldGroup>
-              <FieldGroup label="시작 시간">
-                <Input
-                  type="time"
-                  step="1"
-                  value={draftAbsoluteValue.startTime}
-                  onChange={(event) => {
-                    setDraftAbsoluteValue((previous) => ({
-                      ...previous,
-                      startTime: event.target.value,
-                    }));
-                  }}
-                />
-              </FieldGroup>
-              <FieldGroup label="종료 날짜">
-                <Input
-                  type="date"
-                  value={draftAbsoluteValue.endDate}
-                  onChange={(event) => {
-                    setDraftAbsoluteValue((previous) => ({
-                      ...previous,
-                      endDate: event.target.value,
-                    }));
-                  }}
-                />
-              </FieldGroup>
-              <FieldGroup label="종료 시간">
-                <Input
-                  type="time"
-                  step="1"
-                  value={draftAbsoluteValue.endTime}
-                  onChange={(event) => {
-                    setDraftAbsoluteValue((previous) => ({
-                      ...previous,
-                      endTime: event.target.value,
-                    }));
-                  }}
-                />
-              </FieldGroup>
-            </div>
-            <p className="mt-3 text-[0.84rem] leading-[1.6] text-[var(--text-soft)]">
-              날짜는 로컬 시간대로 적용됩니다. 절대 범위를 적용하면 Follow는 자동으로 꺼집니다.
-            </p>
-          </ModalBody>
-        ) : (
-          <ModalBody className="grid items-start gap-5 lg:grid-cols-[13.5rem_minmax(20rem,24rem)]">
-            <div className="grid content-start gap-[0.55rem]">
-              {RELATIVE_RANGE_PRESET_OPTIONS.map((option) => (
-                <label
-                  key={option.key}
-                  className="grid min-h-[2.25rem] grid-cols-[1rem_minmax(0,1fr)] items-center gap-[0.85rem] text-[0.98rem] font-semibold text-[var(--text)]"
-                >
-                  <input
-                    type="radio"
-                    name="ecs-logs-relative-range"
-                    className="m-0 h-4 w-4 justify-self-center accent-[var(--accent-strong)]"
-                    checked={draftRelativeValue.presetKey === option.key}
-                    onChange={() => {
-                      setDraftRelativeValue({
-                        presetKey: option.key,
-                        amount: String(option.amount),
-                        unit: option.unit,
-                      });
-                    }}
-                  />
-                  <span className="whitespace-nowrap leading-none">{option.label}</span>
-                </label>
-              ))}
-              <label className="mt-1 grid min-h-[2.25rem] grid-cols-[1rem_minmax(0,1fr)] items-center gap-[0.85rem] text-[0.98rem] font-semibold text-[var(--text)]">
-                <input
-                  type="radio"
-                  name="ecs-logs-relative-range"
-                  className="m-0 h-4 w-4 justify-self-center accent-[var(--accent-strong)]"
-                  checked={draftRelativeValue.presetKey === "custom"}
-                  onChange={() => {
-                    setDraftRelativeValue((previous) => ({
-                      ...previous,
-                      presetKey: "custom",
-                    }));
-                  }}
-                />
-                <span className="whitespace-nowrap leading-none">사용자 지정 범위</span>
-              </label>
-            </div>
-            <div className="grid max-w-[24rem] items-end gap-[0.9rem] lg:grid-cols-[minmax(0,1fr)_11.25rem]">
-              <FieldGroup label="기간">
-                <Input
-                  type="number"
-                  min="1"
-                  value={draftRelativeValue.amount}
-                  disabled={draftRelativeValue.presetKey !== "custom"}
-                  onChange={(event) => {
-                    setDraftRelativeValue((previous) => ({
-                      ...previous,
-                      presetKey: "custom",
-                      amount: event.target.value,
-                    }));
-                  }}
-                />
-              </FieldGroup>
-              <FieldGroup label="단위">
-                <SelectField
-                  value={draftRelativeValue.unit}
-                  disabled={draftRelativeValue.presetKey !== "custom"}
-                  onChange={(event) => {
-                    setDraftRelativeValue((previous) => ({
-                      ...previous,
-                      presetKey: "custom",
-                      unit: event.target.value as LogsRelativeUnit,
-                    }));
-                  }}
-                >
-                  {RELATIVE_RANGE_UNIT_OPTIONS.map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </SelectField>
-              </FieldGroup>
-            </div>
-            <p className="text-[0.84rem] leading-[1.6] text-[var(--text-soft)] lg:col-span-2">
-              상대 범위를 적용하면 현재 시점을 기준으로 범위를 계산해 다시 조회합니다.
-            </p>
-          </ModalBody>
-        )}
-
-        {error ? (
-          <div className="px-6 pb-2">
-            <NoticeCard tone="danger" role="alert">
-              {error}
-            </NoticeCard>
-          </div>
-        ) : null}
-
-        <ModalFooter>
-          <Button
-            variant="secondary"
-            onClick={() => {
-              onClose();
-            }}
-          >
-            취소
-          </Button>
-          <Button
-            variant="primary"
-            onClick={() => {
-              if (draftMode === "absolute" && !normalizedDraftAbsolute) {
-                setError("시작 시간과 종료 시간을 확인해 주세요.");
-                return;
-              }
-              if (
-                draftMode === "recent" &&
-                !normalizeLogsRelativeRange(draftRelativeValue)
-              ) {
-                setError("상대 범위 값을 확인해 주세요.");
-                return;
-              }
-              onApply(
-                draftMode,
-                draftMode === "absolute" ? draftAbsoluteValue : null,
-                draftMode === "recent" ? draftRelativeValue : null,
-              );
-            }}
-          >
-            적용
-          </Button>
-        </ModalFooter>
-      </ModalShell>
-    </div>
-  );
-}
-
 function MetricsPanel({
   service,
   history,
@@ -1308,6 +722,7 @@ export function AwsEcsWorkspace({
   const [shellPickerState, setShellPickerState] = useState<ShellPickerState>(
     createEmptyShellPickerState,
   );
+  const [logsFocusMode, setLogsFocusMode] = useState(false);
   const [localFindOpen, setLocalFindOpen] = useState(false);
   const [localFindQuery, setLocalFindQuery] = useState("");
   const [activeLocalFindMatchIndex, setActiveLocalFindMatchIndex] = useState(0);
@@ -1355,6 +770,7 @@ export function AwsEcsWorkspace({
     setLocalFindQuery("");
     setActiveLocalFindMatchIndex(0);
     localFindMatchRefs.current.clear();
+    setLogsFocusMode(false);
     setTunnelState(createEmptyTunnelState());
     setShellPickerState(createEmptyShellPickerState());
   }, [host.id]);
@@ -1441,6 +857,15 @@ export function AwsEcsWorkspace({
       null,
     [selectedServiceName, services],
   );
+  const isLogsPanel = activePanel === "logs";
+  const logsFocusModeActive = logsFocusMode && isLogsPanel && Boolean(selectedService);
+
+  useEffect(() => {
+    if (!isLogsPanel) {
+      setLogsFocusMode(false);
+    }
+  }, [isLogsPanel]);
+
   const setServiceLogsState = useCallback(
     (serviceName: string, updater: LogsStateUpdater) => {
       if (onSetLogsState) {
@@ -2388,26 +1813,28 @@ export function AwsEcsWorkspace({
 
   return (
     <div className="relative flex h-full min-h-0 flex-col gap-3">
-      <Toolbar className="justify-between gap-4 rounded-[24px] border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[var(--surface-elevated)] px-[1.15rem] py-[1.1rem]">
-        <div>
-          <div className="flex flex-wrap gap-2 text-[0.9rem] text-[var(--text-soft)]">
-            <span>{getHostBadgeLabel(host)}</span>
-            <span>{getHostSubtitle(host)}</span>
+      {!logsFocusModeActive ? (
+        <Toolbar className="justify-between gap-4 rounded-[24px] border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[var(--surface-elevated)] px-[1.15rem] py-[1.1rem]">
+          <div>
+            <div className="flex flex-wrap gap-2 text-[0.9rem] text-[var(--text-soft)]">
+              <span>{getHostBadgeLabel(host)}</span>
+              <span>{getHostSubtitle(host)}</span>
+            </div>
           </div>
-        </div>
-        <div className="flex flex-wrap items-center gap-3">
-          <Button
-            variant="secondary"
-            size="sm"
-            disabled={tab.isLoading}
-            onClick={() => {
-              void onRefresh(host.id);
-            }}
-          >
-            {tab.isLoading ? "불러오는 중..." : "Refresh"}
-          </Button>
-        </div>
-      </Toolbar>
+          <div className="flex flex-wrap items-center gap-3">
+            <Button
+              variant="secondary"
+              size="sm"
+              disabled={tab.isLoading}
+              onClick={() => {
+                void onRefresh(host.id);
+              }}
+            >
+              {tab.isLoading ? "불러오는 중..." : "Refresh"}
+            </Button>
+          </div>
+        </Toolbar>
+      ) : null}
 
       {tab.errorMessage ? (
         <NoticeCard tone="danger" role="alert">
@@ -2430,108 +1857,154 @@ export function AwsEcsWorkspace({
       ) : null}
 
       {snapshot ? (
-        <div className="flex min-h-0 flex-1 flex-col gap-[0.95rem]">
-          <div className="grid shrink-0 gap-[0.9rem] lg:grid-cols-[repeat(auto-fit,minmax(280px,1fr))]">
-            <Card className="items-start">
-              <CardMain>
-                <CardTitleRow>
-                  <strong>{snapshot.cluster.clusterName}</strong>
-                  <StatusBadge tone={getRolloutTone(snapshot.cluster.status)}>
-                    {snapshot.cluster.status}
-                  </StatusBadge>
-                </CardTitleRow>
-                <CardMeta>
-                  <span>{snapshot.profileName}</span>
-                  <span>{snapshot.region}</span>
-                  <span>마지막 갱신 {formatLoadedAt(snapshot.loadedAt)}</span>
-                </CardMeta>
-              </CardMain>
-            </Card>
+        <div
+          className={cn(
+            "flex min-h-0 flex-1 flex-col",
+            logsFocusModeActive ? "gap-2" : "gap-[0.95rem]",
+          )}
+        >
+          {!logsFocusModeActive ? (
+            <div
+              className="grid shrink-0 gap-[0.9rem] lg:grid-cols-[repeat(auto-fit,minmax(280px,1fr))]"
+              data-testid="ecs-summary-cards"
+            >
+              <Card className="items-start">
+                <CardMain>
+                  <CardTitleRow>
+                    <strong>{snapshot.cluster.clusterName}</strong>
+                    <StatusBadge tone={getRolloutTone(snapshot.cluster.status)}>
+                      {snapshot.cluster.status}
+                    </StatusBadge>
+                  </CardTitleRow>
+                  <CardMeta>
+                    <span>{snapshot.profileName}</span>
+                    <span>{snapshot.region}</span>
+                    <span>마지막 갱신 {formatLoadedAt(snapshot.loadedAt)}</span>
+                  </CardMeta>
+                </CardMain>
+              </Card>
 
-            <Card className="items-start">
-              <CardMain>
-                <CardTitleRow>
+              <Card className="items-start">
+                <CardMain>
+                  <CardTitleRow>
+                    <strong>Services</strong>
+                  </CardTitleRow>
+                  <CardMeta className="mt-1">
+                    <span>Active {snapshot.cluster.activeServicesCount}</span>
+                    <span>Running {snapshot.cluster.runningTasksCount}</span>
+                    <span>Pending {snapshot.cluster.pendingTasksCount}</span>
+                  </CardMeta>
+                </CardMain>
+              </Card>
+            </div>
+          ) : null}
+
+          <div
+            className={cn(
+              "grid min-h-0 flex-1",
+              logsFocusModeActive
+                ? "gap-0"
+                : "gap-4 lg:grid-cols-[minmax(280px,340px)_minmax(0,1fr)]",
+            )}
+            data-testid={logsFocusModeActive ? "ecs-logs-focus-layout" : undefined}
+          >
+            {!logsFocusModeActive ? (
+              <aside
+                className="flex min-h-0 flex-col gap-4 overflow-hidden rounded-[24px] border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[var(--surface-elevated)] p-[1.15rem]"
+                data-testid="ecs-services-sidebar"
+              >
+                <div className="flex items-center justify-between gap-3">
                   <strong>Services</strong>
-                </CardTitleRow>
-                <CardMeta className="mt-1">
-                  <span>Active {snapshot.cluster.activeServicesCount}</span>
-                  <span>Running {snapshot.cluster.runningTasksCount}</span>
-                  <span>Pending {snapshot.cluster.pendingTasksCount}</span>
-                </CardMeta>
-              </CardMain>
-            </Card>
-          </div>
+                  <span>{services.length}</span>
+                </div>
 
-          <div className="grid min-h-0 flex-1 gap-4 lg:grid-cols-[minmax(280px,340px)_minmax(0,1fr)]">
-            <aside className="flex min-h-0 flex-col gap-4 overflow-hidden rounded-[24px] border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[var(--surface-elevated)] p-[1.15rem]">
-              <div className="flex items-center justify-between gap-3">
-                <strong>Services</strong>
-                <span>{services.length}</span>
-              </div>
-
-              {services.length === 0 ? (
-                <EmptyState title="이 클러스터에는 표시할 서비스가 없습니다." />
-              ) : (
-                <div className="flex min-h-0 flex-col gap-[0.55rem] overflow-y-auto pr-px">
-                  {services.map((service) => {
-                    const isSelected = service.serviceName === selectedService?.serviceName;
-                    return (
-                      <article
-                        key={service.serviceArn}
-                        data-testid="ecs-service-row"
-                        className={cn(
-                          "shrink-0 overflow-hidden rounded-[18px] border bg-[color-mix(in_srgb,var(--surface)_92%,transparent_8%)] shadow-none transition-[border-color,background-color] duration-150",
-                          "border-[var(--border)]",
-                          isSelected
-                            ? "border-[var(--selection-border)] bg-[var(--selection-tint)]"
-                            : "",
-                        )}
-                      >
-                        <button
-                          type="button"
-                          className="grid w-full min-w-0 content-start gap-[0.34rem] border-0 bg-transparent px-[0.95rem] py-[0.72rem] text-left text-inherit"
-                          onClick={() => {
-                            handleSelectService(service.serviceName);
-                          }}
+                {services.length === 0 ? (
+                  <EmptyState title="이 클러스터에는 표시할 서비스가 없습니다." />
+                ) : (
+                  <div className="flex min-h-0 flex-col gap-[0.55rem] overflow-y-auto pr-px">
+                    {services.map((service) => {
+                      const isSelected = service.serviceName === selectedService?.serviceName;
+                      return (
+                        <article
+                          key={service.serviceArn}
+                          data-testid="ecs-service-row"
+                          className={cn(
+                            "shrink-0 overflow-hidden rounded-[18px] border bg-[color-mix(in_srgb,var(--surface)_92%,transparent_8%)] shadow-none transition-[border-color,background-color] duration-150",
+                            "border-[var(--border)]",
+                            isSelected
+                              ? "border-[var(--selection-border)] bg-[var(--selection-tint)]"
+                              : "",
+                          )}
                         >
-                          <strong className="block min-w-0 overflow-wrap-anywhere leading-[1.35]">
-                            {service.serviceName}
-                          </strong>
-                          <div className="flex flex-wrap gap-[0.45rem]">
-                            <StatusBadge
-                              tone={getServiceStatusTone(service)}
-                              className="min-h-[1.55rem] px-[0.62rem] py-[0.14rem] text-[0.72rem]"
-                            >
-                              {service.status}
-                            </StatusBadge>
-                            {service.rolloutState ? (
+                          <button
+                            type="button"
+                            className="grid w-full min-w-0 content-start gap-[0.34rem] border-0 bg-transparent px-[0.95rem] py-[0.72rem] text-left text-inherit"
+                            onClick={() => {
+                              handleSelectService(service.serviceName);
+                            }}
+                          >
+                            <strong className="block min-w-0 overflow-wrap-anywhere leading-[1.35]">
+                              {service.serviceName}
+                            </strong>
+                            <div className="flex flex-wrap gap-[0.45rem]">
                               <StatusBadge
-                                tone={getRolloutTone(service.rolloutState)}
+                                tone={getServiceStatusTone(service)}
                                 className="min-h-[1.55rem] px-[0.62rem] py-[0.14rem] text-[0.72rem]"
                               >
-                                {service.rolloutState}
+                                {service.status}
                               </StatusBadge>
-                            ) : null}
-                          </div>
-                          <div className="flex flex-wrap gap-[0.55rem_0.8rem] text-[0.84rem] text-[var(--text-soft)]">
-                            <span>CPU {formatPercent(service.cpuUtilizationPercent)}</span>
-                            <span>
-                              Memory {formatPercent(service.memoryUtilizationPercent)}
-                            </span>
-                          </div>
-                        </button>
-                      </article>
-                    );
-                  })}
-                </div>
-              )}
-            </aside>
+                              {service.rolloutState ? (
+                                <StatusBadge
+                                  tone={getRolloutTone(service.rolloutState)}
+                                  className="min-h-[1.55rem] px-[0.62rem] py-[0.14rem] text-[0.72rem]"
+                                >
+                                  {service.rolloutState}
+                                </StatusBadge>
+                              ) : null}
+                            </div>
+                            <div className="flex flex-wrap gap-[0.55rem_0.8rem] text-[0.84rem] text-[var(--text-soft)]">
+                              <span>CPU {formatPercent(service.cpuUtilizationPercent)}</span>
+                              <span>
+                                Memory {formatPercent(service.memoryUtilizationPercent)}
+                              </span>
+                            </div>
+                          </button>
+                        </article>
+                      );
+                    })}
+                  </div>
+                )}
+              </aside>
+            ) : null}
 
-            <section className="flex min-h-0 flex-col gap-4 overflow-hidden rounded-[24px] border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[var(--surface-elevated)] p-[1.15rem]">
+            <section
+              className={cn(
+                "flex min-h-0 flex-col overflow-hidden border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[var(--surface-elevated)]",
+                logsFocusModeActive
+                  ? "gap-2 rounded-[20px] p-[0.8rem]"
+                  : isLogsPanel
+                    ? "gap-3 rounded-[24px] p-[0.95rem]"
+                    : "gap-4 rounded-[24px] p-[1.15rem]",
+              )}
+            >
               {selectedService ? (
                 <>
-                  <div className="grid shrink-0 items-start gap-4 lg:grid-cols-[minmax(0,1fr)_auto]">
-                    <div className="min-w-0">
+                  <div
+                    className={cn(
+                      "shrink-0",
+                      logsFocusModeActive
+                        ? "flex flex-wrap items-center justify-between gap-2 rounded-[16px] border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[color-mix(in_srgb,var(--surface-muted)_70%,transparent_30%)] px-3 py-2"
+                        : "grid items-start gap-4 lg:grid-cols-[minmax(0,1fr)_auto]",
+                    )}
+                  >
+                    <div
+                      className={cn(
+                        "min-w-0",
+                        logsFocusModeActive
+                          ? "flex flex-wrap items-center gap-2"
+                          : "",
+                      )}
+                    >
                       <CardTitleRow>
                         <h3>{selectedService.serviceName}</h3>
                         <StatusBadge tone={getServiceStatusTone(selectedService)}>
@@ -2543,81 +2016,143 @@ export function AwsEcsWorkspace({
                           </StatusBadge>
                         ) : null}
                       </CardTitleRow>
-                      <CardMeta>
-                        <span>{selectedService.capacityProviderSummary || selectedService.launchType || "Launch type unavailable"}</span>
-                        <span>
-                          Task def{" "}
-                          {selectedService.taskDefinitionRevision
-                            ? String(selectedService.taskDefinitionRevision)
-                            : selectedService.taskDefinitionArn || "-"}
-                        </span>
-                        {formatServicePorts(selectedService) ? (
-                          <span>{formatServicePorts(selectedService)}</span>
-                        ) : null}
-                        {getExposureBadgeLabels(selectedService.exposureKinds).map((label) => (
-                          <Badge
-                            key={`${selectedService.serviceArn}:${label}`}
-                            tone="neutral"
-                            className="min-h-[1.42rem] border-[color-mix(in_srgb,var(--accent-strong)_18%,var(--border)_82%)] bg-[color-mix(in_srgb,var(--accent-strong)_10%,transparent_90%)] px-[0.48rem] py-[0.04rem] text-[0.74rem] font-semibold text-[var(--text-soft)]"
-                          >
-                            {label}
-                          </Badge>
-                        ))}
-                      </CardMeta>
+                      {!logsFocusModeActive ? (
+                        <CardMeta>
+                          <span>{selectedService.capacityProviderSummary || selectedService.launchType || "Launch type unavailable"}</span>
+                          <span>
+                            Task def{" "}
+                            {selectedService.taskDefinitionRevision
+                              ? String(selectedService.taskDefinitionRevision)
+                              : selectedService.taskDefinitionArn || "-"}
+                          </span>
+                          {formatServicePorts(selectedService) ? (
+                            <span>{formatServicePorts(selectedService)}</span>
+                          ) : null}
+                          {getExposureBadgeLabels(selectedService.exposureKinds).map((label) => (
+                            <Badge
+                              key={`${selectedService.serviceArn}:${label}`}
+                              tone="neutral"
+                              className="min-h-[1.42rem] border-[color-mix(in_srgb,var(--accent-strong)_18%,var(--border)_82%)] bg-[color-mix(in_srgb,var(--accent-strong)_10%,transparent_90%)] px-[0.48rem] py-[0.04rem] text-[0.74rem] font-semibold text-[var(--text-soft)]"
+                            >
+                              {label}
+                            </Badge>
+                          ))}
+                        </CardMeta>
+                      ) : null}
                     </div>
-                    <div className="flex shrink-0 flex-wrap items-center justify-end gap-3 self-start max-[980px]:w-full max-[980px]:justify-start">
-                      <Button
-                        variant="secondary"
-                        size="sm"
-                        onClick={() => {
-                          void handleOpenShell(selectedService.serviceName);
-                        }}
-                      >
-                        쉘 접속
-                      </Button>
-                      <Tabs
-                        role="tablist"
-                        aria-label="ECS 서비스 상세 패널"
-                        className={cn(
-                          ecsDetailTabsClass,
-                          "min-w-0 max-[980px]:overflow-x-auto",
-                        )}
-                      >
-                        {(
-                          [
-                            ["overview", "Overview"],
-                            ["logs", "Logs"],
-                            ["metrics", "Metrics"],
-                            ["tunnel", "Tunnel"],
-                          ] as Array<[EcsDetailPanel, string]>
-                        ).map(([panel, label]) => (
-                          <TabButton
-                            key={panel}
-                            role="tab"
-                            aria-selected={activePanel === panel}
-                            active={activePanel === panel}
-                            className={cn(
-                              ecsDetailTabButtonBaseClass,
-                              activePanel === panel
-                                ? ecsDetailTabButtonActiveClass
-                                : ecsDetailTabButtonInactiveClass,
-                            )}
+                    <div
+                      className={cn(
+                        "flex shrink-0 items-end justify-end self-start",
+                        logsFocusModeActive
+                          ? "flex-wrap gap-2"
+                          : "flex-col gap-3 max-[980px]:w-full max-[980px]:items-start",
+                      )}
+                    >
+                      {logsFocusModeActive ? (
+                        <>
+                          <Button
+                            variant="secondary"
+                            size="sm"
                             onClick={() => {
-                              if (onSetPanel) {
-                                onSetPanel(host.id, panel);
-                                return;
-                              }
-                              setLocalActivePanel(panel);
+                              void handleOpenShell(selectedService.serviceName);
                             }}
                           >
-                            {label}
-                          </TabButton>
-                        ))}
-                      </Tabs>
+                            쉘 접속
+                          </Button>
+                          {isLogsPanel ? (
+                            <Button
+                              variant="primary"
+                              size="sm"
+                              onClick={() => {
+                                setLogsFocusMode((current) => !current);
+                              }}
+                            >
+                              일반 보기
+                            </Button>
+                          ) : null}
+                        </>
+                      ) : (
+                        <>
+                          <div
+                            className="flex flex-wrap justify-end gap-2 max-[980px]:justify-start"
+                            data-testid="ecs-service-action-controls"
+                          >
+                            <Button
+                              variant="secondary"
+                              size="sm"
+                              onClick={() => {
+                                void handleOpenShell(selectedService.serviceName);
+                              }}
+                            >
+                              쉘 접속
+                            </Button>
+                          </div>
+                          <div
+                            className="flex w-full flex-wrap items-center justify-end gap-3 max-[980px]:justify-start"
+                            data-testid="ecs-panel-switcher-row"
+                          >
+                            <Tabs
+                              role="tablist"
+                              aria-label="ECS 서비스 상세 패널"
+                              className={cn(
+                                ecsDetailTabsClass,
+                                "min-w-0 max-[980px]:overflow-x-auto",
+                              )}
+                            >
+                              {(
+                                [
+                                  ["overview", "Overview"],
+                                  ["logs", "Logs"],
+                                  ["metrics", "Metrics"],
+                                  ["tunnel", "Tunnel"],
+                                ] as Array<[EcsDetailPanel, string]>
+                              ).map(([panel, label]) => (
+                                <TabButton
+                                  key={panel}
+                                  role="tab"
+                                  aria-selected={activePanel === panel}
+                                  active={activePanel === panel}
+                                  className={cn(
+                                    ecsDetailTabButtonBaseClass,
+                                    activePanel === panel
+                                      ? ecsDetailTabButtonActiveClass
+                                      : ecsDetailTabButtonInactiveClass,
+                                  )}
+                                  onClick={() => {
+                                    if (onSetPanel) {
+                                      onSetPanel(host.id, panel);
+                                      return;
+                                    }
+                                    setLocalActivePanel(panel);
+                                  }}
+                                >
+                                  {label}
+                                </TabButton>
+                              ))}
+                            </Tabs>
+                            {isLogsPanel ? (
+                              <Button
+                                variant="secondary"
+                                size="sm"
+                                onClick={() => {
+                                  setLogsFocusMode((current) => !current);
+                                }}
+                              >
+                                로그 크게 보기
+                              </Button>
+                            ) : null}
+                          </div>
+                        </>
+                      )}
                     </div>
                   </div>
 
-                  <div className="flex min-h-0 flex-1 flex-col gap-[0.9rem]">
+                  <div
+                    className={cn(
+                      "flex min-h-0 flex-1 flex-col",
+                      logsFocusModeActive ? "gap-2" : "gap-[0.9rem]",
+                    )}
+                  >
                     {activePanel === "overview" ? (
                       <div className="flex min-h-0 flex-1 flex-col gap-[0.9rem] overflow-y-auto pr-[0.1rem]">
                         <div className="grid grid-cols-[repeat(2,minmax(0,1fr))] gap-[0.9rem] max-[1180px]:grid-cols-1">
@@ -2770,8 +2305,19 @@ export function AwsEcsWorkspace({
                     ) : null}
 
                     {activePanel === "logs" ? (
-                      <div className="grid min-h-0 flex-1 grid-rows-[auto_auto_auto_auto_1fr] gap-[0.9rem]">
-                        <FilterRow className="items-center justify-between">
+                      <div
+                        className={cn(
+                          "grid min-h-0 flex-1 grid-rows-[auto_auto_auto_auto_1fr]",
+                          logsFocusModeActive ? "gap-[0.45rem]" : "gap-[0.9rem]",
+                        )}
+                      >
+                        <FilterRow
+                          className={cn(
+                            "items-center justify-between",
+                            logsFocusModeActive ? "gap-2 rounded-[16px]" : "",
+                          )}
+                          style={logsFocusModeActive ? { padding: "0.55rem" } : undefined}
+                        >
                           <ToggleSwitch
                             checked={logsState.follow}
                             label="Follow"

@@ -16,7 +16,11 @@ import { formatConnectionProgressStageLabel } from "../lib/connection-progress";
 import type {
   ContainerTunnelTabState,
   ContainersWorkspacePanel,
+  HostContainerLogsRefreshOptions,
   HostContainersTabState,
+  LogsAbsoluteRangeValue,
+  LogsRangeMode,
+  LogsRelativeRangeValue,
   PendingContainersInteractiveAuth,
 } from "../store/createAppStore";
 import { useContainersWorkspaceController } from "../controllers/useContainersWorkspaceController";
@@ -53,6 +57,13 @@ import {
   shouldOpenLogLocalFind,
   type LocalFindHighlightOptions,
 } from "./LogLocalFind";
+import { LogsRangePickerDialog } from "./LogsRangePickerDialog";
+import {
+  createDefaultLogsRelativeRange,
+  formatLogsRangeLabel,
+  normalizeLogsAbsoluteRange,
+  normalizeLogsRelativeRange,
+} from "../lib/log-range";
 
 interface ContainersWorkspaceProps {
   host: HostRecord;
@@ -72,7 +83,7 @@ interface ContainersWorkspaceProps {
   ) => void;
   onRefreshLogs: (
     hostId: string,
-    options?: { tail?: number; followCursor?: string | null },
+    options?: HostContainerLogsRefreshOptions,
   ) => Promise<void>;
   onLoadMoreLogs: (hostId: string) => Promise<void>;
   onSetLogsFollow: (hostId: string, enabled: boolean) => void;
@@ -1359,6 +1370,8 @@ export function ContainersWorkspace({
   const [tunnelState, setTunnelState] = useState<ContainerTunnelTabState>(
     createEmptyContainerTunnelState,
   );
+  const [logsFocusMode, setLogsFocusMode] = useState(false);
+  const [logsRangePickerOpen, setLogsRangePickerOpen] = useState(false);
   const [localFindOpen, setLocalFindOpen] = useState(false);
   const [localFindQuery, setLocalFindQuery] = useState("");
   const [activeLocalFindMatchIndex, setActiveLocalFindMatchIndex] = useState(0);
@@ -1380,6 +1393,9 @@ export function ContainersWorkspace({
     () => tab.items.find((item) => item.id === tab.selectedContainerId) ?? null,
     [tab.items, tab.selectedContainerId],
   );
+  const isLogsPanel = tab.activePanel === "logs";
+  const logsFocusModeActive =
+    logsFocusMode && isLogsPanel && Boolean(selectedContainer);
   const matchingInteractiveAuth =
     interactiveAuth?.hostId === host.id ? interactiveAuth : null;
   const shouldShowConnectingOverlay = tab.isLoading && !matchingInteractiveAuth;
@@ -1425,6 +1441,15 @@ export function ContainersWorkspace({
     tab.logsSearchResult?.matchCount,
     trimmedLogsSearchQuery,
   ]);
+  const logsRangeLabel = useMemo(
+    () =>
+      formatLogsRangeLabel(
+        tab.logsRangeMode,
+        tab.logsAbsoluteRange,
+        tab.logsRelativeRange,
+      ),
+    [tab.logsAbsoluteRange, tab.logsRangeMode, tab.logsRelativeRange],
+  );
   const canLoadMoreLogs =
     !!tab.selectedContainerId &&
     !tab.logsLoading &&
@@ -1434,6 +1459,46 @@ export function ContainersWorkspace({
     !!tab.selectedContainerId &&
     !tab.logsSearchLoading &&
     trimmedLogsSearchQuery.length > 0;
+  const buildLogsRangeArgs = useCallback(
+    (followCursor?: string | null) => {
+      if (tab.logsFollowEnabled) {
+        return {
+          startTime: null,
+          endTime: null,
+          followCursor: followCursor ?? null,
+        };
+      }
+      if (tab.logsRangeMode === "absolute") {
+        const normalizedRange = normalizeLogsAbsoluteRange(tab.logsAbsoluteRange);
+        if (normalizedRange) {
+          return {
+            startTime: normalizedRange.startTime,
+            endTime: normalizedRange.endTime,
+            followCursor: null,
+          };
+        }
+      }
+      const normalizedRelativeRange = normalizeLogsRelativeRange(tab.logsRelativeRange);
+      if (normalizedRelativeRange) {
+        return {
+          startTime: normalizedRelativeRange.startTime,
+          endTime: normalizedRelativeRange.endTime,
+          followCursor: null,
+        };
+      }
+      return {
+        startTime: null,
+        endTime: null,
+        followCursor: followCursor ?? null,
+      };
+    },
+    [
+      tab.logsAbsoluteRange,
+      tab.logsFollowEnabled,
+      tab.logsRangeMode,
+      tab.logsRelativeRange,
+    ],
+  );
   const trimmedLocalFindQuery = localFindOpen ? localFindQuery.trim() : "";
   const containerLocalFind = useMemo(() => {
     let nextMatchIndex = 0;
@@ -1500,6 +1565,66 @@ export function ContainersWorkspace({
     setActiveLocalFindMatchIndex(0);
     localFindMatchRefs.current.clear();
   }, []);
+
+  const handleToggleLogsFollow = useCallback(() => {
+    const nextFollow = !tab.logsFollowEnabled;
+    onSetLogsFollow(host.id, nextFollow);
+    if (nextFollow && tab.selectedContainerId) {
+      void onRefreshLogs(host.id, {
+        tail: tab.logsTailWindow,
+        followCursor: null,
+        startTime: null,
+        endTime: null,
+      });
+    }
+  }, [
+    host.id,
+    onRefreshLogs,
+    onSetLogsFollow,
+    tab.logsFollowEnabled,
+    tab.logsTailWindow,
+    tab.selectedContainerId,
+  ]);
+
+  const handleApplyLogsRange = useCallback(
+    (
+      nextMode: LogsRangeMode,
+      nextAbsoluteValue: LogsAbsoluteRangeValue | null,
+      nextRelativeValue: LogsRelativeRangeValue | null,
+    ) => {
+      setLogsRangePickerOpen(false);
+      const normalizedRange =
+        nextMode === "absolute"
+          ? normalizeLogsAbsoluteRange(nextAbsoluteValue)
+          : normalizeLogsRelativeRange(
+              nextRelativeValue ?? createDefaultLogsRelativeRange(),
+            );
+      void onRefreshLogs(host.id, {
+        tail: tab.logsTailWindow,
+        followCursor: null,
+        startTime: normalizedRange?.startTime ?? null,
+        endTime: normalizedRange?.endTime ?? null,
+        rangeMode: nextMode,
+        relativeRange:
+          nextMode === "recent"
+            ? nextRelativeValue ?? createDefaultLogsRelativeRange()
+            : null,
+        absoluteRange: nextMode === "absolute" ? nextAbsoluteValue : null,
+      });
+    },
+    [host.id, onRefreshLogs, tab.logsTailWindow],
+  );
+
+  useEffect(() => {
+    setLogsFocusMode(false);
+    setLogsRangePickerOpen(false);
+  }, [host.id]);
+
+  useEffect(() => {
+    if (!isLogsPanel) {
+      setLogsFocusMode(false);
+    }
+  }, [isLogsPanel]);
 
   const moveLocalFindMatch = useCallback(
     (direction: 1 | -1) => {
@@ -1664,14 +1789,19 @@ export function ContainersWorkspace({
     if (tab.logsState === "empty" && !enteredLogs) {
       return;
     }
-    void onRefreshLogs(host.id);
+    void onRefreshLogs(host.id, {
+      tail: tab.logsTailWindow,
+      ...buildLogsRangeArgs(),
+    });
   }, [
     host.id,
     isActive,
+    buildLogsRangeArgs,
     onRefreshLogs,
     tab.activePanel,
     tab.logsLoading,
     tab.logsState,
+    tab.logsTailWindow,
     tab.selectedContainerId,
   ]);
 
@@ -1730,7 +1860,7 @@ export function ContainersWorkspace({
     const interval = window.setInterval(() => {
       void onRefreshLogs(host.id, {
         tail: tab.logsTailWindow,
-        followCursor: tab.logs?.cursor ?? null,
+        ...buildLogsRangeArgs(tab.logs?.cursor ?? null),
       });
     }, 2500);
 
@@ -1740,6 +1870,7 @@ export function ContainersWorkspace({
   }, [
     host.id,
     isActive,
+    buildLogsRangeArgs,
     onRefreshLogs,
     tab.activePanel,
     tab.logs?.cursor,
@@ -2006,18 +2137,18 @@ export function ContainersWorkspace({
 
   return (
     <div className="relative flex h-full min-h-0 flex-col gap-4">
-      <Toolbar className="justify-between gap-4 rounded-[24px] border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[var(--surface-elevated)] px-[1.15rem] py-[1.1rem]">
-        <div>
-          <SectionLabel>Host Containers</SectionLabel>
-          <h2>{host.label}</h2>
-          <div className="mt-2 flex flex-wrap gap-2 text-[0.9rem] text-[var(--text-soft)]">
-            <span>{getHostBadgeLabel(host)}</span>
-            {tab.runtime ? (
-              <span>{tab.runtime === "docker" ? "Docker" : "Podman"}</span>
-            ) : null}
+      {!logsFocusModeActive ? (
+        <Toolbar className="justify-between gap-4 rounded-[24px] border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[var(--surface-elevated)] px-[1.15rem] py-[1.1rem]">
+          <div>
+            <SectionLabel>Host Containers</SectionLabel>
+            <h2>{host.label}</h2>
+            <div className="mt-2 flex flex-wrap gap-2 text-[0.9rem] text-[var(--text-soft)]">
+              <span>{getHostBadgeLabel(host)}</span>
+              {tab.runtime ? (
+                <span>{tab.runtime === "docker" ? "Docker" : "Podman"}</span>
+              ) : null}
+            </div>
           </div>
-        </div>
-        <div className="flex flex-wrap items-center gap-3">
           <Button
             type="button"
             variant="secondary"
@@ -2028,21 +2159,8 @@ export function ContainersWorkspace({
           >
             {tab.isLoading ? "새로고침 중..." : "새로고침"}
           </Button>
-          <Button
-            type="button"
-            variant="primary"
-            onClick={() => {
-              if (!tab.selectedContainerId) {
-                return;
-              }
-              void onOpenShell(host.id, tab.selectedContainerId);
-            }}
-            disabled={!tab.selectedContainerId}
-          >
-            셸 접속
-          </Button>
-        </div>
-      </Toolbar>
+        </Toolbar>
+      ) : null}
 
       {tab.unsupportedReason ? (
         <NoticeCard
@@ -2053,151 +2171,261 @@ export function ContainersWorkspace({
           <p>{tab.unsupportedReason}</p>
         </NoticeCard>
       ) : (
-        <div className="grid min-h-0 flex-1 gap-4 lg:grid-cols-[minmax(280px,340px)_minmax(0,1fr)]">
-          <aside className="flex min-h-0 flex-col gap-4 rounded-[24px] border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[var(--surface-elevated)] p-[1.15rem]">
-            <div className="flex items-center justify-between gap-3">
-              <strong>컨테이너</strong>
-              <span>{tab.items.length}</span>
-            </div>
-            {tab.errorMessage ? (
-              <NoticeCard tone="danger" role="alert">
-                {tab.errorMessage}
-              </NoticeCard>
-            ) : null}
-            <div className="flex min-h-0 flex-col gap-[0.7rem] overflow-y-auto pr-px">
-              {tab.items.length === 0 && !tab.isLoading ? (
-                <div className={emptyDetailClass}>감지된 컨테이너가 없습니다.</div>
-              ) : null}
-              {tab.items.map((item) => (
-                <ContainerListItem
-                  key={item.id}
-                  id={item.id}
-                  name={item.name}
-                  image={item.image}
-                  status={item.status}
-                  isActive={item.id === tab.selectedContainerId}
-                  onSelect={() => {
-                    void onSelectContainer(host.id, item.id);
-                  }}
-                />
-              ))}
-            </div>
-          </aside>
-
-          <section className="flex min-h-0 flex-col gap-4 rounded-[24px] border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[var(--surface-elevated)] p-[1.15rem]">
-            <div className="flex flex-wrap items-start justify-between gap-4">
-              <div>
-                <h3>{selectedContainer?.name ?? "컨테이너를 선택하세요"}</h3>
-                {selectedContainer ? <p>{selectedContainer.image}</p> : null}
+        <div
+          className={cn(
+            "grid min-h-0 flex-1",
+            logsFocusModeActive
+              ? "gap-0"
+              : "gap-4 lg:grid-cols-[minmax(280px,340px)_minmax(0,1fr)]",
+          )}
+          data-testid={logsFocusModeActive ? "containers-logs-focus-layout" : undefined}
+        >
+          {!logsFocusModeActive ? (
+            <aside
+              className="flex min-h-0 flex-col gap-4 rounded-[24px] border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[var(--surface-elevated)] p-[1.15rem]"
+              data-testid="containers-sidebar"
+            >
+              <div className="flex items-center justify-between gap-3">
+                <strong>컨테이너</strong>
+                <span>{tab.items.length}</span>
               </div>
-              <div className="flex flex-col items-start gap-3 self-stretch">
-                <div className="flex flex-wrap gap-2">
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    size="sm"
-                    onClick={() => setPendingConfirmAction("start")}
-                    disabled={!selectedContainer || !canStart || !!tab.pendingAction}
-                  >
-                    Start
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    size="sm"
-                    onClick={() => setPendingConfirmAction("stop")}
-                    disabled={!selectedContainer || !canStop || !!tab.pendingAction}
-                  >
-                    Stop
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    size="sm"
-                    onClick={() => setPendingConfirmAction("restart")}
-                    disabled={!selectedContainer || !canRestart || !!tab.pendingAction}
-                  >
-                    Restart
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="danger"
-                    size="sm"
-                    onClick={() => setPendingConfirmAction("remove")}
-                    disabled={!selectedContainer || !canRemove || !!tab.pendingAction}
-                  >
-                    Remove
-                  </Button>
-                </div>
-                <Tabs
-                  role="tablist"
-                  aria-label="컨테이너 상세 패널"
-                  className={detailPanelTabsClass}
-                >
-                  <TabButton
-                    type="button"
-                    role="tab"
-                    aria-selected={tab.activePanel === "overview"}
-                    active={tab.activePanel === "overview"}
-                    className={cn(
-                      detailPanelTabButtonBaseClass,
-                      tab.activePanel === "overview"
-                        ? detailPanelTabButtonActiveClass
-                        : detailPanelTabButtonInactiveClass,
-                    )}
-                    onClick={() => onSetPanel(host.id, "overview")}
-                  >
-                    Overview
-                  </TabButton>
-                  <TabButton
-                    type="button"
-                    role="tab"
-                    aria-selected={tab.activePanel === "logs"}
-                    active={tab.activePanel === "logs"}
-                    className={cn(
-                      detailPanelTabButtonBaseClass,
-                      tab.activePanel === "logs"
-                        ? detailPanelTabButtonActiveClass
-                        : detailPanelTabButtonInactiveClass,
-                    )}
-                    onClick={() => onSetPanel(host.id, "logs")}
-                    disabled={!tab.selectedContainerId}
-                  >
-                    Logs
-                  </TabButton>
-                  <TabButton
-                    type="button"
-                    role="tab"
-                    aria-selected={tab.activePanel === "metrics"}
-                    active={tab.activePanel === "metrics"}
-                    className={cn(
-                      detailPanelTabButtonBaseClass,
-                      tab.activePanel === "metrics"
-                        ? detailPanelTabButtonActiveClass
-                        : detailPanelTabButtonInactiveClass,
-                    )}
-                    onClick={() => onSetPanel(host.id, "metrics")}
-                    disabled={!tab.selectedContainerId}
-                  >
-                    Metrics
-                  </TabButton>
-                  <TabButton
-                    type="button"
-                    role="tab"
-                    aria-selected={tab.activePanel === "tunnel"}
-                    active={tab.activePanel === "tunnel"}
-                    className={cn(
-                      detailPanelTabButtonBaseClass,
-                      tab.activePanel === "tunnel"
-                        ? detailPanelTabButtonActiveClass
-                        : detailPanelTabButtonInactiveClass,
-                    )}
-                    onClick={() => onSetPanel(host.id, "tunnel")}
-                    disabled={!tab.selectedContainerId}
-                  >
-                    Tunnel
-                  </TabButton>
-                </Tabs>
+              {tab.errorMessage ? (
+                <NoticeCard tone="danger" role="alert">
+                  {tab.errorMessage}
+                </NoticeCard>
+              ) : null}
+              <div className="flex min-h-0 flex-col gap-[0.7rem] overflow-y-auto pr-px">
+                {tab.items.length === 0 && !tab.isLoading ? (
+                  <div className={emptyDetailClass}>감지된 컨테이너가 없습니다.</div>
+                ) : null}
+                {tab.items.map((item) => (
+                  <ContainerListItem
+                    key={item.id}
+                    id={item.id}
+                    name={item.name}
+                    image={item.image}
+                    status={item.status}
+                    isActive={item.id === tab.selectedContainerId}
+                    onSelect={() => {
+                      void onSelectContainer(host.id, item.id);
+                    }}
+                  />
+                ))}
+              </div>
+            </aside>
+          ) : null}
+
+          <section
+            className={cn(
+              "flex min-h-0 flex-col border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[var(--surface-elevated)]",
+              logsFocusModeActive
+                ? "gap-2 rounded-[20px] p-[0.8rem]"
+                : isLogsPanel
+                  ? "gap-3 rounded-[24px] p-[0.95rem]"
+                  : "gap-4 rounded-[24px] p-[1.15rem]",
+            )}
+          >
+            <div
+              className={cn(
+                logsFocusModeActive
+                  ? "flex flex-wrap items-center justify-between gap-2 rounded-[16px] border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[color-mix(in_srgb,var(--surface-muted)_70%,transparent_30%)] px-3 py-2"
+                  : "flex flex-wrap items-start justify-between gap-4",
+              )}
+            >
+              <div
+                className={cn(
+                  logsFocusModeActive
+                    ? "flex min-w-0 flex-wrap items-center gap-2"
+                    : "",
+                )}
+              >
+                <h3>{selectedContainer?.name ?? "컨테이너를 선택하세요"}</h3>
+                {selectedContainer && !logsFocusModeActive ? (
+                  <p>{selectedContainer.image}</p>
+                ) : null}
+              </div>
+              <div
+                className={cn(
+                  "flex items-start gap-3",
+                  logsFocusModeActive
+                    ? "flex-wrap self-auto"
+                    : "flex-col items-end self-stretch max-[980px]:items-start",
+                )}
+              >
+                {logsFocusModeActive ? (
+                  <>
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      size="sm"
+                      onClick={() => {
+                        if (!tab.selectedContainerId) {
+                          return;
+                        }
+                        void onOpenShell(host.id, tab.selectedContainerId);
+                      }}
+                      disabled={!tab.selectedContainerId}
+                    >
+                      셸 접속
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="primary"
+                      size="sm"
+                      onClick={() => {
+                        setLogsFocusMode((current) => !current);
+                      }}
+                      disabled={!tab.selectedContainerId}
+                    >
+                      일반 보기
+                    </Button>
+                  </>
+                ) : (
+                  <>
+                    <div
+                      className="flex flex-wrap justify-end gap-2 max-[980px]:justify-start"
+                      data-testid="container-action-controls"
+                    >
+                      <Button
+                        type="button"
+                        variant="primary"
+                        size="sm"
+                        onClick={() => {
+                          if (!tab.selectedContainerId) {
+                            return;
+                          }
+                          void onOpenShell(host.id, tab.selectedContainerId);
+                        }}
+                        disabled={!tab.selectedContainerId}
+                      >
+                        셸 접속
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        size="sm"
+                        onClick={() => setPendingConfirmAction("start")}
+                        disabled={!selectedContainer || !canStart || !!tab.pendingAction}
+                      >
+                        Start
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        size="sm"
+                        onClick={() => setPendingConfirmAction("stop")}
+                        disabled={!selectedContainer || !canStop || !!tab.pendingAction}
+                      >
+                        Stop
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        size="sm"
+                        onClick={() => setPendingConfirmAction("restart")}
+                        disabled={!selectedContainer || !canRestart || !!tab.pendingAction}
+                      >
+                        Restart
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="danger"
+                        size="sm"
+                        onClick={() => setPendingConfirmAction("remove")}
+                        disabled={!selectedContainer || !canRemove || !!tab.pendingAction}
+                      >
+                        Remove
+                      </Button>
+                    </div>
+                    <div
+                      className="flex w-full flex-wrap items-center justify-end gap-3 max-[980px]:justify-start"
+                      data-testid="container-panel-switcher-row"
+                    >
+                      <Tabs
+                        role="tablist"
+                        aria-label="컨테이너 상세 패널"
+                        className={detailPanelTabsClass}
+                      >
+                        <TabButton
+                          type="button"
+                          role="tab"
+                          aria-selected={tab.activePanel === "overview"}
+                          active={tab.activePanel === "overview"}
+                          className={cn(
+                            detailPanelTabButtonBaseClass,
+                            tab.activePanel === "overview"
+                              ? detailPanelTabButtonActiveClass
+                              : detailPanelTabButtonInactiveClass,
+                          )}
+                          onClick={() => onSetPanel(host.id, "overview")}
+                        >
+                          Overview
+                        </TabButton>
+                        <TabButton
+                          type="button"
+                          role="tab"
+                          aria-selected={tab.activePanel === "logs"}
+                          active={tab.activePanel === "logs"}
+                          className={cn(
+                            detailPanelTabButtonBaseClass,
+                            tab.activePanel === "logs"
+                              ? detailPanelTabButtonActiveClass
+                              : detailPanelTabButtonInactiveClass,
+                          )}
+                          onClick={() => onSetPanel(host.id, "logs")}
+                          disabled={!tab.selectedContainerId}
+                        >
+                          Logs
+                        </TabButton>
+                        <TabButton
+                          type="button"
+                          role="tab"
+                          aria-selected={tab.activePanel === "metrics"}
+                          active={tab.activePanel === "metrics"}
+                          className={cn(
+                            detailPanelTabButtonBaseClass,
+                            tab.activePanel === "metrics"
+                              ? detailPanelTabButtonActiveClass
+                              : detailPanelTabButtonInactiveClass,
+                          )}
+                          onClick={() => onSetPanel(host.id, "metrics")}
+                          disabled={!tab.selectedContainerId}
+                        >
+                          Metrics
+                        </TabButton>
+                        <TabButton
+                          type="button"
+                          role="tab"
+                          aria-selected={tab.activePanel === "tunnel"}
+                          active={tab.activePanel === "tunnel"}
+                          className={cn(
+                            detailPanelTabButtonBaseClass,
+                            tab.activePanel === "tunnel"
+                              ? detailPanelTabButtonActiveClass
+                              : detailPanelTabButtonInactiveClass,
+                          )}
+                          onClick={() => onSetPanel(host.id, "tunnel")}
+                          disabled={!tab.selectedContainerId}
+                        >
+                          Tunnel
+                        </TabButton>
+                      </Tabs>
+                      {isLogsPanel ? (
+                        <Button
+                          type="button"
+                          variant="secondary"
+                          size="sm"
+                          onClick={() => {
+                            setLogsFocusMode((current) => !current);
+                          }}
+                          disabled={!tab.selectedContainerId}
+                        >
+                          로그 크게 보기
+                        </Button>
+                      ) : null}
+                    </div>
+                  </>
+                )}
               </div>
             </div>
             {tab.actionError ? (
@@ -2243,16 +2471,38 @@ export function ContainersWorkspace({
                 />
               </ContainerTunnelErrorBoundary>
             ) : (
-              <PanelSection className="min-h-0">
-                <FilterRow className="items-center justify-between">
+              <PanelSection
+                className={cn("min-h-0", logsFocusModeActive ? "gap-[0.45rem]" : "")}
+              >
+                <FilterRow
+                  className={cn(
+                    "items-center justify-between",
+                    logsFocusModeActive ? "gap-2 rounded-[16px]" : "",
+                  )}
+                  style={logsFocusModeActive ? { padding: "0.55rem" } : undefined}
+                >
                   <ToggleSwitch
                     checked={tab.logsFollowEnabled}
                     aria-label="Follow"
                     className="max-w-[15rem]"
                     label="Follow"
                     description="새 로그가 들어오면 하단을 자동으로 따라갑니다."
-                    onClick={() => onSetLogsFollow(host.id, !tab.logsFollowEnabled)}
+                    onClick={handleToggleLogsFollow}
                   />
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    active={tab.logsRangeMode === "absolute"}
+                    aria-label="로그 범위"
+                    className="max-w-[min(360px,100%)] overflow-hidden text-ellipsis whitespace-nowrap"
+                    onClick={() => {
+                      setLogsRangePickerOpen(true);
+                    }}
+                    disabled={tab.logsLoading}
+                  >
+                    {logsRangeLabel}
+                  </Button>
                   <div className="flex min-w-[18rem] flex-1 flex-wrap items-center gap-3">
                     <Input
                       type="search"
@@ -2301,7 +2551,10 @@ export function ContainersWorkspace({
                     variant="secondary"
                     size="sm"
                     onClick={() => {
-                      void onRefreshLogs(host.id);
+                      void onRefreshLogs(host.id, {
+                        tail: tab.logsTailWindow,
+                        ...buildLogsRangeArgs(),
+                      });
                     }}
                     disabled={!tab.selectedContainerId || tab.logsLoading}
                   >
@@ -2324,6 +2577,12 @@ export function ContainersWorkspace({
                   <NoticeCard tone="danger" role="alert">
                     {tab.logsError}
                   </NoticeCard>
+                ) : null}
+                {tab.logs && tab.logsState === "ready" ? (
+                  <div className="mt-[-0.2rem] flex flex-wrap gap-3 text-[0.84rem] text-[var(--text-soft)]">
+                    <span>{logsRangeLabel}</span>
+                    <span>{effectiveLogLines.length} lines</span>
+                  </div>
                 ) : null}
                 {localFindOpen ? (
                   <LogLocalFindBar
@@ -2356,7 +2615,7 @@ export function ContainersWorkspace({
                     <div className={emptyDetailClass}>로그를 불러오는 중입니다...</div>
                   ) : tab.logsState === "empty" ? (
                     <div className={emptyDetailClass}>
-                      최근 {tab.logsTailWindow}줄 기준 로그가 없습니다.
+                      {logsRangeLabel} 기준 로그가 없습니다.
                     </div>
                   ) : tab.logsState === "error" ||
                     tab.logsState === "malformed" ? (
@@ -2455,6 +2714,17 @@ export function ContainersWorkspace({
           </section>
         </div>
       )}
+
+      <LogsRangePickerDialog
+        open={logsRangePickerOpen}
+        mode={tab.logsRangeMode}
+        absoluteValue={tab.logsAbsoluteRange}
+        relativeValue={tab.logsRelativeRange}
+        onClose={() => {
+          setLogsRangePickerOpen(false);
+        }}
+        onApply={handleApplyLogsRange}
+      />
 
       {matchingInteractiveAuth ? (
         <div

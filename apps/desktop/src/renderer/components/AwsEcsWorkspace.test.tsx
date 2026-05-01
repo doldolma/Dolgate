@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, within, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type {
   AwsEcsClusterSnapshot,
@@ -194,6 +194,13 @@ function createTab(
     logsError: undefined,
     logsFollowEnabled: false,
     logsTailWindow: 200,
+    logsRangeMode: "recent",
+    logsRelativeRange: {
+      presetKey: "30m",
+      amount: "30",
+      unit: "minute",
+    },
+    logsAbsoluteRange: null,
     logsSearchQuery: "",
     logsSearchMode: "local",
     logsSearchLoading: false,
@@ -639,6 +646,60 @@ describe("AwsEcsWorkspace", () => {
     fireEvent.keyDown(localFindInput, { key: "Escape" });
 
     expect(screen.queryByLabelText("현재 로그에서 찾기")).not.toBeInTheDocument();
+  });
+
+  it("expands ECS logs into focus mode and restores the regular layout", () => {
+    const { container } = render(
+      <AwsEcsWorkspace
+        host={createHost()}
+        tab={createTab(createSnapshot(), {
+          ecsActivePanel: "logs",
+          ecsLogsByServiceName: {
+            worker: {
+              ...createEmptyEcsServiceLogsState(),
+              snapshot: createLogsSnapshot(),
+            },
+          },
+        })}
+        isActive={true}
+        onRefresh={vi.fn().mockResolvedValue(undefined)}
+        onRefreshUtilization={vi.fn().mockResolvedValue(undefined)}
+        onOpenEcsExecShell={vi.fn().mockResolvedValue(undefined)}
+      />,
+    );
+
+    expect(screen.getByTestId("ecs-summary-cards")).toBeInTheDocument();
+    expect(container.querySelectorAll('[data-testid="ecs-service-row"]')).toHaveLength(2);
+    expect(
+      within(screen.getByTestId("ecs-service-action-controls")).getByRole("button", {
+        name: "쉘 접속",
+      }),
+    ).toBeInTheDocument();
+    expect(
+      within(screen.getByTestId("ecs-panel-switcher-row")).getByRole("button", {
+        name: "로그 크게 보기",
+      }),
+    ).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "로그 크게 보기" }));
+
+    expect(screen.getByTestId("ecs-logs-focus-layout")).toBeInTheDocument();
+    expect(screen.queryByTestId("ecs-summary-cards")).toBeNull();
+    expect(screen.queryByTestId("ecs-services-sidebar")).toBeNull();
+    expect(screen.queryByTestId("ecs-service-action-controls")).toBeNull();
+    expect(screen.queryByTestId("ecs-panel-switcher-row")).toBeNull();
+    expect(container.querySelectorAll('[data-testid="ecs-service-row"]')).toHaveLength(0);
+    expect(screen.getByText("hello from task-1")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "쉘 접속" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "일반 보기" })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "일반 보기" }));
+
+    expect(screen.getByTestId("ecs-summary-cards")).toBeInTheDocument();
+    expect(screen.getByTestId("ecs-services-sidebar")).toBeInTheDocument();
+    expect(screen.getByTestId("ecs-service-action-controls")).toBeInTheDocument();
+    expect(screen.getByTestId("ecs-panel-switcher-row")).toBeInTheDocument();
+    expect(container.querySelectorAll('[data-testid="ecs-service-row"]')).toHaveLength(2);
   });
 
   it("shows a generic empty-state message when the selected range has no logs", async () => {

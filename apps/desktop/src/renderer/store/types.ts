@@ -145,6 +145,16 @@ export interface LogsRelativeRangeValue {
   unit: LogsRelativeUnit;
 }
 
+export interface HostContainerLogsRefreshOptions {
+  tail?: number;
+  followCursor?: string | null;
+  startTime?: string | null;
+  endTime?: string | null;
+  rangeMode?: LogsRangeMode;
+  relativeRange?: LogsRelativeRangeValue | null;
+  absoluteRange?: LogsAbsoluteRangeValue | null;
+}
+
 export interface EcsServiceUtilizationHistoryState {
   cpuHistory: AwsMetricHistoryPoint[];
   memoryHistory: AwsMetricHistoryPoint[];
@@ -213,6 +223,9 @@ export interface HostContainersTabState {
   logsError?: string;
   logsFollowEnabled: boolean;
   logsTailWindow: number;
+  logsRangeMode: LogsRangeMode;
+  logsRelativeRange: LogsRelativeRangeValue;
+  logsAbsoluteRange: LogsAbsoluteRangeValue | null;
   logsSearchQuery: string;
   logsSearchMode: ContainerLogsSearchMode;
   logsSearchLoading: boolean;
@@ -561,7 +574,7 @@ interface AppStateParts {
   ) => void;
   refreshHostContainerLogs: (
     hostId: string,
-    options?: { tail?: number; followCursor?: string | null },
+    options?: HostContainerLogsRefreshOptions,
   ) => Promise<void>;
   loadMoreHostContainerLogs: (hostId: string) => Promise<void>;
   setHostContainerLogsFollow: (hostId: string, enabled: boolean) => void;

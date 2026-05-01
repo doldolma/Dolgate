@@ -457,6 +457,8 @@ func (s *Service) Logs(endpointID, requestID string, payload protocol.Containers
 		payload.ContainerID,
 		payload.Tail,
 		payload.FollowCursor,
+		payload.StartTime,
+		payload.EndTime,
 	))
 	if err != nil {
 		return err
@@ -564,7 +566,14 @@ func (s *Service) SearchLogs(endpointID, requestID string, payload protocol.Cont
 
 	stdout, err := s.runEndpointShellCommand(
 		handle,
-		buildSearchLogsCommand(handle.runtimeCommand, payload.ContainerID, payload.Tail, payload.Query),
+		buildSearchLogsCommand(
+			handle.runtimeCommand,
+			payload.ContainerID,
+			payload.Tail,
+			payload.Query,
+			payload.StartTime,
+			payload.EndTime,
+		),
 	)
 	if err != nil {
 		return err
@@ -923,7 +932,14 @@ func extractShellRuntimeProbePayload(output string) string {
 	return strings.TrimSpace(output)
 }
 
-func buildLogsCommand(runtimeCommand string, containerID string, tail int, followCursor string) string {
+func buildLogsCommand(
+	runtimeCommand string,
+	containerID string,
+	tail int,
+	followCursor string,
+	startTime string,
+	endTime string,
+) string {
 	if tail <= 0 {
 		tail = 200
 	}
@@ -932,9 +948,21 @@ func buildLogsCommand(runtimeCommand string, containerID string, tail int, follo
 	command.WriteString(sshcmd.QuotePosix(runtimeCommand))
 	command.WriteString(" logs --timestamps --tail ")
 	command.WriteString(fmt.Sprintf("%d", tail))
-	if strings.TrimSpace(followCursor) != "" {
+	trimmedFollowCursor := strings.TrimSpace(followCursor)
+	trimmedStartTime := strings.TrimSpace(startTime)
+	trimmedEndTime := strings.TrimSpace(endTime)
+	if trimmedFollowCursor != "" {
 		command.WriteString(" --since ")
-		command.WriteString(sshcmd.QuotePosix(strings.TrimSpace(followCursor)))
+		command.WriteString(sshcmd.QuotePosix(trimmedFollowCursor))
+	} else {
+		if trimmedStartTime != "" {
+			command.WriteString(" --since ")
+			command.WriteString(sshcmd.QuotePosix(trimmedStartTime))
+		}
+		if trimmedEndTime != "" {
+			command.WriteString(" --until ")
+			command.WriteString(sshcmd.QuotePosix(trimmedEndTime))
+		}
 	}
 	command.WriteString(" ")
 	command.WriteString(sshcmd.QuotePosix(containerID))
@@ -972,8 +1000,15 @@ func buildStatsCommand(runtimeCommand string, containerID string) string {
 	)
 }
 
-func buildSearchLogsCommand(runtimeCommand string, containerID string, tail int, query string) string {
-	logsCommand := buildLogsCommand(runtimeCommand, containerID, tail, "")
+func buildSearchLogsCommand(
+	runtimeCommand string,
+	containerID string,
+	tail int,
+	query string,
+	startTime string,
+	endTime string,
+) string {
+	logsCommand := buildLogsCommand(runtimeCommand, containerID, tail, "", startTime, endTime)
 	return fmt.Sprintf(
 		`%s 2>&1 | LC_ALL=C grep -iF -- %s || true`,
 		logsCommand,

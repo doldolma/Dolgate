@@ -455,6 +455,8 @@ export interface HostContainersLogsInput {
   containerId: string;
   tail: number;
   followCursor?: string | null;
+  startTime?: string | null;
+  endTime?: string | null;
 }
 
 export interface HostContainersActionInput {
@@ -473,6 +475,8 @@ export interface HostContainersSearchLogsInput {
   containerId: string;
   tail: number;
   query: string;
+  startTime?: string | null;
+  endTime?: string | null;
 }
 
 export interface HostContainersEphemeralTunnelInput {

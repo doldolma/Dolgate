@@ -1,5 +1,6 @@
 import type { SliceDeps } from "../services/context";
 import type { ContainersSlice } from "../types";
+import { createDefaultLogsRelativeRange } from "../../lib/log-range";
 import * as defaults from "../defaults";
 import * as utils from "../utils";
 import { createContainersServices } from "../services/containers";
@@ -388,6 +389,9 @@ export function createContainersSlice(deps: SliceDeps): ContainersSlice {
                   logsState: "idle",
                   logsError: undefined,
                   logsTailWindow: DEFAULT_CONTAINER_LOGS_TAIL_WINDOW,
+                  logsRangeMode: "recent",
+                  logsRelativeRange: createDefaultLogsRelativeRange(),
+                  logsAbsoluteRange: null,
                   logsSearchQuery: "",
                   logsSearchMode: null,
                   logsSearchLoading: false,
@@ -572,6 +576,11 @@ export function createContainersSlice(deps: SliceDeps): ContainersSlice {
                 containerTabs: upsertContainersTab(state.containerTabs, {
                   ...currentTab,
                   logsFollowEnabled: enabled,
+                  logsRangeMode: enabled ? "recent" : currentTab.logsRangeMode,
+                  logsRelativeRange: enabled
+                    ? createDefaultLogsRelativeRange()
+                    : currentTab.logsRelativeRange,
+                  logsAbsoluteRange: enabled ? null : currentTab.logsAbsoluteRange,
                 }),
               };
             }),

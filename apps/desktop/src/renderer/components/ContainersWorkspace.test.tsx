@@ -171,6 +171,13 @@ function createTab(): HostContainersTabState {
     logsLoading: false,
     logsTailWindow: 200,
     logsFollowEnabled: false,
+    logsRangeMode: "recent",
+    logsRelativeRange: {
+      presetKey: "30m",
+      amount: "30",
+      unit: "minute",
+    },
+    logsAbsoluteRange: null,
     logsSearchQuery: "",
     logsSearchMode: null,
     logsSearchLoading: false,
@@ -699,6 +706,118 @@ describe("ContainersWorkspace", () => {
     expect(screen.queryByLabelText("현재 로그에서 찾기")).not.toBeInTheDocument();
   });
 
+  it("expands container logs into focus mode and restores the regular layout", () => {
+    const logsTab = {
+      ...createTab(),
+      activePanel: "logs" as const,
+      logs: {
+        hostId: "host-1",
+        containerId: "container-1",
+        runtime: "docker" as const,
+        lines: ["2025-10-15T08:55:31.000000000Z broker connected"],
+        cursor: "2025-10-15T08:55:31.000000000Z",
+      },
+      logsState: "ready" as const,
+    };
+
+    render(<ContainersWorkspace {...createProps(logsTab)} />);
+
+    expect(screen.getByTestId("containers-sidebar")).toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: "셸 접속" })).toHaveLength(1);
+    expect(
+      within(screen.getByTestId("container-action-controls")).getByRole("button", {
+        name: "셸 접속",
+      }),
+    ).toBeInTheDocument();
+    expect(
+      within(screen.getByTestId("container-panel-switcher-row")).getByRole("button", {
+        name: "로그 크게 보기",
+      }),
+    ).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "로그 크게 보기" }));
+
+    expect(screen.getByTestId("containers-logs-focus-layout")).toBeInTheDocument();
+    expect(screen.queryByTestId("containers-sidebar")).toBeNull();
+    expect(screen.queryByTestId("container-action-controls")).toBeNull();
+    expect(screen.queryByTestId("container-panel-switcher-row")).toBeNull();
+    expect(screen.getByText("broker connected")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "셸 접속" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "일반 보기" })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "일반 보기" }));
+
+    expect(screen.getByTestId("containers-sidebar")).toBeInTheDocument();
+    expect(screen.getByTestId("container-action-controls")).toBeInTheDocument();
+    expect(screen.getByTestId("container-panel-switcher-row")).toBeInTheDocument();
+  });
+
+  it("shows the container log range picker and reloads logs with an absolute range", async () => {
+    const onRefreshLogs = vi.fn().mockResolvedValue(undefined);
+    const logsTab = {
+      ...createTab(),
+      activePanel: "logs" as const,
+      logs: {
+        hostId: "host-1",
+        containerId: "container-1",
+        runtime: "docker" as const,
+        lines: ["2025-10-15T08:55:31.000000000Z broker connected"],
+        cursor: "2025-10-15T08:55:31.000000000Z",
+      },
+      logsState: "ready" as const,
+    };
+
+    render(
+      <ContainersWorkspace
+        {...createProps(logsTab)}
+        onRefreshLogs={onRefreshLogs}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: "로그 범위" })).toHaveTextContent(
+      "최근 30분",
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "로그 범위" }));
+    expect(await screen.findByRole("dialog", { name: "로그 범위 선택" })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("tab", { name: "절대 범위" }));
+    fireEvent.change(screen.getByLabelText("시작 날짜"), {
+      target: { value: "2026-03-01" },
+    });
+    fireEvent.change(screen.getByLabelText("시작 시간"), {
+      target: { value: "00:00:00" },
+    });
+    fireEvent.change(screen.getByLabelText("종료 날짜"), {
+      target: { value: "2026-03-02" },
+    });
+    fireEvent.change(screen.getByLabelText("종료 시간"), {
+      target: { value: "12:30:00" },
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "적용" }));
+
+    await waitFor(() => {
+      expect(onRefreshLogs).toHaveBeenCalledWith(
+        "host-1",
+        expect.objectContaining({
+          tail: 200,
+          followCursor: null,
+          startTime: new Date(2026, 2, 1, 0, 0, 0).toISOString(),
+          endTime: new Date(2026, 2, 2, 12, 30, 0).toISOString(),
+          rangeMode: "absolute",
+          relativeRange: null,
+          absoluteRange: {
+            startDate: "2026-03-01",
+            startTime: "00:00:00",
+            endDate: "2026-03-02",
+            endTime: "12:30:00",
+          },
+        }),
+      );
+    });
+  });
+
   it("calls load more and disables it when remote search is active or the tail cap is reached", () => {
     const onLoadMoreLogs = vi.fn().mockResolvedValue(undefined);
     const logsTab = {
@@ -749,6 +868,7 @@ describe("ContainersWorkspace", () => {
 
   it("toggles follow from the logs toolbar switch", () => {
     const onSetLogsFollow = vi.fn();
+    const onRefreshLogs = vi.fn().mockResolvedValue(undefined);
     const logsTab = {
       ...createTab(),
       activePanel: "logs" as const,
@@ -765,6 +885,7 @@ describe("ContainersWorkspace", () => {
     render(
       <ContainersWorkspace
         {...createProps(logsTab)}
+        onRefreshLogs={onRefreshLogs}
         onSetLogsFollow={onSetLogsFollow}
       />,
     );
@@ -774,6 +895,12 @@ describe("ContainersWorkspace", () => {
 
     fireEvent.click(followSwitch);
     expect(onSetLogsFollow).toHaveBeenCalledWith("host-1", true);
+    expect(onRefreshLogs).toHaveBeenCalledWith("host-1", {
+      tail: 200,
+      followCursor: null,
+      startTime: null,
+      endTime: null,
+    });
   });
 
   it("scrolls logs to the latest line when the logs panel is active", async () => {
@@ -1125,7 +1252,15 @@ describe("ContainersWorkspace", () => {
     );
 
     await waitFor(() => {
-      expect(onRefreshLogs).toHaveBeenCalledWith("host-1");
+      expect(onRefreshLogs).toHaveBeenCalledWith(
+        "host-1",
+        expect.objectContaining({
+          tail: 200,
+          followCursor: null,
+          startTime: expect.any(String),
+          endTime: expect.any(String),
+        }),
+      );
     });
   });
 

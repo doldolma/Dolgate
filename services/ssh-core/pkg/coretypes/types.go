@@ -303,6 +303,8 @@ type ContainersLogsPayload struct {
 	ContainerID  string `json:"containerId"`
 	Tail         int    `json:"tail"`
 	FollowCursor string `json:"followCursor,omitempty"`
+	StartTime    string `json:"startTime,omitempty"`
+	EndTime      string `json:"endTime,omitempty"`
 }
 
 type ContainersActionPayload struct {
@@ -317,6 +319,8 @@ type ContainersSearchLogsPayload struct {
 	ContainerID string `json:"containerId"`
 	Tail        int    `json:"tail"`
 	Query       string `json:"query"`
+	StartTime   string `json:"startTime,omitempty"`
+	EndTime     string `json:"endTime,omitempty"`
 }
 
 type TransferEndpointPayload struct {
