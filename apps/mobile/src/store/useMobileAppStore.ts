@@ -1136,23 +1136,18 @@ function getKnownHostStatus(
   status: 'trusted' | 'untrusted' | 'mismatch';
   existing: KnownHostRecord | null;
 } {
-  const exactMatch =
+  const sameAlgorithm =
     knownHosts.find(
       record =>
         record.host === info.host &&
         record.port === info.port &&
-        record.publicKeyBase64 === info.keyBase64,
+        record.algorithm === info.algorithm,
     ) ?? null;
-  if (exactMatch) {
-    return { status: 'trusted', existing: exactMatch };
-  }
 
-  const sameTarget =
-    knownHosts.find(
-      record => record.host === info.host && record.port === info.port,
-    ) ?? null;
-  if (sameTarget) {
-    return { status: 'mismatch', existing: sameTarget };
+  if (sameAlgorithm) {
+    return sameAlgorithm.publicKeyBase64 === info.keyBase64
+      ? { status: 'trusted', existing: sameAlgorithm }
+      : { status: 'mismatch', existing: sameAlgorithm };
   }
 
   return { status: 'untrusted', existing: null };
@@ -2335,11 +2330,13 @@ export const useMobileAppStore = create<MobileAppState>()(
           region: resolvedSession.region,
           instanceId: host.awsInstanceId,
         });
-        let trustedHostKeyBase64 =
-          get().knownHosts.find(
+        let trustedHostKeysBase64 = get()
+          .knownHosts.filter(
             record =>
               record.host === knownHostName && record.port === sshPort,
-          )?.publicKeyBase64 ?? null;
+          )
+          .map(record => record.publicKeyBase64);
+        let trustedHostKeyBase64 = trustedHostKeysBase64[0] ?? null;
 
         let hostKeyAttempts = 0;
         while (hostKeyAttempts < 2) {
@@ -2355,6 +2352,7 @@ export const useMobileAppStore = create<MobileAppState>()(
             env: resolvedSession.envSpec.env,
             unsetEnv: resolvedSession.envSpec.unsetEnv,
             trustedHostKeyBase64,
+            trustedHostKeysBase64,
           };
 
           try {
@@ -2400,6 +2398,12 @@ export const useMobileAppStore = create<MobileAppState>()(
                 );
                 return;
               }
+              trustedHostKeysBase64 = get()
+                .knownHosts.filter(
+                  record =>
+                    record.host === knownHostName && record.port === sshPort,
+                )
+                .map(record => record.publicKeyBase64);
               trustedHostKeyBase64 = error.info.keyBase64;
               hostKeyAttempts += 1;
               continue;

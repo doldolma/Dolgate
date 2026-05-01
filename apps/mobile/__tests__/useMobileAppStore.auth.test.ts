@@ -8,6 +8,7 @@ import type {
   AuthSession,
   AuthState,
   GroupRecord,
+  KnownHostRecord,
   LoadedManagedSecretPayload,
   MobileSessionRecord,
   ManagedAwsProfilePayload,
@@ -1717,6 +1718,30 @@ describe("useMobileAppStore auth and sync flows", () => {
       lastDisconnectedAt: null,
       errorMessage: null,
     };
+    const knownHosts: KnownHostRecord[] = [
+      {
+        id: "known-host-ed25519",
+        host: "aws-ssm:prod:ap-northeast-2:i-0123456789abcdef0",
+        port: 22,
+        algorithm: "ssh-ed25519",
+        publicKeyBase64: "AAAED25519",
+        fingerprintSha256: "SHA256:ed25519",
+        createdAt: "2026-04-13T00:00:00.000Z",
+        lastSeenAt: "2026-04-13T00:00:00.000Z",
+        updatedAt: "2026-04-13T00:00:00.000Z",
+      },
+      {
+        id: "known-host-ecdsa",
+        host: "aws-ssm:prod:ap-northeast-2:i-0123456789abcdef0",
+        port: 22,
+        algorithm: "ecdsa-sha2-nistp256",
+        publicKeyBase64: "AAAECDSA",
+        fingerprintSha256: "SHA256:ecdsa",
+        createdAt: "2026-04-13T00:00:00.000Z",
+        lastSeenAt: "2026-04-13T00:00:00.000Z",
+        updatedAt: "2026-04-13T00:00:00.000Z",
+      },
+    ];
 
     fetchMock.mockImplementation(async (input, init) => {
       const url = new URL(String(input));
@@ -1765,6 +1790,7 @@ describe("useMobileAppStore auth and sync flows", () => {
         auth: createAuthenticatedState(),
         hosts: [host],
         awsProfiles: [profile],
+        knownHosts,
         sessions: [session],
         syncStatus: {
           ...createDefaultSyncStatus(),
@@ -1803,6 +1829,8 @@ describe("useMobileAppStore auth and sync flows", () => {
           AWS_ACCESS_KEY_ID: "AKIAPROD",
           AWS_SECRET_ACCESS_KEY: "prod-secret",
         }),
+        trustedHostKeyBase64: "AAAED25519",
+        trustedHostKeysBase64: ["AAAED25519", "AAAECDSA"],
       }),
     );
     const sftpSession = useMobileAppStore

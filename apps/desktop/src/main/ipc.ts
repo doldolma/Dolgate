@@ -779,12 +779,19 @@ function requireTrustedHostKey(
   knownHosts: KnownHostRepository,
   host: { hostname: string; port: number },
 ): string {
-  const trusted = knownHosts.getByHostPort(host.hostname, host.port);
-  if (!trusted) {
+  return requireTrustedHostKeys(knownHosts, host)[0];
+}
+
+function requireTrustedHostKeys(
+  knownHosts: KnownHostRepository,
+  host: { hostname: string; port: number },
+): string[] {
+  const trusted = knownHosts.listByHostPort(host.hostname, host.port);
+  if (trusted.length === 0) {
     throw new Error("Host key is not trusted yet.");
   }
   knownHosts.touch(host.hostname, host.port);
-  return trusted.publicKeyBase64;
+  return trusted.map((record) => record.publicKeyBase64);
 }
 
 async function buildHostKeyProbeResult(
@@ -888,7 +895,11 @@ async function buildHostKeyProbeResult(
           instanceId: hydratedHost.awsInstanceId,
         });
         const knownHostPort = getAwsEc2HostSshPort(hydratedHost);
-        const existing = knownHosts.getByHostPort(knownHost, knownHostPort);
+        const existing = knownHosts.getByHostPortAlgorithm(
+          knownHost,
+          knownHostPort,
+          probed.algorithm,
+        );
         const status = !existing
           ? "untrusted"
           : existing.publicKeyBase64 === probed.publicKeyBase64
@@ -896,7 +907,7 @@ async function buildHostKeyProbeResult(
             : "mismatch";
 
         if (status === "trusted") {
-          knownHosts.touch(knownHost, knownHostPort);
+          knownHosts.touch(knownHost, knownHostPort, probed.algorithm);
         }
         if (endpointId) {
           storeAwsSftpPreflight(endpointId, hydratedHost);
@@ -984,7 +995,11 @@ async function buildHostKeyProbeResult(
     host: probeHost,
     port: probePort,
   });
-  const existing = knownHosts.getByHostPort(probeHost, probePort);
+  const existing = knownHosts.getByHostPortAlgorithm(
+    probeHost,
+    probePort,
+    probed.algorithm,
+  );
   const status = !existing
     ? "untrusted"
     : existing.publicKeyBase64 === probed.publicKeyBase64
@@ -992,7 +1007,7 @@ async function buildHostKeyProbeResult(
       : "mismatch";
 
   if (status === "trusted") {
-    knownHosts.touch(probeHost, probePort);
+    knownHosts.touch(probeHost, probePort, probed.algorithm);
   }
 
   return {
@@ -1693,7 +1708,7 @@ export function registerIpcHandlers(
           emitProgress: emitContainersConnectionProgress,
         }));
       const sshPort = getAwsEc2HostSshPort(hydratedHost);
-      const trustedHostKeyBase64 = requireTrustedHostKey(knownHosts, {
+      const trustedHostKeysBase64 = requireTrustedHostKeys(knownHosts, {
         hostname: buildAwsSsmKnownHostIdentity({
           profileName:
             awsService.resolveManagedProfileNameOrFallback(
@@ -1760,7 +1775,8 @@ export function registerIpcHandlers(
           username: sshUsername,
           authType: "privateKey",
           privateKeyPem,
-          trustedHostKeyBase64,
+          trustedHostKeyBase64: trustedHostKeysBase64[0],
+          trustedHostKeysBase64,
           hostId: hydratedHost.id,
         });
         if (result.runtime) {
@@ -1793,7 +1809,7 @@ export function registerIpcHandlers(
     }
 
     if (isWarpgateSshHostRecord(host)) {
-      const trustedHostKeyBase64 = requireTrustedHostKey(knownHosts, {
+      const trustedHostKeysBase64 = requireTrustedHostKeys(knownHosts, {
         hostname: host.warpgateSshHost,
         port: host.warpgateSshPort,
       });
@@ -1803,7 +1819,8 @@ export function registerIpcHandlers(
         port: host.warpgateSshPort,
         username: `${host.warpgateUsername}:${host.warpgateTargetName}`,
         authType: "keyboardInteractive",
-        trustedHostKeyBase64,
+        trustedHostKeyBase64: trustedHostKeysBase64[0],
+        trustedHostKeysBase64,
         hostId: host.id,
       });
       return {
@@ -1815,7 +1832,7 @@ export function registerIpcHandlers(
       };
     }
 
-    const trustedHostKeyBase64 = requireTrustedHostKey(knownHosts, host);
+    const trustedHostKeysBase64 = requireTrustedHostKeys(knownHosts, host);
     const username = requireConfiguredSshUsername(host);
     const { secrets, shouldPersistHostSecret } =
       await resolveRuntimeSshSecrets(secretStore, host);
@@ -1829,7 +1846,8 @@ export function registerIpcHandlers(
       privateKeyPem: secrets.privateKeyPem,
       certificateText: secrets.certificateText,
       passphrase: secrets.passphrase,
-      trustedHostKeyBase64,
+      trustedHostKeyBase64: trustedHostKeysBase64[0],
+      trustedHostKeysBase64,
       hostId: host.id,
     });
     if (shouldPersistHostSecret) {
@@ -2149,6 +2167,7 @@ export function registerIpcHandlers(
         secrets,
       ),
     requireTrustedHostKey: (host) => requireTrustedHostKey(knownHosts, host),
+    requireTrustedHostKeys: (host) => requireTrustedHostKeys(knownHosts, host),
     requireConfiguredSshUsername,
     buildKnownSshDuplicateKeys: () => buildKnownSshDuplicateKeys(hosts),
     assertSshHost,

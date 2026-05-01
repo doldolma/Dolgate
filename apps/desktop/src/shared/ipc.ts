@@ -228,6 +228,7 @@ export interface ResolvedCoreConnectPayload {
   certificateText?: string;
   passphrase?: string;
   trustedHostKeyBase64: string;
+  trustedHostKeysBase64?: string[];
   cols: number;
   rows: number;
   command?: string;
@@ -355,6 +356,7 @@ export interface ResolvedSftpConnectPayload {
   certificateText?: string;
   passphrase?: string;
   trustedHostKeyBase64: string;
+  trustedHostKeysBase64?: string[];
 }
 
 export interface ResolvedContainersConnectPayload {
@@ -367,6 +369,7 @@ export interface ResolvedContainersConnectPayload {
   certificateText?: string;
   passphrase?: string;
   trustedHostKeyBase64: string;
+  trustedHostKeysBase64?: string[];
 }
 
 export interface ResolvedHostKeyProbePayload {
@@ -384,6 +387,7 @@ export interface ResolvedPortForwardStartPayload {
   certificateText?: string;
   passphrase?: string;
   trustedHostKeyBase64: string;
+  trustedHostKeysBase64?: string[];
   mode: PortForwardMode;
   bindAddress: string;
   bindPort: number;

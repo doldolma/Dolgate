@@ -54,6 +54,7 @@ function createContext(host = createAwsHost()) {
       sendSshPublicKey: vi.fn().mockResolvedValue(undefined),
     },
     requireTrustedHostKey: vi.fn().mockReturnValue("AAAATEST"),
+    requireTrustedHostKeys: vi.fn().mockReturnValue(["AAAATEST"]),
     emitSftpConnectionProgress,
     emitSftpConnectionFailureProgress: vi.fn((input) => {
       const message =

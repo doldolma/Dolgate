@@ -239,6 +239,7 @@ export interface MainIpcContext {
     secrets: HostSecretInput,
   ) => Promise<SshCertificateInfo | null>;
   requireTrustedHostKey: (host: { hostname: string; port: number }) => string;
+  requireTrustedHostKeys: (host: { hostname: string; port: number }) => string[];
   requireConfiguredSshUsername: (host: SshHostRecord) => string;
   buildKnownSshDuplicateKeys: () => Set<string>;
   assertSshHost: (host: ReturnType<HostRepository["getById"]>) => void;
