@@ -4330,11 +4330,110 @@ describe("createAppStore", () => {
     expect(api.aws.loadEcsClusterUtilization).toHaveBeenCalledWith("ecs-host-1");
   });
 
+  it("tracks ECS cluster loading progress from profile check through utilization", async () => {
+    const api = createMockApi();
+    const profileStatus =
+      createDeferred<
+        Awaited<ReturnType<DesktopApi["aws"]["getProfileStatus"]>>
+      >();
+    const snapshot =
+      createDeferred<
+        Awaited<ReturnType<DesktopApi["aws"]["loadEcsClusterSnapshot"]>>
+      >();
+    const utilization =
+      createDeferred<
+        Awaited<ReturnType<DesktopApi["aws"]["loadEcsClusterUtilization"]>>
+      >();
+    api.aws.getProfileStatus = vi.fn().mockReturnValue(profileStatus.promise);
+    api.aws.loadEcsClusterSnapshot = vi.fn().mockReturnValue(snapshot.promise);
+    api.aws.loadEcsClusterUtilization = vi
+      .fn()
+      .mockReturnValue(utilization.promise);
+    const store = createAppStore(api);
+    await store.getState().bootstrap();
+
+    store.setState((state) => ({
+      hosts: [...state.hosts, createEcsHost()],
+    }));
+
+    const connectPromise = store.getState().connectHost("ecs-host-1", 120, 32);
+    await flushMicrotasks();
+
+    expect(
+      store.getState().containerTabs.find((tab) => tab.hostId === "ecs-host-1")
+        ?.connectionProgress,
+    ).toMatchObject({
+      stage: "checking-profile",
+      message: "default 프로필 인증 상태를 확인하는 중입니다.",
+    });
+
+    profileStatus.resolve({
+      id: "default",
+      profileName: "default",
+      available: true,
+      isSsoProfile: true,
+      isAuthenticated: true,
+      accountId: "123456789012",
+      arn: "arn:aws:iam::123456789012:user/test",
+      errorMessage: null,
+      missingTools: [],
+    });
+    await flushMicrotasks();
+    await flushMicrotasks();
+
+    expect(
+      store.getState().containerTabs.find((tab) => tab.hostId === "ecs-host-1")
+        ?.connectionProgress,
+    ).toMatchObject({
+      stage: "loading-ecs-cluster",
+      message: "ECS 클러스터와 서비스 목록을 불러오는 중입니다.",
+    });
+
+    snapshot.resolve({
+      profileName: "default",
+      region: "ap-northeast-2",
+      cluster: {
+        clusterArn: "arn:aws:ecs:ap-northeast-2:123456789012:cluster/prod",
+        clusterName: "prod",
+        status: "ACTIVE",
+        activeServicesCount: 1,
+        runningTasksCount: 1,
+        pendingTasksCount: 0,
+      },
+      services: [],
+      metricsWarning: null,
+      loadedAt: "2025-01-01T00:00:00.000Z",
+    });
+    await flushMicrotasks();
+    await flushMicrotasks();
+
+    expect(
+      store.getState().containerTabs.find((tab) => tab.hostId === "ecs-host-1")
+        ?.connectionProgress,
+    ).toMatchObject({
+      stage: "loading-ecs-metrics",
+      message: "AWS ECS/CloudWatch 사용량 지표를 가져오는 중입니다.",
+    });
+
+    utilization.resolve({
+      loadedAt: "2025-01-01T00:00:10.000Z",
+      warning: null,
+      services: [],
+    });
+    await connectPromise;
+
+    expect(
+      store.getState().containerTabs.find((tab) => tab.hostId === "ecs-host-1")
+        ?.connectionProgress,
+    ).toBeNull();
+  });
+
   it("starts AWS SSO login before loading an ECS cluster when the SSO profile is expired", async () => {
     const api = createMockApi();
     api.aws.getProfileStatus = vi
       .fn()
       .mockResolvedValueOnce({
+        id: "default",
         profileName: "default",
         available: true,
         isSsoProfile: true,
@@ -4345,6 +4444,7 @@ describe("createAppStore", () => {
         missingTools: [],
       })
       .mockResolvedValueOnce({
+        id: "default",
         profileName: "default",
         available: true,
         isSsoProfile: true,
@@ -4372,6 +4472,88 @@ describe("createAppStore", () => {
       isLoading: false,
       errorMessage: undefined,
     });
+  });
+
+  it("shows browser-login progress while ECS waits for AWS SSO login", async () => {
+    const api = createMockApi();
+    const login = createDeferred<void>();
+    api.aws.getProfileStatus = vi
+      .fn()
+      .mockResolvedValueOnce({
+        id: "default",
+        profileName: "default",
+        available: true,
+        isSsoProfile: true,
+        isAuthenticated: false,
+        accountId: null,
+        arn: null,
+        errorMessage: "브라우저 로그인이 필요합니다.",
+        missingTools: [],
+      })
+      .mockResolvedValueOnce({
+        id: "default",
+        profileName: "default",
+        available: true,
+        isSsoProfile: true,
+        isAuthenticated: true,
+        accountId: "123456789012",
+        arn: "arn:aws:iam::123456789012:user/test",
+        errorMessage: null,
+        missingTools: [],
+      });
+    api.aws.login = vi.fn().mockReturnValue(login.promise);
+    const store = createAppStore(api);
+    await store.getState().bootstrap();
+
+    store.setState((state) => ({
+      hosts: [...state.hosts, createEcsHost()],
+    }));
+
+    const connectPromise = store.getState().connectHost("ecs-host-1", 120, 32);
+    await flushMicrotasks();
+    await flushMicrotasks();
+
+    expect(
+      store.getState().containerTabs.find((tab) => tab.hostId === "ecs-host-1")
+        ?.connectionProgress,
+    ).toMatchObject({
+      stage: "browser-login",
+      message: "브라우저에서 default AWS 로그인을 진행하는 중입니다.",
+    });
+
+    login.resolve();
+    await connectPromise;
+
+    expect(api.aws.login).toHaveBeenCalledWith("default");
+    expect(
+      store.getState().containerTabs.find((tab) => tab.hostId === "ecs-host-1")
+        ?.connectionProgress,
+    ).toBeNull();
+  });
+
+  it("opens AWS SSO login for an ECS host profile on demand", async () => {
+    const api = createMockApi();
+    const store = createAppStore(api);
+    await store.getState().bootstrap();
+
+    store.setState((state) => ({
+      hosts: [...state.hosts, createEcsHost()],
+    }));
+
+    await store.getState().loginAwsProfileForEcsHost("ecs-host-1");
+
+    expect(api.aws.login).toHaveBeenCalledWith("default");
+  });
+
+  it("ignores on-demand ECS SSO login for missing or non-ECS hosts", async () => {
+    const api = createMockApi();
+    const store = createAppStore(api);
+    await store.getState().bootstrap();
+
+    await store.getState().loginAwsProfileForEcsHost("missing-host");
+    await store.getState().loginAwsProfileForEcsHost("host-1");
+
+    expect(api.aws.login).not.toHaveBeenCalled();
   });
 
   it("recovers an ECS snapshot load once when the first request reports an expired SSO session", async () => {

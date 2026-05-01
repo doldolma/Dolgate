@@ -466,6 +466,181 @@ describe("AwsEcsWorkspace", () => {
     vi.useRealTimers();
   });
 
+  it("shows ECS progress stage and message while the initial snapshot is loading", () => {
+    render(
+      <AwsEcsWorkspace
+        host={createHost()}
+        tab={createTab(createSnapshot(), {
+          isLoading: true,
+          ecsSnapshot: null,
+          connectionProgress: {
+            endpointId: "containers:ecs-host-1",
+            hostId: "ecs-host-1",
+            stage: "loading-ecs-cluster",
+            message: "ECS 클러스터와 서비스 목록을 불러오는 중입니다.",
+          },
+        })}
+        isActive={false}
+        onRefresh={vi.fn().mockResolvedValue(undefined)}
+        onRefreshUtilization={vi.fn().mockResolvedValue(undefined)}
+        onOpenEcsExecShell={vi.fn().mockResolvedValue(undefined)}
+      />,
+    );
+
+    expect(screen.getByText("ECS 클러스터 조회")).toBeInTheDocument();
+    expect(
+      screen.getByText("ECS 클러스터와 서비스 목록을 불러오는 중입니다."),
+    ).toBeInTheDocument();
+    expect(screen.queryByTestId("ecs-summary-cards")).toBeNull();
+  });
+
+  it("keeps the existing ECS snapshot visible and shows a progress banner during refresh", () => {
+    render(
+      <AwsEcsWorkspace
+        host={createHost()}
+        tab={createTab(createSnapshot(), {
+          isLoading: true,
+          connectionProgress: {
+            endpointId: "containers:ecs-host-1",
+            hostId: "ecs-host-1",
+            stage: "loading-ecs-metrics",
+            message: "AWS ECS/CloudWatch 사용량 지표를 가져오는 중입니다.",
+          },
+        })}
+        isActive={false}
+        onRefresh={vi.fn().mockResolvedValue(undefined)}
+        onRefreshUtilization={vi.fn().mockResolvedValue(undefined)}
+        onOpenEcsExecShell={vi.fn().mockResolvedValue(undefined)}
+      />,
+    );
+
+    expect(screen.getByTestId("ecs-summary-cards")).toBeInTheDocument();
+    expect(screen.getByText("사용량 지표 조회")).toBeInTheDocument();
+    expect(
+      screen.getByText("AWS ECS/CloudWatch 사용량 지표를 가져오는 중입니다."),
+    ).toBeInTheDocument();
+    expect(screen.getByText("prod")).toBeInTheDocument();
+  });
+
+  it("shows a browser reopen action while ECS SSO login progress is active", async () => {
+    const login = createDeferred<void>();
+    const onOpenAwsSsoLogin = vi.fn().mockReturnValue(login.promise);
+
+    render(
+      <AwsEcsWorkspace
+        host={createHost()}
+        tab={createTab(createSnapshot(), {
+          isLoading: true,
+          ecsSnapshot: null,
+          connectionProgress: {
+            endpointId: "containers:ecs-host-1",
+            hostId: "ecs-host-1",
+            stage: "browser-login",
+            message: "브라우저에서 default AWS 로그인을 진행하는 중입니다.",
+          },
+        })}
+        isActive={false}
+        onRefresh={vi.fn().mockResolvedValue(undefined)}
+        onRefreshUtilization={vi.fn().mockResolvedValue(undefined)}
+        onOpenAwsSsoLogin={onOpenAwsSsoLogin}
+        onOpenEcsExecShell={vi.fn().mockResolvedValue(undefined)}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "브라우저 다시 열기" }));
+
+    expect(onOpenAwsSsoLogin).toHaveBeenCalledWith("ecs-host-1");
+    expect(
+      screen.getByRole("button", { name: "브라우저 여는 중..." }),
+    ).toBeDisabled();
+
+    login.resolve();
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "브라우저 다시 열기" }),
+      ).toBeEnabled(),
+    );
+  });
+
+  it("shows the browser reopen action in the ECS refresh banner too", () => {
+    render(
+      <AwsEcsWorkspace
+        host={createHost()}
+        tab={createTab(createSnapshot(), {
+          isLoading: true,
+          connectionProgress: {
+            endpointId: "containers:ecs-host-1",
+            hostId: "ecs-host-1",
+            stage: "browser-login",
+            message: "브라우저에서 default AWS 로그인을 진행하는 중입니다.",
+          },
+        })}
+        isActive={false}
+        onRefresh={vi.fn().mockResolvedValue(undefined)}
+        onRefreshUtilization={vi.fn().mockResolvedValue(undefined)}
+        onOpenAwsSsoLogin={vi.fn().mockResolvedValue(undefined)}
+        onOpenEcsExecShell={vi.fn().mockResolvedValue(undefined)}
+      />,
+    );
+
+    expect(screen.getByTestId("ecs-summary-cards")).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "브라우저 다시 열기" }),
+    ).toBeInTheDocument();
+  });
+
+  it("offers SSO login recovery actions for ECS authentication errors", async () => {
+    const onOpenAwsSsoLogin = vi.fn().mockResolvedValue(undefined);
+    const onRefresh = vi.fn().mockResolvedValue(undefined);
+
+    render(
+      <AwsEcsWorkspace
+        host={createHost()}
+        tab={createTab(createSnapshot(), {
+          isLoading: false,
+          errorMessage:
+            "The SSO session associated with this profile has expired.",
+        })}
+        isActive={false}
+        onRefresh={onRefresh}
+        onRefreshUtilization={vi.fn().mockResolvedValue(undefined)}
+        onOpenAwsSsoLogin={onOpenAwsSsoLogin}
+        onOpenEcsExecShell={vi.fn().mockResolvedValue(undefined)}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "브라우저에서 로그인" }));
+
+    await waitFor(() => {
+      expect(onOpenAwsSsoLogin).toHaveBeenCalledWith("ecs-host-1");
+      expect(onRefresh).toHaveBeenCalledWith("ecs-host-1");
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "다시 시도" }));
+    expect(onRefresh).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not show SSO recovery actions for generic ECS errors", () => {
+    render(
+      <AwsEcsWorkspace
+        host={createHost()}
+        tab={createTab(createSnapshot(), {
+          isLoading: false,
+          errorMessage: "ECS 클러스터 정보를 불러오지 못했습니다.",
+        })}
+        isActive={false}
+        onRefresh={vi.fn().mockResolvedValue(undefined)}
+        onRefreshUtilization={vi.fn().mockResolvedValue(undefined)}
+        onOpenAwsSsoLogin={vi.fn().mockResolvedValue(undefined)}
+        onOpenEcsExecShell={vi.fn().mockResolvedValue(undefined)}
+      />,
+    );
+
+    const alert = screen.getByRole("alert");
+    expect(within(alert).queryByRole("button", { name: "브라우저에서 로그인" })).toBeNull();
+    expect(within(alert).queryByRole("button", { name: "다시 시도" })).toBeNull();
+  });
+
   it("renders split view with overview, deployments, and recent events", () => {
     const { container } = render(
       <AwsEcsWorkspace

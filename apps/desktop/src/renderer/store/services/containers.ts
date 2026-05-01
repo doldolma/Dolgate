@@ -1,4 +1,4 @@
-import type { TerminalConnectionProgress } from "@shared";
+import type { ConnectionProgressStage, TerminalConnectionProgress } from "@shared";
 import {
   createDefaultLogsRelativeRange,
   normalizeLogsAbsoluteRange,
@@ -41,6 +41,15 @@ import {
 
 type StoreSetter = SliceDeps["set"];
 type StoreGetter = SliceDeps["get"];
+
+function resolveEcsAuthProgressStage(
+  stage?: TerminalConnectionProgress["stage"],
+): ConnectionProgressStage {
+  if (stage === "browser-login" || stage === "checking-profile") {
+    return stage;
+  }
+  return "checking-profile";
+}
 
 function resolveContainerLogsRange(
   tab: Pick<
@@ -462,6 +471,31 @@ export function createContainersServices(deps: SliceDeps) {
       return;
     }
 
+    const setEcsProgress = (
+      stage: ConnectionProgressStage,
+      message: string,
+    ) => {
+      set((state) => {
+        const currentTab =
+          findContainersTab(state, hostId) ?? createEmptyContainersTabState(host);
+        return {
+          containerTabs: upsertContainersTab(state.containerTabs, {
+            ...currentTab,
+            kind: "ecs-cluster",
+            title: buildContainersTabTitle(host),
+            isLoading: true,
+            connectionProgress: createContainerConnectionProgress(
+              hostId,
+              buildContainersEndpointId(hostId),
+              stage,
+              message,
+            ),
+            errorMessage: undefined,
+          }),
+        };
+      });
+    };
+
     set((state) => {
       const currentTab =
         findContainersTab(state, hostId) ?? createEmptyContainersTabState(host);
@@ -475,31 +509,25 @@ export function createContainersServices(deps: SliceDeps) {
           kind: "ecs-cluster",
           title: buildContainersTabTitle(host),
           isLoading: true,
+          connectionProgress: createContainerConnectionProgress(
+            hostId,
+            buildContainersEndpointId(hostId),
+            "checking-profile",
+            `${host.awsProfileName} 프로필 인증 상태를 확인하는 중입니다.`,
+          ),
           errorMessage: undefined,
         }),
       };
     });
 
     const reportAuthProgress = (
-      _message: string,
-      _options?: {
+      message: string,
+      options?: {
         blockingKind?: TerminalConnectionProgress["blockingKind"];
         stage?: TerminalConnectionProgress["stage"];
       },
     ) => {
-      set((state) => {
-        const currentTab =
-          findContainersTab(state, hostId) ?? createEmptyContainersTabState(host);
-        return {
-          containerTabs: upsertContainersTab(state.containerTabs, {
-            ...currentTab,
-            kind: "ecs-cluster",
-            title: buildContainersTabTitle(host),
-            isLoading: true,
-            errorMessage: undefined,
-          }),
-        };
-      });
+      setEcsProgress(resolveEcsAuthProgressStage(options?.stage), message);
     };
 
     try {
@@ -510,6 +538,10 @@ export function createContainersServices(deps: SliceDeps) {
         );
       let snapshot;
       try {
+        setEcsProgress(
+          "loading-ecs-cluster",
+          "ECS 클러스터와 서비스 목록을 불러오는 중입니다.",
+        );
         snapshot = await api.aws.loadEcsClusterSnapshot(hostId);
       } catch (error) {
         const message = normalizeErrorMessage(
@@ -523,6 +555,10 @@ export function createContainersServices(deps: SliceDeps) {
           await trustServices.loginAwsSsoProfile(
             host.awsProfileName,
             reportAuthProgress,
+          );
+          setEcsProgress(
+            "loading-ecs-cluster",
+            "ECS 클러스터와 서비스 목록을 다시 불러오는 중입니다.",
           );
           snapshot = await api.aws.loadEcsClusterSnapshot(hostId);
         } else {
@@ -547,6 +583,12 @@ export function createContainersServices(deps: SliceDeps) {
             title: buildContainersTabTitle(host),
             isLoading: true,
             errorMessage: undefined,
+            connectionProgress: createContainerConnectionProgress(
+              hostId,
+              buildContainersEndpointId(hostId),
+              "loading-ecs-metrics",
+              "AWS ECS/CloudWatch 사용량 지표를 가져오는 중입니다.",
+            ),
             ecsSnapshot: snapshot,
             ecsMetricsWarning: null,
             ecsMetricsLoadedAt: null,
@@ -565,6 +607,7 @@ export function createContainersServices(deps: SliceDeps) {
             kind: "ecs-cluster",
             title: buildContainersTabTitle(host),
             isLoading: false,
+            connectionProgress: null,
           }),
         };
       });
@@ -578,6 +621,7 @@ export function createContainersServices(deps: SliceDeps) {
             kind: "ecs-cluster",
             title: buildContainersTabTitle(host),
             isLoading: false,
+            connectionProgress: null,
             errorMessage: normalizeErrorMessage(
               error,
               "ECS 클러스터 정보를 불러오지 못했습니다.",

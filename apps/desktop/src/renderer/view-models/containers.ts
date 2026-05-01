@@ -11,6 +11,9 @@ export function useContainersViewModel() {
   const refreshEcsClusterUtilization = useAppStore(
     (state) => state.refreshEcsClusterUtilization,
   );
+  const loginAwsProfileForEcsHost = useAppStore(
+    (state) => state.loginAwsProfileForEcsHost,
+  );
   const openEcsExecShell = useAppStore((state) => state.openEcsExecShell);
   const selectHostContainer = useAppStore((state) => state.selectHostContainer);
   const setHostContainersPanel = useAppStore((state) => state.setHostContainersPanel);
@@ -65,6 +68,7 @@ export function useContainersViewModel() {
     reorderContainerTab,
     refreshHostContainers,
     refreshEcsClusterUtilization,
+    loginAwsProfileForEcsHost,
     openEcsExecShell,
     selectHostContainer,
     setHostContainersPanel,

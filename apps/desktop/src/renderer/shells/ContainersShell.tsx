@@ -410,6 +410,9 @@ export function ContainersShell({
                     onRefreshUtilization={
                       containersViewModel.refreshEcsClusterUtilization
                     }
+                    onOpenAwsSsoLogin={
+                      containersViewModel.loginAwsProfileForEcsHost
+                    }
                     onSelectService={containersViewModel.setEcsClusterSelectedService}
                     onSetPanel={containersViewModel.setEcsClusterActivePanel}
                     onSetTunnelState={containersViewModel.setEcsClusterTunnelState}

@@ -369,6 +369,13 @@ export function createContainersSlice(deps: SliceDeps): ContainersSlice {
             }
             await loadEcsClusterUtilization(set, get, hostId);
           },
+    loginAwsProfileForEcsHost: async (hostId) => {
+            const host = get().hosts.find((item) => item.id === hostId);
+            if (!host || !isAwsEcsHostRecord(host)) {
+              return;
+            }
+            await api.aws.login(host.awsProfileName);
+          },
     selectHostContainer: async (hostId, containerId) => {
             const host = get().hosts.find((item) => item.id === hostId);
             if (!host) {
