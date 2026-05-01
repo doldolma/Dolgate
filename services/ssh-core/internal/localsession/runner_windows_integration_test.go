@@ -325,7 +325,13 @@ func TestWindowsConPTYRunnerSupportsInteractivePowerShell(t *testing.T) {
 		waitResult <- exit
 	}()
 
-	if err := runner.Write([]byte("echo READY_FROM_TEST\r\n")); err != nil {
+	// PowerShell 5 on GitHub's Windows Server 2025 image can drop input sent
+	// while the initial profile/prompt setup is still taking over the console.
+	// Wait for the interactive prompt before sending the probe command.
+	waitForOutputContains(t, output, "PS ", waitResult, waitErr)
+	waitForOutputContains(t, output, "> ", waitResult, waitErr)
+
+	if err := runner.Write([]byte("Write-Output READY_FROM_TEST\r\n")); err != nil {
 		t.Fatalf("write failed: %v", err)
 	}
 	waitForOutputContains(t, output, "READY_FROM_TEST", waitResult, waitErr)
