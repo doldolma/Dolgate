@@ -74,6 +74,11 @@ import {
   normalizeLogsAbsoluteRange,
   normalizeLogsRelativeRange,
 } from "../lib/log-range";
+import { formatConnectionProgressStageLabel } from "../lib/connection-progress";
+import {
+  isAwsSsoAuthenticationErrorMessage,
+  normalizeErrorMessage,
+} from "../store/utils";
 
 interface AwsEcsWorkspaceProps {
   host: HostRecord;
@@ -81,6 +86,7 @@ interface AwsEcsWorkspaceProps {
   isActive: boolean;
   onRefresh: (hostId: string) => Promise<void>;
   onRefreshUtilization: (hostId: string) => Promise<void>;
+  onOpenAwsSsoLogin?: (hostId: string) => Promise<void>;
   onSelectService?: (hostId: string, serviceName: string | null) => void;
   onSetPanel?: (hostId: string, panel: EcsDetailPanel) => void;
   onSetTunnelState?: (
@@ -685,6 +691,7 @@ export function AwsEcsWorkspace({
   isActive,
   onRefresh,
   onRefreshUtilization,
+  onOpenAwsSsoLogin,
   onSelectService,
   onSetPanel,
   onSetTunnelState,
@@ -699,6 +706,19 @@ export function AwsEcsWorkspace({
     stopEcsServiceTunnel,
   } = useAwsEcsWorkspaceController();
   const snapshot = tab.ecsSnapshot;
+  const progressTitle = tab.connectionProgress
+    ? formatConnectionProgressStageLabel(tab.connectionProgress.stage)
+    : "ECS 클러스터 조회";
+  const progressMessage =
+    tab.connectionProgress?.message ??
+    "AWS ECS 서비스 스냅샷과 현재 사용량 지표를 가져오고 있습니다.";
+  const canOpenSsoLoginFromProgress =
+    tab.connectionProgress?.stage === "browser-login" &&
+    Boolean(onOpenAwsSsoLogin);
+  const canRecoverSsoError =
+    Boolean(tab.errorMessage) &&
+    isAwsSsoAuthenticationErrorMessage(tab.errorMessage ?? "") &&
+    Boolean(onOpenAwsSsoLogin);
   const services = useMemo(
     () => (snapshot ? [...snapshot.services].sort(compareServices) : []),
     [snapshot],
@@ -726,6 +746,10 @@ export function AwsEcsWorkspace({
   const [localFindOpen, setLocalFindOpen] = useState(false);
   const [localFindQuery, setLocalFindQuery] = useState("");
   const [activeLocalFindMatchIndex, setActiveLocalFindMatchIndex] = useState(0);
+  const [ssoLoginActionState, setSsoLoginActionState] = useState<{
+    loading: boolean;
+    error: string | null;
+  }>({ loading: false, error: null });
   const tunnelStatesRef = useRef<Record<string, TunnelPanelState>>({});
   const serviceContextsRef = useRef<Record<string, ServiceActionContextState>>({});
   const inFlightContextRequestsRef = useRef<
@@ -749,9 +773,40 @@ export function AwsEcsWorkspace({
   const suppressLogsScrollRef = useRef(false);
   const releaseLogsScrollFrameRef = useRef<number | null>(null);
 
+  const openAwsSsoLogin = useCallback(
+    async (options: { refreshAfterLogin?: boolean } = {}) => {
+      if (!onOpenAwsSsoLogin) {
+        return;
+      }
+      setSsoLoginActionState({ loading: true, error: null });
+      try {
+        await onOpenAwsSsoLogin(host.id);
+        if (options.refreshAfterLogin) {
+          await onRefresh(host.id);
+        }
+        setSsoLoginActionState({ loading: false, error: null });
+      } catch (error) {
+        setSsoLoginActionState({
+          loading: false,
+          error: normalizeErrorMessage(
+            error,
+            "AWS SSO 로그인 창을 열지 못했습니다.",
+          ),
+        });
+      }
+    },
+    [host.id, onOpenAwsSsoLogin, onRefresh],
+  );
+
   useEffect(() => {
     serviceContextsRef.current = serviceContexts;
   }, [serviceContexts]);
+
+  useEffect(() => {
+    setSsoLoginActionState((current) =>
+      current.loading ? current : { loading: false, error: null },
+    );
+  }, [host.id, tab.connectionProgress?.stage, tab.errorMessage]);
 
   useEffect(() => {
     tunnelStatesRef.current = tab.ecsTunnelStatesByServiceName;
@@ -1810,6 +1865,27 @@ export function AwsEcsWorkspace({
     shellPickerState.taskArn,
     { requireExec: true },
   );
+  const ssoActionError = ssoLoginActionState.error ? (
+    <p className="text-[0.86rem] font-semibold text-[var(--danger-text)]">
+      {ssoLoginActionState.error}
+    </p>
+  ) : null;
+  const progressSsoAction = canOpenSsoLoginFromProgress ? (
+    <div className="mt-1 flex flex-wrap items-center gap-2">
+      <Button
+        type="button"
+        variant="secondary"
+        size="sm"
+        disabled={ssoLoginActionState.loading}
+        onClick={() => {
+          void openAwsSsoLogin();
+        }}
+      >
+        {ssoLoginActionState.loading ? "브라우저 여는 중..." : "브라우저 다시 열기"}
+      </Button>
+      {ssoActionError}
+    </div>
+  ) : null;
 
   return (
     <div className="relative flex h-full min-h-0 flex-col gap-3">
@@ -1838,7 +1914,36 @@ export function AwsEcsWorkspace({
 
       {tab.errorMessage ? (
         <NoticeCard tone="danger" role="alert">
-          {tab.errorMessage}
+          <p>{tab.errorMessage}</p>
+          {canRecoverSsoError ? (
+            <div className="mt-1 flex flex-wrap items-center gap-2">
+              <Button
+                type="button"
+                variant="primary"
+                size="sm"
+                disabled={ssoLoginActionState.loading}
+                onClick={() => {
+                  void openAwsSsoLogin({ refreshAfterLogin: true });
+                }}
+              >
+                {ssoLoginActionState.loading
+                  ? "브라우저 여는 중..."
+                  : "브라우저에서 로그인"}
+              </Button>
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                disabled={tab.isLoading || ssoLoginActionState.loading}
+                onClick={() => {
+                  void onRefresh(host.id);
+                }}
+              >
+                다시 시도
+              </Button>
+              {ssoActionError}
+            </div>
+          ) : null}
         </NoticeCard>
       ) : null}
 
@@ -1848,12 +1953,18 @@ export function AwsEcsWorkspace({
         </NoticeCard>
       ) : null}
 
+      {snapshot && tab.isLoading && tab.connectionProgress ? (
+        <NoticeCard tone="info" title={progressTitle}>
+          <p>{progressMessage}</p>
+          {progressSsoAction}
+        </NoticeCard>
+      ) : null}
+
       {tab.isLoading && !snapshot ? (
-        <EmptyState
-          className="max-w-[620px]"
-          title="클러스터 정보를 불러오는 중입니다."
-          description="AWS ECS 서비스 스냅샷과 현재 사용량 지표를 가져오고 있습니다."
-        />
+        <NoticeCard tone="info" title={progressTitle} className="max-w-[620px]">
+          <p>{progressMessage}</p>
+          {progressSsoAction}
+        </NoticeCard>
       ) : null}
 
       {snapshot ? (

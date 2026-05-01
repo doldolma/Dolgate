@@ -90,7 +90,9 @@ export type AwsSftpDiagnosticDetails = Record<
 >;
 export type ConnectionProgressStage =
   | SftpConnectionStage
-  | 'connecting-containers';
+  | 'connecting-containers'
+  | 'loading-ecs-cluster'
+  | 'loading-ecs-metrics';
 
 export const AWS_SFTP_DEFAULT_PORT = 22;
 export const DEFAULT_SESSION_REPLAY_RETENTION_COUNT = 100;

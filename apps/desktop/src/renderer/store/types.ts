@@ -544,6 +544,7 @@ interface AppStateParts {
   ) => void;
   refreshHostContainers: (hostId: string) => Promise<void>;
   refreshEcsClusterUtilization: (hostId: string) => Promise<void>;
+  loginAwsProfileForEcsHost: (hostId: string) => Promise<void>;
   selectHostContainer: (
     hostId: string,
     containerId: string | null,
@@ -840,6 +841,7 @@ export type ContainersSlice = Pick<
   | "reorderContainerTab"
   | "refreshHostContainers"
   | "refreshEcsClusterUtilization"
+  | "loginAwsProfileForEcsHost"
   | "selectHostContainer"
   | "setHostContainersPanel"
   | "setHostContainerTunnelState"

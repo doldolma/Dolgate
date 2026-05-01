@@ -24,6 +24,10 @@ export function formatConnectionProgressStageLabel(
       return "SFTP 연결";
     case "connecting-containers":
       return "컨테이너 연결";
+    case "loading-ecs-cluster":
+      return "ECS 클러스터 조회";
+    case "loading-ecs-metrics":
+      return "사용량 지표 조회";
     default:
       return "연결 준비";
   }
