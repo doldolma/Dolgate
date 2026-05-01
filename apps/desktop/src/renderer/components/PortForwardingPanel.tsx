@@ -70,6 +70,9 @@ import { DialogBackdrop } from './DialogBackdrop';
 import { KnownHostPromptDialog } from './KnownHostPromptDialog';
 
 type ForwardTab = 'ssh' | 'aws-ssm' | 'ecs-task' | 'container' | 'dns';
+type SshForwardHostRecord = Extract<HostRecord, { kind: 'ssh' }>;
+type AwsEc2ForwardHostRecord = Extract<HostRecord, { kind: 'aws-ec2' }>;
+type AwsEcsForwardHostRecord = Extract<HostRecord, { kind: 'aws-ecs' }>;
 
 let lastSelectedForwardTab: ForwardTab = 'ssh';
 
@@ -224,6 +227,69 @@ function getContainerHostSecondaryLabel(host: HostRecord): string {
     return `${host.transport} / ${host.host ?? ''}:${host.port ?? ''}`.replace(/:$/, '');
   }
   return host.hostname;
+}
+
+function getSshForwardHostSecondaryLabel(host: SshForwardHostRecord): string {
+  const endpoint = `${host.hostname}:${host.port}`;
+  const username = host.username?.trim();
+  return username ? `${username}@${endpoint}` : endpoint;
+}
+
+function getSshForwardHostSearchText(host: SshForwardHostRecord): string {
+  return [
+    host.label,
+    host.hostname,
+    host.username ?? '',
+    host.groupName ?? '',
+    getSshForwardHostSecondaryLabel(host),
+    ...(host.tags ?? []),
+  ].join(' ');
+}
+
+function getAwsSsmForwardHostSecondaryLabel(host: AwsEc2ForwardHostRecord): string {
+  return `${host.awsProfileName} / ${host.awsRegion} / ${host.awsInstanceId}`;
+}
+
+function getEcsTaskForwardHostSecondaryLabel(host: AwsEcsForwardHostRecord): string {
+  return `${host.awsProfileName} / ${host.awsRegion} / ${host.awsEcsClusterName}`;
+}
+
+function getPortForwardHostSearchText(host: HostRecord): string {
+  const base = [host.label, host.groupName ?? '', ...(host.tags ?? [])];
+  if (isSshHostRecord(host)) {
+    return [...base, getSshForwardHostSearchText(host)].join(' ');
+  }
+  if (isAwsEc2HostRecord(host)) {
+    return [
+      ...base,
+      host.awsProfileName,
+      host.awsRegion,
+      host.awsInstanceId,
+      host.awsInstanceName ?? '',
+      host.awsPrivateIp ?? '',
+      host.awsState,
+      getAwsSsmForwardHostSecondaryLabel(host),
+    ].join(' ');
+  }
+  if (isAwsEcsHostRecord(host)) {
+    return [
+      ...base,
+      host.awsProfileName,
+      host.awsRegion,
+      host.awsEcsClusterArn,
+      host.awsEcsClusterName,
+      getEcsTaskForwardHostSecondaryLabel(host),
+    ].join(' ');
+  }
+  return [...base, getContainerHostSecondaryLabel(host)].join(' ');
+}
+
+function filterForwardHostOptions<T extends HostRecord>(hosts: T[], query: string): T[] {
+  const normalizedQuery = query.trim().toLowerCase();
+  if (!normalizedQuery) {
+    return hosts;
+  }
+  return hosts.filter((host) => getPortForwardHostSearchText(host).toLowerCase().includes(normalizedQuery));
 }
 
 function emptySshDraft(hostId?: string): PortForwardDraft {
@@ -730,12 +796,14 @@ export function PortForwardingPanel({
   const [discoveryDetailsLoading, setDiscoveryDetailsLoading] = useState(false);
   const [isHostPickerOpen, setIsHostPickerOpen] = useState(false);
   const [isContainerPickerOpen, setIsContainerPickerOpen] = useState(false);
+  const [hostSearchQuery, setHostSearchQuery] = useState('');
   const [knownHostPrompt, setKnownHostPrompt] = useState<PendingHostKeyPrompt | null>(null);
   const discoveryHostIdRef = useRef<string | null>(null);
   const discoveryListRequestRef = useRef(0);
   const discoveryDetailsRequestRef = useRef(0);
   const hostPickerRef = useRef<HTMLDivElement | null>(null);
   const containerPickerRef = useRef<HTMLDivElement | null>(null);
+  const hostSearchInputRef = useRef<HTMLInputElement | null>(null);
   const eligibleRules = useMemo(() => getDnsOverrideEligibleRules(rules), [rules]);
   const ruleMap = useMemo(
     () => new Map(rules.map((rule) => [rule.id, rule])),
@@ -819,6 +887,7 @@ export function PortForwardingPanel({
         visibleEcsEphemeralRuntimes.length > 0 ||
         visibleContainerEphemeralRuntimes.length > 0;
   const containerDraft = isContainerPortForwardDraft(draft) ? draft : null;
+  const sshDraft = isSshPortForwardDraft(draft) ? draft : null;
   const ecsTaskDraft = isEcsTaskPortForwardDraft(draft) ? draft : null;
   const shouldShowDiscoveryProgress = Boolean(discoveryProgressMessage) && (discoveryLoading || discoveryDetailsLoading);
   const selectedContainerSummary =
@@ -845,7 +914,18 @@ export function PortForwardingPanel({
     () => discoveryDetails?.ports.filter((port) => port.protocol === 'tcp' && port.containerPort > 0) ?? [],
     [discoveryDetails]
   );
+  const selectedSshHost = sshDraft ? sshHosts.find((host) => host.id === sshDraft.hostId) ?? null : null;
+  const visibleSshHosts = useMemo(() => filterForwardHostOptions(sshHosts, hostSearchQuery), [hostSearchQuery, sshHosts]);
+  const selectedAwsHost = isAwsSsmPortForwardDraft(draft)
+    ? awsHosts.find((host) => host.id === draft.hostId) ?? null
+    : null;
+  const visibleAwsHosts = useMemo(() => filterForwardHostOptions(awsHosts, hostSearchQuery), [awsHosts, hostSearchQuery]);
   const selectedEcsHost = ecsTaskDraft ? ecsHosts.find((host) => host.id === ecsTaskDraft.hostId) ?? null : null;
+  const visibleEcsHosts = useMemo(() => filterForwardHostOptions(ecsHosts, hostSearchQuery), [ecsHosts, hostSearchQuery]);
+  const visibleContainerHosts = useMemo(
+    () => filterForwardHostOptions(containerHosts, hostSearchQuery),
+    [containerHosts, hostSearchQuery],
+  );
   const ecsContainerOptions = useMemo(
     () => ecsServiceDetails?.containers ?? [],
     [ecsServiceDetails],
@@ -858,6 +938,168 @@ export function PortForwardingPanel({
     () => ecsSelectedContainer?.ports ?? [],
     [ecsSelectedContainer],
   );
+
+  function selectSshForwardHost(hostId: string) {
+    setIsHostPickerOpen(false);
+    setHostSearchQuery('');
+    setDraft((current) => {
+      if (!isSshPortForwardDraft(current)) {
+        return current;
+      }
+      return {
+        ...current,
+        hostId,
+      };
+    });
+  }
+
+  function selectAwsForwardHost(hostId: string) {
+    setIsHostPickerOpen(false);
+    setHostSearchQuery('');
+    setDraft((current) => {
+      if (!isAwsSsmPortForwardDraft(current)) {
+        return current;
+      }
+      return {
+        ...current,
+        hostId,
+      };
+    });
+  }
+
+  function selectEcsForwardHost(hostId: string) {
+    setIsHostPickerOpen(false);
+    setHostSearchQuery('');
+    setDraft((current) => {
+      if (!isEcsTaskPortForwardDraft(current)) {
+        return current;
+      }
+      return {
+        ...current,
+        hostId,
+        serviceName: '',
+        containerName: '',
+        targetPort: 0,
+      };
+    });
+  }
+
+  function selectContainerForwardHost(hostId: string) {
+    setIsHostPickerOpen(false);
+    setHostSearchQuery('');
+    setDraft((current) => {
+      if (!isContainerPortForwardDraft(current)) {
+        return current;
+      }
+      return {
+        ...current,
+        hostId,
+        containerId: '',
+        containerName: '',
+        networkName: '',
+        targetPort: 0,
+      };
+    });
+  }
+
+  function renderForwardHostPicker<T extends HostRecord>({
+    label,
+    selectedHost,
+    visibleHosts,
+    disabled,
+    searchLabel,
+    getSecondaryLabel,
+    getBadgeLabel,
+    onSelect,
+  }: {
+    label: string;
+    selectedHost: T | null;
+    visibleHosts: T[];
+    disabled: boolean;
+    searchLabel: string;
+    getSecondaryLabel: (host: T) => string;
+    getBadgeLabel: (host: T) => string;
+    onSelect: (hostId: string) => void;
+  }) {
+    return (
+      <div ref={hostPickerRef}>
+        <PickerField
+          label={label}
+          placeholder="Select host"
+          isOpen={isHostPickerOpen}
+          disabled={disabled}
+          onToggle={() => {
+            if (disabled) {
+              return;
+            }
+            setIsContainerPickerOpen(false);
+            setIsHostPickerOpen((current) => !current);
+          }}
+          selectedContent={
+            selectedHost ? (
+              <div className="flex min-w-0 items-center justify-between gap-[0.85rem]">
+                <div className="min-w-0 grid gap-[0.18rem]">
+                  <strong className="text-[1rem] text-[var(--text)]">
+                    {selectedHost.label}
+                  </strong>
+                  <span className="truncate text-[0.84rem] text-[var(--text-soft)]">
+                    {getSecondaryLabel(selectedHost)}
+                  </span>
+                </div>
+                <Badge className="shrink-0">{getBadgeLabel(selectedHost)}</Badge>
+              </div>
+            ) : undefined
+          }
+        >
+          <Input
+            ref={hostSearchInputRef}
+            aria-label={searchLabel}
+            placeholder="이름, 주소, 프로필, 그룹, 태그 검색"
+            value={hostSearchQuery}
+            onChange={(event) => setHostSearchQuery(event.target.value)}
+            className="min-h-10 rounded-[14px] px-3 py-2 text-[0.9rem]"
+          />
+          {visibleHosts.length > 0 ? (
+            visibleHosts.map((host) => (
+              <button
+                key={host.id}
+                type="button"
+                role="option"
+                aria-selected={draft.hostId === host.id}
+                className={cn(
+                  'flex w-full items-center justify-between gap-[0.85rem] rounded-[18px] border border-[var(--border)] bg-[color-mix(in_srgb,var(--dialog-surface-muted)_88%,transparent_12%)] px-[0.95rem] py-[0.9rem] text-left transition-[border-color,background,transform] duration-150 hover:border-[color-mix(in_srgb,var(--accent-strong)_30%,var(--border))] hover:bg-[color-mix(in_srgb,var(--dialog-surface)_84%,var(--accent-strong)_16%)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[color-mix(in_srgb,var(--accent-strong)_45%,white_55%)] focus-visible:outline-offset-2',
+                  draft.hostId === host.id &&
+                    'border-[color-mix(in_srgb,var(--accent-strong)_38%,var(--border))] bg-[color-mix(in_srgb,var(--dialog-surface)_76%,var(--accent-strong)_24%)] shadow-[0_0_0_1px_color-mix(in_srgb,var(--accent-strong)_18%,transparent_82%)]',
+                )}
+                onPointerDown={(event) => {
+                  event.preventDefault();
+                  onSelect(host.id);
+                }}
+                onClick={() => onSelect(host.id)}
+              >
+                <div className="min-w-0 grid gap-[0.18rem]">
+                  <strong className="text-[1rem] text-[var(--text)]">
+                    {host.label}
+                  </strong>
+                  <span className="truncate text-[0.84rem] text-[var(--text-soft)]">
+                    {getSecondaryLabel(host)}
+                  </span>
+                </div>
+                <Badge className="shrink-0">{getBadgeLabel(host)}</Badge>
+              </button>
+            ))
+          ) : (
+            <div
+              className="rounded-[16px] border border-dashed border-[var(--border)] px-[0.95rem] py-[0.9rem] text-[0.9rem] text-[var(--text-soft)]"
+              role="status"
+            >
+              검색 결과가 없습니다.
+            </div>
+          )}
+        </PickerField>
+      </div>
+    );
+  }
 
   function renderRuleCard(rule: PortForwardRuleRecord) {
     const runtime = runtimeMap.get(rule.id);
@@ -1193,6 +1435,7 @@ export function PortForwardingPanel({
     setEditingDnsOverrideId(null);
     setIsHostPickerOpen(false);
     setIsContainerPickerOpen(false);
+    setHostSearchQuery('');
     setDraft(
       tab === 'ssh'
         ? emptySshDraft(sshHosts[0]?.id)
@@ -1218,6 +1461,7 @@ export function PortForwardingPanel({
     setActiveTab(rule.transport);
     setIsHostPickerOpen(false);
     setIsContainerPickerOpen(false);
+    setHostSearchQuery('');
     setDraft(toDraft(rule));
     setIsSubmitting(false);
     setError(null);
@@ -1232,6 +1476,7 @@ export function PortForwardingPanel({
     setActiveTab('dns');
     setIsHostPickerOpen(false);
     setIsContainerPickerOpen(false);
+    setHostSearchQuery('');
     setDnsDraft(
       isLinkedDnsOverrideRecord(override)
         ? {
@@ -1279,6 +1524,7 @@ export function PortForwardingPanel({
     setIsModalOpen(false);
     setIsHostPickerOpen(false);
     setIsContainerPickerOpen(false);
+    setHostSearchQuery('');
     setKnownHostPrompt(null);
     resetEcsDiscoveryState();
     await releaseDiscoveryHost(discoveryHostIdRef.current);
@@ -1611,8 +1857,23 @@ export function PortForwardingPanel({
     if (!isModalOpen) {
       setIsHostPickerOpen(false);
       setIsContainerPickerOpen(false);
+      setHostSearchQuery('');
     }
   }, [isModalOpen]);
+
+  useEffect(() => {
+    if (!isHostPickerOpen) {
+      setHostSearchQuery('');
+      return;
+    }
+    if (!isModalOpen) {
+      return;
+    }
+    const frame = window.requestAnimationFrame(() => {
+      hostSearchInputRef.current?.focus();
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [isHostPickerOpen, isModalOpen]);
 
   useEffect(() => {
     if (!isModalOpen || (!isHostPickerOpen && !isContainerPickerOpen)) {
@@ -1984,118 +2245,49 @@ export function PortForwardingPanel({
                     <input value={draft.label} onChange={(event) => setDraft((current) => ({ ...current, label: event.target.value }))} disabled={isSubmitting} />
                   </FieldGroup>
 
-              {isContainerPortForwardDraft(draft) ? (
-                <div ref={hostPickerRef}>
-                  <PickerField
-                    label="Host"
-                    placeholder="Select host"
-                    isOpen={isHostPickerOpen}
-                    disabled={isSubmitting || discoveryLoading || discoveryDetailsLoading}
-                    onToggle={() => {
-                      if (isSubmitting || discoveryLoading || discoveryDetailsLoading) {
-                        return;
-                      }
-                      setIsContainerPickerOpen(false);
-                      setIsHostPickerOpen((current) => !current);
-                    }}
-                    selectedContent={
-                      discoveryHost ? (
-                        <div className="flex min-w-0 items-center justify-between gap-[0.85rem]">
-                          <div className="min-w-0 grid gap-[0.18rem]">
-                            <strong className="text-[1rem] text-[var(--text)]">
-                              {discoveryHost.label}
-                            </strong>
-                            <span className="truncate text-[0.84rem] text-[var(--text-soft)]">
-                              {getContainerHostSecondaryLabel(discoveryHost)}
-                            </span>
-                          </div>
-                          <Badge className="shrink-0">
-                            {getContainerHostKindLabel(discoveryHost)}
-                          </Badge>
-                        </div>
-                      ) : undefined
-                    }
-                  >
-                    {containerHosts.map((host) => (
-                      <button
-                        key={host.id}
-                        type="button"
-                        role="option"
-                        aria-selected={draft.hostId === host.id}
-                        className={cn(
-                          'flex w-full items-center justify-between gap-[0.85rem] rounded-[18px] border border-[var(--border)] bg-[color-mix(in_srgb,var(--dialog-surface-muted)_88%,transparent_12%)] px-[0.95rem] py-[0.9rem] text-left transition-[border-color,background,transform] duration-150 hover:border-[color-mix(in_srgb,var(--accent-strong)_30%,var(--border))] hover:bg-[color-mix(in_srgb,var(--dialog-surface)_84%,var(--accent-strong)_16%)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[color-mix(in_srgb,var(--accent-strong)_45%,white_55%)] focus-visible:outline-offset-2',
-                          draft.hostId === host.id &&
-                            'border-[color-mix(in_srgb,var(--accent-strong)_38%,var(--border))] bg-[color-mix(in_srgb,var(--dialog-surface)_76%,var(--accent-strong)_24%)] shadow-[0_0_0_1px_color-mix(in_srgb,var(--accent-strong)_18%,transparent_82%)]',
-                        )}
-                        onClick={() => {
-                          setIsHostPickerOpen(false);
-                          setDraft((current) => {
-                            if (!isContainerPortForwardDraft(current)) {
-                              return current;
-                            }
-                            return {
-                              ...current,
-                              hostId: host.id,
-                              containerId: '',
-                              containerName: '',
-                              networkName: '',
-                              targetPort: 0,
-                            };
-                          });
-                        }}
-                      >
-                        <div className="min-w-0 grid gap-[0.18rem]">
-                          <strong className="text-[1rem] text-[var(--text)]">
-                            {host.label}
-                          </strong>
-                          <span className="truncate text-[0.84rem] text-[var(--text-soft)]">
-                            {getContainerHostSecondaryLabel(host)}
-                          </span>
-                        </div>
-                        <Badge className="shrink-0">
-                          {getContainerHostKindLabel(host)}
-                        </Badge>
-                      </button>
-                    ))}
-                  </PickerField>
-                </div>
-              ) : (
-                <FieldGroup label={isAwsSsmPortForwardDraft(draft) ? 'AWS EC2 Host' : isEcsTaskPortForwardDraft(draft) ? 'AWS ECS Host' : 'Host'}>
-                  <select
-                    value={draft.hostId}
-                    onChange={(event) => {
-                      const nextHostId = event.target.value;
-                      setDraft((current) =>
-                        isEcsTaskPortForwardDraft(current)
-                          ? {
-                              ...current,
-                              hostId: nextHostId,
-                              serviceName: '',
-                              containerName: '',
-                              targetPort: 0,
-                            }
-                          : { ...current, hostId: nextHostId }
-                      );
-                    }}
-                    disabled={isSubmitting}
-                  >
-                    <option value="">Select host</option>
-                    {(isAwsSsmPortForwardDraft(draft)
-                      ? awsHosts
-                      : isEcsTaskPortForwardDraft(draft)
-                        ? ecsHosts
-                        : sshHosts).map((host) => (
-                      <option key={host.id} value={host.id}>
-                        {isAwsEc2HostRecord(host)
-                          ? `${host.label} (${host.awsProfileName} / ${host.awsRegion} / ${host.awsInstanceId})`
-                          : isAwsEcsHostRecord(host)
-                            ? `${host.label} (${host.awsProfileName} / ${host.awsRegion} / ${host.awsEcsClusterName})`
-                          : `${host.label} (${host.hostname})`}
-                      </option>
-                    ))}
-                  </select>
-                </FieldGroup>
-              )}
+              {isContainerPortForwardDraft(draft)
+                ? renderForwardHostPicker({
+                    label: 'Host',
+                    selectedHost: discoveryHost,
+                    visibleHosts: visibleContainerHosts,
+                    disabled: isSubmitting || discoveryLoading || discoveryDetailsLoading,
+                    searchLabel: 'Container forwarding host search',
+                    getSecondaryLabel: getContainerHostSecondaryLabel,
+                    getBadgeLabel: getContainerHostKindLabel,
+                    onSelect: selectContainerForwardHost,
+                  })
+                : isSshPortForwardDraft(draft)
+                  ? renderForwardHostPicker({
+                      label: 'Host',
+                      selectedHost: selectedSshHost,
+                      visibleHosts: visibleSshHosts,
+                      disabled: isSubmitting,
+                      searchLabel: 'SSH forwarding host search',
+                      getSecondaryLabel: getSshForwardHostSecondaryLabel,
+                      getBadgeLabel: () => 'SSH',
+                      onSelect: selectSshForwardHost,
+                    })
+                  : isAwsSsmPortForwardDraft(draft)
+                    ? renderForwardHostPicker({
+                        label: 'AWS EC2 Host',
+                        selectedHost: selectedAwsHost,
+                        visibleHosts: visibleAwsHosts,
+                        disabled: isSubmitting,
+                        searchLabel: 'AWS EC2 forwarding host search',
+                        getSecondaryLabel: getAwsSsmForwardHostSecondaryLabel,
+                        getBadgeLabel: () => 'AWS',
+                        onSelect: selectAwsForwardHost,
+                      })
+                    : renderForwardHostPicker({
+                        label: 'AWS ECS Host',
+                        selectedHost: selectedEcsHost,
+                        visibleHosts: visibleEcsHosts,
+                        disabled: isSubmitting,
+                        searchLabel: 'ECS task forwarding host search',
+                        getSecondaryLabel: getEcsTaskForwardHostSecondaryLabel,
+                        getBadgeLabel: () => 'ECS',
+                        onSelect: selectEcsForwardHost,
+                      })}
 
               {isContainerPortForwardDraft(draft) ? (
                 <>

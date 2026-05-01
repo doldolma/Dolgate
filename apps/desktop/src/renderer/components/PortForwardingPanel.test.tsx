@@ -211,6 +211,7 @@ async function chooseContainerOption(optionName: RegExp | string) {
 
 function renderPanel(options?: {
   onSave?: (ruleId: string | null, draft: PortForwardDraft) => Promise<void>;
+  hosts?: HostRecord[];
   runtimes?: PortForwardRuntimeRecord[];
   rules?: PortForwardRuleRecord[];
   dnsOverrides?: DnsOverrideResolvedRecord[];
@@ -229,7 +230,7 @@ function renderPanel(options?: {
   const onStop = vi.fn().mockResolvedValue(undefined);
   const view = render(
     <PortForwardingPanel
-      hosts={hosts}
+      hosts={options?.hosts ?? hosts}
       containerTabs={options?.containerTabs ?? []}
       rules={options?.rules ?? rules}
       dnsOverrides={options?.dnsOverrides ?? dnsOverrides}
@@ -370,6 +371,223 @@ describe('PortForwardingPanel dialog', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Close port forwarding dialog' }));
 
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+
+  it('renders SSH forwarding host selection as a searchable picker', async () => {
+    renderPanel();
+
+    fireEvent.click(screen.getByRole('button', { name: 'New SSH Forward' }));
+
+    const dialog = screen.getByRole('dialog');
+    expect(within(dialog).queryByRole('combobox', { name: 'Host' })).not.toBeInTheDocument();
+
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Host' }));
+
+    await waitFor(() =>
+      expect(within(dialog).getByLabelText('SSH forwarding host search')).toHaveFocus(),
+    );
+    expect(within(dialog).getByRole('listbox', { name: 'Host options' })).toBeInTheDocument();
+  });
+
+  it('filters SSH forwarding hosts by label, hostname, username, group, and tags', () => {
+    const searchableHosts: HostRecord[] = [
+      hosts[0]!,
+      {
+        id: 'ssh-host-2',
+        kind: 'ssh',
+        label: 'Production API',
+        hostname: 'api.internal',
+        port: 22,
+        username: 'deploy',
+        authType: 'password',
+        privateKeyPath: null,
+        secretRef: null,
+        groupName: 'platform',
+        tags: ['blue'],
+        terminalThemeId: null,
+        createdAt: '2025-01-01T00:00:00.000Z',
+        updatedAt: '2025-01-01T00:00:00.000Z',
+      },
+      {
+        id: 'ssh-host-3',
+        kind: 'ssh',
+        label: 'Database',
+        hostname: 'db.internal',
+        port: 2222,
+        username: 'postgres',
+        authType: 'password',
+        privateKeyPath: null,
+        secretRef: null,
+        groupName: 'infra',
+        tags: ['storage'],
+        terminalThemeId: null,
+        createdAt: '2025-01-01T00:00:00.000Z',
+        updatedAt: '2025-01-01T00:00:00.000Z',
+      },
+      {
+        id: 'ssh-host-4',
+        kind: 'ssh',
+        label: 'Cache',
+        hostname: 'cache.internal',
+        port: 22,
+        username: 'redis',
+        authType: 'password',
+        privateKeyPath: null,
+        secretRef: null,
+        groupName: 'data',
+        tags: ['hot-path'],
+        terminalThemeId: null,
+        createdAt: '2025-01-01T00:00:00.000Z',
+        updatedAt: '2025-01-01T00:00:00.000Z',
+      },
+    ];
+
+    renderPanel({ hosts: searchableHosts });
+
+    fireEvent.click(screen.getByRole('button', { name: 'New SSH Forward' }));
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Host' }));
+
+    const searchInput = screen.getByLabelText('SSH forwarding host search');
+    fireEvent.change(searchInput, { target: { value: 'deploy' } });
+    let listbox = screen.getByRole('listbox', { name: 'Host options' });
+    expect(within(listbox).getByText('Production API')).toBeInTheDocument();
+    expect(within(listbox).queryByText('Database')).not.toBeInTheDocument();
+    expect(within(listbox).queryByText('Cache')).not.toBeInTheDocument();
+
+    fireEvent.change(searchInput, { target: { value: 'infra' } });
+    listbox = screen.getByRole('listbox', { name: 'Host options' });
+    expect(within(listbox).getByText('Database')).toBeInTheDocument();
+    expect(within(listbox).queryByText('Production API')).not.toBeInTheDocument();
+
+    fireEvent.change(searchInput, { target: { value: 'hot-path' } });
+    listbox = screen.getByRole('listbox', { name: 'Host options' });
+    expect(within(listbox).getByText('Cache')).toBeInTheDocument();
+    expect(within(listbox).queryByText('Database')).not.toBeInTheDocument();
+  });
+
+  it('selects a searched SSH host and preserves the saved hostId', async () => {
+    const searchableHosts: HostRecord[] = [
+      hosts[0]!,
+      {
+        id: 'ssh-host-2',
+        kind: 'ssh',
+        label: 'Database',
+        hostname: 'db.internal',
+        port: 2222,
+        username: 'postgres',
+        authType: 'password',
+        privateKeyPath: null,
+        secretRef: null,
+        groupName: 'infra',
+        tags: [],
+        terminalThemeId: null,
+        createdAt: '2025-01-01T00:00:00.000Z',
+        updatedAt: '2025-01-01T00:00:00.000Z',
+      },
+    ];
+    const onSave = vi.fn().mockResolvedValue(undefined);
+    renderPanel({ hosts: searchableHosts, onSave });
+
+    fireEvent.click(screen.getByRole('button', { name: 'New SSH Forward' }));
+    const dialog = screen.getByRole('dialog');
+    fireEvent.change(within(dialog).getByLabelText('Label'), { target: { value: 'DB tunnel' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Host' }));
+    fireEvent.change(screen.getByLabelText('SSH forwarding host search'), { target: { value: 'database' } });
+    fireEvent.pointerDown(within(screen.getByRole('listbox', { name: 'Host options' })).getByText('Database'));
+
+    expect(screen.queryByRole('listbox', { name: 'Host options' })).not.toBeInTheDocument();
+    expect(within(dialog).getByRole('button', { name: 'Host' })).toHaveTextContent('postgres@db.internal:2222');
+
+    fireEvent.click(within(dialog).getByRole('button', { name: '저장' }));
+
+    await waitFor(() =>
+      expect(onSave).toHaveBeenCalledWith(
+        null,
+        expect.objectContaining({
+          transport: 'ssh',
+          label: 'DB tunnel',
+          hostId: 'ssh-host-2',
+        }),
+      ),
+    );
+  });
+
+  it('shows an empty SSH host search state', () => {
+    renderPanel();
+
+    fireEvent.click(screen.getByRole('button', { name: 'New SSH Forward' }));
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Host' }));
+    fireEvent.change(screen.getByLabelText('SSH forwarding host search'), {
+      target: { value: 'missing-host' },
+    });
+
+    expect(screen.getByText('검색 결과가 없습니다.')).toBeInTheDocument();
+  });
+
+  it('shows the selected SSH host when editing an existing forwarding rule', () => {
+    renderPanel();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
+
+    const hostButton = within(screen.getByRole('dialog')).getByRole('button', { name: 'Host' });
+    expect(hostButton).toHaveTextContent('SSH Host');
+    expect(hostButton).toHaveTextContent('ubuntu@ssh.example.com:22');
+  });
+
+  it('renders AWS EC2 forwarding host selection as a searchable picker', () => {
+    renderPanel();
+
+    fireEvent.click(screen.getByRole('tab', { name: 'AWS EC2' }));
+    fireEvent.click(screen.getByRole('button', { name: 'New AWS EC2 Forward' }));
+
+    const dialog = screen.getByRole('dialog');
+    expect(within(dialog).queryByRole('combobox', { name: 'AWS EC2 Host' })).not.toBeInTheDocument();
+
+    fireEvent.click(within(dialog).getByRole('button', { name: 'AWS EC2 Host' }));
+    fireEvent.change(screen.getByLabelText('AWS EC2 forwarding host search'), {
+      target: { value: 'i-123' },
+    });
+
+    const listbox = screen.getByRole('listbox', { name: 'AWS EC2 Host options' });
+    expect(within(listbox).getByText('Bastion')).toBeInTheDocument();
+    fireEvent.pointerDown(within(listbox).getByText('Bastion'));
+
+    expect(screen.queryByRole('listbox', { name: 'AWS EC2 Host options' })).not.toBeInTheDocument();
+    expect(within(dialog).getByRole('button', { name: 'AWS EC2 Host' })).toHaveTextContent(
+      'default / ap-northeast-2 / i-123',
+    );
+  });
+
+  it('renders ECS task forwarding host selection as a searchable picker', () => {
+    renderPanel();
+
+    fireEvent.click(screen.getByRole('tab', { name: 'ECS Task' }));
+    fireEvent.click(screen.getByRole('button', { name: 'New ECS Task Tunnel' }));
+
+    const dialog = screen.getByRole('dialog');
+    expect(within(dialog).queryByRole('combobox', { name: 'AWS ECS Host' })).not.toBeInTheDocument();
+
+    fireEvent.click(within(dialog).getByRole('button', { name: 'AWS ECS Host' }));
+    fireEvent.change(screen.getByLabelText('ECS task forwarding host search'), {
+      target: { value: 'gridwiz' },
+    });
+
+    const listbox = screen.getByRole('listbox', { name: 'AWS ECS Host options' });
+    expect(within(listbox).getByText('gridwiz-ecs')).toBeInTheDocument();
+  });
+
+  it('filters container forwarding host picker options', () => {
+    renderPanel();
+
+    openContainerDialog();
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Host' }));
+    fireEvent.change(screen.getByLabelText('Container forwarding host search'), {
+      target: { value: 'warp' },
+    });
+
+    const listbox = screen.getByRole('listbox', { name: 'Host options' });
+    expect(within(listbox).getAllByText('Warpgate').length).toBeGreaterThan(0);
+    expect(within(listbox).queryByText('SSH Host')).not.toBeInTheDocument();
   });
 
   it('renames the AWS tab to AWS EC2 in the panel UI', () => {
