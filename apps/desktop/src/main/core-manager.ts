@@ -44,6 +44,7 @@ import type {
   SftpChownInput,
   SftpDeleteInput,
   SftpEndpointSummary,
+  SftpLifecycleLogMetadata,
   SftpListPrincipalsInput,
   SftpListInput,
   SftpMkdirInput,
@@ -108,6 +109,32 @@ interface SftpPartialCleanupRecord {
   createdAt: string;
 }
 
+interface SftpLifecycleState {
+  endpointId: string;
+  hostId: string;
+  hostLabel: string;
+  title: string;
+  startedAt: string;
+  connectedAt: string | null;
+  endedAt: string | null;
+  status: SftpLifecycleLogMetadata["status"];
+  endReason: string | null;
+  uploadedCount: number;
+  downloadedCount: number;
+  remoteCopyCount: number;
+  uploadedBytes: number;
+  downloadedBytes: number;
+  remoteCopyBytes: number;
+  mkdirCount: number;
+  renameCount: number;
+  chmodCount: number;
+  chownCount: number;
+  deleteCount: number;
+  errorCount: number;
+  visitedPaths: Set<string>;
+  lastPath: string | null;
+}
+
 interface ContainersEndpointRuntime {
   hostId: string;
   runtime: HostContainerRuntime | null;
@@ -136,6 +163,8 @@ const packagedUnixCorePathEntries = [
 ];
 const SHUTDOWN_SESSION_DISCONNECT_REASON =
   "앱 종료로 세션이 정리되었습니다.";
+const SHUTDOWN_SFTP_DISCONNECT_REASON =
+  "앱 종료로 SFTP 연결이 정리되었습니다.";
 
 type PathDelimiter = ":" | ";";
 
@@ -711,6 +740,10 @@ function getTransferFailureSummary(input: {
   return input.fallbackMessage ?? "전송에 실패했습니다.";
 }
 
+function toErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : "unknown error";
+}
+
 export class CoreManager {
   constructor(
     private readonly appendLog?: (entry: ActivityLogInput) => void,
@@ -726,6 +759,10 @@ export class CoreManager {
   private readonly windows = new Set<BrowserWindow>();
   private readonly tabs = new Map<string, TerminalTab>();
   private readonly sftpEndpoints = new Map<string, SftpEndpointSummary>();
+  private readonly sftpLifecycleByEndpointId = new Map<
+    string,
+    SftpLifecycleState
+  >();
   private readonly sftpPartialCleanupRecords = new Map<
     string,
     SftpPartialCleanupRecord
@@ -1017,6 +1054,7 @@ export class CoreManager {
     }
 
     this.finalizeActiveRemoteSessionsOnShutdown();
+    this.finalizeActiveSftpLifecyclesOnShutdown();
 
     if (options.finalizePortForwardsAsStopped) {
       await this.finalizeActivePortForwardsAsStopped();
@@ -1068,6 +1106,19 @@ export class CoreManager {
         sessionId,
         "closed",
         SHUTDOWN_SESSION_DISCONNECT_REASON,
+      );
+    }
+  }
+
+  private finalizeActiveSftpLifecyclesOnShutdown(): void {
+    for (const [endpointId, lifecycle] of this.sftpLifecycleByEndpointId) {
+      if (lifecycle.endedAt) {
+        continue;
+      }
+      this.finalizeSftpLifecycle(
+        endpointId,
+        "closed",
+        SHUTDOWN_SFTP_DISCONNECT_REASON,
       );
     }
   }
@@ -2015,6 +2066,7 @@ export class CoreManager {
   ): Promise<SftpEndpointSummary> {
     await this.start();
     const { endpointId, ...connectPayload } = payload;
+    this.startSftpLifecycle(payload);
     try {
       const requestId = randomUUID();
       const response = await this.requestResponse<{
@@ -2043,29 +2095,11 @@ export class CoreManager {
             : "unknown",
       };
       this.sftpEndpoints.set(endpointId, summary);
-      this.log({
-        level: "info",
-        category: "session",
-        message: "SFTP 연결이 시작되었습니다.",
-        metadata: {
-          endpointId,
-          hostId: payload.hostId,
-          title: payload.title,
-        },
-      });
+      this.markSftpLifecycleConnected(summary);
       void this.cleanupSftpPartialRecordsForHost(payload.hostId, endpointId);
       return summary;
     } catch (error) {
-      this.log({
-        level: "error",
-        category: "session",
-        message: "SFTP 연결 오류가 발생했습니다.",
-        metadata: {
-          hostId: payload.hostId,
-          title: payload.title,
-          message: error instanceof Error ? error.message : "unknown error",
-        },
-      });
+      this.finalizeSftpLifecycle(endpointId, "error", toErrorMessage(error));
       throw error;
     }
   }
@@ -2086,101 +2120,134 @@ export class CoreManager {
         ["sftpDisconnected"],
       );
       this.sftpEndpoints.delete(endpointId);
-      this.log({
-        level: "info",
-        category: "session",
-        message: "SFTP 연결이 종료되었습니다.",
-        metadata: { endpointId },
-      });
+      this.finalizeSftpLifecycle(endpointId, "closed", null);
     } catch (error) {
-      this.log({
-        level: "error",
-        category: "session",
-        message: "SFTP 연결 종료 중 오류가 발생했습니다.",
-        metadata: {
-          endpointId,
-          message: error instanceof Error ? error.message : "unknown error",
-        },
-      });
+      this.finalizeSftpLifecycle(endpointId, "error", toErrorMessage(error));
       throw error;
     }
   }
 
   async sftpList(input: SftpListInput): Promise<DirectoryListing> {
     await this.start();
-    const response = await this.requestResponse(
-      {
-        id: randomUUID(),
-        type: "sftpList",
-        endpointId: input.endpointId,
-        payload: {
-          path: input.path,
+    try {
+      const response = await this.requestResponse(
+        {
+          id: randomUUID(),
+          type: "sftpList",
+          endpointId: input.endpointId,
+          payload: {
+            path: input.path,
+          },
         },
-      },
-      ["sftpListed"],
-    );
+        ["sftpListed"],
+      );
 
-    const listing = toDirectoryListing(response);
-    const endpoint = this.sftpEndpoints.get(input.endpointId);
-    if (endpoint) {
-      this.sftpEndpoints.set(input.endpointId, {
-        ...endpoint,
-        path: listing.path,
-      });
+      const listing = toDirectoryListing(response);
+      const endpoint = this.sftpEndpoints.get(input.endpointId);
+      if (endpoint) {
+        this.sftpEndpoints.set(input.endpointId, {
+          ...endpoint,
+          path: listing.path,
+        });
+      }
+      this.recordSftpLifecycleVisit(input.endpointId, listing.path);
+      return listing;
+    } catch (error) {
+      this.recordSftpLifecycleError(input.endpointId, error, input.path);
+      throw error;
     }
-    return listing;
   }
 
   async sftpMkdir(input: SftpMkdirInput): Promise<void> {
     await this.start();
-    await this.requestResponse(
-      {
-        id: randomUUID(),
-        type: "sftpMkdir",
-        endpointId: input.endpointId,
-        payload: input,
-      },
-      ["sftpAck"],
-    );
+    try {
+      await this.requestResponse(
+        {
+          id: randomUUID(),
+          type: "sftpMkdir",
+          endpointId: input.endpointId,
+          payload: input,
+        },
+        ["sftpAck"],
+      );
+      this.incrementSftpLifecycle(
+        input.endpointId,
+        { mkdirCount: 1 },
+        { path: path.posix.join(input.path, input.name) },
+      );
+    } catch (error) {
+      this.recordSftpLifecycleError(input.endpointId, error, input.path);
+      throw error;
+    }
   }
 
   async sftpRename(input: SftpRenameInput): Promise<void> {
     await this.start();
-    await this.requestResponse(
-      {
-        id: randomUUID(),
-        type: "sftpRename",
-        endpointId: input.endpointId,
-        payload: input,
-      },
-      ["sftpAck"],
-    );
+    try {
+      await this.requestResponse(
+        {
+          id: randomUUID(),
+          type: "sftpRename",
+          endpointId: input.endpointId,
+          payload: input,
+        },
+        ["sftpAck"],
+      );
+      this.incrementSftpLifecycle(
+        input.endpointId,
+        { renameCount: 1 },
+        { path: input.path },
+      );
+    } catch (error) {
+      this.recordSftpLifecycleError(input.endpointId, error, input.path);
+      throw error;
+    }
   }
 
   async sftpChmod(input: SftpChmodInput): Promise<void> {
     await this.start();
-    await this.requestResponse(
-      {
-        id: randomUUID(),
-        type: "sftpChmod",
-        endpointId: input.endpointId,
-        payload: input,
-      },
-      ["sftpAck"],
-    );
+    try {
+      await this.requestResponse(
+        {
+          id: randomUUID(),
+          type: "sftpChmod",
+          endpointId: input.endpointId,
+          payload: input,
+        },
+        ["sftpAck"],
+      );
+      this.incrementSftpLifecycle(
+        input.endpointId,
+        { chmodCount: 1 },
+        { path: input.path },
+      );
+    } catch (error) {
+      this.recordSftpLifecycleError(input.endpointId, error, input.path);
+      throw error;
+    }
   }
 
   async sftpChown(input: SftpChownInput): Promise<void> {
     await this.start();
-    await this.requestResponse(
-      {
-        id: randomUUID(),
-        type: "sftpChown",
-        endpointId: input.endpointId,
-        payload: input,
-      },
-      ["sftpAck"],
-    );
+    try {
+      await this.requestResponse(
+        {
+          id: randomUUID(),
+          type: "sftpChown",
+          endpointId: input.endpointId,
+          payload: input,
+        },
+        ["sftpAck"],
+      );
+      this.incrementSftpLifecycle(
+        input.endpointId,
+        { chownCount: 1 },
+        { path: input.path },
+      );
+    } catch (error) {
+      this.recordSftpLifecycleError(input.endpointId, error, input.path);
+      throw error;
+    }
   }
 
   async sftpListPrincipals(
@@ -2201,15 +2268,29 @@ export class CoreManager {
 
   async sftpDelete(input: SftpDeleteInput): Promise<void> {
     await this.start();
-    await this.requestResponse(
-      {
-        id: randomUUID(),
-        type: "sftpDelete",
-        endpointId: input.endpointId,
-        payload: input,
-      },
-      ["sftpAck"],
-    );
+    try {
+      await this.requestResponse(
+        {
+          id: randomUUID(),
+          type: "sftpDelete",
+          endpointId: input.endpointId,
+          payload: input,
+        },
+        ["sftpAck"],
+      );
+      this.incrementSftpLifecycle(
+        input.endpointId,
+        { deleteCount: input.paths.length },
+        { path: input.paths[0] ?? null },
+      );
+    } catch (error) {
+      this.recordSftpLifecycleError(
+        input.endpointId,
+        error,
+        input.paths[0] ?? null,
+      );
+      throw error;
+    }
   }
 
   async startSftpTransfer(input: TransferStartInput): Promise<TransferJob> {
@@ -2511,6 +2592,7 @@ export class CoreManager {
         next.job.status === "cancelled"
       ) {
         this.transferJobs.set(next.job.id, next.job);
+        this.recordSftpTransferLifecycle(next.job);
         this.clearSftpPartialRecordsForJob(next.job.id);
       }
       return;
@@ -2808,6 +2890,7 @@ export class CoreManager {
   private clearRuntimeState(): void {
     this.tabs.clear();
     this.sftpEndpoints.clear();
+    this.sftpLifecycleByEndpointId.clear();
     this.containerEndpoints.clear();
     this.transferJobs.clear();
     this.portForwardDefinitions.clear();
@@ -2922,6 +3005,268 @@ export class CoreManager {
     void this.onTerminalStream?.(metadata.sessionId, new Uint8Array(payload));
   }
 
+  private startSftpLifecycle(
+    payload: ResolvedSftpConnectPayload & {
+      endpointId: string;
+      title: string;
+      hostId: string;
+    },
+  ): void {
+    const startedAt = new Date().toISOString();
+    const lifecycle: SftpLifecycleState = {
+      endpointId: payload.endpointId,
+      hostId: payload.hostId,
+      hostLabel: payload.title,
+      title: payload.title,
+      startedAt,
+      connectedAt: null,
+      endedAt: null,
+      status: "connecting",
+      endReason: null,
+      uploadedCount: 0,
+      downloadedCount: 0,
+      remoteCopyCount: 0,
+      uploadedBytes: 0,
+      downloadedBytes: 0,
+      remoteCopyBytes: 0,
+      mkdirCount: 0,
+      renameCount: 0,
+      chmodCount: 0,
+      chownCount: 0,
+      deleteCount: 0,
+      errorCount: 0,
+      visitedPaths: new Set<string>(),
+      lastPath: null,
+    };
+    this.sftpLifecycleByEndpointId.set(payload.endpointId, lifecycle);
+    this.upsertSftpLifecycleLog(lifecycle);
+  }
+
+  private markSftpLifecycleConnected(summary: SftpEndpointSummary): void {
+    const lifecycle = this.sftpLifecycleByEndpointId.get(summary.id);
+    if (!lifecycle) {
+      return;
+    }
+    lifecycle.connectedAt = summary.connectedAt;
+    lifecycle.status = "connected";
+    lifecycle.lastPath = summary.path;
+    lifecycle.visitedPaths.add(summary.path);
+    this.sftpLifecycleByEndpointId.set(summary.id, lifecycle);
+    this.upsertSftpLifecycleLog(lifecycle);
+  }
+
+  private finalizeSftpLifecycle(
+    endpointId: string,
+    status: "closed" | "error",
+    endReason: string | null,
+  ): void {
+    const lifecycle = this.sftpLifecycleByEndpointId.get(endpointId);
+    if (!lifecycle || lifecycle.endedAt) {
+      return;
+    }
+    lifecycle.endedAt = new Date().toISOString();
+    lifecycle.status = status;
+    lifecycle.endReason = endReason;
+    this.sftpLifecycleByEndpointId.set(endpointId, lifecycle);
+    this.upsertSftpLifecycleLog(lifecycle);
+  }
+
+  private recordSftpLifecycleVisit(endpointId: string, pathValue: string): void {
+    const lifecycle = this.sftpLifecycleByEndpointId.get(endpointId);
+    if (!lifecycle) {
+      return;
+    }
+    lifecycle.lastPath = pathValue;
+    lifecycle.visitedPaths.add(pathValue);
+    this.sftpLifecycleByEndpointId.set(endpointId, lifecycle);
+    this.upsertSftpLifecycleLog(lifecycle);
+  }
+
+  private incrementSftpLifecycle(
+    endpointId: string,
+    updates: Partial<
+      Pick<
+        SftpLifecycleState,
+        | "uploadedCount"
+        | "downloadedCount"
+        | "remoteCopyCount"
+        | "uploadedBytes"
+        | "downloadedBytes"
+        | "remoteCopyBytes"
+        | "mkdirCount"
+        | "renameCount"
+        | "chmodCount"
+        | "chownCount"
+        | "deleteCount"
+        | "errorCount"
+      >
+    >,
+    options: { path?: string | null; endReason?: string | null } = {},
+  ): void {
+    const lifecycle = this.sftpLifecycleByEndpointId.get(endpointId);
+    if (!lifecycle) {
+      return;
+    }
+    lifecycle.uploadedCount += updates.uploadedCount ?? 0;
+    lifecycle.downloadedCount += updates.downloadedCount ?? 0;
+    lifecycle.remoteCopyCount += updates.remoteCopyCount ?? 0;
+    lifecycle.uploadedBytes += updates.uploadedBytes ?? 0;
+    lifecycle.downloadedBytes += updates.downloadedBytes ?? 0;
+    lifecycle.remoteCopyBytes += updates.remoteCopyBytes ?? 0;
+    lifecycle.mkdirCount += updates.mkdirCount ?? 0;
+    lifecycle.renameCount += updates.renameCount ?? 0;
+    lifecycle.chmodCount += updates.chmodCount ?? 0;
+    lifecycle.chownCount += updates.chownCount ?? 0;
+    lifecycle.deleteCount += updates.deleteCount ?? 0;
+    lifecycle.errorCount += updates.errorCount ?? 0;
+    if (options.path) {
+      lifecycle.lastPath = options.path;
+      lifecycle.visitedPaths.add(options.path);
+    }
+    if (options.endReason) {
+      lifecycle.endReason = options.endReason;
+    }
+    this.sftpLifecycleByEndpointId.set(endpointId, lifecycle);
+    this.upsertSftpLifecycleLog(lifecycle);
+  }
+
+  private recordSftpLifecycleError(
+    endpointId: string,
+    error: unknown,
+    pathValue?: string | null,
+  ): void {
+    this.incrementSftpLifecycle(
+      endpointId,
+      { errorCount: 1 },
+      { endReason: toErrorMessage(error), path: pathValue },
+    );
+  }
+
+  private recordSftpTransferLifecycle(job: TransferJob): void {
+    const request = job.request;
+    if (!request) {
+      return;
+    }
+    const sourceEndpointId =
+      request.source.kind === "remote" ? request.source.endpointId : null;
+    const targetEndpointId =
+      request.target.kind === "remote" ? request.target.endpointId : null;
+    const remoteEndpointIds = Array.from(
+      new Set([sourceEndpointId, targetEndpointId].filter(Boolean) as string[]),
+    );
+    if (remoteEndpointIds.length === 0) {
+      return;
+    }
+
+    if (job.status === "failed") {
+      for (const endpointId of remoteEndpointIds) {
+        this.incrementSftpLifecycle(
+          endpointId,
+          { errorCount: 1 },
+          {
+            endReason:
+              job.errorMessage ?? job.detailMessage ?? "전송에 실패했습니다.",
+          },
+        );
+      }
+      return;
+    }
+
+    if (job.status !== "completed") {
+      return;
+    }
+
+    const itemCount = job.completedItemCount ?? job.itemCount;
+    const bytes = Math.max(0, job.bytesCompleted || job.bytesTotal);
+    if (sourceEndpointId && targetEndpointId) {
+      if (sourceEndpointId === targetEndpointId) {
+        this.incrementSftpLifecycle(sourceEndpointId, {
+          remoteCopyCount: itemCount,
+          remoteCopyBytes: bytes,
+        });
+        return;
+      }
+      this.incrementSftpLifecycle(sourceEndpointId, {
+        downloadedCount: itemCount,
+        downloadedBytes: bytes,
+      });
+      this.incrementSftpLifecycle(targetEndpointId, {
+        uploadedCount: itemCount,
+        uploadedBytes: bytes,
+      });
+      return;
+    }
+
+    if (sourceEndpointId) {
+      this.incrementSftpLifecycle(sourceEndpointId, {
+        downloadedCount: itemCount,
+        downloadedBytes: bytes,
+      });
+    }
+    if (targetEndpointId) {
+      this.incrementSftpLifecycle(targetEndpointId, {
+        uploadedCount: itemCount,
+        uploadedBytes: bytes,
+      });
+    }
+  }
+
+  private upsertSftpLifecycleLog(lifecycle: SftpLifecycleState): void {
+    const metadata = this.buildSftpLifecycleMetadata(lifecycle);
+    this.upsertLog({
+      id: this.getSftpLifecycleLogId(lifecycle.endpointId),
+      level:
+        metadata.status === "error" || metadata.errorCount > 0
+          ? "error"
+          : "info",
+      category: "session",
+      kind: "sftp-lifecycle",
+      message: "SFTP 세션",
+      metadata: metadata as unknown as Record<string, unknown>,
+      createdAt: lifecycle.startedAt,
+      updatedAt: lifecycle.endedAt ?? new Date().toISOString(),
+    });
+  }
+
+  private buildSftpLifecycleMetadata(
+    lifecycle: SftpLifecycleState,
+  ): SftpLifecycleLogMetadata {
+    const durationStart = lifecycle.connectedAt ?? lifecycle.startedAt;
+    const durationMs = lifecycle.endedAt
+      ? Math.max(
+          0,
+          new Date(lifecycle.endedAt).getTime() -
+            new Date(durationStart).getTime(),
+        )
+      : null;
+    return {
+      endpointId: lifecycle.endpointId,
+      hostId: lifecycle.hostId,
+      hostLabel: lifecycle.hostLabel,
+      title: lifecycle.title,
+      startedAt: lifecycle.startedAt,
+      connectedAt: lifecycle.connectedAt,
+      endedAt: lifecycle.endedAt,
+      durationMs,
+      status: lifecycle.status,
+      endReason: lifecycle.endReason,
+      uploadedCount: lifecycle.uploadedCount,
+      downloadedCount: lifecycle.downloadedCount,
+      remoteCopyCount: lifecycle.remoteCopyCount,
+      uploadedBytes: lifecycle.uploadedBytes,
+      downloadedBytes: lifecycle.downloadedBytes,
+      remoteCopyBytes: lifecycle.remoteCopyBytes,
+      mkdirCount: lifecycle.mkdirCount,
+      renameCount: lifecycle.renameCount,
+      chmodCount: lifecycle.chmodCount,
+      chownCount: lifecycle.chownCount,
+      deleteCount: lifecycle.deleteCount,
+      errorCount: lifecycle.errorCount,
+      visitedPathCount: lifecycle.visitedPaths.size,
+      lastPath: lifecycle.lastPath,
+    };
+  }
+
   private log(entry: ActivityLogInput): void {
     this.appendLog?.(entry);
   }
@@ -2932,6 +3277,10 @@ export class CoreManager {
 
   private getRemoteSessionLifecycleLogId(sessionId: string): string {
     return `session:${sessionId}`;
+  }
+
+  private getSftpLifecycleLogId(endpointId: string): string {
+    return `sftp:${endpointId}`;
   }
 
   private getConnectionKindLabel(kind: SessionConnectionKind): string {

@@ -1,6 +1,11 @@
 import { EventEmitter } from "node:events";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { CoreEvent, CoreRequest } from "@shared";
+import type {
+  ActivityLogRecord,
+  CoreEvent,
+  CoreRequest,
+  SftpLifecycleLogMetadata,
+} from "@shared";
 import { ipcChannels } from "../common/ipc-channels";
 import { encodeControlFrame } from "./core-framing";
 
@@ -128,6 +133,27 @@ function getTransferEventPayloads(sent: Array<{ channel: string; payload: unknow
     );
 }
 
+function getSftpLifecycleLogs(records: ActivityLogRecord[]) {
+  return records.filter((record) => record.kind === "sftp-lifecycle");
+}
+
+async function resolveNextSftpRequest(
+  fakeProcess: ReturnType<typeof createFakeChildProcess>,
+  writeIndex: number,
+  type: CoreEvent<Record<string, unknown>>["type"],
+  payload: Record<string, unknown> = {},
+): Promise<CoreRequest<Record<string, unknown>>> {
+  await waitForWriteCount(fakeProcess.writes, writeIndex + 1);
+  const request = decodeControlFrame(fakeProcess.writes[writeIndex]);
+  fakeProcess.emitControl({
+    type,
+    requestId: request.id,
+    endpointId: request.endpointId,
+    payload,
+  });
+  return request;
+}
+
 function expectSerializedNotToContain(value: unknown, secrets: string[]) {
   const serialized = JSON.stringify(value);
   for (const secret of secrets) {
@@ -204,6 +230,239 @@ describe("CoreManager SFTP sessions", () => {
       hostId: "host-1",
       title: "Warpgate Prod",
       path: "/home/example.user",
+    });
+  });
+
+  it("records SFTP connect and disconnect as a single lifecycle log row", async () => {
+    const fakeProcess = createFakeChildProcess();
+    spawnMock.mockReturnValue(fakeProcess.child);
+    const appendedLogs: unknown[] = [];
+    const upsertedLogs: ActivityLogRecord[] = [];
+
+    const manager = new CoreManager(
+      (entry) => {
+        appendedLogs.push(entry);
+      },
+      (record) => {
+        upsertedLogs.push(record);
+      },
+    );
+
+    const connectPromise = manager.sftpConnect({
+      endpointId: "endpoint-lifecycle",
+      host: "prod.example.com",
+      port: 22,
+      username: "ubuntu",
+      authType: "password",
+      password: "ssh-login-secret",
+      trustedHostKeyBase64: "AAAATEST",
+      hostId: "host-lifecycle",
+      title: "Prod SFTP",
+    });
+
+    await resolveNextSftpRequest(fakeProcess, 0, "sftpConnected", {
+      path: "/home/ubuntu",
+    });
+    await connectPromise;
+
+    const disconnectPromise = manager.sftpDisconnect("endpoint-lifecycle");
+    await resolveNextSftpRequest(fakeProcess, 1, "sftpDisconnected");
+    await disconnectPromise;
+
+    const lifecycleLogs = getSftpLifecycleLogs(upsertedLogs);
+    expect(appendedLogs).toEqual([]);
+    expect(lifecycleLogs.length).toBeGreaterThanOrEqual(3);
+    expect(new Set(lifecycleLogs.map((record) => record.id))).toEqual(
+      new Set(["sftp:endpoint-lifecycle"]),
+    );
+    const finalMetadata = lifecycleLogs.at(-1)
+      ?.metadata as unknown as SftpLifecycleLogMetadata;
+    expect(finalMetadata).toMatchObject({
+      endpointId: "endpoint-lifecycle",
+      hostId: "host-lifecycle",
+      hostLabel: "Prod SFTP",
+      title: "Prod SFTP",
+      status: "closed",
+      uploadedCount: 0,
+      downloadedCount: 0,
+      errorCount: 0,
+      visitedPathCount: 1,
+      lastPath: "/home/ubuntu",
+    });
+    expect(finalMetadata.connectedAt).toBeTruthy();
+    expect(finalMetadata.endedAt).toBeTruthy();
+  });
+
+  it("summarizes SFTP operations and transfers in the lifecycle log", async () => {
+    const fakeProcess = createFakeChildProcess();
+    spawnMock.mockReturnValue(fakeProcess.child);
+    const upsertedLogs: ActivityLogRecord[] = [];
+
+    const manager = new CoreManager(
+      undefined,
+      (record) => {
+        upsertedLogs.push(record);
+      },
+    );
+
+    const connectPromise = manager.sftpConnect({
+      endpointId: "endpoint-summary",
+      host: "prod.example.com",
+      port: 22,
+      username: "ubuntu",
+      authType: "password",
+      password: "ssh-login-secret",
+      trustedHostKeyBase64: "AAAATEST",
+      hostId: "host-summary",
+      title: "Summary Host",
+    });
+    await resolveNextSftpRequest(fakeProcess, 0, "sftpConnected", {
+      path: "/home/ubuntu",
+    });
+    await connectPromise;
+
+    const listPromise = manager.sftpList({
+      endpointId: "endpoint-summary",
+      path: "/srv",
+    });
+    await resolveNextSftpRequest(fakeProcess, 1, "sftpListed", {
+      path: "/srv",
+      entries: [],
+    });
+    await listPromise;
+
+    const mkdirPromise = manager.sftpMkdir({
+      endpointId: "endpoint-summary",
+      path: "/srv",
+      name: "logs",
+    });
+    await resolveNextSftpRequest(fakeProcess, 2, "sftpAck");
+    await mkdirPromise;
+
+    const renamePromise = manager.sftpRename({
+      endpointId: "endpoint-summary",
+      path: "/srv/old.txt",
+      nextName: "new.txt",
+    });
+    await resolveNextSftpRequest(fakeProcess, 3, "sftpAck");
+    await renamePromise;
+
+    const chmodPromise = manager.sftpChmod({
+      endpointId: "endpoint-summary",
+      path: "/srv/app.txt",
+      mode: 0o644,
+    });
+    await resolveNextSftpRequest(fakeProcess, 4, "sftpAck");
+    await chmodPromise;
+
+    const chownPromise = manager.sftpChown({
+      endpointId: "endpoint-summary",
+      path: "/srv/app.txt",
+      owner: "ubuntu",
+      group: "ubuntu",
+    });
+    await resolveNextSftpRequest(fakeProcess, 5, "sftpAck");
+    await chownPromise;
+
+    const deletePromise = manager.sftpDelete({
+      endpointId: "endpoint-summary",
+      paths: ["/srv/a.txt", "/srv/b.txt"],
+    });
+    await resolveNextSftpRequest(fakeProcess, 6, "sftpAck");
+    await deletePromise;
+
+    const uploadJob = await manager.startSftpTransfer({
+      source: { kind: "local", path: "/Users/tester" },
+      target: { kind: "remote", endpointId: "endpoint-summary", path: "/srv" },
+      items: [
+        { name: "a.txt", path: "/Users/tester/a.txt", isDirectory: false, size: 100 },
+        { name: "b.txt", path: "/Users/tester/b.txt", isDirectory: false, size: 200 },
+      ],
+      conflictResolution: "overwrite",
+    });
+    fakeProcess.emitControl({
+      type: "sftpTransferCompleted",
+      jobId: uploadJob.id,
+      payload: {
+        bytesTotal: 300,
+        bytesCompleted: 300,
+        completedItemCount: 2,
+      },
+    });
+
+    const downloadJob = await manager.startSftpTransfer({
+      source: { kind: "remote", endpointId: "endpoint-summary", path: "/srv" },
+      target: { kind: "local", path: "/Users/tester/Downloads" },
+      items: [
+        { name: "remote.log", path: "/srv/remote.log", isDirectory: false, size: 400 },
+      ],
+      conflictResolution: "overwrite",
+    });
+    fakeProcess.emitControl({
+      type: "sftpTransferCompleted",
+      jobId: downloadJob.id,
+      payload: {
+        bytesTotal: 400,
+        bytesCompleted: 400,
+        completedItemCount: 1,
+      },
+    });
+
+    const copyJob = await manager.startSftpTransfer({
+      source: { kind: "remote", endpointId: "endpoint-summary", path: "/srv" },
+      target: { kind: "remote", endpointId: "endpoint-summary", path: "/srv/copy" },
+      items: [
+        { name: "remote.log", path: "/srv/remote.log", isDirectory: false, size: 50 },
+      ],
+      conflictResolution: "overwrite",
+    });
+    fakeProcess.emitControl({
+      type: "sftpTransferCompleted",
+      jobId: copyJob.id,
+      payload: {
+        bytesTotal: 50,
+        bytesCompleted: 50,
+        completedItemCount: 1,
+      },
+    });
+
+    const failedJob = await manager.startSftpTransfer({
+      source: { kind: "local", path: "/Users/tester" },
+      target: { kind: "remote", endpointId: "endpoint-summary", path: "/root" },
+      items: [
+        { name: "denied.txt", path: "/Users/tester/denied.txt", isDirectory: false, size: 10 },
+      ],
+      conflictResolution: "overwrite",
+    });
+    fakeProcess.emitControl({
+      type: "sftpTransferFailed",
+      jobId: failedJob.id,
+      payload: {
+        message: "permission denied",
+        errorCode: "permission_denied",
+        errorOperation: "target_create",
+      },
+    });
+
+    const finalLog = getSftpLifecycleLogs(upsertedLogs).at(-1);
+    expect(finalLog?.level).toBe("error");
+    expect(finalLog?.metadata).toMatchObject({
+      endpointId: "endpoint-summary",
+      status: "connected",
+      uploadedCount: 2,
+      uploadedBytes: 300,
+      downloadedCount: 1,
+      downloadedBytes: 400,
+      remoteCopyCount: 1,
+      remoteCopyBytes: 50,
+      mkdirCount: 1,
+      renameCount: 1,
+      chmodCount: 1,
+      chownCount: 1,
+      deleteCount: 2,
+      errorCount: 1,
+      visitedPathCount: 6,
+      lastPath: "/srv/a.txt",
     });
   });
 

@@ -6,6 +6,7 @@ import type {
   PortForwardLifecycleLogMetadata,
   SessionConnectionKind,
   SessionLifecycleLogMetadata,
+  SftpLifecycleLogMetadata,
   PortForwardTransport,
 } from '@shared';
 import {
@@ -53,6 +54,26 @@ function isPortForwardLifecycleMetadata(value: Record<string, unknown> | null): 
       typeof value.targetSummary === 'string' &&
       typeof value.startedAt === 'string' &&
       typeof value.status === 'string'
+  );
+}
+
+function isSftpLifecycleMetadata(value: Record<string, unknown> | null): value is SftpLifecycleLogMetadata & Record<string, unknown> {
+  return Boolean(
+    value &&
+      typeof value.endpointId === 'string' &&
+      typeof value.hostId === 'string' &&
+      typeof value.hostLabel === 'string' &&
+      typeof value.title === 'string' &&
+      typeof value.startedAt === 'string' &&
+      typeof value.status === 'string' &&
+      typeof value.uploadedCount === 'number' &&
+      typeof value.downloadedCount === 'number' &&
+      typeof value.mkdirCount === 'number' &&
+      typeof value.renameCount === 'number' &&
+      typeof value.chmodCount === 'number' &&
+      typeof value.chownCount === 'number' &&
+      typeof value.deleteCount === 'number' &&
+      typeof value.errorCount === 'number'
   );
 }
 
@@ -148,8 +169,51 @@ function getPortForwardStatusTone(status: PortForwardLifecycleLogMetadata['statu
   return 'stopped';
 }
 
+function getSftpStatusLabel(status: SftpLifecycleLogMetadata['status']): string {
+  if (status === 'connecting') {
+    return 'Connecting';
+  }
+  if (status === 'connected') {
+    return 'Connected';
+  }
+  if (status === 'error') {
+    return 'Error';
+  }
+  return 'Closed';
+}
+
+function getSftpStatusTone(status: SftpLifecycleLogMetadata['status']): 'running' | 'starting' | 'error' | 'stopped' {
+  if (status === 'connecting') {
+    return 'starting';
+  }
+  if (status === 'connected') {
+    return 'running';
+  }
+  if (status === 'error') {
+    return 'error';
+  }
+  return 'stopped';
+}
+
 function formatLogTimestamp(value: string): string {
   return new Date(value).toLocaleString('ko-KR');
+}
+
+function formatBytes(value?: number | null): string | null {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) {
+    return null;
+  }
+  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+  let nextValue = value;
+  let unitIndex = 0;
+  while (nextValue >= 1024 && unitIndex < units.length - 1) {
+    nextValue /= 1024;
+    unitIndex += 1;
+  }
+  const formatted = Number.isInteger(nextValue) || nextValue >= 10 || unitIndex === 0
+    ? Math.round(nextValue).toString()
+    : nextValue.toFixed(1);
+  return `${formatted}${units[unitIndex]}`;
 }
 
 export function formatSessionLifecycleDuration(durationMs?: number | null): string {
@@ -182,6 +246,29 @@ function getSessionLifecycleSubtitle(metadata: SessionLifecycleLogMetadata): str
     return null;
   }
   return title;
+}
+
+function formatSftpCountWithBytes(label: string, count: number, bytes: number): string | null {
+  if (count <= 0) {
+    return null;
+  }
+  const formattedBytes = formatBytes(bytes);
+  return formattedBytes ? `${label} ${count}개 · ${formattedBytes}` : `${label} ${count}개`;
+}
+
+function getSftpSummaryItems(metadata: SftpLifecycleLogMetadata): string[] {
+  return [
+    formatSftpCountWithBytes('다운로드', metadata.downloadedCount, metadata.downloadedBytes),
+    formatSftpCountWithBytes('업로드', metadata.uploadedCount, metadata.uploadedBytes),
+    formatSftpCountWithBytes('원격 복사', metadata.remoteCopyCount ?? 0, metadata.remoteCopyBytes ?? 0),
+    metadata.deleteCount > 0 ? `삭제 ${metadata.deleteCount}개` : null,
+    metadata.mkdirCount > 0 ? `폴더 생성 ${metadata.mkdirCount}개` : null,
+    metadata.renameCount > 0 ? `이름 변경 ${metadata.renameCount}개` : null,
+    metadata.chmodCount > 0 ? `권한 변경 ${metadata.chmodCount}개` : null,
+    metadata.chownCount > 0 ? `소유권 변경 ${metadata.chownCount}개` : null,
+    metadata.visitedPathCount > 1 ? `경로 탐색 ${metadata.visitedPathCount}개` : null,
+    metadata.errorCount > 0 ? `오류 ${metadata.errorCount}개` : null,
+  ].filter((item): item is string => Boolean(item));
 }
 
 export function LogsPanel({ logs, onClear, onOpenReplay }: LogsPanelProps) {
@@ -261,6 +348,10 @@ export function LogsPanel({ logs, onClear, onOpenReplay }: LogsPanelProps) {
               log.kind === 'port-forward-lifecycle' && isPortForwardLifecycleMetadata(log.metadata)
                 ? log.metadata
                 : null;
+            const sftpLifecycleMetadata =
+              log.kind === 'sftp-lifecycle' && isSftpLifecycleMetadata(log.metadata)
+                ? log.metadata
+                : null;
             const replayRecordingId =
               sessionLifecycleMetadata != null &&
               sessionLifecycleMetadata.hasReplay === true &&
@@ -309,6 +400,60 @@ export function LogsPanel({ logs, onClear, onOpenReplay }: LogsPanelProps) {
                   {sessionLifecycleMetadata.disconnectReason ? (
                     <div className="mt-[0.75rem] rounded-[14px] bg-[color-mix(in_srgb,var(--surface-muted)_88%,transparent_12%)] px-[0.9rem] py-[0.75rem] text-[0.92rem] text-[var(--text-soft)]">{sessionLifecycleMetadata.disconnectReason}</div>
                   ) : null}
+                </CardMain>
+              </Card>
+            ) : sftpLifecycleMetadata ? (
+              <Card key={log.id} data-testid="logs-sftp-lifecycle-card">
+                <CardMain>
+                  <div className="flex flex-wrap items-center gap-[0.7rem]">
+                    <div>
+                      <strong>{sftpLifecycleMetadata.hostLabel}</strong>
+                      {sftpLifecycleMetadata.title.trim() && sftpLifecycleMetadata.title.trim() !== sftpLifecycleMetadata.hostLabel.trim() ? (
+                        <div className="text-[0.92rem] text-[var(--text-soft)]">{sftpLifecycleMetadata.title}</div>
+                      ) : null}
+                    </div>
+                    <div className="flex flex-wrap items-center gap-[0.55rem]">
+                      <Badge tone="running">SFTP</Badge>
+                      <Badge tone={getSftpStatusTone(sftpLifecycleMetadata.status)}>
+                        {getSftpStatusLabel(sftpLifecycleMetadata.status)}
+                      </Badge>
+                    </div>
+                  </div>
+                  <div className="mt-[0.85rem] grid gap-[0.75rem] md:grid-cols-3">
+                    <div className="grid gap-[0.25rem] rounded-[16px] bg-[color-mix(in_srgb,var(--surface)_72%,transparent_28%)] px-[0.9rem] py-[0.8rem]">
+                      <span>연결 시작</span>
+                      <strong>{formatLogTimestamp(sftpLifecycleMetadata.connectedAt ?? sftpLifecycleMetadata.startedAt)}</strong>
+                    </div>
+                    <div className="grid gap-[0.25rem] rounded-[16px] bg-[color-mix(in_srgb,var(--surface)_72%,transparent_28%)] px-[0.9rem] py-[0.8rem]">
+                      <span>연결 종료</span>
+                      <strong>{sftpLifecycleMetadata.endedAt ? formatLogTimestamp(sftpLifecycleMetadata.endedAt) : '연결 중'}</strong>
+                    </div>
+                    <div className="grid gap-[0.25rem] rounded-[16px] bg-[color-mix(in_srgb,var(--surface)_72%,transparent_28%)] px-[0.9rem] py-[0.8rem]">
+                      <span>연결 시간</span>
+                      <strong>{formatSessionLifecycleDuration(sftpLifecycleMetadata.durationMs)}</strong>
+                    </div>
+                  </div>
+                  {getSftpSummaryItems(sftpLifecycleMetadata).length > 0 ? (
+                    <div className="mt-[0.75rem] flex flex-wrap gap-[0.45rem]">
+                      {getSftpSummaryItems(sftpLifecycleMetadata).map((item) => (
+                        <span key={item} className="rounded-full bg-[color-mix(in_srgb,var(--surface-muted)_88%,transparent_12%)] px-[0.75rem] py-[0.42rem] text-[0.88rem] text-[var(--text-soft)]">
+                          {item}
+                        </span>
+                      ))}
+                    </div>
+                  ) : null}
+                  {sftpLifecycleMetadata.lastPath ? (
+                    <div className="mt-[0.75rem] rounded-[14px] bg-[color-mix(in_srgb,var(--surface-muted)_88%,transparent_12%)] px-[0.9rem] py-[0.75rem] text-[0.92rem] text-[var(--text-soft)]">
+                      마지막 경로: {sftpLifecycleMetadata.lastPath}
+                    </div>
+                  ) : null}
+                  {sftpLifecycleMetadata.endReason ? (
+                    <div className="mt-[0.75rem] rounded-[14px] bg-[color-mix(in_srgb,var(--surface-muted)_88%,transparent_12%)] px-[0.9rem] py-[0.75rem] text-[0.92rem] text-[var(--text-soft)]">{sftpLifecycleMetadata.endReason}</div>
+                  ) : null}
+                  <details className="mt-[0.75rem] rounded-[14px] border border-[var(--border)] bg-[color-mix(in_srgb,var(--surface)_72%,transparent_28%)] px-[0.9rem] py-[0.8rem]">
+                    <summary>Metadata</summary>
+                    <pre className="mt-[0.6rem] overflow-x-auto whitespace-pre-wrap break-words rounded-[12px] bg-[color-mix(in_srgb,var(--surface-muted)_92%,transparent_8%)] px-3 py-3 text-[0.82rem] leading-[1.55]">{JSON.stringify(log.metadata, null, 2)}</pre>
+                  </details>
                 </CardMain>
               </Card>
             ) : portForwardLifecycleMetadata ? (

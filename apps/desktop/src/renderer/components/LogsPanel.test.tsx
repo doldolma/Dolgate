@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
-import type { ActivityLogRecord, PortForwardLifecycleLogMetadata, SessionLifecycleLogMetadata } from '@shared';
+import type { ActivityLogRecord, PortForwardLifecycleLogMetadata, SessionLifecycleLogMetadata, SftpLifecycleLogMetadata } from '@shared';
 import { LogsPanel } from './LogsPanel';
 
 function createLifecycleLog(
@@ -33,6 +33,23 @@ function createPortForwardLifecycleLog(
     metadata: metadata as unknown as Record<string, unknown>,
     createdAt: metadata.startedAt,
     updatedAt: metadata.stoppedAt ?? metadata.startedAt,
+    ...overrides
+  };
+}
+
+function createSftpLifecycleLog(
+  metadata: SftpLifecycleLogMetadata,
+  overrides: Partial<ActivityLogRecord> = {}
+): ActivityLogRecord {
+  return {
+    id: `sftp:${metadata.endpointId}`,
+    level: metadata.status === 'error' || metadata.errorCount > 0 ? 'error' : 'info',
+    category: 'session',
+    kind: 'sftp-lifecycle',
+    message: 'SFTP 세션',
+    metadata: metadata as unknown as Record<string, unknown>,
+    createdAt: metadata.startedAt,
+    updatedAt: metadata.endedAt ?? metadata.startedAt,
     ...overrides
   };
 }
@@ -182,6 +199,101 @@ describe('LogsPanel', () => {
     expect(within(lifecycleCard as HTMLElement).getByText('Closed')).toBeInTheDocument();
     expect(screen.queryByText('포워딩 중')).not.toBeInTheDocument();
     expect(screen.getByText('5분 0초')).toBeInTheDocument();
+  });
+
+  it('renders SFTP lifecycle rows as a single summary card', () => {
+    render(
+      <LogsPanel
+        logs={[
+          createSftpLifecycleLog({
+            endpointId: 'endpoint-1',
+            hostId: 'host-1',
+            hostLabel: 'Synology',
+            title: 'Synology',
+            startedAt: '2026-03-29T00:00:00.000Z',
+            connectedAt: '2026-03-29T00:00:01.000Z',
+            endedAt: '2026-03-29T00:03:01.000Z',
+            durationMs: 180000,
+            status: 'closed',
+            uploadedCount: 1,
+            downloadedCount: 3,
+            remoteCopyCount: 1,
+            uploadedBytes: 2048,
+            downloadedBytes: 4096,
+            remoteCopyBytes: 1024,
+            mkdirCount: 1,
+            renameCount: 1,
+            chmodCount: 2,
+            chownCount: 0,
+            deleteCount: 2,
+            errorCount: 1,
+            visitedPathCount: 4,
+            lastPath: '/volume1/logs',
+            endReason: 'client requested disconnect',
+          })
+        ]}
+        onClear={vi.fn().mockResolvedValue(undefined)}
+        onOpenReplay={vi.fn().mockResolvedValue(undefined)}
+      />
+    );
+
+    const lifecycleCard = screen.getByText('Synology').closest('article');
+    expect(lifecycleCard).not.toBeNull();
+    expect(screen.getByText('SFTP')).toBeInTheDocument();
+    expect(within(lifecycleCard as HTMLElement).getByText('Closed')).toBeInTheDocument();
+    expect(screen.getByText('3분 0초')).toBeInTheDocument();
+    expect(screen.getByText('다운로드 3개 · 4KB')).toBeInTheDocument();
+    expect(screen.getByText('업로드 1개 · 2KB')).toBeInTheDocument();
+    expect(screen.getByText('원격 복사 1개 · 1KB')).toBeInTheDocument();
+    expect(screen.getByText('삭제 2개')).toBeInTheDocument();
+    expect(screen.getByText('폴더 생성 1개')).toBeInTheDocument();
+    expect(screen.getByText('이름 변경 1개')).toBeInTheDocument();
+    expect(screen.getByText('권한 변경 2개')).toBeInTheDocument();
+    expect(screen.getByText('경로 탐색 4개')).toBeInTheDocument();
+    expect(screen.getByText('오류 1개')).toBeInTheDocument();
+    expect(screen.getByText('마지막 경로: /volume1/logs')).toBeInTheDocument();
+    expect(screen.getByText('client requested disconnect')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Replay' })).not.toBeInTheDocument();
+  });
+
+  it('keeps empty SFTP lifecycle rows compact without noisy summary chips', () => {
+    render(
+      <LogsPanel
+        logs={[
+          createSftpLifecycleLog({
+            endpointId: 'endpoint-empty',
+            hostId: 'host-empty',
+            hostLabel: 'Empty SFTP',
+            title: 'Empty SFTP',
+            startedAt: '2026-03-29T00:00:00.000Z',
+            connectedAt: '2026-03-29T00:00:00.000Z',
+            status: 'connected',
+            uploadedCount: 0,
+            downloadedCount: 0,
+            remoteCopyCount: 0,
+            uploadedBytes: 0,
+            downloadedBytes: 0,
+            remoteCopyBytes: 0,
+            mkdirCount: 0,
+            renameCount: 0,
+            chmodCount: 0,
+            chownCount: 0,
+            deleteCount: 0,
+            errorCount: 0,
+            visitedPathCount: 1,
+            lastPath: '/home/user',
+          })
+        ]}
+        onClear={vi.fn().mockResolvedValue(undefined)}
+        onOpenReplay={vi.fn().mockResolvedValue(undefined)}
+      />
+    );
+
+    expect(screen.getByText('Empty SFTP')).toBeInTheDocument();
+    expect(screen.getByText('Connected')).toBeInTheDocument();
+    expect(screen.getByText('연결 중')).toBeInTheDocument();
+    expect(screen.queryByText(/다운로드/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/경로 탐색/)).not.toBeInTheDocument();
   });
 
   it('keeps category and level filters working for lifecycle rows', () => {
