@@ -52,7 +52,7 @@ export type DnsOverrideStatus = 'inactive' | 'active';
 export type KnownHostTrustStatus = 'trusted' | 'untrusted' | 'mismatch';
 export type ActivityLogLevel = 'info' | 'warn' | 'error';
 export type ActivityLogCategory = 'session' | 'audit';
-export type ActivityLogKind = 'generic' | 'session-lifecycle' | 'port-forward-lifecycle';
+export type ActivityLogKind = 'generic' | 'session-lifecycle' | 'port-forward-lifecycle' | 'sftp-lifecycle';
 export type AuthStatus = 'loading' | 'unauthenticated' | 'authenticating' | 'authenticated' | 'offline-authenticated' | 'error';
 export type SyncBootstrapStatus = 'idle' | 'syncing' | 'ready' | 'paused' | 'error';
 export type AwsProfilesServerSupport = 'unknown' | 'supported' | 'unsupported';
@@ -61,6 +61,7 @@ export type AwsSshMetadataStatus = 'idle' | 'loading' | 'ready' | 'error';
 export type SessionConnectionKind = 'ssh' | 'aws-ssm' | 'warpgate' | 'aws-ecs-exec' | 'serial';
 export type SessionLifecycleStatus = 'connected' | 'closed' | 'error';
 export type PortForwardLifecycleStatus = 'running' | 'closed' | 'error';
+export type SftpLifecycleStatus = 'connecting' | 'connected' | 'closed' | 'error';
 export type SftpConnectionStage =
   | 'loading-instance-metadata'
   | 'checking-profile'
@@ -1752,6 +1753,33 @@ export interface PortForwardLifecycleLogMetadata {
   durationMs?: number | null;
   status: PortForwardLifecycleStatus;
   endReason?: string | null;
+}
+
+export interface SftpLifecycleLogMetadata {
+  endpointId: string;
+  hostId: string;
+  hostLabel: string;
+  title: string;
+  startedAt: string;
+  connectedAt?: string | null;
+  endedAt?: string | null;
+  durationMs?: number | null;
+  status: SftpLifecycleStatus;
+  endReason?: string | null;
+  uploadedCount: number;
+  downloadedCount: number;
+  remoteCopyCount: number;
+  uploadedBytes: number;
+  downloadedBytes: number;
+  remoteCopyBytes: number;
+  mkdirCount: number;
+  renameCount: number;
+  chmodCount: number;
+  chownCount: number;
+  deleteCount: number;
+  errorCount: number;
+  visitedPathCount: number;
+  lastPath?: string | null;
 }
 
 export interface SessionReplayOutputEntry {
