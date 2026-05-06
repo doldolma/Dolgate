@@ -44,6 +44,7 @@ import type {
   SftpState,
 } from "../store/createAppStore";
 import { formatConnectionProgressStageLabel } from "../lib/connection-progress";
+import { matchesKeyboardLayoutQuery } from "../lib/keyboard-layout-search";
 import { useResponsiveCardGrid } from "../lib/useResponsiveCardGrid";
 import { DialogBackdrop } from "./DialogBackdrop";
 import { HostCard } from "./HostCard";
@@ -327,10 +328,9 @@ export function visibleHostPickerHosts(
   query: string,
 ): SftpConnectableHostRecord[] {
   const scopedHosts = filterHostsInGroupTree(hosts, groupPath);
-  const normalizedQuery = query.trim().toLowerCase();
-  if (normalizedQuery) {
+  if (query.trim()) {
     return scopedHosts.filter((host) =>
-      getHostSearchText(host).join(" ").toLowerCase().includes(normalizedQuery),
+      matchesKeyboardLayoutQuery(getHostSearchText(host).join(" "), query),
     );
   }
   return scopedHosts;

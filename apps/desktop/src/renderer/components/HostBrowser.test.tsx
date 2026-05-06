@@ -10,7 +10,7 @@ import {
   isGroupWithinPath,
   normalizeGroupPath
 } from '@shared';
-import type { GroupRecord, HostRecord, SecretMetadataRecord } from '@shared';
+import type { GroupRecord, HostRecord, SecretMetadataRecord, SshHostRecord } from '@shared';
 import {
   HostBrowser,
   getHostBrowserEmptyCalloutMessage,
@@ -354,6 +354,46 @@ describe('HostBrowser helpers', () => {
 
   it('shows subtree hosts when a parent group is selected', () => {
     expect(filterHostsInGroupTree(hosts, 'Servers').map((host) => host.label)).toEqual(['App', 'AWS App', 'DB']);
+  });
+
+  it('matches English host labels when the query was typed in the Korean keyboard layout', () => {
+    const baseHost = hosts[0] as SshHostRecord;
+    renderBrowser({
+      hosts: [
+        ...hosts,
+        {
+          ...baseHost,
+          id: 'host-lime',
+          label: 'Lime',
+          hostname: 'lime.example.com',
+          groupName: null,
+          tags: []
+        }
+      ],
+      searchQuery: 'ㅣㅑㅡㄷ'
+    });
+
+    expect(screen.getByText('Lime')).toBeInTheDocument();
+  });
+
+  it('matches Hangul host labels when the query was typed in the English keyboard layout', () => {
+    const baseHost = hosts[0] as SshHostRecord;
+    renderBrowser({
+      hosts: [
+        ...hosts,
+        {
+          ...baseHost,
+          id: 'host-asan',
+          label: '아산',
+          hostname: 'asan.example.com',
+          groupName: null,
+          tags: []
+        }
+      ],
+      searchQuery: 'dktks'
+    });
+
+    expect(screen.getByText('아산')).toBeInTheDocument();
   });
 
   it('keeps tags hidden until the toggle is pressed', () => {

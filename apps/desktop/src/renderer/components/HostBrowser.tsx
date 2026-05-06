@@ -19,6 +19,7 @@ import {
 } from '@shared';
 import type { GroupRecord, GroupRemoveMode, HostRecord, SecretMetadataRecord } from '@shared';
 import { getUnusedSavedCredentialsAfterHostDeletion } from '../lib/host-secret-cleanup';
+import { getKeyboardLayoutSearchQueries } from '../lib/keyboard-layout-search';
 import { useResponsiveCardGrid } from '../lib/useResponsiveCardGrid';
 import { cn } from '../lib/cn';
 import { DialogBackdrop } from './DialogBackdrop';
@@ -340,16 +341,24 @@ export function HostBrowser({
       }),
     [searchableHosts]
   );
+  const searchQueries = useMemo(() => getKeyboardLayoutSearchQueries(searchQuery), [searchQuery]);
 
   const visibleHosts = useMemo(() => {
-    if (searchQuery) {
-      return fuse.search(searchQuery).map((result) => {
-        const { searchText: _searchText, ...host } = result.item;
-        return host;
-      });
+    if (searchQueries.length > 0) {
+      const seenHostIds = new Set<string>();
+      return searchQueries.flatMap((query) =>
+        fuse.search(query).flatMap((result) => {
+          if (seenHostIds.has(result.item.id)) {
+            return [];
+          }
+          seenHostIds.add(result.item.id);
+          const { searchText: _searchText, ...host } = result.item;
+          return [host];
+        }),
+      );
     }
     return searchableHosts;
-  }, [currentGroupPath, fuse, searchableHosts, searchQuery]);
+  }, [fuse, searchableHosts, searchQueries]);
 
   const allGroupPaths = useMemo(() => collectGroupPaths(groups, hosts), [groups, hosts]);
   const groupTreeRows = useMemo(() => buildGroupTreeRows(allGroupPaths, groups, hosts), [allGroupPaths, groups, hosts]);

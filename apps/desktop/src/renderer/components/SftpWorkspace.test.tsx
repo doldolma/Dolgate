@@ -233,6 +233,31 @@ describe('SftpWorkspace helpers', () => {
     expect(visibleHostPickerHosts(sshHosts, null, '')).toEqual(sshHosts);
   });
 
+  it('matches host picker hosts when the query was typed in the Korean keyboard layout', () => {
+    const layoutHosts: SshHostRecord[] = [
+      ...sshHosts,
+      {
+        ...sshHosts[0],
+        id: 'ssh-lime',
+        label: 'Lime',
+        hostname: 'lime.example.com',
+        groupName: null,
+        tags: []
+      },
+      {
+        ...sshHosts[0],
+        id: 'ssh-asan',
+        label: '아산',
+        hostname: 'asan.example.com',
+        groupName: null,
+        tags: []
+      }
+    ];
+
+    expect(visibleHostPickerHosts(layoutHosts, null, 'ㅣㅑㅡㄷ')).toEqual([layoutHosts[3]]);
+    expect(visibleHostPickerHosts(layoutHosts, null, 'dktks')).toEqual([layoutHosts[4]]);
+  });
+
   it('uses the simplified pane titles for local and host panes', () => {
     expect(getSftpPaneTitle({ sourceKind: 'local', endpoint: null })).toBe('Local');
     expect(
