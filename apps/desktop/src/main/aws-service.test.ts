@@ -194,6 +194,72 @@ describe('AwsService.isManagedInstance', () => {
   });
 });
 
+describe('AwsService.listRegions', () => {
+  function createListRegionsService(result: {
+    stdout: string;
+    stderr: string;
+    exitCode: number;
+  }) {
+    const service = new AwsService() as unknown as {
+      ensureAwsCliAvailable: ReturnType<typeof vi.fn>;
+      runResolvedCommand: ReturnType<typeof vi.fn>;
+      listRegions: (profileName: string) => Promise<string[]>;
+    };
+
+    service.ensureAwsCliAvailable = vi.fn().mockResolvedValue(undefined);
+    service.runResolvedCommand = vi.fn().mockResolvedValue(result);
+    return service;
+  }
+
+  it('falls back to the built-in EC2 region list when DescribeRegions is denied', async () => {
+    const service = createListRegionsService({
+      stdout: '',
+      stderr:
+        'An error occurred (UnauthorizedOperation) when calling the DescribeRegions operation: You are not authorized to perform this operation.',
+      exitCode: 255,
+    });
+
+    const regions = await service.listRegions('readonly');
+
+    expect(regions).toContain('ap-northeast-2');
+    expect(regions).toContain('us-east-1');
+    expect(regions).toContain('mx-central-1');
+    expect(service.runResolvedCommand).toHaveBeenCalledWith('aws', [
+      'ec2',
+      'describe-regions',
+      '--profile',
+      'readonly',
+      '--region',
+      'us-east-1',
+      '--output',
+      'json',
+    ]);
+  });
+
+  it('keeps non-permission DescribeRegions failures visible', async () => {
+    const service = createListRegionsService({
+      stdout: '',
+      stderr:
+        'Unable to locate credentials. You can configure credentials by running "aws configure".',
+      exitCode: 255,
+    });
+
+    await expect(service.listRegions('broken')).rejects.toThrow(
+      'Unable to locate credentials',
+    );
+  });
+
+  it('falls back to the built-in EC2 region list when DescribeRegions returns an empty payload', async () => {
+    const service = createListRegionsService({
+      stdout: JSON.stringify({ Regions: [] }),
+      stderr: '',
+      exitCode: 0,
+    });
+
+    await expect(service.listRegions('empty')).resolves.toContain('ap-northeast-2');
+  });
+});
+
 describe('AwsService.getProfileStatus', () => {
   it('includes the configured region when the profile is authenticated', async () => {
     const service = new AwsService() as unknown as {

@@ -83,6 +83,44 @@ const REGION_DISCOVERY_REGION = "us-east-1";
 const ECS_LOG_INITIAL_LOOKBACK_MS = 30 * 60 * 1000;
 const AWS_SSO_REGISTRATION_SCOPES = "sso:account:access";
 const SSO_PREPARATION_TTL_MS = 10 * 60 * 1000;
+const DEFAULT_AWS_EC2_REGIONS = [
+  "af-south-1",
+  "ap-east-1",
+  "ap-east-2",
+  "ap-northeast-1",
+  "ap-northeast-2",
+  "ap-northeast-3",
+  "ap-south-1",
+  "ap-south-2",
+  "ap-southeast-1",
+  "ap-southeast-2",
+  "ap-southeast-3",
+  "ap-southeast-4",
+  "ap-southeast-5",
+  "ap-southeast-6",
+  "ap-southeast-7",
+  "ca-central-1",
+  "ca-west-1",
+  "eu-central-1",
+  "eu-central-2",
+  "eu-north-1",
+  "eu-south-1",
+  "eu-south-2",
+  "eu-west-1",
+  "eu-west-2",
+  "eu-west-3",
+  "il-central-1",
+  "me-central-1",
+  "me-south-1",
+  "mx-central-1",
+  "sa-east-1",
+  "us-east-1",
+  "us-east-2",
+  "us-gov-east-1",
+  "us-gov-west-1",
+  "us-west-1",
+  "us-west-2",
+];
 
 function isE2EFakeAwsSessionEnabled(): boolean {
   const mode = process.env.DOLSSH_E2E_FAKE_AWS_SESSION;
@@ -139,6 +177,16 @@ function resolveSsmLookupUnknownReason(error: unknown): string {
     return "AWS 자격 증명을 확인하지 못해 가져오기를 차단했습니다. 선택한 프로필의 로그인 상태와 자격 증명을 먼저 확인해 주세요.";
   }
   return "SSM 상태를 확인하지 못해 가져오기를 차단했습니다. 사용자/역할 권한 또는 SSM 설정을 먼저 확인해 주세요.";
+}
+
+function isDescribeRegionsPermissionDenied(stderr: string): boolean {
+  const normalized = stderr.toLowerCase();
+  return (
+    normalized.includes("unauthorizedoperation") ||
+    normalized.includes("accessdenied") ||
+    (normalized.includes("not authorized") &&
+      normalized.includes("describeregions"))
+  );
 }
 
 function resolveUnavailableSsmReason(input: {
@@ -3537,6 +3585,9 @@ export class AwsService {
       "json",
     ]);
     if (result.exitCode !== 0) {
+      if (isDescribeRegionsPermissionDenied(result.stderr)) {
+        return [...DEFAULT_AWS_EC2_REGIONS];
+      }
       throw normalizeAwsCliError(
         result.stderr,
         "AWS 리전 목록을 읽지 못했습니다.",
@@ -3547,10 +3598,11 @@ export class AwsService {
       result.stdout,
       "AWS 리전 목록 응답을 해석하지 못했습니다.",
     );
-    return (payload.Regions ?? [])
+    const regions = (payload.Regions ?? [])
       .map((region) => region.RegionName?.trim() ?? "")
       .filter(Boolean)
       .sort((left, right) => left.localeCompare(right));
+    return regions.length > 0 ? regions : [...DEFAULT_AWS_EC2_REGIONS];
   }
 
   async listEc2Instances(
