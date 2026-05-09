@@ -111,6 +111,14 @@ export function SessionScreen(): React.JSX.Element {
   const { width, height } = useWindowDimensions();
   const terminalRef = useRef<XtermWebViewHandle | null>(null);
   const nativeTerminalInputRef = useRef<TerminalInputViewHandle | null>(null);
+  const directTerminalInputSuppressedRef = useRef(false);
+  const terminalInputStateRef = useRef<{
+    sessionId: string | null;
+    terminalVisible: boolean;
+  }>({
+    sessionId: null,
+    terminalVisible: false,
+  });
   const [terminalReady, setTerminalReady] = useState(false);
   const [nativeInputFocusToken, setNativeInputFocusToken] = useState(0);
   const [nativeInputClearToken, setNativeInputClearToken] = useState(0);
@@ -269,6 +277,48 @@ export function SessionScreen(): React.JSX.Element {
     activeTab?.kind === 'sftp'
       ? (liveSftpSessions.find(session => session.id === activeTab.id) ?? null)
       : null;
+  const [rememberedTerminalSessionId, setRememberedTerminalSessionId] =
+    useState<string | null>(() => {
+      if (activeTab?.kind === 'terminal') {
+        return activeTab.id;
+      }
+      if (
+        activeSessionTabId &&
+        liveSessions.some(session => session.id === activeSessionTabId)
+      ) {
+        return activeSessionTabId;
+      }
+      return liveSessions[0]?.id ?? null;
+    });
+  useEffect(() => {
+    if (activeTab?.kind === 'terminal') {
+      setRememberedTerminalSessionId(activeTab.id);
+      return;
+    }
+
+    setRememberedTerminalSessionId(current => {
+      if (current && liveSessions.some(session => session.id === current)) {
+        return current;
+      }
+      if (
+        activeSessionTabId &&
+        liveSessions.some(session => session.id === activeSessionTabId)
+      ) {
+        return activeSessionTabId;
+      }
+      return liveSessions[0]?.id ?? null;
+    });
+  }, [activeSessionTabId, activeTab?.id, activeTab?.kind, liveSessions]);
+  const rememberedTerminalSession =
+    rememberedTerminalSessionId != null
+      ? (liveSessions.find(
+          session => session.id === rememberedTerminalSessionId,
+        ) ?? null)
+      : null;
+  const renderedTerminalSession = activeSession ?? rememberedTerminalSession;
+  const terminalVisible = Boolean(
+    activeSession && renderedTerminalSession?.id === activeSession.id,
+  );
   const menuSession =
     liveSessions.find(session => session.id === menuSessionId) ?? null;
   const menuHost = menuSession
@@ -296,7 +346,13 @@ export function SessionScreen(): React.JSX.Element {
   const keyboardToggleActive = isAndroid
     ? keyboardVisible || keyboardRequestedVisible
     : keyboardVisible;
-  const allowDirectTerminalInput = !isAndroid || !keyboardRequestedVisible;
+  terminalInputStateRef.current = {
+    sessionId: renderedTerminalSession?.id ?? null,
+    terminalVisible,
+  };
+  directTerminalInputSuppressedRef.current = isAndroid
+    ? keyboardRequestedVisible || keyboardVisible
+    : false;
   const toolbarKeyboardInset = getKeyboardDockInset({
     keyboardVisible,
     keyboardInset: keyboardInset + (isAndroid ? safeAreaInsets.bottom : 0),
@@ -318,7 +374,19 @@ export function SessionScreen(): React.JSX.Element {
     terminalRef.current?.fit();
   }, [terminalReady]);
 
+  useEffect(() => {
+    if (renderedTerminalSession) {
+      return;
+    }
+    setTerminalReady(false);
+    terminalViewportSizeRef.current = null;
+    restoredConnectedSnapshotSessionIdRef.current = null;
+  }, [renderedTerminalSession]);
+
   const focusTerminal = useCallback(() => {
+    if (Platform.OS === 'android') {
+      return;
+    }
     requestAnimationFrame(() => {
       terminalRef.current?.focus();
     });
@@ -359,7 +427,8 @@ export function SessionScreen(): React.JSX.Element {
       !isAndroid ||
       !useTerminalInputOverlay ||
       !terminalReady ||
-      !activeSession
+      !activeSession ||
+      !terminalVisible
     ) {
       return;
     }
@@ -370,25 +439,47 @@ export function SessionScreen(): React.JSX.Element {
     focusRequestedTerminalInput,
     isAndroid,
     terminalReady,
+    terminalVisible,
     useTerminalInputOverlay,
   ]);
 
+  useEffect(() => {
+    if (!terminalReady || !terminalVisible || !renderedTerminalSession) {
+      return;
+    }
+
+    requestAnimationFrame(() => {
+      terminalRef.current?.fit();
+      if (isAndroid) {
+        focusRequestedTerminalInput(true);
+      }
+    });
+  }, [
+    focusRequestedTerminalInput,
+    isAndroid,
+    renderedTerminalSession,
+    terminalReady,
+    terminalVisible,
+  ]);
+
   const openKeyboard = useCallback(() => {
-    if (isAndroid) {
+    if (Platform.OS === 'android') {
       setInputFocused(true);
+      directTerminalInputSuppressedRef.current = true;
       setKeyboardRequestedVisible(true);
       focusRequestedTerminalInput(true);
       return;
     }
 
     focusTerminal();
-  }, [focusRequestedTerminalInput, focusTerminal, isAndroid]);
+  }, [focusRequestedTerminalInput, focusTerminal]);
 
   const closeKeyboard = useCallback(() => {
     setKeyboardVisible(false);
     setKeyboardInset(0);
-    if (isAndroid) {
+    if (Platform.OS === 'android') {
       setInputFocused(true);
+      directTerminalInputSuppressedRef.current = false;
       setKeyboardRequestedVisible(false);
       focusRequestedTerminalInput(true);
       return;
@@ -396,7 +487,7 @@ export function SessionScreen(): React.JSX.Element {
 
     Keyboard.dismiss();
     blurTerminal();
-  }, [blurTerminal, focusRequestedTerminalInput, isAndroid]);
+  }, [blurTerminal, focusRequestedTerminalInput]);
 
   const toggleKeyboard = useCallback(() => {
     if (keyboardToggleActive) {
@@ -415,6 +506,7 @@ export function SessionScreen(): React.JSX.Element {
       setKeyboardInset(event?.endCoordinates?.height ?? 0);
       if (isAndroid) {
         setInputFocused(true);
+        directTerminalInputSuppressedRef.current = true;
         setKeyboardRequestedVisible(true);
       }
     };
@@ -422,6 +514,7 @@ export function SessionScreen(): React.JSX.Element {
       setKeyboardVisible(false);
       setKeyboardInset(0);
       if (isAndroid) {
+        directTerminalInputSuppressedRef.current = false;
         setKeyboardRequestedVisible(false);
       }
     };
@@ -483,13 +576,16 @@ export function SessionScreen(): React.JSX.Element {
   useEffect(() => {
     if (
       !terminalReady ||
-      !activeSession ||
-      activeSession.status === 'connected'
+      !renderedTerminalSession ||
+      renderedTerminalSession.status === 'connected'
     ) {
       return;
     }
 
-    if (restoredConnectedSnapshotSessionIdRef.current === activeSession.id) {
+    if (
+      restoredConnectedSnapshotSessionIdRef.current ===
+      renderedTerminalSession.id
+    ) {
       restoredConnectedSnapshotSessionIdRef.current = null;
     }
 
@@ -498,25 +594,31 @@ export function SessionScreen(): React.JSX.Element {
       return;
     }
 
-    restoreTerminalSnapshot(terminal, activeSession.lastViewportSnapshot);
+    restoreTerminalSnapshot(
+      terminal,
+      renderedTerminalSession.lastViewportSnapshot,
+    );
   }, [
-    activeSession,
-    activeSession?.id,
-    activeSession?.lastViewportSnapshot,
-    activeSession?.status,
+    renderedTerminalSession,
+    renderedTerminalSession?.id,
+    renderedTerminalSession?.lastViewportSnapshot,
+    renderedTerminalSession?.status,
     terminalReady,
   ]);
 
   useEffect(() => {
     if (
       !terminalReady ||
-      !activeSession ||
-      activeSession.status !== 'connected'
+      !renderedTerminalSession ||
+      renderedTerminalSession.status !== 'connected'
     ) {
       return;
     }
 
-    if (restoredConnectedSnapshotSessionIdRef.current === activeSession.id) {
+    if (
+      restoredConnectedSnapshotSessionIdRef.current ===
+      renderedTerminalSession.id
+    ) {
       return;
     }
 
@@ -525,21 +627,24 @@ export function SessionScreen(): React.JSX.Element {
       return;
     }
 
-    restoredConnectedSnapshotSessionIdRef.current = activeSession.id;
-    restoreTerminalSnapshot(terminal, activeSession.lastViewportSnapshot);
+    restoredConnectedSnapshotSessionIdRef.current = renderedTerminalSession.id;
+    restoreTerminalSnapshot(
+      terminal,
+      renderedTerminalSession.lastViewportSnapshot,
+    );
   }, [
-    activeSession,
-    activeSession?.id,
-    activeSession?.lastViewportSnapshot,
-    activeSession?.status,
+    renderedTerminalSession,
+    renderedTerminalSession?.id,
+    renderedTerminalSession?.lastViewportSnapshot,
+    renderedTerminalSession?.status,
     terminalReady,
   ]);
 
   useEffect(() => {
     if (
       !terminalReady ||
-      !activeSession ||
-      activeSession.status !== 'connected'
+      !renderedTerminalSession ||
+      renderedTerminalSession.status !== 'connected'
     ) {
       return;
     }
@@ -550,11 +655,14 @@ export function SessionScreen(): React.JSX.Element {
     }
 
     resetTerminalViewport(terminal);
-    const unsubscribe = subscribeToSessionTerminal(activeSession.id, {
+    const unsubscribe = subscribeToSessionTerminal(renderedTerminalSession.id, {
       onReplay: chunks => {
         resetTerminalViewport(terminal);
         if (chunks.length > 0) {
           terminal.writeMany(chunks);
+        }
+        if (!terminalVisible) {
+          return;
         }
         if (isAndroid) {
           focusRequestedTerminalInput(true);
@@ -569,12 +677,13 @@ export function SessionScreen(): React.JSX.Element {
 
     return unsubscribe;
   }, [
-    activeSession,
-    activeSession?.id,
-    activeSession?.status,
+    renderedTerminalSession,
+    renderedTerminalSession?.id,
+    renderedTerminalSession?.status,
     isAndroid,
     subscribeToSessionTerminal,
     terminalReady,
+    terminalVisible,
     focusTerminal,
     focusRequestedTerminalInput,
   ]);
@@ -583,6 +692,7 @@ export function SessionScreen(): React.JSX.Element {
     if (
       useTerminalInputOverlay ||
       !terminalReady ||
+      !terminalVisible ||
       activeSession?.status !== 'connected'
     ) {
       return;
@@ -594,6 +704,7 @@ export function SessionScreen(): React.JSX.Element {
     activeSession?.status,
     focusTerminal,
     terminalReady,
+    terminalVisible,
     useTerminalInputOverlay,
   ]);
 
@@ -605,10 +716,22 @@ export function SessionScreen(): React.JSX.Element {
   };
 
   const sendSessionInput = (value: string) => {
-    if (!value || !activeSession) {
+    const inputState = terminalInputStateRef.current;
+    if (!value || !inputState.terminalVisible || !inputState.sessionId) {
       return;
     }
-    void writeToSession(activeSession.id, value);
+    void writeToSession(inputState.sessionId, value);
+  };
+
+  const sendDirectTerminalInput = (value: string) => {
+    const inputState = terminalInputStateRef.current;
+    if (
+      !inputState.terminalVisible ||
+      (Platform.OS === 'android' && directTerminalInputSuppressedRef.current)
+    ) {
+      return;
+    }
+    sendSessionInput(value);
   };
 
   const sendTranslatedInput = (event: NativeTerminalInputEvent) => {
@@ -914,146 +1037,174 @@ export function SessionScreen(): React.JSX.Element {
           },
         ]}
       >
-        {activeSftpSession ? (
-          <SftpBrowserView
-            palette={palette}
-            session={activeSftpSession}
-            transfers={sftpTransfers}
-            onNavigate={path => listSftpDirectory(activeSftpSession.id, path)}
-            onRefresh={() => listSftpDirectory(activeSftpSession.id)}
-            onUpload={() => uploadSftpFile(activeSftpSession.id)}
-            onDownload={path => downloadSftpFile(activeSftpSession.id, path)}
-            onDownloadEntries={paths =>
-              downloadSftpEntries(activeSftpSession.id, paths)
-            }
-            onMkdir={name => createSftpDirectory(activeSftpSession.id, name)}
-            onRename={(sourcePath, nextName) =>
-              renameSftpEntry(activeSftpSession.id, sourcePath, nextName)
-            }
-            onChmod={(path, mode) =>
-              chmodSftpEntry(activeSftpSession.id, path, mode)
-            }
-            onDelete={paths => deleteSftpEntries(activeSftpSession.id, paths)}
-            copyBufferCount={
-              sftpCopyBuffer?.sftpSessionId === activeSftpSession.id
-                ? sftpCopyBuffer.entries.length
-                : 0
-            }
-            onCopy={paths => copySftpEntries(activeSftpSession.id, paths)}
-            onPaste={() => pasteSftpEntries(activeSftpSession.id)}
-            onClearCopy={clearSftpCopyBuffer}
-          />
-        ) : (
-          <View
-            testID="session-terminal-card"
-            onLayout={event => {
-              const nextWidth = Math.ceil(event.nativeEvent.layout.width);
-              const nextHeight = Math.ceil(event.nativeEvent.layout.height);
-              if (nextWidth <= 0 || nextHeight <= 0) {
-                return;
-              }
-              const current = terminalViewportSizeRef.current;
-              if (
-                current?.width === nextWidth &&
-                current?.height === nextHeight
-              ) {
-                return;
-              }
-              terminalViewportSizeRef.current = {
-                width: nextWidth,
-                height: nextHeight,
-              };
-              if (!terminalReady) {
-                return;
-              }
-              terminalRef.current?.fit();
-            }}
-            style={[
-              styles.terminalCard,
-              {
-                backgroundColor: palette.sessionTerminalBg,
-                borderColor: palette.sessionSurfaceBorder,
-                marginHorizontal: 2,
-              },
-            ]}
-            onTouchEnd={
-              isAndroid ? () => focusRequestedTerminalInput(true) : undefined
-            }
-          >
-            <XtermJsWebView
-              ref={terminalRef}
-              style={styles.terminal}
-              logger={terminalLogger}
-              webViewOptions={{
-                hideKeyboardAccessoryView: true,
-              }}
-              onInitialized={() => setTerminalReady(true)}
-              onData={data => {
-                if (!allowDirectTerminalInput) {
-                  return;
-                }
-                sendSessionInput(data);
-              }}
-              xtermOptions={{
-                fontSize: width > height ? 12 : 11,
-                scrollback: 2_000,
-                theme: {
-                  background: palette.sessionTerminalBg,
-                  foreground: palette.sessionTerminalFg,
-                  cursor: palette.sessionTerminalCursor,
-                  selectionBackground: palette.sessionTerminalSelection,
-                },
-              }}
-            />
-            {!terminalReady ? (
+        <View style={styles.connectionLayerShell}>
+          {renderedTerminalSession ? (
+            <View
+              pointerEvents={terminalVisible ? 'auto' : 'none'}
+              style={[
+                styles.connectionLayer,
+                terminalVisible
+                  ? styles.activeConnectionLayer
+                  : styles.inactiveConnectionLayer,
+              ]}
+            >
               <View
-                pointerEvents="none"
-                style={[
-                  styles.terminalLoadingOverlay,
-                  { backgroundColor: palette.sessionTerminalBg },
-                ]}
-              >
-                <ActivityIndicator size="small" color={palette.accent} />
-                <Text
-                  style={[styles.terminalLoadingTitle, { color: palette.text }]}
-                >
-                  터미널 준비 중
-                </Text>
-                <Text
-                  style={[
-                    styles.terminalLoadingBody,
-                    { color: palette.mutedText },
-                  ]}
-                >
-                  연결 화면을 불러오고 있습니다.
-                </Text>
-              </View>
-            ) : null}
-            {useTerminalInputOverlay ? (
-              <View
-                pointerEvents="none"
-                style={styles.nativeTerminalInputShell}
-              >
-                <TerminalInputView
-                  ref={nativeTerminalInputRef}
-                  clearToken={nativeInputClearToken}
-                  focusToken={nativeInputFocusToken}
-                  focused={inputFocused}
-                  softKeyboardEnabled={
-                    isAndroid ? keyboardRequestedVisible : undefined
+                testID="session-terminal-card"
+                onLayout={event => {
+                  const nextWidth = Math.ceil(event.nativeEvent.layout.width);
+                  const nextHeight = Math.ceil(event.nativeEvent.layout.height);
+                  if (nextWidth <= 0 || nextHeight <= 0) {
+                    return;
                   }
-                  onTerminalInput={event => {
-                    sendTranslatedInput(event.nativeEvent);
-                    if (event.nativeEvent.kind === 'special-key') {
-                      resetNativeInputBuffer();
-                    }
+                  const current = terminalViewportSizeRef.current;
+                  if (
+                    current?.width === nextWidth &&
+                    current?.height === nextHeight
+                  ) {
+                    return;
+                  }
+                  terminalViewportSizeRef.current = {
+                    width: nextWidth,
+                    height: nextHeight,
+                  };
+                  if (!terminalReady) {
+                    return;
+                  }
+                  terminalRef.current?.fit();
+                }}
+                style={[
+                  styles.terminalCard,
+                  {
+                    backgroundColor: palette.sessionTerminalBg,
+                    borderColor: palette.sessionSurfaceBorder,
+                    marginHorizontal: 2,
+                  },
+                ]}
+                onTouchEnd={
+                  isAndroid && terminalVisible
+                    ? () => focusRequestedTerminalInput(true)
+                    : undefined
+                }
+              >
+                <XtermJsWebView
+                  ref={terminalRef}
+                  style={styles.terminal}
+                  logger={terminalLogger}
+                  webViewOptions={{
+                    hideKeyboardAccessoryView: true,
                   }}
-                  style={styles.nativeTerminalInput}
+                  onInitialized={() => setTerminalReady(true)}
+                  onData={data => {
+                    sendDirectTerminalInput(data);
+                  }}
+                  xtermOptions={{
+                    fontSize: width > height ? 12 : 11,
+                    scrollback: 2_000,
+                    theme: {
+                      background: palette.sessionTerminalBg,
+                      foreground: palette.sessionTerminalFg,
+                      cursor: palette.sessionTerminalCursor,
+                      selectionBackground: palette.sessionTerminalSelection,
+                    },
+                  }}
                 />
+                {!terminalReady ? (
+                  <View
+                    pointerEvents="none"
+                    style={[
+                      styles.terminalLoadingOverlay,
+                      { backgroundColor: palette.sessionTerminalBg },
+                    ]}
+                  >
+                    <ActivityIndicator size="small" color={palette.accent} />
+                    <Text
+                      style={[
+                        styles.terminalLoadingTitle,
+                        { color: palette.text },
+                      ]}
+                    >
+                      터미널 준비 중
+                    </Text>
+                    <Text
+                      style={[
+                        styles.terminalLoadingBody,
+                        { color: palette.mutedText },
+                      ]}
+                    >
+                      연결 화면을 불러오고 있습니다.
+                    </Text>
+                  </View>
+                ) : null}
+                {useTerminalInputOverlay && terminalVisible ? (
+                  <View
+                    pointerEvents="none"
+                    style={styles.nativeTerminalInputShell}
+                  >
+                    <TerminalInputView
+                      ref={nativeTerminalInputRef}
+                      clearToken={nativeInputClearToken}
+                      focusToken={nativeInputFocusToken}
+                      focused={inputFocused}
+                      softKeyboardEnabled={
+                        isAndroid ? keyboardRequestedVisible : undefined
+                      }
+                      onTerminalInput={event => {
+                        sendTranslatedInput(event.nativeEvent);
+                        if (event.nativeEvent.kind === 'special-key') {
+                          resetNativeInputBuffer();
+                        }
+                      }}
+                      style={styles.nativeTerminalInput}
+                    />
+                  </View>
+                ) : null}
               </View>
-            ) : null}
-          </View>
-        )}
+            </View>
+          ) : null}
+
+          {activeSftpSession ? (
+            <View
+              style={[styles.connectionLayer, styles.activeConnectionLayer]}
+            >
+              <SftpBrowserView
+                palette={palette}
+                session={activeSftpSession}
+                transfers={sftpTransfers}
+                onNavigate={path =>
+                  listSftpDirectory(activeSftpSession.id, path)
+                }
+                onRefresh={() => listSftpDirectory(activeSftpSession.id)}
+                onUpload={() => uploadSftpFile(activeSftpSession.id)}
+                onDownload={path =>
+                  downloadSftpFile(activeSftpSession.id, path)
+                }
+                onDownloadEntries={paths =>
+                  downloadSftpEntries(activeSftpSession.id, paths)
+                }
+                onMkdir={name =>
+                  createSftpDirectory(activeSftpSession.id, name)
+                }
+                onRename={(sourcePath, nextName) =>
+                  renameSftpEntry(activeSftpSession.id, sourcePath, nextName)
+                }
+                onChmod={(path, mode) =>
+                  chmodSftpEntry(activeSftpSession.id, path, mode)
+                }
+                onDelete={paths =>
+                  deleteSftpEntries(activeSftpSession.id, paths)
+                }
+                copyBufferCount={
+                  sftpCopyBuffer?.sftpSessionId === activeSftpSession.id
+                    ? sftpCopyBuffer.entries.length
+                    : 0
+                }
+                onCopy={paths => copySftpEntries(activeSftpSession.id, paths)}
+                onPaste={() => pasteSftpEntries(activeSftpSession.id)}
+                onClearCopy={clearSftpCopyBuffer}
+              />
+            </View>
+          ) : null}
+        </View>
 
         {activeSession ? (
           <View
@@ -1351,6 +1502,20 @@ const styles = StyleSheet.create({
   },
   screenBody: {
     flex: 1,
+  },
+  connectionLayerShell: {
+    flex: 1,
+  },
+  connectionLayer: {
+    ...StyleSheet.absoluteFill,
+  },
+  activeConnectionLayer: {
+    opacity: 1,
+    zIndex: 1,
+  },
+  inactiveConnectionLayer: {
+    opacity: 0,
+    zIndex: 0,
   },
   terminalCard: {
     flex: 1,

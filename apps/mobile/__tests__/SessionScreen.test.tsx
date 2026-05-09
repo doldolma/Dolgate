@@ -1112,9 +1112,99 @@ describe('SessionScreen', () => {
     expect(text).toContain('/home/doyoung');
     expect(text).toContain('logs');
     expect(text).toContain('notes.txt');
+    expect(
+      tree!.root.findByProps({ testID: 'session-terminal-card' }),
+    ).toBeDefined();
     expect(() =>
       tree!.root.findByProps({ testID: 'session-toolbar-shell' }),
     ).toThrow();
+
+    await act(async () => {
+      tree!.unmount();
+    });
+  });
+
+  it('keeps the Android terminal webview mounted while an SFTP tab is active', async () => {
+    setPlatformOs('android');
+    const sftpSession: MobileSftpSessionRecord = {
+      id: 'sftp-1',
+      hostId: 'host-1',
+      sourceSessionId: 'session-1',
+      title: 'Synology SFTP',
+      status: 'connected',
+      currentPath: '/home/doyoung',
+      listing: {
+        path: '/home/doyoung',
+        entries: [],
+      },
+      errorMessage: null,
+      lastEventAt: new Date().toISOString(),
+      lastConnectedAt: new Date().toISOString(),
+      lastDisconnectedAt: null,
+    };
+    act(() => {
+      useMobileAppStore.setState({
+        sftpSessions: [sftpSession],
+        activeConnectionTab: { kind: 'sftp', id: 'sftp-1' },
+      });
+    });
+
+    let tree: renderer.ReactTestRenderer;
+    await act(async () => {
+      tree = renderer.create(<SessionScreen />);
+      jest.runOnlyPendingTimers();
+    });
+
+    const hiddenTerminalCard = tree!.root.findByProps({
+      testID: 'session-terminal-card',
+    });
+    expect(
+      StyleSheet.flatten(hiddenTerminalCard.parent?.props.style).opacity,
+    ).toBe(0);
+    expect(hiddenTerminalCard.parent?.props.pointerEvents).toBe('none');
+    expect(
+      tree!.root.findAll(
+        node => (node.type as unknown) === 'TerminalInputView',
+      ),
+    ).toHaveLength(0);
+    expect(() =>
+      tree!.root.findByProps({ testID: 'session-toolbar-shell' }),
+    ).toThrow();
+    expect(mockNativeTerminalInputHandle!.focus).not.toHaveBeenCalled();
+
+    await act(async () => {
+      useMobileAppStore.setState({
+        activeConnectionTab: { kind: 'terminal', id: 'session-1' },
+      });
+      jest.runOnlyPendingTimers();
+    });
+
+    const visibleTerminalCard = tree!.root.findByProps({
+      testID: 'session-terminal-card',
+    });
+    expect(
+      StyleSheet.flatten(visibleTerminalCard.parent?.props.style).opacity,
+    ).toBe(1);
+    expect(visibleTerminalCard.parent?.props.pointerEvents).toBe('auto');
+    expect(
+      tree!.root.findAll(
+        node => (node.type as unknown) === 'TerminalInputView',
+      ),
+    ).toHaveLength(1);
+    expect(
+      tree!.root.findByProps({ testID: 'session-toolbar-shell' }),
+    ).toBeDefined();
+    await act(async () => {
+      visibleTerminalCard.props.onLayout({
+        nativeEvent: {
+          layout: {
+            width: 360,
+            height: 220,
+          },
+        },
+      });
+    });
+    expect(mockTerminalHandle!.fit).toHaveBeenCalled();
 
     await act(async () => {
       tree!.unmount();
