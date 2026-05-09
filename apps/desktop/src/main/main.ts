@@ -33,6 +33,7 @@ import { TermiusImportService } from './termius-import-service';
 import { UpdateService } from './update-service';
 import { WarpgateService } from './warpgate-service';
 import { XshellImportService } from './xshell-import-service';
+import { shouldRequestSingleInstanceLock } from './app-runtime-policy';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const require = createRequire(import.meta.url);
@@ -297,10 +298,12 @@ if (termiusHelperArgIndex >= 0) {
     window.focus();
   }
 
-  const hasSingleInstanceLock =
-    process.env.DOLSSH_E2E_ALLOW_MULTI_INSTANCE === '1'
-      ? true
-      : app.requestSingleInstanceLock();
+  const hasSingleInstanceLock = shouldRequestSingleInstanceLock({
+    isPackaged: app.isPackaged,
+    allowMultiInstanceEnv: process.env.DOLSSH_E2E_ALLOW_MULTI_INSTANCE,
+  })
+    ? app.requestSingleInstanceLock()
+    : true;
   if (!hasSingleInstanceLock) {
     app.quit();
   }

@@ -30,3 +30,9 @@ export function createConnectionProgress(
     retryable: options.retryable ?? false,
   };
 }
+
+export function isAwsSsoAuthenticationErrorMessage(message: string): boolean {
+  return /sso session associated with this profile has expired|sso token.+expired|aws sso login|브라우저 로그인이 필요합니다/iu.test(
+    message,
+  );
+}

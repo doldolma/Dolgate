@@ -3,8 +3,12 @@ import {
   isAwsEc2HostRecord,
 } from "@shared";
 import type {
+  FileEntry,
+  HostKeyProbeResult,
   HostRecord,
   SftpConnectionProgressEvent,
+  SftpPaneId,
+  TransferJob,
 } from "@shared";
 import type {
   AppState,
@@ -13,26 +17,7 @@ import type {
   SftpState,
 } from "../types";
 
-export function resolveSftpPaneIdByEndpoint(
-  state: Pick<AppState, "sftp">,
-  endpointId: string,
-): "left" | "right" | null {
-  if (
-    state.sftp.leftPane.endpoint?.id === endpointId ||
-    state.sftp.leftPane.connectingEndpointId === endpointId
-  ) {
-    return "left";
-  }
-  if (
-    state.sftp.rightPane.endpoint?.id === endpointId ||
-    state.sftp.rightPane.connectingEndpointId === endpointId
-  ) {
-    return "right";
-  }
-  return null;
-}
-
-export function createEmptyPane(id: "left" | "right"): SftpPaneState {
+export function createEmptyPane(id: SftpPaneId): SftpPaneState {
   return {
     id,
     sourceKind: id === "left" ? "local" : "host",
@@ -57,6 +42,25 @@ export function createEmptyPane(id: "left" | "right"): SftpPaneState {
   };
 }
 
+export function resolveSftpPaneIdByEndpoint(
+  state: Pick<AppState, "sftp">,
+  endpointId: string,
+): SftpPaneId | null {
+  if (
+    state.sftp.leftPane.endpoint?.id === endpointId ||
+    state.sftp.leftPane.connectingEndpointId === endpointId
+  ) {
+    return "left";
+  }
+  if (
+    state.sftp.rightPane.endpoint?.id === endpointId ||
+    state.sftp.rightPane.connectingEndpointId === endpointId
+  ) {
+    return "right";
+  }
+  return null;
+}
+
 export function buildSftpHostPickerPane(pane: SftpPaneState): SftpPaneState {
   return {
     ...pane,
@@ -79,6 +83,40 @@ export function buildSftpHostPickerPane(pane: SftpPaneState): SftpPaneState {
     errorMessage: undefined,
     warningMessages: [],
   };
+}
+
+export const defaultSftpState: SftpState = {
+  localHomePath: "",
+  leftPane: createEmptyPane("left"),
+  rightPane: createEmptyPane("right"),
+  transfers: [],
+  pendingConflictDialog: null,
+};
+
+export function upsertTransferJob(
+  transfers: TransferJob[],
+  job: TransferJob,
+): TransferJob[] {
+  const existingIndex = transfers.findIndex((item) => item.id === job.id);
+  if (existingIndex >= 0) {
+    return transfers.map((item, index) =>
+      index === existingIndex ? job : item,
+    );
+  }
+  return [job, ...transfers].sort(
+    (a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime(),
+  );
+}
+
+export function basenameFromPath(targetPath: string): string {
+  const normalized = targetPath.replace(/[\\/]+$/, "");
+  const separatorIndex = Math.max(
+    normalized.lastIndexOf("/"),
+    normalized.lastIndexOf("\\"),
+  );
+  return separatorIndex >= 0
+    ? normalized.slice(separatorIndex + 1)
+    : normalized;
 }
 
 export function resolveSftpVisibleEntryPaths(
@@ -164,16 +202,56 @@ export function resolveNextSftpSelection(
   };
 }
 
-export function getPane(
-  state: Pick<AppState, "sftp">,
-  paneId: "left" | "right",
-): SftpPaneState {
+export function resolveTransferItemsFromPane(
+  pane: SftpPaneState,
+  draggedPath?: string | null,
+): FileEntry[] {
+  if (!draggedPath) {
+    return pane.entries.filter((entry) =>
+      pane.selectedPaths.includes(entry.path),
+    );
+  }
+  const selected = pane.entries.filter((entry) =>
+    pane.selectedPaths.includes(entry.path),
+  );
+  if (selected.some((entry) => entry.path === draggedPath)) {
+    return selected;
+  }
+  return pane.entries.filter((entry) => entry.path === draggedPath);
+}
+
+export function isBrowsableSftpPane(pane: SftpPaneState): boolean {
+  return (
+    pane.sourceKind === "local" ||
+    (Boolean(pane.endpoint) && !pane.connectingHostId)
+  );
+}
+
+export function pushHistory(
+  pane: SftpPaneState,
+  nextPath: string,
+): Pick<SftpPaneState, "history" | "historyIndex"> {
+  const historyPrefix = pane.history.slice(0, pane.historyIndex + 1);
+  if (historyPrefix[historyPrefix.length - 1] === nextPath) {
+    return {
+      history: historyPrefix,
+      historyIndex: historyPrefix.length - 1,
+    };
+  }
+  const history = [...historyPrefix, nextPath];
+  return {
+    history,
+    historyIndex: history.length - 1,
+  };
+}
+
+export function getPane(state: Pick<AppState, "sftp">, paneId: SftpPaneId): SftpPaneState {
   return paneId === "left" ? state.sftp.leftPane : state.sftp.rightPane;
 }
 
 export function updatePaneState(
   state: Pick<AppState, "sftp">,
-  paneId: "left" | "right",
+  paneId: SftpPaneId,
   nextPane: SftpPaneState,
 ): SftpState {
   return {
@@ -183,18 +261,16 @@ export function updatePaneState(
   };
 }
 
-export function setPaneConnectionProgress(
-  state: Pick<AppState, "sftp">,
-  paneId: "left" | "right",
-  progress: SftpConnectionProgressEvent | null,
-): SftpState {
-  return updatePaneState(state, paneId, {
-    ...getPane(state, paneId),
-    connectionProgress: progress,
-    connectionDiagnostic: progress?.reasonCode
-      ? progress
-      : getPane(state, paneId).connectionDiagnostic,
-  });
+export function toTrustInput(probe: HostKeyProbeResult) {
+  return {
+    hostId: probe.hostId,
+    hostLabel: probe.hostLabel,
+    host: probe.host,
+    port: probe.port,
+    algorithm: probe.algorithm,
+    publicKeyBase64: probe.publicKeyBase64,
+    fingerprintSha256: probe.fingerprintSha256,
+  };
 }
 
 export function resolveAwsSftpFailureDiagnostic(input: {

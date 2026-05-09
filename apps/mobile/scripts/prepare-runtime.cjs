@@ -93,6 +93,17 @@ function hasFile(filePath) {
   return fs.existsSync(filePath) && fs.statSync(filePath).isFile();
 }
 
+function assertFiles(label, filePaths) {
+  const missing = filePaths.filter((filePath) => !hasFile(filePath));
+  if (missing.length > 0) {
+    throw new Error(
+      `${label} is stale or missing. Missing: ${missing
+        .map((filePath) => path.relative(repoRoot, filePath))
+        .join(", ")}`,
+    );
+  }
+}
+
 function hydrateXtermInternalHtml() {
   if (hasFile(xtermInternalHtmlPath)) {
     return;
@@ -186,6 +197,13 @@ function ensureUniffiRuntime() {
   }
 }
 
+function checkUniffiRuntime() {
+  assertFiles("uniffi-bindgen-react-native runtime", [
+    uniffiDistJsPath,
+    uniffiDistTypesPath,
+  ]);
+}
+
 function ensureXtermRuntime() {
   if (hasFile(xtermDistJsPath) && hasFile(xtermDistTypesPath)) {
     return;
@@ -214,12 +232,34 @@ function ensureXtermRuntime() {
   }
 }
 
+function checkXtermRuntime() {
+  assertFiles("@fressh/react-native-xtermjs-webview runtime", [
+    xtermDistJsPath,
+    xtermDistTypesPath,
+    xtermInternalHtmlPath,
+  ]);
+}
+
 function ensureRusshRuntime() {
   const { ensureRusshNative } = require(russhEnsureScriptPath);
   ensureRusshNative({ jsOnly: true });
 }
 
+function checkRusshRuntime() {
+  const { ensureRusshNative } = require(russhEnsureScriptPath);
+  ensureRusshNative({ jsOnly: true, check: true });
+}
+
 function ensureMobileWorkspaceRuntime(options = {}) {
+  if (options.check) {
+    checkUniffiRuntime();
+    checkXtermRuntime();
+    if (!options.skipRussh) {
+      checkRusshRuntime();
+    }
+    return;
+  }
+
   ensureUniffiRuntime();
   ensureXtermRuntime();
   if (!options.skipRussh) {
@@ -227,9 +267,25 @@ function ensureMobileWorkspaceRuntime(options = {}) {
   }
 }
 
+function parseArgs(argv) {
+  const options = {};
+  for (const arg of argv) {
+    if (arg === "--check") {
+      options.check = true;
+      continue;
+    }
+    if (arg === "--skip-russh") {
+      options.skipRussh = true;
+      continue;
+    }
+    throw new Error(`Unknown option: ${arg}`);
+  }
+  return options;
+}
+
 if (require.main === module) {
   try {
-    ensureMobileWorkspaceRuntime();
+    ensureMobileWorkspaceRuntime(parseArgs(process.argv.slice(2)));
   } catch (error) {
     console.error(error instanceof Error ? error.message : String(error));
     process.exit(1);
@@ -237,5 +293,8 @@ if (require.main === module) {
 }
 
 module.exports = {
+  checkRusshRuntime,
+  checkUniffiRuntime,
+  checkXtermRuntime,
   ensureMobileWorkspaceRuntime,
 };

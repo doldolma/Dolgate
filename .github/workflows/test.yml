@@ -16,6 +16,60 @@ env:
   MOBILE_RUSSH_NDK_VERSION: "27.1.12297006"
 
 jobs:
+  version-check:
+    name: version check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run version check
+        run: npm run version:check
+
+  root-typecheck:
+    name: root typecheck
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run root typecheck
+        run: npm run typecheck
+
+  sync-api-test:
+    name: sync-api test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.25.0"
+
+      - name: Run sync-api tests
+        working-directory: services/sync-api
+        run: go test ./... -cover
+
   ssh-core-test:
     name: ssh-core test (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
@@ -103,6 +157,9 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+
+      - name: Check mobile generated runtime artifacts
+        run: npm run mobile:runtime:check
 
       - name: Run mobile typecheck
         run: npm run typecheck:mobile

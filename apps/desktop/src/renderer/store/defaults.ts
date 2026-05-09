@@ -5,6 +5,6 @@ export {
   MAX_CONTAINER_LOGS_TAIL_WINDOW,
   MAX_CONTAINER_METRICS_SAMPLES,
   createEmptyContainersTabState,
-  defaultSettings,
-  defaultSftpState,
-} from "./utils/core";
+} from "./utils/containers";
+export { defaultSettings } from "./utils/settings";
+export { defaultSftpState } from "./utils/sftp";

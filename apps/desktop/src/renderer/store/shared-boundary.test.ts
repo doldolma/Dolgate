@@ -6,6 +6,7 @@ import fs from "node:fs";
 const storeDir = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
 );
+const sharedDir = path.resolve(storeDir, "..", "..", "shared");
 
 describe("store shared boundary", () => {
   it("keeps slices and service factories free of legacy shared imports", () => {
@@ -45,5 +46,32 @@ describe("store shared boundary", () => {
       false,
     );
     expect(fs.existsSync(path.join(storeDir, "bindings.ts"))).toBe(false);
+    expect(fs.existsSync(path.join(storeDir, "utils", "core.ts"))).toBe(false);
+  });
+
+  it("keeps slices on named domain helpers instead of the old core barrel", () => {
+    const offenders: string[] = [];
+    const slicesDir = path.join(storeDir, "slices");
+    for (const entry of fs.readdirSync(slicesDir)) {
+      if (!entry.endsWith(".ts")) {
+        continue;
+      }
+      const fullPath = path.join(slicesDir, entry);
+      const content = fs.readFileSync(fullPath, "utf8");
+      if (
+        content.includes("../utils/core") ||
+        content.includes("import * as utils") ||
+        content.includes("import * as defaults") ||
+        content.includes("{ ...defaults, ...utils }")
+      ) {
+        offenders.push(path.relative(storeDir, fullPath));
+      }
+    }
+
+    expect(offenders).toEqual([]);
+  });
+
+  it("keeps desktop shared as a facade over shared-core plus IPC types", () => {
+    expect(fs.readdirSync(sharedDir).sort()).toEqual(["index.ts", "ipc.ts"]);
   });
 });

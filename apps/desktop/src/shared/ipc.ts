@@ -48,6 +48,7 @@ import type {
   PortForwardRuleRecord,
   PortForwardRuntimeEvent,
   PortForwardRuntimeRecord,
+  ResolvedAwsConnectPayload,
   SessionReplayRecording,
   DirectoryListing,
   GroupRecord,
@@ -55,6 +56,7 @@ import type {
   GroupRemoveMode,
   GroupRemoveResult,
   HostDraft,
+  HostSecretInput,
   HostContainerAction,
   HostContainerDetails,
   HostContainerListResult,
@@ -100,8 +102,8 @@ import type {
   WarpgateConnectionInfo,
   WarpgateImportEvent,
   WarpgateTargetSummary,
-} from "./models";
-import type { SyncPayloadV2 } from "./api";
+} from "@dolssh/shared-core";
+import type { SyncPayloadV2 } from "@dolssh/shared-core";
 
 // Electron main과 Go SSH 코어가 주고받는 명령/이벤트의 집합이다.
 export type CoreCommandType =
@@ -232,16 +234,6 @@ export interface ResolvedCoreConnectPayload {
   cols: number;
   rows: number;
   command?: string;
-}
-
-export interface ResolvedAwsConnectPayload {
-  profileName: string;
-  region: string;
-  instanceId: string;
-  cols: number;
-  rows: number;
-  env?: Record<string, string>;
-  unsetEnv?: string[];
 }
 
 export interface ResolvedLocalConnectPayload {
@@ -522,14 +514,6 @@ export interface CoreStreamFrame {
   type: CoreStreamType;
   sessionId: string;
   requestId?: string;
-}
-
-// 비밀번호와 passphrase는 DB가 아니라 키체인에 저장되는 비밀 입력이다.
-export interface HostSecretInput {
-  password?: string;
-  passphrase?: string;
-  privateKeyPem?: string;
-  certificateText?: string;
 }
 
 export interface PickedShellFile {

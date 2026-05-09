@@ -9,6 +9,7 @@ import type {
   DesktopSyncedWorkspaceSnapshot,
   DesktopWindowState,
   DnsOverrideDraft,
+  DnsOverrideResolvedRecord,
   HostContainerRuntime,
   HostDraft,
   HostKeyProbeResult,
@@ -116,7 +117,7 @@ export interface MainIpcContext {
     rules: ReturnType<PortForwardRepository["list"]>;
     runtimes: ReturnType<CoreManager["listPortForwardRuntimes"]>;
   };
-  listResolvedDnsOverrides: () => any[];
+  listResolvedDnsOverrides: () => DnsOverrideResolvedRecord[];
   emitSftpConnectionProgress: AwsConnectionProgressEmitter;
   emitSftpConnectionFailureProgress: (input: {
     endpointId: string;
