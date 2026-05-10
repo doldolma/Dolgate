@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -447,6 +448,181 @@ func TestServerInfoEndpoint(t *testing.T) {
 	}
 	if !response.Capabilities.Sessions.AWSSsoBrowserFlow {
 		t.Fatalf("expected awsSsoBrowserFlow capability to be enabled")
+	}
+}
+
+func TestAwsSsoMobileStartRecoversAfterStartupProbeTimeout(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	writeRouterFakeAWSCLI(t)
+	router := createTestRouterWithConfig(t, httpserver.RouterConfig{
+		LocalAuthEnabled:   true,
+		LocalSignupEnabled: true,
+		AwsSsmRuntime: httpserver.AwsSsmRuntime{
+			Enabled:                      true,
+			AWSPath:                      "/usr/local/bin/aws",
+			SessionManagerPluginPath:     "/usr/local/bin/session-manager-plugin",
+			AwsSsoBrowserFlowReason:      "AWS CLI mobile SSO probe timed out",
+			AwsSsoBrowserFlowRecoverable: true,
+			AwsSsoBrowserFlowSupported:   false,
+		},
+	})
+	accessToken := signupAccessToken(t, router, "aws-sso-recover@example.com")
+
+	infoBefore := requestServerInfo(t, router)
+	if infoBefore.Capabilities.Sessions.AWSSsoBrowserFlow {
+		t.Fatalf("expected awsSsoBrowserFlow to start disabled")
+	}
+
+	recorder := postAwsSsoMobileStart(t, router, accessToken)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected recovered AWS SSO start to succeed, got %d: %s", recorder.Code, recorder.Body.String())
+	}
+	var response struct {
+		LoginID    string `json:"loginId"`
+		Status     string `json:"status"`
+		BrowserURL string `json:"browserUrl"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode AWS SSO start response: %v", err)
+	}
+	if response.Status != "pending" || response.LoginID == "" || response.BrowserURL == "" {
+		t.Fatalf("unexpected AWS SSO start response: %#v", response)
+	}
+
+	handoffRequest := httptest.NewRequest(http.MethodGet, "/api/aws-sso/mobile/handoff/"+response.LoginID, nil)
+	handoffRequest.Header.Set("Authorization", "Bearer "+accessToken)
+	handoffRecorder := httptest.NewRecorder()
+	router.ServeHTTP(handoffRecorder, handoffRequest)
+	if handoffRecorder.Code != http.StatusOK {
+		t.Fatalf("expected recovered AWS SSO handoff status to succeed, got %d: %s", handoffRecorder.Code, handoffRecorder.Body.String())
+	}
+
+	infoAfter := requestServerInfo(t, router)
+	if !infoAfter.Capabilities.Sessions.AWSSsoBrowserFlow {
+		t.Fatalf("expected awsSsoBrowserFlow to be enabled after recovery")
+	}
+}
+
+func TestAwsSsoMobileStartDoesNotRecoverHardUnsupported(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	writeRouterFakeAWSCLI(t)
+	router := createTestRouterWithConfig(t, httpserver.RouterConfig{
+		LocalAuthEnabled:   true,
+		LocalSignupEnabled: true,
+		AwsSsmRuntime: httpserver.AwsSsmRuntime{
+			Enabled:                    true,
+			AWSPath:                    "/usr/local/bin/aws",
+			SessionManagerPluginPath:   "/usr/local/bin/session-manager-plugin",
+			AwsSsoBrowserFlowReason:    "AWS CLI mobile SSO probe failed: Unknown options: --issuer-url",
+			AwsSsoBrowserFlowSupported: false,
+		},
+	})
+	accessToken := signupAccessToken(t, router, "aws-sso-hard-unsupported@example.com")
+
+	recorder := postAwsSsoMobileStart(t, router, accessToken)
+	if recorder.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected hard unsupported AWS SSO start to remain 503, got %d: %s", recorder.Code, recorder.Body.String())
+	}
+	if !strings.Contains(recorder.Body.String(), "Unknown options") {
+		t.Fatalf("expected hard unsupported reason in response, got %s", recorder.Body.String())
+	}
+}
+
+type testServerInfoResponse struct {
+	ServerVersion string `json:"serverVersion"`
+	Capabilities  struct {
+		Sessions struct {
+			AWSSsoBrowserFlow bool `json:"awsSsoBrowserFlow"`
+		} `json:"sessions"`
+	} `json:"capabilities"`
+}
+
+func requestServerInfo(t *testing.T, router *gin.Engine) testServerInfoResponse {
+	t.Helper()
+
+	request := httptest.NewRequest(http.MethodGet, "/api/info", nil)
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected server info to succeed, got %d: %s", recorder.Code, recorder.Body.String())
+	}
+
+	var response testServerInfoResponse
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode server info response: %v", err)
+	}
+	return response
+}
+
+func signupAccessToken(t *testing.T, router *gin.Engine, email string) string {
+	t.Helper()
+
+	signupBody := bytes.NewBufferString(`{"email":"` + email + `","password":"supersecure"}`)
+	signupRequest := httptest.NewRequest(http.MethodPost, "/auth/signup", signupBody)
+	signupRequest.Header.Set("Content-Type", "application/json")
+	signupRecorder := httptest.NewRecorder()
+	router.ServeHTTP(signupRecorder, signupRequest)
+	if signupRecorder.Code != http.StatusCreated {
+		t.Fatalf("expected signup to succeed, got %d: %s", signupRecorder.Code, signupRecorder.Body.String())
+	}
+
+	var signupResponse struct {
+		Tokens struct {
+			AccessToken string `json:"accessToken"`
+		} `json:"tokens"`
+	}
+	if err := json.Unmarshal(signupRecorder.Body.Bytes(), &signupResponse); err != nil {
+		t.Fatalf("decode signup response: %v", err)
+	}
+	if signupResponse.Tokens.AccessToken == "" {
+		t.Fatalf("signup access token should not be empty")
+	}
+	return signupResponse.Tokens.AccessToken
+}
+
+func postAwsSsoMobileStart(t *testing.T, router *gin.Engine, accessToken string) *httptest.ResponseRecorder {
+	t.Helper()
+
+	body := strings.NewReader(`{
+		"targetProfileName":"prod",
+		"sourceProfileName":"prod",
+		"sourceProfileFingerprint":"fingerprint-1",
+		"ssoStartUrl":"https://example.awsapps.com/start",
+		"ssoRegion":"us-east-1",
+		"ssoAccountId":"123456789012",
+		"ssoRoleName":"AdministratorAccess",
+		"redirectUri":"http://127.0.0.1:43111/oauth/callback"
+	}`)
+	request := httptest.NewRequest(http.MethodPost, "/api/aws-sso/mobile/start", body)
+	request.Header.Set("Authorization", "Bearer "+accessToken)
+	request.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, request)
+	return recorder
+}
+
+func writeRouterFakeAWSCLI(t *testing.T) {
+	t.Helper()
+
+	dir := t.TempDir()
+	writeRouterExecutable(t, filepath.Join(dir, "aws"), `#!/bin/sh
+cmd1="$1"
+cmd2="$2"
+if [ "$cmd1" = "sso-oidc" ] && [ "$cmd2" = "register-client" ]; then
+  echo '{"clientId":"client-1","clientSecret":"secret-1"}'
+  exit 0
+fi
+echo "unexpected command: $*" >&2
+exit 1
+`)
+	writeRouterExecutable(t, filepath.Join(dir, "session-manager-plugin"), "#!/bin/sh\nexit 0\n")
+	t.Setenv("PATH", dir)
+}
+
+func writeRouterExecutable(t *testing.T, path string, contents string) {
+	t.Helper()
+	if err := os.WriteFile(path, []byte(contents), 0o755); err != nil {
+		t.Fatalf("WriteFile(%s) error = %v", path, err)
 	}
 }
 

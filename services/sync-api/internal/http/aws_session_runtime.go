@@ -9,13 +9,16 @@ import (
 	"time"
 )
 
+const awsSsoBrowserFlowProbeTimeout = 30 * time.Second
+
 type AwsSsmRuntime struct {
-	Enabled                    bool
-	AWSPath                    string
-	SessionManagerPluginPath   string
-	MissingTools               []string
-	AwsSsoBrowserFlowSupported bool
-	AwsSsoBrowserFlowReason    string
+	Enabled                      bool
+	AWSPath                      string
+	SessionManagerPluginPath     string
+	MissingTools                 []string
+	AwsSsoBrowserFlowSupported   bool
+	AwsSsoBrowserFlowReason      string
+	AwsSsoBrowserFlowRecoverable bool
 }
 
 func DetectAwsSsmRuntime() AwsSsmRuntime {
@@ -30,7 +33,7 @@ func DetectAwsSsmRuntime() AwsSsmRuntime {
 	if result.SessionManagerPluginPath == "" {
 		result.MissingTools = append(result.MissingTools, "session-manager-plugin")
 	}
-	result.AwsSsoBrowserFlowSupported, result.AwsSsoBrowserFlowReason = detectAwsSsoBrowserFlowSupport(result.AWSPath)
+	result.AwsSsoBrowserFlowSupported, result.AwsSsoBrowserFlowReason, result.AwsSsoBrowserFlowRecoverable = detectAwsSsoBrowserFlowSupport(result.AWSPath)
 	result.Enabled = len(result.MissingTools) == 0
 	return result
 }
@@ -43,12 +46,16 @@ func resolveExecutablePath(command string) string {
 	return path
 }
 
-func detectAwsSsoBrowserFlowSupport(awsPath string) (bool, string) {
+func detectAwsSsoBrowserFlowSupport(awsPath string) (bool, string, bool) {
+	return detectAwsSsoBrowserFlowSupportWithTimeout(awsPath, awsSsoBrowserFlowProbeTimeout)
+}
+
+func detectAwsSsoBrowserFlowSupportWithTimeout(awsPath string, timeout time.Duration) (bool, string, bool) {
 	if strings.TrimSpace(awsPath) == "" {
-		return false, "aws executable not found"
+		return false, "aws executable not found", false
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
 	cmd := exec.CommandContext(
@@ -68,15 +75,15 @@ func detectAwsSsoBrowserFlowSupport(awsPath string) (bool, string) {
 	cmd.Env = append(os.Environ(), "AWS_PAGER=", "AWS_CLI_AUTO_PROMPT=off")
 	output, err := cmd.CombinedOutput()
 	if ctx.Err() == context.DeadlineExceeded {
-		return false, "AWS CLI mobile SSO probe timed out"
+		return false, "AWS CLI mobile SSO probe timed out", true
 	}
 	if err != nil {
 		reason := strings.TrimSpace(string(output))
 		if reason == "" {
 			reason = err.Error()
 		}
-		return false, fmt.Sprintf("AWS CLI mobile SSO probe failed: %s", reason)
+		return false, fmt.Sprintf("AWS CLI mobile SSO probe failed: %s", reason), false
 	}
 
-	return true, ""
+	return true, "", false
 }

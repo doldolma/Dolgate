@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func TestDetectAwsSsmRuntimeSupportsMobileSsoBrowserFlow(t *testing.T) {
@@ -29,6 +30,9 @@ exit 1
 	if runtime.AwsSsoBrowserFlowReason != "" {
 		t.Fatalf("DetectAwsSsmRuntime().AwsSsoBrowserFlowReason = %q, want empty", runtime.AwsSsoBrowserFlowReason)
 	}
+	if runtime.AwsSsoBrowserFlowRecoverable {
+		t.Fatalf("DetectAwsSsmRuntime().AwsSsoBrowserFlowRecoverable = true, want false")
+	}
 }
 
 func TestDetectAwsSsmRuntimeRejectsOldAwsCliForMobileSsoBrowserFlow(t *testing.T) {
@@ -50,6 +54,28 @@ exit 252
 	if runtime.AwsSsoBrowserFlowReason == "" {
 		t.Fatalf("DetectAwsSsmRuntime().AwsSsoBrowserFlowReason should not be empty")
 	}
+	if runtime.AwsSsoBrowserFlowRecoverable {
+		t.Fatalf("DetectAwsSsmRuntime().AwsSsoBrowserFlowRecoverable = true, want false")
+	}
+}
+
+func TestDetectAwsSsmRuntimeMarksMobileSsoBrowserFlowTimeoutRecoverable(t *testing.T) {
+	dir := t.TempDir()
+	awsPath := filepath.Join(dir, "aws")
+	writeExecutable(t, awsPath, `#!/bin/sh
+sleep 1
+`)
+
+	supported, reason, recoverable := detectAwsSsoBrowserFlowSupportWithTimeout(awsPath, 10*time.Millisecond)
+	if supported {
+		t.Fatalf("detectAwsSsoBrowserFlowSupportWithTimeout() supported = true, want false")
+	}
+	if reason != "AWS CLI mobile SSO probe timed out" {
+		t.Fatalf("detectAwsSsoBrowserFlowSupportWithTimeout() reason = %q, want timeout", reason)
+	}
+	if !recoverable {
+		t.Fatalf("detectAwsSsoBrowserFlowSupportWithTimeout() recoverable = false, want true")
+	}
 }
 
 func TestDetectAwsSsmRuntimeWithoutAws(t *testing.T) {
@@ -66,6 +92,9 @@ func TestDetectAwsSsmRuntimeWithoutAws(t *testing.T) {
 	}
 	if runtime.AwsSsoBrowserFlowReason == "" {
 		t.Fatalf("DetectAwsSsmRuntime().AwsSsoBrowserFlowReason should not be empty")
+	}
+	if runtime.AwsSsoBrowserFlowRecoverable {
+		t.Fatalf("DetectAwsSsmRuntime().AwsSsoBrowserFlowRecoverable = true, want false")
 	}
 }
 

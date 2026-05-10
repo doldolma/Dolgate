@@ -4,10 +4,12 @@ import (
 	"context"
 	"errors"
 	"html/template"
+	"log"
 	"net/http"
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/coreos/go-oidc/v3/oidc"
@@ -31,6 +33,53 @@ type RouterConfig struct {
 	AwsSessionBridge   *AwsSessionBridge
 	AwsSftpBridge      *AwsSftpBridge
 	AwsSsoMobile       *AwsSsoMobileManager
+}
+
+type awsSsoMobileRuntimeState struct {
+	mu      sync.Mutex
+	runtime AwsSsmRuntime
+	manager *AwsSsoMobileManager
+}
+
+func newAwsSsoMobileRuntimeState(config RouterConfig) *awsSsoMobileRuntimeState {
+	return &awsSsoMobileRuntimeState{
+		runtime: config.AwsSsmRuntime,
+		manager: config.AwsSsoMobile,
+	}
+}
+
+func (state *awsSsoMobileRuntimeState) browserFlowSupported() bool {
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	return state.manager != nil || state.runtime.AwsSsoBrowserFlowSupported
+}
+
+func (state *awsSsoMobileRuntimeState) managerForStart() (*AwsSsoMobileManager, AwsSsmRuntime) {
+	state.mu.Lock()
+	defer state.mu.Unlock()
+
+	if state.manager != nil {
+		return state.manager, state.runtime
+	}
+	if !state.runtime.AwsSsoBrowserFlowRecoverable {
+		return nil, state.runtime
+	}
+
+	nextRuntime := DetectAwsSsmRuntime()
+	state.runtime = nextRuntime
+	if !nextRuntime.AwsSsoBrowserFlowSupported {
+		return nil, nextRuntime
+	}
+
+	state.manager = NewAwsSsoMobileManager(nextRuntime)
+	log.Printf("AWS SSO browser flow recovered on request (aws=%s)", nextRuntime.AWSPath)
+	return state.manager, state.runtime
+}
+
+func (state *awsSsoMobileRuntimeState) currentManager() (*AwsSsoMobileManager, AwsSsmRuntime) {
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	return state.manager, state.runtime
 }
 
 type serverInfoResponse struct {
@@ -162,6 +211,7 @@ func NewRouter(store store.Store, authService *auth.Service, config RouterConfig
 		return nil, err
 	}
 	router.Use(gin.Logger(), gin.Recovery(), securityHeadersMiddleware())
+	awsSsoMobileRuntime := newAwsSsoMobileRuntimeState(config)
 	shareHub := NewSessionShareHub()
 	var awsSessionFactory awsSessionRunnerFactory
 	if config.AwsSessionBridge != nil {
@@ -190,7 +240,7 @@ func NewRouter(store store.Store, authService *auth.Service, config RouterConfig
 				Sessions: serverInfoSessionCapabilities{
 					AWSSsm:            config.AwsSsmRuntime.Enabled,
 					AWSSftp:           config.AwsSftpBridge != nil && config.AwsSsmRuntime.Enabled,
-					AWSSsoBrowserFlow: config.AwsSsoBrowserFlow,
+					AWSSsoBrowserFlow: awsSsoMobileRuntime.browserFlowSupported(),
 				},
 			},
 		})
@@ -769,8 +819,9 @@ func NewRouter(store store.Store, authService *auth.Service, config RouterConfig
 	awsSsoGroup := router.Group("/api/aws-sso/mobile")
 	awsSsoGroup.Use(authMiddleware(authService))
 	awsSsoGroup.POST("/start", func(ctx *gin.Context) {
-		if config.AwsSsoMobile == nil {
-			ctx.JSON(http.StatusServiceUnavailable, gin.H{"error": awsSsoBrowserUnavailableMessage(config.AwsSsmRuntime)})
+		awsSsoMobile, awsSsmRuntime := awsSsoMobileRuntime.managerForStart()
+		if awsSsoMobile == nil {
+			ctx.JSON(http.StatusServiceUnavailable, gin.H{"error": awsSsoBrowserUnavailableMessage(awsSsmRuntime)})
 			return
 		}
 
@@ -780,7 +831,7 @@ func NewRouter(store store.Store, authService *auth.Service, config RouterConfig
 			return
 		}
 
-		response, err := config.AwsSsoMobile.Start(ctx.Request.Context(), ctx.GetString("userId"), request)
+		response, err := awsSsoMobile.Start(ctx.Request.Context(), ctx.GetString("userId"), request)
 		if err != nil {
 			ctx.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
 			return
@@ -788,12 +839,13 @@ func NewRouter(store store.Store, authService *auth.Service, config RouterConfig
 		ctx.JSON(http.StatusOK, response)
 	})
 	awsSsoGroup.GET("/handoff/:loginId", func(ctx *gin.Context) {
-		if config.AwsSsoMobile == nil {
-			ctx.JSON(http.StatusServiceUnavailable, gin.H{"error": awsSsoBrowserUnavailableMessage(config.AwsSsmRuntime)})
+		awsSsoMobile, awsSsmRuntime := awsSsoMobileRuntime.currentManager()
+		if awsSsoMobile == nil {
+			ctx.JSON(http.StatusServiceUnavailable, gin.H{"error": awsSsoBrowserUnavailableMessage(awsSsmRuntime)})
 			return
 		}
 
-		response, err := config.AwsSsoMobile.Status(
+		response, err := awsSsoMobile.Status(
 			ctx.GetString("userId"),
 			ctx.Param("loginId"),
 		)
@@ -804,8 +856,9 @@ func NewRouter(store store.Store, authService *auth.Service, config RouterConfig
 		ctx.JSON(http.StatusOK, response)
 	})
 	awsSsoGroup.POST("/handoff/:loginId", func(ctx *gin.Context) {
-		if config.AwsSsoMobile == nil {
-			ctx.JSON(http.StatusServiceUnavailable, gin.H{"error": awsSsoBrowserUnavailableMessage(config.AwsSsmRuntime)})
+		awsSsoMobile, awsSsmRuntime := awsSsoMobileRuntime.currentManager()
+		if awsSsoMobile == nil {
+			ctx.JSON(http.StatusServiceUnavailable, gin.H{"error": awsSsoBrowserUnavailableMessage(awsSsmRuntime)})
 			return
 		}
 
@@ -815,7 +868,7 @@ func NewRouter(store store.Store, authService *auth.Service, config RouterConfig
 			return
 		}
 
-		response, err := config.AwsSsoMobile.Complete(
+		response, err := awsSsoMobile.Complete(
 			ctx.Request.Context(),
 			ctx.GetString("userId"),
 			ctx.Param("loginId"),
@@ -828,7 +881,8 @@ func NewRouter(store store.Store, authService *auth.Service, config RouterConfig
 		ctx.JSON(http.StatusOK, response)
 	})
 	awsSsoGroup.POST("/cancel", func(ctx *gin.Context) {
-		if config.AwsSsoMobile == nil {
+		awsSsoMobile, _ := awsSsoMobileRuntime.currentManager()
+		if awsSsoMobile == nil {
 			ctx.Status(http.StatusNoContent)
 			return
 		}
@@ -840,7 +894,7 @@ func NewRouter(store store.Store, authService *auth.Service, config RouterConfig
 			ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
-		if err := config.AwsSsoMobile.Cancel(ctx.GetString("userId"), request.LoginID); err != nil {
+		if err := awsSsoMobile.Cancel(ctx.GetString("userId"), request.LoginID); err != nil {
 			ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
