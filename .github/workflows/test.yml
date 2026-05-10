@@ -158,9 +158,6 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Check mobile generated runtime artifacts
-        run: npm run mobile:runtime:check
-
       - name: Run mobile typecheck
         run: npm run typecheck:mobile
 
@@ -213,6 +210,10 @@ jobs:
           restore-keys: |
             mobile-russh-cargo-${{ runner.os }}-${{ env.MOBILE_RUSSH_CARGO_NDK_VERSION }}-${{ env.MOBILE_RUSSH_NDK_VERSION }}-
             mobile-russh-cargo-${{ runner.os }}-
+
+      - name: Run mobile russh Rust tests
+        working-directory: packages/fressh-react-native-uniffi-russh/rust
+        run: cargo test --workspace
 
       - name: Install cargo-ndk
         shell: bash

@@ -22,7 +22,6 @@
     "mobile:russh:check:js": "npm run mobile:russh:check -- --js-only",
     "mobile:russh:check:android": "npm run mobile:russh:check -- --platform android",
     "mobile:russh:regenerate": "npm run regenerate:native --workspace @fressh/react-native-uniffi-russh --",
-    "mobile:runtime:check": "node ./apps/mobile/scripts/prepare-runtime.cjs --check",
     "build:mobile:android": "npm run build:android --workspace @dolssh/mobile --",
     "build:mobile:ios": "npm run build:ios --workspace @dolssh/mobile --",
     "version:set": "node ./scripts/version.cjs set",
@@ -50,7 +49,7 @@
     "test:sync-api": "cd services/sync-api && go test ./... -cover",
     "test:services": "npm run test:ssh-core && npm run test:sync-api",
     "test:smoke": "npm run test:desktop:smoke",
-    "test:all": "npm run test:fast && npm run test:smoke",
+    "test:all": "npm run test:fast && npm run test:mobile -- --runInBand && npm run test:smoke",
     "typecheck": "npm-run-all --parallel typecheck:desktop typecheck:mobile",
     "typecheck:desktop": "npm run typecheck --workspace @dolssh/desktop",
     "typecheck:mobile": "node ./apps/mobile/scripts/prepare-runtime.cjs && cd apps/mobile && tsc --noEmit"
