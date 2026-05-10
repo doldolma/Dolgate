@@ -221,6 +221,8 @@ jobs:
     needs:
       - verify-version
       - mobile-test
+    env:
+      DOLGATE_ANDROID_RELEASE_ARCHES: arm64-v8a
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -236,7 +238,11 @@ jobs:
         with:
           distribution: temurin
           java-version: "17"
-          cache: gradle
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v6
+        with:
+          cache-provider: basic
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
@@ -278,7 +284,7 @@ jobs:
         run: npm ci
 
       - name: Prepare mobile russh Android artifacts
-        run: npm run mobile:russh:ensure -- --platform android
+        run: npm run mobile:russh:ensure -- --platform android --android-abis "${DOLGATE_ANDROID_RELEASE_ARCHES}"
 
       - name: Restore Android release keystore
         env:

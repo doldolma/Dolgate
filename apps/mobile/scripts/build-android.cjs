@@ -22,7 +22,21 @@ const outputApkPath = path.join(
   "app-release.apk",
 );
 const cmakeBuildPath = path.join(androidRoot, "app", ".cxx");
-const defaultReleaseArchitectures = "armeabi-v7a,arm64-v8a";
+const defaultReleaseArchitectures = "arm64-v8a";
+
+function resolveReleaseArchitectures() {
+  const value =
+    process.env.DOLGATE_ANDROID_RELEASE_ARCHES?.trim() ||
+    defaultReleaseArchitectures;
+  const architectures = value
+    .split(",")
+    .map((architecture) => architecture.trim())
+    .filter(Boolean);
+  if (architectures.length === 0) {
+    throw new Error("At least one Android release architecture is required.");
+  }
+  return architectures.join(",");
+}
 
 function resolveApkSigner(androidEnv) {
   const sdkRoot = androidEnv.ANDROID_SDK_ROOT || androidEnv.ANDROID_HOME;
@@ -72,13 +86,11 @@ function verifySignedApk(androidEnv) {
 
 function main() {
   ensureMobileWorkspaceRuntime({ skipRussh: true });
-  ensureRusshNative({ platform: "android" });
 
   const androidEnv = buildEnvForAndroid(process.env);
   const gradlew = process.platform === "win32" ? "gradlew.bat" : "./gradlew";
-  const releaseArchitectures =
-    process.env.DOLGATE_ANDROID_RELEASE_ARCHES?.trim() ||
-    defaultReleaseArchitectures;
+  const releaseArchitectures = resolveReleaseArchitectures();
+  ensureRusshNative({ platform: "android", androidAbis: releaseArchitectures });
 
   try {
     require("fs").rmSync(cmakeBuildPath, { recursive: true, force: true });
@@ -93,10 +105,10 @@ function main() {
       `-PreactNativeArchitectures=${releaseArchitectures}`,
     ],
     {
-    cwd: androidRoot,
-    env: androidEnv,
-    stdio: "inherit",
-    shell: process.platform === "win32",
+      cwd: androidRoot,
+      env: androidEnv,
+      stdio: "inherit",
+      shell: process.platform === "win32",
     },
   );
 

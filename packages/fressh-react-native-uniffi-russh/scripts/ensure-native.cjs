@@ -12,6 +12,13 @@ const markerRoot = path.join(packageRoot, "rust", "target", "dolssh-russh-build"
 const lockDir = path.join(markerRoot, ".lock");
 const regenerateScript = path.join(__dirname, "regenerate-native.cjs");
 const expectedGeneratorVersion = "0.29.3-1";
+const androidAbiTargets = {
+  "arm64-v8a": "aarch64-linux-android",
+  "armeabi-v7a": "armv7-linux-androideabi",
+  x86_64: "x86_64-linux-android",
+  x86: "i686-linux-android",
+};
+const defaultAndroidAbis = Object.keys(androidAbiTargets);
 
 function toPosixPath(filePath) {
   return filePath.split(path.sep).join("/");
@@ -27,6 +34,58 @@ function hasFile(filePath) {
 
 function readJson(filePath) {
   return JSON.parse(fs.readFileSync(filePath, "utf8"));
+}
+
+function normalizeAndroidAbis(value) {
+  if (typeof value === "string" && !value.trim()) {
+    throw new Error("At least one Android ABI is required.");
+  }
+  const abis = Array.isArray(value)
+    ? value
+    : typeof value === "string"
+      ? value.split(",")
+      : defaultAndroidAbis;
+  const seen = new Set();
+  const normalized = [];
+  for (const rawAbi of abis) {
+    const abi = String(rawAbi).trim();
+    if (!abi) {
+      continue;
+    }
+    if (!androidAbiTargets[abi]) {
+      throw new Error(`Unknown Android ABI: ${abi}`);
+    }
+    if (!seen.has(abi)) {
+      normalized.push(abi);
+      seen.add(abi);
+    }
+  }
+  if (normalized.length === 0) {
+    throw new Error("At least one Android ABI is required.");
+  }
+  return defaultAndroidAbis.filter((abi) => seen.has(abi));
+}
+
+function isDefaultAndroidAbis(androidAbis) {
+  return JSON.stringify(androidAbis) === JSON.stringify(defaultAndroidAbis);
+}
+
+function markerTargetForPlatform(target, options = {}) {
+  if (target !== "android") {
+    return target;
+  }
+  return isDefaultAndroidAbis(options.androidAbis)
+    ? "android"
+    : `android-${options.androidAbis.join("-")}`;
+}
+
+function labelForPlatform(target, options = {}) {
+  if (target !== "android") {
+    return target;
+  }
+  return isDefaultAndroidAbis(options.androidAbis)
+    ? "android"
+    : `android (${options.androidAbis.join(",")})`;
 }
 
 function listDirectories(parentDir) {
@@ -349,14 +408,15 @@ function jsOutputs() {
   ];
 }
 
-function androidOutputs() {
+function androidOutputs(androidAbis = defaultAndroidAbis) {
   return [
+    path.join(packageRoot, "android", "build.gradle"),
+    path.join(packageRoot, "android", "cpp-adapter.cpp"),
     path.join(packageRoot, "cpp", "generated", "uniffi_russh.cpp"),
     path.join(packageRoot, "cpp", "generated", "uniffi_russh.hpp"),
-    path.join(packageRoot, "android", "src", "main", "jniLibs", "arm64-v8a", "libuniffi_russh.a"),
-    path.join(packageRoot, "android", "src", "main", "jniLibs", "armeabi-v7a", "libuniffi_russh.a"),
-    path.join(packageRoot, "android", "src", "main", "jniLibs", "x86", "libuniffi_russh.a"),
-    path.join(packageRoot, "android", "src", "main", "jniLibs", "x86_64", "libuniffi_russh.a"),
+    ...androidAbis.map((abi) =>
+      path.join(packageRoot, "android", "src", "main", "jniLibs", abi, "libuniffi_russh.a"),
+    ),
   ];
 }
 
@@ -379,12 +439,12 @@ function iosOutputs() {
   ];
 }
 
-function outputFilesForTarget(target) {
+function outputFilesForTarget(target, options = {}) {
   if (target === "js") {
     return jsOutputs();
   }
   if (target === "android") {
-    return [...jsOutputs(), ...androidOutputs()];
+    return [...jsOutputs(), ...androidOutputs(options.androidAbis)];
   }
   if (target === "ios") {
     return [...jsOutputs(), ...iosOutputs()];
@@ -469,10 +529,11 @@ function jsFingerprint(toolVersions) {
   });
 }
 
-function nativeFingerprint(target, toolVersions) {
+function nativeFingerprint(target, toolVersions, options = {}) {
   return digestFiles(nativeInputFiles(), {
     kind: "native",
     target,
+    androidAbis: target === "android" ? options.androidAbis : undefined,
     toolVersions,
   });
 }
@@ -515,33 +576,39 @@ function ensureJs(options = {}) {
 }
 
 function ensurePlatform(target, options = {}) {
+  const markerTarget = markerTargetForPlatform(target, options);
+  const label = labelForPlatform(target, options);
   const toolVersions = readToolVersions(target, options);
-  const fingerprint = nativeFingerprint(target, toolVersions);
-  const outputs = outputFilesForTarget(target);
-  const marker = readMarker(target);
+  const fingerprint = nativeFingerprint(target, toolVersions, options);
+  const outputs = outputFilesForTarget(target, options);
+  const marker = readMarker(markerTarget);
 
   if (
     !options.fresh &&
     !process.env.DOLSSH_FORCE_REGENERATE_RUSSH &&
-    markerMatches(marker, target, fingerprint, toolVersions, outputs)
+    markerMatches(marker, markerTarget, fingerprint, toolVersions, outputs)
   ) {
-    console.log(`Reusing generated russh ${target} native artifacts.`);
+    console.log(`Reusing generated russh ${label} native artifacts.`);
     ensureJs(options);
     return;
   }
 
   if (options.check) {
-    throw new Error(`Generated russh ${target} native artifacts are stale or missing.`);
+    throw new Error(`Generated russh ${label} native artifacts are stale or missing.`);
   }
 
-  console.log(`Preparing generated russh ${target} native artifacts...`);
-  runRegenerate(target === "android" ? ["--android-only"] : ["--ios-only"], options);
+  console.log(`Preparing generated russh ${label} native artifacts...`);
+  const regenerateArgs =
+    target === "android"
+      ? ["--android-only", "--android-abis", options.androidAbis.join(",")]
+      : ["--ios-only"];
+  runRegenerate(regenerateArgs, options);
 
   const missing = missingFiles(outputs);
   if (missing.length > 0) {
-    throw new Error(`Generated russh ${target} outputs are missing: ${missing.map(relativePath).join(", ")}`);
+    throw new Error(`Generated russh ${label} outputs are missing: ${missing.map(relativePath).join(", ")}`);
   }
-  writeMarker(target, buildMarker(target, fingerprint, toolVersions, outputs));
+  writeMarker(markerTarget, buildMarker(markerTarget, fingerprint, toolVersions, outputs));
 
   const jsToolVersions = readToolVersions("js", options);
   writeMarker(
@@ -583,11 +650,15 @@ function normalizeOptions(options = {}) {
   if (platform && !["android", "ios", "all"].includes(platform)) {
     throw new Error(`Unknown russh platform: ${platform}`);
   }
+  if (jsOnly && options.androidAbis) {
+    throw new Error("--android-abis cannot be used with --js-only.");
+  }
   return {
     platform,
     jsOnly,
     check: Boolean(options.check),
     fresh: Boolean(options.fresh),
+    androidAbis: normalizeAndroidAbis(options.androidAbis),
     env: options.env,
   };
 }
@@ -636,12 +707,29 @@ function parseArgs(argv) {
       continue;
     }
     if (arg === "--platform") {
-      options.platform = argv[index + 1];
+      const value = argv[index + 1];
+      if (!value || value.startsWith("--")) {
+        throw new Error("--platform requires a value.");
+      }
+      options.platform = value;
       index += 1;
       continue;
     }
     if (arg.startsWith("--platform=")) {
       options.platform = arg.slice("--platform=".length);
+      continue;
+    }
+    if (arg === "--android-abis") {
+      const value = argv[index + 1];
+      if (!value || value.startsWith("--")) {
+        throw new Error("--android-abis requires a comma-separated ABI list.");
+      }
+      options.androidAbis = value;
+      index += 1;
+      continue;
+    }
+    if (arg.startsWith("--android-abis=")) {
+      options.androidAbis = arg.slice("--android-abis=".length);
       continue;
     }
     throw new Error(`Unknown option: ${arg}`);

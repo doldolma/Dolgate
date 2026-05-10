@@ -7,8 +7,79 @@ const { spawnSync } = require("child_process");
 
 const packageRoot = path.resolve(__dirname, "..");
 const repoRoot = path.resolve(packageRoot, "..", "..");
-const args = new Set(process.argv.slice(2));
 const expectedGeneratorVersion = "0.29.3-1";
+const androidAbiTargets = {
+  "arm64-v8a": "aarch64-linux-android",
+  "armeabi-v7a": "armv7-linux-androideabi",
+  x86_64: "x86_64-linux-android",
+  x86: "i686-linux-android",
+};
+const defaultAndroidAbis = Object.keys(androidAbiTargets);
+
+function parseArgs(argv) {
+  const options = {};
+  for (let index = 0; index < argv.length; index += 1) {
+    const arg = argv[index];
+    if (arg === "--android-only") {
+      options.androidOnly = true;
+      continue;
+    }
+    if (arg === "--ios-only") {
+      options.iosOnly = true;
+      continue;
+    }
+    if (arg === "--js-only") {
+      options.jsOnly = true;
+      continue;
+    }
+    if (arg === "--skip-js") {
+      options.skipJs = true;
+      continue;
+    }
+    if (arg === "--android-abis") {
+      const value = argv[index + 1];
+      if (!value || value.startsWith("--")) {
+        throw new Error("--android-abis requires a comma-separated ABI list.");
+      }
+      options.androidAbis = value;
+      index += 1;
+      continue;
+    }
+    if (arg.startsWith("--android-abis=")) {
+      options.androidAbis = arg.slice("--android-abis=".length);
+      continue;
+    }
+    throw new Error(`Unknown option: ${arg}`);
+  }
+  return options;
+}
+
+function normalizeAndroidAbis(value) {
+  if (typeof value === "string" && !value.trim()) {
+    throw new Error("At least one Android ABI is required.");
+  }
+  const abis =
+    typeof value === "string"
+      ? value.split(",").map((abi) => abi.trim()).filter(Boolean)
+      : defaultAndroidAbis;
+  const seen = new Set();
+  const normalized = [];
+  for (const abi of abis) {
+    if (!androidAbiTargets[abi]) {
+      throw new Error(`Unknown Android ABI: ${abi}`);
+    }
+    if (!seen.has(abi)) {
+      normalized.push(abi);
+      seen.add(abi);
+    }
+  }
+  if (normalized.length === 0) {
+    throw new Error("At least one Android ABI is required.");
+  }
+  return defaultAndroidAbis.filter((abi) => seen.has(abi));
+}
+
+const options = parseArgs(process.argv.slice(2));
 
 process.env.PATH = [
   "/opt/homebrew/opt/rustup/bin",
@@ -18,21 +89,17 @@ process.env.PATH = [
   .filter(Boolean)
   .join(path.delimiter);
 
-const androidOnly = args.has("--android-only");
-const iosOnly = args.has("--ios-only");
-const jsOnly = args.has("--js-only");
-const skipJs = args.has("--skip-js");
+const androidOnly = Boolean(options.androidOnly);
+const iosOnly = Boolean(options.iosOnly);
+const jsOnly = Boolean(options.jsOnly);
+const skipJs = Boolean(options.skipJs);
 
 const shouldBuildAndroid = !iosOnly && !jsOnly;
 const shouldBuildIos = !androidOnly && !jsOnly;
 const shouldBuildJs = !skipJs;
+const selectedAndroidAbis = normalizeAndroidAbis(options.androidAbis);
 
-const androidTargets = [
-  "aarch64-linux-android",
-  "armv7-linux-androideabi",
-  "x86_64-linux-android",
-  "i686-linux-android",
-].join(",");
+const androidTargets = selectedAndroidAbis.map((abi) => androidAbiTargets[abi]).join(",");
 
 const iosTargets = [
   "aarch64-apple-ios",
@@ -120,6 +187,39 @@ function copyDirectoryContents(sourceDir, targetDir) {
       fs.copyFileSync(sourcePath, targetPath);
     }
   }
+}
+
+function backupNonSelectedAndroidJniLibs(selectedAndroidAbis) {
+  const selected = new Set(selectedAndroidAbis);
+  const abiDirs = defaultAndroidAbis.filter((abi) => !selected.has(abi));
+  if (abiDirs.length === 0) {
+    return () => {};
+  }
+
+  const jniLibsRoot = path.join(packageRoot, "android", "src", "main", "jniLibs");
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "dolssh-russh-jni-"));
+  const backups = [];
+
+  for (const abi of abiDirs) {
+    const sourceDir = path.join(jniLibsRoot, abi);
+    if (!fs.existsSync(sourceDir)) {
+      continue;
+    }
+    const backupDir = path.join(tempRoot, abi);
+    copyDirectoryContents(sourceDir, backupDir);
+    backups.push({ sourceDir, backupDir });
+  }
+
+  return () => {
+    try {
+      for (const { sourceDir, backupDir } of backups) {
+        fs.rmSync(sourceDir, { recursive: true, force: true });
+        copyDirectoryContents(backupDir, sourceDir);
+      }
+    } finally {
+      fs.rmSync(tempRoot, { recursive: true, force: true });
+    }
+  };
 }
 
 function stripTrailingWhitespace(filePath) {
@@ -373,6 +473,23 @@ Java_com_uniffirussh_ReactNativeUniffiRusshModule_nativeInstallRustCrate(
   );
 }
 
+function patchAndroidBuildGradleAbiFilters() {
+  const gradlePath = path.join(packageRoot, "android", "build.gradle");
+  if (!fs.existsSync(gradlePath)) {
+    return;
+  }
+
+  const content = fs.readFileSync(gradlePath, "utf8");
+  const nextContent = content.replace(
+    /ndk \{\n\s+abiFilters [^\n]+\n\s+\}/,
+    "ndk {\n      abiFilters (*reactNativeArchitectures())\n    }",
+  );
+  if (nextContent === content) {
+    throw new Error("Unable to patch Android ABI filters in build.gradle.");
+  }
+  fs.writeFileSync(gradlePath, nextContent);
+}
+
 if (shouldBuildAndroid || shouldBuildIos) {
   requireTool("cargo", ["--version"], "Install Rust with rustup first.");
 }
@@ -388,16 +505,22 @@ if (shouldBuildAndroid) {
 const ubrn = resolvePackageFile("uniffi-bindgen-react-native", "bin/cli.cjs");
 
 if (shouldBuildAndroid) {
-  run(process.execPath, [
-    ubrn,
-    "build",
-    "android",
-    "--release",
-    "--and-generate",
-    "--targets",
-    androidTargets,
-  ]);
-  patchAndroidCallInvokerAdapter();
+  const restoreAndroidJniLibs = backupNonSelectedAndroidJniLibs(selectedAndroidAbis);
+  try {
+    run(process.execPath, [
+      ubrn,
+      "build",
+      "android",
+      "--release",
+      "--and-generate",
+      "--targets",
+      androidTargets,
+    ]);
+    patchAndroidCallInvokerAdapter();
+    patchAndroidBuildGradleAbiFilters();
+  } finally {
+    restoreAndroidJniLibs();
+  }
 }
 
 if (shouldBuildIos) {
