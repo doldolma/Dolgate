@@ -1,8 +1,16 @@
-import { fireEvent, render, screen } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { DEFAULT_SFTP_BROWSER_COLUMN_WIDTHS } from '@shared';
-import type { AppSettings, HostRecord } from '@shared';
+import type { AppSettings, HostRecord, SecretMetadataRecord } from '@shared';
 import { SettingsPanel } from './SettingsPanel';
+
+const settingsServiceMocks = vi.hoisted(() => ({
+  copySavedCredentialPassword: vi.fn(),
+}));
+
+vi.mock('../services/desktop/settings', () => ({
+  copySavedCredentialPassword: settingsServiceMocks.copySavedCredentialPassword,
+}));
 
 const settings: AppSettings = {
   theme: 'system',
@@ -38,7 +46,7 @@ const knownHosts = [
   }
 ];
 
-const keychainEntries = [
+const keychainEntries: SecretMetadataRecord[] = [
   {
     secretRef: 'secret-1',
     label: 'Prod password',
@@ -49,6 +57,50 @@ const keychainEntries = [
     hasCertificate: false,
     updatedAt: '2026-03-24T12:00:00.000Z'
   }
+];
+
+const searchableKeychainEntries: SecretMetadataRecord[] = [
+  ...keychainEntries,
+  {
+    secretRef: 'secret-backup',
+    label: 'Backup private key',
+    linkedHostCount: 0,
+    hasPassword: false,
+    hasPassphrase: false,
+    hasManagedPrivateKey: true,
+    hasCertificate: false,
+    updatedAt: '2026-03-24T12:00:00.000Z',
+  },
+  {
+    secretRef: 'secret-cert',
+    label: 'Prod cert',
+    linkedHostCount: 1,
+    hasPassword: false,
+    hasPassphrase: true,
+    hasManagedPrivateKey: true,
+    hasCertificate: true,
+    updatedAt: '2026-03-24T12:00:00.000Z',
+  },
+  {
+    secretRef: 'secret-lime',
+    label: 'Shared credentials',
+    linkedHostCount: 1,
+    hasPassword: true,
+    hasPassphrase: false,
+    hasManagedPrivateKey: false,
+    hasCertificate: false,
+    updatedAt: '2026-03-24T12:00:00.000Z',
+  },
+  {
+    secretRef: 'secret-asan',
+    label: '아산 password',
+    linkedHostCount: 0,
+    hasPassword: true,
+    hasPassphrase: false,
+    hasManagedPrivateKey: false,
+    hasCertificate: false,
+    updatedAt: '2026-03-24T12:00:00.000Z',
+  },
 ];
 
 const hosts: HostRecord[] = [
@@ -70,6 +122,23 @@ const hosts: HostRecord[] = [
     awsSshMetadataError: null,
     groupName: 'Servers',
     tags: [],
+    terminalThemeId: null,
+    createdAt: '2026-03-24T10:00:00.000Z',
+    updatedAt: '2026-03-24T12:00:00.000Z'
+  },
+  {
+    id: 'ssh-lime',
+    kind: 'ssh',
+    label: 'Lime prod',
+    hostname: 'lime.example.com',
+    port: 22,
+    username: 'deploy',
+    authType: 'password',
+    privateKeyPath: null,
+    certificatePath: null,
+    secretRef: 'secret-lime',
+    groupName: 'Servers/Prod',
+    tags: ['lime'],
     terminalThemeId: null,
     createdAt: '2026-03-24T10:00:00.000Z',
     updatedAt: '2026-03-24T12:00:00.000Z'
@@ -114,6 +183,11 @@ function renderSettingsPanel(overrides: Partial<Parameters<typeof SettingsPanel>
 }
 
 describe('SettingsPanel', () => {
+  beforeEach(() => {
+    settingsServiceMocks.copySavedCredentialPassword.mockReset();
+    settingsServiceMocks.copySavedCredentialPassword.mockResolvedValue(undefined);
+  });
+
   it('renders appearance theme cards with descriptions', () => {
     renderSettingsPanel();
 
@@ -203,17 +277,113 @@ describe('SettingsPanel', () => {
     expect(onRemoveKnownHost).toHaveBeenCalledWith('known-host-1');
   });
 
-  it('renders keychain entries inside the secrets section', () => {
+  it('renders keychain entries inside the secrets section', async () => {
     const { onEditSecret, onRemoveSecret } = renderSettingsPanel({ activeSection: 'secrets' });
 
     expect(screen.getByRole('heading', { name: 'Saved Credentials' })).toBeInTheDocument();
     expect(screen.queryByText('local_keychain')).not.toBeInTheDocument();
     expect(screen.getByText('Password')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '비밀번호 복사' }));
     fireEvent.click(screen.getByRole('button', { name: '편집' }));
     fireEvent.click(screen.getByRole('button', { name: '삭제' }));
 
+    await waitFor(() =>
+      expect(settingsServiceMocks.copySavedCredentialPassword).toHaveBeenCalledWith('secret-1'),
+    );
+    expect(screen.getByText('비밀번호를 클립보드에 복사했습니다.')).toBeInTheDocument();
     expect(onEditSecret).toHaveBeenCalledWith('secret-1');
     expect(onRemoveSecret).toHaveBeenCalledWith('secret-1');
+  });
+
+  it('shows an error when saved password copy fails', async () => {
+    settingsServiceMocks.copySavedCredentialPassword.mockRejectedValueOnce(
+      new Error('이 인증 정보에는 저장된 비밀번호가 없습니다.'),
+    );
+
+    renderSettingsPanel({ activeSection: 'secrets' });
+
+    fireEvent.click(screen.getByRole('button', { name: '비밀번호 복사' }));
+
+    expect(
+      await screen.findByText('이 인증 정보에는 저장된 비밀번호가 없습니다.'),
+    ).toBeInTheDocument();
+  });
+
+  it('filters saved credentials by label and preserves actions', async () => {
+    const { onEditSecret, onRemoveSecret } = renderSettingsPanel({
+      activeSection: 'secrets',
+      keychainEntries: searchableKeychainEntries,
+    });
+
+    fireEvent.change(screen.getByLabelText('Search saved credentials'), {
+      target: { value: 'backup' },
+    });
+
+    expect(screen.getByText('Backup private key')).toBeInTheDocument();
+    expect(screen.queryByText('Prod password')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: '편집' }));
+    fireEvent.click(screen.getByRole('button', { name: '삭제' }));
+
+    expect(onEditSecret).toHaveBeenCalledWith('secret-backup');
+    expect(onRemoveSecret).toHaveBeenCalledWith('secret-backup');
+  });
+
+  it('filters saved credentials by secret type', () => {
+    renderSettingsPanel({
+      activeSection: 'secrets',
+      keychainEntries: searchableKeychainEntries,
+    });
+
+    fireEvent.change(screen.getByLabelText('Search saved credentials'), {
+      target: { value: 'certificate' },
+    });
+
+    expect(screen.getByText('Prod cert')).toBeInTheDocument();
+    expect(screen.getByText('SSH certificate + Passphrase')).toBeInTheDocument();
+    expect(screen.queryByText('Prod password')).not.toBeInTheDocument();
+  });
+
+  it('filters saved credentials by linked host search text', () => {
+    renderSettingsPanel({
+      activeSection: 'secrets',
+      keychainEntries: searchableKeychainEntries,
+    });
+
+    fireEvent.change(screen.getByLabelText('Search saved credentials'), {
+      target: { value: 'lime.example.com' },
+    });
+
+    expect(screen.getByText('Shared credentials')).toBeInTheDocument();
+    expect(screen.queryByText('Backup private key')).not.toBeInTheDocument();
+  });
+
+  it('matches saved credential search when the query uses the wrong Korean keyboard layout', () => {
+    renderSettingsPanel({
+      activeSection: 'secrets',
+      keychainEntries: searchableKeychainEntries,
+    });
+
+    const searchInput = screen.getByLabelText('Search saved credentials');
+    fireEvent.change(searchInput, { target: { value: 'ㅣㅑㅡㄷ' } });
+    expect(screen.getByText('Shared credentials')).toBeInTheDocument();
+
+    fireEvent.change(searchInput, { target: { value: 'dktks' } });
+    expect(screen.getByText('아산 password')).toBeInTheDocument();
+  });
+
+  it('shows an empty state when saved credential search has no results', () => {
+    renderSettingsPanel({
+      activeSection: 'secrets',
+      keychainEntries: searchableKeychainEntries,
+    });
+
+    fireEvent.change(screen.getByLabelText('Search saved credentials'), {
+      target: { value: 'no-such-credential' },
+    });
+
+    expect(screen.getByText('검색 결과가 없습니다.')).toBeInTheDocument();
+    expect(screen.queryByText('Prod password')).not.toBeInTheDocument();
   });
 
   it('shows a shared edit action for certificate secrets too', () => {
@@ -234,6 +404,7 @@ describe('SettingsPanel', () => {
     });
 
     expect(screen.getByText('SSH certificate + Passphrase')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '비밀번호 복사' })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '편집' }));
 
     fireEvent.click(screen.getByRole('button', { name: '삭제' }));

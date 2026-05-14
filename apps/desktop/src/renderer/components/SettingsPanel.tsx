@@ -535,7 +535,12 @@ export function SettingsPanel({
       {activeSection === 'security' ? <KnownHostsPanel records={knownHosts} onRemove={onRemoveKnownHost} /> : null}
 
       {activeSection === 'secrets' ? (
-        <KeychainPanel entries={keychainEntries} onRemoveSecret={onRemoveSecret} onEditSecret={onEditSecret} />
+        <KeychainPanel
+          entries={keychainEntries}
+          hosts={hosts}
+          onRemoveSecret={onRemoveSecret}
+          onEditSecret={onEditSecret}
+        />
       ) : null}
 
       {activeSection === 'aws-profiles' ? <AwsProfilesPanel hosts={hosts} /> : null}

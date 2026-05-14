@@ -34,6 +34,7 @@ describe("createDesktopApi", () => {
     await api.serial.listPorts();
     await api.serial.control({ sessionId: "session-1", action: "break" });
     api.files.getPathForDroppedFile({ name: "upload.txt" } as File);
+    await api.keychain.copyPassword("secret-1");
     await api.groups.move("Servers/Nested", "Clients");
     await api.groups.rename("Servers/Nested", "API");
 
@@ -72,12 +73,17 @@ describe("createDesktopApi", () => {
     );
     expect(ipcRenderer.invoke).toHaveBeenNthCalledWith(
       8,
+      ipcChannels.keychain.copyPassword,
+      "secret-1",
+    );
+    expect(ipcRenderer.invoke).toHaveBeenNthCalledWith(
+      9,
       ipcChannels.groups.move,
       "Servers/Nested",
       "Clients",
     );
     expect(ipcRenderer.invoke).toHaveBeenNthCalledWith(
-      9,
+      10,
       ipcChannels.groups.rename,
       "Servers/Nested",
       "API",

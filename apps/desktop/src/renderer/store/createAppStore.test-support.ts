@@ -907,6 +907,7 @@ export function createMockApi(): DesktopApi {
     keychain: {
       list: vi.fn().mockResolvedValue([]),
       load: vi.fn().mockResolvedValue(null),
+      copyPassword: vi.fn().mockResolvedValue(undefined),
       remove: vi.fn().mockResolvedValue(undefined),
       update: vi.fn().mockResolvedValue(undefined),
       cloneForHost: vi.fn().mockResolvedValue(undefined),

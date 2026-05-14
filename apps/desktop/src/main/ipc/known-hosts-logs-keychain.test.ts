@@ -1,12 +1,20 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ipcChannels } from '../../common/ipc-channels';
 
-const ipcHandlers = new Map<string, (...args: any[]) => any>();
+const electronMocks = vi.hoisted(() => ({
+  ipcHandlers: new Map<string, (...args: any[]) => any>(),
+  clipboardWriteText: vi.fn(),
+}));
+
+const ipcHandlers = electronMocks.ipcHandlers;
 
 vi.mock('electron', () => ({
+  clipboard: {
+    writeText: electronMocks.clipboardWriteText,
+  },
   ipcMain: {
     handle: vi.fn((channel: string, handler: (...args: any[]) => any) => {
-      ipcHandlers.set(channel, handler);
+      electronMocks.ipcHandlers.set(channel, handler);
     }),
   },
 }));
@@ -71,6 +79,7 @@ function createContext() {
 describe('registerKnownHostsLogsKeychainIpcHandlers', () => {
   beforeEach(() => {
     ipcHandlers.clear();
+    electronMocks.clipboardWriteText.mockReset();
   });
 
   it('includes certificate validity info when loading a certificate secret', async () => {
@@ -108,6 +117,63 @@ describe('registerKnownHostsLogsKeychainIpcHandlers', () => {
         principals: ['ubuntu'],
       },
     });
+  });
+
+  it('copies a saved password to the Electron clipboard without returning it', async () => {
+    const ctx = createContext();
+    ctx.secretMetadata.getBySecretRef.mockReturnValue({
+      secretRef: 'secret-1',
+      label: 'Prod password',
+      updatedAt: '2026-04-12T00:00:00.000Z',
+    });
+    ctx.secretStore.load.mockResolvedValue(
+      JSON.stringify({
+        secretRef: 'secret-1',
+        label: 'Prod password',
+        password: 'super-secret-password',
+        updatedAt: '2026-04-12T00:00:00.000Z',
+      }),
+    );
+
+    registerKnownHostsLogsKeychainIpcHandlers(ctx);
+
+    const copyHandler = ipcHandlers.get(ipcChannels.keychain.copyPassword);
+    expect(copyHandler).toBeTypeOf('function');
+
+    await expect(copyHandler?.(null, 'secret-1')).resolves.toBeUndefined();
+
+    expect(electronMocks.clipboardWriteText).toHaveBeenCalledWith(
+      'super-secret-password',
+    );
+    expect(ctx.activityLogs.append).not.toHaveBeenCalled();
+  });
+
+  it('rejects password copy for secrets that do not contain a password', async () => {
+    const ctx = createContext();
+    ctx.secretMetadata.getBySecretRef.mockReturnValue({
+      secretRef: 'secret-key',
+      label: 'Prod key',
+      updatedAt: '2026-04-12T00:00:00.000Z',
+    });
+    ctx.secretStore.load.mockResolvedValue(
+      JSON.stringify({
+        secretRef: 'secret-key',
+        label: 'Prod key',
+        privateKeyPem: 'PRIVATE KEY',
+        updatedAt: '2026-04-12T00:00:00.000Z',
+      }),
+    );
+
+    registerKnownHostsLogsKeychainIpcHandlers(ctx);
+
+    const copyHandler = ipcHandlers.get(ipcChannels.keychain.copyPassword);
+    expect(copyHandler).toBeTypeOf('function');
+
+    await expect(copyHandler?.(null, 'secret-key')).rejects.toThrow(
+      '이 인증 정보에는 저장된 비밀번호가 없습니다.',
+    );
+    expect(electronMocks.clipboardWriteText).not.toHaveBeenCalled();
+    expect(ctx.activityLogs.append).not.toHaveBeenCalled();
   });
 
   it('recomputes key and certificate metadata from the merged secret payload', async () => {

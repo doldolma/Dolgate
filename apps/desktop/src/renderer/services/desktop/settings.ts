@@ -11,6 +11,10 @@ export function loadSavedCredential(
   return desktopApi.keychain.load(secretRef);
 }
 
+export function copySavedCredentialPassword(secretRef: string): Promise<void> {
+  return desktopApi.keychain.copyPassword(secretRef);
+}
+
 export function pickPrivateKey() {
   return desktopApi.shell.pickPrivateKey();
 }

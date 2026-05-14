@@ -7,7 +7,7 @@ import type {
   HostSecretInput,
   ManagedSecretPayload,
 } from "@shared";
-import { ipcMain } from "electron";
+import { clipboard, ipcMain } from "electron";
 import { ipcChannels } from "../../common/ipc-channels";
 import type { MainIpcContext, SshHostRecord } from "./context";
 
@@ -157,6 +157,28 @@ export function registerKnownHostsLogsKeychainIpcHandlers(
         updatedAt: payload.updatedAt ?? metadata.updatedAt,
         certificateInfo,
       } satisfies LoadedManagedSecretPayload;
+    },
+  );
+
+  ipcMain.handle(
+    ipcChannels.keychain.copyPassword,
+    async (_event, secretRef: string) => {
+      const metadata = ctx.secretMetadata.getBySecretRef(secretRef);
+      if (!metadata) {
+        throw new Error("저장된 인증 정보를 찾지 못했습니다.");
+      }
+
+      const raw = await ctx.secretStore.load(secretRef);
+      if (!raw) {
+        throw new Error("저장된 인증 정보를 불러오지 못했습니다.");
+      }
+
+      const payload = JSON.parse(raw) as ManagedSecretPayload;
+      if (!payload.password) {
+        throw new Error("이 인증 정보에는 저장된 비밀번호가 없습니다.");
+      }
+
+      clipboard.writeText(payload.password);
     },
   );
 

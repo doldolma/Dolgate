@@ -176,6 +176,7 @@ export const ipcChannels = {
   keychain: {
     list: 'keychain:list',
     load: 'keychain:load',
+    copyPassword: 'keychain:copy-password',
     remove: 'keychain:remove',
     update: 'keychain:update',
     cloneForHost: 'keychain:clone-for-host'

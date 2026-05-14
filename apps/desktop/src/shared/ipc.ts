@@ -790,6 +790,7 @@ export interface DesktopApi {
   keychain: {
     list: () => Promise<SecretMetadataRecord[]>;
     load: (secretRef: string) => Promise<LoadedManagedSecretPayload | null>;
+    copyPassword: (secretRef: string) => Promise<void>;
     remove: (secretRef: string) => Promise<void>;
     update: (input: KeychainSecretUpdateInput) => Promise<void>;
     cloneForHost: (input: KeychainSecretCloneInput) => Promise<void>;
