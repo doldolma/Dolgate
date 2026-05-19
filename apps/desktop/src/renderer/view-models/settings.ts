@@ -24,12 +24,18 @@ export function useSettingsViewModel() {
   const hosts = useAppStore((state) => state.hosts);
   const settings = useAppStore((state) => state.settings);
   const settingsSection = useAppStore((state) => state.settingsSection);
+  const savedCredentialsSearchQuery = useAppStore(
+    (state) => state.savedCredentialsSearchQuery,
+  );
   const knownHosts = useAppStore((state) => state.knownHosts);
   const activityLogs = useAppStore((state) => state.activityLogs);
   const keychainEntries = useAppStore((state) => state.keychainEntries);
   const loadSettings = useAppStore((state) => state.loadSettings);
   const updateSettings = useAppStore((state) => state.updateSettings);
   const openSettingsSection = useAppStore((state) => state.openSettingsSection);
+  const setSavedCredentialsSearchQuery = useAppStore(
+    (state) => state.setSavedCredentialsSearchQuery,
+  );
   const removeKnownHost = useAppStore((state) => state.removeKnownHost);
   const clearLogs = useAppStore((state) => state.clearLogs);
   const removeKeychainSecret = useAppStore((state) => state.removeKeychainSecret);
@@ -42,12 +48,14 @@ export function useSettingsViewModel() {
     hosts,
     settings,
     settingsSection,
+    savedCredentialsSearchQuery,
     knownHosts,
     activityLogs,
     keychainEntries,
     loadSettings,
     updateSettings,
     openSettingsSection,
+    setSavedCredentialsSearchQuery,
     removeKnownHost,
     clearLogs,
     removeKeychainSecret,

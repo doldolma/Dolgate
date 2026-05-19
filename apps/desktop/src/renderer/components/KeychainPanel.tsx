@@ -20,6 +20,8 @@ import { copySavedCredentialPassword } from '../services/desktop/settings';
 interface KeychainPanelProps {
   entries: SecretMetadataRecord[];
   hosts: HostRecord[];
+  searchQuery: string;
+  onSearchQueryChange: (query: string) => void;
   onRemoveSecret: (secretRef: string) => Promise<void>;
   onEditSecret: (secretRef: string) => void;
 }
@@ -43,8 +45,14 @@ function buildKeychainEntrySearchText(
   ].join(' ');
 }
 
-export function KeychainPanel({ entries, hosts, onRemoveSecret, onEditSecret }: KeychainPanelProps) {
-  const [searchQuery, setSearchQuery] = useState('');
+export function KeychainPanel({
+  entries,
+  hosts,
+  searchQuery,
+  onSearchQueryChange,
+  onRemoveSecret,
+  onEditSecret,
+}: KeychainPanelProps) {
   const [copyingSecretRef, setCopyingSecretRef] = useState<string | null>(null);
   const [copyStatus, setCopyStatus] = useState<{
     tone: 'success' | 'danger';
@@ -115,7 +123,7 @@ export function KeychainPanel({ entries, hosts, onRemoveSecret, onEditSecret }: 
           aria-label="Search saved credentials"
           placeholder="Search saved credentials"
           value={searchQuery}
-          onChange={(event) => setSearchQuery(event.target.value)}
+          onChange={(event) => onSearchQueryChange(event.target.value)}
         />
       ) : null}
 

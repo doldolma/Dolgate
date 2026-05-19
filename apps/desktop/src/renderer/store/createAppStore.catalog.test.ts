@@ -33,6 +33,7 @@ describe("createAppStore catalog and settings", () => {
     expect(store.getState().activeWorkspaceTab).toBe("home");
     expect(store.getState().homeSection).toBe("hosts");
     expect(store.getState().settingsSection).toBe("general");
+    expect(store.getState().savedCredentialsSearchQuery).toBe("");
     expect(store.getState().currentGroupPath).toBeNull();
     expect(store.getState().settings.theme).toBe("system");
     expect(store.getState().sftp.leftPane.currentPath).toBe("/Users/tester");
@@ -303,6 +304,23 @@ describe("createAppStore catalog and settings", () => {
     store.getState().openSettingsSection("general");
     expect(store.getState().homeSection).toBe("settings");
     expect(store.getState().settingsSection).toBe("general");
+  });
+
+  it("preserves saved credentials search while navigating settings", async () => {
+    const store = createAppStore(createMockApi());
+
+    await store.getState().bootstrap();
+    expect(store.getState().savedCredentialsSearchQuery).toBe("");
+
+    store.getState().setSavedCredentialsSearchQuery("backup");
+    store.getState().openHomeSection("hosts");
+    expect(store.getState().savedCredentialsSearchQuery).toBe("backup");
+
+    store.getState().openSettingsSection("general");
+    expect(store.getState().savedCredentialsSearchQuery).toBe("backup");
+
+    store.getState().openSettingsSection("secrets");
+    expect(store.getState().savedCredentialsSearchQuery).toBe("backup");
   });
 
   it("clears the SFTP filter only when the pane path changes", async () => {

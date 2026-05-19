@@ -157,12 +157,15 @@ export function createCatalogSlice(deps: SliceDeps): CatalogSlice {
     activeWorkspaceTab: "home",
     homeSection: "hosts",
     settingsSection: "general",
+    savedCredentialsSearchQuery: "",
     hostDrawer: { mode: "closed" },
     currentGroupPath: null,
     searchQuery: "",
     selectedHostTags: [],
     isReady: false,
     setSearchQuery: (value) => set({ searchQuery: value }),
+    setSavedCredentialsSearchQuery: (value) =>
+            set({ savedCredentialsSearchQuery: value }),
     toggleHostTag: (tag) =>
             set((state) => {
               const key = normalizeTagValue(tag);

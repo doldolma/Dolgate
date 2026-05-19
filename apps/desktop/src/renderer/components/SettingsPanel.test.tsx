@@ -1,4 +1,5 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { useState } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { DEFAULT_SFTP_BROWSER_COLUMN_WIDTHS } from '@shared';
 import type { AppSettings, HostRecord, SecretMetadataRecord } from '@shared';
@@ -145,36 +146,72 @@ const hosts: HostRecord[] = [
   }
 ];
 
-function renderSettingsPanel(overrides: Partial<Parameters<typeof SettingsPanel>[0]> = {}) {
+function renderSettingsPanel(
+  overrides: Partial<Parameters<typeof SettingsPanel>[0]> = {},
+  options: { interactiveSection?: boolean } = {},
+) {
   const onUpdateSettings = vi.fn().mockResolvedValue(undefined);
   const onSelectSection = vi.fn();
+  const onSavedCredentialsSearchQueryChange = vi.fn();
   const onRemoveKnownHost = vi.fn().mockResolvedValue(undefined);
   const onRemoveSecret = vi.fn().mockResolvedValue(undefined);
   const onEditSecret = vi.fn();
   const onLogout = vi.fn();
+  const {
+    activeSection: initialActiveSection = 'general',
+    savedCredentialsSearchQuery: initialSavedCredentialsSearchQuery = '',
+    onSelectSection: overrideOnSelectSection,
+    onSavedCredentialsSearchQueryChange:
+      overrideOnSavedCredentialsSearchQueryChange,
+    ...restOverrides
+  } = overrides;
+  const handleSelectSection = overrideOnSelectSection ?? onSelectSection;
+  const handleSavedCredentialsSearchQueryChange =
+    overrideOnSavedCredentialsSearchQueryChange ??
+    onSavedCredentialsSearchQueryChange;
 
-  render(
-    <SettingsPanel
-      activeSection="general"
-      settings={settings}
-      hosts={hosts}
-      knownHosts={knownHosts}
-      keychainEntries={keychainEntries}
-      currentUserEmail="user@example.com"
-      desktopPlatform="darwin"
-      onSelectSection={onSelectSection}
-      onUpdateSettings={onUpdateSettings}
-      onRemoveKnownHost={onRemoveKnownHost}
-      onRemoveSecret={onRemoveSecret}
-      onEditSecret={onEditSecret}
-      onLogout={onLogout}
-      {...overrides}
-    />
-  );
+  function SettingsPanelHarness() {
+    const [activeSection, setActiveSection] = useState(initialActiveSection);
+    const [savedCredentialsSearchQuery, setSavedCredentialsSearchQuery] =
+      useState(initialSavedCredentialsSearchQuery);
+
+    return (
+      <SettingsPanel
+        activeSection={options.interactiveSection ? activeSection : initialActiveSection}
+        settings={settings}
+        hosts={hosts}
+        knownHosts={knownHosts}
+        keychainEntries={keychainEntries}
+        savedCredentialsSearchQuery={savedCredentialsSearchQuery}
+        currentUserEmail="user@example.com"
+        desktopPlatform="darwin"
+        onSelectSection={(section) => {
+          handleSelectSection(section);
+          if (options.interactiveSection) {
+            setActiveSection(section);
+          }
+        }}
+        onSavedCredentialsSearchQueryChange={(query) => {
+          handleSavedCredentialsSearchQueryChange(query);
+          setSavedCredentialsSearchQuery(query);
+        }}
+        onUpdateSettings={onUpdateSettings}
+        onRemoveKnownHost={onRemoveKnownHost}
+        onRemoveSecret={onRemoveSecret}
+        onEditSecret={onEditSecret}
+        onLogout={onLogout}
+        {...restOverrides}
+      />
+    );
+  }
+
+  render(<SettingsPanelHarness />);
 
   return {
     onUpdateSettings,
-    onSelectSection,
+    onSelectSection: handleSelectSection,
+    onSavedCredentialsSearchQueryChange:
+      handleSavedCredentialsSearchQueryChange,
     onRemoveKnownHost,
     onRemoveSecret,
     onEditSecret,
@@ -310,7 +347,11 @@ describe('SettingsPanel', () => {
   });
 
   it('filters saved credentials by label and preserves actions', async () => {
-    const { onEditSecret, onRemoveSecret } = renderSettingsPanel({
+    const {
+      onEditSecret,
+      onRemoveSecret,
+      onSavedCredentialsSearchQueryChange,
+    } = renderSettingsPanel({
       activeSection: 'secrets',
       keychainEntries: searchableKeychainEntries,
     });
@@ -321,12 +362,36 @@ describe('SettingsPanel', () => {
 
     expect(screen.getByText('Backup private key')).toBeInTheDocument();
     expect(screen.queryByText('Prod password')).not.toBeInTheDocument();
+    expect(onSavedCredentialsSearchQueryChange).toHaveBeenCalledWith('backup');
 
     fireEvent.click(screen.getByRole('button', { name: '편집' }));
     fireEvent.click(screen.getByRole('button', { name: '삭제' }));
 
     expect(onEditSecret).toHaveBeenCalledWith('secret-backup');
     expect(onRemoveSecret).toHaveBeenCalledWith('secret-backup');
+  });
+
+  it('preserves saved credential search across settings section changes', () => {
+    renderSettingsPanel({
+      activeSection: 'secrets',
+      keychainEntries: searchableKeychainEntries,
+    }, { interactiveSection: true });
+
+    fireEvent.change(screen.getByLabelText('Search saved credentials'), {
+      target: { value: 'backup' },
+    });
+
+    expect(screen.getByText('Backup private key')).toBeInTheDocument();
+    expect(screen.queryByText('Prod password')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('tab', { name: 'General' }));
+    expect(screen.queryByLabelText('Search saved credentials')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('tab', { name: 'Saved Credentials' }));
+    const searchInput = screen.getByLabelText('Search saved credentials') as HTMLInputElement;
+    expect(searchInput.value).toBe('backup');
+    expect(screen.getByText('Backup private key')).toBeInTheDocument();
+    expect(screen.queryByText('Prod password')).not.toBeInTheDocument();
   });
 
   it('filters saved credentials by secret type', () => {

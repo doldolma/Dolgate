@@ -423,9 +423,13 @@ export function HomeShell({
             settings={settingsViewModel.settings}
             knownHosts={settingsViewModel.knownHosts}
             keychainEntries={settingsViewModel.keychainEntries}
+            savedCredentialsSearchQuery={settingsViewModel.savedCredentialsSearchQuery}
             currentUserEmail={authState.session?.user.email ?? null}
             desktopPlatform={desktopPlatform}
             onSelectSection={settingsViewModel.openSettingsSection}
+            onSavedCredentialsSearchQueryChange={
+              settingsViewModel.setSavedCredentialsSearchQuery
+            }
             onUpdateSettings={settingsViewModel.updateSettings}
             onRemoveKnownHost={settingsViewModel.removeKnownHost}
             onRemoveSecret={handleRemoveSecret}

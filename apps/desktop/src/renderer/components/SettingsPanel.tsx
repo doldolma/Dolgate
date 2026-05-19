@@ -36,9 +36,11 @@ interface SettingsPanelProps {
   hosts: HostRecord[];
   knownHosts: KnownHostRecord[];
   keychainEntries: SecretMetadataRecord[];
+  savedCredentialsSearchQuery: string;
   currentUserEmail?: string | null;
   desktopPlatform: 'darwin' | 'win32' | 'linux' | 'unknown';
   onSelectSection: (section: SettingsSection) => void;
+  onSavedCredentialsSearchQueryChange: (query: string) => void;
   onUpdateSettings: (input: Partial<AppSettings>) => Promise<void>;
   onRemoveKnownHost: (id: string) => Promise<void>;
   onRemoveSecret: (secretRef: string) => Promise<void>;
@@ -163,9 +165,11 @@ export function SettingsPanel({
   hosts,
   knownHosts,
   keychainEntries,
+  savedCredentialsSearchQuery,
   currentUserEmail = null,
   desktopPlatform,
   onSelectSection,
+  onSavedCredentialsSearchQueryChange,
   onUpdateSettings,
   onRemoveKnownHost,
   onRemoveSecret,
@@ -538,6 +542,8 @@ export function SettingsPanel({
         <KeychainPanel
           entries={keychainEntries}
           hosts={hosts}
+          searchQuery={savedCredentialsSearchQuery}
+          onSearchQueryChange={onSavedCredentialsSearchQueryChange}
           onRemoveSecret={onRemoveSecret}
           onEditSecret={onEditSecret}
         />

@@ -465,6 +465,7 @@ interface AppStateParts {
   activeWorkspaceTab: WorkspaceTabId;
   homeSection: HomeSection;
   settingsSection: SettingsSection;
+  savedCredentialsSearchQuery: string;
   hostDrawer: HostDrawerState;
   currentGroupPath: string | null;
   searchQuery: string;
@@ -481,6 +482,7 @@ interface AppStateParts {
   pendingConnectionAttempts: PendingConnectionAttempt[];
   sessionReturnTargets: Record<string, SessionReturnTarget>;
   setSearchQuery: (value: string) => void;
+  setSavedCredentialsSearchQuery: (value: string) => void;
   toggleHostTag: (tag: string) => void;
   clearHostTagFilter: () => void;
   activateHome: () => void;
@@ -757,12 +759,14 @@ export type CatalogSlice = Pick<
   | "activeWorkspaceTab"
   | "homeSection"
   | "settingsSection"
+  | "savedCredentialsSearchQuery"
   | "hostDrawer"
   | "currentGroupPath"
   | "searchQuery"
   | "selectedHostTags"
   | "isReady"
   | "setSearchQuery"
+  | "setSavedCredentialsSearchQuery"
   | "toggleHostTag"
   | "clearHostTagFilter"
   | "activateHome"
