@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"runtime"
 	"strings"
 	"syscall"
 
@@ -118,17 +119,67 @@ func resolveUserHomeDirectory() string {
 
 func ensureUnixTerminalEnv(env []string) []string {
 	nextEnv := append([]string(nil), env...)
-	for index, entry := range nextEnv {
-		key, value, found := strings.Cut(entry, "=")
-		if !found || key != "TERM" {
+	nextEnv = ensureEnvDefault(nextEnv, "TERM", "xterm-256color")
+	return ensureUnixLocaleEnv(nextEnv, runtime.GOOS)
+}
+
+func ensureEnvDefault(env []string, key, fallbackValue string) []string {
+	for index, entry := range env {
+		entryKey, value, found := strings.Cut(entry, "=")
+		if !found || entryKey != key {
 			continue
 		}
 		if strings.TrimSpace(value) == "" {
-			nextEnv[index] = "TERM=xterm-256color"
+			env[index] = key + "=" + fallbackValue
 		}
-		return nextEnv
+		return env
 	}
-	return append(nextEnv, "TERM=xterm-256color")
+	return append(env, key+"="+fallbackValue)
+}
+
+func ensureUnixLocaleEnv(env []string, goos string) []string {
+	if envHasNonEmptyValue(env, "LC_ALL") || envHasUTF8Locale(env) {
+		return env
+	}
+	if lcCtype, found := envValue(env, "LC_CTYPE"); found && strings.TrimSpace(lcCtype) != "" {
+		return env
+	}
+
+	fallbackValue := "C.UTF-8"
+	if goos == "darwin" {
+		fallbackValue = "UTF-8"
+	}
+	return ensureEnvDefault(env, "LC_CTYPE", fallbackValue)
+}
+
+func envValue(env []string, key string) (string, bool) {
+	for _, entry := range env {
+		entryKey, value, found := strings.Cut(entry, "=")
+		if found && entryKey == key {
+			return value, true
+		}
+	}
+	return "", false
+}
+
+func envHasNonEmptyValue(env []string, key string) bool {
+	value, found := envValue(env, key)
+	return found && strings.TrimSpace(value) != ""
+}
+
+func envHasUTF8Locale(env []string) bool {
+	for _, key := range []string{"LANG", "LC_CTYPE"} {
+		value, found := envValue(env, key)
+		if found && isUTF8LocaleValue(value) {
+			return true
+		}
+	}
+	return false
+}
+
+func isUTF8LocaleValue(value string) bool {
+	normalized := strings.ToLower(strings.ReplaceAll(strings.TrimSpace(value), "-", ""))
+	return strings.Contains(normalized, "utf8")
 }
 
 func (r *unixPTYRunner) Write(data []byte) error {
