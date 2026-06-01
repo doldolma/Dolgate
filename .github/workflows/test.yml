@@ -143,9 +143,10 @@ jobs:
         env:
           ELECTRON_SKIP_BINARY_DOWNLOAD: ""
         run: |
+          rm -rf node_modules/electron/dist node_modules/electron/path.txt
           node node_modules/electron/install.js
           test -f node_modules/electron/path.txt
-          node -e "require('electron')"
+          node -e "console.log(require('electron'))"
 
       - name: Run desktop tests
         run: npm run test:desktop
