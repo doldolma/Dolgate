@@ -28,8 +28,11 @@ class MockTunnelChild extends EventEmitter {
 async function listenLoopback(): Promise<{
   port: number;
   close: () => Promise<void>;
+  getConnectionCount: () => number;
 }> {
+  let connectionCount = 0;
   const server = createServer((socket) => {
+    connectionCount += 1;
     socket.end();
   });
   await new Promise<void>((resolve, reject) => {
@@ -52,6 +55,7 @@ async function listenLoopback(): Promise<{
           resolve();
         });
       }),
+    getConnectionCount: () => connectionCount,
   };
 }
 
@@ -87,6 +91,161 @@ describe("buildAwsSsmTunnelArgs", () => {
 });
 
 describe("AwsSsmTunnelService", () => {
+  it("resolves start from the SSM port-open output without a local TCP probe", async () => {
+    const child = new MockTunnelChild();
+    const service = new AwsSsmTunnelService({
+      spawnProcess: vi.fn(() => child as never),
+      readyTimeoutMs: 10_000,
+    });
+
+    const startPromise = service.start({
+      runtimeId: "runtime-output-ready",
+      profileName: "default",
+      region: "ap-northeast-2",
+      instanceId: "i-abc",
+      bindAddress: "127.0.0.1",
+      bindPort: 2222,
+      targetPort: 22,
+    });
+    await Promise.resolve();
+
+    child.stdout.write("Port 2222 opened for sessionId session-abc.");
+
+    await expect(startPromise).resolves.toEqual({
+      runtimeId: "runtime-output-ready",
+      bindAddress: "127.0.0.1",
+      bindPort: 2222,
+    });
+  });
+
+  it("resolves from local bind availability without connecting to the bind port", async () => {
+    let connectionCount = 0;
+    const listener = createServer((socket) => {
+      connectionCount += 1;
+      socket.end();
+    });
+    await new Promise<void>((resolve, reject) => {
+      listener.once("error", reject);
+      listener.listen(0, "127.0.0.1", () => resolve());
+    });
+    const address = listener.address();
+    if (!address || typeof address === "string") {
+      throw new Error("failed to bind loopback server");
+    }
+
+    const child = new MockTunnelChild();
+    const service = new AwsSsmTunnelService({
+      spawnProcess: vi.fn(() => child as never),
+      portProbePollMs: 5,
+    });
+
+    await expect(
+      service.start({
+        runtimeId: "runtime-no-probe",
+        profileName: "default",
+        region: "ap-northeast-2",
+        instanceId: "i-abc",
+        bindAddress: "127.0.0.1",
+        bindPort: address.port,
+        targetPort: 22,
+      }),
+    ).resolves.toEqual({
+      runtimeId: "runtime-no-probe",
+      bindAddress: "127.0.0.1",
+      bindPort: address.port,
+    });
+    expect(connectionCount).toBe(0);
+
+    await new Promise<void>((resolve, reject) => {
+      listener.close((error) => {
+        if (error) {
+          reject(error);
+          return;
+        }
+        resolve();
+      });
+    });
+  });
+
+  it("rejects when output is missing and the local bind port stays free", async () => {
+    const listener = await listenLoopback();
+    const freePort = listener.port;
+    await listener.close();
+    const child = new MockTunnelChild();
+    const killProcessTree = vi.fn(async () => {
+      child.exitCode = 1;
+      child.emit("exit", 1, null);
+    });
+    const service = new AwsSsmTunnelService({
+      spawnProcess: vi.fn(() => child as never),
+      killProcessTree,
+      readyTimeoutMs: 25,
+      portProbePollMs: 5,
+    });
+
+    await expect(
+      service.start({
+        runtimeId: "runtime-grace",
+        profileName: "default",
+        region: "ap-northeast-2",
+        instanceId: "i-abc",
+        bindPort: freePort,
+        targetPort: 22,
+      }),
+    ).rejects.toThrow(`AWS SSM tunnel on local port ${freePort} readiness timed out.`);
+    expect(killProcessTree).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects start when the process exits before startup grace", async () => {
+    const child = new MockTunnelChild();
+    const spawnProcess = vi.fn(() => child as never);
+    const service = new AwsSsmTunnelService({
+      spawnProcess,
+      readyTimeoutMs: 250,
+      portProbePollMs: 5,
+    });
+
+    const startPromise = service.start({
+      runtimeId: "runtime-early-exit",
+      profileName: "default",
+      region: "ap-northeast-2",
+      instanceId: "i-abc",
+      bindPort: 49124,
+      targetPort: 22,
+    });
+    await vi.waitFor(() => expect(spawnProcess).toHaveBeenCalledTimes(1));
+
+    child.stderr.write("session failed immediately");
+    child.exitCode = 255;
+    child.emit("exit", 255, null);
+
+    await expect(startPromise).rejects.toThrow("session failed immediately");
+  });
+
+  it("rejects start when the tunnel process cannot be spawned", async () => {
+    const child = new MockTunnelChild();
+    const spawnProcess = vi.fn(() => child as never);
+    const service = new AwsSsmTunnelService({
+      spawnProcess,
+      readyTimeoutMs: 250,
+      portProbePollMs: 5,
+    });
+
+    const startPromise = service.start({
+      runtimeId: "runtime-spawn-error",
+      profileName: "default",
+      region: "ap-northeast-2",
+      instanceId: "i-abc",
+      bindPort: 49125,
+      targetPort: 22,
+    });
+    await vi.waitFor(() => expect(spawnProcess).toHaveBeenCalledTimes(1));
+
+    child.emit("error", new Error("spawn aws ENOENT"));
+
+    await expect(startPromise).rejects.toThrow("spawn aws ENOENT");
+  });
+
   it("waits for process exit and local port release before stop resolves", async () => {
     const listener = await listenLoopback();
     const child = new MockTunnelChild();
@@ -95,6 +254,7 @@ describe("AwsSsmTunnelService", () => {
     const service = new AwsSsmTunnelService({
       spawnProcess,
       killProcessTree,
+      portProbePollMs: 5,
       stopTimeoutMs: 250,
       portReleaseTimeoutMs: 250,
     });
@@ -133,6 +293,7 @@ describe("AwsSsmTunnelService", () => {
     await listener.close();
     await stopPromise;
     expect(stopResolved).toBe(true);
+    expect(listener.getConnectionCount()).toBe(0);
   });
 
   it("fails stop when the runtime does not exit in time", async () => {
@@ -141,6 +302,7 @@ describe("AwsSsmTunnelService", () => {
     const service = new AwsSsmTunnelService({
       spawnProcess: vi.fn(() => child as never),
       killProcessTree: vi.fn(async () => undefined),
+      portProbePollMs: 5,
       stopTimeoutMs: 25,
       portReleaseTimeoutMs: 25,
     });
@@ -168,6 +330,7 @@ describe("AwsSsmTunnelService", () => {
     const service = new AwsSsmTunnelService({
       spawnProcess: vi.fn(() => child as never),
       onRuntimeTerminated,
+      portProbePollMs: 5,
     });
 
     await service.start({
@@ -199,6 +362,7 @@ describe("AwsSsmTunnelService", () => {
     const service = new AwsSsmTunnelService({
       spawnProcess: vi.fn(() => child as never),
       onRuntimeTerminated,
+      portProbePollMs: 5,
     });
 
     await service.start({

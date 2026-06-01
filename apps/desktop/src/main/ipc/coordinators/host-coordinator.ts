@@ -20,6 +20,10 @@ import type { AwsSsmTunnelService } from "../../aws-ssm-tunnel-service";
 import type { CoreManager } from "../../core-manager";
 import type { HostRepository, KnownHostRepository } from "../../database";
 import type { AwsSftpCoordinator } from "./aws-sftp-coordinator";
+import {
+  isTransientAwsSsmSshError,
+  retryAwsSsmSshOperation,
+} from "./aws-ssm-ssh-retry";
 import type {
   AwsConnectionProgressEmitter,
   AwsEc2HostRecord,
@@ -273,10 +277,12 @@ export function createHostCoordinator(deps: {
             "SSH 호스트 키를 확인하는 중입니다.",
             hydratedHost.id,
           );
-          const probed = await coreManager.probeHostKey({
-            host: tunnel.bindAddress,
-            port: tunnel.bindPort,
-          });
+          const probed = await retryAwsSsmSshOperation(() =>
+            coreManager.probeHostKey({
+              host: tunnel.bindAddress,
+              port: tunnel.bindPort,
+            }),
+          );
           const knownHost = buildAwsSsmKnownHostIdentity({
             profileName:
               awsService.resolveManagedProfileNameOrFallback(
@@ -329,8 +335,9 @@ export function createHostCoordinator(deps: {
           error,
           {
             reasonCode:
-              currentStage === "probing-host-key"
-                ? "host-key-missing"
+              currentStage === "probing-host-key" &&
+              isTransientAwsSsmSshError(error)
+                ? "tunnel-open-failed"
                 : currentStage === "opening-tunnel"
                   ? "tunnel-open-failed"
                   : undefined,

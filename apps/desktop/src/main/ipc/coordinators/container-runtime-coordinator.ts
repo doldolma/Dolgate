@@ -11,6 +11,7 @@ import type { CoreManager } from "../../core-manager";
 import { resolveContainerTunnelTarget } from "../../container-port-forward-target";
 import type { KnownHostRepository } from "../../database";
 import type { AwsSftpCoordinator } from "./aws-sftp-coordinator";
+import { retryAwsSsmSshOperation } from "./aws-ssm-ssh-retry";
 import type { HostCoordinator } from "./host-coordinator";
 import type { SecretCoordinator } from "./secret-coordinator";
 import type { TunnelRegistry } from "./tunnel-registry";
@@ -193,17 +194,19 @@ export function createContainerRuntimeCoordinator(deps: {
           stage: "opening-tunnel",
           message: "컨테이너 런타임 확인을 위한 내부 터널을 여는 중입니다.",
         });
-        const result = await coreManager.containersConnect({
-          endpointId,
-          host: tunnel.bindAddress,
-          port: tunnel.bindPort,
-          username: sshUsername,
-          authType: "privateKey",
-          privateKeyPem,
-          trustedHostKeyBase64: trustedHostKeysBase64[0],
-          trustedHostKeysBase64,
-          hostId: hydratedHost.id,
-        });
+        const result = await retryAwsSsmSshOperation(() =>
+          coreManager.containersConnect({
+            endpointId,
+            host: tunnel.bindAddress,
+            port: tunnel.bindPort,
+            username: sshUsername,
+            authType: "privateKey",
+            privateKeyPem,
+            trustedHostKeyBase64: trustedHostKeysBase64[0],
+            trustedHostKeysBase64,
+            hostId: hydratedHost.id,
+          }),
+        );
         if (result.runtime) {
           tunnelRegistry.trackContainersTunnelRuntime(
             endpointId,

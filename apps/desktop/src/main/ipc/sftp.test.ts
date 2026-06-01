@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { inferAwsSftpDiagnosticReasonCode } from "@shared";
 import { ipcChannels } from "../../common/ipc-channels";
 
@@ -109,6 +109,10 @@ describe("registerSftpIpcHandlers", () => {
     ipcHandlers.clear();
   });
 
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it("emits a missing-username diagnostic when AWS SSH metadata has no username", async () => {
     const ctx = createContext(createAwsHost({ awsSshUsername: null }));
     registerSftpIpcHandlers(ctx);
@@ -184,5 +188,93 @@ describe("registerSftpIpcHandlers", () => {
       }),
     );
     expect(ctx.coreManager.sftpConnect).not.toHaveBeenCalled();
+  });
+
+  it("retries AWS SFTP connect once after a transient SSH handshake failure", async () => {
+    vi.useFakeTimers();
+    const ctx = createContext();
+    ctx.coreManager.sftpConnect
+      .mockRejectedValueOnce(new Error("ssh handshake failed: EOF"))
+      .mockResolvedValueOnce({
+        id: "endpoint-aws",
+        kind: "remote",
+        hostId: "aws-host-1",
+        title: "AWS Linux",
+        path: "/home/ubuntu",
+        connectedAt: "2025-01-01T00:00:00.000Z",
+      });
+    registerSftpIpcHandlers(ctx);
+
+    const handler = ipcHandlers.get(ipcChannels.sftp.connect);
+    const connectPromise = handler?.(null, {
+      hostId: "aws-host-1",
+      endpointId: "endpoint-aws",
+    });
+    await vi.advanceTimersByTimeAsync(500);
+
+    await expect(connectPromise).resolves.toMatchObject({
+      id: "endpoint-aws",
+    });
+    expect(ctx.coreManager.sftpConnect).toHaveBeenCalledTimes(2);
+    expect(ctx.trackAwsSftpTunnelRuntime).toHaveBeenCalledWith(
+      "endpoint-aws",
+      "aws-sftp-runtime",
+    );
+  });
+
+  it("does not retry AWS SFTP connect after an explicit SSH auth failure", async () => {
+    const ctx = createContext();
+    ctx.coreManager.sftpConnect.mockRejectedValue(
+      new Error(
+        "ssh handshake failed: ssh: unable to authenticate, attempted methods [none publickey], no supported methods remain",
+      ),
+    );
+    registerSftpIpcHandlers(ctx);
+
+    const handler = ipcHandlers.get(ipcChannels.sftp.connect);
+    await expect(
+      handler?.(null, {
+        hostId: "aws-host-1",
+        endpointId: "endpoint-aws",
+      }),
+    ).rejects.toThrow("unable to authenticate");
+
+    expect(ctx.coreManager.sftpConnect).toHaveBeenCalledTimes(1);
+    expect(ctx.emitSftpConnectionProgress).toHaveBeenCalledWith(
+      expect.objectContaining({
+        stage: "connecting-sftp",
+        reasonCode: "ssh-auth-failed",
+      }),
+    );
+  });
+
+  it("classifies local SSM listener connection refused as a tunnel failure", async () => {
+    vi.useFakeTimers();
+    const ctx = createContext();
+    ctx.coreManager.sftpConnect.mockRejectedValue(
+      new Error(
+        "dial failed: dial tcp 127.0.0.1:60050: connect: connection refused",
+      ),
+    );
+    registerSftpIpcHandlers(ctx);
+
+    const handler = ipcHandlers.get(ipcChannels.sftp.connect);
+    const connectPromise = handler?.(null, {
+      hostId: "aws-host-1",
+      endpointId: "endpoint-aws",
+    });
+    const expectation = expect(connectPromise).rejects.toThrow(
+      "connection refused",
+    );
+    await vi.advanceTimersByTimeAsync(500);
+
+    await expectation;
+    expect(ctx.coreManager.sftpConnect).toHaveBeenCalledTimes(2);
+    expect(ctx.emitSftpConnectionProgress).toHaveBeenCalledWith(
+      expect.objectContaining({
+        stage: "connecting-sftp",
+        reasonCode: "tunnel-open-failed",
+      }),
+    );
   });
 });

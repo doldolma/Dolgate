@@ -826,6 +826,42 @@ describe("createAppStore sftp", () => {
     expect(api.aws.loadHostSshMetadata).not.toHaveBeenCalled();
   });
 
+  it("skips the extra AWS host-key probe when the SSM target is already trusted", async () => {
+    const api = createMockApi();
+    const awsHost = createAwsEc2Host();
+    api.hosts.list = vi.fn().mockResolvedValue([awsHost]);
+    api.knownHosts.list = vi.fn().mockResolvedValue([
+      {
+        id: "known-aws",
+        host: "aws-ssm:default:ap-northeast-2:i-aws",
+        port: 22,
+        algorithm: "ecdsa-sha2-nistp256",
+        publicKeyBase64: "AAAATEST",
+        fingerprintSha256: "SHA256:test",
+        createdAt: "2025-01-01T00:00:00.000Z",
+        lastSeenAt: "2025-01-01T00:00:00.000Z",
+        updatedAt: "2025-01-01T00:00:00.000Z",
+      },
+    ]);
+    api.knownHosts.probeHost = vi
+      .fn()
+      .mockRejectedValue(new Error("probe should not run"));
+
+    const store = createAppStore(api);
+    await store.getState().bootstrap();
+    store.getState().activateSftp();
+
+    await store.getState().connectSftpHost("right", "aws-host-1");
+
+    expect(api.knownHosts.probeHost).not.toHaveBeenCalled();
+    expect(api.sftp.connect).toHaveBeenCalledWith(
+      expect.objectContaining({
+        hostId: "aws-host-1",
+        endpointId: expect.any(String),
+      }),
+    );
+  });
+
   it("does not preload AWS SSH metadata before connecting SFTP when username is missing", async () => {
     const api = createMockApi();
     api.hosts.list = vi.fn().mockResolvedValue([

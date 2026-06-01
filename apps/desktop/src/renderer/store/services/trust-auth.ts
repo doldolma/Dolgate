@@ -3,6 +3,12 @@ import type {
   HostSecretInput,
   TerminalConnectionProgress,
 } from "@shared";
+import {
+  buildAwsSsmKnownHostIdentity,
+  getAwsEc2HostSshPort,
+  isSshHostRecord,
+  isWarpgateSshHostRecord,
+} from "@shared";
 import type { PendingHostKeyPrompt } from "../types";
 import type { SliceDeps } from "./context";
 import {
@@ -14,7 +20,44 @@ import {
 
 type StoreSetter = SliceDeps["set"];
 
-export function createTrustAuthServices({ api }: SliceDeps) {
+export function createTrustAuthServices({ api, get }: SliceDeps) {
+  const hasTrustedHostKey = (hostId: string): boolean => {
+    const state = get();
+    const host = state.hosts.find((item) => item.id === hostId);
+    if (!host) {
+      return false;
+    }
+
+    const target = isAwsEc2HostRecord(host)
+      ? {
+          host: buildAwsSsmKnownHostIdentity({
+            profileName: host.awsProfileName,
+            region: host.awsRegion,
+            instanceId: host.awsInstanceId,
+          }),
+          port: getAwsEc2HostSshPort(host),
+        }
+      : isWarpgateSshHostRecord(host)
+        ? {
+            host: host.warpgateSshHost,
+            port: host.warpgateSshPort,
+          }
+        : isSshHostRecord(host)
+          ? {
+              host: host.hostname,
+              port: host.port,
+            }
+          : null;
+
+    if (!target) {
+      return false;
+    }
+
+    return state.knownHosts.some(
+      (record) => record.host === target.host && record.port === target.port,
+    );
+  };
+
   const loginAwsSsoProfile = async (
     profileName: string,
     reportProgress: (
@@ -107,9 +150,14 @@ export function createTrustAuthServices({ api }: SliceDeps) {
       hostId: string;
       sessionId?: string | null;
       endpointId?: string | null;
+      skipProbeIfAlreadyTrusted?: boolean;
       action: PendingHostKeyPrompt["action"];
     },
   ): Promise<boolean> => {
+    if (input.skipProbeIfAlreadyTrusted && hasTrustedHostKey(input.hostId)) {
+      return true;
+    }
+
     const probe = await api.knownHosts.probeHost({
       hostId: input.hostId,
       endpointId: input.endpointId ?? null,

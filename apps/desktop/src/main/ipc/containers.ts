@@ -17,6 +17,7 @@ import type {
   SftpCompatibleHostRecord,
   SshHostRecord,
 } from "./context";
+import { retryAwsSsmSshOperation } from "./coordinators/aws-ssm-ssh-retry";
 
 export function registerContainersIpcHandlers(ctx: MainIpcContext): void {
   ipcMain.handle(
@@ -298,22 +299,24 @@ export function registerContainersIpcHandlers(ctx: MainIpcContext): void {
           targetPort: sshPort,
         });
         try {
-          const connection = await ctx.coreManager.connect({
-            host: tunnel.bindAddress,
-            port: tunnel.bindPort,
-            username: sshUsername,
-            authType: "privateKey",
-            privateKeyPem,
-            trustedHostKeyBase64: trustedHostKeysBase64[0],
-            trustedHostKeysBase64,
-            cols: 120,
-            rows: 32,
-            command,
-            hostId: hydratedHost.id,
-            hostLabel: hydratedHost.label,
-            title,
-            transport: "aws-ssm",
-          });
+          const connection = await retryAwsSsmSshOperation(() =>
+            ctx.coreManager.connect({
+              host: tunnel.bindAddress,
+              port: tunnel.bindPort,
+              username: sshUsername,
+              authType: "privateKey",
+              privateKeyPem,
+              trustedHostKeyBase64: trustedHostKeysBase64[0],
+              trustedHostKeysBase64,
+              cols: 120,
+              rows: 32,
+              command,
+              hostId: hydratedHost.id,
+              hostLabel: hydratedHost.label,
+              title,
+              transport: "aws-ssm",
+            }),
+          );
           ctx.trackAwsContainerShellTunnelRuntime(
             connection.sessionId,
             tunnel.runtimeId,

@@ -21,6 +21,7 @@ import type {
   SftpCompatibleHostRecord,
   SshHostRecord,
 } from "./context";
+import { retryAwsSsmSshOperation } from "./coordinators/aws-ssm-ssh-retry";
 
 export function registerSftpIpcHandlers(ctx: MainIpcContext): void {
   ipcMain.handle(
@@ -146,18 +147,20 @@ export function registerSftpIpcHandlers(ctx: MainIpcContext): void {
             stage: "connecting-sftp",
             message: "SFTP 세션을 시작하는 중입니다.",
           });
-          const endpoint = await ctx.coreManager.sftpConnect({
-            endpointId,
-            host: tunnel.bindAddress,
-            port: tunnel.bindPort,
-            username: sshUsername,
-            authType: "privateKey",
-            privateKeyPem,
-            trustedHostKeyBase64: trustedHostKeysBase64[0],
-            trustedHostKeysBase64,
-            hostId: hydratedHost.id,
-            title: hydratedHost.label,
-          });
+          const endpoint = await retryAwsSsmSshOperation(() =>
+            ctx.coreManager.sftpConnect({
+              endpointId,
+              host: tunnel.bindAddress,
+              port: tunnel.bindPort,
+              username: sshUsername,
+              authType: "privateKey",
+              privateKeyPem,
+              trustedHostKeyBase64: trustedHostKeysBase64[0],
+              trustedHostKeysBase64,
+              hostId: hydratedHost.id,
+              title: hydratedHost.label,
+            }),
+          );
           ctx.trackAwsSftpTunnelRuntime(endpoint.id, tunnel.runtimeId);
           return endpoint;
         } catch (error) {

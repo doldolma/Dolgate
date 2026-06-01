@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { createContainerRuntimeCoordinator } from "./container-runtime-coordinator";
 
 function createAwsHost() {
@@ -80,6 +80,10 @@ function createCoordinator(overrides: Record<string, unknown> = {}) {
 }
 
 describe("container runtime coordinator", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it("stops temporary AWS tunnels when no container runtime is available", async () => {
     const { deps, coordinator, host } = createCoordinator();
 
@@ -128,6 +132,41 @@ describe("container runtime coordinator", () => {
         status: "error",
         message: "runtime missing",
       }),
+    );
+  });
+
+  it("retries AWS container runtime connect once after a transient SSH handshake failure", async () => {
+    vi.useFakeTimers();
+    const containersConnect = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("ssh handshake failed: EOF"))
+      .mockResolvedValueOnce({
+        runtime: "docker",
+        runtimeCommand: "/usr/bin/docker",
+        unsupportedReason: null,
+      });
+    const { deps, coordinator, host } = createCoordinator({
+      coreManager: {
+        getContainersEndpointRuntime: vi.fn(() => null),
+        containersConnect,
+        setPortForwardRuntime: vi.fn(),
+        listPortForwardRuntimes: vi.fn(() => []),
+        containersDisconnect: vi.fn().mockResolvedValue(undefined),
+      },
+    });
+
+    const connectPromise = coordinator.ensureContainersEndpoint(host, "endpoint-1");
+    await vi.advanceTimersByTimeAsync(500);
+
+    await expect(connectPromise).resolves.toMatchObject({
+      runtime: "docker",
+      runtimeCommand: "/usr/bin/docker",
+    });
+    expect(containersConnect).toHaveBeenCalledTimes(2);
+    expect(deps.tunnelRegistry.trackContainersTunnelRuntime).toHaveBeenCalledWith(
+      "endpoint-1",
+      "runtime-1",
+      host,
     );
   });
 });

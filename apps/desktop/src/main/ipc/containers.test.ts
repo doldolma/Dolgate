@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ipcChannels } from "../../common/ipc-channels";
 import { registerContainersIpcHandlers } from "./containers";
 
@@ -40,6 +40,10 @@ function createAwsHost() {
 describe("registerContainersIpcHandlers", () => {
   beforeEach(() => {
     electronSpies.ipcMainHandle.mockReset();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   it("reuses hydrated AWS host metadata returned by ensureContainersEndpoint when opening a container shell", async () => {
@@ -205,6 +209,66 @@ describe("registerContainersIpcHandlers", () => {
       allowBrowserLogin: true,
     });
     expect(connect).toHaveBeenCalledTimes(1);
+  });
+
+  it("retries AWS container shell connect once after a transient SSH handshake failure", async () => {
+    vi.useFakeTimers();
+    const handlers = new Map<string, (...args: unknown[]) => Promise<unknown>>();
+    electronSpies.ipcMainHandle.mockImplementation((channel, handler) => {
+      handlers.set(channel, handler);
+    });
+
+    const host = createAwsHost();
+    const connect = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("ssh handshake failed: EOF"))
+      .mockResolvedValueOnce({ sessionId: "session-1" });
+
+    registerContainersIpcHandlers({
+      hosts: {
+        getById: vi.fn().mockReturnValue(host),
+      },
+      assertSftpCompatibleHost: vi.fn(),
+      ensureContainersEndpoint: vi.fn().mockResolvedValue({
+        endpointId: "containers:aws-host-1",
+        runtime: "docker",
+        runtimeCommand: "/usr/bin/docker",
+        unsupportedReason: null,
+        hydratedHost: host,
+      }),
+      buildContainerShellCommand: vi
+        .fn()
+        .mockReturnValue("/usr/bin/docker exec -it container-1 /bin/sh"),
+      awsService: {
+        resolveManagedProfileNameOrFallback: vi.fn().mockReturnValue("default"),
+        sendSshPublicKey: vi.fn().mockResolvedValue(undefined),
+      },
+      requireTrustedHostKeys: vi.fn().mockReturnValue(["AAAATEST"]),
+      createEphemeralAwsSftpKeyPair: vi.fn().mockReturnValue({
+        privateKeyPem: "PRIVATE KEY",
+        publicKey: "PUBLIC KEY",
+      }),
+      reserveLoopbackPort: vi.fn().mockResolvedValue(2222),
+      awsSsmTunnelService: {
+        start: vi.fn().mockResolvedValue({
+          runtimeId: "aws-container-shell-runtime",
+          bindAddress: "127.0.0.1",
+          bindPort: 2222,
+        }),
+        stop: vi.fn().mockResolvedValue(undefined),
+      },
+      coreManager: {
+        connect,
+      },
+      trackAwsContainerShellTunnelRuntime: vi.fn(),
+    } as any);
+
+    const handler = handlers.get(ipcChannels.containers.openShell);
+    const shellPromise = handler?.({}, "aws-host-1", "container-1");
+    await vi.advanceTimersByTimeAsync(500);
+
+    await expect(shellPromise).resolves.toEqual({ sessionId: "session-1" });
+    expect(connect).toHaveBeenCalledTimes(2);
   });
 
   it("keeps release cleanup wired through containersDisconnect and AWS tunnel stop", async () => {

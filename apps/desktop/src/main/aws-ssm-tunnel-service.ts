@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { spawn, type ChildProcessByStdio } from "node:child_process";
-import { createConnection } from "node:net";
+import { createServer } from "node:net";
 import path from "node:path";
 import type { Readable } from "node:stream";
 import {
@@ -10,7 +10,7 @@ import {
 } from "./aws-service";
 
 const TUNNEL_READY_TIMEOUT_MS = 15_000;
-const TUNNEL_READY_POLL_MS = 150;
+const TUNNEL_PORT_PROBE_POLL_MS = 150;
 const TUNNEL_STOP_TIMEOUT_MS = 6_000;
 const TUNNEL_PORT_RELEASE_TIMEOUT_MS = 5_000;
 const TUNNEL_OUTPUT_BUFFER_LIMIT_BYTES = 8_192;
@@ -48,6 +48,8 @@ interface AwsSsmTunnelServiceOptions {
   killProcessTree?: (
     process: ChildProcessByStdio<null, Readable, Readable>,
   ) => Promise<void>;
+  readyTimeoutMs?: number;
+  portProbePollMs?: number;
   stopTimeoutMs?: number;
   portReleaseTimeoutMs?: number;
 }
@@ -99,62 +101,146 @@ function normalizeBindAddress(value?: string | null): string {
   return trimmed ? trimmed : "127.0.0.1";
 }
 
-function resolveProbeAddress(bindAddress: string): string {
+function resolveBindProbeAddress(bindAddress: string): string {
   switch (bindAddress) {
-    case "0.0.0.0":
-      return "127.0.0.1";
-    case "::":
     case "[::]":
-      return "::1";
+      return "::";
     default:
       return bindAddress;
   }
 }
 
+function hasOpenedBindPort(message: string, bindPort: number): boolean {
+  const escapedPort = String(bindPort).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`\\bPort\\s+${escapedPort}\\s+opened\\b`, "i").test(
+    message,
+  );
+}
+
+async function isLocalPortInUse(
+  bindAddress: string,
+  bindPort: number,
+): Promise<boolean> {
+  if (bindPort <= 0) {
+    return false;
+  }
+
+  const probeAddress = resolveBindProbeAddress(bindAddress);
+  return new Promise<boolean>((resolve, reject) => {
+    const server = createServer();
+    let settled = false;
+
+    const finish = (result: boolean, error?: Error) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      server.removeAllListeners();
+      if (error) {
+        reject(error);
+        return;
+      }
+      resolve(result);
+    };
+
+    server.once("error", (error: NodeJS.ErrnoException) => {
+      if (error.code === "EADDRINUSE") {
+        finish(true);
+        return;
+      }
+      finish(false, error);
+    });
+    server.listen(
+      {
+        host: probeAddress,
+        port: bindPort,
+        exclusive: true,
+      },
+      () => {
+        server.close((error) => {
+          finish(false, error ?? undefined);
+        });
+      },
+    );
+  });
+}
+
 async function waitForTunnelReady(
   bindAddress: string,
   bindPort: number,
-  process: ChildProcessByStdio<null, Readable, Readable>,
+  exitPromise: Promise<void>,
+  outputReadyPromise: Promise<void>,
+  processErrorPromise: Promise<never>,
   getLastMessage: () => string,
+  readyTimeoutMs: number,
+  pollMs: number,
 ): Promise<void> {
-  const startedAt = Date.now();
-  const probeAddress = resolveProbeAddress(bindAddress);
+  await new Promise<void>((resolve, reject) => {
+    let settled = false;
+    let pollTimer: NodeJS.Timeout | null = null;
+    let timeoutTimer: NodeJS.Timeout | null = null;
 
-  while (Date.now() - startedAt < TUNNEL_READY_TIMEOUT_MS) {
-    if (process.exitCode !== null) {
-      throw new Error(
-        getLastMessage() || "AWS SSM tunnel exited before it became ready.",
-      );
-    }
+    const finish = (error?: Error) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      if (pollTimer) {
+        clearTimeout(pollTimer);
+      }
+      if (timeoutTimer) {
+        clearTimeout(timeoutTimer);
+      }
+      if (error) {
+        reject(error);
+        return;
+      }
+      resolve();
+    };
 
-    try {
-      await new Promise<void>((resolve, reject) => {
-        const socket = createConnection(
-          {
-            host: probeAddress,
-            port: bindPort,
-          },
-          () => {
-            socket.destroy();
-            resolve();
-          },
-        );
-        socket.setTimeout(1_000);
-        socket.once("error", reject);
-        socket.once("timeout", () => {
-          socket.destroy();
-          reject(new Error("timeout"));
-        });
-      });
-      return;
-    } catch {
-      await delay(TUNNEL_READY_POLL_MS);
-    }
-  }
+    const pollLocalBind = async () => {
+      if (settled) {
+        return;
+      }
+      try {
+        if (await isLocalPortInUse(bindAddress, bindPort)) {
+          finish();
+          return;
+        }
+      } catch (error) {
+        finish(error instanceof Error ? error : new Error(String(error)));
+        return;
+      }
+      if (!settled) {
+        pollTimer = setTimeout(pollLocalBind, pollMs);
+      }
+    };
 
-  throw new Error(
-    getLastMessage() || "AWS SSM tunnel readiness timed out.",
-  );
+    void outputReadyPromise.then(
+      () => finish(),
+      (error) =>
+        finish(error instanceof Error ? error : new Error(String(error))),
+    );
+    void processErrorPromise.catch((error) => finish(error));
+    void exitPromise.then(() =>
+      finish(
+        new Error(
+          getLastMessage() || "AWS SSM tunnel exited before it became ready.",
+        ),
+      ),
+    );
+    pollTimer = setTimeout(pollLocalBind, pollMs);
+    timeoutTimer = setTimeout(
+      () =>
+        finish(
+          new Error(
+            getLastMessage() ||
+              `AWS SSM tunnel on local port ${bindPort} readiness timed out.`,
+          ),
+        ),
+      readyTimeoutMs,
+    );
+  });
 }
 
 async function waitForTunnelClosed(
@@ -168,38 +254,18 @@ async function waitForTunnelClosed(
   }
 
   const startedAt = Date.now();
-  const probeAddress = resolveProbeAddress(bindAddress);
 
   while (Date.now() - startedAt < timeoutMs) {
-    const isClosed = await new Promise<boolean>((resolve) => {
-      const socket = createConnection(
-        {
-          host: probeAddress,
-          port: bindPort,
-        },
-        () => {
-          socket.destroy();
-          resolve(false);
-        },
-      );
-      socket.setTimeout(1_000);
-      socket.once("error", () => resolve(true));
-      socket.once("timeout", () => {
-        socket.destroy();
-        resolve(false);
-      });
-    });
-
-    if (isClosed) {
+    if (!(await isLocalPortInUse(bindAddress, bindPort))) {
       return;
     }
 
-    await delay(TUNNEL_READY_POLL_MS);
+    await delay(TUNNEL_PORT_PROBE_POLL_MS);
   }
 
   throw new Error(
     getLastMessage() ||
-      `AWS SSM tunnel ${probeAddress}:${bindPort} is still accepting connections.`,
+      `AWS SSM tunnel ${bindAddress}:${bindPort} is still holding the local port.`,
   );
 }
 
@@ -272,6 +338,8 @@ export class AwsSsmTunnelService {
   private readonly killProcessTree: (
     process: ChildProcessByStdio<null, Readable, Readable>,
   ) => Promise<void>;
+  private readonly readyTimeoutMs: number;
+  private readonly portProbePollMs: number;
   private readonly stopTimeoutMs: number;
   private readonly portReleaseTimeoutMs: number;
 
@@ -280,6 +348,8 @@ export class AwsSsmTunnelService {
     this.spawnProcess = options.spawnProcess ?? spawn;
     this.buildCommandEnv = options.buildCommandEnv ?? (() => buildAwsCommandEnv());
     this.killProcessTree = options.killProcessTree ?? defaultKillProcessTree;
+    this.readyTimeoutMs = options.readyTimeoutMs ?? TUNNEL_READY_TIMEOUT_MS;
+    this.portProbePollMs = options.portProbePollMs ?? TUNNEL_PORT_PROBE_POLL_MS;
     this.stopTimeoutMs = options.stopTimeoutMs ?? TUNNEL_STOP_TIMEOUT_MS;
     this.portReleaseTimeoutMs =
       options.portReleaseTimeoutMs ?? TUNNEL_PORT_RELEASE_TIMEOUT_MS;
@@ -312,6 +382,8 @@ export class AwsSsmTunnelService {
     });
 
     let resolveExit!: () => void;
+    let resolveOutputReady!: () => void;
+    let rejectProcessError!: (error: Error) => void;
     const runtime: TunnelRuntime = {
       process: child,
       stopRequested: false,
@@ -323,6 +395,12 @@ export class AwsSsmTunnelService {
       }),
       resolveExit,
     };
+    const outputReadyPromise = new Promise<void>((resolve) => {
+      resolveOutputReady = resolve;
+    });
+    const processErrorPromise = new Promise<never>((_, reject) => {
+      rejectProcessError = reject;
+    });
     this.runtimes.set(runtimeId, runtime);
 
     let capturedOutput: Uint8Array = Buffer.alloc(0);
@@ -337,6 +415,9 @@ export class AwsSsmTunnelService {
       }).trim();
       if (value) {
         runtime.lastMessage = value;
+        if (hasOpenedBindPort(value, input.bindPort)) {
+          resolveOutputReady();
+        }
       }
     };
     child.stdout.on("data", captureOutput);
@@ -360,14 +441,19 @@ export class AwsSsmTunnelService {
     });
     child.once("error", (error) => {
       runtime.lastMessage = error.message;
+      rejectProcessError(error);
     });
 
     try {
       await waitForTunnelReady(
         bindAddress,
         input.bindPort,
-        child,
+        runtime.exitPromise,
+        outputReadyPromise,
+        processErrorPromise,
         () => runtime.lastMessage,
+        this.readyTimeoutMs,
+        this.portProbePollMs,
       );
       return {
         runtimeId,

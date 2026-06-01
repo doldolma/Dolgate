@@ -366,6 +366,7 @@ export function createSftpSlice(deps: SliceDeps): SftpSlice {
               const trusted = await ensureTrustedHost(set, {
                 hostId,
                 endpointId,
+                skipProbeIfAlreadyTrusted: Boolean(awsHost),
                 action: {
                   kind: "sftp",
                   paneId,

@@ -520,6 +520,14 @@ export function inferAwsSftpDiagnosticReasonCode(
   }
   if (
     stage === 'connecting-sftp' &&
+    /dial failed: dial tcp (127\.0\.0\.1|localhost|\[?::1\]?):\d+: connect: connection refused/.test(
+      normalized,
+    )
+  ) {
+    return 'tunnel-open-failed';
+  }
+  if (
+    stage === 'connecting-sftp' &&
     /authentication failed|unable to authenticate|permission denied|ssh handshake|unexpected message type 51|connection refused|timed out/.test(
       normalized,
     )
