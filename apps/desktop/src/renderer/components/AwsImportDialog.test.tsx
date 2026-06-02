@@ -561,7 +561,7 @@ describe('AwsImportDialog', () => {
     expect(
       screen.getByText('이 인스턴스는 Systems Manager managed instance 목록에 나타나지 않습니다. SSM Agent 설치와 인스턴스 프로파일(AmazonSSMManagedInstanceCore)을 확인해 주세요.'),
     ).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'SSM 미설정' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'SSM 사용 불가' })).toBeDisabled();
     expect(api.aws.inspectHostSshMetadata).not.toHaveBeenCalled();
   });
 
@@ -632,7 +632,41 @@ describe('AwsImportDialog', () => {
         '이 인스턴스는 SSM managed instance로 등록되어 있지만 현재 연결이 비활성 상태입니다. SSM Agent, 인스턴스 프로파일, 네트워크 연결을 확인해 주세요.',
       ),
     ).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'SSM 미설정' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'SSM 사용 불가' })).toBeDisabled();
+  });
+
+  it('blocks inspection for ConnectionLost managed instances', async () => {
+    const api = installMockApi();
+    api.aws.listEc2Instances.mockResolvedValue([
+      {
+        instanceId: 'i-aws',
+        name: 'web-1',
+        availabilityZone: 'ap-northeast-2a',
+        platform: 'Linux/UNIX',
+        privateIp: '10.0.0.10',
+        state: 'running',
+        ssmAvailability: 'unavailable',
+        ssmAvailabilityReason:
+          '이 인스턴스는 SSM managed instance로 등록되어 있지만 Session Manager 연결 상태가 오프라인(ConnectionLost)입니다. SSM Agent, 인스턴스 프로파일, 네트워크 연결을 확인해 주세요.',
+      },
+    ]);
+
+    render(
+      <AwsImportDialog
+        open
+        currentGroupPath="Servers"
+        onClose={vi.fn()}
+        onImport={vi.fn().mockResolvedValue(undefined)}
+      />,
+    );
+
+    expect(
+      await screen.findByText(
+        '이 인스턴스는 SSM managed instance로 등록되어 있지만 Session Manager 연결 상태가 오프라인(ConnectionLost)입니다. SSM Agent, 인스턴스 프로파일, 네트워크 연결을 확인해 주세요.',
+      ),
+    ).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'SSM 사용 불가' })).toBeDisabled();
+    expect(api.aws.inspectHostSshMetadata).not.toHaveBeenCalled();
   });
 
   it('does not auto-select a configured region when it is missing from the loaded region list', async () => {

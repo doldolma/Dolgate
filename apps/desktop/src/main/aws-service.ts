@@ -162,7 +162,7 @@ type AwsEc2SsmAvailability = AwsEc2InstanceSummary["ssmAvailability"];
 
 interface SsmManagedInstanceLookupResult {
   readyInstanceIds: Set<string>;
-  inactiveInstanceIds: Set<string>;
+  unavailableInstanceStatuses: Map<string, string | null>;
   unknownReason: string | null;
 }
 
@@ -193,16 +193,28 @@ function isDescribeRegionsPermissionDenied(stderr: string): boolean {
 
 function resolveUnavailableSsmReason(input: {
   state?: string | null;
-  isInactive: boolean;
+  pingStatus?: string | null;
 }): string {
   const normalizedState = input.state?.trim().toLowerCase() ?? "";
+  const pingStatus = input.pingStatus?.trim() ?? "";
+  const normalizedPingStatus = pingStatus.toLowerCase();
   if (normalizedState && normalizedState !== "running") {
     return `이 인스턴스는 현재 ${normalizedState} 상태라 SSM import를 사용할 수 없습니다. 인스턴스를 실행한 뒤 다시 시도해 주세요.`;
   }
-  if (input.isInactive) {
+  if (normalizedPingStatus === "connectionlost") {
+    return "이 인스턴스는 SSM managed instance로 등록되어 있지만 Session Manager 연결 상태가 오프라인(ConnectionLost)입니다. SSM Agent, 인스턴스 프로파일, 네트워크 연결을 확인해 주세요.";
+  }
+  if (normalizedPingStatus === "inactive") {
     return "이 인스턴스는 SSM managed instance로 등록되어 있지만 현재 연결이 비활성 상태입니다. SSM Agent, 인스턴스 프로파일, 네트워크 연결을 확인해 주세요.";
   }
+  if (pingStatus) {
+    return `이 인스턴스는 SSM managed instance로 등록되어 있지만 Session Manager 연결 상태가 ${pingStatus}입니다. SSM Agent, 인스턴스 프로파일, 네트워크 연결을 확인해 주세요.`;
+  }
   return "이 인스턴스는 Systems Manager managed instance 목록에 나타나지 않습니다. SSM Agent 설치와 인스턴스 프로파일(AmazonSSMManagedInstanceCore)을 확인해 주세요.";
+}
+
+function isSsmPingStatusOnline(status?: string | null): boolean {
+  return status?.trim().toLowerCase() === "online";
 }
 
 export interface AwsSessionEnvSpec {
@@ -301,6 +313,9 @@ async function resolveExecutable(command: string): Promise<string> {
 
 const DEFAULT_AWS_COMMAND_TIMEOUT_MS = 30_000;
 const AWS_PROFILE_DETAILS_STATUS_TIMEOUT_MS = 8_000;
+const AWS_SSH_METADATA_PROBE_TIMEOUT_MS = 12_000;
+const AWS_SSH_METADATA_COMMAND_TIMEOUT_MS = 5_000;
+const AWS_SSH_METADATA_POLL_INTERVAL_MS = 1_000;
 const WINDOWS_EUC_KR_DECODER = new TextDecoder("euc-kr");
 
 interface AwsCliDecodeOptions {
@@ -3596,7 +3611,7 @@ export class AwsService {
     return (payload.InstanceInformationList ?? []).some(
       (item) =>
         item.InstanceId?.trim() === instanceId &&
-        (item.PingStatus?.trim() ?? "") !== "Inactive",
+        isSsmPingStatusOnline(item.PingStatus),
     );
   }
 
@@ -3688,7 +3703,10 @@ export class AwsService {
               ? null
               : resolveUnavailableSsmReason({
                 state: instance.State?.Name?.trim() || null,
-                isInactive: Boolean(instanceId && ssmLookup?.inactiveInstanceIds.has(instanceId)),
+                pingStatus:
+                  instanceId && ssmLookup?.unavailableInstanceStatuses.has(instanceId)
+                    ? ssmLookup.unavailableInstanceStatuses.get(instanceId) ?? null
+                    : null,
               }),
         });
         if (summary) {
@@ -3710,7 +3728,7 @@ export class AwsService {
   ): Promise<SsmManagedInstanceLookupResult> {
     try {
       const readyInstanceIds = new Set<string>();
-      const inactiveInstanceIds = new Set<string>();
+      const unavailableInstanceStatuses = new Map<string, string | null>();
       let nextToken: string | undefined;
       do {
         const args = [
@@ -3751,10 +3769,11 @@ export class AwsService {
           if (!instanceId) {
             continue;
           }
-          if ((item.PingStatus?.trim() ?? "") !== "Inactive") {
+          const pingStatus = item.PingStatus?.trim() || null;
+          if (isSsmPingStatusOnline(pingStatus)) {
             readyInstanceIds.add(instanceId);
           } else {
-            inactiveInstanceIds.add(instanceId);
+            unavailableInstanceStatuses.set(instanceId, pingStatus);
           }
         }
 
@@ -3763,13 +3782,13 @@ export class AwsService {
 
       return {
         readyInstanceIds,
-        inactiveInstanceIds,
+        unavailableInstanceStatuses,
         unknownReason: null,
       };
     } catch (error) {
       return {
         readyInstanceIds: new Set<string>(),
-        inactiveInstanceIds: new Set<string>(),
+        unavailableInstanceStatuses: new Map<string, string | null>(),
         unknownReason: resolveSsmLookupUnknownReason(error),
       };
     }
@@ -4915,6 +4934,7 @@ export class AwsService {
     region: string;
     instanceId: string;
     commands: string[];
+    timeoutMs?: number;
   }): Promise<string> {
     const result = await this.runResolvedCommand(
       "aws",
@@ -4934,7 +4954,7 @@ export class AwsService {
         "--output",
         "json",
       ],
-      30_000,
+      input.timeoutMs ?? 30_000,
     );
     if (result.exitCode !== 0) {
       throw normalizeAwsCliError(
@@ -4958,6 +4978,7 @@ export class AwsService {
     region: string;
     instanceId: string;
     commandId: string;
+    timeoutMs?: number;
   }): Promise<CommandInvocationPayload> {
     const result = await this.runResolvedCommand(
       "aws",
@@ -4975,7 +4996,7 @@ export class AwsService {
         "--output",
         "json",
       ],
-      30_000,
+      input.timeoutMs ?? 30_000,
     );
     if (result.exitCode !== 0) {
       throw normalizeAwsCliError(
@@ -5035,20 +5056,36 @@ export class AwsService {
       throw prefixInspectionError("SSM 명령 전송", error);
     }
 
+    const startedAt = Date.now();
+    const getRemainingTimeoutMs = () =>
+      Math.max(0, AWS_SSH_METADATA_PROBE_TIMEOUT_MS - (Date.now() - startedAt));
+    const getCommandTimeoutMs = () =>
+      Math.max(
+        1,
+        Math.min(AWS_SSH_METADATA_COMMAND_TIMEOUT_MS, getRemainingTimeoutMs()),
+      );
+    const buildTimeoutError = () =>
+      new Error(
+        "SSH 설정 확인이 제한 시간을 초과했습니다. SSM 연결 상태와 권한을 확인한 뒤 다시 시도해 주세요.",
+      );
+
     let commandId = "";
     try {
+      if (getRemainingTimeoutMs() <= 0) {
+        throw buildTimeoutError();
+      }
       commandId = await this.sendRunCommand({
         profileName: input.profileName,
         region: input.region,
         instanceId: input.instanceId,
         commands: buildSshMetadataProbeCommands(),
+        timeoutMs: getCommandTimeoutMs(),
       });
     } catch (error) {
       throw prefixInspectionError("SSM 명령 전송", error);
     }
 
-    const startedAt = Date.now();
-    while (Date.now() - startedAt < 90_000) {
+    while (getRemainingTimeoutMs() > 0) {
       let invocation: CommandInvocationPayload;
       try {
         invocation = await this.getCommandInvocation({
@@ -5056,21 +5093,29 @@ export class AwsService {
           region: input.region,
           instanceId: input.instanceId,
           commandId,
+          timeoutMs: getCommandTimeoutMs(),
         });
       } catch (error) {
         throw prefixInspectionError("SSH 설정 조회", error);
       }
       const status = (invocation.Status ?? "").trim();
       if (status === "Pending" || status === "InProgress" || status === "Delayed") {
-        await new Promise((resolve) => setTimeout(resolve, 1_500));
+        const delayMs = Math.min(
+          AWS_SSH_METADATA_POLL_INTERVAL_MS,
+          getRemainingTimeoutMs(),
+        );
+        if (delayMs <= 0) {
+          break;
+        }
+        await new Promise((resolve) => setTimeout(resolve, delayMs));
         continue;
       }
       if (status !== "Success") {
         throw prefixInspectionError(
           "SSH 설정 조회",
           new Error(
-          invocation.StandardErrorContent?.trim() ||
-            `SSM 명령이 ${status || "Unknown"} 상태로 종료되었습니다.`,
+            invocation.StandardErrorContent?.trim() ||
+              `SSM 명령이 ${status || "Unknown"} 상태로 종료되었습니다.`,
           ),
         );
       }
@@ -5091,6 +5136,6 @@ export class AwsService {
       };
     }
 
-    throw new Error("SSH 설정 확인이 제한 시간을 초과했습니다.");
+    throw buildTimeoutError();
   }
 }

@@ -192,6 +192,27 @@ describe('AwsService.isManagedInstance', () => {
 
     await expect(service.isManagedInstance('default', 'ap-northeast-2', 'i-123')).resolves.toBe(false);
   });
+
+  it('returns false when Session Manager reports ConnectionLost', async () => {
+    const service = new AwsService() as unknown as {
+      ensureAwsCliAvailable: () => Promise<void>;
+      ensureSessionManagerPluginAvailable: () => Promise<void>;
+      runResolvedCommand: () => Promise<{ stdout: string; stderr: string; exitCode: number }>;
+      isManagedInstance: (profileName: string, region: string, instanceId: string) => Promise<boolean>;
+    };
+
+    service.ensureAwsCliAvailable = vi.fn().mockResolvedValue(undefined);
+    service.ensureSessionManagerPluginAvailable = vi.fn().mockResolvedValue(undefined);
+    service.runResolvedCommand = vi.fn().mockResolvedValue({
+      stdout: JSON.stringify({
+        InstanceInformationList: [{ InstanceId: 'i-123', PingStatus: 'ConnectionLost' }]
+      }),
+      stderr: '',
+      exitCode: 0
+    });
+
+    await expect(service.isManagedInstance('default', 'ap-northeast-2', 'i-123')).resolves.toBe(false);
+  });
 });
 
 describe('AwsService.listRegions', () => {
@@ -1840,6 +1861,59 @@ describe('AwsService EC2 helpers', () => {
     ]);
   });
 
+  it('marks ConnectionLost managed instances unavailable with an offline reason', async () => {
+    const service = new AwsService() as unknown as {
+      ensureAwsCliAvailable: () => Promise<void>;
+      runResolvedCommand: ReturnType<typeof vi.fn>;
+      listEc2Instances: (profileName: string, region: string) => Promise<Array<Record<string, unknown>>>;
+    };
+
+    service.ensureAwsCliAvailable = vi.fn().mockResolvedValue(undefined);
+    service.runResolvedCommand = vi
+      .fn()
+      .mockResolvedValueOnce({
+        stdout: JSON.stringify({
+          Reservations: [
+            {
+              Instances: [
+                {
+                  InstanceId: 'i-123',
+                  PrivateIpAddress: '10.0.0.10',
+                  PlatformDetails: 'Linux/UNIX',
+                  Placement: { AvailabilityZone: 'ap-northeast-2a' },
+                  State: { Name: 'running' },
+                  Tags: [{ Key: 'Name', Value: 'web-1' }]
+                }
+              ]
+            }
+          ]
+        }),
+        stderr: '',
+        exitCode: 0
+      })
+      .mockResolvedValueOnce({
+        stdout: JSON.stringify({
+          InstanceInformationList: [{ InstanceId: 'i-123', PingStatus: 'ConnectionLost' }]
+        }),
+        stderr: '',
+        exitCode: 0
+      });
+
+    await expect(service.listEc2Instances('default', 'ap-northeast-2')).resolves.toEqual([
+      {
+        instanceId: 'i-123',
+        name: 'web-1',
+        availabilityZone: 'ap-northeast-2a',
+        platform: 'Linux/UNIX',
+        privateIp: '10.0.0.10',
+        state: 'running',
+        ssmAvailability: 'unavailable',
+        ssmAvailabilityReason:
+          '이 인스턴스는 SSM managed instance로 등록되어 있지만 Session Manager 연결 상태가 오프라인(ConnectionLost)입니다. SSM Agent, 인스턴스 프로파일, 네트워크 연결을 확인해 주세요.',
+      }
+    ]);
+  });
+
   it('marks non-running instances unavailable with a state-specific reason', async () => {
     const service = new AwsService() as unknown as {
       ensureAwsCliAvailable: () => Promise<void>;
@@ -2091,6 +2165,52 @@ describe('AwsService EC2 helpers', () => {
       recommendedUsername: 'ubuntu',
       usernameCandidates: ['deploy', 'ubuntu']
     });
+  });
+
+  it('times out SSH metadata polling after the shorter SSM probe budget', async () => {
+    vi.useFakeTimers();
+    const service = new AwsService() as unknown as {
+      ensureAwsCliAvailable: () => Promise<void>;
+      ensureSessionManagerPluginAvailable: () => Promise<void>;
+      sendRunCommand: ReturnType<typeof vi.fn>;
+      getCommandInvocation: ReturnType<typeof vi.fn>;
+      loadHostSshMetadata: (input: {
+        profileName: string;
+        region: string;
+        instanceId: string;
+      }) => Promise<unknown>;
+    };
+
+    service.ensureAwsCliAvailable = vi.fn().mockResolvedValue(undefined);
+    service.ensureSessionManagerPluginAvailable = vi.fn().mockResolvedValue(undefined);
+    service.sendRunCommand = vi.fn().mockResolvedValue('cmd-123');
+    service.getCommandInvocation = vi.fn().mockResolvedValue({
+      Status: 'InProgress',
+      StandardOutputContent: '',
+      StandardErrorContent: '',
+    });
+
+    try {
+      const promise = service.loadHostSshMetadata({
+        profileName: 'default',
+        region: 'ap-northeast-2',
+        instanceId: 'i-abc',
+      });
+      const expectation = expect(promise).rejects.toThrow(
+        'SSH 설정 확인이 제한 시간을 초과했습니다. SSM 연결 상태와 권한을 확인한 뒤 다시 시도해 주세요.',
+      );
+
+      await vi.advanceTimersByTimeAsync(12_000);
+      await expectation;
+      expect(service.getCommandInvocation).toHaveBeenCalledTimes(12);
+      expect(service.sendRunCommand).toHaveBeenCalledWith(
+        expect.objectContaining({
+          timeoutMs: 5_000,
+        }),
+      );
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('builds SSM probe commands as a command array instead of a single blob script', () => {

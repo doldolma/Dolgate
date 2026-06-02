@@ -95,7 +95,7 @@ function getInspectButtonLabel(instance: AwsEc2InstanceSummary): string {
     return 'Windows 미지원';
   }
   if (instance.ssmAvailability === 'unavailable') {
-    return 'SSM 미설정';
+    return 'SSM 사용 불가';
   }
   if (instance.ssmAvailability === 'unknown') {
     return '가져오기 차단됨';
