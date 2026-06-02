@@ -200,6 +200,19 @@ function installMockApi(input?: {
         }
       }),
       updateProfile: vi.fn().mockResolvedValue(undefined),
+      updateProfileRegion: vi.fn().mockImplementation(async (input) => {
+        const current = detailsByProfileName[input.profileName]
+        if (!current) {
+          throw new Error('missing profile')
+        }
+        detailsByProfileName = {
+          ...detailsByProfileName,
+          [input.profileName]: createProfileDetails({
+            ...current,
+            configuredRegion: input.region ?? null,
+          }),
+        }
+      }),
       renameProfile: vi.fn().mockImplementation(async (input) => {
         const current = detailsByProfileName[input.profileName]
         profiles = profiles.map((profile) =>
@@ -523,6 +536,104 @@ describe('AwsProfilesPanel', () => {
     expect(
       screen.queryByText(/Error invoking remote method 'aws:update-profile'/),
     ).not.toBeInTheDocument()
+  })
+
+  it('allows changing the default region for an sso profile', async () => {
+    const { api } = installMockApi({
+      profiles: [{ name: 'corp-sso' }],
+      detailsByProfileName: {
+        'corp-sso': createProfileDetails({
+          profileName: 'corp-sso',
+          kind: 'sso',
+          isSsoProfile: true,
+          isAuthenticated: false,
+          configuredRegion: null,
+          errorMessage: '브라우저 로그인이 필요합니다.',
+          ssoSession: 'corp-session',
+        }),
+      },
+    })
+
+    render(<AwsProfilesPanel hosts={[]} />)
+
+    await screen.findByRole('heading', { name: 'corp-sso' })
+    expect(screen.getByRole('button', { name: '기본 Region 변경' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '수정' })).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: '기본 Region 변경' }))
+    fireEvent.change(screen.getByRole('combobox', { name: '기본 Region' }), {
+      target: { value: 'ap-southeast-2' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Region 저장' }))
+
+    await waitFor(() =>
+      expect(api.aws.updateProfileRegion).toHaveBeenCalledWith({
+        profileName: 'corp-sso',
+        region: 'ap-southeast-2',
+      }),
+    )
+    await waitFor(() => expect(api.aws.listProfiles).toHaveBeenCalledTimes(2))
+    await waitFor(() =>
+      expect(screen.getAllByText('ap-southeast-2').length).toBeGreaterThan(0),
+    )
+  })
+
+  it('saves Region 없음 and shows region update failures', async () => {
+    const { api } = installMockApi()
+
+    render(<AwsProfilesPanel hosts={[]} />)
+
+    await screen.findByRole('heading', { name: 'default' })
+
+    fireEvent.click(screen.getByRole('button', { name: '기본 Region 변경' }))
+    fireEvent.change(screen.getByRole('combobox', { name: '기본 Region' }), {
+      target: { value: '' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Region 저장' }))
+
+    await waitFor(() =>
+      expect(api.aws.updateProfileRegion).toHaveBeenCalledWith({
+        profileName: 'default',
+        region: null,
+      }),
+    )
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: '기본 Region 변경' })).toBeEnabled(),
+    )
+
+    api.aws.updateProfileRegion.mockRejectedValue(
+      new Error(
+        "Error invoking remote method 'aws:update-profile-region': Error: 지원하지 않는 AWS Region입니다.",
+      ),
+    )
+    fireEvent.click(screen.getByRole('button', { name: '기본 Region 변경' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Region 저장' }))
+
+    expect(
+      await screen.findByText('지원하지 않는 AWS Region입니다.'),
+    ).toBeInTheDocument()
+    expect(
+      screen.queryByText(/Error invoking remote method 'aws:update-profile-region'/),
+    ).not.toBeInTheDocument()
+  })
+
+  it('shows the default region action for role profiles', async () => {
+    installMockApi({
+      profiles: [{ name: 'admin-role' }],
+      detailsByProfileName: {
+        'admin-role': createProfileDetails({
+          profileName: 'admin-role',
+          kind: 'role',
+          sourceProfile: 'default',
+          roleArn: 'arn:aws:iam::123456789012:role/Admin',
+        }),
+      },
+    })
+
+    render(<AwsProfilesPanel hosts={[]} />)
+
+    await screen.findByRole('heading', { name: 'admin-role' })
+    expect(screen.getByRole('button', { name: '기본 Region 변경' })).toBeInTheDocument()
   })
 
   it('shows rename warnings for host references and source_profile references', async () => {

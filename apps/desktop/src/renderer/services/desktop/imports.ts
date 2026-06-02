@@ -47,6 +47,12 @@ export function updateAwsProfile(
   return desktopApi.aws.updateProfile(input);
 }
 
+export function updateAwsProfileRegion(
+  input: Parameters<typeof desktopApi.aws.updateProfileRegion>[0],
+) {
+  return desktopApi.aws.updateProfileRegion(input);
+}
+
 export function renameAwsProfile(
   input: Parameters<typeof desktopApi.aws.renameProfile>[0],
 ) {

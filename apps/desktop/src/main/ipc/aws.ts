@@ -1,6 +1,7 @@
 import type {
   AwsProfileCreateInput,
   AwsProfileRenameInput,
+  AwsProfileRegionUpdateInput,
   AwsSsoProfilePrepareInput,
   AwsProfileUpdateInput,
 } from "@shared";
@@ -83,6 +84,14 @@ export function registerAwsIpcHandlers(ctx: MainIpcContext): void {
     ipcChannels.aws.updateProfile,
     async (_event, input: AwsProfileUpdateInput) => {
       await ctx.awsService.updateProfile(input);
+      ctx.queueSync();
+    },
+  );
+
+  ipcMain.handle(
+    ipcChannels.aws.updateProfileRegion,
+    async (_event, input: AwsProfileRegionUpdateInput) => {
+      await ctx.awsService.updateProfileRegion(input);
       ctx.queueSync();
     },
   );

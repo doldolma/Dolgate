@@ -41,6 +41,7 @@ export const ipcChannels = {
     getExternalProfileDetails: 'aws:get-external-profile-details',
     importExternalProfiles: 'aws:import-external-profiles',
     updateProfile: 'aws:update-profile',
+    updateProfileRegion: 'aws:update-profile-region',
     renameProfile: 'aws:rename-profile',
     deleteProfile: 'aws:delete-profile',
     getProfileStatus: 'aws:get-profile-status',

@@ -19,6 +19,7 @@ import type {
   AwsExternalProfileImportInput,
   AwsExternalProfileImportResult,
   AwsProfileRenameInput,
+  AwsProfileRegionUpdateInput,
   AwsSsoProfilePrepareInput,
   AwsSsoProfilePrepareResult,
   AwsProfileStatus,
@@ -596,6 +597,7 @@ export interface DesktopApi {
       input: AwsExternalProfileImportInput,
     ) => Promise<AwsExternalProfileImportResult>;
     updateProfile: (input: AwsProfileUpdateInput) => Promise<void>;
+    updateProfileRegion: (input: AwsProfileRegionUpdateInput) => Promise<void>;
     renameProfile: (input: AwsProfileRenameInput) => Promise<void>;
     deleteProfile: (profileName: string) => Promise<void>;
     getProfileStatus: (profileName: string) => Promise<AwsProfileStatus>;

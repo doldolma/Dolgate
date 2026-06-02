@@ -5,6 +5,7 @@ import path from "node:path";
 import { spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { TextDecoder } from "node:util";
+import { AWS_PROFILE_REGION_OPTIONS } from "@shared";
 import type {
   AwsEc2InstanceSummary,
   AwsEcsClusterListItem,
@@ -30,6 +31,7 @@ import type {
   AwsProfileDetails,
   AwsExternalProfileImportInput,
   AwsExternalProfileImportResult,
+  AwsProfileRegionUpdateInput,
   AwsProfileKind,
   AwsProfileRenameInput,
   AwsSsoProfileAccountOption,
@@ -3447,6 +3449,32 @@ export class AwsService {
       secretAccessKey,
       region,
     });
+  }
+
+  async updateProfileRegion(input: AwsProfileRegionUpdateInput): Promise<void> {
+    if (isE2EFakeAwsSessionEnabled()) {
+      return;
+    }
+
+    await this.ensureManagedProfilesReady();
+
+    const profileName = normalizeAwsProfileName(input.profileName);
+    const region = input.region?.trim() || null;
+    if (region && !(AWS_PROFILE_REGION_OPTIONS as readonly string[]).includes(region)) {
+      throw new Error("지원하지 않는 AWS Region입니다.");
+    }
+
+    const currentProfile = this.getManagedProfileByName(profileName);
+    if (!currentProfile) {
+      throw new Error("선택한 AWS 프로필을 찾지 못했습니다.");
+    }
+
+    this.profileRepository.upsert({
+      ...currentProfile,
+      region,
+      updatedAt: new Date().toISOString(),
+    });
+    await this.materializeManagedProfiles();
   }
 
   async renameProfile(input: AwsProfileRenameInput): Promise<void> {

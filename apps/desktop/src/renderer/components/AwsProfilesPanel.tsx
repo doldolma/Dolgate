@@ -1,4 +1,5 @@
 import {
+  AWS_PROFILE_REGION_OPTIONS,
   isAwsEc2HostRecord,
   isAwsEcsHostRecord,
   type AwsProfileDetails,
@@ -26,6 +27,7 @@ import {
   ModalShell,
   NoticeCard,
   SectionLabel,
+  SelectField,
   StatusBadge,
 } from '../ui'
 
@@ -238,6 +240,10 @@ function ProfileField({
   )
 }
 
+function canEditAwsProfileRegion(kind: AwsProfileDetails['kind']): boolean {
+  return kind === 'static' || kind === 'sso' || kind === 'role'
+}
+
 export function AwsProfilesPanel({ hosts }: AwsProfilesPanelProps) {
   const {
     getSyncStatus,
@@ -249,6 +255,7 @@ export function AwsProfilesPanel({ hosts }: AwsProfilesPanelProps) {
     getExternalAwsProfileDetails,
     importExternalAwsProfiles,
     updateAwsProfile,
+    updateAwsProfileRegion,
     renameAwsProfile,
     deleteAwsProfile,
     loginAwsProfile,
@@ -280,6 +287,10 @@ export function AwsProfilesPanel({ hosts }: AwsProfilesPanelProps) {
   )
   const [profileFormError, setProfileFormError] = useState<string | null>(null)
   const [isSavingProfile, setIsSavingProfile] = useState(false)
+  const [isRegionOpen, setIsRegionOpen] = useState(false)
+  const [regionDraft, setRegionDraft] = useState('')
+  const [regionError, setRegionError] = useState<string | null>(null)
+  const [isSavingRegion, setIsSavingRegion] = useState(false)
   const [isRenameOpen, setIsRenameOpen] = useState(false)
   const [renameDraft, setRenameDraft] = useState('')
   const [renameError, setRenameError] = useState<string | null>(null)
@@ -508,6 +519,40 @@ export function AwsProfilesPanel({ hosts }: AwsProfilesPanelProps) {
     }
   }
 
+  function openRegionDialog() {
+    if (!selectedDetails) {
+      return
+    }
+    setRegionDraft(selectedDetails.configuredRegion ?? '')
+    setRegionError(null)
+    setIsRegionOpen(true)
+  }
+
+  async function handleSaveRegion() {
+    if (!selectedDetails) {
+      return
+    }
+
+    const profileName = selectedDetails.profileName
+    setRegionError(null)
+    setIsSavingRegion(true)
+
+    try {
+      await updateAwsProfileRegion({
+        profileName,
+        region: regionDraft || null,
+      })
+      setIsRegionOpen(false)
+      await refreshProfiles(profileName)
+    } catch (error) {
+      setRegionError(
+        normalizeErrorMessage(error, 'AWS 프로필 기본 Region을 저장하지 못했습니다.'),
+      )
+    } finally {
+      setIsSavingRegion(false)
+    }
+  }
+
   async function handleCreateProfileSuccess(profileName: string) {
     setProfileFormMode(null)
     await refreshProfiles(profileName)
@@ -611,6 +656,7 @@ export function AwsProfilesPanel({ hosts }: AwsProfilesPanelProps) {
               isRefreshingProfileDetails ||
               isLoggingIn ||
               isSavingProfile ||
+              isSavingRegion ||
               isRenaming ||
               isDeleting
             }
@@ -623,7 +669,12 @@ export function AwsProfilesPanel({ hosts }: AwsProfilesPanelProps) {
           <Button
             variant="secondary"
             disabled={
-              isLoadingProfileList || isLoggingIn || isSavingProfile || isRenaming || isDeleting
+              isLoadingProfileList ||
+              isLoggingIn ||
+              isSavingProfile ||
+              isSavingRegion ||
+              isRenaming ||
+              isDeleting
             }
             onClick={() => setIsExternalImportOpen(true)}
           >
@@ -632,7 +683,12 @@ export function AwsProfilesPanel({ hosts }: AwsProfilesPanelProps) {
           <Button
             variant="primary"
             disabled={
-              isLoadingProfileList || isLoggingIn || isSavingProfile || isRenaming || isDeleting
+              isLoadingProfileList ||
+              isLoggingIn ||
+              isSavingProfile ||
+              isSavingRegion ||
+              isRenaming ||
+              isDeleting
             }
             onClick={openCreateDialog}
           >
@@ -775,6 +831,7 @@ export function AwsProfilesPanel({ hosts }: AwsProfilesPanelProps) {
                       isLoadingProfileList ||
                       isRefreshingProfileDetails ||
                       isSavingProfile ||
+                      isSavingRegion ||
                       isRenaming ||
                       isDeleting ||
                       isLoggingIn
@@ -788,6 +845,24 @@ export function AwsProfilesPanel({ hosts }: AwsProfilesPanelProps) {
                     이름 변경
                   </Button>
 
+                  {canEditAwsProfileRegion(selectedDetails.kind) ? (
+                    <Button
+                      variant="secondary"
+                      disabled={
+                        isLoadingProfileList ||
+                        isRefreshingProfileDetails ||
+                        isSavingProfile ||
+                        isSavingRegion ||
+                        isRenaming ||
+                        isDeleting ||
+                        isLoggingIn
+                      }
+                      onClick={openRegionDialog}
+                    >
+                      기본 Region 변경
+                    </Button>
+                  ) : null}
+
                   {selectedDetails.kind === 'static' ? (
                     <Button
                       variant="secondary"
@@ -795,6 +870,7 @@ export function AwsProfilesPanel({ hosts }: AwsProfilesPanelProps) {
                         isLoadingProfileList ||
                         isRefreshingProfileDetails ||
                         isSavingProfile ||
+                        isSavingRegion ||
                         isRenaming ||
                         isDeleting ||
                         isLoggingIn
@@ -812,6 +888,7 @@ export function AwsProfilesPanel({ hosts }: AwsProfilesPanelProps) {
                         isLoadingProfileList ||
                         isRefreshingProfileDetails ||
                         isSavingProfile ||
+                        isSavingRegion ||
                         isRenaming ||
                         isDeleting ||
                         isLoggingIn
@@ -830,6 +907,7 @@ export function AwsProfilesPanel({ hosts }: AwsProfilesPanelProps) {
                       isLoadingProfileList ||
                       isRefreshingProfileDetails ||
                       isSavingProfile ||
+                      isSavingRegion ||
                       isRenaming ||
                       isDeleting ||
                       isLoggingIn
@@ -942,6 +1020,62 @@ export function AwsProfilesPanel({ hosts }: AwsProfilesPanelProps) {
                 />
               )}
             </ModalBody>
+          </ModalShell>
+        </DialogBackdrop>
+      ) : null}
+
+      {isRegionOpen && selectedDetails ? (
+        <DialogBackdrop onDismiss={() => setIsRegionOpen(false)}>
+          <ModalShell size="md">
+            <ModalHeader>
+              <div className="grid gap-1">
+                <strong>기본 Region 변경</strong>
+                <span className="text-[0.9rem] text-[var(--text-soft)]">
+                  앱 전용 AWS 프로필의 기본 Region만 저장합니다.
+                </span>
+              </div>
+            </ModalHeader>
+            <ModalBody className="grid gap-4">
+              <FieldGroup label="기본 Region">
+                <SelectField
+                  aria-label="기본 Region"
+                  value={regionDraft}
+                  onChange={(event) => setRegionDraft(event.target.value)}
+                  disabled={isSavingRegion}
+                >
+                  <option value="">Region 없음</option>
+                  {AWS_PROFILE_REGION_OPTIONS.map((region) => (
+                    <option key={region} value={region}>
+                      {region}
+                    </option>
+                  ))}
+                </SelectField>
+              </FieldGroup>
+
+              {regionError ? (
+                <NoticeCard tone="danger" role="alert">
+                  {regionError}
+                </NoticeCard>
+              ) : null}
+            </ModalBody>
+            <ModalFooter>
+              <Button
+                variant="secondary"
+                disabled={isSavingRegion}
+                onClick={() => setIsRegionOpen(false)}
+              >
+                취소
+              </Button>
+              <Button
+                variant="primary"
+                disabled={isSavingRegion}
+                onClick={() => {
+                  void handleSaveRegion()
+                }}
+              >
+                {isSavingRegion ? '저장 중...' : 'Region 저장'}
+              </Button>
+            </ModalFooter>
           </ModalShell>
         </DialogBackdrop>
       ) : null}

@@ -1358,6 +1358,137 @@ describe('AwsService AWS profile management', () => {
     expect(service.runResolvedCommandWithEnv).toHaveBeenCalled();
   });
 
+  it('updates static, sso, and role profile regions without validating aws auth', async () => {
+    const rootDir = await createTempAwsProfileDir();
+    await writeAwsProfileFiles(rootDir, {
+      config: [
+        '[profile source-static]',
+        'region = ap-northeast-2',
+        '',
+        '[profile corp-sso]',
+        'sso_session = corp-session',
+        'sso_account_id = 123456789012',
+        'sso_role_name = ReadOnly',
+        'region = us-west-2',
+        '',
+        '[sso-session corp-session]',
+        'sso_region = ap-northeast-2',
+        'sso_start_url = https://example.awsapps.com/start',
+        'sso_registration_scopes = sso:account:access',
+        '',
+        '[profile assume-admin]',
+        'role_arn = arn:aws:iam::123456789012:role/Admin',
+        'source_profile = source-static',
+        '',
+      ].join('\n'),
+      credentials: [
+        '[source-static]',
+        'aws_access_key_id = AKIASOURCE1234',
+        'aws_secret_access_key = source-secret',
+        '',
+      ].join('\n'),
+    });
+
+    const service = new AwsService(rootDir) as unknown as {
+      ensureAwsCliAvailable: ReturnType<typeof vi.fn>;
+      runResolvedCommandWithEnv: ReturnType<typeof vi.fn>;
+      updateProfileRegion: (input: {
+        profileName: string;
+        region?: string | null;
+      }) => Promise<void>;
+    };
+
+    service.ensureAwsCliAvailable = vi
+      .fn()
+      .mockRejectedValue(new Error('aws cli should not be checked'));
+    service.runResolvedCommandWithEnv = vi
+      .fn()
+      .mockRejectedValue(new Error('auth validation should not run'));
+
+    await service.updateProfileRegion({
+      profileName: 'source-static',
+      region: 'us-east-1',
+    });
+    await service.updateProfileRegion({
+      profileName: 'corp-sso',
+      region: 'ap-southeast-2',
+    });
+    await service.updateProfileRegion({
+      profileName: 'assume-admin',
+      region: 'eu-west-1',
+    });
+
+    const config = await readFile(path.join(rootDir, 'config'), 'utf8');
+    const credentials = await readFile(path.join(rootDir, 'credentials'), 'utf8');
+
+    expect(config).toContain('[profile source-static]\nregion = us-east-1');
+    expect(config).toContain(
+      [
+        '[profile assume-admin]',
+        'role_arn = arn:aws:iam::123456789012:role/Admin',
+        'source_profile = source-static',
+        'region = eu-west-1',
+      ].join('\n'),
+    );
+    expect(config).toMatch(
+      /\[profile corp-sso\]\nsso_session = dolssh-[0-9a-f]{12}\nsso_account_id = 123456789012\nsso_role_name = ReadOnly\nregion = ap-southeast-2/,
+    );
+    expect(credentials).toContain('aws_access_key_id = AKIASOURCE1234');
+    expect(service.ensureAwsCliAvailable).not.toHaveBeenCalled();
+    expect(service.runResolvedCommandWithEnv).not.toHaveBeenCalled();
+  });
+
+  it('removes a profile region when saving a blank region-only update', async () => {
+    const rootDir = await createTempAwsProfileDir();
+    await writeAwsProfileFiles(rootDir, {
+      config: ['[profile static-profile]', 'region = ap-northeast-2', ''].join('\n'),
+      credentials: [
+        '[static-profile]',
+        'aws_access_key_id = AKIAOLDVALUE',
+        'aws_secret_access_key = old-secret',
+        '',
+      ].join('\n'),
+    });
+
+    const service = new AwsService(rootDir) as unknown as {
+      updateProfileRegion: (input: {
+        profileName: string;
+        region?: string | null;
+      }) => Promise<void>;
+    };
+
+    await service.updateProfileRegion({
+      profileName: 'static-profile',
+      region: '',
+    });
+
+    const config = await readFile(path.join(rootDir, 'config'), 'utf8');
+    expect(config.trim()).toBe('');
+    expect(config).not.toContain('region = ap-northeast-2');
+  });
+
+  it('rejects region-only updates for missing managed profiles', async () => {
+    const rootDir = await createTempAwsProfileDir();
+    await writeAwsProfileFiles(rootDir, {
+      config: '',
+      credentials: '',
+    });
+
+    const service = new AwsService(rootDir) as unknown as {
+      updateProfileRegion: (input: {
+        profileName: string;
+        region?: string | null;
+      }) => Promise<void>;
+    };
+
+    await expect(
+      service.updateProfileRegion({
+        profileName: 'missing-profile',
+        region: 'us-east-1',
+      }),
+    ).rejects.toThrow('선택한 AWS 프로필을 찾지 못했습니다.');
+  });
+
   it('translates SignatureDoesNotMatch during static profile updates', async () => {
     const rootDir = await createTempAwsProfileDir();
     await writeAwsProfileFiles(rootDir, {

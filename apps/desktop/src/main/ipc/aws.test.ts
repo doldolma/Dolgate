@@ -84,6 +84,38 @@ describe("registerAwsIpcHandlers", () => {
     expect(queueSync).toHaveBeenCalledTimes(1);
   });
 
+  it("updates an aws profile region and queues sync", async () => {
+    const handlers = new Map<string, (...args: unknown[]) => Promise<unknown>>();
+    electronSpies.ipcMainHandle.mockImplementation((channel, handler) => {
+      handlers.set(channel, handler);
+    });
+
+    const updateProfileRegion = vi.fn().mockResolvedValue(undefined);
+    const queueSync = vi.fn();
+
+    registerAwsIpcHandlers({
+      awsService: {
+        resolveManagedProfileNameOrFallback: vi.fn(),
+        updateProfileRegion,
+      },
+      queueSync,
+    } as any);
+
+    const handler = handlers.get(ipcChannels.aws.updateProfileRegion);
+    expect(handler).toBeTypeOf("function");
+    if (!handler) {
+      throw new Error("expected aws.updateProfileRegion handler to be registered");
+    }
+
+    await handler({}, { profileName: "corp-sso", region: "ap-southeast-2" });
+
+    expect(updateProfileRegion).toHaveBeenCalledWith({
+      profileName: "corp-sso",
+      region: "ap-southeast-2",
+    });
+    expect(queueSync).toHaveBeenCalledTimes(1);
+  });
+
   it("retries ECS exec shell setup once with a fresh action context when the cached task selection is stale", async () => {
     const handlers = new Map<string, (...args: unknown[]) => Promise<unknown>>();
     electronSpies.ipcMainHandle.mockImplementation((channel, handler) => {

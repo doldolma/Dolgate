@@ -33,6 +33,7 @@ import {
   renameAwsProfile,
   startWarpgateBrowserImport,
   updateAwsProfile,
+  updateAwsProfileRegion,
 } from '../services/desktop/imports';
 
 export function useAwsImportController() {
@@ -81,6 +82,7 @@ export function useAwsProfilesController() {
       getExternalAwsProfileDetails,
       importExternalAwsProfiles,
       updateAwsProfile,
+      updateAwsProfileRegion,
       renameAwsProfile,
       deleteAwsProfile,
       loginAwsProfile,

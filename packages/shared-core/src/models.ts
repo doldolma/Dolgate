@@ -1138,6 +1138,11 @@ export interface AwsProfileUpdateInput extends AwsStaticProfileDraft {
   profileName: string;
 }
 
+export interface AwsProfileRegionUpdateInput {
+  profileName: string;
+  region?: string | null;
+}
+
 export interface AwsProfileRenameInput {
   profileName: string;
   nextProfileName: string;

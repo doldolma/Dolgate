@@ -37,6 +37,10 @@ describe("createDesktopApi", () => {
     await api.keychain.copyPassword("secret-1");
     await api.groups.move("Servers/Nested", "Clients");
     await api.groups.rename("Servers/Nested", "API");
+    await api.aws.updateProfileRegion({
+      profileName: "corp-sso",
+      region: null,
+    });
 
     expect(ipcRenderer.invoke).toHaveBeenNthCalledWith(
       1,
@@ -87,6 +91,14 @@ describe("createDesktopApi", () => {
       ipcChannels.groups.rename,
       "Servers/Nested",
       "API",
+    );
+    expect(ipcRenderer.invoke).toHaveBeenNthCalledWith(
+      11,
+      ipcChannels.aws.updateProfileRegion,
+      {
+        profileName: "corp-sso",
+        region: null,
+      },
     );
   });
 

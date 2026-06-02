@@ -49,6 +49,8 @@ export function buildAwsBridge(ipcRenderer: IpcRenderer): DesktopApi["aws"] {
       ipcRenderer.invoke(ipcChannels.aws.importExternalProfiles, input),
     updateProfile: (input) =>
       ipcRenderer.invoke(ipcChannels.aws.updateProfile, input),
+    updateProfileRegion: (input) =>
+      ipcRenderer.invoke(ipcChannels.aws.updateProfileRegion, input),
     renameProfile: (input) =>
       ipcRenderer.invoke(ipcChannels.aws.renameProfile, input),
     deleteProfile: (profileName: string) =>
