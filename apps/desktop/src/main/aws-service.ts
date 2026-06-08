@@ -168,6 +168,9 @@ interface SsmManagedInstanceLookupResult {
 
 function resolveSsmLookupUnknownReason(error: unknown): string {
   const message = error instanceof Error ? error.message.trim() : "";
+  if (/제한 시간을 초과|timed?\s*out|timeout/i.test(message)) {
+    return "SSM 상태 조회가 제한 시간을 초과했습니다. SSM 연결 상태와 권한을 확인한 뒤 다시 시도해 주세요.";
+  }
   if (/ssm:DescribeInstanceInformation|AccessDenied|UnauthorizedOperation/i.test(message)) {
     return "SSM 상태를 조회할 권한이 없어 가져오기를 차단했습니다. 사용자/역할에 `ssm:DescribeInstanceInformation` 권한이 포함되어 있는지 확인해 주세요.";
   }
@@ -313,6 +316,9 @@ async function resolveExecutable(command: string): Promise<string> {
 
 const DEFAULT_AWS_COMMAND_TIMEOUT_MS = 30_000;
 const AWS_PROFILE_DETAILS_STATUS_TIMEOUT_MS = 8_000;
+const AWS_EC2_LIST_COMMAND_TIMEOUT_MS = 20_000;
+const AWS_SSM_AVAILABILITY_LOOKUP_TIMEOUT_MS = 12_000;
+const AWS_SSM_AVAILABILITY_COMMAND_TIMEOUT_MS = 5_000;
 const AWS_SSH_METADATA_PROBE_TIMEOUT_MS = 12_000;
 const AWS_SSH_METADATA_COMMAND_TIMEOUT_MS = 5_000;
 const AWS_SSH_METADATA_POLL_INTERVAL_MS = 1_000;
@@ -3665,7 +3671,7 @@ export class AwsService {
         "--output",
         "json",
       ],
-      60_000,
+      AWS_EC2_LIST_COMMAND_TIMEOUT_MS,
     );
     if (result.exitCode !== 0) {
       throw normalizeAwsCliError(
@@ -3727,10 +3733,28 @@ export class AwsService {
     region: string,
   ): Promise<SsmManagedInstanceLookupResult> {
     try {
+      const startedAt = Date.now();
+      const getRemainingTimeoutMs = () =>
+        Math.max(
+          0,
+          AWS_SSM_AVAILABILITY_LOOKUP_TIMEOUT_MS - (Date.now() - startedAt),
+        );
+      const getCommandTimeoutMs = () =>
+        Math.max(
+          1,
+          Math.min(AWS_SSM_AVAILABILITY_COMMAND_TIMEOUT_MS, getRemainingTimeoutMs()),
+        );
+      const buildTimeoutError = () =>
+        new Error(
+          "SSM 상태 조회가 제한 시간을 초과했습니다. SSM 연결 상태와 권한을 확인한 뒤 다시 시도해 주세요.",
+        );
       const readyInstanceIds = new Set<string>();
       const unavailableInstanceStatuses = new Map<string, string | null>();
       let nextToken: string | undefined;
       do {
+        if (getRemainingTimeoutMs() <= 0) {
+          throw buildTimeoutError();
+        }
         const args = [
           "ssm",
           "describe-instance-information",
@@ -3745,7 +3769,11 @@ export class AwsService {
           args.push("--next-token", nextToken);
         }
 
-        const result = await this.runResolvedCommand("aws", args, 60_000);
+        const result = await this.runResolvedCommand(
+          "aws",
+          args,
+          getCommandTimeoutMs(),
+        );
         if (result.exitCode !== 0) {
           throw normalizeAwsCliError(
             result.stderr,

@@ -602,6 +602,43 @@ describe('AwsImportDialog', () => {
     expect(api.aws.inspectHostSshMetadata).not.toHaveBeenCalled();
   });
 
+  it('shows an SSM lookup timeout notice and disables inspection', async () => {
+    const api = installMockApi();
+    api.aws.listEc2Instances.mockResolvedValue([
+      {
+        instanceId: 'i-aws',
+        name: 'web-1',
+        availabilityZone: 'ap-northeast-2a',
+        platform: 'Linux/UNIX',
+        privateIp: '10.0.0.10',
+        state: 'running',
+        ssmAvailability: 'unknown',
+        ssmAvailabilityReason:
+          'SSM 상태 조회가 제한 시간을 초과했습니다. SSM 연결 상태와 권한을 확인한 뒤 다시 시도해 주세요.',
+      },
+    ]);
+
+    render(
+      <AwsImportDialog
+        open
+        currentGroupPath="Servers"
+        onClose={vi.fn()}
+        onImport={vi.fn().mockResolvedValue(undefined)}
+      />,
+    );
+
+    await waitFor(() =>
+      expect(
+        screen.getAllByText(
+          'SSM 상태 조회가 제한 시간을 초과했습니다. SSM 연결 상태와 권한을 확인한 뒤 다시 시도해 주세요.',
+        ).length,
+      ).toBeGreaterThan(0),
+    );
+    expect(screen.getByText('SSM Unknown')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '가져오기 차단됨' })).toBeDisabled();
+    expect(api.aws.inspectHostSshMetadata).not.toHaveBeenCalled();
+  });
+
   it('shows an inactive-agent reason for managed instances that are not currently reachable over SSM', async () => {
     const api = installMockApi();
     api.aws.listEc2Instances.mockResolvedValue([

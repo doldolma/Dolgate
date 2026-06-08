@@ -1,6 +1,6 @@
 {
   "name": "dolssh",
-  "version": "1.6.13",
+  "version": "1.6.14",
   "private": true,
   "workspaces": [
     "apps/*",
@@ -37,7 +37,7 @@
     "release:mac": "npm run release:publish:mac --workspace @dolssh/desktop",
     "release:win": "npm run release:publish:win --workspace @dolssh/desktop",
     "release:all": "npm run release:all --workspace @dolssh/desktop",
-    "check": "npm run version:check && npm run typecheck && npm run test:services",
+    "check": "npm run version:check && npm run typecheck && npm run test:fast && npm run test:mobile -- --runInBand",
     "test": "npm run test:fast",
     "test:fast": "npm run test:desktop && npm run test:services",
     "test:desktop": "npm run test --workspace @dolssh/desktop",
@@ -49,7 +49,7 @@
     "test:sync-api": "cd services/sync-api && go test ./... -cover",
     "test:services": "npm run test:ssh-core && npm run test:sync-api",
     "test:smoke": "npm run test:desktop:smoke",
-    "test:all": "npm run test:fast && npm run test:mobile -- --runInBand && npm run test:smoke",
+    "test:all": "npm run check && npm run test:smoke",
     "typecheck": "npm-run-all --parallel typecheck:desktop typecheck:mobile",
     "typecheck:desktop": "npm run typecheck --workspace @dolssh/desktop",
     "typecheck:mobile": "node ./apps/mobile/scripts/prepare-runtime.cjs && cd apps/mobile && tsc --noEmit"

@@ -1806,6 +1806,18 @@ describe('AwsService EC2 helpers', () => {
         ssmAvailabilityReason: null,
       }
     ]);
+    expect(service.runResolvedCommand).toHaveBeenNthCalledWith(
+      1,
+      'aws',
+      expect.arrayContaining(['ec2', 'describe-instances']),
+      20_000,
+    );
+    expect(service.runResolvedCommand).toHaveBeenNthCalledWith(
+      2,
+      'aws',
+      expect.arrayContaining(['ssm', 'describe-instance-information']),
+      5_000,
+    );
   });
 
   it('marks inactive managed instances unavailable with a more specific reason', async () => {
@@ -2016,6 +2028,145 @@ describe('AwsService EC2 helpers', () => {
           'SSM 상태를 조회할 권한이 없어 가져오기를 차단했습니다. 사용자/역할에 `ssm:DescribeInstanceInformation` 권한이 포함되어 있는지 확인해 주세요.',
       }
     ]);
+  });
+
+  it('keeps the EC2 list but marks every instance unknown when SSM availability lookup times out', async () => {
+    const service = new AwsService() as unknown as {
+      ensureAwsCliAvailable: () => Promise<void>;
+      runResolvedCommand: ReturnType<typeof vi.fn>;
+      listEc2Instances: (profileName: string, region: string) => Promise<Array<Record<string, unknown>>>;
+    };
+
+    service.ensureAwsCliAvailable = vi.fn().mockResolvedValue(undefined);
+    service.runResolvedCommand = vi
+      .fn()
+      .mockResolvedValueOnce({
+        stdout: JSON.stringify({
+          Reservations: [
+            {
+              Instances: [
+                {
+                  InstanceId: 'i-123',
+                  PrivateIpAddress: '10.0.0.10',
+                  PlatformDetails: 'Linux/UNIX',
+                  Placement: { AvailabilityZone: 'ap-northeast-2a' },
+                  State: { Name: 'running' },
+                  Tags: [{ Key: 'Name', Value: 'web-1' }]
+                }
+              ]
+            }
+          ]
+        }),
+        stderr: '',
+        exitCode: 0
+      })
+      .mockRejectedValueOnce(new Error('aws 명령 실행이 제한 시간을 초과했습니다.'));
+
+    await expect(service.listEc2Instances('default', 'ap-northeast-2')).resolves.toEqual([
+      {
+        instanceId: 'i-123',
+        name: 'web-1',
+        availabilityZone: 'ap-northeast-2a',
+        platform: 'Linux/UNIX',
+        privateIp: '10.0.0.10',
+        state: 'running',
+        ssmAvailability: 'unknown',
+        ssmAvailabilityReason:
+          'SSM 상태 조회가 제한 시간을 초과했습니다. SSM 연결 상태와 권한을 확인한 뒤 다시 시도해 주세요.',
+      }
+    ]);
+    expect(service.runResolvedCommand).toHaveBeenNthCalledWith(
+      1,
+      'aws',
+      expect.arrayContaining(['ec2', 'describe-instances']),
+      20_000,
+    );
+    expect(service.runResolvedCommand).toHaveBeenNthCalledWith(
+      2,
+      'aws',
+      expect.arrayContaining(['ssm', 'describe-instance-information']),
+      5_000,
+    );
+  });
+
+  it('caps paginated SSM availability lookup calls to the remaining timeout budget', async () => {
+    const service = new AwsService() as unknown as {
+      ensureAwsCliAvailable: () => Promise<void>;
+      runResolvedCommand: ReturnType<typeof vi.fn>;
+      listEc2Instances: (profileName: string, region: string) => Promise<Array<Record<string, unknown>>>;
+    };
+    const nowValues = [1_000_000, 1_000_000, 1_000_000, 1_010_500, 1_010_500];
+    const nowSpy = vi
+      .spyOn(Date, 'now')
+      .mockImplementation(() => nowValues.shift() ?? 1_010_500);
+
+    service.ensureAwsCliAvailable = vi.fn().mockResolvedValue(undefined);
+    service.runResolvedCommand = vi
+      .fn()
+      .mockResolvedValueOnce({
+        stdout: JSON.stringify({
+          Reservations: [
+            {
+              Instances: [
+                {
+                  InstanceId: 'i-123',
+                  PrivateIpAddress: '10.0.0.10',
+                  PlatformDetails: 'Linux/UNIX',
+                  Placement: { AvailabilityZone: 'ap-northeast-2a' },
+                  State: { Name: 'running' },
+                  Tags: [{ Key: 'Name', Value: 'web-1' }]
+                }
+              ]
+            }
+          ]
+        }),
+        stderr: '',
+        exitCode: 0
+      })
+      .mockResolvedValueOnce({
+        stdout: JSON.stringify({
+          InstanceInformationList: [],
+          NextToken: 'next-page'
+        }),
+        stderr: '',
+        exitCode: 0
+      })
+      .mockResolvedValueOnce({
+        stdout: JSON.stringify({
+          InstanceInformationList: [{ InstanceId: 'i-123', PingStatus: 'Online' }]
+        }),
+        stderr: '',
+        exitCode: 0
+      });
+
+    try {
+      await expect(service.listEc2Instances('default', 'ap-northeast-2')).resolves.toEqual([
+        {
+          instanceId: 'i-123',
+          name: 'web-1',
+          availabilityZone: 'ap-northeast-2a',
+          platform: 'Linux/UNIX',
+          privateIp: '10.0.0.10',
+          state: 'running',
+          ssmAvailability: 'ready',
+          ssmAvailabilityReason: null,
+        }
+      ]);
+      expect(service.runResolvedCommand).toHaveBeenNthCalledWith(
+        2,
+        'aws',
+        expect.arrayContaining(['ssm', 'describe-instance-information']),
+        5_000,
+      );
+      expect(service.runResolvedCommand).toHaveBeenNthCalledWith(
+        3,
+        'aws',
+        expect.arrayContaining(['ssm', 'describe-instance-information']),
+        1_500,
+      );
+    } finally {
+      nowSpy.mockRestore();
+    }
   });
 
   it('describes a single EC2 instance and returns null when no instance is present', async () => {
