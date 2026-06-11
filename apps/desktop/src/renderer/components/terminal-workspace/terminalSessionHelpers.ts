@@ -3,6 +3,7 @@ import type {
   SessionShareSnapshotInput,
   TerminalTab,
 } from '@shared';
+import { resolveConnectionFailurePresentation } from '../../store/utils';
 
 export const SESSION_SHARE_CHAT_TOAST_LIMIT = 3;
 export const SESSION_SHARE_CHAT_TOAST_TTL_MS = 8000;
@@ -98,7 +99,9 @@ export function resolveConnectionOverlayTitle(
   }
 
   if (tab.status === 'error') {
-    return 'Connection Failed';
+    return tab.errorMessage
+      ? resolveConnectionFailurePresentation(tab.errorMessage).title
+      : 'Connection Failed';
   }
 
   if (tab.connectionProgress?.blockingKind === 'browser') {
@@ -122,6 +125,18 @@ export function resolveConnectionOverlayTitle(
 export function resolveConnectionOverlayMessage(
   tab: TerminalTab | undefined,
 ): string {
+  if (
+    tab?.status === 'error' &&
+    tab.connectionProgress?.message &&
+    tab.connectionProgress.blockingKind !== 'none'
+  ) {
+    return tab.connectionProgress.message;
+  }
+
+  if (tab?.status === 'error' && tab.errorMessage) {
+    return resolveConnectionFailurePresentation(tab.errorMessage).message;
+  }
+
   if (tab?.connectionProgress?.message) {
     return tab.connectionProgress.message;
   }

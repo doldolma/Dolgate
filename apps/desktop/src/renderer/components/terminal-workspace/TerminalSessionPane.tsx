@@ -10,6 +10,7 @@ import { TerminalSearchOverlay } from './TerminalSearchOverlay';
 import { TerminalSharePopover } from './TerminalSharePopover';
 import type { TerminalSessionPaneProps } from './types';
 import { NoticeCard } from '../../ui';
+import { resolveConnectionFailurePresentation } from '../../store/utils';
 
 export function TerminalSessionPane(props: TerminalSessionPaneProps) {
   const {
@@ -61,6 +62,13 @@ export function TerminalSessionPane(props: TerminalSessionPaneProps) {
       />
     ),
     [props.host, sessionId, tab?.status],
+  );
+  const connectionFailurePresentation = useMemo(
+    () =>
+      tab?.errorMessage
+        ? resolveConnectionFailurePresentation(tab.errorMessage)
+        : null,
+    [tab?.errorMessage],
   );
 
   return (
@@ -123,7 +131,7 @@ export function TerminalSessionPane(props: TerminalSessionPaneProps) {
 
       {tab?.errorMessage ? (
         <NoticeCard tone="danger" className="mx-[0.55rem] mt-[0.55rem]" role="alert">
-          {tab.errorMessage}
+          {connectionFailurePresentation?.message ?? tab.errorMessage}
         </NoticeCard>
       ) : null}
       {serialNotice ? (

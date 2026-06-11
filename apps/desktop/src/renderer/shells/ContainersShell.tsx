@@ -430,6 +430,8 @@ export function ContainersShell({
                         : null
                     }
                     onRefresh={containersViewModel.refreshHostContainers}
+                    onRetryConnection={containersViewModel.refreshHostContainers}
+                    onClose={containersViewModel.closeHostContainersTab}
                     onSelectContainer={containersViewModel.selectHostContainer}
                     onSetPanel={containersViewModel.setHostContainersPanel}
                     onSetTunnelState={containersViewModel.setHostContainerTunnelState}

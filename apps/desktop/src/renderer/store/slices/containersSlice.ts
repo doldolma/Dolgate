@@ -165,116 +165,118 @@ export function createContainersSlice(deps: SliceDeps): ContainersSlice {
     ensureTrustedHost,
   } = services;
 
+  const connectHostContainersTab = async (hostId: string) => {
+    const host = get().hosts.find((item) => item.id === hostId);
+    if (!host) {
+      return;
+    }
+    if (isAwsEcsHostRecord(host)) {
+      set((state) => {
+        const existingTab = findContainersTab(state, hostId);
+        const nextTab = {
+          ...(existingTab ?? createEmptyContainersTabState(host)),
+          kind: "ecs-cluster" as const,
+          title: buildContainersTabTitle(host),
+          isLoading: true,
+          errorMessage: undefined,
+        };
+        return {
+          activeWorkspaceTab: "containers",
+          activeContainerHostId: hostId,
+          homeSection: "hosts",
+          hostDrawer: { mode: "closed" },
+          containerTabs: upsertContainersTab(state.containerTabs, nextTab),
+        };
+      });
+      await loadEcsClusterSnapshot(set, get, hostId);
+      return;
+    }
+    if (
+      promptForMissingUsername(set, get, {
+        hostId,
+        source: "containers",
+      })
+    ) {
+      return;
+    }
+    set((state) => {
+      const existingTab = findContainersTab(state, hostId);
+      const nextTab = {
+        ...(existingTab ?? createEmptyContainersTabState(host)),
+        title: buildContainersTabTitle(host),
+        isLoading: true,
+        connectionProgress: createContainerConnectionProgress(
+          hostId,
+          buildContainersEndpointId(hostId),
+          "probing-host-key",
+          `${host.label} 호스트 키를 확인하는 중입니다.`,
+        ),
+        errorMessage: undefined,
+      };
+      return {
+        activeWorkspaceTab: "containers",
+        activeContainerHostId: hostId,
+        homeSection: "hosts",
+        hostDrawer: { mode: "closed" },
+        containerTabs: upsertContainersTab(state.containerTabs, nextTab),
+      };
+    });
+
+    let trusted = false;
+    try {
+      trusted = await ensureTrustedHost(set, {
+        hostId,
+        endpointId: buildContainersEndpointId(hostId),
+        action: {
+          kind: "containers",
+          hostId,
+        },
+      });
+    } catch (error) {
+      const message =
+        error instanceof Error
+          ? normalizeRemoteInvokeErrorMessage(error.message)
+          : "컨테이너 페이지를 열지 못했습니다.";
+      set((state) => {
+        const currentTab = findContainersTab(state, hostId);
+        if (!currentTab) {
+          return state;
+        }
+        return {
+          containerTabs: upsertContainersTab(state.containerTabs, {
+            ...currentTab,
+            isLoading: false,
+            connectionProgress: null,
+            errorMessage: message,
+          }),
+        };
+      });
+      return;
+    }
+    if (!trusted) {
+      set((state) => {
+        const currentTab = findContainersTab(state, hostId);
+        if (!currentTab) {
+          return state;
+        }
+        return {
+          containerTabs: upsertContainersTab(state.containerTabs, {
+            ...currentTab,
+            isLoading: false,
+            connectionProgress: null,
+          }),
+        };
+      });
+      return;
+    }
+
+    await loadContainersList(set, get, hostId);
+  };
+
   return {
     containerTabs: [],
     activeContainerHostId: null,
-    openHostContainersTab: async (hostId) => {
-            const host = get().hosts.find((item) => item.id === hostId);
-            if (!host) {
-              return;
-            }
-            if (isAwsEcsHostRecord(host)) {
-              set((state) => {
-                const existingTab = findContainersTab(state, hostId);
-                const nextTab = {
-                  ...(existingTab ?? createEmptyContainersTabState(host)),
-                  kind: "ecs-cluster" as const,
-                  title: buildContainersTabTitle(host),
-                  isLoading: true,
-                  errorMessage: undefined,
-                };
-                return {
-                  activeWorkspaceTab: "containers",
-                  activeContainerHostId: hostId,
-                  homeSection: "hosts",
-                  hostDrawer: { mode: "closed" },
-                  containerTabs: upsertContainersTab(state.containerTabs, nextTab),
-                };
-              });
-              await loadEcsClusterSnapshot(set, get, hostId);
-              return;
-            }
-            if (
-              promptForMissingUsername(set, get, {
-                hostId,
-                source: "containers",
-              })
-            ) {
-              return;
-            }
-            set((state) => {
-              const existingTab = findContainersTab(state, hostId);
-              const nextTab = {
-                ...(existingTab ?? createEmptyContainersTabState(host)),
-                title: buildContainersTabTitle(host),
-                isLoading: true,
-                connectionProgress: createContainerConnectionProgress(
-                  hostId,
-                  buildContainersEndpointId(hostId),
-                  "probing-host-key",
-                  `${host.label} 호스트 키를 확인하는 중입니다.`,
-                ),
-                errorMessage: undefined,
-              };
-              return {
-                activeWorkspaceTab: "containers",
-                activeContainerHostId: hostId,
-                homeSection: "hosts",
-                hostDrawer: { mode: "closed" },
-                containerTabs: upsertContainersTab(state.containerTabs, nextTab),
-              };
-            });
-
-            let trusted = false;
-            try {
-              trusted = await ensureTrustedHost(set, {
-                hostId,
-                endpointId: buildContainersEndpointId(hostId),
-                action: {
-                  kind: "containers",
-                  hostId,
-                },
-              });
-            } catch (error) {
-              const message =
-                error instanceof Error
-                  ? error.message
-                  : "컨테이너 페이지를 열지 못했습니다.";
-              set((state) => {
-                const currentTab = findContainersTab(state, hostId);
-                if (!currentTab) {
-                  return state;
-                }
-                return {
-                  containerTabs: upsertContainersTab(state.containerTabs, {
-                    ...currentTab,
-                    isLoading: false,
-                    connectionProgress: null,
-                    errorMessage: message,
-                  }),
-                };
-              });
-              return;
-            }
-            if (!trusted) {
-              set((state) => {
-                const currentTab = findContainersTab(state, hostId);
-                if (!currentTab) {
-                  return state;
-                }
-                return {
-                  containerTabs: upsertContainersTab(state.containerTabs, {
-                    ...currentTab,
-                    isLoading: false,
-                    connectionProgress: null,
-                  }),
-                };
-              });
-              return;
-            }
-    
-            await loadContainersList(set, get, hostId);
-          },
+    openHostContainersTab: connectHostContainersTab,
     closeHostContainersTab: async (hostId) => {
             const host = get().hosts.find((item) => item.id === hostId);
             const currentTab = findContainersTab(get(), hostId);
@@ -358,7 +360,7 @@ export function createContainersSlice(deps: SliceDeps): ContainersSlice {
               await loadEcsClusterSnapshot(set, get, hostId);
               return;
             }
-            await loadContainersList(set, get, hostId);
+            await connectHostContainersTab(hostId);
           },
     refreshEcsClusterUtilization: async (hostId) => {
             const host = get().hosts.find((item) => item.id === hostId);

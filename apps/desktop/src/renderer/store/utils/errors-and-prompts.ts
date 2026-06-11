@@ -16,6 +16,61 @@ export function normalizeErrorMessage(
     : fallback;
 }
 
+export interface ConnectionFailurePresentation {
+  title: string;
+  message: string;
+}
+
+function extractDialTarget(message: string): string {
+  const match = /\bdial tcp (?:\[[^\]]+\]|[^:\s]+):\d+/iu.exec(message);
+  if (!match) {
+    return "대상 호스트";
+  }
+  return match[0].replace(/^dial tcp\s+/iu, "");
+}
+
+export function resolveConnectionFailurePresentation(
+  message: string,
+): ConnectionFailurePresentation {
+  const normalized = normalizeRemoteInvokeErrorMessage(message);
+  const target = extractDialTarget(normalized);
+  if (/host key is not trusted yet/i.test(normalized)) {
+    return {
+      title: "Host Key Not Trusted",
+      message:
+        "이 호스트의 SSH 호스트 키를 먼저 신뢰해야 컨테이너를 조회할 수 있습니다.",
+    };
+  }
+  if (/network is unreachable|no route to host/i.test(normalized)) {
+    return {
+      title: "Connection Failed",
+      message: `${target}에 연결할 수 없습니다. 현재 네트워크에서 해당 호스트로 가는 경로가 없습니다.`,
+    };
+  }
+  if (/connection refused/i.test(normalized)) {
+    return {
+      title: "Connection Failed",
+      message: `${target}에서 연결을 거부했습니다.`,
+    };
+  }
+  if (/i\/o timeout|timed out|operation timed out/i.test(normalized)) {
+    return {
+      title: "Connection Failed",
+      message: `${target} 연결 시간이 초과되었습니다.`,
+    };
+  }
+  if (/connection reset|\bEOF\b/i.test(normalized)) {
+    return {
+      title: "Connection Failed",
+      message: `${target} 연결이 중간에 끊겼습니다.`,
+    };
+  }
+  return {
+    title: "Connection Failed",
+    message: normalized || "연결을 완료하지 못했습니다.",
+  };
+}
+
 export function createConnectionProgress(
   stage: TerminalConnectionProgress["stage"],
   message: string,

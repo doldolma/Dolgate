@@ -1219,6 +1219,52 @@ describe("createAppStore containers", () => {
     );
   });
 
+  it("runs host-key preflight again when refreshing host containers", async () => {
+    const api = createMockApi();
+    const store = createAppStore(api);
+
+    await store.getState().bootstrap();
+    await store.getState().openHostContainersTab("host-1");
+    vi.mocked(api.knownHosts.probeHost).mockClear();
+    vi.mocked(api.containers.list).mockClear();
+
+    await store.getState().refreshHostContainers("host-1");
+
+    expect(api.knownHosts.probeHost).toHaveBeenCalledWith({
+      hostId: "host-1",
+      endpointId: "containers:host-1",
+    });
+    expect(api.containers.list).toHaveBeenCalledWith("host-1");
+  });
+
+  it("stops container refresh at the known-host prompt when the host key is not trusted", async () => {
+    const api = createMockApi();
+    vi.mocked(api.knownHosts.probeHost).mockResolvedValueOnce(
+      createUntrustedHostProbe(),
+    );
+    const store = createAppStore(api);
+
+    await store.getState().bootstrap();
+    await store.getState().refreshHostContainers("host-1");
+
+    expect(api.containers.list).not.toHaveBeenCalled();
+    expect(store.getState().pendingHostKeyPrompt).toMatchObject({
+      action: {
+        kind: "containers",
+        hostId: "host-1",
+      },
+      probe: {
+        status: "untrusted",
+      },
+    });
+    expect(
+      store.getState().containerTabs.find((tab) => tab.hostId === "host-1"),
+    ).toMatchObject({
+      isLoading: false,
+      connectionProgress: null,
+    });
+  });
+
   it("marks the pending AWS container shell session as error when host-key probing times out", async () => {
     const api = createMockApi();
     vi.mocked(api.containers.list).mockResolvedValue({

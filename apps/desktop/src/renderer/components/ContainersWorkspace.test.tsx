@@ -208,6 +208,8 @@ function createProps(
     isActive: true,
     interactiveAuth: null,
     onRefresh: vi.fn().mockResolvedValue(undefined),
+    onRetryConnection: vi.fn().mockResolvedValue(undefined),
+    onClose: vi.fn().mockResolvedValue(undefined),
     onSelectContainer: vi.fn().mockResolvedValue(undefined),
     onSetPanel: vi.fn(),
     onSetTunnelState: vi.fn(),
@@ -346,6 +348,59 @@ describe("container list presentation helpers", () => {
 });
 
 describe("ContainersWorkspace", () => {
+  it("shows a connection failure overlay for untrusted host keys and wires retry and close actions", () => {
+    const onRetryConnection = vi.fn().mockResolvedValue(undefined);
+    const onClose = vi.fn().mockResolvedValue(undefined);
+    render(
+      <ContainersWorkspace
+        {...createProps({
+          ...createTab(),
+          errorMessage: "Host key is not trusted yet.",
+        })}
+        onRetryConnection={onRetryConnection}
+        onClose={onClose}
+      />,
+    );
+
+    expect(
+      screen.getByRole("alertdialog", { name: "Host Key Not Trusted" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getAllByText(
+        "이 호스트의 SSH 호스트 키를 먼저 신뢰해야 컨테이너를 조회할 수 있습니다.",
+      ).length,
+    ).toBeGreaterThanOrEqual(2);
+
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+
+    expect(onRetryConnection).toHaveBeenCalledWith("host-1");
+    expect(onClose).toHaveBeenCalledWith("host-1");
+  });
+
+  it("shows a friendly connection failure overlay and notice for container list network errors", () => {
+    render(
+      <ContainersWorkspace
+        {...createProps({
+          ...createTab(),
+          errorMessage:
+            "Error invoking remote method 'containers:list': Error: dial failed: dial tcp 192.168.0.48:22: connect: network is unreachable",
+        })}
+      />,
+    );
+
+    expect(
+      screen.getByRole("alertdialog", { name: "Connection Failed" }),
+    ).toBeInTheDocument();
+    const friendlyMessage =
+      "192.168.0.48:22에 연결할 수 없습니다. 현재 네트워크에서 해당 호스트로 가는 경로가 없습니다.";
+    expect(
+      screen.getAllByText(friendlyMessage).length,
+    ).toBeGreaterThanOrEqual(2);
+    expect(screen.queryByText(/dial failed/u)).toBeNull();
+    expect(screen.queryByText(/Error invoking remote method/u)).toBeNull();
+  });
+
   it("marks the selected detail panel tab accessibly and keeps disabled tabs visually inactive", () => {
     render(
       <ContainersWorkspace

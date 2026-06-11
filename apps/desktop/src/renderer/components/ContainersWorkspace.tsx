@@ -23,6 +23,7 @@ import type {
   LogsRelativeRangeValue,
   PendingContainersInteractiveAuth,
 } from "../store/createAppStore";
+import { resolveConnectionFailurePresentation } from "../store/utils";
 import { useContainersWorkspaceController } from "../controllers/useContainersWorkspaceController";
 import {
   Button,
@@ -49,6 +50,7 @@ import {
   UPlotMetricChart,
   type MetricChartSeriesDefinition,
 } from "./UPlotMetricChart";
+import { ConnectionStatusOverlay } from "./ConnectionStatusOverlay";
 import { TerminalInteractiveAuthOverlay } from "./terminal-workspace/TerminalInteractiveAuthOverlay";
 import {
   countLocalFindMatches,
@@ -71,6 +73,8 @@ interface ContainersWorkspaceProps {
   isActive: boolean;
   interactiveAuth: PendingContainersInteractiveAuth | null;
   onRefresh: (hostId: string) => Promise<void>;
+  onRetryConnection: (hostId: string) => Promise<void>;
+  onClose: (hostId: string) => Promise<void>;
   onSelectContainer: (
     hostId: string,
     containerId: string | null,
@@ -1345,6 +1349,8 @@ export function ContainersWorkspace({
   isActive,
   interactiveAuth,
   onRefresh,
+  onRetryConnection,
+  onClose,
   onSelectContainer,
   onSetPanel,
   onSetTunnelState,
@@ -1399,6 +1405,17 @@ export function ContainersWorkspace({
   const matchingInteractiveAuth =
     interactiveAuth?.hostId === host.id ? interactiveAuth : null;
   const shouldShowConnectingOverlay = tab.isLoading && !matchingInteractiveAuth;
+  const connectionFailurePresentation = useMemo(
+    () =>
+      tab.errorMessage
+        ? resolveConnectionFailurePresentation(tab.errorMessage)
+        : null,
+    [tab.errorMessage],
+  );
+  const shouldShowConnectionFailureOverlay =
+    Boolean(connectionFailurePresentation) &&
+    !tab.isLoading &&
+    !matchingInteractiveAuth;
   const selectedContainerDetails =
     tab.details && tab.details.id === tab.selectedContainerId ? tab.details : null;
   const selectedContainerStatusSummary = useMemo(
@@ -2191,7 +2208,7 @@ export function ContainersWorkspace({
               </div>
               {tab.errorMessage ? (
                 <NoticeCard tone="danger" role="alert">
-                  {tab.errorMessage}
+                  {connectionFailurePresentation?.message ?? tab.errorMessage}
                 </NoticeCard>
               ) : null}
               <div className="flex min-h-0 flex-col gap-[0.7rem] overflow-y-auto pr-px">
@@ -2760,6 +2777,18 @@ export function ContainersWorkspace({
             }}
           />
         </div>
+      ) : shouldShowConnectionFailureOverlay && connectionFailurePresentation ? (
+        <ConnectionStatusOverlay
+          error
+          title={connectionFailurePresentation.title}
+          message={connectionFailurePresentation.message}
+          onRetry={() => {
+            void onRetryConnection(host.id);
+          }}
+          onClose={() => {
+            void onClose(host.id);
+          }}
+        />
       ) : shouldShowConnectingOverlay ? (
         <div
           className="absolute inset-0 z-[3] grid place-items-center rounded-[20px] bg-[rgba(12,20,32,0.18)]"
