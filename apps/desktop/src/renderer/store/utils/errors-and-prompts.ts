@@ -34,6 +34,14 @@ export function resolveConnectionFailurePresentation(
 ): ConnectionFailurePresentation {
   const normalized = normalizeRemoteInvokeErrorMessage(message);
   const target = extractDialTarget(normalized);
+  const awsSsmExitCodeMatch =
+    /^AWS SSM session exited with code\s+(-?\d+)/i.exec(normalized);
+  if (awsSsmExitCodeMatch) {
+    return {
+      title: "Connection Failed",
+      message: `AWS SSM 세션이 종료되었습니다. (code ${awsSsmExitCodeMatch[1]})`,
+    };
+  }
   if (/host key is not trusted yet/i.test(normalized)) {
     return {
       title: "Host Key Not Trusted",

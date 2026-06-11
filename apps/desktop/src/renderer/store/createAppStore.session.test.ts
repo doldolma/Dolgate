@@ -4,6 +4,7 @@ import type {
   HostContainerLogsSnapshot,
   HostDraft,
   HostRecord,
+  TerminalTab,
 } from "@shared";
 import { DEFAULT_SFTP_BROWSER_COLUMN_WIDTHS, isSshHostRecord } from "@shared";
 import type { HostContainersTabState } from "./createAppStore";
@@ -21,6 +22,23 @@ import {
 } from "./createAppStore.test-support";
 
 describe("createAppStore sessions and auth recovery", () => {
+  function createAwsSessionTab(
+    overrides: Partial<TerminalTab> = {},
+  ): TerminalTab {
+    return {
+      id: "aws-session-1",
+      sessionId: "aws-session-1",
+      source: "host",
+      hostId: "aws-host-1",
+      title: "AWS Linux",
+      status: "connecting",
+      sessionShare: null,
+      hasReceivedOutput: false,
+      lastEventAt: "2026-06-11T07:49:48.000Z",
+      ...overrides,
+    };
+  }
+
   it("opens a new session tab and moves to focus mode on connect", async () => {
     const store = createAppStore(createMockApi());
 
@@ -77,6 +95,129 @@ describe("createAppStore sessions and auth recovery", () => {
     expect(api.ssh.connect).not.toHaveBeenCalled();
     expect(store.getState().pendingMissingUsernamePrompt).toBeNull();
     expect(store.getState().tabs[0]?.sessionId).toBe("serial-session-1");
+  });
+
+  it("keeps an AWS SSM session tab open when an error is followed by a closed event", async () => {
+    const store = createAppStore(createMockApi());
+    await store.getState().bootstrap();
+    store.setState((state) => ({
+      hosts: [...state.hosts, createAwsEc2Host()],
+      tabs: [createAwsSessionTab()],
+      tabStrip: [{ kind: "session", sessionId: "aws-session-1" }],
+      activeWorkspaceTab: "session:aws-session-1",
+    }));
+
+    store.getState().handleCoreEvent({
+      type: "error",
+      sessionId: "aws-session-1",
+      payload: {
+        message: "session-manager-plugin failed",
+      },
+    });
+    store.getState().handleCoreEvent({
+      type: "closed",
+      sessionId: "aws-session-1",
+      payload: {
+        message: "AWS SSM session exited with code 254",
+      },
+    });
+
+    expect(store.getState().tabs).toHaveLength(1);
+    expect(store.getState().tabs[0]).toMatchObject({
+      sessionId: "aws-session-1",
+      status: "error",
+      errorMessage: "session-manager-plugin failed",
+    });
+    expect(store.getState().tabs[0]?.connectionProgress?.message).toBe(
+      "session-manager-plugin failed",
+    );
+  });
+
+  it("keeps an AWS SSM session tab open when the plugin closes with a non-zero exit code", async () => {
+    const store = createAppStore(createMockApi());
+    await store.getState().bootstrap();
+    store.setState((state) => ({
+      hosts: [...state.hosts, createAwsEc2Host()],
+      tabs: [createAwsSessionTab()],
+      tabStrip: [{ kind: "session", sessionId: "aws-session-1" }],
+      activeWorkspaceTab: "session:aws-session-1",
+    }));
+
+    store.getState().handleCoreEvent({
+      type: "closed",
+      sessionId: "aws-session-1",
+      payload: {
+        message: "AWS SSM session exited with code 254",
+      },
+    });
+
+    expect(store.getState().tabs).toHaveLength(1);
+    expect(store.getState().tabs[0]).toMatchObject({
+      sessionId: "aws-session-1",
+      status: "error",
+      errorMessage: "AWS SSM session exited with code 254",
+    });
+    expect(store.getState().tabs[0]?.connectionProgress?.message).toBe(
+      "AWS SSM session exited with code 254",
+    );
+  });
+
+  it("keeps an AWS SSM session tab open for non-zero exit even after output was printed", async () => {
+    const store = createAppStore(createMockApi());
+    await store.getState().bootstrap();
+    store.setState((state) => ({
+      hosts: [...state.hosts, createAwsEc2Host()],
+      tabs: [
+        createAwsSessionTab({
+          status: "connected",
+          hasReceivedOutput: true,
+        }),
+      ],
+      tabStrip: [{ kind: "session", sessionId: "aws-session-1" }],
+      activeWorkspaceTab: "session:aws-session-1",
+    }));
+
+    store.getState().handleCoreEvent({
+      type: "closed",
+      sessionId: "aws-session-1",
+      payload: {
+        message: "AWS SSM session exited with code 254",
+      },
+    });
+
+    expect(store.getState().tabs).toHaveLength(1);
+    expect(store.getState().tabs[0]).toMatchObject({
+      sessionId: "aws-session-1",
+      status: "error",
+      errorMessage: "AWS SSM session exited with code 254",
+    });
+  });
+
+  it("removes an AWS SSM session tab on normal close after output was received", async () => {
+    const store = createAppStore(createMockApi());
+    await store.getState().bootstrap();
+    store.setState((state) => ({
+      hosts: [...state.hosts, createAwsEc2Host()],
+      tabs: [
+        createAwsSessionTab({
+          status: "connected",
+          hasReceivedOutput: true,
+        }),
+      ],
+      tabStrip: [{ kind: "session", sessionId: "aws-session-1" }],
+      activeWorkspaceTab: "session:aws-session-1",
+    }));
+
+    store.getState().handleCoreEvent({
+      type: "closed",
+      sessionId: "aws-session-1",
+      payload: {
+        message: "AWS SSM session exited with code 0",
+      },
+    });
+
+    expect(store.getState().tabs).toHaveLength(0);
+    expect(store.getState().tabStrip).toHaveLength(0);
   });
 
   it("prompts for a missing SSH username before opening a session", async () => {

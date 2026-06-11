@@ -39,6 +39,22 @@ describe("terminalSessionHelpers connection error presentation", () => {
     );
   });
 
+  it("uses friendly AWS SSM exit copy for terminal error overlays", () => {
+    const tab = createErrorTab({
+      errorMessage: "AWS SSM session exited with code 254",
+      connectionProgress: {
+        stage: "connecting",
+        message: "AWS SSM session exited with code 254",
+        blockingKind: "none",
+        retryable: true,
+      },
+    });
+
+    expect(resolveConnectionOverlayMessage(tab)).toBe(
+      "AWS SSM 세션이 종료되었습니다. (code 254)",
+    );
+  });
+
   it("keeps blocking progress messages for credential retry prompts", () => {
     const tab = createErrorTab({
       errorMessage: "permission denied",

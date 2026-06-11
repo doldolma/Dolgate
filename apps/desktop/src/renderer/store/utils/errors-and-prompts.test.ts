@@ -15,6 +15,17 @@ describe("normalizeRemoteInvokeErrorMessage", () => {
 });
 
 describe("resolveConnectionFailurePresentation", () => {
+  it("presents AWS SSM session exit codes with concise copy", () => {
+    expect(
+      resolveConnectionFailurePresentation(
+        "AWS SSM session exited with code 254",
+      ),
+    ).toEqual({
+      title: "Connection Failed",
+      message: "AWS SSM 세션이 종료되었습니다. (code 254)",
+    });
+  });
+
   it("presents network unreachable errors without raw Go wording", () => {
     expect(
       resolveConnectionFailurePresentation(

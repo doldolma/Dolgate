@@ -170,6 +170,8 @@ export function createRuntimeEventSlice(deps: SliceDeps): RuntimeEventSlice {
     /status 127|command not found|not found|no such file|cannot execute|exec format|executable file not found/i.test(
       message,
     );
+  const awsSsmSessionExitPattern =
+    /^AWS SSM session exited with code\s+(-?\d+)/i;
 
   return {
     handleCoreEvent: (event) => {
@@ -769,10 +771,41 @@ export function createRuntimeEventSlice(deps: SliceDeps): RuntimeEventSlice {
                 state,
                 sessionId,
               );
+              const currentHost =
+                currentTab?.source === "host" && currentTab.hostId
+                  ? state.hosts.find((host) => host.id === currentTab.hostId)
+                  : undefined;
+              const currentAwsHost =
+                currentHost && isAwsEc2HostRecord(currentHost)
+                  ? currentHost
+                  : null;
               const rawEventMessage =
                 event.type === "error"
                   ? String(event.payload.message ?? "SSH error")
                   : "";
+              const closedEventMessage =
+                event.type === "closed"
+                  ? String(event.payload.message ?? "")
+                  : "";
+              const awsSsmExitCodeMatch =
+                awsSsmSessionExitPattern.exec(closedEventMessage);
+              const isFailedAwsSsmExit =
+                awsSsmExitCodeMatch !== null &&
+                Number(awsSsmExitCodeMatch[1]) !== 0;
+              const shouldKeepAwsSsmClosedAsError =
+                event.type === "closed" &&
+                currentTab != null &&
+                currentAwsHost != null &&
+                (
+                  isFailedAwsSsmExit ||
+                  (
+                    currentTab.hasReceivedOutput !== true &&
+                    (
+                      currentTab.status === "connecting" ||
+                      currentTab.status === "error"
+                    )
+                  )
+                );
               const shellLaunchFailureMessage =
                 currentAttempt?.source === "container-shell"
                   ? missingContainerShellMessage
@@ -878,15 +911,34 @@ export function createRuntimeEventSlice(deps: SliceDeps): RuntimeEventSlice {
                 if (isContainerShellLaunchFailure) {
                   return nextContainerShellFailureState(true);
                 }
+                if (shouldKeepAwsSsmClosedAsError) {
+                  const message =
+                    currentTab.errorMessage?.trim() ||
+                    closedEventMessage.trim() ||
+                    "AWS SSM session closed";
+                  return {
+                    tabs: state.tabs.map((tab): TerminalTab =>
+                      tab.sessionId === sessionId
+                        ? {
+                            ...tab,
+                            status: "error" as const,
+                            errorMessage: message,
+                            connectionProgress: resolveErrorProgress(message),
+                            lastEventAt: new Date().toISOString(),
+                          }
+                        : tab,
+                    ),
+                    pendingConnectionAttempts:
+                      state.pendingConnectionAttempts.filter(
+                        (attempt) => attempt.sessionId !== sessionId,
+                      ),
+                  };
+                }
                 return removeSessionFromState(state, sessionId);
               }
               if (!currentTab) {
                 return state;
               }
-              const currentHost =
-                currentTab.source === "host" && currentTab.hostId
-                  ? state.hosts.find((host) => host.id === currentTab.hostId)
-                  : undefined;
               const currentSshHost =
                 currentHost && isSshHostRecord(currentHost) ? currentHost : null;
               const errorMessage = String(event.payload.message ?? "SSH error");
