@@ -59,32 +59,36 @@ func TestPrepareRuntimePathsSkipsNonFileSQLiteTargets(t *testing.T) {
 	}
 }
 
-func TestPrepareRuntimePathsSkipsMySQLDatabaseDirectoryCreation(t *testing.T) {
-	tempDir := t.TempDir()
-	keyDir := filepath.Join(tempDir, "keys")
-	cfg := appconfig.AppConfig{
-		Database: appconfig.DatabaseConfig{
-			Driver: "mysql",
-			URL:    "user:pass@tcp(localhost:3306)/dolgate",
-		},
-		Auth: appconfig.AuthConfig{
-			SigningPrivateKeyPath: filepath.Join(keyDir, "auth-signing-private.pem"),
-		},
-	}
+func TestPrepareRuntimePathsSkipsServerDatabaseDirectoryCreation(t *testing.T) {
+	for _, driver := range []string{"mysql", "postgres", "postgresql"} {
+		t.Run(driver, func(t *testing.T) {
+			tempDir := t.TempDir()
+			keyDir := filepath.Join(tempDir, "keys")
+			cfg := appconfig.AppConfig{
+				Database: appconfig.DatabaseConfig{
+					Driver: driver,
+					URL:    "host=localhost user=dolgate password=secret dbname=dolgate port=5432 sslmode=disable TimeZone=UTC",
+				},
+				Auth: appconfig.AuthConfig{
+					SigningPrivateKeyPath: filepath.Join(keyDir, "auth-signing-private.pem"),
+				},
+			}
 
-	if err := prepareRuntimePaths(cfg); err != nil {
-		t.Fatalf("prepareRuntimePaths() error = %v", err)
-	}
+			if err := prepareRuntimePaths(cfg); err != nil {
+				t.Fatalf("prepareRuntimePaths() error = %v", err)
+			}
 
-	if _, err := os.Stat(keyDir); err != nil {
-		t.Fatalf("key dir stat error = %v", err)
-	}
+			if _, err := os.Stat(keyDir); err != nil {
+				t.Fatalf("key dir stat error = %v", err)
+			}
 
-	entries, err := os.ReadDir(tempDir)
-	if err != nil {
-		t.Fatalf("ReadDir() error = %v", err)
-	}
-	if len(entries) != 1 || entries[0].Name() != "keys" || !entries[0].IsDir() {
-		t.Fatalf("expected only signing key directory, found %+v", entries)
+			entries, err := os.ReadDir(tempDir)
+			if err != nil {
+				t.Fatalf("ReadDir() error = %v", err)
+			}
+			if len(entries) != 1 || entries[0].Name() != "keys" || !entries[0].IsDir() {
+				t.Fatalf("expected only signing key directory, found %+v", entries)
+			}
+		})
 	}
 }

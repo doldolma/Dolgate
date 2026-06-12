@@ -11,6 +11,7 @@ import (
 	"github.com/glebarez/sqlite"
 	"github.com/google/uuid"
 	"gorm.io/driver/mysql"
+	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 
@@ -154,6 +155,10 @@ func OpenMySQL(dsn string) (*GormStore, error) {
 	return Open("mysql", dsn)
 }
 
+func OpenPostgres(dsn string) (*GormStore, error) {
+	return Open("postgres", dsn)
+}
+
 func (s *GormStore) Close() error {
 	if s == nil || s.db == nil {
 		return nil
@@ -172,6 +177,8 @@ func openDialector(driver string, dsn string) (gorm.Dialector, error) {
 		return sqlite.Open(dsn), nil
 	case "mysql":
 		return mysql.Open(dsn), nil
+	case "postgres", "postgresql":
+		return postgres.Open(dsn), nil
 	default:
 		return nil, fmt.Errorf("unsupported db driver: %s", driver)
 	}

@@ -222,12 +222,18 @@ OIDC_SCOPES
 기본값 메모:
 
 - `PORT`: `8080`
-- `DB_DRIVER`: `sqlite`
+- `DB_DRIVER`: `sqlite` (`mysql`, `postgres`도 지원)
 - `DATABASE_URL`: `file:./data/dolgate_sync.db?_pragma=busy_timeout(5000)`
 - `AUTH_SIGNING_PRIVATE_KEY_PATH`: `./data/auth-signing-private.pem`
 - `LOCAL_AUTH_ENABLED`: `true`
 - `LOCAL_SIGNUP_ENABLED`: `true`
 - `OIDC_ENABLED`: `false`
+
+PostgreSQL을 사용할 때는 `DB_DRIVER=postgres`와 PostgreSQL DSN을 지정합니다.
+
+```text
+DATABASE_URL=host=127.0.0.1 user=dolgate_user password=CHANGE_ME_PASSWORD dbname=dolgate port=5432 sslmode=disable TimeZone=UTC
+```
 
 ## 서명 키 관련 주의사항
 
