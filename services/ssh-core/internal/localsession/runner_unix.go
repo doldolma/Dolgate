@@ -61,7 +61,7 @@ func resolveLocalRuntime(payload protocol.LocalConnectPayload) (localCommandRunt
 			shellKind:        shellKind,
 			executablePath:   executablePath,
 			args:             args,
-			env:              buildRuntimeEnv(os.Environ(), payload.Env),
+			env:              buildRuntimeEnv(os.Environ(), payload.UnsetEnv, payload.Env),
 			workingDirectory: workingDirectory,
 		}, nil
 	}

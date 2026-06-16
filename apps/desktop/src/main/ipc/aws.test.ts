@@ -138,12 +138,22 @@ describe("registerAwsIpcHandlers", () => {
       });
     const invalidateEcsServiceActionContext = vi.fn();
     const connectLocalSession = vi.fn().mockResolvedValue({ sessionId: "session-1" });
+    const buildManagedSessionEnvSpec = vi.fn().mockReturnValue({
+      env: {
+        HOME: "/tmp/dolgate-aws-home",
+        USERPROFILE: "/tmp/dolgate-aws-home",
+        AWS_CONFIG_FILE: "/tmp/dolgate-aws-home/.aws/config",
+        AWS_SHARED_CREDENTIALS_FILE: "/tmp/dolgate-aws-home/.aws/credentials",
+      },
+      unsetEnv: ["AWS_PROFILE", "AWS_DEFAULT_PROFILE"],
+    });
 
     registerAwsIpcHandlers({
       awsService: {
         resolveManagedProfileNameOrFallback: vi.fn().mockReturnValue("default"),
         ensureAwsCliAvailable: vi.fn().mockResolvedValue(undefined),
         ensureSessionManagerPluginAvailable: vi.fn().mockResolvedValue(undefined),
+        buildManagedSessionEnvSpec,
         describeEcsServiceActionContext,
         invalidateEcsServiceActionContext,
       },
@@ -188,6 +198,19 @@ describe("registerAwsIpcHandlers", () => {
     );
     expect(describeEcsServiceActionContext).toHaveBeenCalledTimes(2);
     expect(connectLocalSession).toHaveBeenCalledTimes(1);
+    expect(connectLocalSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        executable: "aws",
+        args: expect.arrayContaining(["ecs", "execute-command"]),
+        env: {
+          HOME: "/tmp/dolgate-aws-home",
+          USERPROFILE: "/tmp/dolgate-aws-home",
+          AWS_CONFIG_FILE: "/tmp/dolgate-aws-home/.aws/config",
+          AWS_SHARED_CREDENTIALS_FILE: "/tmp/dolgate-aws-home/.aws/credentials",
+        },
+        unsetEnv: ["AWS_PROFILE", "AWS_DEFAULT_PROFILE"],
+      }),
+    );
   });
 
   it("retries ECS tunnel startup once after invalidating the cached action context", async () => {

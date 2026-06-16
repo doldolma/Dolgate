@@ -615,6 +615,57 @@ describe("createAppStore sessions and auth recovery", () => {
     });
   });
 
+  it("keeps ECS exec AWS auth errors instead of rewriting them as missing shell failures", async () => {
+    const api = createMockApi();
+    api.aws.openEcsExecShell = vi
+      .fn()
+      .mockResolvedValueOnce({ sessionId: "ecs-shell-1" });
+    const store = createAppStore(api);
+
+    await store.getState().bootstrap();
+    store.setState((state) => ({
+      hosts: [...state.hosts, createEcsHost()],
+    }));
+    await store.getState().openEcsExecShell(
+      "ecs-host-1",
+      "api",
+      "arn:aws:ecs:ap-northeast-2:123456789012:task/prod/api-1",
+      "api",
+    );
+
+    store.getState().handleCoreEvent({
+      type: "connected",
+      sessionId: "ecs-shell-1",
+      payload: { shellKind: "aws-ecs-exec" },
+    });
+    store.getState().markSessionOutput(
+      "ecs-shell-1",
+      new TextEncoder().encode("The Session Manager plugin was installed successfully."),
+    );
+    store.getState().handleCoreEvent({
+      type: "error",
+      sessionId: "ecs-shell-1",
+      payload: {
+        message:
+          "aws: [ERROR]: Error when retrieving token from sso: Token has expired and refresh failed",
+      },
+    });
+    store.getState().handleCoreEvent({
+      type: "closed",
+      sessionId: "ecs-shell-1",
+      payload: {},
+    });
+
+    expect(store.getState().tabs).toHaveLength(1);
+    expect(store.getState().tabs[0]?.status).toBe("error");
+    expect(store.getState().tabs[0]?.errorMessage).toContain(
+      "Token has expired",
+    );
+    expect(store.getState().tabs[0]?.errorMessage).not.toContain(
+      "ECS 컨테이너 셸을 시작하지 못했습니다.",
+    );
+  });
+
   it("retries a failed ECS exec shell using /bin/sh again", async () => {
     const api = createMockApi();
     api.aws.openEcsExecShell = vi

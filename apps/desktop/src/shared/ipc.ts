@@ -204,6 +204,7 @@ export interface DesktopLocalConnectInput {
   executable?: string;
   args?: string[];
   env?: Record<string, string>;
+  unsetEnv?: string[];
   workingDirectory?: string | null;
 }
 
@@ -245,6 +246,7 @@ export interface ResolvedLocalConnectPayload {
   executable?: string;
   args?: string[];
   env?: Record<string, string>;
+  unsetEnv?: string[];
   workingDirectory?: string | null;
 }
 

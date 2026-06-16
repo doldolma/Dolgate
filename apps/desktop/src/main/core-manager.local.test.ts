@@ -116,6 +116,10 @@ describe("CoreManager local shell sessions", () => {
       cols: 132,
       rows: 40,
       title: "Terminal",
+      env: {
+        AWS_CONFIG_FILE: "/tmp/dolgate/.aws/config",
+      },
+      unsetEnv: ["AWS_PROFILE", "AWS_DEFAULT_PROFILE"],
     });
 
     const connectRequest = decodeControlFrame(fakeProcess.writes[0]);
@@ -125,6 +129,10 @@ describe("CoreManager local shell sessions", () => {
       cols: 132,
       rows: 40,
       title: "Terminal",
+      env: {
+        AWS_CONFIG_FILE: "/tmp/dolgate/.aws/config",
+      },
+      unsetEnv: ["AWS_PROFILE", "AWS_DEFAULT_PROFILE"],
     });
 
     fakeProcess.emitControl({

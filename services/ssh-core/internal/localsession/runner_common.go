@@ -48,8 +48,8 @@ func defaultRunnerFactory(payload protocol.LocalConnectPayload) (sessionRunner, 
 	return startPlatformLocalRunner(payload, runtime)
 }
 
-func buildRuntimeEnv(base []string, overrides map[string]string) []string {
-	if len(overrides) == 0 {
+func buildRuntimeEnv(base []string, unsetKeys []string, overrides map[string]string) []string {
+	if len(unsetKeys) == 0 && len(overrides) == 0 {
 		return append([]string(nil), base...)
 	}
 	envMap := make(map[string]string, len(base)+len(overrides))
@@ -59,6 +59,12 @@ func buildRuntimeEnv(base []string, overrides map[string]string) []string {
 			continue
 		}
 		envMap[key] = value
+	}
+	for _, key := range unsetKeys {
+		if key == "" {
+			continue
+		}
+		delete(envMap, key)
 	}
 	for key, value := range overrides {
 		if key == "" {

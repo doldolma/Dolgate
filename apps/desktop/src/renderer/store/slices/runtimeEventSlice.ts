@@ -821,21 +821,13 @@ export function createRuntimeEventSlice(deps: SliceDeps): RuntimeEventSlice {
                   IMMEDIATE_ECS_CLOSE_WINDOW_MS;
               const hasKnownShellLaunchFailureState =
                 currentTab?.status === "error" &&
-                (
-                  (shellLaunchFailureMessage != null &&
-                    currentTab.errorMessage === shellLaunchFailureMessage) ||
-                  isEcsExecTab
-                );
+                shellLaunchFailureMessage != null &&
+                currentTab.errorMessage === shellLaunchFailureMessage;
               const isContainerShellLaunchFailure =
                 shellLaunchFailureMessage != null &&
                 currentTab != null &&
                 (
                   hasKnownShellLaunchFailureState ||
-                  (event.type === "error" &&
-                    isEcsExecTab &&
-                    (currentTab.status === "connecting" ||
-                      currentTab.status === "connected" ||
-                      currentTab.status === "error")) ||
                   (event.type === "error" &&
                     isLikelyMissingShellErrorMessage(rawEventMessage) &&
                     (currentAttempt?.source === "container-shell" ||
@@ -843,16 +835,18 @@ export function createRuntimeEventSlice(deps: SliceDeps): RuntimeEventSlice {
                       currentTab?.shellKind === "aws-ecs-exec")) ||
                   (event.type === "closed" &&
                     isEcsExecTab &&
+                    currentTab.hasReceivedOutput !== true &&
                     wasClosedImmediatelyAfterLastEvent &&
                     (currentTab.status === "connecting" ||
                       currentTab.status === "connected" ||
-                      currentTab.status === "error")) ||
+                      hasKnownShellLaunchFailureState)) ||
                   (currentTab.hasReceivedOutput !== true &&
                     (
                       currentAttempt?.source === "ecs-shell" ||
                       currentTab?.shellKind === "aws-ecs-exec"
                         ? currentTab.status === "connecting" ||
                           currentTab.status === "connected" ||
+                          hasKnownShellLaunchFailureState ||
                           currentTab.connectionProgress?.stage ===
                             "waiting-shell"
                         : currentTab.status === "connected" ||
@@ -896,6 +890,10 @@ export function createRuntimeEventSlice(deps: SliceDeps): RuntimeEventSlice {
                 return nextContainerShellFailureState(false);
               }
               if (event.type === "closed") {
+                const shouldKeepEcsExecClosedAsError =
+                  isEcsExecTab &&
+                  currentTab?.status === "error" &&
+                  !hasKnownShellLaunchFailureState;
                 if (
                   activeRetryAttemptBeforeUpdate?.source === "ssh" &&
                   activeRetryAttemptBeforeUpdate.sessionId === sessionId &&
@@ -910,6 +908,29 @@ export function createRuntimeEventSlice(deps: SliceDeps): RuntimeEventSlice {
                 }
                 if (isContainerShellLaunchFailure) {
                   return nextContainerShellFailureState(true);
+                }
+                if (shouldKeepEcsExecClosedAsError) {
+                  const message =
+                    currentTab.errorMessage?.trim() ||
+                    closedEventMessage.trim() ||
+                    "ECS Exec 세션이 종료되었습니다.";
+                  return {
+                    tabs: state.tabs.map((tab): TerminalTab =>
+                      tab.sessionId === sessionId
+                        ? {
+                            ...tab,
+                            status: "error" as const,
+                            errorMessage: message,
+                            connectionProgress: resolveErrorProgress(message),
+                            lastEventAt: new Date().toISOString(),
+                          }
+                        : tab,
+                    ),
+                    pendingConnectionAttempts:
+                      state.pendingConnectionAttempts.filter(
+                        (attempt) => attempt.sessionId !== sessionId,
+                      ),
+                  };
                 }
                 if (shouldKeepAwsSsmClosedAsError) {
                   const message =

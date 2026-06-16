@@ -69,6 +69,17 @@ describe("resolveConnectionFailurePresentation", () => {
     });
   });
 
+  it("presents AWS CLI SSO token failures as authentication guidance", () => {
+    expect(
+      resolveConnectionFailurePresentation(
+        "aws: [ERROR]: Error when retrieving token from sso: Token has expired and refresh failed",
+      ),
+    ).toEqual({
+      title: "AWS Authentication Required",
+      message: "AWS 인증을 확인하지 못했습니다. 다시 로그인해 주세요.",
+    });
+  });
+
   it("falls back to the normalized raw message for unknown errors", () => {
     expect(
       resolveConnectionFailurePresentation(

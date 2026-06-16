@@ -1706,6 +1706,7 @@ export class CoreManager {
     executable?: string;
     args?: string[];
     env?: Record<string, string>;
+    unsetEnv?: string[];
     workingDirectory?: string | null;
   }): Promise<{ sessionId: string }> {
     await this.start();
@@ -1733,6 +1734,7 @@ export class CoreManager {
         executable: payload.executable?.trim() || undefined,
         args: payload.args?.filter((value) => value.trim().length > 0),
         env: payload.env,
+        unsetEnv: payload.unsetEnv,
         workingDirectory: payload.workingDirectory?.trim() || undefined,
       },
     });

@@ -143,6 +143,7 @@ type LocalConnectPayload struct {
 	Executable       string            `json:"executable,omitempty"`
 	Args             []string          `json:"args,omitempty"`
 	Env              map[string]string `json:"env,omitempty"`
+	UnsetEnv         []string          `json:"unsetEnv,omitempty"`
 	WorkingDirectory string            `json:"workingDirectory,omitempty"`
 }
 

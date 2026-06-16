@@ -49,6 +49,16 @@ export function resolveConnectionFailurePresentation(
         "이 호스트의 SSH 호스트 키를 먼저 신뢰해야 컨테이너를 조회할 수 있습니다.",
     };
   }
+  if (
+    /error when retrieving token from sso|token has expired|refresh failed|sso session.*expired|unable to locate credentials|expiredtoken|security token included in the request is invalid/i.test(
+      normalized,
+    )
+  ) {
+    return {
+      title: "AWS Authentication Required",
+      message: "AWS 인증을 확인하지 못했습니다. 다시 로그인해 주세요.",
+    };
+  }
   if (/network is unreachable|no route to host/i.test(normalized)) {
     return {
       title: "Connection Failed",
