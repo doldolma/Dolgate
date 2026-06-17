@@ -1538,6 +1538,101 @@ describe("AwsEcsWorkspace", () => {
     });
   });
 
+  it("reloads running tasks every time the shell picker opens", async () => {
+    const onOpenEcsExecShell = vi.fn().mockResolvedValue(undefined);
+
+    render(
+      <AwsEcsWorkspace
+        host={createHost()}
+        tab={createTab(createSnapshot())}
+        isActive={false}
+        onRefresh={vi.fn().mockResolvedValue(undefined)}
+        onRefreshUtilization={vi.fn().mockResolvedValue(undefined)}
+        onOpenEcsExecShell={onOpenEcsExecShell}
+      />,
+    );
+
+    // First open caches the current task (task-1).
+    fireEvent.click(screen.getByRole("button", { name: "쉘 접속" }));
+    expect(await screen.findByRole("dialog")).toBeInTheDocument();
+    expect(await screen.findByRole("option", { name: "task-1" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "취소" }));
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument(),
+    );
+
+    // The service is redeployed and its task is replaced.
+    awsApi.loadEcsServiceActionContext.mockResolvedValue(
+      createActionContext({
+        runningTasks: [
+          {
+            taskArn: "arn:aws:ecs:ap-northeast-2:123456789012:task/prod/task-2",
+            taskId: "task-2",
+            lastStatus: "RUNNING",
+            enableExecuteCommand: true,
+            containers: [
+              {
+                containerName: "worker",
+                lastStatus: "RUNNING",
+                runtimeId: "runtime-2",
+              },
+            ],
+          },
+        ],
+      }),
+    );
+
+    // Reopening must fetch the fresh task list instead of reusing the cache.
+    fireEvent.click(screen.getByRole("button", { name: "쉘 접속" }));
+    expect(await screen.findByRole("dialog")).toBeInTheDocument();
+    expect(await screen.findByRole("option", { name: "task-2" })).toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: "task-1" })).not.toBeInTheDocument();
+    expect(awsApi.loadEcsServiceActionContext).toHaveBeenCalledTimes(2);
+
+    // And connecting targets the new task, not the terminated one.
+    fireEvent.click(screen.getAllByRole("button", { name: "쉘 접속" })[1]);
+    await waitFor(() => {
+      expect(onOpenEcsExecShell).toHaveBeenCalledWith(
+        "ecs-host-1",
+        "worker",
+        "arn:aws:ecs:ap-northeast-2:123456789012:task/prod/task-2",
+        "worker",
+      );
+    });
+  });
+
+  it("drops the cached service context when Refresh is pressed", async () => {
+    const onRefresh = vi.fn().mockResolvedValue(undefined);
+
+    render(
+      <AwsEcsWorkspace
+        host={createHost()}
+        tab={createTab(createSnapshot(), {
+          ecsActivePanel: "tunnel",
+          ecsSelectedServiceName: "worker",
+        })}
+        isActive={false}
+        onRefresh={onRefresh}
+        onRefreshUtilization={vi.fn().mockResolvedValue(undefined)}
+        onOpenEcsExecShell={vi.fn().mockResolvedValue(undefined)}
+      />,
+    );
+
+    // The tunnel panel loads the action context once and caches it.
+    await waitFor(() =>
+      expect(awsApi.loadEcsServiceActionContext).toHaveBeenCalledTimes(1),
+    );
+
+    // Refresh must invalidate the cache so the panel refetches the tasks
+    // instead of reusing the stale ones, mirroring a tab reopen.
+    fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+
+    await waitFor(() =>
+      expect(awsApi.loadEcsServiceActionContext).toHaveBeenCalledTimes(2),
+    );
+    expect(onRefresh).toHaveBeenCalledWith("ecs-host-1");
+  });
+
   it("keeps a started tunnel alive across panel changes", async () => {
     render(
       <AwsEcsWorkspace

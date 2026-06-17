@@ -773,6 +773,12 @@ export function AwsEcsWorkspace({
   const suppressLogsScrollRef = useRef(false);
   const releaseLogsScrollFrameRef = useRef<number | null>(null);
 
+  const clearServiceContexts = useCallback(() => {
+    setServiceContexts({});
+    serviceContextsRef.current = {};
+    inFlightContextRequestsRef.current = {};
+  }, []);
+
   const openAwsSsoLogin = useCallback(
     async (options: { refreshAfterLogin?: boolean } = {}) => {
       if (!onOpenAwsSsoLogin) {
@@ -782,6 +788,7 @@ export function AwsEcsWorkspace({
       try {
         await onOpenAwsSsoLogin(host.id);
         if (options.refreshAfterLogin) {
+          clearServiceContexts();
           await onRefresh(host.id);
         }
         setSsoLoginActionState({ loading: false, error: null });
@@ -795,8 +802,13 @@ export function AwsEcsWorkspace({
         });
       }
     },
-    [host.id, onOpenAwsSsoLogin, onRefresh],
+    [clearServiceContexts, host.id, onOpenAwsSsoLogin, onRefresh],
   );
+
+  const handleRefresh = useCallback(() => {
+    clearServiceContexts();
+    return onRefresh(host.id);
+  }, [clearServiceContexts, host.id, onRefresh]);
 
   useEffect(() => {
     serviceContextsRef.current = serviceContexts;
@@ -1686,7 +1698,7 @@ export function AwsEcsWorkspace({
         containerName: null,
         submitting: false,
       });
-      const context = await loadServiceContext(serviceName);
+      const context = await loadServiceContext(serviceName, true);
       setShellPickerState((previous) =>
         buildShellPickerStateFromContext(serviceName, context, previous),
       );
@@ -1903,7 +1915,7 @@ export function AwsEcsWorkspace({
               size="sm"
               disabled={tab.isLoading}
               onClick={() => {
-                void onRefresh(host.id);
+                void handleRefresh();
               }}
             >
               {tab.isLoading ? "불러오는 중..." : "Refresh"}
@@ -1936,7 +1948,7 @@ export function AwsEcsWorkspace({
                 size="sm"
                 disabled={tab.isLoading || ssoLoginActionState.loading}
                 onClick={() => {
-                  void onRefresh(host.id);
+                  void handleRefresh();
                 }}
               >
                 다시 시도
