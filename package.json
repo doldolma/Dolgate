@@ -1,6 +1,6 @@
 {
   "name": "dolssh",
-  "version": "1.6.16",
+  "version": "1.6.17",
   "private": true,
   "workspaces": [
     "apps/*",

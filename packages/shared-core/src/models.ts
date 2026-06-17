@@ -156,6 +156,7 @@ export interface AwsEc2HostRecord extends HostBaseRecord {
   awsSshPort?: number | null;
   awsSshMetadataStatus?: AwsSshMetadataStatus | null;
   awsSshMetadataError?: string | null;
+  awsSsmServerProxyEnabled?: boolean;
 }
 
 export interface AwsEc2HostDraft extends HostBaseDraft {
@@ -173,6 +174,7 @@ export interface AwsEc2HostDraft extends HostBaseDraft {
   awsSshPort?: number | null;
   awsSshMetadataStatus?: AwsSshMetadataStatus | null;
   awsSshMetadataError?: string | null;
+  awsSsmServerProxyEnabled?: boolean;
 }
 
 export interface AwsEcsHostRecord extends HostBaseRecord {

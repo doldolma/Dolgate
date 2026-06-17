@@ -12,6 +12,7 @@ type fakeAwsSessionCoreRuntime struct {
 	mu sync.Mutex
 
 	connectCalls    []coretypes.AWSConnectPayload
+	signalCalls     []coretypes.ControlSignalPayload
 	disconnectCalls []string
 	shutdownCalls   int
 	onDisconnect    func(string)
@@ -25,6 +26,13 @@ func (core *fakeAwsSessionCoreRuntime) ConnectAWS(sessionID, requestID string, p
 }
 
 func (core *fakeAwsSessionCoreRuntime) SendSessionInput(sessionID string, data []byte) error {
+	return nil
+}
+
+func (core *fakeAwsSessionCoreRuntime) SendControlSignal(sessionID string, payload coretypes.ControlSignalPayload) error {
+	core.mu.Lock()
+	defer core.mu.Unlock()
+	core.signalCalls = append(core.signalCalls, payload)
 	return nil
 }
 
@@ -106,6 +114,32 @@ func TestAwsSessionBridgeRejectsNewRunnersAfterClose(t *testing.T) {
 	defer core.mu.Unlock()
 	if core.shutdownCalls != 1 {
 		t.Fatalf("Shutdown() calls = %d, want 1", core.shutdownCalls)
+	}
+}
+
+func TestDirectAwsSessionForwardsControlSignal(t *testing.T) {
+	core := &fakeAwsSessionCoreRuntime{}
+	bridge := newAwsSessionBridgeWithCore(core)
+	defer bridge.Close()
+
+	runner, err := bridge.NewRunner(awsSessionStartRequest{
+		HostID:     "host-aws-1",
+		Label:      "Production EC2",
+		Region:     "ap-northeast-2",
+		InstanceID: "i-0123456789",
+	})
+	if err != nil {
+		t.Fatalf("NewRunner() error = %v", err)
+	}
+
+	if err := runner.ControlSignal("interrupt"); err != nil {
+		t.Fatalf("ControlSignal() error = %v", err)
+	}
+
+	core.mu.Lock()
+	defer core.mu.Unlock()
+	if len(core.signalCalls) != 1 || core.signalCalls[0].Signal != "interrupt" {
+		t.Fatalf("signal calls = %#v", core.signalCalls)
 	}
 }
 

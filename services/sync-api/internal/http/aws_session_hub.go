@@ -32,6 +32,7 @@ type awsSessionClientMessage struct {
 	DataBase64 string                  `json:"dataBase64,omitempty"`
 	Cols       int                     `json:"cols,omitempty"`
 	Rows       int                     `json:"rows,omitempty"`
+	Signal     string                  `json:"signal,omitempty"`
 }
 
 type awsSessionServerMessage struct {
@@ -50,6 +51,7 @@ type awsSessionRunner interface {
 	Events() <-chan awsSessionRuntimeEvent
 	Write([]byte) error
 	Resize(cols, rows int) error
+	ControlSignal(signal string) error
 	Close() error
 }
 
@@ -319,6 +321,25 @@ func (hub *AwsSessionHub) HandleWebSocket(writer http.ResponseWriter, request *h
 				continue
 			}
 			if err := activeRunner.Resize(message.Cols, message.Rows); err != nil {
+				if !enqueue(awsSessionServerMessage{
+					Type:    "error",
+					Message: err.Error(),
+				}, false) {
+					return nil
+				}
+			}
+
+		case "controlSignal":
+			if activeRunner == nil {
+				if !enqueue(awsSessionServerMessage{
+					Type:    "error",
+					Message: "AWS session is not started",
+				}, false) {
+					return nil
+				}
+				continue
+			}
+			if err := activeRunner.ControlSignal(message.Signal); err != nil {
 				if !enqueue(awsSessionServerMessage{
 					Type:    "error",
 					Message: err.Error(),

@@ -1,5 +1,5 @@
 import { EventEmitter } from "node:events";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type {
   ActivityLogRecord,
   CoreEvent,
@@ -112,6 +112,41 @@ function createFakeChildProcess() {
   };
 }
 
+class FakeWebSocket {
+  static readonly OPEN = 1;
+  static readonly CLOSED = 3;
+  static instances: FakeWebSocket[] = [];
+
+  readonly sent: string[] = [];
+  readyState = 0;
+  onopen: (() => void) | null = null;
+  onmessage: ((event: { data: unknown }) => void) | null = null;
+  onerror: (() => void) | null = null;
+  onclose: (() => void) | null = null;
+
+  constructor(readonly url: string) {
+    FakeWebSocket.instances.push(this);
+  }
+
+  send(message: string): void {
+    this.sent.push(message);
+  }
+
+  close(): void {
+    this.readyState = FakeWebSocket.CLOSED;
+    this.onclose?.();
+  }
+
+  open(): void {
+    this.readyState = FakeWebSocket.OPEN;
+    this.onopen?.();
+  }
+
+  receive(message: Record<string, unknown>): void {
+    this.onmessage?.({ data: JSON.stringify(message) });
+  }
+}
+
 async function waitForWriteCount(
   writes: Buffer[],
   expectedCount: number,
@@ -127,6 +162,11 @@ async function waitForWriteCount(
 describe("CoreManager AWS SSM sessions", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    FakeWebSocket.instances = [];
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
   });
 
   it("prepends standard Unix tool directories for packaged ssh-core child envs", () => {
@@ -272,6 +312,91 @@ describe("CoreManager AWS SSM sessions", () => {
     );
     expect(metadata.connectionKind).toBe("aws-ssm");
     expect(metadata.status).toBe("connected");
+  });
+
+  it("routes AWS server proxy sessions through websocket IO and terminal events", async () => {
+    vi.stubGlobal("WebSocket", FakeWebSocket);
+    const manager = new CoreManager();
+    const fakeWindow = createFakeWindow();
+    const events: CoreEvent<Record<string, unknown>>[] = [];
+    const streamChunks: Uint8Array[] = [];
+    manager.registerWindow(fakeWindow.window as never);
+    manager.setTerminalEventHandler((event) => {
+      events.push(event);
+    });
+    manager.setTerminalStreamHandler((_sessionId, chunk) => {
+      streamChunks.push(chunk);
+    });
+
+    const connectPromise = manager.connectAwsServerProxySession({
+      serverUrl: "https://sync.example.com",
+      accessToken: "access-token",
+      profileName: "managed-prod",
+      region: "ap-southeast-2",
+      instanceId: "i-1234567890",
+      cols: 132,
+      rows: 44,
+      title: "AWS Proxy Host",
+      hostId: "host-proxy",
+      hostLabel: "AWS Proxy Host",
+      env: {
+        AWS_ACCESS_KEY_ID: "AKIATEST",
+      },
+      unsetEnv: ["AWS_PROFILE"],
+    });
+
+    const socket = FakeWebSocket.instances[0]!;
+    expect(socket.url).toBe(
+      "wss://sync.example.com/api/aws-sessions/ws?access_token=access-token",
+    );
+    socket.open();
+    const { sessionId } = await connectPromise;
+
+    expect(JSON.parse(socket.sent[0]!)).toMatchObject({
+      type: "start",
+      payload: {
+        hostId: "host-proxy",
+        label: "AWS Proxy Host",
+        profileName: "",
+        region: "ap-southeast-2",
+        instanceId: "i-1234567890",
+        cols: 132,
+        rows: 44,
+        env: {
+          AWS_ACCESS_KEY_ID: "AKIATEST",
+        },
+        unsetEnv: ["AWS_PROFILE"],
+      },
+    });
+
+    socket.receive({ type: "ready" });
+    manager.write(sessionId, "ls\r");
+    manager.resize(sessionId, 140, 40);
+    manager.sendControlSignal(sessionId, "interrupt");
+    socket.receive({
+      type: "output",
+      dataBase64: Buffer.from("hello\r\n").toString("base64"),
+    });
+    socket.receive({ type: "exit", message: "done" });
+
+    expect(socket.sent.slice(1).map((message) => JSON.parse(message))).toEqual([
+      {
+        type: "input",
+        dataBase64: Buffer.from("ls\r", "utf8").toString("base64"),
+      },
+      {
+        type: "resize",
+        cols: 140,
+        rows: 40,
+      },
+      {
+        type: "controlSignal",
+        signal: "interrupt",
+      },
+    ]);
+    expect(events.map((event) => event.type)).toEqual(["connected", "closed"]);
+    expect(Buffer.from(streamChunks[0] ?? []).toString("utf8")).toBe("hello\r\n");
+    expect(fakeWindow.sent.some((entry) => entry.channel === ipcChannels.ssh.data)).toBe(true);
   });
 
   it("includes session-scoped AWS env overrides when provided", async () => {

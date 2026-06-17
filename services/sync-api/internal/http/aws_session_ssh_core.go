@@ -21,6 +21,7 @@ const (
 type awsSessionCoreRuntime interface {
 	ConnectAWS(sessionID, requestID string, payload coretypes.AWSConnectPayload) error
 	SendSessionInput(sessionID string, data []byte) error
+	SendControlSignal(sessionID string, payload coretypes.ControlSignalPayload) error
 	ResizeSession(sessionID string, payload coretypes.ResizePayload) error
 	DisconnectSession(sessionID string) error
 	Shutdown()
@@ -214,6 +215,12 @@ func (session *directAwsSession) Resize(cols, rows int) error {
 	return session.bridge.core.ResizeSession(session.sessionID, coretypes.ResizePayload{
 		Cols: cols,
 		Rows: rows,
+	})
+}
+
+func (session *directAwsSession) ControlSignal(signal string) error {
+	return session.bridge.core.SendControlSignal(session.sessionID, coretypes.ControlSignalPayload{
+		Signal: signal,
 	})
 }
 

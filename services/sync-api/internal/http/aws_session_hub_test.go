@@ -19,6 +19,7 @@ type fakeAwsSessionRunner struct {
 	mu           sync.Mutex
 	writes       [][]byte
 	resizeCalls  [][2]int
+	signals      []string
 	closeCount   int
 	closeReasons []string
 	closeOnce    sync.Once
@@ -45,6 +46,13 @@ func (runner *fakeAwsSessionRunner) Resize(cols, rows int) error {
 	runner.mu.Lock()
 	defer runner.mu.Unlock()
 	runner.resizeCalls = append(runner.resizeCalls, [2]int{cols, rows})
+	return nil
+}
+
+func (runner *fakeAwsSessionRunner) ControlSignal(signal string) error {
+	runner.mu.Lock()
+	defer runner.mu.Unlock()
+	runner.signals = append(runner.signals, signal)
 	return nil
 }
 
@@ -77,6 +85,12 @@ func (runner *fakeAwsSessionRunner) resizeSnapshot() [][2]int {
 	runner.mu.Lock()
 	defer runner.mu.Unlock()
 	return append([][2]int(nil), runner.resizeCalls...)
+}
+
+func (runner *fakeAwsSessionRunner) signalsSnapshot() []string {
+	runner.mu.Lock()
+	defer runner.mu.Unlock()
+	return append([]string(nil), runner.signals...)
 }
 
 func (runner *fakeAwsSessionRunner) closedCount() int {
@@ -217,6 +231,17 @@ func TestAwsSessionHubBridgesStartInputResizeAndOutput(t *testing.T) {
 	waitForCondition(t, func() bool {
 		resizeCalls := fakeRunner.resizeSnapshot()
 		return len(resizeCalls) == 1 && resizeCalls[0] == [2]int{140, 40}
+	})
+
+	if err := conn.WriteJSON(awsSessionClientMessage{
+		Type:   "controlSignal",
+		Signal: "interrupt",
+	}); err != nil {
+		t.Fatalf("write control signal message: %v", err)
+	}
+	waitForCondition(t, func() bool {
+		signals := fakeRunner.signalsSnapshot()
+		return len(signals) == 1 && signals[0] == "interrupt"
 	})
 
 	if err := conn.WriteJSON(awsSessionClientMessage{Type: "close"}); err != nil {

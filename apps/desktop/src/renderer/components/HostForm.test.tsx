@@ -660,4 +660,31 @@ describe('HostForm', () => {
       undefined,
     );
   });
+
+  it('auto-saves the AWS SSM server proxy toggle for an existing AWS host', async () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+
+    render(
+      <HostForm
+        host={createAwsHost()}
+        keychainEntries={keychainEntries}
+        groupOptions={groupOptions}
+        onSubmit={onSubmit}
+      />
+    );
+
+    fireEvent.click(screen.getByRole('switch', { name: /서버 프록시 사용/ }));
+
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1), {
+      timeout: 1200,
+    });
+
+    expect(onSubmit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: 'aws-ec2',
+        awsSsmServerProxyEnabled: true,
+      }),
+      undefined,
+    );
+  });
 });

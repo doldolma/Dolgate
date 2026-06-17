@@ -381,6 +381,48 @@ describe('AwsService.buildManagedSessionEnvSpec', () => {
   });
 });
 
+describe('AwsService.buildServerProxySessionEnvSpec', () => {
+  it('resolves managed profile credentials into server-safe AWS env values', async () => {
+    const rootDir = await createTempAwsProfileDir();
+    await writeFile(
+      path.join(rootDir, 'config'),
+      ['[profile prod]', 'region = ap-southeast-2', ''].join('\n'),
+      'utf8',
+    );
+    await writeFile(
+      path.join(rootDir, 'credentials'),
+      [
+        '[prod]',
+        'aws_access_key_id = AKIATEST123',
+        'aws_secret_access_key = secret-value',
+        'aws_session_token = token-value',
+        '',
+      ].join('\n'),
+      'utf8',
+    );
+
+    const service = new AwsService(rootDir);
+
+    await expect(
+      service.buildServerProxySessionEnvSpec('prod', 'ap-southeast-2'),
+    ).resolves.toEqual({
+      env: {
+        AWS_ACCESS_KEY_ID: 'AKIATEST123',
+        AWS_SECRET_ACCESS_KEY: 'secret-value',
+        AWS_REGION: 'ap-southeast-2',
+        AWS_DEFAULT_REGION: 'ap-southeast-2',
+      },
+      unsetEnv: [
+        'AWS_SESSION_TOKEN',
+        'AWS_PROFILE',
+        'AWS_DEFAULT_PROFILE',
+        'AWS_CONFIG_FILE',
+        'AWS_SHARED_CREDENTIALS_FILE',
+      ],
+    });
+  });
+});
+
 describe('AwsService.createProfile', () => {
   it('validates credentials first and writes the new profile when they are valid', async () => {
     const rootDir = await createTempAwsProfileDir();

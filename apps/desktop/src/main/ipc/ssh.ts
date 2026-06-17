@@ -5,10 +5,85 @@ import {
   type DesktopConnectInput,
   type DesktopLocalConnectInput,
   type KeyboardInteractiveRespondInput,
+  type ServerInfoResponse,
 } from "@shared";
 import { shell as electronShell, ipcMain } from "electron";
 import { ipcChannels } from "../../common/ipc-channels";
 import type { MainIpcContext, SshHostRecord } from "./context";
+
+async function assertAwsSsmServerProxySupported(
+  ctx: MainIpcContext,
+  accessToken: string,
+): Promise<void> {
+  let response: Response;
+  try {
+    response = await fetch(new URL("/api/info", ctx.authService.getServerUrl()), {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+      },
+    });
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : "unknown error";
+    throw new Error(
+      `서버 AWS SSM 지원 여부를 확인하지 못했습니다. ${message}`,
+    );
+  }
+
+  if (!response.ok) {
+    throw new Error(
+      response.status === 401 || response.status === 403
+        ? "서버 인증이 필요합니다."
+        : `서버 AWS SSM 지원 여부를 확인하지 못했습니다. (${response.status})`,
+    );
+  }
+
+  const info = (await response.json()) as Partial<ServerInfoResponse>;
+  if (info.capabilities?.sessions?.awsSsm !== true) {
+    throw new Error("서버에서 AWS SSM 세션을 지원하지 않습니다.");
+  }
+}
+
+async function connectAwsServerProxySessionWithAuthRetry(
+  ctx: MainIpcContext,
+  input: {
+    profileName: string;
+    region: string;
+    instanceId: string;
+    cols: number;
+    rows: number;
+    title: string;
+    hostId: string;
+    hostLabel: string;
+  },
+): Promise<{ sessionId: string }> {
+  const envSpec = await ctx.awsService.buildServerProxySessionEnvSpec(
+    input.profileName,
+    input.region,
+  );
+
+  const connectOnce = async (accessToken: string) => {
+    await assertAwsSsmServerProxySupported(ctx, accessToken);
+    return ctx.coreManager.connectAwsServerProxySession({
+      ...input,
+      serverUrl: ctx.authService.getServerUrl(),
+      accessToken,
+      env: envSpec.env,
+      unsetEnv: envSpec.unsetEnv,
+    });
+  };
+
+  const initialAccessToken = ctx.authService.getAccessToken();
+  try {
+    return await connectOnce(initialAccessToken);
+  } catch (error) {
+    const refreshed = await ctx.authService.refreshSession().catch(() => null);
+    if (refreshed?.status !== "authenticated") {
+      throw error;
+    }
+    return connectOnce(ctx.authService.getAccessToken());
+  }
+}
 
 export function registerSshIpcHandlers(ctx: MainIpcContext): void {
   ipcMain.handle(
@@ -28,8 +103,8 @@ export function registerSshIpcHandlers(ctx: MainIpcContext): void {
             host.awsProfileId,
             host.awsProfileName,
           ) ?? host.awsProfileName;
-        const awsSessionEnv = ctx.awsService.buildManagedSessionEnvSpec();
-        const connection = await ctx.coreManager.connectAwsSession({
+        const title = input.title?.trim() || host.label;
+        const connectionInput = {
           profileName,
           region: host.awsRegion,
           instanceId: host.awsInstanceId,
@@ -37,10 +112,18 @@ export function registerSshIpcHandlers(ctx: MainIpcContext): void {
           rows: input.rows,
           hostId: host.id,
           hostLabel: host.label,
-          title: input.title?.trim() || host.label,
-          env: awsSessionEnv.env,
-          unsetEnv: awsSessionEnv.unsetEnv,
-        });
+          title,
+        };
+        const connection = host.awsSsmServerProxyEnabled === true
+          ? await connectAwsServerProxySessionWithAuthRetry(ctx, connectionInput)
+          : await (async () => {
+              const awsSessionEnv = ctx.awsService.buildManagedSessionEnvSpec();
+              return ctx.coreManager.connectAwsSession({
+                ...connectionInput,
+                env: awsSessionEnv.env,
+                unsetEnv: awsSessionEnv.unsetEnv,
+              });
+            })();
         ctx.sessionReplayService.noteSessionConfigured(
           connection.sessionId,
           input.cols,

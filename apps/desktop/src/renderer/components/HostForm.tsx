@@ -476,7 +476,8 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
         awsSshUsername: host.awsSshUsername ?? null,
         awsSshPort: host.awsSshPort ?? 22,
         awsSshMetadataStatus: host.awsSshMetadataStatus ?? null,
-        awsSshMetadataError: host.awsSshMetadataError ?? null
+        awsSshMetadataError: host.awsSshMetadataError ?? null,
+        awsSsmServerProxyEnabled: host.awsSsmServerProxyEnabled === true
       };
       nextCredentialMode = 'new';
     } else if (isAwsEcsHostRecord(host)) {
@@ -1162,6 +1163,22 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
               />
             </label>
           </div>
+          <ToggleSwitch
+              checked={draft.awsSsmServerProxyEnabled === true}
+              label="서버 프록시 사용"
+              description="활성화 시 서버가 AWS SSM 세션을 열고 터미널 입출력만 전달합니다."
+              onClick={() =>
+                  setDraft((current) =>
+                      current.kind === 'aws-ec2'
+                          ? {
+                            ...current,
+                            awsSsmServerProxyEnabled:
+                                current.awsSsmServerProxyEnabled !== true
+                          }
+                          : current
+                  )
+              }
+          />
         </>
       ) : isAwsEcsDraft ? (
         <>

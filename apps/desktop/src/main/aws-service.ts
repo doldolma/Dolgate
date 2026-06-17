@@ -2041,6 +2041,36 @@ export class AwsService {
     return splitAwsSessionEnvSpec(this.getManagedAwsEnvOverrides());
   }
 
+  async buildServerProxySessionEnvSpec(
+    profileName: string,
+    region: string,
+  ): Promise<AwsSessionEnvSpec> {
+    const resolvedRegion = region.trim();
+    if (!resolvedRegion) {
+      throw new Error("AWS region is required for server proxy sessions.");
+    }
+    const resolvedProfileName = profileName.trim();
+    if (!resolvedProfileName) {
+      throw new Error("AWS profile is required for server proxy sessions.");
+    }
+
+    const credentials = await this.getAwsSdkCredentialsProvider(
+      resolvedProfileName,
+      resolvedRegion,
+    )();
+    return splitAwsSessionEnvSpec({
+      AWS_ACCESS_KEY_ID: credentials.accessKeyId,
+      AWS_SECRET_ACCESS_KEY: credentials.secretAccessKey,
+      AWS_SESSION_TOKEN: credentials.sessionToken || null,
+      AWS_REGION: resolvedRegion,
+      AWS_DEFAULT_REGION: resolvedRegion,
+      AWS_PROFILE: null,
+      AWS_DEFAULT_PROFILE: null,
+      AWS_CONFIG_FILE: null,
+      AWS_SHARED_CREDENTIALS_FILE: null,
+    });
+  }
+
   private getConfiguredAwsRootEnvPatch(): Record<string, string | null> {
     return this.getManagedAwsEnvOverrides();
   }

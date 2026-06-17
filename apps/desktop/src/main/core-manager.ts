@@ -87,6 +87,24 @@ interface RemoteSessionLifecycleState {
   hasReplay: boolean;
 }
 
+interface AwsServerProxyStartPayload {
+  hostId: string;
+  label: string;
+  profileName: string;
+  region: string;
+  instanceId: string;
+  cols: number;
+  rows: number;
+  env?: Record<string, string>;
+  unsetEnv?: string[];
+}
+
+interface AwsServerProxySessionRuntime {
+  socket: WebSocket;
+  finalized: boolean;
+  errorEmitted: boolean;
+}
+
 interface PortForwardDefinition {
   ruleId: string;
   hostId: string;
@@ -142,7 +160,13 @@ interface ContainersEndpointRuntime {
   unsupportedReason: string | null;
 }
 
-type SessionTransport = "ssh" | "aws-ssm" | "warpgate" | "local-shell" | "serial";
+type SessionTransport =
+  | "ssh"
+  | "aws-ssm"
+  | "aws-ssm-server-proxy"
+  | "warpgate"
+  | "local-shell"
+  | "serial";
 
 const AWS_SSM_CONTROL_SIGNAL_BY_BYTE: ReadonlyMap<
   number,
@@ -792,6 +816,10 @@ export class CoreManager {
   private readonly sentResizeBySession = new Map<
     string,
     { cols: number; rows: number }
+  >();
+  private readonly awsServerProxySessions = new Map<
+    string,
+    AwsServerProxySessionRuntime
   >();
   private readonly sessionTransportById = new Map<string, SessionTransport>();
   private readonly remoteSessionLifecycleById = new Map<
@@ -1698,6 +1726,259 @@ export class CoreManager {
     return { sessionId };
   }
 
+  async connectAwsServerProxySession(payload: {
+    serverUrl: string;
+    accessToken: string;
+    profileName: string;
+    region: string;
+    instanceId: string;
+    cols: number;
+    rows: number;
+    title: string;
+    hostId: string;
+    hostLabel: string;
+    env?: Record<string, string>;
+    unsetEnv?: string[];
+  }): Promise<{ sessionId: string }> {
+    const sessionId = randomUUID();
+    const wsUrl = this.buildAwsServerProxyUrl(payload.serverUrl, payload.accessToken);
+    const socket = new WebSocket(wsUrl);
+
+    return new Promise<{ sessionId: string }>((resolve, reject) => {
+      let settled = false;
+      const openTimeout = setTimeout(() => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        try {
+          socket.close();
+        } catch {
+          // ignore close failures during startup timeout
+        }
+        reject(new Error("서버 AWS SSM 프록시 연결 시간이 초과되었습니다."));
+      }, 8_000);
+
+      socket.onopen = () => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        clearTimeout(openTimeout);
+
+        this.sessionTransportById.set(sessionId, "aws-ssm-server-proxy");
+        this.remoteSessionLifecycleById.set(sessionId, {
+          hostId: payload.hostId,
+          hostLabel: payload.hostLabel,
+          title: payload.title,
+          connectionDetails: `${payload.profileName} · ${payload.region} · ${payload.instanceId}`,
+          connectionKind: "aws-ssm",
+          connectedAt: null,
+          disconnectedAt: null,
+          disconnectReason: null,
+          status: null,
+          recordingId: null,
+          hasReplay: false,
+        });
+        this.tabs.set(sessionId, {
+          id: sessionId,
+          title: payload.title,
+          source: "host",
+          hostId: payload.hostId,
+          sessionId,
+          status: "connecting",
+          lastEventAt: new Date().toISOString(),
+        });
+        this.awsServerProxySessions.set(sessionId, {
+          socket,
+          finalized: false,
+          errorEmitted: false,
+        });
+
+        this.sendAwsServerProxyMessage(sessionId, {
+          type: "start",
+          payload: {
+            hostId: payload.hostId,
+            label: payload.hostLabel,
+            profileName: "",
+            region: payload.region,
+            instanceId: payload.instanceId,
+            cols: payload.cols,
+            rows: payload.rows,
+            env: payload.env,
+            unsetEnv: payload.unsetEnv,
+          } satisfies AwsServerProxyStartPayload,
+        });
+        resolve({ sessionId });
+      };
+
+      socket.onerror = () => {
+        if (!settled) {
+          settled = true;
+          clearTimeout(openTimeout);
+          reject(new Error("서버 AWS SSM 프록시 연결에 실패했습니다."));
+          return;
+        }
+        this.emitAwsServerProxyEvent(
+          sessionId,
+          "error",
+          "서버 AWS SSM 프록시 연결에 실패했습니다.",
+        );
+      };
+
+      socket.onmessage = (event) => {
+        this.handleAwsServerProxyMessage(sessionId, event.data);
+      };
+
+      socket.onclose = () => {
+        if (!settled) {
+          settled = true;
+          clearTimeout(openTimeout);
+          reject(new Error("서버 AWS SSM 프록시 연결이 종료되었습니다."));
+          return;
+        }
+        this.handleAwsServerProxySocketClosed(sessionId);
+      };
+    });
+  }
+
+  private buildAwsServerProxyUrl(serverUrl: string, accessToken: string): string {
+    const url = new URL("/api/aws-sessions/ws", serverUrl);
+    url.searchParams.set("access_token", accessToken);
+    url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
+    return url.toString();
+  }
+
+  private sendAwsServerProxyMessage(
+    sessionId: string,
+    message: Record<string, unknown>,
+  ): boolean {
+    const runtime = this.awsServerProxySessions.get(sessionId);
+    if (!runtime || runtime.finalized || runtime.socket.readyState !== WebSocket.OPEN) {
+      return false;
+    }
+    runtime.socket.send(JSON.stringify(message));
+    return true;
+  }
+
+  private handleAwsServerProxyMessage(sessionId: string, rawData: unknown): void {
+    let message: Record<string, unknown>;
+    try {
+      message = JSON.parse(String(rawData)) as Record<string, unknown>;
+    } catch {
+      this.emitAwsServerProxyEvent(
+        sessionId,
+        "error",
+        "서버 AWS SSM 프록시 응답을 해석하지 못했습니다.",
+      );
+      return;
+    }
+
+    const type = typeof message.type === "string" ? message.type : "";
+    if (type === "ready") {
+      this.emitAwsServerProxyEvent(sessionId, "connected", "");
+      return;
+    }
+
+    if (type === "output") {
+      const dataBase64 = typeof message.dataBase64 === "string" ? message.dataBase64 : "";
+      if (!dataBase64) {
+        return;
+      }
+      try {
+        this.broadcastStream(
+          {
+            type: "data",
+            sessionId,
+          },
+          Uint8Array.from(Buffer.from(dataBase64, "base64")),
+        );
+      } catch {
+        this.emitAwsServerProxyEvent(
+          sessionId,
+          "error",
+          "서버 AWS SSM 프록시 출력 데이터를 해석하지 못했습니다.",
+        );
+      }
+      return;
+    }
+
+    if (type === "error") {
+      const runtime = this.awsServerProxySessions.get(sessionId);
+      if (runtime) {
+        runtime.errorEmitted = true;
+      }
+      this.emitAwsServerProxyEvent(
+        sessionId,
+        "error",
+        typeof message.message === "string"
+          ? message.message
+          : "서버 AWS SSM 프록시 오류가 발생했습니다.",
+      );
+      return;
+    }
+
+    if (type === "exit") {
+      const runtime = this.awsServerProxySessions.get(sessionId);
+      if (runtime) {
+        runtime.finalized = true;
+        this.awsServerProxySessions.delete(sessionId);
+      }
+      this.emitAwsServerProxyEvent(
+        sessionId,
+        "closed",
+        typeof message.message === "string" ? message.message : "AWS SSM 세션이 종료되었습니다.",
+      );
+    }
+  }
+
+  private handleAwsServerProxySocketClosed(sessionId: string): void {
+    const runtime = this.awsServerProxySessions.get(sessionId);
+    if (!runtime || runtime.finalized) {
+      return;
+    }
+    runtime.finalized = true;
+    this.awsServerProxySessions.delete(sessionId);
+
+    if (runtime.errorEmitted) {
+      return;
+    }
+    this.emitAwsServerProxyEvent(
+      sessionId,
+      "closed",
+      "서버 AWS SSM 프록시 연결이 종료되었습니다.",
+    );
+  }
+
+  private closeAwsServerProxySession(sessionId: string, message: string): void {
+    const runtime = this.awsServerProxySessions.get(sessionId);
+    if (runtime && !runtime.finalized) {
+      this.sendAwsServerProxyMessage(sessionId, { type: "close" });
+      runtime.finalized = true;
+      try {
+        runtime.socket.close();
+      } catch {
+        // ignore close failures
+      }
+    }
+    this.awsServerProxySessions.delete(sessionId);
+    this.emitAwsServerProxyEvent(sessionId, "closed", message);
+  }
+
+  private emitAwsServerProxyEvent(
+    sessionId: string,
+    type: Extract<CoreEventType, "connected" | "error" | "closed">,
+    message: string,
+  ): void {
+    this.handleControlEvent({
+      type,
+      sessionId,
+      payload: {
+        message,
+      },
+    });
+  }
+
   async connectLocalSession(payload: {
     cols: number;
     rows: number;
@@ -2399,7 +2680,8 @@ export class CoreManager {
     if (!tab || tab.status !== "connected") {
       return;
     }
-    if (this.sessionTransportById.get(sessionId) === "aws-ssm") {
+    const transport = this.sessionTransportById.get(sessionId);
+    if (transport === "aws-ssm" || transport === "aws-ssm-server-proxy") {
       const controlSignal = resolveAwsSsmControlSignal(
         Buffer.from(data, "utf8"),
       );
@@ -2407,6 +2689,13 @@ export class CoreManager {
         this.sendControlSignal(sessionId, controlSignal);
         return;
       }
+    }
+    if (transport === "aws-ssm-server-proxy") {
+      this.sendAwsServerProxyMessage(sessionId, {
+        type: "input",
+        dataBase64: Buffer.from(data, "utf8").toString("base64"),
+      });
+      return;
     }
     this.sendStream(
       {
@@ -2423,12 +2712,20 @@ export class CoreManager {
     if (!tab || tab.status !== "connected") {
       return;
     }
-    if (this.sessionTransportById.get(sessionId) === "aws-ssm") {
+    const transport = this.sessionTransportById.get(sessionId);
+    if (transport === "aws-ssm" || transport === "aws-ssm-server-proxy") {
       const controlSignal = resolveAwsSsmControlSignal(data);
       if (controlSignal) {
         this.sendControlSignal(sessionId, controlSignal);
         return;
       }
+    }
+    if (transport === "aws-ssm-server-proxy") {
+      this.sendAwsServerProxyMessage(sessionId, {
+        type: "input",
+        dataBase64: Buffer.from(data).toString("base64"),
+      });
+      return;
     }
     this.sendStream(
       {
@@ -2447,7 +2744,15 @@ export class CoreManager {
     if (!tab || tab.status !== "connected") {
       return;
     }
-    if (this.sessionTransportById.get(sessionId) !== "aws-ssm") {
+    const transport = this.sessionTransportById.get(sessionId);
+    if (transport === "aws-ssm-server-proxy") {
+      this.sendAwsServerProxyMessage(sessionId, {
+        type: "controlSignal",
+        signal,
+      });
+      return;
+    }
+    if (transport !== "aws-ssm") {
       return;
     }
 
@@ -2500,6 +2805,14 @@ export class CoreManager {
     }
 
     this.sentResizeBySession.set(sessionId, desiredSize);
+    if (this.sessionTransportById.get(sessionId) === "aws-ssm-server-proxy") {
+      this.sendAwsServerProxyMessage(sessionId, {
+        type: "resize",
+        cols: desiredSize.cols,
+        rows: desiredSize.rows,
+      });
+      return;
+    }
     this.sendControl({
       id: randomUUID(),
       type: "resize",
@@ -2513,6 +2826,10 @@ export class CoreManager {
     this.sentResizeBySession.delete(sessionId);
     const tab = this.tabs.get(sessionId);
     if (!tab) {
+      return;
+    }
+    if (this.sessionTransportById.get(sessionId) === "aws-ssm-server-proxy") {
+      this.closeAwsServerProxySession(sessionId, "client requested disconnect");
       return;
     }
     // 코어에 실제 세션 핸들이 없을 수 있는 connecting/error 탭은 로컬에서 바로 닫아준다.
@@ -2665,7 +2982,8 @@ export class CoreManager {
     if (event.sessionId) {
       const existing = this.tabs.get(event.sessionId);
       const transport = this.sessionTransportById.get(event.sessionId) ?? "ssh";
-      const isAwsSession = transport === "aws-ssm";
+      const isAwsSession =
+        transport === "aws-ssm" || transport === "aws-ssm-server-proxy";
       const isWarpgateSession = transport === "warpgate";
       const isLocalSession = transport === "local-shell";
       const remoteLifecycle = this.remoteSessionLifecycleById.get(event.sessionId);
@@ -2890,6 +3208,15 @@ export class CoreManager {
   }
 
   private clearRuntimeState(): void {
+    for (const runtime of this.awsServerProxySessions.values()) {
+      runtime.finalized = true;
+      try {
+        runtime.socket.close();
+      } catch {
+        // ignore close failures while clearing runtime state
+      }
+    }
+    this.awsServerProxySessions.clear();
     this.tabs.clear();
     this.sftpEndpoints.clear();
     this.sftpLifecycleByEndpointId.clear();
