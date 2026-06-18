@@ -3,6 +3,8 @@ import type {
   ActivityLogCategory,
   ActivityLogLevel,
   ActivityLogRecord,
+  ContainerActionLogMetadata,
+  ContainerLifecycleLogMetadata,
   PortForwardLifecycleLogMetadata,
   SessionConnectionKind,
   SessionLifecycleLogMetadata,
@@ -74,6 +76,36 @@ function isSftpLifecycleMetadata(value: Record<string, unknown> | null): value i
       typeof value.chownCount === 'number' &&
       typeof value.deleteCount === 'number' &&
       typeof value.errorCount === 'number'
+  );
+}
+
+function isContainerLifecycleMetadata(value: Record<string, unknown> | null): value is ContainerLifecycleLogMetadata & Record<string, unknown> {
+  return Boolean(
+    value &&
+      typeof value.lifecycleId === 'string' &&
+      typeof value.hostId === 'string' &&
+      typeof value.hostLabel === 'string' &&
+      typeof value.workspaceKind === 'string' &&
+      typeof value.transport === 'string' &&
+      typeof value.startedAt === 'string' &&
+      typeof value.status === 'string' &&
+      typeof value.refreshCount === 'number' &&
+      typeof value.errorCount === 'number'
+  );
+}
+
+function isContainerActionMetadata(value: Record<string, unknown> | null): value is ContainerActionLogMetadata & Record<string, unknown> {
+  return Boolean(
+    value &&
+      typeof value.actionId === 'string' &&
+      typeof value.hostId === 'string' &&
+      typeof value.hostLabel === 'string' &&
+      typeof value.containerId === 'string' &&
+      typeof value.action === 'string' &&
+      typeof value.status === 'string' &&
+      typeof value.startedAt === 'string' &&
+      typeof value.completedAt === 'string' &&
+      typeof value.durationMs === 'number'
   );
 }
 
@@ -199,6 +231,36 @@ function getSftpStatusTone(status: SftpLifecycleLogMetadata['status']): 'running
     return 'error';
   }
   return 'stopped';
+}
+
+function getContainerStatusLabel(status: ContainerLifecycleLogMetadata['status']): string {
+  if (status === 'connecting') return 'Connecting';
+  if (status === 'connected') return 'Connected';
+  if (status === 'unsupported') return 'Unsupported';
+  if (status === 'error') return 'Error';
+  return 'Closed';
+}
+
+function getContainerStatusTone(status: ContainerLifecycleLogMetadata['status']): 'running' | 'starting' | 'paused' | 'error' | 'stopped' {
+  if (status === 'connecting') return 'starting';
+  if (status === 'connected') return 'running';
+  if (status === 'unsupported') return 'paused';
+  if (status === 'error') return 'error';
+  return 'stopped';
+}
+
+function getContainerTransportLabel(transport: ContainerLifecycleLogMetadata['transport']): string {
+  if (transport === 'aws-ssm') return 'AWS SSM';
+  if (transport === 'aws-ecs') return 'AWS ECS';
+  if (transport === 'warpgate') return 'Warpgate';
+  return 'SSH';
+}
+
+function getContainerActionLabel(action: ContainerActionLogMetadata['action']): string {
+  if (action === 'start') return 'Start';
+  if (action === 'stop') return 'Stop';
+  if (action === 'restart') return 'Restart';
+  return 'Remove';
 }
 
 function formatLogTimestamp(value: string): string {
@@ -358,6 +420,14 @@ export function LogsPanel({ logs, onClear, onOpenReplay }: LogsPanelProps) {
               log.kind === 'sftp-lifecycle' && isSftpLifecycleMetadata(log.metadata)
                 ? log.metadata
                 : null;
+            const containerLifecycleMetadata =
+              log.kind === 'container-lifecycle' && isContainerLifecycleMetadata(log.metadata)
+                ? log.metadata
+                : null;
+            const containerActionMetadata =
+              log.kind === 'container-action' && isContainerActionMetadata(log.metadata)
+                ? log.metadata
+                : null;
             const replayRecordingId =
               sessionLifecycleMetadata != null &&
               sessionLifecycleMetadata.hasReplay === true &&
@@ -365,7 +435,105 @@ export function LogsPanel({ logs, onClear, onOpenReplay }: LogsPanelProps) {
                 ? sessionLifecycleMetadata.recordingId
                 : null;
 
-            return sessionLifecycleMetadata ? (
+            return containerLifecycleMetadata ? (
+              <Card key={log.id} data-testid="logs-container-lifecycle-card">
+                <CardMain>
+                  <div className="flex flex-wrap items-center gap-[0.7rem]">
+                    <div>
+                      <strong>{containerLifecycleMetadata.hostLabel}</strong>
+                      <div className="text-[0.92rem] text-[var(--text-soft)]">
+                        {containerLifecycleMetadata.workspaceKind === 'ecs-cluster' ? 'ECS cluster' : 'Host containers'}
+                      </div>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-[0.55rem]">
+                      <Badge tone={containerLifecycleMetadata.transport === 'aws-ecs' ? 'starting' : 'running'}>
+                        {getContainerTransportLabel(containerLifecycleMetadata.transport)}
+                      </Badge>
+                      {containerLifecycleMetadata.runtime ? (
+                        <Badge tone="paused">{containerLifecycleMetadata.runtime.toUpperCase()}</Badge>
+                      ) : null}
+                      <Badge tone={getContainerStatusTone(containerLifecycleMetadata.status)}>
+                        {getContainerStatusLabel(containerLifecycleMetadata.status)}
+                      </Badge>
+                    </div>
+                  </div>
+                  <div className="mt-[0.85rem] grid gap-[0.75rem] md:grid-cols-3">
+                    <div className="grid gap-[0.25rem] rounded-[16px] bg-[color-mix(in_srgb,var(--surface)_72%,transparent_28%)] px-[0.9rem] py-[0.8rem]">
+                      <span>탐색 시작</span>
+                      <strong>{formatLogTimestamp(containerLifecycleMetadata.startedAt)}</strong>
+                    </div>
+                    <div className="grid gap-[0.25rem] rounded-[16px] bg-[color-mix(in_srgb,var(--surface)_72%,transparent_28%)] px-[0.9rem] py-[0.8rem]">
+                      <span>탐색 종료</span>
+                      <strong>{containerLifecycleMetadata.endedAt ? formatLogTimestamp(containerLifecycleMetadata.endedAt) : '연결 중'}</strong>
+                    </div>
+                    <div className="grid gap-[0.25rem] rounded-[16px] bg-[color-mix(in_srgb,var(--surface)_72%,transparent_28%)] px-[0.9rem] py-[0.8rem]">
+                      <span>유지 시간</span>
+                      <strong>{formatSessionLifecycleDuration(containerLifecycleMetadata.durationMs)}</strong>
+                    </div>
+                  </div>
+                  <div className="mt-[0.75rem] flex flex-wrap gap-[0.45rem]">
+                    {typeof containerLifecycleMetadata.resourceCount === 'number' ? (
+                      <span className="rounded-full bg-[color-mix(in_srgb,var(--surface-muted)_88%,transparent_12%)] px-[0.75rem] py-[0.42rem] text-[0.88rem] text-[var(--text-soft)]">
+                        {containerLifecycleMetadata.workspaceKind === 'ecs-cluster' ? '서비스' : '컨테이너'} {containerLifecycleMetadata.resourceCount}개
+                      </span>
+                    ) : null}
+                    {containerLifecycleMetadata.refreshCount > 0 ? (
+                      <span className="rounded-full bg-[color-mix(in_srgb,var(--surface-muted)_88%,transparent_12%)] px-[0.75rem] py-[0.42rem] text-[0.88rem] text-[var(--text-soft)]">
+                        새로고침 {containerLifecycleMetadata.refreshCount}회
+                      </span>
+                    ) : null}
+                    {containerLifecycleMetadata.errorCount > 0 ? (
+                      <span className="rounded-full bg-[color-mix(in_srgb,var(--surface-muted)_88%,transparent_12%)] px-[0.75rem] py-[0.42rem] text-[0.88rem] text-[var(--text-soft)]">
+                        오류 {containerLifecycleMetadata.errorCount}회
+                      </span>
+                    ) : null}
+                  </div>
+                  {containerLifecycleMetadata.lastError || containerLifecycleMetadata.endReason ? (
+                    <div className="mt-[0.75rem] rounded-[14px] bg-[color-mix(in_srgb,var(--surface-muted)_88%,transparent_12%)] px-[0.9rem] py-[0.75rem] text-[0.92rem] text-[var(--text-soft)]">
+                      {containerLifecycleMetadata.lastError ?? containerLifecycleMetadata.endReason}
+                    </div>
+                  ) : null}
+                </CardMain>
+              </Card>
+            ) : containerActionMetadata ? (
+              <Card key={log.id} data-testid="logs-container-action-card">
+                <CardMain>
+                  <div className="flex flex-wrap items-center gap-[0.7rem]">
+                    <div>
+                      <strong>{containerActionMetadata.containerName || containerActionMetadata.containerId}</strong>
+                      <div className="text-[0.92rem] text-[var(--text-soft)]">{containerActionMetadata.hostLabel}</div>
+                      {containerActionMetadata.containerName ? (
+                        <div className="text-[0.82rem] text-[var(--text-soft)]">{containerActionMetadata.containerId}</div>
+                      ) : null}
+                    </div>
+                    <div className="flex flex-wrap items-center gap-[0.55rem]">
+                      {containerActionMetadata.runtime ? (
+                        <Badge tone="paused">{containerActionMetadata.runtime.toUpperCase()}</Badge>
+                      ) : null}
+                      <Badge tone="starting">{getContainerActionLabel(containerActionMetadata.action)}</Badge>
+                      <Badge tone={containerActionMetadata.status === 'success' ? 'running' : 'error'}>
+                        {containerActionMetadata.status === 'success' ? 'Success' : 'Error'}
+                      </Badge>
+                    </div>
+                  </div>
+                  <div className="mt-[0.85rem] grid gap-[0.75rem] md:grid-cols-2">
+                    <div className="grid gap-[0.25rem] rounded-[16px] bg-[color-mix(in_srgb,var(--surface)_72%,transparent_28%)] px-[0.9rem] py-[0.8rem]">
+                      <span>실행 시각</span>
+                      <strong>{formatLogTimestamp(containerActionMetadata.startedAt)}</strong>
+                    </div>
+                    <div className="grid gap-[0.25rem] rounded-[16px] bg-[color-mix(in_srgb,var(--surface)_72%,transparent_28%)] px-[0.9rem] py-[0.8rem]">
+                      <span>실행 시간</span>
+                      <strong>{formatSessionLifecycleDuration(containerActionMetadata.durationMs)}</strong>
+                    </div>
+                  </div>
+                  {containerActionMetadata.errorMessage ? (
+                    <div className="mt-[0.75rem] rounded-[14px] bg-[color-mix(in_srgb,var(--surface-muted)_88%,transparent_12%)] px-[0.9rem] py-[0.75rem] text-[0.92rem] text-[var(--text-soft)]">
+                      {containerActionMetadata.errorMessage}
+                    </div>
+                  ) : null}
+                </CardMain>
+              </Card>
+            ) : sessionLifecycleMetadata ? (
               <Card key={log.id} data-testid="logs-lifecycle-card">
                 <CardMain>
                   <div className="flex flex-wrap items-center gap-[0.7rem]">

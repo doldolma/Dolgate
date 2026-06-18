@@ -1066,6 +1066,59 @@ describe('ActivityLogRepository', () => {
       ]),
     );
   });
+
+  it('restores SFTP and container activity log kinds after reload', async () => {
+    const { ActivityLogRepository } = await loadRepositories();
+    const logs = new ActivityLogRepository();
+    const createdAt = '2026-06-18T00:00:00.000Z';
+
+    logs.upsert({
+      id: 'sftp:endpoint-1',
+      level: 'info',
+      category: 'session',
+      kind: 'sftp-lifecycle',
+      message: 'SFTP 세션',
+      metadata: { endpointId: 'endpoint-1' },
+      createdAt,
+      updatedAt: createdAt,
+    });
+    logs.upsert({
+      id: 'container:lifecycle-1',
+      level: 'info',
+      category: 'session',
+      kind: 'container-lifecycle',
+      message: 'Containers 연결',
+      metadata: { lifecycleId: 'lifecycle-1', status: 'connected' },
+      createdAt,
+      updatedAt: createdAt,
+    });
+    logs.upsert({
+      id: 'container-action:action-1',
+      level: 'warn',
+      category: 'audit',
+      kind: 'container-action',
+      message: '컨테이너 삭제',
+      metadata: { actionId: 'action-1', action: 'remove' },
+      createdAt,
+      updatedAt: createdAt,
+    });
+
+    vi.resetModules();
+    const stateStorageModule = await import('./state-storage');
+    stateStorageModule.resetDesktopStateStorageForTests();
+    const databaseModule = await import('./database');
+    stateStorageModule
+      .getDesktopStateStorage()
+      .activateActivityLogScope(TEST_HISTORY_OWNER);
+
+    expect(
+      new databaseModule.ActivityLogRepository().list().map((entry) => entry.kind),
+    ).toEqual(expect.arrayContaining([
+      'sftp-lifecycle',
+      'container-lifecycle',
+      'container-action',
+    ]));
+  });
 });
 
 describe('KnownHostRepository', () => {

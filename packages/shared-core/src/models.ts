@@ -52,7 +52,13 @@ export type DnsOverrideStatus = 'inactive' | 'active';
 export type KnownHostTrustStatus = 'trusted' | 'untrusted' | 'mismatch';
 export type ActivityLogLevel = 'info' | 'warn' | 'error';
 export type ActivityLogCategory = 'session' | 'audit';
-export type ActivityLogKind = 'generic' | 'session-lifecycle' | 'port-forward-lifecycle' | 'sftp-lifecycle';
+export type ActivityLogKind =
+  | 'generic'
+  | 'session-lifecycle'
+  | 'port-forward-lifecycle'
+  | 'sftp-lifecycle'
+  | 'container-lifecycle'
+  | 'container-action';
 export type AuthStatus = 'loading' | 'unauthenticated' | 'authenticating' | 'authenticated' | 'offline-authenticated' | 'error';
 export type SyncBootstrapStatus = 'idle' | 'syncing' | 'ready' | 'paused' | 'error';
 export type AwsProfilesServerSupport = 'unknown' | 'supported' | 'unsupported';
@@ -62,6 +68,15 @@ export type SessionConnectionKind = 'local' | 'ssh' | 'aws-ssm' | 'warpgate' | '
 export type SessionLifecycleStatus = 'connected' | 'closed' | 'error';
 export type PortForwardLifecycleStatus = 'running' | 'closed' | 'error';
 export type SftpLifecycleStatus = 'connecting' | 'connected' | 'closed' | 'error';
+export type ContainerLifecycleStatus =
+  | 'connecting'
+  | 'connected'
+  | 'unsupported'
+  | 'closed'
+  | 'error';
+export type ContainerWorkspaceKind = 'host-runtime' | 'ecs-cluster';
+export type ContainerLifecycleTransport = 'ssh' | 'aws-ssm' | 'warpgate' | 'aws-ecs';
+export type ContainerActionStatus = 'success' | 'error';
 export type SftpConnectionStage =
   | 'loading-instance-metadata'
   | 'checking-profile'
@@ -1797,6 +1812,40 @@ export interface SftpLifecycleLogMetadata {
   errorCount: number;
   visitedPathCount: number;
   lastPath?: string | null;
+}
+
+export interface ContainerLifecycleLogMetadata {
+  lifecycleId: string;
+  hostId: string;
+  hostLabel: string;
+  workspaceKind: ContainerWorkspaceKind;
+  transport: ContainerLifecycleTransport;
+  runtime?: HostContainerRuntime | null;
+  startedAt: string;
+  connectedAt?: string | null;
+  endedAt?: string | null;
+  durationMs?: number | null;
+  status: ContainerLifecycleStatus;
+  refreshCount: number;
+  errorCount: number;
+  resourceCount?: number | null;
+  lastError?: string | null;
+  endReason?: string | null;
+}
+
+export interface ContainerActionLogMetadata {
+  actionId: string;
+  hostId: string;
+  hostLabel: string;
+  containerId: string;
+  containerName?: string | null;
+  runtime?: HostContainerRuntime | null;
+  action: HostContainerAction;
+  status: ContainerActionStatus;
+  startedAt: string;
+  completedAt: string;
+  durationMs: number;
+  errorMessage?: string | null;
 }
 
 export interface SessionReplayOutputEntry {

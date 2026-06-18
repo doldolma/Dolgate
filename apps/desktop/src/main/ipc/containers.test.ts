@@ -271,6 +271,35 @@ describe("registerContainersIpcHandlers", () => {
     expect(connect).toHaveBeenCalledTimes(2);
   });
 
+  it("starts AWS container lifecycle logging with the SSM transport", async () => {
+    const handlers = new Map<string, (...args: unknown[]) => Promise<unknown>>();
+    electronSpies.ipcMainHandle.mockImplementation((channel, handler) => {
+      handlers.set(channel, handler);
+    });
+    const host = createAwsHost();
+    const beginContainerLifecycle = vi
+      .fn()
+      .mockReturnValue({ lifecycleId: "lifecycle-1" });
+
+    registerContainersIpcHandlers({
+      hosts: { getById: vi.fn(() => host) },
+      coreManager: { beginContainerLifecycle },
+      buildContainersEndpointId: vi.fn(() => "containers:host-1"),
+    } as any);
+
+    const handler = handlers.get(ipcChannels.containers.beginLifecycle);
+    await expect(handler?.({}, "host-1")).resolves.toEqual({
+      lifecycleId: "lifecycle-1",
+    });
+    expect(beginContainerLifecycle).toHaveBeenCalledWith({
+      scopeId: "containers:host-1",
+      hostId: "aws-host-1",
+      hostLabel: "AWS Linux",
+      workspaceKind: "host-runtime",
+      transport: "aws-ssm",
+    });
+  });
+
   it("keeps release cleanup wired through containersDisconnect and AWS tunnel stop", async () => {
     const handlers = new Map<string, (...args: unknown[]) => Promise<unknown>>();
     electronSpies.ipcMainHandle.mockImplementation((channel, handler) => {
@@ -281,8 +310,12 @@ describe("registerContainersIpcHandlers", () => {
     const stopAwsContainersTunnelForEndpoint = vi.fn().mockResolvedValue(undefined);
 
     registerContainersIpcHandlers({
+      hosts: {
+        getById: vi.fn(() => ({ id: "aws-host-1", kind: "ssh" })),
+      },
       coreManager: {
         containersDisconnect,
+        finalizeContainerLifecycleForScope: vi.fn(),
       },
       buildContainersEndpointId: vi
         .fn()

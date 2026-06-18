@@ -295,6 +295,7 @@ function createDolsshApi(options: {
   const off = {
     core: vi.fn(),
     containersProgress: vi.fn(),
+    logsChanged: vi.fn(),
     transfer: vi.fn(),
     forward: vi.fn(),
     sessionShare: vi.fn(),
@@ -312,6 +313,9 @@ function createDolsshApi(options: {
     },
     containers: {
       onConnectionProgress: vi.fn(() => off.containersProgress),
+    },
+    logs: {
+      onChanged: vi.fn(() => off.logsChanged),
     },
     sftp: {
       onConnectionProgress: vi.fn(() => vi.fn()),

@@ -176,6 +176,7 @@ function createTab(
   return {
     kind: "ecs-cluster",
     hostId: "ecs-host-1",
+    lifecycleId: null,
     title: "prod · ECS",
     runtime: null,
     unsupportedReason: null,

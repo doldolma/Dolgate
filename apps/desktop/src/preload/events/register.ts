@@ -15,6 +15,7 @@ import type {
 import { ipcChannels } from "../../common/ipc-channels";
 import {
   emitAuthEvent,
+  emitActivityLogsChanged,
   emitContainerConnectionProgress,
   emitCoreEvent,
   emitPortForwardEvent,
@@ -60,6 +61,10 @@ export function registerPreloadEventBindings(ipcRenderer: IpcRenderer): void {
       emitContainerConnectionProgress(payload);
     },
   );
+
+  ipcRenderer.on(ipcChannels.logs.changed, () => {
+    emitActivityLogsChanged();
+  });
 
   ipcRenderer.on(
     ipcChannels.sftp.transferEvent,

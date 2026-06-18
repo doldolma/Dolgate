@@ -174,6 +174,9 @@ export function createRuntimeEventSlice(deps: SliceDeps): RuntimeEventSlice {
     /^AWS SSM session exited with code\s+(-?\d+)/i;
 
   return {
+    handleActivityLogsChanged: () => {
+      scheduleActivityLogsRefresh();
+    },
     handleCoreEvent: (event) => {
             const sessionId = event.sessionId;
             const endpointId = event.endpointId;

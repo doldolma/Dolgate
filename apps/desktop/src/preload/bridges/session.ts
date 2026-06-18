@@ -89,6 +89,10 @@ export function buildContainersBridge(
   ipcRenderer: IpcRenderer,
 ): DesktopApi["containers"] {
   return {
+    beginLifecycle: (hostId: string) =>
+      ipcRenderer.invoke(ipcChannels.containers.beginLifecycle, hostId),
+    reportLifecycleError: (input) =>
+      ipcRenderer.invoke(ipcChannels.containers.reportLifecycleError, input),
     list: (hostId: string) =>
       ipcRenderer.invoke(ipcChannels.containers.list, hostId),
     inspect: (hostId: string, containerId: string) =>
@@ -111,8 +115,8 @@ export function buildContainersBridge(
       ipcRenderer.invoke(ipcChannels.containers.searchLogs, input),
     openShell: (hostId: string, containerId: string) =>
       ipcRenderer.invoke(ipcChannels.containers.openShell, hostId, containerId),
-    release: (hostId: string) =>
-      ipcRenderer.invoke(ipcChannels.containers.release, hostId),
+    release: (hostId: string, lifecycleId?: string) =>
+      ipcRenderer.invoke(ipcChannels.containers.release, hostId, lifecycleId),
     onConnectionProgress: (listener) =>
       subscribeContainerConnectionProgress(listener),
   };

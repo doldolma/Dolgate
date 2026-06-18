@@ -2,6 +2,8 @@ import { EventEmitter } from "node:events";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type {
   ActivityLogRecord,
+  ContainerActionLogMetadata,
+  ContainerLifecycleLogMetadata,
   CoreEvent,
   CoreRequest,
   SessionLifecycleLogMetadata,
@@ -929,6 +931,210 @@ describe("CoreManager local shell sessions", () => {
       expect(expectedTypes).toEqual(["containersActionCompleted"]);
       expect(options).toEqual({ timeoutMs: 25000 });
     }
+  });
+
+  it("keeps one container lifecycle row across refresh errors and close", () => {
+    const logs: ActivityLogRecord[] = [];
+    const manager = new CoreManager(undefined, (record) => {
+      const index = logs.findIndex((entry) => entry.id === record.id);
+      if (index >= 0) {
+        logs[index] = record;
+      } else {
+        logs.push(record);
+      }
+    });
+
+    const { lifecycleId } = manager.beginContainerLifecycle({
+      scopeId: "containers:host-1",
+      hostId: "host-1",
+      hostLabel: "Prod",
+      workspaceKind: "host-runtime",
+      transport: "ssh",
+    });
+    manager.markContainerLifecycleConnected({
+      scopeId: "containers:host-1",
+      lifecycleId,
+      runtime: "docker",
+      resourceCount: 3,
+    });
+    manager.noteContainerLifecycleLoadStarted("containers:host-1", lifecycleId);
+    manager.reportContainerLifecycleError({
+      lifecycleId,
+      message: "refresh failed",
+    });
+
+    expect(logs).toHaveLength(1);
+    expect(logs[0]?.metadata).toMatchObject({
+      status: "connected",
+      runtime: "docker",
+      resourceCount: 3,
+      refreshCount: 1,
+      errorCount: 1,
+      lastError: "refresh failed",
+    });
+
+    manager.finalizeContainerLifecycleForScope(
+      "containers:host-1",
+      lifecycleId,
+    );
+    const metadata = logs[0]?.metadata as unknown as ContainerLifecycleLogMetadata;
+    expect(metadata.status).toBe("closed");
+    expect(metadata.endedAt).toBeTypeOf("string");
+    expect(metadata.durationMs).toBeTypeOf("number");
+  });
+
+  it("starts a new container lifecycle after an initial failure", () => {
+    const logs: ActivityLogRecord[] = [];
+    const manager = new CoreManager(undefined, (record) => {
+      const index = logs.findIndex((entry) => entry.id === record.id);
+      if (index >= 0) logs[index] = record;
+      else logs.push(record);
+    });
+    const input = {
+      scopeId: "containers:ecs-1",
+      hostId: "ecs-1",
+      hostLabel: "Prod ECS",
+      workspaceKind: "ecs-cluster" as const,
+      transport: "aws-ecs" as const,
+    };
+
+    const first = manager.beginContainerLifecycle(input);
+    manager.reportContainerLifecycleError({
+      lifecycleId: first.lifecycleId,
+      message: "access denied",
+    });
+    const second = manager.beginContainerLifecycle(input);
+
+    expect(second.lifecycleId).not.toBe(first.lifecycleId);
+    expect(logs).toHaveLength(2);
+    expect(logs[0]?.metadata).toMatchObject({
+      status: "error",
+      errorCount: 1,
+    });
+    expect(logs[1]?.metadata).toMatchObject({ status: "connecting" });
+  });
+
+  it("records unsupported runtimes and closes active container lifecycles on shutdown", async () => {
+    const logs: ActivityLogRecord[] = [];
+    const manager = new CoreManager(undefined, (record) => {
+      const index = logs.findIndex((entry) => entry.id === record.id);
+      if (index >= 0) logs[index] = record;
+      else logs.push(record);
+    });
+
+    const unsupported = manager.beginContainerLifecycle({
+      scopeId: "containers:host-1",
+      hostId: "host-1",
+      hostLabel: "No runtime",
+      workspaceKind: "host-runtime",
+      transport: "ssh",
+    });
+    manager.markContainerLifecycleUnsupported({
+      scopeId: "containers:host-1",
+      lifecycleId: unsupported.lifecycleId,
+      reason: "docker/podman not found",
+    });
+    const active = manager.beginContainerLifecycle({
+      scopeId: "containers:ecs-1",
+      hostId: "ecs-1",
+      hostLabel: "Prod ECS",
+      workspaceKind: "ecs-cluster",
+      transport: "aws-ecs",
+    });
+    manager.markContainerLifecycleConnected({
+      scopeId: "containers:ecs-1",
+      lifecycleId: active.lifecycleId,
+      resourceCount: 2,
+    });
+
+    await manager.shutdown();
+
+    expect(logs.find((record) => record.id === `container:${unsupported.lifecycleId}`)).toMatchObject({
+      level: "warn",
+      metadata: expect.objectContaining({ status: "unsupported" }),
+    });
+    expect(logs.find((record) => record.id === `container:${active.lifecycleId}`)?.metadata).toMatchObject({
+      status: "closed",
+      endReason: "앱 종료로 Containers 연결이 정리되었습니다.",
+    });
+  });
+
+  it("records container actions without storing command output or credentials", async () => {
+    const logs: ActivityLogRecord[] = [];
+    const manager = new CoreManager(undefined, (record) => logs.push(record));
+    manager.beginContainerLifecycle({
+      scopeId: "containers:host-1",
+      hostId: "host-1",
+      hostLabel: "Prod",
+      workspaceKind: "host-runtime",
+      transport: "ssh",
+    });
+    const internals = manager as unknown as {
+      containerEndpoints: Map<string, unknown>;
+      containerNamesByEndpointId: Map<string, Map<string, string>>;
+      start: () => Promise<void>;
+      requestResponse: () => Promise<Record<string, unknown>>;
+    };
+    internals.containerEndpoints.set("containers:host-1", {
+      hostId: "host-1",
+      runtime: "podman",
+      runtimeCommand: "/usr/bin/podman",
+      unsupportedReason: null,
+    });
+    internals.containerNamesByEndpointId.set(
+      "containers:host-1",
+      new Map([["container-1", "api"]]),
+    );
+    vi.spyOn(internals, "start").mockResolvedValue(undefined);
+    vi.spyOn(internals, "requestResponse").mockResolvedValue({});
+
+    await manager.containersRemove("containers:host-1", "container-1");
+
+    const actionLog = logs.find((record) => record.kind === "container-action");
+    const metadata = actionLog?.metadata as unknown as ContainerActionLogMetadata;
+    expect(actionLog?.level).toBe("warn");
+    expect(metadata).toMatchObject({
+      hostLabel: "Prod",
+      containerId: "container-1",
+      containerName: "api",
+      runtime: "podman",
+      action: "remove",
+      status: "success",
+    });
+    expect(JSON.stringify(metadata)).not.toContain("password");
+    expect(JSON.stringify(metadata)).not.toContain("privateKey");
+  });
+
+  it("records failed container actions as errors", async () => {
+    const logs: ActivityLogRecord[] = [];
+    const manager = new CoreManager(undefined, (record) => logs.push(record));
+    manager.beginContainerLifecycle({
+      scopeId: "containers:host-1",
+      hostId: "host-1",
+      hostLabel: "Prod",
+      workspaceKind: "host-runtime",
+      transport: "aws-ssm",
+    });
+    const internals = manager as unknown as {
+      start: () => Promise<void>;
+      requestResponse: () => Promise<Record<string, unknown>>;
+    };
+    vi.spyOn(internals, "start").mockResolvedValue(undefined);
+    vi.spyOn(internals, "requestResponse").mockRejectedValue(
+      new Error("permission denied"),
+    );
+
+    await expect(
+      manager.containersRestart("containers:host-1", "container-1"),
+    ).rejects.toThrow("permission denied");
+
+    const actionLog = logs.find((record) => record.kind === "container-action");
+    expect(actionLog?.level).toBe("error");
+    expect(actionLog?.metadata).toMatchObject({
+      action: "restart",
+      status: "error",
+      errorMessage: "permission denied",
+    });
   });
 
   it("parses container stats responses and validates remote log search payloads", async () => {

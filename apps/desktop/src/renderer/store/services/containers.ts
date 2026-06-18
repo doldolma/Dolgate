@@ -146,6 +146,46 @@ export function createContainersServices(deps: SliceDeps) {
       };
     });
   };
+  const beginContainerLifecycle = async (
+    set: StoreSetter,
+    hostId: string,
+  ): Promise<string> => {
+    const { lifecycleId } = await api.containers.beginLifecycle(hostId);
+    set((state) => {
+      const host = state.hosts.find((item) => item.id === hostId);
+      const currentTab =
+        findContainersTab(state, hostId) ??
+        (host ? createEmptyContainersTabState(host) : null);
+      if (!currentTab) {
+        return state;
+      }
+      if (currentTab.lifecycleId === lifecycleId) {
+        return state;
+      }
+      return {
+        containerTabs: upsertContainersTab(state.containerTabs, {
+          ...currentTab,
+          lifecycleId,
+        }),
+      };
+    });
+    return lifecycleId;
+  };
+  const reportContainerLifecycleError = async (
+    lifecycleId: string | null | undefined,
+    error: unknown,
+    fallbackMessage: string,
+  ): Promise<void> => {
+    if (!lifecycleId) {
+      return;
+    }
+    await api.containers
+      .reportLifecycleError({
+        lifecycleId,
+        message: normalizeErrorMessage(error, fallbackMessage),
+      })
+      .catch(() => undefined);
+  };
   const {
     updateSessionProgress,
     promptForMissingUsername,
@@ -531,6 +571,7 @@ export function createContainersServices(deps: SliceDeps) {
     };
 
     try {
+      await beginContainerLifecycle(set, hostId);
       const profileStatus =
         await trustServices.ensureAwsSsoProfileAuthenticationIfNeeded(
           host.awsProfileName,
@@ -665,6 +706,7 @@ export function createContainersServices(deps: SliceDeps) {
     });
 
     try {
+      await beginContainerLifecycle(set, hostId);
       const result = await api.containers.list(hostId);
       const nextSelectedContainerId = (() => {
         const currentSelectedId =
@@ -1112,6 +1154,8 @@ export function createContainersServices(deps: SliceDeps) {
     promptForMissingUsername,
     ensureTrustedHost: trustServices.ensureTrustedHost,
     clearContainerTabConnectionOverlay,
+    beginContainerLifecycle,
+    reportContainerLifecycleError,
     createPendingSessionTabForContainerShell,
     createPendingSessionTabForEcsShell,
     startPendingContainerShellConnect,

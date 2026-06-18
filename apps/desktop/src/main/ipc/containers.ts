@@ -2,6 +2,7 @@ import {
   buildAwsSsmKnownHostIdentity,
   getAwsEc2HostSshPort,
   isAwsEc2HostRecord,
+  isAwsEcsHostRecord,
   isWarpgateSshHostRecord,
   type HostContainersEphemeralTunnelInput,
   type HostContainersLogsInput,
@@ -19,27 +20,103 @@ import type {
 } from "./context";
 import { retryAwsSsmSshOperation } from "./coordinators/aws-ssm-ssh-retry";
 
+function beginContainersLifecycle(
+  ctx: MainIpcContext,
+  host: NonNullable<ReturnType<MainIpcContext["hosts"]["getById"]>>,
+) {
+  return ctx.coreManager.beginContainerLifecycle({
+    scopeId: ctx.buildContainersEndpointId(host.id),
+    hostId: host.id,
+    hostLabel: host.label,
+    workspaceKind: isAwsEcsHostRecord(host) ? "ecs-cluster" : "host-runtime",
+    transport: isAwsEcsHostRecord(host)
+      ? "aws-ecs"
+      : isAwsEc2HostRecord(host)
+        ? "aws-ssm"
+        : isWarpgateSshHostRecord(host)
+          ? "warpgate"
+          : "ssh",
+  });
+}
+
 export function registerContainersIpcHandlers(ctx: MainIpcContext): void {
+  ipcMain.handle(
+    ipcChannels.containers.beginLifecycle,
+    async (_event, hostId: string) => {
+      const host = ctx.hosts.getById(hostId);
+      if (!host) {
+        throw new Error("Containers host를 찾지 못했습니다.");
+      }
+      return beginContainersLifecycle(ctx, host);
+    },
+  );
+
+  ipcMain.handle(
+    ipcChannels.containers.reportLifecycleError,
+    async (
+      _event,
+      input: { lifecycleId: string; message: string },
+    ) => {
+      const lifecycleId = input.lifecycleId?.trim();
+      if (!lifecycleId) {
+        return;
+      }
+      ctx.coreManager.reportContainerLifecycleError({
+        lifecycleId,
+        message:
+          input.message?.trim().slice(0, 4_000) ||
+          "Containers 연결 오류가 발생했습니다.",
+      });
+    },
+  );
+
   ipcMain.handle(
     ipcChannels.containers.list,
     async (_event, hostId: string) => {
       const host = ctx.hosts.getById(hostId);
       ctx.assertSftpCompatibleHost(host);
       const typedHost = host as SftpCompatibleHostRecord;
-      const runtimeInfo = await ctx.ensureContainersEndpoint(typedHost);
-      if (runtimeInfo.unsupportedReason || !runtimeInfo.runtime) {
+      const scopeId = ctx.buildContainersEndpointId(hostId);
+      const { lifecycleId } = beginContainersLifecycle(ctx, typedHost);
+      ctx.coreManager.noteContainerLifecycleLoadStarted(scopeId, lifecycleId);
+      try {
+        const runtimeInfo = await ctx.ensureContainersEndpoint(typedHost);
+        if (runtimeInfo.unsupportedReason || !runtimeInfo.runtime) {
+          ctx.coreManager.markContainerLifecycleUnsupported({
+            scopeId,
+            lifecycleId,
+            reason:
+              runtimeInfo.unsupportedReason ||
+              "docker/podman 런타임을 확인하지 못했습니다.",
+          });
+          return {
+            runtime: null,
+            unsupportedReason: runtimeInfo.unsupportedReason,
+            containers: [],
+          };
+        }
+        const listing = await ctx.coreManager.containersList(runtimeInfo.endpointId);
+        ctx.coreManager.markContainerLifecycleConnected({
+          scopeId,
+          lifecycleId,
+          runtime: listing.runtime,
+          resourceCount: listing.containers.length,
+        });
         return {
-          runtime: null,
-          unsupportedReason: runtimeInfo.unsupportedReason,
-          containers: [],
+          runtime: listing.runtime,
+          unsupportedReason: null,
+          containers: listing.containers,
         };
+      } catch (error) {
+        ctx.coreManager.reportContainerLifecycleError({
+          lifecycleId,
+          message:
+            error instanceof Error
+              ? error.message
+              : "컨테이너 목록을 불러오지 못했습니다.",
+        });
+        throw error;
       }
-      const listing = await ctx.coreManager.containersList(runtimeInfo.endpointId);
-      return {
-        runtime: listing.runtime,
-        unsupportedReason: null,
-        containers: listing.containers,
-      };
     },
   );
 
@@ -219,12 +296,19 @@ export function registerContainersIpcHandlers(ctx: MainIpcContext): void {
 
   ipcMain.handle(
     ipcChannels.containers.release,
-    async (_event, hostId: string) => {
+    async (_event, hostId: string, lifecycleId?: string) => {
+      const host = ctx.hosts.getById(hostId);
       const endpointId = ctx.buildContainersEndpointId(hostId);
       try {
-        await ctx.coreManager.containersDisconnect(endpointId);
+        if (!host || !isAwsEcsHostRecord(host)) {
+          await ctx.coreManager.containersDisconnect(endpointId);
+        }
       } finally {
         await ctx.stopAwsContainersTunnelForEndpoint(endpointId);
+        ctx.coreManager.finalizeContainerLifecycleForScope(
+          endpointId,
+          lifecycleId,
+        );
       }
     },
   );

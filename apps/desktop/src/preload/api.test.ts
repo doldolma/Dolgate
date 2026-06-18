@@ -41,6 +41,12 @@ describe("createDesktopApi", () => {
       profileName: "corp-sso",
       region: null,
     });
+    await api.containers.beginLifecycle("host-1");
+    await api.containers.reportLifecycleError({
+      lifecycleId: "lifecycle-1",
+      message: "failed",
+    });
+    await api.containers.release("host-1", "lifecycle-1");
 
     expect(ipcRenderer.invoke).toHaveBeenNthCalledWith(
       1,
@@ -100,6 +106,22 @@ describe("createDesktopApi", () => {
         region: null,
       },
     );
+    expect(ipcRenderer.invoke).toHaveBeenNthCalledWith(
+      12,
+      ipcChannels.containers.beginLifecycle,
+      "host-1",
+    );
+    expect(ipcRenderer.invoke).toHaveBeenNthCalledWith(
+      13,
+      ipcChannels.containers.reportLifecycleError,
+      { lifecycleId: "lifecycle-1", message: "failed" },
+    );
+    expect(ipcRenderer.invoke).toHaveBeenNthCalledWith(
+      14,
+      ipcChannels.containers.release,
+      "host-1",
+      "lifecycle-1",
+    );
   });
 
   it("resolves dropped file paths through Electron webUtils without IPC", async () => {
@@ -138,8 +160,10 @@ describe("createDesktopApi", () => {
 
     const authListener = vi.fn();
     const transferListener = vi.fn();
+    const logsChangedListener = vi.fn();
     const authOff = api.auth.onEvent(authListener);
     const transferOff = api.sftp.onTransferEvent(transferListener);
+    const logsChangedOff = api.logs.onChanged(logsChangedListener);
 
     const authState = {
       status: "authenticated",
@@ -151,17 +175,22 @@ describe("createDesktopApi", () => {
 
     handlers.get(ipcChannels.auth.event)?.({}, authState);
     handlers.get(ipcChannels.sftp.transferEvent)?.({}, transferEvent);
+    handlers.get(ipcChannels.logs.changed)?.({}, undefined);
 
     expect(authListener).toHaveBeenCalledWith(authState);
     expect(transferListener).toHaveBeenCalledWith(transferEvent);
+    expect(logsChangedListener).toHaveBeenCalledTimes(1);
 
     authOff();
     transferOff();
+    logsChangedOff();
 
     handlers.get(ipcChannels.auth.event)?.({}, authState);
     handlers.get(ipcChannels.sftp.transferEvent)?.({}, transferEvent);
+    handlers.get(ipcChannels.logs.changed)?.({}, undefined);
 
     expect(authListener).toHaveBeenCalledTimes(1);
     expect(transferListener).toHaveBeenCalledTimes(1);
+    expect(logsChangedListener).toHaveBeenCalledTimes(1);
   });
 });

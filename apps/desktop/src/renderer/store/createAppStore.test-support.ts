@@ -70,6 +70,7 @@ export function createContainerTab(
   return {
     kind: "host-containers",
     hostId,
+    lifecycleId: null,
     title: `${hostId} 쨌 Containers`,
     runtime: null,
     unsupportedReason: null,
@@ -648,6 +649,8 @@ export function createMockApi(): DesktopApi {
       listPorts: vi.fn().mockResolvedValue([]),
     },
     containers: {
+      beginLifecycle: vi.fn().mockResolvedValue({ lifecycleId: "lifecycle-1" }),
+      reportLifecycleError: vi.fn().mockResolvedValue(undefined),
       list: vi.fn().mockResolvedValue({
         hostId: "host-1",
         runtime: "docker",
@@ -903,6 +906,7 @@ export function createMockApi(): DesktopApi {
     logs: {
       list: vi.fn().mockResolvedValue([]),
       clear: vi.fn().mockResolvedValue(undefined),
+      onChanged: vi.fn().mockReturnValue(() => undefined),
     },
     keychain: {
       list: vi.fn().mockResolvedValue([]),

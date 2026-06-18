@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
-import type { ActivityLogRecord, PortForwardLifecycleLogMetadata, SessionLifecycleLogMetadata, SftpLifecycleLogMetadata } from '@shared';
+import type { ActivityLogRecord, ContainerActionLogMetadata, ContainerLifecycleLogMetadata, PortForwardLifecycleLogMetadata, SessionLifecycleLogMetadata, SftpLifecycleLogMetadata } from '@shared';
 import { LogsPanel } from './LogsPanel';
 
 function createLifecycleLog(
@@ -54,7 +54,99 @@ function createSftpLifecycleLog(
   };
 }
 
+function createContainerLifecycleLog(metadata: ContainerLifecycleLogMetadata): ActivityLogRecord {
+  return {
+    id: `container:${metadata.lifecycleId}`,
+    level: metadata.status === 'error' ? 'error' : 'info',
+    category: 'session',
+    kind: 'container-lifecycle',
+    message: 'Containers 연결',
+    metadata: metadata as unknown as Record<string, unknown>,
+    createdAt: metadata.startedAt,
+    updatedAt: metadata.endedAt ?? metadata.startedAt,
+  };
+}
+
+function createContainerActionLog(metadata: ContainerActionLogMetadata): ActivityLogRecord {
+  return {
+    id: `container-action:${metadata.actionId}`,
+    level: metadata.status === 'error' ? 'error' : 'warn',
+    category: 'audit',
+    kind: 'container-action',
+    message: '컨테이너 삭제',
+    metadata: metadata as unknown as Record<string, unknown>,
+    createdAt: metadata.startedAt,
+    updatedAt: metadata.completedAt,
+  };
+}
+
 describe('LogsPanel', () => {
+  it('renders a container lifecycle summary card', () => {
+    render(
+      <LogsPanel
+        logs={[
+          createContainerLifecycleLog({
+            lifecycleId: 'lifecycle-1',
+            hostId: 'host-1',
+            hostLabel: 'Prod Docker',
+            workspaceKind: 'host-runtime',
+            transport: 'aws-ssm',
+            runtime: 'docker',
+            startedAt: '2026-06-18T00:00:00.000Z',
+            connectedAt: '2026-06-18T00:00:01.000Z',
+            status: 'connected',
+            refreshCount: 2,
+            errorCount: 1,
+            resourceCount: 4,
+            lastError: 'refresh failed',
+          }),
+        ]}
+        onClear={vi.fn().mockResolvedValue(undefined)}
+        onOpenReplay={vi.fn().mockResolvedValue(undefined)}
+      />,
+    );
+
+    expect(screen.getByTestId('logs-container-lifecycle-card')).toBeInTheDocument();
+    expect(screen.getByText('Prod Docker')).toBeInTheDocument();
+    expect(screen.getByText('AWS SSM')).toBeInTheDocument();
+    expect(screen.getByText('DOCKER')).toBeInTheDocument();
+    expect(screen.getByText('컨테이너 4개')).toBeInTheDocument();
+    expect(screen.getByText('새로고침 2회')).toBeInTheDocument();
+    expect(screen.getByText('오류 1회')).toBeInTheDocument();
+    expect(screen.getByText('refresh failed')).toBeInTheDocument();
+  });
+
+  it('renders container actions in the audit category', () => {
+    render(
+      <LogsPanel
+        logs={[
+          createContainerActionLog({
+            actionId: 'action-1',
+            hostId: 'host-1',
+            hostLabel: 'Prod Docker',
+            containerId: 'abc123',
+            containerName: 'api',
+            runtime: 'podman',
+            action: 'remove',
+            status: 'success',
+            startedAt: '2026-06-18T00:00:00.000Z',
+            completedAt: '2026-06-18T00:00:01.000Z',
+            durationMs: 1000,
+          }),
+        ]}
+        onClear={vi.fn().mockResolvedValue(undefined)}
+        onOpenReplay={vi.fn().mockResolvedValue(undefined)}
+      />,
+    );
+
+    expect(screen.getByTestId('logs-container-action-card')).toBeInTheDocument();
+    expect(screen.getByText('api')).toBeInTheDocument();
+    expect(screen.getByText('abc123')).toBeInTheDocument();
+    expect(screen.getByText('PODMAN')).toBeInTheDocument();
+    expect(screen.getByText('Remove')).toBeInTheDocument();
+    expect(screen.getByText('Success')).toBeInTheDocument();
+  });
+
   it('renders remote session lifecycle rows with host label, kind badge, and connected state', () => {
     render(
       <LogsPanel

@@ -173,6 +173,7 @@ export function createEmptyContainersTabState(host: HostRecord): HostContainersT
   return {
     kind: isAwsEcsHostRecord(host) ? "ecs-cluster" : "host-containers",
     hostId: host.id,
+    lifecycleId: null,
     title: buildContainersTabTitle(host),
     runtime: null,
     unsupportedReason: null,

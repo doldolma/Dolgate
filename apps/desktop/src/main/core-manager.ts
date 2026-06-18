@@ -5,7 +5,12 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import type {
   ActivityLogRecord,
+  ContainerActionLogMetadata,
+  ContainerLifecycleLogMetadata,
+  ContainerLifecycleTransport,
+  ContainerWorkspaceKind,
   HostKeyProbeResult,
+  HostContainerAction,
   HostContainerDetails,
   HostContainerListResult,
   HostContainerLogSearchResult,
@@ -160,6 +165,25 @@ interface ContainersEndpointRuntime {
   unsupportedReason: string | null;
 }
 
+interface ContainerLifecycleState {
+  lifecycleId: string;
+  scopeId: string;
+  hostId: string;
+  hostLabel: string;
+  workspaceKind: ContainerWorkspaceKind;
+  transport: ContainerLifecycleTransport;
+  runtime: HostContainerRuntime | null;
+  startedAt: string;
+  connectedAt: string | null;
+  endedAt: string | null;
+  status: ContainerLifecycleLogMetadata["status"];
+  refreshCount: number;
+  errorCount: number;
+  resourceCount: number | null;
+  lastError: string | null;
+  endReason: string | null;
+}
+
 type SessionTransport =
   | "ssh"
   | "aws-ssm"
@@ -189,6 +213,8 @@ const SHUTDOWN_SESSION_DISCONNECT_REASON =
   "앱 종료로 세션이 정리되었습니다.";
 const SHUTDOWN_SFTP_DISCONNECT_REASON =
   "앱 종료로 SFTP 연결이 정리되었습니다.";
+const SHUTDOWN_CONTAINERS_DISCONNECT_REASON =
+  "앱 종료로 Containers 연결이 정리되었습니다.";
 
 type PathDelimiter = ":" | ";";
 
@@ -796,6 +822,14 @@ export class CoreManager {
     string,
     ContainersEndpointRuntime
   >();
+  private readonly containerLifecycleByScopeId = new Map<
+    string,
+    ContainerLifecycleState
+  >();
+  private readonly containerNamesByEndpointId = new Map<
+    string,
+    Map<string, string>
+  >();
   private readonly transferJobs = new Map<string, TransferJob>();
   private readonly portForwardDefinitions = new Map<
     string,
@@ -1083,6 +1117,7 @@ export class CoreManager {
 
     this.finalizeActiveSessionsOnShutdown();
     this.finalizeActiveSftpLifecyclesOnShutdown();
+    this.finalizeActiveContainerLifecyclesOnShutdown();
 
     if (options.finalizePortForwardsAsStopped) {
       await this.finalizeActivePortForwardsAsStopped();
@@ -1147,6 +1182,20 @@ export class CoreManager {
         endpointId,
         "closed",
         SHUTDOWN_SFTP_DISCONNECT_REASON,
+      );
+    }
+  }
+
+  private finalizeActiveContainerLifecyclesOnShutdown(): void {
+    for (const lifecycle of this.containerLifecycleByScopeId.values()) {
+      if (lifecycle.endedAt) {
+        continue;
+      }
+      this.finalizeContainerLifecycle(
+        lifecycle.scopeId,
+        lifecycle.lifecycleId,
+        "closed",
+        SHUTDOWN_CONTAINERS_DISCONNECT_REASON,
       );
     }
   }
@@ -1302,6 +1351,161 @@ export class CoreManager {
     return { sessionId };
   }
 
+  beginContainerLifecycle(input: {
+    scopeId: string;
+    hostId: string;
+    hostLabel: string;
+    workspaceKind: ContainerWorkspaceKind;
+    transport: ContainerLifecycleTransport;
+  }): { lifecycleId: string } {
+    const current = this.containerLifecycleByScopeId.get(input.scopeId);
+    if (current && !current.endedAt) {
+      current.hostId = input.hostId;
+      current.hostLabel = input.hostLabel;
+      current.workspaceKind = input.workspaceKind;
+      current.transport = input.transport;
+      this.containerLifecycleByScopeId.set(input.scopeId, current);
+      this.upsertContainerLifecycleLog(current);
+      return { lifecycleId: current.lifecycleId };
+    }
+
+    const lifecycle: ContainerLifecycleState = {
+      lifecycleId: randomUUID(),
+      scopeId: input.scopeId,
+      hostId: input.hostId,
+      hostLabel: input.hostLabel,
+      workspaceKind: input.workspaceKind,
+      transport: input.transport,
+      runtime: null,
+      startedAt: new Date().toISOString(),
+      connectedAt: null,
+      endedAt: null,
+      status: "connecting",
+      refreshCount: 0,
+      errorCount: 0,
+      resourceCount: null,
+      lastError: null,
+      endReason: null,
+    };
+    this.containerLifecycleByScopeId.set(input.scopeId, lifecycle);
+    this.upsertContainerLifecycleLog(lifecycle);
+    return { lifecycleId: lifecycle.lifecycleId };
+  }
+
+  noteContainerLifecycleLoadStarted(
+    scopeId: string,
+    lifecycleId: string,
+  ): void {
+    const lifecycle = this.getActiveContainerLifecycle(scopeId, lifecycleId);
+    if (!lifecycle) {
+      return;
+    }
+    if (lifecycle.status === "connected") {
+      lifecycle.refreshCount += 1;
+      this.containerLifecycleByScopeId.set(scopeId, lifecycle);
+      this.upsertContainerLifecycleLog(lifecycle);
+    }
+  }
+
+  markContainerLifecycleConnected(input: {
+    scopeId: string;
+    lifecycleId: string;
+    runtime?: HostContainerRuntime | null;
+    resourceCount?: number | null;
+  }): void {
+    const lifecycle = this.getActiveContainerLifecycle(
+      input.scopeId,
+      input.lifecycleId,
+    );
+    if (!lifecycle) {
+      return;
+    }
+    lifecycle.status = "connected";
+    lifecycle.connectedAt ??= new Date().toISOString();
+    lifecycle.runtime = input.runtime ?? lifecycle.runtime;
+    lifecycle.resourceCount = input.resourceCount ?? lifecycle.resourceCount;
+    lifecycle.lastError = null;
+    lifecycle.endReason = null;
+    this.containerLifecycleByScopeId.set(input.scopeId, lifecycle);
+    this.upsertContainerLifecycleLog(lifecycle);
+  }
+
+  markContainerLifecycleUnsupported(input: {
+    scopeId: string;
+    lifecycleId: string;
+    reason: string;
+  }): void {
+    this.finalizeContainerLifecycle(
+      input.scopeId,
+      input.lifecycleId,
+      "unsupported",
+      input.reason,
+    );
+  }
+
+  reportContainerLifecycleError(input: {
+    lifecycleId: string;
+    message: string;
+  }): void {
+    const matched = Array.from(this.containerLifecycleByScopeId.values()).find(
+      (lifecycle) => lifecycle.lifecycleId === input.lifecycleId,
+    );
+    if (!matched || matched.endedAt) {
+      return;
+    }
+    if (matched.status === "connected") {
+      matched.errorCount += 1;
+      matched.lastError = input.message;
+      this.containerLifecycleByScopeId.set(matched.scopeId, matched);
+      this.upsertContainerLifecycleLog(matched);
+      return;
+    }
+    this.finalizeContainerLifecycle(
+      matched.scopeId,
+      matched.lifecycleId,
+      "error",
+      input.message,
+    );
+  }
+
+  finalizeContainerLifecycleForScope(
+    scopeId: string,
+    lifecycleId?: string,
+    reason: string | null = null,
+  ): void {
+    const lifecycle = this.containerLifecycleByScopeId.get(scopeId);
+    if (!lifecycle || lifecycle.endedAt) {
+      return;
+    }
+    if (lifecycleId && lifecycle.lifecycleId !== lifecycleId) {
+      return;
+    }
+    this.finalizeContainerLifecycle(
+      scopeId,
+      lifecycle.lifecycleId,
+      "closed",
+      reason,
+    );
+  }
+
+  failContainerLifecycleForScope(scopeId: string, reason: string): void {
+    const lifecycle = this.containerLifecycleByScopeId.get(scopeId);
+    if (!lifecycle || lifecycle.endedAt) {
+      return;
+    }
+    this.finalizeContainerLifecycle(
+      scopeId,
+      lifecycle.lifecycleId,
+      "error",
+      reason,
+    );
+  }
+
+  getContainerLifecycleId(scopeId: string): string | null {
+    const lifecycle = this.containerLifecycleByScopeId.get(scopeId);
+    return lifecycle && !lifecycle.endedAt ? lifecycle.lifecycleId : null;
+  }
+
   async containersConnect(
     payload: ResolvedContainersConnectPayload & {
       endpointId: string;
@@ -1348,6 +1552,7 @@ export class CoreManager {
 
   async containersDisconnect(endpointId: string): Promise<void> {
     this.containerEndpoints.delete(endpointId);
+    this.containerNamesByEndpointId.delete(endpointId);
     if (!this.process) {
       return;
     }
@@ -1396,6 +1601,15 @@ export class CoreManager {
           };
         })
       : [];
+    this.containerNamesByEndpointId.set(
+      endpointId,
+      new Map(
+        containers.map((container) => [
+          container.id,
+          container.name.trim() || container.id,
+        ]),
+      ),
+    );
     return {
       hostId: this.containerEndpoints.get(endpointId)?.hostId ?? "",
       runtime,
@@ -1574,17 +1788,42 @@ export class CoreManager {
     type: "containersStart" | "containersStop" | "containersRestart" | "containersRemove",
     containerId: string,
   ): Promise<void> {
-    await this.start();
-    await this.requestResponse<Record<string, unknown>>(
-      {
-        id: randomUUID(),
-        type,
+    const action = this.resolveContainerAction(type);
+    const actionId = randomUUID();
+    const startedAt = new Date().toISOString();
+    try {
+      await this.start();
+      await this.requestResponse<Record<string, unknown>>(
+        {
+          id: randomUUID(),
+          type,
+          endpointId,
+          payload: { containerId },
+        },
+        ["containersActionCompleted"],
+        { timeoutMs: 25000 },
+      );
+      this.recordContainerActionLog({
+        actionId,
         endpointId,
-        payload: { containerId },
-      },
-      ["containersActionCompleted"],
-      { timeoutMs: 25000 },
-    );
+        containerId,
+        action,
+        startedAt,
+        status: "success",
+        errorMessage: null,
+      });
+    } catch (error) {
+      this.recordContainerActionLog({
+        actionId,
+        endpointId,
+        containerId,
+        action,
+        startedAt,
+        status: "error",
+        errorMessage: toErrorMessage(error),
+      });
+      throw error;
+    }
   }
 
   async containersStats(
@@ -2988,6 +3227,26 @@ export class CoreManager {
           event.type === "containersError"
         ) {
           this.containerEndpoints.delete(event.endpointId);
+          this.containerNamesByEndpointId.delete(event.endpointId);
+          const lifecycleId = this.getContainerLifecycleId(event.endpointId);
+          if (lifecycleId) {
+            if (event.type === "containersError") {
+              this.failContainerLifecycleForScope(
+                event.endpointId,
+                String(
+                  event.payload.message ?? "Containers 연결 오류가 발생했습니다.",
+                ),
+              );
+            } else {
+              this.finalizeContainerLifecycleForScope(
+                event.endpointId,
+                lifecycleId,
+                typeof event.payload.message === "string"
+                  ? event.payload.message
+                  : null,
+              );
+            }
+          }
         }
         this.broadcastTerminalEvent(event);
         return;
@@ -3246,6 +3505,8 @@ export class CoreManager {
     this.sftpEndpoints.clear();
     this.sftpLifecycleByEndpointId.clear();
     this.containerEndpoints.clear();
+    this.containerLifecycleByScopeId.clear();
+    this.containerNamesByEndpointId.clear();
     this.transferJobs.clear();
     this.portForwardDefinitions.clear();
     this.portForwardRuntimes.clear();
@@ -3627,6 +3888,166 @@ export class CoreManager {
 
   private upsertLog(record: ActivityLogRecord): void {
     this.upsertLogRecord?.(record);
+  }
+
+  private getActiveContainerLifecycle(
+    scopeId: string,
+    lifecycleId: string,
+  ): ContainerLifecycleState | null {
+    const lifecycle = this.containerLifecycleByScopeId.get(scopeId);
+    if (
+      !lifecycle ||
+      lifecycle.lifecycleId !== lifecycleId ||
+      lifecycle.endedAt
+    ) {
+      return null;
+    }
+    return lifecycle;
+  }
+
+  private finalizeContainerLifecycle(
+    scopeId: string,
+    lifecycleId: string,
+    status: "closed" | "error" | "unsupported",
+    reason: string | null,
+  ): void {
+    const lifecycle = this.getActiveContainerLifecycle(scopeId, lifecycleId);
+    if (!lifecycle) {
+      return;
+    }
+    lifecycle.status = status;
+    lifecycle.endedAt = new Date().toISOString();
+    lifecycle.endReason = reason;
+    if (status === "error") {
+      lifecycle.errorCount += 1;
+      lifecycle.lastError = reason;
+    }
+    this.containerLifecycleByScopeId.set(scopeId, lifecycle);
+    this.upsertContainerLifecycleLog(lifecycle);
+  }
+
+  private upsertContainerLifecycleLog(
+    lifecycle: ContainerLifecycleState,
+  ): void {
+    const durationMs = lifecycle.endedAt
+      ? Math.max(
+          0,
+          new Date(lifecycle.endedAt).getTime() -
+            new Date(lifecycle.startedAt).getTime(),
+        )
+      : null;
+    const metadata: ContainerLifecycleLogMetadata = {
+      lifecycleId: lifecycle.lifecycleId,
+      hostId: lifecycle.hostId,
+      hostLabel: lifecycle.hostLabel,
+      workspaceKind: lifecycle.workspaceKind,
+      transport: lifecycle.transport,
+      runtime: lifecycle.runtime,
+      startedAt: lifecycle.startedAt,
+      connectedAt: lifecycle.connectedAt,
+      endedAt: lifecycle.endedAt,
+      durationMs,
+      status: lifecycle.status,
+      refreshCount: lifecycle.refreshCount,
+      errorCount: lifecycle.errorCount,
+      resourceCount: lifecycle.resourceCount,
+      lastError: lifecycle.lastError,
+      endReason: lifecycle.endReason,
+    };
+    this.upsertLog({
+      id: `container:${lifecycle.lifecycleId}`,
+      level:
+        lifecycle.status === "error"
+          ? "error"
+          : lifecycle.status === "unsupported"
+            ? "warn"
+            : "info",
+      category: "session",
+      kind: "container-lifecycle",
+      message:
+        lifecycle.workspaceKind === "ecs-cluster"
+          ? "ECS Containers 탐색"
+          : "Containers 연결",
+      metadata: metadata as unknown as Record<string, unknown>,
+      createdAt: lifecycle.startedAt,
+      updatedAt: lifecycle.endedAt ?? new Date().toISOString(),
+    });
+  }
+
+  private resolveContainerAction(
+    type:
+      | "containersStart"
+      | "containersStop"
+      | "containersRestart"
+      | "containersRemove",
+  ): HostContainerAction {
+    if (type === "containersStart") {
+      return "start";
+    }
+    if (type === "containersStop") {
+      return "stop";
+    }
+    if (type === "containersRestart") {
+      return "restart";
+    }
+    return "remove";
+  }
+
+  private recordContainerActionLog(input: {
+    actionId: string;
+    endpointId: string;
+    containerId: string;
+    action: HostContainerAction;
+    startedAt: string;
+    status: ContainerActionLogMetadata["status"];
+    errorMessage: string | null;
+  }): void {
+    const lifecycle = this.containerLifecycleByScopeId.get(input.endpointId);
+    const endpoint = this.containerEndpoints.get(input.endpointId);
+    const completedAt = new Date().toISOString();
+    const metadata: ContainerActionLogMetadata = {
+      actionId: input.actionId,
+      hostId: lifecycle?.hostId ?? endpoint?.hostId ?? "",
+      hostLabel: lifecycle?.hostLabel ?? endpoint?.hostId ?? "Unknown host",
+      containerId: input.containerId,
+      containerName:
+        this.containerNamesByEndpointId
+          .get(input.endpointId)
+          ?.get(input.containerId) ?? null,
+      runtime: endpoint?.runtime ?? lifecycle?.runtime ?? null,
+      action: input.action,
+      status: input.status,
+      startedAt: input.startedAt,
+      completedAt,
+      durationMs: Math.max(
+        0,
+        new Date(completedAt).getTime() - new Date(input.startedAt).getTime(),
+      ),
+      errorMessage: input.errorMessage,
+    };
+    const actionLabel =
+      input.action === "start"
+        ? "시작"
+        : input.action === "stop"
+          ? "중지"
+          : input.action === "restart"
+            ? "재시작"
+            : "삭제";
+    this.upsertLog({
+      id: `container-action:${input.actionId}`,
+      level:
+        input.status === "error"
+          ? "error"
+          : input.action === "remove"
+            ? "warn"
+            : "info",
+      category: "audit",
+      kind: "container-action",
+      message: `컨테이너 ${actionLabel}`,
+      metadata: metadata as unknown as Record<string, unknown>,
+      createdAt: input.startedAt,
+      updatedAt: completedAt,
+    });
   }
 
   private getSessionLifecycleLogId(sessionId: string): string {

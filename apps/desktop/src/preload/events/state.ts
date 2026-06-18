@@ -38,6 +38,7 @@ const sftpConnectionProgressHub =
   createListenerHub<SftpConnectionProgressEvent>();
 const containerConnectionProgressHub =
   createListenerHub<ContainerConnectionProgressEvent>();
+const activityLogsChangedHub = createListenerHub<void>();
 const portForwardEventHub = createListenerHub<PortForwardRuntimeEvent>();
 const updateEventHub = createListenerHub<UpdateEvent>();
 const authEventHub = createListenerHub<AuthState>();
@@ -179,6 +180,14 @@ export function subscribeContainerConnectionProgress(
   listener: Listener<ContainerConnectionProgressEvent>,
 ): () => void {
   return containerConnectionProgressHub.subscribe(listener);
+}
+
+export function emitActivityLogsChanged(): void {
+  activityLogsChangedHub.emit();
+}
+
+export function subscribeActivityLogsChanged(listener: () => void): () => void {
+  return activityLogsChangedHub.subscribe(listener);
 }
 
 export function emitPortForwardEvent(payload: PortForwardRuntimeEvent): void {

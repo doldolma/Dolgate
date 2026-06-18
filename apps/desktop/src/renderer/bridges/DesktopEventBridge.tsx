@@ -6,6 +6,7 @@ interface DesktopEventBridgeProps {
   onCoreEvent: (event: any) => void;
   onSftpConnectionProgress: (event: any) => void;
   onContainerConnectionProgress: (event: any) => void;
+  onActivityLogsChanged: () => void;
   onTransferEvent: (event: any) => void;
   onPortForwardEvent: (event: any) => void;
   onSessionShareEvent: (event: any) => void;
@@ -17,6 +18,7 @@ export function DesktopEventBridge({
   onCoreEvent,
   onSftpConnectionProgress,
   onContainerConnectionProgress,
+  onActivityLogsChanged,
   onTransferEvent,
   onPortForwardEvent,
   onSessionShareEvent,
@@ -28,6 +30,7 @@ export function DesktopEventBridge({
   const handleContainerConnectionProgress = useEffectEvent(
     onContainerConnectionProgress,
   );
+  const handleActivityLogsChanged = useEffectEvent(onActivityLogsChanged);
   const handleTransferEvent = useEffectEvent(onTransferEvent);
   const handlePortForwardEvent = useEffectEvent(onPortForwardEvent);
   const handleSessionShareEvent = useEffectEvent(onSessionShareEvent);
@@ -48,6 +51,12 @@ export function DesktopEventBridge({
       typeof desktopApi.containers.onConnectionProgress === "function"
         ? desktopApi.containers.onConnectionProgress((event) => {
             handleContainerConnectionProgress(event);
+          })
+        : () => undefined;
+    const offActivityLogsChanged =
+      typeof desktopApi.logs.onChanged === "function"
+        ? desktopApi.logs.onChanged(() => {
+            handleActivityLogsChanged();
           })
         : () => undefined;
     const offTransfer = desktopApi.sftp.onTransferEvent((event) => {
@@ -73,6 +82,7 @@ export function DesktopEventBridge({
       offCore();
       offSftpProgress();
       offContainersProgress();
+      offActivityLogsChanged();
       offTransfer();
       offForward();
       offSessionShare();

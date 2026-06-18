@@ -2,6 +2,7 @@ import { webUtils, type IpcRenderer } from "electron";
 import type { DesktopApi } from "@shared";
 import { ipcChannels } from "../../common/ipc-channels";
 import {
+  subscribeActivityLogsChanged,
   subscribePortForwardEvent,
   subscribeUpdateEvent,
   subscribeWindowState,
@@ -121,6 +122,7 @@ export function buildLogsBridge(
   return {
     list: () => ipcRenderer.invoke(ipcChannels.logs.list),
     clear: () => ipcRenderer.invoke(ipcChannels.logs.clear),
+    onChanged: (listener) => subscribeActivityLogsChanged(listener),
   };
 }
 

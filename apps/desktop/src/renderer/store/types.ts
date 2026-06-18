@@ -205,6 +205,7 @@ export type EcsServiceLogsStateUpdater =
 export interface HostContainersTabState {
   kind: HostContainersTabKind;
   hostId: string;
+  lifecycleId: string | null;
   title: string;
   runtime: HostContainerRuntime | null;
   unsupportedReason: string | null;
@@ -688,6 +689,7 @@ interface AppStateParts {
   handleContainerConnectionProgressEvent: (
     event: ContainerConnectionProgressEvent,
   ) => void;
+  handleActivityLogsChanged: () => void;
   setSftpPaneSource: (
     paneId: SftpPaneId,
     sourceKind: SftpSourceKind,
@@ -946,6 +948,7 @@ export type RuntimeEventSlice = Pick<
   | "handlePortForwardEvent"
   | "handleSftpConnectionProgressEvent"
   | "handleContainerConnectionProgressEvent"
+  | "handleActivityLogsChanged"
 >;
 
 export type AppState = CatalogSlice &

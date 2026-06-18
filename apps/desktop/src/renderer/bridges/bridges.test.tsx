@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => {
     core: null as ((event: unknown) => void) | null,
     sftpProgress: null as ((event: unknown) => void) | null,
     containersProgress: null as ((event: unknown) => void) | null,
+    activityLogsChanged: null as (() => void) | null,
     transfer: null as ((event: unknown) => void) | null,
     forward: null as ((event: unknown) => void) | null,
     sessionShare: null as ((event: unknown) => void) | null,
@@ -40,6 +41,12 @@ const mocks = vi.hoisted(() => {
       containers: {
         onConnectionProgress: vi.fn((listener: (event: unknown) => void) => {
           listeners.containersProgress = listener;
+          return vi.fn();
+        }),
+      },
+      logs: {
+        onChanged: vi.fn((listener: () => void) => {
+          listeners.activityLogsChanged = listener;
           return vi.fn();
         }),
       },
@@ -105,6 +112,7 @@ describe('renderer bridges', () => {
     mocks.listeners.core = null;
     mocks.listeners.sftpProgress = null;
     mocks.listeners.containersProgress = null;
+    mocks.listeners.activityLogsChanged = null;
     mocks.listeners.transfer = null;
     mocks.listeners.forward = null;
     mocks.listeners.sessionShare = null;
@@ -126,6 +134,7 @@ describe('renderer bridges', () => {
         onCoreEvent={firstCore}
         onSftpConnectionProgress={stableFn}
         onContainerConnectionProgress={stableFn}
+        onActivityLogsChanged={stableFn}
         onTransferEvent={stableFn}
         onPortForwardEvent={stableFn}
         onSessionShareEvent={stableFn}
@@ -139,6 +148,7 @@ describe('renderer bridges', () => {
         onCoreEvent={latestCore}
         onSftpConnectionProgress={stableFn}
         onContainerConnectionProgress={stableFn}
+        onActivityLogsChanged={stableFn}
         onTransferEvent={stableFn}
         onPortForwardEvent={stableFn}
         onSessionShareEvent={stableFn}

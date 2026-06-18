@@ -243,6 +243,7 @@ export function App() {
         onContainerConnectionProgress={
           containersViewModel.handleContainerConnectionProgressEvent
         }
+        onActivityLogsChanged={homeViewModel.handleActivityLogsChanged}
         onTransferEvent={sftpViewModel.handleTransferEvent}
         onPortForwardEvent={homeViewModel.handlePortForwardEvent}
         onSessionShareEvent={sessionViewModel.handleSessionShareEvent}

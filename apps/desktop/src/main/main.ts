@@ -94,6 +94,11 @@ if (termiusHelperArgIndex >= 0) {
   };
   const upsertActivityLog = (record: import('@shared').ActivityLogRecord) => {
     activityLogRepository.upsert(record);
+    for (const window of BrowserWindow.getAllWindows()) {
+      if (!window.isDestroyed()) {
+        window.webContents.send(ipcChannels.logs.changed);
+      }
+    }
   };
   const authService = new AuthService(secretStore, desktopConfigService, settingsRepository, appendActivityLog);
   const coreManager = new CoreManager(

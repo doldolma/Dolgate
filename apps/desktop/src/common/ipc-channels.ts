@@ -168,7 +168,8 @@ export const ipcChannels = {
   },
   logs: {
     list: 'logs:list',
-    clear: 'logs:clear'
+    clear: 'logs:clear',
+    changed: 'logs:changed'
   },
   sessionReplays: {
     open: 'session-replays:open',
@@ -183,6 +184,8 @@ export const ipcChannels = {
     cloneForHost: 'keychain:clone-for-host'
   },
   containers: {
+    beginLifecycle: 'containers:begin-lifecycle',
+    reportLifecycleError: 'containers:report-lifecycle-error',
     list: 'containers:list',
     inspect: 'containers:inspect',
     logs: 'containers:logs',

@@ -120,6 +120,7 @@ function createTab(): HostContainersTabState {
   return {
     kind: "host-containers",
     hostId: "host-1",
+    lifecycleId: null,
     title: "nas",
     runtime: "docker",
     unsupportedReason: null,

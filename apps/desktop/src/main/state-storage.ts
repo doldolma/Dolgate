@@ -867,7 +867,12 @@ function normalizeActivityLogRecord(value: unknown): ActivityLogRecord | null {
 
   const level = value.level === 'warn' || value.level === 'error' ? value.level : 'info';
   const kind =
-    value.kind === 'session-lifecycle' || value.kind === 'port-forward-lifecycle' || value.kind === 'generic'
+    value.kind === 'session-lifecycle' ||
+    value.kind === 'port-forward-lifecycle' ||
+    value.kind === 'sftp-lifecycle' ||
+    value.kind === 'container-lifecycle' ||
+    value.kind === 'container-action' ||
+    value.kind === 'generic'
       ? value.kind
       : 'generic';
   const metadata = isObject(value.metadata) ? value.metadata : null;

@@ -150,6 +150,8 @@ export function createContainersSlice(deps: SliceDeps): ContainersSlice {
     markSessionError,
     promptForMissingUsername,
     clearContainerTabConnectionOverlay,
+    beginContainerLifecycle,
+    reportContainerLifecycleError,
     loadContainerDetails,
     loadEcsClusterUtilization,
     loadEcsClusterSnapshot,
@@ -199,6 +201,29 @@ export function createContainersSlice(deps: SliceDeps): ContainersSlice {
     ) {
       return;
     }
+    let lifecycleId: string | null = null;
+    try {
+      lifecycleId = await beginContainerLifecycle(set, hostId);
+    } catch (error) {
+      set((state) => {
+        const currentTab = findContainersTab(state, hostId);
+        if (!currentTab) {
+          return state;
+        }
+        return {
+          containerTabs: upsertContainersTab(state.containerTabs, {
+            ...currentTab,
+            isLoading: false,
+            connectionProgress: null,
+            errorMessage: normalizeErrorMessage(
+              error,
+              "Containers 연결 기록을 시작하지 못했습니다.",
+            ),
+          }),
+        };
+      });
+      return;
+    }
     set((state) => {
       const existingTab = findContainersTab(state, hostId);
       const nextTab = {
@@ -237,6 +262,11 @@ export function createContainersSlice(deps: SliceDeps): ContainersSlice {
         error instanceof Error
           ? normalizeRemoteInvokeErrorMessage(error.message)
           : "컨테이너 페이지를 열지 못했습니다.";
+      await reportContainerLifecycleError(
+        lifecycleId,
+        error,
+        "컨테이너 페이지를 열지 못했습니다.",
+      );
       set((state) => {
         const currentTab = findContainersTab(state, hostId);
         if (!currentTab) {
@@ -298,6 +328,13 @@ export function createContainersSlice(deps: SliceDeps): ContainersSlice {
               for (const runtimeId of runtimeIds) {
                 await api.containers.stopTunnel(runtimeId).catch(() => undefined);
               }
+            }
+            const lifecycleId = currentTab?.lifecycleId ?? null;
+            if (lifecycleId) {
+              await api.containers
+                .release(hostId, lifecycleId)
+                .catch(() => undefined);
+            } else {
               await api.containers.release(hostId).catch(() => undefined);
             }
             set((state) => {

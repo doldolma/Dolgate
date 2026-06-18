@@ -47,7 +47,8 @@ describe("createAppStore containers", () => {
   });
 
   it("opens host containers inside the fixed containers section without touching the main tab strip", async () => {
-    const store = createAppStore(createMockApi());
+    const api = createMockApi();
+    const store = createAppStore(api);
     await store.getState().bootstrap();
 
     const beforeTabStrip = store.getState().tabStrip;
@@ -59,7 +60,8 @@ describe("createAppStore containers", () => {
     expect(store.getState().tabStrip).toEqual(beforeTabStrip);
     expect(
       store.getState().containerTabs.find((tab) => tab.hostId === "host-1"),
-    ).toBeDefined();
+    ).toMatchObject({ lifecycleId: "lifecycle-1" });
+    expect(api.containers.beginLifecycle).toHaveBeenCalledWith("host-1");
   });
 
   it("routes aws-ecs hosts into an ECS containers tab instead of starting a terminal session", async () => {
@@ -96,6 +98,7 @@ describe("createAppStore containers", () => {
       store.getState().containerTabs.find((tab) => tab.hostId === "ecs-host-1"),
     ).toMatchObject({
       kind: "ecs-cluster",
+      lifecycleId: "lifecycle-1",
       ecsMetricsLoadedAt: "2025-01-01T00:00:10.000Z",
     });
     expect(api.aws.loadEcsClusterSnapshot).toHaveBeenCalledWith("ecs-host-1");
@@ -1122,7 +1125,10 @@ describe("createAppStore containers", () => {
 
     await store.getState().closeHostContainersTab("host-1");
 
-    expect(api.containers.release).toHaveBeenCalledWith("host-1");
+    expect(api.containers.release).toHaveBeenCalledWith(
+      "host-1",
+      "lifecycle-1",
+    );
     expect(
       store.getState().containerTabs.find((tab) => tab.hostId === "host-1"),
     ).toBeUndefined();
@@ -1140,7 +1146,10 @@ describe("createAppStore containers", () => {
 
     await store.getState().closeHostContainersTab("host-1");
 
-    expect(api.containers.release).toHaveBeenCalledWith("host-1");
+    expect(api.containers.release).toHaveBeenCalledWith(
+      "host-1",
+      "lifecycle-1",
+    );
     expect(store.getState().containerTabs).toEqual([]);
     expect(store.getState().activeWorkspaceTab).toBe("containers");
     expect(store.getState().activeContainerHostId).toBeNull();

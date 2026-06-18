@@ -157,11 +157,37 @@ export function registerAwsIpcHandlers(ctx: MainIpcContext): void {
       if (!host || !isAwsEcsHostRecord(host)) {
         throw new Error("이 기능은 ECS host에서만 사용할 수 있습니다.");
       }
-      return ctx.awsService.describeEcsClusterSnapshot(
-        resolveHostProfileName(host),
-        host.awsRegion,
-        host.awsEcsClusterArn,
-      );
+      const scopeId = ctx.buildContainersEndpointId(host.id);
+      const { lifecycleId } = ctx.coreManager.beginContainerLifecycle({
+        scopeId,
+        hostId: host.id,
+        hostLabel: host.label,
+        workspaceKind: "ecs-cluster",
+        transport: "aws-ecs",
+      });
+      ctx.coreManager.noteContainerLifecycleLoadStarted(scopeId, lifecycleId);
+      try {
+        const snapshot = await ctx.awsService.describeEcsClusterSnapshot(
+          resolveHostProfileName(host),
+          host.awsRegion,
+          host.awsEcsClusterArn,
+        );
+        ctx.coreManager.markContainerLifecycleConnected({
+          scopeId,
+          lifecycleId,
+          resourceCount: snapshot.services.length,
+        });
+        return snapshot;
+      } catch (error) {
+        ctx.coreManager.reportContainerLifecycleError({
+          lifecycleId,
+          message:
+            error instanceof Error
+              ? error.message
+              : "ECS 클러스터 정보를 불러오지 못했습니다.",
+        });
+        throw error;
+      }
     },
   );
 

@@ -786,6 +786,7 @@ export interface DesktopApi {
   logs: {
     list: () => Promise<ActivityLogRecord[]>;
     clear: () => Promise<void>;
+    onChanged: (listener: () => void) => () => void;
   };
   sessionReplays: {
     open: (recordingId: string) => Promise<void>;
@@ -800,6 +801,11 @@ export interface DesktopApi {
     cloneForHost: (input: KeychainSecretCloneInput) => Promise<void>;
   };
   containers: {
+    beginLifecycle: (hostId: string) => Promise<{ lifecycleId: string }>;
+    reportLifecycleError: (input: {
+      lifecycleId: string;
+      message: string;
+    }) => Promise<void>;
     list: (hostId: string) => Promise<HostContainerListResult>;
     inspect: (
       hostId: string,
@@ -824,7 +830,7 @@ export interface DesktopApi {
     searchLogs: (
       input: HostContainersSearchLogsInput,
     ) => Promise<HostContainerLogSearchResult>;
-    release: (hostId: string) => Promise<void>;
+    release: (hostId: string, lifecycleId?: string) => Promise<void>;
     onConnectionProgress: (
       listener: (event: ContainerConnectionProgressEvent) => void,
     ) => () => void;

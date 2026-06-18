@@ -49,6 +49,9 @@ export function useHomeViewModel() {
   const stopPortForward = useAppStore((state) => state.stopPortForward);
   const handleCoreEvent = useAppStore((state) => state.handleCoreEvent);
   const handlePortForwardEvent = useAppStore((state) => state.handlePortForwardEvent);
+  const handleActivityLogsChanged = useAppStore(
+    (state) => state.handleActivityLogsChanged,
+  );
 
   return {
     hosts,
@@ -93,5 +96,6 @@ export function useHomeViewModel() {
     stopPortForward,
     handleCoreEvent,
     handlePortForwardEvent,
+    handleActivityLogsChanged,
   };
 }
