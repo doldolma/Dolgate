@@ -154,6 +154,8 @@ describe("AuthService offline bootstrap", () => {
     const serverUrl = "https://ssh.doldolma.com";
     const { service, secretStore } = await createService(serverUrl);
     const session = createSession(serverUrl);
+    const onSessionActivated = vi.fn();
+    service.setOnSessionActivated(onSessionActivated);
 
     await secretStore.save("auth:refresh-token", session.tokens.refreshToken);
     await secretStore.save(
@@ -186,6 +188,40 @@ describe("AuthService offline bootstrap", () => {
     expect(() => service.getAccessToken()).toThrow(
       "오프라인 모드에서는 서버 연결이 필요한 기능을 사용할 수 없습니다.",
     );
+    expect(onSessionActivated).toHaveBeenCalledWith({
+      userId: session.user.id,
+      serverUrl: `${serverUrl}/`,
+    });
+  });
+
+  it("activates local account history on login and invalidates it on logout", async () => {
+    const serverUrl = "https://ssh.doldolma.com";
+    const { service } = await createService(serverUrl);
+    const session = createSession(serverUrl);
+    const onSessionActivated = vi.fn();
+    const onSessionInvalidated = vi.fn();
+    service.setOnSessionActivated(onSessionActivated);
+    service.setOnSessionInvalidated(onSessionInvalidated);
+
+    await (
+      service as unknown as {
+        persistSession: (value: AuthSession) => Promise<void>;
+      }
+    ).persistSession(session);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(new Response(null, { status: 204 })),
+    );
+    await service.logout();
+
+    expect(onSessionActivated).toHaveBeenCalledWith({
+      userId: session.user.id,
+      serverUrl: `${serverUrl}/`,
+    });
+    expect(onSessionInvalidated).toHaveBeenCalledWith({
+      reason: "logout",
+      purgeSyncedCache: true,
+    });
   });
 
   it("reconnects back to authenticated when retryOnline succeeds", async () => {

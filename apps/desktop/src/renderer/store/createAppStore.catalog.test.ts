@@ -242,6 +242,16 @@ describe("createAppStore catalog and settings", () => {
     await store.getState().bootstrap();
     store.setState({
       activeWorkspaceTab: "session:session-1",
+      activityLogs: [
+        {
+          id: "log-1",
+          level: "info",
+          category: "audit",
+          message: "local account log",
+          metadata: null,
+          createdAt: "2025-01-01T00:00:00.000Z",
+        },
+      ],
       dnsOverrides: [
         {
           id: "dns-1",
@@ -260,6 +270,7 @@ describe("createAppStore catalog and settings", () => {
     expect(store.getState().hosts).toEqual([]);
     expect(store.getState().groups).toEqual([]);
     expect(store.getState().dnsOverrides).toEqual([]);
+    expect(store.getState().activityLogs).toEqual([]);
     expect(store.getState().activeWorkspaceTab).toBe("session:session-1");
   });
 

@@ -71,6 +71,7 @@ import type {
 } from '@shared';
 import { DesktopConfigService } from './app-config';
 import { getDesktopStateStorage, type SyncDeletionRecord } from './state-storage';
+import type { LocalHistoryOwner } from './local-history-scope';
 import { decodeSecretFromStorage, encodeSecretForStorage } from './secret-store';
 
 function nowIso(): string {
@@ -1602,6 +1603,14 @@ export class KnownHostRepository {
 }
 
 export class ActivityLogRepository {
+  activate(owner: LocalHistoryOwner): void {
+    getDesktopStateStorage().activateActivityLogScope(owner);
+  }
+
+  deactivate(): void {
+    getDesktopStateStorage().deactivateActivityLogScope();
+  }
+
   list(): ActivityLogRecord[] {
     return stateStorage.listActivityLogs();
   }

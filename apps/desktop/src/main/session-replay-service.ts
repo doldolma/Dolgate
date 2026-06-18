@@ -5,12 +5,14 @@ import {
   mkdirSync,
   readdirSync,
   readFileSync,
+  renameSync,
+  rmdirSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { BrowserWindow, app } from "electron";
+import { BrowserWindow } from "electron";
 import type {
   CoreEvent,
   SessionReplayEntry,
@@ -23,9 +25,12 @@ import {
 } from "@shared";
 import type { SettingsRepository } from "./database";
 import type { CoreManager } from "./core-manager";
+import {
+  resolveLocalHistoryScope,
+  type LocalHistoryOwner,
+  type LocalHistoryScope,
+} from "./local-history-scope";
 
-const STORAGE_DIRNAME = "storage";
-const SESSION_REPLAYS_DIRNAME = "session-replays";
 const META_SUFFIX = ".meta.json";
 const EVENTS_SUFFIX = ".events.jsonl";
 const DEFAULT_REPLAY_COLS = 120;
@@ -47,6 +52,7 @@ interface ActiveRecording {
   connectedAtMs: number;
   initialCols: number;
   initialRows: number;
+  replayDirectoryPath: string;
 }
 
 function nowIso(): string {
@@ -58,17 +64,6 @@ function clampRetentionCount(value: number): number {
     MAX_SESSION_REPLAY_RETENTION_COUNT,
     Math.max(MIN_SESSION_REPLAY_RETENTION_COUNT, Math.round(value)),
   );
-}
-
-function resolveUserDataPath(): string {
-  const override = process.env.DOLSSH_USER_DATA_DIR?.trim();
-  if (override) {
-    return path.resolve(override);
-  }
-  if (app?.getPath) {
-    return app.getPath("userData");
-  }
-  return path.join(process.cwd(), ".tmp", `dolssh-desktop-storage-${process.pid}`);
 }
 
 function parseRecordingId(fileName: string): string | null {
@@ -122,11 +117,30 @@ export class SessionReplayService {
     { cols: number; rows: number }
   >();
   private readonly replayWindows = new Map<string, BrowserWindow>();
+  private activeScope: LocalHistoryScope | null = null;
 
   constructor(
     private readonly settingsRepository: SettingsRepository,
     private readonly coreManager: CoreManager,
   ) {}
+
+  activate(owner: LocalHistoryOwner): void {
+    const scope = resolveLocalHistoryScope(owner);
+    if (this.activeScope?.id === scope.id) {
+      return;
+    }
+    this.closeReplayWindows();
+    this.migrateLegacyRecordings(scope);
+    this.activeScope = scope;
+    this.prune();
+  }
+
+  deactivate(): void {
+    this.shutdown();
+    this.closeReplayWindows();
+    this.activeScope = null;
+    this.initialSizeBySession.clear();
+  }
 
   noteSessionConfigured(sessionId: string, cols: number, rows: number): void {
     this.initialSizeBySession.set(sessionId, { cols, rows });
@@ -190,6 +204,7 @@ export class SessionReplayService {
     recordingId: string,
     _sourceWindow: BrowserWindow,
   ): Promise<void> {
+    this.requireActiveScope();
     const existingWindow = this.replayWindows.get(recordingId);
     if (existingWindow && !existingWindow.isDestroyed()) {
       if (existingWindow.isMinimized()) {
@@ -240,8 +255,12 @@ export class SessionReplayService {
   }
 
   get(recordingId: string): SessionReplayRecording {
-    const meta = this.loadRecordingMeta(recordingId);
-    const eventsPath = this.getEventsPath(recordingId);
+    const scope = this.requireActiveScope();
+    const meta = this.loadRecordingMeta(recordingId, scope.replayDirectoryPath);
+    const eventsPath = this.getEventsPath(
+      recordingId,
+      scope.replayDirectoryPath,
+    );
     const entries = existsSync(eventsPath)
       ? decodeRecordingEntries(readFileSync(eventsPath, "utf8"))
       : [];
@@ -252,25 +271,40 @@ export class SessionReplayService {
   }
 
   prune(): void {
+    const scope = this.activeScope;
+    if (!scope) {
+      return;
+    }
+    this.pruneDirectory(scope.replayDirectoryPath);
+  }
+
+  private pruneDirectory(replayDirectoryPath: string): void {
     const retentionCount = this.resolveRetentionCount();
-    const recordings = this.listRecordingMeta().sort((left, right) => {
-      const leftKey = left.disconnectedAt || left.connectedAt;
-      const rightKey = right.disconnectedAt || right.connectedAt;
-      return rightKey.localeCompare(leftKey);
-    });
+    const recordings = this.listRecordingMeta(replayDirectoryPath).sort(
+      (left, right) => {
+        const leftKey = left.disconnectedAt || left.connectedAt;
+        const rightKey = right.disconnectedAt || right.connectedAt;
+        return rightKey.localeCompare(leftKey);
+      },
+    );
 
     for (const stale of recordings.slice(retentionCount)) {
-      rmSync(this.getMetaPath(stale.recordingId), { force: true });
-      rmSync(this.getEventsPath(stale.recordingId), { force: true });
+      rmSync(this.getMetaPath(stale.recordingId, replayDirectoryPath), {
+        force: true,
+      });
+      rmSync(this.getEventsPath(stale.recordingId, replayDirectoryPath), {
+        force: true,
+      });
     }
   }
 
   private startRecording(sessionId: string): void {
-    if (this.activeRecordings.has(sessionId)) {
+    const scope = this.activeScope;
+    if (!scope || this.activeRecordings.has(sessionId)) {
       return;
     }
 
-    const lifecycle = this.coreManager.getRemoteSessionLifecycleState(sessionId);
+    const lifecycle = this.coreManager.getSessionLifecycleState(sessionId);
     if (!lifecycle?.connectedAt || !lifecycle.connectionKind) {
       return;
     }
@@ -281,8 +315,12 @@ export class SessionReplayService {
       rows: DEFAULT_REPLAY_ROWS,
     };
 
-    this.ensureReplayDirectory();
-    writeFileSync(this.getEventsPath(recordingId), "", "utf8");
+    this.ensureReplayDirectory(scope.replayDirectoryPath);
+    writeFileSync(
+      this.getEventsPath(recordingId, scope.replayDirectoryPath),
+      "",
+      "utf8",
+    );
 
     const active: ActiveRecording = {
       recordingId,
@@ -296,10 +334,11 @@ export class SessionReplayService {
       connectedAtMs: new Date(lifecycle.connectedAt).getTime(),
       initialCols: initialSize.cols,
       initialRows: initialSize.rows,
+      replayDirectoryPath: scope.replayDirectoryPath,
     };
 
     this.activeRecordings.set(sessionId, active);
-    this.coreManager.attachRemoteSessionRecording(sessionId, recordingId);
+    this.coreManager.attachSessionRecording(sessionId, recordingId);
   }
 
   private finalizeRecording(
@@ -334,32 +373,34 @@ export class SessionReplayService {
     };
 
     writeFileSync(
-      this.getMetaPath(active.recordingId),
+      this.getMetaPath(active.recordingId, active.replayDirectoryPath),
       JSON.stringify(meta, null, 2),
       "utf8",
     );
 
     this.activeRecordings.delete(sessionId);
     this.initialSizeBySession.delete(sessionId);
-    this.prune();
+    this.pruneDirectory(active.replayDirectoryPath);
   }
 
   private appendEntry(active: ActiveRecording, entry: SessionReplayEntry): void {
     appendFileSync(
-      this.getEventsPath(active.recordingId),
+      this.getEventsPath(active.recordingId, active.replayDirectoryPath),
       `${JSON.stringify(entry)}\n`,
       "utf8",
     );
   }
 
-  private listRecordingMeta(): SessionReplayRecordingMeta[] {
-    this.ensureReplayDirectory();
-    return readdirSync(this.replayDirectoryPath())
+  private listRecordingMeta(
+    replayDirectoryPath: string,
+  ): SessionReplayRecordingMeta[] {
+    this.ensureReplayDirectory(replayDirectoryPath);
+    return readdirSync(replayDirectoryPath)
       .map((fileName) => parseRecordingId(fileName))
       .filter((recordingId): recordingId is string => Boolean(recordingId))
       .map((recordingId) => {
         try {
-          return this.loadRecordingMeta(recordingId);
+          return this.loadRecordingMeta(recordingId, replayDirectoryPath);
         } catch {
           return null;
         }
@@ -370,9 +411,12 @@ export class SessionReplayService {
       );
   }
 
-  private loadRecordingMeta(recordingId: string): SessionReplayRecordingMeta {
+  private loadRecordingMeta(
+    recordingId: string,
+    replayDirectoryPath: string,
+  ): SessionReplayRecordingMeta {
     const raw = JSON.parse(
-      readFileSync(this.getMetaPath(recordingId), "utf8"),
+      readFileSync(this.getMetaPath(recordingId, replayDirectoryPath), "utf8"),
     ) as SessionReplayRecordingMeta;
     return raw;
   }
@@ -384,27 +428,65 @@ export class SessionReplayService {
     );
   }
 
-  private ensureReplayDirectory(): void {
-    mkdirSync(this.replayDirectoryPath(), { recursive: true });
+  private ensureReplayDirectory(replayDirectoryPath: string): void {
+    mkdirSync(replayDirectoryPath, { recursive: true });
   }
 
-  private replayDirectoryPath(): string {
+  private requireActiveScope(): LocalHistoryScope {
+    if (!this.activeScope) {
+      throw new Error("로그인된 계정의 Replay만 열 수 있습니다.");
+    }
+    return this.activeScope;
+  }
+
+  private getMetaPath(
+    recordingId: string,
+    replayDirectoryPath: string,
+  ): string {
+    return path.join(replayDirectoryPath, `${recordingId}${META_SUFFIX}`);
+  }
+
+  private getEventsPath(
+    recordingId: string,
+    replayDirectoryPath: string,
+  ): string {
     return path.join(
-      resolveUserDataPath(),
-      STORAGE_DIRNAME,
-      SESSION_REPLAYS_DIRNAME,
-    );
-  }
-
-  private getMetaPath(recordingId: string): string {
-    return path.join(this.replayDirectoryPath(), `${recordingId}${META_SUFFIX}`);
-  }
-
-  private getEventsPath(recordingId: string): string {
-    return path.join(
-      this.replayDirectoryPath(),
+      replayDirectoryPath,
       `${recordingId}${EVENTS_SUFFIX}`,
     );
+  }
+
+  private migrateLegacyRecordings(scope: LocalHistoryScope): void {
+    if (!existsSync(scope.legacyReplayDirectoryPath)) {
+      return;
+    }
+
+    this.ensureReplayDirectory(scope.replayDirectoryPath);
+    for (const fileName of readdirSync(scope.legacyReplayDirectoryPath)) {
+      if (!fileName.endsWith(META_SUFFIX) && !fileName.endsWith(EVENTS_SUFFIX)) {
+        continue;
+      }
+      const sourcePath = path.join(scope.legacyReplayDirectoryPath, fileName);
+      const targetPath = path.join(scope.replayDirectoryPath, fileName);
+      if (existsSync(targetPath)) {
+        rmSync(sourcePath, { force: true });
+        continue;
+      }
+      renameSync(sourcePath, targetPath);
+    }
+
+    if (readdirSync(scope.legacyReplayDirectoryPath).length === 0) {
+      rmdirSync(scope.legacyReplayDirectoryPath);
+    }
+  }
+
+  private closeReplayWindows(): void {
+    for (const replayWindow of this.replayWindows.values()) {
+      if (!replayWindow.isDestroyed()) {
+        replayWindow.close();
+      }
+    }
+    this.replayWindows.clear();
   }
 
   private buildReplayWindowTitle(title: string): string {

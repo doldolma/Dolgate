@@ -166,6 +166,11 @@ if (termiusHelperArgIndex >= 0) {
     void rewriteDnsOverridesForCurrentState().catch(() => undefined);
   });
 
+  authService.setOnSessionActivated((owner) => {
+    activityLogRepository.activate(owner);
+    sessionReplayService.activate(owner);
+  });
+
   type PatchedWriteStream = NodeJS.WriteStream & {
     __dolsshWriteGuardInstalled?: boolean;
   };
@@ -344,6 +349,8 @@ if (termiusHelperArgIndex >= 0) {
     await coreManager.shutdown({ finalizePortForwardsAsStopped: true });
     hostsOverrideManager.clearStaticOverrideStates();
     await rewriteDnsOverridesForCurrentState().catch(() => undefined);
+    sessionReplayService.deactivate();
+    activityLogRepository.deactivate();
     if (context.purgeSyncedCache) {
       await syncService.purgeSyncedCache();
       return;

@@ -81,8 +81,14 @@ function formatTimestamp(value: string): string {
 }
 
 function getConnectionKindLabel(kind: SessionReplayRecording["connectionKind"]): string {
+  if (kind === "local") {
+    return "Local";
+  }
   if (kind === "aws-ssm") {
     return "AWS SSM";
+  }
+  if (kind === "aws-ecs-exec") {
+    return "AWS ECS Exec";
   }
   if (kind === "serial") {
     return "Serial";

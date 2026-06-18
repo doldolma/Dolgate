@@ -78,6 +78,9 @@ function isSftpLifecycleMetadata(value: Record<string, unknown> | null): value i
 }
 
 function getConnectionKindLabel(kind: SessionConnectionKind): string {
+  if (kind === 'local') {
+    return 'Local';
+  }
   if (kind === 'aws-ssm') {
     return 'AWS SSM';
   }
@@ -94,6 +97,9 @@ function getConnectionKindLabel(kind: SessionConnectionKind): string {
 }
 
 function getConnectionKindTone(kind: SessionConnectionKind): 'running' | 'starting' | 'paused' {
+  if (kind === 'local') {
+    return 'running';
+  }
   if (kind === 'aws-ssm') {
     return 'starting';
   }

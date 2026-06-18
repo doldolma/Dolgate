@@ -206,6 +206,31 @@ describe("SessionReplayWindow", () => {
     ).toBe("hello\n");
   });
 
+  it.each([
+    ["local", "Local"],
+    ["aws-ecs-exec", "AWS ECS Exec"],
+  ] as const)("renders the %s replay connection kind label", async (connectionKind, label) => {
+    window.dolssh.sessionReplays.get = vi.fn().mockResolvedValue({
+      recordingId: "recording-kind",
+      sessionId: "session-kind",
+      hostId: "host-kind",
+      hostLabel: connectionKind === "local" ? "Local Terminal" : "prod",
+      title: "Terminal",
+      connectionDetails: null,
+      connectionKind,
+      connectedAt: "2026-03-29T00:00:00.000Z",
+      disconnectedAt: "2026-03-29T00:00:01.000Z",
+      durationMs: 1000,
+      initialCols: 80,
+      initialRows: 24,
+      entries: [],
+    });
+
+    render(<SessionReplayWindow recordingId="recording-kind" />);
+
+    await waitFor(() => expect(screen.getByText(label)).toBeInTheDocument());
+  });
+
   it("starts playing immediately and keeps paused state when seeking after pause", async () => {
     render(<SessionReplayWindow recordingId="recording-1" />);
 

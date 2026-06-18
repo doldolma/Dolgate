@@ -1,10 +1,16 @@
 import os from 'node:os';
 import path from 'node:path';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { DEFAULT_SFTP_BROWSER_COLUMN_WIDTHS } from '@shared';
+import { resolveLocalHistoryScope } from './local-history-scope';
 
 type DatabaseModule = typeof import('./database');
+
+const TEST_HISTORY_OWNER = {
+  userId: 'user-1',
+  serverUrl: 'https://ssh.doldolma.com',
+};
 
 async function loadRepositories(): Promise<{
   tempDir: string;
@@ -23,6 +29,9 @@ async function loadRepositories(): Promise<{
   const stateStorageModule = await import('./state-storage');
   stateStorageModule.resetDesktopStateStorageForTests();
   const databaseModule = await import('./database');
+  stateStorageModule
+    .getDesktopStateStorage()
+    .activateActivityLogScope(TEST_HISTORY_OWNER);
 
   return {
     tempDir,
@@ -51,6 +60,9 @@ async function loadRepositoriesWithStateFile(stateFile: unknown): Promise<{
   const stateStorageModule = await import('./state-storage');
   stateStorageModule.resetDesktopStateStorageForTests();
   const databaseModule = await import('./database');
+  stateStorageModule
+    .getDesktopStateStorage()
+    .activateActivityLogScope(TEST_HISTORY_OWNER);
 
   return {
     tempDir,
@@ -835,6 +847,95 @@ describe('PortForwardRepository', () => {
 });
 
 describe('ActivityLogRepository', () => {
+  it('isolates logs by server and user while restoring the matching account history', async () => {
+    const { ActivityLogRepository } = await loadRepositories();
+    const logs = new ActivityLogRepository();
+
+    logs.append('info', 'audit', 'user-1 log');
+    expect(logs.list().map((entry) => entry.message)).toEqual(['user-1 log']);
+
+    logs.activate({
+      userId: 'user-2',
+      serverUrl: TEST_HISTORY_OWNER.serverUrl,
+    });
+    expect(logs.list()).toEqual([]);
+    logs.append('info', 'audit', 'user-2 log');
+
+    logs.activate(TEST_HISTORY_OWNER);
+    expect(logs.list().map((entry) => entry.message)).toEqual(['user-1 log']);
+
+    logs.activate({
+      userId: TEST_HISTORY_OWNER.userId,
+      serverUrl: 'https://other.example.com',
+    });
+    expect(logs.list()).toEqual([]);
+
+    logs.activate({
+      userId: 'user-2',
+      serverUrl: TEST_HISTORY_OWNER.serverUrl,
+    });
+    logs.clear();
+    expect(logs.list()).toEqual([]);
+    logs.activate(TEST_HISTORY_OWNER);
+    expect(logs.list().map((entry) => entry.message)).toEqual(['user-1 log']);
+
+    logs.deactivate();
+    expect(logs.list()).toEqual([]);
+  });
+
+  it('migrates and merges legacy unscoped logs into the first activated account', async () => {
+    const tempDir = mkdtempSync(path.join(os.tmpdir(), 'dolgate-desktop-db-'));
+    process.env.DOLSSH_USER_DATA_DIR = tempDir;
+    const scope = resolveLocalHistoryScope(TEST_HISTORY_OWNER);
+    const legacyRecord = {
+      id: 'legacy-log',
+      level: 'info',
+      category: 'audit',
+      kind: 'generic',
+      message: 'legacy log',
+      metadata: null,
+      createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:00.000Z',
+    };
+    const targetRecord = {
+      ...legacyRecord,
+      id: 'target-log',
+      message: 'target log',
+      createdAt: '2026-01-02T00:00:00.000Z',
+      updatedAt: '2026-01-02T00:00:00.000Z',
+    };
+    mkdirSync(path.dirname(scope.legacyActivityLogFilePath), { recursive: true });
+    mkdirSync(path.dirname(scope.activityLogFilePath), { recursive: true });
+    writeFileSync(
+      scope.legacyActivityLogFilePath,
+      `${JSON.stringify(legacyRecord)}\n${JSON.stringify({
+        ...targetRecord,
+        message: 'legacy duplicate',
+      })}\n`,
+      'utf8',
+    );
+    writeFileSync(
+      scope.activityLogFilePath,
+      `${JSON.stringify(targetRecord)}\n`,
+      'utf8',
+    );
+
+    vi.resetModules();
+    const stateStorageModule = await import('./state-storage');
+    stateStorageModule.resetDesktopStateStorageForTests();
+    const databaseModule = await import('./database');
+    const logs = new databaseModule.ActivityLogRepository();
+    logs.activate(TEST_HISTORY_OWNER);
+
+    expect(logs.list().map((entry) => entry.id)).toEqual([
+      'target-log',
+      'legacy-log',
+    ]);
+    expect(logs.list()[0]?.message).toBe('target log');
+    expect(existsSync(scope.legacyActivityLogFilePath)).toBe(false);
+    expect(existsSync(scope.activityLogFilePath)).toBe(true);
+  });
+
   it('upserts session lifecycle logs by id and restores them after reload', async () => {
     const { ActivityLogRepository } = await loadRepositories();
     const logs = new ActivityLogRepository();
@@ -897,6 +998,9 @@ describe('ActivityLogRepository', () => {
     const stateStorageModule = await import('./state-storage');
     stateStorageModule.resetDesktopStateStorageForTests();
     const databaseModule = await import('./database');
+    stateStorageModule
+      .getDesktopStateStorage()
+      .activateActivityLogScope(TEST_HISTORY_OWNER);
     const reloadedLogs = new databaseModule.ActivityLogRepository();
 
     expect(reloadedLogs.list()).toHaveLength(1);
@@ -943,6 +1047,9 @@ describe('ActivityLogRepository', () => {
     const stateStorageModule = await import('./state-storage');
     stateStorageModule.resetDesktopStateStorageForTests();
     const databaseModule = await import('./database');
+    stateStorageModule
+      .getDesktopStateStorage()
+      .activateActivityLogScope(TEST_HISTORY_OWNER);
     const reloadedLogs = new databaseModule.ActivityLogRepository();
 
     expect(reloadedLogs.list()).toEqual(

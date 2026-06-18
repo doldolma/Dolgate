@@ -108,6 +108,11 @@ type SessionInvalidationContext = {
   purgeSyncedCache: boolean;
 };
 
+type SessionActivatedContext = {
+  userId: string;
+  serverUrl: string;
+};
+
 function createFallbackOfflineLease(): AuthSession["offlineLease"] {
   return {
     token: "",
@@ -230,6 +235,9 @@ export class AuthService {
   private onSessionInvalidated:
     | ((context: SessionInvalidationContext) => Promise<void> | void)
     | null = null;
+  private onSessionActivated:
+    | ((context: SessionActivatedContext) => Promise<void> | void)
+    | null = null;
   private loopbackCallbackServer: Server | null = null;
   private clientInstallationId: string | null = null;
 
@@ -290,6 +298,12 @@ export class AuthService {
     this.onSessionInvalidated = callback;
   }
 
+  setOnSessionActivated(
+    callback: (context: SessionActivatedContext) => Promise<void> | void,
+  ): void {
+    this.onSessionActivated = callback;
+  }
+
   async bootstrap(): Promise<AuthState> {
     if (
       this.state.status === "authenticated" ||
@@ -300,6 +314,10 @@ export class AuthService {
 
     const e2eSession = readE2EAuthSessionFromEnv();
     if (e2eSession) {
+      await this.notifySessionActivated({
+        userId: e2eSession.user.id,
+        serverUrl: this.getServerUrl(),
+      });
       this.stateStorage.updateAuthStatus("authenticated");
       this.patchState({
         status: "authenticated",
@@ -713,6 +731,11 @@ export class AuthService {
       });
     }
 
+    await this.notifySessionActivated({
+      userId: session.user.id,
+      serverUrl: normalizedServerUrl,
+    });
+
     let persistenceDisabledMessage: string | null = null;
     try {
       await this.secretStore.save(
@@ -857,6 +880,10 @@ export class AuthService {
 
     this.clearRefreshTimer();
     this.clearOfflineTimers();
+    await this.notifySessionActivated({
+      userId: offlineSession.user.id,
+      serverUrl: cache.serverUrl,
+    });
     this.stateStorage.updateAuthStatus("offline-authenticated");
     this.patchState({
       status: "offline-authenticated",
@@ -997,6 +1024,15 @@ export class AuthService {
       return;
     }
     await this.onSessionInvalidated(context);
+  }
+
+  private async notifySessionActivated(
+    context: SessionActivatedContext,
+  ): Promise<void> {
+    if (!this.onSessionActivated) {
+      return;
+    }
+    await this.onSessionActivated(context);
   }
 
   private patchState(patch: Partial<AuthState>): void {

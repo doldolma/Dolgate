@@ -73,7 +73,7 @@ interface ActivityLogInput {
   metadata?: Record<string, unknown> | null;
 }
 
-interface RemoteSessionLifecycleState {
+interface SessionLifecycleState {
   hostId: string;
   hostLabel: string;
   title: string;
@@ -822,9 +822,9 @@ export class CoreManager {
     AwsServerProxySessionRuntime
   >();
   private readonly sessionTransportById = new Map<string, SessionTransport>();
-  private readonly remoteSessionLifecycleById = new Map<
+  private readonly sessionLifecycleById = new Map<
     string,
-    RemoteSessionLifecycleState
+    SessionLifecycleState
   >();
   private onTerminalEvent?: (
     event: CoreEvent<Record<string, unknown>>,
@@ -1013,21 +1013,21 @@ export class CoreManager {
     );
   }
 
-  getRemoteSessionLifecycleState(
+  getSessionLifecycleState(
     sessionId: string,
-  ): RemoteSessionLifecycleState | null {
-    const lifecycle = this.remoteSessionLifecycleById.get(sessionId);
+  ): SessionLifecycleState | null {
+    const lifecycle = this.sessionLifecycleById.get(sessionId);
     return lifecycle ? { ...lifecycle } : null;
   }
 
-  attachRemoteSessionRecording(sessionId: string, recordingId: string): void {
-    const lifecycle = this.remoteSessionLifecycleById.get(sessionId);
+  attachSessionRecording(sessionId: string, recordingId: string): void {
+    const lifecycle = this.sessionLifecycleById.get(sessionId);
     if (!lifecycle) {
       return;
     }
     lifecycle.recordingId = recordingId;
     lifecycle.hasReplay = true;
-    this.remoteSessionLifecycleById.set(sessionId, lifecycle);
+    this.sessionLifecycleById.set(sessionId, lifecycle);
 
     if (!lifecycle.connectedAt) {
       return;
@@ -1056,7 +1056,7 @@ export class CoreManager {
     };
 
     this.upsertLog({
-      id: this.getRemoteSessionLifecycleLogId(sessionId),
+      id: this.getSessionLifecycleLogId(sessionId),
       level: metadata.status === "error" ? "error" : "info",
       category: "session",
       kind: "session-lifecycle",
@@ -1081,7 +1081,7 @@ export class CoreManager {
       return this.shutdownPromise;
     }
 
-    this.finalizeActiveRemoteSessionsOnShutdown();
+    this.finalizeActiveSessionsOnShutdown();
     this.finalizeActiveSftpLifecyclesOnShutdown();
 
     if (options.finalizePortForwardsAsStopped) {
@@ -1124,13 +1124,13 @@ export class CoreManager {
     return this.shutdownPromise;
   }
 
-  private finalizeActiveRemoteSessionsOnShutdown(): void {
-    for (const [sessionId, lifecycle] of this.remoteSessionLifecycleById) {
+  private finalizeActiveSessionsOnShutdown(): void {
+    for (const [sessionId, lifecycle] of this.sessionLifecycleById) {
       if (!lifecycle.connectedAt || lifecycle.disconnectedAt) {
         continue;
       }
 
-      this.finalizeRemoteSessionLifecycle(
+      this.finalizeSessionLifecycle(
         sessionId,
         "closed",
         SHUTDOWN_SESSION_DISCONNECT_REASON,
@@ -1266,7 +1266,7 @@ export class CoreManager {
     // 세션 ID는 Electron 쪽에서 먼저 발급해서 탭과 SSH 세션을 동일한 식별자로 묶는다.
     const sessionId = randomUUID();
     this.sessionTransportById.set(sessionId, payload.transport ?? "ssh");
-    this.remoteSessionLifecycleById.set(sessionId, {
+    this.sessionLifecycleById.set(sessionId, {
       hostId: payload.hostId,
       hostLabel: payload.hostLabel,
       title: payload.title,
@@ -1683,7 +1683,7 @@ export class CoreManager {
     await this.start();
     const sessionId = randomUUID();
     this.sessionTransportById.set(sessionId, "aws-ssm");
-    this.remoteSessionLifecycleById.set(sessionId, {
+    this.sessionLifecycleById.set(sessionId, {
       hostId: payload.hostId,
       hostLabel: payload.hostLabel,
       title: payload.title,
@@ -1767,7 +1767,7 @@ export class CoreManager {
         clearTimeout(openTimeout);
 
         this.sessionTransportById.set(sessionId, "aws-ssm-server-proxy");
-        this.remoteSessionLifecycleById.set(sessionId, {
+        this.sessionLifecycleById.set(sessionId, {
           hostId: payload.hostId,
           hostLabel: payload.hostLabel,
           title: payload.title,
@@ -1989,10 +1989,34 @@ export class CoreManager {
     env?: Record<string, string>;
     unsetEnv?: string[];
     workingDirectory?: string | null;
+    lifecycle?: {
+      hostId: string;
+      hostLabel: string;
+      connectionDetails?: string | null;
+      connectionKind: Extract<
+        SessionConnectionKind,
+        "local" | "aws-ecs-exec"
+      >;
+    };
   }): Promise<{ sessionId: string }> {
     await this.start();
     const sessionId = randomUUID();
     this.sessionTransportById.set(sessionId, "local-shell");
+    if (payload.lifecycle) {
+      this.sessionLifecycleById.set(sessionId, {
+        hostId: payload.lifecycle.hostId,
+        hostLabel: payload.lifecycle.hostLabel,
+        title: payload.title,
+        connectionDetails: payload.lifecycle.connectionDetails ?? null,
+        connectionKind: payload.lifecycle.connectionKind,
+        connectedAt: null,
+        disconnectedAt: null,
+        disconnectReason: null,
+        status: null,
+        recordingId: null,
+        hasReplay: false,
+      });
+    }
     this.tabs.set(sessionId, {
       id: sessionId,
       title: payload.title,
@@ -2036,7 +2060,7 @@ export class CoreManager {
       payload.transport === "local"
         ? payload.devicePath ?? "Local serial port"
         : `${payload.transport} · ${payload.host ?? ""}:${payload.port ?? ""}`.replace(/:$/, "");
-    this.remoteSessionLifecycleById.set(sessionId, {
+    this.sessionLifecycleById.set(sessionId, {
       hostId: payload.hostId,
       hostLabel: payload.hostLabel,
       title: payload.title,
@@ -2986,14 +3010,14 @@ export class CoreManager {
         transport === "aws-ssm" || transport === "aws-ssm-server-proxy";
       const isWarpgateSession = transport === "warpgate";
       const isLocalSession = transport === "local-shell";
-      const remoteLifecycle = this.remoteSessionLifecycleById.get(event.sessionId);
+      const sessionLifecycle = this.sessionLifecycleById.get(event.sessionId);
       const resolvedLocalShellKind =
         isLocalSession && typeof event.payload.shellKind === "string"
           ? event.payload.shellKind
           : null;
       if (!existing && event.type === "closed") {
         this.sessionTransportById.delete(event.sessionId);
-        this.remoteSessionLifecycleById.delete(event.sessionId);
+        this.sessionLifecycleById.delete(event.sessionId);
       }
       if (existing) {
         if (event.type === "closed") {
@@ -3001,7 +3025,7 @@ export class CoreManager {
           this.tabs.delete(event.sessionId);
           this.desiredResizeBySession.delete(event.sessionId);
           this.sentResizeBySession.delete(event.sessionId);
-          if (isLocalSession || !remoteLifecycle) {
+          if (!sessionLifecycle) {
             this.log({
               level: "info",
               category: "session",
@@ -3017,8 +3041,8 @@ export class CoreManager {
                 message: event.payload.message ?? null,
               },
             });
-          } else if (!remoteLifecycle.disconnectedAt) {
-            this.finalizeRemoteSessionLifecycle(
+          } else if (!sessionLifecycle.disconnectedAt) {
+            this.finalizeSessionLifecycle(
               event.sessionId,
               "closed",
               typeof event.payload.message === "string"
@@ -3026,7 +3050,7 @@ export class CoreManager {
                 : null,
             );
           }
-          this.remoteSessionLifecycleById.delete(event.sessionId);
+          this.sessionLifecycleById.delete(event.sessionId);
           this.broadcastTerminalEvent(event);
           return;
         }
@@ -3049,7 +3073,7 @@ export class CoreManager {
         });
         if (event.type === "connected") {
           this.flushResizeIfReady(event.sessionId);
-          if (isLocalSession || !remoteLifecycle) {
+          if (!sessionLifecycle) {
             this.log({
               level: "info",
               category: "session",
@@ -3069,11 +3093,11 @@ export class CoreManager {
               },
             });
           } else {
-            this.markRemoteSessionConnected(event.sessionId);
+            this.markSessionConnected(event.sessionId);
           }
         }
         if (event.type === "error") {
-          if (isLocalSession || !remoteLifecycle) {
+          if (!sessionLifecycle) {
             this.log({
               level: "error",
               category: "session",
@@ -3090,29 +3114,30 @@ export class CoreManager {
                 transport,
               },
             });
-          } else if (remoteLifecycle.connectedAt) {
-            this.finalizeRemoteSessionLifecycle(
+          } else if (sessionLifecycle.connectedAt) {
+            this.finalizeSessionLifecycle(
               event.sessionId,
               "error",
               typeof event.payload.message === "string"
                 ? event.payload.message
                 : null,
             );
-          } else {
+          } else if (sessionLifecycle.status !== "error") {
             this.log({
               level: "error",
               category: "session",
-              message: `${this.getConnectionKindLabel(remoteLifecycle.connectionKind)} 세션 오류가 발생했습니다.`,
+              message: `${this.getConnectionKindLabel(sessionLifecycle.connectionKind)} 세션 오류가 발생했습니다.`,
               metadata: {
                 sessionId: event.sessionId,
-                hostId: remoteLifecycle.hostId,
-                hostLabel: remoteLifecycle.hostLabel,
-                title: remoteLifecycle.title,
-                connectionKind: remoteLifecycle.connectionKind,
+                hostId: sessionLifecycle.hostId,
+                hostLabel: sessionLifecycle.hostLabel,
+                title: sessionLifecycle.title,
+                connectionKind: sessionLifecycle.connectionKind,
                 message: event.payload.message ?? null,
               },
             });
-            this.remoteSessionLifecycleById.delete(event.sessionId);
+            sessionLifecycle.status = "error";
+            this.sessionLifecycleById.set(event.sessionId, sessionLifecycle);
           }
         }
       }
@@ -3227,7 +3252,7 @@ export class CoreManager {
     this.desiredResizeBySession.clear();
     this.sentResizeBySession.clear();
     this.sessionTransportById.clear();
-    this.remoteSessionLifecycleById.clear();
+    this.sessionLifecycleById.clear();
   }
 
   private buildForwardRuntime(
@@ -3604,7 +3629,7 @@ export class CoreManager {
     this.upsertLogRecord?.(record);
   }
 
-  private getRemoteSessionLifecycleLogId(sessionId: string): string {
+  private getSessionLifecycleLogId(sessionId: string): string {
     return `session:${sessionId}`;
   }
 
@@ -3613,6 +3638,9 @@ export class CoreManager {
   }
 
   private getConnectionKindLabel(kind: SessionConnectionKind): string {
+    if (kind === "local") {
+      return "Local";
+    }
     if (kind === "aws-ssm") {
       return "AWS SSM";
     }
@@ -3628,8 +3656,8 @@ export class CoreManager {
     return "SSH";
   }
 
-  private markRemoteSessionConnected(sessionId: string): void {
-    const lifecycle = this.remoteSessionLifecycleById.get(sessionId);
+  private markSessionConnected(sessionId: string): void {
+    const lifecycle = this.sessionLifecycleById.get(sessionId);
     if (!lifecycle || lifecycle.connectedAt) {
       return;
     }
@@ -3638,7 +3666,7 @@ export class CoreManager {
     lifecycle.status = "connected";
     lifecycle.disconnectedAt = null;
     lifecycle.disconnectReason = null;
-    this.remoteSessionLifecycleById.set(sessionId, lifecycle);
+    this.sessionLifecycleById.set(sessionId, lifecycle);
 
     const metadata: SessionLifecycleLogMetadata = {
       sessionId,
@@ -3656,7 +3684,7 @@ export class CoreManager {
       hasReplay: lifecycle.hasReplay,
     };
     this.upsertLog({
-      id: this.getRemoteSessionLifecycleLogId(sessionId),
+      id: this.getSessionLifecycleLogId(sessionId),
       level: "info",
       category: "session",
       kind: "session-lifecycle",
@@ -3667,12 +3695,12 @@ export class CoreManager {
     });
   }
 
-  private finalizeRemoteSessionLifecycle(
+  private finalizeSessionLifecycle(
     sessionId: string,
     status: "closed" | "error",
     disconnectReason: string | null,
   ): void {
-    const lifecycle = this.remoteSessionLifecycleById.get(sessionId);
+    const lifecycle = this.sessionLifecycleById.get(sessionId);
     if (!lifecycle || !lifecycle.connectedAt) {
       return;
     }
@@ -3688,7 +3716,7 @@ export class CoreManager {
     lifecycle.disconnectedAt = disconnectedAt;
     lifecycle.disconnectReason = disconnectReason;
     lifecycle.status = status;
-    this.remoteSessionLifecycleById.set(sessionId, lifecycle);
+    this.sessionLifecycleById.set(sessionId, lifecycle);
 
     const metadata: SessionLifecycleLogMetadata = {
       sessionId,
@@ -3706,7 +3734,7 @@ export class CoreManager {
       hasReplay: lifecycle.hasReplay,
     };
     this.upsertLog({
-      id: this.getRemoteSessionLifecycleLogId(sessionId),
+      id: this.getSessionLifecycleLogId(sessionId),
       level: status === "error" ? "error" : "info",
       category: "session",
       kind: "session-lifecycle",

@@ -82,6 +82,65 @@ describe('LogsPanel', () => {
     expect(screen.getByText('연결 중')).toBeInTheDocument();
   });
 
+  it('renders a local terminal lifecycle row with replay access', () => {
+    const onOpenReplay = vi.fn().mockResolvedValue(undefined);
+    render(
+      <LogsPanel
+        logs={[
+          createLifecycleLog({
+            sessionId: 'local-session-1',
+            hostId: 'local-terminal',
+            hostLabel: 'Local Terminal',
+            title: 'Terminal 2',
+            connectionKind: 'local',
+            connectedAt: '2026-03-29T00:00:00.000Z',
+            disconnectedAt: '2026-03-29T00:01:00.000Z',
+            durationMs: 60000,
+            status: 'closed',
+            recordingId: 'local-recording-1',
+            hasReplay: true,
+          }),
+        ]}
+        onClear={vi.fn().mockResolvedValue(undefined)}
+        onOpenReplay={onOpenReplay}
+      />
+    );
+
+    expect(screen.getByText('Local Terminal')).toBeInTheDocument();
+    expect(screen.getByText('Terminal 2')).toBeInTheDocument();
+    expect(screen.getByText('Local')).toBeInTheDocument();
+    expect(screen.getByText('1분 0초')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Replay' }));
+    expect(onOpenReplay).toHaveBeenCalledWith('local-recording-1');
+  });
+
+  it('renders ECS Exec lifecycle metadata with the AWS ECS Exec badge', () => {
+    render(
+      <LogsPanel
+        logs={[
+          createLifecycleLog({
+            sessionId: 'ecs-session-1',
+            hostId: 'ecs-host-1',
+            hostLabel: 'prod',
+            title: 'prod · api · web',
+            connectionDetails: 'api · web · task-1',
+            connectionKind: 'aws-ecs-exec',
+            connectedAt: '2026-03-29T00:00:00.000Z',
+            disconnectedAt: '2026-03-29T00:00:30.000Z',
+            durationMs: 30000,
+            status: 'closed',
+          }),
+        ]}
+        onClear={vi.fn().mockResolvedValue(undefined)}
+        onOpenReplay={vi.fn().mockResolvedValue(undefined)}
+      />
+    );
+
+    expect(screen.getByText('prod')).toBeInTheDocument();
+    expect(screen.getByText('api · web · task-1')).toBeInTheDocument();
+    expect(screen.getByText('AWS ECS Exec')).toBeInTheDocument();
+  });
+
   it('hides duplicate lifecycle subtitles when host label and title are the same', () => {
     render(
       <LogsPanel

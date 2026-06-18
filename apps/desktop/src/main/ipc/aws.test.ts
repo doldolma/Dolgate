@@ -138,6 +138,7 @@ describe("registerAwsIpcHandlers", () => {
       });
     const invalidateEcsServiceActionContext = vi.fn();
     const connectLocalSession = vi.fn().mockResolvedValue({ sessionId: "session-1" });
+    const noteSessionConfigured = vi.fn();
     const buildManagedSessionEnvSpec = vi.fn().mockReturnValue({
       env: {
         HOME: "/tmp/dolgate-aws-home",
@@ -169,6 +170,9 @@ describe("registerAwsIpcHandlers", () => {
       assertAwsEcsHost: vi.fn(),
       coreManager: {
         connectLocalSession,
+      },
+      sessionReplayService: {
+        noteSessionConfigured,
       },
       normalizeEcsExecPermissionError: vi.fn((error) => error as Error),
     } as any);
@@ -209,8 +213,15 @@ describe("registerAwsIpcHandlers", () => {
           AWS_SHARED_CREDENTIALS_FILE: "/tmp/dolgate-aws-home/.aws/credentials",
         },
         unsetEnv: ["AWS_PROFILE", "AWS_DEFAULT_PROFILE"],
+        lifecycle: {
+          hostId: "host-1",
+          hostLabel: "prod",
+          connectionDetails: "api · api · task-1",
+          connectionKind: "aws-ecs-exec",
+        },
       }),
     );
+    expect(noteSessionConfigured).toHaveBeenCalledWith("session-1", 120, 40);
   });
 
   it("retries ECS tunnel startup once after invalidating the cached action context", async () => {

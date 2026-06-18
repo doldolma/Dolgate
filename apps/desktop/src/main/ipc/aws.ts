@@ -268,7 +268,9 @@ export function registerAwsIpcHandlers(ctx: MainIpcContext): void {
             throw new Error("선택한 컨테이너를 실행 중인 task에서 찾지 못했습니다.");
           }
           const awsSessionEnv = ctx.awsService.buildManagedSessionEnvSpec();
-          return ctx.coreManager.connectLocalSession({
+          const taskId =
+            input.taskArn.split("/").filter(Boolean).at(-1) ?? input.taskArn;
+          const connection = await ctx.coreManager.connectLocalSession({
             cols: input.cols,
             rows: input.rows,
             title: `${ecsHost.label} · ${input.serviceName} · ${input.containerName}`,
@@ -293,7 +295,20 @@ export function registerAwsIpcHandlers(ctx: MainIpcContext): void {
             ],
             env: awsSessionEnv.env,
             unsetEnv: awsSessionEnv.unsetEnv,
+            lifecycle: {
+              hostId: ecsHost.id,
+              hostLabel: ecsHost.label,
+              connectionDetails:
+                `${input.serviceName} · ${input.containerName} · ${taskId}`,
+              connectionKind: "aws-ecs-exec",
+            },
           });
+          ctx.sessionReplayService.noteSessionConfigured(
+            connection.sessionId,
+            input.cols,
+            input.rows,
+          );
+          return connection;
         };
 
         try {

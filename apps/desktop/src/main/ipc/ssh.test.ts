@@ -28,6 +28,7 @@ function createContext() {
     },
     coreManager: {
       connect: vi.fn(),
+      connectLocalSession: vi.fn(),
       connectAwsSession: vi.fn(),
       connectAwsServerProxySession: vi.fn(),
     },
@@ -56,6 +57,44 @@ describe("registerSshIpcHandlers", () => {
 
   afterEach(() => {
     vi.unstubAllGlobals();
+  });
+
+  it("configures local terminal lifecycle metadata and replay dimensions", async () => {
+    const ctx = createContext();
+    ctx.coreManager.connectLocalSession.mockResolvedValue({
+      sessionId: "local-session-1",
+    });
+    registerSshIpcHandlers(ctx);
+
+    const connectLocalHandler = ipcHandlers.get(ipcChannels.ssh.connectLocal);
+    await expect(
+      connectLocalHandler?.(null, {
+        title: "Terminal 2",
+        cols: 132,
+        rows: 44,
+      }),
+    ).resolves.toEqual({ sessionId: "local-session-1" });
+
+    expect(ctx.coreManager.connectLocalSession).toHaveBeenCalledWith({
+      cols: 132,
+      rows: 44,
+      title: "Terminal 2",
+      shellKind: undefined,
+      executable: undefined,
+      args: undefined,
+      env: undefined,
+      workingDirectory: undefined,
+      lifecycle: {
+        hostId: "local-terminal",
+        hostLabel: "Local Terminal",
+        connectionKind: "local",
+      },
+    });
+    expect(ctx.sessionReplayService.noteSessionConfigured).toHaveBeenCalledWith(
+      "local-session-1",
+      132,
+      44,
+    );
   });
 
   it("blocks certificate auth before connect when certificate inspection reports an error", async () => {

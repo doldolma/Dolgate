@@ -22,6 +22,10 @@ async function loadRepositories(): Promise<{
 
   const stateStorageModule = await import('./state-storage');
   stateStorageModule.resetDesktopStateStorageForTests();
+  stateStorageModule.getDesktopStateStorage().activateActivityLogScope({
+    userId: 'user-1',
+    serverUrl: 'https://ssh.doldolma.com',
+  });
   const databaseModule = await import('./database');
 
   return {

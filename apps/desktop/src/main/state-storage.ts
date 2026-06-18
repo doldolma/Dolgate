@@ -9,6 +9,7 @@ import {
   openSync,
   readFileSync,
   renameSync,
+  rmSync,
   writeFileSync
 } from 'node:fs';
 import { isIP } from 'node:net';
@@ -42,12 +43,15 @@ import {
   normalizeSftpBrowserColumnWidths
 } from '@shared';
 import type { SyncKind } from '@shared';
+import {
+  resolveLocalHistoryScope,
+  type LocalHistoryOwner
+} from './local-history-scope';
 
 const STORAGE_DIRNAME = 'storage';
 const STATE_FILE_NAME = 'state.json';
 const STATE_TEMP_FILE_NAME = 'state.json.tmp';
 const STATE_BACKUP_FILE_NAME = 'state.json.bak';
-const ACTIVITY_LOG_FILE_NAME = 'activity-log.jsonl';
 const DESKTOP_STATE_SCHEMA_VERSION = 1;
 const MAX_ACTIVITY_LOGS = 10_000;
 
@@ -885,6 +889,43 @@ class DesktopStateStorage {
   private loaded = false;
   private state = createDefaultStateFile();
   private activityLogs: ActivityLogRecord[] = [];
+  private activityLogScopeId: string | null = null;
+  private activityLogFilePath: string | null = null;
+
+  activateActivityLogScope(owner: LocalHistoryOwner): void {
+    this.ensureLoaded();
+    const scope = resolveLocalHistoryScope(owner);
+    if (this.activityLogScopeId === scope.id) {
+      return;
+    }
+
+    const scopedLogs = this.loadActivityLogs(scope.activityLogFilePath);
+    const legacyLogs = this.loadActivityLogs(scope.legacyActivityLogFilePath);
+    const mergedById = new Map<string, ActivityLogRecord>();
+    for (const record of legacyLogs) {
+      mergedById.set(record.id, record);
+    }
+    for (const record of scopedLogs) {
+      mergedById.set(record.id, record);
+    }
+
+    this.activityLogScopeId = scope.id;
+    this.activityLogFilePath = scope.activityLogFilePath;
+    this.activityLogs = Array.from(mergedById.values())
+      .sort(compareIsoDesc)
+      .slice(0, MAX_ACTIVITY_LOGS);
+
+    if (existsSync(scope.legacyActivityLogFilePath)) {
+      this.rewriteLogsFile();
+      rmSync(scope.legacyActivityLogFilePath, { force: true });
+    }
+  }
+
+  deactivateActivityLogScope(): void {
+    this.activityLogScopeId = null;
+    this.activityLogFilePath = null;
+    this.activityLogs = [];
+  }
 
   getState(): DesktopStateFile {
     this.ensureLoaded();
@@ -905,8 +946,12 @@ class DesktopStateStorage {
 
   appendActivityLog(record: ActivityLogRecord): ActivityLogRecord {
     this.ensureLoaded();
+    if (!this.activityLogFilePath) {
+      return deepClone(record);
+    }
     this.activityLogs.unshift(record);
-    appendFileSync(this.logFilePath(), `${JSON.stringify(record)}\n`, 'utf8');
+    mkdirSync(path.dirname(this.activityLogFilePath), { recursive: true });
+    appendFileSync(this.activityLogFilePath, `${JSON.stringify(record)}\n`, 'utf8');
     if (this.activityLogs.length > MAX_ACTIVITY_LOGS) {
       this.activityLogs = this.activityLogs.slice(0, MAX_ACTIVITY_LOGS);
       this.rewriteLogsFile();
@@ -916,6 +961,9 @@ class DesktopStateStorage {
 
   upsertActivityLog(record: ActivityLogRecord): ActivityLogRecord {
     this.ensureLoaded();
+    if (!this.activityLogFilePath) {
+      return deepClone(record);
+    }
     const currentIndex = this.activityLogs.findIndex((entry) => entry.id === record.id);
     if (currentIndex >= 0) {
       this.activityLogs[currentIndex] = { ...record };
@@ -932,6 +980,9 @@ class DesktopStateStorage {
 
   clearActivityLogs(): void {
     this.ensureLoaded();
+    if (!this.activityLogFilePath) {
+      return;
+    }
     this.activityLogs = [];
     this.rewriteLogsFile();
   }
@@ -1056,7 +1107,6 @@ class DesktopStateStorage {
 
     mkdirSync(this.storageDirectoryPath(), { recursive: true });
     this.state = this.loadStateWithRecovery();
-    this.activityLogs = this.loadActivityLogs();
     this.loaded = true;
   }
 
@@ -1075,8 +1125,7 @@ class DesktopStateStorage {
     return createDefaultStateFile();
   }
 
-  private loadActivityLogs(): ActivityLogRecord[] {
-    const filePath = this.logFilePath();
+  private loadActivityLogs(filePath: string): ActivityLogRecord[] {
     if (!existsSync(filePath)) {
       return [];
     }
@@ -1124,9 +1173,20 @@ class DesktopStateStorage {
   }
 
   private rewriteLogsFile(): void {
-    mkdirSync(this.storageDirectoryPath(), { recursive: true });
+    if (!this.activityLogFilePath) {
+      return;
+    }
+    mkdirSync(path.dirname(this.activityLogFilePath), { recursive: true });
     const payload = this.activityLogs.map((entry) => JSON.stringify(entry)).join('\n');
-    writeFileSync(this.logFilePath(), payload.length > 0 ? `${payload}\n` : '', 'utf8');
+    const tempPath = `${this.activityLogFilePath}.tmp`;
+    const descriptor = openSync(tempPath, 'w');
+    try {
+      writeFileSync(descriptor, payload.length > 0 ? `${payload}\n` : '', 'utf8');
+      fsyncSync(descriptor);
+    } finally {
+      closeSync(descriptor);
+    }
+    renameSync(tempPath, this.activityLogFilePath);
   }
 
   private storageDirectoryPath(): string {
@@ -1145,9 +1205,6 @@ class DesktopStateStorage {
     return path.join(this.storageDirectoryPath(), STATE_BACKUP_FILE_NAME);
   }
 
-  private logFilePath(): string {
-    return path.join(this.storageDirectoryPath(), ACTIVITY_LOG_FILE_NAME);
-  }
 }
 
 let desktopStateStorage: DesktopStateStorage | null = null;

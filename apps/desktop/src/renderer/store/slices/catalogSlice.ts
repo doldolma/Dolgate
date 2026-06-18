@@ -342,6 +342,7 @@ export function createCatalogSlice(deps: SliceDeps): CatalogSlice {
               dnsOverrides: [],
               portForwardRuntimes: [],
               knownHosts: [],
+              activityLogs: [],
               keychainEntries: [],
             }),
     createGroup: async (name) => {

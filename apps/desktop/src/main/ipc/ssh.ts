@@ -209,16 +209,28 @@ export function registerSshIpcHandlers(ctx: MainIpcContext): void {
   ipcMain.handle(
     ipcChannels.ssh.connectLocal,
     async (_event, input: DesktopLocalConnectInput) => {
-      return ctx.coreManager.connectLocalSession({
+      const title = input.title?.trim() || "Terminal";
+      const connection = await ctx.coreManager.connectLocalSession({
         cols: input.cols,
         rows: input.rows,
-        title: input.title?.trim() || "Terminal",
+        title,
         shellKind: input.shellKind?.trim() || undefined,
         executable: input.executable?.trim() || undefined,
         args: input.args?.filter((value) => value.trim().length > 0),
         env: input.env,
         workingDirectory: input.workingDirectory?.trim() || undefined,
+        lifecycle: {
+          hostId: "local-terminal",
+          hostLabel: "Local Terminal",
+          connectionKind: "local",
+        },
       });
+      ctx.sessionReplayService.noteSessionConfigured(
+        connection.sessionId,
+        input.cols,
+        input.rows,
+      );
+      return connection;
     },
   );
 

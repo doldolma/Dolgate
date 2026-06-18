@@ -1,6 +1,12 @@
 import os from "node:os";
 import path from "node:path";
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const { browserWindowInstances } = vi.hoisted(() => ({
@@ -94,6 +100,17 @@ vi.mock("electron", () => {
 });
 
 import { SessionReplayService } from "./session-replay-service";
+import { resolveLocalHistoryScope } from "./local-history-scope";
+
+const TEST_HISTORY_OWNER = {
+  userId: "user-1",
+  serverUrl: "https://ssh.doldolma.com",
+};
+
+function activateService(service: SessionReplayService): SessionReplayService {
+  service.activate(TEST_HISTORY_OWNER);
+  return service;
+}
 
 function createLifecycleState(
   overrides: Partial<{
@@ -101,7 +118,13 @@ function createLifecycleState(
     hostLabel: string;
     title: string;
     connectionDetails: string | null;
-    connectionKind: "ssh" | "aws-ssm" | "warpgate" | "serial";
+    connectionKind:
+      | "local"
+      | "ssh"
+      | "aws-ssm"
+      | "warpgate"
+      | "aws-ecs-exec"
+      | "serial";
     connectedAt: string;
   }> = {},
 ) {
@@ -146,17 +169,16 @@ describe("SessionReplayService", () => {
       ["session-1", createLifecycleState()],
     ]);
     const coreManager = {
-      getRemoteSessionLifecycleState: vi.fn((sessionId: string) =>
+      getSessionLifecycleState: vi.fn((sessionId: string) =>
         lifecycleStates.get(sessionId) ?? null,
       ),
-      attachRemoteSessionRecording: vi.fn(),
+      attachSessionRecording: vi.fn(),
     };
     const settingsRepository = {
       get: vi.fn(() => ({ sessionReplayRetentionCount: 100 })),
     };
-    const service = new SessionReplayService(
-      settingsRepository as never,
-      coreManager as never,
+    const service = activateService(
+      new SessionReplayService(settingsRepository as never, coreManager as never),
     );
 
     service.noteSessionConfigured("session-1", 132, 44);
@@ -166,7 +188,7 @@ describe("SessionReplayService", () => {
       payload: { status: "connected" },
     } as never);
 
-    const recordingId = coreManager.attachRemoteSessionRecording.mock.calls[0]?.[1];
+    const recordingId = coreManager.attachSessionRecording.mock.calls[0]?.[1];
     expect(typeof recordingId).toBe("string");
 
     vi.setSystemTime(new Date("2026-03-29T00:00:00.500Z"));
@@ -206,6 +228,69 @@ describe("SessionReplayService", () => {
     });
   });
 
+  it.each([
+    ["local", "Local Terminal", "Terminal"],
+    ["aws-ecs-exec", "prod", "prod · api · web"],
+  ] as const)(
+    "records %s process-backed terminal output with the shared replay flow",
+    (connectionKind, hostLabel, title) => {
+      const lifecycleStates = new Map<
+        string,
+        ReturnType<typeof createLifecycleState>
+      >([
+        [
+          "session-1",
+          createLifecycleState({ connectionKind, hostLabel, title }),
+        ],
+      ]);
+      const coreManager = {
+        getSessionLifecycleState: vi.fn((sessionId: string) =>
+          lifecycleStates.get(sessionId) ?? null,
+        ),
+        attachSessionRecording: vi.fn(),
+      };
+      const service = activateService(
+        new SessionReplayService(
+          { get: () => ({ sessionReplayRetentionCount: 100 }) } as never,
+          coreManager as never,
+        ),
+      );
+
+      service.noteSessionConfigured("session-1", 132, 44);
+      service.handleTerminalEvent({
+        type: "connected",
+        sessionId: "session-1",
+        payload: { status: "connected" },
+      } as never);
+      const recordingId = coreManager.attachSessionRecording.mock.calls[0]?.[1];
+      vi.setSystemTime(new Date("2026-03-29T00:00:00.500Z"));
+      service.handleTerminalStream(
+        "session-1",
+        new Uint8Array(Buffer.from("output\n", "utf8")),
+      );
+      vi.setSystemTime(new Date("2026-03-29T00:00:01.000Z"));
+      service.handleTerminalResize("session-1", 140, 48);
+      service.handleTerminalEvent({
+        type: "closed",
+        sessionId: "session-1",
+        payload: { message: "closed" },
+      } as never);
+
+      expect(service.get(recordingId)).toMatchObject({
+        recordingId,
+        hostLabel,
+        title,
+        connectionKind,
+        initialCols: 132,
+        initialRows: 44,
+        entries: [
+          expect.objectContaining({ type: "output", atMs: 500 }),
+          expect.objectContaining({ type: "resize", cols: 140, rows: 48 }),
+        ],
+      });
+    },
+  );
+
   it("prunes old recordings using the configured retention count", () => {
     const lifecycleStates = new Map<string, ReturnType<typeof createLifecycleState>>();
     for (let index = 0; index < 11; index += 1) {
@@ -217,17 +302,16 @@ describe("SessionReplayService", () => {
       );
     }
     const coreManager = {
-      getRemoteSessionLifecycleState: vi.fn((sessionId: string) =>
+      getSessionLifecycleState: vi.fn((sessionId: string) =>
         lifecycleStates.get(sessionId) ?? null,
       ),
-      attachRemoteSessionRecording: vi.fn(),
+      attachSessionRecording: vi.fn(),
     };
     const settingsRepository = {
       get: vi.fn(() => ({ sessionReplayRetentionCount: 10 })),
     };
-    const service = new SessionReplayService(
-      settingsRepository as never,
-      coreManager as never,
+    const service = activateService(
+      new SessionReplayService(settingsRepository as never, coreManager as never),
     );
 
     const recordingIds: string[] = [];
@@ -241,7 +325,7 @@ describe("SessionReplayService", () => {
         payload: { status: "connected" },
       } as never);
       recordingIds.push(
-        coreManager.attachRemoteSessionRecording.mock.calls[index]?.[1],
+        coreManager.attachSessionRecording.mock.calls[index]?.[1],
       );
       vi.setSystemTime(new Date(`2026-03-29T00:${minute}:03.000Z`));
       service.handleTerminalEvent({
@@ -251,7 +335,7 @@ describe("SessionReplayService", () => {
       } as never);
     }
 
-    const replayDir = path.join(tempDir, "storage", "session-replays");
+    const replayDir = resolveLocalHistoryScope(TEST_HISTORY_OWNER).replayDirectoryPath;
     const firstRecordingId = recordingIds[0]!;
     const lastRecordingId = recordingIds[10]!;
     expect(existsSync(path.join(replayDir, `${firstRecordingId}.meta.json`))).toBe(false);
@@ -265,17 +349,16 @@ describe("SessionReplayService", () => {
       ["session-1", createLifecycleState()],
     ]);
     const coreManager = {
-      getRemoteSessionLifecycleState: vi.fn((sessionId: string) =>
+      getSessionLifecycleState: vi.fn((sessionId: string) =>
         lifecycleStates.get(sessionId) ?? null,
       ),
-      attachRemoteSessionRecording: vi.fn(),
+      attachSessionRecording: vi.fn(),
     };
     const settingsRepository = {
       get: vi.fn(() => ({ sessionReplayRetentionCount: 100 })),
     };
-    const service = new SessionReplayService(
-      settingsRepository as never,
-      coreManager as never,
+    const service = activateService(
+      new SessionReplayService(settingsRepository as never, coreManager as never),
     );
 
     service.handleTerminalEvent({
@@ -283,7 +366,7 @@ describe("SessionReplayService", () => {
       sessionId: "session-1",
       payload: { status: "connected" },
     } as never);
-    const recordingId = coreManager.attachRemoteSessionRecording.mock.calls[0]?.[1];
+    const recordingId = coreManager.attachSessionRecording.mock.calls[0]?.[1];
     vi.setSystemTime(new Date("2026-03-29T00:00:02.000Z"));
     service.handleTerminalEvent({
       type: "closed",
@@ -314,17 +397,16 @@ describe("SessionReplayService", () => {
       ["session-1", createLifecycleState()],
     ]);
     const coreManager = {
-      getRemoteSessionLifecycleState: vi.fn((sessionId: string) =>
+      getSessionLifecycleState: vi.fn((sessionId: string) =>
         lifecycleStates.get(sessionId) ?? null,
       ),
-      attachRemoteSessionRecording: vi.fn(),
+      attachSessionRecording: vi.fn(),
     };
     const settingsRepository = {
       get: vi.fn(() => ({ sessionReplayRetentionCount: 100 })),
     };
-    const service = new SessionReplayService(
-      settingsRepository as never,
-      coreManager as never,
+    const service = activateService(
+      new SessionReplayService(settingsRepository as never, coreManager as never),
     );
 
     service.handleTerminalEvent({
@@ -332,7 +414,7 @@ describe("SessionReplayService", () => {
       sessionId: "session-1",
       payload: { status: "connected" },
     } as never);
-    const recordingId = coreManager.attachRemoteSessionRecording.mock.calls[0]?.[1];
+    const recordingId = coreManager.attachSessionRecording.mock.calls[0]?.[1];
     vi.setSystemTime(new Date("2026-03-29T00:00:02.000Z"));
     service.handleTerminalEvent({
       type: "closed",
@@ -358,17 +440,16 @@ describe("SessionReplayService", () => {
       ["session-1", createLifecycleState()],
     ]);
     const coreManager = {
-      getRemoteSessionLifecycleState: vi.fn((sessionId: string) =>
+      getSessionLifecycleState: vi.fn((sessionId: string) =>
         lifecycleStates.get(sessionId) ?? null,
       ),
-      attachRemoteSessionRecording: vi.fn(),
+      attachSessionRecording: vi.fn(),
     };
     const settingsRepository = {
       get: vi.fn(() => ({ sessionReplayRetentionCount: 100 })),
     };
-    const service = new SessionReplayService(
-      settingsRepository as never,
-      coreManager as never,
+    const service = activateService(
+      new SessionReplayService(settingsRepository as never, coreManager as never),
     );
 
     service.noteSessionConfigured("session-1", 132, 44);
@@ -378,7 +459,7 @@ describe("SessionReplayService", () => {
       payload: { status: "connected" },
     } as never);
 
-    const recordingId = coreManager.attachRemoteSessionRecording.mock.calls[0]?.[1];
+    const recordingId = coreManager.attachSessionRecording.mock.calls[0]?.[1];
     expect(typeof recordingId).toBe("string");
 
     vi.setSystemTime(new Date("2026-03-29T00:00:01.000Z"));
@@ -400,5 +481,182 @@ describe("SessionReplayService", () => {
       type: "output",
       atMs: 1000,
     });
+  });
+
+  it("isolates replay access by account and keeps an active recording in its starting scope", () => {
+    const lifecycleStates = new Map<string, ReturnType<typeof createLifecycleState>>([
+      ["session-1", createLifecycleState()],
+    ]);
+    const coreManager = {
+      getSessionLifecycleState: vi.fn((sessionId: string) =>
+        lifecycleStates.get(sessionId) ?? null,
+      ),
+      attachSessionRecording: vi.fn(),
+    };
+    const service = activateService(
+      new SessionReplayService(
+        { get: () => ({ sessionReplayRetentionCount: 100 }) } as never,
+        coreManager as never,
+      ),
+    );
+
+    service.handleTerminalEvent({
+      type: "connected",
+      sessionId: "session-1",
+      payload: { status: "connected" },
+    } as never);
+    const recordingId = coreManager.attachSessionRecording.mock.calls[0]?.[1];
+
+    service.activate({
+      userId: "user-2",
+      serverUrl: TEST_HISTORY_OWNER.serverUrl,
+    });
+    vi.setSystemTime(new Date("2026-03-29T00:00:01.000Z"));
+    service.handleTerminalEvent({
+      type: "closed",
+      sessionId: "session-1",
+      payload: { message: "closed" },
+    } as never);
+
+    expect(() => service.get(recordingId)).toThrow();
+    service.activate(TEST_HISTORY_OWNER);
+    expect(service.get(recordingId)).toMatchObject({
+      recordingId,
+      sessionId: "session-1",
+    });
+  });
+
+  it("migrates legacy replay files into the first activated account", () => {
+    const scope = resolveLocalHistoryScope(TEST_HISTORY_OWNER);
+    const recordingId = "legacy-recording";
+    mkdirSync(scope.legacyReplayDirectoryPath, { recursive: true });
+    writeFileSync(
+      path.join(scope.legacyReplayDirectoryPath, `${recordingId}.meta.json`),
+      JSON.stringify({
+        recordingId,
+        sessionId: "legacy-session",
+        hostId: "legacy-host",
+        hostLabel: "legacy",
+        title: "Legacy",
+        connectionDetails: null,
+        connectionKind: "ssh",
+        connectedAt: "2026-03-29T00:00:00.000Z",
+        disconnectedAt: "2026-03-29T00:00:01.000Z",
+        durationMs: 1000,
+        initialCols: 120,
+        initialRows: 32,
+      }),
+      "utf8",
+    );
+    writeFileSync(
+      path.join(scope.legacyReplayDirectoryPath, `${recordingId}.events.jsonl`),
+      `${JSON.stringify({
+        type: "output",
+        atMs: 100,
+        dataBase64: Buffer.from("legacy").toString("base64"),
+      })}\n`,
+      "utf8",
+    );
+
+    const service = activateService(
+      new SessionReplayService(
+        { get: () => ({ sessionReplayRetentionCount: 100 }) } as never,
+        {
+          getSessionLifecycleState: vi.fn(),
+          attachSessionRecording: vi.fn(),
+        } as never,
+      ),
+    );
+
+    expect(service.get(recordingId)).toMatchObject({
+      recordingId,
+      sessionId: "legacy-session",
+      entries: [expect.objectContaining({ type: "output", atMs: 100 })],
+    });
+    expect(existsSync(scope.legacyReplayDirectoryPath)).toBe(false);
+    expect(
+      existsSync(path.join(scope.replayDirectoryPath, `${recordingId}.meta.json`)),
+    ).toBe(true);
+  });
+
+  it("keeps scoped replay files when a partial legacy migration has matching files", () => {
+    const scope = resolveLocalHistoryScope(TEST_HISTORY_OWNER);
+    const recordingId = "partially-migrated-recording";
+    const createMeta = (sessionId: string) => ({
+      recordingId,
+      sessionId,
+      hostId: "host-1",
+      hostLabel: "host",
+      title: "Replay",
+      connectionDetails: null,
+      connectionKind: "ssh",
+      connectedAt: "2026-03-29T00:00:00.000Z",
+      disconnectedAt: "2026-03-29T00:00:01.000Z",
+      durationMs: 1000,
+      initialCols: 120,
+      initialRows: 32,
+    });
+    mkdirSync(scope.legacyReplayDirectoryPath, { recursive: true });
+    mkdirSync(scope.replayDirectoryPath, { recursive: true });
+    writeFileSync(
+      path.join(scope.legacyReplayDirectoryPath, `${recordingId}.meta.json`),
+      JSON.stringify(createMeta("legacy-session")),
+      "utf8",
+    );
+    writeFileSync(
+      path.join(scope.replayDirectoryPath, `${recordingId}.meta.json`),
+      JSON.stringify(createMeta("scoped-session")),
+      "utf8",
+    );
+
+    const service = activateService(
+      new SessionReplayService(
+        { get: () => ({ sessionReplayRetentionCount: 100 }) } as never,
+        {
+          getSessionLifecycleState: vi.fn(),
+          attachSessionRecording: vi.fn(),
+        } as never,
+      ),
+    );
+
+    expect(service.get(recordingId).sessionId).toBe("scoped-session");
+    expect(existsSync(scope.legacyReplayDirectoryPath)).toBe(false);
+  });
+
+  it("closes replay windows and blocks replay reads after deactivation", async () => {
+    const lifecycleStates = new Map<string, ReturnType<typeof createLifecycleState>>([
+      ["session-1", createLifecycleState()],
+    ]);
+    const coreManager = {
+      getSessionLifecycleState: vi.fn((sessionId: string) =>
+        lifecycleStates.get(sessionId) ?? null,
+      ),
+      attachSessionRecording: vi.fn(),
+    };
+    const service = activateService(
+      new SessionReplayService(
+        { get: () => ({ sessionReplayRetentionCount: 100 }) } as never,
+        coreManager as never,
+      ),
+    );
+    service.handleTerminalEvent({
+      type: "connected",
+      sessionId: "session-1",
+      payload: { status: "connected" },
+    } as never);
+    const recordingId = coreManager.attachSessionRecording.mock.calls[0]?.[1];
+    service.handleTerminalEvent({
+      type: "closed",
+      sessionId: "session-1",
+      payload: { message: "closed" },
+    } as never);
+    await service.openReplayWindow(recordingId, {} as never);
+
+    service.deactivate();
+
+    expect(browserWindowInstances[0]?.close).toHaveBeenCalledTimes(1);
+    expect(() => service.get(recordingId)).toThrow(
+      "로그인된 계정의 Replay만 열 수 있습니다.",
+    );
   });
 });

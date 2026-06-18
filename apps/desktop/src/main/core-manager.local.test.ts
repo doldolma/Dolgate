@@ -155,6 +155,194 @@ describe("CoreManager local shell sessions", () => {
     expect(decodeControlFrame(fakeProcess.writes[3]).type).toBe("disconnect");
   });
 
+  it("records a local terminal as one lifecycle row with replay metadata", async () => {
+    const logs: ActivityLogRecord[] = [];
+    const fakeProcess = createFakeChildProcess();
+    spawnMock.mockReturnValue(fakeProcess.child);
+    const manager = new CoreManager(undefined, (record) => {
+      const currentIndex = logs.findIndex((entry) => entry.id === record.id);
+      if (currentIndex >= 0) {
+        logs[currentIndex] = record;
+        return;
+      }
+      logs.push(record);
+    });
+
+    const { sessionId } = await manager.connectLocalSession({
+      cols: 132,
+      rows: 40,
+      title: "Terminal 2",
+      lifecycle: {
+        hostId: "local-terminal",
+        hostLabel: "Local Terminal",
+        connectionKind: "local",
+      },
+    });
+    fakeProcess.emitControl({
+      type: "connected",
+      sessionId,
+      payload: { status: "connected", shellKind: "shell" },
+    });
+    manager.attachSessionRecording(sessionId, "recording-local-1");
+    fakeProcess.emitControl({
+      type: "closed",
+      sessionId,
+      payload: { message: "client requested disconnect" },
+    });
+
+    expect(logs).toHaveLength(1);
+    expect(logs[0]).toMatchObject({
+      id: `session:${sessionId}`,
+      kind: "session-lifecycle",
+      message: "Local 세션",
+      metadata: {
+        hostId: "local-terminal",
+        hostLabel: "Local Terminal",
+        title: "Terminal 2",
+        connectionKind: "local",
+        status: "closed",
+        disconnectReason: "client requested disconnect",
+        recordingId: "recording-local-1",
+        hasReplay: true,
+      },
+    });
+    expect(
+      (logs[0]?.metadata as unknown as SessionLifecycleLogMetadata).durationMs,
+    ).toBeTypeOf("number");
+  });
+
+  it("keeps a connected local terminal error and close in one lifecycle row", async () => {
+    const logs: ActivityLogRecord[] = [];
+    const fakeProcess = createFakeChildProcess();
+    spawnMock.mockReturnValue(fakeProcess.child);
+    const manager = new CoreManager(undefined, (record) => {
+      const currentIndex = logs.findIndex((entry) => entry.id === record.id);
+      if (currentIndex >= 0) {
+        logs[currentIndex] = record;
+        return;
+      }
+      logs.push(record);
+    });
+
+    const { sessionId } = await manager.connectLocalSession({
+      cols: 120,
+      rows: 32,
+      title: "Terminal",
+      lifecycle: {
+        hostId: "local-terminal",
+        hostLabel: "Local Terminal",
+        connectionKind: "local",
+      },
+    });
+    fakeProcess.emitControl({
+      type: "connected",
+      sessionId,
+      payload: { status: "connected" },
+    });
+    fakeProcess.emitControl({
+      type: "error",
+      sessionId,
+      payload: { message: "shell exited with code 1" },
+    });
+    fakeProcess.emitControl({
+      type: "closed",
+      sessionId,
+      payload: { message: "shell exited with code 1" },
+    });
+
+    expect(logs).toHaveLength(1);
+    expect(logs[0]?.metadata).toMatchObject({
+      connectionKind: "local",
+      status: "error",
+      disconnectReason: "shell exited with code 1",
+    });
+  });
+
+  it("records ECS Exec lifecycle metadata and finalizes it during shutdown", async () => {
+    const logs: ActivityLogRecord[] = [];
+    const fakeProcess = createFakeChildProcess();
+    spawnMock.mockReturnValue(fakeProcess.child);
+    const manager = new CoreManager(undefined, (record) => {
+      const currentIndex = logs.findIndex((entry) => entry.id === record.id);
+      if (currentIndex >= 0) {
+        logs[currentIndex] = record;
+        return;
+      }
+      logs.push(record);
+    });
+
+    const { sessionId } = await manager.connectLocalSession({
+      cols: 120,
+      rows: 40,
+      title: "prod · api · web",
+      shellKind: "aws-ecs-exec",
+      executable: "aws",
+      lifecycle: {
+        hostId: "ecs-host-1",
+        hostLabel: "prod",
+        connectionDetails: "api · web · task-1",
+        connectionKind: "aws-ecs-exec",
+      },
+    });
+    fakeProcess.emitControl({
+      type: "connected",
+      sessionId,
+      payload: { status: "connected", shellKind: "aws-ecs-exec" },
+    });
+
+    await manager.shutdown();
+
+    expect(logs).toHaveLength(1);
+    expect(logs[0]?.metadata).toMatchObject({
+      hostId: "ecs-host-1",
+      hostLabel: "prod",
+      connectionDetails: "api · web · task-1",
+      connectionKind: "aws-ecs-exec",
+      status: "closed",
+      disconnectReason: "앱 종료로 세션이 정리되었습니다.",
+    });
+  });
+
+  it("keeps a pre-connect local failure as one generic error without replay lifecycle", async () => {
+    const genericLogs: Array<{ level: string; message: string }> = [];
+    const lifecycleLogs: ActivityLogRecord[] = [];
+    const fakeProcess = createFakeChildProcess();
+    spawnMock.mockReturnValue(fakeProcess.child);
+    const manager = new CoreManager(
+      (entry) => genericLogs.push(entry),
+      (record) => lifecycleLogs.push(record),
+    );
+
+    const { sessionId } = await manager.connectLocalSession({
+      cols: 120,
+      rows: 32,
+      title: "Terminal",
+      lifecycle: {
+        hostId: "local-terminal",
+        hostLabel: "Local Terminal",
+        connectionKind: "local",
+      },
+    });
+    fakeProcess.emitControl({
+      type: "error",
+      sessionId,
+      payload: { message: "unable to start shell" },
+    });
+    fakeProcess.emitControl({
+      type: "closed",
+      sessionId,
+      payload: { message: "unable to start shell" },
+    });
+
+    expect(genericLogs).toEqual([
+      expect.objectContaining({
+        level: "error",
+        message: "Local 세션 오류가 발생했습니다.",
+      }),
+    ]);
+    expect(lifecycleLogs).toEqual([]);
+  });
+
   it("sends serialConnect through ssh-core and reuses terminal lifecycle flow", async () => {
     const fakeProcess = createFakeChildProcess();
     spawnMock.mockReturnValue(fakeProcess.child);
@@ -920,7 +1108,7 @@ describe("CoreManager local shell sessions", () => {
       payload: { status: "connected" },
     });
 
-    manager.attachRemoteSessionRecording(sessionId, "recording-1");
+    manager.attachSessionRecording(sessionId, "recording-1");
 
     expect(logs).toHaveLength(1);
     expect(logs[0]?.kind).toBe("session-lifecycle");
