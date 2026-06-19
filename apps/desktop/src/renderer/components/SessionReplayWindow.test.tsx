@@ -418,7 +418,7 @@ describe("SessionReplayWindow", () => {
     expect(screen.getByRole("button", { name: "Pause" })).toBeInTheDocument();
   });
 
-  it("adjusts replay zoom with the plus and minus controls", async () => {
+  it("adjusts zoom in place without recreating the terminal or blanking it", async () => {
     render(<SessionReplayWindow recordingId="recording-1" />);
 
     await waitFor(() => expect(mocks.runtimeRecords).toHaveLength(1));
@@ -432,44 +432,41 @@ describe("SessionReplayWindow", () => {
     const initialWidth = replayTerminal?.style.width;
     const initialHeight = replayTerminal?.style.height;
 
+    // Pause so the assertions are isolated from playback animation frames.
+    fireEvent.click(screen.getByRole("button", { name: "Pause" }));
+    runtime.setAppearance.mockClear();
+    runtime.terminal.reset.mockClear();
+    runtime.terminal.clear.mockClear();
     expect(screen.getByText("100%")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Zoom in" }));
 
     expect(screen.getByText("110%")).toBeInTheDocument();
-    await act(async () => {
-      const callback = mocks.rafCallbacks.pop();
-      callback?.(0);
+    // Regression: zooming must NOT tear down and rebuild the terminal
+    // (that left the replay blank until the user scrubbed elsewhere).
+    expect(mocks.runtimeRecords).toHaveLength(1);
+    expect(runtime.dispose).not.toHaveBeenCalled();
+    // The font size is updated in place (13 * 1.1 = 14.3), keeping the buffer.
+    expect(runtime.setAppearance).toHaveBeenCalled();
+    expect(runtime.setAppearance.mock.calls.at(-1)?.[0]).toMatchObject({
+      fontSize: 14.3,
     });
+    // The surrounding surface still re-sizes for the new zoom level.
     expect(replayTerminal?.style.width).not.toBe(initialWidth);
     expect(replayTerminal?.style.height).not.toBe(initialHeight);
+    // No content re-application is scheduled (no reset/clear, no rewrite).
+    expect(runtime.terminal.reset).not.toHaveBeenCalled();
+    expect(runtime.terminal.clear).not.toHaveBeenCalled();
 
     fireEvent.click(screen.getByRole("button", { name: "Zoom out" }));
 
     expect(screen.getByText("100%")).toBeInTheDocument();
-    await act(async () => {
-      const callback = mocks.rafCallbacks.pop();
-      callback?.(0);
-    });
+    expect(mocks.runtimeRecords).toHaveLength(1);
+    expect(runtime.dispose).not.toHaveBeenCalled();
     expect(replayTerminal?.style.width).toBe(initialWidth);
     expect(replayTerminal?.style.height).toBe(initialHeight);
 
-    fireEvent.change(screen.getByLabelText("Replay scrubber"), {
-      target: { value: "1250" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: "Pause" }));
-    const pausedWidth = replayTerminal?.style.width;
-    const pausedHeight = replayTerminal?.style.height;
-
-    fireEvent.click(screen.getByRole("button", { name: "Zoom in" }));
-
-    expect(screen.getByText("110%")).toBeInTheDocument();
-    await act(async () => {
-      const callback = mocks.rafCallbacks.pop();
-      callback?.(0);
-    });
+    // Zooming does not resume playback.
     expect(screen.getByRole("button", { name: "Play" })).toBeInTheDocument();
-    expect(replayTerminal?.style.width).not.toBe(pausedWidth);
-    expect(replayTerminal?.style.height).not.toBe(pausedHeight);
   });
 });

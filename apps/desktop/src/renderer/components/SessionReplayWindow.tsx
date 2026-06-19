@@ -164,7 +164,6 @@ export function SessionReplayWindow({
   const isPlayingRef = useRef(false);
   const appliedIndexRef = useRef(-1);
   const appliedPositionRef = useRef(0);
-  const positionMsRef = useRef(0);
   const initializedRecordingIdRef = useRef<string | null>(null);
   const appliedViewportRef = useRef<{
     cols: number;
@@ -191,6 +190,9 @@ export function SessionReplayWindow({
       fontSize: Math.max(8, Math.round(terminalSettings.fontSize * zoomScale * 10) / 10),
     };
   }, [terminalSettings, zoomScale]);
+  const hasTerminalSettings = Boolean(effectiveTerminalSettings);
+  const effectiveTerminalSettingsRef = useRef(effectiveTerminalSettings);
+  effectiveTerminalSettingsRef.current = effectiveTerminalSettings;
   const terminalRef = useCallback((node: HTMLDivElement | null) => {
     setTerminalContainer(node);
   }, []);
@@ -297,22 +299,23 @@ export function SessionReplayWindow({
   }, [recordingId]);
 
   useEffect(() => {
-    if (!recording || !terminalContainer || runtimeRef.current || !effectiveTerminalSettings) {
+    const initialSettings = effectiveTerminalSettingsRef.current;
+    if (!recording || !terminalContainer || runtimeRef.current || !initialSettings) {
       return;
     }
     try {
-      const themePreset = getTerminalThemePreset(effectiveTerminalSettings.terminalThemeId);
+      const themePreset = getTerminalThemePreset(initialSettings.terminalThemeId);
       const nextRuntime = createTerminalRuntime({
         container: terminalContainer,
         appearance: {
           theme: themePreset.theme,
-          fontFamily: effectiveTerminalSettings.fontFamily,
-          fontSize: effectiveTerminalSettings.fontSize,
-          scrollbackLines: effectiveTerminalSettings.scrollbackLines,
-          lineHeight: effectiveTerminalSettings.lineHeight,
-          letterSpacing: effectiveTerminalSettings.letterSpacing,
-          minimumContrastRatio: effectiveTerminalSettings.minimumContrastRatio,
-          macOptionIsMeta: effectiveTerminalSettings.altIsMeta,
+          fontFamily: initialSettings.fontFamily,
+          fontSize: initialSettings.fontSize,
+          scrollbackLines: initialSettings.scrollbackLines,
+          lineHeight: initialSettings.lineHeight,
+          letterSpacing: initialSettings.letterSpacing,
+          minimumContrastRatio: initialSettings.minimumContrastRatio,
+          macOptionIsMeta: initialSettings.altIsMeta,
         },
         onData: () => undefined,
         onBinary: () => undefined,
@@ -336,11 +339,7 @@ export function SessionReplayWindow({
       );
       return undefined;
     }
-  }, [effectiveTerminalSettings, recording, terminalContainer]);
-
-  useEffect(() => {
-    positionMsRef.current = positionMs;
-  }, [positionMs]);
+  }, [hasTerminalSettings, recording, terminalContainer]);
 
   useEffect(() => {
     isPlayingRef.current = isPlaying;
@@ -562,27 +561,13 @@ export function SessionReplayWindow({
   }, [togglePlayback]);
 
   const handleZoomChange = useCallback((delta: number) => {
-    setZoomPercent((current) => {
-      const next = Math.max(
+    setZoomPercent((current) =>
+      Math.max(
         MIN_REPLAY_ZOOM_PERCENT,
         Math.min(MAX_REPLAY_ZOOM_PERCENT, current + delta),
-      );
-      if (next !== current && recording && runtimeRef.current) {
-        window.requestAnimationFrame(() => {
-          if (!runtimeRef.current) {
-            return;
-          }
-          const targetPosition = Math.min(
-            positionMsRef.current,
-            recording.durationMs,
-          );
-          resetTerminal();
-          applyUntil(targetPosition);
-        });
-      }
-      return next;
-    });
-  }, [applyUntil, recording, resetTerminal]);
+      ),
+    );
+  }, []);
 
   return (
     <div className="grid h-full min-h-0 grid-rows-[auto_auto_auto_minmax(0,1fr)] gap-[0.95rem] bg-[linear-gradient(180deg,color-mix(in_srgb,var(--surface-elevated)_97%,white_3%),color-mix(in_srgb,var(--surface)_96%,var(--app-bg)_4%))] p-[1.1rem] text-[var(--text)]">
