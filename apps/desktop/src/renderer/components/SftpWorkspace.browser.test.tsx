@@ -97,6 +97,7 @@ const baseSettings: AppSettings = {
   terminalMinimumContrastRatio: 1,
   terminalAltIsMeta: false,
   terminalWebglEnabled: true,
+  terminalAutocompleteEnabled: false,
   sftpBrowserColumnWidths: { ...DEFAULT_SFTP_BROWSER_COLUMN_WIDTHS },
   sessionReplayRetentionCount: 100,
   serverUrl: "https://ssh.doldolma.com",

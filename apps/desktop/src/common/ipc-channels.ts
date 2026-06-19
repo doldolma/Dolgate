@@ -93,6 +93,10 @@ export const ipcChannels = {
     writeBinary: 'ssh:write-binary',
     resize: 'ssh:resize',
     disconnect: 'ssh:disconnect',
+    prepareAutocomplete: 'ssh:autocomplete-prepare',
+    refreshAutocomplete: 'ssh:autocomplete-refresh',
+    stopAutocomplete: 'ssh:autocomplete-stop',
+    completionQuery: 'ssh:completion-query',
     respondKeyboardInteractive: 'ssh:respond-keyboard-interactive',
     event: 'ssh:core-event',
     data: 'ssh:stream-data'

@@ -2,10 +2,12 @@ package runtime
 
 import (
 	"strconv"
+	"sync"
 	"time"
 
 	"golang.org/x/crypto/ssh"
 
+	"dolssh/services/ssh-core/internal/autocomplete"
 	"dolssh/services/ssh-core/internal/awssession"
 	containersvc "dolssh/services/ssh-core/internal/containers"
 	"dolssh/services/ssh-core/internal/forwarding"
@@ -29,6 +31,11 @@ type sshSessionManager interface {
 	Resize(sessionID string, cols, rows int) error
 	Disconnect(sessionID string) error
 	RespondKeyboardInteractive(sessionID, challengeID string, responses []string) error
+	HasSession(sessionID string) bool
+	CollectAutocomplete(sessionID string, revision int) (autocomplete.Result, error)
+	InstallShellIntegration(sessionID string) error
+	FlushShellIntegration(sessionID string)
+	RunCompletionCommand(sessionID, command string) (string, bool, error)
 }
 
 type awsSessionManager interface {
@@ -39,6 +46,10 @@ type awsSessionManager interface {
 	Resize(sessionID string, cols, rows int) error
 	Disconnect(sessionID string) error
 	Shutdown()
+	CollectAutocomplete(sessionID string, revision int) (autocomplete.Result, error)
+	StopAutocomplete(sessionID string)
+	InstallShellIntegration(sessionID string) error
+	FlushShellIntegration(sessionID string)
 }
 
 type localSessionManager interface {
@@ -47,6 +58,10 @@ type localSessionManager interface {
 	WriteBytes(sessionID string, data []byte) error
 	Resize(sessionID string, cols, rows int) error
 	Disconnect(sessionID string) error
+	CollectAutocomplete(sessionID string, revision int) (autocomplete.Result, error)
+	InstallShellIntegration(sessionID string) error
+	FlushShellIntegration(sessionID string)
+	RunCompletionCommand(sessionID, command string) (string, bool, error)
 }
 
 type serialSessionManager interface {
@@ -112,18 +127,21 @@ type hostKeyProbeFunc func(payload coretypes.HostKeyProbePayload) (coretypes.Hos
 type certificateInspectFunc func(payload coretypes.CertificateInspectPayload) coretypes.CertificateInspectedPayload
 
 type Runtime struct {
-	emitEvent          func(coretypes.Event)
-	emitStream         func(coretypes.StreamFrame, []byte)
-	ssh                sshSessionManager
-	aws                awsSessionManager
-	local              localSessionManager
-	serial             serialSessionManager
-	sftp               sftpService
-	containers         containersService
-	forwarding         forwardingService
-	ssmForwarding      ssmForwardingService
-	probeHostKey       hostKeyProbeFunc
-	inspectCertificate certificateInspectFunc
+	emitEvent                 func(coretypes.Event)
+	emitStream                func(coretypes.StreamFrame, []byte)
+	ssh                       sshSessionManager
+	aws                       awsSessionManager
+	local                     localSessionManager
+	serial                    serialSessionManager
+	sftp                      sftpService
+	containers                containersService
+	forwarding                forwardingService
+	ssmForwarding             ssmForwardingService
+	probeHostKey              hostKeyProbeFunc
+	inspectCertificate        certificateInspectFunc
+	autocompleteMu            sync.Mutex
+	autocompleteRevisions     map[string]int
+	shellIntegrationInstalled map[string]bool
 }
 
 func New(options Options) *Runtime {
@@ -194,18 +212,20 @@ func newRuntimeWithDeps(
 	inspectCertificate certificateInspectFunc,
 ) *Runtime {
 	return &Runtime{
-		emitEvent:          emitEvent,
-		emitStream:         emitStream,
-		ssh:                ssh,
-		aws:                aws,
-		local:              local,
-		serial:             serial,
-		sftp:               sftp,
-		containers:         containers,
-		forwarding:         forwarding,
-		ssmForwarding:      ssmForwarding,
-		probeHostKey:       probeHostKey,
-		inspectCertificate: inspectCertificate,
+		emitEvent:                 emitEvent,
+		emitStream:                emitStream,
+		ssh:                       ssh,
+		aws:                       aws,
+		local:                     local,
+		serial:                    serial,
+		sftp:                      sftp,
+		containers:                containers,
+		forwarding:                forwarding,
+		ssmForwarding:             ssmForwarding,
+		probeHostKey:              probeHostKey,
+		inspectCertificate:        inspectCertificate,
+		autocompleteRevisions:     make(map[string]int),
+		shellIntegrationInstalled: make(map[string]bool),
 	}
 }
 
@@ -288,6 +308,7 @@ func (runtime *Runtime) ResizeSession(sessionID string, payload coretypes.Resize
 }
 
 func (runtime *Runtime) DisconnectSession(sessionID string) error {
+	runtime.StopAutocomplete(sessionID)
 	switch {
 	case runtime.aws.HasSession(sessionID):
 		return runtime.aws.Disconnect(sessionID)
@@ -298,6 +319,158 @@ func (runtime *Runtime) DisconnectSession(sessionID string) error {
 	default:
 		return runtime.ssh.Disconnect(sessionID)
 	}
+}
+
+func (runtime *Runtime) PrepareAutocomplete(sessionID, requestID string) error {
+	return runtime.collectAutocomplete(sessionID, requestID)
+}
+
+// RunCompletionQuery runs a renderer-built read-only command on the host's
+// auxiliary channel (SSH exec / local subprocess) and returns its stdout for
+// dynamic completion. Unsupported on AWS SSM (single PTY, no aux channel).
+func (runtime *Runtime) RunCompletionQuery(sessionID, requestID, command string) error {
+	var (
+		stdout    string
+		truncated bool
+	)
+	switch {
+	case runtime.ssh.HasSession(sessionID):
+		stdout, truncated, _ = runtime.ssh.RunCompletionCommand(sessionID, command)
+	case runtime.local.HasSession(sessionID):
+		stdout, truncated, _ = runtime.local.RunCompletionCommand(sessionID, command)
+	}
+	// Completion is strictly best-effort. Any failure (unknown session,
+	// non-zero exit, timeout) yields an empty result rather than an error — an
+	// error here would be emitted as a session-fatal event and tear down the
+	// terminal. Always emit a result so the desktop request resolves promptly.
+	runtime.emitEvent(coretypes.Event{
+		Type:      coretypes.EventTerminalCompletionResult,
+		RequestID: requestID,
+		SessionID: sessionID,
+		Payload: coretypes.TerminalCompletionResultPayload{
+			Stdout:    stdout,
+			Truncated: truncated,
+		},
+	})
+	return nil
+}
+
+func (runtime *Runtime) RefreshAutocomplete(sessionID, requestID string) error {
+	return runtime.collectAutocomplete(sessionID, requestID)
+}
+
+func (runtime *Runtime) StopAutocomplete(sessionID string) {
+	runtime.autocompleteMu.Lock()
+	delete(runtime.autocompleteRevisions, sessionID)
+	delete(runtime.shellIntegrationInstalled, sessionID)
+	runtime.autocompleteMu.Unlock()
+	// Release any output a mid-flight handshake is still holding so disabling
+	// the feature never strands terminal output.
+	switch {
+	case runtime.aws.HasSession(sessionID):
+		runtime.aws.StopAutocomplete(sessionID)
+		runtime.aws.FlushShellIntegration(sessionID)
+	case runtime.local.HasSession(sessionID):
+		runtime.local.FlushShellIntegration(sessionID)
+	case runtime.ssh.HasSession(sessionID):
+		runtime.ssh.FlushShellIntegration(sessionID)
+	}
+}
+
+// shellIntegrationHandshakeTimeout bounds how long the echo-suppression
+// handshake waits for the first OSC 133;A prompt marker before releasing any
+// buffered output.
+const shellIntegrationHandshakeTimeout = 2500 * time.Millisecond
+
+// installShellIntegration injects the OSC 133 hooks into the interactive shell
+// once per session (idempotent across refreshes) and schedules a flush so a
+// failed handshake never strands output. Injection runs before the snapshot
+// probe so the prompt marker arrives ahead of the probe response.
+func (runtime *Runtime) installShellIntegration(sessionID string) {
+	runtime.autocompleteMu.Lock()
+	if runtime.shellIntegrationInstalled[sessionID] {
+		runtime.autocompleteMu.Unlock()
+		return
+	}
+	runtime.shellIntegrationInstalled[sessionID] = true
+	runtime.autocompleteMu.Unlock()
+
+	switch {
+	case runtime.aws.HasSession(sessionID):
+		_ = runtime.aws.InstallShellIntegration(sessionID)
+		time.AfterFunc(shellIntegrationHandshakeTimeout, func() {
+			runtime.aws.FlushShellIntegration(sessionID)
+		})
+	case runtime.local.HasSession(sessionID):
+		_ = runtime.local.InstallShellIntegration(sessionID)
+		time.AfterFunc(shellIntegrationHandshakeTimeout, func() {
+			runtime.local.FlushShellIntegration(sessionID)
+		})
+	case runtime.ssh.HasSession(sessionID):
+		_ = runtime.ssh.InstallShellIntegration(sessionID)
+		time.AfterFunc(shellIntegrationHandshakeTimeout, func() {
+			runtime.ssh.FlushShellIntegration(sessionID)
+		})
+	}
+}
+
+func (runtime *Runtime) collectAutocomplete(sessionID, requestID string) error {
+	runtime.emitEvent(coretypes.Event{
+		Type:      coretypes.EventTerminalAutocompleteCapability,
+		SessionID: sessionID,
+		Payload: coretypes.TerminalAutocompleteCapabilityPayload{
+			Status: "probing", Sources: []string{},
+		},
+	})
+	runtime.autocompleteMu.Lock()
+	revision := runtime.autocompleteRevisions[sessionID] + 1
+	runtime.autocompleteRevisions[sessionID] = revision
+	runtime.autocompleteMu.Unlock()
+
+	// Install the OSC 133 hooks (once) before collecting the snapshot so the
+	// prompt marker leads the snapshot probe response on shared in-band PTYs.
+	runtime.installShellIntegration(sessionID)
+
+	var (
+		result autocomplete.Result
+		err    error
+	)
+	switch {
+	case runtime.aws.HasSession(sessionID):
+		result, err = runtime.aws.CollectAutocomplete(sessionID, revision)
+	case runtime.local.HasSession(sessionID):
+		result, err = runtime.local.CollectAutocomplete(sessionID, revision)
+	case runtime.ssh.HasSession(sessionID):
+		result, err = runtime.ssh.CollectAutocomplete(sessionID, revision)
+	default:
+		result = autocomplete.Unsupported()
+	}
+	if err != nil {
+		result = autocomplete.Degraded("", "metadata-unavailable")
+	}
+	if result.Snapshot != nil {
+		runtime.emitEvent(coretypes.Event{
+			Type:      coretypes.EventTerminalAutocompleteSnapshot,
+			SessionID: sessionID,
+			Payload:   *result.Snapshot,
+		})
+	}
+	runtime.emitEvent(coretypes.Event{
+		Type:      coretypes.EventTerminalAutocompleteCapability,
+		RequestID: requestID,
+		SessionID: sessionID,
+		Payload:   result.Capability,
+	})
+	if result.Capability.Shell != "" {
+		runtime.emitEvent(coretypes.Event{
+			Type:      coretypes.EventTerminalAutocompleteShellState,
+			SessionID: sessionID,
+			Payload: coretypes.TerminalAutocompleteShellStatePayload{
+				Kind: "shellReady", Shell: result.Capability.Shell,
+			},
+		})
+	}
+	return nil
 }
 
 func (runtime *Runtime) ProbeHostKey(requestID string, payload coretypes.HostKeyProbePayload) error {

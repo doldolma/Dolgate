@@ -6,19 +6,23 @@ import (
 
 	"golang.org/x/crypto/ssh"
 
+	"dolssh/services/ssh-core/internal/autocomplete"
 	"dolssh/services/ssh-core/pkg/coretypes"
 )
 
 type stubSSHManager struct {
-	hasSession    bool
-	writeSession  string
-	writeData     []byte
-	resizeSession string
-	resizeCols    int
-	resizeRows    int
-	disconnectID  string
-	challengeID   string
-	responses     []string
+	hasSession     bool
+	writeSession   string
+	writeData      []byte
+	resizeSession  string
+	resizeCols     int
+	resizeRows     int
+	disconnectID   string
+	challengeID    string
+	responses      []string
+	completionOut  string
+	completionTrun bool
+	completionErr  error
 }
 
 func (stub *stubSSHManager) Connect(sessionID, requestID string, payload coretypes.ConnectPayload) error {
@@ -45,6 +49,14 @@ func (stub *stubSSHManager) RespondKeyboardInteractive(sessionID, challengeID st
 	stub.challengeID = challengeID
 	stub.responses = append([]string(nil), responses...)
 	return nil
+}
+func (stub *stubSSHManager) CollectAutocomplete(string, int) (autocomplete.Result, error) {
+	return autocomplete.Unsupported(), nil
+}
+func (stub *stubSSHManager) InstallShellIntegration(string) error { return nil }
+func (stub *stubSSHManager) FlushShellIntegration(string)         {}
+func (stub *stubSSHManager) RunCompletionCommand(string, string) (string, bool, error) {
+	return stub.completionOut, stub.completionTrun, stub.completionErr
 }
 
 type stubAWSManager struct {
@@ -83,12 +95,19 @@ func (stub *stubAWSManager) Disconnect(sessionID string) error {
 	return nil
 }
 func (stub *stubAWSManager) Shutdown() { stub.shutdownCall++ }
+func (stub *stubAWSManager) CollectAutocomplete(string, int) (autocomplete.Result, error) {
+	return autocomplete.Unsupported(), nil
+}
+func (stub *stubAWSManager) StopAutocomplete(string)              {}
+func (stub *stubAWSManager) InstallShellIntegration(string) error { return nil }
+func (stub *stubAWSManager) FlushShellIntegration(string)         {}
 
 type stubLocalManager struct {
-	hasSession   bool
-	writeSession string
-	resizeID     string
-	disconnectID string
+	hasSession        bool
+	writeSession      string
+	resizeID          string
+	disconnectID      string
+	installShellCount int
 }
 
 func (stub *stubLocalManager) Connect(sessionID, requestID string, payload coretypes.LocalConnectPayload) error {
@@ -106,6 +125,17 @@ func (stub *stubLocalManager) Resize(sessionID string, cols, rows int) error {
 func (stub *stubLocalManager) Disconnect(sessionID string) error {
 	stub.disconnectID = sessionID
 	return nil
+}
+func (stub *stubLocalManager) CollectAutocomplete(string, int) (autocomplete.Result, error) {
+	return autocomplete.Unsupported(), nil
+}
+func (stub *stubLocalManager) InstallShellIntegration(string) error {
+	stub.installShellCount++
+	return nil
+}
+func (stub *stubLocalManager) FlushShellIntegration(string) {}
+func (stub *stubLocalManager) RunCompletionCommand(string, string) (string, bool, error) {
+	return "", false, nil
 }
 
 type stubSerialManager struct {
@@ -394,5 +424,85 @@ func TestRuntimeRoutesKeyboardInteractivePortForwardAndShutdown(t *testing.T) {
 	runtime.Shutdown()
 	if aws.shutdownCall != 1 || sftp.shutdownCall != 1 || containers.shutdownCall != 1 || forwarding.shutdownCall != 1 || ssmForwarding.shutdownCall != 1 {
 		t.Fatalf("expected shutdown on all services, got aws=%d sftp=%d containers=%d forwarding=%d ssm=%d", aws.shutdownCall, sftp.shutdownCall, containers.shutdownCall, forwarding.shutdownCall, ssmForwarding.shutdownCall)
+	}
+}
+
+func TestPrepareAutocompleteInstallsShellIntegrationOnce(t *testing.T) {
+	localManager := &stubLocalManager{hasSession: true}
+	var capabilities int
+	runtime := newRuntimeWithDeps(
+		func(event coretypes.Event) {
+			if event.Type == coretypes.EventTerminalAutocompleteCapability {
+				capabilities++
+			}
+		},
+		func(coretypes.StreamFrame, []byte) {},
+		&stubSSHManager{},
+		&stubAWSManager{},
+		localManager,
+		&stubSerialManager{},
+		&stubSFTPService{},
+		&stubContainersService{},
+		&stubForwardingService{},
+		&stubSSMForwardingService{},
+		nil,
+		nil,
+	)
+
+	if err := runtime.PrepareAutocomplete("session-local", "req-1"); err != nil {
+		t.Fatalf("PrepareAutocomplete() error = %v", err)
+	}
+	// A refresh must not re-inject the hooks (they persist for the session).
+	if err := runtime.RefreshAutocomplete("session-local", "req-2"); err != nil {
+		t.Fatalf("RefreshAutocomplete() error = %v", err)
+	}
+
+	if localManager.installShellCount != 1 {
+		t.Fatalf("expected shell integration installed exactly once, got %d", localManager.installShellCount)
+	}
+	if capabilities == 0 {
+		t.Fatal("expected at least one capability event for the renderer to gate on")
+	}
+}
+
+// A completion command exiting non-zero must NOT surface as a session error
+// (that would tear down the terminal). RunCompletionQuery must instead always
+// emit a (possibly empty) result event and never return an error.
+func TestRunCompletionQueryNeverEmitsSessionError(t *testing.T) {
+	sshManager := &stubSSHManager{
+		hasSession:    true,
+		completionErr: errors.New("Process exited with status 1"),
+	}
+	var results, errorsEmitted int
+	runtime := newRuntimeWithDeps(
+		func(event coretypes.Event) {
+			switch event.Type {
+			case coretypes.EventTerminalCompletionResult:
+				results++
+			case coretypes.EventError:
+				errorsEmitted++
+			}
+		},
+		func(coretypes.StreamFrame, []byte) {},
+		sshManager,
+		&stubAWSManager{},
+		&stubLocalManager{},
+		&stubSerialManager{},
+		&stubSFTPService{},
+		&stubContainersService{},
+		&stubForwardingService{},
+		&stubSSMForwardingService{},
+		nil,
+		nil,
+	)
+
+	if err := runtime.RunCompletionQuery("session-ssh", "req-1", "docker ps"); err != nil {
+		t.Fatalf("RunCompletionQuery() must swallow completion failures, got %v", err)
+	}
+	if errorsEmitted != 0 {
+		t.Fatalf("expected no session error events, got %d", errorsEmitted)
+	}
+	if results != 1 {
+		t.Fatalf("expected exactly one completion result event, got %d", results)
 	}
 }

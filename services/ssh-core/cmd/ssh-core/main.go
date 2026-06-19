@@ -26,6 +26,10 @@ type coreRuntime interface {
 	SendControlSignal(sessionID string, payload protocol.ControlSignalPayload) error
 	ResizeSession(sessionID string, payload protocol.ResizePayload) error
 	DisconnectSession(sessionID string) error
+	PrepareAutocomplete(sessionID, requestID string) error
+	RefreshAutocomplete(sessionID, requestID string) error
+	StopAutocomplete(sessionID string)
+	RunCompletionQuery(sessionID, requestID, command string) error
 	ProbeHostKey(requestID string, payload protocol.HostKeyProbePayload) error
 	InspectCertificate(requestID string, payload protocol.CertificateInspectPayload) error
 	RespondKeyboardInteractive(sessionID, endpointID string, payload protocol.KeyboardInteractiveRespondPayload) error
@@ -239,6 +243,39 @@ func dispatch(core coreRuntime, writer *eventWriter, request protocol.Request) e
 		return core.ResizeSession(request.SessionID, payload)
 	case protocol.CommandDisconnect:
 		return core.DisconnectSession(request.SessionID)
+	case protocol.CommandTerminalAutocompletePrepare:
+		go emitAsyncError(writer, request.ID, request.SessionID, "", protocol.EventError, func() error {
+			return core.PrepareAutocomplete(request.SessionID, request.ID)
+		})()
+		return nil
+	case protocol.CommandTerminalAutocompleteRefresh:
+		go emitAsyncError(writer, request.ID, request.SessionID, "", protocol.EventError, func() error {
+			return core.RefreshAutocomplete(request.SessionID, request.ID)
+		})()
+		return nil
+	case protocol.CommandTerminalAutocompleteStop:
+		core.StopAutocomplete(request.SessionID)
+		writer.emit(protocol.Event{
+			Type:      protocol.EventTerminalAutocompleteCapability,
+			RequestID: request.ID,
+			SessionID: request.SessionID,
+			Payload: protocol.TerminalAutocompleteCapabilityPayload{
+				Status: "unsupported", Sources: []string{},
+			},
+		})
+		return nil
+	case protocol.CommandTerminalCompletionQuery:
+		var payload protocol.TerminalCompletionQueryPayload
+		if err := json.Unmarshal(request.Payload, &payload); err != nil {
+			return err
+		}
+		// Completion is best-effort: it must never emit a session-scoped error
+		// event (that would tear down the terminal), so it is NOT wrapped in
+		// emitAsyncError. RunCompletionQuery always emits its own result event.
+		go func() {
+			_ = core.RunCompletionQuery(request.SessionID, request.ID, payload.Command)
+		}()
+		return nil
 	case protocol.CommandKeyboardInteractiveRespond:
 		var payload protocol.KeyboardInteractiveRespondPayload
 		if err := json.Unmarshal(request.Payload, &payload); err != nil {

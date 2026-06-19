@@ -65,6 +65,7 @@ export interface TerminalSessionPaneProps {
   layoutKey: string;
   appearance: TerminalSessionAppearance;
   terminalWebglEnabled: boolean;
+  terminalAutocompleteEnabled: boolean;
   style?: CSSProperties;
   showHeader?: boolean;
   draggingDisabled?: boolean;

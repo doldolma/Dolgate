@@ -74,6 +74,17 @@ interface CreateTerminalRuntimeOptions {
   appearance: TerminalRuntimeAppearance;
   onData: (data: string) => void;
   onBinary: (data: string) => void;
+  /**
+   * Called with the payload of each OSC 133 shell-integration sequence
+   * (`A`, `B`, `C`, `D;<exit>`) emitted by the remote shell. The handler
+   * consumes the sequence so it never reaches the screen.
+   */
+  onShellIntegration?: (marker: string) => void;
+  /**
+   * Called with the payload of each OSC 7 cwd report (`file://host/path`)
+   * emitted by the remote shell.
+   */
+  onCwd?: (data: string) => void;
   dependencies?: CreateTerminalRuntimeDependencies;
 }
 
@@ -282,6 +293,8 @@ export function createTerminalRuntime({
   appearance,
   onData,
   onBinary,
+  onShellIntegration,
+  onCwd,
   dependencies = {}
 }: CreateTerminalRuntimeOptions): TerminalRuntime {
   const terminal = (dependencies.createTerminal ?? ((options) => new Terminal(options)))(buildTerminalOptions(appearance));
@@ -347,6 +360,33 @@ export function createTerminalRuntime({
     linkProviderDisposable = terminal.registerLinkProvider(createTerminalLinkProvider(terminal, openExternal, logger));
   } catch (error) {
     safeWarn(logger, 'Link detection unavailable, continuing without clickable terminal links.', error);
+  }
+
+  let shellIntegrationDisposable: IDisposable | null = null;
+  if (onShellIntegration) {
+    try {
+      // OSC 133 prompt/command lifecycle markers (A/B/C/D). Returning true
+      // consumes the sequence so it is never rendered.
+      shellIntegrationDisposable = terminal.parser.registerOscHandler(133, (data) => {
+        onShellIntegration(data);
+        return true;
+      });
+    } catch (error) {
+      safeWarn(logger, 'OSC 133 shell integration unavailable, continuing without prompt markers.', error);
+    }
+  }
+
+  let cwdDisposable: IDisposable | null = null;
+  if (onCwd) {
+    try {
+      // OSC 7 cwd report (file://host/path). Consumed; not rendered.
+      cwdDisposable = terminal.parser.registerOscHandler(7, (data) => {
+        onCwd(data);
+        return true;
+      });
+    } catch (error) {
+      safeWarn(logger, 'OSC 7 cwd reporting unavailable, continuing without directory context.', error);
+    }
   }
 
   const clearWebglAddon = () => {
@@ -593,6 +633,8 @@ export function createTerminalRuntime({
       queuedSize = 0;
       clearWebglAddon();
       linkProviderDisposable?.dispose();
+      shellIntegrationDisposable?.dispose();
+      cwdDisposable?.dispose();
       disposeBinarySubscription.dispose();
       disposeDataSubscription.dispose();
       terminal.dispose();

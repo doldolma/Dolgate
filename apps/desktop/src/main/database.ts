@@ -1091,6 +1091,7 @@ export class SettingsRepository {
       terminalMinimumContrastRatio: state.terminal.minimumContrastRatio,
       terminalAltIsMeta: state.terminal.altIsMeta,
       terminalWebglEnabled: state.terminal.webglEnabled,
+      terminalAutocompleteEnabled: state.terminal.autocompleteEnabled,
       sftpBrowserColumnWidths: { ...state.settings.sftpBrowserColumnWidths },
       sftpConflictPolicy: state.settings.sftpConflictPolicy,
       sftpPreserveMtime: state.settings.sftpPreserveMtime,
@@ -1226,6 +1227,11 @@ export class SettingsRepository {
         state.terminal.localUpdatedAt = nowIso();
       }
 
+      if (typeof input.terminalAutocompleteEnabled === 'boolean') {
+        state.terminal.autocompleteEnabled = input.terminalAutocompleteEnabled;
+        state.terminal.localUpdatedAt = nowIso();
+      }
+
       if (Object.prototype.hasOwnProperty.call(input, 'serverUrlOverride')) {
         const nextValue =
           typeof input.serverUrlOverride === 'string' && input.serverUrlOverride.trim() ? input.serverUrlOverride.trim() : null;
@@ -1261,7 +1267,8 @@ export class SettingsRepository {
         input.terminalLetterSpacing == null &&
         input.terminalMinimumContrastRatio == null &&
         input.terminalAltIsMeta == null &&
-        input.terminalWebglEnabled == null
+        input.terminalWebglEnabled == null &&
+        input.terminalAutocompleteEnabled == null
       ) {
         state.settings.theme = current.theme as AppTheme;
         state.settings.sftpBrowserColumnWidths = { ...current.sftpBrowserColumnWidths };
@@ -1282,6 +1289,7 @@ export class SettingsRepository {
           current.terminalMinimumContrastRatio ?? DEFAULT_TERMINAL_MINIMUM_CONTRAST_RATIO;
         state.terminal.altIsMeta = current.terminalAltIsMeta ?? DEFAULT_TERMINAL_ALT_IS_META;
         state.terminal.webglEnabled = current.terminalWebglEnabled ?? DEFAULT_TERMINAL_WEBGL_ENABLED;
+        state.terminal.autocompleteEnabled = current.terminalAutocompleteEnabled ?? true;
       }
     });
     return this.get();

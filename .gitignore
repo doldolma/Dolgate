@@ -7,6 +7,7 @@ out
 coverage
 apps/desktop/.vite
 apps/desktop/.electron-vite
+apps/desktop/.cache
 apps/desktop/out
 apps/desktop/test-results
 apps/desktop/playwright-report

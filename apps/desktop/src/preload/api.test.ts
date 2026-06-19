@@ -47,6 +47,9 @@ describe("createDesktopApi", () => {
       message: "failed",
     });
     await api.containers.release("host-1", "lifecycle-1");
+    await api.ssh.prepareAutocomplete("session-1");
+    await api.ssh.refreshAutocomplete("session-1");
+    await api.ssh.stopAutocomplete("session-1");
 
     expect(ipcRenderer.invoke).toHaveBeenNthCalledWith(
       1,
@@ -121,6 +124,18 @@ describe("createDesktopApi", () => {
       ipcChannels.containers.release,
       "host-1",
       "lifecycle-1",
+    );
+    expect(ipcRenderer.invoke).toHaveBeenCalledWith(
+      ipcChannels.ssh.prepareAutocomplete,
+      "session-1",
+    );
+    expect(ipcRenderer.invoke).toHaveBeenCalledWith(
+      ipcChannels.ssh.refreshAutocomplete,
+      "session-1",
+    );
+    expect(ipcRenderer.invoke).toHaveBeenCalledWith(
+      ipcChannels.ssh.stopAutocomplete,
+      "session-1",
     );
   });
 

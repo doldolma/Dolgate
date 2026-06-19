@@ -1,0 +1,3 @@
+// AUTO-GENERATED from withfig/autocomplete (rmdir), MIT. Do not edit.
+// Bundled Fig spec WITH generator functions for runtime use. See NOTICE.md.
+var e={name:"rmdir",description:"Remove directories",args:{isVariadic:!0,template:"folders"},options:[{name:"-p",description:"Remove each directory of path",isDangerous:!0}]},i=e;export{i as default};

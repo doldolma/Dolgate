@@ -1,0 +1,691 @@
+{
+  "name": "apt",
+  "description": "Package manager for Debian-based Linux distributions",
+  "options": [
+    {
+      "names": [
+        "-h",
+        "--help"
+      ],
+      "description": "Print help message and exit"
+    },
+    {
+      "names": [
+        "-v",
+        "--version"
+      ],
+      "description": "Print version information and exit"
+    }
+  ],
+  "subcommands": [
+    {
+      "name": "update",
+      "description": "Update the package database",
+      "options": [
+        {
+          "names": [
+            "-y"
+          ],
+          "description": "Assume yes to all prompts"
+        },
+        {
+          "names": [
+            "--assume-no"
+          ],
+          "description": "Assume no to all prompts"
+        }
+      ]
+    },
+    {
+      "name": "upgrade",
+      "description": "Install all available upgrades",
+      "options": [
+        {
+          "names": [
+            "-d",
+            "--download-only"
+          ],
+          "description": "For any operation that would download packages, download them, but do nothing else"
+        },
+        {
+          "names": [
+            "--no-download"
+          ],
+          "description": "Do not download packages, attempt to use already downloaded packages"
+        },
+        {
+          "names": [
+            "-y"
+          ],
+          "description": "Assume yes to all prompts"
+        },
+        {
+          "names": [
+            "--assume-no"
+          ],
+          "description": "Assume no to all prompts"
+        },
+        {
+          "names": [
+            "-s",
+            "--simulate"
+          ],
+          "description": "Simulate running this command and show it's output, without actually changing anything"
+        }
+      ],
+      "args": [
+        {
+          "name": "package",
+          "optional": true,
+          "variadic": true,
+          "hasGenerator": true
+        }
+      ]
+    },
+    {
+      "name": "full-upgrade",
+      "description": "Install available upgrades, removing currently installed packages if needed to upgrade the system as a whole",
+      "options": [
+        {
+          "names": [
+            "-d",
+            "--download-only"
+          ],
+          "description": "For any operation that would download packages, download them, but do nothing else"
+        },
+        {
+          "names": [
+            "--no-download"
+          ],
+          "description": "Do not download packages, attempt to use already downloaded packages"
+        },
+        {
+          "names": [
+            "-y"
+          ],
+          "description": "Assume yes to all prompts"
+        },
+        {
+          "names": [
+            "--assume-no"
+          ],
+          "description": "Assume no to all prompts"
+        },
+        {
+          "names": [
+            "-s",
+            "--simulate"
+          ],
+          "description": "Simulate running this command and show it's output, without actually changing anything"
+        }
+      ]
+    },
+    {
+      "name": "install",
+      "description": "Install package(s)",
+      "options": [
+        {
+          "names": [
+            "-d",
+            "--download-only"
+          ],
+          "description": "For any operation that would download packages, download them, but do nothing else"
+        },
+        {
+          "names": [
+            "--no-download"
+          ],
+          "description": "Do not download packages, attempt to use already downloaded packages"
+        },
+        {
+          "names": [
+            "-y"
+          ],
+          "description": "Assume yes to all prompts"
+        },
+        {
+          "names": [
+            "--assume-no"
+          ],
+          "description": "Assume no to all prompts"
+        },
+        {
+          "names": [
+            "-s",
+            "--simulate"
+          ],
+          "description": "Simulate running this command and show it's output, without actually changing anything"
+        },
+        {
+          "names": [
+            "--reinstall"
+          ],
+          "description": "Reinstall the package if it is already installed"
+        },
+        {
+          "names": [
+            "-f",
+            "--fix-broken"
+          ],
+          "description": "Attempt to fix broken packages"
+        }
+      ],
+      "args": [
+        {
+          "name": "package",
+          "variadic": true,
+          "template": "filepaths"
+        }
+      ]
+    },
+    {
+      "name": "reinstall",
+      "description": "Reinstall package(s)",
+      "options": [
+        {
+          "names": [
+            "-y"
+          ],
+          "description": "Assume yes to all prompts"
+        },
+        {
+          "names": [
+            "--assume-no"
+          ],
+          "description": "Assume no to all prompts"
+        },
+        {
+          "names": [
+            "-s",
+            "--simulate"
+          ],
+          "description": "Simulate running this command and show it's output, without actually changing anything"
+        }
+      ],
+      "args": [
+        {
+          "name": "package",
+          "variadic": true,
+          "hasGenerator": true
+        }
+      ]
+    },
+    {
+      "name": "remove",
+      "description": "Remove package(s)",
+      "options": [
+        {
+          "names": [
+            "-y"
+          ],
+          "description": "Assume yes to all prompts"
+        },
+        {
+          "names": [
+            "--assume-no"
+          ],
+          "description": "Assume no to all prompts"
+        },
+        {
+          "names": [
+            "-s",
+            "--simulate"
+          ],
+          "description": "Simulate running this command and show it's output, without actually changing anything"
+        },
+        {
+          "names": [
+            "-f",
+            "--fix-broken"
+          ],
+          "description": "Attempt to fix broken packages"
+        }
+      ],
+      "args": [
+        {
+          "name": "package",
+          "variadic": true,
+          "hasGenerator": true
+        }
+      ]
+    },
+    {
+      "name": "purge",
+      "description": "Remove package(s) and their configuration files",
+      "options": [
+        {
+          "names": [
+            "-y"
+          ],
+          "description": "Assume yes to all prompts"
+        },
+        {
+          "names": [
+            "--assume-no"
+          ],
+          "description": "Assume no to all prompts"
+        },
+        {
+          "names": [
+            "-s",
+            "--simulate"
+          ],
+          "description": "Simulate running this command and show it's output, without actually changing anything"
+        }
+      ],
+      "args": [
+        {
+          "name": "package",
+          "variadic": true,
+          "hasGenerator": true
+        }
+      ]
+    },
+    {
+      "name": "autoremove",
+      "description": "Remove unused packages",
+      "options": [
+        {
+          "names": [
+            "-y"
+          ],
+          "description": "Assume yes to all prompts"
+        },
+        {
+          "names": [
+            "--assume-no"
+          ],
+          "description": "Assume no to all prompts"
+        },
+        {
+          "names": [
+            "-s",
+            "--simulate"
+          ],
+          "description": "Simulate running this command and show it's output, without actually changing anything"
+        }
+      ]
+    },
+    {
+      "name": "list",
+      "description": "List packages",
+      "options": [
+        {
+          "names": [
+            "--installed"
+          ],
+          "description": "List installed packages"
+        },
+        {
+          "names": [
+            "--upgradable"
+          ],
+          "description": "List upgradable packages"
+        }
+      ]
+    },
+    {
+      "name": "search",
+      "description": "Search for packages",
+      "options": [
+        {
+          "names": [
+            "-y"
+          ],
+          "description": "Assume yes to all prompts"
+        },
+        {
+          "names": [
+            "--assume-no"
+          ],
+          "description": "Assume no to all prompts"
+        }
+      ],
+      "args": [
+        {
+          "name": "query"
+        }
+      ]
+    },
+    {
+      "name": "show",
+      "description": "Show package details",
+      "args": [
+        {
+          "name": "package",
+          "hasGenerator": true
+        }
+      ]
+    },
+    {
+      "name": "satisfy",
+      "description": "Satisfy package dependencies",
+      "options": [
+        {
+          "names": [
+            "-d",
+            "--download-only"
+          ],
+          "description": "For any operation that would download packages, download them, but do nothing else"
+        },
+        {
+          "names": [
+            "--no-download"
+          ],
+          "description": "Do not download packages, attempt to use already downloaded packages"
+        },
+        {
+          "names": [
+            "-y"
+          ],
+          "description": "Assume yes to all prompts"
+        },
+        {
+          "names": [
+            "--assume-no"
+          ],
+          "description": "Assume no to all prompts"
+        },
+        {
+          "names": [
+            "-s",
+            "--simulate"
+          ],
+          "description": "Simulate running this command and show it's output, without actually changing anything"
+        }
+      ],
+      "args": [
+        {
+          "name": "package",
+          "variadic": true,
+          "hasGenerator": true
+        }
+      ]
+    },
+    {
+      "name": "clean",
+      "description": "Remove downloaded package files",
+      "options": [
+        {
+          "names": [
+            "-y"
+          ],
+          "description": "Assume yes to all prompts"
+        },
+        {
+          "names": [
+            "--assume-no"
+          ],
+          "description": "Assume no to all prompts"
+        },
+        {
+          "names": [
+            "-s",
+            "--simulate"
+          ],
+          "description": "Simulate running this command and show it's output, without actually changing anything"
+        }
+      ]
+    },
+    {
+      "name": "edit-sources",
+      "description": "Edit the list of package sources",
+      "options": [
+        {
+          "names": [
+            "-y"
+          ],
+          "description": "Assume yes to all prompts"
+        },
+        {
+          "names": [
+            "--assume-no"
+          ],
+          "description": "Assume no to all prompts"
+        }
+      ]
+    },
+    {
+      "name": "source",
+      "description": "Fetch package source files",
+      "options": [
+        {
+          "names": [
+            "-d",
+            "--download-only"
+          ],
+          "description": "For any operation that would download packages, download them, but do nothing else"
+        },
+        {
+          "names": [
+            "--no-download"
+          ],
+          "description": "Do not download packages, attempt to use already downloaded packages"
+        },
+        {
+          "names": [
+            "-y"
+          ],
+          "description": "Assume yes to all prompts"
+        },
+        {
+          "names": [
+            "--assume-no"
+          ],
+          "description": "Assume no to all prompts"
+        },
+        {
+          "names": [
+            "-s",
+            "--simulate"
+          ],
+          "description": "Simulate running this command and show it's output, without actually changing anything"
+        },
+        {
+          "names": [
+            "--compile"
+          ],
+          "description": "Compile the package to a binary using dpkg-buildpackage"
+        },
+        {
+          "names": [
+            "--only-source"
+          ]
+        },
+        {
+          "names": [
+            "--host-architecture"
+          ],
+          "description": "The architecture to build for",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "architecture"
+            }
+          ]
+        }
+      ],
+      "args": [
+        {
+          "name": "package",
+          "variadic": true,
+          "hasGenerator": true
+        }
+      ]
+    },
+    {
+      "name": "build-dep",
+      "description": "Install/remove packages in an attempt to satisfy the build dependencies for a source package",
+      "options": [
+        {
+          "names": [
+            "-d",
+            "--download-only"
+          ],
+          "description": "For any operation that would download packages, download them, but do nothing else"
+        },
+        {
+          "names": [
+            "--no-download"
+          ],
+          "description": "Do not download packages, attempt to use already downloaded packages"
+        },
+        {
+          "names": [
+            "-y"
+          ],
+          "description": "Assume yes to all prompts"
+        },
+        {
+          "names": [
+            "--assume-no"
+          ],
+          "description": "Assume no to all prompts"
+        },
+        {
+          "names": [
+            "-s",
+            "--simulate"
+          ],
+          "description": "Simulate running this command and show it's output, without actually changing anything"
+        },
+        {
+          "names": [
+            "--host-architecture"
+          ],
+          "description": "The architecture to build for",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "architecture"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--only-source"
+          ]
+        }
+      ],
+      "args": [
+        {
+          "name": "package",
+          "hasGenerator": true
+        }
+      ]
+    },
+    {
+      "name": "download",
+      "description": "Download package binary into the current directory",
+      "options": [
+        {
+          "names": [
+            "-d",
+            "--download-only"
+          ],
+          "description": "For any operation that would download packages, download them, but do nothing else"
+        },
+        {
+          "names": [
+            "--no-download"
+          ],
+          "description": "Do not download packages, attempt to use already downloaded packages"
+        },
+        {
+          "names": [
+            "-y"
+          ],
+          "description": "Assume yes to all prompts"
+        },
+        {
+          "names": [
+            "--assume-no"
+          ],
+          "description": "Assume no to all prompts"
+        }
+      ],
+      "args": [
+        {
+          "name": "package",
+          "hasGenerator": true
+        }
+      ]
+    },
+    {
+      "name": "autoclean",
+      "description": "Like clean, but only removes package files that can no longer be downloaded",
+      "options": [
+        {
+          "names": [
+            "-d",
+            "--download-only"
+          ],
+          "description": "For any operation that would download packages, download them, but do nothing else"
+        },
+        {
+          "names": [
+            "--no-download"
+          ],
+          "description": "Do not download packages, attempt to use already downloaded packages"
+        },
+        {
+          "names": [
+            "-y"
+          ],
+          "description": "Assume yes to all prompts"
+        },
+        {
+          "names": [
+            "--assume-no"
+          ],
+          "description": "Assume no to all prompts"
+        },
+        {
+          "names": [
+            "-s",
+            "--simulate"
+          ],
+          "description": "Simulate running this command and show it's output, without actually changing anything"
+        }
+      ]
+    },
+    {
+      "name": "changelog",
+      "description": "Show the changelog for a package",
+      "options": [
+        {
+          "names": [
+            "-d",
+            "--download-only"
+          ],
+          "description": "For any operation that would download packages, download them, but do nothing else"
+        },
+        {
+          "names": [
+            "--no-download"
+          ],
+          "description": "Do not download packages, attempt to use already downloaded packages"
+        },
+        {
+          "names": [
+            "-y"
+          ],
+          "description": "Assume yes to all prompts"
+        },
+        {
+          "names": [
+            "--assume-no"
+          ],
+          "description": "Assume no to all prompts"
+        }
+      ],
+      "args": [
+        {
+          "name": "package",
+          "variadic": true,
+          "hasGenerator": true
+        }
+      ]
+    }
+  ]
+}

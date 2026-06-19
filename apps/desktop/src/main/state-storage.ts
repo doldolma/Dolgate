@@ -89,6 +89,7 @@ export interface DesktopStateFile {
     minimumContrastRatio: number;
     altIsMeta: boolean;
     webglEnabled: boolean;
+    autocompleteEnabled: boolean;
     localUpdatedAt: string;
   };
   updater: {
@@ -459,6 +460,7 @@ function createDefaultStateFile(): DesktopStateFile {
       minimumContrastRatio: 1,
       altIsMeta: false,
       webglEnabled: defaultTerminalWebglEnabled,
+      autocompleteEnabled: true,
       localUpdatedAt: timestamp
     },
     updater: {
@@ -788,6 +790,12 @@ function normalizeStateFile(value: unknown): DesktopStateFile {
       minimumContrastRatio: normalizeTerminalMinimumContrastRatio(terminal.minimumContrastRatio),
       altIsMeta: normalizeTerminalAltIsMeta(terminal.altIsMeta),
       webglEnabled: normalizedTerminalWebglEnabled,
+      // Absent in a stored state (existing users upgrading to the first version
+      // with this feature) → default ON, matching the fresh-install default.
+      autocompleteEnabled:
+        typeof terminal.autocompleteEnabled === 'boolean'
+          ? terminal.autocompleteEnabled
+          : true,
       localUpdatedAt: typeof terminal.localUpdatedAt === 'string' ? terminal.localUpdatedAt : fallback.terminal.localUpdatedAt
     },
     updater: {

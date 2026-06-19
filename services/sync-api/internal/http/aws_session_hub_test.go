@@ -16,13 +16,14 @@ import (
 type fakeAwsSessionRunner struct {
 	events chan awsSessionRuntimeEvent
 
-	mu           sync.Mutex
-	writes       [][]byte
-	resizeCalls  [][2]int
-	signals      []string
-	closeCount   int
-	closeReasons []string
-	closeOnce    sync.Once
+	mu                   sync.Mutex
+	writes               [][]byte
+	resizeCalls          [][2]int
+	signals              []string
+	autocompleteRequests []string
+	closeCount           int
+	closeReasons         []string
+	closeOnce            sync.Once
 }
 
 func newFakeAwsSessionRunner() *fakeAwsSessionRunner {
@@ -54,6 +55,26 @@ func (runner *fakeAwsSessionRunner) ControlSignal(signal string) error {
 	defer runner.mu.Unlock()
 	runner.signals = append(runner.signals, signal)
 	return nil
+}
+
+func (runner *fakeAwsSessionRunner) PrepareAutocomplete(requestID string) error {
+	runner.mu.Lock()
+	defer runner.mu.Unlock()
+	runner.autocompleteRequests = append(runner.autocompleteRequests, "prepare:"+requestID)
+	return nil
+}
+func (runner *fakeAwsSessionRunner) RefreshAutocomplete(requestID string) error {
+	runner.mu.Lock()
+	defer runner.mu.Unlock()
+	runner.autocompleteRequests = append(runner.autocompleteRequests, "refresh:"+requestID)
+	return nil
+}
+func (runner *fakeAwsSessionRunner) StopAutocomplete() error { return nil }
+
+func (runner *fakeAwsSessionRunner) autocompleteSnapshot() []string {
+	runner.mu.Lock()
+	defer runner.mu.Unlock()
+	return append([]string(nil), runner.autocompleteRequests...)
 }
 
 func (runner *fakeAwsSessionRunner) Close() error {
@@ -243,6 +264,27 @@ func TestAwsSessionHubBridgesStartInputResizeAndOutput(t *testing.T) {
 		signals := fakeRunner.signalsSnapshot()
 		return len(signals) == 1 && signals[0] == "interrupt"
 	})
+
+	if err := conn.WriteJSON(awsSessionClientMessage{
+		Type: "autocompletePrepare", RequestID: "autocomplete-1",
+	}); err != nil {
+		t.Fatalf("write autocomplete message: %v", err)
+	}
+	waitForCondition(t, func() bool {
+		requests := fakeRunner.autocompleteSnapshot()
+		return len(requests) == 1 && requests[0] == "prepare:autocomplete-1"
+	})
+	fakeRunner.events <- awsSessionRuntimeEvent{
+		Type: "autocompleteCapability", RequestID: "autocomplete-1",
+		Payload: map[string]any{"status": "ready", "shell": "bash"},
+	}
+	var autocompleteResponse awsSessionServerMessage
+	if err := conn.ReadJSON(&autocompleteResponse); err != nil {
+		t.Fatalf("read autocomplete response: %v", err)
+	}
+	if autocompleteResponse.Type != "autocompleteCapability" || autocompleteResponse.RequestID != "autocomplete-1" {
+		t.Fatalf("unexpected autocomplete response: %#v", autocompleteResponse)
+	}
 
 	if err := conn.WriteJSON(awsSessionClientMessage{Type: "close"}); err != nil {
 		t.Fatalf("write close message: %v", err)

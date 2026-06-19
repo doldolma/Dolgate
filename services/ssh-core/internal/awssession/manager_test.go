@@ -2,10 +2,13 @@ package awssession
 
 import (
 	"bytes"
+	"encoding/base64"
 	"io"
+	"regexp"
 	"testing"
 	"time"
 
+	"dolssh/services/ssh-core/internal/autocomplete"
 	"dolssh/services/ssh-core/internal/protocol"
 )
 
@@ -168,6 +171,55 @@ func TestManagerFakeSessionFlow(t *testing.T) {
 	if payload.Message != "client requested disconnect" {
 		t.Fatalf("closed message = %q, want %q", payload.Message, "client requested disconnect")
 	}
+}
+
+func TestManagerCollectAutocompleteFiltersProbeOutput(t *testing.T) {
+	events := make(chan protocol.Event, 16)
+	streams := make(chan []byte, 16)
+	runner := newStubRunner()
+	manager := NewManagerWithRunnerFactory(func(event protocol.Event) {
+		events <- event
+	}, func(_ protocol.StreamFrame, payload []byte) {
+		streams <- payload
+	}, func(protocol.AWSConnectPayload) (sessionRunner, error) {
+		return runner, nil
+	})
+	if err := manager.Connect("session-1", "request-1", protocol.AWSConnectPayload{}); err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	waitForEvent(t, events, protocol.EventConnected)
+
+	resultCh := make(chan autocomplete.Result, 1)
+	go func() {
+		result, _ := manager.CollectAutocomplete("session-1", 7)
+		resultCh <- result
+	}()
+	deadline := time.Now().Add(time.Second)
+	for len(runner.writes) == 0 && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if len(runner.writes) == 0 {
+		t.Fatal("probe command was not written")
+	}
+	match := regexp.MustCompile(`6973;([0-9a-f]+);snapshot`).FindSubmatch(runner.writes[0])
+	if len(match) != 2 {
+		t.Fatalf("probe nonce not found in %q", runner.writes[0])
+	}
+	payload := []byte("S\x00bash\x00H\x00git status\x00E\x00git\x00/usr/bin/git\x00")
+	runner.emitOutput("probe echo\r\n\x1b]6973;" + string(match[1]) + ";snapshot;" + base64.StdEncoding.EncodeToString(payload) + "\a$ ")
+
+	select {
+	case result := <-resultCh:
+		if result.Snapshot == nil || result.Snapshot.Revision != 7 || len(result.Snapshot.History) != 1 {
+			t.Fatalf("unexpected result: %#v", result)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for autocomplete result")
+	}
+	if output := waitForStream(t, streams); string(output) != "$ " {
+		t.Fatalf("probe output leaked to terminal: %q", output)
+	}
+	_ = manager.Disconnect("session-1")
 }
 
 func TestManagerRoutesWriteResizeAndOutputThroughRunner(t *testing.T) {

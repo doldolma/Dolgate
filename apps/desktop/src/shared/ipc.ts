@@ -148,7 +148,11 @@ export type CoreCommandType =
   | "containersRestart"
   | "containersRemove"
   | "containersStats"
-  | "containersSearchLogs";
+  | "containersSearchLogs"
+  | "terminalAutocompletePrepare"
+  | "terminalAutocompleteRefresh"
+  | "terminalAutocompleteStop"
+  | "terminalCompletionQuery";
 export type CoreEventType =
   | "status"
   | "connected"
@@ -183,7 +187,11 @@ export type CoreEventType =
   | "containersActionCompleted"
   | "containersStats"
   | "containersLogsSearched"
-  | "containersError";
+  | "containersError"
+  | "terminalAutocompleteCapability"
+  | "terminalAutocompleteSnapshot"
+  | "terminalAutocompleteShellState"
+  | "terminalCompletionResult";
 export type CoreStreamType = "write" | "data";
 
 // renderer는 hostId만 넘기고, 실제 비밀값 해석은 main 프로세스가 담당한다.
@@ -696,6 +704,10 @@ export interface DesktopApi {
     writeBinary: (sessionId: string, data: Uint8Array) => Promise<void>;
     resize: (sessionId: string, cols: number, rows: number) => Promise<void>;
     disconnect: (sessionId: string) => Promise<void>;
+    prepareAutocomplete: (sessionId: string) => Promise<void>;
+    refreshAutocomplete: (sessionId: string) => Promise<void>;
+    stopAutocomplete: (sessionId: string) => Promise<void>;
+    queryCompletion: (sessionId: string, command: string) => Promise<string>;
     respondKeyboardInteractive: (
       input: KeyboardInteractiveRespondInput,
     ) => Promise<void>;

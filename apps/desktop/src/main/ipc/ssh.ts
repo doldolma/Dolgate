@@ -264,6 +264,34 @@ export function registerSshIpcHandlers(ctx: MainIpcContext): void {
   );
 
   ipcMain.handle(
+    ipcChannels.ssh.prepareAutocomplete,
+    async (_event, sessionId: string) => {
+      await ctx.coreManager.prepareAutocomplete(sessionId);
+    },
+  );
+
+  ipcMain.handle(
+    ipcChannels.ssh.refreshAutocomplete,
+    async (_event, sessionId: string) => {
+      await ctx.coreManager.refreshAutocomplete(sessionId);
+    },
+  );
+
+  ipcMain.handle(
+    ipcChannels.ssh.stopAutocomplete,
+    async (_event, sessionId: string) => {
+      await ctx.coreManager.stopAutocomplete(sessionId);
+    },
+  );
+
+  ipcMain.handle(
+    ipcChannels.ssh.completionQuery,
+    async (_event, sessionId: string, command: string) => {
+      return ctx.coreManager.queryCompletion(sessionId, command);
+    },
+  );
+
+  ipcMain.handle(
     ipcChannels.ssh.respondKeyboardInteractive,
     async (_event, input: KeyboardInteractiveRespondInput) => {
       await ctx.coreManager.respondKeyboardInteractive(input);

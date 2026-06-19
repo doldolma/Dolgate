@@ -24,6 +24,9 @@ type awsSessionCoreRuntime interface {
 	SendControlSignal(sessionID string, payload coretypes.ControlSignalPayload) error
 	ResizeSession(sessionID string, payload coretypes.ResizePayload) error
 	DisconnectSession(sessionID string) error
+	PrepareAutocomplete(sessionID, requestID string) error
+	RefreshAutocomplete(sessionID, requestID string) error
+	StopAutocomplete(sessionID string)
 	Shutdown()
 }
 
@@ -139,6 +142,18 @@ func (bridge *AwsSessionBridge) handleEvent(event coretypes.Event) {
 			Type:    "exit",
 			Message: extractRuntimeMessage(event.Payload),
 		})
+	case coretypes.EventTerminalAutocompleteCapability:
+		session.emit(awsSessionRuntimeEvent{
+			Type: "autocompleteCapability", RequestID: event.RequestID, Payload: event.Payload,
+		})
+	case coretypes.EventTerminalAutocompleteSnapshot:
+		session.emit(awsSessionRuntimeEvent{
+			Type: "autocompleteSnapshot", RequestID: event.RequestID, Payload: event.Payload,
+		})
+	case coretypes.EventTerminalAutocompleteShellState:
+		session.emit(awsSessionRuntimeEvent{
+			Type: "autocompleteShellState", RequestID: event.RequestID, Payload: event.Payload,
+		})
 	}
 }
 
@@ -222,6 +237,19 @@ func (session *directAwsSession) ControlSignal(signal string) error {
 	return session.bridge.core.SendControlSignal(session.sessionID, coretypes.ControlSignalPayload{
 		Signal: signal,
 	})
+}
+
+func (session *directAwsSession) PrepareAutocomplete(requestID string) error {
+	return session.bridge.core.PrepareAutocomplete(session.sessionID, requestID)
+}
+
+func (session *directAwsSession) RefreshAutocomplete(requestID string) error {
+	return session.bridge.core.RefreshAutocomplete(session.sessionID, requestID)
+}
+
+func (session *directAwsSession) StopAutocomplete() error {
+	session.bridge.core.StopAutocomplete(session.sessionID)
+	return nil
 }
 
 func (session *directAwsSession) Close() error {

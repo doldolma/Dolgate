@@ -1,0 +1,179 @@
+{
+  "name": "scp",
+  "description": "Copies files or directories between hosts on a network",
+  "options": [
+    {
+      "names": [
+        "-3"
+      ],
+      "description": "Copies between two remote hosts are transferred through the local\nhost.  Without this option the data is copied directly between the\ntwo remote hosts.  Note that this option disables the progress\nmeter and selects batch mode for the second host, since scp cannot\nask for passwords or passphrases for both hosts"
+    },
+    {
+      "names": [
+        "-4"
+      ],
+      "description": "Forces scp to use IPv4 addresses only"
+    },
+    {
+      "names": [
+        "-6"
+      ],
+      "description": "Forces scp to use IPv6 addresses only"
+    },
+    {
+      "names": [
+        "-A"
+      ],
+      "description": "Allows forwarding of ssh-agent(1) to the remote system. The default is not to forward an authentication agent"
+    },
+    {
+      "names": [
+        "-B"
+      ],
+      "description": "Selects batch mode (prevents asking for passwords or passphrases)"
+    },
+    {
+      "names": [
+        "-C"
+      ],
+      "description": "Compression enable. Passes the -C flag to ssh(1) to enable compression"
+    },
+    {
+      "names": [
+        "-c"
+      ],
+      "description": "Selects the cipher to use for encrypting the data transfer. This option is directly passed to ssh(1)",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "cipher"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-F"
+      ],
+      "description": "Specifies an alternative per-user configuration file for ssh. This option is directly passed to ssh(1)",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "ssh_config"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-i"
+      ],
+      "description": "Selects the file from which the identity (private key) for public key authentication is read. This option is directly passed to ssh(1)",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "identity_file"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-J"
+      ],
+      "description": "Connect to the target host by first making an scp connection to the\njump host described by destination and then establishing a TCP\nforwarding to the ultimate destination from there.  Multiple jump\nhops may be specified separated by comma characters.  This is a\nshortcut to specify a ProxyJump configuration directive.  This\noption is directly passed to ssh(1)",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "destination"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-l"
+      ],
+      "description": "Limits the used bandwidth, specified in Kbit/s",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "limit"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-o"
+      ],
+      "description": "Can be used to pass options to ssh in the format used in\nssh_config(5).  This is useful for specifying options for which\nthere is no separate scp command-line flag.  For full details of\nthe options listed below, and their possible values, see\nssh_config(5)",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "option"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-P"
+      ],
+      "description": "Specifies the port to connect to on the remote host.  Note that\nthis option is written with a capital ‘P’, because -p is already\nreserved for preserving the times and modes of the file",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "port"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-p"
+      ],
+      "description": "Preserves modification times, access times, and modes from the original file"
+    },
+    {
+      "names": [
+        "-q"
+      ],
+      "description": "Quiet mode: disables the progress meter as well as warning and diagnostic messages from ssh(1)"
+    },
+    {
+      "names": [
+        "-r"
+      ],
+      "description": "Recursively copy entire directories.  Note that scp follows symbolic links encountered in the tree traversal"
+    },
+    {
+      "names": [
+        "-S"
+      ],
+      "description": "Name of program to use for the encrypted connection.  The program must understand ssh(1) options",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "program"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-T"
+      ],
+      "description": "Disable strict filename checking.  By default when copying files\nfrom a remote host to a local directory scp checks that the\nreceived filenames match those requested on the command-line to\nprevent the remote end from sending unexpected or unwanted files.\nBecause of differences in how various operating systems and shells\ninterpret filename wildcards, these checks may cause wanted files\nto be rejected.  This option disables these checks at the expense\nof fully trusting that the server will not send unexpected\nfilenames"
+    },
+    {
+      "names": [
+        "-v"
+      ],
+      "description": "Verbose mode.  Causes scp and ssh(1) to print debugging messages about their progress. This is helpful in debugging connection, authentication, and configuration problems"
+    }
+  ],
+  "args": [
+    {
+      "name": "sources",
+      "variadic": true,
+      "hasGenerator": true
+    },
+    {
+      "name": "target",
+      "hasGenerator": true
+    }
+  ]
+}

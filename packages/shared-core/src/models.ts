@@ -880,6 +880,7 @@ export interface TerminalAppearanceSettings {
   terminalMinimumContrastRatio: number;
   terminalAltIsMeta: boolean;
   terminalWebglEnabled: boolean;
+  terminalAutocompleteEnabled: boolean;
 }
 
 // AppSettings는 사용자의 로컬 환경 설정을 표현한다.
@@ -935,6 +936,47 @@ export interface AppSettings extends TerminalAppearanceSettings {
   serverUrlOverride?: string | null;
   dismissedUpdateVersion?: string | null;
   updatedAt: string;
+}
+
+export type TerminalAutocompleteShell = 'bash' | 'zsh';
+
+export type TerminalAutocompleteStatus =
+  | 'probing'
+  | 'ready'
+  | 'degraded'
+  | 'unsupported';
+
+export interface TerminalAutocompleteCapability {
+  sessionId: string;
+  status: TerminalAutocompleteStatus;
+  shell?: TerminalAutocompleteShell;
+  sources: Array<'history' | 'executable' | 'session-history'>;
+  reasonCode?:
+    | 'unsupported-shell'
+    | 'probe-timeout'
+    | 'metadata-unavailable';
+}
+
+export interface TerminalAutocompleteExecutable {
+  name: string;
+  path?: string;
+}
+
+export interface TerminalAutocompleteSnapshot {
+  sessionId: string;
+  shell: TerminalAutocompleteShell;
+  revision: number;
+  history: string[];
+  executables: TerminalAutocompleteExecutable[];
+  truncated: boolean;
+}
+
+export interface TerminalAutocompleteShellState {
+  sessionId: string;
+  kind: 'shellReady' | 'promptStart' | 'commandStart' | 'commandEnd';
+  shell?: TerminalAutocompleteShell;
+  cwd?: string;
+  command?: string;
 }
 
 export interface DesktopBootstrapSnapshot {

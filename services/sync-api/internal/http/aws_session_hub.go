@@ -33,18 +33,23 @@ type awsSessionClientMessage struct {
 	Cols       int                     `json:"cols,omitempty"`
 	Rows       int                     `json:"rows,omitempty"`
 	Signal     string                  `json:"signal,omitempty"`
+	RequestID  string                  `json:"requestId,omitempty"`
 }
 
 type awsSessionServerMessage struct {
 	Type       string `json:"type"`
 	DataBase64 string `json:"dataBase64,omitempty"`
 	Message    string `json:"message,omitempty"`
+	RequestID  string `json:"requestId,omitempty"`
+	Payload    any    `json:"payload,omitempty"`
 }
 
 type awsSessionRuntimeEvent struct {
-	Type    string
-	Message string
-	Data    []byte
+	Type      string
+	Message   string
+	Data      []byte
+	RequestID string
+	Payload   any
 }
 
 type awsSessionRunner interface {
@@ -52,6 +57,9 @@ type awsSessionRunner interface {
 	Write([]byte) error
 	Resize(cols, rows int) error
 	ControlSignal(signal string) error
+	PrepareAutocomplete(requestID string) error
+	RefreshAutocomplete(requestID string) error
+	StopAutocomplete() error
 	Close() error
 }
 
@@ -265,6 +273,8 @@ func (hub *AwsSessionHub) HandleWebSocket(writer http.ResponseWriter, request *h
 							return
 						}
 						serverMessage := awsSessionServerMessage{Type: event.Type}
+						serverMessage.RequestID = event.RequestID
+						serverMessage.Payload = event.Payload
 						if len(event.Data) > 0 {
 							serverMessage.DataBase64 = base64.StdEncoding.EncodeToString(event.Data)
 						}
@@ -346,6 +356,30 @@ func (hub *AwsSessionHub) HandleWebSocket(writer http.ResponseWriter, request *h
 				}, false) {
 					return nil
 				}
+			}
+
+		case "autocompletePrepare", "autocompleteRefresh":
+			if activeRunner == nil {
+				if !enqueue(awsSessionServerMessage{Type: "error", Message: "AWS session is not started"}, false) {
+					return nil
+				}
+				continue
+			}
+			var err error
+			if message.Type == "autocompletePrepare" {
+				err = activeRunner.PrepareAutocomplete(message.RequestID)
+			} else {
+				err = activeRunner.RefreshAutocomplete(message.RequestID)
+			}
+			if err != nil {
+				enqueue(awsSessionServerMessage{Type: "autocompleteCapability", RequestID: message.RequestID, Payload: map[string]any{
+					"status": "degraded", "sources": []string{"session-history"}, "reasonCode": "metadata-unavailable",
+				}}, false)
+			}
+
+		case "autocompleteStop":
+			if activeRunner != nil {
+				_ = activeRunner.StopAutocomplete()
 			}
 
 		case "close":

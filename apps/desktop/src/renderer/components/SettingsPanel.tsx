@@ -197,6 +197,12 @@ export function SettingsPanel({
     await onUpdateSettings({ terminalWebglEnabled });
   }
 
+  async function handleChangeTerminalAutocompleteEnabled(
+    terminalAutocompleteEnabled: boolean,
+  ) {
+    await onUpdateSettings({ terminalAutocompleteEnabled });
+  }
+
   async function handleChangeTerminalScrollbackLines(terminalScrollbackLines: number) {
     await onUpdateSettings({ terminalScrollbackLines });
   }
@@ -301,6 +307,19 @@ export function SettingsPanel({
                 className="min-h-[72px] flex-row-reverse justify-between rounded-[20px] px-4 py-4"
                 onClick={() => {
                   void handleChangeTerminalWebglEnabled(!settings.terminalWebglEnabled);
+                }}
+              />
+
+              <ToggleSwitch
+                checked={settings.terminalAutocompleteEnabled}
+                aria-label="Command autocomplete"
+                label="Command autocomplete"
+                description="PATH·history에 더해 Fig 스펙·generator로 자동완성합니다. (SSM 에서는 일부 기능 제한)"
+                className="min-h-[72px] flex-row-reverse justify-between rounded-[20px] px-4 py-4"
+                onClick={() => {
+                  void handleChangeTerminalAutocompleteEnabled(
+                    !settings.terminalAutocompleteEnabled,
+                  );
                 }}
               />
 

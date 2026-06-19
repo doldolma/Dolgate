@@ -34,6 +34,14 @@ export function buildSshBridge(ipcRenderer: IpcRenderer): DesktopApi["ssh"] {
       ipcRenderer.invoke(ipcChannels.ssh.resize, sessionId, cols, rows),
     disconnect: (sessionId: string) =>
       ipcRenderer.invoke(ipcChannels.ssh.disconnect, sessionId),
+    prepareAutocomplete: (sessionId: string) =>
+      ipcRenderer.invoke(ipcChannels.ssh.prepareAutocomplete, sessionId),
+    refreshAutocomplete: (sessionId: string) =>
+      ipcRenderer.invoke(ipcChannels.ssh.refreshAutocomplete, sessionId),
+    stopAutocomplete: (sessionId: string) =>
+      ipcRenderer.invoke(ipcChannels.ssh.stopAutocomplete, sessionId),
+    queryCompletion: (sessionId: string, command: string) =>
+      ipcRenderer.invoke(ipcChannels.ssh.completionQuery, sessionId, command),
     respondKeyboardInteractive: (input: KeyboardInteractiveRespondInput) =>
       ipcRenderer.invoke(ipcChannels.ssh.respondKeyboardInteractive, input),
     onEvent: (listener: (event: CoreEvent) => void) =>

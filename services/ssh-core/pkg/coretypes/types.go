@@ -9,84 +9,92 @@ type EventType string
 type StreamType string
 
 const (
-	CommandHealth                     CommandType = "health"
-	CommandConnect                    CommandType = "connect"
-	CommandAWSConnect                 CommandType = "awsConnect"
-	CommandLocalConnect               CommandType = "localConnect"
-	CommandSerialConnect              CommandType = "serialConnect"
-	CommandSerialListPorts            CommandType = "serialListPorts"
-	CommandSerialControl              CommandType = "serialControl"
-	CommandKeyboardInteractiveRespond CommandType = "keyboardInteractiveRespond"
-	CommandControlSignal              CommandType = "controlSignal"
-	CommandResize                     CommandType = "resize"
-	CommandDisconnect                 CommandType = "disconnect"
-	CommandProbeHostKey               CommandType = "probeHostKey"
-	CommandInspectCertificate         CommandType = "inspectCertificate"
-	CommandPortForwardStart           CommandType = "portForwardStart"
-	CommandSSMPortForwardStart        CommandType = "ssmPortForwardStart"
-	CommandPortForwardStop            CommandType = "portForwardStop"
-	CommandSSMPortForwardStop         CommandType = "ssmPortForwardStop"
-	CommandSFTPConnect                CommandType = "sftpConnect"
-	CommandSFTPDisconnect             CommandType = "sftpDisconnect"
-	CommandSFTPList                   CommandType = "sftpList"
-	CommandSFTPMkdir                  CommandType = "sftpMkdir"
-	CommandSFTPRename                 CommandType = "sftpRename"
-	CommandSFTPChmod                  CommandType = "sftpChmod"
-	CommandSFTPChown                  CommandType = "sftpChown"
-	CommandSFTPListPrincipals         CommandType = "sftpListPrincipals"
-	CommandSFTPDelete                 CommandType = "sftpDelete"
-	CommandSFTPTransferStart          CommandType = "sftpTransferStart"
-	CommandSFTPTransferCancel         CommandType = "sftpTransferCancel"
-	CommandSFTPTransferPause          CommandType = "sftpTransferPause"
-	CommandSFTPTransferResume         CommandType = "sftpTransferResume"
-	CommandContainersConnect          CommandType = "containersConnect"
-	CommandContainersDisconnect       CommandType = "containersDisconnect"
-	CommandContainersList             CommandType = "containersList"
-	CommandContainersInspect          CommandType = "containersInspect"
-	CommandContainersLogs             CommandType = "containersLogs"
-	CommandContainersStart            CommandType = "containersStart"
-	CommandContainersStop             CommandType = "containersStop"
-	CommandContainersRestart          CommandType = "containersRestart"
-	CommandContainersRemove           CommandType = "containersRemove"
-	CommandContainersStats            CommandType = "containersStats"
-	CommandContainersSearchLogs       CommandType = "containersSearchLogs"
+	CommandHealth                      CommandType = "health"
+	CommandConnect                     CommandType = "connect"
+	CommandAWSConnect                  CommandType = "awsConnect"
+	CommandLocalConnect                CommandType = "localConnect"
+	CommandSerialConnect               CommandType = "serialConnect"
+	CommandSerialListPorts             CommandType = "serialListPorts"
+	CommandSerialControl               CommandType = "serialControl"
+	CommandKeyboardInteractiveRespond  CommandType = "keyboardInteractiveRespond"
+	CommandControlSignal               CommandType = "controlSignal"
+	CommandResize                      CommandType = "resize"
+	CommandDisconnect                  CommandType = "disconnect"
+	CommandProbeHostKey                CommandType = "probeHostKey"
+	CommandInspectCertificate          CommandType = "inspectCertificate"
+	CommandPortForwardStart            CommandType = "portForwardStart"
+	CommandSSMPortForwardStart         CommandType = "ssmPortForwardStart"
+	CommandPortForwardStop             CommandType = "portForwardStop"
+	CommandSSMPortForwardStop          CommandType = "ssmPortForwardStop"
+	CommandSFTPConnect                 CommandType = "sftpConnect"
+	CommandSFTPDisconnect              CommandType = "sftpDisconnect"
+	CommandSFTPList                    CommandType = "sftpList"
+	CommandSFTPMkdir                   CommandType = "sftpMkdir"
+	CommandSFTPRename                  CommandType = "sftpRename"
+	CommandSFTPChmod                   CommandType = "sftpChmod"
+	CommandSFTPChown                   CommandType = "sftpChown"
+	CommandSFTPListPrincipals          CommandType = "sftpListPrincipals"
+	CommandSFTPDelete                  CommandType = "sftpDelete"
+	CommandSFTPTransferStart           CommandType = "sftpTransferStart"
+	CommandSFTPTransferCancel          CommandType = "sftpTransferCancel"
+	CommandSFTPTransferPause           CommandType = "sftpTransferPause"
+	CommandSFTPTransferResume          CommandType = "sftpTransferResume"
+	CommandContainersConnect           CommandType = "containersConnect"
+	CommandContainersDisconnect        CommandType = "containersDisconnect"
+	CommandContainersList              CommandType = "containersList"
+	CommandContainersInspect           CommandType = "containersInspect"
+	CommandContainersLogs              CommandType = "containersLogs"
+	CommandContainersStart             CommandType = "containersStart"
+	CommandContainersStop              CommandType = "containersStop"
+	CommandContainersRestart           CommandType = "containersRestart"
+	CommandContainersRemove            CommandType = "containersRemove"
+	CommandContainersStats             CommandType = "containersStats"
+	CommandContainersSearchLogs        CommandType = "containersSearchLogs"
+	CommandTerminalAutocompletePrepare CommandType = "terminalAutocompletePrepare"
+	CommandTerminalAutocompleteRefresh CommandType = "terminalAutocompleteRefresh"
+	CommandTerminalAutocompleteStop    CommandType = "terminalAutocompleteStop"
+	CommandTerminalCompletionQuery     CommandType = "terminalCompletionQuery"
 )
 
 const (
-	EventStatus                       EventType = "status"
-	EventConnected                    EventType = "connected"
-	EventData                         EventType = "data"
-	EventError                        EventType = "error"
-	EventClosed                       EventType = "closed"
-	EventSerialPortsListed            EventType = "serialPortsListed"
-	EventSerialControlCompleted       EventType = "serialControlCompleted"
-	EventHostKeyProbed                EventType = "hostKeyProbed"
-	EventCertificateInspected         EventType = "certificateInspected"
-	EventKeyboardInteractiveChallenge EventType = "keyboardInteractiveChallenge"
-	EventKeyboardInteractiveResolved  EventType = "keyboardInteractiveResolved"
-	EventPortForwardStarted           EventType = "portForwardStarted"
-	EventPortForwardStopped           EventType = "portForwardStopped"
-	EventPortForwardError             EventType = "portForwardError"
-	EventSFTPConnected                EventType = "sftpConnected"
-	EventSFTPDisconnected             EventType = "sftpDisconnected"
-	EventSFTPListed                   EventType = "sftpListed"
-	EventSFTPAck                      EventType = "sftpAck"
-	EventSFTPError                    EventType = "sftpError"
-	EventSFTPSudoStatus               EventType = "sftpSudoStatus"
-	EventSFTPPrincipalsListed         EventType = "sftpPrincipalsListed"
-	EventSFTPTransferProgress         EventType = "sftpTransferProgress"
-	EventSFTPTransferCompleted        EventType = "sftpTransferCompleted"
-	EventSFTPTransferFailed           EventType = "sftpTransferFailed"
-	EventSFTPTransferCancelled        EventType = "sftpTransferCancelled"
-	EventContainersConnected          EventType = "containersConnected"
-	EventContainersDisconnected       EventType = "containersDisconnected"
-	EventContainersListed             EventType = "containersListed"
-	EventContainersInspected          EventType = "containersInspected"
-	EventContainersLogs               EventType = "containersLogs"
-	EventContainersActionCompleted    EventType = "containersActionCompleted"
-	EventContainersStats              EventType = "containersStats"
-	EventContainersLogsSearched       EventType = "containersLogsSearched"
-	EventContainersError              EventType = "containersError"
+	EventStatus                         EventType = "status"
+	EventConnected                      EventType = "connected"
+	EventData                           EventType = "data"
+	EventError                          EventType = "error"
+	EventClosed                         EventType = "closed"
+	EventSerialPortsListed              EventType = "serialPortsListed"
+	EventSerialControlCompleted         EventType = "serialControlCompleted"
+	EventHostKeyProbed                  EventType = "hostKeyProbed"
+	EventCertificateInspected           EventType = "certificateInspected"
+	EventKeyboardInteractiveChallenge   EventType = "keyboardInteractiveChallenge"
+	EventKeyboardInteractiveResolved    EventType = "keyboardInteractiveResolved"
+	EventPortForwardStarted             EventType = "portForwardStarted"
+	EventPortForwardStopped             EventType = "portForwardStopped"
+	EventPortForwardError               EventType = "portForwardError"
+	EventSFTPConnected                  EventType = "sftpConnected"
+	EventSFTPDisconnected               EventType = "sftpDisconnected"
+	EventSFTPListed                     EventType = "sftpListed"
+	EventSFTPAck                        EventType = "sftpAck"
+	EventSFTPError                      EventType = "sftpError"
+	EventSFTPSudoStatus                 EventType = "sftpSudoStatus"
+	EventSFTPPrincipalsListed           EventType = "sftpPrincipalsListed"
+	EventSFTPTransferProgress           EventType = "sftpTransferProgress"
+	EventSFTPTransferCompleted          EventType = "sftpTransferCompleted"
+	EventSFTPTransferFailed             EventType = "sftpTransferFailed"
+	EventSFTPTransferCancelled          EventType = "sftpTransferCancelled"
+	EventContainersConnected            EventType = "containersConnected"
+	EventContainersDisconnected         EventType = "containersDisconnected"
+	EventContainersListed               EventType = "containersListed"
+	EventContainersInspected            EventType = "containersInspected"
+	EventContainersLogs                 EventType = "containersLogs"
+	EventContainersActionCompleted      EventType = "containersActionCompleted"
+	EventContainersStats                EventType = "containersStats"
+	EventContainersLogsSearched         EventType = "containersLogsSearched"
+	EventContainersError                EventType = "containersError"
+	EventTerminalAutocompleteCapability EventType = "terminalAutocompleteCapability"
+	EventTerminalAutocompleteSnapshot   EventType = "terminalAutocompleteSnapshot"
+	EventTerminalAutocompleteShellState EventType = "terminalAutocompleteShellState"
+	EventTerminalCompletionResult       EventType = "terminalCompletionResult"
 )
 
 const (
@@ -145,6 +153,44 @@ type LocalConnectPayload struct {
 	Env              map[string]string `json:"env,omitempty"`
 	UnsetEnv         []string          `json:"unsetEnv,omitempty"`
 	WorkingDirectory string            `json:"workingDirectory,omitempty"`
+}
+
+type TerminalAutocompleteExecutable struct {
+	Name string `json:"name"`
+	Path string `json:"path,omitempty"`
+}
+
+type TerminalAutocompleteCapabilityPayload struct {
+	Status     string   `json:"status"`
+	Shell      string   `json:"shell,omitempty"`
+	Sources    []string `json:"sources"`
+	ReasonCode string   `json:"reasonCode,omitempty"`
+}
+
+type TerminalAutocompleteSnapshotPayload struct {
+	Shell       string                           `json:"shell"`
+	Revision    int                              `json:"revision"`
+	History     []string                         `json:"history"`
+	Executables []TerminalAutocompleteExecutable `json:"executables"`
+	Truncated   bool                             `json:"truncated"`
+}
+
+type TerminalAutocompleteShellStatePayload struct {
+	Kind    string `json:"kind"`
+	Shell   string `json:"shell,omitempty"`
+	Cwd     string `json:"cwd,omitempty"`
+	Command string `json:"command,omitempty"`
+}
+
+// TerminalCompletionQueryPayload asks the host to run a short read-only command
+// (built by the renderer) over the auxiliary channel for dynamic completion.
+type TerminalCompletionQueryPayload struct {
+	Command string `json:"command"`
+}
+
+type TerminalCompletionResultPayload struct {
+	Stdout    string `json:"stdout"`
+	Truncated bool   `json:"truncated,omitempty"`
 }
 
 type SerialConnectPayload struct {

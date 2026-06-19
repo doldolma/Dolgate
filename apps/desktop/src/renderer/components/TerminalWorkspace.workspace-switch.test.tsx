@@ -74,6 +74,7 @@ const settings: AppSettings = {
   terminalMinimumContrastRatio: 1,
   terminalAltIsMeta: false,
   terminalWebglEnabled: true,
+  terminalAutocompleteEnabled: false,
   sftpBrowserColumnWidths: {
     name: 360,
     dateModified: 168,

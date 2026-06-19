@@ -11,6 +11,7 @@ import { TerminalSharePopover } from './TerminalSharePopover';
 import type { TerminalSessionPaneProps } from './types';
 import { NoticeCard } from '../../ui';
 import { resolveConnectionFailurePresentation } from '../../store/utils';
+import { TerminalAutocompleteOverlay } from './TerminalAutocompleteOverlay';
 
 export function TerminalSessionPane(props: TerminalSessionPaneProps) {
   const {
@@ -199,6 +200,13 @@ export function TerminalSessionPane(props: TerminalSessionPaneProps) {
             }}
           />
         ) : null}
+        <TerminalAutocompleteOverlay
+          suggestions={controller.autocompleteSuggestions}
+          command={controller.autocompleteCommand}
+          anchor={controller.autocompleteAnchor}
+          selectedIndex={controller.autocompleteSelectedIndex}
+          onAccept={controller.acceptAutocompleteSuggestion}
+        />
       </div>
     </div>
   );

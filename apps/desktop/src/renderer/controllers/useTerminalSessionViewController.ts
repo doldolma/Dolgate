@@ -26,6 +26,7 @@ import {
   shouldOpenTerminalSearch,
   shouldShowSessionOverlay,
 } from '../components/terminal-workspace/terminalSessionHelpers';
+import { useTerminalAutocomplete } from './useTerminalAutocomplete';
 
 function isMacPlatform(): boolean {
   if (typeof navigator === 'undefined') {
@@ -82,6 +83,7 @@ export function useTerminalSessionViewController({
   layoutKey,
   appearance,
   terminalWebglEnabled,
+  terminalAutocompleteEnabled,
   interactiveAuth,
   onFocus,
   onStartSessionShare,
@@ -138,6 +140,58 @@ export function useTerminalSessionViewController({
   const [terminalInitError, setTerminalInitError] = useState<string | null>(
     null,
   );
+  const [autocompleteAnchor, setAutocompleteAnchor] = useState({
+    left: 8,
+    top: 32,
+    openAbove: false,
+  });
+  const [terminalAlternateScreen, setTerminalAlternateScreen] = useState(false);
+
+  const sendAutocompleteInput = useCallback((data: string) => {
+    const currentSessionId = liveSessionIdRef.current;
+    const currentStatus = liveSessionStatusRef.current;
+    if (
+      isPendingConnectionSessionId(currentSessionId) ||
+      currentStatus === 'pending' ||
+      currentStatus === 'error' ||
+      currentStatus === 'disconnecting'
+    ) {
+      return;
+    }
+    liveOnSendInputRef.current?.(currentSessionId, data);
+  }, []);
+
+  const autocomplete = useTerminalAutocomplete({
+    sessionId,
+    enabled:
+      terminalAutocompleteEnabled &&
+      host?.kind !== 'serial' &&
+      tab?.shellKind !== 'aws-ecs-exec',
+    connected: tab?.status === 'connected',
+    lazyPrepare: host?.kind === 'aws-ec2',
+    sendInput: sendAutocompleteInput,
+  });
+  const liveAutocompleteInputRef = useRef(autocomplete.handleInput);
+  const liveAutocompleteVisibleRef = useRef(false);
+  const liveAutocompleteShellMarkerRef = useRef(autocomplete.handleShellMarker);
+  const liveAutocompleteCwdRef = useRef(autocomplete.handleCwd);
+
+  useEffect(() => {
+    liveAutocompleteInputRef.current = terminalAlternateScreen
+      ? sendAutocompleteInput
+      : autocomplete.handleInput;
+    liveAutocompleteVisibleRef.current =
+      !terminalAlternateScreen && autocomplete.suggestions.length > 0;
+    liveAutocompleteShellMarkerRef.current = autocomplete.handleShellMarker;
+    liveAutocompleteCwdRef.current = autocomplete.handleCwd;
+  }, [
+    autocomplete.handleCwd,
+    autocomplete.handleInput,
+    autocomplete.handleShellMarker,
+    autocomplete.suggestions.length,
+    sendAutocompleteInput,
+    terminalAlternateScreen,
+  ]);
 
   useEffect(() => {
     if (!interactiveAuth || interactiveAuth.sessionId !== sessionId) {
@@ -450,7 +504,7 @@ export function useTerminalSessionViewController({
           ) {
             return;
           }
-          liveOnSendInputRef.current?.(currentSessionId, data);
+          liveAutocompleteInputRef.current(data);
         },
         onBinary: (data) => {
           const currentSessionId = liveSessionIdRef.current;
@@ -465,6 +519,12 @@ export function useTerminalSessionViewController({
           }
           const bytes = Uint8Array.from(data, (char) => char.charCodeAt(0));
           liveOnSendBinaryInputRef.current?.(currentSessionId, bytes);
+        },
+        onShellIntegration: (marker) => {
+          liveAutocompleteShellMarkerRef.current(marker);
+        },
+        onCwd: (data) => {
+          liveAutocompleteCwdRef.current(data);
         },
       });
       setTerminalInitError(null);
@@ -556,6 +616,44 @@ export function useTerminalSessionViewController({
     publishCurrentTerminalE2EState();
   }, [appearance, publishCurrentTerminalE2EState, refreshViewport]);
 
+  const refreshAutocompleteAnchor = useCallback(() => {
+    const terminal = terminalRef.current;
+    const container = containerRef.current;
+    const screen = terminal?.element?.querySelector<HTMLElement>('.xterm-screen');
+    if (!terminal || !container || !screen || terminal.cols <= 0 || terminal.rows <= 0) {
+      return;
+    }
+    const containerBounds = container.getBoundingClientRect();
+    const screenBounds = screen.getBoundingClientRect();
+    const cellWidth = screenBounds.width / terminal.cols;
+    const cellHeight = screenBounds.height / terminal.rows;
+    const cursor = terminal.buffer.active;
+    const left =
+      screenBounds.left - containerBounds.left +
+      Math.min(terminal.cols - 1, cursor.cursorX) * cellWidth;
+    const top =
+      screenBounds.top - containerBounds.top +
+      (Math.min(terminal.rows - 1, cursor.cursorY) + 1) * cellHeight + 4;
+    setAutocompleteAnchor({
+      left: Math.min(Math.max(4, left), Math.max(4, containerBounds.width - 288)),
+      top,
+      openAbove: containerBounds.height - top < 190,
+    });
+  }, []);
+
+  useEffect(() => {
+    if (autocomplete.suggestions.length === 0) {
+      return;
+    }
+    const frame = requestAnimationFrame(refreshAutocompleteAnchor);
+    return () => cancelAnimationFrame(frame);
+  }, [
+    autocomplete.command.cursor,
+    autocomplete.command.value,
+    autocomplete.suggestions.length,
+    refreshAutocompleteAnchor,
+  ]);
+
   useEffect(() => {
     const nextWebglEnabled = resolveTerminalRuntimeWebglEnabled({
       isMac: isMacPlatform(),
@@ -594,13 +692,35 @@ export function useTerminalSessionViewController({
           }
         }
         runtimeRef.current?.write(chunk);
+        runtimeRef.current?.scheduleAfterWriteDrain(() => {
+          const terminal = runtimeRef.current?.terminal;
+          if (!terminal) {
+            return;
+          }
+          const buffer = terminal.buffer?.active;
+          if (!buffer) {
+            return;
+          }
+          // Prompt boundaries now come from OSC 133 markers (onShellIntegration),
+          // so the only thing tracked from raw output here is alternate-screen
+          // state (vim/less/htop) to suspend the autocomplete overlay.
+          setTerminalAlternateScreen(buffer.type === 'alternate');
+        });
+        if (liveAutocompleteVisibleRef.current) {
+          runtimeRef.current?.scheduleAfterWriteDrain(refreshAutocompleteAnchor);
+        }
         if (e2eTerminalHookEnabledRef.current) {
           runtimeRef.current?.scheduleAfterWriteDrain(() => {
             publishCurrentTerminalE2EState();
           });
         }
       }),
-    [onSessionData, publishCurrentTerminalE2EState, sessionId],
+    [
+      onSessionData,
+      publishCurrentTerminalE2EState,
+      refreshAutocompleteAnchor,
+      sessionId,
+    ],
   );
 
   useEffect(() => {
@@ -854,6 +974,13 @@ export function useTerminalSessionViewController({
     sharePopoverOpen,
     shareCopyStatus,
     terminalInitError,
+    autocompleteSuggestions: terminalAlternateScreen
+      ? []
+      : autocomplete.suggestions,
+    autocompleteCommand: autocomplete.command.value,
+    autocompleteSelectedIndex: autocomplete.selectedIndex,
+    autocompleteAnchor,
+    acceptAutocompleteSuggestion: autocomplete.acceptSuggestion,
     shareState,
     canShareSession,
     canStartShare,

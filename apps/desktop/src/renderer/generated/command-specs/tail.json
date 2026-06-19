@@ -1,0 +1,24 @@
+{
+  "name": "tail",
+  "description": "Display the last part of a file",
+  "options": [
+    {
+      "names": [
+        "-f"
+      ],
+      "description": "Wait for additional data to be appended"
+    },
+    {
+      "names": [
+        "-r"
+      ],
+      "description": "Display in reverse order"
+    }
+  ],
+  "args": [
+    {
+      "variadic": true,
+      "template": "filepaths"
+    }
+  ]
+}

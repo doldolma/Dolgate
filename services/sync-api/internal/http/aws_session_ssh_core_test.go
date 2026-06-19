@@ -18,6 +18,10 @@ type fakeAwsSessionCoreRuntime struct {
 	onDisconnect    func(string)
 }
 
+func (core *fakeAwsSessionCoreRuntime) PrepareAutocomplete(string, string) error { return nil }
+func (core *fakeAwsSessionCoreRuntime) RefreshAutocomplete(string, string) error { return nil }
+func (core *fakeAwsSessionCoreRuntime) StopAutocomplete(string)                  {}
+
 func (core *fakeAwsSessionCoreRuntime) ConnectAWS(sessionID, requestID string, payload coretypes.AWSConnectPayload) error {
 	core.mu.Lock()
 	core.connectCalls = append(core.connectCalls, payload)

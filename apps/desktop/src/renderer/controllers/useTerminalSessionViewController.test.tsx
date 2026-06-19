@@ -141,6 +141,7 @@ function createProps(
       minimumContrastRatio: 1,
     },
     terminalWebglEnabled: true,
+    terminalAutocompleteEnabled: false,
     interactiveAuth: null,
     onStartSessionShare: vi.fn().mockResolvedValue(undefined),
     onUpdateSessionShareSnapshot: vi.fn().mockResolvedValue(undefined),

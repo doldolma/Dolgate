@@ -79,6 +79,7 @@ export const defaultSettings: AppSettings = {
   terminalMinimumContrastRatio: 1,
   terminalAltIsMeta: false,
   terminalWebglEnabled: true,
+  terminalAutocompleteEnabled: true,
   sftpBrowserColumnWidths: { ...DEFAULT_SFTP_BROWSER_COLUMN_WIDTHS },
   sftpConflictPolicy: "ask",
   sftpPreserveMtime: true,

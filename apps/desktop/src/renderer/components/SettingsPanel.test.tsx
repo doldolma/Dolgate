@@ -24,6 +24,7 @@ const settings: AppSettings = {
   terminalMinimumContrastRatio: 1,
   terminalAltIsMeta: false,
   terminalWebglEnabled: true,
+  terminalAutocompleteEnabled: false,
   sftpBrowserColumnWidths: { ...DEFAULT_SFTP_BROWSER_COLUMN_WIDTHS },
   sessionReplayRetentionCount: 100,
   serverUrl: 'https://ssh.doldolma.com',
@@ -261,6 +262,19 @@ describe('SettingsPanel', () => {
     fireEvent.click(toggle);
 
     expect(onUpdateSettings).toHaveBeenCalledWith({ terminalWebglEnabled: false });
+  });
+
+  it('keeps command autocomplete opt-in', () => {
+    const { onUpdateSettings } = renderSettingsPanel();
+
+    const toggle = screen.getByRole('switch', { name: 'Command autocomplete' });
+    expect(toggle).toHaveAttribute('aria-checked', 'false');
+
+    fireEvent.click(toggle);
+
+    expect(onUpdateSettings).toHaveBeenCalledWith({
+      terminalAutocompleteEnabled: true,
+    });
   });
 
   it('renders extended terminal controls and updates numeric settings', () => {

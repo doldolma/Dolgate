@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"syscall"
@@ -55,7 +56,7 @@ func resolveLocalRuntime(payload protocol.LocalConnectPayload) (localCommandRunt
 		}
 		shellKind := strings.TrimSpace(payload.ShellKind)
 		if shellKind == "" {
-			shellKind = "shell"
+			shellKind = strings.TrimPrefix(filepath.Base(executablePath), "-")
 		}
 		return localCommandRuntime{
 			shellKind:        shellKind,
@@ -73,7 +74,7 @@ func resolveLocalRuntime(payload protocol.LocalConnectPayload) (localCommandRunt
 
 	workingDirectory := resolveUserHomeDirectory()
 	return localCommandRuntime{
-		shellKind:        "shell",
+		shellKind:        strings.TrimPrefix(filepath.Base(executablePath), "-"),
 		executablePath:   executablePath,
 		args:             nil,
 		env:              os.Environ(),

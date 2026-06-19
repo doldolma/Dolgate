@@ -539,6 +539,13 @@ interface PendingResponse<TPayload> {
   timeout: NodeJS.Timeout;
 }
 
+interface PendingAwsAutocompleteResponse {
+  sessionId: string;
+  resolve: () => void;
+  reject: (error: Error) => void;
+  timeout: NodeJS.Timeout;
+}
+
 function isTransferEvent(type: CoreEventType): boolean {
   return (
     type === "sftpTransferProgress" ||
@@ -854,6 +861,10 @@ export class CoreManager {
   private readonly awsServerProxySessions = new Map<
     string,
     AwsServerProxySessionRuntime
+  >();
+  private readonly pendingAwsAutocompleteResponses = new Map<
+    string,
+    PendingAwsAutocompleteResponse
   >();
   private readonly sessionTransportById = new Map<string, SessionTransport>();
   private readonly sessionLifecycleById = new Map<
@@ -2142,6 +2153,40 @@ export class CoreManager {
       return;
     }
 
+    if (
+      type === "autocompleteCapability" ||
+      type === "autocompleteSnapshot" ||
+      type === "autocompleteShellState"
+    ) {
+      const requestId =
+        typeof message.requestId === "string" ? message.requestId : undefined;
+      const payload =
+        message.payload && typeof message.payload === "object"
+          ? (message.payload as Record<string, unknown>)
+          : {};
+      const eventType =
+        type === "autocompleteCapability"
+          ? "terminalAutocompleteCapability"
+          : type === "autocompleteSnapshot"
+            ? "terminalAutocompleteSnapshot"
+            : "terminalAutocompleteShellState";
+      this.handleControlEvent({
+        type: eventType,
+        requestId,
+        sessionId,
+        payload,
+      });
+      if (type === "autocompleteCapability" && requestId) {
+        const pending = this.pendingAwsAutocompleteResponses.get(requestId);
+        if (pending) {
+          clearTimeout(pending.timeout);
+          this.pendingAwsAutocompleteResponses.delete(requestId);
+          pending.resolve();
+        }
+      }
+      return;
+    }
+
     if (type === "error") {
       const runtime = this.awsServerProxySessions.get(sessionId);
       if (runtime) {
@@ -2178,6 +2223,7 @@ export class CoreManager {
     }
     runtime.finalized = true;
     this.awsServerProxySessions.delete(sessionId);
+    this.rejectPendingAwsAutocomplete(sessionId);
 
     if (runtime.errorEmitted) {
       return;
@@ -2201,7 +2247,19 @@ export class CoreManager {
       }
     }
     this.awsServerProxySessions.delete(sessionId);
+    this.rejectPendingAwsAutocomplete(sessionId);
     this.emitAwsServerProxyEvent(sessionId, "closed", message);
+  }
+
+  private rejectPendingAwsAutocomplete(sessionId: string): void {
+    for (const [requestId, pending] of this.pendingAwsAutocompleteResponses) {
+      if (pending.sessionId !== sessionId) {
+        continue;
+      }
+      clearTimeout(pending.timeout);
+      pending.reject(new Error("AWS SSM server proxy session closed"));
+      this.pendingAwsAutocompleteResponses.delete(requestId);
+    }
   }
 
   private emitAwsServerProxyEvent(
@@ -2969,6 +3027,108 @@ export class CoreManager {
     );
   }
 
+  async prepareAutocomplete(sessionId: string): Promise<void> {
+    await this.start();
+    if (this.sessionTransportById.get(sessionId) === "aws-ssm-server-proxy") {
+      return this.requestAwsServerProxyAutocomplete(sessionId, "autocompletePrepare");
+    }
+    await this.requestResponse(
+      {
+        id: randomUUID(),
+        type: "terminalAutocompletePrepare",
+        sessionId,
+        payload: {},
+      },
+      ["terminalAutocompleteCapability"],
+      { timeoutMs: 3500 },
+    );
+  }
+
+  async refreshAutocomplete(sessionId: string): Promise<void> {
+    await this.start();
+    if (this.sessionTransportById.get(sessionId) === "aws-ssm-server-proxy") {
+      return this.requestAwsServerProxyAutocomplete(sessionId, "autocompleteRefresh");
+    }
+    await this.requestResponse(
+      {
+        id: randomUUID(),
+        type: "terminalAutocompleteRefresh",
+        sessionId,
+        payload: {},
+      },
+      ["terminalAutocompleteCapability"],
+      { timeoutMs: 3500 },
+    );
+  }
+
+  async stopAutocomplete(sessionId: string): Promise<void> {
+    if (this.sessionTransportById.get(sessionId) === "aws-ssm-server-proxy") {
+      this.sendAwsServerProxyMessage(sessionId, { type: "autocompleteStop" });
+      return;
+    }
+    if (!this.process) {
+      return;
+    }
+    await this.requestResponse(
+      {
+        id: randomUUID(),
+        type: "terminalAutocompleteStop",
+        sessionId,
+        payload: {},
+      },
+      ["terminalAutocompleteCapability"],
+      { timeoutMs: 1500 },
+    );
+  }
+
+  async queryCompletion(sessionId: string, command: string): Promise<string> {
+    await this.start();
+    // 동적 완성은 보조 채널이 있는 전송에서만 지원한다(SSH/local). SSM 계열은 단일 PTY라 미지원이며,
+    // 호출되더라도 원격을 건드리지 않고 빈 결과로 조용히 degrade한다.
+    const transport = this.sessionTransportById.get(sessionId);
+    if (transport !== "ssh" && transport !== "local-shell") {
+      return "";
+    }
+    const response = await this.requestResponse<{
+      stdout?: string;
+      truncated?: boolean;
+    }>(
+      {
+        id: randomUUID(),
+        type: "terminalCompletionQuery",
+        sessionId,
+        payload: { command },
+      },
+      ["terminalCompletionResult"],
+      { timeoutMs: 3000 },
+    );
+    return typeof response.stdout === "string" ? response.stdout : "";
+  }
+
+  private requestAwsServerProxyAutocomplete(
+    sessionId: string,
+    type: "autocompletePrepare" | "autocompleteRefresh",
+  ): Promise<void> {
+    const requestId = randomUUID();
+    return new Promise<void>((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        this.pendingAwsAutocompleteResponses.delete(requestId);
+        reject(new Error("Timed out waiting for AWS SSM autocomplete probe"));
+      }, 3500);
+      this.pendingAwsAutocompleteResponses.set(requestId, {
+        sessionId,
+        resolve,
+        reject,
+        timeout,
+      });
+      if (!this.sendAwsServerProxyMessage(sessionId, { type, requestId })) {
+        clearTimeout(timeout);
+        this.pendingAwsAutocompleteResponses.delete(requestId);
+        reject(new Error("AWS SSM server proxy session is unavailable"));
+      }
+    });
+  }
+
   writeBinary(sessionId: string, data: Uint8Array): void {
     const tab = this.tabs.get(sessionId);
     // 마우스 보고 등 raw 입력도 연결 완료 이후에만 전달한다.
@@ -3501,6 +3661,11 @@ export class CoreManager {
       }
     }
     this.awsServerProxySessions.clear();
+    for (const pending of this.pendingAwsAutocompleteResponses.values()) {
+      clearTimeout(pending.timeout);
+      pending.reject(new Error("SSH core process stopped"));
+    }
+    this.pendingAwsAutocompleteResponses.clear();
     this.tabs.clear();
     this.sftpEndpoints.clear();
     this.sftpLifecycleByEndpointId.clear();

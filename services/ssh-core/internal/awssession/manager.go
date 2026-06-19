@@ -1,11 +1,15 @@
 package awssession
 
 import (
+	"bytes"
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"sync"
 	"time"
 
+	"dolssh/services/ssh-core/internal/autocomplete"
 	"dolssh/services/ssh-core/internal/protocol"
 )
 
@@ -20,6 +24,21 @@ type sessionHandle struct {
 	disconnectRequested bool
 	errorNotified       bool
 	done                chan struct{}
+	probeMu             sync.Mutex
+	probe               *autocompleteProbe
+	handshake           autocomplete.Handshake
+}
+
+type autocompleteProbe struct {
+	nonce    string
+	revision int
+	buffer   []byte
+	result   chan autocompleteProbeResult
+}
+
+type autocompleteProbeResult struct {
+	result autocomplete.Result
+	err    error
 }
 
 type Manager struct {
@@ -94,6 +113,76 @@ func (m *Manager) WriteBytes(sessionID string, data []byte) error {
 		return err
 	}
 	return session.runner.Write(data)
+}
+
+func (m *Manager) CollectAutocomplete(sessionID string, revision int) (autocomplete.Result, error) {
+	session, err := m.getSession(sessionID)
+	if err != nil {
+		return autocomplete.Result{}, err
+	}
+	nonceBytes := make([]byte, 12)
+	if _, err := rand.Read(nonceBytes); err != nil {
+		return autocomplete.Result{}, err
+	}
+	probe := &autocompleteProbe{
+		nonce:    hex.EncodeToString(nonceBytes),
+		revision: revision,
+		result:   make(chan autocompleteProbeResult, 1),
+	}
+	session.probeMu.Lock()
+	if session.probe != nil {
+		session.probeMu.Unlock()
+		return autocomplete.Degraded("", "metadata-unavailable"), nil
+	}
+	session.probe = probe
+	session.probeMu.Unlock()
+
+	if err := session.runner.Write([]byte(autocomplete.InBandProbeCommand(probe.nonce))); err != nil {
+		m.clearAutocompleteProbe(session, probe)
+		return autocomplete.Result{}, err
+	}
+
+	select {
+	case response := <-probe.result:
+		return response.result, response.err
+	case <-time.After(2 * time.Second):
+		m.clearAutocompleteProbe(session, probe)
+		return autocomplete.Degraded("", "probe-timeout"), nil
+	}
+}
+
+func (m *Manager) StopAutocomplete(sessionID string) {
+	session, err := m.getSession(sessionID)
+	if err != nil {
+		return
+	}
+	session.probeMu.Lock()
+	session.probe = nil
+	session.probeMu.Unlock()
+}
+
+// InstallShellIntegration arms the OSC 133 handshake filter and writes the
+// integration init command into the SSM PTY. Must run before the snapshot probe
+// so the prompt marker arrives ahead of the probe response.
+func (m *Manager) InstallShellIntegration(sessionID string) error {
+	session, err := m.getSession(sessionID)
+	if err != nil {
+		return err
+	}
+	session.handshake.Arm()
+	return session.runner.Write([]byte(autocomplete.ShellIntegrationInitCommand()))
+}
+
+// FlushShellIntegration releases any output held by the handshake filter when
+// the prompt marker never arrives within the handshake timeout.
+func (m *Manager) FlushShellIntegration(sessionID string) {
+	session, err := m.getSession(sessionID)
+	if err != nil {
+		return
+	}
+	if flushed := session.handshake.Flush(); len(flushed) > 0 {
+		m.emitStream(protocol.StreamFrame{Type: protocol.StreamTypeData, SessionID: sessionID}, flushed)
+	}
 }
 
 func (m *Manager) SendControlSignal(sessionID, signal string) error {
@@ -182,10 +271,20 @@ func (m *Manager) stream(sessionID string, handle *sessionHandle, reader io.Read
 		if n > 0 {
 			chunk := make([]byte, n)
 			copy(chunk, buffer[:n])
-			m.emitStream(protocol.StreamFrame{
-				Type:      protocol.StreamTypeData,
-				SessionID: sessionID,
-			}, chunk)
+			// Suppress the integration command echo until the first prompt
+			// marker, then let the 6973 snapshot probe parsing run on what
+			// remains (the marker is injected before the probe, so it arrives
+			// first and the probe response is never swallowed).
+			chunk = handle.handshake.Filter(chunk)
+			if len(chunk) > 0 {
+				chunk = m.consumeAutocompleteProbe(handle, chunk)
+			}
+			if len(chunk) > 0 {
+				m.emitStream(protocol.StreamFrame{
+					Type:      protocol.StreamTypeData,
+					SessionID: sessionID,
+				}, chunk)
+			}
 		}
 
 		if err != nil {
@@ -195,6 +294,62 @@ func (m *Manager) stream(sessionID string, handle *sessionHandle, reader io.Read
 			return
 		}
 	}
+}
+
+func (m *Manager) clearAutocompleteProbe(handle *sessionHandle, expected *autocompleteProbe) {
+	handle.probeMu.Lock()
+	if handle.probe == expected {
+		handle.probe = nil
+	}
+	handle.probeMu.Unlock()
+}
+
+func (m *Manager) consumeAutocompleteProbe(handle *sessionHandle, chunk []byte) []byte {
+	handle.probeMu.Lock()
+	probe := handle.probe
+	if probe == nil {
+		handle.probeMu.Unlock()
+		return chunk
+	}
+	probe.buffer = append(probe.buffer, chunk...)
+	if len(probe.buffer) > autocomplete.MaxMetadataBytes*2 {
+		handle.probe = nil
+		handle.probeMu.Unlock()
+		select {
+		case probe.result <- autocompleteProbeResult{err: fmt.Errorf("autocomplete probe response exceeded limit")}:
+		default:
+		}
+		return nil
+	}
+	prefix := []byte("\x1b]6973;" + probe.nonce + ";snapshot;")
+	start := bytes.Index(probe.buffer, prefix)
+	if start < 0 {
+		if len(probe.buffer) > autocomplete.MaxMetadataBytes {
+			handle.probe = nil
+			select {
+			case probe.result <- autocompleteProbeResult{err: fmt.Errorf("autocomplete probe response exceeded limit")}:
+			default:
+			}
+		}
+		handle.probeMu.Unlock()
+		return nil
+	}
+	endOffset := bytes.IndexByte(probe.buffer[start+len(prefix):], '\a')
+	if endOffset < 0 {
+		handle.probeMu.Unlock()
+		return nil
+	}
+	end := start + len(prefix) + endOffset
+	encoded := append([]byte(nil), probe.buffer[start+len(prefix):end]...)
+	remainder := append([]byte(nil), probe.buffer[end+1:]...)
+	handle.probe = nil
+	handle.probeMu.Unlock()
+	result, err := autocomplete.DecodeInBandSnapshot(encoded, probe.revision)
+	select {
+	case probe.result <- autocompleteProbeResult{result: result, err: err}:
+	default:
+	}
+	return remainder
 }
 
 func (m *Manager) emitSessionError(sessionID, message string) {

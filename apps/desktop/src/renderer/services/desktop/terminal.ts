@@ -22,6 +22,28 @@ export function writeTerminalBinaryInput(sessionId: string, data: Uint8Array) {
   return desktopApi.ssh.writeBinary(sessionId, data);
 }
 
+export function prepareTerminalAutocomplete(sessionId: string) {
+  return desktopApi.ssh.prepareAutocomplete(sessionId);
+}
+
+export function refreshTerminalAutocomplete(sessionId: string) {
+  return desktopApi.ssh.refreshAutocomplete(sessionId);
+}
+
+export function stopTerminalAutocomplete(sessionId: string) {
+  return desktopApi.ssh.stopAutocomplete(sessionId);
+}
+
+export function queryTerminalCompletion(sessionId: string, command: string) {
+  return desktopApi.ssh.queryCompletion(sessionId, command);
+}
+
+export function subscribeToTerminalEvents(
+  listener: Parameters<SshApi['onEvent']>[0],
+) {
+  return desktopApi.ssh.onEvent(listener);
+}
+
 export function openTerminalExternalUrl(url: string) {
   return desktopApi.shell.openExternal(url);
 }

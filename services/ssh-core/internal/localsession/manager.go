@@ -1,10 +1,13 @@
 package localsession
 
 import (
+	"context"
 	"fmt"
 	"io"
+	"os/exec"
 	"sync"
 
+	"dolssh/services/ssh-core/internal/autocomplete"
 	"dolssh/services/ssh-core/internal/protocol"
 )
 
@@ -18,6 +21,7 @@ type sessionHandle struct {
 	streams             sync.WaitGroup
 	disconnectRequested bool
 	errorNotified       bool
+	handshake           autocomplete.Handshake
 }
 
 type Manager struct {
@@ -90,6 +94,57 @@ func (m *Manager) WriteBytes(sessionID string, data []byte) error {
 	return session.runner.Write(data)
 }
 
+func (m *Manager) CollectAutocomplete(sessionID string, revision int) (autocomplete.Result, error) {
+	session, err := m.getSession(sessionID)
+	if err != nil {
+		return autocomplete.Result{}, err
+	}
+	return autocomplete.CollectLocal(session.runner.ShellKind(), revision), nil
+}
+
+// RunCompletionCommand runs a short read-only command for dynamic completion in
+// a one-off subprocess (separate from the interactive PTY). The renderer
+// resolves directories to absolute paths (via OSC 7 cwd), so the subprocess cwd
+// is not relied upon. Bounded by CompletionTimeout and CapOutput.
+func (m *Manager) RunCompletionCommand(sessionID, command string) (string, bool, error) {
+	if _, err := m.getSession(sessionID); err != nil {
+		return "", false, err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), autocomplete.CompletionTimeout)
+	defer cancel()
+	output, err := exec.CommandContext(ctx, "/bin/sh", "-c", command).Output()
+	if err != nil && len(output) == 0 {
+		return "", false, err
+	}
+	out, truncated := autocomplete.CapOutput(output)
+	return out, truncated, nil
+}
+
+// InstallShellIntegration arms the OSC 133 handshake filter and writes the
+// integration init command into the interactive shell. The filter hides the
+// command's echo until the first prompt marker is seen.
+func (m *Manager) InstallShellIntegration(sessionID string) error {
+	session, err := m.getSession(sessionID)
+	if err != nil {
+		return err
+	}
+	session.handshake.Arm()
+	return session.runner.Write([]byte(autocomplete.ShellIntegrationInitCommand()))
+}
+
+// FlushShellIntegration releases any output the handshake filter is holding,
+// used when the prompt marker never arrives within the handshake timeout so the
+// user still sees whatever the shell produced.
+func (m *Manager) FlushShellIntegration(sessionID string) {
+	session, err := m.getSession(sessionID)
+	if err != nil {
+		return
+	}
+	if flushed := session.handshake.Flush(); len(flushed) > 0 {
+		m.emitStream(protocol.StreamFrame{Type: protocol.StreamTypeData, SessionID: sessionID}, flushed)
+	}
+}
+
 func (m *Manager) Resize(sessionID string, cols, rows int) error {
 	session, err := m.getSession(sessionID)
 	if err != nil {
@@ -146,10 +201,13 @@ func (m *Manager) stream(sessionID string, handle *sessionHandle, reader io.Read
 		if n > 0 {
 			chunk := make([]byte, n)
 			copy(chunk, buffer[:n])
-			m.emitStream(protocol.StreamFrame{
-				Type:      protocol.StreamTypeData,
-				SessionID: sessionID,
-			}, chunk)
+			chunk = handle.handshake.Filter(chunk)
+			if len(chunk) > 0 {
+				m.emitStream(protocol.StreamFrame{
+					Type:      protocol.StreamTypeData,
+					SessionID: sessionID,
+				}, chunk)
+			}
 		}
 
 		if err != nil {

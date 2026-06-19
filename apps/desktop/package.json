@@ -1,6 +1,6 @@
 {
   "name": "@dolssh/desktop",
-  "version": "1.6.18",
+  "version": "1.6.19",
   "private": true,
   "description": "Dolgate desktop client",
   "author": "doldolma",
@@ -11,6 +11,7 @@
   "main": ".vite/build/main.js",
   "scripts": {
     "generate:icons": "node ./scripts/generate-icons.cjs",
+    "generate:specs": "node ./scripts/generate-command-specs.cjs",
     "sync:runtime-deps": "node ./scripts/sync-runtime-deps.cjs",
     "sync:runtime-deps:mac": "cross-env DOLSSH_TARGET_PLATFORM=darwin node ./scripts/sync-runtime-deps.cjs",
     "sync:runtime-deps:win": "cross-env DOLSSH_TARGET_PLATFORM=win32 node ./scripts/sync-runtime-deps.cjs",

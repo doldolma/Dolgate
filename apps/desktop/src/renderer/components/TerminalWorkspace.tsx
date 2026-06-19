@@ -465,6 +465,7 @@ export function TerminalWorkspace({
             resolveTerminalAppearanceForSession(settings, hosts, tab, prefersDark)
           }
           terminalWebglEnabled={settings.terminalWebglEnabled}
+          terminalAutocompleteEnabled={settings.terminalAutocompleteEnabled}
           style={activeWorkspace ? undefined : rectStyle}
           showHeader={Boolean(activeWorkspace && placement)}
           host={

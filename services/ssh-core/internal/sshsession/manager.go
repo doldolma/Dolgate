@@ -8,7 +8,9 @@ import (
 
 	"golang.org/x/crypto/ssh"
 
+	"dolssh/services/ssh-core/internal/autocomplete"
 	"dolssh/services/ssh-core/internal/protocol"
+	"dolssh/services/ssh-core/internal/sshcmd"
 	"dolssh/services/ssh-core/internal/sshconn"
 )
 
@@ -19,11 +21,12 @@ type EventEmitter func(protocol.Event)
 type StreamEmitter func(protocol.StreamFrame, []byte)
 
 type sessionHandle struct {
-	client  *ssh.Client
-	session *ssh.Session
-	stdin   io.WriteCloser
-	closed  chan struct{}
-	closer  sync.Once
+	client    *ssh.Client
+	session   *ssh.Session
+	stdin     io.WriteCloser
+	closed    chan struct{}
+	closer    sync.Once
+	handshake autocomplete.Handshake
 }
 
 type ManagerConfig struct {
@@ -225,8 +228,8 @@ func (m *Manager) Connect(sessionID, requestID string, payload protocol.ConnectP
 		},
 	})
 
-	go m.stream(sessionID, stdout)
-	go m.stream(sessionID, stderr)
+	go m.stream(sessionID, handle, stdout)
+	go m.stream(sessionID, handle, stderr)
 	// Wait는 별도 goroutine에서 감시해 원격 종료를 이벤트로 전파한다.
 	go m.waitForSession(sessionID)
 	if m.config.SSHKeepAliveInterval > 0 {
@@ -253,6 +256,13 @@ func (m *Manager) RespondKeyboardInteractive(sessionID, challengeID string, resp
 	}
 }
 
+func (m *Manager) HasSession(sessionID string) bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	_, ok := m.sessions[sessionID]
+	return ok
+}
+
 func (m *Manager) WriteBytes(sessionID string, data []byte) error {
 	// stdin pipe는 사실상 사용자의 키 입력 스트림이다.
 	session, err := m.getSession(sessionID)
@@ -261,6 +271,65 @@ func (m *Manager) WriteBytes(sessionID string, data []byte) error {
 	}
 	_, err = session.stdin.Write(data)
 	return err
+}
+
+func (m *Manager) CollectAutocomplete(sessionID string, revision int) (autocomplete.Result, error) {
+	session, err := m.getSession(sessionID)
+	if err != nil {
+		return autocomplete.Result{}, err
+	}
+	stdout, _, err := sshcmd.RunWithTimeout(
+		session.client,
+		autocomplete.RemoteSnapshotCommand(),
+		3*time.Second,
+	)
+	if err != nil {
+		return autocomplete.Degraded("", "metadata-unavailable"), nil
+	}
+	return autocomplete.ParseSnapshot(stdout, revision), nil
+}
+
+// RunCompletionCommand runs a short read-only command on a separate exec
+// channel (not the interactive shell) and returns its stdout, for dynamic
+// completion. Bounded by CompletionTimeout and CapOutput.
+func (m *Manager) RunCompletionCommand(sessionID, command string) (string, bool, error) {
+	session, err := m.getSession(sessionID)
+	if err != nil {
+		return "", false, err
+	}
+	stdout, _, err := sshcmd.RunWithTimeout(session.client, command, autocomplete.CompletionTimeout)
+	// A completion command exiting non-zero is not fatal — return whatever it
+	// printed (best-effort). Only surface an error when nothing was captured.
+	if err != nil && len(stdout) == 0 {
+		return "", false, err
+	}
+	out, truncated := autocomplete.CapOutput(stdout)
+	return out, truncated, nil
+}
+
+// InstallShellIntegration arms the OSC 133 handshake filter and writes the
+// integration init command into the interactive shell's stdin. The filter hides
+// the command's echo until the first prompt marker is seen.
+func (m *Manager) InstallShellIntegration(sessionID string) error {
+	session, err := m.getSession(sessionID)
+	if err != nil {
+		return err
+	}
+	session.handshake.Arm()
+	_, err = session.stdin.Write([]byte(autocomplete.ShellIntegrationInitCommand()))
+	return err
+}
+
+// FlushShellIntegration releases any output held by the handshake filter when
+// the prompt marker never arrives within the handshake timeout.
+func (m *Manager) FlushShellIntegration(sessionID string) {
+	session, err := m.getSession(sessionID)
+	if err != nil {
+		return
+	}
+	if flushed := session.handshake.Flush(); len(flushed) > 0 {
+		m.emitStream(protocol.StreamFrame{Type: protocol.StreamTypeData, SessionID: sessionID}, flushed)
+	}
 }
 
 func (m *Manager) Resize(sessionID string, cols, rows int) error {
@@ -298,7 +367,7 @@ func (m *Manager) waitForSession(sessionID string) {
 	m.closeSession(sessionID, "")
 }
 
-func (m *Manager) stream(sessionID string, reader io.Reader) {
+func (m *Manager) stream(sessionID string, handle *sessionHandle, reader io.Reader) {
 	// stdout/stderr 모두 동일한 raw stream frame으로 흘려 상위 레이어가 그대로 전달할 수 있게 한다.
 	buffer := make([]byte, 4096)
 	for {
@@ -306,10 +375,13 @@ func (m *Manager) stream(sessionID string, reader io.Reader) {
 		if n > 0 {
 			chunk := make([]byte, n)
 			copy(chunk, buffer[:n])
-			m.emitStream(protocol.StreamFrame{
-				Type:      protocol.StreamTypeData,
-				SessionID: sessionID,
-			}, chunk)
+			chunk = handle.handshake.Filter(chunk)
+			if len(chunk) > 0 {
+				m.emitStream(protocol.StreamFrame{
+					Type:      protocol.StreamTypeData,
+					SessionID: sessionID,
+				}, chunk)
+			}
 		}
 		if err != nil {
 			if err != io.EOF {
