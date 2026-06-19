@@ -2,6 +2,7 @@ package localsession
 
 import (
 	"io"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -27,6 +28,9 @@ func newTestManager(runner sessionRunner) *Manager {
 }
 
 func TestRunCompletionCommand(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("RunCompletionCommand uses /bin/sh; local dynamic completion is unsupported on Windows")
+	}
 	runner := &fakeRunner{done: make(chan struct{})}
 	defer close(runner.done)
 	m := newTestManager(runner)

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os/exec"
+	"runtime"
 	"sync"
 
 	"dolssh/services/ssh-core/internal/autocomplete"
@@ -109,6 +110,13 @@ func (m *Manager) CollectAutocomplete(sessionID string, revision int) (autocompl
 func (m *Manager) RunCompletionCommand(sessionID, command string) (string, bool, error) {
 	if _, err := m.getSession(sessionID); err != nil {
 		return "", false, err
+	}
+	// Completion commands are POSIX shell (`ls -1Ap`, `git branch`, …) run via
+	// /bin/sh. A local Windows shell isn't POSIX, so dynamic completion isn't
+	// supported there — degrade to nothing instead of failing on a missing
+	// /bin/sh. (Remote SSH sessions still complete on the remote Unix host.)
+	if runtime.GOOS == "windows" {
+		return "", false, nil
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), autocomplete.CompletionTimeout)
 	defer cancel()

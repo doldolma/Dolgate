@@ -29,8 +29,14 @@ func TestParseSnapshot(t *testing.T) {
 }
 
 func TestCollectorCommandsAreValidShellSyntax(t *testing.T) {
+	// Validate POSIX syntax via whatever `sh` is on PATH (git-bash on Windows
+	// runners); skip if none is available.
+	sh, err := exec.LookPath("sh")
+	if err != nil {
+		t.Skip("sh not available")
+	}
 	for _, command := range []string{RemoteSnapshotCommand(), InBandProbeCommand("nonce-1")} {
-		if output, err := exec.Command("/bin/sh", "-n", "-c", command).CombinedOutput(); err != nil {
+		if output, err := exec.Command(sh, "-n", "-c", command).CombinedOutput(); err != nil {
 			t.Fatalf("invalid command: %v\n%s", err, output)
 		}
 	}
