@@ -107,6 +107,7 @@ func (s *Service) Connect(endpointID, requestID string, payload protocol.SFTPCon
 		Passphrase:            payload.Passphrase,
 		TrustedHostKeyBase64:  payload.TrustedHostKeyBase64,
 		TrustedHostKeysBase64: payload.TrustedHostKeysBase64,
+		Jump:                  sshconn.JumpTargetFromCore(payload.Jump),
 	}, sshconn.DefaultConfig, func(challenge sshconn.InteractiveChallenge) ([]string, error) {
 		attempt += 1
 		challengeID := fmt.Sprintf("%s-%d", endpointID, attempt)

@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"dolssh/services/ssh-core/pkg/coretypes"
 	"golang.org/x/crypto/ssh"
 )
 
@@ -26,6 +27,32 @@ type Target struct {
 	Passphrase            string
 	TrustedHostKeyBase64  string
 	TrustedHostKeysBase64 []string
+	// Jump이 설정되면 그 호스트(베스천)를 먼저 접속한 뒤, 그 위로 TCP를 포워딩해
+	// 이 Target에 2차 SSH 핸드셰이크를 한다 (ProxyJump / `ssh -J`). 재귀 구조라
+	// 다단 체인도 표현 가능하지만 현재 UI는 단일 홉만 사용한다.
+	Jump *Target
+}
+
+// JumpTargetFromCore는 와이어 페이로드의 점프 호스트(coretypes.JumpTarget)를
+// dial용 Target으로 재귀 변환한다. nil이면 nil을 돌려줘서 호출부에서 그대로
+// Target.Jump에 대입할 수 있다(점프 미설정 = 직접 접속).
+func JumpTargetFromCore(jump *coretypes.JumpTarget) *Target {
+	if jump == nil {
+		return nil
+	}
+	return &Target{
+		Host:                  jump.Host,
+		Port:                  jump.Port,
+		Username:              jump.Username,
+		AuthType:              jump.AuthType,
+		Password:              jump.Password,
+		PrivateKeyPEM:         jump.PrivateKeyPEM,
+		CertificateText:       jump.CertificateText,
+		Passphrase:            jump.Passphrase,
+		TrustedHostKeyBase64:  jump.TrustedHostKeyBase64,
+		TrustedHostKeysBase64: jump.TrustedHostKeysBase64,
+		Jump:                  JumpTargetFromCore(jump.Jump),
+	}
 }
 
 type Config struct {
@@ -92,26 +119,63 @@ func DialClient(target Target, config Config, responder InteractiveResponder) (*
 	}
 
 	addr := fmt.Sprintf("%s:%d", target.Host, target.Port)
-	dialer := &net.Dialer{
-		Timeout:   config.TCPDialTimeout,
-		KeepAlive: config.TCPKeepAliveInterval,
-	}
-	rawConn, err := dialer.Dial("tcp", addr)
-	if err != nil {
-		return nil, fmt.Errorf("dial failed: %w", err)
+
+	// Establish the raw TCP connection to the target — either directly, or, when a
+	// jump host is configured, tunneled through the jump client's connection
+	// (ProxyJump). The target SSH handshake below then runs end-to-end over it.
+	var (
+		rawConn    net.Conn
+		jumpClient *ssh.Client
+	)
+	if target.Jump != nil {
+		jumpClient, err = DialClient(*target.Jump, config, responder)
+		if err != nil {
+			return nil, fmt.Errorf("jump host: %w", err)
+		}
+		rawConn, err = jumpClient.Dial("tcp", addr)
+		if err != nil {
+			_ = jumpClient.Close()
+			return nil, fmt.Errorf("dial through jump host: %w", err)
+		}
+	} else {
+		dialer := &net.Dialer{
+			Timeout:   config.TCPDialTimeout,
+			KeepAlive: config.TCPKeepAliveInterval,
+		}
+		rawConn, err = dialer.Dial("tcp", addr)
+		if err != nil {
+			return nil, fmt.Errorf("dial failed: %w", err)
+		}
 	}
 
 	clientConn, chans, reqs, err := ssh.NewClientConn(rawConn, addr, clientConfig)
 	if err != nil {
 		_ = rawConn.Close()
+		if jumpClient != nil {
+			_ = jumpClient.Close()
+		}
 		return nil, fmt.Errorf("ssh handshake failed: %w", err)
 	}
 
-	return ssh.NewClient(clientConn, chans, reqs), nil
+	client := ssh.NewClient(clientConn, chans, reqs)
+	if jumpClient != nil {
+		// Close the jump connection once the target session ends (target Close /
+		// remote hang-up / jump drop all unblock Wait), so the bastion link isn't
+		// leaked for the life of the process.
+		go func() {
+			_ = client.Wait()
+			_ = jumpClient.Close()
+		}()
+	}
+	return client, nil
 }
 
 // ProbeHostKey는 인증 전에 서버의 실제 호스트 키만 읽어와 TOFU/UI 비교에 사용한다.
-func ProbeHostKey(host string, port int, config Config) (HostKeyProbeResult, error) {
+// jump이 설정되면 그 베스천을 먼저 접속한 뒤 그 위로 타깃에 TCP를 포워딩해 키를
+// 읽는다 — 베스천 뒤의(직접 닿지 않는) 타깃 키도 신뢰할 수 있게 한다. 베스천 인증은
+// 비대화형(password/privateKey/certificate)만 지원하며(responder 없이 DialClient),
+// keyboard-interactive 베스천을 경유하는 probe는 현재 지원하지 않는다.
+func ProbeHostKey(host string, port int, jump *Target, config Config) (HostKeyProbeResult, error) {
 	if config.TCPDialTimeout == 0 {
 		config.TCPDialTimeout = DefaultConfig.TCPDialTimeout
 	}
@@ -120,13 +184,28 @@ func ProbeHostKey(host string, port int, config Config) (HostKeyProbeResult, err
 	}
 
 	addr := fmt.Sprintf("%s:%d", host, port)
-	dialer := &net.Dialer{
-		Timeout:   config.TCPDialTimeout,
-		KeepAlive: config.TCPKeepAliveInterval,
-	}
-	rawConn, err := dialer.Dial("tcp", addr)
-	if err != nil {
-		return HostKeyProbeResult{}, fmt.Errorf("dial failed: %w", err)
+
+	var rawConn net.Conn
+	if jump != nil {
+		jumpClient, err := DialClient(*jump, config, nil)
+		if err != nil {
+			return HostKeyProbeResult{}, fmt.Errorf("jump host: %w", err)
+		}
+		defer jumpClient.Close()
+		rawConn, err = jumpClient.Dial("tcp", addr)
+		if err != nil {
+			return HostKeyProbeResult{}, fmt.Errorf("dial through jump host: %w", err)
+		}
+	} else {
+		dialer := &net.Dialer{
+			Timeout:   config.TCPDialTimeout,
+			KeepAlive: config.TCPKeepAliveInterval,
+		}
+		var err error
+		rawConn, err = dialer.Dial("tcp", addr)
+		if err != nil {
+			return HostKeyProbeResult{}, fmt.Errorf("dial failed: %w", err)
+		}
 	}
 	defer rawConn.Close()
 
@@ -144,7 +223,7 @@ func ProbeHostKey(host string, port int, config Config) (HostKeyProbeResult, err
 		Timeout: config.TCPDialTimeout,
 	}
 
-	_, _, _, err = ssh.NewClientConn(rawConn, addr, clientConfig)
+	_, _, _, err := ssh.NewClientConn(rawConn, addr, clientConfig)
 	if result.PublicKeyBase64 != "" {
 		return result, nil
 	}

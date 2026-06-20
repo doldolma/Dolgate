@@ -91,6 +91,7 @@ func (m *Manager) Connect(sessionID, requestID string, payload protocol.ConnectP
 		Passphrase:            payload.Passphrase,
 		TrustedHostKeyBase64:  payload.TrustedHostKeyBase64,
 		TrustedHostKeysBase64: payload.TrustedHostKeysBase64,
+		Jump:                  sshconn.JumpTargetFromCore(payload.Jump),
 	}, sshconn.Config{
 		TCPDialTimeout:       m.config.TCPDialTimeout,
 		TCPKeepAliveInterval: m.config.TCPKeepAliveInterval,

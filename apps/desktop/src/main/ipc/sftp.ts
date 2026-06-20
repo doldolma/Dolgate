@@ -204,6 +204,7 @@ export function registerSftpIpcHandlers(ctx: MainIpcContext): void {
       const { secrets, shouldPersistHostSecret } =
         await ctx.resolveRuntimeSshSecrets(sshHost, input.secrets);
       await ctx.ensureCertificateAuthReady(sshHost, secrets);
+      const jump = await ctx.resolveJumpHostTarget(sshHost);
 
       const endpoint = await ctx.coreManager.sftpConnect({
         endpointId: input.endpointId,
@@ -217,6 +218,7 @@ export function registerSftpIpcHandlers(ctx: MainIpcContext): void {
         passphrase: secrets.passphrase,
         trustedHostKeyBase64: trustedHostKeysBase64[0],
         trustedHostKeysBase64,
+        jump,
         hostId: sshHost.id,
         title: sshHost.label,
       });

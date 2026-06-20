@@ -166,7 +166,7 @@ func New(options Options) *Runtime {
 		forwarding.New(emitEvent),
 		ssmforward.New(emitEvent),
 		func(payload coretypes.HostKeyProbePayload) (coretypes.HostKeyProbedPayload, error) {
-			result, err := sshconn.ProbeHostKey(payload.Host, payload.Port, sshconn.DefaultConfig)
+			result, err := sshconn.ProbeHostKey(payload.Host, payload.Port, sshconn.JumpTargetFromCore(payload.Jump), sshconn.DefaultConfig)
 			if err != nil {
 				return coretypes.HostKeyProbedPayload{}, err
 			}

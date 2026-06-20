@@ -168,6 +168,7 @@ export function registerSshIpcHandlers(ctx: MainIpcContext): void {
       const { secrets, shouldPersistHostSecret } =
         await ctx.resolveRuntimeSshSecrets(sshHost, input.secrets);
       await ctx.ensureCertificateAuthReady(sshHost, secrets);
+      const jump = await ctx.resolveJumpHostTarget(sshHost);
       const title = input.title?.trim() || sshHost.label;
       const connection = await ctx.coreManager.connect({
         host: sshHost.hostname,
@@ -180,6 +181,7 @@ export function registerSshIpcHandlers(ctx: MainIpcContext): void {
         passphrase: secrets.passphrase,
         trustedHostKeyBase64: trustedHostKeysBase64[0],
         trustedHostKeysBase64,
+        jump,
         cols: input.cols,
         rows: input.rows,
         command: input.command?.trim() || undefined,

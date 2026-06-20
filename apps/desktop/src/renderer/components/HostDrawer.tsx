@@ -3,6 +3,7 @@ import type { HostRecord, SecretMetadataRecord } from '@shared';
 import { HostForm, type HostFormActionState, type HostFormHandle, type HostFormProps } from './HostForm';
 import { cn } from '../lib/cn';
 import { Button, CloseIcon, IconButton, SectionLabel } from '../ui';
+import type { SearchableSelectOption } from '../ui';
 
 interface HostDrawerProps {
   open: boolean;
@@ -10,6 +11,7 @@ interface HostDrawerProps {
   host: HostRecord | null;
   keychainEntries: SecretMetadataRecord[];
   groupOptions: Array<{ value: string | null; label: string }>;
+  jumpHostOptions?: SearchableSelectOption[];
   defaultGroupPath?: string | null;
   createKind?: 'ssh' | 'serial';
   desktopPlatform?: 'darwin' | 'win32' | 'linux' | 'unknown';
@@ -26,6 +28,7 @@ export function HostDrawer({
   host,
   keychainEntries,
   groupOptions,
+  jumpHostOptions = [],
   defaultGroupPath = null,
   createKind = 'ssh',
   desktopPlatform = 'unknown',
@@ -112,6 +115,7 @@ export function HostDrawer({
           host={formHost}
           keychainEntries={keychainEntries}
           groupOptions={groupOptions}
+          jumpHostOptions={jumpHostOptions}
           defaultGroupPath={defaultGroupPath}
           createKind={createKind}
           desktopPlatform={desktopPlatform}

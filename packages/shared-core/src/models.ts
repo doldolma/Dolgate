@@ -143,6 +143,8 @@ export interface SshHostRecord extends HostBaseRecord {
   privateKeyPath?: string | null;
   certificatePath?: string | null;
   secretRef?: string | null;
+  /** id of another SSH host to tunnel through (ProxyJump / bastion); null = direct. */
+  jumpHostId?: string | null;
 }
 
 export interface SshHostDraft extends HostBaseDraft {
@@ -154,6 +156,8 @@ export interface SshHostDraft extends HostBaseDraft {
   privateKeyPath?: string | null;
   certificatePath?: string | null;
   secretRef?: string | null;
+  /** id of another SSH host to tunnel through (ProxyJump / bastion); null = direct. */
+  jumpHostId?: string | null;
 }
 
 export interface AwsEc2HostRecord extends HostBaseRecord {

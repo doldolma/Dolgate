@@ -12,6 +12,7 @@ import { AwsImportDialog } from '../components/AwsImportDialog';
 import { HomeNavigation } from '../components/HomeNavigation';
 import { HostBrowser } from '../components/HostBrowser';
 import { HostDrawer } from '../components/HostDrawer';
+import { getJumpHostCandidates } from '../components/HostForm';
 import { LogsPanel } from '../components/LogsPanel';
 import { OpenSshImportDialog } from '../components/OpenSshImportDialog';
 import { PortForwardingPanel } from '../components/PortForwardingPanel';
@@ -97,6 +98,10 @@ export function HomeShell({
       homeViewModel.hostDrawer,
       homeViewModel.hosts,
     ],
+  );
+  const jumpHostOptions = useMemo(
+    () => getJumpHostCandidates(homeViewModel.hosts, currentHost?.id ?? null),
+    [homeViewModel.hosts, currentHost?.id],
   );
   const isDrawerOpen =
     active &&
@@ -445,6 +450,7 @@ export function HomeShell({
         host={currentHost}
         keychainEntries={settingsViewModel.keychainEntries}
         groupOptions={groupOptions}
+        jumpHostOptions={jumpHostOptions}
         defaultGroupPath={
           homeViewModel.hostDrawer.mode === 'create'
             ? homeViewModel.hostDrawer.defaultGroupPath

@@ -68,6 +68,7 @@ function createCoordinator(overrides: Record<string, unknown> = {}) {
       requireTrustedHostKeys: vi.fn(() => ["trusted"]),
       requireConfiguredSshUsername: vi.fn(() => "ubuntu"),
     },
+    resolveJumpHostTarget: vi.fn().mockResolvedValue(undefined),
     emitContainersConnectionProgress: vi.fn(),
     ...overrides,
   } as any;

@@ -117,20 +117,40 @@ type StreamFrame struct {
 	RequestID string     `json:"requestId,omitempty"`
 }
 
+// JumpTarget describes a bastion/jump host to tunnel a connection through
+// (ProxyJump / `ssh -J`). It carries the same SSH connection + credential fields
+// as a primary target; the desktop resolver fills these from the referenced
+// saved host. Jump is recursive so multi-hop chains are representable, although
+// the current UI configures only a single hop.
+type JumpTarget struct {
+	Host                  string      `json:"host"`
+	Port                  int         `json:"port"`
+	Username              string      `json:"username"`
+	AuthType              string      `json:"authType"`
+	Password              string      `json:"password,omitempty"`
+	PrivateKeyPEM         string      `json:"privateKeyPem,omitempty"`
+	CertificateText       string      `json:"certificateText,omitempty"`
+	Passphrase            string      `json:"passphrase,omitempty"`
+	TrustedHostKeyBase64  string      `json:"trustedHostKeyBase64,omitempty"`
+	TrustedHostKeysBase64 []string    `json:"trustedHostKeysBase64,omitempty"`
+	Jump                  *JumpTarget `json:"jump,omitempty"`
+}
+
 type ConnectPayload struct {
-	Host                  string   `json:"host"`
-	Port                  int      `json:"port"`
-	Username              string   `json:"username"`
-	AuthType              string   `json:"authType"`
-	Password              string   `json:"password,omitempty"`
-	PrivateKeyPEM         string   `json:"privateKeyPem,omitempty"`
-	CertificateText       string   `json:"certificateText,omitempty"`
-	Passphrase            string   `json:"passphrase,omitempty"`
-	TrustedHostKeyBase64  string   `json:"trustedHostKeyBase64"`
-	TrustedHostKeysBase64 []string `json:"trustedHostKeysBase64,omitempty"`
-	Cols                  int      `json:"cols"`
-	Rows                  int      `json:"rows"`
-	Command               string   `json:"command,omitempty"`
+	Host                  string      `json:"host"`
+	Port                  int         `json:"port"`
+	Username              string      `json:"username"`
+	AuthType              string      `json:"authType"`
+	Password              string      `json:"password,omitempty"`
+	PrivateKeyPEM         string      `json:"privateKeyPem,omitempty"`
+	CertificateText       string      `json:"certificateText,omitempty"`
+	Passphrase            string      `json:"passphrase,omitempty"`
+	TrustedHostKeyBase64  string      `json:"trustedHostKeyBase64"`
+	TrustedHostKeysBase64 []string    `json:"trustedHostKeysBase64,omitempty"`
+	Jump                  *JumpTarget `json:"jump,omitempty"`
+	Cols                  int         `json:"cols"`
+	Rows                  int         `json:"rows"`
+	Command               string      `json:"command,omitempty"`
 }
 
 type AWSConnectPayload struct {
@@ -236,34 +256,38 @@ type SerialControlCompletedPayload struct {
 }
 
 type SFTPConnectPayload struct {
-	Host                  string   `json:"host"`
-	Port                  int      `json:"port"`
-	Username              string   `json:"username"`
-	AuthType              string   `json:"authType"`
-	Password              string   `json:"password,omitempty"`
-	PrivateKeyPEM         string   `json:"privateKeyPem,omitempty"`
-	CertificateText       string   `json:"certificateText,omitempty"`
-	Passphrase            string   `json:"passphrase,omitempty"`
-	TrustedHostKeyBase64  string   `json:"trustedHostKeyBase64"`
-	TrustedHostKeysBase64 []string `json:"trustedHostKeysBase64,omitempty"`
+	Host                  string      `json:"host"`
+	Port                  int         `json:"port"`
+	Username              string      `json:"username"`
+	AuthType              string      `json:"authType"`
+	Password              string      `json:"password,omitempty"`
+	PrivateKeyPEM         string      `json:"privateKeyPem,omitempty"`
+	CertificateText       string      `json:"certificateText,omitempty"`
+	Passphrase            string      `json:"passphrase,omitempty"`
+	TrustedHostKeyBase64  string      `json:"trustedHostKeyBase64"`
+	TrustedHostKeysBase64 []string    `json:"trustedHostKeysBase64,omitempty"`
+	Jump                  *JumpTarget `json:"jump,omitempty"`
 }
 
 type ContainersConnectPayload struct {
-	Host                  string   `json:"host"`
-	Port                  int      `json:"port"`
-	Username              string   `json:"username"`
-	AuthType              string   `json:"authType"`
-	Password              string   `json:"password,omitempty"`
-	PrivateKeyPEM         string   `json:"privateKeyPem,omitempty"`
-	CertificateText       string   `json:"certificateText,omitempty"`
-	Passphrase            string   `json:"passphrase,omitempty"`
-	TrustedHostKeyBase64  string   `json:"trustedHostKeyBase64"`
-	TrustedHostKeysBase64 []string `json:"trustedHostKeysBase64,omitempty"`
+	Host                  string      `json:"host"`
+	Port                  int         `json:"port"`
+	Username              string      `json:"username"`
+	AuthType              string      `json:"authType"`
+	Password              string      `json:"password,omitempty"`
+	PrivateKeyPEM         string      `json:"privateKeyPem,omitempty"`
+	CertificateText       string      `json:"certificateText,omitempty"`
+	Passphrase            string      `json:"passphrase,omitempty"`
+	TrustedHostKeyBase64  string      `json:"trustedHostKeyBase64"`
+	TrustedHostKeysBase64 []string    `json:"trustedHostKeysBase64,omitempty"`
+	Jump                  *JumpTarget `json:"jump,omitempty"`
 }
 
 type HostKeyProbePayload struct {
 	Host string `json:"host"`
 	Port int    `json:"port"`
+	// Jump이 설정되면 그 베스천을 경유해 타깃 호스트 키를 읽는다(베스천 뒤의 타깃 TOFU).
+	Jump *JumpTarget `json:"jump,omitempty"`
 }
 
 type CertificateInspectPayload struct {
@@ -409,22 +433,23 @@ type TransferFailedItemPayload struct {
 }
 
 type PortForwardStartPayload struct {
-	Host                  string   `json:"host"`
-	Port                  int      `json:"port"`
-	Username              string   `json:"username"`
-	AuthType              string   `json:"authType"`
-	Password              string   `json:"password,omitempty"`
-	PrivateKeyPEM         string   `json:"privateKeyPem,omitempty"`
-	CertificateText       string   `json:"certificateText,omitempty"`
-	Passphrase            string   `json:"passphrase,omitempty"`
-	TrustedHostKeyBase64  string   `json:"trustedHostKeyBase64"`
-	TrustedHostKeysBase64 []string `json:"trustedHostKeysBase64,omitempty"`
-	Mode                  string   `json:"mode"`
-	BindAddress           string   `json:"bindAddress"`
-	BindPort              int      `json:"bindPort"`
-	TargetHost            string   `json:"targetHost,omitempty"`
-	TargetPort            int      `json:"targetPort,omitempty"`
-	SourceEndpointID      string   `json:"sourceEndpointId,omitempty"`
+	Host                  string      `json:"host"`
+	Port                  int         `json:"port"`
+	Username              string      `json:"username"`
+	AuthType              string      `json:"authType"`
+	Password              string      `json:"password,omitempty"`
+	PrivateKeyPEM         string      `json:"privateKeyPem,omitempty"`
+	CertificateText       string      `json:"certificateText,omitempty"`
+	Passphrase            string      `json:"passphrase,omitempty"`
+	TrustedHostKeyBase64  string      `json:"trustedHostKeyBase64"`
+	TrustedHostKeysBase64 []string    `json:"trustedHostKeysBase64,omitempty"`
+	Jump                  *JumpTarget `json:"jump,omitempty"`
+	Mode                  string      `json:"mode"`
+	BindAddress           string      `json:"bindAddress"`
+	BindPort              int         `json:"bindPort"`
+	TargetHost            string      `json:"targetHost,omitempty"`
+	TargetPort            int         `json:"targetPort,omitempty"`
+	SourceEndpointID      string      `json:"sourceEndpointId,omitempty"`
 }
 
 type SSMPortForwardStartPayload struct {

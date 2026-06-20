@@ -145,7 +145,10 @@ export function createMainIpcContext(
     awsService,
     awsSsmTunnelService,
     awsSftpCoordinator,
+    resolveRuntimeSshSecrets: secretCoordinator.resolveRuntimeSshSecrets,
+    ensureCertificateAuthReady: secretCoordinator.ensureCertificateAuthReady,
   });
+
   const containerRuntimeCoordinator = createContainerRuntimeCoordinator({
     coreManager,
     knownHosts,
@@ -155,6 +158,7 @@ export function createMainIpcContext(
     tunnelRegistry,
     secretCoordinator,
     hostCoordinator,
+    resolveJumpHostTarget: hostCoordinator.resolveJumpHostTarget,
     emitContainersConnectionProgress:
       coreEventBridge.emitContainersConnectionProgress,
   });
@@ -171,6 +175,7 @@ export function createMainIpcContext(
   });
 
   return {
+    resolveJumpHostTarget: hostCoordinator.resolveJumpHostTarget,
     hosts,
     groups,
     settings,

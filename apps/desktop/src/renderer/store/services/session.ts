@@ -445,6 +445,31 @@ export function createSessionServices(deps: SliceDeps) {
       return;
     }
 
+    // 점프(베스천) 경유 타깃이면, 신뢰된 베스천을 통해 타깃 호스트 키를 probe/신뢰한
+    // 뒤에 연결한다. 베스천 자체의 신뢰는 진입 플로우(또는 직전 프롬프트 수락)에서
+    // 이미 보장돼, 이 시점엔 베스천 경유 probe가 동작한다.
+    if (isSshHostRecord(host) && host.jumpHostId) {
+      const targetTrusted = await ensureTrustedHost(set, {
+        hostId,
+        sessionId,
+        action: {
+          kind: "ssh",
+          hostId,
+          cols: attempt.latestCols,
+          rows: attempt.latestRows,
+          secrets,
+        },
+      });
+      if (!targetTrusted) {
+        updateSessionProgress(
+          set,
+          sessionId,
+          resolveAwaitingHostTrustProgress(host),
+        );
+        return;
+      }
+    }
+
     const currentProgressStage = state.tabs.find(
       (tab) => tab.sessionId === sessionId,
     )?.connectionProgress?.stage;
@@ -644,6 +669,9 @@ export function createSessionServices(deps: SliceDeps) {
         return;
       }
 
+      // ensureTrustedHost는 jumpHostId가 있으면 베스천을 먼저 신뢰한 뒤 타깃을
+      // (베스천 경유로) probe한다. 타깃 자신의 키 신뢰는 startPendingSessionConnect에서
+      // 베스천이 신뢰된 상태로 한 번 더 보장한다(수락 후 재시도 경로 포함).
       const trusted = await ensureTrustedHost(set, {
         hostId,
         sessionId,

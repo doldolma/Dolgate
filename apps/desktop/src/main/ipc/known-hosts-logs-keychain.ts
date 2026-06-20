@@ -7,6 +7,7 @@ import type {
   HostSecretInput,
   ManagedSecretPayload,
 } from "@shared";
+import { isSshHostRecord } from "@shared";
 import { clipboard, ipcMain } from "electron";
 import { ipcChannels } from "../../common/ipc-channels";
 import type { MainIpcContext, SshHostRecord } from "./context";
@@ -59,7 +60,14 @@ export function registerKnownHostsLogsKeychainIpcHandlers(
         input.endpointId?.startsWith("containers:")
           ? ctx.emitContainersConnectionProgress
           : ctx.emitSftpConnectionProgress;
-      return ctx.buildHostKeyProbeResult(emitProgress, input);
+      // 베스천 뒤의(직접 닿지 않는) 타깃이면 점프 호스트를 해석해 그 경유로 키를 읽는다.
+      // 점프 호스트 자신을 probe할 땐 jumpHostId가 없어 jump는 undefined → 직접 probe된다.
+      const host = ctx.hosts.getById(input.hostId);
+      const jump =
+        host && isSshHostRecord(host)
+          ? await ctx.resolveJumpHostTarget(host)
+          : undefined;
+      return ctx.buildHostKeyProbeResult(emitProgress, input, jump);
     },
   );
 

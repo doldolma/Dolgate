@@ -120,6 +120,7 @@ func (s *Service) Start(ruleID, requestID string, payload protocol.PortForwardSt
 		Passphrase:            payload.Passphrase,
 		TrustedHostKeyBase64:  payload.TrustedHostKeyBase64,
 		TrustedHostKeysBase64: payload.TrustedHostKeysBase64,
+		Jump:                  sshconn.JumpTargetFromCore(payload.Jump),
 	})
 	if err != nil {
 		return err

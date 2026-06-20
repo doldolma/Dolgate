@@ -1,7 +1,7 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AwsEc2HostRecord, SecretMetadataRecord, SshHostRecord } from '@shared';
-import { HostForm } from './HostForm';
+import { HostForm, getJumpHostCandidates } from './HostForm';
 import { listAwsProfiles } from '../services/desktop/imports';
 import { useHostFormController } from '../controllers/useHostFormController';
 
@@ -686,5 +686,46 @@ describe('HostForm', () => {
       }),
       undefined,
     );
+  });
+});
+
+describe('getJumpHostCandidates', () => {
+  it('returns other SSH hosts, excluding self and non-SSH kinds', () => {
+    const self = createHost({ id: 'self', label: 'Target' });
+    const bastion = createHost({ id: 'bastion', label: 'Bastion' });
+    const aws = createAwsHost({ id: 'aws-1' });
+
+    const options = getJumpHostCandidates([self, bastion, aws], 'self');
+
+    expect(options).toEqual([
+      {
+        value: 'bastion',
+        label: 'Bastion',
+        description: 'ubuntu@prod.example.com:22',
+      },
+    ]);
+  });
+
+  it('includes every SSH host when there is no self id (new host)', () => {
+    const a = createHost({ id: 'a', label: 'A' });
+    const b = createHost({ id: 'b', label: 'B' });
+
+    const options = getJumpHostCandidates([a, b], null);
+
+    expect(options.map((option) => option.value)).toEqual(['a', 'b']);
+  });
+
+  it('falls back to hostname when the label is blank', () => {
+    const host = createHost({ id: 'h', label: '   ', hostname: 'edge.example.com' });
+
+    const options = getJumpHostCandidates([host], null);
+
+    expect(options).toEqual([
+      {
+        value: 'h',
+        label: 'edge.example.com',
+        description: 'ubuntu@edge.example.com:22',
+      },
+    ]);
   });
 });

@@ -522,6 +522,7 @@ export function registerPortForwardAndDnsIpcHandlers(
       const { secrets, shouldPersistHostSecret } =
         await ctx.resolveRuntimeSshSecrets(sshHost);
       await ctx.ensureCertificateAuthReady(sshHost, secrets);
+      const jump = await ctx.resolveJumpHostTarget(sshHost);
 
       const runtime = await ctx.coreManager.startPortForward({
         ruleId: rule.id,
@@ -536,6 +537,7 @@ export function registerPortForwardAndDnsIpcHandlers(
         passphrase: secrets.passphrase,
         trustedHostKeyBase64: trustedHostKeysBase64[0],
         trustedHostKeysBase64,
+        jump,
         mode: rule.mode,
         bindAddress: rule.bindAddress,
         bindPort: rule.bindPort,

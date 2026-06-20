@@ -144,15 +144,20 @@ export function createTrustAuthServices({ api, get }: SliceDeps) {
     }
   };
 
-  const ensureTrustedHost = async (
+  type EnsureTrustedHostInput = {
+    hostId: string;
+    sessionId?: string | null;
+    endpointId?: string | null;
+    skipProbeIfAlreadyTrusted?: boolean;
+    action: PendingHostKeyPrompt["action"];
+  };
+
+  // Probe + (if needed) prompt for a single host's key. The main process probes
+  // a host that has a jumpHostId THROUGH its (already-trusted) jump host, so the
+  // jump must be trusted before this is called for such a target.
+  const ensureTrustedHostKey = async (
     set: StoreSetter,
-    input: {
-      hostId: string;
-      sessionId?: string | null;
-      endpointId?: string | null;
-      skipProbeIfAlreadyTrusted?: boolean;
-      action: PendingHostKeyPrompt["action"];
-    },
+    input: EnsureTrustedHostInput,
   ): Promise<boolean> => {
     if (input.skipProbeIfAlreadyTrusted && hasTrustedHostKey(input.hostId)) {
       return true;
@@ -173,6 +178,38 @@ export function createTrustAuthServices({ api, get }: SliceDeps) {
       },
     });
     return false;
+  };
+
+  const ensureTrustedHost = (
+    set: StoreSetter,
+    input: EnsureTrustedHostInput,
+  ): Promise<boolean> => {
+    // 타깃이 점프(베스천)를 경유하면, 베스천을 먼저 신뢰해야 main이 그 경유로 타깃 키를
+    // probe할 수 있다. 베스천 자신은 jumpHostId가 없어 직접 probe된다. v1은 단일 홉이라
+    // 한 단계만 선행 신뢰한다(체인/사이클 무한재귀 방지).
+    // 점프가 없는 일반 경로는 inner 프로미스를 그대로 반환해 추가 마이크로태스크 없이
+    // 기존 타이밍을 유지한다.
+    const targetHost = get().hosts.find((item) => item.id === input.hostId);
+    if (
+      targetHost &&
+      isSshHostRecord(targetHost) &&
+      targetHost.jumpHostId &&
+      targetHost.jumpHostId !== input.hostId
+    ) {
+      const jumpHostId = targetHost.jumpHostId;
+      return (async () => {
+        const jumpTrusted = await ensureTrustedHostKey(set, {
+          ...input,
+          hostId: jumpHostId,
+        });
+        if (!jumpTrusted) {
+          return false;
+        }
+        return ensureTrustedHostKey(set, input);
+      })();
+    }
+
+    return ensureTrustedHostKey(set, input);
   };
 
   return {

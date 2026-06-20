@@ -8,6 +8,7 @@ Dolgate Desktop은 macOS와 Windows를 위한 Electron 기반 SSH 워크스페�
 - 멀티 세션 터미널과 탭 기반 워크스페이스
 - 명령어 자동완성 (Fig 스펙 + generator + 경로)
 - 듀얼 패널 SFTP 브라우저와 파일 전송
+- 점프 호스트(베스천) 경유 연결 (ProxyJump / `ssh -J`)
 - Local / Remote / Dynamic 포트 포워딩
 - 세션 녹화 및 재생
 - Session Share, 브라우저 viewer, 실시간 채팅
@@ -62,6 +63,16 @@ generator 실행 엔진은 Amazon Q Developer CLI(오픈소스 Fig 후신, Apach
 - raw history는 일부러 약하게(150) 둬서, 매우 자주 쓰는 줄(횟수 ~20+)만 Path/Value 위로 올라옵니다.
 
 가중치 상수는 `apps/desktop/src/renderer/lib/terminal-autocomplete.ts`의 `SCORE_WEIGHTS` 한 곳에서 조정합니다.
+
+## 점프 호스트 (베스천)
+
+프라이빗 서브넷처럼 직접 닿지 않는 호스트를, 중간 **베스천(SSH 서버)을 경유**해 접속하는 기능입니다. 표준 SSH의 `direct-tcpip` 포워딩(`ssh -J`)을 쓰므로 베스천에는 평범한 sshd만 있으면 되고, 모든 처리는 클라이언트(`ssh-core`)에서 일어납니다(sync-api 무관).
+
+- **설정**: 호스트 생성/수정 창의 Connection 섹션 **Jump host** 선택기에서 **저장된 다른 SSH 호스트**를 베스천으로 고릅니다. 베스천의 자격증명·known-host는 그 저장 호스트 것을 재사용합니다.
+- **적용 범위**: 터미널 · SFTP · 포트 포워딩 · 컨테이너 — 4개 연결 전부 동일하게 경유합니다. (내부적으로 모든 연결이 거치는 단일 dial 지점 `sshconn.DialClient`에 점프를 주입)
+- **신뢰(TOFU)**: 베스천을 먼저 신뢰한 뒤, 타깃 호스트 키는 **신뢰된 베스천을 경유해** probe합니다. 베스천이 신뢰돼 있지 않으면 자동으로 지문 프롬프트가 떠 신뢰 후 진행합니다(Termius 스타일). 베스천 뒤의(직접 닿지 않는) 타깃 키도 이 경유 probe로 확인/신뢰할 수 있습니다.
+- **인증**: 베스천이 password / privateKey / certificate / keyboard-interactive 어느 방식이든 연결됩니다(두 홉을 순차 인증). 단, 베스천 경유 **키 probe**는 비대화형 인증(password/key/certificate)만 지원합니다.
+- **제약(v1)**: 단일 홉만 지원합니다(`h1,h2,h3` 같은 다단 체인 UI는 범위 밖 — Go 코어는 재귀 구조로 표현 가능). 점프 대상은 일반 SSH 호스트만 가능하며 AWS-SSM/Warpgate 호스트는 점프로 쓸 수 없습니다.
 
 ## 로컬 실행
 

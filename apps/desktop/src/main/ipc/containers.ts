@@ -440,6 +440,7 @@ export function registerContainersIpcHandlers(ctx: MainIpcContext): void {
       const { secrets, shouldPersistHostSecret } =
         await ctx.resolveRuntimeSshSecrets(sshHost);
       await ctx.ensureCertificateAuthReady(sshHost, secrets);
+      const jump = await ctx.resolveJumpHostTarget(sshHost);
       const connection = await ctx.coreManager.connect({
         host: sshHost.hostname,
         port: sshHost.port,
@@ -451,6 +452,7 @@ export function registerContainersIpcHandlers(ctx: MainIpcContext): void {
         passphrase: secrets.passphrase,
         trustedHostKeyBase64: trustedHostKeysBase64[0],
         trustedHostKeysBase64,
+        jump,
         cols: 120,
         rows: 32,
         command,

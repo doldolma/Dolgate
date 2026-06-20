@@ -229,6 +229,23 @@ export interface DesktopSftpConnectInput {
   secrets?: HostSecretInput;
 }
 
+// main 프로세스가 점프(베스천) 호스트의 자격증명/신뢰키까지 해석한 결과. Go 코어의
+// JumpTarget(json: jump)에 1:1로 직렬화되며, 재귀 구조라 다단 체인도 표현 가능하다
+// (현재 UI는 단일 홉만 설정). 필드명은 Go json 태그와 정확히 일치해야 한다.
+export interface ResolvedJumpHost {
+  host: string;
+  port: number;
+  username: string;
+  authType: AuthType;
+  password?: string;
+  privateKeyPem?: string;
+  certificateText?: string;
+  passphrase?: string;
+  trustedHostKeyBase64: string;
+  trustedHostKeysBase64?: string[];
+  jump?: ResolvedJumpHost;
+}
+
 // main 프로세스가 키체인과 DB를 합쳐 최종적으로 Go 코어에 보내는 payload다.
 export interface ResolvedCoreConnectPayload {
   host: string;
@@ -241,6 +258,7 @@ export interface ResolvedCoreConnectPayload {
   passphrase?: string;
   trustedHostKeyBase64: string;
   trustedHostKeysBase64?: string[];
+  jump?: ResolvedJumpHost;
   cols: number;
   rows: number;
   command?: string;
@@ -360,6 +378,7 @@ export interface ResolvedSftpConnectPayload {
   passphrase?: string;
   trustedHostKeyBase64: string;
   trustedHostKeysBase64?: string[];
+  jump?: ResolvedJumpHost;
 }
 
 export interface ResolvedContainersConnectPayload {
@@ -373,11 +392,14 @@ export interface ResolvedContainersConnectPayload {
   passphrase?: string;
   trustedHostKeyBase64: string;
   trustedHostKeysBase64?: string[];
+  jump?: ResolvedJumpHost;
 }
 
 export interface ResolvedHostKeyProbePayload {
   host: string;
   port: number;
+  // 베스천 뒤의(직접 닿지 않는) 타깃 호스트 키를 읽을 때, 경유할 점프 호스트.
+  jump?: ResolvedJumpHost;
 }
 
 export interface ResolvedPortForwardStartPayload {
@@ -391,6 +413,7 @@ export interface ResolvedPortForwardStartPayload {
   passphrase?: string;
   trustedHostKeyBase64: string;
   trustedHostKeysBase64?: string[];
+  jump?: ResolvedJumpHost;
   mode: PortForwardMode;
   bindAddress: string;
   bindPort: number;

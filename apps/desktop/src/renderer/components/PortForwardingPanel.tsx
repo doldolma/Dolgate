@@ -60,6 +60,8 @@ import {
   ModalShell,
   NoticeCard,
   PanelSection,
+  SearchableSelect,
+  type SearchableSelectOption,
   SectionLabel,
   SelectField,
   StatusBadge,
@@ -282,14 +284,6 @@ function getPortForwardHostSearchText(host: HostRecord): string {
     ].join(' ');
   }
   return [...base, getContainerHostSecondaryLabel(host)].join(' ');
-}
-
-function filterForwardHostOptions<T extends HostRecord>(hosts: T[], query: string): T[] {
-  const normalizedQuery = query.trim().toLowerCase();
-  if (!normalizedQuery) {
-    return hosts;
-  }
-  return hosts.filter((host) => getPortForwardHostSearchText(host).toLowerCase().includes(normalizedQuery));
 }
 
 function emptySshDraft(hostId?: string): PortForwardDraft {
@@ -794,16 +788,12 @@ export function PortForwardingPanel({
   const [discoveryContainers, setDiscoveryContainers] = useState<HostContainerSummary[]>([]);
   const [discoveryDetails, setDiscoveryDetails] = useState<HostContainerDetails | null>(null);
   const [discoveryDetailsLoading, setDiscoveryDetailsLoading] = useState(false);
-  const [isHostPickerOpen, setIsHostPickerOpen] = useState(false);
   const [isContainerPickerOpen, setIsContainerPickerOpen] = useState(false);
-  const [hostSearchQuery, setHostSearchQuery] = useState('');
   const [knownHostPrompt, setKnownHostPrompt] = useState<PendingHostKeyPrompt | null>(null);
   const discoveryHostIdRef = useRef<string | null>(null);
   const discoveryListRequestRef = useRef(0);
   const discoveryDetailsRequestRef = useRef(0);
-  const hostPickerRef = useRef<HTMLDivElement | null>(null);
   const containerPickerRef = useRef<HTMLDivElement | null>(null);
-  const hostSearchInputRef = useRef<HTMLInputElement | null>(null);
   const eligibleRules = useMemo(() => getDnsOverrideEligibleRules(rules), [rules]);
   const ruleMap = useMemo(
     () => new Map(rules.map((rule) => [rule.id, rule])),
@@ -914,17 +904,50 @@ export function PortForwardingPanel({
     () => discoveryDetails?.ports.filter((port) => port.protocol === 'tcp' && port.containerPort > 0) ?? [],
     [discoveryDetails]
   );
-  const selectedSshHost = sshDraft ? sshHosts.find((host) => host.id === sshDraft.hostId) ?? null : null;
-  const visibleSshHosts = useMemo(() => filterForwardHostOptions(sshHosts, hostSearchQuery), [hostSearchQuery, sshHosts]);
-  const selectedAwsHost = isAwsSsmPortForwardDraft(draft)
-    ? awsHosts.find((host) => host.id === draft.hostId) ?? null
-    : null;
-  const visibleAwsHosts = useMemo(() => filterForwardHostOptions(awsHosts, hostSearchQuery), [awsHosts, hostSearchQuery]);
+  const sshHostOptions = useMemo<SearchableSelectOption[]>(
+    () =>
+      sshHosts.map((host) => ({
+        value: host.id,
+        label: host.label,
+        description: getSshForwardHostSecondaryLabel(host),
+        badge: 'SSH',
+        searchText: getPortForwardHostSearchText(host),
+      })),
+    [sshHosts],
+  );
+  const awsHostOptions = useMemo<SearchableSelectOption[]>(
+    () =>
+      awsHosts.map((host) => ({
+        value: host.id,
+        label: host.label,
+        description: getAwsSsmForwardHostSecondaryLabel(host),
+        badge: 'AWS',
+        searchText: getPortForwardHostSearchText(host),
+      })),
+    [awsHosts],
+  );
   const selectedEcsHost = ecsTaskDraft ? ecsHosts.find((host) => host.id === ecsTaskDraft.hostId) ?? null : null;
-  const visibleEcsHosts = useMemo(() => filterForwardHostOptions(ecsHosts, hostSearchQuery), [ecsHosts, hostSearchQuery]);
-  const visibleContainerHosts = useMemo(
-    () => filterForwardHostOptions(containerHosts, hostSearchQuery),
-    [containerHosts, hostSearchQuery],
+  const ecsHostOptions = useMemo<SearchableSelectOption[]>(
+    () =>
+      ecsHosts.map((host) => ({
+        value: host.id,
+        label: host.label,
+        description: getEcsTaskForwardHostSecondaryLabel(host),
+        badge: 'ECS',
+        searchText: getPortForwardHostSearchText(host),
+      })),
+    [ecsHosts],
+  );
+  const containerHostOptions = useMemo<SearchableSelectOption[]>(
+    () =>
+      containerHosts.map((host) => ({
+        value: host.id,
+        label: host.label,
+        description: getContainerHostSecondaryLabel(host),
+        badge: getContainerHostKindLabel(host),
+        searchText: getPortForwardHostSearchText(host),
+      })),
+    [containerHosts],
   );
   const ecsContainerOptions = useMemo(
     () => ecsServiceDetails?.containers ?? [],
@@ -940,8 +963,6 @@ export function PortForwardingPanel({
   );
 
   function selectSshForwardHost(hostId: string) {
-    setIsHostPickerOpen(false);
-    setHostSearchQuery('');
     setDraft((current) => {
       if (!isSshPortForwardDraft(current)) {
         return current;
@@ -954,8 +975,6 @@ export function PortForwardingPanel({
   }
 
   function selectAwsForwardHost(hostId: string) {
-    setIsHostPickerOpen(false);
-    setHostSearchQuery('');
     setDraft((current) => {
       if (!isAwsSsmPortForwardDraft(current)) {
         return current;
@@ -968,8 +987,6 @@ export function PortForwardingPanel({
   }
 
   function selectEcsForwardHost(hostId: string) {
-    setIsHostPickerOpen(false);
-    setHostSearchQuery('');
     setDraft((current) => {
       if (!isEcsTaskPortForwardDraft(current)) {
         return current;
@@ -985,8 +1002,6 @@ export function PortForwardingPanel({
   }
 
   function selectContainerForwardHost(hostId: string) {
-    setIsHostPickerOpen(false);
-    setHostSearchQuery('');
     setDraft((current) => {
       if (!isContainerPortForwardDraft(current)) {
         return current;
@@ -1002,104 +1017,6 @@ export function PortForwardingPanel({
     });
   }
 
-  function renderForwardHostPicker<T extends HostRecord>({
-    label,
-    selectedHost,
-    visibleHosts,
-    disabled,
-    searchLabel,
-    getSecondaryLabel,
-    getBadgeLabel,
-    onSelect,
-  }: {
-    label: string;
-    selectedHost: T | null;
-    visibleHosts: T[];
-    disabled: boolean;
-    searchLabel: string;
-    getSecondaryLabel: (host: T) => string;
-    getBadgeLabel: (host: T) => string;
-    onSelect: (hostId: string) => void;
-  }) {
-    return (
-      <div ref={hostPickerRef}>
-        <PickerField
-          label={label}
-          placeholder="Select host"
-          isOpen={isHostPickerOpen}
-          disabled={disabled}
-          onToggle={() => {
-            if (disabled) {
-              return;
-            }
-            setIsContainerPickerOpen(false);
-            setIsHostPickerOpen((current) => !current);
-          }}
-          selectedContent={
-            selectedHost ? (
-              <div className="flex min-w-0 items-center justify-between gap-[0.85rem]">
-                <div className="min-w-0 grid gap-[0.18rem]">
-                  <strong className="text-[1rem] text-[var(--text)]">
-                    {selectedHost.label}
-                  </strong>
-                  <span className="truncate text-[0.84rem] text-[var(--text-soft)]">
-                    {getSecondaryLabel(selectedHost)}
-                  </span>
-                </div>
-                <Badge className="shrink-0">{getBadgeLabel(selectedHost)}</Badge>
-              </div>
-            ) : undefined
-          }
-        >
-          <Input
-            ref={hostSearchInputRef}
-            aria-label={searchLabel}
-            placeholder="이름, 주소, 프로필, 그룹, 태그 검색"
-            value={hostSearchQuery}
-            onChange={(event) => setHostSearchQuery(event.target.value)}
-            className="min-h-10 rounded-[14px] px-3 py-2 text-[0.9rem]"
-          />
-          {visibleHosts.length > 0 ? (
-            visibleHosts.map((host) => (
-              <button
-                key={host.id}
-                type="button"
-                role="option"
-                aria-selected={draft.hostId === host.id}
-                className={cn(
-                  'flex w-full items-center justify-between gap-[0.85rem] rounded-[18px] border border-[var(--border)] bg-[color-mix(in_srgb,var(--dialog-surface-muted)_88%,transparent_12%)] px-[0.95rem] py-[0.9rem] text-left transition-[border-color,background,transform] duration-150 hover:border-[color-mix(in_srgb,var(--accent-strong)_30%,var(--border))] hover:bg-[color-mix(in_srgb,var(--dialog-surface)_84%,var(--accent-strong)_16%)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[color-mix(in_srgb,var(--accent-strong)_45%,white_55%)] focus-visible:outline-offset-2',
-                  draft.hostId === host.id &&
-                    'border-[color-mix(in_srgb,var(--accent-strong)_38%,var(--border))] bg-[color-mix(in_srgb,var(--dialog-surface)_76%,var(--accent-strong)_24%)] shadow-[0_0_0_1px_color-mix(in_srgb,var(--accent-strong)_18%,transparent_82%)]',
-                )}
-                onPointerDown={(event) => {
-                  event.preventDefault();
-                  onSelect(host.id);
-                }}
-                onClick={() => onSelect(host.id)}
-              >
-                <div className="min-w-0 grid gap-[0.18rem]">
-                  <strong className="text-[1rem] text-[var(--text)]">
-                    {host.label}
-                  </strong>
-                  <span className="truncate text-[0.84rem] text-[var(--text-soft)]">
-                    {getSecondaryLabel(host)}
-                  </span>
-                </div>
-                <Badge className="shrink-0">{getBadgeLabel(host)}</Badge>
-              </button>
-            ))
-          ) : (
-            <div
-              className="rounded-[16px] border border-dashed border-[var(--border)] px-[0.95rem] py-[0.9rem] text-[0.9rem] text-[var(--text-soft)]"
-              role="status"
-            >
-              검색 결과가 없습니다.
-            </div>
-          )}
-        </PickerField>
-      </div>
-    );
-  }
 
   function renderRuleCard(rule: PortForwardRuleRecord) {
     const runtime = runtimeMap.get(rule.id);
@@ -1433,9 +1350,7 @@ export function PortForwardingPanel({
     setActiveTab(tab);
     setEditingRuleId(null);
     setEditingDnsOverrideId(null);
-    setIsHostPickerOpen(false);
     setIsContainerPickerOpen(false);
-    setHostSearchQuery('');
     setDraft(
       tab === 'ssh'
         ? emptySshDraft(sshHosts[0]?.id)
@@ -1459,9 +1374,7 @@ export function PortForwardingPanel({
     setEditingRuleId(rule.id);
     setEditingDnsOverrideId(null);
     setActiveTab(rule.transport);
-    setIsHostPickerOpen(false);
     setIsContainerPickerOpen(false);
-    setHostSearchQuery('');
     setDraft(toDraft(rule));
     setIsSubmitting(false);
     setError(null);
@@ -1474,9 +1387,7 @@ export function PortForwardingPanel({
     setEditingRuleId(null);
     setEditingDnsOverrideId(override.id);
     setActiveTab('dns');
-    setIsHostPickerOpen(false);
     setIsContainerPickerOpen(false);
-    setHostSearchQuery('');
     setDnsDraft(
       isLinkedDnsOverrideRecord(override)
         ? {
@@ -1522,9 +1433,7 @@ export function PortForwardingPanel({
       return;
     }
     setIsModalOpen(false);
-    setIsHostPickerOpen(false);
     setIsContainerPickerOpen(false);
-    setHostSearchQuery('');
     setKnownHostPrompt(null);
     resetEcsDiscoveryState();
     await releaseDiscoveryHost(discoveryHostIdRef.current);
@@ -1855,28 +1764,12 @@ export function PortForwardingPanel({
 
   useEffect(() => {
     if (!isModalOpen) {
-      setIsHostPickerOpen(false);
       setIsContainerPickerOpen(false);
-      setHostSearchQuery('');
     }
   }, [isModalOpen]);
 
   useEffect(() => {
-    if (!isHostPickerOpen) {
-      setHostSearchQuery('');
-      return;
-    }
-    if (!isModalOpen) {
-      return;
-    }
-    const frame = window.requestAnimationFrame(() => {
-      hostSearchInputRef.current?.focus();
-    });
-    return () => window.cancelAnimationFrame(frame);
-  }, [isHostPickerOpen, isModalOpen]);
-
-  useEffect(() => {
-    if (!isModalOpen || (!isHostPickerOpen && !isContainerPickerOpen)) {
+    if (!isModalOpen || !isContainerPickerOpen) {
       return;
     }
 
@@ -1885,10 +1778,9 @@ export function PortForwardingPanel({
       if (!(target instanceof Node)) {
         return;
       }
-      if (hostPickerRef.current?.contains(target) || containerPickerRef.current?.contains(target)) {
+      if (containerPickerRef.current?.contains(target)) {
         return;
       }
-      setIsHostPickerOpen(false);
       setIsContainerPickerOpen(false);
     }
 
@@ -1896,7 +1788,6 @@ export function PortForwardingPanel({
       if (event.key !== 'Escape') {
         return;
       }
-      setIsHostPickerOpen(false);
       setIsContainerPickerOpen(false);
     }
 
@@ -1906,7 +1797,7 @@ export function PortForwardingPanel({
       document.removeEventListener('mousedown', handlePointerDown);
       document.removeEventListener('keydown', handleKeyDown);
     };
-  }, [isContainerPickerOpen, isHostPickerOpen, isModalOpen]);
+  }, [isContainerPickerOpen, isModalOpen]);
 
   useEffect(() => {
     if (!isModalOpen || !containerDraft) {
@@ -2245,49 +2136,59 @@ export function PortForwardingPanel({
                     <input value={draft.label} onChange={(event) => setDraft((current) => ({ ...current, label: event.target.value }))} disabled={isSubmitting} />
                   </FieldGroup>
 
-              {isContainerPortForwardDraft(draft)
-                ? renderForwardHostPicker({
-                    label: 'Host',
-                    selectedHost: discoveryHost,
-                    visibleHosts: visibleContainerHosts,
-                    disabled: isSubmitting || discoveryLoading || discoveryDetailsLoading,
-                    searchLabel: 'Container forwarding host search',
-                    getSecondaryLabel: getContainerHostSecondaryLabel,
-                    getBadgeLabel: getContainerHostKindLabel,
-                    onSelect: selectContainerForwardHost,
-                  })
-                : isSshPortForwardDraft(draft)
-                  ? renderForwardHostPicker({
-                      label: 'Host',
-                      selectedHost: selectedSshHost,
-                      visibleHosts: visibleSshHosts,
-                      disabled: isSubmitting,
-                      searchLabel: 'SSH forwarding host search',
-                      getSecondaryLabel: getSshForwardHostSecondaryLabel,
-                      getBadgeLabel: () => 'SSH',
-                      onSelect: selectSshForwardHost,
-                    })
-                  : isAwsSsmPortForwardDraft(draft)
-                    ? renderForwardHostPicker({
-                        label: 'AWS EC2 Host',
-                        selectedHost: selectedAwsHost,
-                        visibleHosts: visibleAwsHosts,
-                        disabled: isSubmitting,
-                        searchLabel: 'AWS EC2 forwarding host search',
-                        getSecondaryLabel: getAwsSsmForwardHostSecondaryLabel,
-                        getBadgeLabel: () => 'AWS',
-                        onSelect: selectAwsForwardHost,
-                      })
-                    : renderForwardHostPicker({
-                        label: 'AWS ECS Host',
-                        selectedHost: selectedEcsHost,
-                        visibleHosts: visibleEcsHosts,
-                        disabled: isSubmitting,
-                        searchLabel: 'ECS task forwarding host search',
-                        getSecondaryLabel: getEcsTaskForwardHostSecondaryLabel,
-                        getBadgeLabel: () => 'ECS',
-                        onSelect: selectEcsForwardHost,
-                      })}
+              {isContainerPortForwardDraft(draft) ? (
+                <FieldGroup label="Host">
+                  <SearchableSelect
+                    ariaLabel="Host"
+                    searchAriaLabel="Container forwarding host search"
+                    placeholder="Select host"
+                    searchPlaceholder="이름, 주소, 프로필, 그룹, 태그 검색"
+                    value={draft.hostId}
+                    options={containerHostOptions}
+                    onChange={selectContainerForwardHost}
+                    disabled={isSubmitting || discoveryLoading || discoveryDetailsLoading}
+                  />
+                </FieldGroup>
+              ) : isSshPortForwardDraft(draft) ? (
+                <FieldGroup label="Host">
+                  <SearchableSelect
+                    ariaLabel="Host"
+                    searchAriaLabel="SSH forwarding host search"
+                    placeholder="Select host"
+                    searchPlaceholder="이름, 주소, 프로필, 그룹, 태그 검색"
+                    value={draft.hostId}
+                    options={sshHostOptions}
+                    onChange={selectSshForwardHost}
+                    disabled={isSubmitting}
+                  />
+                </FieldGroup>
+              ) : isAwsSsmPortForwardDraft(draft) ? (
+                <FieldGroup label="AWS EC2 Host">
+                  <SearchableSelect
+                    ariaLabel="AWS EC2 Host"
+                    searchAriaLabel="AWS EC2 forwarding host search"
+                    placeholder="Select host"
+                    searchPlaceholder="이름, 주소, 프로필, 그룹, 태그 검색"
+                    value={draft.hostId}
+                    options={awsHostOptions}
+                    onChange={selectAwsForwardHost}
+                    disabled={isSubmitting}
+                  />
+                </FieldGroup>
+              ) : (
+                <FieldGroup label="AWS ECS Host">
+                  <SearchableSelect
+                    ariaLabel="AWS ECS Host"
+                    searchAriaLabel="ECS task forwarding host search"
+                    placeholder="Select host"
+                    searchPlaceholder="이름, 주소, 프로필, 그룹, 태그 검색"
+                    value={draft.hostId}
+                    options={ecsHostOptions}
+                    onChange={selectEcsForwardHost}
+                    disabled={isSubmitting}
+                  />
+                </FieldGroup>
+              )}
 
               {isContainerPortForwardDraft(draft) ? (
                 <>
@@ -2317,7 +2218,6 @@ export function PortForwardingPanel({
                         if (isSubmitting || discoveryLoading || !draft.hostId) {
                           return;
                         }
-                        setIsHostPickerOpen(false);
                         setIsContainerPickerOpen((current) => !current);
                       }}
                       selectedContent={

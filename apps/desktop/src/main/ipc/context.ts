@@ -20,6 +20,7 @@ import type {
   ManagedSecretPayload,
   PortForwardDraft,
   PortForwardRuntimeRecord,
+  ResolvedJumpHost,
   SshCertificateInfo,
 } from "@shared";
 import type { BrowserWindow, WebContents } from "electron";
@@ -220,6 +221,11 @@ export interface MainIpcContext {
     secrets: HostSecretInput;
     shouldPersistHostSecret: boolean;
   }>;
+  // host.jumpHostId가 있으면 그 점프 호스트를 해석한 ResolvedJumpHost, 없으면
+  // undefined를 돌려준다. 4개 connect 핸들러가 payload.jump로 실어 보낸다.
+  resolveJumpHostTarget: (
+    host: SshHostRecord,
+  ) => Promise<ResolvedJumpHost | undefined>;
   resolveManagedPrivateKeyPem: (
     draft: HostDraft,
     nextSecrets: HostSecretInput | undefined,
@@ -256,6 +262,7 @@ export interface MainIpcContext {
   buildHostKeyProbeResult: (
     emitProgress: AwsConnectionProgressEmitter,
     input: KnownHostProbeInput,
+    jump?: ResolvedJumpHost,
   ) => Promise<HostKeyProbeResult>;
   loadAwsHostSshMetadataRecord: (
     host: AwsEc2HostRecord,

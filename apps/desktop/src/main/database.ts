@@ -448,6 +448,7 @@ function toSshHostRecord(id: string, draft: SshHostDraft, secretRef: string | nu
     privateKeyPath: null,
     certificatePath: null,
     secretRef: secretRef ?? draft.secretRef ?? null,
+    jumpHostId: draft.jumpHostId ?? null,
     groupName: normalizeGroupPath(draft.groupName),
     tags: normalizeTags(draft.tags),
     terminalThemeId: normalizeTerminalThemeId(draft.terminalThemeId),
@@ -751,7 +752,13 @@ export class HostRepository {
 
   remove(id: string): void {
     stateStorage.updateState((state) => {
-      state.data.hosts = state.data.hosts.filter((entry) => entry.id !== id);
+      state.data.hosts = state.data.hosts
+        .filter((entry) => entry.id !== id)
+        // Drop dangling jump-host references so a removed bastion doesn't leave
+        // other hosts pointing at a host that no longer exists.
+        .map((entry) =>
+          isSshHostRecord(entry) && entry.jumpHostId === id ? { ...entry, jumpHostId: null } : entry
+        );
     });
   }
 

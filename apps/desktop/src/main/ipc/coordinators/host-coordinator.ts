@@ -13,7 +13,10 @@ import type {
   AwsSftpDiagnosticReasonCode,
   HostDraft,
   HostKeyProbeResult,
+  HostSecretInput,
   KnownHostProbeInput,
+  ResolvedJumpHost,
+  SshCertificateInfo,
 } from "@shared";
 import type { AwsService } from "../../aws-service";
 import type { AwsSsmTunnelService } from "../../aws-ssm-tunnel-service";
@@ -51,7 +54,11 @@ export interface HostCoordinator {
   buildHostKeyProbeResult: (
     emitProgress: AwsConnectionProgressEmitter,
     input: KnownHostProbeInput,
+    jump?: ResolvedJumpHost,
   ) => Promise<HostKeyProbeResult>;
+  resolveJumpHostTarget: (
+    host: SshHostRecord,
+  ) => Promise<ResolvedJumpHost | undefined>;
 }
 
 export function createHostCoordinator(deps: {
@@ -61,6 +68,14 @@ export function createHostCoordinator(deps: {
   awsService: AwsService;
   awsSsmTunnelService: AwsSsmTunnelService;
   awsSftpCoordinator: AwsSftpCoordinator;
+  resolveRuntimeSshSecrets: (
+    host: SshHostRecord,
+    secrets?: HostSecretInput,
+  ) => Promise<{ secrets: HostSecretInput; shouldPersistHostSecret: boolean }>;
+  ensureCertificateAuthReady: (
+    host: SshHostRecord,
+    secrets: HostSecretInput,
+  ) => Promise<SshCertificateInfo | null>;
 }): HostCoordinator {
   const {
     hosts,
@@ -69,6 +84,8 @@ export function createHostCoordinator(deps: {
     awsService,
     awsSsmTunnelService,
     awsSftpCoordinator,
+    resolveRuntimeSshSecrets,
+    ensureCertificateAuthReady,
   } = deps;
 
   const requireTrustedHostKeys = (host: {
@@ -208,6 +225,9 @@ export function createHostCoordinator(deps: {
   const buildHostKeyProbeResult = async (
     emitConnectionProgress: AwsConnectionProgressEmitter,
     input: KnownHostProbeInput,
+    // 점프(베스천) 호스트가 해석돼 넘어오면 그 경유로 타깃 키를 읽는다. 베스천 뒤의
+    // 직접 닿지 않는 타깃도 지문을 확인/신뢰할 수 있게 한다(SSH 호스트에만 해당).
+    jump?: ResolvedJumpHost,
   ): Promise<HostKeyProbeResult> => {
     const host = hosts.getById(input.hostId);
     if (!host) {
@@ -388,6 +408,8 @@ export function createHostCoordinator(deps: {
     const probed = await coreManager.probeHostKey({
       host: probeHost,
       port: probePort,
+      // 점프는 SSH 호스트 타깃에만 적용된다(warpgate/aws는 jump 미전달).
+      jump: isSshHostRecord(host) ? jump : undefined,
     });
     const existing = knownHosts.getByHostPortAlgorithm(
       probeHost,
@@ -418,6 +440,49 @@ export function createHostCoordinator(deps: {
     };
   };
 
+  // 점프(베스천) 호스트를 가리키는 SSH 호스트의 연결/probe 직전에, 그 점프 호스트의
+  // 자격증명·신뢰키·인증서를 타깃과 동일한 헬퍼로 해석해 ResolvedJumpHost로 만든다.
+  // (점프는 저장된 일반 SSH 호스트만 허용 → 기존 해석 경로를 그대로 재사용.)
+  // v1은 단일 홉이라 점프 호스트 자신의 jumpHostId(체인)는 따라가지 않는다.
+  const resolveJumpHostTarget = async (
+    host: SshHostRecord,
+  ): Promise<ResolvedJumpHost | undefined> => {
+    const jumpHostId = host.jumpHostId;
+    if (!jumpHostId) {
+      return undefined;
+    }
+    if (jumpHostId === host.id) {
+      throw new Error("점프 호스트가 자기 자신을 가리킬 수 없습니다.");
+    }
+    const jumpHost = hosts.getById(jumpHostId);
+    if (!jumpHost) {
+      throw new Error(
+        "점프 호스트를 찾을 수 없습니다. 호스트 설정에서 점프 호스트를 다시 선택해 주세요.",
+      );
+    }
+    if (!isSshHostRecord(jumpHost)) {
+      throw new Error("점프 호스트는 일반 SSH 호스트여야 합니다.");
+    }
+
+    const trustedHostKeysBase64 = requireTrustedHostKeys(jumpHost);
+    const username = requireConfiguredSshUsername(jumpHost);
+    const { secrets } = await resolveRuntimeSshSecrets(jumpHost);
+    await ensureCertificateAuthReady(jumpHost, secrets);
+
+    return {
+      host: jumpHost.hostname,
+      port: jumpHost.port,
+      username,
+      authType: jumpHost.authType,
+      password: secrets.password,
+      privateKeyPem: secrets.privateKeyPem,
+      certificateText: secrets.certificateText,
+      passphrase: secrets.passphrase,
+      trustedHostKeyBase64: trustedHostKeysBase64[0],
+      trustedHostKeysBase64,
+    };
+  };
+
   return {
     requireTrustedHostKey: (host) => requireTrustedHostKeys(host)[0],
     requireTrustedHostKeys,
@@ -430,5 +495,6 @@ export function createHostCoordinator(deps: {
     describeHostLabel,
     describeHostTarget,
     buildHostKeyProbeResult,
+    resolveJumpHostTarget,
   };
 }

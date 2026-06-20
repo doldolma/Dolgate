@@ -1,11 +1,12 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, type ReactNode } from 'react';
 import { getAwsEc2HostSshMetadataStatusLabel, isAwsEc2HostRecord, isAwsEcsHostRecord, isSerialHostDraft, isSerialHostRecord, isSshHostDraft, isSshHostRecord, isWarpgateSshHostRecord } from '@shared';
-import type { AwsProfileSummary, HostDraft, HostRecord, HostSecretInput, SecretMetadataRecord, SerialHostDraft, SerialPortSummary, SshHostDraft, TerminalThemeId } from '@shared';
+import type { AwsProfileSummary, HostDraft, HostRecord, HostSecretInput, SecretMetadataRecord, SerialHostDraft, SerialPortSummary, SshHostDraft, SshHostRecord, TerminalThemeId } from '@shared';
 import { useHostFormController } from '../controllers/useHostFormController';
 import { formatSavedSecretOptionLabel } from '../lib/secret-display';
 import { terminalThemePresets } from '../lib/terminal-presets';
 import { listAwsProfiles } from '../services/desktop/imports';
-import { Button, Input, SelectField, TagInputField, ToggleSwitch } from '../ui';
+import { Button, Input, SearchableSelect, SelectField, TagInputField, ToggleSwitch } from '../ui';
+import type { SearchableSelectOption } from '../ui';
 
 const defaultSshDraft: SshHostDraft = {
   kind: 'ssh',
@@ -16,9 +17,28 @@ const defaultSshDraft: SshHostDraft = {
   username: '',
   authType: 'password',
   secretRef: null,
+  jumpHostId: null,
   groupName: '',
   terminalThemeId: null
 };
+
+// Saved SSH hosts that can act as a jump host (bastion) for another host.
+// Excludes the host being edited (no self-jump) and non-SSH kinds (jump targets
+// must be a plain SSH host). The "None (direct)" option is added by the form.
+// `description` carries the address so the picker can be searched by it too.
+export function getJumpHostCandidates(
+  hosts: HostRecord[],
+  selfId: string | null,
+): SearchableSelectOption[] {
+  return hosts
+    .filter((host): host is SshHostRecord => isSshHostRecord(host))
+    .filter((host) => host.id !== selfId)
+    .map((host) => ({
+      value: host.id,
+      label: host.label?.trim() || host.hostname,
+      description: `${host.username ? `${host.username}@` : ''}${host.hostname}:${host.port}`,
+    }));
+}
 
 const defaultSerialDraft: SerialHostDraft = {
   kind: 'serial',
@@ -118,6 +138,8 @@ export interface HostFormProps {
   host: HostRecord | null;
   keychainEntries: SecretMetadataRecord[];
   groupOptions: Array<{ value: string | null; label: string }>;
+  /** Saved SSH hosts selectable as a jump host (bastion). See getJumpHostCandidates. */
+  jumpHostOptions?: SearchableSelectOption[];
   defaultGroupPath?: string | null;
   createKind?: 'ssh' | 'serial';
   desktopPlatform?: 'darwin' | 'win32' | 'linux' | 'unknown';
@@ -295,6 +317,7 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
   host,
   keychainEntries,
   groupOptions,
+  jumpHostOptions = [],
   defaultGroupPath = null,
   createKind = 'ssh',
   desktopPlatform = 'unknown',
@@ -305,6 +328,10 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
   onOpenSecrets,
   onActionStateChange
 }: HostFormProps, ref) {
+  const jumpHostSelectOptions = useMemo<SearchableSelectOption[]>(
+    () => [{ value: '', label: 'None (direct)' }, ...jumpHostOptions],
+    [jumpHostOptions],
+  );
   const fieldClassName = 'flex flex-col gap-[0.45rem] text-[var(--text)]';
   const fieldLabelClassName =
     'text-[0.82rem] font-semibold uppercase tracking-[0.12em] text-[var(--text-soft)]';
@@ -540,6 +567,7 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
         username: host.username,
         authType: host.authType,
         secretRef: host.secretRef,
+        jumpHostId: host.jumpHostId ?? null,
         groupName: host.groupName ?? '',
         terminalThemeId: host.terminalThemeId ?? null
       };
@@ -1424,6 +1452,23 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
                 ) : null}
               </>
             ) : null}
+
+            <label className={fieldClassName}>
+              <span className={fieldLabelClassName}>Jump host</span>
+              <SearchableSelect
+                ariaLabel="Jump host"
+                placeholder="None (direct)"
+                searchPlaceholder="이름, 호스트, 사용자 검색"
+                value={sshDraft.jumpHostId ?? ''}
+                options={jumpHostSelectOptions}
+                onChange={(value) =>
+                  setDraft({ ...sshDraft, jumpHostId: value || null })
+                }
+              />
+              <span className="text-[0.82rem] text-[var(--text-soft)]">
+                Connect through another saved SSH host (bastion / ProxyJump).
+              </span>
+            </label>
           </FormSection>
 
           <FormSection

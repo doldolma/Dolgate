@@ -102,6 +102,7 @@ func (s *Service) Connect(endpointID, requestID string, payload protocol.Contain
 		Passphrase:            payload.Passphrase,
 		TrustedHostKeyBase64:  payload.TrustedHostKeyBase64,
 		TrustedHostKeysBase64: payload.TrustedHostKeysBase64,
+		Jump:                  sshconn.JumpTargetFromCore(payload.Jump),
 	}
 	client, err := s.dialTarget(endpointID, requestID, target)
 	if err != nil {

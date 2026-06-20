@@ -4,7 +4,11 @@ import {
   isAwsEc2HostRecord,
   isWarpgateSshHostRecord,
 } from "@shared";
-import type { HostContainerRuntime } from "@shared";
+import type {
+  HostContainerRuntime,
+  ResolvedJumpHost,
+  SshHostRecord,
+} from "@shared";
 import type { AwsSsmTunnelService } from "../../aws-ssm-tunnel-service";
 import type { AwsService } from "../../aws-service";
 import type { CoreManager } from "../../core-manager";
@@ -61,6 +65,9 @@ export function createContainerRuntimeCoordinator(deps: {
   tunnelRegistry: TunnelRegistry;
   secretCoordinator: SecretCoordinator;
   hostCoordinator: HostCoordinator;
+  resolveJumpHostTarget: (
+    host: SshHostRecord,
+  ) => Promise<ResolvedJumpHost | undefined>;
   emitContainersConnectionProgress: AwsConnectionProgressEmitter;
 }): ContainerRuntimeCoordinator {
   const {
@@ -72,6 +79,7 @@ export function createContainerRuntimeCoordinator(deps: {
     tunnelRegistry,
     secretCoordinator,
     hostCoordinator,
+    resolveJumpHostTarget,
     emitContainersConnectionProgress,
   } = deps;
 
@@ -262,6 +270,7 @@ export function createContainerRuntimeCoordinator(deps: {
     const username = hostCoordinator.requireConfiguredSshUsername(host);
     const { secrets, shouldPersistHostSecret } =
       await secretCoordinator.resolveRuntimeSshSecrets(host);
+    const jump = await resolveJumpHostTarget(host);
     const result = await coreManager.containersConnect({
       endpointId,
       host: host.hostname,
@@ -274,6 +283,7 @@ export function createContainerRuntimeCoordinator(deps: {
       passphrase: secrets.passphrase,
       trustedHostKeyBase64: trustedHostKeysBase64[0],
       trustedHostKeysBase64,
+      jump,
       hostId: host.id,
     });
     if (shouldPersistHostSecret) {

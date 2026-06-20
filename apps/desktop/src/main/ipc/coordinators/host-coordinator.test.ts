@@ -77,6 +77,10 @@ function createCoordinator(options: { probeHostKey?: ReturnType<typeof vi.fn> } 
       }),
       buildDiagnosticDetails: vi.fn(() => ({})),
     },
+    resolveRuntimeSshSecrets: vi
+      .fn()
+      .mockResolvedValue({ secrets: {}, shouldPersistHostSecret: false }),
+    ensureCertificateAuthReady: vi.fn().mockResolvedValue(null),
   } as any;
 
   return {

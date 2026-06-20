@@ -19,6 +19,7 @@ Dolgate는 데스크톱과 모바일에서 같은 호스트/세션 워크플로�
 - 다중 SSH 세션과 분할 Workspace
 - 명령어 자동완성 — Fig 스펙 옵션·서브커맨드, 파일/폴더 경로, 컨테이너·브랜치 같은 동적 값 (셸 통합 기반)
 - 듀얼 패널 SFTP 브라우저와 파일 전송
+- 점프 호스트(베스천) 경유 연결 — 저장된 SSH 호스트를 ProxyJump로 지정
 - Local / Remote / Dynamic 포트 포워딩
 - 세션 녹화 및 재생
 - Session Share, 브라우저 viewer, 실시간 채팅
