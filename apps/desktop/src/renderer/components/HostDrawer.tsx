@@ -20,6 +20,7 @@ interface HostDrawerProps {
   onSubmit: HostFormProps['onSubmit'];
   onConnect?: HostFormProps['onConnect'];
   onEditExistingSecret?: (secretRef: string) => void;
+  onPersistEnv?: HostFormProps['onPersistEnv'];
   onOpenSecrets?: () => void;
 }
 
@@ -38,6 +39,7 @@ export function HostDrawer({
   onSubmit,
   onConnect,
   onEditExistingSecret,
+  onPersistEnv,
   onOpenSecrets
 }: HostDrawerProps) {
   const drawerRef = useRef<HTMLElement | null>(null);
@@ -125,6 +127,7 @@ export function HostDrawer({
           onSubmit={onSubmit}
           onConnect={onConnect}
           onEditExistingSecret={onEditExistingSecret}
+          onPersistEnv={onPersistEnv}
           onOpenSecrets={onOpenSecrets}
           onActionStateChange={setFormActionState}
         />

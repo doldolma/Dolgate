@@ -1,6 +1,7 @@
 import type {
   AppTheme,
   AuthState,
+  HostEnvVar,
   HostRecord,
   KnownHostRecord,
   LoadedManagedSecretPayload,
@@ -17,6 +18,7 @@ export interface HostSecretInput {
   passphrase?: string;
   privateKeyPem?: string;
   certificateText?: string;
+  env?: HostEnvVar[];
 }
 
 export interface ClientSessionEvent {

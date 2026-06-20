@@ -1,7 +1,8 @@
 import { randomUUID } from "node:crypto";
-import { isSshHostDraft } from "@shared";
+import { isSshHostDraft, normalizeHostEnvVars } from "@shared";
 import type {
   HostDraft,
+  HostEnvVar,
   HostSecretInput,
   ManagedSecretPayload,
   SshCertificateInfo,
@@ -130,7 +131,8 @@ export function createSecretCoordinator(deps: {
       secrets.password ||
         secrets.passphrase ||
         secrets.privateKeyPem ||
-        secrets.certificateText,
+        secrets.certificateText ||
+        normalizeHostEnvVars(secrets.env).length > 0,
     );
 
   const mergeSecrets = (
@@ -148,6 +150,7 @@ export function createSecretCoordinator(deps: {
       patch.certificateText !== undefined
         ? patch.certificateText
         : current.certificateText,
+    env: patch.env !== undefined ? patch.env : current.env,
   });
 
   const persistSecret = async (
@@ -169,6 +172,7 @@ export function createSecretCoordinator(deps: {
         passphrase: secrets.passphrase,
         privateKeyPem: secrets.privateKeyPem,
         certificateText: secrets.certificateText,
+        env: normalizeHostEnvVars(secrets.env),
         updatedAt,
       } satisfies ManagedSecretPayload),
     );
@@ -208,6 +212,7 @@ export function createSecretCoordinator(deps: {
         typeof parsed.certificateText === "string"
           ? parsed.certificateText
           : undefined,
+      env: normalizeHostEnvVars(parsed.env as HostEnvVar[] | undefined),
       updatedAt:
         typeof parsed.updatedAt === "string"
           ? parsed.updatedAt

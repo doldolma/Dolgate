@@ -189,6 +189,7 @@ export function registerSshIpcHandlers(ctx: MainIpcContext): void {
         rows: input.rows,
         command: input.command?.trim() || undefined,
         startupCommand: input.startupCommand,
+        env: secrets.env,
         hostId: sshHost.id,
         hostLabel: sshHost.label,
         title,

@@ -7,6 +7,7 @@ import {
   isSshHostRecord,
   normalizeGroupPath,
   type AuthState,
+  type HostEnvVar,
 } from '@shared';
 import { AwsImportDialog } from '../components/AwsImportDialog';
 import { HomeNavigation } from '../components/HomeNavigation';
@@ -25,6 +26,7 @@ import { XshellImportDialog } from '../components/XshellImportDialog';
 import type { useLoginController } from '../controllers/useLoginController';
 import { useSettingsViewModel } from '../view-models/appViewModels';
 import { openSessionReplay } from '../services/desktop/session-replays';
+import { loadSavedCredential } from '../services/desktop/settings';
 import type {
   useAppModalViewModel,
   useContainersViewModel,
@@ -166,6 +168,20 @@ export function HomeShell({
         .map(toLinkedHostSummary),
       initialMode: 'clone-for-host',
       initialHostId: currentHost.id,
+    });
+  }
+
+  // 기존 호스트의 환경변수 인라인 편집 저장: 현재 시크릿 번들을 복호화해
+  // 자격증명은 보존한 채 env만 교체해 같은 secretRef로 재저장한다(호스트 레코드
+  // 미변경 → 폼 재hydrate 루프 없음).
+  async function handlePersistEnv(secretRef: string, env: HostEnvVar[]) {
+    const loaded = await loadSavedCredential(secretRef);
+    await settingsViewModel.updateKeychainSecret(secretRef, {
+      password: loaded?.password,
+      passphrase: loaded?.passphrase,
+      privateKeyPem: loaded?.privateKeyPem,
+      certificateText: loaded?.certificateText,
+      env,
     });
   }
 
@@ -485,6 +501,7 @@ export function HomeShell({
             : undefined
         }
         onEditExistingSecret={openHostSecretEditor}
+        onPersistEnv={handlePersistEnv}
         onOpenSecrets={() => settingsViewModel.openSettingsSection('secrets')}
       />
 

@@ -1,7 +1,9 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, type ReactNode } from 'react';
 import { MAX_HOST_STARTUP_COMMAND_LENGTH, getAwsEc2HostSshMetadataStatusLabel, isAwsEc2HostRecord, isAwsEcsHostRecord, isSerialHostDraft, isSerialHostRecord, isSshHostDraft, isSshHostRecord, isWarpgateSshHostRecord } from '@shared';
-import type { AwsProfileSummary, HostDraft, HostRecord, HostSecretInput, HostStartupCommand, SecretMetadataRecord, SerialHostDraft, SerialPortSummary, SnippetRecord, SshHostDraft, SshHostRecord, TerminalThemeId } from '@shared';
+import type { AwsProfileSummary, HostDraft, HostEnvVar, HostRecord, HostSecretInput, HostStartupCommand, SecretMetadataRecord, SerialHostDraft, SerialPortSummary, SnippetRecord, SshHostDraft, SshHostRecord, TerminalThemeId } from '@shared';
 import { useHostFormController } from '../controllers/useHostFormController';
+import { EnvironmentVariablesEditor } from './EnvironmentVariablesEditor';
+import { loadSavedCredential } from '../services/desktop/settings';
 import { formatSavedSecretOptionLabel } from '../lib/secret-display';
 import { terminalThemePresets } from '../lib/terminal-presets';
 import { listAwsProfiles } from '../services/desktop/imports';
@@ -149,6 +151,7 @@ export interface HostFormProps {
   onSubmit: (draft: HostDraft, secrets?: HostSecretInput) => Promise<void>;
   onConnect?: (hostId: string) => Promise<void>;
   onEditExistingSecret?: (secretRef: string) => void;
+  onPersistEnv?: (secretRef: string, env: HostEnvVar[]) => Promise<void>;
   onOpenSecrets?: () => void;
   onActionStateChange?: (state: HostFormActionState) => void;
 }
@@ -202,6 +205,38 @@ function isHostDraftValid(draft: HostDraft): boolean {
   return true;
 }
 
+// @shared의 normalizeHostEnvVars를 인라인한다. vite dev가 shared-core의 export*로
+// 새로 추가된 value export를 렌더러 module graph에서 비결정적으로 누락시켜 렌더러
+// 로드를 깨는 이슈를 피하기 위함(설정 기본값 인라인과 동일한 이유).
+const MAX_HOST_ENV_VARS = 100;
+function normalizeHostEnvVars(
+  value: HostEnvVar[] | null | undefined,
+): HostEnvVar[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  const envNamePattern = /^[A-Za-z_][A-Za-z0-9_]*$/;
+  const result: HostEnvVar[] = [];
+  for (const entry of value) {
+    if (
+      !entry ||
+      typeof entry.key !== 'string' ||
+      typeof entry.value !== 'string'
+    ) {
+      continue;
+    }
+    const key = entry.key.trim();
+    if (!envNamePattern.test(key)) {
+      continue;
+    }
+    result.push({ key, value: entry.value.replace(/[\r\n]+/g, '') });
+    if (result.length >= MAX_HOST_ENV_VARS) {
+      break;
+    }
+  }
+  return result;
+}
+
 function buildHostFormSubmission(input: {
   draft: HostDraft;
   tags: string[];
@@ -211,6 +246,7 @@ function buildHostFormSubmission(input: {
   passphrase: string;
   privateKeyPem?: string;
   certificateText?: string;
+  env?: HostEnvVar[];
 }): HostFormSubmission {
   const nextTags = dedupeTags(input.tags);
   const nextLabel = input.draft.label.trim() || deriveDefaultHostLabel(input.draft);
@@ -260,11 +296,13 @@ function buildHostFormSubmission(input: {
     };
   }
 
+  const normalizedEnv = normalizeHostEnvVars(input.env);
   const nextSecrets = {
     password: input.password || undefined,
     passphrase: input.passphrase || undefined,
     privateKeyPem: input.privateKeyPem || undefined,
-    certificateText: input.certificateText || undefined
+    certificateText: input.certificateText || undefined,
+    env: normalizedEnv.length > 0 ? normalizedEnv : undefined
   };
 
   return {
@@ -273,7 +311,8 @@ function buildHostFormSubmission(input: {
       nextSecrets.password ||
       nextSecrets.passphrase ||
       nextSecrets.privateKeyPem ||
-      nextSecrets.certificateText
+      nextSecrets.certificateText ||
+      nextSecrets.env
         ? nextSecrets
         : undefined
   };
@@ -349,6 +388,7 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
   onSubmit,
   onConnect,
   onEditExistingSecret,
+  onPersistEnv,
   onOpenSecrets,
   onActionStateChange
 }: HostFormProps, ref) {
@@ -375,6 +415,9 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
   const [tagInput, setTagInput] = useState('');
   const [password, setPassword] = useState('');
   const [passphrase, setPassphrase] = useState('');
+  const [envVars, setEnvVars] = useState<HostEnvVar[]>([]);
+  const envLoadedSecretRef = useRef<string | null>(null);
+  const loadedEnvSnapshotRef = useRef('');
   const [credentialMode, setCredentialMode] = useState<'new' | 'existing'>('new');
   const [selectedSecretRef, setSelectedSecretRef] = useState('');
   const [privateKeyFile, setPrivateKeyFile] = useState<ImportedShellCredentialFile | null>(null);
@@ -406,12 +449,14 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
         password,
         passphrase,
         privateKeyPem: privateKeyFile?.content,
-        certificateText: certificateFile?.content
+        certificateText: certificateFile?.content,
+        env: envVars
       }),
     [
       certificateFile?.content,
       credentialMode,
       draft,
+      envVars,
       passphrase,
       password,
       privateKeyFile?.content,
@@ -621,6 +666,9 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
     setCredentialMode(nextCredentialMode);
     setPrivateKeyFile(nextPrivateKeyFile);
     setCertificateFile(nextCertificateFile);
+    setEnvVars([]);
+    envLoadedSecretRef.current = null;
+    loadedEnvSnapshotRef.current = '';
     setTagTokens(nextTagTokens);
     setTagInput('');
     setSaveStatus('idle');
@@ -629,6 +677,59 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
     lastHydratedHostIdRef.current = host.id;
     lastHydratedHostKeyRef.current = nextHydrationKey;
   }, [createKind, defaultGroupPath, host, isEditDirty, saveInFlight]);
+
+  // 기존 호스트(저장된 인증 정보 보유)의 환경변수는 암호화 시크릿 번들에 있으므로
+  // 폼에서 보여주려면 복호화해 읽어온다. snapshot은 변경 감지(저장 트리거)용 기준값.
+  useEffect(() => {
+    if (!sshDraft || credentialMode !== 'existing' || !selectedSecretRef) {
+      return;
+    }
+    if (envLoadedSecretRef.current === selectedSecretRef) {
+      return;
+    }
+    envLoadedSecretRef.current = selectedSecretRef;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const loaded = await loadSavedCredential(selectedSecretRef);
+        if (!cancelled) {
+          const nextEnv = loaded?.env ?? [];
+          setEnvVars(nextEnv);
+          loadedEnvSnapshotRef.current = JSON.stringify(nextEnv);
+        }
+      } catch {
+        if (!cancelled) {
+          setEnvVars([]);
+          loadedEnvSnapshotRef.current = JSON.stringify([]);
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [sshDraft, credentialMode, selectedSecretRef]);
+
+  // 기존 호스트의 환경변수 인라인 편집 저장. 호스트 레코드가 아니라 암호화 시크릿
+  // 번들만 갱신(updateKeychainSecret)하므로 폼 재hydrate 루프가 없다. 디바운스 적용.
+  useEffect(() => {
+    if (
+      credentialMode !== 'existing' ||
+      !selectedSecretRef ||
+      !onPersistEnv ||
+      envLoadedSecretRef.current !== selectedSecretRef
+    ) {
+      return;
+    }
+    const serialized = JSON.stringify(envVars);
+    if (serialized === loadedEnvSnapshotRef.current) {
+      return;
+    }
+    const timer = setTimeout(() => {
+      loadedEnvSnapshotRef.current = serialized;
+      void onPersistEnv(selectedSecretRef, envVars);
+    }, 700);
+    return () => clearTimeout(timer);
+  }, [envVars, credentialMode, selectedSecretRef, onPersistEnv]);
 
   useEffect(() => {
     if (!sshDraft) {
@@ -883,7 +984,8 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
         password,
         passphrase,
         privateKeyPem: privateKeyFile?.content,
-        certificateText: certificateFile?.content
+        certificateText: certificateFile?.content,
+        env: envVars
       });
       const submissionKey = serializeHostFormSubmission(submission);
       if (submissionKey === lastSavedSubmissionKey) {
@@ -918,6 +1020,7 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
     [
       credentialMode,
       draft,
+      envVars,
       host,
       isEditMode,
       isFormValid,
@@ -1613,6 +1716,16 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
           >
             {renderTerminalThemeField(sshDraft.terminalThemeId ?? null, (terminalThemeId) => setDraft({ ...sshDraft, terminalThemeId }))}
             {startupCommandField}
+            <div className={fieldClassName}>
+              <span className={fieldLabelClassName}>Environment Variables</span>
+              <EnvironmentVariablesEditor
+                variables={envVars}
+                onChange={setEnvVars}
+              />
+              <span className="text-[0.78rem] leading-[1.45] text-[var(--text-soft)]">
+                연결 시 셸에 주입됩니다(SetEnv→export 폴백). 값은 비밀번호처럼 암호화되어 저장·동기화됩니다.
+              </span>
+            </div>
           </FormSection>
         </>
       ) : serialDraft ? (

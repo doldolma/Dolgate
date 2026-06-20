@@ -129,6 +129,7 @@ type Request struct {
 type Event = coretypes.Event
 type StreamFrame = coretypes.StreamFrame
 type ConnectPayload = coretypes.ConnectPayload
+type EnvVar = coretypes.EnvVar
 type AWSConnectPayload = coretypes.AWSConnectPayload
 type LocalConnectPayload = coretypes.LocalConnectPayload
 type TerminalAutocompleteCapabilityPayload = coretypes.TerminalAutocompleteCapabilityPayload

@@ -120,6 +120,43 @@ export type HostStartupCommand =
   | { type: 'command'; command: string }
   | { type: 'snippet'; snippetId: string };
 
+export interface HostEnvVar {
+  key: string;
+  value: string;
+}
+
+export const MAX_HOST_ENV_VARS = 100;
+
+// 호스트 환경변수 정규화: 유효한 env 이름만 남기고, 값은 한 줄로 만든다
+// (연결 시 `export KEY='VALUE'` 폴백의 줄 분리를 깨지 않도록 개행 제거).
+export function normalizeHostEnvVars(
+  value: HostEnvVar[] | null | undefined,
+): HostEnvVar[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  const envNamePattern = /^[A-Za-z_][A-Za-z0-9_]*$/;
+  const result: HostEnvVar[] = [];
+  for (const entry of value) {
+    if (
+      !entry ||
+      typeof entry.key !== 'string' ||
+      typeof entry.value !== 'string'
+    ) {
+      continue;
+    }
+    const key = entry.key.trim();
+    if (!envNamePattern.test(key)) {
+      continue;
+    }
+    result.push({ key, value: entry.value.replace(/[\r\n]+/g, '') });
+    if (result.length >= MAX_HOST_ENV_VARS) {
+      break;
+    }
+  }
+  return result;
+}
+
 interface HostBaseRecord {
   id: string;
   kind: HostKind;
@@ -2085,6 +2122,7 @@ export interface ManagedSecretPayload {
   passphrase?: string;
   privateKeyPem?: string;
   certificateText?: string;
+  env?: HostEnvVar[];
   updatedAt: string;
 }
 

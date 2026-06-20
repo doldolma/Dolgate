@@ -59,6 +59,7 @@ import type {
   GroupRemoveMode,
   GroupRemoveResult,
   HostDraft,
+  HostEnvVar,
   HostSecretInput,
   HostContainerAction,
   HostContainerDetails,
@@ -268,6 +269,7 @@ export interface ResolvedCoreConnectPayload {
   cols: number;
   rows: number;
   command?: string;
+  env?: HostEnvVar[];
 }
 
 export interface ResolvedLocalConnectPayload {

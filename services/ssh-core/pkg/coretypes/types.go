@@ -139,6 +139,11 @@ type JumpTarget struct {
 	Jump                  *JumpTarget `json:"jump,omitempty"`
 }
 
+type EnvVar struct {
+	Key   string `json:"key"`
+	Value string `json:"value"`
+}
+
 type ConnectPayload struct {
 	Host                  string      `json:"host"`
 	Port                  int         `json:"port"`
@@ -154,6 +159,7 @@ type ConnectPayload struct {
 	Cols                  int         `json:"cols"`
 	Rows                  int         `json:"rows"`
 	Command               string      `json:"command,omitempty"`
+	Env                   []EnvVar    `json:"env,omitempty"`
 }
 
 type AWSConnectPayload struct {

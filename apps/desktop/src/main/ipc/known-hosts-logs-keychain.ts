@@ -7,7 +7,7 @@ import type {
   HostSecretInput,
   ManagedSecretPayload,
 } from "@shared";
-import { isSshHostRecord } from "@shared";
+import { isSshHostRecord, normalizeHostEnvVars } from "@shared";
 import { clipboard, ipcMain } from "electron";
 import { ipcChannels } from "../../common/ipc-channels";
 import type { MainIpcContext, SshHostRecord } from "./context";
@@ -22,11 +22,14 @@ function normalizeReplacementSecrets(secrets: HostSecretInput): HostSecretInput 
       ? secrets.certificateText
       : undefined;
 
+  const env = normalizeHostEnvVars(secrets.env);
+
   return {
     password: secrets.password ? secrets.password : undefined,
     passphrase: secrets.passphrase ? secrets.passphrase : undefined,
     privateKeyPem,
     certificateText,
+    env: env.length > 0 ? env : undefined,
   };
 }
 
@@ -35,7 +38,8 @@ function validateReplacementSecrets(secrets: HostSecretInput): string | null {
     !secrets.password &&
     !secrets.passphrase &&
     !secrets.privateKeyPem &&
-    !secrets.certificateText
+    !secrets.certificateText &&
+    (!secrets.env || secrets.env.length === 0)
   ) {
     return "저장할 인증 정보가 없습니다.";
   }
@@ -227,6 +231,7 @@ export function registerKnownHostsLogsKeychainIpcHandlers(
           passphrase: replacementSecrets.passphrase,
           privateKeyPem: replacementSecrets.privateKeyPem,
           certificateText: replacementSecrets.certificateText,
+          env: replacementSecrets.env,
           updatedAt: new Date().toISOString(),
         } satisfies ManagedSecretPayload),
       );

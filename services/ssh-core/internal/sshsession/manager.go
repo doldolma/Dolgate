@@ -3,6 +3,7 @@ package sshsession
 import (
 	"fmt"
 	"io"
+	"strings"
 	"sync"
 	"time"
 
@@ -99,6 +100,24 @@ func NewManagerWithConfig(emit EventEmitter, stream StreamEmitter, config Manage
 		emitStream:        stream,
 		config:            config,
 	}
+}
+
+// buildEnvExportFallback는 SetEnv가 거부된 변수들을 대화형 셸에 주입할
+// `export KEY='VALUE'` 줄(캐리지 리턴 구분)로 만든다. 값은 QuotePosix로 안전하게
+// 감싸 셸 인젝션을 막는다.
+func buildEnvExportFallback(envVars []protocol.EnvVar) string {
+	var builder strings.Builder
+	for _, envVar := range envVars {
+		if envVar.Key == "" {
+			continue
+		}
+		builder.WriteString("export ")
+		builder.WriteString(envVar.Key)
+		builder.WriteString("=")
+		builder.WriteString(sshcmd.QuotePosix(envVar.Value))
+		builder.WriteString("\r")
+	}
+	return builder.String()
 }
 
 func (m *Manager) Connect(sessionID, requestID string, payload protocol.ConnectPayload) error {
@@ -218,6 +237,18 @@ func (m *Manager) Connect(sessionID, requestID string, payload protocol.ConnectP
 		return fmt.Errorf("pty request failed: %w", err)
 	}
 
+	// 환경변수 주입: SSH SetEnv를 먼저 시도한다(서버 AcceptEnv 허용 시 무가시 적용).
+	// 서버가 거부한 변수는 export 폴백 목록에 모아 Shell 시작 후 PTY로 주입한다.
+	var envFallback []protocol.EnvVar
+	for _, envVar := range payload.Env {
+		if envVar.Key == "" {
+			continue
+		}
+		if err := session.Setenv(envVar.Key, envVar.Value); err != nil {
+			envFallback = append(envFallback, envVar)
+		}
+	}
+
 	if payload.Command != "" {
 		if err := session.Start(payload.Command); err != nil {
 			session.Close()
@@ -241,6 +272,13 @@ func (m *Manager) Connect(sessionID, requestID string, payload protocol.ConnectP
 	m.mu.Lock()
 	m.sessions[sessionID] = handle
 	m.mu.Unlock()
+
+	// SetEnv가 거부된 변수는 대화형 셸에 export로 폴백 주입한다. PTY가 입력을
+	// 버퍼링하므로 첫 프롬프트에서 실행되어 startup command보다 먼저 적용된다.
+	// 비대화형(command 실행) 세션에는 주입하지 않는다.
+	if payload.Command == "" && len(envFallback) > 0 {
+		_, _ = stdin.Write([]byte(buildEnvExportFallback(envFallback)))
+	}
 
 	// connected 이벤트는 renderer가 탭 상태를 연결 완료로 바꾸는 기준점이다.
 	m.emit(protocol.Event{

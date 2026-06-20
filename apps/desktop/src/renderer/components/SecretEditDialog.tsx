@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react';
-import type { HostSecretInput, LinkedHostSummary, SshCertificateInfo } from '@shared';
+import type { HostEnvVar, HostSecretInput, LinkedHostSummary, SshCertificateInfo } from '@shared';
 import { useHostFormController } from '../controllers/useHostFormController';
 import { describeCertificateInfo } from '../lib/certificate-info';
 import { loadSavedCredential } from '../services/desktop/settings';
 import { DialogBackdrop } from './DialogBackdrop';
+import { EnvironmentVariablesEditor } from './EnvironmentVariablesEditor';
 import {
   Button,
   CloseIcon,
@@ -82,6 +83,7 @@ export function SecretEditDialog({
     useState<SshCertificateInfo | null>(null);
   const [privateKeyFileName, setPrivateKeyFileName] = useState('');
   const [certificateFileName, setCertificateFileName] = useState('');
+  const [envVars, setEnvVars] = useState<HostEnvVar[]>([]);
 
   useEffect(() => {
     let cancelled = false;
@@ -101,6 +103,7 @@ export function SecretEditDialog({
         setCertificateInfo(null);
         setPrivateKeyFileName('');
         setCertificateFileName('');
+        setEnvVars([]);
         return;
       }
 
@@ -137,6 +140,7 @@ export function SecretEditDialog({
         setPrivateKey(nextPrivateKey);
         setCertificate(nextCertificate);
         setCertificateInfo(loaded.certificateInfo ?? null);
+        setEnvVars(loaded.env ?? []);
       } catch (error) {
         if (cancelled) {
           return;
@@ -188,6 +192,7 @@ export function SecretEditDialog({
         : undefined,
     certificateText:
       authType === 'certificate' ? certificate || undefined : undefined,
+    env: envVars.length > 0 ? envVars : undefined,
   };
 
   function validateSecrets(): string | null {
@@ -406,6 +411,19 @@ export function SecretEditDialog({
                 </>
               ) : null}
             </div>
+          ) : null}
+
+          {!loading && !loadError ? (
+            <FieldGroup label="환경 변수">
+              <EnvironmentVariablesEditor
+                variables={envVars}
+                onChange={setEnvVars}
+                disabled={isSubmitting}
+              />
+              <p className="text-[0.8rem] leading-[1.5] text-[var(--text-soft)]">
+                연결 시 셸에 주입됩니다. 값은 비밀번호와 함께 암호화되어 저장·동기화됩니다.
+              </p>
+            </FieldGroup>
           ) : null}
 
           {submitError ? <p className="text-[0.9rem] text-[var(--danger-text)]">{submitError}</p> : null}
