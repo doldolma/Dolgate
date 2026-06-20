@@ -91,6 +91,7 @@ export const defaultSftpState: SftpState = {
   rightPane: createEmptyPane("right"),
   transfers: [],
   pendingConflictDialog: null,
+  terminalUploadEndpoints: {},
 };
 
 export function upsertTransferJob(

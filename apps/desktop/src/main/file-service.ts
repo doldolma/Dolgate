@@ -57,6 +57,32 @@ export class LocalFileService {
     return app.getPath('downloads');
   }
 
+  // ZMODEM 다운로드 등 렌더러가 받은 바이트를 Downloads에 저장한다.
+  // 같은 이름이 있으면 " (n)" 접미사로 충돌을 피하고, 최종 경로를 반환한다.
+  async saveToDownloads(name: string, bytes: Uint8Array): Promise<string> {
+    const dir = await this.getDownloadsDirectory();
+    const safeName = path.basename(name) || 'download';
+    const ext = path.extname(safeName);
+    const base = safeName.slice(0, safeName.length - ext.length);
+    let target = path.join(dir, safeName);
+    let counter = 1;
+    while (await this.pathExists(target)) {
+      target = path.join(dir, `${base} (${counter})${ext}`);
+      counter += 1;
+    }
+    await fs.writeFile(target, Buffer.from(bytes));
+    return target;
+  }
+
+  private async pathExists(targetPath: string): Promise<boolean> {
+    try {
+      await fs.access(targetPath);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   async listRoots(): Promise<FileSystemRoot[]> {
     if (process.platform !== 'win32') {
       return [{ label: '/', path: '/' }];

@@ -2,11 +2,13 @@ import type {
   DirectoryListing,
   FileEntry,
   HostSecretInput,
+  SftpEndpointSummary,
   SftpPaneId,
   TransferStartInput,
 } from "@shared";
-import type { SftpPaneState } from "../types";
+import type { SftpPaneState, TerminalUploadResult } from "../types";
 import type { SliceDeps } from "./context";
+import { markTerminalUploadJob } from "../../lib/terminal-upload-registry";
 import { createBootstrapSyncServices } from "./bootstrap-sync";
 import { createSessionServices } from "./session";
 import { createTrustAuthServices } from "./trust-auth";
@@ -17,6 +19,7 @@ import {
   hasProvidedSecrets,
   isAwsEc2HostRecord,
   isSshHostRecord,
+  isWarpgateSshHostRecord,
   pushHistory,
   resolveAwsSftpFailureDiagnostic,
   resolveCredentialRetryKind,
@@ -440,6 +443,161 @@ export function createSftpServices(deps: SliceDeps) {
     }
   };
 
+  // 터미널 파일 드롭(SFTP 업로드)용 endpoint를 확보한다.
+  //  1) 사용자가 이미 SFTP 패널에 같은 호스트를 열어둔 경우 그 연결 재사용
+  //  2) 이전에 만든 백그라운드 업로드 endpoint 재사용(유효성 확인 후, 끊겼으면 폐기)
+  //  3) 없으면 패널/워크스페이스 전환 없이 새 연결(자격증명은 main 리졸버=keychain/
+  //     런타임 시크릿 캐시에 위임 — 없으면 connect가 던지고 호출자가 안내한다)
+  const ensureSftpEndpointForHost = async (
+    set: StoreSetter,
+    get: StoreGetter,
+    hostId: string,
+    onProgress?: (message: string) => void,
+  ): Promise<SftpEndpointSummary> => {
+    const state = get();
+    for (const pane of [state.sftp.leftPane, state.sftp.rightPane]) {
+      if (
+        pane.sourceKind === "host" &&
+        pane.endpoint &&
+        pane.endpoint.hostId === hostId
+      ) {
+        return pane.endpoint;
+      }
+    }
+
+    const cached = state.sftp.terminalUploadEndpoints[hostId];
+    if (cached) {
+      try {
+        await api.sftp.list({ endpointId: cached.id, path: cached.path });
+        return cached;
+      } catch {
+        set((current) => {
+          const next = { ...current.sftp.terminalUploadEndpoints };
+          delete next[hostId];
+          return { sftp: { ...current.sftp, terminalUploadEndpoints: next } };
+        });
+      }
+    }
+
+    const endpointId = globalThis.crypto.randomUUID();
+    // 연결 단계(SSM 터널/핸드셰이크/SFTP 채널 등)를 호출자에게 흘려 준다.
+    const unsubscribeProgress = onProgress
+      ? api.sftp.onConnectionProgress((event) => {
+          if (event.endpointId === endpointId) {
+            onProgress(event.message);
+          }
+        })
+      : null;
+    try {
+      const endpoint = await api.sftp.connect({ hostId, endpointId });
+      set((current) => ({
+        sftp: {
+          ...current.sftp,
+          terminalUploadEndpoints: {
+            ...current.sftp.terminalUploadEndpoints,
+            [hostId]: endpoint,
+          },
+        },
+      }));
+      return endpoint;
+    } finally {
+      unsubscribeProgress?.();
+    }
+  };
+
+  // 터미널 패널에 드롭한 로컬 파일을 호스트의 targetPath(없으면 홈)로 SFTP 업로드한다.
+  // SFTP 패널/워크스페이스로 전환하지 않고 전송 잡만 등록한다(충돌은 대화상자 없이 정책 적용).
+  const uploadFilesToHostPath = async (
+    set: StoreSetter,
+    get: StoreGetter,
+    input: { hostId: string; targetPath: string | null; localPaths: string[] },
+    onProgress?: (message: string) => void,
+  ): Promise<TerminalUploadResult> => {
+    const host = get().hosts.find((item) => item.id === input.hostId);
+    if (
+      !host ||
+      !(
+        isSshHostRecord(host) ||
+        isAwsEc2HostRecord(host) ||
+        isWarpgateSshHostRecord(host)
+      )
+    ) {
+      return { ok: false, reason: "unsupported" };
+    }
+
+    let endpoint: SftpEndpointSummary;
+    try {
+      endpoint = await ensureSftpEndpointForHost(
+        set,
+        get,
+        input.hostId,
+        onProgress,
+      );
+    } catch (error) {
+      return {
+        ok: false,
+        reason: "connect-failed",
+        message:
+          error instanceof Error ? error.message : "SFTP 연결에 실패했습니다.",
+      };
+    }
+
+    const usedHomeFallback = !(input.targetPath && input.targetPath.length > 0);
+    const targetPath = usedHomeFallback
+      ? endpoint.path
+      : (input.targetPath as string);
+
+    const { items, warnings } = await resolveLocalTransferItemsFromPaths(
+      input.localPaths,
+    );
+    if (items.length === 0) {
+      return {
+        ok: false,
+        reason: "no-items",
+        message: warnings[0] ?? "드롭한 항목 경로를 읽지 못했습니다.",
+      };
+    }
+
+    const settings = get().settings;
+    const conflictPolicy = settings.sftpConflictPolicy ?? "ask";
+    const conflictResolution =
+      conflictPolicy !== "ask" ? conflictPolicy : "overwrite";
+
+    const transferInput: TransferStartInput = {
+      source: { kind: "local", path: "" },
+      target: { kind: "remote", endpointId: endpoint.id, path: targetPath },
+      items: items.map((item) => ({
+        name: item.name,
+        path: item.path,
+        isDirectory: item.isDirectory,
+        size: item.size,
+      })),
+      conflictResolution,
+      preserveMetadata: {
+        mtime: settings.sftpPreserveMtime ?? true,
+        permissions: settings.sftpPreservePermissions ?? false,
+      },
+    };
+
+    const job = await api.sftp.startTransfer(transferInput);
+    markTerminalUploadJob(job.id);
+    set((state) => ({
+      sftp: {
+        ...state.sftp,
+        transfers: upsertTransferJob(state.sftp.transfers, job),
+      },
+    }));
+
+    return {
+      ok: true,
+      job,
+      hostLabel: endpoint.title,
+      targetPath,
+      usedHomeFallback,
+      warnings,
+    };
+  };
+
   return {
     loadPaneListing,
     setSftpPaneWarnings,
@@ -447,6 +605,8 @@ export function createSftpServices(deps: SliceDeps) {
     startSftpTransferForItems,
     resolveLocalTransferItemsFromPaths,
     connectTrustedHostPane,
+    ensureSftpEndpointForHost,
+    uploadFilesToHostPath,
     refreshHostAndKeychainState,
     promptForMissingUsername,
     ensureTrustedHost,

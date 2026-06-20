@@ -333,7 +333,8 @@ describe('TerminalWorkspace workspace switching', () => {
           onData: vi.fn(() => () => undefined),
           write: vi.fn().mockResolvedValue(undefined),
           writeBinary: vi.fn().mockResolvedValue(undefined),
-          resize: vi.fn().mockResolvedValue(undefined)
+          resize: vi.fn().mockResolvedValue(undefined),
+          installShellIntegration: vi.fn().mockResolvedValue(undefined)
         }
       }
     });

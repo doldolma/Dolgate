@@ -278,6 +278,13 @@ export function registerSshIpcHandlers(ctx: MainIpcContext): void {
   );
 
   ipcMain.handle(
+    ipcChannels.ssh.installShellIntegration,
+    async (_event, sessionId: string) => {
+      await ctx.coreManager.installShellIntegration(sessionId);
+    },
+  );
+
+  ipcMain.handle(
     ipcChannels.ssh.refreshAutocomplete,
     async (_event, sessionId: string) => {
       await ctx.coreManager.refreshAutocomplete(sessionId);

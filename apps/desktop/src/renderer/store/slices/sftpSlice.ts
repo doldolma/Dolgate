@@ -154,6 +154,7 @@ export function createSftpSlice(deps: SliceDeps): SftpSlice {
     startSftpTransferForItems,
     resolveLocalTransferItemsFromPaths,
     connectTrustedHostPane,
+    uploadFilesToHostPath,
     ensureTrustedHost,
     refreshHostAndKeychainState,
     promptForMissingUsername,
@@ -730,6 +731,8 @@ export function createSftpSlice(deps: SliceDeps): SftpSlice {
               items,
             });
           },
+    uploadLocalFilesToHost: async (input, onProgress) =>
+      uploadFilesToHostPath(set, get, input, onProgress),
     transferSftpSelectionToPane: async (sourcePaneId, targetPaneId) => {
             const state = get();
             const sourcePane = getPane(state, sourcePaneId);

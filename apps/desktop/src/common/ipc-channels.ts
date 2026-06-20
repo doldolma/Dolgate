@@ -94,6 +94,7 @@ export const ipcChannels = {
     resize: 'ssh:resize',
     disconnect: 'ssh:disconnect',
     prepareAutocomplete: 'ssh:autocomplete-prepare',
+    installShellIntegration: 'ssh:install-shell-integration',
     refreshAutocomplete: 'ssh:autocomplete-refresh',
     stopAutocomplete: 'ssh:autocomplete-stop',
     completionQuery: 'ssh:completion-query',
@@ -227,7 +228,9 @@ export const ipcChannels = {
     mkdir: 'files:mkdir',
     rename: 'files:rename',
     chmod: 'files:chmod',
-    delete: 'files:delete'
+    delete: 'files:delete',
+    saveZmodemDownload: 'files:save-zmodem-download',
+    reveal: 'files:reveal'
   },
   sftp: {
     connect: 'sftp:connect',

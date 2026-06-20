@@ -47,6 +47,29 @@ import type {
 import { formatConnectionProgressStageLabel } from "../lib/connection-progress";
 import { matchesKeyboardLayoutQuery } from "../lib/keyboard-layout-search";
 import { useResponsiveCardGrid } from "../lib/useResponsiveCardGrid";
+import {
+  buildTransferCardTitle,
+  buildTransferDirection,
+  formatEta,
+  formatSize,
+  formatTransferSpeed,
+  getTransferFailureDisplayMessage,
+} from "../lib/transfer-format";
+import {
+  extractDroppedAbsolutePaths,
+  hasExternalFileDrop,
+} from "../lib/file-drop";
+// 헬퍼를 lib로 이전했지만 기존 import 경로(테스트 포함)를 보존하기 위해 재-export한다.
+export {
+  buildTransferCardTitle,
+  formatEta,
+  formatTransferSpeed,
+  getTransferFailureDisplayMessage,
+} from "../lib/transfer-format";
+export {
+  extractDroppedAbsolutePaths,
+  hasExternalFileDrop,
+} from "../lib/file-drop";
 import { DialogBackdrop } from "./DialogBackdrop";
 import { HostCard } from "./HostCard";
 import { TerminalInteractiveAuthOverlay } from "./terminal-workspace/TerminalInteractiveAuthOverlay";
@@ -848,52 +871,6 @@ function formatPermissionMode(mode: number): string {
   return `0${mode.toString(8).padStart(3, "0")}`;
 }
 
-function formatSize(size: number): string {
-  if (!size) {
-    return "--";
-  }
-  if (size < 1024) {
-    return `${size} B`;
-  }
-  if (size < 1024 * 1024) {
-    return `${(size / 1024).toFixed(1)} KB`;
-  }
-  if (size < 1024 * 1024 * 1024) {
-    return `${(size / (1024 * 1024)).toFixed(1)} MB`;
-  }
-  return `${(size / (1024 * 1024 * 1024)).toFixed(1)} GB`;
-}
-
-export function formatTransferSpeed(
-  bytesPerSecond?: number | null,
-): string | null {
-  if (!bytesPerSecond || bytesPerSecond <= 0) {
-    return null;
-  }
-  return `${formatSize(bytesPerSecond)}/s`;
-}
-
-export function formatEta(seconds?: number | null): string | null {
-  if (!seconds || seconds <= 0) {
-    return null;
-  }
-  if (seconds < 60) {
-    return `남은 시간 ${seconds}초`;
-  }
-  const minutes = Math.floor(seconds / 60);
-  const remainder = seconds % 60;
-  if (minutes < 60) {
-    return remainder > 0
-      ? `남은 시간 ${minutes}분 ${remainder}초`
-      : `남은 시간 ${minutes}분`;
-  }
-  const hours = Math.floor(minutes / 60);
-  const minuteRemainder = minutes % 60;
-  return minuteRemainder > 0
-    ? `남은 시간 ${hours}시간 ${minuteRemainder}분`
-    : `남은 시간 ${hours}시간`;
-}
-
 function formatDate(value: string): string {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) {
@@ -905,33 +882,6 @@ function formatDate(value: string): string {
     hour: "numeric",
     minute: "2-digit",
   }).format(date);
-}
-
-function buildTransferDirection(job: TransferJob): string {
-  return `${job.sourceLabel} -> ${job.targetLabel}`;
-}
-
-export function buildTransferCardTitle(job: TransferJob): string {
-  const firstRequestedItemName = job.request?.items[0]?.name?.trim();
-  if (firstRequestedItemName) {
-    if (job.itemCount > 1) {
-      return `${firstRequestedItemName} 외 ${job.itemCount - 1}개`;
-    }
-    return firstRequestedItemName;
-  }
-
-  if (job.activeItemName) {
-    return job.activeItemName;
-  }
-
-  return buildTransferDirection(job);
-}
-
-export function getTransferFailureDisplayMessage(job: TransferJob): string {
-  if (job.failedItemCount && job.failedItemCount > 0) {
-    return `${job.failedItemCount}개 항목 전송에 실패했습니다.`;
-  }
-  return job.errorMessage?.trim() || "전송에 실패했습니다.";
 }
 
 export function buildTransferFailureDetailLines(job: TransferJob): string[] {
@@ -987,23 +937,6 @@ export function isSftpTransferArrowDisabled(
   );
 }
 
-export async function extractDroppedAbsolutePaths(
-  files: Iterable<File>,
-  getPathForDroppedFile: (file: File) => string | null,
-): Promise<string[]> {
-  const paths = await Promise.all(
-    Array.from(files).map(async (file) => {
-      try {
-        const filePath = getPathForDroppedFile(file);
-        return filePath && filePath.length > 0 ? filePath : null;
-      } catch {
-        return null;
-      }
-    }),
-  );
-  return paths.filter((value): value is string => Boolean(value));
-}
-
 interface InternalTransferPayload {
   sourcePaneId: SftpPaneId;
   draggedPath: string;
@@ -1048,13 +981,6 @@ export function hasInternalTransferData(
     types.includes("application/x-dolssh-transfer") ||
     types.includes("text/plain")
   );
-}
-
-export function hasExternalFileDrop(
-  dataTransfer: Pick<DataTransfer, "files" | "types">,
-): boolean {
-  const types = Array.from(dataTransfer.types ?? []);
-  return types.includes("Files") || dataTransfer.files.length > 0;
 }
 
 const SFTP_BROWSER_COLUMNS: Array<{

@@ -317,6 +317,7 @@ export function createCatalogSlice(deps: SliceDeps): CatalogSlice {
                 rightPane: createEmptyPane("right"),
                 transfers: [],
                 pendingConflictDialog: null,
+                terminalUploadEndpoints: {},
               },
             });
           },

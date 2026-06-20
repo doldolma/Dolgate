@@ -21,6 +21,21 @@ import {
   unregisterTerminalHooks,
   type TerminalHooks,
 } from '../lib/terminal-write-registry';
+import {
+  clearSessionCwd,
+  setSessionCwd,
+} from '../lib/terminal-cwd-registry';
+import { createZmodemController } from '../lib/zmodem/zmodem-controller';
+import {
+  installTerminalShellIntegration,
+  writeTerminalBinaryInput,
+} from '../services/desktop/terminal';
+import { saveZmodemDownload } from '../services/desktop/files';
+import { appStore } from '../store/appStore';
+import {
+  clearZmodemAbort,
+  registerZmodemAbort,
+} from '../store/slices/zmodemSlice';
 import type { TerminalSessionPaneProps } from '../components/terminal-workspace/types';
 import {
   SESSION_SHARE_CHAT_TOAST_TTL_MS,
@@ -34,7 +49,10 @@ import {
   shouldOpenTerminalSearch,
   shouldShowSessionOverlay,
 } from '../components/terminal-workspace/terminalSessionHelpers';
-import { useTerminalAutocomplete } from './useTerminalAutocomplete';
+import {
+  parseCwdFromOsc7,
+  useTerminalAutocomplete,
+} from './useTerminalAutocomplete';
 import type { CommandFinishedInfo } from '../lib/command-notification';
 
 function isMacPlatform(): boolean {
@@ -186,10 +204,11 @@ export function useTerminalSessionViewController({
       host?.kind !== 'serial' &&
       tab?.shellKind !== 'aws-ecs-exec',
     connected: tab?.status === 'connected',
-    // startup command가 있어도 lazy로 미루지 않는다. 셸 통합 init을 연결 직후
-    // 주입해 두면(아래 core-manager가 통합 프롬프트 133;A를 본 뒤 startup command를
-    // flush) 첫 프롬프트가 곧 통합 프롬프트라 프롬프트가 두 번 그려지지 않는다.
-    lazyPrepare: host?.kind === 'aws-ec2' && host.startupCommand == null,
+    // 셸 통합 init을 연결 직후 주입한다(lazy 미사용). 통합 프롬프트가 곧 첫 프롬프트라
+    // (core-manager가 133;A를 본 뒤 startup command를 flush) 더블 프롬프트는 없다.
+    // eager로 둬야 OSC 7(cwd)·OSC 133이 첫 프롬프트부터 흘러, SSM(aws-ec2)에서도 파일
+    // 드롭 업로드가 현재 경로를 인식한다(lazy면 cwd 미보고로 홈에 폴백됐었다).
+    lazyPrepare: false,
     sendInput: sendAutocompleteInput,
     snippets,
     onCommandFinished,
@@ -216,6 +235,41 @@ export function useTerminalSessionViewController({
     terminalAlternateScreen,
   ]);
 
+  // 셸 통합(OSC 7 cwd / OSC 133)은 평소 autocomplete prepare 안에서 설치되지만,
+  // autocomplete를 꺼도 파일 드롭 업로드의 cwd 인식·명령 알림이 동작하도록,
+  // 업로드 가능한(ssh/aws-ec2/warpgate) 연결 세션에서는 probe 없는 전용 경로로
+  // 한 번 보장한다. autocomplete가 켜져 있으면 그 훅이 이미 설치하므로 생략한다.
+  const shellIntegrationEnsuredRef = useRef(false);
+  useEffect(() => {
+    if (tab?.status !== 'connected') {
+      shellIntegrationEnsuredRef.current = false;
+      return;
+    }
+    const autocompleteActive =
+      terminalAutocompleteEnabled &&
+      host?.kind !== 'serial' &&
+      tab?.shellKind !== 'aws-ecs-exec';
+    const sftpCapable =
+      host?.kind === 'ssh' ||
+      host?.kind === 'aws-ec2' ||
+      host?.kind === 'warpgate-ssh';
+    if (
+      autocompleteActive ||
+      !sftpCapable ||
+      shellIntegrationEnsuredRef.current
+    ) {
+      return;
+    }
+    shellIntegrationEnsuredRef.current = true;
+    void installTerminalShellIntegration(sessionId).catch(() => undefined);
+  }, [
+    host?.kind,
+    sessionId,
+    tab?.shellKind,
+    tab?.status,
+    terminalAutocompleteEnabled,
+  ]);
+
   useEffect(() => {
     if (!interactiveAuth || interactiveAuth.sessionId !== sessionId) {
       setPromptResponses([]);
@@ -232,11 +286,13 @@ export function useTerminalSessionViewController({
     previousSessionStatusRef.current = null;
   }, [sessionId]);
 
+  const liveSourceLabelRef = useRef('');
   useEffect(() => {
     liveSessionIdRef.current = sessionId;
     liveSessionStatusRef.current = tab?.status ?? null;
     liveSessionShareStatusRef.current = tab?.sessionShare?.status ?? 'inactive';
-  }, [sessionId, tab?.sessionShare?.status, tab?.status]);
+    liveSourceLabelRef.current = host?.label ?? title;
+  }, [host?.label, sessionId, tab?.sessionShare?.status, tab?.status, title]);
 
   useEffect(() => {
     liveAppearanceRef.current = appearance;
@@ -548,6 +604,9 @@ export function useTerminalSessionViewController({
         },
         onCwd: (data) => {
           liveAutocompleteCwdRef.current(data);
+          // 터미널 파일 드롭(SFTP 업로드) 핸들러가 드롭 시점에 읽을 수 있도록
+          // 세션 cwd를 모듈 레지스트리에 보관한다.
+          setSessionCwd(liveSessionIdRef.current, parseCwdFromOsc7(data));
         },
       });
       setTerminalInitError(null);
@@ -641,6 +700,7 @@ export function useTerminalSessionViewController({
       resizeSchedulerRef.current?.reset();
       resizeSchedulerRef.current = null;
       unregisterTerminalHooks(stableId, terminalHooks);
+      clearSessionCwd(liveSessionIdRef.current);
       // 안전망: 파괴 직전 스크롤백을 저장해, 같은 stableId로 재생성되면 복원한다.
       saveScrollbackSnapshot(stableId, runtime.captureRestoreSnapshot());
       runtime.dispose();
@@ -729,50 +789,76 @@ export function useTerminalSessionViewController({
     void runtimeRef.current.setWebglEnabled(nextWebglEnabled);
   }, [sessionId, tab?.sessionShare?.status, tab?.source, terminalWebglEnabled]);
 
-  useEffect(
-    () =>
-      onSessionData(sessionId, (chunk) => {
-        if (chunk.byteLength > 0) {
-          debugSessionShareRenderer('terminal stream chunk received', {
-            sessionId,
-            byteLength: chunk.byteLength,
-            shareStatus: liveSessionShareStatusRef.current,
-          });
-          if (liveSessionShareStatusRef.current === 'active') {
-            shareSnapshotDirtyRef.current = true;
-          }
+  useEffect(() => {
+    // Sentry의 to_terminal(ZMODEM이 아닌 일반 출력)만 기존 소비자(화면/공유/E2E)에게
+    // 흘린다. ZMODEM 프로토콜 바이트는 sentry가 가로채 화면/공유/E2E에 도달하지 않는다.
+    const writeToTerminal = (bytes: Uint8Array) => {
+      if (
+        bytes.byteLength > 0 &&
+        liveSessionShareStatusRef.current === 'active'
+      ) {
+        shareSnapshotDirtyRef.current = true;
+      }
+      runtimeRef.current?.write(bytes);
+      runtimeRef.current?.scheduleAfterWriteDrain(() => {
+        const terminal = runtimeRef.current?.terminal;
+        if (!terminal) {
+          return;
         }
-        runtimeRef.current?.write(chunk);
+        const buffer = terminal.buffer?.active;
+        if (!buffer) {
+          return;
+        }
+        // Prompt boundaries now come from OSC 133 markers (onShellIntegration),
+        // so the only thing tracked from raw output here is alternate-screen
+        // state (vim/less/htop) to suspend the autocomplete overlay.
+        setTerminalAlternateScreen(buffer.type === 'alternate');
+      });
+      if (liveAutocompleteVisibleRef.current) {
+        runtimeRef.current?.scheduleAfterWriteDrain(refreshAutocompleteAnchor);
+      }
+      if (e2eTerminalHookEnabledRef.current) {
         runtimeRef.current?.scheduleAfterWriteDrain(() => {
-          const terminal = runtimeRef.current?.terminal;
-          if (!terminal) {
-            return;
-          }
-          const buffer = terminal.buffer?.active;
-          if (!buffer) {
-            return;
-          }
-          // Prompt boundaries now come from OSC 133 markers (onShellIntegration),
-          // so the only thing tracked from raw output here is alternate-screen
-          // state (vim/less/htop) to suspend the autocomplete overlay.
-          setTerminalAlternateScreen(buffer.type === 'alternate');
+          publishCurrentTerminalE2EState();
         });
-        if (liveAutocompleteVisibleRef.current) {
-          runtimeRef.current?.scheduleAfterWriteDrain(refreshAutocompleteAnchor);
-        }
-        if (e2eTerminalHookEnabledRef.current) {
-          runtimeRef.current?.scheduleAfterWriteDrain(() => {
-            publishCurrentTerminalE2EState();
-          });
-        }
-      }),
-    [
-      onSessionData,
-      publishCurrentTerminalE2EState,
-      refreshAutocompleteAnchor,
+      }
+    };
+
+    // 세션당 ZMODEM Sentry. sessionId 키잉이라 재연결(effect 재실행) 시 dispose되어
+    // 진행 중 전송이 abort된다(스크롤백은 stableId 보존이라 유지).
+    const zmodem = createZmodemController({
       sessionId,
-    ],
-  );
+      hostLabel: liveSourceLabelRef.current || 'ZMODEM',
+      // SSM(aws-ec2)은 데이터 채널이 ZMODEM 바이너리 스트림을 신뢰성 있게 전달하지
+      // 못해(꼬리 바이트 누락) 비활성. SSH/Warpgate 등 8-bit clean 전송만 사용.
+      enabled: host?.kind !== 'aws-ec2',
+      writeToTerminal,
+      // ZMODEM 회신은 활성 세션에만 보낸다(브로드캐스트 팬아웃 금지).
+      sendToRemote: (bytes) => {
+        void writeTerminalBinaryInput(liveSessionIdRef.current, bytes);
+      },
+      saveDownload: saveZmodemDownload,
+      upsertJob: (job) => appStore.getState().upsertZmodemTransfer(job),
+      registerAbort: registerZmodemAbort,
+      clearAbort: clearZmodemAbort,
+    });
+
+    const unsubscribe = onSessionData(sessionId, (chunk) => {
+      zmodem.consume(chunk);
+    });
+
+    return () => {
+      unsubscribe();
+      zmodem.dispose();
+      clearSessionCwd(sessionId);
+    };
+  }, [
+    host?.kind,
+    onSessionData,
+    publishCurrentTerminalE2EState,
+    refreshAutocompleteAnchor,
+    sessionId,
+  ]);
 
   useEffect(() => {
     if (!searchOpen) {

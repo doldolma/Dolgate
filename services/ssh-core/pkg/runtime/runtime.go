@@ -416,6 +416,15 @@ func (runtime *Runtime) installShellIntegration(sessionID string) {
 	}
 }
 
+// InstallShellIntegration injects the OSC 7/133 shell hooks WITHOUT running the
+// autocomplete snapshot probe, so cwd reporting and prompt markers work even when
+// the autocomplete feature is disabled (e.g. for terminal drag-to-SFTP uploads).
+// Idempotent per session (shares the same install-once flag as the probe path).
+func (runtime *Runtime) InstallShellIntegration(sessionID string) error {
+	runtime.installShellIntegration(sessionID)
+	return nil
+}
+
 func (runtime *Runtime) collectAutocomplete(sessionID, requestID string) error {
 	runtime.emitEvent(coretypes.Event{
 		Type:      coretypes.EventTerminalAutocompleteCapability,

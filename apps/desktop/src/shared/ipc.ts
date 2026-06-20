@@ -157,7 +157,8 @@ export type CoreCommandType =
   | "terminalAutocompletePrepare"
   | "terminalAutocompleteRefresh"
   | "terminalAutocompleteStop"
-  | "terminalCompletionQuery";
+  | "terminalCompletionQuery"
+  | "terminalShellIntegrationInstall";
 export type CoreEventType =
   | "status"
   | "connected"
@@ -769,6 +770,7 @@ export interface DesktopApi {
     prepareAutocomplete: (sessionId: string) => Promise<void>;
     refreshAutocomplete: (sessionId: string) => Promise<void>;
     stopAutocomplete: (sessionId: string) => Promise<void>;
+    installShellIntegration: (sessionId: string) => Promise<void>;
     queryCompletion: (sessionId: string, command: string) => Promise<string>;
     respondKeyboardInteractive: (
       input: KeyboardInteractiveRespondInput,
@@ -958,5 +960,10 @@ export interface DesktopApi {
     rename: (path: string, nextName: string) => Promise<void>;
     chmod: (path: string, mode: number) => Promise<void>;
     delete: (paths: string[]) => Promise<void>;
+    saveZmodemDownload: (input: {
+      name: string;
+      bytes: Uint8Array;
+    }) => Promise<{ savedPath: string }>;
+    reveal: (targetPath: string) => Promise<void>;
   };
 }

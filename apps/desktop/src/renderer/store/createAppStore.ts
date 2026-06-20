@@ -7,6 +7,7 @@ import { createRuntimeEventSlice } from "./slices/runtimeEventSlice";
 import { createSessionSlice } from "./slices/sessionSlice";
 import { createSettingsSlice } from "./slices/settingsSlice";
 import { createSftpSlice } from "./slices/sftpSlice";
+import { createZmodemSlice } from "./slices/zmodemSlice";
 import { upsertTransferJob } from "./services/sftp";
 import type { AppState } from "./types";
 
@@ -24,6 +25,7 @@ export function createAppStore(api: DesktopApi) {
       ...createNetworkSlice(deps),
       ...createSettingsSlice(deps),
       ...createRuntimeEventSlice(deps),
+      ...createZmodemSlice(deps),
     };
   });
 }

@@ -225,6 +225,18 @@ describe('useTerminalSessionViewController', () => {
     mocks.schedulerRecords.length = 0;
     mocks.sessionDataListeners.clear();
     vi.stubGlobal('ResizeObserver', MockResizeObserver);
+    Object.defineProperty(window, 'dolssh', {
+      configurable: true,
+      value: {
+        ssh: {
+          onData: vi.fn(() => () => undefined),
+          write: vi.fn().mockResolvedValue(undefined),
+          writeBinary: vi.fn().mockResolvedValue(undefined),
+          resize: vi.fn().mockResolvedValue(undefined),
+          installShellIntegration: vi.fn().mockResolvedValue(undefined),
+        },
+      },
+    });
     Object.defineProperty(window.navigator, 'clipboard', {
       configurable: true,
       value: {

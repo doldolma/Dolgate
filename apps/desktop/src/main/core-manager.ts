@@ -3160,6 +3160,30 @@ export class CoreManager {
     );
   }
 
+  // autocomplete와 무관하게 셸 통합(OSC 7 cwd / OSC 133)만 설치한다(probe 없음).
+  // 터미널 드롭 업로드의 cwd 인식이 autocomplete 설정에 휘둘리지 않도록 쓴다.
+  async installShellIntegration(sessionId: string): Promise<void> {
+    await this.start();
+    if (this.sessionTransportById.get(sessionId) === "aws-ssm-server-proxy") {
+      // server-proxy 세션은 코어 stdin 밖이라 기존 prepare 경로로 위임(probe 포함).
+      try {
+        await this.requestAwsServerProxyAutocomplete(
+          sessionId,
+          "autocompletePrepare",
+        );
+      } catch {
+        // best-effort
+      }
+      return;
+    }
+    this.sendControl({
+      id: randomUUID(),
+      type: "terminalShellIntegrationInstall",
+      sessionId,
+      payload: {},
+    });
+  }
+
   async refreshAutocomplete(sessionId: string): Promise<void> {
     await this.start();
     if (this.sessionTransportById.get(sessionId) === "aws-ssm-server-proxy") {

@@ -56,6 +56,7 @@ func (stub *stubCoreRuntime) DisconnectSession(sessionID string) error          
 func (stub *stubCoreRuntime) PrepareAutocomplete(sessionID, requestID string) error { return nil }
 func (stub *stubCoreRuntime) RefreshAutocomplete(sessionID, requestID string) error { return nil }
 func (stub *stubCoreRuntime) StopAutocomplete(sessionID string)                     {}
+func (stub *stubCoreRuntime) InstallShellIntegration(sessionID string) error        { return nil }
 func (stub *stubCoreRuntime) RunCompletionQuery(sessionID, requestID, command string) error {
 	return nil
 }

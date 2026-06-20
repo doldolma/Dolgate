@@ -61,6 +61,7 @@ const (
 	CommandTerminalAutocompleteRefresh = coretypes.CommandTerminalAutocompleteRefresh
 	CommandTerminalAutocompleteStop    = coretypes.CommandTerminalAutocompleteStop
 	CommandTerminalCompletionQuery     = coretypes.CommandTerminalCompletionQuery
+	CommandShellIntegrationInstall     = coretypes.CommandShellIntegrationInstall
 )
 
 const (

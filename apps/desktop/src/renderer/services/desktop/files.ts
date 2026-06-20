@@ -18,3 +18,13 @@ export function getLocalParentPath(
 ) {
   return desktopApi.files.getParentPath(targetPath);
 }
+
+export function saveZmodemDownload(
+  input: Parameters<FilesApi["saveZmodemDownload"]>[0],
+) {
+  return desktopApi.files.saveZmodemDownload(input);
+}
+
+export function revealPath(targetPath: Parameters<FilesApi["reveal"]>[0]) {
+  return desktopApi.files.reveal(targetPath);
+}

@@ -284,6 +284,7 @@ function createSftpState(): SftpState {
     rightPane: createPane("right", createEntry("right-beta.txt", "/right")),
     transfers: [],
     pendingConflictDialog: null,
+    terminalUploadEndpoints: {},
   };
 }
 

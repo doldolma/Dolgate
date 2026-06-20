@@ -30,6 +30,7 @@ type coreRuntime interface {
 	RefreshAutocomplete(sessionID, requestID string) error
 	StopAutocomplete(sessionID string)
 	RunCompletionQuery(sessionID, requestID, command string) error
+	InstallShellIntegration(sessionID string) error
 	ProbeHostKey(requestID string, payload protocol.HostKeyProbePayload) error
 	InspectCertificate(requestID string, payload protocol.CertificateInspectPayload) error
 	RespondKeyboardInteractive(sessionID, endpointID string, payload protocol.KeyboardInteractiveRespondPayload) error
@@ -276,6 +277,13 @@ func dispatch(core coreRuntime, writer *eventWriter, request protocol.Request) e
 		// emitAsyncError. RunCompletionQuery always emits its own result event.
 		go func() {
 			_ = core.RunCompletionQuery(request.SessionID, request.ID, payload.Command)
+		}()
+		return nil
+	case protocol.CommandShellIntegrationInstall:
+		// Best-effort, fire-and-forget: install shell integration (OSC 7/133)
+		// independent of autocomplete so cwd/markers work even with it disabled.
+		go func() {
+			_ = core.InstallShellIntegration(request.SessionID)
 		}()
 		return nil
 	case protocol.CommandKeyboardInteractiveRespond:

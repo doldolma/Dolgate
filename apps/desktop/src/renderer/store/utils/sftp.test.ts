@@ -65,6 +65,7 @@ describe("sftp utils", () => {
             rightPane: createEmptyPane("right"),
             transfers: [],
             pendingConflictDialog: null,
+            terminalUploadEndpoints: {},
           },
         },
         "endpoint-left",
@@ -121,6 +122,7 @@ describe("sftp utils", () => {
         rightPane: createEmptyPane("right"),
         transfers: [],
         pendingConflictDialog: null,
+        terminalUploadEndpoints: {},
       },
     };
 

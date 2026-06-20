@@ -1,6 +1,7 @@
 import { useMemo } from 'react';
 import type { AuthState } from '@shared';
 import { TerminalWorkspace } from '../components/TerminalWorkspace';
+import { TerminalTransferToastRegion } from '../components/TerminalTransferToastRegion';
 import type { useLoginController } from '../controllers/useLoginController';
 import { openOwnerChatWindow } from '../services/desktop/session-shares';
 import type {
@@ -91,7 +92,7 @@ export function SessionShell({
           }}
         />
       ) : null}
-      <div className="min-h-0 flex-1">
+      <div className="relative min-h-0 flex-1">
         <TerminalWorkspace
           tabs={sessionViewModel.tabs}
           hosts={homeViewModel.hosts}
@@ -139,6 +140,7 @@ export function SessionShell({
           onToggleWorkspaceBroadcast={sessionViewModel.toggleWorkspaceBroadcast}
           onResizeWorkspaceSplit={sessionViewModel.resizeWorkspaceSplit}
         />
+        <TerminalTransferToastRegion />
       </div>
     </section>
   );

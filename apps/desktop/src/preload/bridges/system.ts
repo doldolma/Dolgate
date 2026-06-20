@@ -212,5 +212,9 @@ export function buildFilesBridge(
       ipcRenderer.invoke(ipcChannels.files.chmod, path, mode),
     delete: (paths: string[]) =>
       ipcRenderer.invoke(ipcChannels.files.delete, paths),
+    saveZmodemDownload: (input: { name: string; bytes: Uint8Array }) =>
+      ipcRenderer.invoke(ipcChannels.files.saveZmodemDownload, input),
+    reveal: (targetPath: string) =>
+      ipcRenderer.invoke(ipcChannels.files.reveal, targetPath),
   };
 }

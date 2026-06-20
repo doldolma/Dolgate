@@ -1,7 +1,7 @@
 import type { AppSettings } from "@shared";
 import path from "node:path";
 import { readFile } from "node:fs/promises";
-import { app, dialog, ipcMain } from "electron";
+import { app, dialog, ipcMain, shell } from "electron";
 import { ipcChannels } from "../../common/ipc-channels";
 import type { MainIpcContext } from "./context";
 
@@ -169,4 +169,22 @@ export function registerWindowUpdaterSettingsFilesIpcHandlers(
   ipcMain.handle(ipcChannels.files.delete, async (_event, paths: string[]) => {
     await ctx.localFiles.delete(paths);
   });
+
+  ipcMain.handle(
+    ipcChannels.files.saveZmodemDownload,
+    async (_event, input: { name: string; bytes: Uint8Array }) => {
+      const savedPath = await ctx.localFiles.saveToDownloads(
+        input.name,
+        input.bytes,
+      );
+      return { savedPath };
+    },
+  );
+
+  ipcMain.handle(
+    ipcChannels.files.reveal,
+    async (_event, targetPath: string) => {
+      shell.showItemInFolder(targetPath);
+    },
+  );
 }

@@ -30,6 +30,10 @@ export function refreshTerminalAutocomplete(sessionId: string) {
   return desktopApi.ssh.refreshAutocomplete(sessionId);
 }
 
+export function installTerminalShellIntegration(sessionId: string) {
+  return desktopApi.ssh.installShellIntegration(sessionId);
+}
+
 export function stopTerminalAutocomplete(sessionId: string) {
   return desktopApi.ssh.stopAutocomplete(sessionId);
 }

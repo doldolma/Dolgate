@@ -464,7 +464,27 @@ export interface SftpState {
   rightPane: SftpPaneState;
   transfers: TransferJob[];
   pendingConflictDialog: PendingConflictDialog | null;
+  // 터미널 파일 드롭(SFTP 업로드)용 백그라운드 endpoint를 hostId별로 캐시한다.
+  // SFTP 패널 UI와 무관하게 재사용해 중복 연결과 워크스페이스 전환을 막는다.
+  terminalUploadEndpoints: Record<string, SftpEndpointSummary>;
 }
+
+// 터미널 파일 드롭 업로드 결과. 드롭 핸들러가 토스트 피드백에 사용한다.
+export type TerminalUploadResult =
+  | {
+      ok: true;
+      job: TransferJob;
+      hostLabel: string;
+      targetPath: string;
+      /** cwd를 못 찾아 홈(endpoint 루트)으로 업로드한 경우 true. */
+      usedHomeFallback: boolean;
+      warnings: string[];
+    }
+  | {
+      ok: false;
+      reason: "unsupported" | "connect-failed" | "no-items";
+      message?: string;
+    };
 
 interface AppStateParts {
   hosts: HostRecord[];
@@ -771,6 +791,15 @@ interface AppStateParts {
     targetPath: string,
     droppedPaths: string[],
   ) => Promise<void>;
+  // 터미널 패널에 드롭한 파일을 해당 세션 호스트의 cwd로 SFTP 업로드한다(SFTP 패널 비종속).
+  uploadLocalFilesToHost: (
+    input: {
+      hostId: string;
+      targetPath: string | null;
+      localPaths: string[];
+    },
+    onProgress?: (message: string) => void,
+  ) => Promise<TerminalUploadResult>;
   transferSftpSelectionToPane: (
     sourcePaneId: SftpPaneId,
     targetPaneId: SftpPaneId,
@@ -934,6 +963,7 @@ export type SftpSlice = Pick<
   | "downloadSftpSelection"
   | "prepareSftpTransfer"
   | "prepareSftpExternalTransfer"
+  | "uploadLocalFilesToHost"
   | "transferSftpSelectionToPane"
   | "resolveSftpConflict"
   | "dismissSftpConflict"
@@ -993,13 +1023,23 @@ export type RuntimeEventSlice = Pick<
   | "handleActivityLogsChanged"
 >;
 
+// ZMODEM(sz) 다운로드 진행 상태. 렌더러 컨트롤러가 잡을 upsert하고,
+// 통합 전송 토스트가 이를 읽어 표시한다.
+export interface ZmodemSlice {
+  zmodemTransfers: TransferJob[];
+  upsertZmodemTransfer: (job: TransferJob) => void;
+  cancelZmodemTransfer: (jobId: string) => void;
+  dismissZmodemTransfer: (jobId: string) => void;
+}
+
 export type AppState = CatalogSlice &
   SessionSlice &
   ContainersSlice &
   SftpSlice &
   NetworkSlice &
   SettingsSlice &
-  RuntimeEventSlice;
+  RuntimeEventSlice &
+  ZmodemSlice;
 
 export interface SliceDeps {
   api: DesktopApi;

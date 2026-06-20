@@ -56,6 +56,7 @@ const (
 	CommandTerminalAutocompleteRefresh CommandType = "terminalAutocompleteRefresh"
 	CommandTerminalAutocompleteStop    CommandType = "terminalAutocompleteStop"
 	CommandTerminalCompletionQuery     CommandType = "terminalCompletionQuery"
+	CommandShellIntegrationInstall     CommandType = "terminalShellIntegrationInstall"
 )
 
 const (

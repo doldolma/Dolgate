@@ -59,7 +59,7 @@ function parseExitCode(marker: string): number | null {
   return Number.isFinite(code) ? code : null;
 }
 
-function parseCwdFromOsc7(data: string): string | null {
+export function parseCwdFromOsc7(data: string): string | null {
   // OSC 7 payload: file://<host><abs-path>
   const match = data.match(/^file:\/\/[^/]*(\/.*)$/);
   if (!match) {
