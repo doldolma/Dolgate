@@ -2,6 +2,7 @@ import { FitAddon } from 'xterm-addon-fit/lib/xterm-addon-fit.js';
 import { SearchAddon } from 'xterm-addon-search/lib/xterm-addon-search.js';
 import { SerializeAddon, type ISerializeOptions } from 'xterm-addon-serialize/lib/xterm-addon-serialize.js';
 import { Unicode11Addon } from 'xterm-addon-unicode11/lib/xterm-addon-unicode11.js';
+import { ImageAddon } from 'xterm-addon-image/lib/xterm-addon-image.js';
 import {
   Terminal,
   type IBufferRange,
@@ -356,6 +357,13 @@ export function createTerminalRuntime({
   } catch (error) {
     unicode11Addon = null;
     safeWarn(logger, 'Unicode11 addon unavailable, continuing with the default unicode width handling.', error);
+  }
+  try {
+    // 인라인 이미지(Sixel + iTerm2 IIP) 렌더링. 항상 활성. SSH 스트림에 들어온 이미지
+    // escape sequence를 xterm이 디코드해 그린다. 백엔드 변경은 필요 없다.
+    terminal.loadAddon(new ImageAddon({ storageLimit: 128 }));
+  } catch (error) {
+    safeWarn(logger, 'Image addon unavailable, continuing without inline image (sixel/iip) support.', error);
   }
   terminal.open(container);
   fitAddon.fit();

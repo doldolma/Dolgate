@@ -48,3 +48,28 @@ declare module 'xterm-addon-webgl/lib/xterm-addon-webgl.js' {
     dispose(): void;
   }
 }
+
+declare module 'xterm-addon-image/lib/xterm-addon-image.js' {
+  export interface IImageAddonOptions {
+    enableSizeReports?: boolean;
+    pixelLimit?: number;
+    storageLimit?: number;
+    showPlaceholder?: boolean;
+    sixelSupport?: boolean;
+    sixelScrolling?: boolean;
+    sixelPaletteLimit?: number;
+    sixelSizeLimit?: number;
+    iipSupport?: boolean;
+    iipSizeLimit?: number;
+  }
+
+  export class ImageAddon {
+    constructor(options?: IImageAddonOptions);
+    activate(terminal: unknown): void;
+    dispose(): void;
+    reset(): void;
+    storageLimit: number;
+    readonly storageUsage: number;
+    showPlaceholder: boolean;
+  }
+}
