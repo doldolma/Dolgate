@@ -1,4 +1,4 @@
-import { app, BrowserWindow } from 'electron';
+import { app, BrowserWindow, powerMonitor } from 'electron';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
@@ -424,6 +424,18 @@ if (termiusHelperArgIndex >= 0) {
         await createWindow();
       }
     });
+
+    // 절전/화면잠금에서 복귀하면 navigator.onLine이 true여도 SSH 소켓이 죽어
+    // 있을 수 있다. 렌더러에 알려 자동 재연결이 모든 세션을 즉시 재검증하게 한다.
+    const notifyResume = () => {
+      for (const window of BrowserWindow.getAllWindows()) {
+        if (!window.isDestroyed()) {
+          window.webContents.send(ipcChannels.system.resume);
+        }
+      }
+    };
+    powerMonitor.on('resume', notifyResume);
+    powerMonitor.on('unlock-screen', notifyResume);
   });
 
   app.on('before-quit', (event) => {

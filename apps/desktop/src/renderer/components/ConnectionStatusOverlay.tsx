@@ -8,6 +8,9 @@ export interface ConnectionStatusOverlayProps {
   showRetry?: boolean;
   onRetry?: () => void;
   onClose?: () => void;
+  /** 자동 재연결 진행 중 표시되는 취소 버튼(에러가 아니어도 상호작용 가능). */
+  showCancel?: boolean;
+  onCancel?: () => void;
 }
 
 export function ConnectionStatusOverlay({
@@ -17,7 +20,10 @@ export function ConnectionStatusOverlay({
   showRetry = true,
   onRetry,
   onClose,
+  showCancel = false,
+  onCancel,
 }: ConnectionStatusOverlayProps) {
+  const interactive = error || showCancel;
   return (
     <div
       role={error ? 'alertdialog' : 'status'}
@@ -25,7 +31,7 @@ export function ConnectionStatusOverlay({
       aria-label={title}
       className={cn(
         'absolute inset-0 z-[3] flex items-center justify-center px-[1.2rem] py-[1.2rem] text-center',
-        error
+        interactive
           ? 'pointer-events-auto bg-[color-mix(in_srgb,var(--surface)_72%,transparent_28%)] text-[var(--text-soft)]'
           : 'pointer-events-none bg-[color-mix(in_srgb,var(--surface)_72%,transparent_28%)] text-[var(--text-soft)]',
       )}
@@ -48,6 +54,12 @@ export function ConnectionStatusOverlay({
             ) : null}
             <Button type="button" variant="secondary" onClick={onClose}>
               Close
+            </Button>
+          </div>
+        ) : showCancel ? (
+          <div className="flex w-full justify-end pt-[0.35rem]">
+            <Button type="button" variant="secondary" onClick={onCancel}>
+              재연결 취소
             </Button>
           </div>
         ) : null}

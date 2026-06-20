@@ -131,6 +131,7 @@ export function createSessionServices(deps: SliceDeps) {
       );
     const tab = createPendingSessionTab({
       sessionId,
+      stableId: existingTab?.stableId,
       source: "host",
       hostId: host.id,
       title,
@@ -211,6 +212,7 @@ export function createSessionServices(deps: SliceDeps) {
       buildSessionTitle("Terminal", { source: "local" }, get().tabs);
     const tab = createPendingSessionTab({
       sessionId,
+      stableId: existingTab?.stableId,
       source: "local",
       hostId: null,
       title,
@@ -294,6 +296,7 @@ export function createSessionServices(deps: SliceDeps) {
       );
     const tab = createPendingSessionTab({
       sessionId,
+      stableId: existingTab?.stableId,
       source: "host",
       hostId: host.id,
       title,
@@ -377,6 +380,7 @@ export function createSessionServices(deps: SliceDeps) {
       `${host?.label ?? "ECS"} · ${input.serviceName} · ${input.containerName}`;
     const tab = createPendingSessionTab({
       sessionId,
+      stableId: existingTab?.stableId,
       source: "local",
       hostId: null,
       title,

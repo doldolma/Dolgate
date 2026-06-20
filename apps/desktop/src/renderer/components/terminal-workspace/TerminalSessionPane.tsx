@@ -29,6 +29,7 @@ export function TerminalSessionPane(props: TerminalSessionPaneProps) {
     onFocus,
     onClose,
     onRetry,
+    onCancelReconnect,
     onReopenInteractiveAuthUrl,
     onClearPendingInteractiveAuth,
     onOpenSessionShareChatWindow,
@@ -218,6 +219,13 @@ export function TerminalSessionPane(props: TerminalSessionPaneProps) {
             }}
             onClose={() => {
               void onClose?.();
+            }}
+            showCancel={
+              tab?.connectionProgress?.stage === 'reconnecting' &&
+              tab?.status !== 'error'
+            }
+            onCancel={() => {
+              void onCancelReconnect?.();
             }}
           />
         ) : null}

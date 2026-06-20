@@ -178,6 +178,7 @@ describe('TerminalWorkspace search shortcut helper', () => {
       shouldShowSessionOverlay(
         {
           id: 'tab-1',
+          stableId: 'tab-1',
           sessionId: 'session-1',
           source: 'local',
           hostId: null,
@@ -195,6 +196,7 @@ describe('TerminalWorkspace search shortcut helper', () => {
       shouldShowSessionOverlay(
         {
           id: 'tab-2',
+          stableId: 'tab-2',
           sessionId: 'session-2',
           source: 'local',
           hostId: null,

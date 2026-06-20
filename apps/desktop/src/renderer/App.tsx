@@ -7,6 +7,7 @@ import type {
 } from '@shared';
 import { AuthBootstrapBridge } from './bridges/AuthBootstrapBridge';
 import { DesktopEventBridge } from './bridges/DesktopEventBridge';
+import { NetworkBridge } from './bridges/NetworkBridge';
 import { DesktopStateBridge } from './bridges/DesktopStateBridge';
 import { ThemeBridge } from './bridges/ThemeBridge';
 import { useLoginController } from './controllers/useLoginController';
@@ -263,6 +264,7 @@ export function App() {
         onSessionShareChatEvent={sessionViewModel.handleSessionShareChatEvent}
         onAuthEvent={handleAuthEvent}
       />
+      <NetworkBridge />
       <DesktopStateBridge
         loadSettings={settingsViewModel.loadSettings}
         onLoginServerSettingsReady={() => {

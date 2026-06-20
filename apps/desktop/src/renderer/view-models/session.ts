@@ -8,6 +8,9 @@ export function useSessionWorkspaceViewModel() {
   const activateSession = useAppStore((state) => state.activateSession);
   const activateWorkspace = useAppStore((state) => state.activateWorkspace);
   const retrySessionConnection = useAppStore((state) => state.retrySessionConnection);
+  const cancelSessionReconnect = useAppStore(
+    (state) => state.cancelSessionReconnect,
+  );
   const startSessionShare = useAppStore((state) => state.startSessionShare);
   const updateSessionShareSnapshot = useAppStore(
     (state) => state.updateSessionShareSnapshot,
@@ -46,6 +49,7 @@ export function useSessionWorkspaceViewModel() {
     activateSession,
     activateWorkspace,
     retrySessionConnection,
+    cancelSessionReconnect,
     startSessionShare,
     updateSessionShareSnapshot,
     setSessionShareInputEnabled,

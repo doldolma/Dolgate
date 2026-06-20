@@ -510,6 +510,64 @@ export function SettingsPanel({
               ) : null}
             </div>
 
+            {/* 자동 재연결 — 끊김 시 백오프 재연결 동작 제어 */}
+            <div className="mb-[1.15rem] grid gap-[0.7rem] rounded-[20px] border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[color-mix(in_srgb,var(--surface-muted)_55%,transparent_45%)] p-[1.1rem]">
+              <SectionLabel>Auto-Reconnect</SectionLabel>
+              <ToggleSwitch
+                checked={settings.autoReconnectEnabled}
+                label="자동 재연결"
+                description="연결이 예기치 않게 끊기면 자동으로 다시 연결합니다 (SSH/Warpgate 터미널, SFTP, 포트포워딩)."
+                onClick={() => {
+                  void onUpdateSettings({
+                    autoReconnectEnabled: !settings.autoReconnectEnabled,
+                  });
+                }}
+              />
+
+              {settings.autoReconnectEnabled ? (
+                <div className="grid grid-cols-[repeat(2,minmax(0,1fr))] items-start gap-[0.9rem] border-t border-[color-mix(in_srgb,var(--border)_60%,transparent_40%)] pt-[0.85rem] max-[760px]:grid-cols-1">
+                  <FieldGroup label="최대 재시도 횟수">
+                    <Input
+                      aria-label="최대 재시도 횟수"
+                      type="number"
+                      min={1}
+                      max={100}
+                      step={1}
+                      value={settings.autoReconnectMaxAttempts}
+                      onChange={async (event) =>
+                        onUpdateSettings({
+                          autoReconnectMaxAttempts: Number(event.target.value),
+                        })
+                      }
+                    />
+                    <p className="m-0 text-[0.78rem] leading-[1.45] text-[var(--text-soft)]">
+                      이 횟수만큼 실패하면 수동 재연결로 전환합니다.
+                    </p>
+                  </FieldGroup>
+
+                  <FieldGroup label="최대 재시도 간격(초)">
+                    <Input
+                      aria-label="최대 재시도 간격(초)"
+                      type="number"
+                      min={1}
+                      max={300}
+                      step={1}
+                      value={Math.round(settings.autoReconnectMaxDelayMs / 1000)}
+                      onChange={async (event) =>
+                        onUpdateSettings({
+                          autoReconnectMaxDelayMs:
+                            Number(event.target.value) * 1000,
+                        })
+                      }
+                    />
+                    <p className="m-0 text-[0.78rem] leading-[1.45] text-[var(--text-soft)]">
+                      지수 백오프가 늘어날 수 있는 최대 간격입니다.
+                    </p>
+                  </FieldGroup>
+                </div>
+              ) : null}
+            </div>
+
             <div className="mb-4">
               <div>
                 <SectionLabel>Appearance</SectionLabel>

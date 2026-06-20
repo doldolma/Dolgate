@@ -44,8 +44,10 @@ vi.mock('../lib/terminal-runtime', () => ({
           callback();
         }),
         captureSnapshot: vi.fn(() => 'snapshot'),
+      captureRestoreSnapshot: vi.fn(() => ''),
         setAppearance: vi.fn(),
         setWebglEnabled: vi.fn().mockResolvedValue(undefined),
+        repaint: vi.fn(),
         syncDisplayMetrics: vi.fn(),
         focus: vi.fn(() => {
           container.dispatchEvent(new FocusEvent('focusin', { bubbles: true }));
@@ -96,6 +98,7 @@ const host: HostRecord = {
 
 const baseTab: TerminalTab = {
   id: 'tab-1',
+  stableId: 'tab-1',
   sessionId: 'session-1',
   source: 'host',
   hostId: 'host-1',
@@ -263,6 +266,7 @@ describe('useTerminalSessionViewController', () => {
         tab: {
           ...baseTab,
           id: 'tab-2',
+          stableId: 'tab-2',
           sessionId: 'session-2',
           title: 'Session 2',
         },
@@ -343,6 +347,62 @@ describe('useTerminalSessionViewController', () => {
     });
 
     expect(onDismissSessionShareChatNotification).not.toHaveBeenCalled();
+  });
+
+  it('preserves the terminal instance across reconnect (sessionId changes, stableId stable)', async () => {
+    const { rerenderWithProps } = renderController(createProps());
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(mocks.runtimeRecords).toHaveLength(1);
+    const runtime = mocks.runtimeRecords[0];
+
+    // 재연결: sessionId만 바뀌고 stableId('tab-1')는 유지된다.
+    rerenderWithProps(
+      createProps({
+        sessionId: 'session-1-reconnected',
+        tab: { ...baseTab, sessionId: 'session-1-reconnected' },
+      }),
+    );
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    // 터미널을 dispose/recreate 하지 않아 스크롤백이 보존된다.
+    expect(runtime.dispose).not.toHaveBeenCalled();
+    expect(mocks.runtimeRecords).toHaveLength(1);
+
+    // 새 sessionId의 출력이 동일 터미널에 append된다(데이터 구독은 sessionId 기준 재구독).
+    await act(async () => {
+      mocks.sessionDataListeners
+        .get('session-1-reconnected')
+        ?.(new Uint8Array([120]));
+    });
+    expect(runtime.write).toHaveBeenCalledWith(new Uint8Array([120]));
+  });
+
+  it('disposes and recreates the terminal when switching to a different tab (stableId changes)', async () => {
+    const { rerenderWithProps } = renderController(createProps());
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+    const firstRuntime = mocks.runtimeRecords[0];
+
+    // 다른 탭으로 전환: stableId가 바뀌면 터미널은 새로 만들어진다.
+    rerenderWithProps(
+      createProps({
+        sessionId: 'session-2',
+        tab: { ...baseTab, id: 'tab-2', stableId: 'tab-2', sessionId: 'session-2' },
+      }),
+    );
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(firstRuntime.dispose).toHaveBeenCalled();
+    expect(mocks.runtimeRecords).toHaveLength(2);
   });
 
   it('routes resize scheduling through the session controller boundary', async () => {

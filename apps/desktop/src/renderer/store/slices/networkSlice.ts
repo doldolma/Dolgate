@@ -137,6 +137,7 @@ import {
   updatePaneState,
   toTrustInput,
 } from "../utils";
+import { cancelReconnect } from "../services/reconnect-orchestrator";
 import { createContainersServices } from "../services/containers";
 import { createNetworkServices } from "../services/network";
 import { createSessionServices } from "../services/session";
@@ -295,6 +296,8 @@ export function createNetworkSlice(deps: SliceDeps): NetworkSlice {
             await startTrustedPortForward(set, get, ruleId);
           },
     stopPortForward: async (ruleId) => {
+            // 사용자가 직접 멈추면 진행 중 자동 재연결을 취소(의도적 종료).
+            cancelReconnect(ruleId, "user-stop");
             await api.portForwards.stop(ruleId);
             const rule = get().portForwards.find((item) => item.id === ruleId);
             set((state) => ({

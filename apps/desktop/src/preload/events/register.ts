@@ -23,6 +23,7 @@ import {
   emitSessionShareEvent,
   emitSftpConnectionProgress,
   emitSshData,
+  emitSystemResume,
   emitTransferEvent,
   emitUpdateEvent,
   emitWarpgateImportEvent,
@@ -115,4 +116,8 @@ export function registerPreloadEventBindings(ipcRenderer: IpcRenderer): void {
       emitSessionShareChatEvent(payload);
     },
   );
+
+  ipcRenderer.on(ipcChannels.system.resume, () => {
+    emitSystemResume();
+  });
 }

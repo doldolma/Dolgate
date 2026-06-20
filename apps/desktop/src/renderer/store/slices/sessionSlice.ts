@@ -140,6 +140,7 @@ import {
 } from "../utils";
 import { createBootstrapSyncServices } from "../services/bootstrap-sync";
 import { updateStoredSshUsername } from "../services/credential-retry";
+import { cancelReconnect } from "../services/reconnect-orchestrator";
 import { createContainersServices } from "../services/containers";
 import { createSessionServices } from "../services/session";
 import { createSftpServices } from "../services/sftp";
@@ -313,6 +314,7 @@ export function createSessionSlice(deps: SliceDeps): SessionSlice {
                   (tab) =>
                     createPendingSessionTab({
                       sessionId: pendingSessionId,
+                      stableId: tab.stableId,
                       source: "local",
                       hostId: null,
                       title: tab.title,
@@ -366,6 +368,7 @@ export function createSessionSlice(deps: SliceDeps): SessionSlice {
                   (tab) =>
                     createPendingSessionTab({
                       sessionId: pendingSessionId,
+                      stableId: tab.stableId,
                       source: "host",
                       hostId: currentAttempt.hostId,
                       title: tab.title,
@@ -438,6 +441,7 @@ export function createSessionSlice(deps: SliceDeps): SessionSlice {
                   (tab) =>
                     createPendingSessionTab({
                       sessionId: pendingSessionId,
+                      stableId: tab.stableId,
                       source: "local",
                       hostId: null,
                       title: tab.title,
@@ -507,6 +511,7 @@ export function createSessionSlice(deps: SliceDeps): SessionSlice {
                 (tab) =>
                   createPendingSessionTab({
                     sessionId: pendingSessionId,
+                    stableId: tab.stableId,
                     source: "host",
                     hostId: tab.hostId,
                     title: tab.title,
@@ -609,6 +614,13 @@ export function createSessionSlice(deps: SliceDeps): SessionSlice {
             }));
           },
     disconnectTab: async (sessionId) => {
+            // 사용자가 직접 끊으면 진행 중인 자동 재연결을 즉시 취소(의도적 종료).
+            const reconnectTab = get().tabs.find(
+              (tab) => tab.sessionId === sessionId,
+            );
+            if (reconnectTab) {
+              cancelReconnect(reconnectTab.stableId, "user-disconnect");
+            }
             const currentShare = get().tabs.find(
               (tab) => tab.sessionId === sessionId,
             )?.sessionShare;
@@ -642,6 +654,33 @@ export function createSessionSlice(deps: SliceDeps): SessionSlice {
               ),
             }));
           },
+    cancelSessionReconnect: (sessionId) => {
+            // 사용자가 자동 재연결을 취소 → 백오프 중단 + 수동 재연결 가능한 error 상태로.
+            const tab = get().tabs.find((item) => item.sessionId === sessionId);
+            if (!tab) {
+              return;
+            }
+            cancelReconnect(tab.stableId, "user-cancel");
+            const message = "자동 재연결을 취소했습니다.";
+            set((state) => ({
+              tabs: state.tabs.map((item) =>
+                item.sessionId === sessionId
+                  ? {
+                      ...item,
+                      status: "error" as const,
+                      errorMessage: message,
+                      connectionProgress: createConnectionProgress(
+                        "reconnecting",
+                        message,
+                        { retryable: true },
+                      ),
+                      reconnect: null,
+                      lastEventAt: new Date().toISOString(),
+                    }
+                  : item,
+              ),
+            }));
+          },
     closeWorkspace: async (workspaceId) => {
             const workspace = get().workspaces.find(
               (item) => item.id === workspaceId,
@@ -651,6 +690,12 @@ export function createSessionSlice(deps: SliceDeps): SessionSlice {
             }
     
             const sessionIds = listWorkspaceSessionIds(workspace.layout);
+            for (const sessionId of sessionIds) {
+              const tab = get().tabs.find((item) => item.sessionId === sessionId);
+              if (tab) {
+                cancelReconnect(tab.stableId, "workspace-closed");
+              }
+            }
             await Promise.all(
               sessionIds.map((sessionId) => api.ssh.disconnect(sessionId)),
             );

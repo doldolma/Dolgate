@@ -132,6 +132,10 @@ export const ipcChannels = {
     close: 'window:close',
     stateChanged: 'window:state-changed'
   },
+  system: {
+    // OS 절전/잠금 복귀 알림. 자동 재연결이 죽은 소켓을 즉시 재검증하는 데 쓰인다.
+    resume: 'system:resume'
+  },
   tabs: {
     list: 'tabs:list'
   },

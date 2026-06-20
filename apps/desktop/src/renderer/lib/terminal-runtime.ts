@@ -34,8 +34,12 @@ export interface TerminalRuntime {
   write: (data: Uint8Array | string) => void;
   scheduleAfterWriteDrain: (callback: () => void) => void;
   captureSnapshot: () => string;
+  /** 스크롤백까지 포함해 직렬화한다. 터미널 재생성 시 버퍼 복원용. */
+  captureRestoreSnapshot: () => string;
   setAppearance: (appearance: TerminalRuntimeAppearance) => void;
   setWebglEnabled: (enabled: boolean) => Promise<void>;
+  /** GPU/WebGL 컨텍스트 손실(절전·깨우기 등) 후 강제 재렌더 + 필요 시 WebGL 재생성. */
+  repaint: () => void;
   syncDisplayMetrics: () => void;
   focus: () => void;
   findNext: (term: string) => boolean;
@@ -400,6 +404,62 @@ export function createTerminalRuntime({
     safeWarn(logger, message, error);
   };
 
+  const applyWebglEnabled = async (enabled: boolean): Promise<void> => {
+    webglDesiredEnabled = enabled;
+    webglRequestId += 1;
+    const requestId = webglRequestId;
+
+    if (!enabled) {
+      clearWebglAddon();
+      return;
+    }
+
+    if (disposed || webglAddon) {
+      return;
+    }
+
+    try {
+      const { WebglAddon } = await loadWebglAddonModule();
+      if (disposed || requestId !== webglRequestId || !webglDesiredEnabled || webglAddon) {
+        return;
+      }
+
+      const nextAddon = new WebglAddon();
+      const contextLossDisposable = nextAddon.onContextLoss(() => {
+        if (webglAddon !== nextAddon) {
+          return;
+        }
+        clearWebglAddon();
+        warnFallback('WebGL renderer context lost, falling back to the default terminal renderer.');
+        // macOS 절전/깨우기 등으로 GPU 컨텍스트를 잃으면 WebGL addon을 dispose한 뒤
+        // 기본(DOM) 렌더러로 즉시 다시 그려야 화면이 빈 채로 남지 않는다.
+        if (!disposed && terminal.rows > 0) {
+          terminal.refresh(0, terminal.rows - 1);
+        }
+      });
+
+      try {
+        terminal.loadAddon(nextAddon as never);
+      } catch (error) {
+        contextLossDisposable.dispose();
+        nextAddon.dispose();
+        throw error;
+      }
+
+      if (disposed || requestId !== webglRequestId || !webglDesiredEnabled) {
+        contextLossDisposable.dispose();
+        nextAddon.dispose();
+        return;
+      }
+
+      lastDevicePixelRatio = readDevicePixelRatio();
+      webglAddon = nextAddon;
+      webglContextLossDisposable = contextLossDisposable;
+    } catch (error) {
+      warnFallback('WebGL renderer unavailable, falling back to the default terminal renderer.', error);
+    }
+  };
+
   const flushPendingWriteDrainCallback = () => {
     if (disposed || writeInFlight || queuedChunks.length > 0) {
       return;
@@ -532,57 +592,43 @@ export function createTerminalRuntime({
       }
       return buildViewportSnapshot(terminal);
     },
+    captureRestoreSnapshot() {
+      // 스크롤백까지 포함해 직렬화한다(재생성 시 이전 출력 복원용). 실패하면 빈 문자열.
+      if (!serializeAddon) {
+        return '';
+      }
+      try {
+        return serializeAddon.serialize({
+          scrollback: terminal.options.scrollback ?? 0,
+        });
+      } catch (error) {
+        safeWarn(
+          logger,
+          'Serialize addon failed to capture the restore snapshot.',
+          error,
+        );
+        return '';
+      }
+    },
     setAppearance(nextAppearance) {
       applyTerminalAppearance(terminal, nextAppearance);
     },
-    async setWebglEnabled(enabled) {
-      webglDesiredEnabled = enabled;
-      webglRequestId += 1;
-      const requestId = webglRequestId;
-
-      if (!enabled) {
+    setWebglEnabled(enabled) {
+      return applyWebglEnabled(enabled);
+    },
+    repaint() {
+      if (disposed) {
+        return;
+      }
+      // 절전/깨우기 후 GL 컨텍스트는 (1)손실되어 addon이 dispose됐거나 (2)손실 이벤트
+      // 없이 stale 상태로 남아 빈 화면을 그릴 수 있다. 두 경우 모두 안전하게 복구하려고
+      // WebGL을 강제로 재생성한다(원래 켜져 있던 경우). DOM 렌더러면 즉시 refresh만.
+      if (webglDesiredEnabled) {
         clearWebglAddon();
-        return;
+        void applyWebglEnabled(true);
       }
-
-      if (disposed || webglAddon) {
-        return;
-      }
-
-      try {
-        const { WebglAddon } = await loadWebglAddonModule();
-        if (disposed || requestId !== webglRequestId || !webglDesiredEnabled || webglAddon) {
-          return;
-        }
-
-        const nextAddon = new WebglAddon();
-        const contextLossDisposable = nextAddon.onContextLoss(() => {
-          if (webglAddon !== nextAddon) {
-            return;
-          }
-          clearWebglAddon();
-          warnFallback('WebGL renderer context lost, falling back to the default terminal renderer.');
-        });
-
-        try {
-          terminal.loadAddon(nextAddon as never);
-        } catch (error) {
-          contextLossDisposable.dispose();
-          nextAddon.dispose();
-          throw error;
-        }
-
-        if (disposed || requestId !== webglRequestId || !webglDesiredEnabled) {
-          contextLossDisposable.dispose();
-          nextAddon.dispose();
-          return;
-        }
-
-        lastDevicePixelRatio = readDevicePixelRatio();
-        webglAddon = nextAddon;
-        webglContextLossDisposable = contextLossDisposable;
-      } catch (error) {
-        warnFallback('WebGL renderer unavailable, falling back to the default terminal renderer.', error);
+      if (terminal.rows > 0) {
+        terminal.refresh(0, terminal.rows - 1);
       }
     },
     syncDisplayMetrics,

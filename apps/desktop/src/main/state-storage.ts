@@ -38,12 +38,15 @@ import type {
   TerminalThemeId
 } from '@shared';
 import {
+  DEFAULT_AUTO_RECONNECT_SETTINGS,
   DEFAULT_COMMAND_NOTIFICATION_SETTINGS,
   DEFAULT_SESSION_REPLAY_RETENTION_COUNT,
   DEFAULT_SFTP_BROWSER_COLUMN_WIDTHS,
   MAX_SESSION_REPLAY_RETENTION_COUNT,
   MAX_HOST_STARTUP_COMMAND_LENGTH,
   MIN_SESSION_REPLAY_RETENTION_COUNT,
+  clampAutoReconnectDelayMs,
+  clampAutoReconnectMaxAttempts,
   clampCommandNotificationThresholdSeconds,
   normalizeSftpBrowserColumnWidths
 } from '@shared';
@@ -85,6 +88,10 @@ export interface DesktopStateFile {
     commandNotificationOnlyWhenUnfocused: boolean;
     commandNotificationOnFailure: boolean;
     commandNotificationSound: boolean;
+    autoReconnectEnabled: boolean;
+    autoReconnectMaxAttempts: number;
+    autoReconnectBaseDelayMs: number;
+    autoReconnectMaxDelayMs: number;
     serverUrlOverride: string | null;
     updatedAt: string;
   };
@@ -464,6 +471,10 @@ function createDefaultStateFile(): DesktopStateFile {
         DEFAULT_COMMAND_NOTIFICATION_SETTINGS.commandNotificationOnlyWhenUnfocused,
       commandNotificationOnFailure: DEFAULT_COMMAND_NOTIFICATION_SETTINGS.commandNotificationOnFailure,
       commandNotificationSound: DEFAULT_COMMAND_NOTIFICATION_SETTINGS.commandNotificationSound,
+      autoReconnectEnabled: DEFAULT_AUTO_RECONNECT_SETTINGS.autoReconnectEnabled,
+      autoReconnectMaxAttempts: DEFAULT_AUTO_RECONNECT_SETTINGS.autoReconnectMaxAttempts,
+      autoReconnectBaseDelayMs: DEFAULT_AUTO_RECONNECT_SETTINGS.autoReconnectBaseDelayMs,
+      autoReconnectMaxDelayMs: DEFAULT_AUTO_RECONNECT_SETTINGS.autoReconnectMaxDelayMs,
       serverUrlOverride: null,
       updatedAt: timestamp
     },
@@ -833,6 +844,22 @@ function normalizeStateFile(value: unknown): DesktopStateFile {
         typeof settings.commandNotificationSound === 'boolean'
           ? settings.commandNotificationSound
           : DEFAULT_COMMAND_NOTIFICATION_SETTINGS.commandNotificationSound,
+      autoReconnectEnabled:
+        typeof settings.autoReconnectEnabled === 'boolean'
+          ? settings.autoReconnectEnabled
+          : DEFAULT_AUTO_RECONNECT_SETTINGS.autoReconnectEnabled,
+      autoReconnectMaxAttempts:
+        typeof settings.autoReconnectMaxAttempts === 'number'
+          ? clampAutoReconnectMaxAttempts(settings.autoReconnectMaxAttempts)
+          : DEFAULT_AUTO_RECONNECT_SETTINGS.autoReconnectMaxAttempts,
+      autoReconnectBaseDelayMs:
+        typeof settings.autoReconnectBaseDelayMs === 'number'
+          ? clampAutoReconnectDelayMs(settings.autoReconnectBaseDelayMs)
+          : DEFAULT_AUTO_RECONNECT_SETTINGS.autoReconnectBaseDelayMs,
+      autoReconnectMaxDelayMs:
+        typeof settings.autoReconnectMaxDelayMs === 'number'
+          ? clampAutoReconnectDelayMs(settings.autoReconnectMaxDelayMs)
+          : DEFAULT_AUTO_RECONNECT_SETTINGS.autoReconnectMaxDelayMs,
       serverUrlOverride: typeof settings.serverUrlOverride === 'string' && settings.serverUrlOverride.trim() ? settings.serverUrlOverride.trim() : null,
       updatedAt: typeof settings.updatedAt === 'string' ? settings.updatedAt : fallback.settings.updatedAt
     },

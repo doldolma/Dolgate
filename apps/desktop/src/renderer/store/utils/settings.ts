@@ -94,6 +94,12 @@ export const defaultSettings: AppSettings = {
   commandNotificationOnlyWhenUnfocused: true,
   commandNotificationOnFailure: false,
   commandNotificationSound: false,
+  // @shared의 DEFAULT_AUTO_RECONNECT_SETTINGS를 인라인한다(위 command notification과
+  // 동일한 이유 — vite dev의 비결정적 export* 누락 회피).
+  autoReconnectEnabled: true,
+  autoReconnectMaxAttempts: 10,
+  autoReconnectBaseDelayMs: 1000,
+  autoReconnectMaxDelayMs: 30000,
   serverUrl: "https://ssh.doldolma.com",
   serverUrlOverride: null,
   dismissedUpdateVersion: null,

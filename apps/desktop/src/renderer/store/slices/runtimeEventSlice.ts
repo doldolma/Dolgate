@@ -150,6 +150,119 @@ import {
 import { createBootstrapSyncServices } from "../services/bootstrap-sync";
 import { updateStoredSshUsername } from "../services/credential-retry";
 import { createRuntimeEventServices } from "../services/runtime-events";
+import {
+  cancelReconnect,
+  isReconnecting,
+  scheduleReconnect,
+} from "../services/reconnect-orchestrator";
+import { classifyReconnect } from "../utils/reconnect-classify";
+import type { CoreEvent, HostRecord } from "@shared";
+
+// AWS SSM 세션 종료 메시지에서 종료 코드를 뽑는다(예: "AWS SSM session exited with code 1").
+const AWS_SSM_SESSION_EXIT_PATTERN = /AWS SSM session exited with code\s+(-?\d+)/i;
+
+// 예기치 않은 끊김(closed/error)에 대해 터미널 세션을 자동 재연결할지 판별한다.
+// - 활성 연결(connected) + 실제 출력이 있던 세션만 대상(최초 연결 실패는 기존 경로).
+// - 의도적 종료(상태가 connected가 아님)·인증/영구 오류는 제외.
+// - 원격 정상 종료(exit)는 빈 close 메시지(또는 reason=remote-exit, SSM code 0)로 오므로 제외.
+// - 대상: ssh/warpgate-ssh(전송 reason·메시지 기준) + aws-ec2(SSM 종료코드 기준).
+//   serial·로컬·컨테이너·ecs-exec는 제외.
+function shouldAutoReconnectSession(
+  tab: TerminalTab | undefined,
+  host: HostRecord | undefined,
+  event: CoreEvent,
+  autoReconnectEnabled: boolean,
+): boolean {
+  if (!autoReconnectEnabled) {
+    return false;
+  }
+  if (!tab || tab.source !== "host" || !host) {
+    return false;
+  }
+  if (
+    host.kind !== "ssh" &&
+    host.kind !== "warpgate-ssh" &&
+    host.kind !== "aws-ec2"
+  ) {
+    return false;
+  }
+  // ecs-exec 셸은 SSM이지만 태스크 종속이라 재연결 대상이 아니다.
+  if (tab.shellKind === "aws-ecs-exec") {
+    return false;
+  }
+  if (tab.status !== "connected" || tab.hasReceivedOutput !== true) {
+    return false;
+  }
+  const payload = event.payload as
+    | { message?: unknown; reason?: unknown }
+    | undefined;
+  const message = String(payload?.message ?? "");
+
+  // aws-ec2(SSM): reason discriminator가 없으므로 SSM 종료 코드로 판별한다.
+  if (host.kind === "aws-ec2") {
+    if (event.type === "error") {
+      return classifyReconnect(message) !== "permanent";
+    }
+    if (event.type === "closed") {
+      const exitMatch = AWS_SSM_SESSION_EXIT_PATTERN.exec(message);
+      if (exitMatch) {
+        // code 0 = 사용자 정상 종료 → 재연결 안 함. 비정상 종료 = 드롭 → 재연결.
+        return Number(exitMatch[1]) !== 0;
+      }
+      if (!message.trim()) {
+        return false; // 빈 메시지 = 정상 종료로 간주
+      }
+      return classifyReconnect(message) !== "permanent";
+    }
+    return false;
+  }
+
+  // ssh / warpgate-ssh
+  if (event.type === "closed") {
+    // Go 코어가 제공하는 reason discriminator를 우선 사용한다(Part E).
+    const reason = String(payload?.reason ?? "");
+    if (reason === "remote-exit" || reason === "client") {
+      return false; // 정상 종료/클라이언트 요청 → 되살리지 않음
+    }
+    if (reason === "transport" || reason === "keepalive") {
+      return true; // 전송 단절/keepalive 실패 → 재연결
+    }
+    // 구버전 코어(reason 없음): 빈 close 메시지는 정상 종료로 간주(오탐 방지),
+    // 비어있지 않으면 transient 여부로 판단.
+    if (!message.trim()) {
+      return false;
+    }
+    return classifyReconnect(message) === "transient";
+  }
+  if (event.type === "error") {
+    return classifyReconnect(message) === "transient";
+  }
+  return false;
+}
+
+// 자동 재연결 트리거 시 탭을 제거/에러로 두지 않고 connecting+reconnecting 상태로
+// 유지한다. 정확한 시도횟수/메시지는 이후 오케스트레이터의 renderScheduled가 채운다.
+function applySessionReconnecting(
+  state: AppState,
+  sessionId: string,
+): Partial<AppState> {
+  return {
+    tabs: state.tabs.map((tab) =>
+      tab.sessionId === sessionId
+        ? {
+            ...tab,
+            status: "connecting" as const,
+            errorMessage: undefined,
+            connectionProgress: createConnectionProgress(
+              "reconnecting",
+              "연결이 끊겨 재연결 중입니다…",
+            ),
+            lastEventAt: new Date().toISOString(),
+          }
+        : tab,
+    ),
+  };
+}
 
 export function createRuntimeEventSlice(deps: SliceDeps): RuntimeEventSlice {
   const { api, set, get } = deps;
@@ -569,6 +682,36 @@ export function createRuntimeEventSlice(deps: SliceDeps): RuntimeEventSlice {
                 event.type === "sftpError" ||
                 event.type === "sftpSudoStatus"
               ) {
+                // 자동 재연결 판별(set 이전). 드롭은 sftpError로 surface된다(Go SFTP엔
+                // keepalive 없음). 연결돼 있던 pane(endpoint 존재) 또는 진행 중 재연결의
+                // transient 에러면 백오프 재연결. 영구 오류는 제외.
+                const sftpPaneId = resolveSftpPaneIdByEndpoint(get(), endpointId);
+                const sftpPaneBefore = sftpPaneId
+                  ? getPane(get(), sftpPaneId)
+                  : null;
+                const sftpActiveReconnect = sftpPaneId
+                  ? isReconnecting(sftpPaneId)
+                  : false;
+                const sftpReconnectHostId =
+                  sftpPaneBefore?.endpoint?.hostId ??
+                  sftpPaneBefore?.connectingHostId ??
+                  sftpPaneBefore?.selectedHostId ??
+                  null;
+                const sftpPermanent =
+                  classifyReconnect(
+                    String(
+                      (event.payload as { message?: unknown } | undefined)
+                        ?.message ?? "",
+                    ),
+                  ) === "permanent";
+                const sftpWillReconnect =
+                  get().settings.autoReconnectEnabled &&
+                  sftpPaneId != null &&
+                  sftpReconnectHostId != null &&
+                  event.type === "sftpError" &&
+                  !sftpPermanent &&
+                  (sftpPaneBefore?.endpoint != null || sftpActiveReconnect);
+
                 set((state) => {
                   const paneId = resolveSftpPaneIdByEndpoint(state, endpointId);
                   if (!paneId) {
@@ -612,12 +755,27 @@ export function createRuntimeEventSlice(deps: SliceDeps): RuntimeEventSlice {
                     }),
                   };
                 });
+
+                if (sftpWillReconnect && sftpPaneId) {
+                  scheduleReconnect({
+                    kind: "sftp",
+                    key: sftpPaneId,
+                    meta: { hostId: sftpReconnectHostId },
+                  });
+                } else if (
+                  sftpPaneId &&
+                  sftpActiveReconnect &&
+                  (event.type === "sftpConnected" ||
+                    (event.type === "sftpError" && sftpPermanent))
+                ) {
+                  cancelReconnect(sftpPaneId, "resolved");
+                }
                 return;
               }
-    
+
               return;
             }
-    
+
             if (!sessionId) {
               return;
             }
@@ -766,6 +924,51 @@ export function createRuntimeEventSlice(deps: SliceDeps): RuntimeEventSlice {
                 ? event.payload.shellKind.trim() || undefined
                 : undefined;
 
+            // 자동 재연결 판별은 set 이전(끊김 반영 전) 상태로 한다. set 안에서는
+            // 탭을 유지(reconnecting)하고, set 이후에 백오프 스케줄을 건다.
+            const sessionTabBeforeEvent = get().tabs.find(
+              (tab) => tab.sessionId === sessionId,
+            );
+            const sessionHostBeforeEvent =
+              sessionTabBeforeEvent?.source === "host" &&
+              sessionTabBeforeEvent.hostId
+                ? get().hosts.find(
+                    (host) => host.id === sessionTabBeforeEvent.hostId,
+                  )
+                : undefined;
+            const reconnectStableId = sessionTabBeforeEvent?.stableId ?? null;
+            const autoReconnectEnabled = get().settings.autoReconnectEnabled;
+            // 진행 중 재연결의 시도 결과인지(이미 reconnecting 상태라 status가 connecting).
+            const activeSessionReconnect = reconnectStableId
+              ? isReconnecting(reconnectStableId)
+              : false;
+            const isDropEvent =
+              event.type === "closed" || event.type === "error";
+            const reconnectEventPermanent =
+              event.type === "error" &&
+              classifyReconnect(
+                String(
+                  (event.payload as { message?: unknown } | undefined)
+                    ?.message ?? "",
+                ),
+              ) === "permanent";
+            // 탭을 reconnecting으로 유지하고 다음 백오프를 걸 조건:
+            //  - 활성 연결의 첫 드롭(shouldAutoReconnectSession), 또는
+            //  - 진행 중 재연결 시도의 실패(영구 오류 제외 → 그 경우 일반 플로우로).
+            const willKeepSessionReconnecting =
+              isDropEvent &&
+              reconnectStableId != null &&
+              autoReconnectEnabled &&
+              (shouldAutoReconnectSession(
+                sessionTabBeforeEvent,
+                sessionHostBeforeEvent,
+                event,
+                true,
+              ) ||
+                (activeSessionReconnect && !reconnectEventPermanent));
+            const willCancelSessionReconnect =
+              isDropEvent && activeSessionReconnect && reconnectEventPermanent;
+
             set((state) => {
               const currentTab = state.tabs.find(
                 (tab) => tab.sessionId === sessionId,
@@ -799,6 +1002,8 @@ export function createRuntimeEventSlice(deps: SliceDeps): RuntimeEventSlice {
                 event.type === "closed" &&
                 currentTab != null &&
                 currentAwsHost != null &&
+                // 자동 재연결이 처리할 드롭(연결됨+출력)이면 error로 잡지 않고 재연결로 넘긴다.
+                !willKeepSessionReconnecting &&
                 (
                   isFailedAwsSsmExit ||
                   (
@@ -958,10 +1163,18 @@ export function createRuntimeEventSlice(deps: SliceDeps): RuntimeEventSlice {
                       ),
                   };
                 }
+                // 예기치 않은 끊김이면 탭을 제거하지 않고 reconnecting 상태로 유지.
+                if (willKeepSessionReconnecting) {
+                  return applySessionReconnecting(state, sessionId);
+                }
                 return removeSessionFromState(state, sessionId);
               }
               if (!currentTab) {
                 return state;
+              }
+              // transient 에러로 인한 자동 재연결: 에러/자격증명 프롬프트 대신 유지.
+              if (event.type === "error" && willKeepSessionReconnecting) {
+                return applySessionReconnecting(state, sessionId);
               }
               const currentSshHost =
                 currentHost && isSshHostRecord(currentHost) ? currentHost : null;
@@ -1075,6 +1288,21 @@ export function createRuntimeEventSlice(deps: SliceDeps): RuntimeEventSlice {
                     : state.activeCredentialRetryAttempt,
               };
             });
+
+            // 자동 재연결 스케줄/취소 (set 이후 — 타이머 등 부수효과).
+            // 인터미널 안내선은 출력하지 않는다(Termius처럼 조용히 이어지게). 진행 표시는
+            // 오버레이(connectionProgress)로만 한다.
+            if (willKeepSessionReconnecting && reconnectStableId) {
+              scheduleReconnect({ kind: "session", key: reconnectStableId });
+            } else if (willCancelSessionReconnect && reconnectStableId) {
+              cancelReconnect(reconnectStableId, "permanent-error");
+            } else if (
+              event.type === "connected" &&
+              reconnectStableId &&
+              isReconnecting(reconnectStableId)
+            ) {
+              cancelReconnect(reconnectStableId, "reconnected");
+            }
 
             if (
               event.type === "connected" &&
@@ -1193,6 +1421,25 @@ export function createRuntimeEventSlice(deps: SliceDeps): RuntimeEventSlice {
             }
           },
     handlePortForwardEvent: (event) => {
+            // 자동 재연결 판별(set 이전 상태로). 확립된 포워딩(running)이 error로
+            // 떨어지면 드롭으로 보고 재시작한다. ecs/container 터널 ruleId는 제외.
+            const pfRuleId = event.runtime.ruleId;
+            const pfIsRealRule = get().portForwards.some(
+              (rule) => rule.id === pfRuleId,
+            );
+            const pfPrev = get().portForwardRuntimes.find(
+              (runtime) => runtime.ruleId === pfRuleId,
+            );
+            const pfActiveReconnect = isReconnecting(pfRuleId);
+            const pfPermanent =
+              classifyReconnect(event.runtime.message ?? "") === "permanent";
+            const pfWillReconnect =
+              get().settings.autoReconnectEnabled &&
+              pfIsRealRule &&
+              event.runtime.status === "error" &&
+              !pfPermanent &&
+              (pfPrev?.status === "running" || pfActiveReconnect);
+
             set((state) => {
               const nextState: Partial<AppState> = {
                 portForwardRuntimes: upsertForwardRuntime(
@@ -1276,6 +1523,18 @@ export function createRuntimeEventSlice(deps: SliceDeps): RuntimeEventSlice {
     
               return nextState;
             });
+
+            if (pfWillReconnect) {
+              scheduleReconnect({ kind: "portForward", key: pfRuleId });
+            } else if (
+              pfActiveReconnect &&
+              (event.runtime.status === "running" ||
+                event.runtime.status === "stopped" ||
+                (event.runtime.status === "error" && pfPermanent))
+            ) {
+              cancelReconnect(pfRuleId, "resolved");
+            }
+
             scheduleActivityLogsRefresh();
           },
     handleSftpConnectionProgressEvent: (event) => {

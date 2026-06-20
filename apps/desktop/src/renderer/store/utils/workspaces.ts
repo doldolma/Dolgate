@@ -357,12 +357,21 @@ export function createPendingSessionId(): string {
   return `${PENDING_SESSION_PREFIX}${globalThis.crypto.randomUUID()}`;
 }
 
+export const STABLE_SESSION_PREFIX = "term:";
+
+// 탭 생명주기 동안 불변인 안정 식별자. 재연결로 sessionId가 바뀌어도 유지된다.
+export function createStableId(): string {
+  return `${STABLE_SESSION_PREFIX}${globalThis.crypto.randomUUID()}`;
+}
+
 export function isPendingSessionId(sessionId: string): boolean {
   return sessionId.startsWith(PENDING_SESSION_PREFIX);
 }
 
 export function createPendingSessionTab(input: {
   sessionId: string;
+  /** 재연결/재시도 시 기존 탭의 stableId를 넘겨 연속성(스크롤백/재연결 key)을 유지. */
+  stableId?: string;
   source: "host" | "local";
   hostId: string | null;
   title: string;
@@ -371,6 +380,7 @@ export function createPendingSessionTab(input: {
 }): TerminalTab {
   return {
     id: input.sessionId,
+    stableId: input.stableId ?? createStableId(),
     sessionId: input.sessionId,
     source: input.source,
     hostId: input.hostId,

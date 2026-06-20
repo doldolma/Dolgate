@@ -122,6 +122,7 @@ describe('AppTitleBar update popover', () => {
         tabs={[
           {
             id: 'tab-1',
+            stableId: 'tab-1',
             sessionId: 'session-1',
             source: 'host',
             hostId: 'host-1',
@@ -176,6 +177,7 @@ describe('AppTitleBar update popover', () => {
         tabs={[
           {
             id: 'tab-1',
+            stableId: 'tab-1',
             sessionId: 'session-1',
             source: 'host',
             hostId: 'host-1',
@@ -225,6 +227,7 @@ describe('AppTitleBar update popover', () => {
   it('hides the native scrollbar and shows edge fades when the titlebar tab strip overflows', () => {
     const tabs = Array.from({ length: 4 }, (_, index) => ({
       id: `tab-${index + 1}`,
+      stableId: `tab-${index + 1}`,
       sessionId: `session-${index + 1}`,
       source: 'host' as const,
       hostId: `host-${index + 1}`,

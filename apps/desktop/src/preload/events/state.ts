@@ -46,6 +46,7 @@ const windowStateHub = createListenerHub<DesktopWindowState>();
 const warpgateImportEventHub = createListenerHub<WarpgateImportEvent>();
 const sessionShareEventHub = createListenerHub<SessionShareEvent>();
 const sessionShareChatEventHub = createListenerHub<SessionShareChatEvent>();
+const systemResumeHub = createListenerHub<void>();
 
 const streamListeners = new Map<string, Set<(chunk: Uint8Array) => void>>();
 const sessionBacklog = new Map<string, Uint8Array[]>();
@@ -260,6 +261,14 @@ export function subscribeSessionShareChatEvent(
   listener: Listener<SessionShareChatEvent>,
 ): () => void {
   return sessionShareChatEventHub.subscribe(listener);
+}
+
+export function emitSystemResume(): void {
+  systemResumeHub.emit(undefined);
+}
+
+export function subscribeSystemResume(listener: () => void): () => void {
+  return systemResumeHub.subscribe(listener);
 }
 
 export function registerE2EWindowEvents(): void {

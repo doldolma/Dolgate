@@ -33,8 +33,10 @@ vi.mock('../lib/terminal-runtime', () => ({
       write: vi.fn(),
       scheduleAfterWriteDrain: vi.fn(),
       captureSnapshot: vi.fn(() => ''),
+      captureRestoreSnapshot: vi.fn(() => ''),
       setAppearance: vi.fn(),
       setWebglEnabled: vi.fn().mockResolvedValue(undefined),
+      repaint: vi.fn(),
       syncDisplayMetrics: vi.fn(),
       focus: vi.fn(() => {
         container.dispatchEvent(new FocusEvent('focusin', { bubbles: true }));
@@ -87,6 +89,10 @@ const settings: AppSettings = {
   commandNotificationOnlyWhenUnfocused: true,
   commandNotificationOnFailure: true,
   commandNotificationSound: false,
+  autoReconnectEnabled: true,
+  autoReconnectMaxAttempts: 10,
+  autoReconnectBaseDelayMs: 1000,
+  autoReconnectMaxDelayMs: 30000,
   serverUrl: 'https://example.test',
   serverUrlOverride: null,
   updatedAt: '2025-01-01T00:00:00.000Z'
@@ -95,6 +101,7 @@ const settings: AppSettings = {
 const tabs: TerminalTab[] = [
   {
     id: 'tab-1',
+    stableId: 'tab-1',
     sessionId: 'session-1',
     source: 'local',
     hostId: null,
@@ -106,6 +113,7 @@ const tabs: TerminalTab[] = [
   },
   {
     id: 'tab-2',
+    stableId: 'tab-2',
     sessionId: 'session-2',
     source: 'local',
     hostId: null,
@@ -295,6 +303,7 @@ function renderWorkspace(input: {
       canDropDraggedSession={input.canDropDraggedSession ?? false}
       onCloseSession={vi.fn().mockResolvedValue(undefined)}
       onRetryConnection={vi.fn().mockResolvedValue(undefined)}
+      onCancelReconnect={vi.fn()}
       onStartSessionShare={vi.fn().mockResolvedValue(undefined)}
       onUpdateSessionShareSnapshot={vi.fn().mockResolvedValue(undefined)}
       onSetSessionShareInputEnabled={vi.fn().mockResolvedValue(undefined)}
@@ -364,6 +373,7 @@ describe('TerminalWorkspace workspace switching', () => {
         canDropDraggedSession={false}
         onCloseSession={vi.fn().mockResolvedValue(undefined)}
         onRetryConnection={vi.fn().mockResolvedValue(undefined)}
+        onCancelReconnect={vi.fn()}
         onStartSessionShare={vi.fn().mockResolvedValue(undefined)}
         onUpdateSessionShareSnapshot={vi.fn().mockResolvedValue(undefined)}
         onSetSessionShareInputEnabled={vi.fn().mockResolvedValue(undefined)}
@@ -410,6 +420,7 @@ describe('TerminalWorkspace workspace switching', () => {
         canDropDraggedSession={false}
         onCloseSession={vi.fn().mockResolvedValue(undefined)}
         onRetryConnection={vi.fn().mockResolvedValue(undefined)}
+        onCancelReconnect={vi.fn()}
         onStartSessionShare={vi.fn().mockResolvedValue(undefined)}
         onUpdateSessionShareSnapshot={vi.fn().mockResolvedValue(undefined)}
         onSetSessionShareInputEnabled={vi.fn().mockResolvedValue(undefined)}
@@ -585,6 +596,7 @@ describe('TerminalWorkspace workspace switching', () => {
     const hostTabs: TerminalTab[] = [
       {
         id: 'tab-1',
+        stableId: 'tab-1',
         sessionId: 'session-1',
         source: 'host',
         hostId: 'host-1',
@@ -596,6 +608,7 @@ describe('TerminalWorkspace workspace switching', () => {
       },
       {
         id: 'tab-2',
+        stableId: 'tab-2',
         sessionId: 'session-2',
         source: 'host',
         hostId: 'host-2',
@@ -638,6 +651,7 @@ describe('TerminalWorkspace workspace switching', () => {
         canDropDraggedSession={false}
         onCloseSession={vi.fn().mockResolvedValue(undefined)}
         onRetryConnection={vi.fn().mockResolvedValue(undefined)}
+        onCancelReconnect={vi.fn()}
         onStartSessionShare={vi.fn().mockResolvedValue(undefined)}
         onUpdateSessionShareSnapshot={vi.fn().mockResolvedValue(undefined)}
         onSetSessionShareInputEnabled={vi.fn().mockResolvedValue(undefined)}
@@ -664,6 +678,7 @@ describe('TerminalWorkspace workspace switching', () => {
     const hostTabs: TerminalTab[] = [
       {
         id: 'tab-1',
+        stableId: 'tab-1',
         sessionId: 'session-1',
         source: 'host',
         hostId: 'host-1',
@@ -675,6 +690,7 @@ describe('TerminalWorkspace workspace switching', () => {
       },
       {
         id: 'tab-2',
+        stableId: 'tab-2',
         sessionId: 'session-2',
         source: 'host',
         hostId: 'host-2',
@@ -717,6 +733,7 @@ describe('TerminalWorkspace workspace switching', () => {
         canDropDraggedSession={false}
         onCloseSession={vi.fn().mockResolvedValue(undefined)}
         onRetryConnection={vi.fn().mockResolvedValue(undefined)}
+        onCancelReconnect={vi.fn()}
         onStartSessionShare={vi.fn().mockResolvedValue(undefined)}
         onUpdateSessionShareSnapshot={vi.fn().mockResolvedValue(undefined)}
         onSetSessionShareInputEnabled={vi.fn().mockResolvedValue(undefined)}
@@ -746,6 +763,7 @@ describe('TerminalWorkspace workspace switching', () => {
     const localAndHostTabs: TerminalTab[] = [
       {
         id: 'tab-1',
+        stableId: 'tab-1',
         sessionId: 'session-1',
         source: 'local',
         hostId: null,
@@ -757,6 +775,7 @@ describe('TerminalWorkspace workspace switching', () => {
       },
       {
         id: 'tab-2',
+        stableId: 'tab-2',
         sessionId: 'session-2',
         source: 'host',
         hostId: 'host-2',
@@ -845,6 +864,7 @@ describe('TerminalWorkspace workspace switching', () => {
     const threePaneTabs: TerminalTab[] = [
       {
         id: 'tab-1',
+        stableId: 'tab-1',
         sessionId: 'session-1',
         source: 'host',
         hostId: 'host-1',
@@ -856,6 +876,7 @@ describe('TerminalWorkspace workspace switching', () => {
       },
       {
         id: 'tab-2',
+        stableId: 'tab-2',
         sessionId: 'session-2',
         source: 'host',
         hostId: 'host-2',
@@ -867,6 +888,7 @@ describe('TerminalWorkspace workspace switching', () => {
       },
       {
         id: 'tab-3',
+        stableId: 'tab-3',
         sessionId: 'session-3',
         source: 'host',
         hostId: 'host-1',
@@ -906,6 +928,7 @@ describe('TerminalWorkspace workspace switching', () => {
       const hostTabs: TerminalTab[] = [
         {
           id: 'tab-host',
+          stableId: 'tab-host',
           sessionId: 'session-1',
           source: 'host',
           hostId: 'host-1',
@@ -967,6 +990,7 @@ describe('TerminalWorkspace workspace switching', () => {
           canDropDraggedSession={false}
           onCloseSession={vi.fn().mockResolvedValue(undefined)}
           onRetryConnection={vi.fn().mockResolvedValue(undefined)}
+          onCancelReconnect={vi.fn()}
           onStartSessionShare={vi.fn().mockResolvedValue(undefined)}
           onUpdateSessionShareSnapshot={vi.fn().mockResolvedValue(undefined)}
           onSetSessionShareInputEnabled={vi.fn().mockResolvedValue(undefined)}
@@ -1003,6 +1027,7 @@ describe('TerminalWorkspace workspace switching', () => {
     const hostTabs: TerminalTab[] = [
       {
         id: 'tab-host',
+        stableId: 'tab-host',
         sessionId: 'session-1',
         source: 'host',
         hostId: 'host-1',
@@ -1055,6 +1080,7 @@ describe('TerminalWorkspace workspace switching', () => {
         canDropDraggedSession={false}
         onCloseSession={vi.fn().mockResolvedValue(undefined)}
         onRetryConnection={vi.fn().mockResolvedValue(undefined)}
+        onCancelReconnect={vi.fn()}
         onStartSessionShare={vi.fn().mockResolvedValue(undefined)}
         onUpdateSessionShareSnapshot={vi.fn().mockResolvedValue(undefined)}
         onSetSessionShareInputEnabled={vi.fn().mockResolvedValue(undefined)}
@@ -1080,6 +1106,7 @@ describe('TerminalWorkspace workspace switching', () => {
     const hostTabs: TerminalTab[] = [
       {
         id: 'tab-host',
+        stableId: 'tab-host',
         sessionId: 'session-1',
         source: 'host',
         hostId: 'host-1',
@@ -1132,6 +1159,7 @@ describe('TerminalWorkspace workspace switching', () => {
         canDropDraggedSession={false}
         onCloseSession={vi.fn().mockResolvedValue(undefined)}
         onRetryConnection={vi.fn().mockResolvedValue(undefined)}
+        onCancelReconnect={vi.fn()}
         onStartSessionShare={vi.fn().mockResolvedValue(undefined)}
         onUpdateSessionShareSnapshot={vi.fn().mockResolvedValue(undefined)}
         onSetSessionShareInputEnabled={vi.fn().mockResolvedValue(undefined)}
@@ -1159,6 +1187,7 @@ describe('TerminalWorkspace workspace switching', () => {
     const hostTabs: TerminalTab[] = [
       {
         id: 'tab-host',
+        stableId: 'tab-host',
         sessionId: 'session-1',
         source: 'host',
         hostId: 'host-1',
@@ -1212,6 +1241,7 @@ describe('TerminalWorkspace workspace switching', () => {
           canDropDraggedSession={false}
           onCloseSession={vi.fn().mockResolvedValue(undefined)}
           onRetryConnection={vi.fn().mockResolvedValue(undefined)}
+          onCancelReconnect={vi.fn()}
           onStartSessionShare={vi.fn().mockResolvedValue(undefined)}
           onUpdateSessionShareSnapshot={vi.fn().mockResolvedValue(undefined)}
           onSetSessionShareInputEnabled={vi.fn().mockResolvedValue(undefined)}

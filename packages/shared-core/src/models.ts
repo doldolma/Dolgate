@@ -953,6 +953,10 @@ export interface AppSettings extends TerminalAppearanceSettings {
   commandNotificationOnlyWhenUnfocused: boolean;
   commandNotificationOnFailure: boolean;
   commandNotificationSound: boolean;
+  autoReconnectEnabled: boolean;
+  autoReconnectMaxAttempts: number;
+  autoReconnectBaseDelayMs: number;
+  autoReconnectMaxDelayMs: number;
   serverUrl: string;
   serverUrlOverride?: string | null;
   dismissedUpdateVersion?: string | null;
@@ -987,6 +991,49 @@ export function clampCommandNotificationThresholdSeconds(value: number): number 
     Math.max(MIN_COMMAND_NOTIFICATION_THRESHOLD_SECONDS, Math.round(value))
   );
 }
+
+// AutoReconnectSettings는 예기치 않은 연결 끊김 시 자동 재연결 동작을 제어한다.
+export interface AutoReconnectSettings {
+  autoReconnectEnabled: boolean;
+  autoReconnectMaxAttempts: number;
+  autoReconnectBaseDelayMs: number;
+  autoReconnectMaxDelayMs: number;
+}
+
+export const DEFAULT_AUTO_RECONNECT_SETTINGS: AutoReconnectSettings = {
+  autoReconnectEnabled: true,
+  autoReconnectMaxAttempts: 10,
+  autoReconnectBaseDelayMs: 1000,
+  autoReconnectMaxDelayMs: 30000
+};
+
+export const MIN_AUTO_RECONNECT_MAX_ATTEMPTS = 1;
+export const MAX_AUTO_RECONNECT_MAX_ATTEMPTS = 100;
+export const MIN_AUTO_RECONNECT_DELAY_MS = 250;
+export const MAX_AUTO_RECONNECT_DELAY_MS = 300000;
+
+export function clampAutoReconnectMaxAttempts(value: number): number {
+  if (!Number.isFinite(value)) {
+    return DEFAULT_AUTO_RECONNECT_SETTINGS.autoReconnectMaxAttempts;
+  }
+  return Math.min(
+    MAX_AUTO_RECONNECT_MAX_ATTEMPTS,
+    Math.max(MIN_AUTO_RECONNECT_MAX_ATTEMPTS, Math.round(value))
+  );
+}
+
+export function clampAutoReconnectDelayMs(value: number): number {
+  if (!Number.isFinite(value)) {
+    return DEFAULT_AUTO_RECONNECT_SETTINGS.autoReconnectBaseDelayMs;
+  }
+  return Math.min(
+    MAX_AUTO_RECONNECT_DELAY_MS,
+    Math.max(MIN_AUTO_RECONNECT_DELAY_MS, Math.round(value))
+  );
+}
+
+// AutoReconnectPolicy는 호스트별 자동 재연결 정책 오버라이드를 표현한다.
+export type AutoReconnectPolicy = 'inherit' | 'on' | 'off';
 
 export type TerminalAutocompleteShell = 'bash' | 'zsh';
 
@@ -2310,6 +2357,7 @@ export type TerminalConnectionStage =
   | 'host-key-check'
   | 'awaiting-host-trust'
   | 'retrying-session'
+  | 'reconnecting'
   | 'connecting'
   | 'awaiting-credentials'
   | 'waiting-interactive-auth'
@@ -2537,8 +2585,23 @@ export interface TerminalConnectionProgress {
   retryable: boolean;
 }
 
+// TerminalReconnectState는 자동 재연결 진행 상황을 UI에 표시하기 위한 요약이다.
+// 휘발성 타이머/시크릿 등은 store 밖 오케스트레이터가 보유하고, 여기엔 표시용 값만 둔다.
+export interface TerminalReconnectState {
+  attempt: number;
+  maxAttempts: number;
+  /** 다음 시도 예정 시각(epoch ms). 네트워크 대기 중이면 0. */
+  nextAttemptAt: number;
+  waitingForNetwork: boolean;
+}
+
 export interface TerminalTab {
   id: string;
+  /**
+   * 탭 최초 생성 시 1회 발급되어 재연결/재시도로 sessionId가 바뀌어도 불변인 식별자.
+   * 자동 재연결 오케스트레이터의 key, 터미널 인스턴스(스크롤백) 보존, pane key에 쓰인다.
+   */
+  stableId: string;
   sessionId: string;
   source: TerminalSessionSource;
   hostId: string | null;
@@ -2547,6 +2610,8 @@ export interface TerminalTab {
   status: 'pending' | 'connecting' | 'connected' | 'disconnecting' | 'closed' | 'error';
   errorMessage?: string;
   connectionProgress?: TerminalConnectionProgress | null;
+  /** 자동 재연결 진행 중일 때만 채워지는 표시용 상태. 평시엔 null/undefined. */
+  reconnect?: TerminalReconnectState | null;
   sessionShare?: SessionShareState | null;
   hasReceivedOutput?: boolean;
   lastEventAt: string;

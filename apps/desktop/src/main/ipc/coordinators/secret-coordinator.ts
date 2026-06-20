@@ -14,6 +14,52 @@ import type {
 import type { SecretStore } from "../../secret-store";
 import type { SshHostRecord } from "../context";
 
+// 자동 재연결용 런타임 시크릿 캐시(메모리 전용). 디스크/keychain에 저장하지 않으며
+// 앱 종료 시 프로세스 메모리와 함께 소멸한다. TTL로 오래된 항목을 자동 폐기한다.
+interface RuntimeSecretCacheEntry {
+  password?: string;
+  passphrase?: string;
+  cachedAt: number;
+}
+const RUNTIME_SECRET_TTL_MS = 60 * 60 * 1000;
+const runtimeSecretCache = new Map<string, RuntimeSecretCacheEntry>();
+
+function writeRuntimeSecretCache(
+  hostId: string,
+  value: { password?: string; passphrase?: string },
+): void {
+  if (!value.password && !value.passphrase) {
+    return;
+  }
+  runtimeSecretCache.set(hostId, {
+    password: value.password,
+    passphrase: value.passphrase,
+    cachedAt: Date.now(),
+  });
+}
+
+function readRuntimeSecretCache(
+  hostId: string,
+): RuntimeSecretCacheEntry | null {
+  const entry = runtimeSecretCache.get(hostId);
+  if (!entry) {
+    return null;
+  }
+  if (Date.now() - entry.cachedAt > RUNTIME_SECRET_TTL_MS) {
+    runtimeSecretCache.delete(hostId);
+    return null;
+  }
+  return entry;
+}
+
+export function clearRuntimeSecretCache(hostId?: string): void {
+  if (hostId) {
+    runtimeSecretCache.delete(hostId);
+    return;
+  }
+  runtimeSecretCache.clear();
+}
+
 export interface SecretCoordinator {
   persistSecret: (
     label: string,
@@ -211,11 +257,33 @@ export function createSecretCoordinator(deps: {
     host: SshHostRecord,
     secrets?: HostSecretInput,
   ) => {
-    const resolvedSecrets = mergeSecrets(
+    const provided = secrets ?? {};
+    let resolvedSecrets = mergeSecrets(
       await loadSecrets(host.secretRef),
-      secrets ?? {},
+      provided,
     );
     const shouldPersistHostSecret = Boolean(secrets && hasSecretValue(secrets));
+
+    // 자동 재연결: 사용자가 런타임에 입력한(=keychain에 저장하지 않은) 비밀번호/
+    // 패스프레이즈를 호스트 단위로 메모리에 캐시한다. keychain·입력 어디에도
+    // 비밀번호가 없을 때만 캐시를 폴백으로 사용한다. 이 캐시는 "최초 연결 성공
+    // 이후의 transient 재연결"에서만 소비되므로(인증 실패는 permanent로 분류돼
+    // 재연결하지 않음) 잘못된 비밀번호가 재사용될 위험이 없다.
+    if (provided.password || provided.passphrase) {
+      writeRuntimeSecretCache(host.id, {
+        password: provided.password,
+        passphrase: provided.passphrase,
+      });
+    }
+    if (!resolvedSecrets.password && !resolvedSecrets.passphrase) {
+      const cached = readRuntimeSecretCache(host.id);
+      if (cached) {
+        resolvedSecrets = mergeSecrets(resolvedSecrets, {
+          password: cached.password,
+          passphrase: cached.passphrase,
+        });
+      }
+    }
 
     return {
       secrets: resolvedSecrets,

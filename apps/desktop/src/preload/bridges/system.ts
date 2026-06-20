@@ -4,6 +4,7 @@ import { ipcChannels } from "../../common/ipc-channels";
 import {
   subscribeActivityLogsChanged,
   subscribePortForwardEvent,
+  subscribeSystemResume,
   subscribeUpdateEvent,
   subscribeWindowState,
 } from "../events/state";
@@ -40,6 +41,14 @@ export function buildWindowBridge(
 export function buildTabsBridge(ipcRenderer: IpcRenderer): DesktopApi["tabs"] {
   return {
     list: () => ipcRenderer.invoke(ipcChannels.tabs.list),
+  };
+}
+
+export function buildSystemBridge(
+  _ipcRenderer: IpcRenderer,
+): DesktopApi["system"] {
+  return {
+    onResume: (listener) => subscribeSystemResume(listener),
   };
 }
 

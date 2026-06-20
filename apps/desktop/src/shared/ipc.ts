@@ -814,6 +814,10 @@ export interface DesktopApi {
       listener: (state: DesktopWindowState) => void,
     ) => () => void;
   };
+  system: {
+    /** OS 절전/잠금 복귀 알림 구독. 자동 재연결의 즉시 재검증 트리거. */
+    onResume: (listener: () => void) => () => void;
+  };
   tabs: {
     list: () => Promise<TerminalTab[]>;
   };

@@ -1404,6 +1404,7 @@ export class CoreManager {
     });
     this.tabs.set(sessionId, {
       id: sessionId,
+      stableId: sessionId,
       title: payload.title,
       source: "host",
       hostId: payload.hostId,
@@ -2012,6 +2013,7 @@ export class CoreManager {
     });
     const tab: TerminalTab = {
       id: sessionId,
+      stableId: sessionId,
       title: payload.title,
       source: "host",
       hostId: payload.hostId,
@@ -2102,6 +2104,7 @@ export class CoreManager {
         });
         this.tabs.set(sessionId, {
           id: sessionId,
+          stableId: sessionId,
           title: payload.title,
           source: "host",
           hostId: payload.hostId,
@@ -2388,6 +2391,7 @@ export class CoreManager {
     }
     this.tabs.set(sessionId, {
       id: sessionId,
+      stableId: sessionId,
       title: payload.title,
       source: "local",
       hostId: null,
@@ -2444,6 +2448,7 @@ export class CoreManager {
     });
     this.tabs.set(sessionId, {
       id: sessionId,
+      stableId: sessionId,
       title: payload.title,
       source: "host",
       hostId: payload.hostId,

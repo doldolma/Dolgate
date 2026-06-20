@@ -1,11 +1,14 @@
 import { randomUUID } from 'node:crypto';
 import { isIP } from 'node:net';
 import {
+  DEFAULT_AUTO_RECONNECT_SETTINGS,
   DEFAULT_COMMAND_NOTIFICATION_SETTINGS,
   DEFAULT_SESSION_REPLAY_RETENTION_COUNT,
   MAX_HOST_STARTUP_COMMAND_LENGTH,
   MAX_SESSION_REPLAY_RETENTION_COUNT,
   MIN_SESSION_REPLAY_RETENTION_COUNT,
+  clampAutoReconnectDelayMs,
+  clampAutoReconnectMaxAttempts,
   clampCommandNotificationThresholdSeconds,
   isDnsOverrideEligiblePortForwardRule,
   isLinkedDnsOverrideDraft,
@@ -1168,6 +1171,18 @@ export class SettingsRepository {
       commandNotificationSound:
         state.settings.commandNotificationSound ??
         DEFAULT_COMMAND_NOTIFICATION_SETTINGS.commandNotificationSound,
+      autoReconnectEnabled:
+        state.settings.autoReconnectEnabled ??
+        DEFAULT_AUTO_RECONNECT_SETTINGS.autoReconnectEnabled,
+      autoReconnectMaxAttempts:
+        state.settings.autoReconnectMaxAttempts ??
+        DEFAULT_AUTO_RECONNECT_SETTINGS.autoReconnectMaxAttempts,
+      autoReconnectBaseDelayMs:
+        state.settings.autoReconnectBaseDelayMs ??
+        DEFAULT_AUTO_RECONNECT_SETTINGS.autoReconnectBaseDelayMs,
+      autoReconnectMaxDelayMs:
+        state.settings.autoReconnectMaxDelayMs ??
+        DEFAULT_AUTO_RECONNECT_SETTINGS.autoReconnectMaxDelayMs,
       serverUrl: serverUrlOverride || this.getDefaultServerUrl(),
       serverUrlOverride,
       dismissedUpdateVersion: state.updater.dismissedVersion,
@@ -1278,6 +1293,41 @@ export class SettingsRepository {
 
       if (typeof input.commandNotificationSound === 'boolean') {
         state.settings.commandNotificationSound = input.commandNotificationSound;
+        state.settings.updatedAt = nowIso();
+      }
+
+      if (typeof input.autoReconnectEnabled === 'boolean') {
+        state.settings.autoReconnectEnabled = input.autoReconnectEnabled;
+        state.settings.updatedAt = nowIso();
+      }
+
+      if (
+        typeof input.autoReconnectMaxAttempts === 'number' &&
+        Number.isFinite(input.autoReconnectMaxAttempts)
+      ) {
+        state.settings.autoReconnectMaxAttempts = clampAutoReconnectMaxAttempts(
+          input.autoReconnectMaxAttempts,
+        );
+        state.settings.updatedAt = nowIso();
+      }
+
+      if (
+        typeof input.autoReconnectBaseDelayMs === 'number' &&
+        Number.isFinite(input.autoReconnectBaseDelayMs)
+      ) {
+        state.settings.autoReconnectBaseDelayMs = clampAutoReconnectDelayMs(
+          input.autoReconnectBaseDelayMs,
+        );
+        state.settings.updatedAt = nowIso();
+      }
+
+      if (
+        typeof input.autoReconnectMaxDelayMs === 'number' &&
+        Number.isFinite(input.autoReconnectMaxDelayMs)
+      ) {
+        state.settings.autoReconnectMaxDelayMs = clampAutoReconnectDelayMs(
+          input.autoReconnectMaxDelayMs,
+        );
         state.settings.updatedAt = nowIso();
       }
 

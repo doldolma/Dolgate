@@ -13,6 +13,14 @@ import {
   type TerminalRuntime,
 } from '../lib/terminal-runtime';
 import { createTerminalResizeScheduler } from '../components/terminal-resize';
+import {
+  loadScrollbackFromSession,
+  registerTerminalHooks,
+  saveScrollbackSnapshot,
+  takeScrollbackSnapshot,
+  unregisterTerminalHooks,
+  type TerminalHooks,
+} from '../lib/terminal-write-registry';
 import type { TerminalSessionPaneProps } from '../components/terminal-workspace/types';
 import {
   SESSION_SHARE_CHAT_TOAST_TTL_MS,
@@ -109,6 +117,10 @@ export function useTerminalSessionViewController({
   snippets?: readonly { label: string; command: string; keyword?: string | null }[];
   onCommandFinished?: (info: CommandFinishedInfo) => void;
 }) {
+  // 재연결로 sessionId가 바뀌어도 불변인 안정 식별자. 터미널(xterm) 인스턴스 생성/해제를
+  // 이 값에 묶어, 재연결 시 dispose/recreate 없이 스크롤백을 보존한다(입력·resize·데이터
+  // 구독은 계속 sessionId 기준으로 동작 — liveSessionIdRef/데이터 구독 effect 참고).
+  const stableId = tab?.stableId ?? sessionId;
   const containerRef = useRef<HTMLDivElement | null>(null);
   const terminalRef = useRef<Terminal | null>(null);
   const runtimeRef = useRef<TerminalRuntime | null>(null);
@@ -177,7 +189,7 @@ export function useTerminalSessionViewController({
     // startup command가 있어도 lazy로 미루지 않는다. 셸 통합 init을 연결 직후
     // 주입해 두면(아래 core-manager가 통합 프롬프트 133;A를 본 뒤 startup command를
     // flush) 첫 프롬프트가 곧 통합 프롬프트라 프롬프트가 두 번 그려지지 않는다.
-    lazyPrepare: host?.kind === 'aws-ec2',
+    lazyPrepare: host?.kind === 'aws-ec2' && host.startupCommand == null,
     sendInput: sendAutocompleteInput,
     snippets,
     onCommandFinished,
@@ -549,6 +561,29 @@ export function useTerminalSessionViewController({
 
     terminalRef.current = runtime.terminal;
     runtimeRef.current = runtime;
+    // 자동 재연결 안내선 출력(write) + 절전 복귀 시 강제 재렌더(refresh)를 위해
+    // stableId 기준으로 훅을 등록한다.
+    const terminalHooks: TerminalHooks = {
+      write: (text: string) => {
+        runtime.write(text);
+      },
+      refresh: () => {
+        runtime.repaint();
+        resizeSchedulerRef.current?.request();
+      },
+      serialize: () => runtime.captureRestoreSnapshot(),
+      getSessionId: () => liveSessionIdRef.current,
+    };
+    registerTerminalHooks(stableId, terminalHooks);
+    // 안전망: 이전 터미널이 남긴 스크롤백이 있으면 복원한다.
+    //  1) 같은 세션 내 재생성: 모듈 Map(stableId 키) — B1b로 보존되면 비어 있어 no-op.
+    //  2) 페이지 리로드(dev vite 등): sessionStorage(sessionId 키) — 리로드에도 살아남는다.
+    const restoredSnapshot =
+      takeScrollbackSnapshot(stableId) ??
+      loadScrollbackFromSession(liveSessionIdRef.current);
+    if (restoredSnapshot) {
+      runtime.write(restoredSnapshot);
+    }
     resizeSchedulerRef.current = createTerminalResizeScheduler({
       fit: () => {
         runtime.fitAddon.fit();
@@ -605,6 +640,9 @@ export function useTerminalSessionViewController({
       containerRef.current?.removeEventListener('focusout', handleFocusOut);
       resizeSchedulerRef.current?.reset();
       resizeSchedulerRef.current = null;
+      unregisterTerminalHooks(stableId, terminalHooks);
+      // 안전망: 파괴 직전 스크롤백을 저장해, 같은 stableId로 재생성되면 복원한다.
+      saveScrollbackSnapshot(stableId, runtime.captureRestoreSnapshot());
       runtime.dispose();
       publishTerminalE2EState(liveSessionIdRef.current, null);
       runtimeRef.current = null;
@@ -614,7 +652,9 @@ export function useTerminalSessionViewController({
     publishCurrentTerminalE2EState,
     refreshViewport,
     requestShareSnapshot,
-    sessionId,
+    // sessionId가 아닌 stableId에 묶는다 — 재연결로 sessionId가 바뀌어도 터미널을
+    // dispose/recreate 하지 않아 스크롤백이 보존된다.
+    stableId,
   ]);
 
   useEffect(() => {

@@ -189,6 +189,10 @@ describe("createAppStore catalog and settings", () => {
         commandNotificationOnlyWhenUnfocused: true,
         commandNotificationOnFailure: true,
         commandNotificationSound: false,
+        autoReconnectEnabled: true,
+        autoReconnectMaxAttempts: 10,
+        autoReconnectBaseDelayMs: 1000,
+        autoReconnectMaxDelayMs: 30000,
         updatedAt: "2025-01-01T00:00:00.000Z",
       })
       .mockResolvedValueOnce({
@@ -213,6 +217,10 @@ describe("createAppStore catalog and settings", () => {
         commandNotificationOnlyWhenUnfocused: true,
         commandNotificationOnFailure: true,
         commandNotificationSound: false,
+        autoReconnectEnabled: true,
+        autoReconnectMaxAttempts: 10,
+        autoReconnectBaseDelayMs: 1000,
+        autoReconnectMaxDelayMs: 30000,
         updatedAt: "2025-01-02T00:00:00.000Z",
       });
 

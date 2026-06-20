@@ -141,6 +141,7 @@ import {
   updatePaneState,
   toTrustInput,
 } from "../utils";
+import { cancelReconnect } from "../services/reconnect-orchestrator";
 import { createSftpServices } from "../services/sftp";
 
 export function createSftpSlice(deps: SliceDeps): SftpSlice {
@@ -251,6 +252,8 @@ export function createSftpSlice(deps: SliceDeps): SftpSlice {
             }
           },
     disconnectSftpPane: async (paneId) => {
+            // 사용자가 직접 끊으면 진행 중 자동 재연결을 취소(의도적 종료).
+            cancelReconnect(paneId, "user-disconnect");
             const pane = getPane(get(), paneId);
             if (!pane.endpoint && !pane.connectingEndpointId) {
               return;

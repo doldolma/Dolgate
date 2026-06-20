@@ -2464,6 +2464,7 @@ describe("createAppStore containers", () => {
         ...state.tabs,
         {
           id: "tab-2",
+          stableId: "tab-2",
           sessionId: "session-2",
           source: "local",
           hostId: null,

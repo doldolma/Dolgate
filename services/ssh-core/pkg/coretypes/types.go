@@ -496,6 +496,10 @@ type ErrorPayload struct {
 
 type ClosedPayload struct {
 	Message string `json:"message,omitempty"`
+	// Reason는 종료 유형을 구분한다: "remote-exit"(원격 셸 정상 종료),
+	// "transport"(전송 단절), "keepalive"(keepalive 연속 실패), "client"(클라이언트 요청).
+	// 자동 재연결 판단에서 정상 종료(exit)를 되살리지 않도록 하는 데 쓰인다.
+	Reason string `json:"reason,omitempty"`
 }
 
 type SFTPConnectedPayload struct {

@@ -44,6 +44,7 @@ vi.mock('../services/desktop/terminal', () => ({
 const tabs: TerminalTab[] = [
   {
     id: 'tab-1',
+    stableId: 'tab-1',
     sessionId: 'session-1',
     source: 'host',
     hostId: 'host-1',
@@ -55,6 +56,7 @@ const tabs: TerminalTab[] = [
   },
   {
     id: 'tab-2',
+    stableId: 'tab-2',
     sessionId: 'session-2',
     source: 'host',
     hostId: 'host-2',

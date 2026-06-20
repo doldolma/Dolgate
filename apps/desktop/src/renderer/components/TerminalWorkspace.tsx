@@ -57,6 +57,7 @@ interface TerminalWorkspaceProps {
   canDropDraggedSession: boolean;
   onCloseSession: (sessionId: string) => Promise<void>;
   onRetryConnection: (sessionId: string) => Promise<void>;
+  onCancelReconnect: (sessionId: string) => void;
   onStartSessionShare: (input: SessionShareStartInput) => Promise<void>;
   onUpdateSessionShareSnapshot: (
     input: SessionShareSnapshotInput,
@@ -142,6 +143,7 @@ export function TerminalWorkspace({
   canDropDraggedSession,
   onCloseSession,
   onRetryConnection,
+  onCancelReconnect,
   onStartSessionShare,
   onUpdateSessionShareSnapshot,
   onSetSessionShareInputEnabled,
@@ -371,7 +373,9 @@ export function TerminalWorkspace({
     const rectStyle = placement ? toPercentRectStyle(placement.rect) : undefined;
 
     return {
-      key: `${tab.sessionId}:${activeWorkspace ? 'workspace' : 'standalone'}`,
+      // stableId 기준 key — 재연결로 sessionId가 바뀌어도 pane이 remount되지 않아
+      // 터미널 인스턴스(스크롤백)가 보존된다.
+      key: `${tab.stableId}:${activeWorkspace ? 'workspace' : 'standalone'}`,
       className: isWorkspacePane ? 'absolute p-[0.3rem]' : undefined,
       style: isWorkspacePane ? rectStyle : undefined,
       onDragOver: isWorkspacePane
@@ -512,6 +516,9 @@ export function TerminalWorkspace({
           }}
           onRetry={async () => {
             await onRetryConnection(tab.sessionId);
+          }}
+          onCancelReconnect={() => {
+            onCancelReconnect(tab.sessionId);
           }}
           onStartDrag={
             activeWorkspace && placement

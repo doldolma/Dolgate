@@ -104,6 +104,7 @@ export function SessionShell({
           canDropDraggedSession={canDropDraggedSession}
           onCloseSession={sessionViewModel.disconnectTab}
           onRetryConnection={sessionViewModel.retrySessionConnection}
+          onCancelReconnect={sessionViewModel.cancelSessionReconnect}
           onStartSessionShare={sessionViewModel.startSessionShare}
           onUpdateSessionShareSnapshot={sessionViewModel.updateSessionShareSnapshot}
           onSetSessionShareInputEnabled={

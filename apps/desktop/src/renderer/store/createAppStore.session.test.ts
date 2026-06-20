@@ -27,6 +27,7 @@ describe("createAppStore sessions and auth recovery", () => {
   ): TerminalTab {
     return {
       id: "aws-session-1",
+      stableId: "aws-session-1",
       sessionId: "aws-session-1",
       source: "host",
       hostId: "aws-host-1",

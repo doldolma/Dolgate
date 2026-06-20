@@ -73,6 +73,8 @@ export interface TerminalSessionPaneProps {
   onFocus?: () => void;
   onClose?: () => Promise<void>;
   onRetry?: () => Promise<void>;
+  /** 자동 재연결 중 사용자가 취소할 때 호출. */
+  onCancelReconnect?: () => Promise<void> | void;
   onStartSessionShare?: (input: SessionShareStartInput) => Promise<void>;
   onUpdateSessionShareSnapshot?: (input: SessionShareSnapshotInput) => Promise<void>;
   onSetSessionShareInputEnabled?: (

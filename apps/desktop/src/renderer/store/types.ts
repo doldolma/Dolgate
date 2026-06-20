@@ -558,6 +558,7 @@ interface AppStateParts {
   ) => Promise<void>;
   stopSessionShare: (sessionId: string) => Promise<void>;
   disconnectTab: (sessionId: string) => Promise<void>;
+  cancelSessionReconnect: (sessionId: string) => void;
   closeWorkspace: (workspaceId: string) => Promise<void>;
   openHostContainersTab: (hostId: string) => Promise<void>;
   closeHostContainersTab: (hostId: string) => Promise<void>;
@@ -853,6 +854,7 @@ export type SessionSlice = Pick<
   | "setSessionShareInputEnabled"
   | "stopSessionShare"
   | "disconnectTab"
+  | "cancelSessionReconnect"
   | "closeWorkspace"
   | "splitSessionIntoWorkspace"
   | "moveWorkspaceSession"

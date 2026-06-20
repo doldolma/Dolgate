@@ -115,6 +115,10 @@ export function resolveConnectionOverlayTitle(
     return 'Action Required';
   }
 
+  if (tab.connectionProgress?.stage === 'reconnecting') {
+    return 'Reconnecting';
+  }
+
   if (tab.status === 'connected') {
     return 'Connected';
   }

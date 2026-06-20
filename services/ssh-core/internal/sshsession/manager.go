@@ -36,13 +36,30 @@ type ManagerConfig struct {
 	TCPKeepAliveInterval time.Duration
 	// SSHKeepAliveInterval은 애플리케이션 레벨 keepalive 전송 간격이다. 음수면 비활성화한다.
 	SSHKeepAliveInterval time.Duration
+	// SSHKeepAliveMaxFailures는 세션을 끊김으로 판단하기 전 허용하는 연속 keepalive
+	// 실패 횟수다(OpenSSH의 ServerAliveCountMax에 해당). 단발 네트워크 블립으로 멀쩡한
+	// 세션을 죽이는 오탐을 막는다. 0 이하면 기본값을 쓴다.
+	SSHKeepAliveMaxFailures int
+	// SSHKeepAliveProbeTimeout은 keepalive probe 한 번의 응답을 기다리는 최대 시간이다.
+	// 커널 TCP 타임아웃에 끌려가지 않고 간격 기반으로 실패를 감지하기 위함이다.
+	SSHKeepAliveProbeTimeout time.Duration
 }
 
 var defaultManagerConfig = ManagerConfig{
-	TCPDialTimeout:       10 * time.Second,
-	TCPKeepAliveInterval: 30 * time.Second,
-	SSHKeepAliveInterval: 30 * time.Second,
+	TCPDialTimeout:           10 * time.Second,
+	TCPKeepAliveInterval:     30 * time.Second,
+	SSHKeepAliveInterval:     30 * time.Second,
+	SSHKeepAliveMaxFailures:  3,
+	SSHKeepAliveProbeTimeout: 10 * time.Second,
 }
+
+// 종료 사유 — ClosedPayload.Reason으로 renderer에 전달돼 자동 재연결 판단에 쓰인다.
+const (
+	closeReasonRemoteExit = "remote-exit" // 원격 셸 정상 종료(exit) → 재연결하지 않음
+	closeReasonTransport  = "transport"   // 전송 단절 → 재연결 대상
+	closeReasonKeepalive  = "keepalive"   // keepalive 연속 실패 → 재연결 대상
+	closeReasonClient     = "client"      // 클라이언트 요청 종료 → 재연결하지 않음
+)
 
 type Manager struct {
 	// 여러 SSH 세션을 sessionId 기준으로 관리한다.
@@ -67,6 +84,12 @@ func NewManagerWithConfig(emit EventEmitter, stream StreamEmitter, config Manage
 	}
 	if config.SSHKeepAliveInterval == 0 {
 		config.SSHKeepAliveInterval = defaultManagerConfig.SSHKeepAliveInterval
+	}
+	if config.SSHKeepAliveMaxFailures <= 0 {
+		config.SSHKeepAliveMaxFailures = defaultManagerConfig.SSHKeepAliveMaxFailures
+	}
+	if config.SSHKeepAliveProbeTimeout == 0 {
+		config.SSHKeepAliveProbeTimeout = defaultManagerConfig.SSHKeepAliveProbeTimeout
 	}
 
 	return &Manager{
@@ -350,7 +373,7 @@ func (m *Manager) Resize(sessionID string, cols, rows int) error {
 
 func (m *Manager) Disconnect(sessionID string) error {
 	// 명시적 종료와 원격 종료를 동일한 close 경로로 모아 정리 로직을 일원화한다.
-	m.closeSession(sessionID, "client requested disconnect")
+	m.closeSession(sessionID, "client requested disconnect", closeReasonClient)
 	return nil
 }
 
@@ -361,11 +384,12 @@ func (m *Manager) waitForSession(sessionID string) {
 	}
 	waitErr := session.session.Wait()
 	if waitErr != nil && waitErr != io.EOF {
-		// 원격 셸이 비정상 종료되면 그 이유를 renderer까지 전달한다.
-		m.closeSession(sessionID, waitErr.Error())
+		// 전송 단절 등으로 비정상 종료된 경우. renderer가 자동 재연결 대상으로 본다.
+		m.closeSession(sessionID, waitErr.Error(), closeReasonTransport)
 		return
 	}
-	m.closeSession(sessionID, "")
+	// 정상 종료(원격 셸이 exit). 자동 재연결로 되살리지 않는다.
+	m.closeSession(sessionID, "", closeReasonRemoteExit)
 }
 
 func (m *Manager) stream(sessionID string, handle *sessionHandle, reader io.Reader) {
@@ -404,22 +428,53 @@ func (m *Manager) keepAlive(sessionID string, session *sessionHandle) {
 	ticker := time.NewTicker(m.config.SSHKeepAliveInterval)
 	defer ticker.Stop()
 
+	// 단발 블립으로 멀쩡한 세션을 죽이지 않도록 연속 실패가 임계값에 도달해야 종료한다
+	// (OpenSSH ServerAliveCountMax와 동일한 개념). 자동 재연결에선 오탐=실세션 종료라 중요.
+	consecutiveFailures := 0
 	for {
 		select {
 		case <-session.closed:
 			return
 		case <-ticker.C:
-			// wantReply=true로 보내야 연결이 실제로 살아 있는지 round-trip 기준으로 확인할 수 있다.
-			_, _, err := session.client.SendRequest("keepalive@openssh.com", true, nil)
-			if err != nil {
-				m.closeSession(sessionID, fmt.Sprintf("ssh keepalive failed: %v", err))
+			if m.sendKeepAliveProbe(session) {
+				consecutiveFailures = 0
+				continue
+			}
+			consecutiveFailures++
+			if consecutiveFailures >= m.config.SSHKeepAliveMaxFailures {
+				m.closeSession(
+					sessionID,
+					fmt.Sprintf("ssh keepalive failed after %d attempts", consecutiveFailures),
+					closeReasonKeepalive,
+				)
 				return
 			}
 		}
 	}
 }
 
-func (m *Manager) closeSession(sessionID string, message string) {
+// sendKeepAliveProbe는 probe 한 번을 보내고 타임아웃 내 round-trip 성공 여부를 반환한다.
+// SendRequest를 고루틴으로 감싸 커널 TCP 타임아웃에 끌려가지 않고 간격 기반으로 실패를
+// 감지한다. probe가 늦게 끝나도 채널이 버퍼(1)라 고루틴은 누수 없이 정리된다.
+func (m *Manager) sendKeepAliveProbe(session *sessionHandle) bool {
+	resultCh := make(chan error, 1)
+	go func() {
+		// wantReply=true로 보내야 연결이 실제로 살아 있는지 round-trip으로 확인된다.
+		_, _, err := session.client.SendRequest("keepalive@openssh.com", true, nil)
+		resultCh <- err
+	}()
+	select {
+	case err := <-resultCh:
+		return err == nil
+	case <-time.After(m.config.SSHKeepAliveProbeTimeout):
+		return false
+	case <-session.closed:
+		// 종료 중이면 실패로 치지 않는다(곧 keepAlive 루프가 빠져나간다).
+		return true
+	}
+}
+
+func (m *Manager) closeSession(sessionID string, message string, reason string) {
 	// 맵에서 먼저 제거해 중복 종료 요청이 다시 같은 세션을 건드리지 않게 한다.
 	m.mu.Lock()
 	session, ok := m.sessions[sessionID]
@@ -461,6 +516,7 @@ func (m *Manager) closeSession(sessionID string, message string) {
 		SessionID: sessionID,
 		Payload: protocol.ClosedPayload{
 			Message: message,
+			Reason:  reason,
 		},
 	})
 }
