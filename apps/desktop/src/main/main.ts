@@ -270,7 +270,13 @@ if (termiusHelperArgIndex >= 0) {
       show: false,
       backgroundColor: '#0d141a',
       ...(process.platform === 'win32' ? { frame: false } : {}),
-      ...(process.platform === 'darwin' ? { titleBarStyle: 'hiddenInset' as const } : {}),
+      ...(process.platform === 'darwin'
+        ? {
+            titleBarStyle: 'hiddenInset' as const,
+            // 타이틀바(~48px)에 맞춰 신호등을 세로 중앙으로 내린다.
+            trafficLightPosition: { x: 18, y: 16 },
+          }
+        : {}),
       webPreferences: {
         // forge + vite 출력에서는 main.js와 preload.js가 같은 build 디렉터리에 놓인다.
         preload: path.join(__dirname, 'preload.js'),

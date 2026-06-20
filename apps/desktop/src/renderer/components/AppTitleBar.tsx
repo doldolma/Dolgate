@@ -369,7 +369,7 @@ export function AppTitleBar({
   return (
     <header
       className={cn(
-        'flex min-h-16 items-center gap-4 border-b border-[var(--chrome-border)] bg-[linear-gradient(180deg,color-mix(in_srgb,var(--chrome-bg)_94%,white_6%),color-mix(in_srgb,var(--chrome-bg)_98%,black_2%))] px-[1rem] pb-[0.85rem] pt-[0.9rem] text-[#f3f7fb] shadow-[inset_0_-1px_0_rgba(255,255,255,0.03)] [-webkit-app-region:drag] max-[760px]:px-[1rem] max-[760px]:pr-[0.8rem]',
+        'flex min-h-12 items-center gap-4 border-b border-[var(--chrome-border)] bg-[linear-gradient(180deg,color-mix(in_srgb,var(--chrome-bg)_94%,white_6%),color-mix(in_srgb,var(--chrome-bg)_98%,black_2%))] px-[1rem] py-[0.3rem] text-[#f3f7fb] shadow-[inset_0_-1px_0_rgba(255,255,255,0.03)] [-webkit-app-region:drag] max-[760px]:px-[1rem] max-[760px]:pr-[0.8rem]',
         desktopPlatform === 'darwin' && 'pl-[5.4rem] max-[1040px]:pl-[4.8rem] max-[760px]:px-[4.8rem] max-[760px]:pr-[0.8rem]',
       )}
     >
@@ -716,7 +716,7 @@ export function AppTitleBar({
           <IconButton
             tone="default"
             active={isUpdateOpen}
-            className="relative h-12 w-12 rounded-full border-[rgba(255,255,255,0.1)] bg-[rgba(255,255,255,0.06)] text-[1.1rem] text-white shadow-none hover:bg-[rgba(255,255,255,0.1)]"
+            className="relative h-9 w-9 rounded-full border-transparent bg-[rgba(255,255,255,0.06)] text-[1.1rem] text-white shadow-none hover:bg-[rgba(255,255,255,0.1)]"
             aria-label="업데이트 상태 보기"
             onClick={() => setIsUpdateOpen((current) => !current)}
           >
