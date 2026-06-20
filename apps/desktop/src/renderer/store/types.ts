@@ -1,4 +1,5 @@
 import type { StoreApi } from "zustand/vanilla";
+import type { CommandFinishedInfo } from "../lib/command-notification";
 import type {
   ActivityLogRecord,
   AuthType,
@@ -643,6 +644,10 @@ interface AppStateParts {
   ) => void;
   loadSettings: () => Promise<void>;
   updateSettings: (input: Partial<AppSettings>) => Promise<void>;
+  notifyCommandFinished: (
+    info: CommandFinishedInfo,
+    context: { visibleToUser: boolean; hostLabel: string },
+  ) => void;
   savePortForward: (
     ruleId: string | null,
     draft: PortForwardDraft,
@@ -966,6 +971,7 @@ export type SettingsSlice = Pick<
   | "keychainEntries"
   | "loadSettings"
   | "updateSettings"
+  | "notifyCommandFinished"
   | "clearLogs"
   | "removeKeychainSecret"
   | "updateKeychainSecret"

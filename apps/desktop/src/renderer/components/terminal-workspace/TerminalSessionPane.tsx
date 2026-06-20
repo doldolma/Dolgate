@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { cn } from '../../lib/cn';
 import { useAppStore } from '../../store/appStore';
 import { useTerminalSessionViewController } from '../../controllers/useTerminalSessionViewController';
@@ -14,6 +14,7 @@ import { NoticeCard } from '../../ui';
 import { resolveConnectionFailurePresentation } from '../../store/utils';
 import { TerminalAutocompleteOverlay } from './TerminalAutocompleteOverlay';
 import { SnippetVariablesDialog } from './SnippetVariablesDialog';
+import type { CommandFinishedInfo } from '../../lib/command-notification';
 
 export function TerminalSessionPane(props: TerminalSessionPaneProps) {
   const {
@@ -35,7 +36,24 @@ export function TerminalSessionPane(props: TerminalSessionPaneProps) {
   } = props;
 
   const snippets = useAppStore((state) => state.snippets);
-  const controller = useTerminalSessionViewController({ ...props, snippets });
+  const notifyCommandFinished = useAppStore(
+    (state) => state.notifyCommandFinished,
+  );
+  const onCommandFinished = useCallback(
+    (info: CommandFinishedInfo) => {
+      // 사용자가 이 명령의 출력을 지금 보고 있으면(앱 포커스 + 활성 탭) 알리지 않는다.
+      notifyCommandFinished(info, {
+        visibleToUser: document.hasFocus() && active,
+        hostLabel: props.host?.label ?? '',
+      });
+    },
+    [notifyCommandFinished, active, props.host],
+  );
+  const controller = useTerminalSessionViewController({
+    ...props,
+    snippets,
+    onCommandFinished,
+  });
   const [serialNotice, setSerialNotice] = useState<string | null>(null);
 
   useEffect(() => {

@@ -38,11 +38,13 @@ import type {
   TerminalThemeId
 } from '@shared';
 import {
+  DEFAULT_COMMAND_NOTIFICATION_SETTINGS,
   DEFAULT_SESSION_REPLAY_RETENTION_COUNT,
   DEFAULT_SFTP_BROWSER_COLUMN_WIDTHS,
   MAX_SESSION_REPLAY_RETENTION_COUNT,
   MAX_HOST_STARTUP_COMMAND_LENGTH,
   MIN_SESSION_REPLAY_RETENTION_COUNT,
+  clampCommandNotificationThresholdSeconds,
   normalizeSftpBrowserColumnWidths
 } from '@shared';
 import type { SyncKind } from '@shared';
@@ -78,6 +80,11 @@ export interface DesktopStateFile {
     sftpPreserveMtime: boolean;
     sftpPreservePermissions: boolean;
     sessionReplayRetentionCount: number;
+    commandNotificationsEnabled: boolean;
+    commandNotificationThresholdSeconds: number;
+    commandNotificationOnlyWhenUnfocused: boolean;
+    commandNotificationOnFailure: boolean;
+    commandNotificationSound: boolean;
     serverUrlOverride: string | null;
     updatedAt: string;
   };
@@ -450,6 +457,13 @@ function createDefaultStateFile(): DesktopStateFile {
       sftpPreserveMtime: true,
       sftpPreservePermissions: false,
       sessionReplayRetentionCount: DEFAULT_SESSION_REPLAY_RETENTION_COUNT,
+      commandNotificationsEnabled: DEFAULT_COMMAND_NOTIFICATION_SETTINGS.commandNotificationsEnabled,
+      commandNotificationThresholdSeconds:
+        DEFAULT_COMMAND_NOTIFICATION_SETTINGS.commandNotificationThresholdSeconds,
+      commandNotificationOnlyWhenUnfocused:
+        DEFAULT_COMMAND_NOTIFICATION_SETTINGS.commandNotificationOnlyWhenUnfocused,
+      commandNotificationOnFailure: DEFAULT_COMMAND_NOTIFICATION_SETTINGS.commandNotificationOnFailure,
+      commandNotificationSound: DEFAULT_COMMAND_NOTIFICATION_SETTINGS.commandNotificationSound,
       serverUrlOverride: null,
       updatedAt: timestamp
     },
@@ -799,6 +813,26 @@ function normalizeStateFile(value: unknown): DesktopStateFile {
       sftpPreservePermissions:
         typeof settings.sftpPreservePermissions === 'boolean' ? settings.sftpPreservePermissions : false,
       sessionReplayRetentionCount: normalizeSessionReplayRetentionCount(settings.sessionReplayRetentionCount),
+      commandNotificationsEnabled:
+        typeof settings.commandNotificationsEnabled === 'boolean'
+          ? settings.commandNotificationsEnabled
+          : DEFAULT_COMMAND_NOTIFICATION_SETTINGS.commandNotificationsEnabled,
+      commandNotificationThresholdSeconds:
+        typeof settings.commandNotificationThresholdSeconds === 'number'
+          ? clampCommandNotificationThresholdSeconds(settings.commandNotificationThresholdSeconds)
+          : DEFAULT_COMMAND_NOTIFICATION_SETTINGS.commandNotificationThresholdSeconds,
+      commandNotificationOnlyWhenUnfocused:
+        typeof settings.commandNotificationOnlyWhenUnfocused === 'boolean'
+          ? settings.commandNotificationOnlyWhenUnfocused
+          : DEFAULT_COMMAND_NOTIFICATION_SETTINGS.commandNotificationOnlyWhenUnfocused,
+      commandNotificationOnFailure:
+        typeof settings.commandNotificationOnFailure === 'boolean'
+          ? settings.commandNotificationOnFailure
+          : DEFAULT_COMMAND_NOTIFICATION_SETTINGS.commandNotificationOnFailure,
+      commandNotificationSound:
+        typeof settings.commandNotificationSound === 'boolean'
+          ? settings.commandNotificationSound
+          : DEFAULT_COMMAND_NOTIFICATION_SETTINGS.commandNotificationSound,
       serverUrlOverride: typeof settings.serverUrlOverride === 'string' && settings.serverUrlOverride.trim() ? settings.serverUrlOverride.trim() : null,
       updatedAt: typeof settings.updatedAt === 'string' ? settings.updatedAt : fallback.settings.updatedAt
     },

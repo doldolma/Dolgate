@@ -30,6 +30,11 @@ import {
   ToggleSwitch,
 } from '../ui';
 
+// shared-core의 clampCommandNotificationThresholdSeconds 범위와 동일하게 유지.
+// @shared value를 직접 import하면 vite dev에서 export* 누락 이슈가 있어 인라인.
+const COMMAND_NOTIFICATION_THRESHOLD_MIN_SECONDS = 1;
+const COMMAND_NOTIFICATION_THRESHOLD_MAX_SECONDS = 86400;
+
 interface SettingsPanelProps {
   activeSection: SettingsSection;
   settings: AppSettings;
@@ -299,30 +304,6 @@ export function SettingsPanel({
                 </SelectField>
               </FieldGroup>
 
-              <ToggleSwitch
-                checked={settings.terminalWebglEnabled}
-                aria-label="WebGL Renderer"
-                label="WebGL Renderer"
-                description="지원되지 않는 환경에서는 자동으로 기본 렌더러로 전환합니다."
-                className="min-h-[72px] flex-row-reverse justify-between rounded-[20px] px-4 py-4"
-                onClick={() => {
-                  void handleChangeTerminalWebglEnabled(!settings.terminalWebglEnabled);
-                }}
-              />
-
-              <ToggleSwitch
-                checked={settings.terminalAutocompleteEnabled}
-                aria-label="Command autocomplete"
-                label="Command autocomplete"
-                description="PATH·history에 더해 Fig 스펙·generator로 자동완성합니다. (SSM 에서는 일부 기능 제한)"
-                className="min-h-[72px] flex-row-reverse justify-between rounded-[20px] px-4 py-4"
-                onClick={() => {
-                  void handleChangeTerminalAutocompleteEnabled(
-                    !settings.terminalAutocompleteEnabled,
-                  );
-                }}
-              />
-
               <FieldGroup label="Scrollback">
                 <Input
                   aria-label="Scrollback"
@@ -408,17 +389,124 @@ export function SettingsPanel({
                 </p>
               </FieldGroup>
 
+            </div>
+
+            {/* 터미널 동작 토글 — 토글끼리 묶어 input과 높이가 섞이지 않게 한다 */}
+            <div className="mb-[1.15rem] grid grid-cols-[repeat(2,minmax(0,1fr))] gap-[0.9rem] max-[760px]:grid-cols-1">
+              <ToggleSwitch
+                checked={settings.terminalWebglEnabled}
+                label="WebGL Renderer"
+                description="지원되지 않는 환경에서는 자동으로 기본 렌더러로 전환합니다."
+                onClick={() => {
+                  void handleChangeTerminalWebglEnabled(!settings.terminalWebglEnabled);
+                }}
+              />
+
+              <ToggleSwitch
+                checked={settings.terminalAutocompleteEnabled}
+                label="Command autocomplete"
+                description="PATH·history에 더해 Fig 스펙·generator로 자동완성합니다. (SSM 에서는 일부 기능 제한)"
+                onClick={() => {
+                  void handleChangeTerminalAutocompleteEnabled(
+                    !settings.terminalAutocompleteEnabled,
+                  );
+                }}
+              />
+
               {desktopPlatform === 'darwin' ? (
                 <ToggleSwitch
                   checked={settings.terminalAltIsMeta}
-                  aria-label="Use Option/Alt as Meta"
                   label="Use Option/Alt as Meta"
                   description="macOS에서 Option 키를 터미널 메타 키로 사용합니다."
-                  className="min-h-[72px] flex-row-reverse justify-between rounded-[20px] px-4 py-4"
                   onClick={() => {
                     void handleChangeTerminalAltIsMeta(!settings.terminalAltIsMeta);
                   }}
                 />
+              ) : null}
+            </div>
+
+            {/* 명령 완료 알림 — 관련 설정을 한 그룹 카드로 묶는다 */}
+            <div className="mb-[1.15rem] grid gap-[0.7rem] rounded-[20px] border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[color-mix(in_srgb,var(--surface-muted)_55%,transparent_45%)] p-[1.1rem]">
+              <SectionLabel>Notifications</SectionLabel>
+              <ToggleSwitch
+                checked={settings.commandNotificationsEnabled}
+                label="명령 완료 알림"
+                description="오래 걸리거나 실패한 명령이 끝나면 OS 알림으로 알려줍니다."
+                onClick={() => {
+                  const next = !settings.commandNotificationsEnabled;
+                  // 알림을 켤 때 OS 권한이 미결정이면 권한 요청 프롬프트를 유도한다.
+                  if (
+                    next &&
+                    typeof window !== 'undefined' &&
+                    'Notification' in window &&
+                    typeof window.Notification?.requestPermission === 'function' &&
+                    window.Notification.permission === 'default'
+                  ) {
+                    void window.Notification.requestPermission();
+                  }
+                  void onUpdateSettings({ commandNotificationsEnabled: next });
+                }}
+              />
+
+              {settings.commandNotificationsEnabled ? (
+                <div className="grid grid-cols-[repeat(2,minmax(0,1fr))] items-start gap-[0.9rem] border-t border-[color-mix(in_srgb,var(--border)_60%,transparent_40%)] pt-[0.85rem] max-[760px]:grid-cols-1">
+                  <FieldGroup label="알림 기준 시간(초)">
+                    <Input
+                      aria-label="알림 기준 시간(초)"
+                      type="number"
+                      min={COMMAND_NOTIFICATION_THRESHOLD_MIN_SECONDS}
+                      max={COMMAND_NOTIFICATION_THRESHOLD_MAX_SECONDS}
+                      step={5}
+                      value={settings.commandNotificationThresholdSeconds}
+                      onChange={async (event) =>
+                        onUpdateSettings({
+                          commandNotificationThresholdSeconds: Number(
+                            event.target.value,
+                          ),
+                        })
+                      }
+                    />
+                    <p className="m-0 text-[0.78rem] leading-[1.45] text-[var(--text-soft)]">
+                      이 시간 이상 걸린 명령이 끝나면 알립니다.
+                    </p>
+                  </FieldGroup>
+
+                  <ToggleSwitch
+                    checked={settings.commandNotificationOnlyWhenUnfocused}
+                    label="비활성 상태일 때만 알림"
+                    description="앱을 보고 있고 해당 탭이 활성일 때는 알리지 않습니다."
+                    onClick={() => {
+                      void onUpdateSettings({
+                        commandNotificationOnlyWhenUnfocused:
+                          !settings.commandNotificationOnlyWhenUnfocused,
+                      });
+                    }}
+                  />
+
+                  <ToggleSwitch
+                    checked={settings.commandNotificationOnFailure}
+                    label="실패한 명령은 항상 알림"
+                    description="0이 아닌 종료 코드는 시간과 무관하게 알립니다."
+                    onClick={() => {
+                      void onUpdateSettings({
+                        commandNotificationOnFailure:
+                          !settings.commandNotificationOnFailure,
+                      });
+                    }}
+                  />
+
+                  <ToggleSwitch
+                    checked={settings.commandNotificationSound}
+                    label="알림 소리"
+                    description="알림이 표시될 때 소리를 함께 재생합니다."
+                    onClick={() => {
+                      void onUpdateSettings({
+                        commandNotificationSound:
+                          !settings.commandNotificationSound,
+                      });
+                    }}
+                  />
+                </div>
               ) : null}
             </div>
 
@@ -531,7 +619,6 @@ export function SettingsPanel({
               aria-label="Preserve modified time"
               label="Preserve modified time"
               description="전송 완료 후 원본 수정 시간을 대상 파일에 적용합니다."
-              className="min-h-[72px] flex-row-reverse justify-between rounded-[20px] px-4 py-4"
               onClick={() => {
                 void onUpdateSettings({
                   sftpPreserveMtime: !(settings.sftpPreserveMtime ?? true),
@@ -544,7 +631,6 @@ export function SettingsPanel({
               aria-label="Preserve permissions"
               label="Preserve permissions"
               description="가능한 경우 원본 권한 비트를 대상 파일에 적용합니다."
-              className="min-h-[72px] flex-row-reverse justify-between rounded-[20px] px-4 py-4"
               onClick={() => {
                 void onUpdateSettings({
                   sftpPreservePermissions: !(settings.sftpPreservePermissions ?? false),

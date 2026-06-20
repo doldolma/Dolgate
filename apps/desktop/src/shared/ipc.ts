@@ -576,6 +576,12 @@ export interface AuthCallbackPayload {
 }
 
 // preload가 renderer에 노출하는 공개 API 표면이다.
+export interface CommandFinishedNotification {
+  title: string;
+  body: string;
+  silent: boolean;
+}
+
 export interface DesktopApi {
   auth: {
     getState: () => Promise<AuthState>;
@@ -819,6 +825,9 @@ export interface DesktopApi {
     create: (draft: SnippetDraft) => Promise<SnippetRecord>;
     update: (id: string, draft: SnippetDraft) => Promise<SnippetRecord>;
     remove: (id: string) => Promise<void>;
+  };
+  notifications: {
+    commandFinished: (payload: CommandFinishedNotification) => Promise<void>;
   };
   knownHosts: {
     list: () => Promise<KnownHostRecord[]>;

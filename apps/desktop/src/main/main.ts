@@ -32,6 +32,8 @@ import { SessionReplayService } from './session-replay-service';
 import { SyncService } from './sync-service';
 import { TermiusImportService } from './termius-import-service';
 import { UpdateService } from './update-service';
+import { NotificationService } from './notification-service';
+import { registerNotificationsIpcHandlers } from './ipc/notifications';
 import { WarpgateService } from './warpgate-service';
 import { XshellImportService } from './xshell-import-service';
 import { shouldRequestSingleInstanceLock } from './app-runtime-policy';
@@ -127,6 +129,7 @@ if (termiusHelperArgIndex >= 0) {
   const sessionShareService = new SessionShareService(authService, coreManager);
   const sessionReplayService = new SessionReplayService(settingsRepository, coreManager);
   const updateService = new UpdateService(settingsRepository);
+  const notificationService = new NotificationService();
   let isQuitting = false;
   let pendingAuthCallbackUrl: string | null = null;
 
@@ -287,6 +290,7 @@ if (termiusHelperArgIndex >= 0) {
     warpgateService.registerWindow(window);
     sessionShareService.registerWindow(window);
     updateService.registerWindow(window);
+    notificationService.registerWindow(window);
 
     window.once('ready-to-show', () => {
       window.show();
@@ -368,6 +372,11 @@ if (termiusHelperArgIndex >= 0) {
 
   app.whenReady().then(async () => {
     // 앱 준비 이후에만 IPC와 창 생성을 시작한다.
+    if (process.platform === 'win32') {
+      // Squirrel.Windows가 등록하는 AppUserModelID와 일치시켜야 토스트 알림이
+      // 올바른 앱으로 표시된다 (com.squirrel.<name>.<exe>).
+      app.setAppUserModelId('com.squirrel.dolgate.dolgate');
+    }
     authService.registerProtocolClient();
     registerIpcHandlers(
       hostRepository,
@@ -395,6 +404,7 @@ if (termiusHelperArgIndex >= 0) {
       sessionShareService,
       sessionReplayService
     );
+    registerNotificationsIpcHandlers(notificationService);
     await awsService.migrateManagedProfilesFromFilesIfNeeded();
     await reconcileAwsHostProfileReferences();
     await createWindow();

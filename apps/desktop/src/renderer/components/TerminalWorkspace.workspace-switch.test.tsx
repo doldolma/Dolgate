@@ -82,6 +82,11 @@ const settings: AppSettings = {
     kind: 96
   },
   sessionReplayRetentionCount: 100,
+  commandNotificationsEnabled: true,
+  commandNotificationThresholdSeconds: 30,
+  commandNotificationOnlyWhenUnfocused: true,
+  commandNotificationOnFailure: true,
+  commandNotificationSound: false,
   serverUrl: 'https://example.test',
   serverUrlOverride: null,
   updatedAt: '2025-01-01T00:00:00.000Z'

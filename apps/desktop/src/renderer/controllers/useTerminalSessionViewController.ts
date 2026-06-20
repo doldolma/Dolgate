@@ -27,6 +27,7 @@ import {
   shouldShowSessionOverlay,
 } from '../components/terminal-workspace/terminalSessionHelpers';
 import { useTerminalAutocomplete } from './useTerminalAutocomplete';
+import type { CommandFinishedInfo } from '../lib/command-notification';
 
 function isMacPlatform(): boolean {
   if (typeof navigator === 'undefined') {
@@ -103,8 +104,10 @@ export function useTerminalSessionViewController({
   onSessionData,
   onResizeSession,
   snippets,
+  onCommandFinished,
 }: TerminalSessionPaneProps & {
   snippets?: readonly { label: string; command: string; keyword?: string | null }[];
+  onCommandFinished?: (info: CommandFinishedInfo) => void;
 }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const terminalRef = useRef<Terminal | null>(null);
@@ -171,12 +174,13 @@ export function useTerminalSessionViewController({
       host?.kind !== 'serial' &&
       tab?.shellKind !== 'aws-ecs-exec',
     connected: tab?.status === 'connected',
-    lazyPrepare:
-      host?.kind === 'aws-ec2' ||
-      ((host?.kind === 'ssh' || host?.kind === 'warpgate-ssh') &&
-        host.startupCommand != null),
+    // startup command가 있어도 lazy로 미루지 않는다. 셸 통합 init을 연결 직후
+    // 주입해 두면(아래 core-manager가 통합 프롬프트 133;A를 본 뒤 startup command를
+    // flush) 첫 프롬프트가 곧 통합 프롬프트라 프롬프트가 두 번 그려지지 않는다.
+    lazyPrepare: host?.kind === 'aws-ec2',
     sendInput: sendAutocompleteInput,
     snippets,
+    onCommandFinished,
   });
   const liveAutocompleteInputRef = useRef(autocomplete.handleInput);
   const liveAutocompleteVisibleRef = useRef(false);

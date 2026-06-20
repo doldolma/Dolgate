@@ -947,10 +947,44 @@ export interface AppSettings extends TerminalAppearanceSettings {
   sftpPreserveMtime?: boolean;
   sftpPreservePermissions?: boolean;
   sessionReplayRetentionCount: number;
+  commandNotificationsEnabled: boolean;
+  commandNotificationThresholdSeconds: number;
+  commandNotificationOnlyWhenUnfocused: boolean;
+  commandNotificationOnFailure: boolean;
+  commandNotificationSound: boolean;
   serverUrl: string;
   serverUrlOverride?: string | null;
   dismissedUpdateVersion?: string | null;
   updatedAt: string;
+}
+
+export interface CommandNotificationSettings {
+  commandNotificationsEnabled: boolean;
+  commandNotificationThresholdSeconds: number;
+  commandNotificationOnlyWhenUnfocused: boolean;
+  commandNotificationOnFailure: boolean;
+  commandNotificationSound: boolean;
+}
+
+export const DEFAULT_COMMAND_NOTIFICATION_SETTINGS: CommandNotificationSettings = {
+  commandNotificationsEnabled: true,
+  commandNotificationThresholdSeconds: 30,
+  commandNotificationOnlyWhenUnfocused: true,
+  commandNotificationOnFailure: false,
+  commandNotificationSound: false
+};
+
+export const MIN_COMMAND_NOTIFICATION_THRESHOLD_SECONDS = 1;
+export const MAX_COMMAND_NOTIFICATION_THRESHOLD_SECONDS = 86400;
+
+export function clampCommandNotificationThresholdSeconds(value: number): number {
+  if (!Number.isFinite(value)) {
+    return DEFAULT_COMMAND_NOTIFICATION_SETTINGS.commandNotificationThresholdSeconds;
+  }
+  return Math.min(
+    MAX_COMMAND_NOTIFICATION_THRESHOLD_SECONDS,
+    Math.max(MIN_COMMAND_NOTIFICATION_THRESHOLD_SECONDS, Math.round(value))
+  );
 }
 
 export type TerminalAutocompleteShell = 'bash' | 'zsh';

@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type {
   AppTheme,
   AuthState,
@@ -93,6 +93,19 @@ export function App() {
   const sftpViewModel = useSftpViewModel();
   const settingsViewModel = useAppSettingsViewModel();
   const modalViewModel = useAppModalViewModel();
+
+  useEffect(() => {
+    // 알림 권한이 아직 미결정(default)이면 앱 시작 시 한 번 요청해 macOS 권한
+    // 프롬프트를 띄운다. 메인 프로세스 Notification과 같은 앱 번들 권한을 공유한다.
+    if (
+      typeof window !== 'undefined' &&
+      'Notification' in window &&
+      typeof window.Notification?.requestPermission === 'function' &&
+      window.Notification.permission === 'default'
+    ) {
+      void window.Notification.requestPermission();
+    }
+  }, []);
 
   const [authState, setAuthState] = useState<AuthState>({
     status: 'loading',

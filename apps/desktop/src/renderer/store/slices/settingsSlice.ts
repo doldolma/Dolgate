@@ -1,6 +1,10 @@
 import type { SliceDeps } from "../services/context";
 import type { SettingsSlice } from "../types";
 import {
+  formatCommandNotification,
+  shouldNotifyCommandFinished,
+} from "../../lib/command-notification";
+import {
   AWS_SFTP_DEFAULT_PORT,
   DEFAULT_SFTP_BROWSER_COLUMN_WIDTHS,
   getAwsEc2HostSftpDisabledReason,
@@ -162,6 +166,27 @@ export function createSettingsSlice(deps: SliceDeps): SettingsSlice {
             if (input.globalTerminalThemeId) {
               void api.sync.pushDirty();
             }
+          },
+    notifyCommandFinished: (info, context) => {
+            const settings = get().settings;
+            if (
+              !shouldNotifyCommandFinished(settings, {
+                ...info,
+                visibleToUser: context.visibleToUser,
+              })
+            ) {
+              return;
+            }
+            const content = formatCommandNotification({
+              hostLabel: context.hostLabel,
+              command: info.command,
+              exitCode: info.exitCode,
+              durationMs: info.durationMs,
+            });
+            void api.notifications.commandFinished({
+              ...content,
+              silent: !settings.commandNotificationSound,
+            });
           },
     clearLogs: async () => {
             await api.logs.clear();

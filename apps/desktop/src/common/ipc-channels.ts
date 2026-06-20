@@ -147,6 +147,9 @@ export const ipcChannels = {
     get: 'settings:get',
     update: 'settings:update'
   },
+  notifications: {
+    commandFinished: 'notifications:command-finished'
+  },
   portForwards: {
     list: 'port-forwards:list',
     create: 'port-forwards:create',

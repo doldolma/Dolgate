@@ -184,6 +184,11 @@ describe("createAppStore catalog and settings", () => {
         serverUrlOverride: null,
         dismissedUpdateVersion: null,
         sessionReplayRetentionCount: 100,
+        commandNotificationsEnabled: true,
+        commandNotificationThresholdSeconds: 30,
+        commandNotificationOnlyWhenUnfocused: true,
+        commandNotificationOnFailure: true,
+        commandNotificationSound: false,
         updatedAt: "2025-01-01T00:00:00.000Z",
       })
       .mockResolvedValueOnce({
@@ -203,6 +208,11 @@ describe("createAppStore catalog and settings", () => {
         serverUrlOverride: null,
         dismissedUpdateVersion: null,
         sessionReplayRetentionCount: 100,
+        commandNotificationsEnabled: true,
+        commandNotificationThresholdSeconds: 30,
+        commandNotificationOnlyWhenUnfocused: true,
+        commandNotificationOnFailure: true,
+        commandNotificationSound: false,
         updatedAt: "2025-01-02T00:00:00.000Z",
       });
 

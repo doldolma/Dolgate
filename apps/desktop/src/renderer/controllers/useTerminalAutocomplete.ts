@@ -23,6 +23,7 @@ import {
   resolveSnippetCommand,
   type SnippetVariable,
 } from '../lib/snippet';
+import type { CommandFinishedInfo } from '../lib/command-notification';
 import {
   getCachedCommandSpec,
   hasCommandModule,
@@ -112,6 +113,8 @@ interface UseTerminalAutocompleteOptions {
   sendInput: (data: string) => void;
   /** Saved snippets to surface as candidates (synced; supplied by the caller). */
   snippets?: readonly { label: string; command: string; keyword?: string | null }[];
+  /** 명령이 끝났을 때(OSC 133;D) 호출 — 명령 완료 알림 등 후처리에 사용. */
+  onCommandFinished?: (info: CommandFinishedInfo) => void;
 }
 
 const EMPTY_SNIPPETS: readonly { label: string; command: string; keyword?: string | null }[] = [];
@@ -213,6 +216,7 @@ export function useTerminalAutocomplete({
   lazyPrepare,
   sendInput,
   snippets = EMPTY_SNIPPETS,
+  onCommandFinished,
 }: UseTerminalAutocompleteOptions) {
   const [capability, setCapability] =
     useState<TerminalAutocompleteCapability | null>(null);
@@ -250,6 +254,8 @@ export function useTerminalAutocomplete({
   const sessionStatsRef = useRef<Map<string, SessionCommandStat>>(new Map());
   const sessionSeqRef = useRef(0);
   const pendingCommandRef = useRef<string | null>(null);
+  // OSC 133;C(명령 실행 시작) 시각 — D에서 소요 시간 계산에 사용.
+  const commandStartedAtRef = useRef<number | null>(null);
   const currentCwdRef = useRef<string | null>(null);
   const commandSpecRef = useRef<CommandSpec | null>(null);
   const commandSpecNameRef = useRef<string | null>(null);
@@ -264,6 +270,7 @@ export function useTerminalAutocomplete({
   const completionInflightRef = useRef<Map<string, Promise<string>>>(new Map());
   const dynamicGenerationRef = useRef(0);
   const snippetsRef = useRef(snippets);
+  const onCommandFinishedRef = useRef(onCommandFinished);
   const pendingSnippetRef = useRef(pendingSnippet);
 
   useEffect(() => {
@@ -275,6 +282,9 @@ export function useTerminalAutocomplete({
   useEffect(() => {
     snippetsRef.current = snippets;
   }, [snippets]);
+  useEffect(() => {
+    onCommandFinishedRef.current = onCommandFinished;
+  }, [onCommandFinished]);
   useEffect(() => {
     pendingSnippetRef.current = pendingSnippet;
   }, [pendingSnippet]);
@@ -837,6 +847,10 @@ export function useTerminalAutocomplete({
       setSelected(0);
       return;
     }
+    if (kind === 'C') {
+      // 명령 실행 시작 시각을 기록 — D에서 소요 시간 계산에 사용.
+      commandStartedAtRef.current = Date.now();
+    }
     if (kind === 'C' || kind === 'D') {
       // OSC 133;C/D = a command is starting/finishing. Host state (files,
       // branches, …) may change, so drop the dynamic cache and supersede any
@@ -847,16 +861,24 @@ export function useTerminalAutocomplete({
     }
     if (kind === 'D') {
       // OSC 133;D;<exit> = the command finished. Attach its exit code so failed
-      // commands can be dropped from suggestions.
+      // commands can be dropped from suggestions, and notify the caller (명령
+      // 완료 알림 등) with the exit code and elapsed time.
+      const exitCode = parseExitCode(marker);
+      const startedAt = commandStartedAtRef.current;
+      commandStartedAtRef.current = null;
       const pending = pendingCommandRef.current;
-      if (!pending) {
-        return;
-      }
       pendingCommandRef.current = null;
-      const stat = sessionStatsRef.current.get(pending);
-      if (stat) {
-        stat.lastExit = parseExitCode(marker);
+      if (pending) {
+        const stat = sessionStatsRef.current.get(pending);
+        if (stat) {
+          stat.lastExit = exitCode;
+        }
       }
+      onCommandFinishedRef.current?.({
+        command: pending,
+        exitCode,
+        durationMs: startedAt !== null ? Date.now() - startedAt : null,
+      });
     }
   }, [setSelected]);
 

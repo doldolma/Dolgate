@@ -1,10 +1,12 @@
 import { randomUUID } from 'node:crypto';
 import { isIP } from 'node:net';
 import {
+  DEFAULT_COMMAND_NOTIFICATION_SETTINGS,
   DEFAULT_SESSION_REPLAY_RETENTION_COUNT,
   MAX_HOST_STARTUP_COMMAND_LENGTH,
   MAX_SESSION_REPLAY_RETENTION_COUNT,
   MIN_SESSION_REPLAY_RETENTION_COUNT,
+  clampCommandNotificationThresholdSeconds,
   isDnsOverrideEligiblePortForwardRule,
   isLinkedDnsOverrideDraft,
   isLinkedDnsOverrideRecord,
@@ -1151,6 +1153,21 @@ export class SettingsRepository {
       sessionReplayRetentionCount:
         state.settings.sessionReplayRetentionCount ??
         DEFAULT_SESSION_REPLAY_RETENTION_COUNT,
+      commandNotificationsEnabled:
+        state.settings.commandNotificationsEnabled ??
+        DEFAULT_COMMAND_NOTIFICATION_SETTINGS.commandNotificationsEnabled,
+      commandNotificationThresholdSeconds:
+        state.settings.commandNotificationThresholdSeconds ??
+        DEFAULT_COMMAND_NOTIFICATION_SETTINGS.commandNotificationThresholdSeconds,
+      commandNotificationOnlyWhenUnfocused:
+        state.settings.commandNotificationOnlyWhenUnfocused ??
+        DEFAULT_COMMAND_NOTIFICATION_SETTINGS.commandNotificationOnlyWhenUnfocused,
+      commandNotificationOnFailure:
+        state.settings.commandNotificationOnFailure ??
+        DEFAULT_COMMAND_NOTIFICATION_SETTINGS.commandNotificationOnFailure,
+      commandNotificationSound:
+        state.settings.commandNotificationSound ??
+        DEFAULT_COMMAND_NOTIFICATION_SETTINGS.commandNotificationSound,
       serverUrl: serverUrlOverride || this.getDefaultServerUrl(),
       serverUrlOverride,
       dismissedUpdateVersion: state.updater.dismissedVersion,
@@ -1231,6 +1248,36 @@ export class SettingsRepository {
         state.settings.sessionReplayRetentionCount = clampSessionReplayRetentionCount(
           input.sessionReplayRetentionCount,
         );
+        state.settings.updatedAt = nowIso();
+      }
+
+      if (typeof input.commandNotificationsEnabled === 'boolean') {
+        state.settings.commandNotificationsEnabled = input.commandNotificationsEnabled;
+        state.settings.updatedAt = nowIso();
+      }
+
+      if (
+        typeof input.commandNotificationThresholdSeconds === 'number' &&
+        Number.isFinite(input.commandNotificationThresholdSeconds)
+      ) {
+        state.settings.commandNotificationThresholdSeconds = clampCommandNotificationThresholdSeconds(
+          input.commandNotificationThresholdSeconds,
+        );
+        state.settings.updatedAt = nowIso();
+      }
+
+      if (typeof input.commandNotificationOnlyWhenUnfocused === 'boolean') {
+        state.settings.commandNotificationOnlyWhenUnfocused = input.commandNotificationOnlyWhenUnfocused;
+        state.settings.updatedAt = nowIso();
+      }
+
+      if (typeof input.commandNotificationOnFailure === 'boolean') {
+        state.settings.commandNotificationOnFailure = input.commandNotificationOnFailure;
+        state.settings.updatedAt = nowIso();
+      }
+
+      if (typeof input.commandNotificationSound === 'boolean') {
+        state.settings.commandNotificationSound = input.commandNotificationSound;
         state.settings.updatedAt = nowIso();
       }
 

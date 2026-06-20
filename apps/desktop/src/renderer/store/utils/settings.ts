@@ -85,6 +85,14 @@ export const defaultSettings: AppSettings = {
   sftpPreserveMtime: true,
   sftpPreservePermissions: false,
   sessionReplayRetentionCount: 100,
+  // @shared의 DEFAULT_COMMAND_NOTIFICATION_SETTINGS를 인라인한다. vite dev가
+  // workspace 패키지(@dolssh/shared-core)의 export*로 추가된 value를 module
+  // graph에 비결정적으로 누락시켜 렌더러 모듈 로드가 깨지는 이슈를 피하기 위함.
+  commandNotificationsEnabled: true,
+  commandNotificationThresholdSeconds: 30,
+  commandNotificationOnlyWhenUnfocused: true,
+  commandNotificationOnFailure: false,
+  commandNotificationSound: false,
   serverUrl: "https://ssh.doldolma.com",
   serverUrlOverride: null,
   dismissedUpdateVersion: null,

@@ -114,6 +114,15 @@ export function buildSnippetsBridge(
   };
 }
 
+export function buildNotificationsBridge(
+  ipcRenderer: IpcRenderer,
+): DesktopApi["notifications"] {
+  return {
+    commandFinished: (payload) =>
+      ipcRenderer.invoke(ipcChannels.notifications.commandFinished, payload),
+  };
+}
+
 export function buildKnownHostsBridge(
   ipcRenderer: IpcRenderer,
 ): DesktopApi["knownHosts"] {

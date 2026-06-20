@@ -3671,6 +3671,13 @@ export class CoreManager {
     state.tail = (state.tail + Buffer.from(payload).toString("utf8")).slice(
       -STARTUP_COMMAND_TAIL_MAX_LENGTH,
     );
+    // 셸 통합 init이 적용된 통합 프롬프트(OSC 133;A)가 보이면 즉시 flush한다.
+    // 이렇게 하면 startup command가 init 뒤에 들어가, init 주입으로 프롬프트가
+    // 한 번 더 그려지는(=셸이 2개로 보이는) 현상이 사라진다.
+    if (state.tail.includes("]133;A")) {
+      this.flushStartupCommand(sessionId);
+      return;
+    }
     if (state.quietTimer) {
       clearTimeout(state.quietTimer);
     }
