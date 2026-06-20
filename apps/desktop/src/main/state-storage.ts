@@ -26,6 +26,7 @@ import type {
   GlobalTerminalThemeId,
   GroupRecord,
   HostRecord,
+  HostStartupCommand,
   KnownHostRecord,
   PortForwardRuleRecord,
   SftpBrowserColumnWidths,
@@ -40,6 +41,7 @@ import {
   DEFAULT_SESSION_REPLAY_RETENTION_COUNT,
   DEFAULT_SFTP_BROWSER_COLUMN_WIDTHS,
   MAX_SESSION_REPLAY_RETENTION_COUNT,
+  MAX_HOST_STARTUP_COMMAND_LENGTH,
   MIN_SESSION_REPLAY_RETENTION_COUNT,
   normalizeSftpBrowserColumnWidths
 } from '@shared';
@@ -515,6 +517,22 @@ function normalizeStoredEncryptedValue(value: unknown): StoredEncryptedValue | n
   };
 }
 
+function normalizeStoredHostStartupCommand(value: unknown): HostStartupCommand | null {
+  if (!isObject(value)) {
+    return null;
+  }
+  if (value.type === 'command' && typeof value.command === 'string') {
+    return value.command.trim() && value.command.length <= MAX_HOST_STARTUP_COMMAND_LENGTH
+      ? { type: 'command', command: value.command }
+      : null;
+  }
+  if (value.type === 'snippet' && typeof value.snippetId === 'string') {
+    const snippetId = value.snippetId.trim();
+    return snippetId ? { type: 'snippet', snippetId } : null;
+  }
+  return null;
+}
+
 function normalizeHostRecord(value: unknown): HostRecord | null {
   if (!isObject(value) || typeof value.id !== 'string' || typeof value.label !== 'string') {
     return null;
@@ -538,6 +556,7 @@ function normalizeHostRecord(value: unknown): HostRecord | null {
       groupName: typeof value.groupName === 'string' ? value.groupName : null,
       tags,
       terminalThemeId: isTerminalThemeId(value.terminalThemeId) ? value.terminalThemeId : null,
+      startupCommand: normalizeStoredHostStartupCommand(value.startupCommand),
       awsProfileId: typeof value.awsProfileId === 'string' ? value.awsProfileId : null,
       awsProfileName: value.awsProfileName,
       awsRegion: value.awsRegion,
@@ -612,6 +631,7 @@ function normalizeHostRecord(value: unknown): HostRecord | null {
       groupName: typeof value.groupName === 'string' ? value.groupName : null,
       tags,
       terminalThemeId: isTerminalThemeId(value.terminalThemeId) ? value.terminalThemeId : null,
+      startupCommand: normalizeStoredHostStartupCommand(value.startupCommand),
       warpgateBaseUrl: value.warpgateBaseUrl,
       warpgateSshHost: value.warpgateSshHost,
       warpgateSshPort: value.warpgateSshPort,
@@ -697,6 +717,7 @@ function normalizeHostRecord(value: unknown): HostRecord | null {
     groupName: typeof value.groupName === 'string' ? value.groupName : null,
     tags,
     terminalThemeId: isTerminalThemeId(value.terminalThemeId) ? value.terminalThemeId : null,
+    startupCommand: normalizeStoredHostStartupCommand(value.startupCommand),
     hostname: value.hostname,
     port: value.port,
     username: value.username,

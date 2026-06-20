@@ -82,6 +82,38 @@ afterEach(() => {
 });
 
 describe('HostRepository', () => {
+  it('persists startup commands and clears deleted snippet references', async () => {
+    const { HostRepository } = await loadRepositories();
+    const hosts = new HostRepository();
+
+    const created = hosts.create('ssh-startup', {
+      kind: 'ssh',
+      label: 'Startup host',
+      hostname: 'startup.example.com',
+      port: 22,
+      username: 'ubuntu',
+      authType: 'password',
+      startupCommand: { type: 'command', command: 'cd /srv/app' },
+    });
+    expect(created).toMatchObject({
+      startupCommand: { type: 'command', command: 'cd /srv/app' },
+    });
+
+    hosts.update('ssh-startup', {
+      kind: 'ssh',
+      label: 'Startup host',
+      hostname: 'startup.example.com',
+      port: 22,
+      username: 'ubuntu',
+      authType: 'password',
+      startupCommand: { type: 'snippet', snippetId: 'snippet-1' },
+    });
+    const updated = hosts.clearStartupSnippetRef('snippet-1');
+
+    expect(updated).toHaveLength(1);
+    expect(hosts.getById('ssh-startup')).toMatchObject({ startupCommand: null });
+  });
+
   it('persists AWS SFTP metadata on create and update', async () => {
     const { HostRepository } = await loadRepositories();
     const hosts = new HostRepository();

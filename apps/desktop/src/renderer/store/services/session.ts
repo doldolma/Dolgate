@@ -116,6 +116,7 @@ export function createSessionServices(deps: SliceDeps) {
     rows: number,
     progress: TerminalConnectionProgress,
     existingSessionId?: string,
+    startupCommand?: string,
   ): string => {
     const sessionId = existingSessionId ?? createPendingSessionId();
     const existingTab = existingSessionId
@@ -181,6 +182,12 @@ export function createSessionServices(deps: SliceDeps) {
           ...state.sessionReturnTargets,
           [sessionId]: captureSessionReturnTarget(state),
         },
+        resolvedStartupCommandsBySessionId: startupCommand
+          ? {
+              ...state.resolvedStartupCommandsBySessionId,
+              [sessionId]: startupCommand,
+            }
+          : state.resolvedStartupCommandsBySessionId,
       };
     });
 
@@ -490,6 +497,7 @@ export function createSessionServices(deps: SliceDeps) {
             title: attempt.title,
             cols: attempt.latestCols,
             rows: attempt.latestRows,
+            startupCommand: state.resolvedStartupCommandsBySessionId[sessionId],
             secrets,
           });
       const latestAttempt = findPendingConnectionAttempt(get(), sessionId);
@@ -613,6 +621,7 @@ export function createSessionServices(deps: SliceDeps) {
     rows: number,
     secrets?: HostSecretInput,
     reuseSessionId?: string,
+    startupCommand?: string,
   ) => {
     const host = get().hosts.find((item) => item.id === hostId);
     if (!host) {
@@ -635,6 +644,7 @@ export function createSessionServices(deps: SliceDeps) {
       rows,
       initialProgress,
       reuseSessionId,
+      startupCommand,
     );
 
     try {

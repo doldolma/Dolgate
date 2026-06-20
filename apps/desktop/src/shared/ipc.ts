@@ -203,6 +203,7 @@ export interface DesktopConnectInput {
   rows: number;
   title?: string;
   command?: string;
+  startupCommand?: string;
   secrets?: HostSecretInput;
 }
 

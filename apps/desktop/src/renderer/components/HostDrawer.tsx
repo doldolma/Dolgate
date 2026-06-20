@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import type { HostRecord, SecretMetadataRecord } from '@shared';
+import type { HostRecord, SecretMetadataRecord, SnippetRecord } from '@shared';
 import { HostForm, type HostFormActionState, type HostFormHandle, type HostFormProps } from './HostForm';
 import { cn } from '../lib/cn';
 import { Button, CloseIcon, IconButton, SectionLabel } from '../ui';
@@ -12,6 +12,7 @@ interface HostDrawerProps {
   keychainEntries: SecretMetadataRecord[];
   groupOptions: Array<{ value: string | null; label: string }>;
   jumpHostOptions?: SearchableSelectOption[];
+  snippets?: SnippetRecord[];
   defaultGroupPath?: string | null;
   createKind?: 'ssh' | 'serial';
   desktopPlatform?: 'darwin' | 'win32' | 'linux' | 'unknown';
@@ -29,6 +30,7 @@ export function HostDrawer({
   keychainEntries,
   groupOptions,
   jumpHostOptions = [],
+  snippets = [],
   defaultGroupPath = null,
   createKind = 'ssh',
   desktopPlatform = 'unknown',
@@ -116,6 +118,7 @@ export function HostDrawer({
           keychainEntries={keychainEntries}
           groupOptions={groupOptions}
           jumpHostOptions={jumpHostOptions}
+          snippets={snippets}
           defaultGroupPath={defaultGroupPath}
           createKind={createKind}
           desktopPlatform={desktopPlatform}

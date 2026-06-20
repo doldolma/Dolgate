@@ -45,6 +45,7 @@ function createContext() {
     requireTrustedHostKeys: vi.fn(),
     requireConfiguredSshUsername: vi.fn(),
     resolveRuntimeSshSecrets: vi.fn(),
+    resolveJumpHostTarget: vi.fn().mockResolvedValue(undefined),
     ensureCertificateAuthReady: vi.fn(),
     pendingSessionSecrets: new Map(),
   } as any;
@@ -142,6 +143,75 @@ describe("registerSshIpcHandlers", () => {
     expect(ctx.coreManager.connect).not.toHaveBeenCalled();
   });
 
+  it("forwards startup commands for direct SSH sessions", async () => {
+    const ctx = createContext();
+    ctx.hosts.getById.mockReturnValue({
+      id: "host-1",
+      kind: "ssh",
+      label: "Prod",
+      hostname: "prod.example.com",
+      port: 22,
+      username: "ubuntu",
+      authType: "password",
+    });
+    ctx.requireTrustedHostKeys.mockReturnValue(["trusted"]);
+    ctx.requireConfiguredSshUsername.mockReturnValue("ubuntu");
+    ctx.resolveRuntimeSshSecrets.mockResolvedValue({
+      secrets: { password: "secret" },
+      shouldPersistHostSecret: false,
+    });
+    ctx.coreManager.connect.mockResolvedValue({ sessionId: "session-ssh" });
+    registerSshIpcHandlers(ctx);
+
+    const connectHandler = ipcHandlers.get(ipcChannels.ssh.connect);
+    await connectHandler?.(null, {
+      hostId: "host-1",
+      cols: 120,
+      rows: 32,
+      startupCommand: "cd /srv/app",
+    });
+
+    expect(ctx.coreManager.connect).toHaveBeenCalledWith(
+      expect.objectContaining({
+        transport: "ssh",
+        startupCommand: "cd /srv/app",
+      }),
+    );
+  });
+
+  it("forwards startup commands for Warpgate SSH sessions", async () => {
+    const ctx = createContext();
+    ctx.hosts.getById.mockReturnValue({
+      id: "warpgate-1",
+      kind: "warpgate-ssh",
+      label: "Warpgate Prod",
+      warpgateBaseUrl: "https://warpgate.example.com",
+      warpgateSshHost: "warpgate.example.com",
+      warpgateSshPort: 2222,
+      warpgateTargetId: "target-1",
+      warpgateTargetName: "prod",
+      warpgateUsername: "operator",
+    });
+    ctx.requireTrustedHostKeys.mockReturnValue(["trusted"]);
+    ctx.coreManager.connect.mockResolvedValue({ sessionId: "session-warpgate" });
+    registerSshIpcHandlers(ctx);
+
+    const connectHandler = ipcHandlers.get(ipcChannels.ssh.connect);
+    await connectHandler?.(null, {
+      hostId: "warpgate-1",
+      cols: 120,
+      rows: 32,
+      startupCommand: "tmux attach",
+    });
+
+    expect(ctx.coreManager.connect).toHaveBeenCalledWith(
+      expect.objectContaining({
+        transport: "warpgate",
+        startupCommand: "tmux attach",
+      }),
+    );
+  });
+
   it("uses the local AWS SSM session path when server proxy is disabled", async () => {
     const ctx = createContext();
     ctx.hosts.getById.mockReturnValue({
@@ -169,6 +239,7 @@ describe("registerSshIpcHandlers", () => {
         hostId: "aws-host-1",
         cols: 120,
         rows: 32,
+        startupCommand: "sudo -i",
       }),
     ).resolves.toEqual({ sessionId: "session-local-aws" });
 
@@ -179,6 +250,7 @@ describe("registerSshIpcHandlers", () => {
         instanceId: "i-123",
         env: { AWS_CONFIG_FILE: "/managed/config" },
         unsetEnv: ["AWS_PROFILE"],
+        startupCommand: "sudo -i",
       }),
     );
     expect(ctx.coreManager.connectAwsServerProxySession).not.toHaveBeenCalled();
@@ -234,6 +306,7 @@ describe("registerSshIpcHandlers", () => {
         cols: 140,
         rows: 40,
         title: "AWS Prod",
+        startupCommand: "sudo -i",
       }),
     ).resolves.toEqual({ sessionId: "session-server-proxy" });
 
@@ -252,6 +325,7 @@ describe("registerSshIpcHandlers", () => {
           AWS_ACCESS_KEY_ID: "AKIATEST",
         }),
         unsetEnv: ["AWS_PROFILE", "AWS_DEFAULT_PROFILE"],
+        startupCommand: "sudo -i",
       }),
     );
     expect(ctx.coreManager.connectAwsSession).not.toHaveBeenCalled();

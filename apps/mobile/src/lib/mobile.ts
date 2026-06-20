@@ -227,6 +227,7 @@ export function buildEmptySyncPayload(): SyncPayloadV2 {
     dnsOverrides: [],
     preferences: [],
     awsProfiles: [],
+    snippets: [],
   };
 }
 

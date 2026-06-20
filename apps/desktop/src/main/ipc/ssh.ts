@@ -55,6 +55,7 @@ async function connectAwsServerProxySessionWithAuthRetry(
     title: string;
     hostId: string;
     hostLabel: string;
+    startupCommand?: string;
   },
 ): Promise<{ sessionId: string }> {
   const envSpec = await ctx.awsService.buildServerProxySessionEnvSpec(
@@ -113,6 +114,7 @@ export function registerSshIpcHandlers(ctx: MainIpcContext): void {
           hostId: host.id,
           hostLabel: host.label,
           title,
+          startupCommand: input.startupCommand,
         };
         const connection = host.awsSsmServerProxyEnabled === true
           ? await connectAwsServerProxySessionWithAuthRetry(ctx, connectionInput)
@@ -148,6 +150,7 @@ export function registerSshIpcHandlers(ctx: MainIpcContext): void {
           cols: input.cols,
           rows: input.rows,
           command: input.command?.trim() || undefined,
+          startupCommand: input.startupCommand,
           hostId: host.id,
           hostLabel: host.label,
           title,
@@ -185,6 +188,7 @@ export function registerSshIpcHandlers(ctx: MainIpcContext): void {
         cols: input.cols,
         rows: input.rows,
         command: input.command?.trim() || undefined,
+        startupCommand: input.startupCommand,
         hostId: sshHost.id,
         hostLabel: sshHost.label,
         title,

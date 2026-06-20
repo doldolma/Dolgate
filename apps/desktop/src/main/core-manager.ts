@@ -63,6 +63,7 @@ import type {
   TransferJobEvent,
   TransferStartInput,
 } from "@shared";
+import { MAX_HOST_STARTUP_COMMAND_LENGTH } from "@shared";
 import { ipcChannels } from "../common/ipc-channels";
 import {
   CoreFrameParser,
@@ -215,6 +216,39 @@ const SHUTDOWN_SFTP_DISCONNECT_REASON =
   "앱 종료로 SFTP 연결이 정리되었습니다.";
 const SHUTDOWN_CONTAINERS_DISCONNECT_REASON =
   "앱 종료로 Containers 연결이 정리되었습니다.";
+// connected 직후엔 셸이 아직 프롬프트(PS1)를 안 찍었을 수 있다. 이때 startup command를
+// 보내면 커널 tty(cooked, echo on)와 readline(raw)이 입력을 두 번 echo 한다.
+// 그래서 "출력이 잠잠해졌고 + 꼬리가 프롬프트처럼 보일 때"에만 보낸다.
+// (rc 파일 sourcing처럼 출력이 잠깐 멈추는 구간에 속으면 안 되므로 단순 디바운스로는 부족하다.)
+const STARTUP_COMMAND_FLUSH_QUIET_MS = 180;
+// 프롬프트를 끝내 못 알아봐도(특이한 PS1 등) 이 시간이 지나면 보낸다.
+// 이 시점이면 보통 프롬프트가 떠 있어 echo는 한 번만 난다.
+const STARTUP_COMMAND_FLUSH_MAX_WAIT_MS = 2500;
+// 프롬프트 판별을 위해 들여다보는 최근 출력 길이(바이트가 아니라 문자 기준).
+const STARTUP_COMMAND_TAIL_MAX_LENGTH = 256;
+
+interface StartupCommandFlushState {
+  // 프롬프트 판별을 위해 모아 둔 최근 출력 꼬리(제어문자 포함, 길이 제한).
+  tail: string;
+  // 출력이 멈추면 발사되는 디바운스 타이머.
+  quietTimer: ReturnType<typeof setTimeout> | null;
+  // 프롬프트를 못 알아봐도 결국 보내기 위한 상한 타이머.
+  maxWaitTimer: ReturnType<typeof setTimeout>;
+}
+
+// 출력 꼬리가 대화형 셸 프롬프트로 끝나는지 추정한다(완벽할 수는 없고 보수적으로 본다).
+function looksLikeShellPrompt(tail: string): boolean {
+  const stripped = tail
+    // OSC(창 제목 설정 등) 제거: ESC ] ... (BEL | ESC \\)
+    .replace(/\x1b\][\s\S]*?(?:\x07|\x1b\\)/g, "")
+    // CSI(색상 등) 제거: ESC [ ... final
+    .replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, "")
+    // 남은 단독 ESC 시퀀스 제거
+    .replace(/\x1b[@-Z\\-_]/g, "")
+    .replace(/[ \t\r]+$/g, "");
+  // 흔한 프롬프트 종결자: $ # % > 그리고 oh-my-zsh/starship/powerline의 ❯ ➜
+  return /[$#%>\u276f\u279c]$/.test(stripped);
+}
 
 type PathDelimiter = ":" | ";";
 
@@ -867,6 +901,12 @@ export class CoreManager {
     PendingAwsAutocompleteResponse
   >();
   private readonly sessionTransportById = new Map<string, SessionTransport>();
+  private readonly pendingStartupCommandsBySessionId = new Map<string, string>();
+  // connected 후 프롬프트가 떴다고 판단되면 startup command를 flush 하기 위한 상태.
+  private readonly startupCommandFlushStateBySessionId = new Map<
+    string,
+    StartupCommandFlushState
+  >();
   private readonly sessionLifecycleById = new Map<
     string,
     SessionLifecycleState
@@ -1320,11 +1360,16 @@ export class CoreManager {
       hostId: string;
       hostLabel: string;
       transport?: "ssh" | "warpgate" | "aws-ssm";
+      startupCommand?: string;
     },
   ): Promise<{ sessionId: string }> {
     await this.start();
     // 세션 ID는 Electron 쪽에서 먼저 발급해서 탭과 SSH 세션을 동일한 식별자로 묶는다.
     const sessionId = randomUUID();
+    const startupCommand = this.normalizeStartupCommand(payload.startupCommand);
+    if (startupCommand) {
+      this.pendingStartupCommandsBySessionId.set(sessionId, startupCommand);
+    }
     this.sessionTransportById.set(sessionId, payload.transport ?? "ssh");
     this.sessionLifecycleById.set(sessionId, {
       hostId: payload.hostId,
@@ -1353,11 +1398,12 @@ export class CoreManager {
       status: "connecting",
       lastEventAt: new Date().toISOString(),
     });
+    const { startupCommand: _startupCommand, ...corePayload } = payload;
     this.sendControl<ResolvedCoreConnectPayload>({
       id: randomUUID(),
       type: "connect",
       sessionId,
-      payload,
+      payload: corePayload,
     });
     return { sessionId };
   }
@@ -1929,9 +1975,14 @@ export class CoreManager {
     hostLabel: string;
     env?: Record<string, string>;
     unsetEnv?: string[];
+    startupCommand?: string;
   }): Promise<{ sessionId: string }> {
     await this.start();
     const sessionId = randomUUID();
+    const startupCommand = this.normalizeStartupCommand(payload.startupCommand);
+    if (startupCommand) {
+      this.pendingStartupCommandsBySessionId.set(sessionId, startupCommand);
+    }
     this.sessionTransportById.set(sessionId, "aws-ssm");
     this.sessionLifecycleById.set(sessionId, {
       hostId: payload.hostId,
@@ -1989,8 +2040,13 @@ export class CoreManager {
     hostLabel: string;
     env?: Record<string, string>;
     unsetEnv?: string[];
+    startupCommand?: string;
   }): Promise<{ sessionId: string }> {
     const sessionId = randomUUID();
+    const startupCommand = this.normalizeStartupCommand(payload.startupCommand);
+    if (startupCommand) {
+      this.pendingStartupCommandsBySessionId.set(sessionId, startupCommand);
+    }
     const wsUrl = this.buildAwsServerProxyUrl(payload.serverUrl, payload.accessToken);
     const socket = new WebSocket(wsUrl);
 
@@ -2001,6 +2057,7 @@ export class CoreManager {
           return;
         }
         settled = true;
+        this.clearPendingStartupCommand(sessionId);
         try {
           socket.close();
         } catch {
@@ -2066,6 +2123,7 @@ export class CoreManager {
         if (!settled) {
           settled = true;
           clearTimeout(openTimeout);
+          this.clearPendingStartupCommand(sessionId);
           reject(new Error("서버 AWS SSM 프록시 연결에 실패했습니다."));
           return;
         }
@@ -2084,6 +2142,7 @@ export class CoreManager {
         if (!settled) {
           settled = true;
           clearTimeout(openTimeout);
+          this.clearPendingStartupCommand(sessionId);
           reject(new Error("서버 AWS SSM 프록시 연결이 종료되었습니다."));
           return;
         }
@@ -3440,6 +3499,7 @@ export class CoreManager {
       }
       if (existing) {
         if (event.type === "closed") {
+          this.clearPendingStartupCommand(event.sessionId);
           this.sessionTransportById.delete(event.sessionId);
           this.tabs.delete(event.sessionId);
           this.desiredResizeBySession.delete(event.sessionId);
@@ -3492,6 +3552,7 @@ export class CoreManager {
         });
         if (event.type === "connected") {
           this.flushResizeIfReady(event.sessionId);
+          this.armStartupCommandFlush(event.sessionId);
           if (!sessionLifecycle) {
             this.log({
               level: "info",
@@ -3516,6 +3577,7 @@ export class CoreManager {
           }
         }
         if (event.type === "error") {
+          this.clearPendingStartupCommand(event.sessionId);
           if (!sessionLifecycle) {
             this.log({
               level: "error",
@@ -3567,6 +3629,90 @@ export class CoreManager {
     if (event.type === "status" || event.type === "error") {
       this.broadcastTerminalEvent(event);
     }
+  }
+
+  private normalizeStartupCommand(value?: string): string | null {
+    if (typeof value !== "string" || value.length > MAX_HOST_STARTUP_COMMAND_LENGTH) {
+      return null;
+    }
+    const normalized = value.replace(/\r\n?/g, "\n").replace(/\n+$/g, "");
+    return normalized.trim() ? normalized : null;
+  }
+
+  // connected 시점엔 셸이 아직 프롬프트를 안 찍었을 수 있어 바로 보내지 않는다.
+  // 프롬프트가 떴다고 판단될 때까지 기다리되, 끝내 못 알아봐도 상한 시간엔 보낸다.
+  private armStartupCommandFlush(sessionId: string): void {
+    if (!this.pendingStartupCommandsBySessionId.has(sessionId)) {
+      return;
+    }
+    // connected가 중복으로 와도 한 번만 무장한다.
+    if (this.startupCommandFlushStateBySessionId.has(sessionId)) {
+      return;
+    }
+    this.startupCommandFlushStateBySessionId.set(sessionId, {
+      tail: "",
+      quietTimer: null,
+      maxWaitTimer: setTimeout(() => {
+        this.flushStartupCommand(sessionId);
+      }, STARTUP_COMMAND_FLUSH_MAX_WAIT_MS),
+    });
+  }
+
+  // 무장된 세션의 출력을 모아, 출력이 잠시 멈췄을 때 꼬리가 프롬프트처럼 보이면 전송한다.
+  // rc 파일 sourcing 같은 중간 공백에는 프롬프트가 아니므로 발사하지 않고 더 기다린다.
+  private noteOutputForStartupCommand(
+    sessionId: string,
+    payload: Uint8Array,
+  ): void {
+    const state = this.startupCommandFlushStateBySessionId.get(sessionId);
+    if (!state) {
+      return;
+    }
+    state.tail = (state.tail + Buffer.from(payload).toString("utf8")).slice(
+      -STARTUP_COMMAND_TAIL_MAX_LENGTH,
+    );
+    if (state.quietTimer) {
+      clearTimeout(state.quietTimer);
+    }
+    state.quietTimer = setTimeout(() => {
+      state.quietTimer = null;
+      if (looksLikeShellPrompt(state.tail)) {
+        this.flushStartupCommand(sessionId);
+      }
+    }, STARTUP_COMMAND_FLUSH_QUIET_MS);
+  }
+
+  private flushStartupCommand(sessionId: string): void {
+    const command = this.pendingStartupCommandsBySessionId.get(sessionId);
+    this.clearPendingStartupCommand(sessionId);
+    if (!command) {
+      return;
+    }
+    try {
+      this.write(sessionId, `${command}\r`);
+    } catch {
+      this.log({
+        level: "warn",
+        category: "session",
+        message: "Startup command를 터미널에 전송하지 못했습니다.",
+        metadata: {
+          sessionId,
+        },
+      });
+    }
+  }
+
+  // startup command 관련 보류 상태(명령/타이머)를 한 번에 정리한다.
+  private clearPendingStartupCommand(sessionId: string): void {
+    const state = this.startupCommandFlushStateBySessionId.get(sessionId);
+    if (state) {
+      if (state.quietTimer) {
+        clearTimeout(state.quietTimer);
+      }
+      clearTimeout(state.maxWaitTimer);
+      this.startupCommandFlushStateBySessionId.delete(sessionId);
+    }
+    this.pendingStartupCommandsBySessionId.delete(sessionId);
   }
 
   private requestResponse<TPayload extends Record<string, unknown>>(
@@ -3678,6 +3824,14 @@ export class CoreManager {
     this.desiredResizeBySession.clear();
     this.sentResizeBySession.clear();
     this.sessionTransportById.clear();
+    for (const state of this.startupCommandFlushStateBySessionId.values()) {
+      if (state.quietTimer) {
+        clearTimeout(state.quietTimer);
+      }
+      clearTimeout(state.maxWaitTimer);
+    }
+    this.startupCommandFlushStateBySessionId.clear();
+    this.pendingStartupCommandsBySessionId.clear();
     this.sessionLifecycleById.clear();
   }
 
@@ -3773,6 +3927,8 @@ export class CoreManager {
     if (metadata.type !== "data") {
       return;
     }
+    // 출력이 들어올 때마다 프롬프트가 떴는지 보고 그때 startup command를 보낸다.
+    this.noteOutputForStartupCommand(metadata.sessionId, payload);
     // 터미널 데이터는 별도 채널로 보내 renderer store를 거치지 않고 xterm으로 직결한다.
     for (const window of this.windows) {
       if (!window.isDestroyed()) {

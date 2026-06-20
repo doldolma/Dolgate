@@ -237,6 +237,15 @@ export function createNetworkSlice(deps: SliceDeps): NetworkSlice {
             await api.snippets.remove(snippetId);
             set((state) => ({
               snippets: state.snippets.filter((entry) => entry.id !== snippetId),
+              hosts: state.hosts.map((host) =>
+                (host.kind === "ssh" ||
+                  host.kind === "aws-ec2" ||
+                  host.kind === "warpgate-ssh") &&
+                host.startupCommand?.type === "snippet" &&
+                host.startupCommand.snippetId === snippetId
+                  ? { ...host, startupCommand: null }
+                  : host,
+              ),
             }));
           },
     removePortForward: async (ruleId) => {

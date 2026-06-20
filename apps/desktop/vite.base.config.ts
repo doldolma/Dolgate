@@ -6,6 +6,9 @@ const reactEntry = fileURLToPath(new URL('./node_modules/react', import.meta.url
 const reactDomEntry = fileURLToPath(new URL('./node_modules/react-dom', import.meta.url));
 
 export default defineConfig({
+  optimizeDeps: {
+    exclude: ['@dolssh/shared-core']
+  },
   resolve: {
     dedupe: ['react', 'react-dom'],
     alias: {

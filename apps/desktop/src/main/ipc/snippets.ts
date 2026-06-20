@@ -26,6 +26,7 @@ export function registerSnippetsIpcHandlers(ctx: MainIpcContext): void {
 
   ipcMain.handle(ipcChannels.snippets.remove, async (_event, id: string) => {
     ctx.snippets.remove(id);
+    ctx.hosts.clearStartupSnippetRef(id);
     ctx.syncOutbox.upsertDeletion("snippets", id);
     ctx.queueSync();
   });

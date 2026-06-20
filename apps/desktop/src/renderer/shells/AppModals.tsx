@@ -3,6 +3,7 @@ import { AwsSftpConfigRetryDialog } from '../components/AwsSftpConfigRetryDialog
 import { CredentialRetryDialog } from '../components/CredentialRetryDialog';
 import { KnownHostPromptDialog } from '../components/KnownHostPromptDialog';
 import { MissingUsernameDialog } from '../components/MissingUsernameDialog';
+import { SnippetVariablesDialog } from '../components/terminal-workspace/SnippetVariablesDialog';
 import {
   SecretEditDialog,
   type SecretEditDialogRequest,
@@ -107,6 +108,16 @@ export function AppModals({
         }
         onClose={modalViewModel.dismissPendingMissingUsernamePrompt}
         onSubmit={modalViewModel.submitMissingUsernamePrompt}
+      />
+
+      <SnippetVariablesDialog
+        pending={modalViewModel.pendingStartupCommandPrompt}
+        title="Startup Command 변수 입력"
+        confirmLabel="연결"
+        onConfirm={(values) => {
+          void modalViewModel.confirmStartupCommandPrompt(values);
+        }}
+        onCancel={modalViewModel.cancelStartupCommandPrompt}
       />
 
       <SecretEditDialog

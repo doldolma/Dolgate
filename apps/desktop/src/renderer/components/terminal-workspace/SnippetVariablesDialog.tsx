@@ -12,12 +12,16 @@ interface SnippetVariablesDialogProps {
   pending: PendingSnippetInsertion | null;
   onConfirm: (values: Record<string, string>) => void;
   onCancel: () => void;
+  title?: string;
+  confirmLabel?: string;
 }
 
 export function SnippetVariablesDialog({
   pending,
   onConfirm,
   onCancel,
+  title = 'Snippet 변수 입력',
+  confirmLabel = '삽입',
 }: SnippetVariablesDialogProps) {
   const [values, setValues] = useState<Record<string, string>>({});
   const firstInputRef = useRef<HTMLInputElement | null>(null);
@@ -47,7 +51,7 @@ export function SnippetVariablesDialog({
     <DialogBackdrop dismissOnBackdrop={false}>
       <ModalShell>
         <ModalHeader>
-          <h3 className="text-[1.05rem] font-semibold text-[var(--text)]">Snippet 변수 입력</h3>
+          <h3 className="text-[1.05rem] font-semibold text-[var(--text)]">{title}</h3>
         </ModalHeader>
         <ModalBody>
           <pre className="mb-[0.9rem] overflow-x-auto whitespace-pre-wrap break-words rounded-[10px] bg-[color-mix(in_srgb,var(--app-bg)_60%,transparent_40%)] px-[0.8rem] py-[0.6rem] font-mono text-[0.82rem] text-[var(--text-soft)]">
@@ -84,7 +88,7 @@ export function SnippetVariablesDialog({
             취소
           </Button>
           <Button variant="primary" onClick={submit}>
-            삽입
+            {confirmLabel}
           </Button>
         </ModalFooter>
       </ModalShell>

@@ -1,6 +1,6 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { AwsEc2HostRecord, SecretMetadataRecord, SshHostRecord } from '@shared';
+import type { AwsEc2HostRecord, SecretMetadataRecord, SnippetRecord, SshHostRecord } from '@shared';
 import { HostForm, getJumpHostCandidates } from './HostForm';
 import { listAwsProfiles } from '../services/desktop/imports';
 import { useHostFormController } from '../controllers/useHostFormController';
@@ -22,6 +22,16 @@ vi.mock('../controllers/useHostFormController', () => ({
 
 const groupOptions = [{ value: null, label: 'Ungrouped' }];
 const keychainEntries: SecretMetadataRecord[] = [];
+const snippets: SnippetRecord[] = [
+  {
+    id: 'snippet-1',
+    label: 'Open app',
+    keyword: 'app',
+    command: 'cd /srv/app',
+    createdAt: '2026-06-20T00:00:00.000Z',
+    updatedAt: '2026-06-20T00:00:00.000Z',
+  },
+];
 const reusableKeychainEntries: SecretMetadataRecord[] = [
   {
     secretRef: 'secret-password',
@@ -163,6 +173,35 @@ describe('HostForm', () => {
         saveInFlight: false,
         saveStatusText: 'Saved',
       }),
+    );
+  });
+
+  it('configures a direct startup command for an SSH host', async () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    render(
+      <HostForm
+        host={createHost()}
+        snippets={snippets}
+        keychainEntries={keychainEntries}
+        groupOptions={groupOptions}
+        onSubmit={onSubmit}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Command' }));
+    fireEvent.change(screen.getByLabelText('Startup command'), {
+      target: { value: 'cd /srv/app && clear' },
+    });
+
+    await waitFor(() => expect(onSubmit).toHaveBeenCalled(), { timeout: 1200 });
+    expect(onSubmit).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        startupCommand: {
+          type: 'command',
+          command: 'cd /srv/app && clear',
+        },
+      }),
+      undefined,
     );
   });
 

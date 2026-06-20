@@ -460,6 +460,7 @@ export function HomeShell({
         keychainEntries={settingsViewModel.keychainEntries}
         groupOptions={groupOptions}
         jumpHostOptions={jumpHostOptions}
+        snippets={homeViewModel.snippets}
         defaultGroupPath={
           homeViewModel.hostDrawer.mode === 'create'
             ? homeViewModel.hostDrawer.defaultGroupPath

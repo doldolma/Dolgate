@@ -7,7 +7,11 @@ import type {
   SessionLifecycleLogMetadata,
 } from "@shared";
 import { ipcChannels } from "../common/ipc-channels";
-import { CoreFrameParser, encodeControlFrame } from "./core-framing";
+import {
+  CoreFrameParser,
+  encodeControlFrame,
+  encodeStreamFrame,
+} from "./core-framing";
 
 const { spawnMock } = vi.hoisted(() => ({
   spawnMock: vi.fn(),
@@ -109,6 +113,12 @@ function createFakeChildProcess() {
     emitControl(event: CoreEvent<Record<string, unknown>>) {
       child.stdout.emit("data", encodeControlFrame(event));
     },
+    emitData(sessionId: string, text: string) {
+      child.stdout.emit(
+        "data",
+        encodeStreamFrame({ type: "data", sessionId }, Buffer.from(text, "utf8")),
+      );
+    },
   };
 }
 
@@ -167,6 +177,7 @@ describe("CoreManager AWS SSM sessions", () => {
 
   afterEach(() => {
     vi.unstubAllGlobals();
+    vi.useRealTimers();
   });
 
   it("prepends standard Unix tool directories for packaged ssh-core child envs", () => {
@@ -312,6 +323,149 @@ describe("CoreManager AWS SSM sessions", () => {
     );
     expect(metadata.connectionKind).toBe("aws-ssm");
     expect(metadata.status).toBe("connected");
+  });
+
+  it("sends an AWS startup command once the prompt appears, not during the MOTD gap", async () => {
+    const fakeProcess = createFakeChildProcess();
+    spawnMock.mockReturnValue(fakeProcess.child);
+    const manager = new CoreManager();
+    const events: string[] = [];
+    manager.setTerminalEventHandler((event) => {
+      events.push(event.type);
+    });
+
+    const { sessionId } = await manager.connectAwsSession({
+      profileName: "default",
+      region: "ap-northeast-2",
+      instanceId: "i-startup",
+      cols: 120,
+      rows: 32,
+      title: "AWS Startup",
+      hostId: "host-startup",
+      hostLabel: "AWS Startup",
+      startupCommand: "cd /srv/app\r\n",
+    });
+
+    vi.useFakeTimers();
+
+    fakeProcess.emitControl({
+      type: "connected",
+      sessionId,
+      payload: { status: "connected" },
+    });
+    fakeProcess.emitControl({
+      type: "connected",
+      sessionId,
+      payload: { status: "connected" },
+    });
+
+    // connected만으로는 셸 프롬프트가 아직 안 그려졌을 수 있어 보내지 않는다.
+    expect(fakeProcess.writes).toHaveLength(1);
+
+    // MOTD/Last login만 오고 출력이 멈춰도(=rc sourcing 공백) 프롬프트가 아니므로 보내지 않는다.
+    fakeProcess.emitData(
+      sessionId,
+      "Welcome to Ubuntu\r\nLast login: Sat from 192.168.100.4\r\n",
+    );
+    vi.advanceTimersByTime(300);
+    expect(fakeProcess.writes).toHaveLength(1);
+
+    // 진짜 프롬프트가 뜬 뒤 출력이 멈추면 그때 정확히 한 번만 보낸다.
+    fakeProcess.emitData(sessionId, "gridwiz@lime-dev:~$ ");
+    expect(fakeProcess.writes).toHaveLength(1);
+    vi.advanceTimersByTime(300);
+    expect(fakeProcess.writes).toHaveLength(2);
+
+    const frame = decodeSingleFrame(fakeProcess.writes[1]!);
+    expect(frame.kind).toBe("stream");
+    if (frame.kind === "stream") {
+      expect(frame.metadata).toMatchObject({ type: "write", sessionId });
+      expect(Buffer.from(frame.payload).toString("utf8")).toBe("cd /srv/app\r");
+    }
+    expect(events).toEqual(["connected", "connected"]);
+  });
+
+  it("sends an AWS startup command after the max-wait even if no prompt is recognized", async () => {
+    const fakeProcess = createFakeChildProcess();
+    spawnMock.mockReturnValue(fakeProcess.child);
+    const manager = new CoreManager();
+
+    const { sessionId } = await manager.connectAwsSession({
+      profileName: "default",
+      region: "ap-northeast-2",
+      instanceId: "i-startup-exotic",
+      cols: 120,
+      rows: 32,
+      title: "AWS Startup Exotic",
+      hostId: "host-startup-exotic",
+      hostLabel: "AWS Startup Exotic",
+      startupCommand: "cd /srv/app",
+    });
+
+    vi.useFakeTimers();
+
+    fakeProcess.emitControl({
+      type: "connected",
+      sessionId,
+      payload: { status: "connected" },
+    });
+
+    // 프롬프트로 인식 안 되는 특이한 출력만 와도(quiet는 지나도) 발사하지 않는다.
+    fakeProcess.emitData(sessionId, "exotic-prompt ");
+    vi.advanceTimersByTime(300);
+    expect(fakeProcess.writes).toHaveLength(1);
+
+    // 다만 상한 시간(maxWait)이 지나면 안전망으로 한 번 보낸다.
+    vi.advanceTimersByTime(2500);
+    expect(fakeProcess.writes).toHaveLength(2);
+    const frame = decodeSingleFrame(fakeProcess.writes[1]!);
+    if (frame.kind === "stream") {
+      expect(Buffer.from(frame.payload).toString("utf8")).toBe("cd /srv/app\r");
+    }
+  });
+
+  it("sends a server-proxy startup command once the prompt appears", async () => {
+    vi.stubGlobal("WebSocket", FakeWebSocket);
+    const manager = new CoreManager();
+    const connectPromise = manager.connectAwsServerProxySession({
+      serverUrl: "https://sync.example.com",
+      accessToken: "access-token",
+      profileName: "managed-prod",
+      region: "ap-southeast-2",
+      instanceId: "i-startup",
+      cols: 120,
+      rows: 32,
+      title: "AWS Proxy Startup",
+      hostId: "host-proxy-startup",
+      hostLabel: "AWS Proxy Startup",
+      startupCommand: "sudo -i",
+    });
+    const socket = FakeWebSocket.instances[0]!;
+    socket.open();
+    await connectPromise;
+
+    vi.useFakeTimers();
+
+    socket.receive({ type: "ready" });
+    socket.receive({ type: "ready" });
+
+    // ready(=connected)만으로는 보내지 않고 첫 출력을 기다린다.
+    expect(socket.sent).toHaveLength(1);
+
+    socket.receive({
+      type: "output",
+      dataBase64: Buffer.from("gridwiz@lime-dev:~$ ", "utf8").toString("base64"),
+    });
+    expect(socket.sent).toHaveLength(1);
+
+    vi.advanceTimersByTime(300);
+
+    expect(socket.sent.slice(1).map((value) => JSON.parse(value))).toEqual([
+      {
+        type: "input",
+        dataBase64: Buffer.from("sudo -i\r", "utf8").toString("base64"),
+      },
+    ]);
   });
 
   it("routes AWS server proxy sessions through websocket IO and terminal events", async () => {

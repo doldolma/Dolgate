@@ -381,6 +381,16 @@ export interface PendingMissingUsernamePrompt {
   ruleId?: string;
 }
 
+export interface PendingStartupCommandPrompt {
+  hostId: string;
+  cols: number;
+  rows: number;
+  secrets?: HostSecretInput;
+  snippetId: string;
+  command: string;
+  variables: Array<{ name: string; defaultValue: string }>;
+}
+
 interface PendingInteractiveAuthBase {
   sessionId: string;
   challengeId: string;
@@ -487,8 +497,10 @@ interface AppStateParts {
   activeCredentialRetryAttempt: PendingCredentialRetryAttempt | null;
   pendingAwsSftpConfigRetry: PendingAwsSftpConfigRetry | null;
   pendingMissingUsernamePrompt: PendingMissingUsernamePrompt | null;
+  pendingStartupCommandPrompt: PendingStartupCommandPrompt | null;
   pendingInteractiveAuth: PendingInteractiveAuth | null;
   pendingConnectionAttempts: PendingConnectionAttempt[];
+  resolvedStartupCommandsBySessionId: Record<string, string>;
   sessionReturnTargets: Record<string, SessionReturnTarget>;
   setSearchQuery: (value: string) => void;
   setSavedCredentialsSearchQuery: (value: string) => void;
@@ -675,6 +687,8 @@ interface AppStateParts {
   }) => Promise<void>;
   dismissPendingMissingUsernamePrompt: () => void;
   submitMissingUsernamePrompt: (input: { username: string }) => Promise<void>;
+  confirmStartupCommandPrompt: (values: Record<string, string>) => Promise<void>;
+  cancelStartupCommandPrompt: () => void;
   respondInteractiveAuth: (
     challengeId: string,
     responses: string[],
@@ -821,8 +835,10 @@ export type SessionSlice = Pick<
   | "pendingCredentialRetry"
   | "activeCredentialRetryAttempt"
   | "pendingMissingUsernamePrompt"
+  | "pendingStartupCommandPrompt"
   | "pendingInteractiveAuth"
   | "pendingConnectionAttempts"
+  | "resolvedStartupCommandsBySessionId"
   | "sessionReturnTargets"
   | "openLocalTerminal"
   | "connectHost"
@@ -844,6 +860,8 @@ export type SessionSlice = Pick<
   | "submitCredentialRetry"
   | "dismissPendingMissingUsernamePrompt"
   | "submitMissingUsernamePrompt"
+  | "confirmStartupCommandPrompt"
+  | "cancelStartupCommandPrompt"
   | "respondInteractiveAuth"
   | "reopenInteractiveAuthUrl"
   | "clearPendingInteractiveAuth"

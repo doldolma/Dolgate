@@ -171,7 +171,10 @@ export function useTerminalSessionViewController({
       host?.kind !== 'serial' &&
       tab?.shellKind !== 'aws-ecs-exec',
     connected: tab?.status === 'connected',
-    lazyPrepare: host?.kind === 'aws-ec2',
+    lazyPrepare:
+      host?.kind === 'aws-ec2' ||
+      ((host?.kind === 'ssh' || host?.kind === 'warpgate-ssh') &&
+        host.startupCommand != null),
     sendInput: sendAutocompleteInput,
     snippets,
   });

@@ -144,6 +144,7 @@ import { createContainersServices } from "../services/containers";
 import { createSessionServices } from "../services/session";
 import { createSftpServices } from "../services/sftp";
 import { createTrustAuthServices } from "../services/trust-auth";
+import { parseSnippetVariables, resolveSnippetCommand } from "../../lib/snippet";
 
 export function createSessionSlice(deps: SliceDeps): SessionSlice {
   const { api, set, get } = deps;
@@ -182,8 +183,10 @@ export function createSessionSlice(deps: SliceDeps): SessionSlice {
     pendingCredentialRetry: null,
     activeCredentialRetryAttempt: null,
     pendingMissingUsernamePrompt: null,
+    pendingStartupCommandPrompt: null,
     pendingInteractiveAuth: null,
     pendingConnectionAttempts: [],
+    resolvedStartupCommandsBySessionId: {},
     sessionReturnTargets: {},
     openLocalTerminal: async (cols, rows) => {
             await startLocalTerminalFlow(set, get, cols, rows);
@@ -238,7 +241,49 @@ export function createSessionSlice(deps: SliceDeps): SessionSlice {
               );
               return;
             }
-            await startSessionConnectionFlow(set, get, hostId, cols, rows, secrets);
+            let startupCommand: string | undefined;
+            if (
+              host.kind === "ssh" ||
+              host.kind === "aws-ec2" ||
+              host.kind === "warpgate-ssh"
+            ) {
+              const configured = host.startupCommand;
+              if (configured?.type === "command") {
+                startupCommand = configured.command;
+              } else if (configured?.type === "snippet") {
+                const snippet = get().snippets.find(
+                  (entry) => entry.id === configured.snippetId,
+                );
+                if (snippet) {
+                  const variables = parseSnippetVariables(snippet.command);
+                  if (variables.length > 0) {
+                    set({
+                      pendingStartupCommandPrompt: {
+                        hostId,
+                        cols,
+                        rows,
+                        secrets,
+                        snippetId: snippet.id,
+                        command: snippet.command,
+                        variables,
+                      },
+                    });
+                    return;
+                  }
+                  startupCommand = snippet.command;
+                }
+              }
+            }
+            await startSessionConnectionFlow(
+              set,
+              get,
+              hostId,
+              cols,
+              rows,
+              secrets,
+              undefined,
+              startupCommand,
+            );
           },
     retrySessionConnection: async (sessionId, secrets) => {
             const currentTab = get().tabs.find(
@@ -1138,6 +1183,26 @@ export function createSessionSlice(deps: SliceDeps): SessionSlice {
             if (pending.source === "portForward" && pending.ruleId) {
               await get().startPortForward(pending.ruleId);
             }
+          },
+    confirmStartupCommandPrompt: async (values) => {
+            const pending = get().pendingStartupCommandPrompt;
+            if (!pending) {
+              return;
+            }
+            set({ pendingStartupCommandPrompt: null });
+            await startSessionConnectionFlow(
+              set,
+              get,
+              pending.hostId,
+              pending.cols,
+              pending.rows,
+              pending.secrets,
+              undefined,
+              resolveSnippetCommand(pending.command, values),
+            );
+          },
+    cancelStartupCommandPrompt: () => {
+            set({ pendingStartupCommandPrompt: null });
           },
     respondInteractiveAuth: async (challengeId, responses) => {
             const pending = get().pendingInteractiveAuth;

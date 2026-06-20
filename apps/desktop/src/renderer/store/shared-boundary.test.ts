@@ -7,6 +7,7 @@ const storeDir = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
 );
 const sharedDir = path.resolve(storeDir, "..", "..", "shared");
+const desktopDir = path.resolve(sharedDir, "..", "..");
 
 describe("store shared boundary", () => {
   it("keeps slices and service factories free of legacy shared imports", () => {
@@ -73,5 +74,14 @@ describe("store shared boundary", () => {
 
   it("keeps desktop shared as a facade over shared-core plus IPC types", () => {
     expect(fs.readdirSync(sharedDir).sort()).toEqual(["index.ts", "ipc.ts"]);
+  });
+
+  it("loads shared-core source directly instead of a stale Vite dependency cache", () => {
+    const viteConfig = fs.readFileSync(
+      path.join(desktopDir, "vite.base.config.ts"),
+      "utf8",
+    );
+
+    expect(viteConfig).toContain("exclude: ['@dolssh/shared-core']");
   });
 });

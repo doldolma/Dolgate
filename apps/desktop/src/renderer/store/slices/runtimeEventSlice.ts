@@ -1028,6 +1028,14 @@ export function createRuntimeEventSlice(deps: SliceDeps): RuntimeEventSlice {
     
               return {
                 tabs,
+                resolvedStartupCommandsBySessionId:
+                  event.type === "connected"
+                    ? Object.fromEntries(
+                        Object.entries(state.resolvedStartupCommandsBySessionId).filter(
+                          ([id]) => id !== sessionId,
+                        ),
+                      )
+                    : state.resolvedStartupCommandsBySessionId,
                 pendingInteractiveAuth:
                   event.type === "connected" || event.type === "error"
                     ? isPendingSessionInteractiveAuth(state.pendingInteractiveAuth) &&

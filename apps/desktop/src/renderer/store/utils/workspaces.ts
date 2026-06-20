@@ -489,6 +489,14 @@ export function replaceSessionReferencesInState(
     delete nextSessionReturnTargets[previousSessionId];
     nextSessionReturnTargets[nextSessionId] = existingSessionReturnTarget;
   }
+  const nextResolvedStartupCommands = {
+    ...state.resolvedStartupCommandsBySessionId,
+  };
+  const resolvedStartupCommand = nextResolvedStartupCommands[previousSessionId];
+  delete nextResolvedStartupCommands[previousSessionId];
+  if (resolvedStartupCommand !== undefined) {
+    nextResolvedStartupCommands[nextSessionId] = resolvedStartupCommand;
+  }
 
   return {
     tabs: state.tabs.map((tab) => {
@@ -553,6 +561,7 @@ export function replaceSessionReferencesInState(
           }
         : state.pendingInteractiveAuth,
     sessionReturnTargets: nextSessionReturnTargets,
+    resolvedStartupCommandsBySessionId: nextResolvedStartupCommands,
   };
 }
 
@@ -573,12 +582,16 @@ export function removeSessionFromState(
   let nextSettingsSection = state.settingsSection;
   let nextActiveContainerHostId = state.activeContainerHostId;
   const nextSessionReturnTargets = { ...state.sessionReturnTargets };
+  const nextResolvedStartupCommands = {
+    ...state.resolvedStartupCommandsBySessionId,
+  };
   const shouldRestoreReturnTarget =
     state.activeWorkspaceTab === asSessionTabId(sessionId);
   const storedReturnTarget = shouldRestoreReturnTarget
     ? nextSessionReturnTargets[sessionId] ?? null
     : null;
   delete nextSessionReturnTargets[sessionId];
+  delete nextResolvedStartupCommands[sessionId];
 
   const owningWorkspace = state.workspaces.find((workspace) =>
     listWorkspaceSessionIds(workspace.layout).includes(sessionId),
@@ -714,6 +727,7 @@ export function removeSessionFromState(
       (attempt) => attempt.sessionId !== sessionId,
     ),
     sessionReturnTargets: nextSessionReturnTargets,
+    resolvedStartupCommandsBySessionId: nextResolvedStartupCommands,
   };
 }
 

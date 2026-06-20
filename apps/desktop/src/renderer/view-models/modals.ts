@@ -11,6 +11,9 @@ export function useAppModalViewModel() {
   const pendingMissingUsernamePrompt = useAppStore(
     (state) => state.pendingMissingUsernamePrompt,
   );
+  const pendingStartupCommandPrompt = useAppStore(
+    (state) => state.pendingStartupCommandPrompt,
+  );
   const pendingInteractiveAuth = useAppStore(
     (state) => state.pendingInteractiveAuth,
   );
@@ -36,6 +39,12 @@ export function useAppModalViewModel() {
   const submitMissingUsernamePrompt = useAppStore(
     (state) => state.submitMissingUsernamePrompt,
   );
+  const confirmStartupCommandPrompt = useAppStore(
+    (state) => state.confirmStartupCommandPrompt,
+  );
+  const cancelStartupCommandPrompt = useAppStore(
+    (state) => state.cancelStartupCommandPrompt,
+  );
   const respondInteractiveAuth = useAppStore((state) => state.respondInteractiveAuth);
   const reopenInteractiveAuthUrl = useAppStore(
     (state) => state.reopenInteractiveAuthUrl,
@@ -49,6 +58,7 @@ export function useAppModalViewModel() {
     pendingCredentialRetry,
     pendingAwsSftpConfigRetry,
     pendingMissingUsernamePrompt,
+    pendingStartupCommandPrompt,
     pendingInteractiveAuth,
     acceptPendingHostKeyPrompt,
     dismissPendingHostKeyPrompt,
@@ -58,6 +68,8 @@ export function useAppModalViewModel() {
     submitAwsSftpConfigRetry,
     dismissPendingMissingUsernamePrompt,
     submitMissingUsernamePrompt,
+    confirmStartupCommandPrompt,
+    cancelStartupCommandPrompt,
     respondInteractiveAuth,
     reopenInteractiveAuthUrl,
     clearPendingInteractiveAuth,

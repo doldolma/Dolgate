@@ -1,11 +1,11 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, type ReactNode } from 'react';
-import { getAwsEc2HostSshMetadataStatusLabel, isAwsEc2HostRecord, isAwsEcsHostRecord, isSerialHostDraft, isSerialHostRecord, isSshHostDraft, isSshHostRecord, isWarpgateSshHostRecord } from '@shared';
-import type { AwsProfileSummary, HostDraft, HostRecord, HostSecretInput, SecretMetadataRecord, SerialHostDraft, SerialPortSummary, SshHostDraft, SshHostRecord, TerminalThemeId } from '@shared';
+import { MAX_HOST_STARTUP_COMMAND_LENGTH, getAwsEc2HostSshMetadataStatusLabel, isAwsEc2HostRecord, isAwsEcsHostRecord, isSerialHostDraft, isSerialHostRecord, isSshHostDraft, isSshHostRecord, isWarpgateSshHostRecord } from '@shared';
+import type { AwsProfileSummary, HostDraft, HostRecord, HostSecretInput, HostStartupCommand, SecretMetadataRecord, SerialHostDraft, SerialPortSummary, SnippetRecord, SshHostDraft, SshHostRecord, TerminalThemeId } from '@shared';
 import { useHostFormController } from '../controllers/useHostFormController';
 import { formatSavedSecretOptionLabel } from '../lib/secret-display';
 import { terminalThemePresets } from '../lib/terminal-presets';
 import { listAwsProfiles } from '../services/desktop/imports';
-import { Button, Input, SearchableSelect, SelectField, TagInputField, ToggleSwitch } from '../ui';
+import { Button, Input, SearchableSelect, SelectField, TagInputField, Textarea, ToggleSwitch } from '../ui';
 import type { SearchableSelectOption } from '../ui';
 
 const defaultSshDraft: SshHostDraft = {
@@ -18,6 +18,7 @@ const defaultSshDraft: SshHostDraft = {
   authType: 'password',
   secretRef: null,
   jumpHostId: null,
+  startupCommand: null,
   groupName: '',
   terminalThemeId: null
 };
@@ -140,6 +141,7 @@ export interface HostFormProps {
   groupOptions: Array<{ value: string | null; label: string }>;
   /** Saved SSH hosts selectable as a jump host (bastion). See getJumpHostCandidates. */
   jumpHostOptions?: SearchableSelectOption[];
+  snippets?: SnippetRecord[];
   defaultGroupPath?: string | null;
   createKind?: 'ssh' | 'serial';
   desktopPlatform?: 'darwin' | 'win32' | 'linux' | 'unknown';
@@ -212,10 +214,31 @@ function buildHostFormSubmission(input: {
 }): HostFormSubmission {
   const nextTags = dedupeTags(input.tags);
   const nextLabel = input.draft.label.trim() || deriveDefaultHostLabel(input.draft);
-  if (!isSshHostDraft(input.draft)) {
+  const normalizedDraft: HostDraft =
+    input.draft.kind === 'ssh' ||
+    input.draft.kind === 'aws-ec2' ||
+    input.draft.kind === 'warpgate-ssh'
+      ? {
+          ...input.draft,
+          startupCommand:
+            input.draft.startupCommand?.type === 'command'
+              ? input.draft.startupCommand.command.trim()
+                ? input.draft.startupCommand
+                : null
+              : input.draft.startupCommand?.type === 'snippet'
+                ? input.draft.startupCommand.snippetId.trim()
+                  ? {
+                      type: 'snippet',
+                      snippetId: input.draft.startupCommand.snippetId.trim(),
+                    }
+                  : null
+                : null,
+        }
+      : input.draft;
+  if (!isSshHostDraft(normalizedDraft)) {
     return {
       draft: {
-        ...input.draft,
+        ...normalizedDraft,
         label: nextLabel,
         tags: nextTags
       }
@@ -223,7 +246,7 @@ function buildHostFormSubmission(input: {
   }
 
   const nextDraft: SshHostDraft = {
-    ...input.draft,
+    ...normalizedDraft,
     label: nextLabel,
     tags: nextTags,
     secretRef: input.credentialMode === 'existing' ? input.selectedSecretRef || null : null,
@@ -318,6 +341,7 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
   keychainEntries,
   groupOptions,
   jumpHostOptions = [],
+  snippets = [],
   defaultGroupPath = null,
   createKind = 'ssh',
   desktopPlatform = 'unknown',
@@ -504,7 +528,8 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
         awsSshPort: host.awsSshPort ?? 22,
         awsSshMetadataStatus: host.awsSshMetadataStatus ?? null,
         awsSshMetadataError: host.awsSshMetadataError ?? null,
-        awsSsmServerProxyEnabled: host.awsSsmServerProxyEnabled === true
+        awsSsmServerProxyEnabled: host.awsSsmServerProxyEnabled === true,
+        startupCommand: host.startupCommand ?? null
       };
       nextCredentialMode = 'new';
     } else if (isAwsEcsHostRecord(host)) {
@@ -533,7 +558,8 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
         warpgateSshPort: host.warpgateSshPort,
         warpgateTargetId: host.warpgateTargetId,
         warpgateTargetName: host.warpgateTargetName,
-        warpgateUsername: host.warpgateUsername
+        warpgateUsername: host.warpgateUsername,
+        startupCommand: host.startupCommand ?? null
       };
       nextCredentialMode = 'new';
     } else if (isSerialHostRecord(host)) {
@@ -569,7 +595,8 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
         secretRef: host.secretRef,
         jumpHostId: host.jumpHostId ?? null,
         groupName: host.groupName ?? '',
-        terminalThemeId: host.terminalThemeId ?? null
+        terminalThemeId: host.terminalThemeId ?? null,
+        startupCommand: host.startupCommand ?? null
       };
       nextSelectedSecretRef = host.secretRef ?? '';
       nextCredentialMode = host.secretRef ? 'existing' : 'new';
@@ -995,6 +1022,104 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
     </>
   );
 
+  const supportsStartupCommand =
+    draft.kind === 'ssh' || draft.kind === 'aws-ec2' || draft.kind === 'warpgate-ssh';
+  const startupCommand = supportsStartupCommand ? draft.startupCommand ?? null : null;
+  const startupMode = startupCommand?.type ?? 'none';
+  const startupSnippetOptions = snippets.map((snippet) => ({
+    value: snippet.id,
+    label: snippet.label,
+    description: snippet.keyword ? `${snippet.keyword} · ${snippet.command}` : snippet.command,
+    searchText: [snippet.label, snippet.keyword ?? '', snippet.command].join(' '),
+  }));
+  const selectedStartupSnippet =
+    startupCommand?.type === 'snippet'
+      ? snippets.find((snippet) => snippet.id === startupCommand.snippetId) ?? null
+      : null;
+
+  function updateStartupCommand(next: HostStartupCommand | null): void {
+    setDraft((current) => {
+      if (
+        current.kind !== 'ssh' &&
+        current.kind !== 'aws-ec2' &&
+        current.kind !== 'warpgate-ssh'
+      ) {
+        return current;
+      }
+      return { ...current, startupCommand: next };
+    });
+  }
+
+  const startupCommandField = supportsStartupCommand ? (
+    <div className="flex flex-col gap-[0.55rem] text-[var(--text)]">
+      <span className={fieldLabelClassName}>Startup command</span>
+      <div className="grid grid-cols-3 gap-1 rounded-[8px] border border-[var(--border)] bg-[var(--app-bg)] p-1">
+        {(['none', 'command', 'snippet'] as const).map((mode) => (
+          <Button
+            key={mode}
+            size="sm"
+            variant="ghost"
+            active={startupMode === mode}
+            className="rounded-[5px]"
+            onClick={() =>
+              updateStartupCommand(
+                mode === 'none'
+                  ? null
+                  : mode === 'command'
+                    ? { type: 'command', command: '' }
+                    : { type: 'snippet', snippetId: '' },
+              )
+            }
+          >
+            {mode === 'none' ? 'None' : mode === 'command' ? 'Command' : 'Snippet'}
+          </Button>
+        ))}
+      </div>
+      {startupCommand?.type === 'command' ? (
+        <div className="flex flex-col gap-[0.4rem]">
+          <Textarea
+            aria-label="Startup command"
+            value={startupCommand.command}
+            maxLength={MAX_HOST_STARTUP_COMMAND_LENGTH}
+            rows={4}
+            className="font-mono"
+            placeholder="cd /srv/app && clear"
+            onChange={(event) =>
+              updateStartupCommand({ type: 'command', command: event.target.value })
+            }
+          />
+          <span className="text-[0.78rem] text-[var(--text-soft)]">
+            연결 직후 명령과 Enter를 자동으로 전송합니다.
+          </span>
+        </div>
+      ) : null}
+      {startupCommand?.type === 'snippet' ? (
+        <div className="flex flex-col gap-[0.4rem]">
+          <SearchableSelect
+            ariaLabel="Startup snippet"
+            placeholder="Snippet 선택"
+            searchPlaceholder="이름, 키워드, 명령 검색"
+            emptyText="사용 가능한 Snippet이 없습니다."
+            value={startupCommand.snippetId}
+            options={startupSnippetOptions}
+            onChange={(snippetId) =>
+              updateStartupCommand({ type: 'snippet', snippetId })
+            }
+          />
+          {selectedStartupSnippet ? (
+            <pre className="max-h-32 overflow-auto whitespace-pre-wrap break-words rounded-[6px] border border-[var(--border)] bg-[var(--app-bg)] px-3 py-2 font-mono text-[0.78rem] text-[var(--text-soft)]">
+              {selectedStartupSnippet.command}
+            </pre>
+          ) : startupCommand.snippetId ? (
+            <span className="text-[0.8rem] text-[var(--danger-text)]">
+              선택한 Snippet을 찾을 수 없습니다. 연결 시 Startup Command를 건너뜁니다.
+            </span>
+          ) : null}
+        </div>
+      ) : null}
+    </div>
+  ) : null;
+
   const reportCurrentValidity = useCallback(() => {
     const valid = isFormValid(draft);
     if (!valid) {
@@ -1096,6 +1221,7 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
       {isAwsEc2Draft ? (
         <>
           {renderTerminalThemeField(draft.terminalThemeId ?? null, (terminalThemeId) => setDraft((current) => ({ ...current, terminalThemeId })))}
+          {startupCommandField}
 
           <label className={fieldClassName}>
             <span className={fieldLabelClassName}>AWS Profile</span>
@@ -1246,6 +1372,7 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
       ) : draft.kind === 'warpgate-ssh' ? (
         <>
           {renderTerminalThemeField(draft.terminalThemeId ?? null, (terminalThemeId) => setDraft((current) => ({ ...current, terminalThemeId })))}
+          {startupCommandField}
 
           <label className={fieldClassName}>
             <span className={fieldLabelClassName}>Warpgate URL</span>
@@ -1485,6 +1612,7 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
             testId="hostform-section-preferences"
           >
             {renderTerminalThemeField(sshDraft.terminalThemeId ?? null, (terminalThemeId) => setDraft({ ...sshDraft, terminalThemeId }))}
+            {startupCommandField}
           </FormSection>
         </>
       ) : serialDraft ? (

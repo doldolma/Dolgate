@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { isIP } from 'node:net';
 import {
   DEFAULT_SESSION_REPLAY_RETENTION_COUNT,
+  MAX_HOST_STARTUP_COMMAND_LENGTH,
   MAX_SESSION_REPLAY_RETENTION_COUNT,
   MIN_SESSION_REPLAY_RETENTION_COUNT,
   isDnsOverrideEligiblePortForwardRule,
@@ -48,6 +49,7 @@ import type {
   GroupRemoveResult,
   HostDraft,
   HostRecord,
+  HostStartupCommand,
   KnownHostRecord,
   KnownHostTrustInput,
   ManagedAwsProfileKind,
@@ -253,6 +255,21 @@ function normalizeTerminalThemeId(terminalThemeId?: TerminalThemeId | null): Ter
   return terminalThemeId ?? null;
 }
 
+function normalizeHostStartupCommand(
+  value: HostStartupCommand | null | undefined,
+): HostStartupCommand | null {
+  if (value?.type === 'command') {
+    return value.command.trim() && value.command.length <= MAX_HOST_STARTUP_COMMAND_LENGTH
+      ? { type: 'command', command: value.command }
+      : null;
+  }
+  if (value?.type === 'snippet') {
+    const snippetId = value.snippetId.trim();
+    return snippetId ? { type: 'snippet', snippetId } : null;
+  }
+  return null;
+}
+
 function normalizeAwsSshMetadataStatus(
   status?: AwsSshMetadataStatus | null,
   fallback?: { awsSshUsername?: string | null; awsSshPort?: number | null }
@@ -282,6 +299,7 @@ function normalizeIncomingHostRecord(record: HostRecord): HostRecord {
       groupName: normalizeGroupPath(record.groupName),
       tags: normalizeTags(record.tags),
       terminalThemeId: normalizeTerminalThemeId(record.terminalThemeId),
+      startupCommand: normalizeHostStartupCommand(record.startupCommand),
       awsSshUsername: record.awsSshUsername ?? null,
       awsSshPort: record.awsSshPort ?? null,
       awsSshMetadataStatus: normalizeAwsSshMetadataStatus(record.awsSshMetadataStatus, record),
@@ -303,7 +321,8 @@ function normalizeIncomingHostRecord(record: HostRecord): HostRecord {
       ...record,
       groupName: normalizeGroupPath(record.groupName),
       tags: normalizeTags(record.tags),
-      terminalThemeId: normalizeTerminalThemeId(record.terminalThemeId)
+      terminalThemeId: normalizeTerminalThemeId(record.terminalThemeId),
+      startupCommand: normalizeHostStartupCommand(record.startupCommand)
     };
   }
   if (record.kind === 'warpgate-ssh') {
@@ -311,7 +330,8 @@ function normalizeIncomingHostRecord(record: HostRecord): HostRecord {
       ...record,
       groupName: normalizeGroupPath(record.groupName),
       tags: normalizeTags(record.tags),
-      terminalThemeId: normalizeTerminalThemeId(record.terminalThemeId)
+      terminalThemeId: normalizeTerminalThemeId(record.terminalThemeId),
+      startupCommand: normalizeHostStartupCommand(record.startupCommand)
     };
   }
   if (record.kind === 'serial') {
@@ -454,6 +474,7 @@ function toSshHostRecord(id: string, draft: SshHostDraft, secretRef: string | nu
     groupName: normalizeGroupPath(draft.groupName),
     tags: normalizeTags(draft.tags),
     terminalThemeId: normalizeTerminalThemeId(draft.terminalThemeId),
+    startupCommand: normalizeHostStartupCommand(draft.startupCommand),
     createdAt: current?.createdAt ?? timestamp,
     updatedAt: timestamp
   };
@@ -481,6 +502,7 @@ function toAwsHostRecord(id: string, draft: AwsEc2HostDraft, timestamp: string, 
     groupName: normalizeGroupPath(draft.groupName),
     tags: normalizeTags(draft.tags),
     terminalThemeId: normalizeTerminalThemeId(draft.terminalThemeId),
+    startupCommand: normalizeHostStartupCommand(draft.startupCommand),
     createdAt: current?.createdAt ?? timestamp,
     updatedAt: timestamp
   };
@@ -528,6 +550,7 @@ function toWarpgateHostRecord(
     groupName: normalizeGroupPath(draft.groupName),
     tags: normalizeTags(draft.tags),
     terminalThemeId: normalizeTerminalThemeId(draft.terminalThemeId),
+    startupCommand: normalizeHostStartupCommand(draft.startupCommand),
     createdAt: current?.createdAt ?? timestamp,
     updatedAt: timestamp
   };
@@ -750,6 +773,26 @@ export class HostRepository {
         };
       });
     });
+  }
+
+  clearStartupSnippetRef(snippetId: string): HostRecord[] {
+    const updated: HostRecord[] = [];
+    const timestamp = nowIso();
+    stateStorage.updateState((state) => {
+      state.data.hosts = state.data.hosts.map((entry) => {
+        if (
+          (entry.kind !== 'ssh' && entry.kind !== 'aws-ec2' && entry.kind !== 'warpgate-ssh') ||
+          entry.startupCommand?.type !== 'snippet' ||
+          entry.startupCommand.snippetId !== snippetId
+        ) {
+          return entry;
+        }
+        const next = { ...entry, startupCommand: null, updatedAt: timestamp };
+        updated.push(next);
+        return next;
+      });
+    });
+    return updated;
   }
 
   remove(id: string): void {

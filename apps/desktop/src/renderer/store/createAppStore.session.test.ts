@@ -54,6 +54,149 @@ describe("createAppStore sessions and auth recovery", () => {
     expect(store.getState().hostDrawer).toEqual({ mode: "closed" });
   });
 
+  it("prompts for startup snippet variables and sends the resolved command", async () => {
+    const api = createMockApi();
+    const originalHosts = await api.hosts.list();
+    api.hosts.list = vi.fn().mockResolvedValue([
+      {
+        ...originalHosts[0],
+        startupCommand: { type: "snippet", snippetId: "snippet-1" },
+      },
+    ] as HostRecord[]);
+    api.snippets.list = vi.fn().mockResolvedValue([
+      {
+        id: "snippet-1",
+        label: "Open app",
+        keyword: "app",
+        command: "cd {{path=/srv/app}} && echo {{env}}",
+        createdAt: "2026-06-20T00:00:00.000Z",
+        updatedAt: "2026-06-20T00:00:00.000Z",
+      },
+    ]);
+    const store = createAppStore(api);
+    await store.getState().bootstrap();
+
+    await store.getState().connectHost("host-1", 120, 32);
+    expect(api.ssh.connect).not.toHaveBeenCalled();
+    expect(store.getState().pendingStartupCommandPrompt?.variables).toEqual([
+      { name: "path", defaultValue: "/srv/app" },
+      { name: "env", defaultValue: "" },
+    ]);
+
+    await store.getState().confirmStartupCommandPrompt({
+      path: "/opt/service",
+      env: "prod",
+    });
+
+    expect(api.ssh.connect).toHaveBeenCalledWith(
+      expect.objectContaining({
+        startupCommand: "cd /opt/service && echo prod",
+      }),
+    );
+    expect(store.getState().pendingStartupCommandPrompt).toBeNull();
+  });
+
+  it("reuses resolved startup snippet values during an authentication retry", async () => {
+    const api = createMockApi();
+    const originalHosts = await api.hosts.list();
+    api.hosts.list = vi.fn().mockResolvedValue([
+      {
+        ...originalHosts[0],
+        startupCommand: { type: "snippet", snippetId: "snippet-1" },
+      },
+    ] as HostRecord[]);
+    api.snippets.list = vi.fn().mockResolvedValue([
+      {
+        id: "snippet-1",
+        label: "Open app",
+        keyword: "app",
+        command: "cd {{path}}",
+        createdAt: "2026-06-20T00:00:00.000Z",
+        updatedAt: "2026-06-20T00:00:00.000Z",
+      },
+    ]);
+    const store = createAppStore(api);
+    await store.getState().bootstrap();
+
+    await store.getState().connectHost("host-1", 120, 32);
+    await store.getState().confirmStartupCommandPrompt({ path: "/srv/prod" });
+    store.getState().handleCoreEvent({
+      type: "error",
+      sessionId: "session-1",
+      payload: { message: "authentication failed" },
+    });
+    await store.getState().submitCredentialRetry({
+      username: "ubuntu",
+      password: "secret",
+    });
+
+    expect(api.ssh.connect).toHaveBeenCalledTimes(2);
+    expect(api.ssh.connect).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ startupCommand: "cd /srv/prod" }),
+    );
+    expect(store.getState().pendingStartupCommandPrompt).toBeNull();
+  });
+
+  it("clears startup snippet references when the snippet is removed", async () => {
+    const api = createMockApi();
+    const originalHosts = await api.hosts.list();
+    api.hosts.list = vi.fn().mockResolvedValue([
+      {
+        ...originalHosts[0],
+        startupCommand: { type: "snippet", snippetId: "snippet-1" },
+      },
+    ] as HostRecord[]);
+    api.snippets.list = vi.fn().mockResolvedValue([
+      {
+        id: "snippet-1",
+        label: "Open app",
+        keyword: "app",
+        command: "cd /srv/app",
+        createdAt: "2026-06-20T00:00:00.000Z",
+        updatedAt: "2026-06-20T00:00:00.000Z",
+      },
+    ]);
+    const store = createAppStore(api);
+    await store.getState().bootstrap();
+
+    await store.getState().removeSnippet("snippet-1");
+
+    expect(api.snippets.remove).toHaveBeenCalledWith("snippet-1");
+    expect(store.getState().snippets).toEqual([]);
+    expect(store.getState().hosts[0]).toMatchObject({ startupCommand: null });
+  });
+
+  it("cancels a startup snippet prompt without opening a session", async () => {
+    const api = createMockApi();
+    const originalHosts = await api.hosts.list();
+    api.hosts.list = vi.fn().mockResolvedValue([
+      {
+        ...originalHosts[0],
+        startupCommand: { type: "snippet", snippetId: "snippet-1" },
+      },
+    ] as HostRecord[]);
+    api.snippets.list = vi.fn().mockResolvedValue([
+      {
+        id: "snippet-1",
+        label: "Open app",
+        command: "cd {{path}}",
+        keyword: null,
+        createdAt: "2026-06-20T00:00:00.000Z",
+        updatedAt: "2026-06-20T00:00:00.000Z",
+      },
+    ]);
+    const store = createAppStore(api);
+    await store.getState().bootstrap();
+
+    await store.getState().connectHost("host-1", 120, 32);
+    store.getState().cancelStartupCommandPrompt();
+
+    expect(store.getState().pendingStartupCommandPrompt).toBeNull();
+    expect(api.ssh.connect).not.toHaveBeenCalled();
+    expect(store.getState().tabs).toEqual([]);
+  });
+
   it("uses the serial connection flow for serial hosts without SSH auth prompts", async () => {
     const api = createMockApi();
     api.hosts.list = vi.fn().mockResolvedValue([

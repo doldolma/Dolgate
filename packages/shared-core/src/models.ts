@@ -114,6 +114,11 @@ export const AWS_SFTP_DEFAULT_PORT = 22;
 export const DEFAULT_SESSION_REPLAY_RETENTION_COUNT = 100;
 export const MIN_SESSION_REPLAY_RETENTION_COUNT = 10;
 export const MAX_SESSION_REPLAY_RETENTION_COUNT = 1000;
+export const MAX_HOST_STARTUP_COMMAND_LENGTH = 32 * 1024;
+
+export type HostStartupCommand =
+  | { type: 'command'; command: string }
+  | { type: 'snippet'; snippetId: string };
 
 interface HostBaseRecord {
   id: string;
@@ -145,6 +150,7 @@ export interface SshHostRecord extends HostBaseRecord {
   secretRef?: string | null;
   /** id of another SSH host to tunnel through (ProxyJump / bastion); null = direct. */
   jumpHostId?: string | null;
+  startupCommand?: HostStartupCommand | null;
 }
 
 export interface SshHostDraft extends HostBaseDraft {
@@ -158,6 +164,7 @@ export interface SshHostDraft extends HostBaseDraft {
   secretRef?: string | null;
   /** id of another SSH host to tunnel through (ProxyJump / bastion); null = direct. */
   jumpHostId?: string | null;
+  startupCommand?: HostStartupCommand | null;
 }
 
 export interface AwsEc2HostRecord extends HostBaseRecord {
@@ -176,6 +183,7 @@ export interface AwsEc2HostRecord extends HostBaseRecord {
   awsSshMetadataStatus?: AwsSshMetadataStatus | null;
   awsSshMetadataError?: string | null;
   awsSsmServerProxyEnabled?: boolean;
+  startupCommand?: HostStartupCommand | null;
 }
 
 export interface AwsEc2HostDraft extends HostBaseDraft {
@@ -194,6 +202,7 @@ export interface AwsEc2HostDraft extends HostBaseDraft {
   awsSshMetadataStatus?: AwsSshMetadataStatus | null;
   awsSshMetadataError?: string | null;
   awsSsmServerProxyEnabled?: boolean;
+  startupCommand?: HostStartupCommand | null;
 }
 
 export interface AwsEcsHostRecord extends HostBaseRecord {
@@ -222,6 +231,7 @@ export interface WarpgateSshHostRecord extends HostBaseRecord {
   warpgateTargetId: string;
   warpgateTargetName: string;
   warpgateUsername: string;
+  startupCommand?: HostStartupCommand | null;
 }
 
 export interface WarpgateSshHostDraft extends HostBaseDraft {
@@ -232,6 +242,7 @@ export interface WarpgateSshHostDraft extends HostBaseDraft {
   warpgateTargetId: string;
   warpgateTargetName: string;
   warpgateUsername: string;
+  startupCommand?: HostStartupCommand | null;
 }
 
 export interface SerialHostRecord extends HostBaseRecord {
