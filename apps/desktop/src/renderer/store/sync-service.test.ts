@@ -43,6 +43,7 @@ function createRemoteSnapshotWithPreferences(keyBase64: string): SyncPayloadV2 {
     knownHosts: [],
     portForwards: [],
     dnsOverrides: [],
+    snippets: [],
     awsProfiles: [],
     preferences: [
       {
@@ -137,6 +138,7 @@ function createRemoteSnapshotWithManagedSecrets(keyBase64: string, secretCount =
     knownHosts: [],
     portForwards: [],
     dnsOverrides: [],
+    snippets: [],
     awsProfiles: [],
     preferences: [
       {
@@ -180,6 +182,10 @@ function createSyncService() {
     replaceAll: vi.fn()
   };
   const dnsOverrides = {
+    list: vi.fn().mockReturnValue([]),
+    replaceAll: vi.fn()
+  };
+  const snippets = {
     list: vi.fn().mockReturnValue([]),
     replaceAll: vi.fn()
   };
@@ -285,6 +291,7 @@ function createSyncService() {
     groups as never,
     portForwards as never,
     dnsOverrides as never,
+    snippets as never,
     knownHosts as never,
     secretMetadata as never,
     awsProfiles as never,

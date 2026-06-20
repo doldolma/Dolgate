@@ -168,6 +168,7 @@ export function createNetworkSlice(deps: SliceDeps): NetworkSlice {
   return {
     portForwards: [],
     dnsOverrides: [],
+    snippets: [],
     portForwardRuntimes: [],
     knownHosts: [],
     pendingHostKeyPrompt: null,
@@ -219,6 +220,24 @@ export function createNetworkSlice(deps: SliceDeps): NetworkSlice {
               ),
             }));
             await syncOperationalData(set);
+          },
+    saveSnippet: async (snippetId, draft) => {
+            const next = snippetId
+              ? await api.snippets.update(snippetId, draft)
+              : await api.snippets.create(draft);
+            set((state) => ({
+              snippets: [
+                ...state.snippets.filter((entry) => entry.id !== next.id),
+                next,
+              ].sort((left, right) => left.label.localeCompare(right.label)),
+            }));
+            return next;
+          },
+    removeSnippet: async (snippetId) => {
+            await api.snippets.remove(snippetId);
+            set((state) => ({
+              snippets: state.snippets.filter((entry) => entry.id !== snippetId),
+            }));
           },
     removePortForward: async (ruleId) => {
             await api.portForwards.remove(ruleId);

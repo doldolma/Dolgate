@@ -4,7 +4,7 @@ import type { CommandSpec } from './command-spec/types';
 
 export interface TerminalAutocompleteSuggestion {
   insertText: string;
-  source: 'history' | 'executable' | 'spec' | 'path' | 'generator';
+  source: 'history' | 'executable' | 'spec' | 'path' | 'generator' | 'snippet';
   description?: string;
 }
 
@@ -35,6 +35,12 @@ export interface AutocompleteScoringContext {
    * stale history paths (e.g. a dir that no longer exists here) shouldn't show.
    */
   suppressHistory?: boolean;
+  /**
+   * Saved snippets. Matched by keyword (or label) prefix and inserted as the
+   * full command — so the insert text differs from the typed token, and the
+   * controller clears the line + inserts the whole command on accept.
+   */
+  snippets?: readonly { label: string; command: string; keyword?: string | null }[];
   limit?: number;
 }
 
@@ -126,6 +132,9 @@ const DEFAULT_LIMIT = 5;
 const SCORE_WEIGHTS = {
   executableBase: 6_000,
   sessionBase: 4_500,
+  // Saved snippets matched by keyword/label — explicit, user-curated commands.
+  // Ranked just below commands actually run this session, above live paths.
+  snippetBase: 4_000,
   // Dynamic, host-resolved values (real file paths / generator output) are a
   // discovery supplement: ranked above raw file history and spec options, but
   // below commands the user has actually run.
@@ -284,6 +293,25 @@ export function getTerminalAutocompleteSuggestions(
           ? SCORE_WEIGHTS.generatorBase
           : SCORE_WEIGHTS.pathBase;
       consider(suggestion, base - suggestion.insertText.length);
+    }
+  }
+
+  // 5) Saved snippets, matched by keyword (or label) prefix. insertText is the
+  //    full command (possibly with {{variables}}); single-line only here.
+  if (context.snippets) {
+    const lower = value.toLowerCase();
+    for (const snippet of context.snippets) {
+      if (snippet.command.includes('\n')) {
+        continue;
+      }
+      const matchTarget = (snippet.keyword || snippet.label).toLowerCase();
+      if (!matchTarget.startsWith(lower)) {
+        continue;
+      }
+      consider(
+        { insertText: snippet.command, source: 'snippet', description: snippet.label },
+        SCORE_WEIGHTS.snippetBase,
+      );
     }
   }
 

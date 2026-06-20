@@ -46,7 +46,8 @@ export type SyncKind =
   | 'portForwards'
   | 'dnsOverrides'
   | 'preferences'
-  | 'awsProfiles';
+  | 'awsProfiles'
+  | 'snippets';
 
 // 서버는 payload를 해석하지 않고 암호문 그대로 저장한다.
 export interface SyncRecord {
@@ -66,6 +67,7 @@ export interface SyncPayloadV2 {
   dnsOverrides: SyncRecord[];
   preferences: SyncRecord[];
   awsProfiles: SyncRecord[];
+  snippets: SyncRecord[];
 }
 
 export interface ServerInfoResponse {

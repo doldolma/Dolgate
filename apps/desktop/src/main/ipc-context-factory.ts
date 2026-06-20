@@ -11,6 +11,7 @@ import type {
   PortForwardRepository,
   SecretMetadataRepository,
   SettingsRepository,
+  SnippetRepository,
   SyncOutboxRepository,
 } from "./database";
 import { LocalFileService } from "./file-service";
@@ -44,6 +45,7 @@ export interface RegisterIpcDependencies {
   settings: SettingsRepository;
   portForwards: PortForwardRepository;
   dnsOverrides: DnsOverrideRepository;
+  snippets: SnippetRepository;
   knownHosts: KnownHostRepository;
   activityLogs: ActivityLogRepository;
   secretMetadata: SecretMetadataRepository;
@@ -73,6 +75,7 @@ export function createMainIpcContext(
     settings,
     portForwards,
     dnsOverrides,
+    snippets,
     knownHosts,
     activityLogs,
     secretMetadata,
@@ -181,6 +184,7 @@ export function createMainIpcContext(
     settings,
     portForwards,
     dnsOverrides,
+    snippets,
     knownHosts,
     activityLogs,
     secretMetadata,

@@ -38,6 +38,8 @@ import type {
   AwsEcsHostDraft,
   AwsEcsHostRecord,
   DnsOverrideDraft,
+  SnippetDraft,
+  SnippetRecord,
   DnsOverrideRecord,
   GlobalTerminalThemeId,
   GroupPathMutationResult,
@@ -1522,6 +1524,83 @@ export class DnsOverrideRepository {
       createdAt,
       updatedAt,
     };
+  }
+}
+
+function toSnippetRecord(
+  id: string,
+  draft: SnippetDraft,
+  createdAt: string,
+  updatedAt: string,
+): SnippetRecord {
+  const label = draft.label.trim();
+  if (!label) {
+    throw new Error('Snippet label is required');
+  }
+  if (!draft.command.trim()) {
+    throw new Error('Snippet command is required');
+  }
+  return {
+    id,
+    label,
+    command: draft.command,
+    keyword: draft.keyword?.trim() || null,
+    createdAt,
+    updatedAt,
+  };
+}
+
+function normalizeIncomingSnippetRecord(record: SnippetRecord): SnippetRecord {
+  return {
+    ...record,
+    keyword: record.keyword?.trim() || null,
+  };
+}
+
+function compareSnippets(left: SnippetRecord, right: SnippetRecord): number {
+  return left.label.localeCompare(right.label) || left.id.localeCompare(right.id);
+}
+
+export class SnippetRepository {
+  list(): SnippetRecord[] {
+    return stateStorage.getState().data.snippets.slice().sort(compareSnippets);
+  }
+
+  getById(id: string): SnippetRecord | null {
+    return stateStorage.getState().data.snippets.find((record) => record.id === id) ?? null;
+  }
+
+  create(draft: SnippetDraft): SnippetRecord {
+    const timestamp = nowIso();
+    const record = toSnippetRecord(randomUUID(), draft, timestamp, timestamp);
+    stateStorage.updateState((state) => {
+      state.data.snippets.push(record);
+    });
+    return record;
+  }
+
+  update(id: string, draft: SnippetDraft): SnippetRecord {
+    const current = this.getById(id);
+    if (!current) {
+      throw new Error('Snippet not found');
+    }
+    const record = toSnippetRecord(id, draft, current.createdAt, nowIso());
+    stateStorage.updateState((state) => {
+      state.data.snippets = state.data.snippets.map((entry) => (entry.id === id ? record : entry));
+    });
+    return record;
+  }
+
+  remove(id: string): void {
+    stateStorage.updateState((state) => {
+      state.data.snippets = state.data.snippets.filter((entry) => entry.id !== id);
+    });
+  }
+
+  replaceAll(records: SnippetRecord[]): void {
+    stateStorage.updateState((state) => {
+      state.data.snippets = records.map(normalizeIncomingSnippetRecord).sort(compareSnippets);
+    });
   }
 }
 

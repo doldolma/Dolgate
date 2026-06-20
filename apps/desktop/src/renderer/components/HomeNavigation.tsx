@@ -8,6 +8,7 @@ interface HomeNavigationProps {
 const items: Array<{ section: HomeSection; icon: string; label: string }> = [
   { section: 'hosts', icon: '▣', label: 'Hosts' },
   { section: 'portForwarding', icon: '⇄', label: 'Port Forwarding' },
+  { section: 'snippets', icon: '✂', label: 'Snippets' },
   { section: 'logs', icon: '☰', label: 'Logs' },
   { section: 'settings', icon: '◌', label: 'Settings' }
 ];

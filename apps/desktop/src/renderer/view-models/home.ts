@@ -10,6 +10,7 @@ export function useHomeViewModel() {
   const searchQuery = useAppStore((state) => state.searchQuery);
   const portForwards = useAppStore((state) => state.portForwards);
   const dnsOverrides = useAppStore((state) => state.dnsOverrides);
+  const snippets = useAppStore((state) => state.snippets);
   const portForwardRuntimes = useAppStore((state) => state.portForwardRuntimes);
   const bootstrap = useAppStore((state) => state.bootstrap);
   const refreshHostCatalog = useAppStore((state) => state.refreshHostCatalog);
@@ -45,6 +46,8 @@ export function useHomeViewModel() {
   );
   const removeDnsOverride = useAppStore((state) => state.removeDnsOverride);
   const removePortForward = useAppStore((state) => state.removePortForward);
+  const saveSnippet = useAppStore((state) => state.saveSnippet);
+  const removeSnippet = useAppStore((state) => state.removeSnippet);
   const startPortForward = useAppStore((state) => state.startPortForward);
   const stopPortForward = useAppStore((state) => state.stopPortForward);
   const handleCoreEvent = useAppStore((state) => state.handleCoreEvent);
@@ -63,6 +66,7 @@ export function useHomeViewModel() {
     searchQuery,
     portForwards,
     dnsOverrides,
+    snippets,
     portForwardRuntimes,
     bootstrap,
     refreshHostCatalog,
@@ -92,6 +96,8 @@ export function useHomeViewModel() {
     setStaticDnsOverrideActive,
     removeDnsOverride,
     removePortForward,
+    saveSnippet,
+    removeSnippet,
     startPortForward,
     stopPortForward,
     handleCoreEvent,

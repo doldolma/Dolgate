@@ -11,6 +11,8 @@ import type {
   DesktopApi,
   DnsOverrideDraft,
   DnsOverrideResolvedRecord,
+  SnippetRecord,
+  SnippetDraft,
   FileEntry,
   GroupRemoveMode,
   GroupRecord,
@@ -54,7 +56,12 @@ export type WorkspaceTabId =
   | "containers"
   | SessionWorkspaceTabId
   | SplitWorkspaceTabId;
-export type HomeSection = "hosts" | "portForwarding" | "logs" | "settings";
+export type HomeSection =
+  | "hosts"
+  | "portForwarding"
+  | "snippets"
+  | "logs"
+  | "settings";
 export type SettingsSection = "general" | "sftp" | "security" | "secrets" | "aws-profiles";
 export type SftpSourceKind = "local" | "host";
 export type WorkspaceDropDirection = "left" | "right" | "top" | "bottom";
@@ -459,6 +466,7 @@ interface AppStateParts {
   tabStrip: DynamicTabStripItem[];
   portForwards: PortForwardRuleRecord[];
   dnsOverrides: DnsOverrideResolvedRecord[];
+  snippets: SnippetRecord[];
   portForwardRuntimes: PortForwardRuntimeRecord[];
   knownHosts: KnownHostRecord[];
   activityLogs: ActivityLogRecord[];
@@ -636,6 +644,11 @@ interface AppStateParts {
     active: boolean,
   ) => Promise<void>;
   removeDnsOverride: (overrideId: string) => Promise<void>;
+  saveSnippet: (
+    snippetId: string | null,
+    draft: SnippetDraft,
+  ) => Promise<SnippetRecord>;
+  removeSnippet: (snippetId: string) => Promise<void>;
   removePortForward: (ruleId: string) => Promise<void>;
   startPortForward: (ruleId: string) => Promise<void>;
   stopPortForward: (ruleId: string) => Promise<void>;
@@ -910,6 +923,7 @@ export type NetworkSlice = Pick<
   AppStateParts,
   | "portForwards"
   | "dnsOverrides"
+  | "snippets"
   | "portForwardRuntimes"
   | "knownHosts"
   | "pendingHostKeyPrompt"
@@ -917,6 +931,8 @@ export type NetworkSlice = Pick<
   | "saveDnsOverride"
   | "setStaticDnsOverrideActive"
   | "removeDnsOverride"
+  | "saveSnippet"
+  | "removeSnippet"
   | "removePortForward"
   | "startPortForward"
   | "stopPortForward"

@@ -6,7 +6,8 @@ Dolgate Desktop은 macOS와 Windows를 위한 Electron 기반 SSH 워크스페�
 ## 현재 기능
 
 - 멀티 세션 터미널과 탭 기반 워크스페이스
-- 명령어 자동완성 (Fig 스펙 + generator + 경로)
+- 명령어 자동완성 (Fig 스펙 + generator + 경로 + 스니펫)
+- 명령어 스니펫 (변수 지원, 자동완성·관리 UI 연동)
 - 듀얼 패널 SFTP 브라우저와 파일 전송
 - 점프 호스트(베스천) 경유 연결 (ProxyJump / `ssh -J`)
 - Local / Remote / Dynamic 포트 포워딩
@@ -27,6 +28,7 @@ Dolgate Desktop은 macOS와 Windows를 위한 Electron 기반 SSH 워크스페�
   - **Fig 스펙** 기반 옵션·서브커맨드 — withfig/autocomplete에서 변환, 입력한 적 없어도 표시
   - **파일/폴더 경로** — 현재 디렉터리를 실제로 조회해 추천 (`cd`/`ls`/`cat` 등). 경로 인자일 땐 stale한 history 경로 대신 실제 파일시스템이 우선
   - **generator 동적 값** — `docker logs <컨테이너>`, `git checkout <브랜치>`처럼 호스트에서 read-only 명령을 돌려 실제 값을 추천
+  - **스니펫** — 저장한 명령을 keyword(없으면 label) 접두사로 매칭해 전체 명령을 삽입 (변수 `{{name}}`은 삽입 시 입력)
 - **동적 완성 동작**: SSH/로컬은 보조 채널(별도 SSH exec / 로컬 서브프로세스)로 짧은 명령을 실행해 값을 가져오고, 결과는 프롬프트 단위로 캐시합니다(명령 실행 시 갱신, 같은 디렉터리 내 추가 입력은 재조회 없이 필터). AWS SSM은 보조 채널이 없어 동적 값 없이 정적 추천 + history로 degrade합니다.
 - **키보드**: `↓`/`↑` 이동, `Tab` 또는 `→` 선택, `Enter`는 화살표로 고른 항목 선택(맨 위면 명령 실행), `Esc` 닫기.
 
@@ -73,6 +75,14 @@ generator 실행 엔진은 Amazon Q Developer CLI(오픈소스 Fig 후신, Apach
 - **신뢰(TOFU)**: 베스천을 먼저 신뢰한 뒤, 타깃 호스트 키는 **신뢰된 베스천을 경유해** probe합니다. 베스천이 신뢰돼 있지 않으면 자동으로 지문 프롬프트가 떠 신뢰 후 진행합니다(Termius 스타일). 베스천 뒤의(직접 닿지 않는) 타깃 키도 이 경유 probe로 확인/신뢰할 수 있습니다.
 - **인증**: 베스천이 password / privateKey / certificate / keyboard-interactive 어느 방식이든 연결됩니다(두 홉을 순차 인증). 단, 베스천 경유 **키 probe**는 비대화형 인증(password/key/certificate)만 지원합니다.
 - **제약(v1)**: 단일 홉만 지원합니다(`h1,h2,h3` 같은 다단 체인 UI는 범위 밖 — Go 코어는 재귀 구조로 표현 가능). 점프 대상은 일반 SSH 호스트만 가능하며 AWS-SSM/Warpgate 호스트는 점프로 쓸 수 없습니다.
+
+## 명령어 스니펫 (Snippets)
+
+자주 쓰는 명령을 저장해 두고 터미널에서 꺼내 씁니다. 사이드바 **Snippets** 섹션에서 추가/편집/삭제하며, 호스트·그룹처럼 암호화 클라우드 동기화에 포함됩니다.
+
+- **자동완성 연동**: 입력 중 `keyword`(없으면 label) 접두사로 매칭돼 후보로 뜨고, 선택하면 현재 줄을 비우고 **전체 명령**을 삽입합니다(실행은 사용자가 Enter). 자동완성에는 단일 라인 스니펫만 노출됩니다.
+- **변수**: 명령에 `{{name}}` 또는 `{{name=기본값}}`을 넣으면, 삽입 시 값 입력 모달이 떠서 치환합니다.
+- **저장 필드**: label(표시명), keyword(자동완성 매칭용, 선택), command(멀티라인 가능).
 
 ## 로컬 실행
 

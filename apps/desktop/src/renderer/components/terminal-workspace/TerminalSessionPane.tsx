@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { cn } from '../../lib/cn';
+import { useAppStore } from '../../store/appStore';
 import { useTerminalSessionViewController } from '../../controllers/useTerminalSessionViewController';
 import { TerminalChatToastRegion } from './TerminalChatToastRegion';
 import { TerminalConnectionOverlay } from './TerminalConnectionOverlay';
@@ -12,6 +13,7 @@ import type { TerminalSessionPaneProps } from './types';
 import { NoticeCard } from '../../ui';
 import { resolveConnectionFailurePresentation } from '../../store/utils';
 import { TerminalAutocompleteOverlay } from './TerminalAutocompleteOverlay';
+import { SnippetVariablesDialog } from './SnippetVariablesDialog';
 
 export function TerminalSessionPane(props: TerminalSessionPaneProps) {
   const {
@@ -32,7 +34,8 @@ export function TerminalSessionPane(props: TerminalSessionPaneProps) {
     tab,
   } = props;
 
-  const controller = useTerminalSessionViewController(props);
+  const snippets = useAppStore((state) => state.snippets);
+  const controller = useTerminalSessionViewController({ ...props, snippets });
   const [serialNotice, setSerialNotice] = useState<string | null>(null);
 
   useEffect(() => {
@@ -206,6 +209,11 @@ export function TerminalSessionPane(props: TerminalSessionPaneProps) {
           anchor={controller.autocompleteAnchor}
           selectedIndex={controller.autocompleteSelectedIndex}
           onAccept={controller.acceptAutocompleteSuggestion}
+        />
+        <SnippetVariablesDialog
+          pending={controller.autocompletePendingSnippet}
+          onConfirm={controller.confirmAutocompleteSnippet}
+          onCancel={controller.cancelAutocompleteSnippet}
         />
       </div>
     </div>

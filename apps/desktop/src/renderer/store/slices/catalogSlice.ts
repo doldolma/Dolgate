@@ -261,7 +261,10 @@ export function createCatalogSlice(deps: SliceDeps): CatalogSlice {
               hostDrawer: { mode: "closed" },
             }),
     bootstrap: async () => {
-            const snapshot = await api.bootstrap.getInitialSnapshot();
+            const [snapshot, snippets] = await Promise.all([
+              api.bootstrap.getInitialSnapshot(),
+              api.snippets.list(),
+            ]);
             set({
               hosts: sortHosts(snapshot.hosts),
               groups: sortGroups(snapshot.groups),
@@ -280,6 +283,7 @@ export function createCatalogSlice(deps: SliceDeps): CatalogSlice {
               })),
               portForwards: sortPortForwards(snapshot.portForwardSnapshot.rules),
               dnsOverrides: sortDnsOverrides(snapshot.dnsOverrides),
+              snippets,
               portForwardRuntimes: snapshot.portForwardSnapshot.runtimes,
               knownHosts: sortKnownHosts(snapshot.knownHosts),
               activityLogs: sortLogs(snapshot.activityLogs),

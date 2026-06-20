@@ -32,6 +32,7 @@ import type {
   SftpConflictPolicy,
   SshPortForwardRuleRecord,
   SecretMetadataRecord,
+  SnippetRecord,
   TerminalFontFamilyId,
   TerminalThemeId
 } from '@shared';
@@ -121,6 +122,7 @@ export interface DesktopStateFile {
     dnsOverrides: DnsOverrideRecord[];
     secretMetadata: SecretMetadataRecord[];
     awsProfiles: AwsProfileMetadataRecord[];
+    snippets: SnippetRecord[];
     syncOutbox: SyncDeletionRecord[];
   };
   secure: {
@@ -492,6 +494,7 @@ function createDefaultStateFile(): DesktopStateFile {
       dnsOverrides: [],
       secretMetadata: [],
       awsProfiles: [],
+      snippets: [],
       syncOutbox: []
     },
     secure: {
@@ -845,6 +848,7 @@ function normalizeStateFile(value: unknown): DesktopStateFile {
             .map(normalizeSecretMetadataRecord)
             .filter((entry): entry is SecretMetadataRecord => entry !== null)
         : [],
+      snippets: Array.isArray(data.snippets) ? (data.snippets as SnippetRecord[]) : [],
       awsProfiles: Array.isArray(data.awsProfiles) ? (data.awsProfiles as AwsProfileMetadataRecord[]) : [],
       syncOutbox: Array.isArray(data.syncOutbox) ? (data.syncOutbox as SyncDeletionRecord[]) : []
     },

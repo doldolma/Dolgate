@@ -102,6 +102,18 @@ export function buildDnsOverridesBridge(
   };
 }
 
+export function buildSnippetsBridge(
+  ipcRenderer: IpcRenderer,
+): DesktopApi["snippets"] {
+  return {
+    list: () => ipcRenderer.invoke(ipcChannels.snippets.list),
+    create: (draft) => ipcRenderer.invoke(ipcChannels.snippets.create, draft),
+    update: (id: string, draft) =>
+      ipcRenderer.invoke(ipcChannels.snippets.update, id, draft),
+    remove: (id: string) => ipcRenderer.invoke(ipcChannels.snippets.remove, id),
+  };
+}
+
 export function buildKnownHostsBridge(
   ipcRenderer: IpcRenderer,
 ): DesktopApi["knownHosts"] {

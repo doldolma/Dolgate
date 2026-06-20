@@ -282,6 +282,24 @@ func ShellIntegrationInitCommand() string {
 	return " " + shellIntegrationScript + "; history -d $((HISTCMD-1)) >/dev/null 2>&1 || true\r"
 }
 
+// injectedCommandEcho is the visible text the shell echoes back for the injected
+// init command (without the leading space / trailing CR). On a slow host the
+// command can land in the input buffer before the first prompt and get echoed
+// twice — once raw, and again as a prompt redraw that arrives *after* the OSC
+// 133;A marker — so the handshake's "drop everything before the marker" rule
+// can't hide that second copy. We strip this text from every forwarded path
+// instead, so the injection never reaches the screen regardless of timing.
+var injectedCommandEcho = []byte(
+	strings.TrimSuffix(strings.TrimPrefix(ShellIntegrationInitCommand(), " "), "\r"),
+)
+
+func stripInjectedEcho(data []byte) []byte {
+	if len(data) == 0 || len(injectedCommandEcho) == 0 {
+		return data
+	}
+	return bytes.ReplaceAll(data, injectedCommandEcho, nil)
+}
+
 // HandshakeFilter hides the injected shell-integration command's echo: it
 // suppresses interactive output from injection until the first OSC 133;A prompt
 // marker, then forwards everything from that marker onward and becomes a no-op.
@@ -297,12 +315,16 @@ type HandshakeFilter struct {
 // this chunk.
 func (f *HandshakeFilter) Filter(chunk []byte) (forward []byte, handshakeDone bool) {
 	if f.done {
-		return chunk, false
+		// After the handshake, still scrub a late injected-command echo (prompt
+		// redraw) so it never reaches the screen.
+		return stripInjectedEcho(chunk), false
 	}
 	f.buffer = append(f.buffer, chunk...)
 	if idx := bytes.Index(f.buffer, []byte(PromptStartMarker)); idx >= 0 {
 		f.done = true
-		out := f.buffer[idx:]
+		// Forward from the marker on, but drop the injected echo that the prompt
+		// line may redraw right after the marker.
+		out := stripInjectedEcho(f.buffer[idx:])
 		f.buffer = nil
 		return out, true
 	}
@@ -319,7 +341,9 @@ func (f *HandshakeFilter) Flush() []byte {
 		return nil
 	}
 	f.done = true
-	out := f.buffer
+	// Marker never arrived (slow/incompatible host): release the real output but
+	// scrub the injected command echo so it isn't left on the screen.
+	out := stripInjectedEcho(f.buffer)
 	f.buffer = nil
 	return out
 }

@@ -102,7 +102,10 @@ export function useTerminalSessionViewController({
   onClearPendingInteractiveAuth,
   onSessionData,
   onResizeSession,
-}: TerminalSessionPaneProps) {
+  snippets,
+}: TerminalSessionPaneProps & {
+  snippets?: readonly { label: string; command: string; keyword?: string | null }[];
+}) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const terminalRef = useRef<Terminal | null>(null);
   const runtimeRef = useRef<TerminalRuntime | null>(null);
@@ -170,6 +173,7 @@ export function useTerminalSessionViewController({
     connected: tab?.status === 'connected',
     lazyPrepare: host?.kind === 'aws-ec2',
     sendInput: sendAutocompleteInput,
+    snippets,
   });
   const liveAutocompleteInputRef = useRef(autocomplete.handleInput);
   const liveAutocompleteVisibleRef = useRef(false);
@@ -981,6 +985,9 @@ export function useTerminalSessionViewController({
     autocompleteSelectedIndex: autocomplete.selectedIndex,
     autocompleteAnchor,
     acceptAutocompleteSuggestion: autocomplete.acceptSuggestion,
+    autocompletePendingSnippet: autocomplete.pendingSnippet,
+    confirmAutocompleteSnippet: autocomplete.confirmSnippet,
+    cancelAutocompleteSnippet: autocomplete.cancelSnippet,
     shareState,
     canShareSession,
     canStartShare,

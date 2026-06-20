@@ -11,6 +11,7 @@ const (
 	KindDNSOverrides Kind = "dnsOverrides"
 	KindPreferences  Kind = "preferences"
 	KindAWSProfiles  Kind = "awsProfiles"
+	KindSnippets     Kind = "snippets"
 )
 
 var AllKinds = []Kind{
@@ -22,6 +23,7 @@ var AllKinds = []Kind{
 	KindDNSOverrides,
 	KindPreferences,
 	KindAWSProfiles,
+	KindSnippets,
 }
 
 type Record struct {
@@ -40,4 +42,5 @@ type Payload struct {
 	DNSOverrides []Record `json:"dnsOverrides"`
 	Preferences  []Record `json:"preferences"`
 	AWSProfiles  []Record `json:"awsProfiles"`
+	Snippets     []Record `json:"snippets"`
 }

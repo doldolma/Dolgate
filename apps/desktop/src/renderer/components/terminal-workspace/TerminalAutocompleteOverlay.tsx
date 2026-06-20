@@ -10,6 +10,8 @@ function sourceLabel(source: TerminalAutocompleteSuggestion['source']): string {
       return 'Path';
     case 'generator':
       return 'Value';
+    case 'snippet':
+      return 'Snippet';
     default:
       return 'Command';
   }
@@ -20,7 +22,7 @@ interface TerminalAutocompleteOverlayProps {
   command: string;
   anchor: { left: number; top: number; openAbove: boolean };
   selectedIndex: number;
-  onAccept: (insertText: string) => void;
+  onAccept: (suggestion: TerminalAutocompleteSuggestion) => void;
 }
 
 export function TerminalAutocompleteOverlay({
@@ -47,7 +49,12 @@ export function TerminalAutocompleteOverlay({
       aria-label="Command autocomplete suggestions"
     >
       {suggestions.map((suggestion, index) => {
-        const suffix = suggestion.insertText.slice(command.length);
+        const isSnippet = suggestion.source === 'snippet';
+        // Snippets are matched by keyword, not by a prefix of the inserted text,
+        // so don't fake a typed-prefix highlight — show the whole command.
+        const suffix = isSnippet
+          ? suggestion.insertText
+          : suggestion.insertText.slice(command.length);
         const isActive = index === activeIndex;
         return (
           <button
@@ -61,10 +68,10 @@ export function TerminalAutocompleteOverlay({
                 : 'border-transparent hover:bg-[var(--surface-hover)]'
             }`}
             onMouseDown={(event) => event.preventDefault()}
-            onClick={() => onAccept(suggestion.insertText)}
+            onClick={() => onAccept(suggestion)}
           >
             <span className="min-w-0 flex-none truncate">
-              <span className="text-[var(--accent)]">{command}</span>
+              {isSnippet ? null : <span className="text-[var(--accent)]">{command}</span>}
               <span>{suffix}</span>
             </span>
             {suggestion.description ? (

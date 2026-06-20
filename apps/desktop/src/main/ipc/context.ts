@@ -37,6 +37,7 @@ import type {
   PortForwardRepository,
   SecretMetadataRepository,
   SettingsRepository,
+  SnippetRepository,
   SyncOutboxRepository,
 } from "../database";
 import type { LocalFileService } from "../file-service";
@@ -91,6 +92,7 @@ export interface MainIpcContext {
   settings: SettingsRepository;
   portForwards: PortForwardRepository;
   dnsOverrides: DnsOverrideRepository;
+  snippets: SnippetRepository;
   knownHosts: KnownHostRepository;
   activityLogs: ActivityLogRepository;
   secretMetadata: SecretMetadataRepository;

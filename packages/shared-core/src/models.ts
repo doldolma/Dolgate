@@ -1719,6 +1719,24 @@ export function isAwsSsmPortForwardRuleRecord(rule: PortForwardRuleRecord): rule
   return rule.transport === 'aws-ssm';
 }
 
+// Snippet은 터미널에 꺼내 쓰는 저장된 명령이다. 다른 엔티티처럼 동기화된다.
+// command에는 {{name}} / {{name=default}} 형태의 변수를 넣을 수 있고, 삽입 시 값을
+// 입력받아 치환한다. keyword는 자동완성에서 매칭할 짧은 키워드(없으면 label로 매칭).
+export interface SnippetRecord {
+  id: string;
+  label: string;
+  command: string;
+  keyword?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SnippetDraft {
+  label: string;
+  command: string;
+  keyword?: string | null;
+}
+
 export function isEcsTaskPortForwardRuleRecord(rule: PortForwardRuleRecord): rule is EcsTaskPortForwardRuleRecord {
   return rule.transport === 'ecs-task';
 }

@@ -16,6 +16,7 @@ import { getJumpHostCandidates } from '../components/HostForm';
 import { LogsPanel } from '../components/LogsPanel';
 import { OpenSshImportDialog } from '../components/OpenSshImportDialog';
 import { PortForwardingPanel } from '../components/PortForwardingPanel';
+import { SnippetsPanel } from '../components/SnippetsPanel';
 import type { SecretEditDialogRequest } from '../components/SecretEditDialog';
 import { SettingsPanel } from '../components/SettingsPanel';
 import { TermiusImportDialog } from '../components/TermiusImportDialog';
@@ -410,6 +411,14 @@ export function HomeShell({
             onRespondInteractiveAuth={modalViewModel.respondInteractiveAuth}
             onReopenInteractiveAuthUrl={modalViewModel.reopenInteractiveAuthUrl}
             onClearInteractiveAuth={modalViewModel.clearPendingInteractiveAuth}
+          />
+        ) : null}
+
+        {homeViewModel.homeSection === 'snippets' ? (
+          <SnippetsPanel
+            snippets={homeViewModel.snippets}
+            onSave={homeViewModel.saveSnippet}
+            onRemove={homeViewModel.removeSnippet}
           />
         ) : null}
 

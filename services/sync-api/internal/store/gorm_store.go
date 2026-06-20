@@ -526,7 +526,7 @@ func toSyncRecordRow(userID string, kind syncmodel.Kind, record syncmodel.Record
 
 func validateKind(kind syncmodel.Kind) error {
 	switch kind {
-	case syncmodel.KindGroups, syncmodel.KindHosts, syncmodel.KindSecrets, syncmodel.KindKnownHosts, syncmodel.KindPortForwards, syncmodel.KindDNSOverrides, syncmodel.KindPreferences, syncmodel.KindAWSProfiles:
+	case syncmodel.KindGroups, syncmodel.KindHosts, syncmodel.KindSecrets, syncmodel.KindKnownHosts, syncmodel.KindPortForwards, syncmodel.KindDNSOverrides, syncmodel.KindPreferences, syncmodel.KindAWSProfiles, syncmodel.KindSnippets:
 		return nil
 	default:
 		return fmt.Errorf("invalid sync kind: %s", kind)

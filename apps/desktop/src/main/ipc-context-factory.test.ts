@@ -27,6 +27,9 @@ function createDependencies(): RegisterIpcDependencies {
     dnsOverrides: {
       list: vi.fn(() => []),
     } as any,
+    snippets: {
+      list: vi.fn(() => []),
+    } as any,
     knownHosts: {
       list: vi.fn(() => []),
     } as any,

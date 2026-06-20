@@ -14,13 +14,14 @@ type StoreSetter = SliceDeps["set"];
 
 export function createBootstrapSyncServices({ api }: SliceDeps) {
   const syncOperationalData = async (set: StoreSetter) => {
-    const [snapshot, dnsOverrides, knownHosts, activityLogs, keychainEntries] =
+    const [snapshot, dnsOverrides, knownHosts, activityLogs, keychainEntries, snippets] =
       await Promise.all([
         api.portForwards.list(),
         api.dnsOverrides.list(),
         api.knownHosts.list(),
         api.logs.list(),
         api.keychain.list(),
+        api.snippets.list(),
       ]);
 
     set({
@@ -30,11 +31,15 @@ export function createBootstrapSyncServices({ api }: SliceDeps) {
       knownHosts: sortKnownHosts(knownHosts),
       activityLogs: sortLogs(activityLogs),
       keychainEntries: sortKeychainEntries(keychainEntries),
+      snippets,
     } satisfies Partial<AppState>);
   };
 
   const syncSyncedWorkspaceData = async (set: StoreSetter) => {
-    const snapshot = await api.bootstrap.getSyncedWorkspaceSnapshot();
+    const [snapshot, snippets] = await Promise.all([
+      api.bootstrap.getSyncedWorkspaceSnapshot(),
+      api.snippets.list(),
+    ]);
 
     set({
       hosts: sortHosts(snapshot.hosts),
@@ -45,6 +50,7 @@ export function createBootstrapSyncServices({ api }: SliceDeps) {
       knownHosts: sortKnownHosts(snapshot.knownHosts),
       keychainEntries: sortKeychainEntries(snapshot.keychainEntries),
       settings: snapshot.settings,
+      snippets,
     } satisfies Partial<AppState>);
   };
 

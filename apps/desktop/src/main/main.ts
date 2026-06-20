@@ -14,6 +14,7 @@ import {
   PortForwardRepository,
   SecretMetadataRepository,
   SettingsRepository,
+  SnippetRepository,
   SyncOutboxRepository
 } from './database';
 import { DesktopConfigService } from './app-config';
@@ -75,6 +76,7 @@ if (termiusHelperArgIndex >= 0) {
   const settingsRepository = new SettingsRepository(desktopConfigService);
   const portForwardRepository = new PortForwardRepository();
   const dnsOverrideRepository = new DnsOverrideRepository();
+  const snippetRepository = new SnippetRepository();
   const knownHostRepository = new KnownHostRepository();
   const activityLogRepository = new ActivityLogRepository();
   const secretMetadataRepository = new SecretMetadataRepository();
@@ -114,6 +116,7 @@ if (termiusHelperArgIndex >= 0) {
     groupRepository,
     portForwardRepository,
     dnsOverrideRepository,
+    snippetRepository,
     knownHostRepository,
     secretMetadataRepository,
     awsProfileRepository,
@@ -372,6 +375,7 @@ if (termiusHelperArgIndex >= 0) {
       settingsRepository,
       portForwardRepository,
       dnsOverrideRepository,
+      snippetRepository,
       knownHostRepository,
       activityLogRepository,
       secretMetadataRepository,

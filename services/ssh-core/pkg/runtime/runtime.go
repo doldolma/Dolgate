@@ -380,7 +380,7 @@ func (runtime *Runtime) StopAutocomplete(sessionID string) {
 // shellIntegrationHandshakeTimeout bounds how long the echo-suppression
 // handshake waits for the first OSC 133;A prompt marker before releasing any
 // buffered output.
-const shellIntegrationHandshakeTimeout = 2500 * time.Millisecond
+const shellIntegrationHandshakeTimeout = 4000 * time.Millisecond
 
 // installShellIntegration injects the OSC 133 hooks into the interactive shell
 // once per session (idempotent across refreshes) and schedules a flush so a

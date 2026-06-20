@@ -3,6 +3,8 @@ import type {
   AppSettings,
   DnsOverrideDraft,
   DnsOverrideResolvedRecord,
+  SnippetRecord,
+  SnippetDraft,
   AwsSsmPortForwardTargetKind,
   AwsEc2InstanceSummary,
   AwsEcsClusterListItem,
@@ -809,6 +811,12 @@ export interface DesktopApi {
     create: (draft: DnsOverrideDraft) => Promise<DnsOverrideResolvedRecord>;
     update: (id: string, draft: DnsOverrideDraft) => Promise<DnsOverrideResolvedRecord>;
     setStaticActive: (id: string, active: boolean) => Promise<DnsOverrideResolvedRecord>;
+    remove: (id: string) => Promise<void>;
+  };
+  snippets: {
+    list: () => Promise<SnippetRecord[]>;
+    create: (draft: SnippetDraft) => Promise<SnippetRecord>;
+    update: (id: string, draft: SnippetDraft) => Promise<SnippetRecord>;
     remove: (id: string) => Promise<void>;
   };
   knownHosts: {

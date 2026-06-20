@@ -180,3 +180,33 @@ describe('terminal autocomplete', () => {
     ).toEqual([]);
   });
 });
+
+describe('terminal autocomplete snippets', () => {
+  const snippets = [
+    { label: 'Restart web', command: 'kubectl rollout restart deploy/web', keyword: 'rweb' },
+    { label: 'List pods', command: 'kubectl get pods', keyword: null },
+  ];
+
+  it('matches a snippet by keyword and inserts the full command', () => {
+    const results = getTerminalAutocompleteSuggestions(snap([]), cmd('rwe'), { snippets });
+    const snippet = results.find((result) => result.source === 'snippet');
+    expect(snippet?.insertText).toBe('kubectl rollout restart deploy/web');
+    expect(snippet?.description).toBe('Restart web');
+  });
+
+  it('falls back to a label match when there is no keyword', () => {
+    const results = getTerminalAutocompleteSuggestions(snap([]), cmd('List p'), { snippets });
+    expect(
+      results.some(
+        (result) => result.source === 'snippet' && result.insertText === 'kubectl get pods',
+      ),
+    ).toBe(true);
+  });
+
+  it('does not surface multi-line snippets in autocomplete', () => {
+    const results = getTerminalAutocompleteSuggestions(snap([]), cmd('multi'), {
+      snippets: [{ label: 'two liner', command: 'echo a\necho b', keyword: 'multi' }],
+    });
+    expect(results.some((result) => result.source === 'snippet')).toBe(false);
+  });
+});

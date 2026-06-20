@@ -19,6 +19,11 @@ import {
   type TerminalAutocompleteSuggestion,
 } from '../lib/terminal-autocomplete';
 import {
+  parseSnippetVariables,
+  resolveSnippetCommand,
+  type SnippetVariable,
+} from '../lib/snippet';
+import {
   getCachedCommandSpec,
   hasCommandModule,
   hasCommandSpec,
@@ -105,7 +110,11 @@ interface UseTerminalAutocompleteOptions {
   connected: boolean;
   lazyPrepare: boolean;
   sendInput: (data: string) => void;
+  /** Saved snippets to surface as candidates (synced; supplied by the caller). */
+  snippets?: readonly { label: string; command: string; keyword?: string | null }[];
 }
+
+const EMPTY_SNIPPETS: readonly { label: string; command: string; keyword?: string | null }[] = [];
 
 function isPreparationTrigger(data: string): boolean {
   return [...data].some((char) => {
@@ -203,6 +212,7 @@ export function useTerminalAutocomplete({
   connected,
   lazyPrepare,
   sendInput,
+  snippets = EMPTY_SNIPPETS,
 }: UseTerminalAutocompleteOptions) {
   const [capability, setCapability] =
     useState<TerminalAutocompleteCapability | null>(null);
@@ -221,6 +231,12 @@ export function useTerminalAutocomplete({
   // Lazily-loaded Fig-derived spec for the leading command (for option/subcommand
   // discovery beyond what the user has typed).
   const [commandSpec, setCommandSpec] = useState<CommandSpec | null>(null);
+  // Saved snippets (synced) — surfaced as autocomplete candidates, matched by
+  // keyword/label and inserted as the full command. Variables prompt first.
+  const [pendingSnippet, setPendingSnippet] = useState<{
+    command: string;
+    variables: SnippetVariable[];
+  } | null>(null);
   const preparedRef = useRef(false);
   const preparingRef = useRef<Promise<void> | null>(null);
   const queuedInputRef = useRef<string[]>([]);
@@ -247,6 +263,8 @@ export function useTerminalAutocomplete({
   const completionCacheRef = useRef<Map<string, string>>(new Map());
   const completionInflightRef = useRef<Map<string, Promise<string>>>(new Map());
   const dynamicGenerationRef = useRef(0);
+  const snippetsRef = useRef(snippets);
+  const pendingSnippetRef = useRef(pendingSnippet);
 
   useEffect(() => {
     commandRef.current = command;
@@ -254,6 +272,12 @@ export function useTerminalAutocomplete({
   useEffect(() => {
     snapshotRef.current = snapshot;
   }, [snapshot]);
+  useEffect(() => {
+    snippetsRef.current = snippets;
+  }, [snippets]);
+  useEffect(() => {
+    pendingSnippetRef.current = pendingSnippet;
+  }, [pendingSnippet]);
   useEffect(() => {
     sendInputRef.current = sendInput;
   }, [sendInput]);
@@ -481,6 +505,42 @@ export function useTerminalAutocomplete({
     [recordExecutedCommand, setSelected],
   );
 
+  // Insert a snippet by clearing the current line (\x15 empties the buffer, in
+  // both the shell and our local buffer) and sending the full command.
+  const insertSnippetCommand = useCallback(
+    (command: string) => {
+      applyAndSend('\x15' + command);
+    },
+    [applyAndSend],
+  );
+
+  const acceptSnippet = useCallback(
+    (command: string) => {
+      const variables = parseSnippetVariables(command);
+      if (variables.length > 0) {
+        // Has {{variables}} → prompt for values before inserting.
+        setPendingSnippet({ command, variables });
+        return;
+      }
+      insertSnippetCommand(command);
+    },
+    [insertSnippetCommand],
+  );
+
+  const confirmSnippet = useCallback(
+    (values: Record<string, string>) => {
+      const pending = pendingSnippetRef.current;
+      setPendingSnippet(null);
+      if (!pending) {
+        return;
+      }
+      insertSnippetCommand(resolveSnippetCommand(pending.command, values));
+    },
+    [insertSnippetCommand],
+  );
+
+  const cancelSnippet = useCallback(() => setPendingSnippet(null), []);
+
   const prepare = useCallback(() => {
     if (!enabled || !connected || preparedRef.current) {
       return Promise.resolve();
@@ -626,6 +686,7 @@ export function useTerminalAutocomplete({
       // history paths.
       suppressHistory:
         resolveDynamicCompletion(commandSpec, command.value)?.kind === 'path',
+      snippets,
     });
   }, [
     command,
@@ -635,6 +696,7 @@ export function useTerminalAutocomplete({
     enabled,
     integrationReady,
     snapshot,
+    snippets,
   ]);
 
   // Mirror the rendered list for the keyboard handlers, and clamp the highlight
@@ -661,13 +723,21 @@ export function useTerminalAutocomplete({
         suppressHistory:
           resolveDynamicCompletion(commandSpecRef.current, commandRef.current.value)
             ?.kind === 'path',
+        snippets: snippetsRef.current,
       },
     );
     if (list.length === 0) {
       return false;
     }
     const suggestion = list[Math.min(selectedIndexRef.current, list.length - 1)];
-    if (!suggestion || !suggestion.insertText.startsWith(commandRef.current.value)) {
+    if (!suggestion) {
+      return false;
+    }
+    if (suggestion.source === 'snippet') {
+      acceptSnippet(suggestion.insertText);
+      return true;
+    }
+    if (!suggestion.insertText.startsWith(commandRef.current.value)) {
       return false;
     }
     const suffix = suggestion.insertText.slice(commandRef.current.value.length);
@@ -676,7 +746,7 @@ export function useTerminalAutocomplete({
     }
     applyAndSend(suffix);
     return true;
-  }, [applyAndSend]);
+  }, [acceptSnippet, applyAndSend]);
 
   const handleInput = useCallback(
     (data: string) => {
@@ -740,13 +810,17 @@ export function useTerminalAutocomplete({
   );
 
   const acceptSuggestion = useCallback(
-    (insertText: string) => {
-      if (!insertText.startsWith(commandRef.current.value)) {
+    (suggestion: TerminalAutocompleteSuggestion) => {
+      if (suggestion.source === 'snippet') {
+        acceptSnippet(suggestion.insertText);
         return;
       }
-      applyAndSend(insertText.slice(commandRef.current.value.length));
+      if (!suggestion.insertText.startsWith(commandRef.current.value)) {
+        return;
+      }
+      applyAndSend(suggestion.insertText.slice(commandRef.current.value.length));
     },
-    [applyAndSend],
+    [acceptSnippet, applyAndSend],
   );
 
   const handleShellMarker = useCallback((marker: string) => {
@@ -799,5 +873,8 @@ export function useTerminalAutocomplete({
     acceptSuggestion,
     handleShellMarker,
     handleCwd,
+    pendingSnippet,
+    confirmSnippet,
+    cancelSnippet,
   };
 }

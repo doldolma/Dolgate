@@ -876,6 +876,12 @@ export function createMockApi(): DesktopApi {
       setStaticActive: vi.fn(),
       remove: vi.fn().mockResolvedValue(undefined),
     },
+    snippets: {
+      list: vi.fn().mockResolvedValue([]),
+      create: vi.fn(),
+      update: vi.fn(),
+      remove: vi.fn().mockResolvedValue(undefined),
+    },
     knownHosts: {
       list: vi.fn().mockResolvedValue([]),
       probeHost: vi.fn().mockResolvedValue({

@@ -11,6 +11,7 @@ import type {
   PortForwardRepository,
   SecretMetadataRepository,
   SettingsRepository,
+  SnippetRepository,
   SyncOutboxRepository,
 } from "./database";
 import type { HostsOverrideManager } from "./hosts-override-manager";
@@ -32,6 +33,7 @@ import { registerImportIpcHandlers } from "./ipc/imports";
 import { registerKnownHostsLogsKeychainIpcHandlers } from "./ipc/known-hosts-logs-keychain";
 import { registerPortForwardAndDnsIpcHandlers } from "./ipc/port-forwards-dns";
 import { registerSessionShareIpcHandlers } from "./ipc/session-shares";
+import { registerSnippetsIpcHandlers } from "./ipc/snippets";
 import { registerSerialIpcHandlers } from "./ipc/serial";
 import { registerSftpIpcHandlers } from "./ipc/sftp";
 import { registerSshIpcHandlers } from "./ipc/ssh";
@@ -44,6 +46,7 @@ export function registerIpcHandlers(
   settings: SettingsRepository,
   portForwards: PortForwardRepository,
   dnsOverrides: DnsOverrideRepository,
+  snippets: SnippetRepository,
   knownHosts: KnownHostRepository,
   activityLogs: ActivityLogRepository,
   secretMetadata: SecretMetadataRepository,
@@ -69,6 +72,7 @@ export function registerIpcHandlers(
     settings,
     portForwards,
     dnsOverrides,
+    snippets,
     knownHosts,
     activityLogs,
     secretMetadata,
@@ -100,6 +104,7 @@ export function registerIpcHandlers(
   registerContainersIpcHandlers(ctx);
   registerSftpIpcHandlers(ctx);
   registerPortForwardAndDnsIpcHandlers(ctx);
+  registerSnippetsIpcHandlers(ctx);
   registerKnownHostsLogsKeychainIpcHandlers(ctx);
   registerWindowUpdaterSettingsFilesIpcHandlers(ctx);
 }

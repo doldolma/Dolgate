@@ -2,6 +2,7 @@ import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
 import type {
   AwsProfilesServerSupport,
   DnsOverrideRecord,
+  SnippetRecord,
   GroupRecord,
   HostRecord,
   KnownHostRecord,
@@ -21,6 +22,7 @@ import {
   KnownHostRepository,
   DnsOverrideRepository,
   PortForwardRepository,
+  SnippetRepository,
   SecretMetadataRepository,
   AwsProfileRepository,
   SettingsRepository,
@@ -71,6 +73,7 @@ function totalRecordCount(payload: SyncPayloadV2): number {
     payload.knownHosts.length +
     payload.portForwards.length +
     payload.dnsOverrides.length +
+    payload.snippets.length +
     payload.preferences.length +
     payload.awsProfiles.length
   );
@@ -88,6 +91,7 @@ function normalizeSyncPayload(
     knownHosts: Array.isArray(payload?.knownHosts) ? payload.knownHosts : [],
     portForwards: Array.isArray(payload?.portForwards) ? payload.portForwards : [],
     dnsOverrides: Array.isArray(payload?.dnsOverrides) ? payload.dnsOverrides : [],
+    snippets: Array.isArray(payload?.snippets) ? payload.snippets : [],
     preferences: Array.isArray(payload?.preferences) ? payload.preferences : [],
     awsProfiles:
       includeAwsProfiles && Array.isArray(payload?.awsProfiles) ? payload.awsProfiles : []
@@ -254,6 +258,7 @@ export class SyncService {
     private readonly groups: GroupRepository,
     private readonly portForwards: PortForwardRepository,
     private readonly dnsOverrides: DnsOverrideRepository,
+    private readonly snippets: SnippetRepository,
     private readonly knownHosts: KnownHostRepository,
     private readonly secretMetadata: SecretMetadataRepository,
     private readonly awsProfiles: AwsProfileRepository,
@@ -467,6 +472,7 @@ export class SyncService {
     this.knownHosts.replaceAll([]);
     this.portForwards.replaceAll([]);
     this.dnsOverrides.replaceAll([]);
+    this.snippets.replaceAll([]);
     this.awsProfiles.replaceAll([]);
     this.settings.clearSyncedTerminalPreferences();
     this.outbox.clearAll();
@@ -547,6 +553,7 @@ export class SyncService {
     const knownHosts = this.knownHosts.list().map((record) => this.toSyncRecord(record.id, record.updatedAt, record, vaultKeyBase64));
     const portForwards = this.portForwards.list().map((record) => this.toSyncRecord(record.id, record.updatedAt, record, vaultKeyBase64));
     const dnsOverrides = this.dnsOverrides.list().map((record) => this.toSyncRecord(record.id, record.updatedAt, record, vaultKeyBase64));
+    const snippets = this.snippets.list().map((record) => this.toSyncRecord(record.id, record.updatedAt, record, vaultKeyBase64));
     const preferences = [this.settings.getSyncedTerminalPreferences()].map((record) =>
       this.toSyncRecord(record.id, record.updatedAt, record, vaultKeyBase64)
     );
@@ -576,6 +583,7 @@ export class SyncService {
           knownHosts,
           portForwards,
           dnsOverrides,
+          snippets,
           preferences,
           awsProfiles
         },
@@ -610,6 +618,9 @@ export class SyncService {
         case 'dnsOverrides':
           dnsOverrides.push(record);
           break;
+        case 'snippets':
+          snippets.push(record);
+          break;
         case 'preferences':
           preferences.push(record);
           break;
@@ -627,6 +638,7 @@ export class SyncService {
         knownHosts,
         portForwards,
         dnsOverrides,
+        snippets,
         preferences,
         awsProfiles
       },
@@ -674,6 +686,9 @@ export class SyncService {
     const dnsOverrides = payload.dnsOverrides
       .filter((record) => !record.deleted_at)
       .map((record) => decodeEncryptedPayload<DnsOverrideRecord>(record.encrypted_payload, vaultKeyBase64));
+    const snippets = payload.snippets
+      .filter((record) => !record.deleted_at)
+      .map((record) => decodeEncryptedPayload<SnippetRecord>(record.encrypted_payload, vaultKeyBase64));
     const preferences = payload.preferences
       .filter((record) => !record.deleted_at)
       .map((record) => decodeEncryptedPayload<TerminalPreferencesRecord>(record.encrypted_payload, vaultKeyBase64));
@@ -717,6 +732,7 @@ export class SyncService {
       state.data.knownHosts = knownHosts;
       state.data.portForwards = portForwards;
       state.data.dnsOverrides = dnsOverrides;
+      state.data.snippets = snippets;
       if (shouldSyncAwsProfiles) {
         state.data.awsProfiles = awsProfiles.map((record) => ({
           id: record.id,
@@ -841,5 +857,6 @@ type SyncRecordKind =
   | 'knownHosts'
   | 'portForwards'
   | 'dnsOverrides'
+  | 'snippets'
   | 'preferences'
   | 'awsProfiles';

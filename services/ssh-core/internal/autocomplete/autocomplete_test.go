@@ -121,3 +121,45 @@ func TestHandshakeFilterFlushPreservesOutputOnTimeout(t *testing.T) {
 		t.Fatalf("expected passthrough after flush, got %q", forward)
 	}
 }
+
+func TestHandshakeFilterStripsInjectedEchoAfterMarker(t *testing.T) {
+	var filter HandshakeFilter
+	// Prompt marker + prompt text + the injected command echoed again as a prompt
+	// redraw right after the marker (the slow-host failure mode).
+	chunk := append([]byte(PromptStartMarker+"user@host:~$ "), injectedCommandEcho...)
+	forward, done := filter.Filter(chunk)
+	if !done {
+		t.Fatal("expected handshake to complete on the marker chunk")
+	}
+	if bytes.Contains(forward, injectedCommandEcho) {
+		t.Fatalf("injected echo leaked after the marker: %q", forward)
+	}
+	if !bytes.Contains(forward, []byte("user@host:~$ ")) {
+		t.Fatalf("prompt text should be preserved: %q", forward)
+	}
+}
+
+func TestHandshakeFilterStripsInjectedEchoAfterDone(t *testing.T) {
+	var filter HandshakeFilter
+	if _, done := filter.Filter([]byte(PromptStartMarker)); !done {
+		t.Fatal("expected handshake to complete on the marker")
+	}
+	chunk := append([]byte("user@host:~$ "), injectedCommandEcho...)
+	if forward, _ := filter.Filter(chunk); bytes.Contains(forward, injectedCommandEcho) {
+		t.Fatalf("injected echo leaked after the handshake: %q", forward)
+	}
+}
+
+func TestHandshakeFilterFlushStripsInjectedEcho(t *testing.T) {
+	var filter HandshakeFilter
+	// Marker never arrives: a login banner and the injected echo accumulate, then
+	// the timeout flushes. The banner must survive; the injection must not.
+	filter.Filter(append([]byte("login banner\r\n"), injectedCommandEcho...))
+	flushed := filter.Flush()
+	if bytes.Contains(flushed, injectedCommandEcho) {
+		t.Fatalf("injected echo leaked on flush: %q", flushed)
+	}
+	if !bytes.Contains(flushed, []byte("login banner")) {
+		t.Fatalf("real output should survive the flush: %q", flushed)
+	}
+}

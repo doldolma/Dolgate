@@ -1017,6 +1017,11 @@ func NewRouter(store store.Store, authService *auth.Service, config RouterConfig
 			ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
+		snippets, err := store.ListSyncRecords(ctx.Request.Context(), userID, syncmodel.KindSnippets)
+		if err != nil {
+			ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
 
 		ctx.JSON(http.StatusOK, syncmodel.Payload{
 			Groups:       groups,
@@ -1027,6 +1032,7 @@ func NewRouter(store store.Store, authService *auth.Service, config RouterConfig
 			DNSOverrides: dnsOverrides,
 			Preferences:  preferences,
 			AWSProfiles:  awsProfiles,
+			Snippets:     snippets,
 		})
 	})
 	syncGroup.POST("", func(ctx *gin.Context) {
@@ -1065,6 +1071,10 @@ func NewRouter(store store.Store, authService *auth.Service, config RouterConfig
 			return
 		}
 		if err := store.UpsertSyncRecords(ctx.Request.Context(), userID, syncmodel.KindAWSProfiles, payload.AWSProfiles); err != nil {
+			ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		if err := store.UpsertSyncRecords(ctx.Request.Context(), userID, syncmodel.KindSnippets, payload.Snippets); err != nil {
 			ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
