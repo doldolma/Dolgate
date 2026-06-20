@@ -202,6 +202,12 @@ func (stub *stubSFTPService) ListPrincipals(endpointID, requestID string, payloa
 func (stub *stubSFTPService) Delete(endpointID, requestID string, payload coretypes.SFTPDeletePayload) error {
 	return nil
 }
+func (stub *stubSFTPService) ReadFile(endpointID, requestID string, payload coretypes.SFTPReadFilePayload) error {
+	return nil
+}
+func (stub *stubSFTPService) WriteFile(endpointID, requestID string, payload coretypes.SFTPWriteFilePayload) error {
+	return nil
+}
 func (stub *stubSFTPService) StartTransfer(jobID string, payload coretypes.SFTPTransferStartPayload) error {
 	return nil
 }

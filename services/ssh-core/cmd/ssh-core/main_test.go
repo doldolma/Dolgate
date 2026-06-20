@@ -130,6 +130,12 @@ func (stub *stubCoreRuntime) ListSFTPPrincipals(endpointID, requestID string, pa
 func (stub *stubCoreRuntime) DeleteSFTP(endpointID, requestID string, payload protocol.SFTPDeletePayload) error {
 	return nil
 }
+func (stub *stubCoreRuntime) ReadFileSFTP(endpointID, requestID string, payload protocol.SFTPReadFilePayload) error {
+	return nil
+}
+func (stub *stubCoreRuntime) WriteFileSFTP(endpointID, requestID string, payload protocol.SFTPWriteFilePayload) error {
+	return nil
+}
 func (stub *stubCoreRuntime) StartSFTPTransfer(jobID string, payload protocol.SFTPTransferStartPayload) error {
 	return nil
 }

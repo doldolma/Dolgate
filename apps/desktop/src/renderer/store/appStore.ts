@@ -1,12 +1,8 @@
-import type { DesktopApi } from '@shared';
 import { useStore } from 'zustand';
 import { createAppStore } from './createAppStore';
+import { desktopApi } from './desktopApi';
 
-export const desktopApi: DesktopApi = new Proxy({} as DesktopApi, {
-  get(_target, property) {
-    return (window.dolssh as unknown as Record<PropertyKey, unknown>)[property];
-  },
-});
+export { desktopApi };
 
 export const appStore = createAppStore(desktopApi);
 

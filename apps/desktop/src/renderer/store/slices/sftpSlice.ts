@@ -1,6 +1,8 @@
 import type { SliceDeps } from "../services/context";
 import type { SftpPaneState, SftpSlice } from "../types";
 import type { HostDraft } from "@shared";
+import { editorStore } from "../editorStore";
+import { isEditableEntry } from "../../lib/file-detection";
 import {
   AWS_SFTP_DEFAULT_PORT,
   DEFAULT_SFTP_BROWSER_COLUMN_WIDTHS,
@@ -443,12 +445,29 @@ export function createSftpSlice(deps: SliceDeps): SftpSlice {
     openSftpEntry: async (paneId, entryPath) => {
             const pane = getPane(get(), paneId);
             const entry = pane.entries.find((item) => item.path === entryPath);
-            if (!entry || !entry.isDirectory) {
+            if (!entry) {
               return;
             }
-            await loadPaneListing(set, get, paneId, entry.path, {
-              pushToHistory: true,
-            });
+            if (entry.isDirectory) {
+              await loadPaneListing(set, get, paneId, entry.path, {
+                pushToHistory: true,
+              });
+              return;
+            }
+            // A file on a remote pane opens in the built-in editor. Binary /
+            // oversized files are filtered here (and again in ssh-core), so the
+            // editor silently stays closed for anything unsuitable.
+            if (pane.sourceKind === "host" && pane.endpoint) {
+              const maxBytes =
+                (get().settings.editorMaxFileSizeMB ?? 5) * 1024 * 1024;
+              if (isEditableEntry(entry, maxBytes)) {
+                void editorStore.getState().openEditor({
+                  endpointId: pane.endpoint.id,
+                  remotePath: entry.path,
+                  fileName: entry.name,
+                });
+              }
+            }
           },
     refreshSftpPane: async (paneId) => {
             const pane = getPane(get(), paneId);

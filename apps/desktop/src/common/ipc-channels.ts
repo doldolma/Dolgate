@@ -235,6 +235,8 @@ export const ipcChannels = {
     chown: 'sftp:chown',
     listPrincipals: 'sftp:list-principals',
     delete: 'sftp:delete',
+    readFile: 'sftp:read-file',
+    writeFile: 'sftp:write-file',
     startTransfer: 'sftp:start-transfer',
     cancelTransfer: 'sftp:cancel-transfer',
     pauseTransfer: 'sftp:pause-transfer',

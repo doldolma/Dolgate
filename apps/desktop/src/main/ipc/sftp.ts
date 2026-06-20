@@ -10,7 +10,9 @@ import {
   type SftpListPrincipalsInput,
   type SftpListInput,
   type SftpMkdirInput,
+  type SftpReadFileInput,
   type SftpRenameInput,
+  type SftpWriteFileInput,
   type TransferStartInput,
 } from "@shared";
 import { ipcMain } from "electron";
@@ -284,6 +286,19 @@ export function registerSftpIpcHandlers(ctx: MainIpcContext): void {
     ipcChannels.sftp.delete,
     async (_event, input: SftpDeleteInput) => {
       await ctx.coreManager.sftpDelete(input);
+    },
+  );
+
+  ipcMain.handle(
+    ipcChannels.sftp.readFile,
+    async (_event, input: SftpReadFileInput) =>
+      ctx.coreManager.sftpReadFile(input),
+  );
+
+  ipcMain.handle(
+    ipcChannels.sftp.writeFile,
+    async (_event, input: SftpWriteFileInput) => {
+      await ctx.coreManager.sftpWriteFile(input);
     },
   );
 

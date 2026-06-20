@@ -35,6 +35,8 @@ const (
 	CommandSFTPChown                   CommandType = "sftpChown"
 	CommandSFTPListPrincipals          CommandType = "sftpListPrincipals"
 	CommandSFTPDelete                  CommandType = "sftpDelete"
+	CommandSFTPReadFile                CommandType = "sftpReadFile"
+	CommandSFTPWriteFile               CommandType = "sftpWriteFile"
 	CommandSFTPTransferStart           CommandType = "sftpTransferStart"
 	CommandSFTPTransferCancel          CommandType = "sftpTransferCancel"
 	CommandSFTPTransferPause           CommandType = "sftpTransferPause"
@@ -74,6 +76,7 @@ const (
 	EventSFTPConnected                  EventType = "sftpConnected"
 	EventSFTPDisconnected               EventType = "sftpDisconnected"
 	EventSFTPListed                     EventType = "sftpListed"
+	EventSFTPFileRead                   EventType = "sftpFileRead"
 	EventSFTPAck                        EventType = "sftpAck"
 	EventSFTPError                      EventType = "sftpError"
 	EventSFTPSudoStatus                 EventType = "sftpSudoStatus"
@@ -369,6 +372,21 @@ type SFTPDeletePayload struct {
 	Paths []string `json:"paths"`
 }
 
+type SFTPReadFilePayload struct {
+	Path string `json:"path"`
+}
+
+type SFTPWriteFilePayload struct {
+	Path          string `json:"path"`
+	Content       string `json:"content"`
+	Mode          int    `json:"mode"`
+	PreserveMtime bool   `json:"preserveMtime,omitempty"`
+	ExpectedSize  *int64 `json:"expectedSize,omitempty"`
+	ExpectedMtime string `json:"expectedMtime,omitempty"`
+	SudoPassword  string `json:"sudoPassword,omitempty"`
+	Force         bool   `json:"force,omitempty"`
+}
+
 type ContainersInspectPayload struct {
 	ContainerID string `json:"containerId"`
 }
@@ -528,6 +546,14 @@ type SFTPFileEntry struct {
 type SFTPListedPayload struct {
 	Path    string          `json:"path"`
 	Entries []SFTPFileEntry `json:"entries"`
+}
+
+type SFTPFileReadPayload struct {
+	Path    string `json:"path"`
+	Content string `json:"content"`
+	Size    int64  `json:"size"`
+	Mtime   string `json:"mtime"`
+	Mode    int    `json:"mode"`
 }
 
 type SFTPPrincipal struct {

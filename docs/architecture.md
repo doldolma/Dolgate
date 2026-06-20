@@ -47,7 +47,7 @@ flowchart LR
 - 온라인 복구가 실패해도 offline lease가 유효하면 `offline-authenticated` 상태로 홈 화면을 열고, 이후 백그라운드에서 재동기화를 재시도합니다.
 - 새 로그인은 backend `/login` 페이지를 외부 브라우저로 열고, 성공 시 로컬 loopback callback 또는 `dolgate://auth/callback` 식별자를 통해 세션을 교환합니다.
 - `ssh-core`는 앱 시작 시 항상 떠 있지 않고, 실제 SSH/SFTP/포트 포워딩 경로가 필요할 때 lazily 시작합니다.
-- 로컬 파일 브라우징은 Electron main의 파일 서비스가 담당하고, 원격 SFTP 작업과 파일 전송은 Go 코어가 담당합니다.
+- 로컬 파일 브라우징은 Electron main의 파일 서비스가 담당하고, 원격 SFTP 작업·파일 전송·인앱 파일 편집(읽기/쓰기)은 Go 코어가 담당합니다.
 
 ## 모바일 앱
 

@@ -17,10 +17,7 @@ export class NotificationService {
   }
 
   notifyCommandFinished(payload: CommandFinishedNotification): void {
-    // [임시 진단] 알림 IPC 도달 + 표시 여부 확인
-    console.log('[NOTIFY] received:', payload.title, '/', payload.body);
     if (!Notification.isSupported()) {
-      console.log('[NOTIFY] Notification.isSupported() = false');
       return;
     }
     const notification = new Notification({
@@ -31,12 +28,7 @@ export class NotificationService {
     notification.on('click', () => {
       this.focusPrimaryWindow();
     });
-    notification.on('show', () => console.log('[NOTIFY] macOS show event fired'));
-    notification.on('failed', (_event, error) =>
-      console.log('[NOTIFY] failed:', error),
-    );
     notification.show();
-    console.log('[NOTIFY] show() called');
   }
 
   private focusPrimaryWindow(): void {

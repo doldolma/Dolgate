@@ -614,6 +614,28 @@ export function SettingsPanel({
               </SelectField>
             </FieldGroup>
 
+            <FieldGroup label="Editor Max File Size (MB)">
+              <Input
+                aria-label="Editor max file size"
+                type="number"
+                min={1}
+                max={50}
+                step={1}
+                value={settings.editorMaxFileSizeMB ?? 5}
+                onChange={async (event) => {
+                  const next = Number(event.target.value);
+                  await onUpdateSettings({
+                    editorMaxFileSizeMB: Number.isFinite(next)
+                      ? Math.min(50, Math.max(1, Math.round(next)))
+                      : 5,
+                  });
+                }}
+              />
+              <p className="m-0 text-[0.78rem] leading-[1.45] text-[var(--text-soft)]">
+                이 크기 이하의 텍스트 파일만 내장 편집기로 열 수 있습니다.
+              </p>
+            </FieldGroup>
+
             <ToggleSwitch
               checked={settings.sftpPreserveMtime ?? true}
               aria-label="Preserve modified time"

@@ -71,6 +71,9 @@ vi.mock('./components/SettingsPanel', () => ({
 vi.mock('./components/SftpWorkspace', () => ({
   SftpWorkspace: stubComponent('sftp-workspace'),
 }));
+vi.mock('./components/RemoteFileEditorModal', () => ({
+  RemoteFileEditorModal: stubComponent('remote-file-editor-modal'),
+}));
 vi.mock('./components/TermiusImportDialog', () => ({
   TermiusImportDialog: stubComponent('termius-import-dialog'),
 }));

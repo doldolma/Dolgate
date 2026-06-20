@@ -85,6 +85,8 @@ type sftpService interface {
 	Chown(endpointID, requestID string, payload coretypes.SFTPChownPayload) error
 	ListPrincipals(endpointID, requestID string, payload coretypes.SFTPListPrincipalsPayload) error
 	Delete(endpointID, requestID string, payload coretypes.SFTPDeletePayload) error
+	ReadFile(endpointID, requestID string, payload coretypes.SFTPReadFilePayload) error
+	WriteFile(endpointID, requestID string, payload coretypes.SFTPWriteFilePayload) error
 	StartTransfer(jobID string, payload coretypes.SFTPTransferStartPayload) error
 	CancelTransfer(jobID string) error
 	PauseTransfer(jobID string) error
@@ -609,6 +611,14 @@ func (runtime *Runtime) ListSFTPPrincipals(endpointID, requestID string, payload
 
 func (runtime *Runtime) DeleteSFTP(endpointID, requestID string, payload coretypes.SFTPDeletePayload) error {
 	return runtime.sftp.Delete(endpointID, requestID, payload)
+}
+
+func (runtime *Runtime) ReadFileSFTP(endpointID, requestID string, payload coretypes.SFTPReadFilePayload) error {
+	return runtime.sftp.ReadFile(endpointID, requestID, payload)
+}
+
+func (runtime *Runtime) WriteFileSFTP(endpointID, requestID string, payload coretypes.SFTPWriteFilePayload) error {
+	return runtime.sftp.WriteFile(endpointID, requestID, payload)
 }
 
 func (runtime *Runtime) StartSFTPTransfer(jobID string, payload coretypes.SFTPTransferStartPayload) error {

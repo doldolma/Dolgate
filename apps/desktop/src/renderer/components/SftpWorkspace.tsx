@@ -22,6 +22,7 @@ import {
   normalizeSftpBrowserColumnWidths,
   normalizeGroupPath,
 } from "@shared";
+import { isEditableEntry } from "../lib/file-detection";
 import type {
   AppSettings,
   FileEntry,
@@ -1104,6 +1105,7 @@ interface PaneBrowserProps {
   onRefresh: () => Promise<void>;
   onSelectEntry: (input: SftpEntrySelectionInput) => void;
   onOpenEntry: (entryPath: string) => Promise<void>;
+  editorMaxFileSizeBytes: number;
   onOpenCreateDirectoryDialog: () => void;
   onOpenRenameDialog: () => void;
   onOpenPermissionsDialog: () => void;
@@ -1138,6 +1140,7 @@ function PaneBrowser({
   onRefresh,
   onSelectEntry,
   onOpenEntry,
+  editorMaxFileSizeBytes,
   onOpenCreateDirectoryDialog,
   onOpenRenameDialog,
   onOpenPermissionsDialog,
@@ -1250,6 +1253,14 @@ function PaneBrowser({
         top: `${Math.max(12, Math.min(contextMenu.y, window.innerHeight - 220))}px`,
       }
     : null;
+
+  const contextMenuEntry = contextMenu
+    ? pane.entries.find((item) => item.path === contextMenu.entryPath)
+    : undefined;
+  const canEditContextEntry =
+    pane.sourceKind === "host" &&
+    !!contextMenuEntry &&
+    isEditableEntry(contextMenuEntry, editorMaxFileSizeBytes);
 
   const handleInternalDrop = (event: DragEvent, targetPath: string) => {
     const parsed = parseInternalTransferPayload(event.dataTransfer);
@@ -1779,6 +1790,19 @@ function PaneBrowser({
               >
                 소유권 변경
               </button>
+              {canEditContextEntry ? (
+                <button
+                  type="button"
+                  className="flex w-full items-center rounded-[12px] px-[0.8rem] py-[0.75rem] text-left text-[var(--text)] transition-colors duration-150 hover:bg-[color-mix(in_srgb,var(--surface-muted)_92%,transparent_8%)]"
+                  onClick={() => {
+                    const target = contextMenu.entryPath;
+                    setContextMenu(null);
+                    void onOpenEntry(target);
+                  }}
+                >
+                  편집
+                </button>
+              ) : null}
               <button
                 type="button"
                 className="flex w-full items-center rounded-[12px] px-[0.8rem] py-[0.75rem] text-left text-[var(--text)] transition-colors duration-150 hover:bg-[color-mix(in_srgb,var(--surface-muted)_92%,transparent_8%)] disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:bg-transparent"
@@ -3433,6 +3457,9 @@ const SftpWorkspacePanes = memo(function SftpWorkspacePanes({
                   onRefresh={() => onRefreshPane(pane.id)}
                   onSelectEntry={(input) => onSelectEntry(pane.id, input)}
                   onOpenEntry={(entryPath) => onOpenEntry(pane.id, entryPath)}
+                  editorMaxFileSizeBytes={
+                    (settings.editorMaxFileSizeMB ?? 5) * 1024 * 1024
+                  }
                   onOpenCreateDirectoryDialog={() => {
                     setActionDialog({
                       paneId: pane.id,

@@ -136,6 +136,8 @@ export type CoreCommandType =
   | "sftpChown"
   | "sftpListPrincipals"
   | "sftpDelete"
+  | "sftpReadFile"
+  | "sftpWriteFile"
   | "sftpTransferStart"
   | "sftpTransferCancel"
   | "sftpTransferPause"
@@ -174,6 +176,7 @@ export type CoreEventType =
   | "sftpDisconnected"
   | "sftpListed"
   | "sftpAck"
+  | "sftpFileRead"
   | "sftpError"
   | "sftpSudoStatus"
   | "sftpPrincipalsListed"
@@ -457,6 +460,31 @@ export interface SftpRenameInput {
 export interface SftpDeleteInput {
   endpointId: string;
   paths: string[];
+}
+
+export interface SftpReadFileInput {
+  endpointId: string;
+  path: string;
+}
+
+export interface SftpReadFileResult {
+  path: string;
+  content: string;
+  size: number;
+  mtime: string;
+  mode: number;
+}
+
+export interface SftpWriteFileInput {
+  endpointId: string;
+  path: string;
+  content: string;
+  mode: number;
+  preserveMtime?: boolean;
+  expectedSize?: number;
+  expectedMtime?: string;
+  sudoPassword?: string;
+  force?: boolean;
 }
 
 export interface SftpChmodInput {
@@ -900,6 +928,8 @@ export interface DesktopApi {
       input: SftpListPrincipalsInput,
     ) => Promise<SftpPrincipal[]>;
     delete: (input: SftpDeleteInput) => Promise<void>;
+    readFile: (input: SftpReadFileInput) => Promise<SftpReadFileResult>;
+    writeFile: (input: SftpWriteFileInput) => Promise<void>;
     startTransfer: (input: TransferStartInput) => Promise<TransferJob>;
     cancelTransfer: (jobId: string) => Promise<void>;
     pauseTransfer: (jobId: string) => Promise<void>;

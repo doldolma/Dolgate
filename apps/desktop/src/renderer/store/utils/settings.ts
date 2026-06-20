@@ -84,6 +84,7 @@ export const defaultSettings: AppSettings = {
   sftpConflictPolicy: "ask",
   sftpPreserveMtime: true,
   sftpPreservePermissions: false,
+  editorMaxFileSizeMB: 5,
   sessionReplayRetentionCount: 100,
   // @shared의 DEFAULT_COMMAND_NOTIFICATION_SETTINGS를 인라인한다. vite dev가
   // workspace 패키지(@dolssh/shared-core)의 export*로 추가된 value를 module

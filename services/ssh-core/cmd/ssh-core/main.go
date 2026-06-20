@@ -57,6 +57,8 @@ type coreRuntime interface {
 	ChownSFTP(endpointID, requestID string, payload protocol.SFTPChownPayload) error
 	ListSFTPPrincipals(endpointID, requestID string, payload protocol.SFTPListPrincipalsPayload) error
 	DeleteSFTP(endpointID, requestID string, payload protocol.SFTPDeletePayload) error
+	ReadFileSFTP(endpointID, requestID string, payload protocol.SFTPReadFilePayload) error
+	WriteFileSFTP(endpointID, requestID string, payload protocol.SFTPWriteFilePayload) error
 	StartSFTPTransfer(jobID string, payload protocol.SFTPTransferStartPayload) error
 	CancelSFTPTransfer(jobID string) error
 	PauseSFTPTransfer(jobID string) error
@@ -412,6 +414,18 @@ func dispatch(core coreRuntime, writer *eventWriter, request protocol.Request) e
 			return err
 		}
 		return core.DeleteSFTP(request.EndpointID, request.ID, payload)
+	case protocol.CommandSFTPReadFile:
+		var payload protocol.SFTPReadFilePayload
+		if err := json.Unmarshal(request.Payload, &payload); err != nil {
+			return err
+		}
+		return core.ReadFileSFTP(request.EndpointID, request.ID, payload)
+	case protocol.CommandSFTPWriteFile:
+		var payload protocol.SFTPWriteFilePayload
+		if err := json.Unmarshal(request.Payload, &payload); err != nil {
+			return err
+		}
+		return core.WriteFileSFTP(request.EndpointID, request.ID, payload)
 	case protocol.CommandSFTPTransferStart:
 		var payload protocol.SFTPTransferStartPayload
 		if err := json.Unmarshal(request.Payload, &payload); err != nil {
@@ -524,6 +538,8 @@ func isSFTPCommand(frame protocol.Frame) bool {
 		protocol.CommandSFTPChown,
 		protocol.CommandSFTPListPrincipals,
 		protocol.CommandSFTPDelete,
+		protocol.CommandSFTPReadFile,
+		protocol.CommandSFTPWriteFile,
 		protocol.CommandSFTPTransferStart,
 		protocol.CommandSFTPTransferCancel,
 		protocol.CommandSFTPTransferPause,

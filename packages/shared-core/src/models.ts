@@ -946,6 +946,7 @@ export interface AppSettings extends TerminalAppearanceSettings {
   sftpConflictPolicy?: SftpConflictPolicy;
   sftpPreserveMtime?: boolean;
   sftpPreservePermissions?: boolean;
+  editorMaxFileSizeMB?: number;
   sessionReplayRetentionCount: number;
   commandNotificationsEnabled: boolean;
   commandNotificationThresholdSeconds: number;

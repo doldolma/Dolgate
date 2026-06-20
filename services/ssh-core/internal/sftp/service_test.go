@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -254,6 +255,117 @@ func TestServiceConnectsWithKeyboardInteractive(t *testing.T) {
 
 	if err := <-connectDone; err != nil {
 		t.Fatalf("connect failed: %v", err)
+	}
+}
+
+func TestServiceReadsAndWritesFiles(t *testing.T) {
+	server, cleanup := newSFTPTestServer(t)
+	defer cleanup()
+
+	events := make(chan protocol.Event, 64)
+	service := coresftp.New(func(event protocol.Event) {
+		events <- event
+	})
+	defer service.Shutdown()
+
+	if err := service.Connect("endpoint-1", "req-connect", protocol.SFTPConnectPayload{
+		Host:                 "127.0.0.1",
+		Port:                 server.port(),
+		Username:             "tester",
+		AuthType:             "password",
+		Password:             "s3cret",
+		TrustedHostKeyBase64: server.hostKeyBase64,
+	}); err != nil {
+		t.Fatalf("connect failed: %v", err)
+	}
+	connected := waitForEvent(t, events, protocol.EventSFTPConnected)
+	rootPath := connected.Payload.(protocol.SFTPConnectedPayload).Path
+
+	// Seed a text file on disk, then read it over SFTP.
+	textPath := filepath.Join(server.rootDir, "config.conf")
+	if err := os.WriteFile(textPath, []byte("port = 8080\n"), 0o644); err != nil {
+		t.Fatalf("seed file: %v", err)
+	}
+	remotePath := filepath.ToSlash(filepath.Join(rootPath, "config.conf"))
+
+	if err := service.ReadFile("endpoint-1", "req-read", protocol.SFTPReadFilePayload{Path: remotePath}); err != nil {
+		t.Fatalf("read failed: %v", err)
+	}
+	read := waitForEvent(t, events, protocol.EventSFTPFileRead).Payload.(protocol.SFTPFileReadPayload)
+	if read.Content != "port = 8080\n" {
+		t.Fatalf("unexpected content: %q", read.Content)
+	}
+	if read.Size != int64(len("port = 8080\n")) {
+		t.Fatalf("unexpected size: %d", read.Size)
+	}
+
+	// Edit + save a same-length change (the kind size-only diffing would miss).
+	if err := service.WriteFile("endpoint-1", "req-write", protocol.SFTPWriteFilePayload{
+		Path:          remotePath,
+		Content:       "port = 9090\n",
+		Mode:          read.Mode,
+		ExpectedSize:  &read.Size,
+		ExpectedMtime: read.Mtime,
+	}); err != nil {
+		t.Fatalf("write failed: %v", err)
+	}
+	waitForEvent(t, events, protocol.EventSFTPAck)
+
+	saved, err := os.ReadFile(textPath)
+	if err != nil {
+		t.Fatalf("read back: %v", err)
+	}
+	if string(saved) != "port = 9090\n" {
+		t.Fatalf("unexpected saved content: %q", string(saved))
+	}
+
+	// Conflict: an external size change makes the snapshot stale.
+	if err := os.WriteFile(textPath, []byte("x\n"), 0o644); err != nil {
+		t.Fatalf("external change: %v", err)
+	}
+	conflictErr := service.WriteFile("endpoint-1", "req-conflict", protocol.SFTPWriteFilePayload{
+		Path:         remotePath,
+		Content:      "port = 1234\n",
+		Mode:         read.Mode,
+		ExpectedSize: &read.Size,
+	})
+	if conflictErr == nil || !strings.Contains(conflictErr.Error(), "sftp-conflict:") {
+		t.Fatalf("expected conflict error, got: %v", conflictErr)
+	}
+
+	// Force overwrites despite the stale snapshot.
+	if err := service.WriteFile("endpoint-1", "req-force", protocol.SFTPWriteFilePayload{
+		Path:    remotePath,
+		Content: "port = 1234\n",
+		Mode:    read.Mode,
+		Force:   true,
+	}); err != nil {
+		t.Fatalf("force write failed: %v", err)
+	}
+	waitForEvent(t, events, protocol.EventSFTPAck)
+	forced, err := os.ReadFile(textPath)
+	if err != nil {
+		t.Fatalf("read back forced: %v", err)
+	}
+	if string(forced) != "port = 1234\n" {
+		t.Fatalf("unexpected forced content: %q", string(forced))
+	}
+
+	// Binary content is rejected by ReadFile.
+	if err := os.WriteFile(filepath.Join(server.rootDir, "blob.bin"), []byte{0x00, 0x01, 0x02, 0x00}, 0o644); err != nil {
+		t.Fatalf("seed binary: %v", err)
+	}
+	binErr := service.ReadFile("endpoint-1", "req-bin", protocol.SFTPReadFilePayload{
+		Path: filepath.ToSlash(filepath.Join(rootPath, "blob.bin")),
+	})
+	if binErr == nil || !strings.Contains(binErr.Error(), "binary") {
+		t.Fatalf("expected binary rejection, got: %v", binErr)
+	}
+
+	// Directories are not editable.
+	dirErr := service.ReadFile("endpoint-1", "req-dir", protocol.SFTPReadFilePayload{Path: rootPath})
+	if dirErr == nil || !strings.Contains(dirErr.Error(), "directory") {
+		t.Fatalf("expected directory rejection, got: %v", dirErr)
 	}
 }
 

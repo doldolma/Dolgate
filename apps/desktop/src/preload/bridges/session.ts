@@ -146,6 +146,8 @@ export function buildSftpBridge(
     listPrincipals: (input) =>
       ipcRenderer.invoke(ipcChannels.sftp.listPrincipals, input),
     delete: (input) => ipcRenderer.invoke(ipcChannels.sftp.delete, input),
+    readFile: (input) => ipcRenderer.invoke(ipcChannels.sftp.readFile, input),
+    writeFile: (input) => ipcRenderer.invoke(ipcChannels.sftp.writeFile, input),
     startTransfer: (input) =>
       ipcRenderer.invoke(ipcChannels.sftp.startTransfer, input),
     cancelTransfer: (jobId: string) =>

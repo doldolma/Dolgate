@@ -163,7 +163,6 @@ curl http://127.0.0.1:8080/healthz
 - 로컬 회원가입 비활성화
 - Google OIDC 사용
 
-핵심 환경 변수:
 
 ```yaml
 environment:
@@ -181,7 +180,7 @@ environment:
   TRUSTED_PROXIES: "172.17.0.1"
 ```
 
-OIDC에서 특히 중요한 값:
+OIDC 입력값
 
 - `OIDC_ISSUER_URL`
 - `OIDC_CLIENT_ID`
@@ -243,49 +242,13 @@ DATABASE_URL=host=127.0.0.1 user=dolgate_user password=CHANGE_ME_PASSWORD dbname
 
 - 단일 인스턴스면 `/app/data/auth-signing-private.pem` 자동 생성만으로도 충분합니다.
 - 멀티 인스턴스 운영이나 키 교체 정책이 필요하면 직접 PEM을 주입해야 합니다.
-- 운영자가 별도 PEM을 주입하면 자동 생성보다 그 값을 우선 사용합니다.
+- 별도 PEM을 주입하면 자동 생성보다 그 값을 우선 사용합니다.
 
 지원 방식:
 
 - `AUTH_SIGNING_PRIVATE_KEY_PEM`
 - `AUTH_SIGNING_PRIVATE_KEY_PATH`
 
-더 이상 지원하지 않는 legacy 값:
-
-- `JWT_SECRET`
-- `OFFLINE_LEASE_SIGNING_PRIVATE_KEY_PEM`
-
-## 문제 생길 때 먼저 볼 것
-
-### healthz는 되는데 앱 로그인이 안 될 때
-
-- 데스크톱 앱의 `Login Server` 주소가 self-host 주소와 정확히 일치하는지 확인합니다.
-- reverse proxy를 쓴다면 외부 URL과 `OIDC_REDIRECT_URL`이 같은지 확인합니다.
-- `TRUSTED_PROXIES`가 실제 프록시 주소와 맞는지 확인합니다.
-
-### 재시작 후 전부 로그아웃될 때
-
-- `/app/data` volume이 유지되고 있는지 확인합니다.
-- `auth-signing-private.pem`이 바뀌지 않았는지 확인합니다.
-
-### MySQL 연결이 안 될 때
-
-- `DB_DRIVER=mysql`이 설정되어 있는지 확인합니다.
-- `DATABASE_URL`의 host/port/user/password/dbname이 실제 DB와 맞는지 확인합니다.
-- Compose 내부 연결이면 `mysql:3306`, 외부 DB면 실제 IP/도메인을 써야 합니다.
-
-### OIDC 로그인 후 callback이 실패할 때
-
-- `OIDC_REDIRECT_URL`이 provider에 등록된 redirect URI와 정확히 일치하는지 확인합니다.
-- 외부 접속 주소가 `https://ssh.example.com`인데 내부 `http://sync-api:8080` 값을 넣지 않았는지 확인합니다.
-
-## 수동 검증 체크리스트
-
-- `curl http://127.0.0.1:8080/healthz`가 성공하는지
-- 데스크톱 앱에서 브라우저 로그인과 세션 교환이 정상 동작하는지
-- 로그인 후 동기화가 정상적으로 동작하는지
-- 서버 재시작 후에도 기존 로그인 상태가 유지되는지
-- MySQL/OIDC 환경이라면 로컬 로그인 비활성화와 OIDC 로그인만 노출되는지
 
 ## 관련 문서
 

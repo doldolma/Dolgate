@@ -61,6 +61,8 @@ frame kind는 두 가지입니다.
 - `sftpRename`
 - `sftpDelete`
 - `sftpChmod`
+- `sftpReadFile`
+- `sftpWriteFile`
 - `sftpTransferStart`
 - `sftpTransferCancel`
 
@@ -73,6 +75,7 @@ frame kind는 두 가지입니다.
 - `sftpConnected`
 - `sftpDisconnected`
 - `sftpListed`
+- `sftpFileRead`
 - `sftpAck`
 - `sftpError`
 - `sftpTransferProgress`

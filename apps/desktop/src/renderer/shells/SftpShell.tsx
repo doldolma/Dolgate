@@ -1,4 +1,5 @@
 import type { AuthState } from '@shared';
+import { RemoteFileEditorModal } from '../components/RemoteFileEditorModal';
 import { SftpWorkspace } from '../components/SftpWorkspace';
 import type { useLoginController } from '../controllers/useLoginController';
 import { cn } from '../lib/cn';
@@ -107,6 +108,7 @@ export function SftpShell({
           onUpdateSettings={settingsViewModel.updateSettings}
         />
       </div>
+      <RemoteFileEditorModal />
     </section>
   );
 }

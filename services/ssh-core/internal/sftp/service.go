@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path"
 	"sort"
@@ -471,6 +472,255 @@ func (s *Service) Delete(endpointID, requestID string, payload protocol.SFTPDele
 		},
 	})
 	return nil
+}
+
+const (
+	maxEditableFileBytes = 16 * 1024 * 1024 // hard cap; the renderer enforces a smaller, configurable limit
+	binarySniffBytes     = 8 * 1024
+	writeConflictPrefix  = "sftp-conflict:"
+	sudoRequiredPrefix   = "sftp-sudo-required:"
+)
+
+func looksBinary(content []byte) bool {
+	sniff := content
+	if len(sniff) > binarySniffBytes {
+		sniff = sniff[:binarySniffBytes]
+	}
+	for _, b := range sniff {
+		if b == 0x00 {
+			return true
+		}
+	}
+	return false
+}
+
+// ReadFile loads a small text file into memory for the built-in editor. It
+// rejects directories, oversized files, and binary content so the renderer
+// never tries to edit something unsuitable.
+func (s *Service) ReadFile(endpointID, requestID string, payload protocol.SFTPReadFilePayload) error {
+	handle, err := s.getEndpoint(endpointID)
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(payload.Path) == "" {
+		return fmt.Errorf("path is required")
+	}
+
+	info, err := handle.sftp.Stat(payload.Path)
+	if err != nil {
+		return err
+	}
+	if info.IsDir() {
+		return fmt.Errorf("cannot edit a directory")
+	}
+	if info.Size() > maxEditableFileBytes {
+		return fmt.Errorf("file is too large to edit (%d bytes)", info.Size())
+	}
+
+	file, err := handle.sftp.Open(payload.Path)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+
+	content, err := io.ReadAll(io.LimitReader(file, maxEditableFileBytes+1))
+	if err != nil {
+		return err
+	}
+	if int64(len(content)) > maxEditableFileBytes {
+		return fmt.Errorf("file is too large to edit")
+	}
+	if looksBinary(content) {
+		return fmt.Errorf("file appears to be binary and cannot be edited as text")
+	}
+
+	s.emit(protocol.Event{
+		Type:       protocol.EventSFTPFileRead,
+		RequestID:  requestID,
+		EndpointID: endpointID,
+		Payload: protocol.SFTPFileReadPayload{
+			Path:    payload.Path,
+			Content: string(content),
+			Size:    info.Size(),
+			Mtime:   info.ModTime().UTC().Format(time.RFC3339),
+			Mode:    int(info.Mode().Perm()),
+		},
+	})
+	return nil
+}
+
+// WriteFile saves editor content back to the remote file. It detects whether
+// the remote changed since it was read (conflict), then writes atomically
+// (temp + rename) when the directory is writable, falling back to a privileged
+// sudo write (mirrors Chown) for root-owned locations.
+func (s *Service) WriteFile(endpointID, requestID string, payload protocol.SFTPWriteFilePayload) error {
+	handle, err := s.getEndpoint(endpointID)
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(payload.Path) == "" {
+		return fmt.Errorf("path is required")
+	}
+
+	content := []byte(payload.Content)
+	info, statErr := handle.sftp.Stat(payload.Path)
+
+	if statErr == nil && !payload.Force {
+		if payload.ExpectedSize != nil && info.Size() != *payload.ExpectedSize {
+			return fmt.Errorf("%s remote file changed since it was opened", writeConflictPrefix)
+		}
+		if payload.ExpectedMtime != "" && info.ModTime().UTC().Format(time.RFC3339) != payload.ExpectedMtime {
+			return fmt.Errorf("%s remote file changed since it was opened", writeConflictPrefix)
+		}
+	}
+
+	mode := os.FileMode(0o644)
+	switch {
+	case payload.Mode != 0:
+		mode = os.FileMode(payload.Mode).Perm()
+	case statErr == nil:
+		mode = info.Mode().Perm()
+	}
+
+	// Without an explicit sudo password, try a direct unprivileged atomic write.
+	if strings.TrimSpace(payload.SudoPassword) == "" {
+		writeErr := atomicRemoteWrite(handle.sftp, payload.Path, content, mode, payload.PreserveMtime, info, statErr)
+		if writeErr == nil {
+			s.emit(protocol.Event{
+				Type:       protocol.EventSFTPAck,
+				RequestID:  requestID,
+				EndpointID: endpointID,
+				Payload:    protocol.AckPayload{Message: "file saved"},
+			})
+			return nil
+		}
+		if classifyTransferError(writeErr) != transferErrorPermissionDenied {
+			return writeErr
+		}
+		// Permission denied: only escalate automatically when sudo is usable.
+		status := s.getSudoStatus(endpointID)
+		if status != "root" && status != "passwordless" && handle.sudoPassword == "" {
+			return fmt.Errorf("%s sudo password is required to write %s", sudoRequiredPrefix, payload.Path)
+		}
+	}
+
+	if err := s.sudoRemoteWrite(endpointID, handle, payload.Path, content, mode, payload.SudoPassword); err != nil {
+		return err
+	}
+	if strings.TrimSpace(payload.SudoPassword) != "" {
+		s.setSudoStatus(endpointID, "passwordless", "sudo password accepted", strings.TrimRight(payload.SudoPassword, "\r\n"))
+	}
+	s.emit(protocol.Event{
+		Type:       protocol.EventSFTPAck,
+		RequestID:  requestID,
+		EndpointID: endpointID,
+		Payload:    protocol.AckPayload{Message: "file saved"},
+	})
+	return nil
+}
+
+// atomicRemoteWrite writes content to a sibling temp file then renames it over
+// the target, so an interrupted write never truncates the original. It needs
+// only directory write permission.
+func atomicRemoteWrite(
+	client *sftppkg.Client,
+	targetPath string,
+	content []byte,
+	mode os.FileMode,
+	preserveMtime bool,
+	info os.FileInfo,
+	statErr error,
+) error {
+	dir := path.Dir(targetPath)
+	tmpPath := path.Join(dir, "."+path.Base(targetPath)+".dolgate-tmp")
+	_ = client.Remove(tmpPath)
+
+	file, err := client.Create(tmpPath)
+	if err != nil {
+		return err
+	}
+	if _, err := file.Write(content); err != nil {
+		_ = file.Close()
+		_ = client.Remove(tmpPath)
+		return err
+	}
+	if err := file.Close(); err != nil {
+		_ = client.Remove(tmpPath)
+		return err
+	}
+	if err := client.Chmod(tmpPath, mode); err != nil {
+		_ = client.Remove(tmpPath)
+		return err
+	}
+	if preserveMtime && statErr == nil {
+		_ = client.Chtimes(tmpPath, time.Now(), info.ModTime())
+	}
+	if err := client.PosixRename(tmpPath, targetPath); err != nil {
+		// Servers without the posix-rename extension: best-effort fallback.
+		if renameErr := client.Rename(tmpPath, targetPath); renameErr != nil {
+			_ = client.Remove(tmpPath)
+			return renameErr
+		}
+	}
+	return nil
+}
+
+// sudoRemoteWrite stages content in a user-writable temp via SFTP (no
+// privilege), then installs it into place with sudo. The sudo password travels
+// only on the command stdin, never in the command string (mirrors Chown).
+func (s *Service) sudoRemoteWrite(
+	endpointID string,
+	handle *endpointHandle,
+	targetPath string,
+	content []byte,
+	mode os.FileMode,
+	sudoPassword string,
+) error {
+	stagePath := fmt.Sprintf("/tmp/.dolgate-edit-%d.tmp", time.Now().UnixNano())
+	stage, err := handle.sftp.Create(stagePath)
+	if err != nil {
+		return fmt.Errorf("failed to stage file for privileged save: %w", err)
+	}
+	if _, err := stage.Write(content); err != nil {
+		_ = stage.Close()
+		_ = handle.sftp.Remove(stagePath)
+		return err
+	}
+	if err := stage.Close(); err != nil {
+		_ = handle.sftp.Remove(stagePath)
+		return err
+	}
+	defer func() { _ = handle.sftp.Remove(stagePath) }()
+
+	prefix, stdin := s.sudoInvocation(endpointID, handle, sudoPassword)
+	command := buildSudoInstallCommand(prefix, fmt.Sprintf("%04o", mode.Perm()), stagePath, targetPath)
+	if _, stderr, err := sshcmd.RunWithInputWithTimeout(handle.client, command, stdin, 30*time.Second); err != nil {
+		return formatRemoteCommandError(err, stderr)
+	}
+	return nil
+}
+
+func (s *Service) sudoInvocation(endpointID string, handle *endpointHandle, sudoPassword string) (string, []byte) {
+	if s.getSudoStatus(endpointID) == "root" {
+		return "", nil
+	}
+	password := strings.TrimRight(sudoPassword, "\r\n")
+	if password == "" {
+		password = handle.sudoPassword
+	}
+	if password != "" {
+		return "sudo -S -p ''", []byte(password + "\n")
+	}
+	return "sudo -n", nil
+}
+
+func buildSudoInstallCommand(prefix, mode, stagePath, targetPath string) string {
+	parts := []string{}
+	if strings.TrimSpace(prefix) != "" {
+		parts = append(parts, prefix)
+	}
+	parts = append(parts, "install", "-m", mode, "--", sshcmd.QuotePosix(stagePath), sshcmd.QuotePosix(targetPath))
+	return strings.Join(parts, " ")
 }
 
 func (s *Service) StartTransfer(jobID string, payload protocol.SFTPTransferStartPayload) error {

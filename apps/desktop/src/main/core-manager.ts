@@ -48,6 +48,9 @@ import type {
   SftpChmodInput,
   SftpChownInput,
   SftpDeleteInput,
+  SftpReadFileInput,
+  SftpReadFileResult,
+  SftpWriteFileInput,
   SftpEndpointSummary,
   SftpLifecycleLogMetadata,
   SftpListPrincipalsInput,
@@ -649,6 +652,16 @@ function toSftpPrincipals(payload: Record<string, unknown>): SftpPrincipal[] {
       } satisfies SftpPrincipal;
     })
     .filter((principal) => principal.name && Number.isFinite(principal.id));
+}
+
+function toSftpFileRead(payload: Record<string, unknown>): SftpReadFileResult {
+  return {
+    path: String(payload.path ?? ""),
+    content: typeof payload.content === "string" ? payload.content : "",
+    size: Number(payload.size ?? 0),
+    mtime: typeof payload.mtime === "string" ? payload.mtime : "",
+    mode: Number(payload.mode ?? 0),
+  };
 }
 
 function normalizeSftpSudoStatus(value: string): SftpEndpointSummary["sudoStatus"] {
@@ -2952,6 +2965,45 @@ export class CoreManager {
         error,
         input.paths[0] ?? null,
       );
+      throw error;
+    }
+  }
+
+  async sftpReadFile(input: SftpReadFileInput): Promise<SftpReadFileResult> {
+    await this.start();
+    try {
+      const response = await this.requestResponse(
+        {
+          id: randomUUID(),
+          type: "sftpReadFile",
+          endpointId: input.endpointId,
+          payload: { path: input.path },
+        },
+        ["sftpFileRead"],
+        { timeoutMs: 30000 },
+      );
+      return toSftpFileRead(response);
+    } catch (error) {
+      this.recordSftpLifecycleError(input.endpointId, error, input.path);
+      throw error;
+    }
+  }
+
+  async sftpWriteFile(input: SftpWriteFileInput): Promise<void> {
+    await this.start();
+    try {
+      await this.requestResponse(
+        {
+          id: randomUUID(),
+          type: "sftpWriteFile",
+          endpointId: input.endpointId,
+          payload: input,
+        },
+        ["sftpAck"],
+        { timeoutMs: 30000 },
+      );
+    } catch (error) {
+      this.recordSftpLifecycleError(input.endpointId, error, input.path);
       throw error;
     }
   }
