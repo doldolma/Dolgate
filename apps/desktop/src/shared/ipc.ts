@@ -198,7 +198,8 @@ export type CoreEventType =
   | "terminalAutocompleteCapability"
   | "terminalAutocompleteSnapshot"
   | "terminalAutocompleteShellState"
-  | "terminalCompletionResult";
+  | "terminalCompletionResult"
+  | "moshState";
 export type CoreStreamType = "write" | "data";
 
 // renderer는 hostId만 넘기고, 실제 비밀값 해석은 main 프로세스가 담당한다.
@@ -271,6 +272,8 @@ export interface ResolvedCoreConnectPayload {
   rows: number;
   command?: string;
   env?: HostEnvVar[];
+  // true면 SSH 대신 mosh(UDP)로 연결한다. Go 코어의 ConnectPayload.UseMosh에 매핑된다.
+  useMosh?: boolean;
 }
 
 export interface ResolvedLocalConnectPayload {

@@ -190,6 +190,9 @@ export function registerSshIpcHandlers(ctx: MainIpcContext): void {
         command: input.command?.trim() || undefined,
         startupCommand: input.startupCommand,
         env: secrets.env,
+        // mosh는 jump와 상호 배타다(UI에서 차단). 방어적으로 jump가 있으면 useMosh를
+        // 무시해 jump 연결을 보장한다(잘못된 조합이 들어와도 안전하게 SSH로 폴백).
+        useMosh: jump ? false : sshHost.useMosh === true,
         hostId: sshHost.id,
         hostLabel: sshHost.label,
         title,

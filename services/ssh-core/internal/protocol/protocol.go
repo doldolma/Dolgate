@@ -104,6 +104,7 @@ const (
 	EventTerminalAutocompleteSnapshot   = coretypes.EventTerminalAutocompleteSnapshot
 	EventTerminalAutocompleteShellState = coretypes.EventTerminalAutocompleteShellState
 	EventTerminalCompletionResult       = coretypes.EventTerminalCompletionResult
+	EventMoshState                      = coretypes.EventMoshState
 )
 
 type FrameKind byte
@@ -179,6 +180,7 @@ type SSMPortForwardStartPayload = coretypes.SSMPortForwardStartPayload
 type StatusPayload = coretypes.StatusPayload
 type ErrorPayload = coretypes.ErrorPayload
 type ClosedPayload = coretypes.ClosedPayload
+type MoshStatePayload = coretypes.MoshStatePayload
 type SFTPConnectedPayload = coretypes.SFTPConnectedPayload
 type ContainersConnectedPayload = coretypes.ContainersConnectedPayload
 type HostKeyProbedPayload = coretypes.HostKeyProbedPayload

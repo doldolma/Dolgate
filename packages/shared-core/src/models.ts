@@ -64,7 +64,7 @@ export type SyncBootstrapStatus = 'idle' | 'syncing' | 'ready' | 'paused' | 'err
 export type AwsProfilesServerSupport = 'unknown' | 'supported' | 'unsupported';
 export type TermiusProbeStatus = 'ready' | 'unsupported' | 'not-installed' | 'no-data' | 'error';
 export type AwsSshMetadataStatus = 'idle' | 'loading' | 'ready' | 'error';
-export type SessionConnectionKind = 'local' | 'ssh' | 'aws-ssm' | 'warpgate' | 'aws-ecs-exec' | 'serial';
+export type SessionConnectionKind = 'local' | 'ssh' | 'mosh' | 'aws-ssm' | 'warpgate' | 'aws-ecs-exec' | 'serial';
 export type SessionLifecycleStatus = 'connected' | 'closed' | 'error';
 export type PortForwardLifecycleStatus = 'running' | 'closed' | 'error';
 export type SftpLifecycleStatus = 'connecting' | 'connected' | 'closed' | 'error';
@@ -188,6 +188,8 @@ export interface SshHostRecord extends HostBaseRecord {
   /** id of another SSH host to tunnel through (ProxyJump / bastion); null = direct. */
   jumpHostId?: string | null;
   startupCommand?: HostStartupCommand | null;
+  /** mosh(UDP)로 연결한다. jump host와는 상호 배타(UI에서 차단). null/undefined = SSH. */
+  useMosh?: boolean | null;
 }
 
 export interface SshHostDraft extends HostBaseDraft {
@@ -202,6 +204,8 @@ export interface SshHostDraft extends HostBaseDraft {
   /** id of another SSH host to tunnel through (ProxyJump / bastion); null = direct. */
   jumpHostId?: string | null;
   startupCommand?: HostStartupCommand | null;
+  /** mosh(UDP)로 연결한다. jump host와는 상호 배타(UI에서 차단). null/undefined = SSH. */
+  useMosh?: boolean | null;
 }
 
 export interface AwsEc2HostRecord extends HostBaseRecord {
@@ -2652,5 +2656,9 @@ export interface TerminalTab {
   reconnect?: TerminalReconnectState | null;
   sessionShare?: SessionShareState | null;
   hasReceivedOutput?: boolean;
+  /** mosh 세션의 연결 상태(하단 상태바 표시용). mosh가 아니면 null/undefined. */
+  moshState?: 'connected' | 'reconnecting' | 'disconnected' | null;
+  /** 마지막으로 mosh 서버 응답을 받은 시각(RFC3339). "N초 전 응답" 표시에 쓴다. */
+  lastMoshResponseAt?: string | null;
   lastEventAt: string;
 }

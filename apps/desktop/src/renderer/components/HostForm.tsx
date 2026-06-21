@@ -641,7 +641,8 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
         jumpHostId: host.jumpHostId ?? null,
         groupName: host.groupName ?? '',
         terminalThemeId: host.terminalThemeId ?? null,
-        startupCommand: host.startupCommand ?? null
+        startupCommand: host.startupCommand ?? null,
+        useMosh: host.useMosh ?? null
       };
       nextSelectedSecretRef = host.secretRef ?? '';
       nextCredentialMode = host.secretRef ? 'existing' : 'new';
@@ -1691,6 +1692,7 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
                 searchPlaceholder="이름, 호스트, 사용자 검색"
                 value={sshDraft.jumpHostId ?? ''}
                 options={jumpHostSelectOptions}
+                disabled={sshDraft.useMosh === true && !sshDraft.jumpHostId}
                 onChange={(value) =>
                   setDraft({ ...sshDraft, jumpHostId: value || null })
                 }
@@ -1699,6 +1701,21 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
                 Connect through another saved SSH host (bastion / ProxyJump).
               </span>
             </label>
+            <div className={fieldClassName}>
+              <ToggleSwitch
+                label="Mosh로 연결"
+                description={
+                  sshDraft.jumpHostId
+                    ? 'jump host와 함께 쓸 수 없습니다.'
+                    : '원격 서버에 mosh 패키지가 설치돼 있어야 합니다. 네트워크가 끊기거나 절전에서 복귀해도 세션이 유지됩니다.'
+                }
+                checked={sshDraft.useMosh === true && !sshDraft.jumpHostId}
+                disabled={Boolean(sshDraft.jumpHostId)}
+                onClick={() =>
+                  setDraft({ ...sshDraft, useMosh: sshDraft.useMosh !== true })
+                }
+              />
+            </div>
           </FormSection>
 
           <FormSection

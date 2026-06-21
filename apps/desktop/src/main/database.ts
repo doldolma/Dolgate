@@ -476,6 +476,7 @@ function toSshHostRecord(id: string, draft: SshHostDraft, secretRef: string | nu
     certificatePath: null,
     secretRef: secretRef ?? draft.secretRef ?? null,
     jumpHostId: draft.jumpHostId ?? null,
+    useMosh: draft.useMosh ?? null,
     groupName: normalizeGroupPath(draft.groupName),
     tags: normalizeTags(draft.tags),
     terminalThemeId: normalizeTerminalThemeId(draft.terminalThemeId),

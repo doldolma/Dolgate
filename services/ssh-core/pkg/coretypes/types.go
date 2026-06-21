@@ -99,6 +99,7 @@ const (
 	EventTerminalAutocompleteSnapshot   EventType = "terminalAutocompleteSnapshot"
 	EventTerminalAutocompleteShellState EventType = "terminalAutocompleteShellState"
 	EventTerminalCompletionResult       EventType = "terminalCompletionResult"
+	EventMoshState                      EventType = "moshState"
 )
 
 const (
@@ -161,6 +162,9 @@ type ConnectPayload struct {
 	Rows                  int         `json:"rows"`
 	Command               string      `json:"command,omitempty"`
 	Env                   []EnvVar    `json:"env,omitempty"`
+	// UseMosh가 true면 SSH 대신 mosh(UDP)로 연결한다. SSH는 mosh-server 부트스트랩에만
+	// 쓰이고 이후 통신은 mosh SSP다. jump host와는 상호 배타(데스크톱 UI에서 차단).
+	UseMosh bool `json:"useMosh,omitempty"`
 }
 
 type AWSConnectPayload struct {
@@ -507,6 +511,14 @@ type ClosedPayload struct {
 	// "transport"(전송 단절), "keepalive"(keepalive 연속 실패), "client"(클라이언트 요청).
 	// 자동 재연결 판단에서 정상 종료(exit)를 되살리지 않도록 하는 데 쓰인다.
 	Reason string `json:"reason,omitempty"`
+}
+
+// MoshStatePayload는 mosh 세션의 연결 상태 변화를 renderer에 알린다. State는
+// "connected"|"reconnecting"|"disconnected" 중 하나다. LastResponseAt은 마지막으로
+// 서버 응답(SSP)을 받은 시각(RFC3339)으로, UI가 "N초 전 응답"을 표시하는 데 쓴다.
+type MoshStatePayload struct {
+	State          string `json:"state"`
+	LastResponseAt string `json:"lastResponseAt,omitempty"`
 }
 
 type SFTPConnectedPayload struct {

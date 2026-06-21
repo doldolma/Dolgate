@@ -296,6 +296,34 @@ export function createRuntimeEventSlice(deps: SliceDeps): RuntimeEventSlice {
             const activeRetryAttemptBeforeUpdate =
               get().activeCredentialRetryAttempt;
             scheduleActivityLogsRefresh();
+
+            // mosh 연결 상태 이벤트 — 해당 탭의 moshState/lastMoshResponseAt만 갱신한다.
+            if (event.type === "moshState" && sessionId) {
+              const payload = event.payload as {
+                state?: string;
+                lastResponseAt?: string;
+              };
+              const moshState =
+                payload.state === "reconnecting" ||
+                payload.state === "disconnected"
+                  ? payload.state
+                  : "connected";
+              set((state) => ({
+                tabs: state.tabs.map((tab) =>
+                  tab.sessionId === sessionId
+                    ? {
+                        ...tab,
+                        moshState,
+                        lastMoshResponseAt:
+                          payload.lastResponseAt ??
+                          tab.lastMoshResponseAt ??
+                          null,
+                      }
+                    : tab,
+                ),
+              }));
+              return;
+            }
     
             if (endpointId) {
               const containerHostId = resolveContainersHostIdByEndpoint(endpointId);

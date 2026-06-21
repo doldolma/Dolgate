@@ -16,6 +16,7 @@ import { getPathForDroppedFile } from '../../services/desktop/files';
 import { useTerminalSessionViewController } from '../../controllers/useTerminalSessionViewController';
 import { TerminalChatToastRegion } from './TerminalChatToastRegion';
 import { TerminalConnectionOverlay } from './TerminalConnectionOverlay';
+import { TerminalMoshStatusBar } from './TerminalMoshStatusBar';
 import { TerminalInteractiveAuthOverlay } from './TerminalInteractiveAuthOverlay';
 import { TerminalPaneHeader } from './TerminalPaneHeader';
 import { SerialSessionActions } from './SerialSessionActions';
@@ -399,6 +400,12 @@ export function TerminalSessionPane(props: TerminalSessionPaneProps) {
           onCancel={controller.cancelAutocompleteSnippet}
         />
       </div>
+      {tab?.moshState ? (
+        <TerminalMoshStatusBar
+          state={tab.moshState}
+          lastResponseAt={tab.lastMoshResponseAt ?? null}
+        />
+      ) : null}
     </div>
   );
 }

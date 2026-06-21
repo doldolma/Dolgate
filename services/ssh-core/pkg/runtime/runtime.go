@@ -12,6 +12,7 @@ import (
 	containersvc "dolssh/services/ssh-core/internal/containers"
 	"dolssh/services/ssh-core/internal/forwarding"
 	"dolssh/services/ssh-core/internal/localsession"
+	"dolssh/services/ssh-core/internal/moshsession"
 	"dolssh/services/ssh-core/internal/serialsession"
 	coresftp "dolssh/services/ssh-core/internal/sftp"
 	"dolssh/services/ssh-core/internal/sshconn"
@@ -36,6 +37,17 @@ type sshSessionManager interface {
 	InstallShellIntegration(sessionID string) error
 	FlushShellIntegration(sessionID string)
 	RunCompletionCommand(sessionID, command string) (string, bool, error)
+}
+
+// moshSessionManager는 mosh(UDP) 세션을 다룬다. SSH bootstrap+UDP를 캡슐화하며,
+// 자동완성/셸 통합은 v1에서 지원하지 않으므로 sshSessionManager보다 좁다.
+type moshSessionManager interface {
+	Connect(sessionID, requestID string, payload coretypes.ConnectPayload) error
+	WriteBytes(sessionID string, data []byte) error
+	Resize(sessionID string, cols, rows int) error
+	Disconnect(sessionID string) error
+	RespondKeyboardInteractive(sessionID, challengeID string, responses []string) error
+	HasSession(sessionID string) bool
 }
 
 type awsSessionManager interface {
@@ -132,6 +144,7 @@ type Runtime struct {
 	emitEvent                 func(coretypes.Event)
 	emitStream                func(coretypes.StreamFrame, []byte)
 	ssh                       sshSessionManager
+	mosh                      moshSessionManager
 	aws                       awsSessionManager
 	local                     localSessionManager
 	serial                    serialSessionManager
@@ -160,6 +173,7 @@ func New(options Options) *Runtime {
 		emitEvent,
 		emitStream,
 		sshsession.NewManager(emitEvent, emitStream),
+		moshsession.NewManager(emitEvent, emitStream),
 		awssession.NewManager(emitEvent, emitStream),
 		localsession.NewManager(emitEvent, emitStream),
 		serialsession.NewManager(emitEvent, emitStream),
@@ -203,6 +217,7 @@ func newRuntimeWithDeps(
 	emitEvent func(coretypes.Event),
 	emitStream func(coretypes.StreamFrame, []byte),
 	ssh sshSessionManager,
+	mosh moshSessionManager,
 	aws awsSessionManager,
 	local localSessionManager,
 	serial serialSessionManager,
@@ -217,6 +232,7 @@ func newRuntimeWithDeps(
 		emitEvent:                 emitEvent,
 		emitStream:                emitStream,
 		ssh:                       ssh,
+		mosh:                      mosh,
 		aws:                       aws,
 		local:                     local,
 		serial:                    serial,
@@ -253,6 +269,11 @@ func (runtime *Runtime) Health(requestID string) {
 }
 
 func (runtime *Runtime) ConnectSSH(sessionID, requestID string, payload coretypes.ConnectPayload) error {
+	// mosh는 SSH 위의 확장이라 같은 connect 진입점/페이로드를 공유한다. UseMosh면 SSH
+	// bootstrap과 UDP 전송을 담당하는 mosh 매니저로 위임한다.
+	if payload.UseMosh {
+		return runtime.mosh.Connect(sessionID, requestID, payload)
+	}
 	return runtime.ssh.Connect(sessionID, requestID, payload)
 }
 
@@ -278,6 +299,8 @@ func (runtime *Runtime) ControlSerial(sessionID string, payload coretypes.Serial
 
 func (runtime *Runtime) SendSessionInput(sessionID string, data []byte) error {
 	switch {
+	case runtime.mosh.HasSession(sessionID):
+		return runtime.mosh.WriteBytes(sessionID, data)
 	case runtime.aws.HasSession(sessionID):
 		return runtime.aws.WriteBytes(sessionID, data)
 	case runtime.local.HasSession(sessionID):
@@ -298,6 +321,8 @@ func (runtime *Runtime) SendControlSignal(sessionID string, payload coretypes.Co
 
 func (runtime *Runtime) ResizeSession(sessionID string, payload coretypes.ResizePayload) error {
 	switch {
+	case runtime.mosh.HasSession(sessionID):
+		return runtime.mosh.Resize(sessionID, payload.Cols, payload.Rows)
 	case runtime.aws.HasSession(sessionID):
 		return runtime.aws.Resize(sessionID, payload.Cols, payload.Rows)
 	case runtime.local.HasSession(sessionID):
@@ -312,6 +337,8 @@ func (runtime *Runtime) ResizeSession(sessionID string, payload coretypes.Resize
 func (runtime *Runtime) DisconnectSession(sessionID string) error {
 	runtime.StopAutocomplete(sessionID)
 	switch {
+	case runtime.mosh.HasSession(sessionID):
+		return runtime.mosh.Disconnect(sessionID)
 	case runtime.aws.HasSession(sessionID):
 		return runtime.aws.Disconnect(sessionID)
 	case runtime.local.HasSession(sessionID):
@@ -516,7 +543,13 @@ func (runtime *Runtime) RespondKeyboardInteractive(sessionID, endpointID string,
 		}
 		return runtime.sftp.RespondKeyboardInteractive(endpointID, payload.ChallengeID, payload.Responses)
 	}
-	return runtime.ssh.RespondKeyboardInteractive(sessionID, payload.ChallengeID, payload.Responses)
+	// mosh bootstrap도 KI 챌린지를 낼 수 있다. 챌린지는 connect 진행 중 발생해 세션이
+	// 아직 등록 전이라 HasSession으로 구분 못 하므로, ssh→mosh 순으로 시도해 챌린지를
+	// 가진 매니저가 처리하게 한다.
+	if err := runtime.ssh.RespondKeyboardInteractive(sessionID, payload.ChallengeID, payload.Responses); err == nil {
+		return nil
+	}
+	return runtime.mosh.RespondKeyboardInteractive(sessionID, payload.ChallengeID, payload.Responses)
 }
 
 func (runtime *Runtime) ConnectContainers(endpointID, requestID string, payload coretypes.ContainersConnectPayload) error {

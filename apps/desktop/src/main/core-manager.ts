@@ -190,6 +190,7 @@ interface ContainerLifecycleState {
 
 type SessionTransport =
   | "ssh"
+  | "mosh"
   | "aws-ssm"
   | "aws-ssm-server-proxy"
   | "warpgate"
@@ -1383,14 +1384,20 @@ export class CoreManager {
     if (startupCommand) {
       this.pendingStartupCommandsBySessionId.set(sessionId, startupCommand);
     }
-    this.sessionTransportById.set(sessionId, payload.transport ?? "ssh");
+    // mosh는 SSH 호스트의 옵션이라 transport는 "ssh"로 오지만, useMosh면 mosh로 표기해
+    // 라우팅(autocomplete 차단 등)·라벨·하단 상태바가 mosh 경로를 타게 한다.
+    const transport: SessionTransport = payload.useMosh
+      ? "mosh"
+      : payload.transport ?? "ssh";
+    this.sessionTransportById.set(sessionId, transport);
     this.sessionLifecycleById.set(sessionId, {
       hostId: payload.hostId,
       hostLabel: payload.hostLabel,
       title: payload.title,
       connectionDetails: `${payload.host} · ${payload.port} · ${payload.username}`,
-      connectionKind:
-        payload.transport === "warpgate"
+      connectionKind: payload.useMosh
+        ? "mosh"
+        : payload.transport === "warpgate"
           ? "warpgate"
           : payload.transport === "aws-ssm"
             ? "aws-ssm"
@@ -4482,6 +4489,9 @@ export class CoreManager {
     }
     if (kind === "warpgate") {
       return "Warpgate";
+    }
+    if (kind === "mosh") {
+      return "Mosh";
     }
     return "SSH";
   }

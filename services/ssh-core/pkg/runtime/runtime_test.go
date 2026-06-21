@@ -59,6 +59,43 @@ func (stub *stubSSHManager) RunCompletionCommand(string, string) (string, bool, 
 	return stub.completionOut, stub.completionTrun, stub.completionErr
 }
 
+type stubMoshManager struct {
+	hasSession   bool
+	writeSession string
+	writeData    []byte
+	resizeID     string
+	resizeCols   int
+	resizeRows   int
+	disconnectID string
+	challengeID  string
+	responses    []string
+}
+
+func (stub *stubMoshManager) Connect(sessionID, requestID string, payload coretypes.ConnectPayload) error {
+	return nil
+}
+func (stub *stubMoshManager) HasSession(sessionID string) bool { return stub.hasSession }
+func (stub *stubMoshManager) WriteBytes(sessionID string, data []byte) error {
+	stub.writeSession = sessionID
+	stub.writeData = append([]byte(nil), data...)
+	return nil
+}
+func (stub *stubMoshManager) Resize(sessionID string, cols, rows int) error {
+	stub.resizeID = sessionID
+	stub.resizeCols = cols
+	stub.resizeRows = rows
+	return nil
+}
+func (stub *stubMoshManager) Disconnect(sessionID string) error {
+	stub.disconnectID = sessionID
+	return nil
+}
+func (stub *stubMoshManager) RespondKeyboardInteractive(sessionID, challengeID string, responses []string) error {
+	stub.challengeID = challengeID
+	stub.responses = append([]string(nil), responses...)
+	return nil
+}
+
 type stubAWSManager struct {
 	hasSession   bool
 	writeSession string
@@ -303,6 +340,7 @@ func (stub *stubSSMForwardingService) Shutdown()                           { stu
 
 func TestRuntimeRoutesSessionIOResizeDisconnectAndSignals(t *testing.T) {
 	sshManager := &stubSSHManager{}
+	moshManager := &stubMoshManager{}
 	awsManager := &stubAWSManager{hasSession: true}
 	localManager := &stubLocalManager{}
 	serialManager := &stubSerialManager{}
@@ -310,6 +348,7 @@ func TestRuntimeRoutesSessionIOResizeDisconnectAndSignals(t *testing.T) {
 		func(coretypes.Event) {},
 		func(coretypes.StreamFrame, []byte) {},
 		sshManager,
+		moshManager,
 		awsManager,
 		localManager,
 		serialManager,
@@ -375,6 +414,28 @@ func TestRuntimeRoutesSessionIOResizeDisconnectAndSignals(t *testing.T) {
 	if sshManager.writeSession != "session-ssh" || string(sshManager.writeData) != "uname -a\r" {
 		t.Fatalf("expected SSH manager write, got %#v", sshManager)
 	}
+
+	// mosh 세션은 switch에서 가장 먼저 분기되어 ssh보다 우선한다.
+	sshManager.hasSession = false
+	moshManager.hasSession = true
+	if err := runtime.SendSessionInput("session-mosh", []byte("top\r")); err != nil {
+		t.Fatalf("SendSessionInput() mosh error = %v", err)
+	}
+	if moshManager.writeSession != "session-mosh" || string(moshManager.writeData) != "top\r" {
+		t.Fatalf("expected mosh manager write, got %#v", moshManager)
+	}
+	if err := runtime.ResizeSession("session-mosh", coretypes.ResizePayload{Cols: 100, Rows: 30}); err != nil {
+		t.Fatalf("ResizeSession() mosh error = %v", err)
+	}
+	if moshManager.resizeID != "session-mosh" || moshManager.resizeCols != 100 || moshManager.resizeRows != 30 {
+		t.Fatalf("expected mosh resize, got %#v", moshManager)
+	}
+	if err := runtime.DisconnectSession("session-mosh"); err != nil {
+		t.Fatalf("DisconnectSession() mosh error = %v", err)
+	}
+	if moshManager.disconnectID != "session-mosh" {
+		t.Fatalf("expected mosh disconnect, got %#v", moshManager)
+	}
 }
 
 func TestRuntimeRoutesKeyboardInteractivePortForwardAndShutdown(t *testing.T) {
@@ -387,6 +448,7 @@ func TestRuntimeRoutesKeyboardInteractivePortForwardAndShutdown(t *testing.T) {
 		func(coretypes.Event) {},
 		func(coretypes.StreamFrame, []byte) {},
 		&stubSSHManager{},
+		&stubMoshManager{},
 		aws,
 		&stubLocalManager{},
 		&stubSerialManager{},
@@ -444,6 +506,7 @@ func TestPrepareAutocompleteInstallsShellIntegrationOnce(t *testing.T) {
 		},
 		func(coretypes.StreamFrame, []byte) {},
 		&stubSSHManager{},
+		&stubMoshManager{},
 		&stubAWSManager{},
 		localManager,
 		&stubSerialManager{},
@@ -491,6 +554,7 @@ func TestRunCompletionQueryNeverEmitsSessionError(t *testing.T) {
 		},
 		func(coretypes.StreamFrame, []byte) {},
 		sshManager,
+		&stubMoshManager{},
 		&stubAWSManager{},
 		&stubLocalManager{},
 		&stubSerialManager{},
