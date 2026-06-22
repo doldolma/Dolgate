@@ -87,7 +87,10 @@ export function createCoreEventBridge(deps: {
 
   coreManager.setTerminalEventHandler(async (event) => {
     sessionShareService.handleTerminalEvent(event);
-    sessionReplayService.handleTerminalEvent(event);
+    // tmux 세션은 녹화하지 않는다(control 세션 "connected" → 빈 리플레이 파일 방지).
+    if (!coreManager.isTmuxSession(event.sessionId)) {
+      sessionReplayService.handleTerminalEvent(event);
+    }
     if (event.endpointId) {
       if (event.type === "sftpDisconnected" || event.type === "sftpError") {
         awsSftpCoordinator.clearPreflight(event.endpointId);
@@ -144,7 +147,11 @@ export function createCoreEventBridge(deps: {
 
   coreManager.setTerminalStreamHandler((sessionId, chunk) => {
     sessionShareService.handleTerminalStream(sessionId, chunk);
-    sessionReplayService.handleTerminalStream(sessionId, chunk);
+    // tmux 세션(control/pane)은 세션 녹화에서 제외한다(공유는 위에서 유지). pane 출력은
+    // tmux: sessionId 라 control 녹화에 안 잡히고, control 세션 녹화는 빈 파일만 남는다.
+    if (!coreManager.isTmuxSession(sessionId)) {
+      sessionReplayService.handleTerminalStream(sessionId, chunk);
+    }
   });
 
   return {

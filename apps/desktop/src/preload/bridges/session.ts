@@ -46,6 +46,29 @@ export function buildSshBridge(ipcRenderer: IpcRenderer): DesktopApi["ssh"] {
       ipcRenderer.invoke(ipcChannels.ssh.completionQuery, sessionId, command),
     respondKeyboardInteractive: (input: KeyboardInteractiveRespondInput) =>
       ipcRenderer.invoke(ipcChannels.ssh.respondKeyboardInteractive, input),
+    tmuxSplitPane: (sessionId: string, direction: "h" | "v") =>
+      ipcRenderer.invoke(ipcChannels.ssh.tmuxSplitPane, sessionId, direction),
+    tmuxNewWindow: (sessionId: string) =>
+      ipcRenderer.invoke(ipcChannels.ssh.tmuxNewWindow, sessionId),
+    tmuxSelectWindow: (sessionId: string, windowId: string) =>
+      ipcRenderer.invoke(ipcChannels.ssh.tmuxSelectWindow, sessionId, windowId),
+    tmuxSelectPane: (sessionId: string) =>
+      ipcRenderer.invoke(ipcChannels.ssh.tmuxSelectPane, sessionId),
+    tmuxKillPane: (sessionId: string) =>
+      ipcRenderer.invoke(ipcChannels.ssh.tmuxKillPane, sessionId),
+    tmuxKillWindow: (sessionId: string, windowId: string) =>
+      ipcRenderer.invoke(ipcChannels.ssh.tmuxKillWindow, sessionId, windowId),
+    tmuxKillSession: (sessionId: string, sessionName: string) =>
+      ipcRenderer.invoke(ipcChannels.ssh.tmuxKillSession, sessionId, sessionName),
+    tmuxRenameWindow: (sessionId: string, windowId: string, name: string) =>
+      ipcRenderer.invoke(
+        ipcChannels.ssh.tmuxRenameWindow,
+        sessionId,
+        windowId,
+        name,
+      ),
+    tmuxDetach: (sessionId: string) =>
+      ipcRenderer.invoke(ipcChannels.ssh.tmuxDetach, sessionId),
     onEvent: (listener: (event: CoreEvent) => void) =>
       subscribeCoreEvent(listener),
     onData: (sessionId: string, listener: (chunk: Uint8Array) => void) =>

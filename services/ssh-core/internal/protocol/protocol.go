@@ -62,6 +62,16 @@ const (
 	CommandTerminalAutocompleteStop    = coretypes.CommandTerminalAutocompleteStop
 	CommandTerminalCompletionQuery     = coretypes.CommandTerminalCompletionQuery
 	CommandShellIntegrationInstall     = coretypes.CommandShellIntegrationInstall
+	CommandTmuxConnect                 = coretypes.CommandTmuxConnect
+	CommandTmuxSplitPane               = coretypes.CommandTmuxSplitPane
+	CommandTmuxNewWindow               = coretypes.CommandTmuxNewWindow
+	CommandTmuxSelectWindow            = coretypes.CommandTmuxSelectWindow
+	CommandTmuxSelectPane              = coretypes.CommandTmuxSelectPane
+	CommandTmuxKillPane                = coretypes.CommandTmuxKillPane
+	CommandTmuxKillWindow              = coretypes.CommandTmuxKillWindow
+	CommandTmuxKillSession             = coretypes.CommandTmuxKillSession
+	CommandTmuxRenameWindow            = coretypes.CommandTmuxRenameWindow
+	CommandTmuxDetach                  = coretypes.CommandTmuxDetach
 )
 
 const (
@@ -105,6 +115,7 @@ const (
 	EventTerminalAutocompleteShellState = coretypes.EventTerminalAutocompleteShellState
 	EventTerminalCompletionResult       = coretypes.EventTerminalCompletionResult
 	EventMoshState                      = coretypes.EventMoshState
+	EventTmuxAvailable                  = coretypes.EventTmuxAvailable
 )
 
 type FrameKind byte
@@ -181,6 +192,13 @@ type StatusPayload = coretypes.StatusPayload
 type ErrorPayload = coretypes.ErrorPayload
 type ClosedPayload = coretypes.ClosedPayload
 type MoshStatePayload = coretypes.MoshStatePayload
+type TmuxAvailablePayload = coretypes.TmuxAvailablePayload
+type TmuxSessionInfo = coretypes.TmuxSessionInfo
+type TmuxSplitPanePayload = coretypes.TmuxSplitPanePayload
+type TmuxSelectWindowPayload = coretypes.TmuxSelectWindowPayload
+type TmuxKillWindowPayload = coretypes.TmuxKillWindowPayload
+type TmuxKillSessionPayload = coretypes.TmuxKillSessionPayload
+type TmuxRenameWindowPayload = coretypes.TmuxRenameWindowPayload
 type SFTPConnectedPayload = coretypes.SFTPConnectedPayload
 type ContainersConnectedPayload = coretypes.ContainersConnectedPayload
 type HostKeyProbedPayload = coretypes.HostKeyProbedPayload

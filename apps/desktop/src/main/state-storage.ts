@@ -92,6 +92,7 @@ export interface DesktopStateFile {
     autoReconnectMaxAttempts: number;
     autoReconnectBaseDelayMs: number;
     autoReconnectMaxDelayMs: number;
+    tmuxPrefixEnabled: boolean;
     serverUrlOverride: string | null;
     updatedAt: string;
   };
@@ -475,6 +476,7 @@ function createDefaultStateFile(): DesktopStateFile {
       autoReconnectMaxAttempts: DEFAULT_AUTO_RECONNECT_SETTINGS.autoReconnectMaxAttempts,
       autoReconnectBaseDelayMs: DEFAULT_AUTO_RECONNECT_SETTINGS.autoReconnectBaseDelayMs,
       autoReconnectMaxDelayMs: DEFAULT_AUTO_RECONNECT_SETTINGS.autoReconnectMaxDelayMs,
+      tmuxPrefixEnabled: false,
       serverUrlOverride: null,
       updatedAt: timestamp
     },
@@ -860,6 +862,10 @@ function normalizeStateFile(value: unknown): DesktopStateFile {
         typeof settings.autoReconnectMaxDelayMs === 'number'
           ? clampAutoReconnectDelayMs(settings.autoReconnectMaxDelayMs)
           : DEFAULT_AUTO_RECONNECT_SETTINGS.autoReconnectMaxDelayMs,
+      tmuxPrefixEnabled:
+        typeof settings.tmuxPrefixEnabled === 'boolean'
+          ? settings.tmuxPrefixEnabled
+          : false,
       serverUrlOverride: typeof settings.serverUrlOverride === 'string' && settings.serverUrlOverride.trim() ? settings.serverUrlOverride.trim() : null,
       updatedAt: typeof settings.updatedAt === 'string' ? settings.updatedAt : fallback.settings.updatedAt
     },

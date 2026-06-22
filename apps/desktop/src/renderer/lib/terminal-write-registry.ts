@@ -16,6 +16,8 @@ export interface TerminalHooks {
   serialize: () => string;
   /** 현재 live sessionId. 리로드 후에도 main이 세션을 유지하므로 복원 키로 쓴다. */
   getSessionId: () => string;
+  /** 현재 셀(글자 1칸) 픽셀 크기. tmux 워크스페이스 단위 client 리사이즈 계산용. */
+  getCellSize: () => { width: number; height: number } | null;
 }
 
 const hooksByStableId = new Map<string, TerminalHooks>();
@@ -39,6 +41,13 @@ export function unregisterTerminalHooks(
 
 export function writeTerminalNotice(stableId: string, text: string): void {
   hooksByStableId.get(stableId)?.write(text);
+}
+
+/** 살아 있는 터미널(stableId)의 셀 픽셀 크기. 없으면 null. */
+export function getTerminalCellSize(
+  stableId: string,
+): { width: number; height: number } | null {
+  return hooksByStableId.get(stableId)?.getCellSize() ?? null;
 }
 
 /** 절전/잠금 복귀 시 모든 살아 있는 터미널을 강제 재렌더한다. */

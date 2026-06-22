@@ -1,5 +1,10 @@
+import type { TerminalTab } from "@shared";
 import type { SliceDeps } from "../services/context";
-import type { SessionSlice, WorkspaceTab } from "../types";
+import type {
+  DynamicTabStripItem,
+  SessionSlice,
+  WorkspaceTab,
+} from "../types";
 import {
   AWS_SFTP_DEFAULT_PORT,
   DEFAULT_SFTP_BROWSER_COLUMN_WIDTHS,
@@ -54,6 +59,8 @@ import {
   sortKeychainEntries,
   asSessionTabId,
   asWorkspaceTabId,
+  asTmuxSessionGroupTabId,
+  findTmuxGroupForWorkspace,
   buildContainersEndpointId,
   buildContainersTabTitle,
   DEFAULT_CONTAINER_LOGS_TAIL_WINDOW,
@@ -75,6 +82,7 @@ import {
   directionAxis,
   createWorkspaceSplit,
   listWorkspaceSessionIds,
+  parseTmuxLayout,
   countWorkspaceSessions,
   findFirstWorkspaceSessionId,
   insertSessionIntoWorkspaceLayout,
@@ -147,6 +155,54 @@ import { createSftpServices } from "../services/sftp";
 import { createTrustAuthServices } from "../services/trust-auth";
 import { parseSnippetVariables, resolveSnippetCommand } from "../../lib/snippet";
 
+// 사용자가 닫은 tmux control 세션. 닫는 순간 control 채널 stdout 에 이미 버퍼돼 있던
+// 늦은 %layout-change 가 도착해 워크스페이스를 되살리는(부활) 것을 막기 위한 단기 가드.
+const recentlyClosedTmuxControlSessions = new Map<string, number>();
+const TMUX_CLOSED_GUARD_MS = 5000;
+function markTmuxControlSessionClosed(controlSessionId: string): void {
+  recentlyClosedTmuxControlSessions.set(controlSessionId, Date.now());
+}
+function isTmuxControlSessionRecentlyClosed(controlSessionId: string): boolean {
+  const at = recentlyClosedTmuxControlSessions.get(controlSessionId);
+  if (at == null) {
+    return false;
+  }
+  if (Date.now() - at > TMUX_CLOSED_GUARD_MS) {
+    recentlyClosedTmuxControlSessions.delete(controlSessionId);
+    return false;
+  }
+  return true;
+}
+
+// 윈도우 하나만 닫을 때 쓰는 window 단위 가드. 세션 전체 가드를 켜면 같은 control
+// 세션의 다른 window 들 layout-change 까지 막혀 "하나 닫으면 전부 닫힘" 처럼 보인다.
+// (세션 전체 가드는 detach 처럼 세션 전부를 닫을 때만 쓴다.)
+const recentlyClosedTmuxWindows = new Map<string, number>();
+function tmuxWindowGuardKey(controlSessionId: string, windowId: string): string {
+  return `${controlSessionId}\t${windowId}`;
+}
+function markTmuxWindowClosed(controlSessionId: string, windowId: string): void {
+  recentlyClosedTmuxWindows.set(
+    tmuxWindowGuardKey(controlSessionId, windowId),
+    Date.now(),
+  );
+}
+function isTmuxWindowRecentlyClosed(
+  controlSessionId: string,
+  windowId: string,
+): boolean {
+  const key = tmuxWindowGuardKey(controlSessionId, windowId);
+  const at = recentlyClosedTmuxWindows.get(key);
+  if (at == null) {
+    return false;
+  }
+  if (Date.now() - at > TMUX_CLOSED_GUARD_MS) {
+    recentlyClosedTmuxWindows.delete(key);
+    return false;
+  }
+  return true;
+}
+
 export function createSessionSlice(deps: SliceDeps): SessionSlice {
   const { api, set, get } = deps;
   const services = createSessionServices(deps);
@@ -180,6 +236,7 @@ export function createSessionSlice(deps: SliceDeps): SessionSlice {
     tabs: [],
     sessionShareChatNotifications: {},
     workspaces: [],
+    tmuxGroups: [],
     tabStrip: [],
     pendingCredentialRetry: null,
     activeCredentialRetryAttempt: null,
@@ -189,10 +246,229 @@ export function createSessionSlice(deps: SliceDeps): SessionSlice {
     pendingConnectionAttempts: [],
     resolvedStartupCommandsBySessionId: {},
     sessionReturnTargets: {},
+    handleTmuxLayoutChange: (controlSessionId, windowId, layout, meta) => {
+            // 방금 닫은 세션 전체(detach)의 늦은 layout-change 는 무시(부활 금지).
+            if (isTmuxControlSessionRecentlyClosed(controlSessionId)) {
+              return;
+            }
+            // 방금 닫은 이 window 의 늦은 layout-change 만 무시(다른 window 는 계속 갱신).
+            if (isTmuxWindowRecentlyClosed(controlSessionId, windowId)) {
+              return;
+            }
+            const tree = parseTmuxLayout(
+              layout,
+              (paneNum) => `tmux:${controlSessionId}:${paneNum}`,
+            );
+            if (!tree) {
+              return;
+            }
+            const paneSessionIds = listWorkspaceSessionIds(tree);
+            if (paneSessionIds.length === 0) {
+              return;
+            }
+            set((state) => {
+              const existing = new Set(state.tabs.map((t) => t.sessionId));
+              const live = new Set(paneSessionIds);
+              const now = new Date().toISOString();
+              const newPaneTabs: TerminalTab[] = paneSessionIds
+                .filter((sid) => !existing.has(sid))
+                .map((sid) => {
+                  const paneNum = sid.slice(sid.lastIndexOf(":") + 1);
+                  return {
+                    id: sid,
+                    // stableId 는 재연결(=새 controlSessionId)에도 불변이어야 터미널이
+                    // remount/dispose 되지 않는다(그래야 handleResize dispose race 와
+                    // 빈 화면이 사라진다). 그래서 controlSessionId 대신 windowId+paneNum
+                    // 으로 구성한다(단일 호스트 가정; 다중 호스트 동시 tmux 는 windowId
+                    // 충돌 가능 — 후속 과제).
+                    stableId: `tmux-pane:${windowId}:${paneNum}`,
+                    sessionId: sid,
+                    source: "host",
+                    hostId: null,
+                    title: `pane ${paneNum}`,
+                    status: "connected",
+                    hasReceivedOutput: true,
+                    lastEventAt: now,
+                    tmux: { controlSessionId, paneId: `%${paneNum}`, windowId },
+                  } satisfies TerminalTab;
+                });
+
+              // --- 윈도우 = WorkspaceTab (windowId 로 매칭, 재연결에도 동일 workspace
+              // 를 rebind 해 터미널 remount 를 막는다). control 세션이 바뀌어도 windowId
+              // 는 유지된다(단일 호스트 가정). index/name 은 윈도우 바 라벨용. ---
+              const owning = state.workspaces.find(
+                (w) => w.tmux?.windowId === windowId,
+              );
+              const oldControlSessionId = owning?.tmux?.controlSessionId;
+              const windowTmux = {
+                controlSessionId,
+                windowId,
+                index: meta?.index ?? owning?.tmux?.index,
+                name: meta?.name ?? owning?.tmux?.name,
+              };
+              const windowTitle =
+                windowTmux.name !== undefined
+                  ? windowTmux.name
+                    ? `${windowTmux.index ?? 0}:${windowTmux.name}`
+                    : `${windowTmux.index ?? 0}`
+                  : undefined;
+
+              let workspaceId: string;
+              let nextWorkspaces: WorkspaceTab[];
+              if (owning) {
+                workspaceId = owning.id;
+                nextWorkspaces = state.workspaces.map((w) =>
+                  w.id === owning.id
+                    ? {
+                        ...w,
+                        layout: tree,
+                        title: windowTitle ?? w.title,
+                        tmux: windowTmux,
+                        activeSessionId: live.has(w.activeSessionId)
+                          ? w.activeSessionId
+                          : paneSessionIds[0],
+                      }
+                    : w,
+                );
+              } else {
+                workspaceId = globalThis.crypto.randomUUID();
+                const controlTab = state.tabs.find(
+                  (t) => t.sessionId === controlSessionId,
+                );
+                nextWorkspaces = [
+                  ...state.workspaces,
+                  {
+                    id: workspaceId,
+                    title: windowTitle ?? controlTab?.title ?? `tmux ${windowId}`,
+                    layout: tree,
+                    activeSessionId: paneSessionIds[0],
+                    broadcastEnabled: false,
+                    tmux: windowTmux,
+                  },
+                ];
+              }
+
+              // --- 세션 그룹 = TmuxSessionGroup (controlSessionId 당 1개; 상단 탭 1개).
+              // 새 controlSessionId 로 먼저 찾고(재연결 시 형제 윈도우가 이미 rebind 했을
+              // 수 있음), 없으면 기존 윈도우의 옛 controlSessionId 로 찾아 rebind 한다. ---
+              const existingGroup =
+                state.tmuxGroups.find(
+                  (g) => g.controlSessionId === controlSessionId,
+                ) ??
+                (oldControlSessionId
+                  ? state.tmuxGroups.find(
+                      (g) => g.controlSessionId === oldControlSessionId,
+                    )
+                  : undefined);
+              const hadControlTab = state.tabs.some(
+                (t) => t.sessionId === controlSessionId,
+              );
+
+              let groupId: string;
+              let nextGroups: typeof state.tmuxGroups;
+              if (existingGroup) {
+                groupId = existingGroup.id;
+                // 활성 윈도우: list-windows 의 active 플래그가 true 거나, 기존 활성
+                // 윈도우가 더 이상 존재하지 않을 때만 이 윈도우로 옮긴다.
+                const activeStillValid = nextWorkspaces.some(
+                  (w) => w.id === existingGroup.activeWorkspaceId,
+                );
+                const makeActive = meta?.active === true || !activeStillValid;
+                nextGroups = state.tmuxGroups.map((g) =>
+                  g.id === existingGroup.id
+                    ? {
+                        ...g,
+                        controlSessionId,
+                        activeWorkspaceId: makeActive
+                          ? workspaceId
+                          : g.activeWorkspaceId,
+                        // 세션명은 layout-change payload(handle.sessionName)로 따라온다.
+                        // 비어 있으면 기존 값 유지(호스트명 fallback 클로버 방지).
+                        sessionName: meta?.sessionName || g.sessionName,
+                      }
+                    : g,
+                );
+              } else {
+                groupId = globalThis.crypto.randomUUID();
+                const controlTab = state.tabs.find(
+                  (t) => t.sessionId === controlSessionId,
+                );
+                nextGroups = [
+                  ...state.tmuxGroups,
+                  {
+                    id: groupId,
+                    controlSessionId,
+                    // 실제 tmux 세션명(payload) 우선, 없으면 호스트 탭 제목으로 fallback.
+                    sessionName:
+                      meta?.sessionName || controlTab?.title || "tmux",
+                    activeWorkspaceId: workspaceId,
+                    // 새 세션 생성/전환(connectHost)에 쓸 호스트. control 세션 탭에서 캡처.
+                    hostId: controlTab?.hostId ?? null,
+                  },
+                ];
+              }
+
+              const hasGroupTab = state.tabStrip.some(
+                (item) => item.kind === "tmux" && item.tmuxGroupId === groupId,
+              );
+              // control 세션 standalone 탭이 있던 자리에 그룹 탭을 끼운다(끝에 append 가
+              // 아님). 그래야 "현재 탭에서 열기"(원 세션 슬롯에 둔 control 탭) 위치가
+              // 그대로 유지된다. standalone 탭이 없으면(직접 호출 등) 끝에 추가.
+              const controlTabIndex = state.tabStrip.findIndex(
+                (item) =>
+                  item.kind === "session" &&
+                  item.sessionId === controlSessionId,
+              );
+              const nextTabStrip: DynamicTabStripItem[] = state.tabStrip.filter(
+                (item) =>
+                  !(
+                    item.kind === "session" &&
+                    item.sessionId === controlSessionId
+                  ),
+              );
+              if (!hasGroupTab) {
+                const insertAt =
+                  controlTabIndex >= 0 ? controlTabIndex : nextTabStrip.length;
+                nextTabStrip.splice(Math.min(insertAt, nextTabStrip.length), 0, {
+                  kind: "tmux",
+                  tmuxGroupId: groupId,
+                });
+              }
+
+              return {
+                tabs: [
+                  ...state.tabs.filter(
+                    (t) =>
+                      // 같은 window 의 pane 중 현재 레이아웃에 없는 것 제거(재연결로
+                      // controlSessionId 가 바뀐 옛 pane 도 windowId 로 잡아 제거).
+                      !(t.tmux?.windowId === windowId && !live.has(t.sessionId)) &&
+                      // 재연결로 새로 생긴 control 세션 standalone 탭 제거(그룹으로 흡수).
+                      t.sessionId !== controlSessionId,
+                  ),
+                  ...newPaneTabs,
+                ],
+                workspaces: nextWorkspaces,
+                tmuxGroups: nextGroups,
+                tabStrip: nextTabStrip,
+                // 최초 그룹 생성 또는 standalone control 탭 흡수 시 그룹 탭으로 전환.
+                ...(!existingGroup || hadControlTab
+                  ? { activeWorkspaceTab: asTmuxSessionGroupTabId(groupId) }
+                  : {}),
+              };
+            });
+          },
     openLocalTerminal: async (cols, rows) => {
             await startLocalTerminalFlow(set, get, cols, rows);
           },
-    connectHost: async (hostId, cols, rows, secrets) => {
+    connectHost: async (
+            hostId,
+            cols,
+            rows,
+            secrets,
+            tmux,
+            tmuxCommand,
+            replaceSessionId,
+          ) => {
             const host = get().hosts.find((item) => item.id === hostId);
             if (!host) {
               return;
@@ -284,6 +560,10 @@ export function createSessionSlice(deps: SliceDeps): SessionSlice {
               secrets,
               undefined,
               startupCommand,
+              tmux,
+              tmuxCommand,
+              // tmux 일 때만 원 세션을 대체한다(비-tmux 연결에 잘못 전달돼도 무시되게).
+              tmux ? replaceSessionId : undefined,
             );
           },
     retrySessionConnection: async (sessionId, secrets) => {
@@ -614,6 +894,13 @@ export function createSessionSlice(deps: SliceDeps): SessionSlice {
             }));
           },
     disconnectTab: async (sessionId) => {
+            // tmux pane 은 SSH 세션이 아니라 control 채널 위의 가상 pane 이다. 닫기는
+            // tmux kill-pane 으로 보내고, 레이아웃/탭 제거는 이어 오는 tmux 이벤트
+            // (tmuxLayoutChange / tmuxWindowClose)가 처리하므로 로컬 상태는 건드리지 않는다.
+            if (sessionId.startsWith("tmux:")) {
+              void api.ssh.tmuxKillPane(sessionId);
+              return;
+            }
             // 사용자가 직접 끊으면 진행 중인 자동 재연결을 즉시 취소(의도적 종료).
             const reconnectTab = get().tabs.find(
               (tab) => tab.sessionId === sessionId,
@@ -688,7 +975,15 @@ export function createSessionSlice(deps: SliceDeps): SessionSlice {
             if (!workspace) {
               return;
             }
-    
+
+            // tmux control mode 워크스페이스 = window 하나. 닫는 동안 도착하는 늦은
+            // layout-change 가 이 window 만 되살리지 못하도록 **window 단위로** 가드한다
+            // (세션 전체 가드를 쓰면 같은 세션의 다른 window 까지 막혀 전부 닫힌 듯 보였다).
+            const closedTmux = workspace.tmux ?? null;
+            if (closedTmux) {
+              markTmuxWindowClosed(closedTmux.controlSessionId, closedTmux.windowId);
+            }
+
             const sessionIds = listWorkspaceSessionIds(workspace.layout);
             for (const sessionId of sessionIds) {
               const tab = get().tabs.find((item) => item.sessionId === sessionId);
@@ -696,6 +991,26 @@ export function createSessionSlice(deps: SliceDeps): SessionSlice {
                 cancelReconnect(tab.stableId, "workspace-closed");
               }
             }
+
+            // tmux window: kill-window 로 그 window 만 종료(control 세션·다른 window 생존).
+            // 로컬 정리는 그룹을 인지하는 removeTmuxWorkspacesLocal 에 위임한다(마지막
+            // window 면 세션 그룹·상단 탭까지 정리). 이후 도착하는 %window-close 는
+            // 대상이 이미 없어 idempotent.
+            if (closedTmux) {
+              const anyPane = sessionIds[0];
+              if (anyPane) {
+                await Promise.resolve(
+                  api.ssh.tmuxKillWindow(anyPane, closedTmux.windowId),
+                ).catch(() => undefined);
+              }
+              get().removeTmuxWorkspacesLocal(
+                closedTmux.controlSessionId,
+                closedTmux.windowId,
+              );
+              return;
+            }
+
+            // 비 tmux workspace: 각 세션 disconnect + 로컬 제거.
             await Promise.all(
               sessionIds.map((sessionId) => api.ssh.disconnect(sessionId)),
             );
@@ -715,7 +1030,7 @@ export function createSessionSlice(deps: SliceDeps): SessionSlice {
                       workspaceIndex >= 0 ? workspaceIndex : nextTabStrip.length,
                     )
                   : state.activeWorkspaceTab;
-    
+
               return {
                 workspaces: state.workspaces.filter(
                   (item) => item.id !== workspaceId,
@@ -735,6 +1050,17 @@ export function createSessionSlice(deps: SliceDeps): SessionSlice {
             });
           },
     splitSessionIntoWorkspace: (sessionId, direction, targetSessionId) => {
+            // tmux pane 의 분할은 자유로운 drag-split 이 아니라 tmux 의 split-window 다.
+            // 로컬 레이아웃을 직접 바꾸지 않고 control 채널로 분할만 요청한다. 결과
+            // 레이아웃은 이어 도착하는 tmuxLayoutChange 이벤트가 재구성한다.
+            // 방향: left/right → 좌우("h"), top/bottom → 상하("v").
+            if (sessionId.startsWith("tmux:")) {
+              void api.ssh.tmuxSplitPane(
+                sessionId,
+                directionAxis(direction) === "horizontal" ? "h" : "v",
+              );
+              return false;
+            }
             const state = get();
             const adjacent = resolveAdjacentTarget(
               state.tabStrip,
@@ -985,17 +1311,343 @@ export function createSessionSlice(deps: SliceDeps): SessionSlice {
             });
           },
     focusWorkspaceSession: (workspaceId, sessionId) => {
-            set((state) => ({
-              workspaces: state.workspaces.map((workspace) =>
-                workspace.id === workspaceId
+            // tmux pane 포커스는 control 채널의 select-pane 으로도 동기화한다. UI 의 active
+            // pane 표시는 즉시 갱신하고, tmux 쪽 활성 pane 도 따라오게 한다.
+            if (sessionId.startsWith("tmux:")) {
+              void api.ssh.tmuxSelectPane(sessionId);
+            }
+            set((state) => {
+              const workspace = state.workspaces.find(
+                (w) => w.id === workspaceId,
+              );
+              const group = findTmuxGroupForWorkspace(
+                state.tmuxGroups,
+                workspace,
+              );
+              return {
+                workspaces: state.workspaces.map((w) =>
+                  w.id === workspaceId
+                    ? { ...w, activeSessionId: sessionId }
+                    : w,
+                ),
+                // tmux 윈도우면 상단 세션 탭(tmuxgrp:)을 활성 유지하고 그룹의 활성
+                // 윈도우만 옮긴다. workspace: 로 바꾸면 세션 탭 강조가 꺼지고(닫을 때
+                // 빈 화면) 윈도우 바 강조와 화면이 어긋난다.
+                ...(group
                   ? {
-                      ...workspace,
-                      activeSessionId: sessionId,
+                      activeWorkspaceTab: asTmuxSessionGroupTabId(group.id),
+                      tmuxGroups: state.tmuxGroups.map((g) =>
+                        g.id === group.id
+                          ? { ...g, activeWorkspaceId: workspaceId }
+                          : g,
+                      ),
                     }
-                  : workspace,
+                  : { activeWorkspaceTab: asWorkspaceTabId(workspaceId) }),
+              };
+            });
+          },
+    tmuxNewWindowInWorkspace: (workspaceId) => {
+            // tmux workspace 에서 새 tmux window 생성. 비 tmux workspace 면 무시한다.
+            // 대상 control 세션은 이 workspace 의 pane 가상 sessionId 로 식별한다.
+            // 새 window 는 이어 오는 tmuxWindowAdd / tmuxLayoutChange 가 새 workspace 로
+            // 반영하므로 여기서는 로컬 상태를 만들지 않는다.
+            const workspace = get().workspaces.find(
+              (item) => item.id === workspaceId,
+            );
+            if (!workspace?.tmux) {
+              return;
+            }
+            const paneSessionId = listWorkspaceSessionIds(workspace.layout).find(
+              (sessionId) => sessionId.startsWith("tmux:"),
+            );
+            if (!paneSessionId) {
+              return;
+            }
+            void api.ssh.tmuxNewWindow(paneSessionId);
+          },
+    detachTmuxWorkspace: async (workspaceId) => {
+            // closeWorkspace(=kill: 각 pane 을 kill-pane 으로 종료)와 달리, detach 는
+            // 서버 tmux 세션·프로세스를 살린 채 control 채널만 분리한다(detach-client).
+            // pane 을 kill 하지 않으므로 같은 호스트에 다시 attach 하면 그대로 복원된다.
+            const workspace = get().workspaces.find(
+              (item) => item.id === workspaceId,
+            );
+            if (!workspace?.tmux) {
+              return;
+            }
+            const controlSessionId = workspace.tmux.controlSessionId;
+            // 닫는 동안 도착하는 늦은 layout-change 가 워크스페이스를 되살리지 못하게 가드.
+            markTmuxControlSessionClosed(controlSessionId);
+
+            // detach-client 는 control 채널 전체(이 control 세션의 모든 window)를 분리한다.
+            // 그래서 같은 controlSessionId 를 공유하는 모든 workspace(=window)를 함께 정리한다.
+            const siblingWorkspaces = get().workspaces.filter(
+              (item) => item.tmux?.controlSessionId === controlSessionId,
+            );
+            const siblingWorkspaceIds = new Set(
+              siblingWorkspaces.map((item) => item.id),
+            );
+            const allSessionIds = siblingWorkspaces.flatMap((item) =>
+              listWorkspaceSessionIds(item.layout),
+            );
+            for (const sessionId of allSessionIds) {
+              const tab = get().tabs.find((item) => item.sessionId === sessionId);
+              if (tab) {
+                cancelReconnect(tab.stableId, "workspace-closed");
+              }
+            }
+            // detach 는 control 세션 단위 동작이다. 임의의 pane 가상 sessionId 한 개로
+            // control 채널에 detach-client 를 보내면 Go 가 채널을 정리한다(kill-pane 미발생).
+            const paneSessionId = allSessionIds.find((sessionId) =>
+              sessionId.startsWith("tmux:"),
+            );
+            if (paneSessionId) {
+              await Promise.resolve(api.ssh.tmuxDetach(paneSessionId)).catch(
+                () => undefined,
+              );
+            }
+            set((state) => {
+              // detach 는 세션 전체 → 세션 그룹(+상단 탭)과 그 모든 window workspace 를 제거.
+              const group = state.tmuxGroups.find(
+                (g) => g.controlSessionId === controlSessionId,
+              );
+              const groupIndex = group
+                ? state.tabStrip.findIndex(
+                    (item) =>
+                      item.kind === "tmux" && item.tmuxGroupId === group.id,
+                  )
+                : -1;
+              const nextTabStrip = state.tabStrip.filter(
+                (item) =>
+                  !(
+                    item.kind === "tmux" &&
+                    group != null &&
+                    item.tmuxGroupId === group.id
+                  ),
+              );
+              // 활성 탭이 이 그룹(또는 그 윈도우 중 하나)이면 재계산(빈 화면 방지).
+              const activeTabId = state.activeWorkspaceTab;
+              const activeWasGroupOrWindow =
+                (group != null &&
+                  activeTabId === asTmuxSessionGroupTabId(group.id)) ||
+                (activeTabId.startsWith("workspace:") &&
+                  siblingWorkspaceIds.has(
+                    activeTabId.slice("workspace:".length),
+                  ));
+              const nextActive = activeWasGroupOrWindow
+                ? resolveNextVisibleTab(
+                    nextTabStrip,
+                    groupIndex >= 0 ? groupIndex : nextTabStrip.length,
+                  )
+                : state.activeWorkspaceTab;
+              return {
+                workspaces: state.workspaces.filter(
+                  (item) => !siblingWorkspaceIds.has(item.id),
+                ),
+                tmuxGroups: state.tmuxGroups.filter(
+                  (g) => g.controlSessionId !== controlSessionId,
+                ),
+                tabStrip: nextTabStrip,
+                // tmux pane 탭은 SSH 세션이 아니므로 완전히 제거한다(늦은 layout-change 재흡수 방지).
+                tabs: state.tabs.filter(
+                  (tab) => !allSessionIds.includes(tab.sessionId),
+                ),
+                activeWorkspaceTab: nextActive,
+              };
+            });
+          },
+    removeTmuxWorkspacesLocal: (controlSessionId, windowId) => {
+            // tmux window-close(%window-close) / exit(%exit) 후 로컬 정리. 서버에서 이미
+            // 닫혔으므로 tmux 명령은 보내지 않고 window workspace/pane 탭만 제거한다.
+            // windowId 가 있으면 그 window 만, 없으면(=exit) controlSessionId 의 모든 window.
+            // 세션의 window 가 모두 사라지면 그룹·상단 탭까지 제거한다.
+            set((state) => {
+              const targets = state.workspaces.filter(
+                (item) =>
+                  item.tmux?.controlSessionId === controlSessionId &&
+                  (windowId == null || item.tmux?.windowId === windowId),
+              );
+              if (targets.length === 0) {
+                return {};
+              }
+              const targetIds = new Set(targets.map((item) => item.id));
+              const allSessionIds = targets.flatMap((item) =>
+                listWorkspaceSessionIds(item.layout),
+              );
+              const remainingWindows = state.workspaces.filter(
+                (item) =>
+                  item.tmux?.controlSessionId === controlSessionId &&
+                  !targetIds.has(item.id),
+              );
+              const group = state.tmuxGroups.find(
+                (g) => g.controlSessionId === controlSessionId,
+              );
+              const groupGone = group != null && remainingWindows.length === 0;
+              const groupIndex =
+                group && groupGone
+                  ? state.tabStrip.findIndex(
+                      (item) =>
+                        item.kind === "tmux" && item.tmuxGroupId === group.id,
+                    )
+                  : -1;
+              const nextTabStrip =
+                group && groupGone
+                  ? state.tabStrip.filter(
+                      (item) =>
+                        !(item.kind === "tmux" && item.tmuxGroupId === group.id),
+                    )
+                  : state.tabStrip;
+              const nextGroups = groupGone
+                ? state.tmuxGroups.filter(
+                    (g) => g.controlSessionId !== controlSessionId,
+                  )
+                : state.tmuxGroups.map((g) =>
+                    g.controlSessionId === controlSessionId &&
+                    targetIds.has(g.activeWorkspaceId) &&
+                    remainingWindows.length > 0
+                      ? { ...g, activeWorkspaceId: remainingWindows[0].id }
+                      : g,
+                  );
+              // 활성 탭이 닫히는 그룹/윈도우를 가리키면 재계산해 빈 화면을 막는다.
+              // activeWorkspaceTab 은 보통 tmuxgrp:(#3) 지만, 어쩌다 닫힌 윈도우
+              // workspace:<id> 여도 대응한다.
+              const activeTabId = state.activeWorkspaceTab;
+              const activeWasGroupTab =
+                group != null &&
+                activeTabId === asTmuxSessionGroupTabId(group.id);
+              const activeWasRemovedWindow =
+                activeTabId.startsWith("workspace:") &&
+                targetIds.has(activeTabId.slice("workspace:".length));
+              let nextActive = activeTabId;
+              if (groupGone) {
+                if (activeWasGroupTab || activeWasRemovedWindow) {
+                  nextActive = resolveNextVisibleTab(
+                    nextTabStrip,
+                    groupIndex >= 0 ? groupIndex : nextTabStrip.length,
+                  );
+                }
+              } else if (activeWasRemovedWindow && group != null) {
+                // 그룹 생존 + 활성 윈도우가 닫힘 → 그룹 탭으로(생존 윈도우 표시).
+                nextActive = asTmuxSessionGroupTabId(group.id);
+              }
+              return {
+                workspaces: state.workspaces.filter(
+                  (item) => !targetIds.has(item.id),
+                ),
+                tmuxGroups: nextGroups,
+                tabStrip: nextTabStrip,
+                tabs: state.tabs.filter(
+                  (tab) => !allSessionIds.includes(tab.sessionId),
+                ),
+                activeWorkspaceTab: nextActive,
+              };
+            });
+          },
+    selectTmuxWindow: (workspaceId) => {
+            // 그룹 내 활성 window 전환: tmux 에 select-window 를 보내고 그룹의
+            // activeWorkspaceId 를 갱신한다. activeWorkspaceTab 은 그룹 탭 그대로 유지.
+            const workspace = get().workspaces.find(
+              (item) => item.id === workspaceId,
+            );
+            if (!workspace?.tmux) {
+              return;
+            }
+            const { controlSessionId, windowId } = workspace.tmux;
+            const paneSessionId = listWorkspaceSessionIds(workspace.layout).find(
+              (sessionId) => sessionId.startsWith("tmux:"),
+            );
+            if (paneSessionId) {
+              void api.ssh.tmuxSelectWindow(paneSessionId, windowId);
+            }
+            set((state) => {
+              const group = state.tmuxGroups.find(
+                (g) => g.controlSessionId === controlSessionId,
+              );
+              if (!group) {
+                return {};
+              }
+              return {
+                tmuxGroups: state.tmuxGroups.map((g) =>
+                  g.id === group.id
+                    ? { ...g, activeWorkspaceId: workspaceId }
+                    : g,
+                ),
+                activeWorkspaceTab: asTmuxSessionGroupTabId(group.id),
+              };
+            });
+          },
+    renameTmuxWindow: (workspaceId, name) => {
+            const workspace = get().workspaces.find(
+              (item) => item.id === workspaceId,
+            );
+            if (!workspace?.tmux) {
+              return;
+            }
+            const { windowId, index } = workspace.tmux;
+            const paneSessionId = listWorkspaceSessionIds(workspace.layout).find(
+              (sessionId) => sessionId.startsWith("tmux:"),
+            );
+            if (paneSessionId) {
+              void api.ssh.tmuxRenameWindow(paneSessionId, windowId, name);
+            }
+            // 결과는 %window-renamed 로 되돌아오지만, 즉시성 위해 낙관적으로도 반영.
+            set((state) => ({
+              workspaces: state.workspaces.map((w) =>
+                w.id === workspaceId && w.tmux
+                  ? {
+                      ...w,
+                      tmux: { ...w.tmux, name },
+                      title: `${index ?? 0}:${name}`,
+                    }
+                  : w,
               ),
-              activeWorkspaceTab: asWorkspaceTabId(workspaceId),
             }));
+          },
+    applyTmuxWindowRenamed: (controlSessionId, windowId, name) => {
+            set((state) => ({
+              workspaces: state.workspaces.map((w) =>
+                w.tmux?.controlSessionId === controlSessionId &&
+                w.tmux?.windowId === windowId
+                  ? {
+                      ...w,
+                      tmux: { ...w.tmux, name },
+                      title: `${w.tmux.index ?? 0}:${name}`,
+                    }
+                  : w,
+              ),
+            }));
+          },
+    applyTmuxSessionName: (controlSessionId, sessionName) => {
+            // %session-changed → 세션 그룹 푸터의 세션명을 실제 tmux 세션명으로 갱신.
+            // controlSessionId 가 직접 매칭되거나, 재연결로 rebind 됐을 수 있어 그룹의
+            // 현재 controlSessionId 로만 찾는다(handleTmuxLayoutChange 가 rebind 유지).
+            if (!sessionName) {
+              return;
+            }
+            set((state) => ({
+              tmuxGroups: state.tmuxGroups.map((g) =>
+                g.controlSessionId === controlSessionId
+                  ? { ...g, sessionName }
+                  : g,
+              ),
+            }));
+          },
+    applyTmuxSessionsList: (controlSessionId, sessions) => {
+            // %sessions-changed → 그 control 세션 그룹의 원격 세션 목록을 갱신(메뉴 표시용).
+            set((state) => ({
+              tmuxGroups: state.tmuxGroups.map((g) =>
+                g.controlSessionId === controlSessionId ? { ...g, sessions } : g,
+              ),
+            }));
+          },
+    killTmuxSession: (sessionId, sessionName) => {
+            // 원격 tmux 세션 전체 종료(kill-session). sessionId 가 control 세션의 pane id 면
+            // Go 가 control 채널로, 감지 하단바의 SSH 세션 id 면 보조 exec 채널로 라우팅한다.
+            // 결과는 control: %sessions-changed / SSH: 재감지(EventTmuxAvailable)로 목록 갱신.
+            if (!sessionName) {
+              return;
+            }
+            void api.ssh.tmuxKillSession(sessionId, sessionName);
           },
     toggleWorkspaceBroadcast: (workspaceId) => {
             set((state) => ({

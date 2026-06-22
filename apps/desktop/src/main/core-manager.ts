@@ -1,7 +1,12 @@
 import { BrowserWindow, app } from "electron";
 import { randomUUID } from "node:crypto";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  writeFileSync,
+} from "node:fs";
 import path from "node:path";
 import type {
   ActivityLogRecord,
@@ -915,6 +920,10 @@ export class CoreManager {
     PendingAwsAutocompleteResponse
   >();
   private readonly sessionTransportById = new Map<string, SessionTransport>();
+  // tmux control mode 로 연결한 control 세션 id 집합. control 세션은 transport 가 "ssh"
+  // 라 일반 SSH 와 구분이 안 되므로 connect 시점(payload.tmux)에 기록한다. 세션 녹화
+  // 제외 판정(isTmuxSession)에 쓴다(pane 가상 세션은 "tmux:" 프리픽스로 따로 판정).
+  private readonly tmuxControlSessionIds = new Set<string>();
   private readonly pendingStartupCommandsBySessionId = new Map<string, string>();
   // connected 후 프롬프트가 떴다고 판단되면 startup command를 flush 하기 위한 상태.
   private readonly startupCommandFlushStateBySessionId = new Map<
@@ -1375,6 +1384,7 @@ export class CoreManager {
       hostLabel: string;
       transport?: "ssh" | "warpgate" | "aws-ssm";
       startupCommand?: string;
+      tmux?: boolean;
     },
   ): Promise<{ sessionId: string }> {
     await this.start();
@@ -1390,6 +1400,10 @@ export class CoreManager {
       ? "mosh"
       : payload.transport ?? "ssh";
     this.sessionTransportById.set(sessionId, transport);
+    if (payload.tmux === true) {
+      // control 세션(tmux -CC). 세션 녹화 제외 판정에 쓴다(transport 는 "ssh"라 구분 불가).
+      this.tmuxControlSessionIds.add(sessionId);
+    }
     this.sessionLifecycleById.set(sessionId, {
       hostId: payload.hostId,
       hostLabel: payload.hostLabel,
@@ -1419,10 +1433,11 @@ export class CoreManager {
       status: "connecting",
       lastEventAt: new Date().toISOString(),
     });
-    const { startupCommand: _startupCommand, ...corePayload } = payload;
+    const { startupCommand: _startupCommand, tmux: useTmux, ...corePayload } =
+      payload;
     this.sendControl<ResolvedCoreConnectPayload>({
       id: randomUUID(),
-      type: "connect",
+      type: useTmux ? "tmuxConnect" : "connect",
       sessionId,
       payload: corePayload,
     });
@@ -3118,7 +3133,45 @@ export class CoreManager {
     });
   }
 
+  // tmux pane sessionId(tmux:<controlSessionId>:<paneNum>)의 부모 control 세션 탭이
+  // connected 인지 판정한다. pane 은 tabs 에 자기 항목이 없다.
+  // sessionId 가 tmux 관련(control 세션 또는 pane 가상 세션)인지. 세션 녹화 제외 등에 쓴다.
+  isTmuxSession(sessionId: string | undefined | null): boolean {
+    if (!sessionId) {
+      return false;
+    }
+    return (
+      sessionId.startsWith("tmux:") || this.tmuxControlSessionIds.has(sessionId)
+    );
+  }
+
+  private isTmuxControlConnected(paneSessionId: string): boolean {
+    const controlSessionId = paneSessionId.slice(
+      "tmux:".length,
+      paneSessionId.lastIndexOf(":"),
+    );
+    const controlTab = this.tabs.get(controlSessionId);
+    return !!controlTab && controlTab.status === "connected";
+  }
+
   write(sessionId: string, data: string): void {
+    // tmux control 세션 id 자체로 들어온 raw 입력은 버린다. control 세션은 -CC 채널이라
+    // 터미널 입력을 받지 않으며(입력은 pane 으로 send-keys), 흡수 직전 control 터미널/
+    // 자동완성이 보낸 stray write 를 코어로 보내면 "not a tmux pane session" 에러로
+    // control 세션이 죽어 모든 pane 입력이 막힌다(freeze 근본 원인). 경계에서 차단.
+    if (this.tmuxControlSessionIds.has(sessionId)) {
+      return;
+    }
+    // tmux control mode pane(tmux:<controlSessionId>:<paneNum>)은 tabs에 자기 항목이
+    // 없고, 연결 상태는 부모 control 세션 탭으로 판정한다.
+    if (sessionId.startsWith("tmux:")) {
+      const connected = this.isTmuxControlConnected(sessionId);
+      if (!connected) {
+        return;
+      }
+      this.sendStream({ type: "write", sessionId }, Buffer.from(data, "utf8"));
+      return;
+    }
     const tab = this.tabs.get(sessionId);
     // 아직 연결이 성립되지 않은 탭의 입력은 코어로 보내지 않아 "session not found" 오류를 막는다.
     if (!tab || tab.status !== "connected") {
@@ -3232,8 +3285,13 @@ export class CoreManager {
     await this.start();
     // 동적 완성은 보조 채널이 있는 전송에서만 지원한다(SSH/local). SSM 계열은 단일 PTY라 미지원이며,
     // 호출되더라도 원격을 건드리지 않고 빈 결과로 조용히 degrade한다.
+    // tmux control mode pane(가상 세션)은 transport 맵에 없지만, control 세션의 SSH client
+    // 보조 exec 채널로 완성 명령을 돌릴 수 있으므로 허용한다(generator/path 완성). 없으면
+    // 기본(스냅샷) 완성만 되고 동적 완성이 통째로 빠졌다.
     const transport = this.sessionTransportById.get(sessionId);
-    if (transport !== "ssh" && transport !== "local-shell") {
+    const isTmuxPane =
+      sessionId.startsWith("tmux:") && this.isTmuxControlConnected(sessionId);
+    if (transport !== "ssh" && transport !== "local-shell" && !isTmuxPane) {
       return "";
     }
     const response = await this.requestResponse<{
@@ -3277,6 +3335,14 @@ export class CoreManager {
   }
 
   writeBinary(sessionId: string, data: Uint8Array): void {
+    // tmux pane 은 부모 control 세션 탭으로 연결 상태를 판정한다(write 와 동일).
+    if (sessionId.startsWith("tmux:")) {
+      if (!this.isTmuxControlConnected(sessionId)) {
+        return;
+      }
+      this.sendStream({ type: "write", sessionId }, data);
+      return;
+    }
     const tab = this.tabs.get(sessionId);
     // 마우스 보고 등 raw 입력도 연결 완료 이후에만 전달한다.
     if (!tab || tab.status !== "connected") {
@@ -3337,9 +3403,15 @@ export class CoreManager {
   }
 
   resize(sessionId: string, cols: number, rows: number): void {
-    const tab = this.tabs.get(sessionId);
-    if (!tab) {
-      return;
+    if (sessionId.startsWith("tmux:")) {
+      if (!this.isTmuxControlConnected(sessionId)) {
+        return;
+      }
+    } else {
+      const tab = this.tabs.get(sessionId);
+      if (!tab) {
+        return;
+      }
     }
     // 숨겨진 패널이나 과도한 observer 발화로 들어온 무효/중복 resize는 main에서 한 번 더 걸러준다.
     if (cols <= 0 || rows <= 0) {
@@ -3356,9 +3428,15 @@ export class CoreManager {
   }
 
   private flushResizeIfReady(sessionId: string): void {
-    const tab = this.tabs.get(sessionId);
-    if (!tab || tab.status !== "connected") {
-      return;
+    if (sessionId.startsWith("tmux:")) {
+      if (!this.isTmuxControlConnected(sessionId)) {
+        return;
+      }
+    } else {
+      const tab = this.tabs.get(sessionId);
+      if (!tab || tab.status !== "connected") {
+        return;
+      }
     }
 
     const desiredSize = this.desiredResizeBySession.get(sessionId);
@@ -3405,6 +3483,7 @@ export class CoreManager {
     // 코어에 실제 세션 핸들이 없을 수 있는 connecting/error 탭은 로컬에서 바로 닫아준다.
     if (!this.process || tab.status !== "connected") {
       this.sessionTransportById.delete(sessionId);
+      this.tmuxControlSessionIds.delete(sessionId);
       this.tabs.delete(sessionId);
       this.broadcastTerminalEvent({
         type: "closed",
@@ -3418,6 +3497,121 @@ export class CoreManager {
     this.sendControl({
       id: randomUUID(),
       type: "disconnect",
+      sessionId,
+      payload: {},
+    });
+  }
+
+  // tmux control mode 명령들. sessionId 는 pane 가상 세션 id
+  // ("tmux:<controlSessionId>:<paneNum>")이며, control 채널 stdin 으로 명령을 보낸다.
+  // 부모 control 세션이 아직 connected 가 아니면(또는 닫혔으면) 조용히 무시한다.
+  tmuxSplitPane(sessionId: string, direction: "h" | "v"): void {
+    if (!this.isTmuxControlConnected(sessionId)) {
+      return;
+    }
+    this.sendControl<{ direction: string }>({
+      id: randomUUID(),
+      type: "tmuxSplitPane",
+      sessionId,
+      payload: { direction },
+    });
+  }
+
+  tmuxNewWindow(sessionId: string): void {
+    if (!this.isTmuxControlConnected(sessionId)) {
+      return;
+    }
+    this.sendControl({
+      id: randomUUID(),
+      type: "tmuxNewWindow",
+      sessionId,
+      payload: {},
+    });
+  }
+
+  tmuxSelectWindow(sessionId: string, windowId: string): void {
+    if (!this.isTmuxControlConnected(sessionId)) {
+      return;
+    }
+    this.sendControl<{ windowId: string }>({
+      id: randomUUID(),
+      type: "tmuxSelectWindow",
+      sessionId,
+      payload: { windowId },
+    });
+  }
+
+  tmuxSelectPane(sessionId: string): void {
+    if (!this.isTmuxControlConnected(sessionId)) {
+      return;
+    }
+    this.sendControl({
+      id: randomUUID(),
+      type: "tmuxSelectPane",
+      sessionId,
+      payload: {},
+    });
+  }
+
+  tmuxKillPane(sessionId: string): void {
+    if (!this.isTmuxControlConnected(sessionId)) {
+      return;
+    }
+    this.sendControl({
+      id: randomUUID(),
+      type: "tmuxKillPane",
+      sessionId,
+      payload: {},
+    });
+  }
+
+  tmuxKillWindow(sessionId: string, windowId: string): void {
+    if (!this.isTmuxControlConnected(sessionId)) {
+      return;
+    }
+    this.sendControl<{ windowId: string }>({
+      id: randomUUID(),
+      type: "tmuxKillWindow",
+      sessionId,
+      payload: { windowId },
+    });
+  }
+
+  tmuxKillSession(sessionId: string, sessionName: string): void {
+    // control 세션(pane id)이면 control 채널로, 감지 하단바의 연결된 SSH 세션이면 보조
+    // exec 채널로 kill 한다(Go runtime 이 sessionId 종류로 라우팅). 둘 다 아니면 무시.
+    const sshTabConnected =
+      this.tabs.get(sessionId)?.status === "connected";
+    if (!this.isTmuxControlConnected(sessionId) && !sshTabConnected) {
+      return;
+    }
+    this.sendControl<{ sessionName: string }>({
+      id: randomUUID(),
+      type: "tmuxKillSession",
+      sessionId,
+      payload: { sessionName },
+    });
+  }
+
+  tmuxRenameWindow(sessionId: string, windowId: string, name: string): void {
+    if (!this.isTmuxControlConnected(sessionId)) {
+      return;
+    }
+    this.sendControl<{ windowId: string; name: string }>({
+      id: randomUUID(),
+      type: "tmuxRenameWindow",
+      sessionId,
+      payload: { windowId, name },
+    });
+  }
+
+  tmuxDetach(sessionId: string): void {
+    if (!this.isTmuxControlConnected(sessionId)) {
+      return;
+    }
+    this.sendControl({
+      id: randomUUID(),
+      type: "tmuxDetach",
       sessionId,
       payload: {},
     });
@@ -3583,12 +3777,14 @@ export class CoreManager {
           : null;
       if (!existing && event.type === "closed") {
         this.sessionTransportById.delete(event.sessionId);
+        this.tmuxControlSessionIds.delete(event.sessionId);
         this.sessionLifecycleById.delete(event.sessionId);
       }
       if (existing) {
         if (event.type === "closed") {
           this.clearPendingStartupCommand(event.sessionId);
           this.sessionTransportById.delete(event.sessionId);
+          this.tmuxControlSessionIds.delete(event.sessionId);
           this.tabs.delete(event.sessionId);
           this.desiredResizeBySession.delete(event.sessionId);
           this.sentResizeBySession.delete(event.sessionId);

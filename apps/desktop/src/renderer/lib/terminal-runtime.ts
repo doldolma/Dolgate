@@ -32,6 +32,8 @@ export interface TerminalRuntimeAppearance {
 export interface TerminalRuntime {
   terminal: Terminal;
   fitAddon: FitAddon;
+  /** 현재 셀(글자 1칸) 픽셀 크기. 워크스페이스 단위 tmux client 리사이즈 계산용. */
+  getCellSize: () => { width: number; height: number } | null;
   write: (data: Uint8Array | string) => void;
   scheduleAfterWriteDrain: (callback: () => void) => void;
   captureSnapshot: () => string;
@@ -558,6 +560,24 @@ export function createTerminalRuntime({
   return {
     terminal,
     fitAddon,
+    getCellSize: () => {
+      const core = (
+        terminal as unknown as {
+          _core?: {
+            _renderService?: {
+              dimensions?: {
+                css?: { cell?: { width?: number; height?: number } };
+              };
+            };
+          };
+        }
+      )._core;
+      const cell = core?._renderService?.dimensions?.css?.cell;
+      if (!cell?.width || !cell?.height) {
+        return null;
+      }
+      return { width: cell.width, height: cell.height };
+    },
     write(data) {
       if (disposed) {
         return;

@@ -3,6 +3,7 @@ package sshsession
 import (
 	"fmt"
 	"io"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -294,6 +295,10 @@ func (m *Manager) Connect(sessionID, requestID string, payload protocol.ConnectP
 	go m.stream(sessionID, handle, stderr)
 	// Wait는 별도 goroutine에서 감시해 원격 종료를 이벤트로 전파한다.
 	go m.waitForSession(sessionID)
+	// 접속 직후 보조채널로 원격 tmux 설치/세션을 감지해 하단바 신호를 보낸다(대화형 셸만).
+	if payload.Command == "" {
+		go m.detectAndEmitTmux(sessionID)
+	}
 	if m.config.SSHKeepAliveInterval > 0 {
 		// SSH keepalive는 유휴 구간에도 애플리케이션 레벨 왕복을 만들어 중간 장비 timeout을 더 빨리 감지한다.
 		go m.keepAlive(sessionID, handle)
@@ -349,6 +354,77 @@ func (m *Manager) CollectAutocomplete(sessionID string, revision int) (autocompl
 		return autocomplete.Degraded("", "metadata-unavailable"), nil
 	}
 	return autocomplete.ParseSnapshot(stdout, revision), nil
+}
+
+// detectAndEmitTmux는 접속 직후 보조 exec 채널로 원격 tmux 설치/버전/세션 목록을
+// 조회해 EventTmuxAvailable로 emit한다(인터랙티브 셸 무영향). tmux 미설치/실패면
+// 아무 이벤트도 보내지 않아 하단바가 뜨지 않는다.
+func (m *Manager) detectAndEmitTmux(sessionID string) {
+	session, err := m.getSession(sessionID)
+	if err != nil {
+		return
+	}
+	// list-sessions 는 세션이 0개면 exit 1 이라 cmd 전체가 비-0 으로 끝나지만, stdout 에
+	// "tmux <version>" 은 그대로 찍힌다. 그래서 err 는 무시하고 stdout 을 파싱한다(tmux
+	// 미설치면 version 이 비어 아래에서 걸러진다). 세션이 없어도 하단바는 떠야 한다.
+	stdout, _, _ := sshcmd.RunWithTimeout(session.client, TmuxDetectCommand, 3*time.Second)
+	payload := ParseTmuxDetect(string(stdout))
+	if payload.Version == "" {
+		return
+	}
+	m.emit(protocol.Event{
+		Type:      protocol.EventTmuxAvailable,
+		SessionID: sessionID,
+		Payload:   payload,
+	})
+}
+
+// KillTmuxSession 은 감지 하단바(attach 전)에서 원격 tmux 세션을 보조 exec 채널로
+// 종료한다. control mode 진입 없이 kill-session 을 실행한 뒤 목록을 재감지해 하단바를
+// 갱신한다. kill 실패(이미 없는 세션 등)는 무시하고 항상 재감지로 실제 상태를 반영한다
+// — 에러를 올리면 SSH 세션 자체가 영향받을 수 있어 best-effort 로 처리한다.
+func (m *Manager) KillTmuxSession(sessionID, sessionName string) error {
+	session, err := m.getSession(sessionID)
+	if err != nil || sessionName == "" {
+		return nil
+	}
+	// 이름은 작은따옴표로 감싸 셸 인젝션을 막는다(tmuxsession.KillSession 과 동일 escape).
+	quoted := "'" + strings.ReplaceAll(sessionName, "'", `'\''`) + "'"
+	_, _, _ = sshcmd.RunWithTimeout(
+		session.client,
+		fmt.Sprintf("tmux kill-session -t %s", quoted),
+		3*time.Second,
+	)
+	m.detectAndEmitTmux(sessionID)
+	return nil
+}
+
+// TmuxDetectCommand 는 원격 tmux 버전 + 세션 목록(탭 구분)을 한 번에 조회한다.
+// control mode(tmuxsession)에서도 동일 명령으로 세션 목록을 라이브 조회한다.
+const TmuxDetectCommand = "command -v tmux >/dev/null 2>&1 && { tmux -V; tmux list-sessions -F '#{session_name}\t#{session_windows}\t#{?session_attached,1,0}' 2>/dev/null; }"
+
+// ParseTmuxDetect는 "tmux -V" 첫 줄 + "list-sessions -F" 탭 구분 줄들을 파싱한다.
+func ParseTmuxDetect(out string) protocol.TmuxAvailablePayload {
+	var payload protocol.TmuxAvailablePayload
+	lines := strings.Split(strings.TrimRight(out, "\n"), "\n")
+	if len(lines) == 0 || strings.TrimSpace(lines[0]) == "" {
+		return payload
+	}
+	// 첫 줄: "tmux 3.5a" → 버전 "3.5a"
+	payload.Version = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(lines[0]), "tmux "))
+	for _, line := range lines[1:] {
+		parts := strings.Split(line, "\t")
+		if len(parts) < 3 {
+			continue
+		}
+		windows, _ := strconv.Atoi(strings.TrimSpace(parts[1]))
+		payload.Sessions = append(payload.Sessions, protocol.TmuxSessionInfo{
+			Name:     parts[0],
+			Windows:  windows,
+			Attached: strings.TrimSpace(parts[2]) == "1",
+		})
+	}
+	return payload
 }
 
 // RunCompletionCommand runs a short read-only command on a separate exec

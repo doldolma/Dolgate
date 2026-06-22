@@ -228,6 +228,10 @@ export function SettingsPanel({
     await onUpdateSettings({ terminalAltIsMeta });
   }
 
+  async function handleChangeTmuxPrefixEnabled(tmuxPrefixEnabled: boolean) {
+    await onUpdateSettings({ tmuxPrefixEnabled });
+  }
+
   async function handleChangeSessionReplayRetentionCount(
     sessionReplayRetentionCount: number,
   ) {
@@ -423,6 +427,19 @@ export function SettingsPanel({
                   }}
                 />
               ) : null}
+
+              <ToggleSwitch
+                checked={settings.tmuxPrefixEnabled ?? false}
+                label="tmux prefix(Ctrl-b) 단축키"
+                description={
+                  'tmux 제어 모드 pane 에서 Ctrl-b 다음 키(c / % / 따옴표 / n / p / d / x)를 네이티브 동작(새 창·분할·창 전환·detach·pane 종료)으로 매핑합니다. 끄면 평소대로 tmux 에 그대로 전달합니다.'
+                }
+                onClick={() => {
+                  void handleChangeTmuxPrefixEnabled(
+                    !(settings.tmuxPrefixEnabled ?? false),
+                  );
+                }}
+              />
             </div>
 
             {/* 명령 완료 알림 — 관련 설정을 한 그룹 카드로 묶는다 */}

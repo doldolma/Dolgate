@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import type { DesktopWindowState, TerminalTab, UpdateState } from '@shared';
+import type { DesktopWindowState, HostRecord, TerminalTab, UpdateState } from '@shared';
 import type {
   DynamicTabStripItem,
+  TmuxSessionGroup,
   WorkspaceTab,
   WorkspaceTabId
 } from '../store/createAppStore';
@@ -19,6 +20,9 @@ interface AppTitleBarProps {
   desktopPlatform: DesktopPlatform;
   tabs: TerminalTab[];
   workspaces: WorkspaceTab[];
+  tmuxGroups: TmuxSessionGroup[];
+  /** 호스트 카탈로그 — tmux 상단 탭에 호스트명을 표시하기 위해 group.hostId 해석에 사용. */
+  hosts: HostRecord[];
   tabStrip: DynamicTabStripItem[];
   activeWorkspaceTab: WorkspaceTabId;
   draggedSession: DraggedSessionPayload | null;
@@ -31,6 +35,12 @@ interface AppTitleBarProps {
   onSelectWorkspace: (workspaceId: string) => void;
   onCloseSession: (sessionId: string) => Promise<void>;
   onCloseWorkspace: (workspaceId: string) => Promise<void>;
+  /** tmux 세션 그룹 상단 탭 클릭 → 그룹 활성화. */
+  onSelectTmuxGroup: (tmuxGroupId: string) => void;
+  /** tmux 세션 그룹 상단 탭 × → detach(서버 세션 유지). */
+  onCloseTmuxGroup: (tmuxGroupId: string) => void;
+  /** tmux control mode workspace 에 새 tmux window 생성(new-window). 탭의 + 버튼. */
+  onNewTmuxWindow?: (workspaceId: string) => void;
   onStartSessionDrag: (sessionId: string) => void;
   onEndSessionDrag: () => void;
   onDetachSessionToStandalone: (workspaceId: string, sessionId: string) => void;
@@ -60,6 +70,15 @@ type TitlebarDynamicItem =
       title: string;
       paneCount: number;
       active: boolean;
+      /** tmux control mode workspace 면 true — 탭 × 닫기를 kill 대신 detach(서버 유지)로 라우팅. */
+      isTmux: boolean;
+    }
+  | {
+      kind: 'tmux';
+      tmuxGroupId: string;
+      title: string;
+      windowCount: number;
+      active: boolean;
     };
 
 const TAB_DRAG_MIME = 'application/x-dolssh-tab-item';
@@ -68,6 +87,9 @@ function serializeDraggedTab(item: DynamicTabStripItem): string {
   if (item.kind === 'session') {
     return `session:${item.sessionId}`;
   }
+  if (item.kind === 'tmux') {
+    return `tmuxgrp:${item.tmuxGroupId}`;
+  }
   return `workspace:${item.workspaceId}`;
 }
 
@@ -75,6 +97,10 @@ function parseDraggedTab(payload: string): DynamicTabStripItem | null {
   if (payload.startsWith('session:')) {
     const sessionId = payload.slice('session:'.length);
     return sessionId ? { kind: 'session', sessionId } : null;
+  }
+  if (payload.startsWith('tmuxgrp:')) {
+    const tmuxGroupId = payload.slice('tmuxgrp:'.length);
+    return tmuxGroupId ? { kind: 'tmux', tmuxGroupId } : null;
   }
   if (payload.startsWith('workspace:')) {
     const workspaceId = payload.slice('workspace:'.length);
@@ -182,6 +208,8 @@ export function AppTitleBar({
   desktopPlatform,
   tabs,
   workspaces,
+  tmuxGroups,
+  hosts,
   tabStrip,
   activeWorkspaceTab,
   draggedSession,
@@ -194,6 +222,9 @@ export function AppTitleBar({
   onSelectWorkspace,
   onCloseSession,
   onCloseWorkspace,
+  onSelectTmuxGroup,
+  onCloseTmuxGroup,
+  onNewTmuxWindow,
   onStartSessionDrag,
   onEndSessionDrag,
   onDetachSessionToStandalone,
@@ -247,13 +278,38 @@ export function AppTitleBar({
               workspaceId: workspace.id,
               title: workspace.title,
               paneCount: countWorkspacePanes(workspace),
-              active: activeWorkspaceTab === `workspace:${workspace.id}`
+              active: activeWorkspaceTab === `workspace:${workspace.id}`,
+              isTmux: Boolean(workspace.tmux)
+            } satisfies TitlebarDynamicItem;
+          }
+
+          if (item.kind === 'tmux') {
+            const group = tmuxGroups.find((candidate) => candidate.id === item.tmuxGroupId);
+            if (!group) {
+              return null;
+            }
+            // 상단 탭은 "호스트명-세션명"으로 표시. hostId 없거나 호스트 레코드 미발견이면
+            // 세션명만.
+            const host = group.hostId
+              ? hosts.find((candidate) => candidate.id === group.hostId)
+              : undefined;
+            return {
+              kind: 'tmux',
+              tmuxGroupId: group.id,
+              title: host?.label
+                ? `${host.label}-${group.sessionName}`
+                : group.sessionName,
+              windowCount: workspaces.filter(
+                (workspace) =>
+                  workspace.tmux?.controlSessionId === group.controlSessionId,
+              ).length,
+              active: activeWorkspaceTab === `tmuxgrp:${group.id}`
             } satisfies TitlebarDynamicItem;
           }
 
         })
         .filter((item): item is TitlebarDynamicItem => item !== null),
-    [activeWorkspaceTab, tabStrip, tabs, workspaces]
+    [activeWorkspaceTab, hosts, tabStrip, tabs, tmuxGroups, workspaces]
   );
 
   const showBadge = shouldShowBadge(updateState);
@@ -293,6 +349,9 @@ export function AppTitleBar({
   function getTabKey(item: DynamicTabStripItem): string {
     if (item.kind === 'session') {
       return `session:${item.sessionId}`;
+    }
+    if (item.kind === 'tmux') {
+      return `tmuxgrp:${item.tmuxGroupId}`;
     }
     return `workspace:${item.workspaceId}`;
   }
@@ -560,6 +619,52 @@ export function AppTitleBar({
             );
           }
 
+          if (item.kind === 'tmux') {
+            const tmuxTargetKey = getTabKey({
+              kind: 'tmux',
+              tmuxGroupId: item.tmuxGroupId,
+            });
+            return (
+              <div
+                key={`tmuxgrp:${item.tmuxGroupId}`}
+                ref={(node) => {
+                  titlebarTabItemRefs.current[tmuxTargetKey] = node;
+                }}
+                className={cn(
+                  'group relative flex flex-none items-center gap-1 rounded-[22px] border pr-1.5 transition-[box-shadow,background-color,border-color] duration-150',
+                  getTitlebarDynamicTabContainerClass(item.active),
+                )}
+              >
+                <TabButton
+                  active={item.active}
+                  className={cn(
+                    'min-w-[8.5rem]',
+                    getTitlebarDynamicTabButtonClass(item.active),
+                  )}
+                  onClick={() => onSelectTmuxGroup(item.tmuxGroupId)}
+                  title={`tmux 세션 · 윈도우 ${item.windowCount}개`}
+                >
+                  <span className="mr-1 text-[var(--accent)]" aria-hidden>
+                    ⊟
+                  </span>
+                  <span className="truncate">{item.title}</span>
+                </TabButton>
+                <IconButton
+                  size="sm"
+                  tone="ghost"
+                  className={getTitlebarCloseButtonClass(item.active)}
+                  aria-label={`${item.title} tmux 세션 detach`}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    onCloseTmuxGroup(item.tmuxGroupId);
+                  }}
+                >
+                  ×
+                </IconButton>
+              </div>
+            );
+          }
+
           const target = { kind: 'workspace', workspaceId: item.workspaceId } as const;
           const targetKey = getTabKey(target);
           return (
@@ -654,11 +759,38 @@ export function AppTitleBar({
                   {item.paneCount}
                 </span>
               </TabButton>
+              {item.isTmux ? (
+                <IconButton
+                  size="sm"
+                  tone="ghost"
+                  className={getTitlebarCloseButtonClass(item.active)}
+                  aria-label={`${item.title} 새 tmux 창`}
+                  title="새 tmux 창 (new-window)"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    onNewTmuxWindow?.(item.workspaceId);
+                  }}
+                >
+                  ＋
+                </IconButton>
+              ) : null}
               <IconButton
                 size="sm"
                 tone="ghost"
                 className={getTitlebarCloseButtonClass(item.active)}
-                aria-label={`${item.title} 닫기`}
+                // tmux workspace 의 × 는 그 window 하나만 닫는다(closeWorkspace → 그 window 의
+                // pane 만 kill-pane; tmux 가 마지막 pane kill 시 해당 window 만 닫음). 세션 전체
+                // detach 는 pane 하단 control 바의 Detach 로만 한다.
+                aria-label={
+                  item.isTmux
+                    ? `${item.title} 이 창 닫기`
+                    : `${item.title} 닫기`
+                }
+                title={
+                  item.isTmux
+                    ? '이 창 닫기 — 이 tmux window 만 닫습니다. 세션 전체는 하단 바의 Detach/Kill 을 쓰세요.'
+                    : undefined
+                }
                 onClick={async (event) => {
                   event.stopPropagation();
                   await onCloseWorkspace(item.workspaceId);

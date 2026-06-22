@@ -18,6 +18,7 @@ import (
 	"dolssh/services/ssh-core/internal/sshconn"
 	"dolssh/services/ssh-core/internal/sshsession"
 	"dolssh/services/ssh-core/internal/ssmforward"
+	"dolssh/services/ssh-core/internal/tmuxsession"
 	"dolssh/services/ssh-core/pkg/coretypes"
 )
 
@@ -37,6 +38,8 @@ type sshSessionManager interface {
 	InstallShellIntegration(sessionID string) error
 	FlushShellIntegration(sessionID string)
 	RunCompletionCommand(sessionID, command string) (string, bool, error)
+	// KillTmuxSession 은 감지 하단바에서 attach 없이 원격 tmux 세션을 종료한다(보조 exec).
+	KillTmuxSession(sessionID, sessionName string) error
 }
 
 // moshSessionManager는 mosh(UDP) 세션을 다룬다. SSH bootstrap+UDP를 캡슐화하며,
@@ -141,9 +144,12 @@ type hostKeyProbeFunc func(payload coretypes.HostKeyProbePayload) (coretypes.Hos
 type certificateInspectFunc func(payload coretypes.CertificateInspectPayload) coretypes.CertificateInspectedPayload
 
 type Runtime struct {
-	emitEvent                 func(coretypes.Event)
-	emitStream                func(coretypes.StreamFrame, []byte)
-	ssh                       sshSessionManager
+	emitEvent  func(coretypes.Event)
+	emitStream func(coretypes.StreamFrame, []byte)
+	ssh        sshSessionManager
+	// tmux 는 control mode 명령(SplitPane/NewWindow/…)을 위해 concrete 타입으로 둔다.
+	// sshSessionManager 인터페이스(HasSession/WriteBytes/…)도 만족하므로 라우팅에 그대로 쓰인다.
+	tmux                      *tmuxsession.Manager
 	mosh                      moshSessionManager
 	aws                       awsSessionManager
 	local                     localSessionManager
@@ -232,6 +238,7 @@ func newRuntimeWithDeps(
 		emitEvent:                 emitEvent,
 		emitStream:                emitStream,
 		ssh:                       ssh,
+		tmux:                      tmuxsession.NewManager(emitEvent, emitStream),
 		mosh:                      mosh,
 		aws:                       aws,
 		local:                     local,
@@ -277,6 +284,51 @@ func (runtime *Runtime) ConnectSSH(sessionID, requestID string, payload coretype
 	return runtime.ssh.Connect(sessionID, requestID, payload)
 }
 
+func (runtime *Runtime) ConnectTmux(sessionID, requestID string, payload coretypes.ConnectPayload) error {
+	return runtime.tmux.Connect(sessionID, requestID, payload)
+}
+
+func (runtime *Runtime) TmuxSplitPane(sessionID, direction string) error {
+	return runtime.tmux.SplitPane(sessionID, direction)
+}
+
+func (runtime *Runtime) TmuxNewWindow(sessionID string) error {
+	return runtime.tmux.NewWindow(sessionID)
+}
+
+func (runtime *Runtime) TmuxSelectWindow(sessionID, windowID string) error {
+	return runtime.tmux.SelectWindow(sessionID, windowID)
+}
+
+func (runtime *Runtime) TmuxSelectPane(sessionID string) error {
+	return runtime.tmux.SelectPane(sessionID)
+}
+
+func (runtime *Runtime) TmuxKillPane(sessionID string) error {
+	return runtime.tmux.KillPane(sessionID)
+}
+
+func (runtime *Runtime) TmuxKillWindow(sessionID, windowID string) error {
+	return runtime.tmux.KillWindow(sessionID, windowID)
+}
+
+func (runtime *Runtime) TmuxKillSession(sessionID, sessionName string) error {
+	// control mode pane/세션이면 control 채널로 kill, 감지 하단바의 SSH 세션이면 보조
+	// exec 채널로 kill(attach 없이 원격 세션 종료 + 목록 재감지).
+	if runtime.tmux.HasSession(sessionID) {
+		return runtime.tmux.KillSession(sessionID, sessionName)
+	}
+	return runtime.ssh.KillTmuxSession(sessionID, sessionName)
+}
+
+func (runtime *Runtime) TmuxRenameWindow(sessionID, windowID, name string) error {
+	return runtime.tmux.RenameWindow(sessionID, windowID, name)
+}
+
+func (runtime *Runtime) TmuxDetach(sessionID string) error {
+	return runtime.tmux.Detach(sessionID)
+}
+
 func (runtime *Runtime) ConnectAWS(sessionID, requestID string, payload coretypes.AWSConnectPayload) error {
 	return runtime.aws.Connect(sessionID, requestID, payload)
 }
@@ -299,6 +351,8 @@ func (runtime *Runtime) ControlSerial(sessionID string, payload coretypes.Serial
 
 func (runtime *Runtime) SendSessionInput(sessionID string, data []byte) error {
 	switch {
+	case runtime.tmux.HasSession(sessionID):
+		return runtime.tmux.WriteBytes(sessionID, data)
 	case runtime.mosh.HasSession(sessionID):
 		return runtime.mosh.WriteBytes(sessionID, data)
 	case runtime.aws.HasSession(sessionID):
@@ -321,6 +375,8 @@ func (runtime *Runtime) SendControlSignal(sessionID string, payload coretypes.Co
 
 func (runtime *Runtime) ResizeSession(sessionID string, payload coretypes.ResizePayload) error {
 	switch {
+	case runtime.tmux.HasSession(sessionID):
+		return runtime.tmux.Resize(sessionID, payload.Cols, payload.Rows)
 	case runtime.mosh.HasSession(sessionID):
 		return runtime.mosh.Resize(sessionID, payload.Cols, payload.Rows)
 	case runtime.aws.HasSession(sessionID):
@@ -337,6 +393,8 @@ func (runtime *Runtime) ResizeSession(sessionID string, payload coretypes.Resize
 func (runtime *Runtime) DisconnectSession(sessionID string) error {
 	runtime.StopAutocomplete(sessionID)
 	switch {
+	case runtime.tmux.HasSession(sessionID):
+		return runtime.tmux.Disconnect(sessionID)
 	case runtime.mosh.HasSession(sessionID):
 		return runtime.mosh.Disconnect(sessionID)
 	case runtime.aws.HasSession(sessionID):
@@ -363,6 +421,8 @@ func (runtime *Runtime) RunCompletionQuery(sessionID, requestID, command string)
 		truncated bool
 	)
 	switch {
+	case runtime.tmux.HasSession(sessionID):
+		stdout, truncated, _ = runtime.tmux.RunCompletionCommand(sessionID, command)
 	case runtime.ssh.HasSession(sessionID):
 		stdout, truncated, _ = runtime.ssh.RunCompletionCommand(sessionID, command)
 	case runtime.local.HasSession(sessionID):
@@ -425,6 +485,10 @@ func (runtime *Runtime) installShellIntegration(sessionID string) {
 	runtime.autocompleteMu.Unlock()
 
 	switch {
+	case runtime.tmux.HasSession(sessionID):
+		// control mode pane: tmux Manager 가 send-keys 로 init 을 주입하고 자체적으로
+		// 1.5s 뒤 flush 한다(여기서 별도 AfterFunc 불필요).
+		_ = runtime.tmux.InstallShellIntegration(sessionID)
 	case runtime.aws.HasSession(sessionID):
 		_ = runtime.aws.InstallShellIntegration(sessionID)
 		time.AfterFunc(shellIntegrationHandshakeTimeout, func() {
@@ -474,6 +538,8 @@ func (runtime *Runtime) collectAutocomplete(sessionID, requestID string) error {
 		err    error
 	)
 	switch {
+	case runtime.tmux.HasSession(sessionID):
+		result, err = runtime.tmux.CollectAutocomplete(sessionID, revision)
 	case runtime.aws.HasSession(sessionID):
 		result, err = runtime.aws.CollectAutocomplete(sessionID, revision)
 	case runtime.local.HasSession(sessionID):

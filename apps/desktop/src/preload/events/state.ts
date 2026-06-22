@@ -20,7 +20,12 @@ function createListenerHub<T>() {
   return {
     emit(payload: T): void {
       for (const listener of listeners) {
-        listener(payload);
+        try {
+          listener(payload);
+        } catch (err) {
+          // 한 리스너의 throw 가 다른 리스너/후속 이벤트 dispatch 를 막지 않게 격리한다.
+          console.error("event listener failed", err);
+        }
       }
     },
     subscribe(listener: Listener<T>): () => void {

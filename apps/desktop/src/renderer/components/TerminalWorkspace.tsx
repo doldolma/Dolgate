@@ -8,7 +8,11 @@ import type {
   TerminalTab,
 } from '@shared';
 import { useTerminalWorkspaceController } from '../controllers/useTerminalWorkspaceController';
-import type { WorkspaceDropDirection, WorkspaceTab } from '../store/createAppStore';
+import type {
+  WorkspaceDropDirection,
+  WorkspaceLayoutNode,
+  WorkspaceTab,
+} from '../store/createAppStore';
 import {
   getTerminalFontOption,
   getTerminalThemePreset,
@@ -16,6 +20,8 @@ import {
 } from '../lib/terminal-presets';
 import { TerminalSessionPane } from './terminal-workspace/TerminalSessionPane';
 import { TerminalWorkspaceLayoutView } from './terminal-workspace/TerminalWorkspaceLayoutView';
+import { resizeTerminal } from '../services/desktop/terminal';
+import { getTerminalCellSize } from '../lib/terminal-write-registry';
 import { SectionLabel } from '../ui';
 import { cn } from '../lib/cn';
 import {
@@ -222,6 +228,97 @@ export function TerminalWorkspace({
     return listWorkspaceSessionIds(activeWorkspace.layout);
   }, [activeWorkspace]);
 
+  // tmux pane 별 tmux 레이아웃 칸 수(cols×rows). leaf 에 실린 값을 sessionId 로 모은다.
+  // pane 의 xterm 을 이 크기로 고정해 tmux pane 크기와 1:1 일치 → 분할 셰이크 제거.
+  const tmuxCellBySessionId = useMemo(() => {
+    const map = new Map<string, { cols: number; rows: number }>();
+    if (!activeWorkspace) {
+      return map;
+    }
+    const walk = (node: WorkspaceLayoutNode) => {
+      if (node.kind === 'leaf') {
+        if (node.cols && node.rows) {
+          map.set(node.sessionId, { cols: node.cols, rows: node.rows });
+        }
+        return;
+      }
+      walk(node.first);
+      walk(node.second);
+    };
+    walk(activeWorkspace.layout);
+    return map;
+  }, [activeWorkspace]);
+
+  // tmux control-client 크기 보고: 워크스페이스 컨테이너 전체를 칸 수로 환산해 1회 보고한다.
+  // pane 들은 개별 보고를 하지 않으므로(셰이크 방지) 여기가 유일한 드라이버다. tmux 가 이
+  // total 을 layout 에 따라 pane 들에 나눠주고, 각 pane 의 xterm 은 그 layout 칸 수로 고정된다.
+  // 컨테이너 픽셀 크기는 %layout-change 재렌더로 바뀌지 않으므로(앱 창 리사이즈 때만) 루프 없음.
+  const liveTmuxWorkspaceRef = useRef(activeWorkspace);
+  liveTmuxWorkspaceRef.current = activeWorkspace;
+  const liveTabsForCellRef = useRef(tabs);
+  liveTabsForCellRef.current = tabs;
+  const lastReportedClientSizeRef = useRef({ cols: 0, rows: 0 });
+  const tmuxControlSessionId = activeWorkspace?.tmux?.controlSessionId ?? null;
+  useEffect(() => {
+    const container = workspaceRef.current;
+    if (!container || !tmuxControlSessionId) {
+      return;
+    }
+    lastReportedClientSizeRef.current = { cols: 0, rows: 0 };
+    let frame = 0;
+    let cellRetries = 0;
+    const measureAndReport = () => {
+      frame = 0;
+      const workspace = liveTmuxWorkspaceRef.current;
+      const paneSessionId = workspace
+        ? listWorkspaceSessionIds(workspace.layout).find((sessionId) =>
+            sessionId.startsWith('tmux:'),
+          )
+        : undefined;
+      if (!paneSessionId) {
+        return;
+      }
+      const stableId = liveTabsForCellRef.current.find(
+        (tab) => tab.sessionId === paneSessionId,
+      )?.stableId;
+      const cell = stableId ? getTerminalCellSize(stableId) : null;
+      if (!cell) {
+        if (cellRetries < 60) {
+          cellRetries += 1;
+          frame = requestAnimationFrame(measureAndReport);
+        }
+        return;
+      }
+      cellRetries = 0;
+      const rect = container.getBoundingClientRect();
+      if (rect.width === 0 || rect.height === 0) {
+        return;
+      }
+      const cols = Math.max(1, Math.floor(rect.width / cell.width));
+      const rows = Math.max(1, Math.floor(rect.height / cell.height));
+      const last = lastReportedClientSizeRef.current;
+      if (cols === last.cols && rows === last.rows) {
+        return;
+      }
+      lastReportedClientSizeRef.current = { cols, rows };
+      void resizeTerminal(paneSessionId, cols, rows);
+    };
+    const observer = new ResizeObserver(() => {
+      if (frame) {
+        return;
+      }
+      frame = requestAnimationFrame(measureAndReport);
+    });
+    observer.observe(container);
+    frame = requestAnimationFrame(measureAndReport);
+    return () => {
+      observer.disconnect();
+      if (frame) {
+        cancelAnimationFrame(frame);
+      }
+    };
+  }, [tmuxControlSessionId, activeWorkspace?.id]);
+
   const connectedWorkspaceHostSessionIds = useMemo(
     () =>
       activeWorkspaceSessionIds.filter((sessionId) =>
@@ -373,9 +470,12 @@ export function TerminalWorkspace({
     const rectStyle = placement ? toPercentRectStyle(placement.rect) : undefined;
 
     return {
-      // stableId 기준 key — 재연결로 sessionId가 바뀌어도 pane이 remount되지 않아
-      // 터미널 인스턴스(스크롤백)가 보존된다.
-      key: `${tab.stableId}:${activeWorkspace ? 'workspace' : 'standalone'}`,
+      // stableId 만으로 key 를 잡는다(워크스페이스/스탠드얼론 suffix 금지). suffix 를
+      // activeWorkspace 전역 플래그로 붙이면, tmux/워크스페이스 탭 ↔ 스탠드얼론 세션 탭
+      // 전환 시 모든 pane 의 key 가 뒤집혀 전부 remount→dispose 되고, dispose 된 터미널의
+      // 큐잉된 resize 태스크가 xterm IdleTaskQueue 에서 크래시(handleResize undefined)한다.
+      // 모드 전환은 remount 없이 className/style 재배치 + ResizeObserver 재fit 으로 충분.
+      key: tab.stableId,
       className: isWorkspacePane ? 'absolute p-[0.3rem]' : undefined,
       style: isWorkspacePane ? rectStyle : undefined,
       onDragOver: isWorkspacePane
@@ -451,6 +551,7 @@ export function TerminalWorkspace({
         <TerminalSessionPane
           sessionId={tab.sessionId}
           tab={tab}
+          tmuxCell={tmuxCellBySessionId.get(tab.sessionId)}
           title={tab.title}
           visible={visible}
           active={
@@ -470,8 +571,11 @@ export function TerminalWorkspace({
           }
           terminalWebglEnabled={settings.terminalWebglEnabled}
           terminalAutocompleteEnabled={settings.terminalAutocompleteEnabled}
+          tmuxPrefixEnabled={settings.tmuxPrefixEnabled ?? false}
           style={activeWorkspace ? undefined : rectStyle}
-          showHeader={Boolean(activeWorkspace && placement)}
+          // tmux pane 은 헤더 없이 슬롯을 꽉 채운다(컨테이너 px = tmux 셀 그리드 → 밑 짤림 제거).
+          // pane 식별/조작은 상단 윈도우 바 + tmux 자체 경계선/단축키가 담당.
+          showHeader={Boolean(activeWorkspace && placement) && !tab.tmux}
           host={
             tab.source === 'host' && tab.hostId
               ? hosts.find((record) => record.id === tab.hostId)
@@ -578,6 +682,10 @@ export function TerminalWorkspace({
       }}
       paneSlots={workspacePaneSlots}
       handles={activeWorkspace && workspaceLayout ? workspaceLayout.handles : []}
+      // tmux 워크스페이스는 핸들의 보이는 액센트 바를 얇은 가운데 선으로 바꾼다(히트영역
+      // 12px 은 유지). tmux pane 거터가 좁아 기존의 꽉 찬 12px 바가 경계 글자와 겹쳐
+      // 보이던 것을 해소 — 크기/측정/key 는 일절 안 건드리는 순수 시각 변경.
+      tmuxThinHandles={Boolean(activeWorkspace?.tmux)}
       onStartResizeHandle={setResizingHandle}
       dropPreview={dropPreview}
     />

@@ -297,6 +297,157 @@ export function createRuntimeEventSlice(deps: SliceDeps): RuntimeEventSlice {
               get().activeCredentialRetryAttempt;
             scheduleActivityLogsRefresh();
 
+            // tmux control mode: window layout을 workspace(pane 분할)로 반영한다.
+            if (event.type === "tmuxLayoutChange") {
+              const payload = event.payload as {
+                controlSessionId?: string;
+                windowId?: string;
+                layout?: string;
+                index?: number;
+                name?: string;
+                active?: boolean;
+                sessionName?: string;
+              };
+              if (
+                payload.controlSessionId &&
+                payload.windowId &&
+                typeof payload.layout === "string"
+              ) {
+                get().handleTmuxLayoutChange(
+                  payload.controlSessionId,
+                  payload.windowId,
+                  payload.layout,
+                  // index/name/active/sessionName 는 list-windows 응답에서만 온다(실시간
+                  // layout-change 엔 sessionName 만). 없으면 store 가 기존 값을 유지한다.
+                  {
+                    index: payload.index,
+                    name: payload.name,
+                    active: payload.active,
+                    sessionName: payload.sessionName,
+                  },
+                );
+              }
+              return;
+            }
+
+            // tmux 감지(하단바): SSH 접속 후 보조채널이 보낸 원격 tmux 정보를 해당
+            // 탭의 tmuxAvailable 에 set 한다(moshState 와 동일하게 표시 전용).
+            if (event.type === "tmuxAvailable" && sessionId) {
+              const payload = event.payload as {
+                version?: string;
+                sessions?: {
+                  name?: string;
+                  windows?: number;
+                  attached?: boolean;
+                }[];
+              };
+              set((state) => ({
+                tabs: state.tabs.map((tab) =>
+                  tab.sessionId === sessionId
+                    ? {
+                        ...tab,
+                        tmuxAvailable: payload.version
+                          ? {
+                              version: payload.version,
+                              sessions: (payload.sessions ?? []).map((s) => ({
+                                name: s.name ?? "",
+                                windows: s.windows ?? 0,
+                                attached: s.attached ?? false,
+                              })),
+                            }
+                          : null,
+                      }
+                    : tab,
+                ),
+              }));
+              return;
+            }
+
+            // 그 밖의 tmux 구조 이벤트(window-add/close/renamed, sessions-changed,
+            // paused/continue, exit)는 아직 전용 핸들러가 없다. payload 없이 오는
+            // 경우가 있어(예: tmuxSessionsChanged) 일반 세션 경로로 새면 아래 shellKind
+            // 접근에서 throw 하거나 pane 탭 상태를 잘못 갱신하므로 여기서 무시한다.
+            // tmux window 닫힘 / control 세션 종료: 로컬 workspace·pane 탭 정리(좀비 방지).
+            // 서버에서 이미 닫혔으므로 명령은 보내지 않는다.
+            if (event.type === "tmuxWindowClose") {
+              const payload = event.payload as {
+                controlSessionId?: string;
+                windowId?: string;
+              };
+              if (payload?.controlSessionId && payload?.windowId) {
+                get().removeTmuxWorkspacesLocal(
+                  payload.controlSessionId,
+                  payload.windowId,
+                );
+              }
+              return;
+            }
+            if (event.type === "tmuxExit") {
+              const payload = event.payload as { controlSessionId?: string };
+              if (payload?.controlSessionId) {
+                get().removeTmuxWorkspacesLocal(
+                  payload.controlSessionId,
+                  undefined,
+                );
+              }
+              return;
+            }
+
+            // tmux window 이름 변경(%window-renamed) → 해당 window WorkspaceTab 라벨 반영.
+            if (event.type === "tmuxWindowRenamed") {
+              const payload = event.payload as {
+                controlSessionId?: string;
+                windowId?: string;
+                name?: string;
+              };
+              if (payload?.controlSessionId && payload?.windowId) {
+                get().applyTmuxWindowRenamed(
+                  payload.controlSessionId,
+                  payload.windowId,
+                  payload.name ?? "",
+                );
+              }
+              return;
+            }
+
+            // tmux 세션 변경(%session-changed) → 세션 그룹 푸터의 세션명을 실제 tmux
+            // 세션명으로 갱신(호스트명 대체). attach 직후·세션 전환 시 발생.
+            if (event.type === "tmuxSessionChanged") {
+              const payload = event.payload as {
+                controlSessionId?: string;
+                sessionName?: string;
+              };
+              if (payload?.controlSessionId && payload.sessionName) {
+                get().applyTmuxSessionName(
+                  payload.controlSessionId,
+                  payload.sessionName,
+                );
+              }
+              return;
+            }
+
+            // tmux 세션 목록 변경(%sessions-changed) → 그 control 세션 그룹의 세션
+            // 목록 갱신(푸터 메뉴). 페이로드는 SSH 감지와 동일 형태(version+sessions),
+            // controlSessionId 는 event.sessionId(=control 세션 id).
+            if (event.type === "tmuxSessionsChanged" && sessionId) {
+              const payload = event.payload as {
+                sessions?: { name?: string; windows?: number; attached?: boolean }[];
+              };
+              get().applyTmuxSessionsList(
+                sessionId,
+                (payload?.sessions ?? []).map((s) => ({
+                  name: s.name ?? "",
+                  windows: s.windows ?? 0,
+                  attached: s.attached ?? false,
+                })),
+              );
+              return;
+            }
+
+            if (event.type.startsWith("tmux")) {
+              return;
+            }
+
             // mosh 연결 상태 이벤트 — 해당 탭의 moshState/lastMoshResponseAt만 갱신한다.
             if (event.type === "moshState" && sessionId) {
               const payload = event.payload as {
@@ -948,7 +1099,7 @@ export function createRuntimeEventSlice(deps: SliceDeps): RuntimeEventSlice {
             }
     
             const resolvedShellKind =
-              typeof event.payload.shellKind === "string"
+              typeof event.payload?.shellKind === "string"
                 ? event.payload.shellKind.trim() || undefined
                 : undefined;
 

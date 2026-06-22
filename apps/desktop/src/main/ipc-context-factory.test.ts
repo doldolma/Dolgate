@@ -57,6 +57,7 @@ function createDependencies(): RegisterIpcDependencies {
       setTerminalEventHandler: vi.fn(),
       setPortForwardEventHandler: vi.fn(),
       setTerminalStreamHandler: vi.fn(),
+      isTmuxSession: vi.fn(() => false),
     } as any,
     hostsOverrideManager: {
       pruneStaticOverrideStates: vi.fn(),

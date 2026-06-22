@@ -6,6 +6,8 @@ import type {
   SessionReturnTarget,
   SessionWorkspaceTabId,
   SplitWorkspaceTabId,
+  TmuxSessionGroup,
+  TmuxSessionGroupTabId,
   WorkspaceDropDirection,
   WorkspaceLayoutNode,
   WorkspaceLeafNode,
@@ -25,6 +27,25 @@ export function asSessionTabId(sessionId: string): SessionWorkspaceTabId {
 
 export function asWorkspaceTabId(workspaceId: string): SplitWorkspaceTabId {
   return `workspace:${workspaceId}`;
+}
+
+export function asTmuxSessionGroupTabId(
+  tmuxGroupId: string,
+): TmuxSessionGroupTabId {
+  return `tmuxgrp:${tmuxGroupId}`;
+}
+
+// tmux 윈도우(WorkspaceTab.tmux)가 속한 세션 그룹을 controlSessionId 로 찾는다.
+// pane 포커스/윈도우 활성 시 상단 세션 탭(tmuxgrp:)을 활성 유지하는 데 쓴다.
+export function findTmuxGroupForWorkspace(
+  tmuxGroups: TmuxSessionGroup[],
+  workspace: WorkspaceTab | undefined,
+): TmuxSessionGroup | undefined {
+  const controlSessionId = workspace?.tmux?.controlSessionId;
+  if (!controlSessionId) {
+    return undefined;
+  }
+  return tmuxGroups.find((g) => g.controlSessionId === controlSessionId);
 }
 
 export function captureSessionReturnTarget(
@@ -64,6 +85,7 @@ export function resolveSessionReturnTarget(
     | "settingsSection"
     | "tabStrip"
     | "workspaces"
+    | "tmuxGroups"
   >,
   target: SessionReturnTarget,
 ): SessionReturnTarget | null {
@@ -120,6 +142,13 @@ export function resolveSessionReturnTarget(
     const workspaceId = target.activeWorkspaceTab.slice("workspace:".length);
     return state.workspaces.some((workspace) => workspace.id === workspaceId)
       ? { activeWorkspaceTab: asWorkspaceTabId(workspaceId) }
+      : null;
+  }
+
+  if (target.activeWorkspaceTab.startsWith("tmuxgrp:")) {
+    const tmuxGroupId = target.activeWorkspaceTab.slice("tmuxgrp:".length);
+    return state.tmuxGroups.some((group) => group.id === tmuxGroupId)
+      ? { activeWorkspaceTab: asTmuxSessionGroupTabId(tmuxGroupId) }
       : null;
   }
 
@@ -686,6 +715,7 @@ export function removeSessionFromState(
         settingsSection: nextSettingsSection,
         tabStrip: nextTabStrip,
         workspaces: nextWorkspaces,
+        tmuxGroups: state.tmuxGroups,
       },
       storedReturnTarget,
     );
@@ -796,6 +826,9 @@ export function resolveNextVisibleTab(
   if (nextItem.kind === "workspace") {
     return asWorkspaceTabId(nextItem.workspaceId);
   }
+  if (nextItem.kind === "tmux") {
+    return asTmuxSessionGroupTabId(nextItem.tmuxGroupId);
+  }
   return "home";
 }
 
@@ -815,6 +848,10 @@ export function resolveAdjacentTarget(
   for (const index of candidateIndexes) {
     const candidate = tabStrip[index];
     if (!candidate) {
+      continue;
+    }
+    // tmux 세션 그룹 탭은 일반 드래그-분할 워크스페이스에 참여하지 않는다.
+    if (candidate.kind === "tmux") {
       continue;
     }
     if (candidate.kind === "workspace") {
@@ -847,5 +884,159 @@ export function dynamicTabMatches(
   if (left.kind === "workspace" && right.kind === "workspace") {
     return left.workspaceId === right.workspaceId;
   }
+  if (left.kind === "tmux" && right.kind === "tmux") {
+    return left.tmuxGroupId === right.tmuxGroupId;
+  }
   return false;
+}
+
+// --- tmux control mode layout 파싱 ---
+//
+// tmux control mode의 `%layout-change` 문자열을 워크스페이스 레이아웃 트리로 변환한다.
+// 형식: "<checksum>,WxH,X,Y..." 에서 각 셀은
+//   {child,child,...} = 좌우 분할(left-right) → axis "horizontal"
+//   [child,child,...] = 상하 분할(top-bottom) → axis "vertical"
+//   ,<paneId>         = pane(leaf)
+// tmux는 N-way 분할을 허용하므로 binary 트리(first/second)로 중첩 변환하고,
+// ratio는 first 자식의 크기 비율로 계산한다. paneId는 toSessionId로 가상 sessionId에 매핑한다.
+
+interface TmuxLayoutCell {
+  node: WorkspaceLayoutNode;
+  pos: number;
+  width: number;
+  height: number;
+}
+
+export function parseTmuxLayout(
+  layout: string,
+  toSessionId: (paneId: string) => string,
+): WorkspaceLayoutNode | null {
+  let body = layout.trim();
+  const firstComma = body.indexOf(",");
+  // 앞의 체크섬 토큰(예: "bd5e")은 건너뛴다. WxH 토큰은 'x'를 포함하므로 구분된다.
+  if (
+    firstComma > 0 &&
+    !body.slice(0, firstComma).includes("x") &&
+    /^[0-9a-f]+$/i.test(body.slice(0, firstComma))
+  ) {
+    body = body.slice(firstComma + 1);
+  }
+  try {
+    const result = parseTmuxLayoutCell(body, 0, toSessionId);
+    return result.pos === body.length ? result.node : null;
+  } catch {
+    return null;
+  }
+}
+
+function parseTmuxLayoutCell(
+  source: string,
+  start: number,
+  toSessionId: (paneId: string) => string,
+): TmuxLayoutCell {
+  const dims = /^(\d+)x(\d+),\d+,\d+/.exec(source.slice(start));
+  if (!dims) {
+    throw new Error("invalid tmux layout cell");
+  }
+  const width = Number(dims[1]);
+  const height = Number(dims[2]);
+  let pos = start + dims[0].length;
+  const next = source[pos];
+  if (next === "{") {
+    return parseTmuxLayoutContainer(
+      source,
+      pos + 1,
+      "}",
+      "horizontal",
+      width,
+      height,
+      toSessionId,
+    );
+  }
+  if (next === "[") {
+    return parseTmuxLayoutContainer(
+      source,
+      pos + 1,
+      "]",
+      "vertical",
+      width,
+      height,
+      toSessionId,
+    );
+  }
+  if (next === ",") {
+    const pane = /^,(\d+)/.exec(source.slice(pos));
+    if (!pane) {
+      throw new Error("invalid tmux pane id");
+    }
+    pos += pane[0].length;
+    const leaf = createWorkspaceLeaf(toSessionId(pane[1]));
+    // tmux 레이아웃이 지정한 이 pane 의 정확한 칸 수를 leaf 에 싣는다(셰이크 수정용).
+    leaf.cols = width;
+    leaf.rows = height;
+    return {
+      node: leaf,
+      pos,
+      width,
+      height,
+    };
+  }
+  throw new Error("unexpected tmux layout token");
+}
+
+function parseTmuxLayoutContainer(
+  source: string,
+  start: number,
+  close: "}" | "]",
+  axis: WorkspaceSplitNode["axis"],
+  width: number,
+  height: number,
+  toSessionId: (paneId: string) => string,
+): TmuxLayoutCell {
+  const children: TmuxLayoutCell[] = [];
+  let pos = start;
+  for (;;) {
+    const child = parseTmuxLayoutCell(source, pos, toSessionId);
+    children.push(child);
+    pos = child.pos;
+    const ch = source[pos];
+    if (ch === ",") {
+      pos += 1;
+      continue;
+    }
+    if (ch === close) {
+      pos += 1;
+      break;
+    }
+    throw new Error("unterminated tmux layout container");
+  }
+  return {
+    node: buildTmuxLayoutBinary(children, axis),
+    pos,
+    width,
+    height,
+  };
+}
+
+function buildTmuxLayoutBinary(
+  children: TmuxLayoutCell[],
+  axis: WorkspaceSplitNode["axis"],
+): WorkspaceLayoutNode {
+  if (children.length === 1) {
+    return children[0].node;
+  }
+  const [first, ...rest] = children;
+  const measure = (cell: TmuxLayoutCell) =>
+    axis === "horizontal" ? cell.width : cell.height;
+  const firstSize = measure(first);
+  const restSize = rest.reduce((sum, cell) => sum + measure(cell), 0);
+  const total = firstSize + restSize;
+  return {
+    id: globalThis.crypto.randomUUID(),
+    kind: "split",
+    axis,
+    ratio: total > 0 ? firstSize / total : 0.5,
+    first: first.node,
+    second: buildTmuxLayoutBinary(rest, axis),
+  };
 }

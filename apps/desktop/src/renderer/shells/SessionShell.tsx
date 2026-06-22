@@ -1,6 +1,8 @@
 import { useMemo } from 'react';
 import type { AuthState } from '@shared';
 import { TerminalWorkspace } from '../components/TerminalWorkspace';
+import { TmuxWindowBar } from '../components/terminal-workspace/TmuxWindowBar';
+import { TmuxSessionFooter } from '../components/terminal-workspace/TmuxSessionFooter';
 import { TerminalTransferToastRegion } from '../components/TerminalTransferToastRegion';
 import type { useLoginController } from '../controllers/useLoginController';
 import { openOwnerChatWindow } from '../services/desktop/session-shares';
@@ -45,16 +47,51 @@ export function SessionShell({
   onStartSessionDrag,
   onEndSessionDrag,
 }: SessionShellProps) {
-  const activeSessionId = homeViewModel.activeWorkspaceTab.startsWith('session:')
-    ? homeViewModel.activeWorkspaceTab.slice('session:'.length)
+  const activeTabId = homeViewModel.activeWorkspaceTab;
+  const activeSessionId = activeTabId.startsWith('session:')
+    ? activeTabId.slice('session:'.length)
     : null;
-  const activeWorkspace = homeViewModel.activeWorkspaceTab.startsWith('workspace:')
-    ? sessionViewModel.workspaces.find(
-        (workspace) =>
-          workspace.id ===
-          homeViewModel.activeWorkspaceTab.slice('workspace:'.length),
+  // tmuxgrp: 탭이면 그룹을 직접 찾는다.
+  const groupFromTab = activeTabId.startsWith('tmuxgrp:')
+    ? sessionViewModel.tmuxGroups.find(
+        (group) => group.id === activeTabId.slice('tmuxgrp:'.length),
       ) ?? null
     : null;
+  // workspace: 탭이 가리키는 워크스페이스(있다면).
+  const workspaceFromTab = activeTabId.startsWith('workspace:')
+    ? sessionViewModel.workspaces.find(
+        (workspace) => workspace.id === activeTabId.slice('workspace:'.length),
+      ) ?? null
+    : null;
+  // tmux 세션 그룹: tmuxgrp: 탭에서 직접 얻거나, workspace: 탭이 tmux 윈도우면 그
+  // controlSessionId 로 도출한다(activeWorkspaceTab 이 workspace: 든 tmuxgrp: 든 윈도우
+  // 바가 항상 뜨도록 — pane 이 보이는데 바가 안 뜨는 일이 없게).
+  const activeTmuxGroup =
+    groupFromTab ??
+    (workspaceFromTab?.tmux
+      ? sessionViewModel.tmuxGroups.find(
+          (group) =>
+            group.controlSessionId === workspaceFromTab.tmux?.controlSessionId,
+        ) ?? null
+      : null);
+  // 활성 워크스페이스: tmux 면 그룹의 activeWorkspaceId 를 단일 진실원으로 삼아
+  // (activeWorkspaceTab 이 어쩌다 workspace: 여도) 윈도우 바 강조와 보이는 화면을
+  // 일치시킨다. 비-tmux 면 workspace: 탭의 워크스페이스를 그대로 쓴다.
+  const activeWorkspace = activeTmuxGroup
+    ? sessionViewModel.workspaces.find(
+        (workspace) => workspace.id === activeTmuxGroup.activeWorkspaceId,
+      ) ?? null
+    : workspaceFromTab;
+  // 그룹의 윈도우 목록(같은 control 세션) — index 순 정렬, 윈도우 바에 표시.
+  const tmuxWindows = activeTmuxGroup
+    ? sessionViewModel.workspaces
+        .filter(
+          (workspace) =>
+            workspace.tmux?.controlSessionId ===
+            activeTmuxGroup.controlSessionId,
+        )
+        .sort((a, b) => (a.tmux?.index ?? 0) - (b.tmux?.index ?? 0))
+    : [];
   const sessionViewActivationKey =
     homeViewModel.activeWorkspaceTab === 'home' ||
     homeViewModel.activeWorkspaceTab === 'sftp' ||
@@ -75,6 +112,61 @@ export function SessionShell({
     );
   }, [draggedSession, sessionViewModel.tabStrip, sessionViewModel.workspaces]);
 
+  const workspaceEl = (
+    <TerminalWorkspace
+      tabs={sessionViewModel.tabs}
+      hosts={homeViewModel.hosts}
+      settings={settingsViewModel.settings}
+      prefersDark={prefersDark}
+      activeSessionId={activeSessionId}
+      activeWorkspace={activeWorkspace}
+      viewActivationKey={sessionViewActivationKey}
+      draggedSession={draggedSession}
+      canDropDraggedSession={canDropDraggedSession}
+      onCloseSession={sessionViewModel.disconnectTab}
+      onRetryConnection={sessionViewModel.retrySessionConnection}
+      onCancelReconnect={sessionViewModel.cancelSessionReconnect}
+      onStartSessionShare={sessionViewModel.startSessionShare}
+      onUpdateSessionShareSnapshot={sessionViewModel.updateSessionShareSnapshot}
+      onSetSessionShareInputEnabled={
+        sessionViewModel.setSessionShareInputEnabled
+      }
+      onStopSessionShare={sessionViewModel.stopSessionShare}
+      onOpenSessionShareChatWindow={openOwnerChatWindow}
+      onStartPaneDrag={(workspaceId, sessionId) => {
+        onStartSessionDrag({
+          sessionId,
+          source: 'workspace-pane',
+          workspaceId,
+        });
+      }}
+      onEndSessionDrag={onEndSessionDrag}
+      onSplitSessionDrop={(sessionId, direction, targetSessionId) =>
+        sessionViewModel.splitSessionIntoWorkspace(
+          sessionId,
+          direction,
+          targetSessionId,
+        )
+      }
+      onMoveWorkspaceSession={(
+        workspaceId,
+        sessionId,
+        direction,
+        targetSessionId,
+      ) =>
+        sessionViewModel.moveWorkspaceSession(
+          workspaceId,
+          sessionId,
+          direction,
+          targetSessionId,
+        )
+      }
+      onFocusWorkspaceSession={sessionViewModel.focusWorkspaceSession}
+      onToggleWorkspaceBroadcast={sessionViewModel.toggleWorkspaceBroadcast}
+      onResizeWorkspaceSplit={sessionViewModel.resizeWorkspaceSplit}
+    />
+  );
+
   return (
     <section
       className={
@@ -92,55 +184,102 @@ export function SessionShell({
           }}
         />
       ) : null}
-      <div className="relative min-h-0 flex-1">
-        <TerminalWorkspace
-          tabs={sessionViewModel.tabs}
-          hosts={homeViewModel.hosts}
-          settings={settingsViewModel.settings}
-          prefersDark={prefersDark}
-          activeSessionId={activeSessionId}
-          activeWorkspace={activeWorkspace}
-          viewActivationKey={sessionViewActivationKey}
-          draggedSession={draggedSession}
-          canDropDraggedSession={canDropDraggedSession}
-          onCloseSession={sessionViewModel.disconnectTab}
-          onRetryConnection={sessionViewModel.retrySessionConnection}
-          onCancelReconnect={sessionViewModel.cancelSessionReconnect}
-          onStartSessionShare={sessionViewModel.startSessionShare}
-          onUpdateSessionShareSnapshot={sessionViewModel.updateSessionShareSnapshot}
-          onSetSessionShareInputEnabled={
-            sessionViewModel.setSessionShareInputEnabled
-          }
-          onStopSessionShare={sessionViewModel.stopSessionShare}
-          onOpenSessionShareChatWindow={openOwnerChatWindow}
-          onStartPaneDrag={(workspaceId, sessionId) => {
-            onStartSessionDrag({
-              sessionId,
-              source: 'workspace-pane',
-              workspaceId,
-            });
-          }}
-          onEndSessionDrag={onEndSessionDrag}
-          onSplitSessionDrop={(sessionId, direction, targetSessionId) =>
-            sessionViewModel.splitSessionIntoWorkspace(
-              sessionId,
-              direction,
-              targetSessionId,
-            )
-          }
-          onMoveWorkspaceSession={(workspaceId, sessionId, direction, targetSessionId) =>
-            sessionViewModel.moveWorkspaceSession(
-              workspaceId,
-              sessionId,
-              direction,
-              targetSessionId,
-            )
-          }
-          onFocusWorkspaceSession={sessionViewModel.focusWorkspaceSession}
-          onToggleWorkspaceBroadcast={sessionViewModel.toggleWorkspaceBroadcast}
-          onResizeWorkspaceSplit={sessionViewModel.resizeWorkspaceSplit}
-        />
-        <TerminalTransferToastRegion />
+      {/*
+        workspaceEl(=TerminalWorkspace)을 항상 동일한 트리 위치(아래 flex-col 의
+        가운데 자식)에 둔다. tmux 세션 탭을 드나들며 activeTmuxGroup 이 토글돼도
+        workspaceEl 이 다른 위치로 이동/remount 되지 않아야 — 그래야 모든 터미널이
+        keep-mounted 되고, dispose 된 터미널의 큐잉된 resize 태스크가 xterm
+        IdleTaskQueue 에서 크래시(handleResize undefined)하지 않는다. 윈도우 바/푸터는
+        조건부 형제로만 끼운다(워크스페이스 위치는 불변).
+      */}
+      <div className="flex min-h-0 flex-1 flex-col">
+        {activeTmuxGroup ? (
+          <TmuxWindowBar
+            windows={tmuxWindows}
+            activeWorkspaceId={activeTmuxGroup.activeWorkspaceId}
+            onSelect={sessionViewModel.selectTmuxWindow}
+            onNewWindow={() => {
+              if (activeWorkspace) {
+                sessionViewModel.tmuxNewWindowInWorkspace(activeWorkspace.id);
+              }
+            }}
+            onClose={(workspaceId) => {
+              void sessionViewModel.closeWorkspace(workspaceId);
+            }}
+            onRename={sessionViewModel.renameTmuxWindow}
+            onSplitHorizontal={() => {
+              if (activeWorkspace) {
+                sessionViewModel.splitSessionIntoWorkspace(
+                  activeWorkspace.activeSessionId,
+                  'right',
+                );
+              }
+            }}
+            onSplitVertical={() => {
+              if (activeWorkspace) {
+                sessionViewModel.splitSessionIntoWorkspace(
+                  activeWorkspace.activeSessionId,
+                  'bottom',
+                );
+              }
+            }}
+          />
+        ) : null}
+        <div className="relative min-h-0 flex-1">
+          {workspaceEl}
+          <TerminalTransferToastRegion />
+        </div>
+        {activeTmuxGroup ? (
+          <TmuxSessionFooter
+            sessionName={activeTmuxGroup.sessionName}
+            sessions={activeTmuxGroup.sessions ?? []}
+            onCreateSession={(name) => {
+              const hostId = activeTmuxGroup.hostId;
+              if (!hostId) {
+                return;
+              }
+              // 새 세션 = 새 그룹 탭(replaceSessionId 없음 — 현재 tmux 유지). strict new.
+              const quoted = `'${name.replace(/'/g, "'\\''")}'`;
+              void sessionViewModel.connectHost(
+                hostId,
+                120,
+                32,
+                undefined,
+                true,
+                `tmux -CC new-session -s ${quoted}`,
+              );
+            }}
+            onSelectSession={(name) => {
+              const hostId = activeTmuxGroup.hostId;
+              if (!hostId) {
+                return;
+              }
+              // 다른 세션 전환 = 새 그룹 탭으로 attach(현재 세션 유지).
+              const quoted = `'${name.replace(/'/g, "'\\''")}'`;
+              void sessionViewModel.connectHost(
+                hostId,
+                120,
+                32,
+                undefined,
+                true,
+                `tmux -CC attach -t ${quoted}`,
+              );
+            }}
+            onKillSession={(name) => {
+              if (activeWorkspace) {
+                sessionViewModel.killTmuxSession(
+                  activeWorkspace.activeSessionId,
+                  name,
+                );
+              }
+            }}
+            onDetach={() => {
+              if (activeWorkspace) {
+                void sessionViewModel.detachTmuxWorkspace(activeWorkspace.id);
+              }
+            }}
+          />
+        ) : null}
       </div>
     </section>
   );

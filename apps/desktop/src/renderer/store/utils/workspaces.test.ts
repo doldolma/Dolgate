@@ -3,6 +3,7 @@ import type { WorkspaceLayoutNode, WorkspaceTab } from "../types";
 import {
   asSessionTabId,
   asWorkspaceTabId,
+  parseTmuxLayout,
   resolveAdjacentTarget,
   resolveNextVisibleTab,
   updateWorkspaceSplitRatio,
@@ -95,5 +96,97 @@ describe("workspaces utils", () => {
         "session-1",
       ),
     ).toBeNull();
+  });
+
+  it("never picks a tmux session group tab as a split target", () => {
+    // tmux 세션 그룹 탭은 자체 윈도우/pane 레이아웃을 가지므로 일반 드래그-분할에
+    // 참여하지 않는다 — 인접이 tmux 탭뿐이면 분할 대상 없음(null).
+    expect(
+      resolveAdjacentTarget(
+        [
+          { kind: "session", sessionId: "session-1" },
+          { kind: "tmux", tmuxGroupId: "group-1" },
+        ],
+        [],
+        "session-1",
+      ),
+    ).toBeNull();
+  });
+});
+
+describe("parseTmuxLayout", () => {
+  const id = (paneId: string) => `tmux:base:${paneId}`;
+
+  it("parses a single pane into a leaf with tmux cell size", () => {
+    expect(parseTmuxLayout("bd5e,80x24,0,0,0", id)).toEqual({
+      id: expect.any(String),
+      kind: "leaf",
+      sessionId: "tmux:base:0",
+      // leaf 는 tmux 레이아웃 칸 수(cols×rows)를 실어, pane xterm 을 이 크기로 고정한다.
+      cols: 80,
+      rows: 24,
+    });
+  });
+
+  it("parses a left-right split as a horizontal split", () => {
+    const node = parseTmuxLayout("b25d,80x24,0,0{40x24,0,0,1,39x24,41,0,2}", id);
+    if (node?.kind !== "split") throw new Error("expected split");
+    expect(node.axis).toBe("horizontal");
+    expect(node.ratio).toBeCloseTo(40 / 79, 5);
+    expect(node.first).toMatchObject({ kind: "leaf", sessionId: "tmux:base:1" });
+    expect(node.second).toMatchObject({ kind: "leaf", sessionId: "tmux:base:2" });
+  });
+
+  it("parses a top-bottom split as a vertical split", () => {
+    const node = parseTmuxLayout("9f1a,80x24,0,0[80x12,0,0,1,80x11,0,13,2]", id);
+    if (node?.kind !== "split") throw new Error("expected split");
+    expect(node.axis).toBe("vertical");
+    expect(node.ratio).toBeCloseTo(12 / 23, 5);
+    expect(node.first).toMatchObject({ kind: "leaf", sessionId: "tmux:base:1" });
+    expect(node.second).toMatchObject({ kind: "leaf", sessionId: "tmux:base:2" });
+  });
+
+  it("nests an N-way split into a binary tree", () => {
+    const node = parseTmuxLayout(
+      "0000,90x24,0,0{30x24,0,0,1,30x24,31,0,2,28x24,62,0,3}",
+      id,
+    );
+    if (node?.kind !== "split") throw new Error("expected split");
+    expect(node.first).toMatchObject({ kind: "leaf", sessionId: "tmux:base:1" });
+    if (node.second.kind !== "split") throw new Error("expected nested split");
+    expect(node.second.axis).toBe("horizontal");
+    expect(node.second.first).toMatchObject({
+      kind: "leaf",
+      sessionId: "tmux:base:2",
+    });
+    expect(node.second.second).toMatchObject({
+      kind: "leaf",
+      sessionId: "tmux:base:3",
+    });
+  });
+
+  it("parses a left-right split that contains a top-bottom split", () => {
+    const node = parseTmuxLayout(
+      "0000,80x24,0,0{40x24,0,0,1,39x24,41,0[39x12,41,0,2,39x11,41,13,3]}",
+      id,
+    );
+    if (node?.kind !== "split") throw new Error("expected split");
+    expect(node.axis).toBe("horizontal");
+    expect(node.first).toMatchObject({ kind: "leaf", sessionId: "tmux:base:1" });
+    if (node.second.kind !== "split") throw new Error("expected nested split");
+    expect(node.second.axis).toBe("vertical");
+  });
+
+  it("handles a layout without a checksum prefix", () => {
+    expect(parseTmuxLayout("80x24,0,0,5", id)).toMatchObject({
+      kind: "leaf",
+      sessionId: "tmux:base:5",
+    });
+  });
+
+  it("returns null for malformed input", () => {
+    expect(parseTmuxLayout("", id)).toBeNull();
+    expect(parseTmuxLayout("garbage", id)).toBeNull();
+    expect(parseTmuxLayout("bd5e,80x24,0,0{40x24,0,0,1", id)).toBeNull();
   });
 });

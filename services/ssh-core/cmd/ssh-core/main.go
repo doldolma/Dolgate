@@ -17,6 +17,16 @@ type coreRuntime interface {
 	EmitReady()
 	Health(requestID string)
 	ConnectSSH(sessionID, requestID string, payload protocol.ConnectPayload) error
+	ConnectTmux(sessionID, requestID string, payload protocol.ConnectPayload) error
+	TmuxSplitPane(sessionID, direction string) error
+	TmuxNewWindow(sessionID string) error
+	TmuxSelectWindow(sessionID, windowID string) error
+	TmuxSelectPane(sessionID string) error
+	TmuxKillPane(sessionID string) error
+	TmuxKillWindow(sessionID, windowID string) error
+	TmuxKillSession(sessionID, sessionName string) error
+	TmuxRenameWindow(sessionID, windowID, name string) error
+	TmuxDetach(sessionID string) error
 	ConnectAWS(sessionID, requestID string, payload protocol.AWSConnectPayload) error
 	ConnectLocal(sessionID, requestID string, payload protocol.LocalConnectPayload) error
 	ConnectSerial(sessionID, requestID string, payload protocol.SerialConnectPayload) error
@@ -167,6 +177,15 @@ func dispatch(core coreRuntime, writer *eventWriter, request protocol.Request) e
 			return core.ConnectSSH(request.SessionID, request.ID, payload)
 		})()
 		return nil
+	case protocol.CommandTmuxConnect:
+		var payload protocol.ConnectPayload
+		if err := json.Unmarshal(request.Payload, &payload); err != nil {
+			return err
+		}
+		go emitAsyncError(writer, request.ID, request.SessionID, "", protocol.EventError, func() error {
+			return core.ConnectTmux(request.SessionID, request.ID, payload)
+		})()
+		return nil
 	case protocol.CommandAWSConnect:
 		var payload protocol.AWSConnectPayload
 		if err := json.Unmarshal(request.Payload, &payload); err != nil {
@@ -246,6 +265,44 @@ func dispatch(core coreRuntime, writer *eventWriter, request protocol.Request) e
 		return core.ResizeSession(request.SessionID, payload)
 	case protocol.CommandDisconnect:
 		return core.DisconnectSession(request.SessionID)
+	case protocol.CommandTmuxSplitPane:
+		var payload protocol.TmuxSplitPanePayload
+		if err := json.Unmarshal(request.Payload, &payload); err != nil {
+			return err
+		}
+		return core.TmuxSplitPane(request.SessionID, payload.Direction)
+	case protocol.CommandTmuxNewWindow:
+		return core.TmuxNewWindow(request.SessionID)
+	case protocol.CommandTmuxSelectWindow:
+		var payload protocol.TmuxSelectWindowPayload
+		if err := json.Unmarshal(request.Payload, &payload); err != nil {
+			return err
+		}
+		return core.TmuxSelectWindow(request.SessionID, payload.WindowID)
+	case protocol.CommandTmuxSelectPane:
+		return core.TmuxSelectPane(request.SessionID)
+	case protocol.CommandTmuxKillPane:
+		return core.TmuxKillPane(request.SessionID)
+	case protocol.CommandTmuxKillWindow:
+		var payload protocol.TmuxKillWindowPayload
+		if err := json.Unmarshal(request.Payload, &payload); err != nil {
+			return err
+		}
+		return core.TmuxKillWindow(request.SessionID, payload.WindowID)
+	case protocol.CommandTmuxKillSession:
+		var payload protocol.TmuxKillSessionPayload
+		if err := json.Unmarshal(request.Payload, &payload); err != nil {
+			return err
+		}
+		return core.TmuxKillSession(request.SessionID, payload.SessionName)
+	case protocol.CommandTmuxRenameWindow:
+		var payload protocol.TmuxRenameWindowPayload
+		if err := json.Unmarshal(request.Payload, &payload); err != nil {
+			return err
+		}
+		return core.TmuxRenameWindow(request.SessionID, payload.WindowID, payload.Name)
+	case protocol.CommandTmuxDetach:
+		return core.TmuxDetach(request.SessionID)
 	case protocol.CommandTerminalAutocompletePrepare:
 		go emitAsyncError(writer, request.ID, request.SessionID, "", protocol.EventError, func() error {
 			return core.PrepareAutocomplete(request.SessionID, request.ID)

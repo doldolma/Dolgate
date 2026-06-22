@@ -145,6 +145,7 @@ function createProps(
     },
     terminalWebglEnabled: true,
     terminalAutocompleteEnabled: false,
+    tmuxPrefixEnabled: false,
     interactiveAuth: null,
     onStartSessionShare: vi.fn().mockResolvedValue(undefined),
     onUpdateSessionShareSnapshot: vi.fn().mockResolvedValue(undefined),

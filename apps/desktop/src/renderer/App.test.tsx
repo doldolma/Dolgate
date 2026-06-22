@@ -222,6 +222,7 @@ function createMockStoreState(overrides: Record<string, unknown> = {}) {
     detachSessionFromWorkspace: fn(),
     reorderDynamicTab: fn(),
     focusWorkspaceSession: fn(),
+    tmuxNewWindowInWorkspace: fn(),
     toggleWorkspaceBroadcast: fn(),
     resizeWorkspaceSplit: fn(),
     activateSftp: fn(),

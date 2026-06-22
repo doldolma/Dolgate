@@ -117,6 +117,9 @@ export function createSessionServices(deps: SliceDeps) {
     progress: TerminalConnectionProgress,
     existingSessionId?: string,
     startupCommand?: string,
+    tmux?: boolean,
+    tmuxCommand?: string,
+    replaceSessionId?: string,
   ): string => {
     const sessionId = existingSessionId ?? createPendingSessionId();
     const existingTab = existingSessionId
@@ -150,6 +153,8 @@ export function createSessionServices(deps: SliceDeps) {
           title,
           latestCols: cols,
           latestRows: rows,
+          tmux,
+          tmuxCommand,
         },
       ];
 
@@ -163,18 +168,47 @@ export function createSessionServices(deps: SliceDeps) {
         };
       }
 
-      return {
-        tabs: [
-          ...state.tabs.filter((item) => item.sessionId !== sessionId),
-          tab,
-        ],
-        tabStrip: [
-          ...state.tabStrip.filter(
-            (item) =>
-              !(item.kind === "session" && item.sessionId === sessionId),
+      // tmux 를 원 세션 자리에서 열 때: 새 control 세션 탭을 원 세션의 tabStrip
+      // 슬롯에 끼우고 원 세션 탭은 제거한다("현재 화면에서 진행"; 원격 셸 종료는
+      // 호출부가 disconnect 로 처리). replaceSessionId 가 없으면 기존처럼 끝에 추가.
+      const replaceIndex =
+        replaceSessionId != null
+          ? state.tabStrip.findIndex(
+              (item) =>
+                item.kind === "session" &&
+                item.sessionId === replaceSessionId,
+            )
+          : -1;
+      const nextTabs = [
+        ...state.tabs.filter(
+          (item) =>
+            item.sessionId !== sessionId &&
+            !(replaceSessionId != null && item.sessionId === replaceSessionId),
+        ),
+        tab,
+      ];
+      const strippedTabStrip = state.tabStrip.filter(
+        (item) =>
+          !(item.kind === "session" && item.sessionId === sessionId) &&
+          !(
+            replaceSessionId != null &&
+            item.kind === "session" &&
+            item.sessionId === replaceSessionId
           ),
-          { kind: "session", sessionId },
-        ],
+      );
+      const nextTabStrip: typeof state.tabStrip = [...strippedTabStrip];
+      if (replaceIndex >= 0) {
+        nextTabStrip.splice(Math.min(replaceIndex, nextTabStrip.length), 0, {
+          kind: "session",
+          sessionId,
+        });
+      } else {
+        nextTabStrip.push({ kind: "session", sessionId });
+      }
+
+      return {
+        tabs: nextTabs,
+        tabStrip: nextTabStrip,
         activeWorkspaceTab: asSessionTabId(sessionId),
         homeSection: "hosts",
         hostDrawer: { mode: "closed" },
@@ -503,6 +537,8 @@ export function createSessionServices(deps: SliceDeps) {
             rows: attempt.latestRows,
             startupCommand: state.resolvedStartupCommandsBySessionId[sessionId],
             secrets,
+            tmux: attempt.tmux,
+            tmuxCommand: attempt.tmuxCommand,
           });
       const latestAttempt = findPendingConnectionAttempt(get(), sessionId);
       if (!latestAttempt) {
@@ -626,6 +662,9 @@ export function createSessionServices(deps: SliceDeps) {
     secrets?: HostSecretInput,
     reuseSessionId?: string,
     startupCommand?: string,
+    tmux?: boolean,
+    tmuxCommand?: string,
+    replaceSessionId?: string,
   ) => {
     const host = get().hosts.find((item) => item.id === hostId);
     if (!host) {
@@ -640,6 +679,15 @@ export function createSessionServices(deps: SliceDeps) {
       : isSerialHostRecord(host)
         ? resolveConnectingProgress(host)
       : resolveHostKeyCheckProgress(host);
+    // 원 세션이 "standalone 세션 탭"일 때만 그 자리를 재사용한다. 워크스페이스(분할)
+    // 안의 pane 이면 슬롯 교체/disconnect 가 분할을 깨므로 무시하고 새 탭으로 연다.
+    const replaceStandaloneSessionId =
+      replaceSessionId != null &&
+      get().tabStrip.some(
+        (item) => item.kind === "session" && item.sessionId === replaceSessionId,
+      )
+        ? replaceSessionId
+        : undefined;
     const sessionId = createPendingSessionTabForHost(
       set,
       get,
@@ -649,7 +697,18 @@ export function createSessionServices(deps: SliceDeps) {
       initialProgress,
       reuseSessionId,
       startupCommand,
+      tmux,
+      tmuxCommand,
+      replaceStandaloneSessionId,
     );
+
+    // tmux 를 원 세션 자리에서 여는 경우: 원 세션의 로컬 탭은 위에서 이미 control 세션
+    // 탭으로 교체됐다(같은 슬롯). 원 세션의 원격 셸은 여기서 끊는다. 그 'closed'
+    // 이벤트의 탭 제거는 이미 사라진 탭이라 idempotent 하고, 활성 탭은 control(곧 tmux
+    // 그룹)이라 홈으로 튀지 않는다.
+    if (replaceStandaloneSessionId && replaceStandaloneSessionId !== sessionId) {
+      void api.ssh.disconnect(replaceStandaloneSessionId).catch(() => undefined);
+    }
 
     try {
       if (isAwsEc2HostRecord(host)) {

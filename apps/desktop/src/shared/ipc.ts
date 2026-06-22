@@ -158,7 +158,17 @@ export type CoreCommandType =
   | "terminalAutocompleteRefresh"
   | "terminalAutocompleteStop"
   | "terminalCompletionQuery"
-  | "terminalShellIntegrationInstall";
+  | "terminalShellIntegrationInstall"
+  | "tmuxConnect"
+  | "tmuxSplitPane"
+  | "tmuxNewWindow"
+  | "tmuxSelectWindow"
+  | "tmuxSelectPane"
+  | "tmuxKillPane"
+  | "tmuxKillWindow"
+  | "tmuxKillSession"
+  | "tmuxRenameWindow"
+  | "tmuxDetach";
 export type CoreEventType =
   | "status"
   | "connected"
@@ -199,7 +209,17 @@ export type CoreEventType =
   | "terminalAutocompleteSnapshot"
   | "terminalAutocompleteShellState"
   | "terminalCompletionResult"
-  | "moshState";
+  | "moshState"
+  | "tmuxAvailable"
+  | "tmuxLayoutChange"
+  | "tmuxWindowAdd"
+  | "tmuxWindowClose"
+  | "tmuxWindowRenamed"
+  | "tmuxSessionChanged"
+  | "tmuxSessionsChanged"
+  | "tmuxPaused"
+  | "tmuxContinue"
+  | "tmuxExit";
 export type CoreStreamType = "write" | "data";
 
 // renderer는 hostId만 넘기고, 실제 비밀값 해석은 main 프로세스가 담당한다.
@@ -211,6 +231,13 @@ export interface DesktopConnectInput {
   command?: string;
   startupCommand?: string;
   secrets?: HostSecretInput;
+  /** control mode(tmux -CC)로 연결할지. true면 main이 connect 대신 tmuxConnect command를 보낸다. */
+  tmux?: boolean;
+  /**
+   * control mode 진입 시 원격에서 실행할 tmux 명령(예: "tmux -CC attach -t mysession").
+   * 비우면 Go 코어가 기본값("tmux -CC new-session -A -s dolgate")을 쓴다. tmux=true 일 때만 의미가 있다.
+   */
+  tmuxCommand?: string;
 }
 
 export interface DesktopLocalConnectInput {
@@ -778,6 +805,20 @@ export interface DesktopApi {
     respondKeyboardInteractive: (
       input: KeyboardInteractiveRespondInput,
     ) => Promise<void>;
+    // tmux control mode 명령. sessionId 는 pane 가상 세션 id("tmux:<controlSessionId>:<paneNum>")다.
+    tmuxSplitPane: (sessionId: string, direction: "h" | "v") => Promise<void>;
+    tmuxNewWindow: (sessionId: string) => Promise<void>;
+    tmuxSelectWindow: (sessionId: string, windowId: string) => Promise<void>;
+    tmuxSelectPane: (sessionId: string) => Promise<void>;
+    tmuxKillPane: (sessionId: string) => Promise<void>;
+    tmuxKillWindow: (sessionId: string, windowId: string) => Promise<void>;
+    tmuxKillSession: (sessionId: string, sessionName: string) => Promise<void>;
+    tmuxRenameWindow: (
+      sessionId: string,
+      windowId: string,
+      name: string,
+    ) => Promise<void>;
+    tmuxDetach: (sessionId: string) => Promise<void>;
     onEvent: (listener: (event: CoreEvent) => void) => () => void;
     onData: (
       sessionId: string,

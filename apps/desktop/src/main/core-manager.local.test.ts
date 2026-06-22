@@ -103,6 +103,18 @@ async function waitForWriteCount(
   }
 }
 
+describe("CoreManager.isTmuxSession", () => {
+  it("flags tmux: pane sessionIds as tmux; false for regular/undefined", () => {
+    const manager = new CoreManager();
+    // pane 가상 세션은 tmux: 프리픽스로 판정(세션 녹화 제외에 쓰임).
+    expect(manager.isTmuxSession("tmux:ctl-1:0")).toBe(true);
+    // 일반 SSH 세션(랜덤 UUID)·미정의는 false → 정상 녹화 대상.
+    expect(manager.isTmuxSession("3f1c-regular-session")).toBe(false);
+    expect(manager.isTmuxSession(undefined)).toBe(false);
+    expect(manager.isTmuxSession(null)).toBe(false);
+  });
+});
+
 describe("CoreManager local shell sessions", () => {
   beforeEach(() => {
     vi.clearAllMocks();

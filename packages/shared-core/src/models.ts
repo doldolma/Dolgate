@@ -998,6 +998,11 @@ export interface AppSettings extends TerminalAppearanceSettings {
   autoReconnectMaxAttempts: number;
   autoReconnectBaseDelayMs: number;
   autoReconnectMaxDelayMs: number;
+  /**
+   * tmux control mode pane 에서 prefix(Ctrl-b) 단축키를 가로채 네이티브 동작으로
+   * 매핑할지. off(기본)면 Ctrl-b 를 그대로 send-keys 로 전달(평소 tmux 동작).
+   */
+  tmuxPrefixEnabled?: boolean;
   serverUrl: string;
   serverUrlOverride?: string | null;
   dismissedUpdateVersion?: string | null;
@@ -2637,6 +2642,31 @@ export interface TerminalReconnectState {
   waitingForNetwork: boolean;
 }
 
+// TerminalTmuxPaneState는 control mode(tmux -CC) pane일 때만 채워진다.
+// 하나의 control 채널 위에 여러 pane이 가상 sessionId로 얹히므로, 이 탭의 입력은
+// 프록시를 통해 controlSessionId의 control 채널로 send-keys 되고, 출력은 paneId
+// 기반 가상 sessionId의 stream으로 들어온다.
+export interface TerminalTmuxPaneState {
+  /** 이 pane이 얹힌 control 채널(tmux -CC) 세션 id. */
+  controlSessionId: string;
+  /** tmux pane id (예: "%3"). */
+  paneId: string;
+  /** tmux window id (예: "@1"). window→탭 매핑에 쓴다. */
+  windowId: string;
+}
+
+/** SSH 접속 후 보조채널로 감지한 원격 tmux 정보(하단바 표시용). */
+export interface TerminalTmuxAvailable {
+  version: string;
+  sessions: TerminalTmuxSessionInfo[];
+}
+
+export interface TerminalTmuxSessionInfo {
+  name: string;
+  windows: number;
+  attached: boolean;
+}
+
 export interface TerminalTab {
   id: string;
   /**
@@ -2660,5 +2690,9 @@ export interface TerminalTab {
   moshState?: 'connected' | 'reconnecting' | 'disconnected' | null;
   /** 마지막으로 mosh 서버 응답을 받은 시각(RFC3339). "N초 전 응답" 표시에 쓴다. */
   lastMoshResponseAt?: string | null;
+  /** control mode(tmux -CC) pane일 때만 채워진다. 평시엔 null/undefined. */
+  tmux?: TerminalTmuxPaneState | null;
+  /** SSH 접속 후 감지한 원격 tmux 정보(하단바 표시용). 미감지면 null/undefined. */
+  tmuxAvailable?: TerminalTmuxAvailable | null;
   lastEventAt: string;
 }

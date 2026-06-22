@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { AuthState, DesktopWindowState, UpdateState } from '@shared';
 import { AppTitleBar } from '../components/AppTitleBar';
 import type { SecretEditDialogRequest } from '../components/SecretEditDialog';
@@ -78,6 +78,9 @@ export function AppShell({
     sessionViewModel.tabs.length > 0 ||
     hasActiveTransfers ||
     hasActivePortForwards;
+
+  // tmux 조작은 tmux 표준 프리픽스(Ctrl-b, useTerminalSessionViewController)와
+  // 윈도우 바/pane 분할 버튼으로 한다. 혼란을 주던 전역 Cmd-T/Cmd-D 단축키는 제거했다.
 
   useEffect(() => {
     if (modalViewModel.pendingHostKeyPrompt?.sessionId) {
@@ -169,6 +172,8 @@ export function AppShell({
         desktopPlatform={desktopPlatform}
         tabs={sessionViewModel.tabs}
         workspaces={sessionViewModel.workspaces}
+        tmuxGroups={sessionViewModel.tmuxGroups}
+        hosts={homeViewModel.hosts}
         tabStrip={sessionViewModel.tabStrip}
         activeWorkspaceTab={homeViewModel.activeWorkspaceTab}
         draggedSession={draggedSession}
@@ -181,6 +186,16 @@ export function AppShell({
         onSelectWorkspace={sessionViewModel.activateWorkspace}
         onCloseSession={sessionViewModel.disconnectTab}
         onCloseWorkspace={sessionViewModel.closeWorkspace}
+        onSelectTmuxGroup={sessionViewModel.activateTmuxGroup}
+        onCloseTmuxGroup={(tmuxGroupId) => {
+          const group = sessionViewModel.tmuxGroups.find(
+            (item) => item.id === tmuxGroupId,
+          );
+          if (group) {
+            void sessionViewModel.detachTmuxWorkspace(group.activeWorkspaceId);
+          }
+        }}
+        onNewTmuxWindow={sessionViewModel.tmuxNewWindowInWorkspace}
         onStartSessionDrag={(sessionId) => {
           setDraggedSession({ sessionId, source: 'standalone-tab' });
         }}

@@ -17,6 +17,7 @@ import { useTerminalSessionViewController } from '../../controllers/useTerminalS
 import { TerminalChatToastRegion } from './TerminalChatToastRegion';
 import { TerminalConnectionOverlay } from './TerminalConnectionOverlay';
 import { TerminalMoshStatusBar } from './TerminalMoshStatusBar';
+import { TerminalTmuxStatusBar } from './TerminalTmuxStatusBar';
 import { TerminalInteractiveAuthOverlay } from './TerminalInteractiveAuthOverlay';
 import { TerminalPaneHeader } from './TerminalPaneHeader';
 import { SerialSessionActions } from './SerialSessionActions';
@@ -50,6 +51,76 @@ export function TerminalSessionPane(props: TerminalSessionPaneProps) {
   } = props;
 
   const snippets = useAppStore((state) => state.snippets);
+  const connectHost = useAppStore((state) => state.connectHost);
+  const killTmuxSession = useAppStore((state) => state.killTmuxSession);
+  // tmux 하단바 "열기" — 같은 호스트로 control mode(tmux -CC) 연결을 시작한다(기본 dolgate 세션).
+  // 이 세션(tab.sessionId)의 탭 자리를 재사용해 "현재 화면에서" tmux 가 열리게 한다.
+  const handleOpenTmux = useCallback(() => {
+    if (tab?.hostId) {
+      void connectHost(
+        tab.hostId,
+        120,
+        32,
+        undefined,
+        true,
+        undefined,
+        tab.sessionId,
+      );
+    }
+  }, [connectHost, tab?.hostId, tab?.sessionId]);
+  // 하단바 드롭다운에서 감지된 특정 tmux 세션 [attach] — 그 세션 이름으로 control mode 진입.
+  const handleAttachTmuxSession = useCallback(
+    (name: string) => {
+      if (!tab?.hostId) {
+        return;
+      }
+      // tmux 세션 이름은 작은따옴표로 감싸 셸 인젝션을 막는다(이름 내 ' 는 escape).
+      const quoted = `'${name.replace(/'/g, "'\\''")}'`;
+      void connectHost(
+        tab.hostId,
+        120,
+        32,
+        undefined,
+        true,
+        `tmux -CC attach -t ${quoted}`,
+        tab.sessionId,
+      );
+    },
+    [connectHost, tab?.hostId, tab?.sessionId],
+  );
+  // 하단바 드롭다운에서 이름 지정 신규 tmux 세션 생성 — new-session -s <name>(strict new;
+  // 이름 충돌 시 tmux 에러 → 연결 실패 오버레이). attach 와 동일 escape, 현재 탭 재사용.
+  const handleCreateTmuxSession = useCallback(
+    (name: string) => {
+      if (!tab?.hostId) {
+        return;
+      }
+      const quoted = `'${name.replace(/'/g, "'\\''")}'`;
+      void connectHost(
+        tab.hostId,
+        120,
+        32,
+        undefined,
+        true,
+        `tmux -CC new-session -s ${quoted}`,
+        tab.sessionId,
+      );
+    },
+    [connectHost, tab?.hostId, tab?.sessionId],
+  );
+  // 감지 하단바에서 원격 tmux 세션 종료 — attach 없이. sessionId(이 SSH 세션)를 넘기면
+  // Go runtime 이 control 세션이 아님을 보고 보조 exec 채널로 kill-session 후 목록을 재감지한다.
+  const handleKillTmuxSession = useCallback(
+    (name: string) => {
+      killTmuxSession(sessionId, name);
+    },
+    [killTmuxSession, sessionId],
+  );
+  // tmux pane 분할은 상단 윈도우 바의 "분할" 버튼(또는 Ctrl-b % / ")이 담당한다.
+  // pane 헤더/floating 의 │·─ 버튼은 헷갈려서 제거했다.
+  // tmux pane 은 헤더/여백 없이 슬롯을 꽉 채운다 — 그래야 컨테이너 픽셀과 tmux 셀 그리드가
+  // 일치해(여백만큼 행이 더 보고돼 밑이 짤리던 문제 제거) tmux 가 자기 경계선을 직접 그린다.
+  const isTmuxPane = Boolean(tab?.tmux);
   const notifyCommandFinished = useAppStore(
     (state) => state.notifyCommandFinished,
   );
@@ -356,8 +427,17 @@ export function TerminalSessionPane(props: TerminalSessionPaneProps) {
           'relative m-[0.55rem] flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-[6px] bg-[color-mix(in_srgb,var(--surface)_96%,transparent_4%)] p-0 [&_.xterm]:min-h-full [&_.xterm]:h-full [&_.xterm]:w-full [&_.xterm-viewport]:min-h-full [&_.xterm-viewport]:h-full [&_.xterm-viewport]:w-full [&_.xterm-viewport]:bg-transparent [&_.xterm-viewport]:rounded-none',
           showHeader &&
             'mx-[0.55rem] mb-[0.55rem] mt-0 rounded-b-[6px] rounded-t-none border border-[var(--border)] border-t-0',
+          // tmux pane: 여백/라운드 제거 → 슬롯을 꽉 채워 컨테이너 px = tmux 셀 그리드.
+          isTmuxPane && 'm-0 rounded-none border-0',
+          // tmux control mode dead-zone 완화(최소·안전): 공유 크기 탓에 pane 렌더 영역보다
+          // cell grid 가 작아 생기는 빈 영역(.xterm 요소 중 .xterm-screen 바깥)을, 컨테이너와
+          // .xterm 배경을 패널 surface 로 맞춰 회색으로 튀지 않게 블렌딩한다. 실제 문자 셀
+          // (.xterm-screen)의 터미널 테마 배경은 건드리지 않고, xterm 크기/FitAddon 측정도
+          // 그대로 둬(렌더 안정성 보존) 그리드는 좌상단 정렬이되 여백이 배경과 동색이라 덜 띈다.
+          tab?.tmux && 'bg-[var(--surface)] [&_.xterm]:bg-[var(--surface)]',
         )}
         data-terminal-canvas="true"
+        data-tmux-pane={tab?.tmux ? 'true' : undefined}
       >
         {isFileDropActive ? (
           <div className="pointer-events-none absolute inset-0 z-[6] flex items-center justify-center rounded-[6px] border-2 border-dashed border-[color-mix(in_srgb,var(--accent-strong)_60%,transparent)] bg-[color-mix(in_srgb,var(--accent-strong)_14%,transparent)]">
@@ -366,6 +446,8 @@ export function TerminalSessionPane(props: TerminalSessionPaneProps) {
             </span>
           </div>
         ) : null}
+        {/* tmux pane 분할은 상단 윈도우 바의 "분할" 버튼(또는 Ctrl-b % / ")으로 한다.
+            pane 마다 떠 헷갈리던 floating │/─ 버튼은 제거했다. */}
         {controller.shouldShowConnectionOverlay ? (
           <TerminalConnectionOverlay
             error={tab?.status === 'error'}
@@ -404,6 +486,16 @@ export function TerminalSessionPane(props: TerminalSessionPaneProps) {
         <TerminalMoshStatusBar
           state={tab.moshState}
           lastResponseAt={tab.lastMoshResponseAt ?? null}
+        />
+      ) : null}
+      {tab?.tmuxAvailable && !tab.tmux ? (
+        <TerminalTmuxStatusBar
+          version={tab.tmuxAvailable.version}
+          sessions={tab.tmuxAvailable.sessions}
+          onOpen={handleOpenTmux}
+          onAttachSession={handleAttachTmuxSession}
+          onCreateSession={handleCreateTmuxSession}
+          onKillSession={handleKillTmuxSession}
         />
       ) : null}
     </div>

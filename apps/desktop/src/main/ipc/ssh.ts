@@ -187,12 +187,18 @@ export function registerSshIpcHandlers(ctx: MainIpcContext): void {
         jump,
         cols: input.cols,
         rows: input.rows,
-        command: input.command?.trim() || undefined,
+        // tmux control mode 진입이면 tmuxCommand(특정 세션 attach 등)를 Go payload.Command 로
+        // 보내 기본 new-session 대신 쓰게 한다. 일반 연결은 호스트 설정 command 를 그대로 쓴다.
+        command:
+          input.tmux === true
+            ? input.tmuxCommand?.trim() || undefined
+            : input.command?.trim() || undefined,
         startupCommand: input.startupCommand,
         env: secrets.env,
         // mosh는 jump와 상호 배타다(UI에서 차단). 방어적으로 jump가 있으면 useMosh를
         // 무시해 jump 연결을 보장한다(잘못된 조합이 들어와도 안전하게 SSH로 폴백).
         useMosh: jump ? false : sshHost.useMosh === true,
+        tmux: input.tmux === true,
         hostId: sshHost.id,
         hostLabel: sshHost.label,
         title,
@@ -312,6 +318,69 @@ export function registerSshIpcHandlers(ctx: MainIpcContext): void {
     ipcChannels.ssh.respondKeyboardInteractive,
     async (_event, input: KeyboardInteractiveRespondInput) => {
       await ctx.coreManager.respondKeyboardInteractive(input);
+    },
+  );
+
+  ipcMain.handle(
+    ipcChannels.ssh.tmuxSplitPane,
+    async (_event, sessionId: string, direction: "h" | "v") => {
+      ctx.coreManager.tmuxSplitPane(sessionId, direction);
+    },
+  );
+
+  ipcMain.handle(
+    ipcChannels.ssh.tmuxNewWindow,
+    async (_event, sessionId: string) => {
+      ctx.coreManager.tmuxNewWindow(sessionId);
+    },
+  );
+
+  ipcMain.handle(
+    ipcChannels.ssh.tmuxSelectWindow,
+    async (_event, sessionId: string, windowId: string) => {
+      ctx.coreManager.tmuxSelectWindow(sessionId, windowId);
+    },
+  );
+
+  ipcMain.handle(
+    ipcChannels.ssh.tmuxSelectPane,
+    async (_event, sessionId: string) => {
+      ctx.coreManager.tmuxSelectPane(sessionId);
+    },
+  );
+
+  ipcMain.handle(
+    ipcChannels.ssh.tmuxKillPane,
+    async (_event, sessionId: string) => {
+      ctx.coreManager.tmuxKillPane(sessionId);
+    },
+  );
+
+  ipcMain.handle(
+    ipcChannels.ssh.tmuxKillWindow,
+    async (_event, sessionId: string, windowId: string) => {
+      ctx.coreManager.tmuxKillWindow(sessionId, windowId);
+    },
+  );
+
+  ipcMain.handle(
+    ipcChannels.ssh.tmuxKillSession,
+    async (_event, sessionId: string, sessionName: string) => {
+      ctx.coreManager.tmuxKillSession(sessionId, sessionName);
+    },
+  );
+
+  ipcMain.handle(
+    ipcChannels.ssh.tmuxRenameWindow,
+    async (_event, sessionId: string, windowId: string, name: string) => {
+      ctx.coreManager.tmuxRenameWindow(sessionId, windowId, name);
+    },
+  );
+
+  ipcMain.handle(
+    ipcChannels.ssh.tmuxDetach,
+    async (_event, sessionId: string) => {
+      ctx.coreManager.tmuxDetach(sessionId);
     },
   );
 

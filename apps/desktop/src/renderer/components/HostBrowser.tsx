@@ -226,6 +226,7 @@ interface HostBrowserProps {
   onRemoveHost: (hostId: string) => Promise<void>;
   onRemoveSecret: (secretRef: string) => Promise<void>;
   onConnectHost: (hostId: string) => Promise<void>;
+  onConnectHostTmux?: (hostId: string) => Promise<void>;
   onOpenHostContainers: (hostId: string) => Promise<void>;
 }
 
@@ -261,6 +262,7 @@ export function HostBrowser({
   onRemoveHost,
   onRemoveSecret,
   onConnectHost,
+  onConnectHostTmux,
   onOpenHostContainers
 }: HostBrowserProps) {
   const [groupModalState, setGroupModalState] = useState<GroupModalState | null>(null);
@@ -1138,6 +1140,24 @@ export function HostBrowser({
                 >
                   컨테이너
                 </button>
+                {onConnectHostTmux ? (
+                  <button
+                    type="button"
+                    className="flex w-full items-center rounded-[12px] px-[0.8rem] py-[0.75rem] text-left text-[var(--text)] transition-colors duration-150 hover:bg-[color-mix(in_srgb,var(--surface-muted)_92%,transparent_8%)] disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:bg-transparent"
+                    disabled={contextMenu.hostIds.length !== 1}
+                    onClick={async () => {
+                      const orderedHostIds = getOrderedSelectedHostIds(contextMenu.hostIds);
+                      const targetHostId = orderedHostIds[0];
+                      setContextMenu(null);
+                      if (!targetHostId) {
+                        return;
+                      }
+                      await onConnectHostTmux?.(targetHostId);
+                    }}
+                  >
+                    tmux로 연결
+                  </button>
+                ) : null}
                 <button
                   type="button"
                   className="flex w-full items-center rounded-[12px] px-[0.8rem] py-[0.75rem] text-left text-[var(--text)] transition-colors duration-150 hover:bg-[color-mix(in_srgb,var(--surface-muted)_92%,transparent_8%)] disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:bg-transparent"

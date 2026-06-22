@@ -38,6 +38,20 @@ func (stub *stubCoreRuntime) ConnectSerial(sessionID, requestID string, payload 
 func (stub *stubCoreRuntime) ListSerialPorts(requestID string, payload protocol.SerialListPortsPayload) error {
 	return nil
 }
+func (stub *stubCoreRuntime) ConnectTmux(sessionID, requestID string, payload protocol.ConnectPayload) error {
+	return nil
+}
+func (stub *stubCoreRuntime) TmuxSplitPane(sessionID, direction string) error     { return nil }
+func (stub *stubCoreRuntime) TmuxNewWindow(sessionID string) error                { return nil }
+func (stub *stubCoreRuntime) TmuxSelectWindow(sessionID, windowID string) error   { return nil }
+func (stub *stubCoreRuntime) TmuxSelectPane(sessionID string) error               { return nil }
+func (stub *stubCoreRuntime) TmuxKillPane(sessionID string) error                 { return nil }
+func (stub *stubCoreRuntime) TmuxKillWindow(sessionID, windowID string) error     { return nil }
+func (stub *stubCoreRuntime) TmuxKillSession(sessionID, sessionName string) error { return nil }
+func (stub *stubCoreRuntime) TmuxRenameWindow(sessionID, windowID, name string) error {
+	return nil
+}
+func (stub *stubCoreRuntime) TmuxDetach(sessionID string) error { return nil }
 func (stub *stubCoreRuntime) ControlSerial(sessionID string, payload protocol.SerialControlPayload) error {
 	return nil
 }

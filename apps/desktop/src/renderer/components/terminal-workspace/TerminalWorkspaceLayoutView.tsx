@@ -26,6 +26,9 @@ interface TerminalWorkspaceLayoutProps {
   onToggleBroadcast: () => void;
   paneSlots: TerminalWorkspacePaneSlot[];
   handles: SplitHandlePlacement[];
+  /** tmux 워크스페이스: 핸들 히트영역(12px)은 유지하되 보이는 바를 얇은 가운데 선으로.
+   *  좁은 tmux pane 거터에서 꽉 찬 액센트 바가 경계 글자와 겹쳐 보이는 것을 막는다. */
+  tmuxThinHandles?: boolean;
   onStartResizeHandle: (handle: SplitHandlePlacement) => void;
   dropPreview: DropPreview | null;
 }
@@ -48,6 +51,7 @@ export function TerminalWorkspaceLayoutView({
   onToggleBroadcast,
   paneSlots,
   handles,
+  tmuxThinHandles = false,
   onStartResizeHandle,
   dropPreview,
 }: TerminalWorkspaceLayoutProps) {
@@ -161,7 +165,17 @@ export function TerminalWorkspaceLayoutView({
           <div
             key={handle.splitId}
             className={cn(
-              'absolute z-[5] before:absolute before:inset-0 before:rounded-full before:bg-[color-mix(in_srgb,var(--accent-strong)_22%,transparent_78%)] before:content-[""]',
+              'absolute z-[5] before:absolute before:content-[""]',
+              // tmux: 가운데 2px 선(거터 안에 들어가 글자와 안 겹침). 그 외: 핸들 영역을
+              // 꽉 채운 둥근 바(넉넉한 pane 여백이 있어 겹치지 않음).
+              tmuxThinHandles
+                ? cn(
+                    'before:bg-[color-mix(in_srgb,var(--accent-strong)_45%,transparent_55%)]',
+                    handle.axis === 'horizontal'
+                      ? 'before:left-1/2 before:top-0 before:bottom-0 before:w-[2px] before:-translate-x-1/2'
+                      : 'before:top-1/2 before:left-0 before:right-0 before:h-[2px] before:-translate-y-1/2',
+                  )
+                : 'before:inset-0 before:rounded-full before:bg-[color-mix(in_srgb,var(--accent-strong)_22%,transparent_78%)]',
               handle.axis === 'horizontal'
                 ? 'w-[12px] -ml-[6px] cursor-col-resize'
                 : 'h-[12px] -mt-[6px] cursor-row-resize',

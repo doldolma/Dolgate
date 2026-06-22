@@ -14,6 +14,7 @@ function createBridge() {
       setTerminalEventHandler: vi.fn(),
       setPortForwardEventHandler: vi.fn(),
       setTerminalStreamHandler: vi.fn(),
+      isTmuxSession: vi.fn(() => false),
     },
     sessionShareService: {
       handleTerminalEvent: vi.fn(),

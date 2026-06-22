@@ -29,7 +29,17 @@ import { createZmodemController } from '../lib/zmodem/zmodem-controller';
 import {
   installTerminalShellIntegration,
   writeTerminalBinaryInput,
+  tmuxSplitPane,
+  tmuxNewWindow,
+  tmuxSelectWindow,
+  tmuxKillPane,
+  tmuxDetach,
 } from '../services/desktop/terminal';
+import {
+  TMUX_PREFIX_BYTE,
+  mapPrefixKey,
+  type TmuxPrefixResolverContext,
+} from '../lib/tmux-prefix';
 import { saveZmodemDownload } from '../services/desktop/files';
 import { appStore } from '../store/appStore';
 import {
@@ -111,6 +121,8 @@ export function useTerminalSessionViewController({
   appearance,
   terminalWebglEnabled,
   terminalAutocompleteEnabled,
+  tmuxPrefixEnabled,
+  tmuxCell,
   interactiveAuth,
   onFocus,
   onStartSessionShare,
@@ -161,7 +173,24 @@ export function useTerminalSessionViewController({
   const liveOnSendInputRef = useRef(onSendInput);
   const liveOnSendBinaryInputRef = useRef(onSendBinaryInput);
   const liveOnResizeSessionRef = useRef(onResizeSession);
+  // tmux prefix(Ctrl-b) 상태머신. control mode pane + 토글 on 일 때만 동작한다.
+  // tab.tmux 정보(controlSessionId/windowId)와 토글 값을 live ref 로 들고, onData 에서
+  // prefix 다음 키 한 개를 가로채 네이티브 tmux 동작으로 매핑한다.
+  const liveTmuxPaneRef = useRef(tab?.tmux ?? null);
+  const liveTmuxPrefixEnabledRef = useRef(tmuxPrefixEnabled);
+  const tmuxPrefixArmedRef = useRef(false);
+  // onData(터미널 init effect) 에서 최신 핸들러를 쓰기 위한 live ref. 초기값은 no-op.
+  const liveHandleTmuxPrefixInputRef = useRef<(data: string) => boolean>(
+    () => false,
+  );
   const liveHasOutputRef = useRef(tab?.hasReceivedOutput ?? false);
+  // tmux control mode pane 여부 + tmux 레이아웃 칸 수. pane 의 xterm 을 컨테이너에 fit 하지
+  // 않고 이 칸 수로 고정해 tmux pane 크기와 1:1 일치시킨다(분할 셰이크 제거). 개별 resize
+  // 보고도 막는다(워크스페이스가 control-client total 을 1회 보고).
+  const liveIsTmuxPaneRef = useRef(Boolean(tab?.tmux));
+  const liveTmuxCellRef = useRef<{ cols: number; rows: number } | null>(
+    tmuxCell ?? null,
+  );
   const shareSnapshotDirtyRef = useRef(false);
   const pendingShareSnapshotKindRef =
     useRef<SessionShareSnapshotInput['kind'] | null>(null);
@@ -196,6 +225,126 @@ export function useTerminalSessionViewController({
     }
     liveOnSendInputRef.current?.(currentSessionId, data);
   }, []);
+
+  // 같은 control 세션의 window id 목록을 tabStrip(워크스페이스 탭) 순서대로 모은다.
+  // n/p(다음/이전 window) 전환의 순서 기준이다.
+  const resolveTmuxWindowOrder = useCallback(
+    (controlSessionId: string): string[] => {
+      const state = appStore.getState();
+      const ids: string[] = [];
+      for (const item of state.tabStrip) {
+        if (item.kind !== 'workspace') {
+          continue;
+        }
+        const workspace = state.workspaces.find((w) => w.id === item.workspaceId);
+        const windowId = workspace?.tmux?.windowId;
+        if (
+          workspace?.tmux?.controlSessionId === controlSessionId &&
+          windowId &&
+          !ids.includes(windowId)
+        ) {
+          ids.push(windowId);
+        }
+      }
+      return ids;
+    },
+    [],
+  );
+
+  // prefix(Ctrl-b) 직후 키를 네이티브 tmux 동작으로 실행한다. control 명령은 pane 의
+  // 가상 sessionId 로 보내며(Go 가 controlSessionId 로 라우팅), passthrough 면 그대로 send-keys 한다.
+  const dispatchTmuxPrefixData = useCallback(
+    (data: string): boolean => {
+      const pane = liveTmuxPaneRef.current;
+      if (!pane) {
+        return false;
+      }
+      const paneSessionId = liveSessionIdRef.current;
+      const context: TmuxPrefixResolverContext = {
+        orderedWindowIds: resolveTmuxWindowOrder(pane.controlSessionId),
+        currentWindowId: pane.windowId,
+      };
+      const mapped = mapPrefixKey(data, context);
+      if (!mapped) {
+        return false;
+      }
+      const { action } = mapped;
+      switch (action.kind) {
+        case 'newWindow':
+          void tmuxNewWindow(paneSessionId);
+          break;
+        case 'splitPane':
+          void tmuxSplitPane(paneSessionId, action.direction);
+          break;
+        case 'selectWindow':
+          void tmuxSelectWindow(paneSessionId, action.windowId);
+          break;
+        case 'detach':
+          void tmuxDetach(paneSessionId);
+          break;
+        case 'killPane':
+          void tmuxKillPane(paneSessionId);
+          break;
+        case 'passthrough':
+          // 미매핑 키(z=zoom 등)나 리터럴 Ctrl-b 는 그대로 send-keys 로 전달한다.
+          sendAutocompleteInput(action.data);
+          break;
+      }
+      // 첫 문자만 소비했고 뒤에 더 있으면(붙여넣기 등) 일반 입력으로 다시 처리한다.
+      const rest = data.slice(mapped.consumed);
+      if (rest.length > 0) {
+        liveAutocompleteInputRef.current(rest);
+      }
+      return true;
+    },
+    [resolveTmuxWindowOrder, sendAutocompleteInput],
+  );
+
+  // onData 진입점. tmux prefix 토글이 켜진 control mode pane 에서 Ctrl-b 시퀀스를
+  // 가로채 네이티브 동작으로 매핑하고, 그 외에는 false 를 돌려 평소 경로로 흘린다.
+  const handleTmuxPrefixInput = useCallback(
+    (data: string): boolean => {
+      if (
+        !liveTmuxPrefixEnabledRef.current ||
+        !liveTmuxPaneRef.current ||
+        data.length === 0
+      ) {
+        tmuxPrefixArmedRef.current = false;
+        return false;
+      }
+      if (tmuxPrefixArmedRef.current) {
+        tmuxPrefixArmedRef.current = false;
+        return dispatchTmuxPrefixData(data);
+      }
+      if (data === TMUX_PREFIX_BYTE) {
+        // Ctrl-b 단독 청크 → arm 하고 키 입력을 보류한다(다음 청크에서 매핑).
+        tmuxPrefixArmedRef.current = true;
+        return true;
+      }
+      const prefixIndex = data.indexOf(TMUX_PREFIX_BYTE);
+      if (prefixIndex < 0) {
+        return false;
+      }
+      // 한 청크 안에 Ctrl-b 와 다음 키가 함께 온 경우(빠른 타이핑/붙여넣기). 앞부분은
+      // 평소대로 보내고, Ctrl-b 다음 키부터 매핑한다.
+      const before = data.slice(0, prefixIndex);
+      const after = data.slice(prefixIndex + 1);
+      if (before.length > 0) {
+        liveAutocompleteInputRef.current(before);
+      }
+      if (after.length === 0) {
+        tmuxPrefixArmedRef.current = true;
+        return true;
+      }
+      dispatchTmuxPrefixData(after);
+      return true;
+    },
+    [dispatchTmuxPrefixData],
+  );
+
+  useEffect(() => {
+    liveHandleTmuxPrefixInputRef.current = handleTmuxPrefixInput;
+  }, [handleTmuxPrefixInput]);
 
   const autocomplete = useTerminalAutocomplete({
     sessionId,
@@ -245,6 +394,17 @@ export function useTerminalSessionViewController({
       shellIntegrationEnsuredRef.current = false;
       return;
     }
+    // control mode tmux pane(가상 세션)은 자동완성 prepare 경로가 OSC 133 통합을 깔아주지
+    // 않는다. 명시적으로 1회 설치해 pane 셸에서도 마커가 흐르게 한다(→ integrationReady →
+    // 자동완성 동작). 설치 명령의 에코는 Go(tmux Manager)의 pane 핸드셰이크가 숨긴다.
+    if (tab?.tmux) {
+      if (shellIntegrationEnsuredRef.current) {
+        return;
+      }
+      shellIntegrationEnsuredRef.current = true;
+      void installTerminalShellIntegration(sessionId).catch(() => undefined);
+      return;
+    }
     const autocompleteActive =
       terminalAutocompleteEnabled &&
       host?.kind !== 'serial' &&
@@ -267,6 +427,7 @@ export function useTerminalSessionViewController({
     sessionId,
     tab?.shellKind,
     tab?.status,
+    tab?.tmux,
     terminalAutocompleteEnabled,
   ]);
 
@@ -313,6 +474,23 @@ export function useTerminalSessionViewController({
   useEffect(() => {
     liveOnSendBinaryInputRef.current = onSendBinaryInput;
   }, [onSendBinaryInput]);
+
+  useEffect(() => {
+    liveTmuxPaneRef.current = tab?.tmux ?? null;
+    liveIsTmuxPaneRef.current = Boolean(tab?.tmux);
+    liveTmuxPrefixEnabledRef.current = tmuxPrefixEnabled;
+    // pane/세션이 바뀌면 미완 prefix 상태는 폐기한다(다른 pane 으로 키가 새지 않도록).
+    tmuxPrefixArmedRef.current = false;
+  }, [tab?.tmux, tmuxPrefixEnabled, sessionId]);
+
+  // tmux 레이아웃 칸 수가 바뀌면(분할/리사이즈로 %layout-change) xterm 을 그 크기로
+  // 다시 고정한다. request() → fit(=tmux pane 이면 terminal.resize) → 보고는 억제됨.
+  useEffect(() => {
+    liveTmuxCellRef.current = tmuxCell ?? null;
+    if (tmuxCell) {
+      resizeSchedulerRef.current?.request();
+    }
+  }, [tmuxCell?.cols, tmuxCell?.rows]);
 
   useEffect(() => {
     liveOnResizeSessionRef.current = onResizeSession;
@@ -583,6 +761,11 @@ export function useTerminalSessionViewController({
           ) {
             return;
           }
+          // tmux prefix(Ctrl-b) 토글이 켜진 control mode pane 이면 prefix 시퀀스를 먼저
+          // 가로챈다. 소비했으면(true) 평소 입력 경로로 흘리지 않는다.
+          if (liveHandleTmuxPrefixInputRef.current(data)) {
+            return;
+          }
           liveAutocompleteInputRef.current(data);
         },
         onBinary: (data) => {
@@ -632,6 +815,7 @@ export function useTerminalSessionViewController({
       },
       serialize: () => runtime.captureRestoreSnapshot(),
       getSessionId: () => liveSessionIdRef.current,
+      getCellSize: () => runtime.getCellSize(),
     };
     registerTerminalHooks(stableId, terminalHooks);
     // 안전망: 이전 터미널이 남긴 스크롤백이 있으면 복원한다.
@@ -645,7 +829,22 @@ export function useTerminalSessionViewController({
     }
     resizeSchedulerRef.current = createTerminalResizeScheduler({
       fit: () => {
-        runtime.fitAddon.fit();
+        const cell = liveTmuxCellRef.current;
+        if (liveIsTmuxPaneRef.current && cell) {
+          // tmux pane: 컨테이너에 fit 하지 않고 tmux 레이아웃 칸 수로 고정한다(셰이크 방지).
+          // 단, 숨겨진(display:none → clientWidth/Height 0) pane 에는 resize 하지 않는다.
+          // 측정 불가 상태의 xterm 렌더러에 resize 를 강제하면 IdleTaskQueue 의
+          // handleResize 가 undefined 렌더러를 건드려 크래시한다(fitAddon.fit 은 0 크기에서
+          // 스스로 bail 하지만 terminal.resize 는 무조건 적용되므로 직접 가드한다). 다시
+          // 보이면 컨테이너 ResizeObserver(0→N) 가 재요청해 그때 resize 된다.
+          const el = containerRef.current;
+          if (!el || el.clientWidth === 0 || el.clientHeight === 0) {
+            return;
+          }
+          runtime.terminal.resize(cell.cols, cell.rows);
+        } else {
+          runtime.fitAddon.fit();
+        }
       },
       readSize: () => ({
         cols: runtime.terminal.cols,
@@ -660,6 +859,11 @@ export function useTerminalSessionViewController({
         requestShareSnapshot('resync');
       },
       sendResize: ({ cols, rows }) => {
+        // tmux pane 은 개별 크기를 보고하지 않는다(여러 pane 이 단일 control-client 크기를
+        // 공유 → pane 별 보고가 서로 덮어써 셰이크). 대신 워크스페이스가 total 을 1회 보고.
+        if (liveIsTmuxPaneRef.current) {
+          return;
+        }
         return liveOnResizeSessionRef.current(liveSessionIdRef.current, cols, rows);
       },
     });
@@ -787,7 +991,12 @@ export function useTerminalSessionViewController({
       },
     );
     void runtimeRef.current.setWebglEnabled(nextWebglEnabled);
-  }, [sessionId, tab?.sessionShare?.status, tab?.source, terminalWebglEnabled]);
+  }, [
+    sessionId,
+    tab?.sessionShare?.status,
+    tab?.source,
+    terminalWebglEnabled,
+  ]);
 
   useEffect(() => {
     // Sentry의 to_terminal(ZMODEM이 아닌 일반 출력)만 기존 소비자(화면/공유/E2E)에게
@@ -966,14 +1175,17 @@ export function useTerminalSessionViewController({
 
   const handleStartShare = useCallback(async () => {
     const payload = captureShareSnapshot();
-    if (!payload || !canShareSession || !host) {
+    if (!payload || !canShareSession) {
       return;
     }
-
+    // tmux pane 은 hostId 가 null 이라 host 가 undefined 다(이전엔 !host 로 early-return →
+    // 공유 버튼이 눌려도 no-op). share 백엔드는 sessionId(tmux:<ctl>:<pane> 포함) 기준으로
+    // 스트림을 중계하므로 host 없이도 동작한다 — transport 만 도출한다.
+    const transport = host?.kind === 'aws-ec2' ? 'aws-ssm' : 'ssh';
     await onStartSessionShare?.({
       sessionId,
       title,
-      transport: host.kind === 'aws-ec2' ? 'aws-ssm' : 'ssh',
+      transport,
       ...payload,
     });
     setSharePopoverOpen(true);

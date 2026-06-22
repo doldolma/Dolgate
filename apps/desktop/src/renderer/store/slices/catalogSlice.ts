@@ -54,6 +54,8 @@ import {
   sortKeychainEntries,
   asSessionTabId,
   asWorkspaceTabId,
+  asTmuxSessionGroupTabId,
+  findTmuxGroupForWorkspace,
   buildContainersEndpointId,
   buildContainersTabTitle,
   DEFAULT_CONTAINER_LOGS_TAIL_WINDOW,
@@ -185,8 +187,40 @@ export function createCatalogSlice(deps: SliceDeps): CatalogSlice {
     activateSftp: () => set({ activeWorkspaceTab: "sftp" }),
     activateSession: (sessionId) =>
             set({ activeWorkspaceTab: asSessionTabId(sessionId) }),
-    activateWorkspace: (workspaceId) =>
-            set({ activeWorkspaceTab: asWorkspaceTabId(workspaceId) }),
+    activateWorkspace: (workspaceId) => {
+            // tmux workspace(=tmux window) 로 전환하면 control 채널의 select-window 로도
+            // 동기화해, 원격 tmux 의 활성 window 가 따라오게 한다. window id 는 workspace 에,
+            // 대상 control 세션은 그 workspace 의 pane 가상 sessionId 로 식별한다.
+            const workspace = get().workspaces.find(
+              (item) => item.id === workspaceId,
+            );
+            if (workspace?.tmux && workspace.activeSessionId.startsWith("tmux:")) {
+              void api.ssh.tmuxSelectWindow(
+                workspace.activeSessionId,
+                workspace.tmux.windowId,
+              );
+            }
+            // tmux 윈도우면 상단 세션 탭(tmuxgrp:)을 활성 유지하고 그룹의 활성
+            // 윈도우만 옮긴다(세션 탭 강조 + 윈도우 바·화면 일치 보장).
+            const group = findTmuxGroupForWorkspace(get().tmuxGroups, workspace);
+            if (group) {
+              set((state) => ({
+                activeWorkspaceTab: asTmuxSessionGroupTabId(group.id),
+                tmuxGroups: state.tmuxGroups.map((g) =>
+                  g.id === group.id
+                    ? { ...g, activeWorkspaceId: workspaceId }
+                    : g,
+                ),
+              }));
+              return;
+            }
+            set({ activeWorkspaceTab: asWorkspaceTabId(workspaceId) });
+          },
+    activateTmuxGroup: (tmuxGroupId) => {
+            // tmux 세션 그룹 상단 탭으로 전환한다. 그룹 내 활성 window 전환은
+            // selectTmuxWindow 가 담당하므로 여기선 active 탭만 그룹으로 바꾼다.
+            set({ activeWorkspaceTab: asTmuxSessionGroupTabId(tmuxGroupId) });
+          },
     activateContainers: () =>
             set((state) => ({
               activeWorkspaceTab: "containers",

@@ -58,6 +58,7 @@ func (stub *stubSSHManager) FlushShellIntegration(string)         {}
 func (stub *stubSSHManager) RunCompletionCommand(string, string) (string, bool, error) {
 	return stub.completionOut, stub.completionTrun, stub.completionErr
 }
+func (stub *stubSSHManager) KillTmuxSession(string, string) error { return nil }
 
 type stubMoshManager struct {
 	hasSession   bool

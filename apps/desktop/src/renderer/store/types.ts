@@ -51,12 +51,15 @@ import type {
 
 export type SessionWorkspaceTabId = `session:${string}`;
 export type SplitWorkspaceTabId = `workspace:${string}`;
+/** tmux 세션 그룹 상단 탭 id. tmuxGroup.id 로 키잉(재연결에도 불변). */
+export type TmuxSessionGroupTabId = `tmuxgrp:${string}`;
 export type WorkspaceTabId =
   | "home"
   | "sftp"
   | "containers"
   | SessionWorkspaceTabId
-  | SplitWorkspaceTabId;
+  | SplitWorkspaceTabId
+  | TmuxSessionGroupTabId;
 export type HomeSection =
   | "hosts"
   | "portForwarding"
@@ -75,6 +78,13 @@ export interface WorkspaceLeafNode {
   id: string;
   kind: "leaf";
   sessionId: string;
+  /**
+   * tmux control mode pane이면 tmux 레이아웃이 지정한 정확한 칸 수(cols×rows).
+   * 이 pane의 xterm을 컨테이너에 fit하지 않고 이 크기로 고정해 tmux와 1:1 일치시켜
+   * 분할 시 리사이즈 진동(셰이크)을 없앤다. 비-tmux 분할 leaf면 undefined.
+   */
+  cols?: number;
+  rows?: number;
 }
 
 export interface WorkspaceSplitNode {
@@ -94,6 +104,40 @@ export interface WorkspaceTab {
   layout: WorkspaceLayoutNode;
   activeSessionId: string;
   broadcastEnabled: boolean;
+  /**
+   * control mode(tmux -CC) workspace(=하나의 tmux window)면 어느 control 세션·window인지.
+   * index/name 은 윈도우 바 라벨용(list-windows 응답에서 채워짐). 평시엔 null/undefined.
+   */
+  tmux?: {
+    controlSessionId: string;
+    windowId: string;
+    index?: number;
+    name?: string;
+  } | null;
+}
+
+/**
+ * tmux control 세션(=하나의 -CC 연결) 단위 핸들. 상단 탭 1개가 이 그룹 1개에 대응한다.
+ * 윈도우들은 각자 WorkspaceTab(`tmux.controlSessionId` 로 이 그룹에 속함)으로 두고,
+ * 그룹은 세션 식별·이름·활성 윈도우만 들고 있다. id 는 재연결로 controlSessionId 가
+ * 바뀌어도 불변이라 상단 탭/activeWorkspaceTab 이 안정적으로 유지된다.
+ */
+// 원격 tmux 세션 한 개 요약(list-sessions 한 줄). 푸터/감지바 세션 메뉴에 쓴다.
+export interface TmuxSessionInfo {
+  name: string;
+  windows: number;
+  attached: boolean;
+}
+
+export interface TmuxSessionGroup {
+  id: string;
+  controlSessionId: string;
+  sessionName: string;
+  activeWorkspaceId: string;
+  /** 이 control 세션이 붙은 호스트. 메뉴에서 새 세션 생성/전환(connectHost)에 쓴다. */
+  hostId?: string | null;
+  /** 원격 tmux 세션 목록(라이브; %sessions-changed 로 갱신). 세션 메뉴 표시용. */
+  sessions?: TmuxSessionInfo[];
 }
 
 export type DynamicTabStripItem =
@@ -104,6 +148,10 @@ export type DynamicTabStripItem =
   | {
       kind: "workspace";
       workspaceId: string;
+    }
+  | {
+      kind: "tmux";
+      tmuxGroupId: string;
     };
 
 export type ContainersWorkspacePanel =
@@ -449,6 +497,10 @@ export interface PendingConnectionAttempt {
   serviceName?: string;
   taskArn?: string;
   containerName?: string;
+  /** control mode(tmux -CC)로 연결할 attempt면 true. startPendingSessionConnect가 api.ssh.connect에 tmux를 넘긴다. */
+  tmux?: boolean;
+  /** 특정 tmux 세션 attach 등, control mode 진입 시 쓸 원격 tmux 명령. tmux=true 일 때만 의미가 있다. */
+  tmuxCommand?: string;
 }
 
 export interface SessionReturnTarget {
@@ -492,6 +544,7 @@ interface AppStateParts {
   tabs: TerminalTab[];
   sessionShareChatNotifications: Record<string, SessionShareChatMessage[]>;
   workspaces: WorkspaceTab[];
+  tmuxGroups: TmuxSessionGroup[];
   containerTabs: HostContainersTabState[];
   activeContainerHostId: string | null;
   tabStrip: DynamicTabStripItem[];
@@ -531,6 +584,8 @@ interface AppStateParts {
   activateSftp: () => void;
   activateSession: (sessionId: string) => void;
   activateWorkspace: (workspaceId: string) => void;
+  /** tmux 세션 그룹 상단 탭을 활성화한다(activeWorkspaceTab = tmuxgrp:groupId). */
+  activateTmuxGroup: (tmuxGroupId: string) => void;
   activateContainers: () => void;
   focusHostContainersTab: (hostId: string) => void;
   openHomeSection: (section: HomeSection) => void;
@@ -563,6 +618,14 @@ interface AppStateParts {
     cols: number,
     rows: number,
     secrets?: HostSecretInput,
+    tmux?: boolean,
+    tmuxCommand?: string,
+    /**
+     * tmux 를 기존 세션의 탭 자리에서 열 때, 닫고 대체할 그 세션 id. tmux=true 일 때만
+     * 의미가 있다. 지정하면 그 세션을 끊고 tmux 세션 그룹 탭이 그 자리에 들어선다
+     * ("현재 화면에서 진행"). 호스트 레벨 연결처럼 원 세션이 없으면 생략한다.
+     */
+    replaceSessionId?: string,
   ) => Promise<void>;
   retrySessionConnection: (
     sessionId: string,
@@ -657,6 +720,40 @@ interface AppStateParts {
     placement: "before" | "after",
   ) => void;
   focusWorkspaceSession: (workspaceId: string, sessionId: string) => void;
+  /**
+   * tmux workspace(=control mode window)에서 새 tmux window 를 만든다(new-window).
+   * 일반(비 tmux) workspace 면 아무 것도 하지 않는다. 결과 window 는 이어 오는
+   * tmuxWindowAdd / tmuxLayoutChange 이벤트가 새 workspace 로 반영한다.
+   */
+  tmuxNewWindowInWorkspace: (workspaceId: string) => void;
+  /**
+   * tmux control mode workspace 를 detach 한다 — 서버의 tmux 세션·프로세스는 살린 채
+   * control 채널(detach-client)만 분리하고 로컬 워크스페이스/탭만 제거한다. pane 을
+   * kill 하지 않으므로 재접속(attach)으로 그대로 복원된다. 비 tmux workspace 면 무시.
+   * closeWorkspace(=kill: kill-pane 으로 세션째 종료)와 의도가 반대다.
+   */
+  detachTmuxWorkspace: (workspaceId: string) => Promise<void>;
+  /** tmux window-close/exit 후 로컬 workspace·pane 탭 정리(명령 미전송). windowId 생략 시 controlSessionId 전체. 윈도우가 모두 사라지면 그룹/상단탭도 제거. */
+  removeTmuxWorkspacesLocal: (controlSessionId: string, windowId?: string) => void;
+  /** 그룹 내에서 활성 tmux window 를 전환한다(select-window + group.activeWorkspaceId). */
+  selectTmuxWindow: (workspaceId: string) => void;
+  /** tmux window 이름을 바꾼다(rename-window). 결과는 %window-renamed 로 되돌아온다. */
+  renameTmuxWindow: (workspaceId: string, name: string) => void;
+  /** %window-renamed 수신 시 해당 window WorkspaceTab 의 이름을 반영한다. */
+  applyTmuxWindowRenamed: (
+    controlSessionId: string,
+    windowId: string,
+    name: string,
+  ) => void;
+  /** %session-changed 수신 시 세션 그룹 푸터의 세션명을 실제 tmux 세션명으로 갱신한다. */
+  applyTmuxSessionName: (controlSessionId: string, sessionName: string) => void;
+  /** %sessions-changed 수신 시 그 control 세션 그룹의 원격 세션 목록을 갱신한다(메뉴용). */
+  applyTmuxSessionsList: (
+    controlSessionId: string,
+    sessions: TmuxSessionInfo[],
+  ) => void;
+  /** tmux 세션 전체를 종료한다(kill-session). sessionId 는 그 control 세션의 pane id. */
+  killTmuxSession: (sessionId: string, sessionName: string) => void;
   toggleWorkspaceBroadcast: (workspaceId: string) => void;
   resizeWorkspaceSplit: (
     workspaceId: string,
@@ -728,6 +825,17 @@ interface AppStateParts {
   ) => void;
   markSessionOutput: (sessionId: string, chunk?: Uint8Array) => void;
   handleCoreEvent: (event: CoreEvent<Record<string, unknown>>) => void;
+  handleTmuxLayoutChange: (
+    controlSessionId: string,
+    windowId: string,
+    layout: string,
+    meta?: {
+      index?: number;
+      name?: string;
+      active?: boolean;
+      sessionName?: string;
+    },
+  ) => void;
   handleSessionShareEvent: (event: SessionShareEvent) => void;
   handleSessionShareChatEvent: (event: SessionShareChatEvent) => void;
   dismissSessionShareChatNotification: (
@@ -837,6 +945,7 @@ export type CatalogSlice = Pick<
   | "activateSftp"
   | "activateSession"
   | "activateWorkspace"
+  | "activateTmuxGroup"
   | "activateContainers"
   | "focusHostContainersTab"
   | "openHomeSection"
@@ -866,6 +975,7 @@ export type SessionSlice = Pick<
   | "tabs"
   | "sessionShareChatNotifications"
   | "workspaces"
+  | "tmuxGroups"
   | "tabStrip"
   | "pendingCredentialRetry"
   | "activeCredentialRetryAttempt"
@@ -890,6 +1000,15 @@ export type SessionSlice = Pick<
   | "detachSessionFromWorkspace"
   | "reorderDynamicTab"
   | "focusWorkspaceSession"
+  | "tmuxNewWindowInWorkspace"
+  | "detachTmuxWorkspace"
+  | "removeTmuxWorkspacesLocal"
+  | "selectTmuxWindow"
+  | "renameTmuxWindow"
+  | "applyTmuxWindowRenamed"
+  | "applyTmuxSessionName"
+  | "applyTmuxSessionsList"
+  | "killTmuxSession"
   | "toggleWorkspaceBroadcast"
   | "resizeWorkspaceSplit"
   | "dismissPendingCredentialRetry"
@@ -903,6 +1022,7 @@ export type SessionSlice = Pick<
   | "clearPendingInteractiveAuth"
   | "updatePendingConnectionSize"
   | "markSessionOutput"
+  | "handleTmuxLayoutChange"
 >;
 
 export type ContainersSlice = Pick<

@@ -384,6 +384,19 @@ export function HomeShell({
                 );
               }
             }}
+            onConnectHostTmux={async (hostId) => {
+              try {
+                setHostBrowserError(null);
+                setSelectedHostId(hostId);
+                await homeViewModel.connectHost(hostId, 120, 32, undefined, true);
+              } catch (error) {
+                setHostBrowserError(
+                  error instanceof Error
+                    ? error.message
+                    : 'tmux 연결을 시작하지 못했습니다.',
+                );
+              }
+            }}
             onOpenHostContainers={async (hostId) => {
               try {
                 resetHostBrowserMessages();

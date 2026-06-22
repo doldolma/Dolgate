@@ -66,6 +66,13 @@ export interface TerminalSessionPaneProps {
   appearance: TerminalSessionAppearance;
   terminalWebglEnabled: boolean;
   terminalAutocompleteEnabled: boolean;
+  /** tmux prefix(Ctrl-b) 단축키 가로채기 설정. control mode pane 에서만 의미가 있다. */
+  tmuxPrefixEnabled: boolean;
+  /**
+   * control mode tmux pane이면 tmux 레이아웃이 지정한 정확한 칸 수. 이 값이 있으면
+   * pane의 xterm을 컨테이너에 fit하지 않고 이 크기로 고정한다(tmux와 1:1 → 셰이크 제거).
+   */
+  tmuxCell?: { cols: number; rows: number };
   style?: CSSProperties;
   showHeader?: boolean;
   draggingDisabled?: boolean;

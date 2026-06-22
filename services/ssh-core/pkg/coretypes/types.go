@@ -57,6 +57,18 @@ const (
 	CommandTerminalAutocompleteStop    CommandType = "terminalAutocompleteStop"
 	CommandTerminalCompletionQuery     CommandType = "terminalCompletionQuery"
 	CommandShellIntegrationInstall     CommandType = "terminalShellIntegrationInstall"
+	CommandTmuxConnect                 CommandType = "tmuxConnect"
+	CommandTmuxSendKeys                CommandType = "tmuxSendKeys"
+	CommandTmuxSplitPane               CommandType = "tmuxSplitPane"
+	CommandTmuxNewWindow               CommandType = "tmuxNewWindow"
+	CommandTmuxSelectWindow            CommandType = "tmuxSelectWindow"
+	CommandTmuxResizePane              CommandType = "tmuxResizePane"
+	CommandTmuxKillPane                CommandType = "tmuxKillPane"
+	CommandTmuxKillWindow              CommandType = "tmuxKillWindow"
+	CommandTmuxKillSession             CommandType = "tmuxKillSession"
+	CommandTmuxRenameWindow            CommandType = "tmuxRenameWindow"
+	CommandTmuxDetach                  CommandType = "tmuxDetach"
+	CommandTmuxSelectPane              CommandType = "tmuxSelectPane"
 )
 
 const (
@@ -100,12 +112,104 @@ const (
 	EventTerminalAutocompleteShellState EventType = "terminalAutocompleteShellState"
 	EventTerminalCompletionResult       EventType = "terminalCompletionResult"
 	EventMoshState                      EventType = "moshState"
+	EventTmuxLayoutChange               EventType = "tmuxLayoutChange"
+	EventTmuxWindowAdd                  EventType = "tmuxWindowAdd"
+	EventTmuxWindowClose                EventType = "tmuxWindowClose"
+	EventTmuxWindowRenamed              EventType = "tmuxWindowRenamed"
+	EventTmuxSessionChanged             EventType = "tmuxSessionChanged"
+	EventTmuxSessionsChanged            EventType = "tmuxSessionsChanged"
+	EventTmuxPaused                     EventType = "tmuxPaused"
+	EventTmuxContinue                   EventType = "tmuxContinue"
+	EventTmuxExit                       EventType = "tmuxExit"
+	EventTmuxAvailable                  EventType = "tmuxAvailable"
 )
 
 const (
 	StreamTypeWrite StreamType = "write"
 	StreamTypeData  StreamType = "data"
 )
+
+// tmux control mode 이벤트 payload들. control mode pane은 가상 sessionId
+// "tmux:<controlSessionId>:<paneId>" 로 노출되고, 구조 변화(window/layout)는
+// 아래 payload를 가진 control frame 이벤트로 상위 레이어에 전달된다.
+type TmuxLayoutChangePayload struct {
+	ControlSessionID string `json:"controlSessionId"`
+	WindowID         string `json:"windowId"`
+	Layout           string `json:"layout"`
+	// 아래 셋은 list-windows 응답에서만 채워진다(실시간 %layout-change 엔 없음).
+	// 비어 있으면 상위 레이어가 기존 값을 유지한다(merge).
+	Index  int    `json:"index,omitempty"`
+	Name   string `json:"name,omitempty"`
+	Active bool   `json:"active,omitempty"`
+	// 현재 attach 된 tmux 세션명(%session-changed 로 추적). 세션 그룹 푸터를 호스트명
+	// 대신 세션명으로 그리는 데 쓴다. 비어 있으면 상위가 기존 값을 유지한다.
+	SessionName string `json:"sessionName,omitempty"`
+}
+
+type TmuxWindowPayload struct {
+	ControlSessionID string `json:"controlSessionId"`
+	WindowID         string `json:"windowId"`
+	Name             string `json:"name,omitempty"`
+}
+
+type TmuxPanePayload struct {
+	ControlSessionID string `json:"controlSessionId"`
+	PaneID           string `json:"paneId"`
+}
+
+// TmuxSessionChangedPayload는 %session-changed 가 알려온 현재 attach 된 tmux 세션
+// 이름이다. attach 직후·세션 전환 시 발생하며, renderer 가 세션 그룹 푸터의
+// 세션명(호스트명이 아니라 실제 tmux 세션명)을 갱신하는 데 쓴다.
+type TmuxSessionChangedPayload struct {
+	ControlSessionID string `json:"controlSessionId"`
+	SessionName      string `json:"sessionName"`
+}
+
+type TmuxExitPayload struct {
+	ControlSessionID string `json:"controlSessionId"`
+	Reason           string `json:"reason,omitempty"`
+}
+
+// TmuxAvailablePayload는 SSH 접속 후 보조채널(별도 exec)로 감지한 원격 tmux 정보다.
+// tmux 미설치면 이 이벤트 자체가 발생하지 않는다. control mode 진입(attach) 전에
+// 하단바로 "tmux 세션 N개"를 표시하고 attach 진입점을 제공하는 데 쓴다.
+type TmuxAvailablePayload struct {
+	Version  string            `json:"version"`
+	Sessions []TmuxSessionInfo `json:"sessions,omitempty"`
+}
+
+// TmuxSessionInfo는 원격 tmux 의 한 세션 요약이다(list-sessions 한 줄).
+type TmuxSessionInfo struct {
+	Name     string `json:"name"`
+	Windows  int    `json:"windows"`
+	Attached bool   `json:"attached"`
+}
+
+// TmuxSplitPanePayload는 분할 방향("h": 좌우, "v": 상하)을 나른다.
+type TmuxSplitPanePayload struct {
+	Direction string `json:"direction"`
+}
+
+// TmuxSelectWindowPayload는 전환할 window id(@N)를 나른다.
+type TmuxSelectWindowPayload struct {
+	WindowID string `json:"windowId"`
+}
+
+// TmuxKillWindowPayload는 종료할 window id(@N)를 나른다.
+type TmuxKillWindowPayload struct {
+	WindowID string `json:"windowId"`
+}
+
+// TmuxKillSessionPayload는 종료할 tmux 세션 이름을 나른다(kill-session -t <name>).
+type TmuxKillSessionPayload struct {
+	SessionName string `json:"sessionName"`
+}
+
+// TmuxRenameWindowPayload는 이름을 바꿀 window id(@N)와 새 이름을 나른다.
+type TmuxRenameWindowPayload struct {
+	WindowID string `json:"windowId"`
+	Name     string `json:"name"`
+}
 
 type Event struct {
 	Type       EventType `json:"type"`
