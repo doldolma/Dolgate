@@ -63,6 +63,24 @@ func TestParseSessionChanged(t *testing.T) {
 	}
 }
 
+func TestParseSessionRenamed(t *testing.T) {
+	// %session-renamed: $id + 이름 / 이름만, 둘 다 Name 에 새 이름이 실려야 한다.
+	if ev := ParseControlLine("%session-renamed $0 newname"); ev.Kind != ControlSessionRenamed || ev.Name != "newname" {
+		t.Fatalf("session-renamed with id: %+v", ev)
+	}
+	if ev := ParseControlLine("%session-renamed my session"); ev.Kind != ControlSessionRenamed || ev.Name != "my session" {
+		t.Fatalf("session-renamed name only: %+v", ev)
+	}
+}
+
+func TestParseWindowPaneChanged(t *testing.T) {
+	// %window-pane-changed @<win> %<pane>: 활성 pane 변경 → 키보드 pane 이동 포커스 동기화.
+	ev := ParseControlLine("%window-pane-changed @1 %4")
+	if ev.Kind != ControlWindowPaneChanged || ev.WindowID != "@1" || ev.PaneID != "%4" {
+		t.Fatalf("window-pane-changed: %+v", ev)
+	}
+}
+
 func TestParseExitAndLifecycle(t *testing.T) {
 	if ev := ParseControlLine("%exit"); ev.Kind != ControlExit || ev.Name != "" {
 		t.Fatalf("exit: %+v", ev)

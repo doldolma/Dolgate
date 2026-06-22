@@ -237,6 +237,7 @@ export function createSessionSlice(deps: SliceDeps): SessionSlice {
     sessionShareChatNotifications: {},
     workspaces: [],
     tmuxGroups: [],
+    tmuxCommandPrompt: null,
     tabStrip: [],
     pendingCredentialRetry: null,
     activeCredentialRetryAttempt: null,
@@ -968,6 +969,30 @@ export function createSessionSlice(deps: SliceDeps): SessionSlice {
               ),
             }));
           },
+    closeActiveTab: () => {
+            // Cmd+W(크롬식): 현재 활성 동적 탭(세션/분할 워크스페이스/tmux 그룹)을 닫는다.
+            // 닫을 동적 탭이 있으면 true, 없으면(home/sftp/containers 등) false 를 돌려준다
+            // — 호출부가 false 면 창을 닫는다.
+            const active = get().activeWorkspaceTab;
+            if (active.startsWith("session:")) {
+              void get().disconnectTab(active.slice("session:".length));
+              return true;
+            }
+            if (active.startsWith("workspace:")) {
+              void get().closeWorkspace(active.slice("workspace:".length));
+              return true;
+            }
+            if (active.startsWith("tmuxgrp:")) {
+              const groupId = active.slice("tmuxgrp:".length);
+              const group = get().tmuxGroups.find((g) => g.id === groupId);
+              if (group) {
+                // 탭 × 와 동일하게 detach(서버 tmux 세션은 유지).
+                void get().detachTmuxWorkspace(group.activeWorkspaceId);
+              }
+              return true;
+            }
+            return false;
+          },
     closeWorkspace: async (workspaceId) => {
             const workspace = get().workspaces.find(
               (item) => item.id === workspaceId,
@@ -1345,6 +1370,46 @@ export function createSessionSlice(deps: SliceDeps): SessionSlice {
                   : { activeWorkspaceTab: asWorkspaceTabId(workspaceId) }),
               };
             });
+          },
+    applyTmuxActivePane: (controlSessionId, paneId) => {
+            // 서버의 active pane 변경(%window-pane-changed)을 로컬 포커스에 반영한다.
+            // select-pane 을 재전송하지 않아(루프 방지) activeSessionId 와 그룹의 활성
+            // window 만 갱신한다. 상단 탭(activeWorkspaceTab)은 건드리지 않아 다른 화면을
+            // 보고 있을 때 갑자기 끌려오지 않는다.
+            const paneSessionId = `tmux:${controlSessionId}:${paneId.replace(/^%/, "")}`;
+            set((state) => {
+              const workspace = state.workspaces.find(
+                (w) =>
+                  w.tmux?.controlSessionId === controlSessionId &&
+                  listWorkspaceSessionIds(w.layout).includes(paneSessionId),
+              );
+              if (!workspace || workspace.activeSessionId === paneSessionId) {
+                return {};
+              }
+              const group = findTmuxGroupForWorkspace(state.tmuxGroups, workspace);
+              return {
+                workspaces: state.workspaces.map((w) =>
+                  w.id === workspace.id
+                    ? { ...w, activeSessionId: paneSessionId }
+                    : w,
+                ),
+                ...(group
+                  ? {
+                      tmuxGroups: state.tmuxGroups.map((g) =>
+                        g.id === group.id
+                          ? { ...g, activeWorkspaceId: workspace.id }
+                          : g,
+                      ),
+                    }
+                  : {}),
+              };
+            });
+          },
+    openTmuxCommandPrompt: (spec) => {
+            set({ tmuxCommandPrompt: spec });
+          },
+    closeTmuxCommandPrompt: () => {
+            set({ tmuxCommandPrompt: null });
           },
     tmuxNewWindowInWorkspace: (workspaceId) => {
             // tmux workspace 에서 새 tmux window 생성. 비 tmux workspace 면 무시한다.

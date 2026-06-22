@@ -145,7 +145,7 @@ function createProps(
     },
     terminalWebglEnabled: true,
     terminalAutocompleteEnabled: false,
-    tmuxPrefixEnabled: false,
+    tmuxPrefixKey: 'C-b',
     interactiveAuth: null,
     onStartSessionShare: vi.fn().mockResolvedValue(undefined),
     onUpdateSessionShareSnapshot: vi.fn().mockResolvedValue(undefined),

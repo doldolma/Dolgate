@@ -385,6 +385,13 @@ export function registerSshIpcHandlers(ctx: MainIpcContext): void {
   );
 
   ipcMain.handle(
+    ipcChannels.ssh.tmuxCommand,
+    async (_event, sessionId: string, command: string) => {
+      ctx.coreManager.tmuxCommand(sessionId, command);
+    },
+  );
+
+  ipcMain.handle(
     ipcChannels.shell.openExternal,
     async (_event, url: string) => {
       const target = new URL(url);

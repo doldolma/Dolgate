@@ -3,6 +3,7 @@ import type { AuthState } from '@shared';
 import { TerminalWorkspace } from '../components/TerminalWorkspace';
 import { TmuxWindowBar } from '../components/terminal-workspace/TmuxWindowBar';
 import { TmuxSessionFooter } from '../components/terminal-workspace/TmuxSessionFooter';
+import { TmuxCommandPrompt } from '../components/terminal-workspace/TmuxCommandPrompt';
 import { TerminalTransferToastRegion } from '../components/TerminalTransferToastRegion';
 import type { useLoginController } from '../controllers/useLoginController';
 import { openOwnerChatWindow } from '../services/desktop/session-shares';
@@ -228,6 +229,7 @@ export function SessionShell({
         <div className="relative min-h-0 flex-1">
           {workspaceEl}
           <TerminalTransferToastRegion />
+          <TmuxCommandPrompt />
         </div>
         {activeTmuxGroup ? (
           <TmuxSessionFooter

@@ -21,6 +21,7 @@ import {
   emitPortForwardEvent,
   emitSessionShareChatEvent,
   emitSessionShareEvent,
+  emitCloseActiveTab,
   emitSftpConnectionProgress,
   emitSshData,
   emitSystemResume,
@@ -119,5 +120,8 @@ export function registerPreloadEventBindings(ipcRenderer: IpcRenderer): void {
 
   ipcRenderer.on(ipcChannels.system.resume, () => {
     emitSystemResume();
+  });
+  ipcRenderer.on(ipcChannels.window.closeActiveTab, () => {
+    emitCloseActiveTab();
   });
 }

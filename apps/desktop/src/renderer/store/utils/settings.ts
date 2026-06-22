@@ -100,8 +100,8 @@ export const defaultSettings: AppSettings = {
   autoReconnectMaxAttempts: 10,
   autoReconnectBaseDelayMs: 1000,
   autoReconnectMaxDelayMs: 30000,
-  // tmux prefix(Ctrl-b) 단축키 가로채기 — 기본 off(평소 tmux 동작 유지).
-  tmuxPrefixEnabled: false,
+  // tmux prefix 키(기본 Ctrl-b). control mode pane 에서 항상 가로채며, 키만 변경 가능.
+  tmuxPrefixKey: "C-b",
   serverUrl: "https://ssh.doldolma.com",
   serverUrlOverride: null,
   dismissedUpdateVersion: null,

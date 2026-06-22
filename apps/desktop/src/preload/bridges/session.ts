@@ -69,6 +69,8 @@ export function buildSshBridge(ipcRenderer: IpcRenderer): DesktopApi["ssh"] {
       ),
     tmuxDetach: (sessionId: string) =>
       ipcRenderer.invoke(ipcChannels.ssh.tmuxDetach, sessionId),
+    tmuxCommand: (sessionId: string, command: string) =>
+      ipcRenderer.invoke(ipcChannels.ssh.tmuxCommand, sessionId, command),
     onEvent: (listener: (event: CoreEvent) => void) =>
       subscribeCoreEvent(listener),
     onData: (sessionId: string, listener: (chunk: Uint8Array) => void) =>

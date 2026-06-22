@@ -140,6 +140,18 @@ export interface TmuxSessionGroup {
   sessions?: TmuxSessionInfo[];
 }
 
+// tmux 명령 프롬프트 오버레이 상태(Ctrl-b : / $ / ,). 텍스트 입력이 필요한 명령에 쓴다.
+export interface TmuxCommandPromptState {
+  /** 명령을 보낼 pane 가상 sessionId. */
+  sessionId: string;
+  /** 'raw': 입력 그대로 tmux 명령 / 'rename-window'·'rename-session': 입력을 이름으로 사용. */
+  mode: "raw" | "rename-window" | "rename-session";
+  /** rename-window 대상 window id(@N). */
+  windowId?: string;
+  /** 입력창 초기값(예: 현재 윈도우 이름). */
+  initialValue?: string;
+}
+
 export type DynamicTabStripItem =
   | {
       kind: "session";
@@ -545,6 +557,7 @@ interface AppStateParts {
   sessionShareChatNotifications: Record<string, SessionShareChatMessage[]>;
   workspaces: WorkspaceTab[];
   tmuxGroups: TmuxSessionGroup[];
+  tmuxCommandPrompt: TmuxCommandPromptState | null;
   containerTabs: HostContainersTabState[];
   activeContainerHostId: string | null;
   tabStrip: DynamicTabStripItem[];
@@ -643,6 +656,8 @@ interface AppStateParts {
   disconnectTab: (sessionId: string) => Promise<void>;
   cancelSessionReconnect: (sessionId: string) => void;
   closeWorkspace: (workspaceId: string) => Promise<void>;
+  /** Cmd+W: 활성 동적 탭을 닫는다. 닫을 탭이 없으면(home/sftp/containers) false. */
+  closeActiveTab: () => boolean;
   openHostContainersTab: (hostId: string) => Promise<void>;
   closeHostContainersTab: (hostId: string) => Promise<void>;
   reorderContainerTab: (
@@ -720,6 +735,15 @@ interface AppStateParts {
     placement: "before" | "after",
   ) => void;
   focusWorkspaceSession: (workspaceId: string, sessionId: string) => void;
+  /**
+   * tmux 서버의 active pane 변경(%window-pane-changed)을 로컬 포커스에 반영한다.
+   * select-pane 을 재전송하지 않아 키보드 pane 이동의 포커스 동기화에 쓴다.
+   */
+  applyTmuxActivePane: (controlSessionId: string, paneId: string) => void;
+  /** tmux 명령 프롬프트(Ctrl-b : / $ / ,) 오버레이를 연다. */
+  openTmuxCommandPrompt: (spec: TmuxCommandPromptState) => void;
+  /** tmux 명령 프롬프트를 닫는다. */
+  closeTmuxCommandPrompt: () => void;
   /**
    * tmux workspace(=control mode window)에서 새 tmux window 를 만든다(new-window).
    * 일반(비 tmux) workspace 면 아무 것도 하지 않는다. 결과 window 는 이어 오는
@@ -976,6 +1000,7 @@ export type SessionSlice = Pick<
   | "sessionShareChatNotifications"
   | "workspaces"
   | "tmuxGroups"
+  | "tmuxCommandPrompt"
   | "tabStrip"
   | "pendingCredentialRetry"
   | "activeCredentialRetryAttempt"
@@ -995,11 +1020,15 @@ export type SessionSlice = Pick<
   | "disconnectTab"
   | "cancelSessionReconnect"
   | "closeWorkspace"
+  | "closeActiveTab"
   | "splitSessionIntoWorkspace"
   | "moveWorkspaceSession"
   | "detachSessionFromWorkspace"
   | "reorderDynamicTab"
   | "focusWorkspaceSession"
+  | "applyTmuxActivePane"
+  | "openTmuxCommandPrompt"
+  | "closeTmuxCommandPrompt"
   | "tmuxNewWindowInWorkspace"
   | "detachTmuxWorkspace"
   | "removeTmuxWorkspacesLocal"

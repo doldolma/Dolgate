@@ -3469,6 +3469,15 @@ export class CoreManager {
     });
   }
 
+  // 윈도우를 닫으면(Cmd+W; 앱은 유지) 모든 터미널 세션을 끊어 재오픈 시 깨끗하게 시작한다.
+  // 어중간하게 복원돼 tmux 윈도우 이름/세션 목록 같은 메타데이터만 비는 상태를 방지한다.
+  // (포트포워딩·SFTP·컨테이너 등 비-터미널 리소스는 별도 맵이라 건드리지 않는다.)
+  disconnectAllSessions(): void {
+    for (const sessionId of Array.from(this.tabs.keys())) {
+      this.disconnect(sessionId);
+    }
+  }
+
   disconnect(sessionId: string): void {
     this.desiredResizeBySession.delete(sessionId);
     this.sentResizeBySession.delete(sessionId);
@@ -3550,6 +3559,19 @@ export class CoreManager {
       type: "tmuxSelectPane",
       sessionId,
       payload: {},
+    });
+  }
+
+  // tmuxCommand 는 렌더러 키맵이 만든 tmux 명령을 control 채널로 그대로 보낸다(단축키 확장용).
+  tmuxCommand(sessionId: string, command: string): void {
+    if (!this.isTmuxControlConnected(sessionId)) {
+      return;
+    }
+    this.sendControl({
+      id: randomUUID(),
+      type: "tmuxCommand",
+      sessionId,
+      payload: { command },
     });
   }
 

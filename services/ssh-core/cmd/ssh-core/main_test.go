@@ -45,6 +45,7 @@ func (stub *stubCoreRuntime) TmuxSplitPane(sessionID, direction string) error   
 func (stub *stubCoreRuntime) TmuxNewWindow(sessionID string) error                { return nil }
 func (stub *stubCoreRuntime) TmuxSelectWindow(sessionID, windowID string) error   { return nil }
 func (stub *stubCoreRuntime) TmuxSelectPane(sessionID string) error               { return nil }
+func (stub *stubCoreRuntime) TmuxControlCommand(sessionID, command string) error  { return nil }
 func (stub *stubCoreRuntime) TmuxKillPane(sessionID string) error                 { return nil }
 func (stub *stubCoreRuntime) TmuxKillWindow(sessionID, windowID string) error     { return nil }
 func (stub *stubCoreRuntime) TmuxKillSession(sessionID, sessionName string) error { return nil }

@@ -1184,7 +1184,7 @@ export class SettingsRepository {
       autoReconnectMaxDelayMs:
         state.settings.autoReconnectMaxDelayMs ??
         DEFAULT_AUTO_RECONNECT_SETTINGS.autoReconnectMaxDelayMs,
-      tmuxPrefixEnabled: state.settings.tmuxPrefixEnabled ?? false,
+      tmuxPrefixKey: state.settings.tmuxPrefixKey ?? 'C-b',
       serverUrl: serverUrlOverride || this.getDefaultServerUrl(),
       serverUrlOverride,
       dismissedUpdateVersion: state.updater.dismissedVersion,
@@ -1333,8 +1333,8 @@ export class SettingsRepository {
         state.settings.updatedAt = nowIso();
       }
 
-      if (typeof input.tmuxPrefixEnabled === 'boolean') {
-        state.settings.tmuxPrefixEnabled = input.tmuxPrefixEnabled;
+      if (typeof input.tmuxPrefixKey === 'string' && input.tmuxPrefixKey.trim()) {
+        state.settings.tmuxPrefixKey = input.tmuxPrefixKey.trim();
         state.settings.updatedAt = nowIso();
       }
 

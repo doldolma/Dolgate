@@ -22,6 +22,7 @@ type coreRuntime interface {
 	TmuxNewWindow(sessionID string) error
 	TmuxSelectWindow(sessionID, windowID string) error
 	TmuxSelectPane(sessionID string) error
+	TmuxControlCommand(sessionID, command string) error
 	TmuxKillPane(sessionID string) error
 	TmuxKillWindow(sessionID, windowID string) error
 	TmuxKillSession(sessionID, sessionName string) error
@@ -281,6 +282,12 @@ func dispatch(core coreRuntime, writer *eventWriter, request protocol.Request) e
 		return core.TmuxSelectWindow(request.SessionID, payload.WindowID)
 	case protocol.CommandTmuxSelectPane:
 		return core.TmuxSelectPane(request.SessionID)
+	case protocol.CommandTmuxCommand:
+		var payload protocol.TmuxCommandPayload
+		if err := json.Unmarshal(request.Payload, &payload); err != nil {
+			return err
+		}
+		return core.TmuxControlCommand(request.SessionID, payload.Command)
 	case protocol.CommandTmuxKillPane:
 		return core.TmuxKillPane(request.SessionID)
 	case protocol.CommandTmuxKillWindow:

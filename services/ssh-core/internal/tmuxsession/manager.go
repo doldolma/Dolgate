@@ -201,7 +201,10 @@ func (m *Manager) Connect(sessionID, requestID string, payload coretypes.Connect
 
 	command := payload.Command
 	if command == "" {
-		command = "tmux -CC new-session -A -s dolgate"
+		// 기존 세션이 있으면 그것(가장 최근)에 attach 하고, 없을 때만 'dolgate'를 만든다.
+		// 고정 이름으로만 attach 하면 사용자가 rename-session(Ctrl-b $) 으로 이름을 바꿨을 때
+		// 재접속 시 옛 이름을 못 찾아 중복 세션이 생긴다. attach 우선이면 이름이 바뀌어도 잇는다.
+		command = "tmux -CC attach 2>/dev/null || tmux -CC new-session -A -s dolgate"
 	}
 	if err := session.Start(command); err != nil {
 		session.Close()
@@ -305,9 +308,27 @@ func (m *Manager) handleControlEvent(handle *controlHandle, ev ControlEvent) {
 				SessionName:      ev.Name,
 			},
 		})
+	case ControlSessionRenamed:
+		// rename-session(Ctrl-b $) → 현재 세션 이름을 즉시 갱신(푸터 라벨)하고 세션 목록도
+		// 재조회한다. 이게 없으면 재연결 전까지 옛 이름이 남는다.
+		if ev.Name != "" {
+			handle.sessionName = ev.Name
+			m.emit(coretypes.Event{
+				Type:      coretypes.EventTmuxSessionChanged,
+				SessionID: handle.id,
+				Payload: coretypes.TmuxSessionChangedPayload{
+					ControlSessionID: handle.id,
+					SessionName:      ev.Name,
+				},
+			})
+		}
+		go m.emitSessions(handle)
 	case ControlSessionsChanged:
 		// 세션 목록 변화(new/kill/rename) → 재조회해 페이로드와 함께 emit(푸터 메뉴 갱신).
 		go m.emitSessions(handle)
+	case ControlWindowPaneChanged:
+		// 서버의 활성 pane 변경 → renderer가 화면 포커스를 따라오게 한다(키보드 pane 이동).
+		m.emitPane(handle.id, coretypes.EventTmuxActivePaneChanged, ev.PaneID)
 	case ControlPause:
 		m.emitPane(handle.id, coretypes.EventTmuxPaused, ev.PaneID)
 	case ControlContinue:
@@ -422,6 +443,21 @@ func (m *Manager) SelectPane(sessionID string) error {
 		return fmt.Errorf("not a tmux pane session: %s", sessionID)
 	}
 	return handle.writeStdin(fmt.Sprintf("select-pane -t %s\n", paneID))
+}
+
+// ControlCommand 은 renderer 키맵이 만든 tmux 명령(예: "select-pane -L -t %0")을
+// control 채널로 그대로 보낸다. 단축키 확장용 범용 통로이며, 명령 문자열은 렌더러의
+// 고정 키맵에서만 생성된다(사용자 입력 아님). 대상(-t)은 렌더러가 포함해 보낸다.
+func (m *Manager) ControlCommand(sessionID, command string) error {
+	handle, _, err := m.controlOf(sessionID)
+	if err != nil {
+		return err
+	}
+	command = strings.TrimRight(command, "\r\n")
+	if command == "" {
+		return nil
+	}
+	return handle.writeStdin(command + "\n")
 }
 
 // KillPane 은 paneID(%N) 를 종료한다(마지막 pane 이면 window 가 닫힌다).
@@ -701,6 +737,7 @@ func (m *Manager) flushCollectedLayouts(handle *controlHandle) {
 		if !ok {
 			continue
 		}
+		windowIndex := win.index // 포인터로 전달해 index 0 이 omitempty 로 누락되지 않게.
 		m.emit(coretypes.Event{
 			Type:      coretypes.EventTmuxLayoutChange,
 			SessionID: handle.id,
@@ -708,7 +745,7 @@ func (m *Manager) flushCollectedLayouts(handle *controlHandle) {
 				ControlSessionID: handle.id,
 				WindowID:         win.id,
 				Layout:           win.layout,
-				Index:            win.index,
+				Index:            &windowIndex,
 				Name:             win.name,
 				Active:           win.active,
 				SessionName:      handle.sessionName,

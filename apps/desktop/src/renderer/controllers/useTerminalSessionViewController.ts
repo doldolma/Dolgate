@@ -25,19 +25,24 @@ import {
   clearSessionCwd,
   setSessionCwd,
 } from '../lib/terminal-cwd-registry';
+import {
+  registerTerminalFocus,
+  unregisterTerminalFocus,
+} from '../lib/terminal-focus-registry';
 import { createZmodemController } from '../lib/zmodem/zmodem-controller';
 import {
   installTerminalShellIntegration,
   writeTerminalBinaryInput,
   tmuxSplitPane,
   tmuxNewWindow,
-  tmuxSelectWindow,
   tmuxKillPane,
   tmuxDetach,
+  tmuxCommand,
 } from '../services/desktop/terminal';
 import {
-  TMUX_PREFIX_BYTE,
   mapPrefixKey,
+  resolveSiblingWindowId,
+  tmuxPrefixByteFromKey,
   type TmuxPrefixResolverContext,
 } from '../lib/tmux-prefix';
 import { saveZmodemDownload } from '../services/desktop/files';
@@ -64,6 +69,41 @@ import {
   useTerminalAutocomplete,
 } from './useTerminalAutocomplete';
 import type { CommandFinishedInfo } from '../lib/command-notification';
+
+// tmux 윈도우 전환(Ctrl-b n/p/숫자/l): 로컬 뷰를 즉시 전환(selectTmuxWindow)하고
+// select-window 도 함께 보낸다. 'last'(l)는 직전 윈도우를 로컬에서 추적하지 않으므로
+// last-window 명령으로 서버에 맡기고, 포커스는 %window-pane-changed 가 따라온다.
+function dispatchTmuxWindowNav(
+  paneSessionId: string,
+  pane: { controlSessionId: string; windowId: string },
+  context: TmuxPrefixResolverContext,
+  target: 'next' | 'prev' | 'last' | number,
+): void {
+  if (target === 'last') {
+    void tmuxCommand(paneSessionId, 'last-window');
+    return;
+  }
+  const state = appStore.getState();
+  const groupWorkspaces = state.workspaces.filter(
+    (w) => w.tmux?.controlSessionId === pane.controlSessionId,
+  );
+  const targetWorkspace =
+    typeof target === 'number'
+      ? groupWorkspaces.find((w) => w.tmux?.index === target)
+      : (() => {
+          const windowId = resolveSiblingWindowId(
+            context.orderedWindowIds,
+            pane.windowId,
+            target === 'next' ? 1 : -1,
+          );
+          return windowId
+            ? groupWorkspaces.find((w) => w.tmux?.windowId === windowId)
+            : undefined;
+        })();
+  if (targetWorkspace) {
+    state.selectTmuxWindow(targetWorkspace.id);
+  }
+}
 
 function isMacPlatform(): boolean {
   if (typeof navigator === 'undefined') {
@@ -121,7 +161,7 @@ export function useTerminalSessionViewController({
   appearance,
   terminalWebglEnabled,
   terminalAutocompleteEnabled,
-  tmuxPrefixEnabled,
+  tmuxPrefixKey,
   tmuxCell,
   interactiveAuth,
   onFocus,
@@ -177,7 +217,7 @@ export function useTerminalSessionViewController({
   // tab.tmux 정보(controlSessionId/windowId)와 토글 값을 live ref 로 들고, onData 에서
   // prefix 다음 키 한 개를 가로채 네이티브 tmux 동작으로 매핑한다.
   const liveTmuxPaneRef = useRef(tab?.tmux ?? null);
-  const liveTmuxPrefixEnabledRef = useRef(tmuxPrefixEnabled);
+  const liveTmuxPrefixByteRef = useRef(tmuxPrefixByteFromKey(tmuxPrefixKey));
   const tmuxPrefixArmedRef = useRef(false);
   // onData(터미널 init effect) 에서 최신 핸들러를 쓰기 위한 live ref. 초기값은 no-op.
   const liveHandleTmuxPrefixInputRef = useRef<(data: string) => boolean>(
@@ -230,23 +270,16 @@ export function useTerminalSessionViewController({
   // n/p(다음/이전 window) 전환의 순서 기준이다.
   const resolveTmuxWindowOrder = useCallback(
     (controlSessionId: string): string[] => {
+      // tmux 윈도우는 top-level tabStrip 이 아니라 그룹 안의 workspace 들이다.
+      // controlSessionId 로 묶어 tmux index 순으로 정렬해 윈도우 id 순서를 만든다(n/p 전환).
       const state = appStore.getState();
-      const ids: string[] = [];
-      for (const item of state.tabStrip) {
-        if (item.kind !== 'workspace') {
-          continue;
-        }
-        const workspace = state.workspaces.find((w) => w.id === item.workspaceId);
-        const windowId = workspace?.tmux?.windowId;
-        if (
-          workspace?.tmux?.controlSessionId === controlSessionId &&
-          windowId &&
-          !ids.includes(windowId)
-        ) {
-          ids.push(windowId);
-        }
-      }
-      return ids;
+      return state.workspaces
+        .filter(
+          (w) => w.tmux?.controlSessionId === controlSessionId && w.tmux.windowId,
+        )
+        .slice()
+        .sort((a, b) => (a.tmux?.index ?? 0) - (b.tmux?.index ?? 0))
+        .map((w) => w.tmux!.windowId);
     },
     [],
   );
@@ -263,6 +296,8 @@ export function useTerminalSessionViewController({
       const context: TmuxPrefixResolverContext = {
         orderedWindowIds: resolveTmuxWindowOrder(pane.controlSessionId),
         currentWindowId: pane.windowId,
+        currentPaneId: pane.paneId,
+        prefixByte: liveTmuxPrefixByteRef.current,
       };
       const mapped = mapPrefixKey(data, context);
       if (!mapped) {
@@ -276,17 +311,64 @@ export function useTerminalSessionViewController({
         case 'splitPane':
           void tmuxSplitPane(paneSessionId, action.direction);
           break;
-        case 'selectWindow':
-          void tmuxSelectWindow(paneSessionId, action.windowId);
+        case 'command':
+          // 타깃까지 포함한 완전한 tmux 명령(select-pane/resize-pane/...)을 그대로 보낸다.
+          void tmuxCommand(paneSessionId, action.command);
           break;
-        case 'detach':
-          void tmuxDetach(paneSessionId);
+        case 'windowNav':
+          dispatchTmuxWindowNav(paneSessionId, pane, context, action.target);
           break;
+        case 'prompt': {
+          // 텍스트 입력이 필요한 명령(rename/명령 프롬프트) → 하단 입력 오버레이를 연다.
+          const state = appStore.getState();
+          const currentName =
+            action.mode === 'rename-window'
+              ? (state.workspaces.find(
+                  (w) =>
+                    w.tmux?.controlSessionId === pane.controlSessionId &&
+                    w.tmux?.windowId === pane.windowId,
+                )?.tmux?.name ?? '')
+              : '';
+          state.openTmuxCommandPrompt({
+            sessionId: paneSessionId,
+            mode: action.mode,
+            windowId:
+              action.mode === 'rename-window' ? pane.windowId : undefined,
+            initialValue: currentName,
+          });
+          break;
+        }
+        case 'killWindow': {
+          const state = appStore.getState();
+          const ws = state.workspaces.find(
+            (w) =>
+              w.tmux?.controlSessionId === pane.controlSessionId &&
+              w.tmux?.windowId === pane.windowId,
+          );
+          if (ws) {
+            void state.closeWorkspace(ws.id);
+          }
+          break;
+        }
+        case 'detach': {
+          // 탭 × detach 와 동일한 정리 경로(로컬 그룹/워크스페이스 제거 + 탭 전환)를 탄다.
+          // raw tmuxDetach 만 보내면 control 채널은 끊겨도 UI 가 죽은 pane 을 남겨 화면이 멈춘다.
+          const state = appStore.getState();
+          const ws = state.workspaces.find(
+            (w) => w.tmux?.controlSessionId === pane.controlSessionId,
+          );
+          if (ws) {
+            void state.detachTmuxWorkspace(ws.id);
+          } else {
+            void tmuxDetach(paneSessionId);
+          }
+          break;
+        }
         case 'killPane':
           void tmuxKillPane(paneSessionId);
           break;
         case 'passthrough':
-          // 미매핑 키(z=zoom 등)나 리터럴 Ctrl-b 는 그대로 send-keys 로 전달한다.
+          // 미매핑 키나 리터럴 Ctrl-b 는 그대로 send-keys 로 전달한다.
           sendAutocompleteInput(action.data);
           break;
       }
@@ -304,11 +386,7 @@ export function useTerminalSessionViewController({
   // 가로채 네이티브 동작으로 매핑하고, 그 외에는 false 를 돌려 평소 경로로 흘린다.
   const handleTmuxPrefixInput = useCallback(
     (data: string): boolean => {
-      if (
-        !liveTmuxPrefixEnabledRef.current ||
-        !liveTmuxPaneRef.current ||
-        data.length === 0
-      ) {
+      if (!liveTmuxPaneRef.current || data.length === 0) {
         tmuxPrefixArmedRef.current = false;
         return false;
       }
@@ -316,12 +394,13 @@ export function useTerminalSessionViewController({
         tmuxPrefixArmedRef.current = false;
         return dispatchTmuxPrefixData(data);
       }
-      if (data === TMUX_PREFIX_BYTE) {
-        // Ctrl-b 단독 청크 → arm 하고 키 입력을 보류한다(다음 청크에서 매핑).
+      const prefixByte = liveTmuxPrefixByteRef.current;
+      if (data === prefixByte) {
+        // prefix 단독 청크 → arm 하고 키 입력을 보류한다(다음 청크에서 매핑).
         tmuxPrefixArmedRef.current = true;
         return true;
       }
-      const prefixIndex = data.indexOf(TMUX_PREFIX_BYTE);
+      const prefixIndex = data.indexOf(prefixByte);
       if (prefixIndex < 0) {
         return false;
       }
@@ -478,10 +557,10 @@ export function useTerminalSessionViewController({
   useEffect(() => {
     liveTmuxPaneRef.current = tab?.tmux ?? null;
     liveIsTmuxPaneRef.current = Boolean(tab?.tmux);
-    liveTmuxPrefixEnabledRef.current = tmuxPrefixEnabled;
+    liveTmuxPrefixByteRef.current = tmuxPrefixByteFromKey(tmuxPrefixKey);
     // pane/세션이 바뀌면 미완 prefix 상태는 폐기한다(다른 pane 으로 키가 새지 않도록).
     tmuxPrefixArmedRef.current = false;
-  }, [tab?.tmux, tmuxPrefixEnabled, sessionId]);
+  }, [tab?.tmux, tmuxPrefixKey, sessionId]);
 
   // tmux 레이아웃 칸 수가 바뀌면(분할/리사이즈로 %layout-change) xterm 을 그 크기로
   // 다시 고정한다. request() → fit(=tmux pane 이면 terminal.resize) → 보고는 억제됨.
@@ -1123,6 +1202,13 @@ export function useTerminalSessionViewController({
       });
     }
   }, [active, refreshViewport, viewActivationKey, visible]);
+
+  // tmux 명령 프롬프트가 닫힌 뒤 이 pane 의 xterm 으로 포커스를 되돌릴 수 있게 등록한다.
+  useEffect(() => {
+    const focus = () => runtimeRef.current?.focus();
+    registerTerminalFocus(sessionId, focus);
+    return () => unregisterTerminalFocus(sessionId, focus);
+  }, [sessionId]);
 
   useEffect(() => {
     if (tab?.sessionShare?.status !== 'active') {

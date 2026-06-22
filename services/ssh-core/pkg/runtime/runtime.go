@@ -304,6 +304,10 @@ func (runtime *Runtime) TmuxSelectPane(sessionID string) error {
 	return runtime.tmux.SelectPane(sessionID)
 }
 
+func (runtime *Runtime) TmuxControlCommand(sessionID, command string) error {
+	return runtime.tmux.ControlCommand(sessionID, command)
+}
+
 func (runtime *Runtime) TmuxKillPane(sessionID string) error {
 	return runtime.tmux.KillPane(sessionID)
 }

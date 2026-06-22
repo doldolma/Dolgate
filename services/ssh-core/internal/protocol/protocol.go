@@ -72,6 +72,7 @@ const (
 	CommandTmuxKillSession             = coretypes.CommandTmuxKillSession
 	CommandTmuxRenameWindow            = coretypes.CommandTmuxRenameWindow
 	CommandTmuxDetach                  = coretypes.CommandTmuxDetach
+	CommandTmuxCommand                 = coretypes.CommandTmuxCommand
 )
 
 const (
@@ -199,6 +200,7 @@ type TmuxSelectWindowPayload = coretypes.TmuxSelectWindowPayload
 type TmuxKillWindowPayload = coretypes.TmuxKillWindowPayload
 type TmuxKillSessionPayload = coretypes.TmuxKillSessionPayload
 type TmuxRenameWindowPayload = coretypes.TmuxRenameWindowPayload
+type TmuxCommandPayload = coretypes.TmuxCommandPayload
 type SFTPConnectedPayload = coretypes.SFTPConnectedPayload
 type ContainersConnectedPayload = coretypes.ContainersConnectedPayload
 type HostKeyProbedPayload = coretypes.HostKeyProbedPayload

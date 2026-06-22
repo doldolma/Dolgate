@@ -998,11 +998,8 @@ export interface AppSettings extends TerminalAppearanceSettings {
   autoReconnectMaxAttempts: number;
   autoReconnectBaseDelayMs: number;
   autoReconnectMaxDelayMs: number;
-  /**
-   * tmux control mode pane 에서 prefix(Ctrl-b) 단축키를 가로채 네이티브 동작으로
-   * 매핑할지. off(기본)면 Ctrl-b 를 그대로 send-keys 로 전달(평소 tmux 동작).
-   */
-  tmuxPrefixEnabled?: boolean;
+  /** tmux prefix 키 토큰("C-b"/"C-a"/"C-Space" …). 비우면 Ctrl-b. control mode pane 에서 항상 동작. */
+  tmuxPrefixKey?: string;
   serverUrl: string;
   serverUrlOverride?: string | null;
   dismissedUpdateVersion?: string | null;

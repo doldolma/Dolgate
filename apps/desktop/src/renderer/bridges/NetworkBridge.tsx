@@ -51,6 +51,16 @@ export function NetworkBridge() {
           })
         : () => undefined;
 
+    // Cmd+W(메뉴): 활성 탭을 닫는다(크롬식). 닫을 동적 탭이 없으면 창을 닫는다.
+    const offCloseActiveTab =
+      typeof desktopApi.window?.onCloseActiveTab === "function"
+        ? desktopApi.window.onCloseActiveTab(() => {
+            if (!appStore.getState().closeActiveTab()) {
+              void desktopApi.window.close();
+            }
+          })
+        : () => undefined;
+
     // 페이지 리로드(dev vite 풀 리로드 등) 직전에 스크롤백을 sessionStorage에 저장한다.
     // 리로드 후 같은 sessionId의 터미널이 다시 만들어질 때 복원된다.
     const handleBeforeUnload = () => {
@@ -65,6 +75,7 @@ export function NetworkBridge() {
       window.removeEventListener("beforeunload", handleBeforeUnload);
       window.removeEventListener("pagehide", handleBeforeUnload);
       offResume();
+      offCloseActiveTab();
     };
   }, []);
 

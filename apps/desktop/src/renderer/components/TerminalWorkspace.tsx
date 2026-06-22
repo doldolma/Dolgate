@@ -20,13 +20,14 @@ import {
 } from '../lib/terminal-presets';
 import { TerminalSessionPane } from './terminal-workspace/TerminalSessionPane';
 import { TerminalWorkspaceLayoutView } from './terminal-workspace/TerminalWorkspaceLayoutView';
-import { resizeTerminal } from '../services/desktop/terminal';
+import { resizeTerminal, tmuxCommand } from '../services/desktop/terminal';
 import { getTerminalCellSize } from '../lib/terminal-write-registry';
 import { SectionLabel } from '../ui';
 import { cn } from '../lib/cn';
 import {
   collectWorkspacePlacements,
   directionPreviewRect,
+  findSplitNodeById,
   listWorkspaceSessionIds,
   resolveDropDirection,
   toPercentRectStyle,
@@ -167,6 +168,13 @@ export function TerminalWorkspace({
   const [dropPreview, setDropPreview] = useState<DropPreview | null>(null);
   const [resizingHandle, setResizingHandle] =
     useState<SplitHandlePlacement | null>(null);
+  // tmux pane 리사이즈 드래그 중 마지막으로 보낸 target 칸 수(중복 resize-pane 전송 억제).
+  const lastTmuxResizeRef = useRef<number | null>(null);
+  // 드래그 시작 시 캡처한 양쪽 pane sessionId. split id 는 %layout-change 마다 재생성되므로
+  // 그것 대신 안정적인 pane sessionId 로 매 mousemove 에 resize-pane 을 보낸다.
+  const tmuxResizeRef = useRef<{ firstSid: string; secondSid: string } | null>(
+    null,
+  );
   const [isBroadcastTooltipVisible, setIsBroadcastTooltipVisible] =
     useState(false);
   const terminalController = useTerminalWorkspaceController({
@@ -364,27 +372,68 @@ export function TerminalWorkspace({
       return;
     }
 
+    // tmux pane 은 xterm 이 tmux 셀 격자에 고정돼 있어 DOM 비율만 바꾸면 크기가 안 변한다.
+    // 드래그 비율을 첫 pane 의 목표 칸 수로 환산해 resize-pane 을 보내고, tmux 의
+    // %layout-change 가 셀 수를 갱신하면 xterm 이 따라온다(중복 전송은 ref 로 억제).
+    const applyTmuxSplitResize = (ratio: number) => {
+      const panes = tmuxResizeRef.current;
+      if (!panes) {
+        return;
+      }
+      const first = tmuxCellBySessionId.get(panes.firstSid);
+      const second = tmuxCellBySessionId.get(panes.secondSid);
+      if (!first || !second) {
+        return;
+      }
+      const paneId = `%${panes.firstSid.slice(panes.firstSid.lastIndexOf(':') + 1)}`;
+      const horizontal = resizingHandle.axis === 'horizontal';
+      const total = horizontal
+        ? first.cols + second.cols + 1
+        : first.rows + second.rows + 1;
+      const target = Math.min(Math.max(Math.round(ratio * total), 1), total - 1);
+      if (
+        target === lastTmuxResizeRef.current ||
+        target === (horizontal ? first.cols : first.rows)
+      ) {
+        return;
+      }
+      lastTmuxResizeRef.current = target;
+      void tmuxCommand(
+        panes.firstSid,
+        `resize-pane -t ${paneId} -${horizontal ? 'x' : 'y'} ${target}`,
+      );
+    };
+
     const handlePointerMove = (event: MouseEvent) => {
       const container = workspaceRef.current;
       if (!container || !activeWorkspace) {
         return;
       }
       const bounds = container.getBoundingClientRect();
-      const splitLeft = bounds.left + resizingHandle.rect.x * bounds.width;
-      const splitTop = bounds.top + resizingHandle.rect.y * bounds.height;
-      const splitWidth = resizingHandle.rect.width * bounds.width;
-      const splitHeight = resizingHandle.rect.height * bounds.height;
-
-      if (resizingHandle.axis === 'horizontal' && splitWidth > 0) {
-        const ratio = (event.clientX - splitLeft) / splitWidth;
-        onResizeWorkspaceSplit(activeWorkspace.id, resizingHandle.splitId, ratio);
+      let ratio: number | null = null;
+      if (resizingHandle.axis === 'horizontal') {
+        const splitLeft = bounds.left + resizingHandle.rect.x * bounds.width;
+        const splitWidth = resizingHandle.rect.width * bounds.width;
+        if (splitWidth > 0) {
+          ratio = (event.clientX - splitLeft) / splitWidth;
+        }
+      } else {
+        const splitTop = bounds.top + resizingHandle.rect.y * bounds.height;
+        const splitHeight = resizingHandle.rect.height * bounds.height;
+        if (splitHeight > 0) {
+          ratio = (event.clientY - splitTop) / splitHeight;
+        }
+      }
+      if (ratio === null) {
         return;
       }
 
-      if (resizingHandle.axis === 'vertical' && splitHeight > 0) {
-        const ratio = (event.clientY - splitTop) / splitHeight;
-        onResizeWorkspaceSplit(activeWorkspace.id, resizingHandle.splitId, ratio);
+      // tmux workspace 는 tmux 가 레이아웃 권위이므로 resize-pane 으로 보낸다.
+      if (activeWorkspace.tmux) {
+        applyTmuxSplitResize(ratio);
+        return;
       }
+      onResizeWorkspaceSplit(activeWorkspace.id, resizingHandle.splitId, ratio);
     };
 
     const handlePointerUp = () => {
@@ -397,7 +446,12 @@ export function TerminalWorkspace({
       window.removeEventListener('mousemove', handlePointerMove);
       window.removeEventListener('mouseup', handlePointerUp);
     };
-  }, [activeWorkspace, onResizeWorkspaceSplit, resizingHandle]);
+  }, [
+    activeWorkspace,
+    onResizeWorkspaceSplit,
+    resizingHandle,
+    tmuxCellBySessionId,
+  ]);
 
   if (tabs.length === 0) {
     return (
@@ -571,7 +625,7 @@ export function TerminalWorkspace({
           }
           terminalWebglEnabled={settings.terminalWebglEnabled}
           terminalAutocompleteEnabled={settings.terminalAutocompleteEnabled}
-          tmuxPrefixEnabled={settings.tmuxPrefixEnabled ?? false}
+          tmuxPrefixKey={settings.tmuxPrefixKey ?? 'C-b'}
           style={activeWorkspace ? undefined : rectStyle}
           // tmux pane 은 헤더 없이 슬롯을 꽉 채운다(컨테이너 px = tmux 셀 그리드 → 밑 짤림 제거).
           // pane 식별/조작은 상단 윈도우 바 + tmux 자체 경계선/단축키가 담당.
@@ -686,7 +740,26 @@ export function TerminalWorkspace({
       // 12px 은 유지). tmux pane 거터가 좁아 기존의 꽉 찬 12px 바가 경계 글자와 겹쳐
       // 보이던 것을 해소 — 크기/측정/key 는 일절 안 건드리는 순수 시각 변경.
       tmuxThinHandles={Boolean(activeWorkspace?.tmux)}
-      onStartResizeHandle={setResizingHandle}
+      onStartResizeHandle={(handle) => {
+        lastTmuxResizeRef.current = null;
+        // tmux: 드래그 동안 split id 가 %layout-change 로 바뀌므로, 시작 시점에 양쪽
+        // pane sessionId 를 잡아둔다(이후 mousemove 는 이 안정적 id 로 resize-pane).
+        tmuxResizeRef.current = null;
+        if (activeWorkspace?.tmux) {
+          const node = findSplitNodeById(
+            activeWorkspace.layout,
+            handle.splitId,
+          );
+          if (node) {
+            const firstSid = listWorkspaceSessionIds(node.first)[0];
+            const secondSid = listWorkspaceSessionIds(node.second)[0];
+            if (firstSid && secondSid) {
+              tmuxResizeRef.current = { firstSid, secondSid };
+            }
+          }
+        }
+        setResizingHandle(handle);
+      }}
       dropPreview={dropPreview}
     />
   );

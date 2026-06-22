@@ -3,6 +3,7 @@ import type { DesktopApi } from "@shared";
 import { ipcChannels } from "../../common/ipc-channels";
 import {
   subscribeActivityLogsChanged,
+  subscribeCloseActiveTab,
   subscribePortForwardEvent,
   subscribeSystemResume,
   subscribeUpdateEvent,
@@ -35,6 +36,7 @@ export function buildWindowBridge(
     restore: () => ipcRenderer.invoke(ipcChannels.window.restore),
     close: () => ipcRenderer.invoke(ipcChannels.window.close),
     onStateChanged: (listener) => subscribeWindowState(listener),
+    onCloseActiveTab: (listener) => subscribeCloseActiveTab(listener),
   };
 }
 

@@ -9,20 +9,22 @@ import (
 type ControlEventKind string
 
 const (
-	ControlOutput          ControlEventKind = "output"
-	ControlBegin           ControlEventKind = "begin"
-	ControlEnd             ControlEventKind = "end"
-	ControlError           ControlEventKind = "error"
-	ControlWindowAdd       ControlEventKind = "window-add"
-	ControlWindowClose     ControlEventKind = "window-close"
-	ControlWindowRenamed   ControlEventKind = "window-renamed"
-	ControlLayoutChange    ControlEventKind = "layout-change"
-	ControlSessionChanged  ControlEventKind = "session-changed"
-	ControlSessionsChanged ControlEventKind = "sessions-changed"
-	ControlExit            ControlEventKind = "exit"
-	ControlPause           ControlEventKind = "pause"
-	ControlContinue        ControlEventKind = "continue"
-	ControlOther           ControlEventKind = "other"
+	ControlOutput            ControlEventKind = "output"
+	ControlBegin             ControlEventKind = "begin"
+	ControlEnd               ControlEventKind = "end"
+	ControlError             ControlEventKind = "error"
+	ControlWindowAdd         ControlEventKind = "window-add"
+	ControlWindowClose       ControlEventKind = "window-close"
+	ControlWindowRenamed     ControlEventKind = "window-renamed"
+	ControlLayoutChange      ControlEventKind = "layout-change"
+	ControlSessionChanged    ControlEventKind = "session-changed"
+	ControlSessionRenamed    ControlEventKind = "session-renamed"
+	ControlSessionsChanged   ControlEventKind = "sessions-changed"
+	ControlWindowPaneChanged ControlEventKind = "window-pane-changed"
+	ControlExit              ControlEventKind = "exit"
+	ControlPause             ControlEventKind = "pause"
+	ControlContinue          ControlEventKind = "continue"
+	ControlOther             ControlEventKind = "other"
 )
 
 // ControlEvent는 control mode 한 줄을 파싱한 결과다.
@@ -92,8 +94,20 @@ func ParseControlLine(line string) ControlEvent {
 	case "%session-changed":
 		id, name := splitFirst(rest)
 		return ControlEvent{Kind: ControlSessionChanged, WindowID: id, Name: name}
+	case "%session-renamed":
+		// %session-renamed $<id> <name>: 현재 세션 이름 변경(rename-session). 일부 버전은
+		// $id 없이 이름만 보내므로 둘 다 처리한다.
+		first, after := splitFirst(rest)
+		if strings.HasPrefix(first, "$") {
+			return ControlEvent{Kind: ControlSessionRenamed, WindowID: first, Name: after}
+		}
+		return ControlEvent{Kind: ControlSessionRenamed, Name: rest}
 	case "%sessions-changed":
 		return ControlEvent{Kind: ControlSessionsChanged}
+	case "%window-pane-changed":
+		// %window-pane-changed @<win> %<pane> : 윈도우의 활성 pane 이 바뀜
+		win, pane := splitFirst(rest)
+		return ControlEvent{Kind: ControlWindowPaneChanged, WindowID: win, PaneID: strings.TrimSpace(pane)}
 	case "%begin":
 		return ControlEvent{Kind: ControlBegin, Args: strings.Fields(rest)}
 	case "%end":

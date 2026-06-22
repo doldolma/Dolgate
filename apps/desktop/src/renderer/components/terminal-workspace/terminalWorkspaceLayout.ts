@@ -2,6 +2,7 @@ import type React from 'react';
 import type {
   WorkspaceDropDirection,
   WorkspaceLayoutNode,
+  WorkspaceSplitNode,
 } from '../../store/createAppStore';
 import type { Rect, SessionPlacement, SplitHandlePlacement } from './types';
 
@@ -150,4 +151,21 @@ export function listWorkspaceSessionIds(node: WorkspaceLayoutNode): string[] {
     ...listWorkspaceSessionIds(node.first),
     ...listWorkspaceSessionIds(node.second),
   ];
+}
+
+// splitId 로 split 노드를 찾는다(divider 드래그 → tmux resize-pane 매핑에 쓴다).
+export function findSplitNodeById(
+  node: WorkspaceLayoutNode,
+  splitId: string,
+): WorkspaceSplitNode | null {
+  if (node.kind === 'leaf') {
+    return null;
+  }
+  if (node.id === splitId) {
+    return node;
+  }
+  return (
+    findSplitNodeById(node.first, splitId) ??
+    findSplitNodeById(node.second, splitId)
+  );
 }

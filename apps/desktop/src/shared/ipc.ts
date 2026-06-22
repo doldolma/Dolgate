@@ -168,7 +168,8 @@ export type CoreCommandType =
   | "tmuxKillWindow"
   | "tmuxKillSession"
   | "tmuxRenameWindow"
-  | "tmuxDetach";
+  | "tmuxDetach"
+  | "tmuxCommand";
 export type CoreEventType =
   | "status"
   | "connected"
@@ -219,6 +220,7 @@ export type CoreEventType =
   | "tmuxSessionsChanged"
   | "tmuxPaused"
   | "tmuxContinue"
+  | "tmuxActivePaneChanged"
   | "tmuxExit";
 export type CoreStreamType = "write" | "data";
 
@@ -235,7 +237,7 @@ export interface DesktopConnectInput {
   tmux?: boolean;
   /**
    * control mode 진입 시 원격에서 실행할 tmux 명령(예: "tmux -CC attach -t mysession").
-   * 비우면 Go 코어가 기본값("tmux -CC new-session -A -s dolgate")을 쓴다. tmux=true 일 때만 의미가 있다.
+   * 비우면 Go 코어가 기본값(기존 세션 있으면 attach, 없으면 'dolgate' 생성)을 쓴다. tmux=true 일 때만 의미가 있다.
    */
   tmuxCommand?: string;
 }
@@ -819,6 +821,7 @@ export interface DesktopApi {
       name: string,
     ) => Promise<void>;
     tmuxDetach: (sessionId: string) => Promise<void>;
+    tmuxCommand: (sessionId: string, command: string) => Promise<void>;
     onEvent: (listener: (event: CoreEvent) => void) => () => void;
     onData: (
       sessionId: string,
@@ -861,6 +864,8 @@ export interface DesktopApi {
     onStateChanged: (
       listener: (state: DesktopWindowState) => void,
     ) => () => void;
+    /** 메뉴(Cmd+W)의 '탭 닫기' 신호 구독. */
+    onCloseActiveTab: (listener: () => void) => () => void;
   };
   system: {
     /** OS 절전/잠금 복귀 알림 구독. 자동 재연결의 즉시 재검증 트리거. */

@@ -69,6 +69,9 @@ const (
 	CommandTmuxRenameWindow            CommandType = "tmuxRenameWindow"
 	CommandTmuxDetach                  CommandType = "tmuxDetach"
 	CommandTmuxSelectPane              CommandType = "tmuxSelectPane"
+	// CommandTmuxCommand는 렌더러 키맵이 만든 tmux 명령을 control 채널로 그대로
+	// 보내는 범용 통로다(단축키 확장용). 명령 문자열은 고정 키맵에서만 생성된다.
+	CommandTmuxCommand CommandType = "tmuxCommand"
 )
 
 const (
@@ -120,8 +123,11 @@ const (
 	EventTmuxSessionsChanged            EventType = "tmuxSessionsChanged"
 	EventTmuxPaused                     EventType = "tmuxPaused"
 	EventTmuxContinue                   EventType = "tmuxContinue"
-	EventTmuxExit                       EventType = "tmuxExit"
-	EventTmuxAvailable                  EventType = "tmuxAvailable"
+	// EventTmuxActivePaneChanged는 %window-pane-changed(서버의 활성 pane 변경)를
+	// renderer로 전달해, 키보드 pane 이동 등에서 화면 포커스가 따라오게 한다.
+	EventTmuxActivePaneChanged EventType = "tmuxActivePaneChanged"
+	EventTmuxExit              EventType = "tmuxExit"
+	EventTmuxAvailable         EventType = "tmuxAvailable"
 )
 
 const (
@@ -138,7 +144,9 @@ type TmuxLayoutChangePayload struct {
 	Layout           string `json:"layout"`
 	// 아래 셋은 list-windows 응답에서만 채워진다(실시간 %layout-change 엔 없음).
 	// 비어 있으면 상위 레이어가 기존 값을 유지한다(merge).
-	Index  int    `json:"index,omitempty"`
+	// Index 는 포인터다 — int+omitempty 면 윈도우 0(index=0)이 JSON 에서 누락돼
+	// 렌더러에서 undefined 가 되고 Ctrl-b 0 매칭이 깨진다. nil=미제공 / &0=index 0.
+	Index  *int   `json:"index,omitempty"`
 	Name   string `json:"name,omitempty"`
 	Active bool   `json:"active,omitempty"`
 	// 현재 attach 된 tmux 세션명(%session-changed 로 추적). 세션 그룹 푸터를 호스트명
@@ -209,6 +217,11 @@ type TmuxKillSessionPayload struct {
 type TmuxRenameWindowPayload struct {
 	WindowID string `json:"windowId"`
 	Name     string `json:"name"`
+}
+
+// TmuxCommandPayload는 control 채널로 그대로 보낼 tmux 명령 한 줄을 나른다.
+type TmuxCommandPayload struct {
+	Command string `json:"command"`
 }
 
 type Event struct {

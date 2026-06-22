@@ -92,7 +92,7 @@ export interface DesktopStateFile {
     autoReconnectMaxAttempts: number;
     autoReconnectBaseDelayMs: number;
     autoReconnectMaxDelayMs: number;
-    tmuxPrefixEnabled: boolean;
+    tmuxPrefixKey: string;
     serverUrlOverride: string | null;
     updatedAt: string;
   };
@@ -476,7 +476,7 @@ function createDefaultStateFile(): DesktopStateFile {
       autoReconnectMaxAttempts: DEFAULT_AUTO_RECONNECT_SETTINGS.autoReconnectMaxAttempts,
       autoReconnectBaseDelayMs: DEFAULT_AUTO_RECONNECT_SETTINGS.autoReconnectBaseDelayMs,
       autoReconnectMaxDelayMs: DEFAULT_AUTO_RECONNECT_SETTINGS.autoReconnectMaxDelayMs,
-      tmuxPrefixEnabled: false,
+      tmuxPrefixKey: 'C-b',
       serverUrlOverride: null,
       updatedAt: timestamp
     },
@@ -862,10 +862,10 @@ function normalizeStateFile(value: unknown): DesktopStateFile {
         typeof settings.autoReconnectMaxDelayMs === 'number'
           ? clampAutoReconnectDelayMs(settings.autoReconnectMaxDelayMs)
           : DEFAULT_AUTO_RECONNECT_SETTINGS.autoReconnectMaxDelayMs,
-      tmuxPrefixEnabled:
-        typeof settings.tmuxPrefixEnabled === 'boolean'
-          ? settings.tmuxPrefixEnabled
-          : false,
+      tmuxPrefixKey:
+        typeof settings.tmuxPrefixKey === 'string' && settings.tmuxPrefixKey.trim()
+          ? settings.tmuxPrefixKey.trim()
+          : 'C-b',
       serverUrlOverride: typeof settings.serverUrlOverride === 'string' && settings.serverUrlOverride.trim() ? settings.serverUrlOverride.trim() : null,
       updatedAt: typeof settings.updatedAt === 'string' ? settings.updatedAt : fallback.settings.updatedAt
     },

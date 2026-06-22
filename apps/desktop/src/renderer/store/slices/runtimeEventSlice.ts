@@ -330,6 +330,22 @@ export function createRuntimeEventSlice(deps: SliceDeps): RuntimeEventSlice {
               return;
             }
 
+            // tmux 활성 pane 변경(%window-pane-changed): 키보드 pane 이동 등 서버에서
+            // active pane 이 바뀌면 화면 포커스를 따라가게 한다(select-pane 재전송 없이 로컬만).
+            if (event.type === "tmuxActivePaneChanged") {
+              const payload = event.payload as {
+                controlSessionId?: string;
+                paneId?: string;
+              };
+              if (payload.controlSessionId && payload.paneId) {
+                get().applyTmuxActivePane(
+                  payload.controlSessionId,
+                  payload.paneId,
+                );
+              }
+              return;
+            }
+
             // tmux 감지(하단바): SSH 접속 후 보조채널이 보낸 원격 tmux 정보를 해당
             // 탭의 tmuxAvailable 에 set 한다(moshState 와 동일하게 표시 전용).
             if (event.type === "tmuxAvailable" && sessionId) {

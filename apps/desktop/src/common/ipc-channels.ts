@@ -108,6 +108,7 @@ export const ipcChannels = {
     tmuxKillSession: 'ssh:tmux-kill-session',
     tmuxRenameWindow: 'ssh:tmux-rename-window',
     tmuxDetach: 'ssh:tmux-detach',
+    tmuxCommand: 'ssh:tmux-command',
     event: 'ssh:core-event',
     data: 'ssh:stream-data'
   },
@@ -140,7 +141,9 @@ export const ipcChannels = {
     maximize: 'window:maximize',
     restore: 'window:restore',
     close: 'window:close',
-    stateChanged: 'window:state-changed'
+    stateChanged: 'window:state-changed',
+    // 메뉴(Cmd+W)에서 렌더러로: 현재 활성 탭을 닫으라는 신호.
+    closeActiveTab: 'window:close-active-tab'
   },
   system: {
     // OS 절전/잠금 복귀 알림. 자동 재연결이 죽은 소켓을 즉시 재검증하는 데 쓰인다.

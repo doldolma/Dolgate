@@ -52,6 +52,7 @@ const warpgateImportEventHub = createListenerHub<WarpgateImportEvent>();
 const sessionShareEventHub = createListenerHub<SessionShareEvent>();
 const sessionShareChatEventHub = createListenerHub<SessionShareChatEvent>();
 const systemResumeHub = createListenerHub<void>();
+const closeActiveTabHub = createListenerHub<void>();
 
 const streamListeners = new Map<string, Set<(chunk: Uint8Array) => void>>();
 const sessionBacklog = new Map<string, Uint8Array[]>();
@@ -274,6 +275,14 @@ export function emitSystemResume(): void {
 
 export function subscribeSystemResume(listener: () => void): () => void {
   return systemResumeHub.subscribe(listener);
+}
+
+export function emitCloseActiveTab(): void {
+  closeActiveTabHub.emit(undefined);
+}
+
+export function subscribeCloseActiveTab(listener: () => void): () => void {
+  return closeActiveTabHub.subscribe(listener);
 }
 
 export function registerE2EWindowEvents(): void {

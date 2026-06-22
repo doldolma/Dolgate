@@ -1,4 +1,10 @@
-import { app, BrowserWindow, powerMonitor } from 'electron';
+import {
+  app,
+  BrowserWindow,
+  Menu,
+  powerMonitor,
+  type MenuItemConstructorOptions,
+} from 'electron';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
@@ -41,6 +47,42 @@ import { shouldRequestSingleInstanceLock } from './app-runtime-policy';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const require = createRequire(import.meta.url);
 const TERMIUS_HELPER_FLAG = '--dolssh-termius-helper';
+
+// Cmd+W 를 "창 닫기"가 아니라 "현재 탭 닫기"(크롬식)로 바꾸기 위해 커스텀 메뉴를 쓴다.
+// 기본 메뉴엔 Window>Close(Cmd+W, 창 닫기)가 있어 이를 대체해야 한다. 표준 역할
+// (앱/편집/보기 — 복사·붙여넣기·종료 등)은 그대로 유지한다. Cmd+Shift+W 가 창 닫기.
+function installApplicationMenu(): void {
+  const isMac = process.platform === 'darwin';
+  const template: MenuItemConstructorOptions[] = [
+    ...(isMac
+      ? [{ role: 'appMenu' as const }]
+      : [{ label: '파일', submenu: [{ role: 'quit' as const }] }]),
+    { role: 'editMenu' },
+    { role: 'viewMenu' },
+    {
+      label: '윈도우',
+      submenu: [
+        { role: 'minimize' },
+        ...(isMac ? [{ role: 'zoom' as const }] : []),
+        { type: 'separator' as const },
+        {
+          label: '탭 닫기',
+          accelerator: 'CmdOrCtrl+W',
+          click: () => {
+            BrowserWindow.getFocusedWindow()?.webContents.send(
+              ipcChannels.window.closeActiveTab,
+            );
+          },
+        },
+        { label: '창 닫기', accelerator: 'CmdOrCtrl+Shift+W', role: 'close' },
+        ...(isMac
+          ? [{ type: 'separator' as const }, { role: 'front' as const }]
+          : []),
+      ],
+    },
+  ];
+  Menu.setApplicationMenu(Menu.buildFromTemplate(template));
+}
 
 function resolveTermiusHelperAssetPath(filename: string): string {
   if (app.isPackaged) {
@@ -413,6 +455,7 @@ if (termiusHelperArgIndex >= 0) {
     registerNotificationsIpcHandlers(notificationService);
     await awsService.migrateManagedProfilesFromFilesIfNeeded();
     await reconcileAwsHostProfileReferences();
+    installApplicationMenu();
     await createWindow();
     void restoreDnsOverridesForStartup()
       .then(() => rewriteDnsOverridesForCurrentState())
@@ -473,6 +516,13 @@ if (termiusHelperArgIndex >= 0) {
     // macOS 관례를 따라 darwin 외 플랫폼에서만 앱을 완전히 종료한다.
     if (process.platform !== 'darwin') {
       app.quit();
+      return;
+    }
+    // macOS: 창을 닫아도(Cmd+W) 앱은 살아 있다. 종료가 아니라면 모든 터미널 세션을
+    // 정리해 다시 열 때 깨끗하게 시작한다(어중간한 복원으로 tmux 이름/세션 목록만
+    // 비는 문제 방지). 실제 Quit(isQuitting)이면 before-quit 의 shutdown 이 처리한다.
+    if (!isQuitting) {
+      coreManager.disconnectAllSessions();
     }
   });
 }

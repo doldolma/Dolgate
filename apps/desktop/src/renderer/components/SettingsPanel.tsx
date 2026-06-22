@@ -15,6 +15,7 @@ import {
 import type { ReactNode } from 'react';
 import type { SettingsSection } from '../store/createAppStore';
 import { terminalFontOptions, terminalThemePresets } from '../lib/terminal-presets';
+import { TMUX_PREFIX_KEY_OPTIONS } from '../lib/tmux-prefix';
 import { KeychainPanel } from './KeychainPanel';
 import { KnownHostsPanel } from './KnownHostsPanel';
 import { AwsProfilesPanel } from './AwsProfilesPanel';
@@ -228,8 +229,8 @@ export function SettingsPanel({
     await onUpdateSettings({ terminalAltIsMeta });
   }
 
-  async function handleChangeTmuxPrefixEnabled(tmuxPrefixEnabled: boolean) {
-    await onUpdateSettings({ tmuxPrefixEnabled });
+  async function handleChangeTmuxPrefixKey(tmuxPrefixKey: string) {
+    await onUpdateSettings({ tmuxPrefixKey });
   }
 
   async function handleChangeSessionReplayRetentionCount(
@@ -428,18 +429,27 @@ export function SettingsPanel({
                 />
               ) : null}
 
-              <ToggleSwitch
-                checked={settings.tmuxPrefixEnabled ?? false}
-                label="tmux prefix(Ctrl-b) 단축키"
-                description={
-                  'tmux 제어 모드 pane 에서 Ctrl-b 다음 키(c / % / 따옴표 / n / p / d / x)를 네이티브 동작(새 창·분할·창 전환·detach·pane 종료)으로 매핑합니다. 끄면 평소대로 tmux 에 그대로 전달합니다.'
-                }
-                onClick={() => {
-                  void handleChangeTmuxPrefixEnabled(
-                    !(settings.tmuxPrefixEnabled ?? false),
-                  );
-                }}
-              />
+              <FieldGroup label="Tmux Prefix 키">
+                <SelectField
+                  value={settings.tmuxPrefixKey ?? 'C-b'}
+                  onChange={async (event) =>
+                    handleChangeTmuxPrefixKey(event.target.value)
+                  }
+                >
+                  {TMUX_PREFIX_KEY_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </SelectField>
+                <p className="mt-1.5 text-[0.78rem] leading-relaxed text-[var(--text-muted)]">
+                  tmux 제어 모드 pane 에서 prefix 다음 키를 네이티브 동작으로 매핑합니다 —
+                  방향키(pane 이동) · Ctrl+방향키(크기 조절) · c(새 창) · % / 따옴표(분할) ·
+                  n / p / 숫자 / l(창 전환) · w(창 목록) · z(zoom) · swap · break ·
+                  Space(레이아웃) · o / ;(pane 순환) · x / &(종료) · [ / ](복사/붙여넣기) ·
+                  , / $(이름 변경) · :(명령 입력) · d(detach). 매핑 안 된 키는 그대로 전달됩니다.
+                </p>
+              </FieldGroup>
             </div>
 
             {/* 명령 완료 알림 — 관련 설정을 한 그룹 카드로 묶는다 */}

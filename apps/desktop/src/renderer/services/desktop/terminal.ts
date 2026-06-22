@@ -89,6 +89,11 @@ export function tmuxDetach(sessionId: string) {
   return desktopApi.ssh.tmuxDetach(sessionId);
 }
 
+// tmuxCommand 는 렌더러 키맵이 만든 tmux 명령을 control 채널로 그대로 보낸다(단축키 확장용).
+export function tmuxCommand(sessionId: string, command: string) {
+  return desktopApi.ssh.tmuxCommand(sessionId, command);
+}
+
 export function subscribeToTerminalEvents(
   listener: Parameters<SshApi['onEvent']>[0],
 ) {
