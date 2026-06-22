@@ -2,8 +2,6 @@ package http
 
 import (
 	"context"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -111,28 +109,5 @@ func TestAwsSsoMobileManagerCancel(t *testing.T) {
 func writeFakeAWSCLI(t *testing.T) string {
 	t.Helper()
 
-	dir := t.TempDir()
-	path := filepath.Join(dir, "aws")
-	script := `#!/bin/sh
-cmd1="$1"
-cmd2="$2"
-if [ "$cmd1" = "sso-oidc" ] && [ "$cmd2" = "register-client" ]; then
-  echo '{"clientId":"client-1","clientSecret":"secret-1"}'
-  exit 0
-fi
-if [ "$cmd1" = "sso-oidc" ] && [ "$cmd2" = "create-token" ]; then
-  echo '{"accessToken":"access-token-1","refreshToken":"refresh-token-1","expiresIn":3600}'
-  exit 0
-fi
-if [ "$cmd1" = "sso" ] && [ "$cmd2" = "get-role-credentials" ]; then
-  echo '{"roleCredentials":{"accessKeyId":"AKIASSO","secretAccessKey":"sso-secret","sessionToken":"sso-token","expiration":4102444800000}}'
-  exit 0
-fi
-echo "unexpected command: $*" >&2
-exit 1
-`
-	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
-		t.Fatalf("WriteFile() error = %v", err)
-	}
-	return path
+	return buildFakeAwsCLI(t, t.TempDir(), "aws")
 }

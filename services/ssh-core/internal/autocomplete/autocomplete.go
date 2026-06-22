@@ -268,8 +268,13 @@ const shellIntegrationScript = `__ds_o(){ printf '\033]133;%s\007' "$1"; }; __ds
 	`elif [ -n "${ZSH_VERSION:-}" ]; then ` +
 	`__ds_precmd(){ local __e=$?; __ds_o "D;$__e"; __ds_o A; __ds_cwd; }; __ds_preexec(){ __ds_o C; }; ` +
 	`typeset -ga precmd_functions preexec_functions; ` +
-	`(( ${precmd_functions[(I)__ds_precmd]} )) || precmd_functions+=(__ds_precmd); ` +
-	`(( ${preexec_functions[(I)__ds_preexec]} )) || preexec_functions+=(__ds_preexec); ` +
+	// Membership test via case on the space-joined array, mirroring the bash
+	// PROMPT_COMMAND guard above. Avoids zsh-only arithmetic subscripts like
+	// ${arr[(I)x]}: bash still parses this elif branch even though it never runs
+	// it, and the (( … )) arithmetic context rejects (I)… as a syntax error on
+	// bash 5.1.x (e.g. WSL/Ubuntu), which would break the whole script there.
+	`case " ${precmd_functions[*]} " in *" __ds_precmd "*) ;; *) precmd_functions+=(__ds_precmd);; esac; ` +
+	`case " ${preexec_functions[*]} " in *" __ds_preexec "*) ;; *) preexec_functions+=(__ds_preexec);; esac; ` +
 	`case "${PS1:-}" in *'133;B'*) ;; *) PS1="${PS1:-}"$'%{\033]133;B\007%}';; esac; ` +
 	`fi`
 

@@ -472,8 +472,11 @@ func (runtime *Runtime) StopAutocomplete(sessionID string) {
 
 // shellIntegrationHandshakeTimeout bounds how long the echo-suppression
 // handshake waits for the first OSC 133;A prompt marker before releasing any
-// buffered output.
-const shellIntegrationHandshakeTimeout = 4000 * time.Millisecond
+// buffered output. Kept generous: AWS SSM hops through `exec sudo` and ConPTY
+// delivers output slowly (the init marker was observed at ~3.4s), and slow SSH
+// servers / heavy prompts can also push the first prompt past a few seconds.
+// Too short a value flushes the integration init command's echo onto the screen.
+const shellIntegrationHandshakeTimeout = 8 * time.Second
 
 // installShellIntegration injects the OSC 133 hooks into the interactive shell
 // once per session (idempotent across refreshes) and schedules a flush so a

@@ -443,11 +443,7 @@ export function SettingsPanel({
                   ))}
                 </SelectField>
                 <p className="mt-1.5 text-[0.78rem] leading-relaxed text-[var(--text-muted)]">
-                  tmux 제어 모드 pane 에서 prefix 다음 키를 네이티브 동작으로 매핑합니다 —
-                  방향키(pane 이동) · Ctrl+방향키(크기 조절) · c(새 창) · % / 따옴표(분할) ·
-                  n / p / 숫자 / l(창 전환) · w(창 목록) · z(zoom) · swap · break ·
-                  Space(레이아웃) · o / ;(pane 순환) · x / &(종료) · [ / ](복사/붙여넣기) ·
-                  , / $(이름 변경) · :(명령 입력) · d(detach). 매핑 안 된 키는 그대로 전달됩니다.
+                  tmux 제어 모드에서 prefix 다음 키를 네이티브 tmux 동작으로 매핑합니다.
                 </p>
               </FieldGroup>
             </div>

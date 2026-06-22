@@ -51,6 +51,16 @@ type Manager struct {
 
 const shutdownDrainTimeout = 2 * time.Second
 
+// autocompleteProbeTimeout bounds how long we wait for the in-band OSC 6973
+// snapshot response. AWS SSM sessions commonly start as ssm-user and `exec sudo`
+// into the target user before the interactive shell is ready, and the probe then
+// runs a full PATH scan, so the response can land several seconds after we inject
+// it (observed ~5s on a real instance). A 2s budget cancelled the probe before
+// the valid snapshot arrived — the snapshot was then dropped and autocomplete
+// silently stayed disabled (the probe echo also leaked once the probe was gone).
+// Plain SSH has no sudo hop and answers within ~2s, so this only matters for SSM.
+const autocompleteProbeTimeout = 8 * time.Second
+
 func NewManager(emit EventEmitter, stream StreamEmitter) *Manager {
 	return NewManagerWithRunnerFactory(emit, stream, defaultRunnerFactory)
 }
@@ -145,7 +155,7 @@ func (m *Manager) CollectAutocomplete(sessionID string, revision int) (autocompl
 	select {
 	case response := <-probe.result:
 		return response.result, response.err
-	case <-time.After(2 * time.Second):
+	case <-time.After(autocompleteProbeTimeout):
 		m.clearAutocompleteProbe(session, probe)
 		return autocomplete.Degraded("", "probe-timeout"), nil
 	}

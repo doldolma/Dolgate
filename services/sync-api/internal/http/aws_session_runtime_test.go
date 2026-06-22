@@ -1,23 +1,14 @@
 package http
 
 import (
-	"os"
-	"path/filepath"
 	"testing"
 	"time"
 )
 
 func TestDetectAwsSsmRuntimeSupportsMobileSsoBrowserFlow(t *testing.T) {
 	dir := t.TempDir()
-	writeExecutable(t, filepath.Join(dir, "aws"), `#!/bin/sh
-if [ "$1" = "sso-oidc" ] && [ "$2" = "register-client" ]; then
-  echo '{}'
-  exit 0
-fi
-echo "unexpected command: $*" >&2
-exit 1
-`)
-	writeExecutable(t, filepath.Join(dir, "session-manager-plugin"), "#!/bin/sh\nexit 0\n")
+	buildFakeAwsCLI(t, dir, "aws")
+	buildFakeAwsCLI(t, dir, "session-manager-plugin")
 	t.Setenv("PATH", dir)
 
 	runtime := DetectAwsSsmRuntime()
@@ -37,11 +28,9 @@ exit 1
 
 func TestDetectAwsSsmRuntimeRejectsOldAwsCliForMobileSsoBrowserFlow(t *testing.T) {
 	dir := t.TempDir()
-	writeExecutable(t, filepath.Join(dir, "aws"), `#!/bin/sh
-echo "Unknown options: --issuer-url, --redirect-uris, --grant-types" >&2
-exit 252
-`)
-	writeExecutable(t, filepath.Join(dir, "session-manager-plugin"), "#!/bin/sh\nexit 0\n")
+	buildFakeAwsCLI(t, dir, "aws")
+	buildFakeAwsCLI(t, dir, "session-manager-plugin")
+	t.Setenv("FAKE_AWS_MODE", "old-cli")
 	t.Setenv("PATH", dir)
 
 	runtime := DetectAwsSsmRuntime()
@@ -61,10 +50,8 @@ exit 252
 
 func TestDetectAwsSsmRuntimeMarksMobileSsoBrowserFlowTimeoutRecoverable(t *testing.T) {
 	dir := t.TempDir()
-	awsPath := filepath.Join(dir, "aws")
-	writeExecutable(t, awsPath, `#!/bin/sh
-sleep 1
-`)
+	awsPath := buildFakeAwsCLI(t, dir, "aws")
+	t.Setenv("FAKE_AWS_MODE", "timeout")
 
 	supported, reason, recoverable := detectAwsSsoBrowserFlowSupportWithTimeout(awsPath, 10*time.Millisecond)
 	if supported {
@@ -80,7 +67,7 @@ sleep 1
 
 func TestDetectAwsSsmRuntimeWithoutAws(t *testing.T) {
 	dir := t.TempDir()
-	writeExecutable(t, filepath.Join(dir, "session-manager-plugin"), "#!/bin/sh\nexit 0\n")
+	buildFakeAwsCLI(t, dir, "session-manager-plugin")
 	t.Setenv("PATH", dir)
 
 	runtime := DetectAwsSsmRuntime()
@@ -95,12 +82,5 @@ func TestDetectAwsSsmRuntimeWithoutAws(t *testing.T) {
 	}
 	if runtime.AwsSsoBrowserFlowRecoverable {
 		t.Fatalf("DetectAwsSsmRuntime().AwsSsoBrowserFlowRecoverable = true, want false")
-	}
-}
-
-func writeExecutable(t *testing.T, path string, contents string) {
-	t.Helper()
-	if err := os.WriteFile(path, []byte(contents), 0o755); err != nil {
-		t.Fatalf("WriteFile(%s) error = %v", path, err)
 	}
 }

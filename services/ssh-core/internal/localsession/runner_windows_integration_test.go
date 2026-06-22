@@ -328,8 +328,13 @@ func TestWindowsConPTYRunnerSupportsInteractivePowerShell(t *testing.T) {
 	// PowerShell 5 on GitHub's Windows Server 2025 image can drop input sent
 	// while the initial profile/prompt setup is still taking over the console.
 	// Wait for the interactive prompt before sending the probe command.
+	//
+	// Match the prompt's trailing ">" without the following space: ConPTY can
+	// render the gap after the prompt as a cursor-forward escape (ESC [ 1 C)
+	// instead of a literal space, so waiting for "> " times out on a local
+	// Windows 11 console even though the prompt is already interactive.
 	waitForOutputContains(t, output, "PS ", waitResult, waitErr)
-	waitForOutputContains(t, output, "> ", waitResult, waitErr)
+	waitForOutputContains(t, output, ">", waitResult, waitErr)
 
 	if err := runner.Write([]byte("Write-Output READY_FROM_TEST\r\n")); err != nil {
 		t.Fatalf("write failed: %v", err)

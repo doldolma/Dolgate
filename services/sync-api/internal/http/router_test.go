@@ -8,7 +8,9 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -605,25 +607,31 @@ func writeRouterFakeAWSCLI(t *testing.T) {
 	t.Helper()
 
 	dir := t.TempDir()
-	writeRouterExecutable(t, filepath.Join(dir, "aws"), `#!/bin/sh
-cmd1="$1"
-cmd2="$2"
-if [ "$cmd1" = "sso-oidc" ] && [ "$cmd2" = "register-client" ]; then
-  echo '{"clientId":"client-1","clientSecret":"secret-1"}'
-  exit 0
-fi
-echo "unexpected command: $*" >&2
-exit 1
-`)
-	writeRouterExecutable(t, filepath.Join(dir, "session-manager-plugin"), "#!/bin/sh\nexit 0\n")
+	buildRouterFakeAwsCLI(t, dir, "aws")
+	buildRouterFakeAwsCLI(t, dir, "session-manager-plugin")
 	t.Setenv("PATH", dir)
 }
 
-func writeRouterExecutable(t *testing.T, path string, contents string) {
+// buildRouterFakeAwsCLI compiles the cross-platform fake AWS CLI fixture
+// (testfixture/fakeaws) into dir under baseName, appending .exe on Windows so
+// exec.LookPath can resolve it from PATH. router_test lives in the external
+// http_test package, so it cannot reuse the http package's buildFakeAwsCLI
+// helper and keeps its own copy.
+func buildRouterFakeAwsCLI(t *testing.T, dir, baseName string) string {
 	t.Helper()
-	if err := os.WriteFile(path, []byte(contents), 0o755); err != nil {
-		t.Fatalf("WriteFile(%s) error = %v", path, err)
+
+	if runtime.GOOS == "windows" {
+		baseName += ".exe"
 	}
+	binaryPath := filepath.Join(dir, baseName)
+
+	buildCommand := exec.Command("go", "build", "-o", binaryPath, "./testfixture/fakeaws")
+	buildCommand.Dir = "."
+	buildCommand.Env = append(os.Environ(), "CGO_ENABLED=0")
+	if output, err := buildCommand.CombinedOutput(); err != nil {
+		t.Fatalf("build fake aws cli (%s): %v\n%s", baseName, err, output)
+	}
+	return binaryPath
 }
 
 func TestAwsSessionWebSocketAcceptsQueryAccessToken(t *testing.T) {
