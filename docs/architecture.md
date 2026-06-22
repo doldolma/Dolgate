@@ -59,7 +59,8 @@ flowchart LR
 ## SSH 코어
 
 - `services/ssh-core/pkg/runtime`이 공개 런타임 façade 역할을 합니다.
-- 내부 구현은 여전히 `internal/awssession`, `internal/sshsession`, `internal/sftp`, `internal/containers`, `internal/forwarding`, `internal/ssmforward` 같은 세부 서비스에 남아 있습니다.
+- 내부 구현은 여전히 `internal/awssession`, `internal/sshsession`, `internal/moshsession`, `internal/tmuxsession`, `internal/sftp`, `internal/containers`, `internal/forwarding`, `internal/ssmforward` 같은 세부 서비스에 남아 있습니다.
+- 연결 유형은 서비스로 분리돼 있습니다 — `sshsession`(일반 SSH/PTY), `moshsession`(SSH 부트스트랩 후 UDP로 전환하는 mosh), `tmuxsession`(tmux control mode — 원격 윈도우/패인을 탭·분할로 매핑).
 - Electron 데스크톱은 여전히 `cmd/ssh-core` child process를 띄워 사용합니다.
 - `cmd/ssh-core`는 stdio framed protocol을 decode/encode하는 호환 어댑터이고, 실제 작업은 `pkg/runtime`에 위임합니다.
 - `sync-api`는 AWS SSM WebSocket 브로커에서 `pkg/runtime`를 직접 import해서 고루틴 기반으로 세션을 처리합니다.
