@@ -1131,6 +1131,16 @@ export function createRuntimeEventSlice(deps: SliceDeps): RuntimeEventSlice {
                     ?.message ?? "",
                 ),
               ) === "permanent";
+            // 자동 재연결 자격을 갖춘 비정상 드롭인지(설정 OFF여도 판정). 정상 exit/client는
+            // false. 자동 재연결을 안 거는 경우에도 탭을 없애지 않고 끊김 상태로 유지하는 데 쓴다.
+            const eligibleAbnormalDrop =
+              isDropEvent &&
+              shouldAutoReconnectSession(
+                sessionTabBeforeEvent,
+                sessionHostBeforeEvent,
+                event,
+                true,
+              );
             // 탭을 reconnecting으로 유지하고 다음 백오프를 걸 조건:
             //  - 활성 연결의 첫 드롭(shouldAutoReconnectSession), 또는
             //  - 진행 중 재연결 시도의 실패(영구 오류 제외 → 그 경우 일반 플로우로).
@@ -1138,12 +1148,7 @@ export function createRuntimeEventSlice(deps: SliceDeps): RuntimeEventSlice {
               isDropEvent &&
               reconnectStableId != null &&
               autoReconnectEnabled &&
-              (shouldAutoReconnectSession(
-                sessionTabBeforeEvent,
-                sessionHostBeforeEvent,
-                event,
-                true,
-              ) ||
+              (eligibleAbnormalDrop ||
                 (activeSessionReconnect && !reconnectEventPermanent));
             const willCancelSessionReconnect =
               isDropEvent && activeSessionReconnect && reconnectEventPermanent;
@@ -1345,6 +1350,31 @@ export function createRuntimeEventSlice(deps: SliceDeps): RuntimeEventSlice {
                 // 예기치 않은 끊김이면 탭을 제거하지 않고 reconnecting 상태로 유지.
                 if (willKeepSessionReconnecting) {
                   return applySessionReconnecting(state, sessionId);
+                }
+                // 자동 재연결을 안 거는(설정 OFF 등) 비정상 드롭이어도 탭을 없애지 말고
+                // 끊김(error+Retry) 상태로 유지한다 — 정상 exit/client만 닫는다.
+                // resolveErrorProgress는 기본 retryable=true라 수동 재연결 버튼이 노출된다.
+                if (eligibleAbnormalDrop) {
+                  const message =
+                    closedEventMessage.trim() ||
+                    "연결이 끊어졌습니다. 다시 연결하려면 Retry를 누르세요.";
+                  return {
+                    tabs: state.tabs.map((tab): TerminalTab =>
+                      tab.sessionId === sessionId
+                        ? {
+                            ...tab,
+                            status: "error" as const,
+                            errorMessage: message,
+                            connectionProgress: resolveErrorProgress(message),
+                            lastEventAt: new Date().toISOString(),
+                          }
+                        : tab,
+                    ),
+                    pendingConnectionAttempts:
+                      state.pendingConnectionAttempts.filter(
+                        (attempt) => attempt.sessionId !== sessionId,
+                      ),
+                  };
                 }
                 return removeSessionFromState(state, sessionId);
               }

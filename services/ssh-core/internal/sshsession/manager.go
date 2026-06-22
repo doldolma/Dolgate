@@ -1,6 +1,7 @@
 package sshsession
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"strconv"
@@ -491,19 +492,38 @@ func (m *Manager) Disconnect(sessionID string) error {
 	return nil
 }
 
+// classifyWaitError는 Session.Wait() 결과를 종료 사유로 매핑한다.
+// 셸이 스스로 끝낸 경우(exit status 0 / exit N)만 remote-exit(재연결 안 함)로 보고,
+// 시그널 종료(reboot의 SIGHUP/SIGTERM)·상태 없이 채널이 닫힘(ExitMissingError)·EOF·
+// 기타 전송 에러는 transport(재연결 대상)로 본다. reboot은 어떤 형태로 와도 transport가
+// 되어 자동 재연결 머신이 탭을 살려 둔다.
+func classifyWaitError(err error) string {
+	if err == nil {
+		// exit status 0 — 정상 로그아웃.
+		return closeReasonRemoteExit
+	}
+	var exitErr *ssh.ExitError
+	if errors.As(err, &exitErr) && exitErr.Signal() == "" {
+		// 시그널 없이 종료 코드만 보냄(exit / exit N) — 사용자가 셸을 끝낸 것.
+		return closeReasonRemoteExit
+	}
+	// 시그널 종료 / ExitMissingError(상태·시그널 없이 채널 닫힘) / io.EOF / I/O 단절.
+	return closeReasonTransport
+}
+
 func (m *Manager) waitForSession(sessionID string) {
 	session, err := m.getSession(sessionID)
 	if err != nil {
 		return
 	}
 	waitErr := session.session.Wait()
-	if waitErr != nil && waitErr != io.EOF {
-		// 전송 단절 등으로 비정상 종료된 경우. renderer가 자동 재연결 대상으로 본다.
-		m.closeSession(sessionID, waitErr.Error(), closeReasonTransport)
-		return
+	reason := classifyWaitError(waitErr)
+	message := ""
+	if reason == closeReasonTransport && waitErr != nil {
+		// 전송 단절일 때만 진단 메시지를 싣는다(정상 종료는 메시지 없음).
+		message = waitErr.Error()
 	}
-	// 정상 종료(원격 셸이 exit). 자동 재연결로 되살리지 않는다.
-	m.closeSession(sessionID, "", closeReasonRemoteExit)
+	m.closeSession(sessionID, message, reason)
 }
 
 func (m *Manager) stream(sessionID string, handle *sessionHandle, reader io.Reader) {

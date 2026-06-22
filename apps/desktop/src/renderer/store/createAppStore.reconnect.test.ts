@@ -211,3 +211,86 @@ describe("auto-reconnect trigger (runtimeEventSlice)", () => {
     expect(isReconnecting("stable-1")).toBe(false);
   });
 });
+
+// Plan B: 자동 재연결을 안 거는 경우에도 비정상 드롭이면 탭을 없애지 말고 끊김(error+Retry)
+// 상태로 유지한다. 정상 exit/client만 탭을 닫는다.
+describe("hold-on-abnormal-drop (runtimeEventSlice, Plan B)", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    __resetReconnectOrchestratorForTest();
+    // 자동 재연결 OFF로 초기화 — 이 상태에서도 탭이 사라지지 않아야 함.
+    initReconnectOrchestrator(() => ({
+      autoReconnectEnabled: false,
+      autoReconnectMaxAttempts: 10,
+      autoReconnectBaseDelayMs: 1000,
+      autoReconnectMaxDelayMs: 30000,
+    }));
+    registerReconnectHandler("session", {
+      renderScheduled: () => undefined,
+      perform: async () => undefined,
+      renderGaveUp: () => undefined,
+      isStillPresent: () => true,
+    });
+  });
+
+  afterEach(() => {
+    __resetReconnectOrchestratorForTest();
+    vi.useRealTimers();
+  });
+
+  function seedDisabledStore(tab: TerminalTab) {
+    const store = seedStore(tab);
+    store.setState({
+      settings: { ...store.getState().settings, autoReconnectEnabled: false },
+    });
+    return store;
+  }
+
+  it("holds the tab as error+retryable on a transport drop when auto-reconnect is OFF", () => {
+    const store = seedDisabledStore(connectedTab());
+    store
+      .getState()
+      .handleCoreEvent(
+        closedEvent({ reason: "transport", message: "connection reset" }),
+      );
+
+    expect(isReconnecting("stable-1")).toBe(false);
+    const tab = store
+      .getState()
+      .tabs.find((item) => item.stableId === "stable-1");
+    expect(tab).toBeTruthy(); // 탭이 사라지지 않음
+    expect(tab?.status).toBe("error");
+    expect(tab?.connectionProgress?.retryable).toBe(true); // 수동 재연결(Retry) 노출
+    expect(tab?.errorMessage).toBe("connection reset");
+  });
+
+  it("holds the tab on a keepalive drop when auto-reconnect is OFF", () => {
+    const store = seedDisabledStore(connectedTab());
+    store.getState().handleCoreEvent(closedEvent({ reason: "keepalive" }));
+
+    const tab = store
+      .getState()
+      .tabs.find((item) => item.stableId === "stable-1");
+    expect(tab).toBeTruthy();
+    expect(tab?.status).toBe("error");
+    expect(tab?.connectionProgress?.retryable).toBe(true);
+  });
+
+  it("still removes the tab on a clean remote-exit when auto-reconnect is OFF", () => {
+    const store = seedDisabledStore(connectedTab());
+    store.getState().handleCoreEvent(closedEvent({ reason: "remote-exit" }));
+
+    expect(
+      store.getState().tabs.find((item) => item.stableId === "stable-1"),
+    ).toBeUndefined();
+  });
+
+  it("still removes the tab on a client-requested disconnect when auto-reconnect is OFF", () => {
+    const store = seedDisabledStore(connectedTab());
+    store.getState().handleCoreEvent(closedEvent({ reason: "client" }));
+
+    expect(
+      store.getState().tabs.find((item) => item.stableId === "stable-1"),
+    ).toBeUndefined();
+  });
+});
