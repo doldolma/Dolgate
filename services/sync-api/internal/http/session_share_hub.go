@@ -404,8 +404,14 @@ func (hub *SessionShareHub) trustedBaseURL(request *http.Request) string {
 	if hub.publicBaseURL != "" {
 		return hub.publicBaseURL
 	}
+	// host는 실제 Host 헤더만 쓴다 — X-Forwarded-Host는 클라이언트가 임의로 보낼 수 있어
+	// origin 스푸핑 벡터이므로 신뢰하지 않는다. 반면 scheme은 리버스 프록시(TLS 종료) 뒤
+	// https를 인식하도록 X-Forwarded-Proto를 허용한다: host가 고정돼 있어 scheme만으로는
+	// cross-origin 우회가 불가능하다(미허용 시 프록시 뒤 https viewer가 origin 검증에 막힌다).
 	scheme := "http"
-	if request.TLS != nil {
+	if forwarded := strings.TrimSpace(request.Header.Get("X-Forwarded-Proto")); forwarded != "" {
+		scheme = strings.TrimSpace(strings.Split(forwarded, ",")[0])
+	} else if request.TLS != nil {
 		scheme = "https"
 	}
 	host := strings.TrimSpace(request.Host)

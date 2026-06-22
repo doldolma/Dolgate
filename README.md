@@ -279,12 +279,12 @@ ECS Exec는 **task role**이 올바르게 연결되어 있어야 합니다.
 - 컨테이너 이미지에 `/bin/sh` 또는 `bash`가 없으면 ECS Exec 연결 후 interactive shell이 즉시 종료될 수 있습니다.
 - AWS Console의 CloudShell 테스트에서 보이는 `cloudshell:ApproveCommand`는 Dolgate 앱 자체의 필수 권한에 포함되지 않습니다.
 
-### 그 외 알아두면 좋은 점
+### 그 외
 
 - Session Replay는 **로컬에만 저장**되며 서버 동기화 대상이 아닙니다.
 - SSH / AWS / Warpgate host를 추가하면, 해당 호스트 아래의 **Docker 또는 Podman 컨테이너를 함께 모니터링**할 수 있습니다.
 - Containers 기능과 container tunnel은 원격 호스트에 **Docker 또는 Podman**이 실제로 설치되어 있고, 로그인 셸에서 실행 가능해야 합니다.
-- 브라우저 로그인/동기화를 직접 운영하려면 위의 `sync-api`를 self-host 하거나, 앱 로그인 화면의 `Login Server`를 원하는 서버로 바꿔야 합니다.
+- 브라우저 로그인/동기화를 직접 운영하려면 위의 `sync-api`를 self-host 하고 앱 로그인 화면의 `Login Server`를 원하는 서버로 바꿔야 합니다.
 
 ## 문서
 

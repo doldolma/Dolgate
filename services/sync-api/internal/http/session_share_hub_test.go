@@ -338,6 +338,16 @@ func TestSessionShareOriginValidation(t *testing.T) {
 		t.Fatal("expected missing origin to be rejected")
 	}
 
+	// 리버스 프록시(TLS 종료) 뒤: 앱이 받는 요청의 TLS는 nil이지만 X-Forwarded-Proto로
+	// https를 인식해 same-origin viewer를 허용해야 한다(origin 검증 회귀 방지).
+	proxiedRequest := httptest.NewRequest("GET", "http://viewer.example.com/share/abc/token/ws", nil)
+	proxiedRequest.Host = "viewer.example.com"
+	proxiedRequest.Header.Set("X-Forwarded-Proto", "https")
+	proxiedRequest.Header.Set("Origin", "https://viewer.example.com")
+	if !hub.isSessionShareOriginAllowed(proxiedRequest) {
+		t.Fatal("expected proxied https origin (X-Forwarded-Proto) to be allowed")
+	}
+
 	// X-Forwarded-Host를 신뢰하지 않는다: 위조 헤더가 있어도 실제 Host 기준으로 판정해야 한다.
 	spoofRequest := httptest.NewRequest("GET", "https://viewer.example.com/share/abc/token/ws", nil)
 	spoofRequest.Host = "viewer.example.com"
