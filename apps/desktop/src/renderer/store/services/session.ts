@@ -120,6 +120,7 @@ export function createSessionServices(deps: SliceDeps) {
     tmux?: boolean,
     tmuxCommand?: string,
     replaceSessionId?: string,
+    reconnectGroupId?: string,
   ): string => {
     const sessionId = existingSessionId ?? createPendingSessionId();
     const existingTab = existingSessionId
@@ -165,6 +166,22 @@ export function createSessionServices(deps: SliceDeps) {
           ),
           pendingConnectionAttempts: nextAttempts,
           ...activateSessionContextInState(state, sessionId),
+        };
+      }
+
+      // tmux 자동 재연결: 새 control 세션을 standalone 탭(tabStrip)으로 만들지 않는다.
+      // 진행/이벤트 처리를 위해 tabs+pendingConnectionAttempts 에만 추가하고, 화면
+      // (activeWorkspaceTab)·홈/드로어 전환은 건드리지 않아 그룹 탭의 reconnecting 표시를
+      // 유지한다. 성공 시 handleTmuxLayoutChange 가 이 control 을 그룹으로 흡수(tabs 에서
+      // 제거)하고, 직전 시도의 실패 control 탭 정리는 reconnect-handlers(perform)가 한다.
+      // → 재연결 시 별도 SSH 탭이 보이거나 시도마다 쌓이지 않는다.
+      if (reconnectGroupId != null) {
+        return {
+          tabs: [
+            ...state.tabs.filter((item) => item.sessionId !== sessionId),
+            tab,
+          ],
+          pendingConnectionAttempts: nextAttempts,
         };
       }
 
@@ -665,6 +682,7 @@ export function createSessionServices(deps: SliceDeps) {
     tmux?: boolean,
     tmuxCommand?: string,
     replaceSessionId?: string,
+    reconnectGroupId?: string,
   ) => {
     const host = get().hosts.find((item) => item.id === hostId);
     if (!host) {
@@ -700,6 +718,7 @@ export function createSessionServices(deps: SliceDeps) {
       tmux,
       tmuxCommand,
       replaceStandaloneSessionId,
+      reconnectGroupId,
     );
 
     // tmux 를 원 세션 자리에서 여는 경우: 원 세션의 로컬 탭은 위에서 이미 control 세션

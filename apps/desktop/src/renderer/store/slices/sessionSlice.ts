@@ -279,10 +279,21 @@ export function createSessionSlice(deps: SliceDeps): SessionSlice {
             const owningBefore = get().workspaces.find(
               (w) => w.tmux?.windowId === windowId,
             );
-            const oldControlSessionId = owningBefore?.tmux?.controlSessionId;
-            const isControlMigration = Boolean(
-              oldControlSessionId && oldControlSessionId !== controlSessionId,
-            );
+            const owningBeforeControl = owningBefore?.tmux?.controlSessionId;
+            // 다른 control 세션의 같은 windowId(@0 등) workspace 를 old(rebind 대상)로
+            // 삼는 건 그 그룹이 재연결 중일 때만. 그래야 살아있는 별개 tmux 세션(새 탭)을
+            // 덮어쓰지 않는다. 같은 control 이면 migration 이 아니므로 old 는 비운다.
+            const oldControlSessionId =
+              owningBeforeControl &&
+              owningBeforeControl !== controlSessionId &&
+              get().tmuxGroups.some(
+                (g) =>
+                  g.controlSessionId === owningBeforeControl &&
+                  g.reconnect != null,
+              )
+                ? owningBeforeControl
+                : undefined;
+            const isControlMigration = Boolean(oldControlSessionId);
             const reconnectingGroup =
               get().tmuxGroups.find(
                 (g) => g.controlSessionId === controlSessionId,
@@ -325,10 +336,29 @@ export function createSessionSlice(deps: SliceDeps): SessionSlice {
               // --- 윈도우 = WorkspaceTab (windowId 로 매칭, 재연결에도 동일 workspace
               // 를 rebind 해 터미널 remount 를 막는다). control 세션이 바뀌어도 windowId
               // 는 유지된다(단일 호스트 가정). index/name 은 윈도우 바 라벨용. ---
-              const owning = state.workspaces.find(
-                (w) => w.tmux?.windowId === windowId,
-              );
-              const oldControlSessionId = owning?.tmux?.controlSessionId;
+              // 같은 controlSessionId 의 windowId 를 우선 매칭한다. 다른 controlSessionId
+              // 의 같은 windowId(@0 등)는 그 그룹이 재연결 중일 때만 rebind 대상으로 —
+              // 살아있는 별개 tmux 세션(새 탭)을 덮어쓰지 않도록 한다.
+              const owning =
+                state.workspaces.find(
+                  (w) =>
+                    w.tmux?.windowId === windowId &&
+                    w.tmux?.controlSessionId === controlSessionId,
+                ) ??
+                state.workspaces.find(
+                  (w) =>
+                    w.tmux?.windowId === windowId &&
+                    w.tmux?.controlSessionId !== controlSessionId &&
+                    state.tmuxGroups.some(
+                      (g) =>
+                        g.controlSessionId === w.tmux?.controlSessionId &&
+                        g.reconnect != null,
+                    ),
+                );
+              const oldControlSessionId =
+                owning && owning.tmux?.controlSessionId !== controlSessionId
+                  ? owning.tmux?.controlSessionId
+                  : undefined;
               const windowTmux = {
                 controlSessionId,
                 windowId,
@@ -416,6 +446,8 @@ export function createSessionSlice(deps: SliceDeps): SessionSlice {
                         sessionName: meta?.sessionName || g.sessionName,
                         // rebind = 새 control 세션이 붙었다 → 재연결 상태 해제.
                         reconnect: null,
+                        // 재연결 종료 → 직전 control 정리 추적도 비운다.
+                        reconnectSessionId: null,
                       }
                     : g,
                 );
@@ -470,9 +502,17 @@ export function createSessionSlice(deps: SliceDeps): SessionSlice {
                 tabs: [
                   ...state.tabs.filter(
                     (t) =>
-                      // 같은 window 의 pane 중 현재 레이아웃에 없는 것 제거(재연결로
-                      // controlSessionId 가 바뀐 옛 pane 도 windowId 로 잡아 제거).
-                      !(t.tmux?.windowId === windowId && !live.has(t.sessionId)) &&
+                      // 같은 window 의 pane 중 현재 레이아웃에 없는 것 제거. 단 같은
+                      // control 세션이거나 재연결 대상(old)인 pane 만 — 살아있는 다른
+                      // 그룹의 같은 windowId(@0 등) pane 을 지우지 않도록 스코프한다.
+                      // (재연결로 controlSessionId 가 바뀐 옛 pane 은 oldControlSessionId
+                      // 로 잡아 제거된다.)
+                      !(
+                        t.tmux?.windowId === windowId &&
+                        (t.tmux?.controlSessionId === controlSessionId ||
+                          t.tmux?.controlSessionId === oldControlSessionId) &&
+                        !live.has(t.sessionId)
+                      ) &&
                       // 재연결로 새로 생긴 control 세션 standalone 탭 제거(그룹으로 흡수).
                       t.sessionId !== controlSessionId,
                   ),
@@ -519,6 +559,7 @@ export function createSessionSlice(deps: SliceDeps): SessionSlice {
             tmux,
             tmuxCommand,
             replaceSessionId,
+            reconnectGroupId,
           ) => {
             const host = get().hosts.find((item) => item.id === hostId);
             if (!host) {
@@ -615,6 +656,8 @@ export function createSessionSlice(deps: SliceDeps): SessionSlice {
               tmuxCommand,
               // tmux 일 때만 원 세션을 대체한다(비-tmux 연결에 잘못 전달돼도 무시되게).
               tmux ? replaceSessionId : undefined,
+              // tmux 재연결 경로면 새 control 을 standalone 탭으로 만들지 않는다.
+              tmux ? reconnectGroupId : undefined,
             );
           },
     retrySessionConnection: async (sessionId, secrets) => {
@@ -997,6 +1040,23 @@ export function createSessionSlice(deps: SliceDeps): SessionSlice {
             const tab = get().tabs.find((item) => item.sessionId === sessionId);
             if (!tab) {
               return;
+            }
+            // tmux pane 은 그룹 단위(키=tmuxGroup.id)로 백오프가 걸려 있다. stableId 로
+            // 취소하면 그룹 백오프가 안 멈춰 곧 다시 재연결 오버레이가 그룹 전체에 뜬다.
+            // 그룹을 찾아 백오프를 멈추고 모든 pane 을 수동 재연결 가능한 error 로 만든다.
+            const tmuxControlSessionId = tab.tmux?.controlSessionId;
+            if (tmuxControlSessionId) {
+              const group = get().tmuxGroups.find(
+                (g) => g.controlSessionId === tmuxControlSessionId,
+              );
+              if (group) {
+                cancelReconnect(group.id, "user-cancel");
+                get().applyTmuxGroupReconnectGaveUp(
+                  group.id,
+                  "자동 재연결을 취소했습니다.",
+                );
+                return;
+              }
             }
             cancelReconnect(tab.stableId, "user-cancel");
             const message = "자동 재연결을 취소했습니다.";

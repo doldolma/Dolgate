@@ -99,7 +99,9 @@ export const defaultSettings: AppSettings = {
   autoReconnectEnabled: true,
   autoReconnectMaxAttempts: 10,
   autoReconnectBaseDelayMs: 1000,
-  autoReconnectMaxDelayMs: 30000,
+  // 상한 8초(@shared DEFAULT_AUTO_RECONNECT_SETTINGS 와 동일). 네트워크 복구 즉시 재시도가
+  // Windows 에서 navigator.onLine 감지 누락으로 안 걸려도 8초 안에 다시 시도하도록.
+  autoReconnectMaxDelayMs: 8000,
   // tmux prefix 키(기본 Ctrl-b). control mode pane 에서 항상 가로채며, 키만 변경 가능.
   tmuxPrefixKey: "C-b",
   serverUrl: "https://ssh.doldolma.com",

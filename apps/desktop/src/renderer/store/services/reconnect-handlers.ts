@@ -7,6 +7,7 @@
 import type { SftpPaneId, TerminalReconnectState } from "@shared";
 import { appStore } from "../appStore";
 import { createConnectionProgress, getPane, updatePaneState } from "../utils";
+import { findPendingConnectionAttemptByHost } from "../utils/workspaces";
 import {
   registerReconnectHandler,
   type ReconnectAttemptInfo,
@@ -214,14 +215,44 @@ export function registerReconnectHandlers(): void {
       if (!hostId) {
         return;
       }
-      if (!appStore.getState().tmuxGroups.some((g) => g.id === groupId)) {
+      const group = appStore
+        .getState()
+        .tmuxGroups.find((g) => g.id === groupId);
+      if (!group) {
         return;
       }
-      // tmuxCommand 생략 → Go 가 attach-우선 기본 명령으로 살아있는 서버 세션에 재attach.
-      // cols/rows 는 기본값; 패인 mount 후 일반 resize 흐름이 실제 크기로 재동기화한다.
+      // 직전 시도가 만든(실패해 그룹에 흡수되지 않은) control 탭/attempt 를 먼저 정리한다.
+      // 재연결 control 은 reconnectGroupId 경로라 tabStrip 엔 없어 화면엔 안 보이지만,
+      // 진행/이벤트용으로 tabs 에 남으므로 누적되지 않게 직전 것을 제거한다.
+      const prior = group.reconnectSessionId ?? undefined;
+      if (prior) {
+        appStore.setState((state) => ({
+          tabs: state.tabs.filter((t) => t.sessionId !== prior),
+          pendingConnectionAttempts: state.pendingConnectionAttempts.filter(
+            (a) => a.sessionId !== prior,
+          ),
+        }));
+      }
+      // reconnectGroupId(=groupId) 를 넘겨 새 control 세션을 standalone 탭으로 만들지 않고,
+      // 그룹에 흡수될 때까지 화면 밖(tabs/pending)에만 둔다 → 시도마다 별도 SSH 탭이
+      // 보이거나 쌓이지 않는다. tmuxCommand 생략 → Go 가 attach-우선 기본 명령으로 살아있는
+      // 서버 세션에 재attach. cols/rows 는 기본값; 패인 mount 후 일반 resize 흐름이 실제
+      // 크기로 재동기화한다.
       await appStore
         .getState()
-        .connectHost(hostId, 120, 32, undefined, true, undefined);
+        .connectHost(hostId, 120, 32, undefined, true, undefined, undefined, groupId);
+      // 이번 시도가 만든 control 세션 id 를 기록(다음 시도 시작 시 정리용).
+      const attempt = findPendingConnectionAttemptByHost(
+        appStore.getState(),
+        hostId,
+      );
+      appStore.setState((state) => ({
+        tmuxGroups: state.tmuxGroups.map((g) =>
+          g.id === groupId
+            ? { ...g, reconnectSessionId: attempt?.sessionId ?? null }
+            : g,
+        ),
+      }));
     },
     renderGaveUp(groupId, info) {
       const message = `tmux 재연결에 실패했습니다 (${info.attempts}회 시도). 다시 연결해 주세요.`;

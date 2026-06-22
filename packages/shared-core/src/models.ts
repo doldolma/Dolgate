@@ -1047,7 +1047,10 @@ export const DEFAULT_AUTO_RECONNECT_SETTINGS: AutoReconnectSettings = {
   autoReconnectEnabled: true,
   autoReconnectMaxAttempts: 10,
   autoReconnectBaseDelayMs: 1000,
-  autoReconnectMaxDelayMs: 30000
+  // 상한 8초: 네트워크 복구 즉시 재시도는 navigator.onLine(online 이벤트)에 의존하는데
+  // Windows Electron 에선 이 감지가 늦거나 누락된다(맥은 정확). 상한이 30초면 복구 후
+  // 다음 백오프까지 한참 기다리게 되므로, 이벤트 감지에 기대지 않고 8초 안에 재시도하도록 낮춘다.
+  autoReconnectMaxDelayMs: 8000
 };
 
 export const MIN_AUTO_RECONNECT_MAX_ATTEMPTS = 1;

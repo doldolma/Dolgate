@@ -144,6 +144,13 @@ export interface TmuxSessionGroup {
    * 세션은 그룹 형성 시 탭이 사라지므로 재연결 상태를 그룹에 둔다(SSH 탭의 reconnect 와 대응).
    */
   reconnect?: TerminalReconnectState | null;
+  /**
+   * 직전 자동 재연결 시도가 만든 control 세션의 sessionId. 재연결 control 은
+   * reconnectGroupId 경로로 tabStrip 에 들어가지 않아(화면엔 안 보임) 누적되지 않지만,
+   * 진행/이벤트용으로 tabs 엔 남는다. 다음 시도 시작 시 이 (실패한) control 탭/attempt 를
+   * tabs 에서 정리해 잔류를 막는 데 쓴다.
+   */
+  reconnectSessionId?: string | null;
 }
 
 // tmux 명령 프롬프트 오버레이 상태(Ctrl-b : / $ / ,). 텍스트 입력이 필요한 명령에 쓴다.
@@ -645,6 +652,13 @@ interface AppStateParts {
      * ("현재 화면에서 진행"). 호스트 레벨 연결처럼 원 세션이 없으면 생략한다.
      */
     replaceSessionId?: string,
+    /**
+     * tmux 자동 재연결 전용. 지정하면 새 control 세션을 standalone 탭(tabStrip)으로
+     * 만들지 않고, 이 그룹으로 흡수될 때까지 화면 밖(tabs/pending)에만 둔다. 그래서
+     * 재연결 시 별도 SSH 탭이 보이거나 시도마다 쌓이지 않는다(슬롯 식별을 휘발성
+     * sessionId 가 아니라 group.id 로 안정화). tmux=true 일 때만 의미가 있다.
+     */
+    reconnectGroupId?: string,
   ) => Promise<void>;
   retrySessionConnection: (
     sessionId: string,

@@ -44,6 +44,7 @@ export function TerminalSessionPane(props: TerminalSessionPaneProps) {
     onClose,
     onRetry,
     onCancelReconnect,
+    isPrimaryTmuxOverlayPane = true,
     onReopenInteractiveAuthUrl,
     onClearPendingInteractiveAuth,
     onOpenSessionShareChatWindow,
@@ -448,7 +449,7 @@ export function TerminalSessionPane(props: TerminalSessionPaneProps) {
         ) : null}
         {/* tmux pane 분할은 상단 윈도우 바의 "분할" 버튼(또는 Ctrl-b % / ")으로 한다.
             pane 마다 떠 헷갈리던 floating │/─ 버튼은 제거했다. */}
-        {controller.shouldShowConnectionOverlay ? (
+        {controller.shouldShowConnectionOverlay && isPrimaryTmuxOverlayPane ? (
           <TerminalConnectionOverlay
             error={tab?.status === 'error'}
             title={controller.connectionOverlayTitle}

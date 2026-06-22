@@ -82,6 +82,12 @@ export interface TerminalSessionPaneProps {
   onRetry?: () => Promise<void>;
   /** 자동 재연결 중 사용자가 취소할 때 호출. */
   onCancelReconnect?: () => Promise<void> | void;
+  /**
+   * tmux 그룹 재연결 시 그룹 내 모든 pane 이 reconnecting 이 되는데, 재연결/에러
+   * 오버레이는 그룹당 하나만 보이도록 "대표 pane" 에서만 렌더한다. tmux 가 아닌
+   * 일반 세션은 항상 true(기본값).
+   */
+  isPrimaryTmuxOverlayPane?: boolean;
   onStartSessionShare?: (input: SessionShareStartInput) => Promise<void>;
   onUpdateSessionShareSnapshot?: (input: SessionShareSnapshotInput) => Promise<void>;
   onSetSessionShareInputEnabled?: (

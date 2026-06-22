@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import type { HostRecord } from "@shared";
 import { createAppStore } from "./createAppStore";
 import { createMockApi } from "./createAppStore.test-support";
 import { asWorkspaceTabId } from "./utils";
@@ -9,6 +10,24 @@ describe("createAppStore tmux session grouping", () => {
   const CTL = "ctl-1";
   // 단일 pane window 레이아웃. 끝 숫자가 pane id → sessionId tmux:<ctl>:<n>.
   const layoutFor = (paneNum: number) => `bd5e,80x24,0,0,${paneNum}`;
+  const RECONNECT_HOST: HostRecord = {
+    id: "h1",
+    kind: "ssh",
+    label: "Prod",
+    hostname: "prod.example.com",
+    port: 22,
+    username: "ubuntu",
+    authType: "password",
+    privateKeyPath: null,
+    secretRef: null,
+    jumpHostId: null,
+    startupCommand: null,
+    groupName: null,
+    tags: [],
+    terminalThemeId: null,
+    createdAt: "2025-01-01T00:00:00.000Z",
+    updatedAt: "2025-01-01T00:00:00.000Z",
+  };
 
   it("creates one session group + one top tab for the first window", () => {
     const store = createAppStore(createMockApi());
@@ -316,11 +335,18 @@ describe("createAppStore tmux session grouping", () => {
     store
       .getState()
       .handleTmuxLayoutChange(CTL, "@0", layoutFor(0), { index: 0, name: "zsh" });
-    const firstGroupId = store.getState().tmuxGroups[0]?.id;
+    const firstGroupId = store.getState().tmuxGroups[0]!.id;
     const firstStableId = store
       .getState()
       .tabs.find((tab) => tab.tmux?.windowId === "@0")?.stableId;
 
+    // 실제 재연결 흐름: control 끊김 → 그룹이 reconnecting 으로 표시된 뒤 새 control
+    // 세션이 같은 windowId 로 붙어 rebind 된다(살아있는 신규 tmux 와 구분하는 신호).
+    store.getState().applyTmuxGroupReconnecting(
+      firstGroupId,
+      { attempt: 1, maxAttempts: 10, nextAttemptAt: 0, waitingForNetwork: false },
+      "재연결 중…",
+    );
     // 재연결: 새 control 세션 id, 같은 windowId.
     store
       .getState()
@@ -393,6 +419,14 @@ describe("createAppStore tmux session grouping", () => {
       api.handleTmuxLayoutChange("rb-old", "@1", layoutFor(1), { index: 1 });
       expect(store.getState().workspaces).toHaveLength(2);
 
+      // 실제 재부팅 흐름: control 끊김 → 그룹이 reconnecting 으로 표시된 뒤 새 control
+      // 세션이 attach 한다.
+      const rebootGroupId = store.getState().tmuxGroups[0]!.id;
+      store.getState().applyTmuxGroupReconnecting(
+        rebootGroupId,
+        { attempt: 1, maxAttempts: 10, nextAttemptAt: 0, waitingForNetwork: false },
+        "재연결 중…",
+      );
       // 서버 재부팅 → 새 control 세션에서 @0 만 재출현(@1 은 사라짐).
       store
         .getState()
@@ -416,5 +450,86 @@ describe("createAppStore tmux session grouping", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("does not overwrite a live group when a 3rd tmux opens with the same windowId", () => {
+    const store = createAppStore(createMockApi());
+    // 살아있는 tmux 그룹 2개(서로 다른 control 세션, 같은 windowId @0).
+    store
+      .getState()
+      .handleTmuxLayoutChange("ctl-a", "@0", layoutFor(0), { index: 0 });
+    store
+      .getState()
+      .handleTmuxLayoutChange("ctl-b", "@0", layoutFor(0), { index: 0 });
+    expect(store.getState().tmuxGroups).toHaveLength(2);
+
+    // 3번째 tmux 를 추가로 연다(reconnecting 아님 = 신규). 같은 windowId @0 이지만
+    // 살아있는 기존 그룹을 덮어쓰지 않고 새 그룹이 추가돼야 한다.
+    store
+      .getState()
+      .handleTmuxLayoutChange("ctl-c", "@0", layoutFor(0), { index: 0 });
+
+    const state = store.getState();
+    expect(state.tmuxGroups).toHaveLength(3);
+    expect(state.tmuxGroups.map((g) => g.controlSessionId).sort()).toEqual([
+      "ctl-a",
+      "ctl-b",
+      "ctl-c",
+    ]);
+    // 첫 그룹(ctl-a)의 pane 세션이 마지막 세션으로 덮어씌워지지 않았다.
+    expect(state.tabs.some((t) => t.sessionId === "tmux:ctl-a:0")).toBe(true);
+    expect(state.tabs.some((t) => t.sessionId === "tmux:ctl-c:0")).toBe(true);
+  });
+
+  // 재연결 시 "탭 하나 더 생기면서 SSH 연결 시도"하던 회귀 가드: tmux 재연결
+  // (reconnectGroupId)은 새 control 세션을 standalone 탭(tabStrip)으로 만들지 않고
+  // 그룹 자리에서 진행한다 → 별도 SSH 탭이 보이거나 시도마다 쌓이지 않는다.
+  it("does NOT create a standalone control tab on tmux reconnect (reconnectGroupId)", async () => {
+    const store = createAppStore(createMockApi());
+    store.setState({ hosts: [RECONNECT_HOST] });
+    store
+      .getState()
+      .handleTmuxLayoutChange(CTL, "@0", layoutFor(0), { index: 0, active: true });
+    // 그룹 hostId 는 control 탭에서 캡처되는데 테스트엔 control 탭이 없으므로 명시 세팅.
+    store.setState((s) => ({
+      tmuxGroups: s.tmuxGroups.map((g) => ({ ...g, hostId: "h1" })),
+    }));
+    const groupId = store.getState().tmuxGroups[0]!.id;
+    expect(
+      store.getState().tabStrip.filter((i) => i.kind === "session"),
+    ).toHaveLength(0);
+
+    // reconnect-handlers.perform 이 넘기는 형태: 8번째 인자 reconnectGroupId.
+    await store
+      .getState()
+      .connectHost("h1", 120, 32, undefined, true, undefined, undefined, groupId);
+
+    const state = store.getState();
+    // 핵심: 탭바에 별도 standalone control 탭이 생기지 않는다(그룹 탭 1개만).
+    expect(state.tabStrip.filter((i) => i.kind === "session")).toHaveLength(0);
+    expect(state.tabStrip.filter((i) => i.kind === "tmux")).toHaveLength(1);
+    // 화면도 그룹 탭을 유지(control 세션 pending 으로 튀지 않음).
+    expect(state.activeWorkspaceTab).toBe(`tmuxgrp:${groupId}`);
+    // control 세션은 흡수/이벤트용으로 tabs 에만 존재하고 tabStrip(탭바)엔 없다
+    // → 화면에 별도 탭으로 안 보이지만, layout-change 가 오면 그룹으로 흡수될 수 있다.
+    const controlTab = state.tabs.find((t) => t.hostId === "h1" && !t.tmux);
+    expect(controlTab).toBeTruthy();
+    expect(
+      state.tabStrip.some(
+        (i) => i.kind === "session" && i.sessionId === controlTab!.sessionId,
+      ),
+    ).toBe(false);
+  });
+
+  // 대조군: 일반(비-재연결) 연결은 기존대로 standalone 세션 탭을 만든다(정상 동작 보존).
+  it("still creates a standalone tab for a normal (non-reconnect) connect", async () => {
+    const store = createAppStore(createMockApi());
+    store.setState({ hosts: [RECONNECT_HOST] });
+
+    await store.getState().connectHost("h1", 120, 32);
+
+    expect(
+      store.getState().tabStrip.filter((i) => i.kind === "session"),
+    ).toHaveLength(1);
   });
 });

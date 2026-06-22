@@ -75,7 +75,8 @@ const DEFAULT_CONFIG: AutoReconnectConfig = {
   autoReconnectEnabled: true,
   autoReconnectMaxAttempts: 10,
   autoReconnectBaseDelayMs: 1000,
-  autoReconnectMaxDelayMs: 30000,
+  // 상한 8초(@shared DEFAULT_AUTO_RECONNECT_SETTINGS 와 동일). configProvider 미초기화 시 fallback.
+  autoReconnectMaxDelayMs: 8000,
 };
 
 export function initReconnectOrchestrator(

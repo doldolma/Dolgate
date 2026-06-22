@@ -517,6 +517,27 @@ export function TerminalWorkspace({
       'ring-1 ring-[color-mix(in_srgb,var(--accent-strong)_24%,transparent)]',
   );
 
+  // tmux 그룹(controlSessionId)별 재연결/에러 오버레이 "대표 pane".
+  // 그룹 재연결 시 그룹 내 모든 pane 이 reconnecting 이 되어 오버레이가 분할마다
+  // 중복되므로, 그룹당 하나(활성 pane 우선, 없으면 sessionId 최솟값)에서만 그린다.
+  const activePaneSessionId = activeWorkspace?.activeSessionId ?? activeSessionId;
+  const tmuxOverlayPrimary = new Map<string, string>();
+  for (const paneTab of tabs) {
+    const controlSessionId = paneTab.tmux?.controlSessionId;
+    if (!controlSessionId) {
+      continue;
+    }
+    const current = tmuxOverlayPrimary.get(controlSessionId);
+    if (current === undefined) {
+      tmuxOverlayPrimary.set(controlSessionId, paneTab.sessionId);
+    } else if (
+      current !== activePaneSessionId &&
+      (paneTab.sessionId === activePaneSessionId || paneTab.sessionId < current)
+    ) {
+      tmuxOverlayPrimary.set(controlSessionId, paneTab.sessionId);
+    }
+  }
+
   const workspacePaneSlots: TerminalWorkspacePaneSlot[] = tabs.map((tab) => {
     const placement = placementBySessionId.get(tab.sessionId);
     const visible = visibleSessionIds.has(tab.sessionId);
@@ -612,6 +633,10 @@ export function TerminalWorkspace({
             activeWorkspace
               ? activeWorkspace.activeSessionId === tab.sessionId
               : activeSessionId === tab.sessionId
+          }
+          isPrimaryTmuxOverlayPane={
+            !tab.tmux ||
+            tmuxOverlayPrimary.get(tab.tmux.controlSessionId) === tab.sessionId
           }
           viewActivationKey={viewActivationKey}
           layoutKey={

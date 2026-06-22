@@ -280,11 +280,12 @@ func (m *Manager) stream(handle *controlHandle, reader io.Reader) {
 			}
 		}
 		if err != nil {
-			reason := "transport"
-			if err == io.EOF {
-				reason = "remote-exit"
-			}
-			m.closeSession(handle.id, "control channel closed", reason)
+			// 정상 종료(%exit)는 ControlExit 이벤트에서 이미 remote-exit 로 닫는다.
+			// 여기까지 도달한 read 에러는 %exit 없이 채널이 끊긴 것 — 네트워크 단절
+			// 등 비정상 단절이므로 transport 로 분류해 renderer 가 탭을 유지한 채
+			// 자동 재연결하게 한다. (EOF 를 remote-exit 로 오인하면 SSH 채널 종료가
+			// 정상 종료로 처리되어 tmux 탭이 통째로 제거됐다.)
+			m.closeSession(handle.id, "control channel closed", "transport")
 			return
 		}
 	}
