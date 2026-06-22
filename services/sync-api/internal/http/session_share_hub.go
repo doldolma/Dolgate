@@ -371,27 +371,51 @@ type sessionShare struct {
 }
 
 type SessionShareHub struct {
-	mu             sync.Mutex
-	shares         map[string]*sessionShare
+	mu     sync.Mutex
+	shares map[string]*sessionShare
+	// publicBaseURL은 신뢰 가능한 공개 origin이다(config PUBLIC_BASE_URL). 설정되면 viewer URL
+	// 생성·origin 검증에 요청 헤더(X-Forwarded-*) 대신 이 값을 써 origin 스푸핑을 막는다.
+	publicBaseURL  string
 	ownerUpgrader  websocket.Upgrader
 	viewerUpgrader websocket.Upgrader
 }
 
-func NewSessionShareHub() *SessionShareHub {
-	return &SessionShareHub{
-		shares: make(map[string]*sessionShare),
+func NewSessionShareHub(publicBaseURL string) *SessionShareHub {
+	hub := &SessionShareHub{
+		publicBaseURL: publicBaseURL,
+		shares:        make(map[string]*sessionShare),
 		ownerUpgrader: websocket.Upgrader{
 			CheckOrigin: func(_ *http.Request) bool {
 				return true
 			},
 		},
-		viewerUpgrader: websocket.Upgrader{
-			CheckOrigin: isSessionShareOriginAllowed,
-		},
 	}
+	// viewer origin 검증은 hub.publicBaseURL/실제 Host를 기준으로 한다(요청 헤더 비신뢰).
+	hub.viewerUpgrader = websocket.Upgrader{
+		CheckOrigin: hub.isSessionShareOriginAllowed,
+	}
+	return hub
 }
 
-func isSessionShareOriginAllowed(request *http.Request) bool {
+// trustedBaseURL은 origin 검증·viewer URL의 기준이 되는 신뢰 origin을 돌려준다. publicBaseURL이
+// 설정돼 있으면 그 값을(요청 헤더 무시), 없으면 실제 연결의 Host + TLS만으로 산출한다 —
+// X-Forwarded-Proto/Host는 신뢰하지 않아 스푸핑을 막는다.
+func (hub *SessionShareHub) trustedBaseURL(request *http.Request) string {
+	if hub.publicBaseURL != "" {
+		return hub.publicBaseURL
+	}
+	scheme := "http"
+	if request.TLS != nil {
+		scheme = "https"
+	}
+	host := strings.TrimSpace(request.Host)
+	if host == "" {
+		host = "localhost"
+	}
+	return scheme + "://" + host
+}
+
+func (hub *SessionShareHub) isSessionShareOriginAllowed(request *http.Request) bool {
 	origin := strings.TrimSpace(request.Header.Get("Origin"))
 	if origin == "" {
 		return false
@@ -402,12 +426,12 @@ func isSessionShareOriginAllowed(request *http.Request) bool {
 		return false
 	}
 
-	requestURL, err := url.Parse(requestBaseURL(request))
-	if err != nil || requestURL.Scheme == "" || requestURL.Host == "" {
+	baseURL, err := url.Parse(hub.trustedBaseURL(request))
+	if err != nil || baseURL.Scheme == "" || baseURL.Host == "" {
 		return false
 	}
 
-	return strings.EqualFold(originURL.Scheme, requestURL.Scheme) && strings.EqualFold(originURL.Host, requestURL.Host)
+	return strings.EqualFold(originURL.Scheme, baseURL.Scheme) && strings.EqualFold(originURL.Host, baseURL.Host)
 }
 
 func (hub *SessionShareHub) Create(ownerUserID string, input createSessionShareRequest, viewerBaseURL string) createSessionShareResponse {

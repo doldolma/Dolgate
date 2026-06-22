@@ -94,6 +94,7 @@ func main() {
 		LocalAuthEnabled:   cfg.Auth.Local.Enabled,
 		LocalSignupEnabled: cfg.Auth.Local.SignupEnabled,
 		TrustedProxies:     cfg.Server.TrustedProxies,
+		PublicBaseURL:      cfg.Server.PublicBaseURL,
 		ServerVersion:      version,
 		AwsSsmRuntime:      awsSsmRuntime,
 		AwsSsoBrowserFlow:  awsSsoBrowserFlowEnabled,

@@ -144,7 +144,7 @@ func TestResolveOwnerChatNickname(t *testing.T) {
 }
 
 func TestViewerChatMessageUpdatesHistoryAndIgnoresInputGate(t *testing.T) {
-	hub := NewSessionShareHub()
+	hub := NewSessionShareHub("")
 	response := hub.Create("user-1", createSessionShareRequest{
 		SessionID: "session-1",
 		Title:     "Shared Session",
@@ -182,7 +182,7 @@ func TestViewerChatMessageUpdatesHistoryAndIgnoresInputGate(t *testing.T) {
 }
 
 func TestOwnerChatMessageUsesFixedNicknameAndRole(t *testing.T) {
-	hub := NewSessionShareHub()
+	hub := NewSessionShareHub("")
 	response := hub.Create("user-1", createSessionShareRequest{
 		SessionID: "session-1",
 		Title:     "Shared Session",
@@ -210,7 +210,7 @@ func TestOwnerChatMessageUsesFixedNicknameAndRole(t *testing.T) {
 }
 
 func TestChatHistoryPreservesMixedSenderRoles(t *testing.T) {
-	hub := NewSessionShareHub()
+	hub := NewSessionShareHub("")
 	response := hub.Create("user-1", createSessionShareRequest{
 		SessionID: "session-1",
 		Title:     "Shared Session",
@@ -248,7 +248,7 @@ func TestChatHistoryPreservesMixedSenderRoles(t *testing.T) {
 }
 
 func TestViewerChatHistoryCapsAtLatestEntriesAndUsesLatestNickname(t *testing.T) {
-	hub := NewSessionShareHub()
+	hub := NewSessionShareHub("")
 	response := hub.Create("user-1", createSessionShareRequest{
 		SessionID: "session-1",
 		Title:     "Shared Session",
@@ -289,7 +289,7 @@ func TestViewerChatHistoryCapsAtLatestEntriesAndUsesLatestNickname(t *testing.T)
 }
 
 func TestDeleteByShareIDRemovesChatState(t *testing.T) {
-	hub := NewSessionShareHub()
+	hub := NewSessionShareHub("")
 	response := hub.Create("user-1", createSessionShareRequest{
 		SessionID: "session-1",
 		Title:     "Shared Session",
@@ -316,23 +316,50 @@ func TestDeleteByShareIDRemovesChatState(t *testing.T) {
 }
 
 func TestSessionShareOriginValidation(t *testing.T) {
+	hub := NewSessionShareHub("")
+
 	allowedRequest := httptest.NewRequest("GET", "https://viewer.example.com/share/abc/token/ws", nil)
 	allowedRequest.Host = "viewer.example.com"
 	allowedRequest.Header.Set("Origin", "https://viewer.example.com")
-	if !isSessionShareOriginAllowed(allowedRequest) {
+	if !hub.isSessionShareOriginAllowed(allowedRequest) {
 		t.Fatal("expected same-origin websocket request to be allowed")
 	}
 
 	rejectedRequest := httptest.NewRequest("GET", "https://viewer.example.com/share/abc/token/ws", nil)
 	rejectedRequest.Host = "viewer.example.com"
 	rejectedRequest.Header.Set("Origin", "https://evil.example.com")
-	if isSessionShareOriginAllowed(rejectedRequest) {
+	if hub.isSessionShareOriginAllowed(rejectedRequest) {
 		t.Fatal("expected mismatched origin to be rejected")
 	}
 
 	missingOriginRequest := httptest.NewRequest("GET", "https://viewer.example.com/share/abc/token/ws", nil)
 	missingOriginRequest.Host = "viewer.example.com"
-	if isSessionShareOriginAllowed(missingOriginRequest) {
+	if hub.isSessionShareOriginAllowed(missingOriginRequest) {
 		t.Fatal("expected missing origin to be rejected")
+	}
+
+	// X-Forwarded-Host를 신뢰하지 않는다: 위조 헤더가 있어도 실제 Host 기준으로 판정해야 한다.
+	spoofRequest := httptest.NewRequest("GET", "https://viewer.example.com/share/abc/token/ws", nil)
+	spoofRequest.Host = "viewer.example.com"
+	spoofRequest.Header.Set("X-Forwarded-Host", "evil.example.com")
+	spoofRequest.Header.Set("X-Forwarded-Proto", "https")
+	spoofRequest.Header.Set("Origin", "https://evil.example.com")
+	if hub.isSessionShareOriginAllowed(spoofRequest) {
+		t.Fatal("expected spoofed X-Forwarded-Host origin to be rejected")
+	}
+
+	// publicBaseURL이 설정되면 그 origin만 허용하고 실제 Host는 무시한다.
+	cfgHub := NewSessionShareHub("https://sync.example.com")
+	publicOriginRequest := httptest.NewRequest("GET", "https://internal.local/share/abc/token/ws", nil)
+	publicOriginRequest.Host = "internal.local"
+	publicOriginRequest.Header.Set("Origin", "https://sync.example.com")
+	if !cfgHub.isSessionShareOriginAllowed(publicOriginRequest) {
+		t.Fatal("expected configured public origin to be allowed")
+	}
+	internalOriginRequest := httptest.NewRequest("GET", "https://internal.local/share/abc/token/ws", nil)
+	internalOriginRequest.Host = "internal.local"
+	internalOriginRequest.Header.Set("Origin", "https://internal.local")
+	if cfgHub.isSessionShareOriginAllowed(internalOriginRequest) {
+		t.Fatal("expected non-public origin to be rejected when publicBaseURL is set")
 	}
 }

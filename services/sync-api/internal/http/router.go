@@ -25,6 +25,7 @@ type RouterConfig struct {
 	LocalAuthEnabled   bool
 	LocalSignupEnabled bool
 	TrustedProxies     []string
+	PublicBaseURL      string
 	ServerVersion      string
 	RateLimit          AuthRateLimitConfig
 	OIDC               OIDCConfig
@@ -212,7 +213,7 @@ func NewRouter(store store.Store, authService *auth.Service, config RouterConfig
 	}
 	router.Use(gin.Logger(), gin.Recovery(), securityHeadersMiddleware())
 	awsSsoMobileRuntime := newAwsSsoMobileRuntimeState(config)
-	shareHub := NewSessionShareHub()
+	shareHub := NewSessionShareHub(config.PublicBaseURL)
 	var awsSessionFactory awsSessionRunnerFactory
 	if config.AwsSessionBridge != nil {
 		awsSessionFactory = config.AwsSessionBridge.RunnerFactory()
@@ -332,7 +333,7 @@ func NewRouter(store store.Store, authService *auth.Service, config RouterConfig
 			return
 		}
 		if err := validateDesktopRedirectURI(form.RedirectURI); err != nil {
-			ctx.String(http.StatusBadRequest, err.Error())
+			logAndStringError(ctx, http.StatusBadRequest, "잘못된 요청입니다.", err)
 			return
 		}
 
@@ -357,7 +358,7 @@ func NewRouter(store store.Store, authService *auth.Service, config RouterConfig
 
 		code, err := authService.IssueExchangeCode(ctx.Request.Context(), user)
 		if err != nil {
-			ctx.String(http.StatusInternalServerError, err.Error())
+			logAndStringError(ctx, http.StatusInternalServerError, "서버 오류가 발생했습니다.", err)
 			return
 		}
 		completeDesktopLogin(ctx, form.RedirectURI, code, form.State)
@@ -427,7 +428,7 @@ func NewRouter(store store.Store, authService *auth.Service, config RouterConfig
 			return
 		}
 		if err := validateDesktopRedirectURI(form.RedirectURI); err != nil {
-			ctx.String(http.StatusBadRequest, err.Error())
+			logAndStringError(ctx, http.StatusBadRequest, "잘못된 요청입니다.", err)
 			return
 		}
 
@@ -450,7 +451,7 @@ func NewRouter(store store.Store, authService *auth.Service, config RouterConfig
 		}
 		code, err := authService.IssueExchangeCode(ctx.Request.Context(), user)
 		if err != nil {
-			ctx.String(http.StatusInternalServerError, err.Error())
+			logAndStringError(ctx, http.StatusInternalServerError, "서버 오류가 발생했습니다.", err)
 			return
 		}
 		completeDesktopLogin(ctx, form.RedirectURI, code, form.State)
@@ -466,12 +467,12 @@ func NewRouter(store store.Store, authService *auth.Service, config RouterConfig
 		redirectURI := ctx.Query("redirect_uri")
 		desktopState := ctx.Query("state")
 		if err := validateDesktopRedirectURI(redirectURI); err != nil {
-			ctx.String(http.StatusBadRequest, err.Error())
+			logAndStringError(ctx, http.StatusBadRequest, "잘못된 요청입니다.", err)
 			return
 		}
 		signedState, err := authService.NewBrowserLoginState(client, redirectURI, desktopState)
 		if err != nil {
-			ctx.String(http.StatusInternalServerError, err.Error())
+			logAndStringError(ctx, http.StatusInternalServerError, "서버 오류가 발생했습니다.", err)
 			return
 		}
 		ctx.Redirect(http.StatusFound, oidcRuntime.oauth.AuthCodeURL(signedState))
@@ -491,13 +492,13 @@ func NewRouter(store store.Store, authService *auth.Service, config RouterConfig
 
 		loginState, err := authService.ParseBrowserLoginState(rawState)
 		if err != nil {
-			ctx.String(http.StatusUnauthorized, err.Error())
+			logAndStringError(ctx, http.StatusUnauthorized, "인증에 실패했습니다.", err)
 			return
 		}
 
 		token, err := oidcRuntime.oauth.Exchange(ctx.Request.Context(), code)
 		if err != nil {
-			ctx.String(http.StatusBadGateway, err.Error())
+			logAndStringError(ctx, http.StatusBadGateway, "요청 처리 중 오류가 발생했습니다.", err)
 			return
 		}
 
@@ -509,7 +510,7 @@ func NewRouter(store store.Store, authService *auth.Service, config RouterConfig
 
 		idToken, err := oidcRuntime.verifier.Verify(ctx.Request.Context(), rawIDToken)
 		if err != nil {
-			ctx.String(http.StatusBadGateway, err.Error())
+			logAndStringError(ctx, http.StatusBadGateway, "요청 처리 중 오류가 발생했습니다.", err)
 			return
 		}
 
@@ -519,19 +520,19 @@ func NewRouter(store store.Store, authService *auth.Service, config RouterConfig
 			EmailVerified bool   `json:"email_verified"`
 		}
 		if err := idToken.Claims(&claims); err != nil {
-			ctx.String(http.StatusBadGateway, err.Error())
+			logAndStringError(ctx, http.StatusBadGateway, "요청 처리 중 오류가 발생했습니다.", err)
 			return
 		}
 
 		user, err := authService.ResolveOIDCUser(ctx.Request.Context(), "oidc", claims.Subject, claims.Email, claims.EmailVerified)
 		if err != nil {
-			ctx.String(http.StatusInternalServerError, err.Error())
+			logAndStringError(ctx, http.StatusInternalServerError, "서버 오류가 발생했습니다.", err)
 			return
 		}
 
 		exchangeCode, err := authService.IssueExchangeCode(ctx.Request.Context(), user)
 		if err != nil {
-			ctx.String(http.StatusInternalServerError, err.Error())
+			logAndStringError(ctx, http.StatusInternalServerError, "서버 오류가 발생했습니다.", err)
 			return
 		}
 		completeDesktopLogin(ctx, loginState.RedirectURI, exchangeCode, loginState.State)
@@ -540,7 +541,7 @@ func NewRouter(store store.Store, authService *auth.Service, config RouterConfig
 	router.POST("/auth/signup", func(ctx *gin.Context) {
 		var request authRequest
 		if err := ctx.ShouldBindJSON(&request); err != nil {
-			ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			logAndJSONError(ctx, http.StatusBadRequest, "잘못된 요청입니다.", err)
 			return
 		}
 		if !authLimiters.signup.Allow(authAttemptKeys(ctx.ClientIP(), request.Email)...) {
@@ -550,7 +551,7 @@ func NewRouter(store store.Store, authService *auth.Service, config RouterConfig
 
 		_, session, err := authService.Signup(ctx.Request.Context(), request.Email, request.Password, resolveRequestOrigin(ctx))
 		if err != nil {
-			ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			logAndJSONError(ctx, http.StatusBadRequest, "잘못된 요청입니다.", err)
 			return
 		}
 		if err := recordAuthClientObservation(ctx, store, session.User.ID, "signup"); err != nil {
@@ -562,7 +563,7 @@ func NewRouter(store store.Store, authService *auth.Service, config RouterConfig
 	router.POST("/auth/login", func(ctx *gin.Context) {
 		var request authRequest
 		if err := ctx.ShouldBindJSON(&request); err != nil {
-			ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			logAndJSONError(ctx, http.StatusBadRequest, "잘못된 요청입니다.", err)
 			return
 		}
 		if !authLimiters.login.Allow(authAttemptKeys(ctx.ClientIP(), request.Email)...) {
@@ -576,7 +577,7 @@ func NewRouter(store store.Store, authService *auth.Service, config RouterConfig
 			if !errors.Is(err, auth.ErrInvalidCredentials) {
 				status = http.StatusBadRequest
 			}
-			ctx.JSON(status, gin.H{"error": err.Error()})
+			logAndJSONError(ctx, status, "인증에 실패했습니다.", err)
 			return
 		}
 		if err := recordAuthClientObservation(ctx, store, session.User.ID, "login"); err != nil {
@@ -588,7 +589,7 @@ func NewRouter(store store.Store, authService *auth.Service, config RouterConfig
 	router.POST("/auth/exchange", func(ctx *gin.Context) {
 		var request exchangeRequest
 		if err := ctx.ShouldBindJSON(&request); err != nil {
-			ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			logAndJSONError(ctx, http.StatusBadRequest, "잘못된 요청입니다.", err)
 			return
 		}
 		if !authLimiters.exchange.Allow(authAttemptKeys(ctx.ClientIP(), "")...) {
@@ -597,7 +598,7 @@ func NewRouter(store store.Store, authService *auth.Service, config RouterConfig
 		}
 		session, err := authService.ExchangeCode(ctx.Request.Context(), request.Code, resolveRequestOrigin(ctx))
 		if err != nil {
-			ctx.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
+			logAndJSONError(ctx, http.StatusUnauthorized, "인증에 실패했습니다.", err)
 			return
 		}
 		if err := recordAuthClientObservation(ctx, store, session.User.ID, "exchange"); err != nil {
@@ -609,7 +610,7 @@ func NewRouter(store store.Store, authService *auth.Service, config RouterConfig
 	router.POST("/auth/refresh", func(ctx *gin.Context) {
 		var request refreshRequest
 		if err := ctx.ShouldBindJSON(&request); err != nil {
-			ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			logAndJSONError(ctx, http.StatusBadRequest, "잘못된 요청입니다.", err)
 			return
 		}
 		if !authLimiters.refresh.Allow(authAttemptKeys(ctx.ClientIP(), "")...) {
@@ -618,7 +619,7 @@ func NewRouter(store store.Store, authService *auth.Service, config RouterConfig
 		}
 		session, err := authService.Refresh(ctx.Request.Context(), request.RefreshToken, resolveRequestOrigin(ctx))
 		if err != nil {
-			ctx.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
+			logAndJSONError(ctx, http.StatusUnauthorized, "인증에 실패했습니다.", err)
 			return
 		}
 		if err := recordAuthClientObservation(ctx, store, session.User.ID, "refresh"); err != nil {
@@ -630,11 +631,11 @@ func NewRouter(store store.Store, authService *auth.Service, config RouterConfig
 	router.POST("/auth/logout", func(ctx *gin.Context) {
 		var request logoutRequest
 		if err := ctx.ShouldBindJSON(&request); err != nil {
-			ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			logAndJSONError(ctx, http.StatusBadRequest, "잘못된 요청입니다.", err)
 			return
 		}
 		if err := authService.Logout(ctx.Request.Context(), request.RefreshToken); err != nil {
-			ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			logAndJSONError(ctx, http.StatusBadRequest, "잘못된 요청입니다.", err)
 			return
 		}
 		ctx.Status(http.StatusNoContent)
@@ -645,7 +646,7 @@ func NewRouter(store store.Store, authService *auth.Service, config RouterConfig
 	sessionShareGroup.POST("", func(ctx *gin.Context) {
 		var request createSessionShareRequest
 		if err := ctx.ShouldBindJSON(&request); err != nil {
-			ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			logAndJSONError(ctx, http.StatusBadRequest, "잘못된 요청입니다.", err)
 			return
 		}
 		if request.SessionID == "" || request.Title == "" || request.Cols <= 0 || request.Rows <= 0 || !isValidSessionShareTransport(request.Transport) {
@@ -654,7 +655,7 @@ func NewRouter(store store.Store, authService *auth.Service, config RouterConfig
 		}
 
 		userID := ctx.GetString("userId")
-		response := shareHub.Create(userID, request, requestBaseURL(ctx.Request))
+		response := shareHub.Create(userID, request, shareHub.trustedBaseURL(ctx.Request))
 		ctx.JSON(http.StatusCreated, response)
 	})
 
@@ -667,7 +668,7 @@ func NewRouter(store store.Store, authService *auth.Service, config RouterConfig
 			if ctx.Writer.Written() {
 				return
 			}
-			ctx.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+			logAndJSONError(ctx, http.StatusBadGateway, "요청 처리 중 오류가 발생했습니다.", err)
 		}
 	})
 
@@ -680,7 +681,7 @@ func NewRouter(store store.Store, authService *auth.Service, config RouterConfig
 		}
 		var request awsSftpCreateSessionRequest
 		if err := ctx.ShouldBindJSON(&request); err != nil {
-			ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			logAndJSONError(ctx, http.StatusBadRequest, "잘못된 요청입니다.", err)
 			return
 		}
 		response, err := config.AwsSftpBridge.CreateSession(ctx.Request.Context(), ctx.GetString("userId"), request)
@@ -690,7 +691,7 @@ func NewRouter(store store.Store, authService *auth.Service, config RouterConfig
 				ctx.JSON(http.StatusConflict, challenge.response)
 				return
 			}
-			ctx.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+			logAndJSONError(ctx, http.StatusBadGateway, "요청 처리 중 오류가 발생했습니다.", err)
 			return
 		}
 		ctx.JSON(http.StatusCreated, response)
@@ -701,7 +702,7 @@ func NewRouter(store store.Store, authService *auth.Service, config RouterConfig
 			return
 		}
 		if err := config.AwsSftpBridge.CloseSession(ctx.GetString("userId"), ctx.Param("sessionId")); err != nil {
-			ctx.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+			logAndJSONError(ctx, http.StatusNotFound, "대상을 찾을 수 없습니다.", err)
 			return
 		}
 		ctx.Status(http.StatusNoContent)
@@ -713,7 +714,7 @@ func NewRouter(store store.Store, authService *auth.Service, config RouterConfig
 		}
 		response, err := config.AwsSftpBridge.List(ctx.GetString("userId"), ctx.Param("sessionId"), ctx.Query("path"))
 		if err != nil {
-			ctx.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+			logAndJSONError(ctx, http.StatusBadGateway, "요청 처리 중 오류가 발생했습니다.", err)
 			return
 		}
 		ctx.JSON(http.StatusOK, response)
@@ -725,12 +726,12 @@ func NewRouter(store store.Store, authService *auth.Service, config RouterConfig
 		}
 		var request awsSftpReadRequest
 		if err := ctx.ShouldBindJSON(&request); err != nil {
-			ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			logAndJSONError(ctx, http.StatusBadRequest, "잘못된 요청입니다.", err)
 			return
 		}
 		response, err := config.AwsSftpBridge.Read(ctx.GetString("userId"), ctx.Param("sessionId"), request)
 		if err != nil {
-			ctx.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+			logAndJSONError(ctx, http.StatusBadGateway, "요청 처리 중 오류가 발생했습니다.", err)
 			return
 		}
 		ctx.JSON(http.StatusOK, response)
@@ -742,11 +743,11 @@ func NewRouter(store store.Store, authService *auth.Service, config RouterConfig
 		}
 		var request awsSftpWriteRequest
 		if err := ctx.ShouldBindJSON(&request); err != nil {
-			ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			logAndJSONError(ctx, http.StatusBadRequest, "잘못된 요청입니다.", err)
 			return
 		}
 		if err := config.AwsSftpBridge.Write(ctx.GetString("userId"), ctx.Param("sessionId"), request); err != nil {
-			ctx.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+			logAndJSONError(ctx, http.StatusBadGateway, "요청 처리 중 오류가 발생했습니다.", err)
 			return
 		}
 		ctx.Status(http.StatusNoContent)
@@ -758,11 +759,11 @@ func NewRouter(store store.Store, authService *auth.Service, config RouterConfig
 		}
 		var request awsSftpPathRequest
 		if err := ctx.ShouldBindJSON(&request); err != nil {
-			ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			logAndJSONError(ctx, http.StatusBadRequest, "잘못된 요청입니다.", err)
 			return
 		}
 		if err := config.AwsSftpBridge.Mkdir(ctx.GetString("userId"), ctx.Param("sessionId"), request.Path); err != nil {
-			ctx.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+			logAndJSONError(ctx, http.StatusBadGateway, "요청 처리 중 오류가 발생했습니다.", err)
 			return
 		}
 		ctx.Status(http.StatusNoContent)
@@ -774,11 +775,11 @@ func NewRouter(store store.Store, authService *auth.Service, config RouterConfig
 		}
 		var request awsSftpRenameRequest
 		if err := ctx.ShouldBindJSON(&request); err != nil {
-			ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			logAndJSONError(ctx, http.StatusBadRequest, "잘못된 요청입니다.", err)
 			return
 		}
 		if err := config.AwsSftpBridge.Rename(ctx.GetString("userId"), ctx.Param("sessionId"), request.SourcePath, request.TargetPath); err != nil {
-			ctx.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+			logAndJSONError(ctx, http.StatusBadGateway, "요청 처리 중 오류가 발생했습니다.", err)
 			return
 		}
 		ctx.Status(http.StatusNoContent)
@@ -790,11 +791,11 @@ func NewRouter(store store.Store, authService *auth.Service, config RouterConfig
 		}
 		var request awsSftpChmodRequest
 		if err := ctx.ShouldBindJSON(&request); err != nil {
-			ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			logAndJSONError(ctx, http.StatusBadRequest, "잘못된 요청입니다.", err)
 			return
 		}
 		if err := config.AwsSftpBridge.Chmod(ctx.GetString("userId"), ctx.Param("sessionId"), request.Path, request.Permissions); err != nil {
-			ctx.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+			logAndJSONError(ctx, http.StatusBadGateway, "요청 처리 중 오류가 발생했습니다.", err)
 			return
 		}
 		ctx.Status(http.StatusNoContent)
@@ -806,11 +807,11 @@ func NewRouter(store store.Store, authService *auth.Service, config RouterConfig
 		}
 		var request awsSftpPathRequest
 		if err := ctx.ShouldBindJSON(&request); err != nil {
-			ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			logAndJSONError(ctx, http.StatusBadRequest, "잘못된 요청입니다.", err)
 			return
 		}
 		if err := config.AwsSftpBridge.Delete(ctx.GetString("userId"), ctx.Param("sessionId"), request.Path); err != nil {
-			ctx.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+			logAndJSONError(ctx, http.StatusBadGateway, "요청 처리 중 오류가 발생했습니다.", err)
 			return
 		}
 		ctx.Status(http.StatusNoContent)
@@ -827,13 +828,13 @@ func NewRouter(store store.Store, authService *auth.Service, config RouterConfig
 
 		var request awsSsoMobileLoginStartRequest
 		if err := ctx.ShouldBindJSON(&request); err != nil {
-			ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			logAndJSONError(ctx, http.StatusBadRequest, "잘못된 요청입니다.", err)
 			return
 		}
 
 		response, err := awsSsoMobile.Start(ctx.Request.Context(), ctx.GetString("userId"), request)
 		if err != nil {
-			ctx.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+			logAndJSONError(ctx, http.StatusBadGateway, "요청 처리 중 오류가 발생했습니다.", err)
 			return
 		}
 		ctx.JSON(http.StatusOK, response)
@@ -850,7 +851,7 @@ func NewRouter(store store.Store, authService *auth.Service, config RouterConfig
 			ctx.Param("loginId"),
 		)
 		if err != nil {
-			ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			logAndJSONError(ctx, http.StatusBadRequest, "잘못된 요청입니다.", err)
 			return
 		}
 		ctx.JSON(http.StatusOK, response)
@@ -864,7 +865,7 @@ func NewRouter(store store.Store, authService *auth.Service, config RouterConfig
 
 		var request awsSsoMobileLoginHandoffRequest
 		if err := ctx.ShouldBindJSON(&request); err != nil {
-			ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			logAndJSONError(ctx, http.StatusBadRequest, "잘못된 요청입니다.", err)
 			return
 		}
 
@@ -875,7 +876,7 @@ func NewRouter(store store.Store, authService *auth.Service, config RouterConfig
 			request,
 		)
 		if err != nil {
-			ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			logAndJSONError(ctx, http.StatusBadRequest, "잘못된 요청입니다.", err)
 			return
 		}
 		ctx.JSON(http.StatusOK, response)
@@ -891,11 +892,11 @@ func NewRouter(store store.Store, authService *auth.Service, config RouterConfig
 			LoginID string `json:"loginId" binding:"required"`
 		}
 		if err := ctx.ShouldBindJSON(&request); err != nil {
-			ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			logAndJSONError(ctx, http.StatusBadRequest, "잘못된 요청입니다.", err)
 			return
 		}
 		if err := awsSsoMobile.Cancel(ctx.GetString("userId"), request.LoginID); err != nil {
-			ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			logAndJSONError(ctx, http.StatusBadRequest, "잘못된 요청입니다.", err)
 			return
 		}
 		ctx.Status(http.StatusNoContent)
@@ -905,20 +906,20 @@ func NewRouter(store store.Store, authService *auth.Service, config RouterConfig
 			InputEnabled bool `json:"inputEnabled"`
 		}
 		if err := ctx.ShouldBindJSON(&request); err != nil {
-			ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			logAndJSONError(ctx, http.StatusBadRequest, "잘못된 요청입니다.", err)
 			return
 		}
 
 		updated, err := shareHub.SetInputEnabled(ctx.GetString("userId"), ctx.Param("shareId"), request.InputEnabled)
 		if err != nil {
-			ctx.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+			logAndJSONError(ctx, http.StatusNotFound, "대상을 찾을 수 없습니다.", err)
 			return
 		}
 		ctx.JSON(http.StatusOK, gin.H{"updated": updated})
 	})
 	sessionShareGroup.DELETE("/:shareId", func(ctx *gin.Context) {
 		if err := shareHub.Delete(ctx.GetString("userId"), ctx.Param("shareId"), "세션 공유가 종료되었습니다."); err != nil {
-			ctx.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+			logAndJSONError(ctx, http.StatusNotFound, "대상을 찾을 수 없습니다.", err)
 			return
 		}
 		ctx.Status(http.StatusNoContent)
@@ -933,7 +934,7 @@ func NewRouter(store store.Store, authService *auth.Service, config RouterConfig
 		}
 		if err := shareHub.HandleOwnerWebSocket(ctx.Writer, ctx.Request, shareID, ownerToken); err != nil {
 			if !ctx.Writer.Written() {
-				ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+				logAndJSONError(ctx, http.StatusInternalServerError, "서버 오류가 발생했습니다.", err)
 			}
 		}
 	})
@@ -967,7 +968,7 @@ func NewRouter(store store.Store, authService *auth.Service, config RouterConfig
 		}
 		if err := shareHub.HandleViewerWebSocket(ctx.Writer, ctx.Request, shareID, viewerToken); err != nil {
 			if !ctx.Writer.Written() {
-				ctx.String(http.StatusInternalServerError, err.Error())
+				logAndStringError(ctx, http.StatusInternalServerError, "서버 오류가 발생했습니다.", err)
 			}
 		}
 	})
@@ -979,47 +980,47 @@ func NewRouter(store store.Store, authService *auth.Service, config RouterConfig
 
 		groups, err := store.ListSyncRecords(ctx.Request.Context(), userID, syncmodel.KindGroups)
 		if err != nil {
-			ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			logAndJSONError(ctx, http.StatusInternalServerError, "서버 오류가 발생했습니다.", err)
 			return
 		}
 		hosts, err := store.ListSyncRecords(ctx.Request.Context(), userID, syncmodel.KindHosts)
 		if err != nil {
-			ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			logAndJSONError(ctx, http.StatusInternalServerError, "서버 오류가 발생했습니다.", err)
 			return
 		}
 		secrets, err := store.ListSyncRecords(ctx.Request.Context(), userID, syncmodel.KindSecrets)
 		if err != nil {
-			ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			logAndJSONError(ctx, http.StatusInternalServerError, "서버 오류가 발생했습니다.", err)
 			return
 		}
 		knownHosts, err := store.ListSyncRecords(ctx.Request.Context(), userID, syncmodel.KindKnownHosts)
 		if err != nil {
-			ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			logAndJSONError(ctx, http.StatusInternalServerError, "서버 오류가 발생했습니다.", err)
 			return
 		}
 		portForwards, err := store.ListSyncRecords(ctx.Request.Context(), userID, syncmodel.KindPortForwards)
 		if err != nil {
-			ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			logAndJSONError(ctx, http.StatusInternalServerError, "서버 오류가 발생했습니다.", err)
 			return
 		}
 		dnsOverrides, err := store.ListSyncRecords(ctx.Request.Context(), userID, syncmodel.KindDNSOverrides)
 		if err != nil {
-			ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			logAndJSONError(ctx, http.StatusInternalServerError, "서버 오류가 발생했습니다.", err)
 			return
 		}
 		preferences, err := store.ListSyncRecords(ctx.Request.Context(), userID, syncmodel.KindPreferences)
 		if err != nil {
-			ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			logAndJSONError(ctx, http.StatusInternalServerError, "서버 오류가 발생했습니다.", err)
 			return
 		}
 		awsProfiles, err := store.ListSyncRecords(ctx.Request.Context(), userID, syncmodel.KindAWSProfiles)
 		if err != nil {
-			ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			logAndJSONError(ctx, http.StatusInternalServerError, "서버 오류가 발생했습니다.", err)
 			return
 		}
 		snippets, err := store.ListSyncRecords(ctx.Request.Context(), userID, syncmodel.KindSnippets)
 		if err != nil {
-			ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			logAndJSONError(ctx, http.StatusInternalServerError, "서버 오류가 발생했습니다.", err)
 			return
 		}
 
@@ -1039,43 +1040,43 @@ func NewRouter(store store.Store, authService *auth.Service, config RouterConfig
 		userID := ctx.GetString("userId")
 		var payload syncmodel.Payload
 		if err := ctx.ShouldBindJSON(&payload); err != nil {
-			ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			logAndJSONError(ctx, http.StatusBadRequest, "잘못된 요청입니다.", err)
 			return
 		}
 		if err := store.UpsertSyncRecords(ctx.Request.Context(), userID, syncmodel.KindGroups, payload.Groups); err != nil {
-			ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			logAndJSONError(ctx, http.StatusInternalServerError, "서버 오류가 발생했습니다.", err)
 			return
 		}
 		if err := store.UpsertSyncRecords(ctx.Request.Context(), userID, syncmodel.KindHosts, payload.Hosts); err != nil {
-			ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			logAndJSONError(ctx, http.StatusInternalServerError, "서버 오류가 발생했습니다.", err)
 			return
 		}
 		if err := store.UpsertSyncRecords(ctx.Request.Context(), userID, syncmodel.KindSecrets, payload.Secrets); err != nil {
-			ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			logAndJSONError(ctx, http.StatusInternalServerError, "서버 오류가 발생했습니다.", err)
 			return
 		}
 		if err := store.UpsertSyncRecords(ctx.Request.Context(), userID, syncmodel.KindKnownHosts, payload.KnownHosts); err != nil {
-			ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			logAndJSONError(ctx, http.StatusInternalServerError, "서버 오류가 발생했습니다.", err)
 			return
 		}
 		if err := store.UpsertSyncRecords(ctx.Request.Context(), userID, syncmodel.KindPortForwards, payload.PortForwards); err != nil {
-			ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			logAndJSONError(ctx, http.StatusInternalServerError, "서버 오류가 발생했습니다.", err)
 			return
 		}
 		if err := store.UpsertSyncRecords(ctx.Request.Context(), userID, syncmodel.KindDNSOverrides, payload.DNSOverrides); err != nil {
-			ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			logAndJSONError(ctx, http.StatusInternalServerError, "서버 오류가 발생했습니다.", err)
 			return
 		}
 		if err := store.UpsertSyncRecords(ctx.Request.Context(), userID, syncmodel.KindPreferences, payload.Preferences); err != nil {
-			ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			logAndJSONError(ctx, http.StatusInternalServerError, "서버 오류가 발생했습니다.", err)
 			return
 		}
 		if err := store.UpsertSyncRecords(ctx.Request.Context(), userID, syncmodel.KindAWSProfiles, payload.AWSProfiles); err != nil {
-			ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			logAndJSONError(ctx, http.StatusInternalServerError, "서버 오류가 발생했습니다.", err)
 			return
 		}
 		if err := store.UpsertSyncRecords(ctx.Request.Context(), userID, syncmodel.KindSnippets, payload.Snippets); err != nil {
-			ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			logAndJSONError(ctx, http.StatusInternalServerError, "서버 오류가 발생했습니다.", err)
 			return
 		}
 		ctx.Status(http.StatusAccepted)
@@ -1263,7 +1264,8 @@ func authMiddlewareWithOptions(authService *auth.Service, options authMiddleware
 
 		claims, err := authService.ParseAccessToken(token)
 		if err != nil {
-			ctx.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
+			log.Printf("http error (401): access token validation failed: %v", err)
+			ctx.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "인증에 실패했습니다."})
 			return
 		}
 
@@ -1284,6 +1286,22 @@ func extractBearerToken(ctx *gin.Context, options authMiddlewareOptions) string 
 }
 
 const tooManyAuthAttemptsMessage = "너무 많은 인증 시도가 감지되었습니다. 잠시 후 다시 시도해 주세요."
+
+// logAndJSONError/logAndStringError는 클라이언트에는 generic 메시지만 주고 원본 오류는 서버
+// 로그에만 남긴다 — DB/OIDC/JWT 등 내부 오류 문자열이 응답 body로 새어 나가는 것을 막는다.
+func logAndJSONError(ctx *gin.Context, status int, publicMsg string, err error) {
+	if err != nil {
+		log.Printf("http error (%d): %s: %v", status, publicMsg, err)
+	}
+	ctx.JSON(status, gin.H{"error": publicMsg})
+}
+
+func logAndStringError(ctx *gin.Context, status int, publicMsg string, err error) {
+	if err != nil {
+		log.Printf("http error (%d): %s: %v", status, publicMsg, err)
+	}
+	ctx.String(status, publicMsg)
+}
 
 func securityHeadersMiddleware() gin.HandlerFunc {
 	return func(ctx *gin.Context) {
@@ -1318,23 +1336,6 @@ func applyShareResponseHeaders(ctx *gin.Context) {
 	ctx.Header("Cache-Control", "no-store")
 	ctx.Header("Pragma", "no-cache")
 	ctx.Header("X-Robots-Tag", "noindex, nofollow")
-}
-
-func requestBaseURL(request *http.Request) string {
-	scheme := strings.TrimSpace(strings.Split(request.Header.Get("X-Forwarded-Proto"), ",")[0])
-	if scheme == "" {
-		if request.TLS != nil {
-			scheme = "https"
-		} else {
-			scheme = "http"
-		}
-	}
-
-	host := strings.TrimSpace(strings.Split(request.Header.Get("X-Forwarded-Host"), ",")[0])
-	if host == "" {
-		host = request.Host
-	}
-	return scheme + "://" + host
 }
 
 var loginPageTemplate = template.Must(template.New("login").Parse(`

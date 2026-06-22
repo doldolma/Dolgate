@@ -17,6 +17,10 @@ type AppConfig struct {
 type ServerConfig struct {
 	Port           string   `json:"port"`
 	TrustedProxies []string `json:"trustedProxies"`
+	// PublicBaseURL은 클라이언트에게 노출할 공개 origin(scheme+host)이다. 세션 공유 viewer URL
+	// 생성과 viewer WebSocket origin 검증에 쓰이며, 설정되면 요청의 X-Forwarded-* 헤더를 신뢰하지
+	// 않아 origin 스푸핑을 막는다. 리버스 프록시 뒤 배포 시 설정 권장(예: https://sync.example.com).
+	PublicBaseURL string `json:"publicBaseUrl"`
 }
 
 type DatabaseConfig struct {
@@ -68,6 +72,7 @@ func defaultConfig() AppConfig {
 		Server: ServerConfig{
 			Port:           "8080",
 			TrustedProxies: nil,
+			PublicBaseURL:  "",
 		},
 		Database: DatabaseConfig{
 			Driver: "sqlite",
@@ -128,6 +133,7 @@ func applyEnvOverrides(cfg *AppConfig) {
 	cfg.Database.URL = getenv("DATABASE_URL", cfg.Database.URL)
 	cfg.Server.Port = getenv("PORT", cfg.Server.Port)
 	cfg.Server.TrustedProxies = getenvCSV("TRUSTED_PROXIES", cfg.Server.TrustedProxies)
+	cfg.Server.PublicBaseURL = getenv("PUBLIC_BASE_URL", cfg.Server.PublicBaseURL)
 	cfg.Auth.SigningPrivateKeyPEM = getenv("AUTH_SIGNING_PRIVATE_KEY_PEM", cfg.Auth.SigningPrivateKeyPEM)
 	cfg.Auth.SigningPrivateKeyPath = getenv("AUTH_SIGNING_PRIVATE_KEY_PATH", cfg.Auth.SigningPrivateKeyPath)
 	cfg.Auth.AccessTokenTTLMinutes = getenvInt("ACCESS_TOKEN_TTL_MINUTES", cfg.Auth.AccessTokenTTLMinutes)
