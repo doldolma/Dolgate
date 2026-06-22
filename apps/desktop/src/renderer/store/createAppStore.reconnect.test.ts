@@ -294,3 +294,98 @@ describe("hold-on-abnormal-drop (runtimeEventSlice, Plan B)", () => {
     ).toBeUndefined();
   });
 });
+
+// tmux control 세션은 그룹 형성 시 탭이 사라져 일반 세션 재연결(shouldAutoReconnectSession)을
+// 못 탄다. closed 이벤트를 controlSessionId 로 그룹에 매핑해 그룹 단위로 재연결을 거는지 검증.
+describe("tmux auto-reconnect trigger (runtimeEventSlice)", () => {
+  const CTL = "tmux-ctl-1";
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    __resetReconnectOrchestratorForTest();
+    initReconnectOrchestrator(() => ({
+      autoReconnectEnabled: true,
+      autoReconnectMaxAttempts: 10,
+      autoReconnectBaseDelayMs: 1000,
+      autoReconnectMaxDelayMs: 30000,
+    }));
+    registerReconnectHandler("tmux", {
+      renderScheduled: () => undefined,
+      perform: async () => undefined,
+      renderGaveUp: () => undefined,
+      isStillPresent: () => true,
+    });
+  });
+
+  afterEach(() => {
+    __resetReconnectOrchestratorForTest();
+    vi.useRealTimers();
+  });
+
+  function seedTmuxStore() {
+    const store = createAppStore(createMockApi());
+    store.setState({ hosts: [SSH_HOST] });
+    store
+      .getState()
+      .handleTmuxLayoutChange(CTL, "@0", "bd5e,80x24,0,0,0", { index: 0 });
+    // 그룹 hostId 는 control 탭에서 캡처되는데 테스트엔 control 탭이 없으므로 명시 세팅.
+    store.setState((state) => ({
+      tmuxGroups: state.tmuxGroups.map((g) => ({ ...g, hostId: "h1" })),
+    }));
+    return store;
+  }
+
+  it("schedules a tmux reconnect (key = group.id) on a transport drop of the control session", () => {
+    const store = seedTmuxStore();
+    const groupId = store.getState().tmuxGroups[0]!.id;
+
+    store.getState().handleCoreEvent(closedEvent({ reason: "transport" }, CTL));
+
+    expect(isReconnecting(groupId)).toBe(true);
+  });
+
+  it("schedules a tmux reconnect on a keepalive-failure drop (app-level probe)", () => {
+    const store = seedTmuxStore();
+    const groupId = store.getState().tmuxGroups[0]!.id;
+
+    store.getState().handleCoreEvent(closedEvent({ reason: "keepalive" }, CTL));
+
+    expect(isReconnecting(groupId)).toBe(true);
+  });
+
+  it("does NOT reconnect (and cleans up the group) on a clean control-session close", () => {
+    const store = seedTmuxStore();
+    const groupId = store.getState().tmuxGroups[0]!.id;
+
+    store.getState().handleCoreEvent(closedEvent({ reason: "remote-exit" }, CTL));
+
+    expect(isReconnecting(groupId)).toBe(false);
+    expect(store.getState().tmuxGroups).toHaveLength(0);
+  });
+
+  it("does NOT reconnect on a client-requested detach (reason=client)", () => {
+    const store = seedTmuxStore();
+    const groupId = store.getState().tmuxGroups[0]!.id;
+
+    store.getState().handleCoreEvent(closedEvent({ reason: "client" }, CTL));
+
+    expect(isReconnecting(groupId)).toBe(false);
+    expect(store.getState().tmuxGroups).toHaveLength(0);
+  });
+
+  it("marks the group dropped (error, no reconnect) on a transport drop when auto-reconnect is OFF", () => {
+    const store = seedTmuxStore();
+    store.setState((state) => ({
+      settings: { ...state.settings, autoReconnectEnabled: false },
+    }));
+    const groupId = store.getState().tmuxGroups[0]!.id;
+
+    store.getState().handleCoreEvent(closedEvent({ reason: "transport" }, CTL));
+
+    expect(isReconnecting(groupId)).toBe(false);
+    expect(store.getState().tmuxGroups[0]?.reconnect ?? null).toBeNull();
+    const pane = store.getState().tabs.find((t) => t.tmux?.windowId === "@0");
+    expect(pane?.status).toBe("error");
+    expect(pane?.connectionProgress?.retryable).toBe(true);
+  });
+});

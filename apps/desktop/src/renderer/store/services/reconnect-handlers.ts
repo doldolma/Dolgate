@@ -194,4 +194,41 @@ export function registerReconnectHandlers(): void {
         .portForwards.some((rule) => rule.id === ruleId);
     },
   });
+
+  // --- tmux control 세션 (key = group.id, meta.hostId) ---
+  // control 세션은 그룹 형성 시 탭이 사라져 tab 기반 재연결을 못 탄다. 그룹 단위로
+  // 재연결하고, 새 control 세션이 붙으면 handleTmuxLayoutChange 가 windowId 기준으로
+  // 그룹/워크스페이스/패인을 새 controlSessionId 로 rebind 한다(stable pane id 로 xterm 유지).
+  registerReconnectHandler("tmux", {
+    renderScheduled(groupId, info) {
+      appStore
+        .getState()
+        .applyTmuxGroupReconnecting(
+          groupId,
+          reconnectSummary(info),
+          reconnectMessage(info),
+        );
+    },
+    async perform(groupId, meta) {
+      const hostId = typeof meta.hostId === "string" ? meta.hostId : null;
+      if (!hostId) {
+        return;
+      }
+      if (!appStore.getState().tmuxGroups.some((g) => g.id === groupId)) {
+        return;
+      }
+      // tmuxCommand 생략 → Go 가 attach-우선 기본 명령으로 살아있는 서버 세션에 재attach.
+      // cols/rows 는 기본값; 패인 mount 후 일반 resize 흐름이 실제 크기로 재동기화한다.
+      await appStore
+        .getState()
+        .connectHost(hostId, 120, 32, undefined, true, undefined);
+    },
+    renderGaveUp(groupId, info) {
+      const message = `tmux 재연결에 실패했습니다 (${info.attempts}회 시도). 다시 연결해 주세요.`;
+      appStore.getState().applyTmuxGroupReconnectGaveUp(groupId, message);
+    },
+    isStillPresent(groupId) {
+      return appStore.getState().tmuxGroups.some((g) => g.id === groupId);
+    },
+  });
 }

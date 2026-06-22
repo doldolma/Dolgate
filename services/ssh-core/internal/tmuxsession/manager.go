@@ -29,6 +29,7 @@ const sessionPrefix = "tmux:"
 type Manager struct {
 	emit       EventEmitter
 	emitStream StreamEmitter
+	config     sshsession.ManagerConfig
 
 	mu       sync.RWMutex
 	controls map[string]*controlHandle // controlSessionID -> handle
@@ -117,9 +118,32 @@ func (h *controlHandle) paneHandshake(paneID string) *autocomplete.Handshake {
 const listWindowsCommand = "list-windows -F \"#{window_id} #{window_index} #{window_active} #{window_name} #{window_visible_layout}\"\n"
 
 func NewManager(emit EventEmitter, stream StreamEmitter) *Manager {
+	return NewManagerWithConfig(emit, stream, sshsession.ManagerConfig{})
+}
+
+// NewManagerWithConfig 는 keepalive 등 설정을 받아 Manager 를 만든다. 0 값 필드는
+// SSH 세션(sshsession)과 동일한 기본값으로 채워, tmux control 채널도 같은 cadence
+// (30s probe, 연속 3회 실패)로 죽은 소켓을 감지한다.
+func NewManagerWithConfig(emit EventEmitter, stream StreamEmitter, config sshsession.ManagerConfig) *Manager {
+	if config.TCPDialTimeout == 0 {
+		config.TCPDialTimeout = 10 * time.Second
+	}
+	if config.TCPKeepAliveInterval == 0 {
+		config.TCPKeepAliveInterval = 30 * time.Second
+	}
+	if config.SSHKeepAliveInterval == 0 {
+		config.SSHKeepAliveInterval = 30 * time.Second
+	}
+	if config.SSHKeepAliveMaxFailures <= 0 {
+		config.SSHKeepAliveMaxFailures = 3
+	}
+	if config.SSHKeepAliveProbeTimeout == 0 {
+		config.SSHKeepAliveProbeTimeout = 10 * time.Second
+	}
 	return &Manager{
 		emit:       emit,
 		emitStream: stream,
+		config:     config,
 		controls:   make(map[string]*controlHandle),
 	}
 }
@@ -156,7 +180,10 @@ func (m *Manager) Connect(sessionID, requestID string, payload coretypes.Connect
 		TrustedHostKeyBase64:  payload.TrustedHostKeyBase64,
 		TrustedHostKeysBase64: payload.TrustedHostKeysBase64,
 		Jump:                  sshconn.JumpTargetFromCore(payload.Jump),
-	}, sshconn.Config{}, func(sshconn.InteractiveChallenge) ([]string, error) {
+	}, sshconn.Config{
+		TCPDialTimeout:       m.config.TCPDialTimeout,
+		TCPKeepAliveInterval: m.config.TCPKeepAliveInterval,
+	}, func(sshconn.InteractiveChallenge) ([]string, error) {
 		return nil, fmt.Errorf("keyboard-interactive not supported for tmux control mode")
 	})
 	if err != nil {
@@ -230,6 +257,12 @@ func (m *Manager) Connect(sessionID, requestID string, payload coretypes.Connect
 		Payload:   coretypes.StatusPayload{Status: "connected"},
 	})
 	go m.stream(handle, stdout)
+	if m.config.SSHKeepAliveInterval > 0 {
+		// control 채널에도 app-level keepalive 를 돌려 죽은 소켓을 커널 TCP 타임아웃
+		// (~100-300s)보다 빨리(~30-90s) 감지한다. 연속 실패 시 reason="keepalive" 로
+		// 닫혀 renderer 가 tmux 그룹을 자동 재연결한다(SSH 세션과 동일).
+		go m.keepAlive(handle)
+	}
 	// 초기 layout을 직접 쿼리한다(아래 %begin~%end 응답에서 layout 이벤트 합성).
 	_ = handle.writeStdin(listWindowsCommand)
 	// 원격 tmux 세션 목록도 1회 조회해 emit(푸터 세션 메뉴 초기 채움). 보조 exec 채널.
@@ -611,6 +644,55 @@ func (m *Manager) closeSession(controlID, message, reason string) {
 		SessionID: controlID,
 		Payload:   coretypes.ClosedPayload{Message: message, Reason: reason},
 	})
+}
+
+// keepAlive 는 control 채널 위에서 주기적으로 probe 를 보내 죽은 소켓을 감지한다
+// (sshsession.keepAlive 와 동일 로직, controlHandle 단위). 단발 블립으로 멀쩡한
+// 세션을 죽이지 않도록 연속 실패가 임계값에 도달해야 reason="keepalive" 로 닫는다.
+func (m *Manager) keepAlive(handle *controlHandle) {
+	ticker := time.NewTicker(m.config.SSHKeepAliveInterval)
+	defer ticker.Stop()
+
+	consecutiveFailures := 0
+	for {
+		select {
+		case <-handle.closed:
+			return
+		case <-ticker.C:
+			if m.sendKeepAliveProbe(handle) {
+				consecutiveFailures = 0
+				continue
+			}
+			consecutiveFailures++
+			if consecutiveFailures >= m.config.SSHKeepAliveMaxFailures {
+				m.closeSession(
+					handle.id,
+					fmt.Sprintf("tmux keepalive failed after %d attempts", consecutiveFailures),
+					"keepalive",
+				)
+				return
+			}
+		}
+	}
+}
+
+// sendKeepAliveProbe 는 probe 한 번을 보내고 타임아웃 내 round-trip 성공 여부를 반환한다.
+// SendRequest 를 고루틴으로 감싸 커널 TCP 타임아웃에 끌려가지 않고 간격 기반으로 감지한다.
+func (m *Manager) sendKeepAliveProbe(handle *controlHandle) bool {
+	resultCh := make(chan error, 1)
+	go func() {
+		_, _, err := handle.client.SendRequest("keepalive@openssh.com", true, nil)
+		resultCh <- err
+	}()
+	select {
+	case err := <-resultCh:
+		return err == nil
+	case <-time.After(m.config.SSHKeepAliveProbeTimeout):
+		return false
+	case <-handle.closed:
+		// 종료 중이면 실패로 치지 않는다(곧 keepAlive 루프가 빠져나간다).
+		return true
+	}
 }
 
 // --- sshSessionManager 인터페이스의 나머지(tmux 에서는 미지원/무의미) ---

@@ -148,7 +148,15 @@ import {
 } from "../utils";
 import { createBootstrapSyncServices } from "../services/bootstrap-sync";
 import { updateStoredSshUsername } from "../services/credential-retry";
-import { cancelReconnect } from "../services/reconnect-orchestrator";
+import {
+  cancelReconnect,
+  isReconnecting,
+} from "../services/reconnect-orchestrator";
+
+// 재연결로 control 세션이 교체(old→new)되면 서버 tmux 가 재부팅돼 새 세션일 수 있어
+// 일부 window 가 다시 안 나타난다. list-windows rebind burst 가 끝난 뒤(디바운스) 옛
+// controlSessionId 에 남은(=재출현 안 한) workspace 만 1회 정리한다(고스트 윈도우 제거).
+const tmuxRebindPruneTimers = new Map<string, ReturnType<typeof setTimeout>>();
 import { createContainersServices } from "../services/containers";
 import { createSessionServices } from "../services/session";
 import { createSftpServices } from "../services/sftp";
@@ -267,6 +275,26 @@ export function createSessionSlice(deps: SliceDeps): SessionSlice {
             if (paneSessionIds.length === 0) {
               return;
             }
+            // 재연결 rebind 판별은 set 밖에서 한다(cancelReconnect/prune 은 side-effect).
+            const owningBefore = get().workspaces.find(
+              (w) => w.tmux?.windowId === windowId,
+            );
+            const oldControlSessionId = owningBefore?.tmux?.controlSessionId;
+            const isControlMigration = Boolean(
+              oldControlSessionId && oldControlSessionId !== controlSessionId,
+            );
+            const reconnectingGroup =
+              get().tmuxGroups.find(
+                (g) => g.controlSessionId === controlSessionId,
+              ) ??
+              (oldControlSessionId
+                ? get().tmuxGroups.find(
+                    (g) => g.controlSessionId === oldControlSessionId,
+                  )
+                : undefined);
+            const wasReconnecting = reconnectingGroup
+              ? isReconnecting(reconnectingGroup.id)
+              : false;
             set((state) => {
               const existing = new Set(state.tabs.map((t) => t.sessionId));
               const live = new Set(paneSessionIds);
@@ -386,6 +414,8 @@ export function createSessionSlice(deps: SliceDeps): SessionSlice {
                         // 세션명은 layout-change payload(handle.sessionName)로 따라온다.
                         // 비어 있으면 기존 값 유지(호스트명 fallback 클로버 방지).
                         sessionName: meta?.sessionName || g.sessionName,
+                        // rebind = 새 control 세션이 붙었다 → 재연결 상태 해제.
+                        reconnect: null,
                       }
                     : g,
                 );
@@ -457,6 +487,26 @@ export function createSessionSlice(deps: SliceDeps): SessionSlice {
                   : {}),
               };
             });
+            // 재연결 성공: 예약 취소(패인은 위 rebind 로 새 'connected' 탭이 됐다).
+            if (wasReconnecting && reconnectingGroup) {
+              cancelReconnect(reconnectingGroup.id, "reconnected");
+            }
+            // 서버 재부팅 등으로 control 세션이 교체됐으면, list-windows burst 가 끝난
+            // 뒤(디바운스) 옛 controlSessionId 에 남은 고스트 workspace 를 1회 정리한다.
+            if (isControlMigration && oldControlSessionId) {
+              const oldId = oldControlSessionId;
+              const prev = tmuxRebindPruneTimers.get(oldId);
+              if (prev) {
+                clearTimeout(prev);
+              }
+              tmuxRebindPruneTimers.set(
+                oldId,
+                setTimeout(() => {
+                  tmuxRebindPruneTimers.delete(oldId);
+                  get().removeTmuxWorkspacesLocal(oldId);
+                }, 400),
+              );
+            }
           },
     openLocalTerminal: async (cols, rows) => {
             await startLocalTerminalFlow(set, get, cols, rows);
@@ -1443,6 +1493,13 @@ export function createSessionSlice(deps: SliceDeps): SessionSlice {
             const controlSessionId = workspace.tmux.controlSessionId;
             // 닫는 동안 도착하는 늦은 layout-change 가 워크스페이스를 되살리지 못하게 가드.
             markTmuxControlSessionClosed(controlSessionId);
+            // 예약된 rebind prune 타이머도 취소(detach 가 자동 prune 보다 앞섰을 때).
+            const pendingDetachPrune =
+              tmuxRebindPruneTimers.get(controlSessionId);
+            if (pendingDetachPrune) {
+              clearTimeout(pendingDetachPrune);
+              tmuxRebindPruneTimers.delete(controlSessionId);
+            }
 
             // detach-client 는 control 채널 전체(이 control 세션의 모든 window)를 분리한다.
             // 그래서 같은 controlSessionId 를 공유하는 모든 workspace(=window)를 함께 정리한다.
@@ -1460,6 +1517,13 @@ export function createSessionSlice(deps: SliceDeps): SessionSlice {
               if (tab) {
                 cancelReconnect(tab.stableId, "workspace-closed");
               }
+            }
+            // 그룹 단위 재연결 예약도 취소(재연결 갭 중 detach 가 그룹을 되살리지 못하게).
+            const detachGroup = get().tmuxGroups.find(
+              (g) => g.controlSessionId === controlSessionId,
+            );
+            if (detachGroup) {
+              cancelReconnect(detachGroup.id, "workspace-closed");
             }
             // detach 는 control 세션 단위 동작이다. 임의의 pane 가상 sessionId 한 개로
             // control 채널에 detach-client 를 보내면 Go 가 채널을 정리한다(kill-pane 미발생).
@@ -1526,6 +1590,16 @@ export function createSessionSlice(deps: SliceDeps): SessionSlice {
             // 닫혔으므로 tmux 명령은 보내지 않고 window workspace/pane 탭만 제거한다.
             // windowId 가 있으면 그 window 만, 없으면(=exit) controlSessionId 의 모든 window.
             // 세션의 window 가 모두 사라지면 그룹·상단 탭까지 제거한다.
+            // 이 control 세션에 예약된 rebind prune 타이머가 있으면 취소한다(수동 정리가
+            // 자동 prune 보다 앞섰음 → 좀비 타이머가 비어버린 세션을 건드리지 않게).
+            const pendingPrune = tmuxRebindPruneTimers.get(controlSessionId);
+            if (pendingPrune) {
+              clearTimeout(pendingPrune);
+              tmuxRebindPruneTimers.delete(controlSessionId);
+            }
+            const groupBefore = get().tmuxGroups.find(
+              (g) => g.controlSessionId === controlSessionId,
+            );
             set((state) => {
               const targets = state.workspaces.filter(
                 (item) =>
@@ -1605,6 +1679,67 @@ export function createSessionSlice(deps: SliceDeps): SessionSlice {
                   (tab) => !allSessionIds.includes(tab.sessionId),
                 ),
                 activeWorkspaceTab: nextActive,
+              };
+            });
+            // 그룹이 통째로 제거됐으면 예약된 재연결도 취소(좀비 방지).
+            if (
+              groupBefore &&
+              !get().tmuxGroups.some((g) => g.id === groupBefore.id)
+            ) {
+              cancelReconnect(groupBefore.id, "tmux-group-removed");
+            }
+          },
+    applyTmuxGroupReconnecting: (groupId, summary, message) => {
+            set((state) => {
+              const group = state.tmuxGroups.find((g) => g.id === groupId);
+              if (!group) {
+                return {};
+              }
+              const controlSessionId = group.controlSessionId;
+              const progress = createConnectionProgress("reconnecting", message);
+              return {
+                tmuxGroups: state.tmuxGroups.map((g) =>
+                  g.id === groupId ? { ...g, reconnect: summary } : g,
+                ),
+                // 갭 동안 패인 탭을 'connecting'(재연결 중 오버레이)으로. 재연결 성공 시
+                // handleTmuxLayoutChange 가 새 'connected' 패인 탭으로 교체한다.
+                tabs: state.tabs.map((tab) =>
+                  tab.tmux?.controlSessionId === controlSessionId
+                    ? {
+                        ...tab,
+                        status: "connecting" as const,
+                        connectionProgress: progress,
+                        lastEventAt: new Date().toISOString(),
+                      }
+                    : tab,
+                ),
+              };
+            });
+          },
+    applyTmuxGroupReconnectGaveUp: (groupId, message) => {
+            set((state) => {
+              const group = state.tmuxGroups.find((g) => g.id === groupId);
+              if (!group) {
+                return {};
+              }
+              const controlSessionId = group.controlSessionId;
+              const progress = createConnectionProgress("reconnecting", message, {
+                retryable: true,
+              });
+              return {
+                tmuxGroups: state.tmuxGroups.map((g) =>
+                  g.id === groupId ? { ...g, reconnect: null } : g,
+                ),
+                tabs: state.tabs.map((tab) =>
+                  tab.tmux?.controlSessionId === controlSessionId
+                    ? {
+                        ...tab,
+                        status: "error" as const,
+                        connectionProgress: progress,
+                        lastEventAt: new Date().toISOString(),
+                      }
+                    : tab,
+                ),
               };
             });
           },

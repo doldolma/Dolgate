@@ -11,7 +11,7 @@
 //     실패(또 다른 closed/error) → runtimeEventSlice가 scheduleReconnect() 재호출
 //     → attempt 증가, maxAttempts 초과 시 handler.renderGaveUp().
 
-export type ReconnectKind = "session" | "sftp" | "portForward";
+export type ReconnectKind = "session" | "sftp" | "portForward" | "tmux";
 
 export type ReconnectMeta = Record<string, unknown>;
 

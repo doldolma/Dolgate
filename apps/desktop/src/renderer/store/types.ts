@@ -43,6 +43,7 @@ import type {
   SftpPaneId,
   SftpPrincipal,
   SecretMetadataRecord,
+  TerminalReconnectState,
   TerminalTab,
   TransferJob,
   TransferJobEvent,
@@ -138,6 +139,11 @@ export interface TmuxSessionGroup {
   hostId?: string | null;
   /** 원격 tmux 세션 목록(라이브; %sessions-changed 로 갱신). 세션 메뉴 표시용. */
   sessions?: TmuxSessionInfo[];
+  /**
+   * 자동 재연결 진행 상태(비정상 단절 시). null/undefined 면 정상 연결. control
+   * 세션은 그룹 형성 시 탭이 사라지므로 재연결 상태를 그룹에 둔다(SSH 탭의 reconnect 와 대응).
+   */
+  reconnect?: TerminalReconnectState | null;
 }
 
 // tmux 명령 프롬프트 오버레이 상태(Ctrl-b : / $ / ,). 텍스트 입력이 필요한 명령에 쓴다.
@@ -759,6 +765,14 @@ interface AppStateParts {
   detachTmuxWorkspace: (workspaceId: string) => Promise<void>;
   /** tmux window-close/exit 후 로컬 workspace·pane 탭 정리(명령 미전송). windowId 생략 시 controlSessionId 전체. 윈도우가 모두 사라지면 그룹/상단탭도 제거. */
   removeTmuxWorkspacesLocal: (controlSessionId: string, windowId?: string) => void;
+  /** 자동 재연결 진행 표시: 그룹의 reconnect 요약 + 패인 탭을 'connecting'(재연결 중)으로. */
+  applyTmuxGroupReconnecting: (
+    groupId: string,
+    summary: TerminalReconnectState,
+    message: string,
+  ) => void;
+  /** 자동 재연결 포기/끊김 확정: 그룹 reconnect 해제 + 패인 탭을 'error'(수동 재시도)로. */
+  applyTmuxGroupReconnectGaveUp: (groupId: string, message: string) => void;
   /** 그룹 내에서 활성 tmux window 를 전환한다(select-window + group.activeWorkspaceId). */
   selectTmuxWindow: (workspaceId: string) => void;
   /** tmux window 이름을 바꾼다(rename-window). 결과는 %window-renamed 로 되돌아온다. */
@@ -1032,6 +1046,8 @@ export type SessionSlice = Pick<
   | "tmuxNewWindowInWorkspace"
   | "detachTmuxWorkspace"
   | "removeTmuxWorkspacesLocal"
+  | "applyTmuxGroupReconnecting"
+  | "applyTmuxGroupReconnectGaveUp"
   | "selectTmuxWindow"
   | "renameTmuxWindow"
   | "applyTmuxWindowRenamed"

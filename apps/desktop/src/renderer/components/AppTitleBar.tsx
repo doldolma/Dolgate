@@ -79,6 +79,8 @@ type TitlebarDynamicItem =
       title: string;
       windowCount: number;
       active: boolean;
+      /** 자동 재연결 진행 중(group.reconnect != null) — 탭에 "재연결 중" 표시. */
+      reconnecting: boolean;
     };
 
 const TAB_DRAG_MIME = 'application/x-dolssh-tab-item';
@@ -303,7 +305,8 @@ export function AppTitleBar({
                 (workspace) =>
                   workspace.tmux?.controlSessionId === group.controlSessionId,
               ).length,
-              active: activeWorkspaceTab === `tmuxgrp:${group.id}`
+              active: activeWorkspaceTab === `tmuxgrp:${group.id}`,
+              reconnecting: group.reconnect != null
             } satisfies TitlebarDynamicItem;
           }
 
@@ -642,12 +645,29 @@ export function AppTitleBar({
                     getTitlebarDynamicTabButtonClass(item.active),
                   )}
                   onClick={() => onSelectTmuxGroup(item.tmuxGroupId)}
-                  title={`tmux 세션 · 윈도우 ${item.windowCount}개`}
+                  title={
+                    item.reconnecting
+                      ? 'tmux 세션 재연결 중…'
+                      : `tmux 세션 · 윈도우 ${item.windowCount}개`
+                  }
                 >
-                  <span className="mr-1 text-[var(--accent)]" aria-hidden>
-                    ⊟
+                  <span
+                    className={cn(
+                      'mr-1',
+                      item.reconnecting
+                        ? 'animate-spin text-[var(--warning,#d97706)]'
+                        : 'text-[var(--accent)]',
+                    )}
+                    aria-hidden
+                  >
+                    {item.reconnecting ? '↻' : '⊟'}
                   </span>
                   <span className="truncate">{item.title}</span>
+                  {item.reconnecting && (
+                    <span className="ml-1 flex-none text-[10px] text-[var(--text-muted,#888)]">
+                      재연결 중
+                    </span>
+                  )}
                 </TabButton>
                 <IconButton
                   size="sm"

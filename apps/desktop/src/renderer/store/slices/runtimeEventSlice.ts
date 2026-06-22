@@ -1114,6 +1114,49 @@ export function createRuntimeEventSlice(deps: SliceDeps): RuntimeEventSlice {
               return;
             }
     
+            // tmux control 세션의 비정상 단절: control 세션은 그룹 형성 시 탭이 제거돼
+            // shouldAutoReconnectSession(탭 필요)을 못 탄다. 그룹을 controlSessionId 로
+            // 찾아 그룹 단위 전용 재연결을 건다. 정상 종료(client/remote-exit)는 detach/
+            // tmuxExit 가 이미 그룹을 정리하므로 여기선 보통 매칭되지 않는다.
+            if (event.type === "closed") {
+              const tmuxGroup = get().tmuxGroups.find(
+                (group) => group.controlSessionId === sessionId,
+              );
+              if (tmuxGroup) {
+                const tmuxReason = String(
+                  (event.payload as { reason?: unknown } | undefined)?.reason ??
+                    "",
+                );
+                const tmuxAbnormal =
+                  tmuxReason === "transport" || tmuxReason === "keepalive";
+                if (
+                  tmuxAbnormal &&
+                  get().settings.autoReconnectEnabled &&
+                  tmuxGroup.hostId
+                ) {
+                  // scheduleReconnect → handler.renderScheduled 가 그룹/패인을
+                  // 재연결 중으로 표시한다(applyTmuxGroupReconnecting).
+                  scheduleReconnect({
+                    kind: "tmux",
+                    key: tmuxGroup.id,
+                    meta: { hostId: tmuxGroup.hostId },
+                  });
+                } else if (tmuxAbnormal) {
+                  // 자동 재연결 off / 호스트 불명 → 패인을 끊김(수동 재시도) 상태로.
+                  get().applyTmuxGroupReconnectGaveUp(
+                    tmuxGroup.id,
+                    "연결이 끊어졌습니다. 다시 연결해 주세요.",
+                  );
+                } else {
+                  // 정상 종료(client/remote-exit): %exit 는 Go 가 stream 을 즉시 닫아
+                  // 늦은 layout-change 가 없으므로 recently-closed 가드 없이 안전하다.
+                  // 보통 detach/tmuxExit 가 이미 그룹을 정리했고 여기선 방어적 정리다.
+                  get().removeTmuxWorkspacesLocal(sessionId);
+                }
+                return;
+              }
+            }
+
             const resolvedShellKind =
               typeof event.payload?.shellKind === "string"
                 ? event.payload.shellKind.trim() || undefined

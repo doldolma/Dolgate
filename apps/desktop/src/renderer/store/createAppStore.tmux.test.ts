@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createAppStore } from "./createAppStore";
 import { createMockApi } from "./createAppStore.test-support";
 import { asWorkspaceTabId } from "./utils";
@@ -337,5 +337,84 @@ describe("createAppStore tmux session grouping", () => {
     // 터미널 remount 방지: pane stableId 는 windowId 기반이라 재연결에도 불변.
     const rebound = state.tabs.find((tab) => tab.tmux?.windowId === "@0");
     expect(rebound?.stableId).toBe(firstStableId);
+  });
+
+  it("toggles group.reconnect + pane status via applyTmuxGroupReconnecting/GaveUp", () => {
+    const store = createAppStore(createMockApi());
+    store.getState().handleTmuxLayoutChange(CTL, "@0", layoutFor(0), { index: 0 });
+    const groupId = store.getState().tmuxGroups[0]!.id;
+
+    store.getState().applyTmuxGroupReconnecting(
+      groupId,
+      { attempt: 2, maxAttempts: 10, nextAttemptAt: 0, waitingForNetwork: false },
+      "재연결 중…",
+    );
+    expect(store.getState().tmuxGroups[0]?.reconnect?.attempt).toBe(2);
+    expect(
+      store.getState().tabs.find((t) => t.tmux?.windowId === "@0")?.status,
+    ).toBe("connecting");
+
+    store.getState().applyTmuxGroupReconnectGaveUp(groupId, "끊김");
+    expect(store.getState().tmuxGroups[0]?.reconnect ?? null).toBeNull();
+    expect(
+      store.getState().tabs.find((t) => t.tmux?.windowId === "@0")?.status,
+    ).toBe("error");
+  });
+
+  it("clears group.reconnect + restores pane status when the control session rebinds", () => {
+    const store = createAppStore(createMockApi());
+    store.getState().handleTmuxLayoutChange(CTL, "@0", layoutFor(0), { index: 0 });
+    const groupId = store.getState().tmuxGroups[0]!.id;
+    store.getState().applyTmuxGroupReconnecting(
+      groupId,
+      { attempt: 1, maxAttempts: 10, nextAttemptAt: 0, waitingForNetwork: false },
+      "재연결 중…",
+    );
+    expect(store.getState().tmuxGroups[0]?.reconnect).not.toBeNull();
+
+    // 새 control 세션 rebind(재연결 성공) → reconnect 해제 + 패인 'connected'.
+    store
+      .getState()
+      .handleTmuxLayoutChange("ctl-2", "@0", layoutFor(0), { index: 0 });
+    const state = store.getState();
+    expect(state.tmuxGroups[0]?.controlSessionId).toBe("ctl-2");
+    expect(state.tmuxGroups[0]?.reconnect ?? null).toBeNull();
+    expect(state.tabs.find((t) => t.tmux?.windowId === "@0")?.status).toBe(
+      "connected",
+    );
+  });
+
+  it("prunes orphaned windows of the old control session after reconnect to a fresh tmux (reboot)", () => {
+    vi.useFakeTimers();
+    try {
+      const store = createAppStore(createMockApi());
+      const api = store.getState();
+      api.handleTmuxLayoutChange("rb-old", "@0", layoutFor(0), { index: 0 });
+      api.handleTmuxLayoutChange("rb-old", "@1", layoutFor(1), { index: 1 });
+      expect(store.getState().workspaces).toHaveLength(2);
+
+      // 서버 재부팅 → 새 control 세션에서 @0 만 재출현(@1 은 사라짐).
+      store
+        .getState()
+        .handleTmuxLayoutChange("rb-new", "@0", layoutFor(0), { index: 0 });
+      // 디바운스 전: 아직 @1(rb-old) 고스트 workspace 가 남아 있다.
+      expect(
+        store
+          .getState()
+          .workspaces.some((w) => w.tmux?.controlSessionId === "rb-old"),
+      ).toBe(true);
+
+      vi.advanceTimersByTime(500);
+
+      const state = store.getState();
+      expect(state.tmuxGroups).toHaveLength(1);
+      expect(state.tmuxGroups[0]?.controlSessionId).toBe("rb-new");
+      // 고스트 @1 제거됨; @0(rb-new)만 남음.
+      expect(state.workspaces).toHaveLength(1);
+      expect(state.workspaces[0]?.tmux?.windowId).toBe("@0");
+      expect(state.workspaces[0]?.tmux?.controlSessionId).toBe("rb-new");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
