@@ -114,7 +114,7 @@ SFTP 패널에서 원격 텍스트 파일을 더블클릭하거나 우클릭 **�
 
 ## tmux control mode
 
-tmux는 보통 터미널에서 prefix 단축키로만 다뤄야 해 진입장벽이 높습니다. Dolgate는 tmux를 **GUI로** 보여줍니다 — 원격 tmux의 윈도우는 상단 탭으로, 패인은 분할 화면으로 렌더하고, 마우스(클릭·경계 드래그)나 익숙한 `Ctrl-b` 단축키로 조작합니다. 단축키를 외우지 않아도 tmux 세션을 쓸 수 있고, 연결이 끊겨도 서버 세션은 살아 있어(detach) 다시 붙으면 그대로 이어집니다.
+tmux는 보통 터미널에서 prefix 단축키로만 다뤄야 해 진입장벽이 높습니다. Dolgate는 원격 tmux의 윈도우를 상단 탭으로, 패인을 분할 화면으로 보여주고, 마우스(클릭·경계 드래그)나 익숙한 `Ctrl-b` 단축키로 조작합니다. 단축키를 외우지 않아도 tmux 세션을 쓸 수 있고, 연결이 끊겨도 서버 세션은 살아 있어(detach) 다시 붙으면 그대로 이어집니다.
 
 호스트 우클릭 메뉴의 **tmux로 연결**을 고르면 tmux control mode(`tmux -CC`)로 붙습니다. 일반 SSH 자격증명을 그대로 쓰고 원격엔 tmux만 있으면 됩니다.
 
@@ -198,4 +198,4 @@ aws --version
 session-manager-plugin --version
 ```
 
-추가 운영 전제와 권한 예시는 루트 [README.md](/Users/heodoyeong/develop/dolsh/README.md)와 [build-and-deploy](./build-and-deploy.md) 문서를 참고하면 됩니다.
+추가 운영 전제와 IAM 권한 예시는 [AWS / SSM 설정 가이드](./aws.md)를 참고하면 됩니다.

@@ -1,6 +1,7 @@
 {
   "name": "dolssh",
   "version": "1.7.2",
+  "license": "MIT",
   "private": true,
   "workspaces": [
     "apps/*",

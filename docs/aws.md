@@ -1,0 +1,178 @@
+# AWS / SSM 설정 가이드
+
+Dolgate의 AWS 관련 기능(EC2 import, SSM shell 연결, AWS SFTP, SSM 포트 포워딩, ECS Exec/터널링)을 쓰기 위한 사전 조건과 IAM 권한 예시를 정리합니다.
+빠른 점검만 필요하면 루트 [README](../README.md#aws--ssm-사용-전-확인)의 요약을 참고하세요.
+
+## 사용 전 확인
+
+Dolgate의 AWS 관련 기능은 환경에 따라 로컬 `aws` CLI와 `session-manager-plugin`, 그리고 SSM managed 인스턴스 조건에 의존합니다.
+다음 기능들은 두 도구가 모두 PATH에서 실행 가능해야 정상 동작합니다.
+
+- AWS EC2 Import
+- AWS SSM shell 연결
+- AWS SFTP
+- AWS SSM 포트 포워딩
+- AWS 기반 container tunnel
+
+최소 확인:
+
+```bash
+aws --version
+session-manager-plugin --version
+```
+
+macOS 예시:
+
+```bash
+brew install awscli
+brew install --cask session-manager-plugin
+```
+
+추가로 AWS Import는 대상 인스턴스가 **SSM managed instance** 상태여야 하고, SSH username/port 자동 확인을 위해 SSM Run Command를 사용합니다.
+현재 AWS Import는 **Linux/UNIX 계열 EC2 인스턴스 기준**으로 동작하며, Windows 인스턴스는 SSH import 대상으로 지원하지 않습니다.
+
+## AWS 권한 예시
+
+AWS/SSM 계열 권한은 아래 두 범주로 구분합니다.
+
+1. **앱을 실행하는 사용자/역할 권한**
+   Dolgate가 로컬의 `aws` CLI로 호출하는 권한입니다.
+2. **대상 리소스 쪽 역할**
+   EC2 인스턴스 프로파일이나 ECS task role처럼, 대상 쪽에 붙어 있어야 하는 권한입니다.
+
+### 1) 사용자/역할 권한
+
+다음 예시는 Dolgate를 실행하는 AWS 프로필 사용자 또는 AssumeRole 대상 역할 기준입니다.
+운영 환경에서는 리전, 인스턴스, 문서 이름 기준으로 범위를 축소하는 구성을 권장합니다.
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": [
+        "sts:GetCallerIdentity",
+        "ec2:DescribeRegions",
+        "ec2:DescribeInstances",
+        "ssm:DescribeInstanceInformation",
+        "ssm:StartSession",
+        "ssm:TerminateSession",
+        "ssm:SendCommand",
+        "ssm:GetCommandInvocation"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "ssmmessages:OpenDataChannel"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "ec2-instance-connect:SendSSHPublicKey"
+      ],
+      "Resource": "*"
+    }
+  ]
+}
+```
+
+권한 용도:
+
+- `sts:GetCallerIdentity`: 현재 프로필 인증 상태 확인
+- `ec2:DescribeRegions`, `ec2:DescribeInstances`: AWS import에서 프로필/리전/인스턴스 목록 조회
+- `ssm:DescribeInstanceInformation`: 인스턴스가 SSM managed 상태인지 확인
+- `ssm:StartSession`, `ssm:TerminateSession`, `ssmmessages:OpenDataChannel`: AWS shell, SFTP, 포트 포워딩, container tunnel
+- `ssm:SendCommand`, `ssm:GetCommandInvocation`: SSH username/port 자동 확인
+- `ec2-instance-connect:SendSSHPublicKey`: AWS SFTP 및 SSH-over-SSM 계열 연결에서 임시 공개키 주입
+
+최소 권한 정책을 구성할 때는 SSM document 기준 분리를 함께 고려합니다.
+Dolgate에서 사용하는 대표 문서는 아래와 같습니다.
+
+- `ssm:StartSession`: `AWS-StartPortForwardingSession`
+- `ssm:SendCommand`: `AWS-RunShellScript`
+
+최소 권한 구성에서는 `instance/*`뿐 아니라 해당 SSM document ARN도 함께 범위에 포함합니다.
+
+### 2) EC2 인스턴스 프로파일(Role)
+
+대상 EC2 인스턴스는 **SSM managed instance** 상태여야 합니다.
+가장 단순한 구성은 인스턴스 프로파일에 AWS 관리형 정책 `AmazonSSMManagedInstanceCore`를 연결하는 방식입니다.
+
+구성 기준:
+
+- 사용자/역할 권한: Dolgate가 `aws` CLI로 세션 시작, Run Command, 공개키 주입을 수행하는 데 필요한 권한
+- EC2 인스턴스 프로파일: SSM Agent가 Session Manager / Run Command를 처리하는 데 필요한 역할
+
+참고:
+
+- `ec2-instance-connect:SendSSHPublicKey`는 **사용자/역할 권한**에 해당합니다.
+- 인스턴스 측 구성에서는 개별 IAM 액션보다 **SSM Agent / 인스턴스 프로파일 / OS 지원 상태**가 우선 확인 대상입니다.
+- SSH-over-SSM 계열 기능은 Linux/UNIX 기반 인스턴스를 기준으로 설명합니다.
+
+## AWS ECS Exec 권한
+
+ECS Exec 권한도 일반 AWS/SSM 권한과 별도로 두 범주로 구분합니다.
+
+### 1) 사용자/역할 권한
+
+Dolgate에서 ECS `쉘 접속`을 실행하는 사용자/역할에는 최소한 아래 권한이 필요합니다.
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": [
+        "ecs:ExecuteCommand",
+        "ecs:DescribeTasks"
+      ],
+      "Resource": "*"
+    }
+  ]
+}
+```
+
+운영 환경에서는 ECS 리소스 조회를 위해 아래 읽기 권한을 함께 포함하는 구성이 일반적입니다.
+
+- `ecs:ListClusters`
+- `ecs:DescribeClusters`
+- `ecs:ListServices`
+- `ecs:DescribeServices`
+- `ecs:ListTasks`
+- `ecs:DescribeTaskDefinition`
+
+### 2) ECS task role
+
+ECS Exec는 **task role**이 올바르게 연결되어 있어야 합니다.
+아래 권한은 선택사항이 아니라 ECS Exec 동작 조건에 해당합니다.
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": [
+        "ssmmessages:CreateControlChannel",
+        "ssmmessages:CreateDataChannel",
+        "ssmmessages:OpenControlChannel",
+        "ssmmessages:OpenDataChannel"
+      ],
+      "Resource": "*"
+    }
+  ]
+}
+```
+
+추가 참고:
+
+- ECS 서비스/태스크에는 `enableExecuteCommand`가 활성화되어 있어야 합니다.
+- 위 `ssmmessages:*Channel` 권한은 **task execution role**이 아니라 **task role** 기준으로 확인합니다.
+- 컨테이너 이미지에 `/bin/sh` 또는 `bash`가 없으면 ECS Exec 연결 후 interactive shell이 즉시 종료될 수 있습니다.
+- AWS Console의 CloudShell 테스트에서 보이는 `cloudshell:ApproveCommand`는 Dolgate 앱 자체의 필수 권한에 포함되지 않습니다.
