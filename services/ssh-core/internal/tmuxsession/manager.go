@@ -45,6 +45,13 @@ type controlHandle struct {
 	// %begin~%end 블록(명령 응답) 수집 상태. list-windows 응답에서 layout을 추출한다.
 	collecting bool
 	collected  []string
+	// sawControl: control 프로토콜(% notification)이 한 번이라도 시작됐는지. 시작 전에
+	// 채널이 닫히면 원격에 tmux 가 없거나(-CC 미지원/명령 없음) 시작 실패로 보고 탭을
+	// 조용히 닫는 대신 에러로 표시한다. earlyOutput: 그때 셸이 내놓은 텍스트(예:
+	// "tmux: command not found")를 모아 에러 메시지에 싣는다. (둘 다 stream 고루틴
+	// 단독 접근 → 락 불필요.)
+	sawControl  bool
+	earlyOutput []byte
 	// 현재 attach 된 tmux 세션명(%session-changed 로 갱신). layout-change payload 에 실어
 	// renderer 가 세션 그룹 푸터를 호스트명 대신 세션명으로 그리게 한다(이벤트 순서 무관).
 	sessionName string
@@ -276,10 +283,26 @@ func (m *Manager) stream(handle *controlHandle, reader io.Reader) {
 		n, err := reader.Read(buffer)
 		if n > 0 {
 			for _, ev := range handle.parser.Feed(buffer[:n]) {
+				if ev.Kind != ControlOther {
+					handle.sawControl = true
+				} else if !handle.sawControl {
+					// tmux 시작 전 셸이 내놓는 텍스트(예: "tmux: command not found")를
+					// 모아둔다 — 시작 실패 시 에러 메시지에 싣는다.
+					if len(ev.Args) > 0 {
+						handle.appendEarlyOutput(ev.Args[0])
+					}
+				}
 				m.handleControlEvent(handle, ev)
 			}
 		}
 		if err != nil {
+			if !handle.sawControl {
+				// control 프로토콜이 한 번도 시작되지 않고 채널이 닫혔다 — 원격에 tmux 가
+				// 없거나(-CC 미지원/명령 없음) 시작에 실패한 것이다. 탭을 조용히 닫는 대신
+				// EventError 로 표시해 사용자가 원인(tmux 미설치 등)을 알 수 있게 한다.
+				m.failTmuxStart(handle)
+				return
+			}
 			// 정상 종료(%exit)는 ControlExit 이벤트에서 이미 remote-exit 로 닫는다.
 			// 여기까지 도달한 read 에러는 %exit 없이 채널이 끊긴 것 — 네트워크 단절
 			// 등 비정상 단절이므로 transport 로 분류해 renderer 가 탭을 유지한 채
@@ -624,7 +647,9 @@ func (m *Manager) getControl(controlID string) *controlHandle {
 	return m.controls[controlID]
 }
 
-func (m *Manager) closeSession(controlID, message, reason string) {
+// detachControl 은 맵에서 핸들을 제거하고 채널/세션/클라이언트를 1회 정리한다.
+// 이미 제거됐으면 nil 을 반환한다(중복 종료 no-op). 이벤트는 호출부가 emit 한다.
+func (m *Manager) detachControl(controlID string) *controlHandle {
 	m.mu.Lock()
 	handle := m.controls[controlID]
 	if handle != nil {
@@ -632,19 +657,64 @@ func (m *Manager) closeSession(controlID, message, reason string) {
 	}
 	m.mu.Unlock()
 	if handle == nil {
-		return
+		return nil
 	}
 	handle.closer.Do(func() {
 		close(handle.closed)
-		_ = handle.stdin.Close()
-		_ = handle.session.Close()
-		_ = handle.client.Close()
+		if handle.stdin != nil {
+			_ = handle.stdin.Close()
+		}
+		if handle.session != nil {
+			_ = handle.session.Close()
+		}
+		if handle.client != nil {
+			_ = handle.client.Close()
+		}
 	})
+	return handle
+}
+
+func (m *Manager) closeSession(controlID, message, reason string) {
+	if m.detachControl(controlID) == nil {
+		return
+	}
 	m.emit(coretypes.Event{
 		Type:      coretypes.EventClosed,
 		SessionID: controlID,
 		Payload:   coretypes.ClosedPayload{Message: message, Reason: reason},
 	})
+}
+
+// failTmuxStart 는 control 프로토콜이 시작되기 전에 채널이 닫혔을 때(=원격 tmux 부재/
+// 시작 실패) 호출된다. closeSession(EventClosed) 대신 EventError 를 emit 해 renderer 가
+// 탭을 제거하지 않고 에러 상태로 유지하게 한다. 메시지는 자동 재연결 분류기에서
+// transient 로 잡히지 않으므로(=재연결 루프 없음) 사용자가 수동으로 다시 시도한다.
+func (m *Manager) failTmuxStart(handle *controlHandle) {
+	if m.detachControl(handle.id) == nil {
+		return
+	}
+	msg := "원격 호스트에서 tmux 제어 모드를 시작하지 못했습니다. tmux 가 설치되어 있는지 확인하세요."
+	if detail := strings.TrimSpace(string(handle.earlyOutput)); detail != "" {
+		msg += " (" + detail + ")"
+	}
+	m.emit(coretypes.Event{
+		Type:      coretypes.EventError,
+		SessionID: handle.id,
+		Payload:   coretypes.ErrorPayload{Message: msg},
+	})
+}
+
+// appendEarlyOutput 은 control 프로토콜 시작 전 셸 출력 줄을 에러 메시지용으로 모은다
+// (과도 누적 방지 위해 상한). stream 고루틴 단독 접근.
+func (h *controlHandle) appendEarlyOutput(line string) {
+	line = strings.TrimSpace(line)
+	if line == "" || len(h.earlyOutput) >= 512 {
+		return
+	}
+	if len(h.earlyOutput) > 0 {
+		h.earlyOutput = append(h.earlyOutput, ' ')
+	}
+	h.earlyOutput = append(h.earlyOutput, line...)
 }
 
 // keepAlive 는 control 채널 위에서 주기적으로 probe 를 보내 죽은 소켓을 감지한다

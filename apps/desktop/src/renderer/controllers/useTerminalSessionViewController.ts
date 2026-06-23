@@ -985,7 +985,14 @@ export function useTerminalSessionViewController({
       unregisterTerminalHooks(stableId, terminalHooks);
       clearSessionCwd(liveSessionIdRef.current);
       // 안전망: 파괴 직전 스크롤백을 저장해, 같은 stableId로 재생성되면 복원한다.
-      saveScrollbackSnapshot(stableId, runtime.captureRestoreSnapshot());
+      // 단 tmux pane 은 제외한다 — 내용이 서버(tmux) 권위라 재attach 시 %output 으로
+      // 전체 화면을 다시 replay 한다. 스냅샷까지 복원하면 그 위에 replay 가 덧그려져
+      // 프롬프트가 누적된다(탭 닫았다 재연결할 때마다 "$ $ $"). 네트워크 끊김 자동
+      // 재연결은 pane 을 unmount 하지 않아(같은 stableId 유지) 이 경로를 타지 않으므로
+      // 스크롤백 보존에는 영향이 없다.
+      if (!liveIsTmuxPaneRef.current) {
+        saveScrollbackSnapshot(stableId, runtime.captureRestoreSnapshot());
+      }
       runtime.dispose();
       publishTerminalE2EState(liveSessionIdRef.current, null);
       runtimeRef.current = null;
