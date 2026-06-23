@@ -734,6 +734,21 @@ export function removeSessionFromState(
     }
   }
 
+  // 고정 탭(home/sftp/containers/settings)은 next-focus 최하위 우선순위. 닫을 동적 탭
+  // (세션/워크스페이스/tmux)이 남아 있는데 고정 탭으로 포커스가 튀면, Cmd+W 연타로
+  // 탭을 정리할 때 남은 탭이 있는데도 home 이 포커스돼 다음 Cmd+W 가 창을 닫아버린다.
+  // (return target 이 고정 탭을 가리켜도) 동적 탭이 남아 있으면 인접 동적 탭을 우선한다.
+  const nextIsDynamic =
+    nextActive.startsWith("session:") ||
+    nextActive.startsWith("workspace:") ||
+    nextActive.startsWith("tmuxgrp:");
+  if (!nextIsDynamic && nextTabStrip.length > 0) {
+    nextActive = resolveNextVisibleTab(
+      nextTabStrip,
+      standaloneIndex >= 0 ? standaloneIndex : nextTabStrip.length,
+    );
+  }
+
   return {
     tabs,
     sessionShareChatNotifications: clearSessionShareChatNotifications(

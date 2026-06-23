@@ -483,6 +483,20 @@ export function AppTitleBar({
           data-titlebar-tab-strip="true"
           className="flex min-w-0 items-center gap-[0.55rem] overflow-x-auto overflow-y-hidden px-[0.05rem] py-[0.02rem]"
           onScroll={updateTitlebarTabStripFades}
+          onWheel={(event) => {
+            // 탭이 많아 가로 오버플로우가 있을 때, 마우스 세로 휠을 가로 스크롤로
+            // 변환한다(데스크톱 마우스엔 가로 스크롤 수단이 없어 탭을 못 고르던 문제).
+            // 트랙패드 가로 스와이프(deltaX 우세)는 네이티브로 그대로 두고, 세로 휠
+            // (deltaY 우세)일 때만 가로로 돌린다. preventDefault 없이 scrollLeft 만
+            // 조정해 passive 리스너 경고를 피한다(타이틀바엔 세로 스크롤 대상이 없음).
+            const el = event.currentTarget;
+            if (el.scrollWidth <= el.clientWidth) {
+              return;
+            }
+            if (Math.abs(event.deltaY) > Math.abs(event.deltaX)) {
+              el.scrollLeft += event.deltaY;
+            }
+          }}
         >
           <Tabs className="shrink-0 bg-transparent p-0 shadow-none border-transparent gap-2">
             <div
