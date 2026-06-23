@@ -431,7 +431,10 @@ export function AppTitleBar({
   return (
     <header
       className={cn(
-        'flex min-h-12 items-center gap-4 border-b border-[var(--chrome-border)] bg-[linear-gradient(180deg,color-mix(in_srgb,var(--chrome-bg)_94%,white_6%),color-mix(in_srgb,var(--chrome-bg)_98%,black_2%))] px-[1rem] py-[0.3rem] text-[#f3f7fb] shadow-[inset_0_-1px_0_rgba(255,255,255,0.03)] [-webkit-app-region:drag] max-[760px]:px-[1rem] max-[760px]:pr-[0.8rem]',
+        // 헤더 자체는 no-drag. 스크롤되는 탭 스트립이 drag 영역 "안"에 있으면, 스트립을
+        // 스크롤한 뒤 창 드래그가 통째로 죽는 macOS Chromium 버그(electron #40610)가 난다.
+        // 그래서 drag 는 스트립의 형제인 빈 spacer 에만 준다(아래 min-w-16 flex-1).
+        'flex min-h-12 items-center gap-4 border-b border-[var(--chrome-border)] bg-[linear-gradient(180deg,color-mix(in_srgb,var(--chrome-bg)_94%,white_6%),color-mix(in_srgb,var(--chrome-bg)_98%,black_2%))] px-[1rem] py-[0.3rem] text-[#f3f7fb] shadow-[inset_0_-1px_0_rgba(255,255,255,0.03)] [-webkit-app-region:no-drag] max-[760px]:px-[1rem] max-[760px]:pr-[0.8rem]',
         desktopPlatform === 'darwin' && 'pl-[5.4rem] max-[1040px]:pl-[4.8rem] max-[760px]:px-[4.8rem] max-[760px]:pr-[0.8rem]',
       )}
     >
@@ -876,7 +879,7 @@ export function AppTitleBar({
         ) : null}
         </div>
       </div>
-      <div className="min-w-16 flex-1" />
+      <div className="min-w-16 flex-1 [-webkit-app-region:drag]" />
       <div className="relative flex items-center gap-[0.55rem] [-webkit-app-region:no-drag]">
         <div className="relative [-webkit-app-region:no-drag]" ref={updateMenuRef}>
           <IconButton
