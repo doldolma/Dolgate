@@ -23,7 +23,7 @@ const (
 
 // Dynamic-completion (host command) execution bounds.
 const (
-	CompletionTimeout  = 2 * time.Second
+	CompletionTimeout  = 4 * time.Second
 	MaxCompletionBytes = 256 * 1024
 )
 
