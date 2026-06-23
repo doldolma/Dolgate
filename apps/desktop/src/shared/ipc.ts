@@ -241,6 +241,12 @@ export interface DesktopConnectInput {
    * 비우면 Go 코어가 기본값(기존 세션 있으면 attach, 없으면 'dolgate' 생성)을 쓴다. tmux=true 일 때만 의미가 있다.
    */
   tmuxCommand?: string;
+  /**
+   * 보조채널로 감지한 원격 tmux 버전("3.0a","2.6" 등). Go 코어가 입력 인코딩(-H vs
+   * -l+키이름)과 refresh-client 인자 방언(콤마 vs WxH)을 버전별로 분기하는 데 쓴다.
+   * tmux=true 일 때만 의미가 있고, 비우면 코어가 최신 가정으로 동작한다.
+   */
+  tmuxVersion?: string;
 }
 
 export interface DesktopLocalConnectInput {
@@ -304,6 +310,9 @@ export interface ResolvedCoreConnectPayload {
   env?: HostEnvVar[];
   // true면 SSH 대신 mosh(UDP)로 연결한다. Go 코어의 ConnectPayload.UseMosh에 매핑된다.
   useMosh?: boolean;
+  // 감지된 원격 tmux 버전 문자열. Go 코어의 ConnectPayload.TmuxVersion(json: tmuxVersion)에
+  // 매핑돼 버전별 입력 인코딩/refresh-client 방언 분기에 쓰인다. tmuxConnect일 때만 의미.
+  tmuxVersion?: string;
 }
 
 export interface ResolvedLocalConnectPayload {

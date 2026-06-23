@@ -337,8 +337,12 @@ function buildTabHoverInfo(
     if (tab?.shellKind) {
       rows.push({ label: '셸', value: tab.shellKind });
     }
+    // "연결 경과"는 현재 실제로 연결된 동안만 의미가 있다. tmux control 연결은 SSH 가
+    // 붙는 순간 코어가 낙관적으로 connected 를 emit 해 connectedAt 이 찍히는데, 직후
+    // tmux 가 없어 실패하면 status 가 error 가 된다. 그 상태에서 경과시간이 계속 늘면
+    // 안 되므로 status==='connected' 일 때만 표시한다.
     const connectedAt = getSessionConnectedAt(item.sessionId);
-    if (connectedAt != null) {
+    if (connectedAt != null && tab?.status === 'connected') {
       rows.push({ label: '연결 경과', value: formatElapsed(connectedAt) });
     }
     if (tab?.commandState === 'running') {

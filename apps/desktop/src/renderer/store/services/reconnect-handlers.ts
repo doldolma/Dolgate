@@ -240,7 +240,18 @@ export function registerReconnectHandlers(): void {
       // 크기로 재동기화한다.
       await appStore
         .getState()
-        .connectHost(hostId, 120, 32, undefined, true, undefined, undefined, groupId);
+        .connectHost(
+          hostId,
+          120,
+          32,
+          undefined,
+          true,
+          undefined,
+          undefined,
+          groupId,
+          // 처음 띄울 때 감지한 버전을 재연결에도 넘긴다(구버전 입력 인코딩 유지).
+          group.tmuxVersion ?? undefined,
+        );
       // 이번 시도가 만든 control 세션 id 를 기록(다음 시도 시작 시 정리용).
       const attempt = findPendingConnectionAttemptByHost(
         appStore.getState(),

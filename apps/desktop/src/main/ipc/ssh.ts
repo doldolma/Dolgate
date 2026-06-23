@@ -199,6 +199,9 @@ export function registerSshIpcHandlers(ctx: MainIpcContext): void {
         // 무시해 jump 연결을 보장한다(잘못된 조합이 들어와도 안전하게 SSH로 폴백).
         useMosh: jump ? false : sshHost.useMosh === true,
         tmux: input.tmux === true,
+        // tmux control mode 진입 시 감지된 원격 tmux 버전을 코어로 전달해 버전별 입력
+        // 인코딩(-H vs -l)·refresh-client 방언(콤마 vs WxH)을 고르게 한다.
+        tmuxVersion: input.tmux === true ? input.tmuxVersion : undefined,
         hostId: sshHost.id,
         hostLabel: sshHost.label,
         title,

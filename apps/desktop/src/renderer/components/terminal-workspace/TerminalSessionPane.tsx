@@ -29,6 +29,13 @@ import { resolveConnectionFailurePresentation } from '../../store/utils';
 import { TerminalAutocompleteOverlay } from './TerminalAutocompleteOverlay';
 import { SnippetVariablesDialog } from './SnippetVariablesDialog';
 import type { CommandFinishedInfo } from '../../lib/command-notification';
+import { supportsTmuxControlMode } from '../../lib/tmux-version';
+
+// PASSTHROUGH_TMUX_COMMAND: control mode floor(2.6) 미만 tmux 를 일반 SSH 세션으로 띄울
+// 때 접속 직후 셸에 자동 입력하는 호환 attach-or-create 명령. 모든 tmux 버전에서 동작
+// (attach 실패 시 new 로 폴백). 1.8+ 면 'tmux new -A' 한 줄도 되지만, floor 미만(=구버전)
+// 환경의 폭넓은 호환을 위해 가장 보수적인 폴백 형태를 쓴다.
+const PASSTHROUGH_TMUX_COMMAND = 'tmux attach 2>/dev/null || tmux new';
 
 export function TerminalSessionPane(props: TerminalSessionPaneProps) {
   const {
@@ -57,18 +64,40 @@ export function TerminalSessionPane(props: TerminalSessionPaneProps) {
   // tmux 하단바 "열기" — 같은 호스트로 control mode(tmux -CC) 연결을 시작한다(기본 dolgate 세션).
   // 이 세션(tab.sessionId)의 탭 자리를 재사용해 "현재 화면에서" tmux 가 열리게 한다.
   const handleOpenTmux = useCallback(() => {
-    if (tab?.hostId) {
+    if (!tab?.hostId) {
+      return;
+    }
+    const version = tab.tmuxAvailable?.version;
+    // control mode floor(2.6) 미만 tmux 는 control client 사이즈 모델(refresh-client -C)
+    // 이 없어 -CC 가 제대로 동작하지 않는다. 이 경우 control mode 대신 일반 SSH 세션을
+    // 열고 접속 직후 호환 attach-or-create 명령을 자동 입력해 passthrough 로 tmux 를 띄운다.
+    if (!supportsTmuxControlMode(version)) {
       void connectHost(
         tab.hostId,
         120,
         32,
         undefined,
-        true,
+        false, // tmux=false → 일반 SSH 세션(control mode 아님)
         undefined,
         tab.sessionId,
+        undefined,
+        undefined,
+        PASSTHROUGH_TMUX_COMMAND, // startupCommandOverride
       );
+      return;
     }
-  }, [connectHost, tab?.hostId, tab?.sessionId]);
+    void connectHost(
+      tab.hostId,
+      120,
+      32,
+      undefined,
+      true,
+      undefined,
+      tab.sessionId,
+      undefined,
+      version,
+    );
+  }, [connectHost, tab?.hostId, tab?.sessionId, tab?.tmuxAvailable?.version]);
   // 하단바 드롭다운에서 감지된 특정 tmux 세션 [attach] — 그 세션 이름으로 control mode 진입.
   const handleAttachTmuxSession = useCallback(
     (name: string) => {
@@ -85,9 +114,11 @@ export function TerminalSessionPane(props: TerminalSessionPaneProps) {
         true,
         `tmux -CC attach -t ${quoted}`,
         tab.sessionId,
+        undefined,
+        tab.tmuxAvailable?.version,
       );
     },
-    [connectHost, tab?.hostId, tab?.sessionId],
+    [connectHost, tab?.hostId, tab?.sessionId, tab?.tmuxAvailable?.version],
   );
   // 하단바 드롭다운에서 이름 지정 신규 tmux 세션 생성 — new-session -s <name>(strict new;
   // 이름 충돌 시 tmux 에러 → 연결 실패 오버레이). attach 와 동일 escape, 현재 탭 재사용.
@@ -105,9 +136,11 @@ export function TerminalSessionPane(props: TerminalSessionPaneProps) {
         true,
         `tmux -CC new-session -s ${quoted}`,
         tab.sessionId,
+        undefined,
+        tab.tmuxAvailable?.version,
       );
     },
-    [connectHost, tab?.hostId, tab?.sessionId],
+    [connectHost, tab?.hostId, tab?.sessionId, tab?.tmuxAvailable?.version],
   );
   // 감지 하단바에서 원격 tmux 세션 종료 — attach 없이. sessionId(이 SSH 세션)를 넘기면
   // Go runtime 이 control 세션이 아님을 보고 보조 exec 채널로 kill-session 후 목록을 재감지한다.

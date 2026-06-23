@@ -121,6 +121,7 @@ export function createSessionServices(deps: SliceDeps) {
     tmuxCommand?: string,
     replaceSessionId?: string,
     reconnectGroupId?: string,
+    tmuxVersion?: string,
   ): string => {
     const sessionId = existingSessionId ?? createPendingSessionId();
     const existingTab = existingSessionId
@@ -156,6 +157,7 @@ export function createSessionServices(deps: SliceDeps) {
           latestRows: rows,
           tmux,
           tmuxCommand,
+          tmuxVersion,
         },
       ];
 
@@ -556,6 +558,7 @@ export function createSessionServices(deps: SliceDeps) {
             secrets,
             tmux: attempt.tmux,
             tmuxCommand: attempt.tmuxCommand,
+            tmuxVersion: attempt.tmuxVersion,
           });
       const latestAttempt = findPendingConnectionAttempt(get(), sessionId);
       if (!latestAttempt) {
@@ -683,6 +686,7 @@ export function createSessionServices(deps: SliceDeps) {
     tmuxCommand?: string,
     replaceSessionId?: string,
     reconnectGroupId?: string,
+    tmuxVersion?: string,
   ) => {
     const host = get().hosts.find((item) => item.id === hostId);
     if (!host) {
@@ -719,6 +723,7 @@ export function createSessionServices(deps: SliceDeps) {
       tmuxCommand,
       replaceStandaloneSessionId,
       reconnectGroupId,
+      tmuxVersion,
     );
 
     // tmux 를 원 세션 자리에서 여는 경우: 원 세션의 로컬 탭은 위에서 이미 control 세션

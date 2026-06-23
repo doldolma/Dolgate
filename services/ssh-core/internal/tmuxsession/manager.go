@@ -42,6 +42,10 @@ type controlHandle struct {
 	stdin   io.WriteCloser
 	stdinMu sync.Mutex
 	parser  ControlParser
+	// version 은 원격 tmux 버전(major.minor)이다. 입력 인코딩(-H vs -l+키이름)과
+	// refresh-client 인자 방언(콤마 vs WxH)을 버전별로 분기하는 데 쓴다. known=false
+	// (버전 미상)면 안전 기본=최신 가정(현행 control mode 경로: -H + 콤마).
+	version tmuxVersion
 	// %begin~%end 블록(명령 응답) 수집 상태. list-windows 응답에서 layout을 추출한다.
 	collecting bool
 	collected  []string
@@ -246,12 +250,26 @@ func (m *Manager) Connect(sessionID, requestID string, payload coretypes.Connect
 		return fmt.Errorf("tmux start failed: %w", err)
 	}
 
+	// 입력 인코더/리사이즈 방언이 쓸 tmux 버전. 렌더러가 알려주면(일반 경로: SSH 접속 후
+	// 감지된 버전을 전달) 그대로 쓰고, 모르면(예: 홈 화면에서 호스트 우클릭 'tmux로 연결'
+	// — 사전 접속/감지가 없어 미상) control 세션의 SSH 클라이언트로 직접 tmux 버전을 조회해
+	// 채운다. 이래야 그 진입점에서도 구버전(2.6 등)에 맞는 인코딩(-l)이 적용된다.
+	ver := parseTmuxVersion(payload.TmuxVersion)
+	if !ver.known {
+		if out, _, e := sshcmd.RunWithTimeout(client, sshsession.TmuxDetectCommand, 3*time.Second); e == nil {
+			if probed := parseTmuxVersion(sshsession.ParseTmuxDetect(string(out)).Version); probed.known {
+				ver = probed
+				debugTmux("tmux control %s: 버전 미상 → tmux -V 조회 결과 %d.%d (patch %d)", sessionID, ver.major, ver.minor, ver.patch)
+			}
+		}
+	}
 	handle := &controlHandle{
 		id:      sessionID,
 		client:  client,
 		session: session,
 		stdin:   stdin,
 		closed:  make(chan struct{}),
+		version: ver,
 	}
 	m.mu.Lock()
 	m.controls[sessionID] = handle
@@ -320,6 +338,12 @@ func (m *Manager) handleControlEvent(handle *controlHandle, ev ControlEvent) {
 		handle.collecting = true
 		handle.collected = nil
 	case ControlEnd, ControlError:
+		if ev.Kind == ControlError {
+			// %error 는 직전 명령(send-keys/refresh-client 등)이 거부된 것이다. 예전엔
+			// 조용히 삼켜 2.6 같은 구버전에서 잘못된 문법(예: -H, WxH)이 실패해도 단서가
+			// 없었다. 디버그 로그(DOLGATE_TMUX_DEBUG=1)로 원문을 남겨 진단을 돕는다.
+			debugTmux("tmux %%error (control %s): %s", handle.id, strings.Join(ev.Args, " "))
+		}
 		m.flushCollectedLayouts(handle)
 	case ControlOther:
 		if handle.collecting && len(ev.Args) > 0 {
@@ -435,8 +459,14 @@ func (m *Manager) WriteBytes(sessionID string, data []byte) error {
 	if handle == nil {
 		return fmt.Errorf("tmux control session not found: %s", controlID)
 	}
-	cmd := fmt.Sprintf("send-keys -t %s -H %s\n", paneID, hexBytes(data))
-	return handle.writeStdin(cmd)
+	// 버전별 입력 인코딩: 신버전(>=3.1)은 send-keys -H(hex) 한 줄, 구버전(2.6~3.0)은
+	// 출력가능 런(-l 리터럴) + 제어바이트(키이름)로 분해한 여러 줄(순서 보존).
+	for _, cmd := range encodeInput(paneID, data, handle.version) {
+		if err := handle.writeStdin(cmd); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // controlOf 는 가상 pane sessionId(또는 control sessionId)에서 control 채널 핸들과
@@ -620,8 +650,14 @@ func (m *Manager) Resize(sessionID string, cols, rows int) error {
 	if rows <= 0 {
 		rows = 32
 	}
-	cmd := fmt.Sprintf("refresh-client -C %d,%d\n", cols, rows)
-	return handle.writeStdin(cmd)
+	return handle.writeStdin(refreshClientCommand(cols, rows))
+}
+
+// refreshClientCommand 은 refresh-client -C 사이즈 명령을 만든다. 콤마 "W,H" 는 tmux
+// 2.6 이전부터 모든 버전이 받는 원래 형식이고 WxH 는 2.9 에서 추가된 것일 뿐이므로,
+// 콤마를 항상 쓴다 — 2.6 호환 + 기존(콤마) 동작 무회귀. 끝에 "\n" 포함.
+func refreshClientCommand(cols, rows int) string {
+	return fmt.Sprintf("refresh-client -C %d,%d\n", cols, rows)
 }
 
 func (m *Manager) Disconnect(sessionID string) error {
@@ -819,10 +855,12 @@ func (m *Manager) InstallShellIntegration(sessionID string) error {
 	}
 	handle.armPaneHandshake(paneID)
 	initBytes := []byte(autocomplete.ShellIntegrationInitCommand())
-	if err := handle.writeStdin(
-		fmt.Sprintf("send-keys -t %s -H %s\n", paneID, hexBytes(initBytes)),
-	); err != nil {
-		return err
+	// 셸 통합 주입도 입력과 같은 버전별 인코더를 경유한다 — 2.6 에서도 -l+키이름 분해로
+	// OSC133 셸 통합/자동완성이 살아 있게(send-keys -H 미지원 버전에서 init 스크립트 주입).
+	for _, cmd := range encodeInput(paneID, initBytes, handle.version) {
+		if err := handle.writeStdin(cmd); err != nil {
+			return err
+		}
 	}
 	// 마커가 끝내 안 오면(느린/비호환 셸) 일정 시간 뒤 버퍼를 풀어 실제 출력 손실을 막는다.
 	go func() {

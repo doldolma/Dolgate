@@ -249,6 +249,9 @@ export function SessionShell({
                 undefined,
                 true,
                 `tmux -CC new-session -s ${quoted}`,
+                undefined,
+                undefined,
+                activeTmuxGroup.tmuxVersion ?? undefined,
               );
             }}
             onSelectSession={(name) => {
@@ -265,6 +268,9 @@ export function SessionShell({
                 undefined,
                 true,
                 `tmux -CC attach -t ${quoted}`,
+                undefined,
+                undefined,
+                activeTmuxGroup.tmuxVersion ?? undefined,
               );
             }}
             onKillSession={(name) => {

@@ -456,6 +456,11 @@ export function createSessionSlice(deps: SliceDeps): SessionSlice {
                 const controlTab = state.tabs.find(
                   (t) => t.sessionId === controlSessionId,
                 );
+                // 이 control 세션을 띄운 attempt 에서 감지 버전을 캡처해 그룹에 저장한다
+                // (자동 재연결 시 다시 넘겨 구버전 입력 인코딩이 유지되게).
+                const controlAttempt = state.pendingConnectionAttempts.find(
+                  (a) => a.sessionId === controlSessionId,
+                );
                 nextGroups = [
                   ...state.tmuxGroups,
                   {
@@ -467,6 +472,7 @@ export function createSessionSlice(deps: SliceDeps): SessionSlice {
                     activeWorkspaceId: workspaceId,
                     // 새 세션 생성/전환(connectHost)에 쓸 호스트. control 세션 탭에서 캡처.
                     hostId: controlTab?.hostId ?? null,
+                    tmuxVersion: controlAttempt?.tmuxVersion ?? null,
                   },
                 ];
               }
@@ -560,6 +566,8 @@ export function createSessionSlice(deps: SliceDeps): SessionSlice {
             tmuxCommand,
             replaceSessionId,
             reconnectGroupId,
+            tmuxVersion,
+            startupCommandOverride,
           ) => {
             const host = get().hosts.find((item) => item.id === hostId);
             if (!host) {
@@ -611,7 +619,13 @@ export function createSessionSlice(deps: SliceDeps): SessionSlice {
               return;
             }
             let startupCommand: string | undefined;
+            // passthrough(< 2.6 tmux) 등 일회성 startup 명령은 호스트 설정을 무시하고 그대로 쓴다.
             if (
+              startupCommandOverride !== undefined &&
+              startupCommandOverride !== ""
+            ) {
+              startupCommand = startupCommandOverride;
+            } else if (
               host.kind === "ssh" ||
               host.kind === "aws-ec2" ||
               host.kind === "warpgate-ssh"
@@ -654,10 +668,18 @@ export function createSessionSlice(deps: SliceDeps): SessionSlice {
               startupCommand,
               tmux,
               tmuxCommand,
-              // tmux 일 때만 원 세션을 대체한다(비-tmux 연결에 잘못 전달돼도 무시되게).
-              tmux ? replaceSessionId : undefined,
+              // tmux control mode 또는 passthrough(startupCommandOverride 지정)일 때 원 세션을
+              // 대체해 '현재 화면에서 열기' UX 를 유지한다. 일반 연결엔 replaceSessionId 가
+              // 안 와서(undefined) 영향 없음.
+              tmux ||
+                (startupCommandOverride !== undefined &&
+                  startupCommandOverride !== "")
+                ? replaceSessionId
+                : undefined,
               // tmux 재연결 경로면 새 control 을 standalone 탭으로 만들지 않는다.
               tmux ? reconnectGroupId : undefined,
+              // 버전은 tmux control mode 진입일 때만 의미가 있다.
+              tmux ? tmuxVersion : undefined,
             );
           },
     retrySessionConnection: async (sessionId, secrets) => {

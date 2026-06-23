@@ -153,6 +153,12 @@ export interface TmuxSessionGroup {
    * tabs 에서 정리해 잔류를 막는 데 쓴다.
    */
   reconnectSessionId?: string | null;
+  /**
+   * 이 control 세션을 띄울 때 감지된 원격 tmux 버전("3.0a","2.6"). 자동 재연결 시
+   * connectHost 에 다시 넘겨, 구버전(2.6~3.0)에서 입력 인코딩/refresh-client 방언이
+   * 재연결 후에도 올바르게 유지되게 한다(없으면 코어가 최신 가정으로 폴백).
+   */
+  tmuxVersion?: string | null;
 }
 
 // tmux 명령 프롬프트 오버레이 상태(Ctrl-b : / $ / ,). 텍스트 입력이 필요한 명령에 쓴다.
@@ -528,6 +534,8 @@ export interface PendingConnectionAttempt {
   tmux?: boolean;
   /** 특정 tmux 세션 attach 등, control mode 진입 시 쓸 원격 tmux 명령. tmux=true 일 때만 의미가 있다. */
   tmuxCommand?: string;
+  /** 감지된 원격 tmux 버전("3.0a","2.6"). 코어가 버전별 입력 인코딩/refresh-client 방언을 고르게 한다. tmux=true 일 때만 의미. */
+  tmuxVersion?: string;
 }
 
 export interface SessionReturnTarget {
@@ -661,6 +669,17 @@ interface AppStateParts {
      * sessionId 가 아니라 group.id 로 안정화). tmux=true 일 때만 의미가 있다.
      */
     reconnectGroupId?: string,
+    /**
+     * 감지된 원격 tmux 버전("3.0a","2.6"). 코어가 버전별 입력 인코딩(-H vs -l+키이름)·
+     * refresh-client 방언(콤마 vs WxH)을 고르는 데 쓴다. tmux=true 일 때만 의미가 있다.
+     */
+    tmuxVersion?: string,
+    /**
+     * 호스트 설정의 startupCommand 대신 쓸 일회성 startup 명령. control mode floor(2.6)
+     * 미만 tmux 를 passthrough(일반 SSH 세션)로 띄울 때, 접속 직후 셸에 호환 attach-or-create
+     * 명령("tmux attach || tmux new")을 자동 입력하는 데 쓴다. 지정하면 tmux 는 무시한다.
+     */
+    startupCommandOverride?: string,
   ) => Promise<void>;
   retrySessionConnection: (
     sessionId: string,

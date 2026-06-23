@@ -283,6 +283,11 @@ type ConnectPayload struct {
 	// UseMosh가 true면 SSH 대신 mosh(UDP)로 연결한다. SSH는 mosh-server 부트스트랩에만
 	// 쓰이고 이후 통신은 mosh SSP다. jump host와는 상호 배타(데스크톱 UI에서 차단).
 	UseMosh bool `json:"useMosh,omitempty"`
+	// TmuxVersion은 tmux control mode(tmuxConnect) 연결 시 데스크톱이 보조채널로 감지한
+	// 원격 tmux 버전 문자열("3.0a","2.6" 등)이다. Go runtime 이 입력 인코딩(-H vs -l+키이름)
+	// 과 refresh-client 인자 방언(콤마 vs WxH)을 버전별로 분기하는 데 쓴다. 비어 있으면
+	// 미상으로 보고 안전 기본(최신 가정: -H + 콤마)을 쓴다. 일반 SSH 연결엔 무의미.
+	TmuxVersion string `json:"tmuxVersion,omitempty"`
 }
 
 type AWSConnectPayload struct {
