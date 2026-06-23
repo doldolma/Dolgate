@@ -570,8 +570,17 @@ func (m *Manager) keepAlive(sessionID string, session *sessionHandle) {
 		case <-session.closed:
 			return
 		case <-ticker.C:
-			if m.sendKeepAliveProbe(session) {
+			if rtt, ok := m.sendKeepAliveProbe(session); ok {
 				consecutiveFailures = 0
+				// probe round-trip 을 탭 인디게이터용 RTT 로 보고한다(rtt==0 은 종료 중
+				// 센티넬이라 제외). keepalive 주기마다 갱신.
+				if rtt > 0 {
+					m.emit(protocol.Event{
+						Type:      protocol.EventLatency,
+						SessionID: sessionID,
+						Payload:   protocol.LatencyPayload{RoundTripMs: int(rtt.Milliseconds())},
+					})
+				}
 				continue
 			}
 			consecutiveFailures++
@@ -590,7 +599,8 @@ func (m *Manager) keepAlive(sessionID string, session *sessionHandle) {
 // sendKeepAliveProbe는 probe 한 번을 보내고 타임아웃 내 round-trip 성공 여부를 반환한다.
 // SendRequest를 고루틴으로 감싸 커널 TCP 타임아웃에 끌려가지 않고 간격 기반으로 실패를
 // 감지한다. probe가 늦게 끝나도 채널이 버퍼(1)라 고루틴은 누수 없이 정리된다.
-func (m *Manager) sendKeepAliveProbe(session *sessionHandle) bool {
+func (m *Manager) sendKeepAliveProbe(session *sessionHandle) (time.Duration, bool) {
+	start := time.Now()
 	resultCh := make(chan error, 1)
 	go func() {
 		// wantReply=true로 보내야 연결이 실제로 살아 있는지 round-trip으로 확인된다.
@@ -599,12 +609,12 @@ func (m *Manager) sendKeepAliveProbe(session *sessionHandle) bool {
 	}()
 	select {
 	case err := <-resultCh:
-		return err == nil
+		return time.Since(start), err == nil
 	case <-time.After(m.config.SSHKeepAliveProbeTimeout):
-		return false
+		return 0, false
 	case <-session.closed:
-		// 종료 중이면 실패로 치지 않는다(곧 keepAlive 루프가 빠져나간다).
-		return true
+		// 종료 중이면 실패로 치지 않는다(곧 keepAlive 루프가 빠져나간다). rtt=0 센티넬.
+		return 0, true
 	}
 }
 

@@ -139,6 +139,8 @@ export interface TmuxSessionGroup {
   hostId?: string | null;
   /** 원격 tmux 세션 목록(라이브; %sessions-changed 로 갱신). 세션 메뉴 표시용. */
   sessions?: TmuxSessionInfo[];
+  /** keepalive round-trip(ms). 상단 tmux 그룹 탭 인디게이터의 RTT 표시. control 세션 단위. */
+  lastRttMs?: number | null;
   /**
    * 자동 재연결 진행 상태(비정상 단절 시). null/undefined 면 정상 연결. control
    * 세션은 그룹 형성 시 탭이 사라지므로 재연결 상태를 그룹에 둔다(SSH 탭의 reconnect 와 대응).
@@ -787,6 +789,11 @@ interface AppStateParts {
   ) => void;
   /** 자동 재연결 포기/끊김 확정: 그룹 reconnect 해제 + 패인 탭을 'error'(수동 재시도)로. */
   applyTmuxGroupReconnectGaveUp: (groupId: string, message: string) => void;
+  /** 셸 통합(OSC 133) 마커로 탭의 명령 상태(실행 중/성공/실패)를 갱신한다. 탭 점 하이브리드용. */
+  applyTabCommandState: (
+    sessionId: string,
+    state: "running" | "ok" | "failed" | null,
+  ) => void;
   /** 그룹 내에서 활성 tmux window 를 전환한다(select-window + group.activeWorkspaceId). */
   selectTmuxWindow: (workspaceId: string) => void;
   /** tmux window 이름을 바꾼다(rename-window). 결과는 %window-renamed 로 되돌아온다. */
@@ -1062,6 +1069,7 @@ export type SessionSlice = Pick<
   | "removeTmuxWorkspacesLocal"
   | "applyTmuxGroupReconnecting"
   | "applyTmuxGroupReconnectGaveUp"
+  | "applyTabCommandState"
   | "selectTmuxWindow"
   | "renameTmuxWindow"
   | "applyTmuxWindowRenamed"

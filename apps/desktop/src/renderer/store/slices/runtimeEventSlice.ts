@@ -492,6 +492,30 @@ export function createRuntimeEventSlice(deps: SliceDeps): RuntimeEventSlice {
               return;
             }
     
+            // keepalive RTT 이벤트 — 탭 인디게이터용. SSH 세션은 탭의 sessionId 가,
+            // tmux 는 그룹의 controlSessionId 가 매칭된다(둘 중 하나만 갱신됨).
+            if (event.type === "latency" && sessionId) {
+              const payload = event.payload as { roundTripMs?: number };
+              const rtt =
+                typeof payload?.roundTripMs === "number"
+                  ? payload.roundTripMs
+                  : null;
+              if (rtt == null) {
+                return;
+              }
+              set((state) => ({
+                tabs: state.tabs.map((tab) =>
+                  tab.sessionId === sessionId ? { ...tab, lastRttMs: rtt } : tab,
+                ),
+                tmuxGroups: state.tmuxGroups.map((group) =>
+                  group.controlSessionId === sessionId
+                    ? { ...group, lastRttMs: rtt }
+                    : group,
+                ),
+              }));
+              return;
+            }
+
             if (endpointId) {
               const containerHostId = resolveContainersHostIdByEndpoint(endpointId);
               if (containerHostId) {

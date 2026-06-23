@@ -9,6 +9,10 @@
 // 전역 리렌더를 유발할 필요도 없다. terminal-write-registry와 같은 결의 모듈 레지스트리다.
 
 const cwdBySessionId = new Map<string, string>();
+// 같은 결의 휘발 메타: 처음 connected 된 시각과 마지막 명령(OSC 133;D) 완료 시각(epoch ms).
+// 탭 hover 카드가 "연결 경과 / 마지막 명령" 을 표시할 때 동기 조회한다(리렌더 불필요).
+const connectedAtBySessionId = new Map<string, number>();
+const lastCommandAtBySessionId = new Map<string, number>();
 
 /** OSC 7로 보고된 cwd를 기록한다. 빈 값이면 항목을 제거한다. */
 export function setSessionCwd(sessionId: string, cwd: string | null): void {
@@ -27,6 +31,33 @@ export function getSessionCwd(sessionId: string): string | null {
   return cwdBySessionId.get(sessionId) ?? null;
 }
 
+/** 세션이 처음 connected 된 시각(epoch ms)을 1회 기록한다(이미 있으면 유지). */
+export function markSessionConnected(sessionId: string): void {
+  if (!sessionId || connectedAtBySessionId.has(sessionId)) {
+    return;
+  }
+  connectedAtBySessionId.set(sessionId, Date.now());
+}
+
+export function getSessionConnectedAt(sessionId: string): number | null {
+  return connectedAtBySessionId.get(sessionId) ?? null;
+}
+
+/** OSC 133;D(명령 완료) 시각(epoch ms)을 기록한다. */
+export function setSessionLastCommandAt(sessionId: string): void {
+  if (!sessionId) {
+    return;
+  }
+  lastCommandAtBySessionId.set(sessionId, Date.now());
+}
+
+export function getSessionLastCommandAt(sessionId: string): number | null {
+  return lastCommandAtBySessionId.get(sessionId) ?? null;
+}
+
+/** 세션 종료 시 cwd·연결시각·마지막명령 메타를 모두 정리한다. */
 export function clearSessionCwd(sessionId: string): void {
   cwdBySessionId.delete(sessionId);
+  connectedAtBySessionId.delete(sessionId);
+  lastCommandAtBySessionId.delete(sessionId);
 }

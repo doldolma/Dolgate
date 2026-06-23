@@ -23,7 +23,9 @@ import {
 } from '../lib/terminal-write-registry';
 import {
   clearSessionCwd,
+  markSessionConnected,
   setSessionCwd,
+  setSessionLastCommandAt,
 } from '../lib/terminal-cwd-registry';
 import {
   registerTerminalFocus,
@@ -532,6 +534,10 @@ export function useTerminalSessionViewController({
     liveSessionStatusRef.current = tab?.status ?? null;
     liveSessionShareStatusRef.current = tab?.sessionShare?.status ?? 'inactive';
     liveSourceLabelRef.current = host?.label ?? title;
+    // 연결 경과시간 표시용: 처음 connected 된 시각을 1회 기록(hover 카드가 동기 조회).
+    if (tab?.status === 'connected') {
+      markSessionConnected(sessionId);
+    }
   }, [host?.label, sessionId, tab?.sessionShare?.status, tab?.status, title]);
 
   useEffect(() => {
@@ -863,6 +869,23 @@ export function useTerminalSessionViewController({
         },
         onShellIntegration: (marker) => {
           liveAutocompleteShellMarkerRef.current(marker);
+          // 탭 상태 점(하이브리드)용 명령 상태: C=명령 실행 시작, D;<exit>=완료(성공/실패).
+          // A/B(프롬프트/입력)는 직전 결과를 유지한다.
+          if (marker === 'C') {
+            appStore
+              .getState()
+              .applyTabCommandState(liveSessionIdRef.current, 'running');
+          } else if (marker === 'D' || marker.startsWith('D;')) {
+            const code =
+              marker === 'D' ? 0 : Number(marker.slice(2).split(';')[0]);
+            appStore
+              .getState()
+              .applyTabCommandState(
+                liveSessionIdRef.current,
+                Number.isFinite(code) && code === 0 ? 'ok' : 'failed',
+              );
+            setSessionLastCommandAt(liveSessionIdRef.current);
+          }
         },
         onCwd: (data) => {
           liveAutocompleteCwdRef.current(data);

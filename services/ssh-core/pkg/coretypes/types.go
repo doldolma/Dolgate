@@ -80,6 +80,7 @@ const (
 	EventData                           EventType = "data"
 	EventError                          EventType = "error"
 	EventClosed                         EventType = "closed"
+	EventLatency                        EventType = "latency"
 	EventSerialPortsListed              EventType = "serialPortsListed"
 	EventSerialControlCompleted         EventType = "serialControlCompleted"
 	EventHostKeyProbed                  EventType = "hostKeyProbed"
@@ -636,6 +637,12 @@ type ClosedPayload struct {
 type MoshStatePayload struct {
 	State          string `json:"state"`
 	LastResponseAt string `json:"lastResponseAt,omitempty"`
+}
+
+// LatencyPayload는 keepalive probe의 round-trip 시간(ms)을 renderer에 알린다. 탭
+// 인디케이터가 활성 탭에 RTT를 표시하는 데 쓴다. keepalive 주기(기본 30s)마다 갱신.
+type LatencyPayload struct {
+	RoundTripMs int `json:"roundTripMs"`
 }
 
 type SFTPConnectedPayload struct {

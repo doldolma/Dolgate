@@ -81,6 +81,7 @@ const (
 	EventData                           = coretypes.EventData
 	EventError                          = coretypes.EventError
 	EventClosed                         = coretypes.EventClosed
+	EventLatency                        = coretypes.EventLatency
 	EventSerialPortsListed              = coretypes.EventSerialPortsListed
 	EventSerialControlCompleted         = coretypes.EventSerialControlCompleted
 	EventHostKeyProbed                  = coretypes.EventHostKeyProbed
@@ -143,6 +144,7 @@ type Request struct {
 type Event = coretypes.Event
 type StreamFrame = coretypes.StreamFrame
 type ConnectPayload = coretypes.ConnectPayload
+type LatencyPayload = coretypes.LatencyPayload
 type EnvVar = coretypes.EnvVar
 type AWSConnectPayload = coretypes.AWSConnectPayload
 type LocalConnectPayload = coretypes.LocalConnectPayload

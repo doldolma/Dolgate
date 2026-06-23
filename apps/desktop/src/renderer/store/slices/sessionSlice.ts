@@ -1803,6 +1803,18 @@ export function createSessionSlice(deps: SliceDeps): SessionSlice {
               };
             });
           },
+    applyTabCommandState: (sessionId, commandState) => {
+            // 셸 통합 OSC133 마커마다 호출되므로, 값이 바뀔 때만 set 해 불필요한 리렌더를 막는다.
+            const tab = get().tabs.find((t) => t.sessionId === sessionId);
+            if (!tab || tab.commandState === commandState) {
+              return;
+            }
+            set((state) => ({
+              tabs: state.tabs.map((t) =>
+                t.sessionId === sessionId ? { ...t, commandState } : t,
+              ),
+            }));
+          },
     selectTmuxWindow: (workspaceId) => {
             // 그룹 내 활성 window 전환: tmux 에 select-window 를 보내고 그룹의
             // activeWorkspaceId 를 갱신한다. activeWorkspaceTab 은 그룹 탭 그대로 유지.

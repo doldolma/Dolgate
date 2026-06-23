@@ -389,3 +389,39 @@ describe("tmux auto-reconnect trigger (runtimeEventSlice)", () => {
     expect(pane?.connectionProgress?.retryable).toBe(true);
   });
 });
+
+// keepalive round-trip 이벤트가 탭 인디게이터용 RTT 로 기록되는지(SSH 세션 탭).
+describe("keepalive latency → tab RTT", () => {
+  it("records RTT on the session tab from a latency event", () => {
+    const store = seedStore(connectedTab());
+
+    store.getState().handleCoreEvent({
+      type: "latency",
+      sessionId: "s1",
+      payload: { roundTripMs: 9 },
+    } as CoreEvent);
+
+    expect(
+      store.getState().tabs.find((item) => item.stableId === "stable-1")
+        ?.lastRttMs,
+    ).toBe(9);
+  });
+});
+
+// 셸 통합(OSC133) 기반 명령 상태가 탭에 기록되는지(탭 점 하이브리드용).
+describe("shell-integration command state → tab", () => {
+  it("records running then ok/failed on the session tab", () => {
+    const store = seedStore(connectedTab());
+    const rttTab = () =>
+      store.getState().tabs.find((item) => item.stableId === "stable-1");
+
+    store.getState().applyTabCommandState("s1", "running");
+    expect(rttTab()?.commandState).toBe("running");
+
+    store.getState().applyTabCommandState("s1", "failed");
+    expect(rttTab()?.commandState).toBe("failed");
+
+    store.getState().applyTabCommandState("s1", null);
+    expect(rttTab()?.commandState ?? null).toBeNull();
+  });
+});

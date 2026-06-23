@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import type { HostRecord } from "@shared";
+import type { CoreEvent, HostRecord } from "@shared";
 import { createAppStore } from "./createAppStore";
 import { createMockApi } from "./createAppStore.test-support";
 import { asWorkspaceTabId } from "./utils";
@@ -531,5 +531,44 @@ describe("createAppStore tmux session grouping", () => {
     expect(
       store.getState().tabStrip.filter((i) => i.kind === "session"),
     ).toHaveLength(1);
+  });
+
+  it("updates the tmux group's RTT on a latency event (keyed by controlSessionId)", () => {
+    const store = createAppStore(createMockApi());
+    store
+      .getState()
+      .handleTmuxLayoutChange(CTL, "@0", layoutFor(0), { index: 0 });
+
+    store.getState().handleCoreEvent({
+      type: "latency",
+      sessionId: CTL,
+      payload: { roundTripMs: 23 },
+    } as CoreEvent);
+
+    expect(store.getState().tmuxGroups[0]?.lastRttMs).toBe(23);
+  });
+
+  it("reorders a tmux group tab within the tab strip (drag to move)", () => {
+    const store = createAppStore(createMockApi());
+    store.setState({
+      tabStrip: [
+        { kind: "session", sessionId: "s1" },
+        { kind: "tmux", tmuxGroupId: "g1" },
+      ],
+    });
+
+    // tmux 탭을 세션 탭 앞으로 이동.
+    store
+      .getState()
+      .reorderDynamicTab(
+        { kind: "tmux", tmuxGroupId: "g1" },
+        { kind: "session", sessionId: "s1" },
+        "before",
+      );
+
+    expect(store.getState().tabStrip).toEqual([
+      { kind: "tmux", tmuxGroupId: "g1" },
+      { kind: "session", sessionId: "s1" },
+    ]);
   });
 });

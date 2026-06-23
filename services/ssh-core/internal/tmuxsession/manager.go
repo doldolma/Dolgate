@@ -730,8 +730,17 @@ func (m *Manager) keepAlive(handle *controlHandle) {
 		case <-handle.closed:
 			return
 		case <-ticker.C:
-			if m.sendKeepAliveProbe(handle) {
+			if rtt, ok := m.sendKeepAliveProbe(handle); ok {
 				consecutiveFailures = 0
+				// probe round-trip 을 탭 인디게이터용 RTT 로 보고(handle.id=controlSessionId).
+				// 렌더러가 controlSessionId 로 tmux 그룹을 찾아 표시한다. rtt==0 은 종료 센티넬.
+				if rtt > 0 {
+					m.emit(coretypes.Event{
+						Type:      coretypes.EventLatency,
+						SessionID: handle.id,
+						Payload:   coretypes.LatencyPayload{RoundTripMs: int(rtt.Milliseconds())},
+					})
+				}
 				continue
 			}
 			consecutiveFailures++
@@ -749,7 +758,8 @@ func (m *Manager) keepAlive(handle *controlHandle) {
 
 // sendKeepAliveProbe 는 probe 한 번을 보내고 타임아웃 내 round-trip 성공 여부를 반환한다.
 // SendRequest 를 고루틴으로 감싸 커널 TCP 타임아웃에 끌려가지 않고 간격 기반으로 감지한다.
-func (m *Manager) sendKeepAliveProbe(handle *controlHandle) bool {
+func (m *Manager) sendKeepAliveProbe(handle *controlHandle) (time.Duration, bool) {
+	start := time.Now()
 	resultCh := make(chan error, 1)
 	go func() {
 		_, _, err := handle.client.SendRequest("keepalive@openssh.com", true, nil)
@@ -757,12 +767,12 @@ func (m *Manager) sendKeepAliveProbe(handle *controlHandle) bool {
 	}()
 	select {
 	case err := <-resultCh:
-		return err == nil
+		return time.Since(start), err == nil
 	case <-time.After(m.config.SSHKeepAliveProbeTimeout):
-		return false
+		return 0, false
 	case <-handle.closed:
-		// 종료 중이면 실패로 치지 않는다(곧 keepAlive 루프가 빠져나간다).
-		return true
+		// 종료 중이면 실패로 치지 않는다(곧 keepAlive 루프가 빠져나간다). rtt=0 센티넬.
+		return 0, true
 	}
 }
 

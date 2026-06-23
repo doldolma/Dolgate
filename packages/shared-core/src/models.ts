@@ -2690,6 +2690,13 @@ export interface TerminalTab {
   moshState?: 'connected' | 'reconnecting' | 'disconnected' | null;
   /** 마지막으로 mosh 서버 응답을 받은 시각(RFC3339). "N초 전 응답" 표시에 쓴다. */
   lastMoshResponseAt?: string | null;
+  /** keepalive round-trip(ms). 탭 인디게이터가 활성 탭에 RTT 표시. keepalive 주기마다 갱신. */
+  lastRttMs?: number | null;
+  /**
+   * 셸 통합(OSC 133) 기반 직전 명령 상태: 실행 중 / 성공(exit 0) / 실패(exit≠0).
+   * 탭 상태 점이 연결이 정상일 때 이 값을 보여준다(하이브리드). 셸 통합 없으면 null/undefined.
+   */
+  commandState?: 'running' | 'ok' | 'failed' | null;
   /** control mode(tmux -CC) pane일 때만 채워진다. 평시엔 null/undefined. */
   tmux?: TerminalTmuxPaneState | null;
   /** SSH 접속 후 감지한 원격 tmux 정보(하단바 표시용). 미감지면 null/undefined. */

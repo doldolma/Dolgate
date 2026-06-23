@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import type { DesktopWindowState, HostRecord, TerminalTab, UpdateState } from '@shared';
+import type { CSSProperties } from 'react';
+import type { DesktopWindowState, HostRecord, SessionConnectionKind, TerminalTab, UpdateState } from '@shared';
 import type {
   DynamicTabStripItem,
   TmuxSessionGroup,
@@ -8,6 +9,12 @@ import type {
 } from '../store/createAppStore';
 import { DesktopWindowControls, type DesktopPlatform } from './DesktopWindowControls';
 import { cn } from '../lib/cn';
+import {
+  getSessionConnectedAt,
+  getSessionCwd,
+  getSessionLastCommandAt,
+} from '../lib/terminal-cwd-registry';
+import { listWorkspaceSessionIds } from './terminal-workspace/terminalWorkspaceLayout';
 import { Badge, Button, IconButton, TabButton, Tabs } from '../ui';
 
 interface DraggedSessionPayload {
@@ -56,6 +63,84 @@ interface AppTitleBarProps {
   onCloseWindow: () => Promise<void>;
 }
 
+// 탭 인디게이터(터미널 영역 안 먹고 탭 chrome에): 상태 점 + (활성 탭) RTT.
+// 하이브리드 — 연결 문제(재연결/에러/대기)는 점이 우선, 정상 연결이면 셸 통합 명령 상태.
+type TabConnState = 'connected' | 'reconnecting' | 'error' | 'idle';
+type TabDotState = TabConnState | 'running';
+
+const TAB_DOT_COLOR: Record<TabDotState, string> = {
+  connected: 'var(--success,#3fae8f)',
+  reconnecting: 'var(--warning,#d97706)',
+  error: 'var(--danger,#e2504a)',
+  idle: 'var(--text-muted,#8b96ad)',
+  running: 'var(--accent,#5b9bd5)',
+};
+
+function TabStatusDot({ state }: { state: TabDotState }) {
+  return (
+    <span
+      className={cn(
+        // TabButton 은 flex 가 아니라 gap 이 안 먹으므로 점 자체에 우측 여백을 준다.
+        'mr-2 inline-block h-2 w-2 flex-none rounded-full align-middle',
+        (state === 'reconnecting' || state === 'running') && 'animate-pulse',
+      )}
+      style={{ backgroundColor: TAB_DOT_COLOR[state] }}
+      aria-hidden
+    />
+  );
+}
+
+// 탭의 연결 상태(status/reconnect/moshState)에서 점 색을 도출한다.
+function tabConnStateFromTab(tab: TerminalTab | undefined): TabConnState {
+  if (!tab) {
+    return 'idle';
+  }
+  if (tab.status === 'error' || tab.moshState === 'disconnected') {
+    return 'error';
+  }
+  if (
+    tab.reconnect != null ||
+    tab.status === 'connecting' ||
+    tab.status === 'pending' ||
+    tab.moshState === 'reconnecting'
+  ) {
+    return 'reconnecting';
+  }
+  if (tab.status === 'connected') {
+    return 'connected';
+  }
+  return 'idle';
+}
+
+// 하이브리드 점 상태: 연결 문제(연결 안 정상)는 그대로 우선, 정상 연결이면 셸 통합
+// 명령 상태 — 실행 중=running, 실패=error(빨강), 성공/미관측=connected(초록).
+function combineDotState(
+  conn: TabConnState,
+  command: TerminalTab['commandState'],
+): TabDotState {
+  if (conn !== 'connected') {
+    return conn;
+  }
+  if (command === 'running') {
+    return 'running';
+  }
+  if (command === 'failed') {
+    return 'error';
+  }
+  return 'connected';
+}
+
+// 활성 탭 RTT 색: 빠름 초록 / 보통 주황 / 느림 빨강.
+function rttColor(ms: number): string {
+  if (ms < 80) {
+    return 'var(--success,#3fae8f)';
+  }
+  if (ms < 200) {
+    return 'var(--warning,#d97706)';
+  }
+  return 'var(--danger,#e2504a)';
+}
+
 type TitlebarDynamicItem =
   | {
       kind: 'session';
@@ -63,6 +148,8 @@ type TitlebarDynamicItem =
       title: string;
       status: TerminalTab['status'];
       active: boolean;
+      dotState: TabDotState;
+      rttMs: number | null;
     }
   | {
       kind: 'workspace';
@@ -72,6 +159,8 @@ type TitlebarDynamicItem =
       active: boolean;
       /** tmux control mode workspace 면 true — 탭 × 닫기를 kill 대신 detach(서버 유지)로 라우팅. */
       isTmux: boolean;
+      dotState: TabDotState;
+      rttMs: number | null;
     }
   | {
       kind: 'tmux';
@@ -79,9 +168,255 @@ type TitlebarDynamicItem =
       title: string;
       windowCount: number;
       active: boolean;
-      /** 자동 재연결 진행 중(group.reconnect != null) — 탭에 "재연결 중" 표시. */
+      // tmux 는 pane 이 여러 개라 단일 상태점이 모호해 점을 안 쓰고, ⊟/↻ 아이콘으로
+      // 연결/재연결만 표시한다.
       reconnecting: boolean;
+      rttMs: number | null;
     };
+
+// 연결 종류 라벨(SessionReplay/Logs 와 동일 표기). aws-ec2 는 SSM 으로 연결되므로
+// 절대 SSH 로 표기하지 않는다.
+function connectionKindLabel(kind: SessionConnectionKind): string {
+  switch (kind) {
+    case 'local':
+      return '로컬 셸';
+    case 'ssh':
+      return 'SSH';
+    case 'mosh':
+      return 'Mosh';
+    case 'aws-ssm':
+      return 'AWS SSM';
+    case 'aws-ecs-exec':
+      return 'AWS ECS';
+    case 'warpgate':
+      return 'Warpgate';
+    case 'serial':
+      return '시리얼';
+    default:
+      return kind;
+  }
+}
+
+// 라이브 세션의 실제 연결 종류를 호스트 종류 + 플래그에서 도출한다(메인의 connectionKind
+// 결정 로직과 정합: aws-ec2→aws-ssm). 호스트를 못 찾으면 추측하지 않고 null(=SSH 로
+// 오표기 방지).
+function deriveSessionConnectionKind(
+  tab: TerminalTab | undefined,
+  host: HostRecord | null,
+): SessionConnectionKind | null {
+  if (!tab) {
+    return null;
+  }
+  if (tab.source === 'local' || !tab.hostId) {
+    return 'local';
+  }
+  if (!host) {
+    return null;
+  }
+  switch (host.kind) {
+    case 'serial':
+      return 'serial';
+    case 'warpgate-ssh':
+      return 'warpgate';
+    case 'aws-ecs':
+      return 'aws-ecs-exec';
+    case 'aws-ec2':
+      return 'aws-ssm';
+    case 'ssh':
+      return host.useMosh || tab.moshState != null ? 'mosh' : 'ssh';
+    default:
+      return null;
+  }
+}
+
+// 연결 대상 한 줄(user@host:port 등). 종류/점프/mosh 는 별도 표기하므로 여기선 순수 타겟만.
+function formatHostTarget(host: HostRecord): string | null {
+  switch (host.kind) {
+    case 'ssh':
+      return `${host.username}@${host.hostname}:${host.port}`;
+    case 'warpgate-ssh':
+      return `${host.warpgateUsername}@${host.warpgateSshHost}:${host.warpgateSshPort}`;
+    case 'aws-ec2':
+      return `${host.awsPrivateIp ?? host.awsInstanceId} · ${host.awsRegion}`;
+    case 'aws-ecs':
+      return `${host.awsEcsClusterName} · ${host.awsRegion}`;
+    case 'serial':
+      return host.devicePath
+        ? `${host.devicePath} · ${host.baudRate}bps`
+        : host.host
+          ? `${host.host}:${host.port ?? ''}`
+          : `${host.baudRate}bps`;
+    default:
+      return null;
+  }
+}
+
+// 경과 시간("3시간 12분"). 연결 경과시간용.
+function formatElapsed(sinceMs: number): string {
+  const sec = Math.max(0, Math.floor((Date.now() - sinceMs) / 1000));
+  if (sec < 60) {
+    return `${sec}초`;
+  }
+  const min = Math.floor(sec / 60);
+  if (min < 60) {
+    return `${min}분`;
+  }
+  const hr = Math.floor(min / 60);
+  if (hr < 24) {
+    const remMin = min % 60;
+    return remMin > 0 ? `${hr}시간 ${remMin}분` : `${hr}시간`;
+  }
+  const days = Math.floor(hr / 24);
+  const remHr = hr % 24;
+  return remHr > 0 ? `${days}일 ${remHr}시간` : `${days}일`;
+}
+
+// 상대 시각("2분 전"). 마지막 명령 시각용.
+function formatAgo(atMs: number): string {
+  const sec = Math.max(0, Math.floor((Date.now() - atMs) / 1000));
+  if (sec < 10) {
+    return '방금';
+  }
+  if (sec < 60) {
+    return `${sec}초 전`;
+  }
+  const min = Math.floor(sec / 60);
+  if (min < 60) {
+    return `${min}분 전`;
+  }
+  const hr = Math.floor(min / 60);
+  if (hr < 24) {
+    return `${hr}시간 전`;
+  }
+  return `${Math.floor(hr / 24)}일 전`;
+}
+
+type TabHoverRow = { label: string; value: string; valueColor?: string };
+type TabHoverInfo = {
+  heading: string;
+  target: string | null;
+  rows: TabHoverRow[];
+};
+
+// hover 카드 내용: 탭이 이미 보여주는 것(제목·상태점·활성 RTT)은 빼고, 탭만 봐선 모르는
+// 것만 모은다 — 연결 종류(헤드라인)·대상·비정상 상태·명령·점프·비활성 RTT·공유.
+function buildTabHoverInfo(
+  item: TitlebarDynamicItem,
+  tabs: TerminalTab[],
+  hosts: HostRecord[],
+  tmuxGroups: TmuxSessionGroup[],
+  workspaces: WorkspaceTab[],
+): TabHoverInfo {
+  const rows: TabHoverRow[] = [];
+
+  if (item.kind === 'session') {
+    const tab = tabs.find((candidate) => candidate.sessionId === item.sessionId);
+    const host = tab?.hostId
+      ? hosts.find((candidate) => candidate.id === tab.hostId) ?? null
+      : null;
+    const kind = deriveSessionConnectionKind(tab, host);
+    if (host?.kind === 'ssh' && host.jumpHostId) {
+      const jump = hosts.find((candidate) => candidate.id === host.jumpHostId);
+      rows.push({ label: '점프', value: jump?.label ?? host.jumpHostId });
+    }
+    if (tab?.reconnect) {
+      rows.push({
+        label: '재연결',
+        value: tab.reconnect.waitingForNetwork
+          ? '네트워크 대기 중'
+          : `${tab.reconnect.attempt}/${tab.reconnect.maxAttempts}회 시도`,
+        valueColor: TAB_DOT_COLOR.reconnecting,
+      });
+    } else if (tab?.status === 'error' && tab.errorMessage) {
+      rows.push({ label: '오류', value: tab.errorMessage, valueColor: TAB_DOT_COLOR.error });
+    }
+    const cwd = getSessionCwd(item.sessionId);
+    if (cwd) {
+      rows.push({ label: '현재 위치', value: cwd });
+    }
+    if (tab?.shellKind) {
+      rows.push({ label: '셸', value: tab.shellKind });
+    }
+    const connectedAt = getSessionConnectedAt(item.sessionId);
+    if (connectedAt != null) {
+      rows.push({ label: '연결 경과', value: formatElapsed(connectedAt) });
+    }
+    if (tab?.commandState === 'running') {
+      rows.push({ label: '명령', value: '실행 중', valueColor: TAB_DOT_COLOR.running });
+    } else {
+      const lastCommandAt = getSessionLastCommandAt(item.sessionId);
+      if (lastCommandAt != null) {
+        rows.push({
+          label: '마지막 명령',
+          value:
+            tab?.commandState === 'failed'
+              ? `${formatAgo(lastCommandAt)} · 실패`
+              : formatAgo(lastCommandAt),
+          valueColor: tab?.commandState === 'failed' ? TAB_DOT_COLOR.error : undefined,
+        });
+      }
+    }
+    if (item.rttMs != null) {
+      rows.push({ label: '지연', value: `${item.rttMs}ms`, valueColor: rttColor(item.rttMs) });
+    }
+    if (tab?.sessionShare?.shareUrl) {
+      rows.push({
+        label: '공유',
+        value: `관전 ${tab.sessionShare.viewerCount}명`,
+        valueColor: TAB_DOT_COLOR.running,
+      });
+    }
+    return {
+      heading: kind ? connectionKindLabel(kind) : '세션',
+      target: host ? formatHostTarget(host) : null,
+      rows,
+    };
+  }
+
+  if (item.kind === 'tmux') {
+    const group = tmuxGroups.find((candidate) => candidate.id === item.tmuxGroupId);
+    const host = group?.hostId
+      ? hosts.find((candidate) => candidate.id === group.hostId) ?? null
+      : null;
+    if (group?.reconnect) {
+      rows.push({
+        label: '재연결',
+        value: group.reconnect.waitingForNetwork
+          ? '네트워크 대기 중'
+          : `${group.reconnect.attempt}/${group.reconnect.maxAttempts}회 시도`,
+        valueColor: TAB_DOT_COLOR.reconnecting,
+      });
+    }
+    rows.push({ label: '윈도우', value: `${item.windowCount}개` });
+    if (item.rttMs != null) {
+      rows.push({ label: '지연', value: `${item.rttMs}ms`, valueColor: rttColor(item.rttMs) });
+    }
+    return {
+      heading: 'tmux',
+      target: host ? formatHostTarget(host) : null,
+      rows,
+    };
+  }
+
+  const workspace = workspaces.find((candidate) => candidate.id === item.workspaceId);
+  if (workspace) {
+    listWorkspaceSessionIds(workspace.layout).forEach((sessionId, index) => {
+      const paneTab = tabs.find((candidate) => candidate.sessionId === sessionId);
+      const paneHost = paneTab?.hostId
+        ? hosts.find((candidate) => candidate.id === paneTab.hostId) ?? null
+        : null;
+      rows.push({
+        label: `패널 ${index + 1}`,
+        value: paneHost?.label ?? paneTab?.title ?? '로컬',
+      });
+    });
+  }
+  return {
+    heading: item.isTmux ? '분할 · tmux' : '분할 워크스페이스',
+    target: null,
+    rows,
+  };
+}
 
 const TAB_DRAG_MIME = 'application/x-dolssh-tab-item';
 
@@ -245,10 +580,23 @@ export function AppTitleBar({
   const [isDetachHovering, setIsDetachHovering] = useState(false);
   const [tabDropPreview, setTabDropPreview] = useState<{ targetKey: string; placement: 'before' | 'after' } | null>(null);
   const [isTabDragging, setIsTabDragging] = useState(false);
+  // 끌고 있는 탭을 투명하게 가리는 플래그. dragstart 와 같은 틱에 숨기면 Chromium 이
+  // 드래그를 취소하므로(드래그 이미지 캡처 전 소스 소멸), 다음 틱으로 지연시킨다.
+  const [tabDragSourceHidden, setTabDragSourceHidden] = useState(false);
+  // hover 카드(호스트·상태·RTT). fixed 위치라 스크롤 스트립에 안 잘린다.
+  const [hoveredTab, setHoveredTab] = useState<{ key: string; left: number; top: number } | null>(null);
   const draggedTabRef = useRef<DynamicTabStripItem | null>(null);
   const updateMenuRef = useRef<HTMLDivElement | null>(null);
   const titlebarTabStripRef = useRef<HTMLDivElement | null>(null);
   const titlebarTabItemRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  // 드래그가 스트립 좌/우 끝에 닿으면 자동 가로 스크롤(화면 밖 위치로도 이동 가능).
+  const tabAutoScrollDirRef = useRef(0);
+  const tabAutoScrollRafRef = useRef<number | null>(null);
+  // 드래그 시작 순간의 탭 중심 좌표(스크롤 무관 content 좌표)를 고정 캡처한다.
+  // 히트 테스트를 이 정적 값으로 하면, 옆 탭이 transform 으로 비켜나도 드롭
+  // 위치가 흔들리지(재계산 진동) 않는다.
+  const tabDragLayoutRef = useRef<{ key: string; center: number }[]>([]);
+  const tabDragSourceWidthRef = useRef(0);
   const [showLeftTabStripFade, setShowLeftTabStripFade] = useState(false);
   const [showRightTabStripFade, setShowRightTabStripFade] = useState(false);
 
@@ -266,7 +614,12 @@ export function AppTitleBar({
               sessionId: tab.sessionId,
               title: tab.title,
               status: tab.status,
-              active: activeWorkspaceTab === `session:${tab.sessionId}`
+              active: activeWorkspaceTab === `session:${tab.sessionId}`,
+              dotState: combineDotState(
+                tabConnStateFromTab(tab),
+                tab.commandState,
+              ),
+              rttMs: tab.lastRttMs ?? null
             } satisfies TitlebarDynamicItem;
           }
 
@@ -275,13 +628,32 @@ export function AppTitleBar({
             if (!workspace) {
               return null;
             }
+            // 분할 워크스페이스는 pane 들의 최악 상태로 집계한다(error > reconnecting > connected).
+            const paneStates = listWorkspaceSessionIds(workspace.layout).map((id) =>
+              tabConnStateFromTab(tabs.find((candidate) => candidate.sessionId === id)),
+            );
+            const wsConnState: TabConnState = paneStates.includes('error')
+              ? 'error'
+              : paneStates.includes('reconnecting')
+                ? 'reconnecting'
+                : paneStates.length > 0 && paneStates.every((s) => s === 'connected')
+                  ? 'connected'
+                  : 'idle';
+            const wsActivePaneTab = tabs.find(
+              (candidate) => candidate.sessionId === workspace.activeSessionId,
+            );
             return {
               kind: 'workspace',
               workspaceId: workspace.id,
               title: workspace.title,
               paneCount: countWorkspacePanes(workspace),
               active: activeWorkspaceTab === `workspace:${workspace.id}`,
-              isTmux: Boolean(workspace.tmux)
+              isTmux: Boolean(workspace.tmux),
+              dotState: combineDotState(
+                wsConnState,
+                wsActivePaneTab?.commandState ?? null,
+              ),
+              rttMs: wsActivePaneTab?.lastRttMs ?? null
             } satisfies TitlebarDynamicItem;
           }
 
@@ -306,7 +678,8 @@ export function AppTitleBar({
                   workspace.tmux?.controlSessionId === group.controlSessionId,
               ).length,
               active: activeWorkspaceTab === `tmuxgrp:${group.id}`,
-              reconnecting: group.reconnect != null
+              reconnecting: group.reconnect != null,
+              rttMs: group.lastRttMs ?? null
             } satisfies TitlebarDynamicItem;
           }
 
@@ -349,6 +722,54 @@ export function AppTitleBar({
     );
   }, []);
 
+  const stepTabAutoScroll = useCallback(() => {
+    const el = titlebarTabStripRef.current;
+    const dir = tabAutoScrollDirRef.current;
+    if (!el || dir === 0) {
+      tabAutoScrollRafRef.current = null;
+      return;
+    }
+    el.scrollLeft += dir * 14;
+    updateTitlebarTabStripFades();
+    tabAutoScrollRafRef.current = window.requestAnimationFrame(stepTabAutoScroll);
+  }, [updateTitlebarTabStripFades]);
+
+  const updateTabAutoScroll = useCallback(
+    (clientX: number) => {
+      const el = titlebarTabStripRef.current;
+      if (!el) {
+        return;
+      }
+      const rect = el.getBoundingClientRect();
+      const EDGE = 56;
+      let dir = 0;
+      if (el.scrollWidth > el.clientWidth) {
+        if (clientX < rect.left + EDGE) {
+          dir = -1;
+        } else if (clientX > rect.right - EDGE) {
+          dir = 1;
+        }
+      }
+      tabAutoScrollDirRef.current = dir;
+      if (
+        dir !== 0 &&
+        tabAutoScrollRafRef.current == null &&
+        typeof window.requestAnimationFrame === 'function'
+      ) {
+        tabAutoScrollRafRef.current = window.requestAnimationFrame(stepTabAutoScroll);
+      }
+    },
+    [stepTabAutoScroll],
+  );
+
+  const stopTabAutoScroll = useCallback(() => {
+    tabAutoScrollDirRef.current = 0;
+    if (tabAutoScrollRafRef.current != null) {
+      window.cancelAnimationFrame(tabAutoScrollRafRef.current);
+      tabAutoScrollRafRef.current = null;
+    }
+  }, []);
+
   function getTabKey(item: DynamicTabStripItem): string {
     if (item.kind === 'session') {
       return `session:${item.sessionId}`;
@@ -359,9 +780,112 @@ export function AppTitleBar({
     return `workspace:${item.workspaceId}`;
   }
 
-  function resolveTabDropPlacement(event: React.DragEvent<HTMLDivElement>): 'before' | 'after' {
-    const rect = event.currentTarget.getBoundingClientRect();
-    return event.clientX <= rect.left + rect.width / 2 ? 'before' : 'after';
+  function itemToTarget(item: TitlebarDynamicItem): DynamicTabStripItem {
+    if (item.kind === 'session') {
+      return { kind: 'session', sessionId: item.sessionId };
+    }
+    if (item.kind === 'tmux') {
+      return { kind: 'tmux', tmuxGroupId: item.tmuxGroupId };
+    }
+    return { kind: 'workspace', workspaceId: item.workspaceId };
+  }
+
+  // 드래그 시작 시 호출: 각 탭의 중심을 content 좌표(스크롤 무관)로 고정 캡처하고,
+  // 끌고 있는 탭의 폭(슬롯 크기)을 기록한다.
+  function captureTabDragLayout(sourceWidth: number) {
+    const el = titlebarTabStripRef.current;
+    tabDragSourceWidthRef.current = sourceWidth;
+    if (!el) {
+      tabDragLayoutRef.current = [];
+      return;
+    }
+    const stripLeft = el.getBoundingClientRect().left;
+    const scrollLeft = el.scrollLeft;
+    tabDragLayoutRef.current = dynamicItems.map((item) => {
+      const key = getTabKey(itemToTarget(item));
+      const node = titlebarTabItemRefs.current[key];
+      const rect = node?.getBoundingClientRect();
+      const center = rect ? rect.left + rect.width / 2 - stripLeft + scrollLeft : 0;
+      return { key, center };
+    });
+  }
+
+  // 포인터 X 좌표만으로 "어느 탭 사이에 떨어질지"를 계산한다. 캡처해 둔 정적 중심과
+  // 비교하므로(transform 영향 없음) 진동이 없다. 특정 드롭 존을 조준할 필요가 없고,
+  // 맨 오른쪽 너머로 끌면 자연히 마지막 위치가 된다.
+  function computeTabDrop(
+    clientX: number,
+  ): { target: DynamicTabStripItem; placement: 'before' | 'after' } | null {
+    if (dynamicItems.length === 0) {
+      return null;
+    }
+    const el = titlebarTabStripRef.current;
+    const layout = tabDragLayoutRef.current;
+    if (el && layout.length === dynamicItems.length) {
+      const pointerX = clientX - el.getBoundingClientRect().left + el.scrollLeft;
+      for (let i = 0; i < dynamicItems.length; i += 1) {
+        if (pointerX < layout[i].center) {
+          return { target: itemToTarget(dynamicItems[i]), placement: 'before' };
+        }
+      }
+      return {
+        target: itemToTarget(dynamicItems[dynamicItems.length - 1]),
+        placement: 'after',
+      };
+    }
+    // 캡처가 없으면 라이브 측정으로 폴백.
+    for (const item of dynamicItems) {
+      const node = titlebarTabItemRefs.current[getTabKey(itemToTarget(item))];
+      if (!node) {
+        continue;
+      }
+      const rect = node.getBoundingClientRect();
+      if (clientX < rect.left + rect.width / 2) {
+        return { target: itemToTarget(item), placement: 'before' };
+      }
+    }
+    return {
+      target: itemToTarget(dynamicItems[dynamicItems.length - 1]),
+      placement: 'after',
+    };
+  }
+
+  // 드래그 중 각 탭의 좌우 이동량(px). 끌고 있는 탭은 보이지 않게 하고(드래그
+  // 이미지가 커서를 따라감), 그 슬롯이 드롭 지점으로 미끄러져 오도록 사이 탭들을
+  // 통째로 한 칸(슬롯 폭)씩 밀어 빈 자리를 연다. dragSourceIndex/dropGap 은 렌더에서 계산.
+  function tabSlideX(
+    index: number,
+    dragSourceIndex: number,
+    dropGap: number,
+  ): number {
+    if (dragSourceIndex < 0 || dropGap < 0 || index === dragSourceIndex) {
+      return 0;
+    }
+    const width = tabDragSourceWidthRef.current;
+    if (dragSourceIndex < dropGap && index > dragSourceIndex && index < dropGap) {
+      return -width;
+    }
+    if (dropGap < dragSourceIndex && index >= dropGap && index < dragSourceIndex) {
+      return width;
+    }
+    return 0;
+  }
+
+  // hover 카드를 해당 탭 아래에 띄운다(fixed, 우측 화면 밖으로 안 나가게 clamp).
+  function showTabHover(key: string, node: HTMLElement) {
+    if (isTabDragging) {
+      return;
+    }
+    const rect = node.getBoundingClientRect();
+    setHoveredTab({
+      key,
+      left: Math.max(8, Math.min(rect.left, window.innerWidth - 312)),
+      top: rect.bottom + 6,
+    });
+  }
+
+  function hideTabHover(key: string) {
+    setHoveredTab((current) => (current?.key === key ? null : current));
   }
 
   useEffect(() => {
@@ -400,6 +924,41 @@ export function AppTitleBar({
     };
   }, [updateTitlebarTabStripFades]);
 
+  useEffect(() => stopTabAutoScroll, [stopTabAutoScroll]);
+
+  // 드래그가 확립된 다음 틱에 소스 탭을 숨긴다(같은 틱에 숨기면 드래그가 취소됨).
+  useEffect(() => {
+    if (!isTabDragging) {
+      setTabDragSourceHidden(false);
+      return;
+    }
+    setHoveredTab(null);
+    const timer = window.setTimeout(() => setTabDragSourceHidden(true), 0);
+    return () => window.clearTimeout(timer);
+  }, [isTabDragging]);
+
+  // 탭 두 개를 합쳐 워크스페이스를 만들 때처럼 끌던 pill 이 drop 전에 unmount 되면
+  // 그 pill 의 onDragEnd 가 오지 않아 isTabDragging 이 영구히 true 로 남고, showTabHover
+  // 가 막혀 hover 가 먹통이 된다. document 레벨 dragend/drop 으로 확실히 리셋한다.
+  useEffect(() => {
+    if (!isTabDragging) {
+      return;
+    }
+    const reset = () => {
+      draggedTabRef.current = null;
+      setTabDropPreview(null);
+      setTabDragSourceHidden(false);
+      setIsTabDragging(false);
+      stopTabAutoScroll();
+    };
+    document.addEventListener('dragend', reset);
+    document.addEventListener('drop', reset);
+    return () => {
+      document.removeEventListener('dragend', reset);
+      document.removeEventListener('drop', reset);
+    };
+  }, [isTabDragging, stopTabAutoScroll]);
+
   useLayoutEffect(() => {
     if (isTabDragging) {
       return;
@@ -428,16 +987,54 @@ export function AppTitleBar({
     };
   }, [activeWorkspaceTab, isTabDragging, updateTitlebarTabStripFades]);
 
+  // 라이브 슬라이드 애니메이션용: 끌고 있는 탭의 인덱스와, 떨어질 틈(gap)의 인덱스.
+  const draggedKey =
+    isTabDragging && draggedTabRef.current
+      ? getTabKey(draggedTabRef.current)
+      : null;
+  const dragSourceIndex = draggedKey
+    ? dynamicItems.findIndex((item) => getTabKey(itemToTarget(item)) === draggedKey)
+    : -1;
+  let dropGap = -1;
+  if (isTabDragging && tabDropPreview) {
+    const targetIndex = dynamicItems.findIndex(
+      (item) => getTabKey(itemToTarget(item)) === tabDropPreview.targetKey,
+    );
+    if (targetIndex >= 0) {
+      dropGap = tabDropPreview.placement === 'before' ? targetIndex : targetIndex + 1;
+    }
+  }
+
+  const hoveredItem =
+    hoveredTab && !isTabDragging
+      ? dynamicItems.find(
+          (item) => getTabKey(itemToTarget(item)) === hoveredTab.key,
+        ) ?? null
+      : null;
+  const hoverInfo = hoveredItem
+    ? buildTabHoverInfo(hoveredItem, tabs, hosts, tmuxGroups, workspaces)
+    : null;
+
   return (
     <header
       className={cn(
-        // 헤더 자체는 no-drag. 스크롤되는 탭 스트립이 drag 영역 "안"에 있으면, 스트립을
-        // 스크롤한 뒤 창 드래그가 통째로 죽는 macOS Chromium 버그(electron #40610)가 난다.
-        // 그래서 drag 는 스트립의 형제인 빈 spacer 에만 준다(아래 min-w-16 flex-1).
-        'flex min-h-12 items-center gap-4 border-b border-[var(--chrome-border)] bg-[linear-gradient(180deg,color-mix(in_srgb,var(--chrome-bg)_94%,white_6%),color-mix(in_srgb,var(--chrome-bg)_98%,black_2%))] px-[1rem] py-[0.3rem] text-[#f3f7fb] shadow-[inset_0_-1px_0_rgba(255,255,255,0.03)] [-webkit-app-region:no-drag] max-[760px]:px-[1rem] max-[760px]:pr-[0.8rem]',
+        // 헤더/탭/컨트롤은 no-drag + select-none(글자 선택 방지). 창 드래그는 스크롤 영역과
+        // 겹치지 않는 두 드래그 존이 담당한다: ① 좌측 신호등 영역(절대배치 고정 rect),
+        // ② 우측 빈 spacer(self-stretch, 아래 min-w-16 flex-1). 스트립을 drag 영역에 넣지
+        // 않아 스크롤 후 드래그가 죽는 macOS 버그(#40610)도, 풀커버 레이어가 스크롤과 겹쳐
+        // "스크롤 위치에 따라 한쪽만 드래그되던" 버그도 모두 피한다.
+        'relative flex min-h-12 select-none items-center gap-4 border-b border-[var(--chrome-border)] bg-[linear-gradient(180deg,color-mix(in_srgb,var(--chrome-bg)_94%,white_6%),color-mix(in_srgb,var(--chrome-bg)_98%,black_2%))] px-[1rem] py-[0.3rem] text-[#f3f7fb] shadow-[inset_0_-1px_0_rgba(255,255,255,0.03)] [-webkit-app-region:no-drag] max-[760px]:px-[1rem] max-[760px]:pr-[0.8rem]',
         desktopPlatform === 'darwin' && 'pl-[5.4rem] max-[1040px]:pl-[4.8rem] max-[760px]:px-[4.8rem] max-[760px]:pr-[0.8rem]',
       )}
     >
+      {/* ① 좌측 드래그 존: macOS 신호등 영역(헤더 좌측 패딩). 스크롤 스트립과 겹치지 않는
+          고정 rect 라 위치-의존 버그가 없다. 네이티브 신호등 클릭은 그대로, 빈 곳은 창 드래그. */}
+      {desktopPlatform === 'darwin' ? (
+        <div
+          aria-hidden
+          className="absolute left-0 top-0 bottom-0 w-[5.4rem] max-[1040px]:w-[4.8rem] [-webkit-app-region:drag]"
+        />
+      ) : null}
       <div
         className={cn(
           'relative min-w-0 rounded-[24px] p-[0.2rem] transition-[background-color,box-shadow] duration-140 [-webkit-app-region:no-drag]',
@@ -500,6 +1097,55 @@ export function AppTitleBar({
               el.scrollLeft += event.deltaY;
             }
           }}
+          onDragOver={(event) => {
+            // 탭 재정렬 드래그만 처리. 패널 분할용 세션/페인 드래그(draggedTabRef
+            // 없음)는 그대로 통과시켜 워크스페이스 병합·detach 가 깨지지 않게 한다.
+            if (!draggedTabRef.current) {
+              return;
+            }
+            event.preventDefault();
+            event.dataTransfer.dropEffect = 'move';
+            const drop = computeTabDrop(event.clientX);
+            if (drop) {
+              const targetKey = getTabKey(drop.target);
+              setTabDropPreview((current) =>
+                current &&
+                current.targetKey === targetKey &&
+                current.placement === drop.placement
+                  ? current
+                  : { targetKey, placement: drop.placement },
+              );
+            }
+            updateTabAutoScroll(event.clientX);
+          }}
+          onDragLeave={(event) => {
+            const nextTarget = event.relatedTarget;
+            if (
+              nextTarget instanceof Node &&
+              event.currentTarget.contains(nextTarget)
+            ) {
+              return;
+            }
+            setTabDropPreview(null);
+            stopTabAutoScroll();
+          }}
+          onDrop={(event) => {
+            const payload = parseDraggedTab(
+              event.dataTransfer.getData(TAB_DRAG_MIME),
+            );
+            const sourceTab = payload ?? draggedTabRef.current;
+            stopTabAutoScroll();
+            if (!sourceTab) {
+              return;
+            }
+            const drop = computeTabDrop(event.clientX);
+            if (!drop) {
+              return;
+            }
+            event.preventDefault();
+            setTabDropPreview(null);
+            onReorderDynamicTab(sourceTab, drop.target, drop.placement);
+          }}
         >
           <Tabs className="shrink-0 bg-transparent p-0 shadow-none border-transparent gap-2">
             <div
@@ -545,7 +1191,13 @@ export function AppTitleBar({
               </TabButton>
             </div>
           </Tabs>
-          {dynamicItems.map((item) => {
+          {dynamicItems.map((item, idx) => {
+          const slideX = tabSlideX(idx, dragSourceIndex, dropGap);
+          const isDragSource = idx === dragSourceIndex;
+          // 슬라이드는 컨테이너 className 의 transition 목록에 transform 을 더해 애니메이션.
+          const tabSlideStyle: CSSProperties = {
+            transform: slideX ? `translateX(${slideX}px)` : undefined,
+          };
           if (item.kind === 'session') {
             const target = { kind: 'session', sessionId: item.sessionId } as const;
             const targetKey = getTabKey(target);
@@ -555,23 +1207,22 @@ export function AppTitleBar({
                 ref={(node) => {
                   titlebarTabItemRefs.current[targetKey] = node;
                 }}
+                style={tabSlideStyle}
                 className={cn(
-                  'group relative flex flex-none items-center gap-1 rounded-[22px] border pr-1.5 transition-[box-shadow,background-color,border-color] duration-150',
+                  'group relative flex flex-none items-center gap-1 rounded-[22px] border pr-1.5 transition-[box-shadow,background-color,border-color,transform] duration-150',
                   getTitlebarDynamicTabContainerClass(item.active),
-                  tabDropPreview?.targetKey === targetKey &&
-                    tabDropPreview.placement === 'before' &&
-                    'before:absolute before:-left-1 before:top-2 before:bottom-2 before:w-[3px] before:rounded-full before:bg-[var(--accent-strong)]',
-                  tabDropPreview?.targetKey === targetKey &&
-                    tabDropPreview.placement === 'after' &&
-                    'after:absolute after:-right-1 after:top-2 after:bottom-2 after:w-[3px] after:rounded-full after:bg-[var(--accent-strong)]',
+                  isDragSource && tabDragSourceHidden && 'opacity-0',
                 )}
                 draggable
+                onMouseEnter={(event) => showTabHover(targetKey, event.currentTarget)}
+                onMouseLeave={() => hideTabHover(targetKey)}
                 onDragStart={(event) => {
                   event.dataTransfer.effectAllowed = 'move';
                   event.dataTransfer.setData('application/x-dolssh-session-id', item.sessionId);
                   event.dataTransfer.setData(TAB_DRAG_MIME, serializeDraggedTab({ kind: 'session', sessionId: item.sessionId }));
                   const nextDraggedTab = { kind: 'session', sessionId: item.sessionId } as const;
                   draggedTabRef.current = nextDraggedTab;
+                  captureTabDragLayout(event.currentTarget.offsetWidth);
                   setIsTabDragging(true);
                   onStartSessionDrag(item.sessionId);
                 }}
@@ -580,36 +1231,8 @@ export function AppTitleBar({
                   setTabDropPreview(null);
                   setIsTabDragging(false);
                   setIsDetachHovering(false);
+                  stopTabAutoScroll();
                   onEndSessionDrag();
-                }}
-                onDragOver={(event) => {
-                  if (!draggedTabRef.current) {
-                    return;
-                  }
-                  event.preventDefault();
-                  event.dataTransfer.dropEffect = 'move';
-                  setTabDropPreview({
-                    targetKey,
-                    placement: resolveTabDropPlacement(event)
-                  });
-                }}
-                onDragLeave={(event) => {
-                  const nextTarget = event.relatedTarget;
-                  if (nextTarget instanceof Node && event.currentTarget.contains(nextTarget)) {
-                    return;
-                  }
-                  setTabDropPreview((current) => (current?.targetKey === targetKey ? null : current));
-                }}
-                onDrop={(event) => {
-                  const payload = parseDraggedTab(event.dataTransfer.getData(TAB_DRAG_MIME));
-                  const sourceTab = payload ?? draggedTabRef.current;
-                  if (!sourceTab) {
-                    return;
-                  }
-                  event.preventDefault();
-                  const placement = resolveTabDropPlacement(event);
-                  setTabDropPreview(null);
-                  onReorderDynamicTab(sourceTab, target, placement);
                 }}
               >
                 <TabButton
@@ -620,7 +1243,16 @@ export function AppTitleBar({
                   )}
                   onClick={() => onSelectSession(item.sessionId)}
                 >
+                  <TabStatusDot state={item.dotState} />
                   <span className="truncate">{item.title}</span>
+                  {item.active && item.rttMs != null ? (
+                    <span
+                      className="ml-1 flex-none text-[10px] tabular-nums"
+                      style={{ color: rttColor(item.rttMs) }}
+                    >
+                      {item.rttMs}ms
+                    </span>
+                  ) : null}
                 </TabButton>
                 <IconButton
                   size="sm"
@@ -640,20 +1272,50 @@ export function AppTitleBar({
           }
 
           if (item.kind === 'tmux') {
-            const tmuxTargetKey = getTabKey({
+            const target = {
               kind: 'tmux',
               tmuxGroupId: item.tmuxGroupId,
-            });
+            } as const;
+            const tmuxTargetKey = getTabKey(target);
             return (
               <div
                 key={`tmuxgrp:${item.tmuxGroupId}`}
                 ref={(node) => {
                   titlebarTabItemRefs.current[tmuxTargetKey] = node;
                 }}
+                style={tabSlideStyle}
                 className={cn(
-                  'group relative flex flex-none items-center gap-1 rounded-[22px] border pr-1.5 transition-[box-shadow,background-color,border-color] duration-150',
+                  'group relative flex flex-none items-center gap-1 rounded-[22px] border pr-1.5 transition-[box-shadow,background-color,border-color,transform] duration-150',
                   getTitlebarDynamicTabContainerClass(item.active),
+                  isDragSource && tabDragSourceHidden && 'opacity-0',
                 )}
+                draggable
+                onMouseEnter={(event) => showTabHover(tmuxTargetKey, event.currentTarget)}
+                onMouseLeave={() => hideTabHover(tmuxTargetKey)}
+                onDragStart={(event) => {
+                  event.dataTransfer.effectAllowed = 'move';
+                  event.dataTransfer.setData('text/plain', item.title);
+                  event.dataTransfer.setData(
+                    TAB_DRAG_MIME,
+                    serializeDraggedTab({
+                      kind: 'tmux',
+                      tmuxGroupId: item.tmuxGroupId,
+                    }),
+                  );
+                  draggedTabRef.current = {
+                    kind: 'tmux',
+                    tmuxGroupId: item.tmuxGroupId,
+                  };
+                  captureTabDragLayout(event.currentTarget.offsetWidth);
+                  setIsTabDragging(true);
+                }}
+                onDragEnd={() => {
+                  draggedTabRef.current = null;
+                  setTabDropPreview(null);
+                  setIsTabDragging(false);
+                  setIsDetachHovering(false);
+                  stopTabAutoScroll();
+                }}
               >
                 <TabButton
                   active={item.active}
@@ -662,15 +1324,10 @@ export function AppTitleBar({
                     getTitlebarDynamicTabButtonClass(item.active),
                   )}
                   onClick={() => onSelectTmuxGroup(item.tmuxGroupId)}
-                  title={
-                    item.reconnecting
-                      ? 'tmux 세션 재연결 중…'
-                      : `tmux 세션 · 윈도우 ${item.windowCount}개`
-                  }
                 >
                   <span
                     className={cn(
-                      'mr-1',
+                      'mr-1.5',
                       item.reconnecting
                         ? 'animate-spin text-[var(--warning,#d97706)]'
                         : 'text-[var(--accent)]',
@@ -680,11 +1337,14 @@ export function AppTitleBar({
                     {item.reconnecting ? '↻' : '⊟'}
                   </span>
                   <span className="truncate">{item.title}</span>
-                  {item.reconnecting && (
-                    <span className="ml-1 flex-none text-[10px] text-[var(--text-muted,#888)]">
-                      재연결 중
+                  {item.active && item.rttMs != null ? (
+                    <span
+                      className="ml-1 flex-none text-[10px] tabular-nums"
+                      style={{ color: rttColor(item.rttMs) }}
+                    >
+                      {item.rttMs}ms
                     </span>
-                  )}
+                  ) : null}
                 </TabButton>
                 <IconButton
                   size="sm"
@@ -710,23 +1370,22 @@ export function AppTitleBar({
               ref={(node) => {
                 titlebarTabItemRefs.current[targetKey] = node;
               }}
+              style={tabSlideStyle}
               className={cn(
-                'group relative flex flex-none items-center gap-1 rounded-[22px] border pr-1.5 transition-[box-shadow,background-color,border-color] duration-150',
+                'group relative flex flex-none items-center gap-1 rounded-[22px] border pr-1.5 transition-[box-shadow,background-color,border-color,transform] duration-150',
                 getTitlebarDynamicTabContainerClass(item.active),
-                tabDropPreview?.targetKey === targetKey &&
-                  tabDropPreview.placement === 'before' &&
-                  'before:absolute before:-left-1 before:top-2 before:bottom-2 before:w-[3px] before:rounded-full before:bg-[var(--accent-strong)]',
-                tabDropPreview?.targetKey === targetKey &&
-                  tabDropPreview.placement === 'after' &&
-                  'after:absolute after:-right-1 after:top-2 after:bottom-2 after:w-[3px] after:rounded-full after:bg-[var(--accent-strong)]',
+                isDragSource && tabDragSourceHidden && 'opacity-0',
               )}
               draggable
+              onMouseEnter={(event) => showTabHover(targetKey, event.currentTarget)}
+              onMouseLeave={() => hideTabHover(targetKey)}
               onDragStart={(event) => {
                 event.dataTransfer.effectAllowed = 'move';
                 event.dataTransfer.setData('text/plain', item.title);
                 event.dataTransfer.setData(TAB_DRAG_MIME, serializeDraggedTab({ kind: 'workspace', workspaceId: item.workspaceId }));
                 const nextDraggedTab = { kind: 'workspace', workspaceId: item.workspaceId } as const;
                 draggedTabRef.current = nextDraggedTab;
+                captureTabDragLayout(event.currentTarget.offsetWidth);
                 setIsTabDragging(true);
               }}
               onDragEnd={() => {
@@ -734,35 +1393,7 @@ export function AppTitleBar({
                 setTabDropPreview(null);
                 setIsTabDragging(false);
                 setIsDetachHovering(false);
-              }}
-              onDragOver={(event) => {
-                if (!draggedTabRef.current) {
-                  return;
-                }
-                event.preventDefault();
-                event.dataTransfer.dropEffect = 'move';
-                setTabDropPreview({
-                  targetKey,
-                  placement: resolveTabDropPlacement(event)
-                });
-              }}
-              onDragLeave={(event) => {
-                const nextTarget = event.relatedTarget;
-                if (nextTarget instanceof Node && event.currentTarget.contains(nextTarget)) {
-                  return;
-                }
-                setTabDropPreview((current) => (current?.targetKey === targetKey ? null : current));
-              }}
-              onDrop={(event) => {
-                const payload = parseDraggedTab(event.dataTransfer.getData(TAB_DRAG_MIME));
-                const sourceTab = payload ?? draggedTabRef.current;
-                if (!sourceTab) {
-                  return;
-                }
-                event.preventDefault();
-                const placement = resolveTabDropPlacement(event);
-                setTabDropPreview(null);
-                onReorderDynamicTab(sourceTab, target, placement);
+                stopTabAutoScroll();
               }}
             >
               <TabButton
@@ -838,48 +1469,19 @@ export function AppTitleBar({
             </div>
           );
         })}
+        {/* 드래그 중에는 마지막 탭 뒤에 '뒤에 놓기'용 여백을 둬, 끝으로 옮기기 쉽게 한다. */}
         {isTabDragging && dynamicItems.length > 0 ? (
-          <div
-            className={cn(
-              'h-10 w-6 flex-none rounded-[999px] transition-[background-color,box-shadow] duration-150',
-              tabDropPreview?.targetKey === '__tail__'
-                ? 'bg-[rgba(255,255,255,0.12)] shadow-[inset_0_0_0_1px_rgba(255,255,255,0.16)]'
-                : 'bg-transparent'
-            )}
-            onDragOver={(event) => {
-              if (!draggedTabRef.current) {
-                return;
-              }
-              event.preventDefault();
-              event.dataTransfer.dropEffect = 'move';
-              setTabDropPreview({
-                targetKey: '__tail__',
-                placement: 'after'
-              });
-            }}
-            onDragLeave={(event) => {
-              const nextTarget = event.relatedTarget;
-              if (nextTarget instanceof Node && event.currentTarget.contains(nextTarget)) {
-                return;
-              }
-              setTabDropPreview((current) => (current?.targetKey === '__tail__' ? null : current));
-            }}
-            onDrop={(event) => {
-              const payload = parseDraggedTab(event.dataTransfer.getData(TAB_DRAG_MIME));
-              const sourceTab = payload ?? draggedTabRef.current;
-              const lastItem = tabStrip[tabStrip.length - 1];
-              if (!sourceTab || !lastItem) {
-                return;
-              }
-              event.preventDefault();
-              setTabDropPreview(null);
-              onReorderDynamicTab(sourceTab, lastItem, 'after');
-            }}
-          />
+          <div aria-hidden className="h-10 w-8 flex-none" />
         ) : null}
         </div>
       </div>
-      <div className="min-w-16 flex-1 [-webkit-app-region:drag]" />
+      {/* ② 우측 드래그 존: 탭과 컨트롤 사이 빈 공간. self-stretch 로 헤더 높이를 채워
+          실제 드래그 면적을 갖고(0-height 버그 방지), min-w-16 으로 탭이 많아도 종 옆에
+          항상 드래그 영역이 남는다. 스크롤 스트립과 겹치지 않는 형제라 안전. */}
+      <div
+        aria-hidden
+        className="min-w-16 flex-1 self-stretch [-webkit-app-region:drag]"
+      />
       <div className="relative flex items-center gap-[0.55rem] [-webkit-app-region:no-drag]">
         <div className="relative [-webkit-app-region:no-drag]" ref={updateMenuRef}>
           <IconButton
@@ -988,6 +1590,42 @@ export function AppTitleBar({
           onCloseWindow={onCloseWindow}
         />
       </div>
+      {hoveredTab && hoverInfo ? (
+        <div
+          role="tooltip"
+          className="pointer-events-none fixed z-[200] w-max max-w-[300px] rounded-[12px] border border-[var(--chrome-border)] bg-[color-mix(in_srgb,var(--chrome-bg)_92%,black_8%)] px-3 py-2.5 text-[#f3f7fb] shadow-[0_12px_32px_rgba(0,0,0,0.45)] [-webkit-app-region:no-drag]"
+          style={{ left: hoveredTab.left, top: hoveredTab.top }}
+        >
+          <div className="text-[0.84rem] font-semibold tracking-[0.01em]">
+            {hoverInfo.heading}
+          </div>
+          {hoverInfo.target ? (
+            <div className="mt-0.5 max-w-[276px] truncate font-mono text-[0.72rem] text-[rgba(243,247,251,0.62)]">
+              {hoverInfo.target}
+            </div>
+          ) : null}
+          {hoverInfo.rows.length > 0 ? (
+            <div className="mt-2 space-y-1 border-t border-[rgba(255,255,255,0.08)] pt-2">
+              {hoverInfo.rows.map((row) => (
+                <div
+                  key={row.label}
+                  className="flex items-center justify-between gap-5 text-[0.72rem]"
+                >
+                  <span className="flex-none text-[rgba(243,247,251,0.45)]">
+                    {row.label}
+                  </span>
+                  <span
+                    className="max-w-[190px] truncate text-right text-[rgba(243,247,251,0.9)]"
+                    style={row.valueColor ? { color: row.valueColor } : undefined}
+                  >
+                    {row.value}
+                  </span>
+                </div>
+              ))}
+            </div>
+          ) : null}
+        </div>
+      ) : null}
     </header>
   );
 }

@@ -176,6 +176,7 @@ export type CoreEventType =
   | "data"
   | "error"
   | "closed"
+  | "latency"
   | "serialPortsListed"
   | "serialControlCompleted"
   | "hostKeyProbed"
