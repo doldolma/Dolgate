@@ -7,6 +7,7 @@ import type {
   SessionShareChatEvent,
   SessionShareEvent,
   SftpConnectionProgressEvent,
+  TabCommandPayload,
   TransferJobEvent,
   UpdateEvent,
   WarpgateImportEvent,
@@ -53,6 +54,7 @@ const sessionShareEventHub = createListenerHub<SessionShareEvent>();
 const sessionShareChatEventHub = createListenerHub<SessionShareChatEvent>();
 const systemResumeHub = createListenerHub<void>();
 const closeActiveTabHub = createListenerHub<void>();
+const tabCommandHub = createListenerHub<TabCommandPayload>();
 
 const streamListeners = new Map<string, Set<(chunk: Uint8Array) => void>>();
 const sessionBacklog = new Map<string, Uint8Array[]>();
@@ -283,6 +285,16 @@ export function emitCloseActiveTab(): void {
 
 export function subscribeCloseActiveTab(listener: () => void): () => void {
   return closeActiveTabHub.subscribe(listener);
+}
+
+export function emitTabCommand(payload: TabCommandPayload): void {
+  tabCommandHub.emit(payload);
+}
+
+export function subscribeTabCommand(
+  listener: (payload: TabCommandPayload) => void,
+): () => void {
+  return tabCommandHub.subscribe(listener);
 }
 
 export function registerE2EWindowEvents(): void {

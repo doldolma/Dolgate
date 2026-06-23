@@ -13,6 +13,8 @@ interface TmuxSessionFooterProps {
   onSelectSession: (name: string) => void;
   /** 세션 종료(kill-session). */
   onKillSession: (name: string) => void;
+  /** 메뉴 열 때 세션 목록 재조회. */
+  onRefresh?: () => void;
 }
 
 // tmux 세션 그룹 하단 1줄 바: 세션 메뉴(목록/생성/전환/kill) + detach. 감지 하단바와
@@ -25,6 +27,7 @@ export function TmuxSessionFooter({
   onCreateSession,
   onSelectSession,
   onKillSession,
+  onRefresh,
 }: TmuxSessionFooterProps) {
   return (
     <div className="mx-[0.55rem] mb-[0.55rem] mt-1 flex items-center gap-1.5 rounded-[6px] border border-[var(--border)] bg-[color-mix(in_srgb,var(--surface)_96%,transparent)] px-[0.7rem] py-[0.28rem] text-[0.7rem] text-[var(--text-muted)]">
@@ -40,6 +43,7 @@ export function TmuxSessionFooter({
         onCreateSession={onCreateSession}
         onSelectSession={onSelectSession}
         onKillSession={onKillSession}
+        onRefresh={onRefresh}
       />
       <button
         type="button"

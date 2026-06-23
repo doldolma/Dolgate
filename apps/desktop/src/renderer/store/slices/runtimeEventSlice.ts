@@ -563,10 +563,19 @@ export function createRuntimeEventSlice(deps: SliceDeps): RuntimeEventSlice {
     
                   set((state) => {
                     const currentTab = findContainersTab(state, containerHostId);
+                    // 인증 프롬프트(pendingInteractiveAuth)는 Home/SFTP/Containers 셸 어디서나
+                    // 뜨므로, 그 탭들에 있으면 강제로 containers 로 끌어오지 않는다(연결 중
+                    // 다른 데로 이동했을 때 포커스 가로채기 방지). 프롬프트가 안 보이는
+                    // 세션/그룹 탭에 있을 때만 containers 로 전환해 인증을 놓치지 않게 한다.
+                    const promptVisibleHere =
+                      state.activeWorkspaceTab === "home" ||
+                      state.activeWorkspaceTab === "sftp" ||
+                      state.activeWorkspaceTab === "containers";
                     return {
-                      activeWorkspaceTab: currentTab
-                        ? "containers"
-                        : state.activeWorkspaceTab,
+                      activeWorkspaceTab:
+                        currentTab && !promptVisibleHere
+                          ? "containers"
+                          : state.activeWorkspaceTab,
                       activeContainerHostId: currentTab
                         ? containerHostId
                         : state.activeContainerHostId,

@@ -4,6 +4,7 @@ import { ipcChannels } from "../../common/ipc-channels";
 import {
   subscribeActivityLogsChanged,
   subscribeCloseActiveTab,
+  subscribeTabCommand,
   subscribePortForwardEvent,
   subscribeSystemResume,
   subscribeUpdateEvent,
@@ -37,6 +38,7 @@ export function buildWindowBridge(
     close: () => ipcRenderer.invoke(ipcChannels.window.close),
     onStateChanged: (listener) => subscribeWindowState(listener),
     onCloseActiveTab: (listener) => subscribeCloseActiveTab(listener),
+    onTabCommand: (listener) => subscribeTabCommand(listener),
   };
 }
 

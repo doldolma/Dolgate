@@ -22,6 +22,7 @@ import {
   emitSessionShareChatEvent,
   emitSessionShareEvent,
   emitCloseActiveTab,
+  emitTabCommand,
   emitSftpConnectionProgress,
   emitSshData,
   emitSystemResume,
@@ -123,5 +124,8 @@ export function registerPreloadEventBindings(ipcRenderer: IpcRenderer): void {
   });
   ipcRenderer.on(ipcChannels.window.closeActiveTab, () => {
     emitCloseActiveTab();
+  });
+  ipcRenderer.on(ipcChannels.window.tabCommand, (_event, payload) => {
+    emitTabCommand(payload as import('@shared').TabCommandPayload);
   });
 }

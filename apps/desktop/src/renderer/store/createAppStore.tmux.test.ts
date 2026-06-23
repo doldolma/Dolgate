@@ -31,6 +31,8 @@ describe("createAppStore tmux session grouping", () => {
 
   it("creates one session group + one top tab for the first window", () => {
     const store = createAppStore(createMockApi());
+    // 사용자가 control 세션 연결을 보고 있는 상태(실제 흐름)여야 그룹으로 자동 전환된다.
+    store.getState().activateSession(CTL);
     store
       .getState()
       .handleTmuxLayoutChange(CTL, "@0", layoutFor(0), {
@@ -200,6 +202,7 @@ describe("createAppStore tmux session grouping", () => {
   it("keeps the group tab active (no blank screen) when the active window closes but the group survives", () => {
     const store = createAppStore(createMockApi());
     const api = store.getState();
+    api.activateSession(CTL);
     api.handleTmuxLayoutChange(CTL, "@0", layoutFor(0), { index: 0, active: true });
     api.handleTmuxLayoutChange(CTL, "@1", layoutFor(1), { index: 1, active: false });
     const group = store.getState().tmuxGroups[0]!;
@@ -487,6 +490,7 @@ describe("createAppStore tmux session grouping", () => {
   it("does NOT create a standalone control tab on tmux reconnect (reconnectGroupId)", async () => {
     const store = createAppStore(createMockApi());
     store.setState({ hosts: [RECONNECT_HOST] });
+    store.getState().activateSession(CTL);
     store
       .getState()
       .handleTmuxLayoutChange(CTL, "@0", layoutFor(0), { index: 0, active: true });
@@ -570,5 +574,51 @@ describe("createAppStore tmux session grouping", () => {
       { kind: "tmux", tmuxGroupId: "g1" },
       { kind: "session", sessionId: "s1" },
     ]);
+  });
+
+  it("runTabCommand navigates the visible tab strip (next/prev/index/last/wrap)", () => {
+    const store = createAppStore(createMockApi());
+    // 가시 순서: home, sftp, containers, session:s1, session:s2, tmuxgrp:g1
+    store.setState({
+      tabStrip: [
+        { kind: "session", sessionId: "s1" },
+        { kind: "session", sessionId: "s2" },
+        { kind: "tmux", tmuxGroupId: "g1" },
+      ],
+    });
+    store.getState().activateSession("s1");
+    expect(store.getState().activeWorkspaceTab).toBe("session:s1");
+
+    store.getState().runTabCommand({ kind: "next" });
+    expect(store.getState().activeWorkspaceTab).toBe("session:s2");
+
+    store.getState().runTabCommand({ kind: "prev" });
+    expect(store.getState().activeWorkspaceTab).toBe("session:s1");
+
+    store.getState().runTabCommand({ kind: "index", index: 1 });
+    expect(store.getState().activeWorkspaceTab).toBe("home");
+
+    store.getState().runTabCommand({ kind: "last" });
+    expect(store.getState().activeWorkspaceTab).toBe("tmuxgrp:g1");
+
+    store.getState().runTabCommand({ kind: "index", index: 4 });
+    expect(store.getState().activeWorkspaceTab).toBe("session:s1");
+
+    // 맨 앞(home)에서 이전 → 마지막으로 순환.
+    store.getState().runTabCommand({ kind: "index", index: 1 });
+    store.getState().runTabCommand({ kind: "prev" });
+    expect(store.getState().activeWorkspaceTab).toBe("tmuxgrp:g1");
+  });
+
+  it("does NOT steal focus to the new tmux group if the user navigated away (home)", () => {
+    const store = createAppStore(createMockApi());
+    store.getState().activateSession(CTL); // control 세션 연결을 보는 중…
+    store.getState().activateHome(); // …그 사이 home 으로 이동
+    store
+      .getState()
+      .handleTmuxLayoutChange(CTL, "@0", layoutFor(0), { index: 0, active: true });
+    // 그룹은 생성되지만, 사용자가 떠났으므로 활성 탭은 home 유지(강제 포커스 X).
+    expect(store.getState().tmuxGroups).toHaveLength(1);
+    expect(store.getState().activeWorkspaceTab).toBe("home");
   });
 });

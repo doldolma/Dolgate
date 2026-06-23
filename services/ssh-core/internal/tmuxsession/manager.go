@@ -532,6 +532,10 @@ func (m *Manager) SelectPane(sessionID string) error {
 	return handle.writeStdin(fmt.Sprintf("select-pane -t %s\n", paneID))
 }
 
+// RefreshSessionsCommand 는 ControlCommand 로 들어오면 control 채널에 쓰지 않고 세션 목록을
+// 즉시 재조회(emitSessions)하는 특수 신호다. 렌더러도 같은 문자열을 보낸다(terminal.ts).
+const RefreshSessionsCommand = "__dolssh_refresh_sessions__"
+
 // ControlCommand 은 renderer 키맵이 만든 tmux 명령(예: "select-pane -L -t %0")을
 // control 채널로 그대로 보낸다. 단축키 확장용 범용 통로이며, 명령 문자열은 렌더러의
 // 고정 키맵에서만 생성된다(사용자 입력 아님). 대상(-t)은 렌더러가 포함해 보낸다.
@@ -539,6 +543,12 @@ func (m *Manager) ControlCommand(sessionID, command string) error {
 	handle, _, err := m.controlOf(sessionID)
 	if err != nil {
 		return err
+	}
+	// 세션 목록 즉시 재조회 신호(드롭다운 열 때). %sessions-changed 가 다른 SSH 연결에서
+	// 만든 세션엔 도착 안 하는 경우가 있어, 명시적으로 SSH 보조채널로 재pull 한다.
+	if strings.TrimSpace(command) == RefreshSessionsCommand {
+		go m.emitSessions(handle)
+		return nil
 	}
 	command = strings.TrimRight(command, "\r\n")
 	if command == "" {

@@ -1019,6 +1019,19 @@ export function AppTitleBar({
     ? buildTabHoverInfo(hoveredItem, tabs, hosts, tmuxGroups, workspaces)
     : null;
 
+  // 오버플로우로 잘리는 끝 탭을 직각으로 자르지 않고 알파(투명도)로 부드럽게 페이드한다.
+  // overflow clip 은 사각이라 흰 활성 탭이 "깨진" 사각으로 보이는데, mask 로 색 무관하게
+  // 자연스러운 가장자리를 만든다. 더 보일 게 있는 쪽(showLeft/showRight)만 페이드.
+  const FADE = '34px';
+  const stripMaskImage =
+    showLeftTabStripFade && showRightTabStripFade
+      ? `linear-gradient(to right, transparent, #000 ${FADE}, #000 calc(100% - ${FADE}), transparent)`
+      : showRightTabStripFade
+        ? `linear-gradient(to right, #000 calc(100% - ${FADE}), transparent)`
+        : showLeftTabStripFade
+          ? `linear-gradient(to right, transparent, #000 ${FADE})`
+          : undefined;
+
   return (
     <header
       className={cn(
@@ -1085,7 +1098,8 @@ export function AppTitleBar({
         <div
           ref={titlebarTabStripRef}
           data-titlebar-tab-strip="true"
-          className="flex min-w-0 items-center gap-[0.55rem] overflow-x-auto overflow-y-hidden px-[0.05rem] py-[0.02rem]"
+          className="flex min-w-0 items-center gap-[0.55rem] overflow-x-auto overflow-y-hidden pl-1.5 py-[0.12rem]"
+          style={{ maskImage: stripMaskImage, WebkitMaskImage: stripMaskImage }}
           onScroll={updateTitlebarTabStripFades}
           onWheel={(event) => {
             // 탭이 많아 가로 오버플로우가 있을 때, 마우스 세로 휠을 가로 스크롤로
@@ -1213,7 +1227,7 @@ export function AppTitleBar({
                 }}
                 style={tabSlideStyle}
                 className={cn(
-                  'group relative flex flex-none items-center gap-1 rounded-[22px] border pr-1.5 transition-[box-shadow,background-color,border-color,transform] duration-150',
+                  'group relative flex flex-none items-center gap-1 rounded-[22px] border pr-1.5 scroll-mx-2 transition-[box-shadow,background-color,border-color,transform] duration-150',
                   getTitlebarDynamicTabContainerClass(item.active),
                   isDragSource && tabDragSourceHidden && 'opacity-0',
                 )}
@@ -1289,7 +1303,7 @@ export function AppTitleBar({
                 }}
                 style={tabSlideStyle}
                 className={cn(
-                  'group relative flex flex-none items-center gap-1 rounded-[22px] border pr-1.5 transition-[box-shadow,background-color,border-color,transform] duration-150',
+                  'group relative flex flex-none items-center gap-1 rounded-[22px] border pr-1.5 scroll-mx-2 transition-[box-shadow,background-color,border-color,transform] duration-150',
                   getTitlebarDynamicTabContainerClass(item.active),
                   isDragSource && tabDragSourceHidden && 'opacity-0',
                 )}
@@ -1376,7 +1390,7 @@ export function AppTitleBar({
               }}
               style={tabSlideStyle}
               className={cn(
-                'group relative flex flex-none items-center gap-1 rounded-[22px] border pr-1.5 transition-[box-shadow,background-color,border-color,transform] duration-150',
+                'group relative flex flex-none items-center gap-1 rounded-[22px] border pr-1.5 scroll-mx-2 transition-[box-shadow,background-color,border-color,transform] duration-150',
                 getTitlebarDynamicTabContainerClass(item.active),
                 isDragSource && tabDragSourceHidden && 'opacity-0',
               )}
@@ -1473,9 +1487,14 @@ export function AppTitleBar({
             </div>
           );
         })}
-        {/* 드래그 중에는 마지막 탭 뒤에 '뒤에 놓기'용 여백을 둬, 끝으로 옮기기 쉽게 한다. */}
-        {isTabDragging && dynamicItems.length > 0 ? (
-          <div aria-hidden className="h-10 w-8 flex-none" />
+        {/* 마지막 탭 뒤 여백 스페이서. flex + overflow-x 컨테이너는 스크롤 끝에서
+            오른쪽 padding 을 무시해(Chromium) 마지막 탭의 둥근 모서리가 잘린다 → 패딩 대신
+            항상 스페이서로 여백을 확보한다. 드래그 중엔 넓혀 '맨 끝으로 놓기'도 쉽게. */}
+        {dynamicItems.length > 0 ? (
+          <div
+            aria-hidden
+            className={cn('h-10 flex-none', isTabDragging ? 'w-8' : 'w-2')}
+          />
         ) : null}
         </div>
       </div>

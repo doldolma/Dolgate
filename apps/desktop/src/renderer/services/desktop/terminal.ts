@@ -94,6 +94,15 @@ export function tmuxCommand(sessionId: string, command: string) {
   return desktopApi.ssh.tmuxCommand(sessionId, command);
 }
 
+// Go ControlCommand 의 RefreshSessionsCommand 와 같은 값이어야 한다(세션 목록 즉시 재조회).
+const TMUX_REFRESH_SESSIONS = '__dolssh_refresh_sessions__';
+
+// refreshTmuxSessions 는 control 세션의 tmux 세션 목록을 즉시 재조회시킨다(드롭다운 열 때).
+// %sessions-changed 가 다른 SSH 연결의 새 세션엔 안 오는 경우가 있어 명시적으로 pull.
+export function refreshTmuxSessions(sessionId: string) {
+  return desktopApi.ssh.tmuxCommand(sessionId, TMUX_REFRESH_SESSIONS);
+}
+
 export function subscribeToTerminalEvents(
   listener: Parameters<SshApi['onEvent']>[0],
 ) {

@@ -1,4 +1,4 @@
-import type { TerminalTab } from "@shared";
+import type { TabCommandPayload, TerminalTab } from "@shared";
 import type { SliceDeps } from "../services/context";
 import type {
   DynamicTabStripItem,
@@ -162,6 +162,7 @@ import { createSessionServices } from "../services/session";
 import { createSftpServices } from "../services/sftp";
 import { createTrustAuthServices } from "../services/trust-auth";
 import { parseSnippetVariables, resolveSnippetCommand } from "../../lib/snippet";
+import { popClosedHost, pushClosedHost } from "../../lib/recently-closed-tabs";
 
 // 사용자가 닫은 tmux control 세션. 닫는 순간 control 채널 stdout 에 이미 버퍼돼 있던
 // 늦은 %layout-change 가 도착해 워크스페이스를 되살리는(부활) 것을 막기 위한 단기 가드.
@@ -527,8 +528,12 @@ export function createSessionSlice(deps: SliceDeps): SessionSlice {
                 workspaces: nextWorkspaces,
                 tmuxGroups: nextGroups,
                 tabStrip: nextTabStrip,
-                // 최초 그룹 생성 또는 standalone control 탭 흡수 시 그룹 탭으로 전환.
-                ...(!existingGroup || hadControlTab
+                // 최초 그룹 생성 또는 standalone control 탭 흡수 시 그룹 탭으로 전환 —
+                // 단 사용자가 그 연결을 보고 있을 때만(연결 중인 control 탭에 있거나 이미
+                // 이 그룹에 있을 때). home 등 다른 데로 이동했으면 강제 포커스하지 않는다.
+                ...((!existingGroup || hadControlTab) &&
+                (state.activeWorkspaceTab === asSessionTabId(controlSessionId) ||
+                  state.activeWorkspaceTab === asTmuxSessionGroupTabId(groupId))
                   ? { activeWorkspaceTab: asTmuxSessionGroupTabId(groupId) }
                   : {}),
               };
@@ -1017,6 +1022,13 @@ export function createSessionSlice(deps: SliceDeps): SessionSlice {
               void api.ssh.tmuxKillPane(sessionId);
               return;
             }
+            // 닫은 탭 다시 열기(Cmd+Shift+T)용: 호스트 세션이면 hostId 를 최근닫음 스택에 기록.
+            const closingHostId = get().tabs.find(
+              (tab) => tab.sessionId === sessionId,
+            )?.hostId;
+            if (closingHostId) {
+              pushClosedHost(closingHostId);
+            }
             // 사용자가 직접 끊으면 진행 중인 자동 재연결을 즉시 취소(의도적 종료).
             const reconnectTab = get().tabs.find(
               (tab) => tab.sessionId === sessionId,
@@ -1124,6 +1136,54 @@ export function createSessionSlice(deps: SliceDeps): SessionSlice {
               return true;
             }
             return false;
+          },
+    runTabCommand: (payload) => {
+            // 닫은 탭 다시 열기: 최근닫음 스택에서 호스트를 꺼내 그대로 재연결(내용 복구 X).
+            if (payload.kind === "reopen") {
+              const hostId = popClosedHost();
+              if (hostId && get().hosts.some((host) => host.id === hostId)) {
+                void get().connectHost(hostId, 120, 32);
+              }
+              return;
+            }
+            // 가시 탭 순서: 고정(home/sftp/containers) + 동적(tabStrip) 좌→우.
+            const order: string[] = ["home", "sftp", "containers"];
+            for (const item of get().tabStrip) {
+              if (item.kind === "session") {
+                order.push(asSessionTabId(item.sessionId));
+              } else if (item.kind === "workspace") {
+                order.push(asWorkspaceTabId(item.workspaceId));
+              } else if (item.kind === "tmux") {
+                order.push(asTmuxSessionGroupTabId(item.tmuxGroupId));
+              }
+            }
+            let targetKey: string | undefined;
+            if (payload.kind === "index") {
+              targetKey = order[payload.index - 1]; // 1-based
+            } else if (payload.kind === "last") {
+              targetKey = order[order.length - 1];
+            } else {
+              const delta = payload.kind === "next" ? 1 : -1;
+              const current = order.indexOf(get().activeWorkspaceTab);
+              const base = current < 0 ? 0 : current;
+              targetKey = order[(base + delta + order.length) % order.length];
+            }
+            if (!targetKey) {
+              return;
+            }
+            if (targetKey === "home") {
+              get().activateHome();
+            } else if (targetKey === "sftp") {
+              get().activateSftp();
+            } else if (targetKey === "containers") {
+              get().activateContainers();
+            } else if (targetKey.startsWith("session:")) {
+              get().activateSession(targetKey.slice("session:".length));
+            } else if (targetKey.startsWith("workspace:")) {
+              get().activateWorkspace(targetKey.slice("workspace:".length));
+            } else if (targetKey.startsWith("tmuxgrp:")) {
+              get().activateTmuxGroup(targetKey.slice("tmuxgrp:".length));
+            }
           },
     closeWorkspace: async (workspaceId) => {
             const workspace = get().workspaces.find(

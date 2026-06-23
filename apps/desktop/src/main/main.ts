@@ -53,12 +53,50 @@ const TERMIUS_HELPER_FLAG = '--dolssh-termius-helper';
 // (앱/편집/보기 — 복사·붙여넣기·종료 등)은 그대로 유지한다. Cmd+Shift+W 가 창 닫기.
 function installApplicationMenu(): void {
   const isMac = process.platform === 'darwin';
+  const sendTabCommand = (payload: import('@shared').TabCommandPayload) => {
+    BrowserWindow.getFocusedWindow()?.webContents.send(
+      ipcChannels.window.tabCommand,
+      payload,
+    );
+  };
   const template: MenuItemConstructorOptions[] = [
     ...(isMac
       ? [{ role: 'appMenu' as const }]
       : [{ label: '파일', submenu: [{ role: 'quit' as const }] }]),
     { role: 'editMenu' },
     { role: 'viewMenu' },
+    {
+      label: '탭',
+      submenu: [
+        {
+          label: '다음 탭',
+          accelerator: isMac ? 'Cmd+Alt+Right' : 'Ctrl+Tab',
+          click: () => sendTabCommand({ kind: 'next' }),
+        },
+        {
+          label: '이전 탭',
+          accelerator: isMac ? 'Cmd+Alt+Left' : 'Ctrl+Shift+Tab',
+          click: () => sendTabCommand({ kind: 'prev' }),
+        },
+        { type: 'separator' as const },
+        ...Array.from({ length: 8 }, (_unused, i) => ({
+          label: `${i + 1}번째 탭`,
+          accelerator: `CmdOrCtrl+${i + 1}`,
+          click: () => sendTabCommand({ kind: 'index' as const, index: i + 1 }),
+        })),
+        {
+          label: '마지막 탭',
+          accelerator: 'CmdOrCtrl+9',
+          click: () => sendTabCommand({ kind: 'last' }),
+        },
+        { type: 'separator' as const },
+        {
+          label: '닫은 탭 다시 열기',
+          accelerator: 'CmdOrCtrl+Shift+T',
+          click: () => sendTabCommand({ kind: 'reopen' }),
+        },
+      ],
+    },
     {
       label: '윈도우',
       submenu: [

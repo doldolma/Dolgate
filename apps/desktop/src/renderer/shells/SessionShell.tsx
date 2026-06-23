@@ -7,6 +7,7 @@ import { TmuxCommandPrompt } from '../components/terminal-workspace/TmuxCommandP
 import { TerminalTransferToastRegion } from '../components/TerminalTransferToastRegion';
 import type { useLoginController } from '../controllers/useLoginController';
 import { openOwnerChatWindow } from '../services/desktop/session-shares';
+import { refreshTmuxSessions } from '../services/desktop/terminal';
 import type {
   useAppModalViewModel,
   useAppSettingsViewModel,
@@ -284,6 +285,12 @@ export function SessionShell({
             onDetach={() => {
               if (activeWorkspace) {
                 void sessionViewModel.detachTmuxWorkspace(activeWorkspace.id);
+              }
+            }}
+            onRefresh={() => {
+              if (activeWorkspace) {
+                // 드롭다운 열 때 세션 목록 즉시 재조회(다른 SSH 연결의 새 세션 반영).
+                void refreshTmuxSessions(activeWorkspace.activeSessionId);
               }
             }}
           />

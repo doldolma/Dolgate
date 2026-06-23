@@ -655,6 +655,14 @@ export interface CommandFinishedNotification {
   silent: boolean;
 }
 
+// 메뉴(탭 이동/다시 열기) 단축키가 렌더러로 보내는 명령. index 는 1-based 가시 탭 위치.
+export type TabCommandPayload =
+  | { kind: "next" }
+  | { kind: "prev" }
+  | { kind: "index"; index: number }
+  | { kind: "last" }
+  | { kind: "reopen" };
+
 export interface DesktopApi {
   auth: {
     getState: () => Promise<AuthState>;
@@ -876,6 +884,8 @@ export interface DesktopApi {
     ) => () => void;
     /** 메뉴(Cmd+W)의 '탭 닫기' 신호 구독. */
     onCloseActiveTab: (listener: () => void) => () => void;
+    /** 메뉴(탭 이동/다시 열기) 단축키 신호 구독. */
+    onTabCommand: (listener: (payload: TabCommandPayload) => void) => () => void;
   };
   system: {
     /** OS 절전/잠금 복귀 알림 구독. 자동 재연결의 즉시 재검증 트리거. */

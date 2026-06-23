@@ -61,6 +61,35 @@ export function NetworkBridge() {
           })
         : () => undefined;
 
+    // 메뉴 탭 단축키(다음/이전/번호/마지막/닫은탭 다시 열기) → 스토어 처리.
+    const offTabCommand =
+      typeof desktopApi.window?.onTabCommand === "function"
+        ? desktopApi.window.onTabCommand((payload) => {
+            appStore.getState().runTabCommand(payload);
+          })
+        : () => undefined;
+
+    // 맥 크롬처럼 Ctrl+Tab / Ctrl+Shift+Tab 으로도 다음/이전 탭. macOS 는 메뉴 accelerator
+    // 가 Ctrl+Tab 을 잡지 못해(Tab 예약) 렌더러에서 직접 처리한다. capture 단계에서
+    // 가로채 xterm 으로 새지 않게 한다. (Win/Linux 는 메뉴가 Ctrl+Tab 을 담당하므로 제외 —
+    // 안 그러면 이중 전환.)
+    const handleTabCycleKey = (event: KeyboardEvent) => {
+      if (
+        document.documentElement.dataset.platform === "darwin" &&
+        event.ctrlKey &&
+        !event.metaKey &&
+        !event.altKey &&
+        event.key === "Tab"
+      ) {
+        event.preventDefault();
+        event.stopPropagation();
+        appStore
+          .getState()
+          .runTabCommand({ kind: event.shiftKey ? "prev" : "next" });
+      }
+    };
+    window.addEventListener("keydown", handleTabCycleKey, true);
+
     // 페이지 리로드(dev vite 풀 리로드 등) 직전에 스크롤백을 sessionStorage에 저장한다.
     // 리로드 후 같은 sessionId의 터미널이 다시 만들어질 때 복원된다.
     const handleBeforeUnload = () => {
@@ -74,8 +103,10 @@ export function NetworkBridge() {
       window.removeEventListener("offline", handleOffline);
       window.removeEventListener("beforeunload", handleBeforeUnload);
       window.removeEventListener("pagehide", handleBeforeUnload);
+      window.removeEventListener("keydown", handleTabCycleKey, true);
       offResume();
       offCloseActiveTab();
+      offTabCommand();
     };
   }, []);
 

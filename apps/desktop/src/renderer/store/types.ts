@@ -43,6 +43,7 @@ import type {
   SftpPaneId,
   SftpPrincipal,
   SecretMetadataRecord,
+  TabCommandPayload,
   TerminalReconnectState,
   TerminalTab,
   TransferJob,
@@ -699,6 +700,8 @@ interface AppStateParts {
   closeWorkspace: (workspaceId: string) => Promise<void>;
   /** Cmd+W: 활성 동적 탭을 닫는다. 닫을 탭이 없으면(home/sftp/containers) false. */
   closeActiveTab: () => boolean;
+  /** 메뉴 탭 단축키(다음/이전/번호/마지막/닫은탭 다시 열기) 처리. */
+  runTabCommand: (payload: TabCommandPayload) => void;
   openHostContainersTab: (hostId: string) => Promise<void>;
   closeHostContainersTab: (hostId: string) => Promise<void>;
   reorderContainerTab: (
@@ -1075,6 +1078,7 @@ export type SessionSlice = Pick<
   | "cancelSessionReconnect"
   | "closeWorkspace"
   | "closeActiveTab"
+  | "runTabCommand"
   | "splitSessionIntoWorkspace"
   | "moveWorkspaceSession"
   | "detachSessionFromWorkspace"

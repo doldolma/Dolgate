@@ -15,6 +15,8 @@ interface TmuxSessionMenuProps {
   onSelectSession: (name: string) => void;
   /** 있으면 항목 hover 시 × 로 kill-session. 감지바(SSH)는 미전달. */
   onKillSession?: (name: string) => void;
+  /** 드롭다운을 열 때 세션 목록을 재조회한다(있을 때만). */
+  onRefresh?: () => void;
 }
 
 // tmux 세션 메뉴(목록 + 새 세션 생성 + 선택/전환 + 선택적 kill). 감지 하단바와 tmux
@@ -26,6 +28,7 @@ export function TmuxSessionMenu({
   onCreateSession,
   onSelectSession,
   onKillSession,
+  onRefresh,
 }: TmuxSessionMenuProps) {
   const [open, setOpen] = useState(false);
   const [newSessionName, setNewSessionName] = useState('');
@@ -68,7 +71,15 @@ export function TmuxSessionMenu({
     <div ref={rootRef} className="relative">
       <button
         type="button"
-        onClick={() => setOpen((value) => !value)}
+        onClick={() =>
+          setOpen((value) => {
+            const next = !value;
+            if (next) {
+              onRefresh?.(); // 열 때 세션 목록 재pull(다른 연결의 새 세션 반영).
+            }
+            return next;
+          })
+        }
         aria-haspopup="menu"
         aria-expanded={open}
         className="flex items-center gap-1 rounded-[4px] px-[0.3rem] py-[0.05rem] text-[var(--text-muted)] hover:bg-[color-mix(in_srgb,var(--surface)_80%,var(--text)_20%)]"
