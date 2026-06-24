@@ -27,6 +27,7 @@ async function writeDesktopState(userDataDir) {
           globalThemeUpdatedAt: timestamp,
           fontFamily: "sf-mono",
           fontSize: 13,
+          autocompleteEnabled: false,
           localUpdatedAt: timestamp,
         },
         updater: {
