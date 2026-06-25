@@ -1,6 +1,9 @@
 package tmuxsession
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestParseListWindowsLine(t *testing.T) {
 	cases := []struct {
@@ -98,5 +101,20 @@ func TestMarkIntegratedIsIdempotentPerPane(t *testing.T) {
 	}
 	if h.markIntegrated("%1") {
 		t.Fatal("두 번째 pane 재호출도 false 여야 한다")
+	}
+}
+
+func TestDefaultControlCommandProbesBeforeControlModeAttach(t *testing.T) {
+	if !strings.Contains(defaultControlCommand, "tmux list-sessions >/dev/null 2>&1") {
+		t.Fatalf("default command must probe existing sessions outside control mode: %q", defaultControlCommand)
+	}
+	if strings.Contains(defaultControlCommand, "tmux -CC attach 2>/dev/null ||") {
+		t.Fatalf("default command must not use a failing control-mode attach as fallback: %q", defaultControlCommand)
+	}
+	if !strings.Contains(defaultControlCommand, "exec tmux -CC attach") {
+		t.Fatalf("default command must attach existing tmux sessions: %q", defaultControlCommand)
+	}
+	if !strings.Contains(defaultControlCommand, "exec tmux -CC new-session -A -s dolgate") {
+		t.Fatalf("default command must create the dolgate session when none exists: %q", defaultControlCommand)
 	}
 }

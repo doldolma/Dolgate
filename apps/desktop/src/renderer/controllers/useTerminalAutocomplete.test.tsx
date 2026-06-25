@@ -337,6 +337,43 @@ describe('useTerminalAutocomplete', () => {
     expect(mocks.query.mock.calls.length).toBe(callsAfterList);
   });
 
+  it('uses the docker generator override and filters cached container names', async () => {
+    mocks.query.mockImplementation(async (_sessionId: string, cmd: string) => {
+      if (cmd.includes("'docker'") && cmd.includes("'ps'")) {
+        return 'web\tnginx\napi\trepo/app:1\n';
+      }
+      return '';
+    });
+    const { result } = await mountReadySession();
+    act(() => result.current.handleCwd('file://host/home/u/proj'));
+    act(() => result.current.handleInput('docker logs '));
+
+    await waitFor(
+      () =>
+        expect(
+          result.current.suggestions.some((entry) => entry.insertText === 'docker logs web'),
+        ).toBe(true),
+      { timeout: 3000 },
+    );
+    const hostCommand = mocks.query.mock.calls[0]?.[1] ?? '';
+    expect(hostCommand).toContain("'docker' 'ps' '--format'");
+    expect(hostCommand).toContain('{{.Names}}\t{{.Image}}');
+    expect(hostCommand).not.toContain('{{ json . }}');
+    const callsAfterList = mocks.query.mock.calls.length;
+
+    act(() => result.current.handleInput('we'));
+
+    await waitFor(() =>
+      expect(
+        result.current.suggestions.some((entry) => entry.insertText === 'docker logs web'),
+      ).toBe(true),
+    );
+    expect(
+      result.current.suggestions.some((entry) => entry.insertText === 'docker logs api'),
+    ).toBe(false);
+    expect(mocks.query.mock.calls.length).toBe(callsAfterList);
+  });
+
   it('moves the highlight with arrow keys and Tab accepts the highlighted one', async () => {
     const sendInput = vi.fn();
     const { result } = renderHook(() =>

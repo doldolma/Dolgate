@@ -23,6 +23,8 @@ type stubSSHManager struct {
 	completionOut  string
 	completionTrun bool
 	completionErr  error
+	installCount   int
+	installErr     error
 }
 
 func (stub *stubSSHManager) Connect(sessionID, requestID string, payload coretypes.ConnectPayload) error {
@@ -53,8 +55,11 @@ func (stub *stubSSHManager) RespondKeyboardInteractive(sessionID, challengeID st
 func (stub *stubSSHManager) CollectAutocomplete(string, int) (autocomplete.Result, error) {
 	return autocomplete.Unsupported(), nil
 }
-func (stub *stubSSHManager) InstallShellIntegration(string) error { return nil }
-func (stub *stubSSHManager) FlushShellIntegration(string)         {}
+func (stub *stubSSHManager) InstallShellIntegration(string) error {
+	stub.installCount++
+	return stub.installErr
+}
+func (stub *stubSSHManager) FlushShellIntegration(string) {}
 func (stub *stubSSHManager) RunCompletionCommand(string, string) (string, bool, error) {
 	return stub.completionOut, stub.completionTrun, stub.completionErr
 }
@@ -532,6 +537,37 @@ func TestPrepareAutocompleteInstallsShellIntegrationOnce(t *testing.T) {
 	}
 	if capabilities == 0 {
 		t.Fatal("expected at least one capability event for the renderer to gate on")
+	}
+}
+
+func TestInstallShellIntegrationRollsBackMarkerOnSSHError(t *testing.T) {
+	installErr := errors.New("write failed")
+	sshManager := &stubSSHManager{hasSession: true, installErr: installErr}
+	runtime := newRuntimeWithDeps(
+		func(coretypes.Event) {},
+		func(coretypes.StreamFrame, []byte) {},
+		sshManager,
+		&stubMoshManager{},
+		&stubAWSManager{},
+		&stubLocalManager{},
+		&stubSerialManager{},
+		&stubSFTPService{},
+		&stubContainersService{},
+		&stubForwardingService{},
+		&stubSSMForwardingService{},
+		nil,
+		nil,
+	)
+
+	if err := runtime.InstallShellIntegration("session-ssh"); !errors.Is(err, installErr) {
+		t.Fatalf("expected install error, got %v", err)
+	}
+	sshManager.installErr = nil
+	if err := runtime.InstallShellIntegration("session-ssh"); err != nil {
+		t.Fatalf("expected retry to succeed, got %v", err)
+	}
+	if sshManager.installCount != 2 {
+		t.Fatalf("expected failed install to roll back marker and retry, got %d calls", sshManager.installCount)
 	}
 }
 

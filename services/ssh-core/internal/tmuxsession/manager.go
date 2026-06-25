@@ -1,6 +1,7 @@
 package tmuxsession
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"strconv"
@@ -70,6 +71,9 @@ type controlHandle struct {
 	// controlHandle 이라 이 맵도 비어 있어 자동으로 재설치된다.)
 	integrated   map[string]bool
 	handshakesMu sync.Mutex
+
+	completionWorkerMu sync.Mutex
+	completionWorker   *sshcmd.CompletionWorker
 }
 
 // markIntegrated 는 pane 에 셸 통합 주입을 1회로 제한한다. 아직 주입 안 했으면
@@ -127,6 +131,7 @@ func (h *controlHandle) paneHandshake(paneID string) *autocomplete.Handshake {
 // 응답 파싱은 앞 3토큰(id/index/active)과 마지막 토큰(layout)을 고정으로 떼고
 // 가운데를 name 으로 본다(parseListWindowsLine).
 const listWindowsCommand = "list-windows -F \"#{window_id} #{window_index} #{window_active} #{window_name} #{window_visible_layout}\"\n"
+const defaultControlCommand = "if tmux list-sessions >/dev/null 2>&1; then exec tmux -CC attach; else exec tmux -CC new-session -A -s dolgate; fi"
 
 func NewManager(emit EventEmitter, stream StreamEmitter) *Manager {
 	return NewManagerWithConfig(emit, stream, sshsession.ManagerConfig{})
@@ -242,7 +247,9 @@ func (m *Manager) Connect(sessionID, requestID string, payload coretypes.Connect
 		// 기존 세션이 있으면 그것(가장 최근)에 attach 하고, 없을 때만 'dolgate'를 만든다.
 		// 고정 이름으로만 attach 하면 사용자가 rename-session(Ctrl-b $) 으로 이름을 바꿨을 때
 		// 재접속 시 옛 이름을 못 찾아 중복 세션이 생긴다. attach 우선이면 이름이 바뀌어도 잇는다.
-		command = "tmux -CC attach 2>/dev/null || tmux -CC new-session -A -s dolgate"
+		// control-mode attach 실패는 "%exit"를 stdout에 남길 수 있어, 세션이 없는 첫 연결에서
+		// 탭이 정상 종료처럼 닫힌다. control mode 진입 전 일반 tmux 명령으로 세션 존재만 확인한다.
+		command = defaultControlCommand
 	}
 	if err := session.Start(command); err != nil {
 		session.Close()
@@ -707,6 +714,7 @@ func (m *Manager) detachControl(controlID string) *controlHandle {
 	}
 	handle.closer.Do(func() {
 		close(handle.closed)
+		handle.closeCompletionWorker()
 		if handle.stdin != nil {
 			_ = handle.stdin.Close()
 		}
@@ -909,12 +917,44 @@ func (m *Manager) RunCompletionCommand(sessionID, command string) (string, bool,
 	if err != nil {
 		return "", false, err
 	}
-	stdout, _, err := sshcmd.RunWithTimeout(handle.client, command, autocomplete.CompletionTimeout)
-	if err != nil && len(stdout) == 0 {
+	stdout, truncated, err := handle.runCompletionWorker(command)
+	if err == nil || len(stdout) > 0 {
+		return string(stdout), truncated, err
+	}
+	if !errors.Is(err, sshcmd.ErrCompletionWorkerUnavailable) {
 		return "", false, err
 	}
-	out, truncated := autocomplete.CapOutput(stdout)
+
+	fallbackStdout, _, err := sshcmd.RunWithTimeout(handle.client, command, autocomplete.CompletionTimeout)
+	if err != nil && len(fallbackStdout) == 0 {
+		return "", false, err
+	}
+	out, truncated := autocomplete.CapOutput(fallbackStdout)
 	return out, truncated, nil
+}
+
+func (h *controlHandle) runCompletionWorker(command string) ([]byte, bool, error) {
+	worker := h.getCompletionWorker()
+	return worker.Run(command, autocomplete.CompletionTimeout, autocomplete.MaxCompletionBytes)
+}
+
+func (h *controlHandle) getCompletionWorker() *sshcmd.CompletionWorker {
+	h.completionWorkerMu.Lock()
+	defer h.completionWorkerMu.Unlock()
+	if h.completionWorker == nil {
+		h.completionWorker = sshcmd.NewCompletionWorker(h.client)
+	}
+	return h.completionWorker
+}
+
+func (h *controlHandle) closeCompletionWorker() {
+	h.completionWorkerMu.Lock()
+	worker := h.completionWorker
+	h.completionWorker = nil
+	h.completionWorkerMu.Unlock()
+	if worker != nil {
+		_ = worker.Close()
+	}
 }
 
 // hexBytes 는 send-keys -H 가 받는 공백 구분 hex 문자열로 변환한다.

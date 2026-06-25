@@ -8,7 +8,6 @@ import (
 	"encoding/base64"
 	"encoding/pem"
 	"fmt"
-	"io"
 	"net"
 	"os"
 	"path/filepath"
@@ -18,6 +17,7 @@ import (
 
 	"golang.org/x/crypto/ssh"
 
+	"dolssh/services/ssh-core/internal/autocomplete"
 	"dolssh/services/ssh-core/internal/protocol"
 	"dolssh/services/ssh-core/internal/sshsession"
 )
@@ -28,6 +28,11 @@ type sshTestServer struct {
 	windowChanges  chan [2]int
 	globalRequests chan string
 	hostKeyBase64  string
+
+	shellPath                 string
+	shellInputs               chan []byte
+	promptMarkerOnIntegration bool
+	execDelay                 time.Duration
 }
 
 func TestManagerPasswordFlow(t *testing.T) {
@@ -161,6 +166,73 @@ func TestManagerSendsKeepAliveRequests(t *testing.T) {
 	waitForEvent(t, events, protocol.EventClosed)
 }
 
+func TestManagerEagerInstallsShellIntegrationForSupportedShell(t *testing.T) {
+	server, _, cleanup := newSSHTestServer(
+		t,
+		// Models hosts where $SHELL may be /bin/sh but the exec shell exposes
+		// BASH_VERSION, so the capability probe returns "bash".
+		withRemoteShell("bash"),
+		withPromptMarkerOnIntegration(),
+	)
+	defer cleanup()
+
+	events := make(chan protocol.Event, 16)
+	manager := sshsession.NewManager(func(event protocol.Event) {
+		events <- event
+	}, func(_ protocol.StreamFrame, _ []byte) {})
+
+	err := manager.Connect("session-bash", "req-bash", protocol.ConnectPayload{
+		Host:                 "127.0.0.1",
+		Port:                 server.port(),
+		Username:             "tester",
+		AuthType:             "password",
+		Password:             "s3cret",
+		TrustedHostKeyBase64: server.hostKeyBase64,
+		Cols:                 80,
+		Rows:                 24,
+	})
+	if err != nil {
+		t.Fatalf("connect failed: %v", err)
+	}
+	waitForEvent(t, events, protocol.EventConnected)
+
+	input := waitForShellInput(t, server.shellInputs)
+	if !bytes.Contains(input, []byte("__ds_o")) {
+		t.Fatalf("expected shell integration init input, got %q", input)
+	}
+
+	if err := manager.InstallShellIntegration("session-bash"); err != nil {
+		t.Fatalf("second install failed: %v", err)
+	}
+	assertNoShellInput(t, server.shellInputs)
+}
+
+func TestManagerSkipsEagerShellIntegrationForUnsupportedShell(t *testing.T) {
+	server, _, cleanup := newSSHTestServer(t, withRemoteShell("/usr/bin/fish"))
+	defer cleanup()
+
+	events := make(chan protocol.Event, 16)
+	manager := sshsession.NewManager(func(event protocol.Event) {
+		events <- event
+	}, func(_ protocol.StreamFrame, _ []byte) {})
+
+	err := manager.Connect("session-fish", "req-fish", protocol.ConnectPayload{
+		Host:                 "127.0.0.1",
+		Port:                 server.port(),
+		Username:             "tester",
+		AuthType:             "password",
+		Password:             "s3cret",
+		TrustedHostKeyBase64: server.hostKeyBase64,
+		Cols:                 80,
+		Rows:                 24,
+	})
+	if err != nil {
+		t.Fatalf("connect failed: %v", err)
+	}
+	waitForEvent(t, events, protocol.EventConnected)
+	assertNoShellInput(t, server.shellInputs)
+}
+
 func waitForEvent(t *testing.T, events <-chan protocol.Event, expected protocol.EventType) protocol.Event {
 	t.Helper()
 	deadline := time.After(3 * time.Second)
@@ -187,7 +259,41 @@ func waitForStream(t *testing.T, streams <-chan []byte) []byte {
 	}
 }
 
-func newSSHTestServer(t *testing.T) (*sshTestServer, []byte, func()) {
+func waitForShellInput(t *testing.T, inputs <-chan []byte) []byte {
+	t.Helper()
+	select {
+	case input := <-inputs:
+		return input
+	case <-time.After(3 * time.Second):
+		t.Fatal("timed out waiting for shell input")
+		return nil
+	}
+}
+
+func assertNoShellInput(t *testing.T, inputs <-chan []byte) {
+	t.Helper()
+	select {
+	case input := <-inputs:
+		t.Fatalf("unexpected shell input: %q", input)
+	case <-time.After(150 * time.Millisecond):
+	}
+}
+
+type sshTestServerOption func(*sshTestServer)
+
+func withRemoteShell(path string) sshTestServerOption {
+	return func(server *sshTestServer) {
+		server.shellPath = path
+	}
+}
+
+func withPromptMarkerOnIntegration() sshTestServerOption {
+	return func(server *sshTestServer) {
+		server.promptMarkerOnIntegration = true
+	}
+}
+
+func newSSHTestServer(t *testing.T, options ...sshTestServerOption) (*sshTestServer, []byte, func()) {
 	t.Helper()
 
 	hostPrivateKey, err := rsa.GenerateKey(rand.Reader, 2048)
@@ -239,7 +345,11 @@ func newSSHTestServer(t *testing.T) (*sshTestServer, []byte, func()) {
 		listener:       listener,
 		windowChanges:  make(chan [2]int, 8),
 		globalRequests: make(chan string, 8),
+		shellInputs:    make(chan []byte, 16),
 		hostKeyBase64:  base64.StdEncoding.EncodeToString(hostSigner.PublicKey().Marshal()),
+	}
+	for _, option := range options {
+		option(server)
 	}
 
 	var wg sync.WaitGroup
@@ -251,7 +361,7 @@ func newSSHTestServer(t *testing.T) (*sshTestServer, []byte, func()) {
 			if err != nil {
 				return
 			}
-			go handleConnection(conn, serverConfig, server.windowChanges, server.globalRequests)
+			go handleConnection(conn, serverConfig, server)
 		}
 	}()
 
@@ -270,7 +380,7 @@ func (s *sshTestServer) port() int {
 	return port
 }
 
-func handleConnection(raw net.Conn, config *ssh.ServerConfig, windowChanges chan<- [2]int, globalRequests chan<- string) {
+func handleConnection(raw net.Conn, config *ssh.ServerConfig, server *sshTestServer) {
 	serverConn, chans, reqs, err := ssh.NewServerConn(raw, config)
 	if err != nil {
 		return
@@ -279,7 +389,7 @@ func handleConnection(raw net.Conn, config *ssh.ServerConfig, windowChanges chan
 
 	go func() {
 		for req := range reqs {
-			globalRequests <- req.Type
+			server.globalRequests <- req.Type
 			if req.WantReply {
 				_ = req.Reply(false, nil)
 			}
@@ -302,26 +412,60 @@ func handleConnection(raw net.Conn, config *ssh.ServerConfig, windowChanges chan
 			var echoStarted sync.Once
 			for req := range in {
 				switch req.Type {
+				case "exec":
+					if server.execDelay > 0 {
+						time.Sleep(server.execDelay)
+					}
+					if server.shellPath == "" {
+						_ = req.Reply(false, nil)
+						return
+					}
+					_ = req.Reply(true, nil)
+					_, _ = ch.Write([]byte(server.shellPath + "\n"))
+					_, _ = ch.SendRequest("exit-status", false, ssh.Marshal(struct{ Status uint32 }{0}))
+					return
 				case "pty-req":
 					_ = req.Reply(true, nil)
 				case "shell":
 					_ = req.Reply(true, nil)
 					_, _ = ch.Write([]byte("welcome\n"))
 					echoStarted.Do(func() {
-						go func() {
-							_, _ = io.Copy(ch, ch)
-						}()
+						go echoShell(ch, server)
 					})
 				case "window-change":
 					if len(req.Payload) >= 8 {
 						cols := int(uint32(req.Payload[0])<<24 | uint32(req.Payload[1])<<16 | uint32(req.Payload[2])<<8 | uint32(req.Payload[3]))
 						rows := int(uint32(req.Payload[4])<<24 | uint32(req.Payload[5])<<16 | uint32(req.Payload[6])<<8 | uint32(req.Payload[7]))
-						windowChanges <- [2]int{cols, rows}
+						server.windowChanges <- [2]int{cols, rows}
 					}
 				default:
 					_ = req.Reply(false, nil)
 				}
 			}
 		}(channel, requests)
+	}
+}
+
+func echoShell(ch ssh.Channel, server *sshTestServer) {
+	buffer := make([]byte, 4096)
+	var markerOnce sync.Once
+	for {
+		n, err := ch.Read(buffer)
+		if n > 0 {
+			chunk := append([]byte(nil), buffer[:n]...)
+			select {
+			case server.shellInputs <- chunk:
+			default:
+			}
+			_, _ = ch.Write(chunk)
+			if server.promptMarkerOnIntegration && bytes.Contains(chunk, []byte("__ds_o")) {
+				markerOnce.Do(func() {
+					_, _ = ch.Write([]byte(autocomplete.PromptStartMarker + "tester$ "))
+				})
+			}
+		}
+		if err != nil {
+			return
+		}
 	}
 }

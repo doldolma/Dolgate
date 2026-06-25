@@ -482,35 +482,45 @@ const shellIntegrationHandshakeTimeout = 8 * time.Second
 // once per session (idempotent across refreshes) and schedules a flush so a
 // failed handshake never strands output. Injection runs before the snapshot
 // probe so the prompt marker arrives ahead of the probe response.
-func (runtime *Runtime) installShellIntegration(sessionID string) {
+func (runtime *Runtime) installShellIntegration(sessionID string) error {
 	runtime.autocompleteMu.Lock()
 	if runtime.shellIntegrationInstalled[sessionID] {
 		runtime.autocompleteMu.Unlock()
-		return
+		return nil
 	}
 	runtime.shellIntegrationInstalled[sessionID] = true
 	runtime.autocompleteMu.Unlock()
 
+	var err error
 	switch {
 	case runtime.tmux.HasSession(sessionID):
 		// control mode pane: tmux Manager 가 send-keys 로 init 을 주입하고 자체적으로
 		// 1.5s 뒤 flush 한다(여기서 별도 AfterFunc 불필요).
-		_ = runtime.tmux.InstallShellIntegration(sessionID)
+		err = runtime.tmux.InstallShellIntegration(sessionID)
 	case runtime.aws.HasSession(sessionID):
-		_ = runtime.aws.InstallShellIntegration(sessionID)
-		time.AfterFunc(shellIntegrationHandshakeTimeout, func() {
-			runtime.aws.FlushShellIntegration(sessionID)
-		})
+		err = runtime.aws.InstallShellIntegration(sessionID)
+		if err == nil {
+			time.AfterFunc(shellIntegrationHandshakeTimeout, func() {
+				runtime.aws.FlushShellIntegration(sessionID)
+			})
+		}
 	case runtime.local.HasSession(sessionID):
-		_ = runtime.local.InstallShellIntegration(sessionID)
-		time.AfterFunc(shellIntegrationHandshakeTimeout, func() {
-			runtime.local.FlushShellIntegration(sessionID)
-		})
+		err = runtime.local.InstallShellIntegration(sessionID)
+		if err == nil {
+			time.AfterFunc(shellIntegrationHandshakeTimeout, func() {
+				runtime.local.FlushShellIntegration(sessionID)
+			})
+		}
 	case runtime.ssh.HasSession(sessionID):
-		// SSH는 주입과 flush 타이머를 sshsession.Connect가 서버측에서 직접 처리한다(once).
-		// 이 호출은 Connect가 이미 주입했으면 no-op이라, 자동완성/SFTP install 경로에서도 안전하다.
-		_ = runtime.ssh.InstallShellIntegration(sessionID)
+		// SSH manager가 지원 셸 가드, 중복 방지, flush 타이머를 내부에서 처리한다.
+		err = runtime.ssh.InstallShellIntegration(sessionID)
 	}
+	if err != nil {
+		runtime.autocompleteMu.Lock()
+		delete(runtime.shellIntegrationInstalled, sessionID)
+		runtime.autocompleteMu.Unlock()
+	}
+	return err
 }
 
 // InstallShellIntegration injects the OSC 7/133 shell hooks WITHOUT running the
@@ -518,8 +528,7 @@ func (runtime *Runtime) installShellIntegration(sessionID string) {
 // the autocomplete feature is disabled (e.g. for terminal drag-to-SFTP uploads).
 // Idempotent per session (shares the same install-once flag as the probe path).
 func (runtime *Runtime) InstallShellIntegration(sessionID string) error {
-	runtime.installShellIntegration(sessionID)
-	return nil
+	return runtime.installShellIntegration(sessionID)
 }
 
 func (runtime *Runtime) collectAutocomplete(sessionID, requestID string) error {
@@ -537,7 +546,7 @@ func (runtime *Runtime) collectAutocomplete(sessionID, requestID string) error {
 
 	// Install the OSC 133 hooks (once) before collecting the snapshot so the
 	// prompt marker leads the snapshot probe response on shared in-band PTYs.
-	runtime.installShellIntegration(sessionID)
+	_ = runtime.installShellIntegration(sessionID)
 
 	var (
 		result autocomplete.Result

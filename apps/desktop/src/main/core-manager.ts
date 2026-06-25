@@ -80,6 +80,8 @@ import {
 } from "./core-framing";
 import { resolveDesktopRepoRoot } from "./repo-root";
 
+const TERMINAL_COMPLETION_QUERY_TIMEOUT_MS = 10_000;
+
 interface ActivityLogInput {
   level: "info" | "warn" | "error";
   category: "session" | "audit";
@@ -3305,7 +3307,7 @@ export class CoreManager {
         payload: { command },
       },
       ["terminalCompletionResult"],
-      { timeoutMs: 3000 },
+      { timeoutMs: TERMINAL_COMPLETION_QUERY_TIMEOUT_MS },
     );
     return typeof response.stdout === "string" ? response.stdout : "";
   }

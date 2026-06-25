@@ -31,10 +31,12 @@ type sessionHandle struct {
 	closer    sync.Once
 	handshake autocomplete.Handshake
 
-	// shellIntegrationOnce는 OSC 133 통합 init 주입을 세션당 1회로 제한한다. 서버측 Connect
-	// 주입과 renderer 경유 InstallShellIntegration이 같은 once를 공유하므로 어느 쪽이 먼저
-	// 와도 두 번 주입되지 않는다(두 번 Arm하면 handshake buffer가 리셋돼 motd가 날아간다).
-	shellIntegrationOnce sync.Once
+	shellIntegrationMu             sync.Mutex
+	shellIntegrationState          shellIntegrationState
+	shellIntegrationFlushScheduled bool
+
+	completionWorkerMu sync.Mutex
+	completionWorker   *sshcmd.CompletionWorker
 }
 
 type ManagerConfig struct {
@@ -67,6 +69,14 @@ const (
 	closeReasonTransport  = "transport"   // 전송 단절 → 재연결 대상
 	closeReasonKeepalive  = "keepalive"   // keepalive 연속 실패 → 재연결 대상
 	closeReasonClient     = "client"      // 클라이언트 요청 종료 → 재연결하지 않음
+)
+
+type shellIntegrationState int
+
+const (
+	shellIntegrationUnknown shellIntegrationState = iota
+	shellIntegrationInstalled
+	shellIntegrationUnsupported
 )
 
 type Manager struct {
@@ -280,27 +290,18 @@ func (m *Manager) Connect(sessionID, requestID string, payload protocol.ConnectP
 	m.sessions[sessionID] = handle
 	m.mu.Unlock()
 
-	// 대화형 셸에는 OSC 133 통합 init을 서버측에서 즉시 주입한다. renderer 왕복
+	// bash/zsh 대화형 셸에는 OSC 133 통합 init을 서버측에서 즉시 주입한다. renderer 왕복
 	// (connected→IPC→main→Go→stdin) 없이 stream goroutine보다 확실히 앞서므로, handshake가
 	// 로그인 motd만 남기고 통합 전 첫 프롬프트와 명령 echo를 흡수해 "프롬프트 2개"를 막는다.
-	// env 폴백보다 먼저 써야 init echo가 첫 앵커가 되어 그 이전(motd)만 노출된다.
+	// 셸 판정 실패/unsupported shell은 기존처럼 아무것도 주입하지 않는다.
 	if payload.Command == "" {
-		handle.installShellIntegration()
-		// 비호환 셸(133;A 미도착) 등으로 마커가 안 오면 motd가 handshake buffer에 영구히
-		// 갇히므로, 타임아웃 뒤 flush해 출력을 풀어준다. 세션이 먼저 닫히면 타이머는 즉시 해제된다.
-		go func() {
-			select {
-			case <-handle.closed:
-			case <-time.After(shellIntegrationHandshakeTimeout):
-				m.FlushShellIntegration(sessionID)
-			}
-		}()
+		_, _ = m.installShellIntegrationIfSupported(sessionID, handle)
 	}
 
 	// SetEnv가 거부된 변수는 대화형 셸에 export로 폴백 주입한다. PTY가 입력을
 	// 버퍼링하므로 첫 프롬프트에서 실행되어 startup command보다 먼저 적용된다.
-	// 비대화형(command 실행) 세션에는 주입하지 않는다. init 주입 뒤에 와야 export echo도
-	// 통합 전 프롬프트와 함께 handshake에 흡수된다.
+	// 비대화형(command 실행) 세션에는 주입하지 않는다. shell integration이 설치된 경우에는
+	// init 뒤에 와야 export echo도 통합 전 프롬프트와 함께 handshake에 흡수된다.
 	if payload.Command == "" && len(envFallback) > 0 {
 		_, _ = stdin.Write([]byte(buildEnvExportFallback(envFallback)))
 	}
@@ -427,6 +428,9 @@ func (m *Manager) KillTmuxSession(sessionID, sessionName string) error {
 // control mode(tmuxsession)에서도 동일 명령으로 세션 목록을 라이브 조회한다.
 const TmuxDetectCommand = "command -v tmux >/dev/null 2>&1 && { tmux -V; tmux list-sessions -F '#{session_name}\t#{session_windows}\t#{?session_attached,1,0}' 2>/dev/null; }"
 
+const remoteShellProbeTimeout = 2 * time.Second
+const remoteShellProbeCommand = `if [ -n "${BASH_VERSION:-}" ]; then printf 'bash\n'; elif [ -n "${ZSH_VERSION:-}" ]; then printf 'zsh\n'; fi`
+
 // ParseTmuxDetect는 "tmux -V" 첫 줄 + "list-sessions -F" 탭 구분 줄들을 파싱한다.
 func ParseTmuxDetect(out string) protocol.TmuxAvailablePayload {
 	var payload protocol.TmuxAvailablePayload
@@ -459,14 +463,46 @@ func (m *Manager) RunCompletionCommand(sessionID, command string) (string, bool,
 	if err != nil {
 		return "", false, err
 	}
-	stdout, _, err := sshcmd.RunWithTimeout(session.client, command, autocomplete.CompletionTimeout)
-	// A completion command exiting non-zero is not fatal — return whatever it
-	// printed (best-effort). Only surface an error when nothing was captured.
-	if err != nil && len(stdout) == 0 {
+	stdout, truncated, err := session.runCompletionWorker(command)
+	if err == nil || len(stdout) > 0 {
+		return string(stdout), truncated, err
+	}
+	if !errors.Is(err, sshcmd.ErrCompletionWorkerUnavailable) {
 		return "", false, err
 	}
-	out, truncated := autocomplete.CapOutput(stdout)
+
+	fallbackStdout, _, err := sshcmd.RunWithTimeout(session.client, command, autocomplete.CompletionTimeout)
+	// A completion command exiting non-zero is not fatal — return whatever it
+	// printed (best-effort). Only surface an error when nothing was captured.
+	if err != nil && len(fallbackStdout) == 0 {
+		return "", false, err
+	}
+	out, truncated := autocomplete.CapOutput(fallbackStdout)
 	return out, truncated, nil
+}
+
+func (h *sessionHandle) runCompletionWorker(command string) ([]byte, bool, error) {
+	worker := h.getCompletionWorker()
+	return worker.Run(command, autocomplete.CompletionTimeout, autocomplete.MaxCompletionBytes)
+}
+
+func (h *sessionHandle) getCompletionWorker() *sshcmd.CompletionWorker {
+	h.completionWorkerMu.Lock()
+	defer h.completionWorkerMu.Unlock()
+	if h.completionWorker == nil {
+		h.completionWorker = sshcmd.NewCompletionWorker(h.client)
+	}
+	return h.completionWorker
+}
+
+func (h *sessionHandle) closeCompletionWorker() {
+	h.completionWorkerMu.Lock()
+	worker := h.completionWorker
+	h.completionWorker = nil
+	h.completionWorkerMu.Unlock()
+	if worker != nil {
+		_ = worker.Close()
+	}
 }
 
 // shellIntegrationHandshakeTimeout는 OSC 133;A 마커를 기다리는 한계 시간이다. 이 안에
@@ -482,18 +518,100 @@ func (m *Manager) InstallShellIntegration(sessionID string) error {
 	if err != nil {
 		return err
 	}
-	session.installShellIntegration()
-	return nil
+	_, err = m.installShellIntegrationIfSupported(sessionID, session)
+	return err
+}
+
+func (m *Manager) installShellIntegrationIfSupported(sessionID string, session *sessionHandle) (bool, error) {
+	switch session.shellIntegrationStatus() {
+	case shellIntegrationInstalled:
+		return false, nil
+	case shellIntegrationUnsupported:
+		return false, nil
+	}
+	if !remoteShellSupportsIntegration(session.client) {
+		session.markShellIntegrationUnsupported()
+		return false, nil
+	}
+	return m.installShellIntegration(sessionID, session)
+}
+
+func remoteShellSupportsIntegration(client *ssh.Client) bool {
+	if client == nil {
+		return false
+	}
+	stdout, _, err := sshcmd.RunWithTimeout(client, remoteShellProbeCommand, remoteShellProbeTimeout)
+	if err != nil {
+		return false
+	}
+	return normalizeRemoteShellProbeOutput(stdout) != ""
+}
+
+func normalizeRemoteShellProbeOutput(stdout []byte) string {
+	for _, field := range strings.Fields(string(stdout)) {
+		if shell := autocomplete.NormalizeShell(field); shell != "" {
+			return shell
+		}
+	}
+	return ""
+}
+
+func (h *sessionHandle) shellIntegrationStatus() shellIntegrationState {
+	h.shellIntegrationMu.Lock()
+	defer h.shellIntegrationMu.Unlock()
+	return h.shellIntegrationState
+}
+
+func (h *sessionHandle) markShellIntegrationUnsupported() {
+	h.shellIntegrationMu.Lock()
+	defer h.shellIntegrationMu.Unlock()
+	if h.shellIntegrationState == shellIntegrationUnknown {
+		h.shellIntegrationState = shellIntegrationUnsupported
+	}
 }
 
 // installShellIntegration는 핸드셰이크를 preserveMotd 모드로 arm하고 통합 init 명령을 셸
-// stdin에 1회만 쓴다. preserveMotd라 로그인 motd는 보존하면서 통합 전 첫 프롬프트와 명령
-// echo만 흡수해 프롬프트가 1개로 보인다. once 공유로 서버측/renderer 경로의 중복 주입을 막는다.
-func (h *sessionHandle) installShellIntegration() {
-	h.shellIntegrationOnce.Do(func() {
-		h.handshake.Arm(true)
-		_, _ = h.stdin.Write([]byte(autocomplete.ShellIntegrationInitCommand()))
-	})
+// stdin에 1회만 쓴다. write 성공 후에만 installed 상태가 되므로 실패 시 재시도 가능하다.
+func (m *Manager) installShellIntegration(sessionID string, session *sessionHandle) (bool, error) {
+	session.shellIntegrationMu.Lock()
+	switch session.shellIntegrationState {
+	case shellIntegrationInstalled, shellIntegrationUnsupported:
+		session.shellIntegrationMu.Unlock()
+		return false, nil
+	}
+
+	session.handshake.Arm(true)
+	if _, err := session.stdin.Write([]byte(autocomplete.ShellIntegrationInitCommand())); err != nil {
+		flushed := session.handshake.Flush()
+		session.shellIntegrationState = shellIntegrationUnknown
+		session.shellIntegrationMu.Unlock()
+		if len(flushed) > 0 {
+			m.emitStream(protocol.StreamFrame{Type: protocol.StreamTypeData, SessionID: sessionID}, flushed)
+		}
+		return false, err
+	}
+
+	session.shellIntegrationState = shellIntegrationInstalled
+	shouldScheduleFlush := !session.shellIntegrationFlushScheduled
+	session.shellIntegrationFlushScheduled = true
+	session.shellIntegrationMu.Unlock()
+
+	if shouldScheduleFlush {
+		m.scheduleShellIntegrationFlush(sessionID, session)
+	}
+	return true, nil
+}
+
+func (m *Manager) scheduleShellIntegrationFlush(sessionID string, session *sessionHandle) {
+	go func() {
+		timer := time.NewTimer(shellIntegrationHandshakeTimeout)
+		defer timer.Stop()
+		select {
+		case <-session.closed:
+		case <-timer.C:
+			m.FlushShellIntegration(sessionID)
+		}
+	}()
 }
 
 // FlushShellIntegration releases any output held by the handshake filter when
@@ -685,6 +803,7 @@ func (m *Manager) closeSession(sessionID string, message string, reason string) 
 
 	session.closer.Do(func() {
 		close(session.closed)
+		session.closeCompletionWorker()
 		// stdin, session, client를 같은 순서로 정리해 하위 리소스를 남기지 않는다.
 		_ = session.stdin.Close()
 		_ = session.session.Close()

@@ -1,5 +1,6 @@
 import type { CommandSpec } from './types';
 import type { FigSpecNode } from './fig-runtime';
+import { applyCommandModuleOverrides } from './module-overrides';
 import index from '../../generated/command-specs/index.json';
 
 // Command specs are converted from Fig's autocomplete specs
@@ -79,7 +80,8 @@ export async function loadCommandModule(
   }
   try {
     const module = await loader();
-    const spec = (module.default ?? (module as unknown)) as FigSpecNode;
+    const rawSpec = (module.default ?? (module as unknown)) as FigSpecNode;
+    const spec = applyCommandModuleOverrides(name, rawSpec);
     moduleCache.set(name, spec);
     return spec;
   } catch {

@@ -192,6 +192,17 @@ func TestHandshakeFilterFlushStripsInjectedEcho(t *testing.T) {
 	}
 }
 
+func TestHandshakePassesThroughWhenNotArmed(t *testing.T) {
+	var handshake Handshake
+	chunk := []byte("fish$ echo hello\r\nhello\r\n")
+	if forwarded := handshake.Filter(chunk); !bytes.Equal(forwarded, chunk) {
+		t.Fatalf("unarmed handshake should pass through, got %q", forwarded)
+	}
+	if flushed := handshake.Flush(); len(flushed) != 0 {
+		t.Fatalf("unarmed handshake should have nothing to flush, got %q", flushed)
+	}
+}
+
 // preserveMotd 모드(SSH 로그인 셸): motd는 보존하고 통합 전 첫 프롬프트와 주입 echo만
 // 흡수해 통합 프롬프트가 1개만 보여야 한다.
 func TestHandshakeFilterPreserveMotdKeepsMotdDropsFirstPrompt(t *testing.T) {
