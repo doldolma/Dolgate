@@ -507,10 +507,9 @@ func (runtime *Runtime) installShellIntegration(sessionID string) {
 			runtime.local.FlushShellIntegration(sessionID)
 		})
 	case runtime.ssh.HasSession(sessionID):
+		// SSH는 주입과 flush 타이머를 sshsession.Connect가 서버측에서 직접 처리한다(once).
+		// 이 호출은 Connect가 이미 주입했으면 no-op이라, 자동완성/SFTP install 경로에서도 안전하다.
 		_ = runtime.ssh.InstallShellIntegration(sessionID)
-		time.AfterFunc(shellIntegrationHandshakeTimeout, func() {
-			runtime.ssh.FlushShellIntegration(sessionID)
-		})
 	}
 }
 

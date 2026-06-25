@@ -28,6 +28,34 @@ func TestParseSnapshot(t *testing.T) {
 	}
 }
 
+func TestParseSnapshotFiltersInjectedShellIntegration(t *testing.T) {
+	var payload bytes.Buffer
+	writeFields(&payload, "S", "zsh")
+	// The OSC 133 integration script Dolgate types in (zsh keeps it in history,
+	// since the trailing bash `history -d` self-cleanup is a no-op there).
+	writeFields(&payload, "H", `: 1710000000:0;__ds_o(){ printf '\033]133;%s\007' "$1"; }; precmd_functions+=(__ds_precmd); history -d $((HISTCMD-1)) >/dev/null 2>&1 || true`)
+	// The in-band snapshot probe.
+	writeFields(&payload, "H", `( printf '\033]6973;n;snapshot;'; cat ) | base64`)
+	// Real commands that must survive.
+	writeFields(&payload, "H", ": 1710000000:0;ls -la")
+	writeFields(&payload, "H", "git status")
+
+	result := ParseSnapshot(payload.Bytes(), 1)
+	if result.Snapshot == nil {
+		t.Fatal("nil snapshot")
+	}
+	got := result.Snapshot.History
+	want := []string{"ls -la", "git status"}
+	if len(got) != len(want) {
+		t.Fatalf("expected %v, got %#v", want, got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("expected %v, got %#v", want, got)
+		}
+	}
+}
+
 func TestCollectorCommandsAreValidShellSyntax(t *testing.T) {
 	// Validate POSIX syntax via whatever `sh` is on PATH (git-bash on Windows
 	// runners); skip if none is available.
@@ -161,5 +189,99 @@ func TestHandshakeFilterFlushStripsInjectedEcho(t *testing.T) {
 	}
 	if !bytes.Contains(flushed, []byte("login banner")) {
 		t.Fatalf("real output should survive the flush: %q", flushed)
+	}
+}
+
+// preserveMotd 모드(SSH 로그인 셸): motd는 보존하고 통합 전 첫 프롬프트와 주입 echo만
+// 흡수해 통합 프롬프트가 1개만 보여야 한다.
+func TestHandshakeFilterPreserveMotdKeepsMotdDropsFirstPrompt(t *testing.T) {
+	filter := HandshakeFilter{preserveMotd: true}
+	motd := "Welcome to Synology\r\nLast login: Tue Jun 25\r\n"
+	// 통합 전 첫 프롬프트와 같은 줄에 주입 명령이 echo된다. 이후 통합 프롬프트(마커)가 온다.
+	firstPrompt := "admin@nas:~$ "
+	chunk := []byte(motd + firstPrompt + string(injectedCommandEcho) + "\r\n" +
+		PromptStartMarker + "admin@nas:~$ ")
+
+	forward, done := filter.Filter(chunk)
+	if !done {
+		t.Fatal("expected handshake to complete on the marker chunk")
+	}
+	if !bytes.Contains(forward, []byte("Welcome to Synology")) || !bytes.Contains(forward, []byte("Last login")) {
+		t.Fatalf("motd should be preserved: %q", forward)
+	}
+	if bytes.Contains(forward, injectedCommandEcho) {
+		t.Fatalf("injected echo leaked: %q", forward)
+	}
+	// 통합 프롬프트(마커)는 motd 뒤에 위치해야 한다.
+	if mIdx, wIdx := bytes.Index(forward, []byte(PromptStartMarker)), bytes.Index(forward, []byte("Welcome")); mIdx < 0 || wIdx < 0 || mIdx < wIdx {
+		t.Fatalf("marker should follow motd: %q", forward)
+	}
+	// 프롬프트 텍스트는 통합된 것 1개만 — 통합 전 첫 프롬프트는 흡수된다.
+	if n := bytes.Count(forward, []byte("admin@nas:~$ ")); n != 1 {
+		t.Fatalf("expected exactly one prompt, got %d: %q", n, forward)
+	}
+}
+
+// preserveMotd 모드: motd가 여러 청크로 쪼개져 와도, 주입 echo가 등장한 시점에 그 직전까지의
+// motd를 한 번 흘려보내고 첫 프롬프트~마커는 흡수한다.
+func TestHandshakeFilterPreserveMotdForwardsMotdAcrossChunks(t *testing.T) {
+	filter := HandshakeFilter{preserveMotd: true}
+	// 1) 앵커(echo) 전 motd만 → 아직 아무것도 내보내지 않고 버퍼링한다.
+	if forward, done := filter.Filter([]byte("line1\r\nline2\r\n")); len(forward) != 0 || done {
+		t.Fatalf("motd before the anchor should buffer, got %q done=%v", forward, done)
+	}
+	// 2) 프롬프트+echo 도착 → 직전까지의 motd를 흘려보낸다(마커는 아직 없음).
+	forward, done := filter.Filter([]byte("nas$ " + string(injectedCommandEcho)))
+	if done {
+		t.Fatal("handshake should not be done before the marker")
+	}
+	if string(forward) != "line1\r\nline2\r\n" {
+		t.Fatalf("expected buffered motd to flush before the prompt line, got %q", forward)
+	}
+	// 3) 마커 도착 → 통합 프롬프트만 forward, 첫 프롬프트/echo는 흡수.
+	forward, done = filter.Filter([]byte("\r\n" + PromptStartMarker + "nas$ "))
+	if !done {
+		t.Fatal("expected handshake to complete on the marker")
+	}
+	if !bytes.HasPrefix(forward, []byte(PromptStartMarker)) {
+		t.Fatalf("post-marker forward should start at the marker, got %q", forward)
+	}
+	if bytes.Contains(forward, injectedCommandEcho) {
+		t.Fatalf("injected echo leaked: %q", forward)
+	}
+}
+
+// preserveMotd 모드 + 비호환 셸(ash 등): 가드로 init 본문이 안 돌아 133;A가 안 온다. motd는
+// 앵커 직전에 즉시 노출되고, 나머지(첫 프롬프트+echo)는 Flush에서 echo만 제거되어 나온다
+// (통합만 비활성, 화면이 깨지지 않음).
+func TestHandshakeFilterPreserveMotdFlushKeepsMotdStripsEcho(t *testing.T) {
+	filter := HandshakeFilter{preserveMotd: true}
+	forward, _ := filter.Filter([]byte("motd here\r\nash$ " + string(injectedCommandEcho)))
+	if !bytes.Contains(forward, []byte("motd here")) {
+		t.Fatalf("motd should be forwarded immediately at the anchor: %q", forward)
+	}
+	flushed := filter.Flush()
+	if bytes.Contains(flushed, injectedCommandEcho) {
+		t.Fatalf("injected echo must not survive flush: %q", flushed)
+	}
+	if !bytes.Contains(flushed, []byte("ash$ ")) {
+		t.Fatalf("first prompt should survive flush (integration disabled, not broken): %q", flushed)
+	}
+}
+
+// R8 격리: preserveMotd=false(aws/local/tmux 기존 모드)는 마커 이전 출력을 motd 포함 전부
+// 버린다 — SSH 전용 echo-줄 흡수가 다른 transport로 새지 않는지 보장한다.
+func TestHandshakeFilterWithoutPreserveMotdDropsEverythingBeforeMarker(t *testing.T) {
+	filter := HandshakeFilter{} // preserveMotd=false
+	chunk := []byte("banner\r\nuser$ " + string(injectedCommandEcho) + "\r\n" + PromptStartMarker + "user$ ")
+	forward, done := filter.Filter(chunk)
+	if !done {
+		t.Fatal("expected handshake to complete on the marker")
+	}
+	if bytes.Contains(forward, []byte("banner")) {
+		t.Fatalf("non-preserveMotd mode must drop pre-marker output including motd: %q", forward)
+	}
+	if !bytes.HasPrefix(forward, []byte(PromptStartMarker)) {
+		t.Fatalf("forward should start at the marker, got %q", forward)
 	}
 }

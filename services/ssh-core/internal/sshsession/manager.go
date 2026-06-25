@@ -30,6 +30,11 @@ type sessionHandle struct {
 	closed    chan struct{}
 	closer    sync.Once
 	handshake autocomplete.Handshake
+
+	// shellIntegrationOnce는 OSC 133 통합 init 주입을 세션당 1회로 제한한다. 서버측 Connect
+	// 주입과 renderer 경유 InstallShellIntegration이 같은 once를 공유하므로 어느 쪽이 먼저
+	// 와도 두 번 주입되지 않는다(두 번 Arm하면 handshake buffer가 리셋돼 motd가 날아간다).
+	shellIntegrationOnce sync.Once
 }
 
 type ManagerConfig struct {
@@ -275,9 +280,27 @@ func (m *Manager) Connect(sessionID, requestID string, payload protocol.ConnectP
 	m.sessions[sessionID] = handle
 	m.mu.Unlock()
 
+	// 대화형 셸에는 OSC 133 통합 init을 서버측에서 즉시 주입한다. renderer 왕복
+	// (connected→IPC→main→Go→stdin) 없이 stream goroutine보다 확실히 앞서므로, handshake가
+	// 로그인 motd만 남기고 통합 전 첫 프롬프트와 명령 echo를 흡수해 "프롬프트 2개"를 막는다.
+	// env 폴백보다 먼저 써야 init echo가 첫 앵커가 되어 그 이전(motd)만 노출된다.
+	if payload.Command == "" {
+		handle.installShellIntegration()
+		// 비호환 셸(133;A 미도착) 등으로 마커가 안 오면 motd가 handshake buffer에 영구히
+		// 갇히므로, 타임아웃 뒤 flush해 출력을 풀어준다. 세션이 먼저 닫히면 타이머는 즉시 해제된다.
+		go func() {
+			select {
+			case <-handle.closed:
+			case <-time.After(shellIntegrationHandshakeTimeout):
+				m.FlushShellIntegration(sessionID)
+			}
+		}()
+	}
+
 	// SetEnv가 거부된 변수는 대화형 셸에 export로 폴백 주입한다. PTY가 입력을
 	// 버퍼링하므로 첫 프롬프트에서 실행되어 startup command보다 먼저 적용된다.
-	// 비대화형(command 실행) 세션에는 주입하지 않는다.
+	// 비대화형(command 실행) 세션에는 주입하지 않는다. init 주입 뒤에 와야 export echo도
+	// 통합 전 프롬프트와 함께 handshake에 흡수된다.
 	if payload.Command == "" && len(envFallback) > 0 {
 		_, _ = stdin.Write([]byte(buildEnvExportFallback(envFallback)))
 	}
@@ -446,17 +469,31 @@ func (m *Manager) RunCompletionCommand(sessionID, command string) (string, bool,
 	return out, truncated, nil
 }
 
-// InstallShellIntegration arms the OSC 133 handshake filter and writes the
-// integration init command into the interactive shell's stdin. The filter hides
-// the command's echo until the first prompt marker is seen.
+// shellIntegrationHandshakeTimeout는 OSC 133;A 마커를 기다리는 한계 시간이다. 이 안에
+// 마커가 안 오면(비호환 셸 등) handshake buffer를 flush해 motd가 갇히지 않게 한다. 느린
+// 호스트나 무거운 prompt는 첫 프롬프트가 몇 초 늦을 수 있어 넉넉히 둔다(runtime의 동명 상수와 동일 의도).
+const shellIntegrationHandshakeTimeout = 8 * time.Second
+
+// InstallShellIntegration는 OSC 133 통합 init을 대화형 셸에 1회 주입한다. 서버측 Connect가
+// 이미 주입했으면 once로 no-op이 된다. 자동완성 off에서도 cwd/프롬프트 마커가 필요한
+// 경로(예: 드래그-SFTP)가 호출하지만, 실제 주입은 Connect에서 끝나 있는 경우가 대부분이다.
 func (m *Manager) InstallShellIntegration(sessionID string) error {
 	session, err := m.getSession(sessionID)
 	if err != nil {
 		return err
 	}
-	session.handshake.Arm()
-	_, err = session.stdin.Write([]byte(autocomplete.ShellIntegrationInitCommand()))
-	return err
+	session.installShellIntegration()
+	return nil
+}
+
+// installShellIntegration는 핸드셰이크를 preserveMotd 모드로 arm하고 통합 init 명령을 셸
+// stdin에 1회만 쓴다. preserveMotd라 로그인 motd는 보존하면서 통합 전 첫 프롬프트와 명령
+// echo만 흡수해 프롬프트가 1개로 보인다. once 공유로 서버측/renderer 경로의 중복 주입을 막는다.
+func (h *sessionHandle) installShellIntegration() {
+	h.shellIntegrationOnce.Do(func() {
+		h.handshake.Arm(true)
+		_, _ = h.stdin.Write([]byte(autocomplete.ShellIntegrationInitCommand()))
+	})
 }
 
 // FlushShellIntegration releases any output held by the handshake filter when

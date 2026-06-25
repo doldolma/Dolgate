@@ -213,10 +213,23 @@ func normalizeHistoryLine(shell string, value string) string {
 			value = strings.TrimSpace(value[separator+1:])
 		}
 	}
-	if value == "" || hasUnsafeControl(value) {
+	if value == "" || hasUnsafeControl(value) || isInjectedShellIntegration(value) {
 		return ""
 	}
 	return value
+}
+
+// isInjectedShellIntegration reports whether a history line is one of the
+// commands Dolgate types into the shell to bootstrap autocomplete — the OSC 133
+// integration script (ShellIntegrationInitCommand) and the in-band snapshot
+// probe (InBandProbeCommand). zsh keeps these in history (the trailing bash
+// `history -d $((HISTCMD-1))` self-cleanup is a no-op in zsh), so without this
+// they leak into completion suggestions. Matched by their private markers,
+// which no real user command contains.
+func isInjectedShellIntegration(value string) bool {
+	return strings.Contains(value, "__ds_o") ||
+		strings.Contains(value, "]133;%s") ||
+		strings.Contains(value, "]6973;")
 }
 
 func hasUnsafeControl(value string) bool {
@@ -311,8 +324,13 @@ func stripInjectedEcho(data []byte) []byte {
 // If the marker never arrives within the byte budget (or on Flush after a
 // timeout), the buffered bytes are released so no real output is lost.
 type HandshakeFilter struct {
-	done   bool
-	buffer []byte
+	// preserveMotd가 true면 주입 echo가 찍힌 프롬프트 줄 "이전" 출력(로그인 motd 등)은
+	// 흘려보내고, echo 줄 시작 ~ 첫 133;A 마커만 버린다. false면 Arm~133;A 전부 버린다(기존
+	// 동작). SSH 로그인 셸에서 motd를 보존하면서 통합 프롬프트만 1개로 보이게 하는 용도다.
+	preserveMotd bool
+	motdSeen     bool
+	done         bool
+	buffer       []byte
 }
 
 // Filter consumes one chunk of session output and returns the bytes to forward
@@ -325,13 +343,32 @@ func (f *HandshakeFilter) Filter(chunk []byte) (forward []byte, handshakeDone bo
 		return stripInjectedEcho(chunk), false
 	}
 	f.buffer = append(f.buffer, chunk...)
+
+	// preserveMotd: 주입 echo가 찍힌 프롬프트 줄 "직전"까지(=motd 등 로그인 출력)를 한 번
+	// 흘려보내고, echo 줄부터는 마커가 올 때까지 계속 버퍼링한다. 이렇게 하면 첫(통합 전)
+	// 프롬프트와 echo가 흡수되고, motd는 그대로 남아 통합 프롬프트만 1개로 보인다. 흘려보낸
+	// motd가 이후 append에 덮이지 않도록 남은 버퍼는 새 백킹으로 복사한다.
+	var motd []byte
+	if f.preserveMotd && !f.motdSeen {
+		if echoIdx := bytes.Index(f.buffer, injectedCommandEcho); echoIdx >= 0 {
+			lineStart := bytes.LastIndexByte(f.buffer[:echoIdx], '\n') + 1
+			motd = f.buffer[:lineStart]
+			f.buffer = append([]byte(nil), f.buffer[lineStart:]...)
+			f.motdSeen = true
+		}
+	}
+
 	if idx := bytes.Index(f.buffer, []byte(PromptStartMarker)); idx >= 0 {
 		f.done = true
-		// Forward from the marker on, but drop the injected echo that the prompt
-		// line may redraw right after the marker.
-		out := stripInjectedEcho(f.buffer[idx:])
+		// Forward motd (preserveMotd) then everything from the marker on, dropping
+		// the injected echo that the prompt line may redraw right after the marker.
+		out := append(append([]byte(nil), motd...), stripInjectedEcho(f.buffer[idx:])...)
 		f.buffer = nil
 		return out, true
+	}
+	if len(motd) > 0 {
+		// motd만 내보내고 echo 줄 이후(첫 프롬프트 redraw)는 마커가 올 때까지 버퍼에 둔다.
+		return motd, false
 	}
 	if len(f.buffer) > maxHandshakeBytes {
 		return f.Flush(), false
@@ -369,10 +406,12 @@ type Handshake struct {
 }
 
 // Arm starts suppressing output until the first prompt marker. Call it right
-// before writing the integration init command.
-func (h *Handshake) Arm() {
+// before writing the integration init command. preserveMotd keeps output before
+// the injected command's prompt line (e.g. SSH login motd) visible; pass false
+// for the legacy "drop everything before the marker" behavior.
+func (h *Handshake) Arm(preserveMotd bool) {
 	h.mu.Lock()
-	h.filter = &HandshakeFilter{}
+	h.filter = &HandshakeFilter{preserveMotd: preserveMotd}
 	h.mu.Unlock()
 }
 

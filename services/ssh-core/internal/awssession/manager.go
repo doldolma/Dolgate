@@ -179,7 +179,7 @@ func (m *Manager) InstallShellIntegration(sessionID string) error {
 	if err != nil {
 		return err
 	}
-	session.handshake.Arm()
+	session.handshake.Arm(false)
 	return session.runner.Write([]byte(autocomplete.ShellIntegrationInitCommand()))
 }
 

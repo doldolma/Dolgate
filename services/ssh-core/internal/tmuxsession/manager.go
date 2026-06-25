@@ -100,7 +100,7 @@ func (h *controlHandle) armPaneHandshake(paneID string) {
 		h.handshakes[paneID] = hs
 	}
 	h.handshakesMu.Unlock()
-	hs.Arm()
+	hs.Arm(false)
 }
 
 // filterPaneOutput 는 pane 출력에 핸드셰이크 필터를 적용한다(없으면 그대로 통과).
