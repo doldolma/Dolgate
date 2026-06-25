@@ -476,10 +476,10 @@ describe('HostBrowser helpers', () => {
     expect(onOpenSerialImport).toHaveBeenCalledTimes(1);
   });
 
-  it('shows AWS SSH metadata status on AWS host cards', () => {
+  it('does not show AWS SSH metadata status on host cards (it lives in the edit form)', () => {
     renderBrowser();
 
-    expect(screen.getByText('SSH 설정 확인 중')).toBeInTheDocument();
+    expect(screen.queryByText('SSH 설정 확인 중')).not.toBeInTheDocument();
   });
 
   it('shows the containers action in the host context menu and opens the host-scoped page', async () => {

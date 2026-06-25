@@ -5,7 +5,6 @@ import {
   collectGroupPaths,
   countHostsInGroupTree,
   filterHostsInGroupTree,
-  getAwsEc2HostSshMetadataStatusLabel,
   getGroupDeleteDialogVariant,
   getGroupLabel,
   getParentGroupPath,
@@ -998,10 +997,6 @@ export function HostBrowser({
                 visibleHosts.map((host) => {
                   const isTagsExpanded = expandedHostTags.includes(host.id);
                   const badgeLabel = getHostBadgeLabel(host);
-                  const awsMetadataStatusLabel = host.kind === 'aws-ec2' ? getAwsEc2HostSshMetadataStatusLabel(host.awsSshMetadataStatus) : null;
-                  const hint = host.kind === 'aws-ec2' && awsMetadataStatusLabel
-                    ? `${awsMetadataStatusLabel}${host.awsSshMetadataStatus === 'error' && host.awsSshMetadataError ? ` · ${host.awsSshMetadataError}` : ''}`
-                    : null;
                   return (
                     <HostCard
                       key={host.id}
@@ -1014,7 +1009,7 @@ export function HostBrowser({
                       title={host.label}
                       subtitle={getHostSubtitle(host)}
                       groupLabel={normalizeGroupPath(host.groupName) ?? 'Ungrouped'}
-                      hint={hint}
+                      compact
                       style={clampedHostCardStyle}
                       draggable
                       onClick={(event) => {

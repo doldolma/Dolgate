@@ -8,6 +8,8 @@ interface HostCardProps extends Omit<HTMLAttributes<HTMLElement>, 'title'> {
   subtitle: ReactNode;
   groupLabel: ReactNode;
   hint?: ReactNode;
+  /** Tighter fixed height (no hint line) — used by the host browser list. */
+  compact?: boolean;
   selected?: boolean;
   disabled?: boolean;
   busy?: boolean;
@@ -23,6 +25,7 @@ export function HostCard({
   subtitle,
   groupLabel,
   hint,
+  compact = false,
   selected = false,
   disabled = false,
   busy = false,
@@ -39,8 +42,8 @@ export function HostCard({
       data-host-card-state={busy ? 'busy' : disabled ? 'disabled' : selected ? 'selected' : 'idle'}
       aria-busy={busy || undefined}
       className={cn(
-        'grid min-h-[90px] cursor-pointer grid-cols-[2.3rem_minmax(0,1fr)_auto] items-center gap-[0.62rem] overflow-hidden rounded-[20px] border border-[var(--border)] bg-[var(--surface-elevated)] px-[0.84rem] py-[0.72rem] text-left shadow-none transition-[background-color,border-color,opacity] duration-150',
-        expanded ? 'h-auto items-start' : 'h-[90px]',
+        'grid cursor-pointer grid-cols-[2.3rem_minmax(0,1fr)_auto] items-center gap-[0.62rem] overflow-hidden rounded-[20px] border border-[var(--border)] bg-[var(--surface-elevated)] px-[0.84rem] py-[0.72rem] text-left shadow-none transition-[background-color,border-color,opacity] duration-150',
+        expanded ? 'h-auto min-h-[90px] items-start' : compact ? 'h-[80px] min-h-[80px]' : 'h-[90px] min-h-[90px]',
         selected || busy
           ? 'border-[var(--selection-border)] bg-[var(--selection-tint)]'
           : 'hover:border-[color-mix(in_srgb,var(--accent-strong)_22%,var(--border)_78%)] hover:bg-[color-mix(in_srgb,var(--surface-elevated)_92%,var(--accent-strong)_8%)]',
