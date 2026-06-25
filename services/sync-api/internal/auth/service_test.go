@@ -74,12 +74,12 @@ func TestSignupLoginRefreshAndLogoutLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Refresh() error = %v", err)
 	}
-	if refreshed.Tokens.RefreshToken == loginSession.Tokens.RefreshToken {
-		t.Fatal("Refresh() did not rotate the refresh token")
+	if refreshed.Tokens.RefreshToken != loginSession.Tokens.RefreshToken {
+		t.Fatal("Refresh() should slide the same refresh token in place, not rotate it")
 	}
 
 	if _, err := service.Refresh(ctx, loginSession.Tokens.RefreshToken, "https://ssh.doldolma.com"); err != nil {
-		t.Fatalf("Refresh(old token during handoff) error = %v", err)
+		t.Fatalf("Refresh(same token reused) error = %v", err)
 	}
 
 	if err := service.Logout(ctx, refreshed.Tokens.RefreshToken); err != nil {
@@ -90,31 +90,49 @@ func TestSignupLoginRefreshAndLogoutLifecycle(t *testing.T) {
 	}
 }
 
-func TestRefreshAllowsSupersededTokenOnlyDuringHandoffWindow(t *testing.T) {
+func TestRefreshSlidesTokenAndIgnoresLegacyRotationState(t *testing.T) {
 	ctx := context.Background()
 	service, backingStore := newTestService(t)
 
-	_, session, err := service.Signup(ctx, "handoff@example.com", "hunter2", "https://ssh.doldolma.com")
+	_, session, err := service.Signup(ctx, "slide@example.com", "hunter2", "https://ssh.doldolma.com")
 	if err != nil {
 		t.Fatalf("Signup() error = %v", err)
 	}
 
-	if _, err := service.Refresh(ctx, session.Tokens.RefreshToken, "https://ssh.doldolma.com"); err != nil {
+	// 같은 토큰으로 반복 갱신해도 회전 없이 계속 성공하고 동일 토큰이 유지된다(슬라이딩 idle).
+	refreshed, err := service.Refresh(ctx, session.Tokens.RefreshToken, "https://ssh.doldolma.com")
+	if err != nil {
 		t.Fatalf("Refresh() error = %v", err)
 	}
+	if refreshed.Tokens.RefreshToken != session.Tokens.RefreshToken {
+		t.Fatal("Refresh() should keep the same refresh token, not rotate it")
+	}
 
+	// 회전 시절에 박힌 레거시 상태(SupersededAt + 만료된 GraceUntil)가 있어도 무효화하지 않고
+	// 통과시켜야 한다 — 배포 전에 발급된 토큰을 든 기존 클라이언트의 하위호환.
 	record, err := backingStore.GetRefreshToken(ctx, hashToken(session.Tokens.RefreshToken))
 	if err != nil {
-		t.Fatalf("GetRefreshToken(old token) error = %v", err)
+		t.Fatalf("GetRefreshToken() error = %v", err)
 	}
 	pastGrace := time.Now().Add(-time.Minute)
+	supersededAt := time.Now().Add(-2 * time.Minute)
+	record.SupersededAt = &supersededAt
 	record.GraceUntil = &pastGrace
 	if err := backingStore.SaveRefreshToken(ctx, record); err != nil {
-		t.Fatalf("SaveRefreshToken(old token) error = %v", err)
+		t.Fatalf("SaveRefreshToken() error = %v", err)
 	}
 
-	if _, err := service.Refresh(ctx, session.Tokens.RefreshToken, "https://ssh.doldolma.com"); !errors.Is(err, ErrInvalidCredentials) {
-		t.Fatalf("Refresh(expired handoff token) error = %v, want %v", err, ErrInvalidCredentials)
+	if _, err := service.Refresh(ctx, session.Tokens.RefreshToken, "https://ssh.doldolma.com"); err != nil {
+		t.Fatalf("Refresh(legacy superseded token) should succeed under sliding idle, got %v", err)
+	}
+
+	// 갱신이 레거시 회전 상태를 정리했는지 확인.
+	record, err = backingStore.GetRefreshToken(ctx, hashToken(session.Tokens.RefreshToken))
+	if err != nil {
+		t.Fatalf("GetRefreshToken(after) error = %v", err)
+	}
+	if record.SupersededAt != nil || record.GraceUntil != nil {
+		t.Fatal("Refresh() should clear legacy SupersededAt/GraceUntil")
 	}
 }
 

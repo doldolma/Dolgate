@@ -478,6 +478,11 @@ func NewRouter(store store.Store, authService *auth.Service, config RouterConfig
 		ctx.Redirect(http.StatusFound, oidcRuntime.oauth.AuthCodeURL(signedState))
 	})
 
+	// GET 콜백은 authorization code를 "여기서" 교환하지 않는다. 일회용 code는 브라우저
+	// prefetch/prerender·광고차단/보안확장·링크 스캐너가 콜백 URL을 한 번 긁기만 해도
+	// 소진돼, 실제 사용자 네비게이션의 교환이 invalid_grant 로 실패한다. 그래서 GET 에서는
+	// state 서명만 검증하고, 실제 사용자 페이지의 JS 가 /auth/oidc/complete 로 POST 할 때만
+	// 교환한다(prefetch 는 JS 미실행이라 코드가 안 닳고, prerender 는 활성화 후에만 제출).
 	router.GET("/auth/oidc/callback", func(ctx *gin.Context) {
 		if oidcRuntime == nil {
 			ctx.String(http.StatusNotFound, "oidc is not enabled")
@@ -485,6 +490,24 @@ func NewRouter(store store.Store, authService *auth.Service, config RouterConfig
 		}
 		rawState := ctx.Query("state")
 		code := ctx.Query("code")
+		if rawState == "" || code == "" {
+			ctx.String(http.StatusBadRequest, "missing oidc callback state or code")
+			return
+		}
+		if _, err := authService.ParseBrowserLoginState(rawState); err != nil {
+			logAndStringError(ctx, http.StatusUnauthorized, "인증에 실패했습니다.", err)
+			return
+		}
+		renderOIDCExchangeBridgePage(ctx, code, rawState)
+	})
+
+	router.POST("/auth/oidc/complete", func(ctx *gin.Context) {
+		if oidcRuntime == nil {
+			ctx.String(http.StatusNotFound, "oidc is not enabled")
+			return
+		}
+		rawState := ctx.PostForm("state")
+		code := ctx.PostForm("code")
 		if rawState == "" || code == "" {
 			ctx.String(http.StatusBadRequest, "missing oidc callback state or code")
 			return
@@ -1226,6 +1249,22 @@ func renderDesktopCallbackBridgePage(ctx *gin.Context, callbackURL string) {
 	})
 }
 
+// renderOIDCExchangeBridgePage shows a tiny interstitial that POSTs the OIDC
+// authorization code + state to /auth/oidc/complete via JS. A passive GET of the
+// callback (prefetch, ad-block/security extension, link scanner) renders this
+// page but never runs the submit, so the single-use code is not consumed; only a
+// real user navigation completes the exchange. code/state are auto-escaped by
+// html/template in the hidden-input attribute context.
+func renderOIDCExchangeBridgePage(ctx *gin.Context, code string, state string) {
+	applyAuthHTMLResponseHeaders(ctx)
+	ctx.Header("Cache-Control", "no-store")
+	ctx.Header("Content-Type", "text/html; charset=utf-8")
+	_ = oidcExchangeBridgeTemplate.Execute(ctx.Writer, struct {
+		Code  string
+		State string
+	}{Code: code, State: state})
+}
+
 func completeDesktopLogin(ctx *gin.Context, redirectURI string, code string, state string) {
 	callbackURL := buildDesktopCallbackURL(redirectURI, code, state)
 	renderDesktopCallbackBridgePage(ctx, callbackURL)
@@ -1404,6 +1443,59 @@ var loginPageTemplate = template.Must(template.New("login").Parse(`
   </body>
 </html>
 `))
+
+var oidcExchangeBridgeTemplate = template.Must(template.New("oidc-exchange-bridge").Parse(`
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex" />
+    <title>Dolgate 로그인 처리 중</title>
+    <style>
+      body { margin:0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background:#0f1726; color:#f5f7fb; }
+      .wrap { min-height:100vh; display:flex; align-items:center; justify-content:center; padding:40px; }
+      .card { width:100%; max-width:460px; background:#162133; border:1px solid rgba(255,255,255,.08); border-radius:24px; box-shadow:0 18px 48px rgba(0,0,0,.35); padding:32px; }
+      .eyebrow { letter-spacing:.2em; font-size:12px; text-transform:uppercase; color:#9fb0d3; margin-bottom:10px; }
+      h1 { margin:0 0 10px; font-size:28px; line-height:1.1; }
+      p { color:#9fb0d3; margin:0 0 22px; line-height:1.55; }
+      button.button { display:inline-flex; justify-content:center; align-items:center; border:none; border-radius:16px; padding:14px 18px; font-size:15px; font-weight:700; cursor:pointer; background:#24324a; color:#fff; border:1px solid rgba(185,200,255,.34); }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <div class="card">
+        <div class="eyebrow">Dolgate</div>
+        <h1>로그인 처리 중…</h1>
+        <p>잠시만 기다려 주세요. 자동으로 진행되지 않으면 아래 버튼을 눌러 주세요.</p>
+        <form id="complete-form" method="POST" action="/auth/oidc/complete">
+          <input type="hidden" name="code" value="{{ .Code }}" />
+          <input type="hidden" name="state" value="{{ .State }}" />
+          <button type="submit" class="button">계속</button>
+        </form>
+      </div>
+    </div>
+    <script>
+      (function () {
+        var form = document.getElementById('complete-form');
+        if (!form) { return; }
+        var submitted = false;
+        function submitOnce() {
+          if (submitted) { return; }
+          submitted = true;
+          form.submit();
+        }
+        // prefetch는 이 스크립트를 실행하지 않아 코드가 보존된다. prerender는 활성화(실제
+        // 사용자 네비게이션) 이후에만 제출해 미리 코드를 소진하지 않게 한다.
+        if (document.prerendering) {
+          document.addEventListener('prerenderingchange', submitOnce, { once: true });
+        } else {
+          submitOnce();
+        }
+      })();
+    </script>
+  </body>
+</html>`))
 
 var desktopCallbackBridgeTemplate = template.Must(template.New("desktop-callback-bridge").Parse(`
 <!doctype html>

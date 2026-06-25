@@ -232,17 +232,20 @@ func TestAuthRefreshAndSyncFlow(t *testing.T) {
 	if err := json.Unmarshal(refreshRecorder.Body.Bytes(), &refreshResponse); err != nil {
 		t.Fatalf("decode refresh response: %v", err)
 	}
-	if refreshResponse.Tokens.RefreshToken == "" || refreshResponse.Tokens.RefreshToken == signupResponse.Tokens.RefreshToken {
-		t.Fatalf("expected rotated refresh token")
+	if refreshResponse.Tokens.RefreshToken == "" {
+		t.Fatalf("expected refresh response to include a refresh token")
+	}
+	if refreshResponse.Tokens.RefreshToken != signupResponse.Tokens.RefreshToken {
+		t.Fatalf("expected the same refresh token to slide forward (no rotation)")
 	}
 
-	oldRefreshBody := bytes.NewBufferString(`{"refreshToken":"` + signupResponse.Tokens.RefreshToken + `"}`)
-	oldRefreshRequest := httptest.NewRequest(http.MethodPost, "/auth/refresh", oldRefreshBody)
-	oldRefreshRequest.Header.Set("Content-Type", "application/json")
-	oldRefreshRecorder := httptest.NewRecorder()
-	router.ServeHTTP(oldRefreshRecorder, oldRefreshRequest)
-	if oldRefreshRecorder.Code != http.StatusOK {
-		t.Fatalf("expected old refresh token to succeed during handoff, got %d", oldRefreshRecorder.Code)
+	reuseRefreshBody := bytes.NewBufferString(`{"refreshToken":"` + signupResponse.Tokens.RefreshToken + `"}`)
+	reuseRefreshRequest := httptest.NewRequest(http.MethodPost, "/auth/refresh", reuseRefreshBody)
+	reuseRefreshRequest.Header.Set("Content-Type", "application/json")
+	reuseRefreshRecorder := httptest.NewRecorder()
+	router.ServeHTTP(reuseRefreshRecorder, reuseRefreshRequest)
+	if reuseRefreshRecorder.Code != http.StatusOK {
+		t.Fatalf("expected the same refresh token to keep working, got %d", reuseRefreshRecorder.Code)
 	}
 }
 

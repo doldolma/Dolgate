@@ -147,33 +147,26 @@ func (s *Service) Refresh(ctx context.Context, refreshToken string, issuer strin
 		_ = s.store.DeleteRefreshToken(ctx, tokenHash)
 		return SessionBootstrap{}, ErrExpiredRefreshToken
 	}
-	if record.SupersededAt != nil {
-		if record.GraceUntil == nil || now.After(*record.GraceUntil) {
-			_ = s.store.DeleteRefreshToken(ctx, tokenHash)
-			return SessionBootstrap{}, ErrInvalidCredentials
-		}
-	} else if s.refreshHandoffTTL > 0 {
-		graceUntil := now.Add(s.refreshHandoffTTL)
-		record.LastUsedAt = now
-		record.SupersededAt = &now
-		record.GraceUntil = &graceUntil
-		if err := s.store.SaveRefreshToken(ctx, record); err != nil {
-			return SessionBootstrap{}, err
-		}
-	}
 
 	user, err := s.store.GetUserByID(ctx, record.UserID)
 	if err != nil {
 		return SessionBootstrap{}, ErrInvalidCredentials
 	}
 
-	// refresh 성공 시 토큰을 회전시켜 idle 14일 정책을 밀어준다.
-	if record.SupersededAt == nil && s.refreshHandoffTTL <= 0 {
-		if err := s.store.DeleteRefreshToken(ctx, tokenHash); err != nil {
-			return SessionBootstrap{}, err
-		}
+	// 슬라이딩 idle: 토큰을 회전(교체)하지 않고 같은 토큰의 만료만 idle TTL 만큼 앞으로 민다.
+	// 회전 + 재사용 감지는 슬립/오프라인/갱신응답 유실로 옛 토큰이 재사용되면 뜬금없이
+	// 로그아웃시키는 부작용이 있어 제거했다. "쓰면 계속 연장, idle 기간 미사용에만 만료" 정책.
+	// 레거시 회전 상태(SupersededAt/GraceUntil)는 무효화하지 않고 정리만 해 — 회전 시절에
+	// 발급된 토큰을 들고 있는 기존 클라이언트도 그대로 통과한다(하위호환).
+	record.LastUsedAt = now
+	record.ExpiresAt = now.Add(s.refreshTokenIdleTTL)
+	record.SupersededAt = nil
+	record.GraceUntil = nil
+	if err := s.store.SaveRefreshToken(ctx, record); err != nil {
+		return SessionBootstrap{}, err
 	}
-	return s.issueSession(ctx, user, issuer)
+
+	return s.issueSessionWithRefresh(ctx, user, issuer, refreshToken, record.ExpiresAt)
 }
 
 func (s *Service) Logout(ctx context.Context, refreshToken string) error {
@@ -313,7 +306,41 @@ func (s *Service) issueSession(ctx context.Context, user store.User, issuer stri
 	return session, nil
 }
 
-func (s *Service) issueTokens(ctx context.Context, user store.User) (TokenPair, time.Time, error) {
+// issueSessionWithRefresh builds a session bootstrap that reuses an existing,
+// already-extended refresh token instead of minting a new one. Refresh uses this
+// so the refresh token slides forward in place (no rotation), avoiding the
+// spurious logouts that rotation + reuse-detection caused on sleep/offline or
+// lost refresh responses. Response shape is identical to issueSession, so every
+// client version persists and reuses the returned token exactly as before.
+func (s *Service) issueSessionWithRefresh(ctx context.Context, user store.User, issuer string, refreshToken string, refreshExpiresAt time.Time) (SessionBootstrap, error) {
+	accessToken, err := s.signAccessToken(user)
+	if err != nil {
+		return SessionBootstrap{}, err
+	}
+	vaultKey, err := s.store.GetOrCreateUserVaultKey(ctx, user.ID)
+	if err != nil {
+		return SessionBootstrap{}, err
+	}
+	offlineLease, err := s.issueOfflineLease(user, issuer, refreshExpiresAt)
+	if err != nil {
+		return SessionBootstrap{}, err
+	}
+
+	var session SessionBootstrap
+	session.User.ID = user.ID
+	session.User.Email = user.Email
+	session.Tokens = TokenPair{
+		AccessToken:      accessToken,
+		RefreshToken:     refreshToken,
+		ExpiresInSeconds: int(s.accessTokenTTL.Seconds()),
+	}
+	session.VaultBootstrap = VaultBootstrap{KeyBase64: vaultKey.KeyBase64}
+	session.OfflineLease = offlineLease
+	session.SyncServerTime = time.Now().UTC().Format(time.RFC3339)
+	return session, nil
+}
+
+func (s *Service) signAccessToken(user store.User) (string, error) {
 	claims := Claims{
 		UserID: user.ID,
 		Email:  user.Email,
@@ -323,8 +350,11 @@ func (s *Service) issueTokens(ctx context.Context, user store.User) (TokenPair, 
 			IssuedAt:  jwt.NewNumericDate(time.Now()),
 		},
 	}
+	return jwt.NewWithClaims(jwt.SigningMethodRS256, claims).SignedString(s.signingKey)
+}
 
-	signedToken, err := jwt.NewWithClaims(jwt.SigningMethodRS256, claims).SignedString(s.signingKey)
+func (s *Service) issueTokens(ctx context.Context, user store.User) (TokenPair, time.Time, error) {
+	signedToken, err := s.signAccessToken(user)
 	if err != nil {
 		return TokenPair{}, time.Time{}, err
 	}
