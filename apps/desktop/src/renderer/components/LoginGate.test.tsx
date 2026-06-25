@@ -145,6 +145,39 @@ describe('LoginGate', () => {
     ).toBeInTheDocument();
   });
 
+  it('saves the edited login server url via the 저장 button', async () => {
+    const onSaveServerUrl = vi.fn().mockResolvedValue(undefined);
+    render(
+      <LoginGate
+        authState={{ status: 'unauthenticated', session: null, errorMessage: null }}
+        isSyncBootstrapping={false}
+        serverUrl="https://ssh.doldolma.com"
+        hasServerUrlOverride={false}
+        isLoadingServerUrl={false}
+        onBeginLogin={vi.fn().mockResolvedValue(undefined)}
+        onSaveServerUrl={onSaveServerUrl}
+        onResetServerUrl={vi.fn().mockResolvedValue(undefined)}
+      />
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: '로그인 서버 설정 열기' }));
+
+    // 변경 전에는 저장 버튼이 비활성(저장할 변경 없음).
+    expect(screen.getByRole('button', { name: '저장' })).toBeDisabled();
+
+    fireEvent.change(screen.getByPlaceholderText('https://ssh.example.com'), {
+      target: { value: 'https://ssh.custom.example.com' }
+    });
+
+    const saveButton = screen.getByRole('button', { name: '저장' });
+    expect(saveButton).toBeEnabled();
+    fireEvent.click(saveButton);
+
+    await waitFor(() => {
+      expect(onSaveServerUrl).toHaveBeenCalledWith('https://ssh.custom.example.com');
+    });
+  });
+
   it('renders inline svg icons for the settings and browser login actions', () => {
     render(
       <LoginGate
@@ -194,8 +227,10 @@ describe('LoginGate', () => {
     expect(screen.getByRole('button', { name: '브라우저 다시 열기' })).toBeEnabled();
     expect(screen.getByRole('button', { name: '취소' })).toBeEnabled();
 
-    fireEvent.click(screen.getByRole('button', { name: '로그인 서버 설정 열기' }));
-    expect(screen.getByPlaceholderText('https://ssh.example.com')).toBeDisabled();
+    // 브라우저 로그인 대기 중에는 톱니바퀴(서버 설정)를 숨겨, 왜 변경이 막히는지 헷갈리지 않게 한다.
+    expect(
+      screen.queryByRole('button', { name: '로그인 서버 설정 열기' })
+    ).toBeNull();
 
     fireEvent.click(screen.getByRole('button', { name: '브라우저 다시 열기' }));
     await waitFor(() => {
