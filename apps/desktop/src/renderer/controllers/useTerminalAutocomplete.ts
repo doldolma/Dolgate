@@ -45,6 +45,10 @@ import {
 } from '../lib/command-spec/fig-runtime';
 import type { CommandSpec } from '../lib/command-spec/types';
 
+// The overlay shows ~5 rows at once but keeps a deeper list so arrow keys can
+// scroll through more candidates (TerminalAutocompleteOverlay windows the view).
+const MAX_SUGGESTIONS = 20;
+
 function leadingCommand(value: string): string {
   return value.trimStart().split(/\s+/, 1)[0] ?? '';
 }
@@ -697,6 +701,7 @@ export function useTerminalAutocomplete({
       suppressHistory:
         resolveDynamicCompletion(commandSpec, command.value)?.kind === 'path',
       snippets,
+      limit: MAX_SUGGESTIONS,
     });
   }, [
     command,
@@ -734,6 +739,7 @@ export function useTerminalAutocomplete({
           resolveDynamicCompletion(commandSpecRef.current, commandRef.current.value)
             ?.kind === 'path',
         snippets: snippetsRef.current,
+        limit: MAX_SUGGESTIONS,
       },
     );
     if (list.length === 0) {

@@ -179,6 +179,17 @@ describe('terminal autocomplete', () => {
       }),
     ).toEqual([]);
   });
+
+  it('caps results at the requested limit (default 5)', () => {
+    const history = Array.from({ length: 25 }, (_, index) => `deploy-app-${index}`);
+    const s = snap(history);
+    // Default keeps the overlay tight…
+    expect(getTerminalAutocompleteSuggestions(s, cmd('deploy')).length).toBe(5);
+    // …but the controller asks for a deeper, scrollable list.
+    expect(
+      getTerminalAutocompleteSuggestions(s, cmd('deploy'), { limit: 20 }).length,
+    ).toBe(20);
+  });
 });
 
 describe('terminal autocomplete snippets', () => {
@@ -208,5 +219,94 @@ describe('terminal autocomplete snippets', () => {
       snippets: [{ label: 'two liner', command: 'echo a\necho b', keyword: 'multi' }],
     });
     expect(results.some((result) => result.source === 'snippet')).toBe(false);
+  });
+
+  it('ranks an exact-keyword snippet above even the strongest this-session command', () => {
+    // 가장 강한 세션 명령: 자주(50회)·성공(exit 0)·같은 cwd로 실행 (≈ 10.5k점).
+    // (입력 'git status'의 확장형 'git status -s' — insertText===입력이면 제외되므로.)
+    const sessionStats = new Map<string, SessionCommandStat>([
+      ['git status -s', { count: 50, lastSeq: 10, lastExit: 0, cwd: '/home/me' }],
+    ]);
+    // 입력이 키워드와 정확히 일치 → snippetExact(20000) → 최강 세션 명령보다도 위.
+    const results = getTerminalAutocompleteSuggestions(snap(['git status -s']), cmd('git status'), {
+      sessionStats,
+      currentCwd: '/home/me',
+      snippets: [
+        { label: 'Git status short', command: 'git status --short', keyword: 'git status' },
+      ],
+    });
+    const snippetIndex = results.findIndex((r) => r.insertText === 'git status --short');
+    const sessionIndex = results.findIndex((r) => r.insertText === 'git status -s');
+    expect(snippetIndex).toBeGreaterThanOrEqual(0);
+    expect(sessionIndex).toBeGreaterThanOrEqual(0);
+    expect(snippetIndex).toBeLessThan(sessionIndex);
+  });
+
+  it('ranks an exact keyword match above a mere prefix match', () => {
+    // 'gs' 입력: 'gs'는 정확히 일치(20000), 'gst'는 prefix 일치(4000).
+    const results = getTerminalAutocompleteSuggestions(snap([]), cmd('gs'), {
+      snippets: [
+        { label: 'Git status', command: 'git status', keyword: 'gs' },
+        { label: 'Git stash list', command: 'git stash list', keyword: 'gst' },
+      ],
+    });
+    const exactIndex = results.findIndex((r) => r.insertText === 'git status');
+    const prefixIndex = results.findIndex((r) => r.insertText === 'git stash list');
+    expect(exactIndex).toBeGreaterThanOrEqual(0);
+    expect(prefixIndex).toBeGreaterThanOrEqual(0);
+    expect(exactIndex).toBeLessThan(prefixIndex);
+  });
+
+  it('ranks a prefix-matched snippet below a command run this session', () => {
+    // 4000(prefix) < sessionBase(4500)+보너스 — 부분입력 스니펫은 실제 실행 명령에 양보.
+    const sessionStats = new Map<string, SessionCommandStat>([
+      ['git stash', { count: 1, lastSeq: 1, lastExit: 0 }],
+    ]);
+    const results = getTerminalAutocompleteSuggestions(snap(['git stash']), cmd('git s'), {
+      sessionStats,
+      snippets: [
+        { label: 'Git status short', command: 'git status --short', keyword: 'git status' },
+      ],
+    });
+    const sessionIndex = results.findIndex((r) => r.insertText === 'git stash');
+    const snippetIndex = results.findIndex((r) => r.insertText === 'git status --short');
+    expect(sessionIndex).toBeGreaterThanOrEqual(0);
+    expect(snippetIndex).toBeGreaterThanOrEqual(0);
+    expect(sessionIndex).toBeLessThan(snippetIndex);
+  });
+
+  it('matches a snippet by a substring of its keyword', () => {
+    // 'web'은 키워드 'rweb'의 접두사가 아니라 부분 문자열 → substring 티어로 매칭.
+    const results = getTerminalAutocompleteSuggestions(snap([]), cmd('web'), { snippets });
+    expect(
+      results.some(
+        (r) => r.source === 'snippet' && r.insertText === 'kubectl rollout restart deploy/web',
+      ),
+    ).toBe(true);
+  });
+
+  it('matches a snippet by a substring of its label', () => {
+    // 'pods'는 라벨 'List pods'의 접두사가 아니라 부분 문자열.
+    const results = getTerminalAutocompleteSuggestions(snap([]), cmd('pods'), { snippets });
+    expect(
+      results.some((r) => r.source === 'snippet' && r.insertText === 'kubectl get pods'),
+    ).toBe(true);
+  });
+
+  it('ranks a prefix match above a substring match', () => {
+    // 'rest': 라벨 'Restart web'엔 접두사(4000), 키워드 'prestart'엔 부분 문자열(1500).
+    const results = getTerminalAutocompleteSuggestions(snap([]), cmd('rest'), {
+      snippets: [
+        { label: 'Restart web', command: 'kubectl rollout restart deploy/web', keyword: 'rweb' },
+        { label: 'Prestart hook', command: 'echo prestart', keyword: 'prestart' },
+      ],
+    });
+    const prefixIndex = results.findIndex(
+      (r) => r.insertText === 'kubectl rollout restart deploy/web',
+    );
+    const substringIndex = results.findIndex((r) => r.insertText === 'echo prestart');
+    expect(prefixIndex).toBeGreaterThanOrEqual(0);
+    expect(substringIndex).toBeGreaterThanOrEqual(0);
+    expect(prefixIndex).toBeLessThan(substringIndex);
   });
 });

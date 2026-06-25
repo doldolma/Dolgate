@@ -36,9 +36,10 @@ export interface AutocompleteScoringContext {
    */
   suppressHistory?: boolean;
   /**
-   * Saved snippets. Matched by keyword (or label) prefix and inserted as the
-   * full command — so the insert text differs from the typed token, and the
-   * controller clears the line + inserts the whole command on accept.
+   * Saved snippets. Matched against keyword + label (exact / prefix / substring
+   * tiers) and inserted as the full command — so the insert text differs from
+   * the typed token, and the controller clears the line + inserts the whole
+   * command on accept.
    */
   snippets?: readonly { label: string; command: string; keyword?: string | null }[];
   limit?: number;
@@ -126,15 +127,24 @@ const MIN_PREFIX_LENGTH = 2;
 const DEFAULT_LIMIT = 5;
 
 // Additive scoring weights (tune by feel — kept together for easy adjustment).
-// Executable names intentionally outrank raw file-history lines; commands
-// actually run (and that succeeded) this session rank highest, while commands
-// that failed this session are dropped entirely.
+// Saved snippets (keyword-matched, user-curated) rank highest; executable names
+// outrank raw file-history lines; commands actually run (and that succeeded) this
+// session rank just below snippets, while commands that failed this session are
+// dropped entirely.
 const SCORE_WEIGHTS = {
+  // Saved snippets matched against keyword + label, in three tiers:
+  //  - snippetExact: input === keyword/label — a deliberate trigger, so it
+  //    outranks everything (nothing else reaches 20k; session peaks ~11k).
+  //  - snippetBase: input is a prefix — a hint, deliberately ranked below the
+  //    commands you actually run/installed this session, but above passive
+  //    sources (paths/spec/history). Type the full keyword to pin it to top.
+  //  - snippetSubstring: input appears mid-string — the weakest signal, a low
+  //    discovery tier (above spec/history, below live paths/values).
+  snippetExact: 20_000,
+  snippetBase: 4_000,
+  snippetSubstring: 1_500,
   executableBase: 6_000,
   sessionBase: 4_500,
-  // Saved snippets matched by keyword/label — explicit, user-curated commands.
-  // Ranked just below commands actually run this session, above live paths.
-  snippetBase: 4_000,
   // Dynamic, host-resolved values (real file paths / generator output) are a
   // discovery supplement: ranked above raw file history and spec options, but
   // below commands the user has actually run.
@@ -296,21 +306,36 @@ export function getTerminalAutocompleteSuggestions(
     }
   }
 
-  // 5) Saved snippets, matched by keyword (or label) prefix. insertText is the
-  //    full command (possibly with {{variables}}); single-line only here.
+  // 5) Saved snippets, matched against keyword + label. insertText is the full
+  //    command (possibly with {{variables}}); single-line only here. Each snippet
+  //    is scored by its best match across both targets: exact > prefix > substring
+  //    (see SCORE_WEIGHTS for the rationale of each tier).
   if (context.snippets) {
     const lower = value.toLowerCase();
     for (const snippet of context.snippets) {
       if (snippet.command.includes('\n')) {
         continue;
       }
-      const matchTarget = (snippet.keyword || snippet.label).toLowerCase();
-      if (!matchTarget.startsWith(lower)) {
+      const targets = [snippet.label.toLowerCase()];
+      if (snippet.keyword) {
+        targets.push(snippet.keyword.toLowerCase());
+      }
+      let score = 0;
+      for (const target of targets) {
+        if (target === lower) {
+          score = Math.max(score, SCORE_WEIGHTS.snippetExact);
+        } else if (target.startsWith(lower)) {
+          score = Math.max(score, SCORE_WEIGHTS.snippetBase);
+        } else if (target.includes(lower)) {
+          score = Math.max(score, SCORE_WEIGHTS.snippetSubstring);
+        }
+      }
+      if (score === 0) {
         continue;
       }
       consider(
         { insertText: snippet.command, source: 'snippet', description: snippet.label },
-        SCORE_WEIGHTS.snippetBase,
+        score,
       );
     }
   }

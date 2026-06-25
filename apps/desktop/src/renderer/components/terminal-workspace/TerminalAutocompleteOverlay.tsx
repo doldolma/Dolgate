@@ -1,4 +1,9 @@
+import { useEffect, useRef } from 'react';
 import type { TerminalAutocompleteSuggestion } from '../../lib/terminal-autocomplete';
+
+// The list can hold more candidates than fit; show ~5 rows and scroll the rest.
+const VISIBLE_ROWS = 5;
+const ROW_HEIGHT_PX = 36; // matches the h-9 button height
 
 function sourceLabel(source: TerminalAutocompleteSuggestion['source']): string {
   switch (source) {
@@ -32,18 +37,31 @@ export function TerminalAutocompleteOverlay({
   selectedIndex,
   onAccept,
 }: TerminalAutocompleteOverlayProps) {
+  const activeRef = useRef<HTMLButtonElement>(null);
+  const activeIndex = Math.min(
+    Math.max(selectedIndex, 0),
+    Math.max(suggestions.length - 1, 0),
+  );
+  // Keep the highlighted row visible as arrow keys move past the 5-row window.
+  useEffect(() => {
+    const node = activeRef.current;
+    if (node && typeof node.scrollIntoView === 'function') {
+      node.scrollIntoView({ block: 'nearest' });
+    }
+  }, [activeIndex]);
+
   if (suggestions.length === 0) {
     return null;
   }
-  const activeIndex = Math.min(Math.max(selectedIndex, 0), suggestions.length - 1);
 
   return (
     <div
-      className="absolute z-30 min-w-[280px] max-w-[min(560px,calc(100%-1rem))] overflow-hidden rounded-[6px] border border-[var(--border)] bg-[var(--surface-elevated)] py-1 shadow-[var(--shadow-soft)]"
+      className="absolute z-30 min-w-[280px] max-w-[min(560px,calc(100%-1rem))] overflow-y-auto overflow-x-hidden overscroll-contain rounded-[6px] border border-[var(--border)] bg-[var(--surface-elevated)] py-1 shadow-[var(--shadow-soft)]"
       style={{
         left: Math.max(4, anchor.left),
         top: anchor.openAbove ? undefined : anchor.top,
         bottom: anchor.openAbove ? `calc(100% - ${anchor.top - 2}px)` : undefined,
+        maxHeight: VISIBLE_ROWS * ROW_HEIGHT_PX + 8,
       }}
       role="listbox"
       aria-label="Command autocomplete suggestions"
@@ -59,6 +77,7 @@ export function TerminalAutocompleteOverlay({
         return (
           <button
             key={`${suggestion.source}:${suggestion.insertText}`}
+            ref={isActive ? activeRef : undefined}
             type="button"
             role="option"
             aria-selected={isActive}
