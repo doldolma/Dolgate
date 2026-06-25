@@ -206,7 +206,14 @@ function isTerminalFontFamilyId(value: unknown): value is TerminalFontFamilyId {
     value === 'jetbrains-mono' ||
     value === 'fira-code' ||
     value === 'ibm-plex-mono' ||
-    value === 'source-code-pro'
+    value === 'source-code-pro' ||
+    value === 'cascadia-code' ||
+    value === 'geist-mono' ||
+    value === 'roboto-mono' ||
+    value === 'ubuntu-mono' ||
+    value === 'space-mono' ||
+    value === 'inconsolata' ||
+    value === 'victor-mono'
   );
 }
 

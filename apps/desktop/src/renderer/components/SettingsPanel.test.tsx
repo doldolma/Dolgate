@@ -310,6 +310,9 @@ describe('SettingsPanel', () => {
       desktopPlatform: 'win32'
     });
 
+    // The font picker is a custom listbox — options only exist once opened.
+    fireEvent.click(screen.getByRole('combobox', { name: 'Font' }));
+
     expect(screen.queryByRole('option', { name: 'SF Mono' })).not.toBeInTheDocument();
     expect(screen.queryByRole('option', { name: 'Menlo' })).not.toBeInTheDocument();
     expect(screen.queryByRole('option', { name: 'Monaco' })).not.toBeInTheDocument();

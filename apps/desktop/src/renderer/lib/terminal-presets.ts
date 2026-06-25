@@ -50,7 +50,14 @@ export const terminalFontOptions: TerminalFontOption[] = [
   { id: 'jetbrains-mono', title: 'JetBrains Mono', stack: `"JetBrains Mono", ${windowsMonoFallback}` },
   { id: 'fira-code', title: 'Fira Code', stack: `"Fira Code", "JetBrains Mono", ${windowsMonoFallback}` },
   { id: 'ibm-plex-mono', title: 'IBM Plex Mono', stack: `"IBM Plex Mono", "SF Mono", Menlo, ${windowsMonoFallback}` },
-  { id: 'source-code-pro', title: 'Source Code Pro', stack: `"Source Code Pro", "SF Mono", Menlo, ${windowsMonoFallback}` }
+  { id: 'source-code-pro', title: 'Source Code Pro', stack: `"Source Code Pro", "SF Mono", Menlo, ${windowsMonoFallback}` },
+  { id: 'cascadia-code', title: 'Cascadia Code', stack: `"Cascadia Code", ${windowsMonoFallback}` },
+  { id: 'geist-mono', title: 'Geist Mono', stack: `"Geist Mono", ${windowsMonoFallback}` },
+  { id: 'roboto-mono', title: 'Roboto Mono', stack: `"Roboto Mono", ${windowsMonoFallback}` },
+  { id: 'ubuntu-mono', title: 'Ubuntu Mono', stack: `"Ubuntu Mono", ${windowsMonoFallback}` },
+  { id: 'space-mono', title: 'Space Mono', stack: `"Space Mono", ${windowsMonoFallback}` },
+  { id: 'inconsolata', title: 'Inconsolata', stack: `"Inconsolata", ${windowsMonoFallback}` },
+  { id: 'victor-mono', title: 'Victor Mono', stack: `"Victor Mono", ${windowsMonoFallback}` }
 ];
 
 export const terminalThemePresets: TerminalThemeDefinition[] = [

@@ -5,6 +5,7 @@ export * from './CloseIcon';
 export * from './EmptyState';
 export * from './FieldGroup';
 export * from './FilterRow';
+export * from './FontSelectField';
 export * from './IconButton';
 export * from './Input';
 export * from './ModalShell';

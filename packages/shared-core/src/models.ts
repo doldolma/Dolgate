@@ -34,7 +34,14 @@ export type TerminalFontFamilyId =
   | 'jetbrains-mono'
   | 'fira-code'
   | 'ibm-plex-mono'
-  | 'source-code-pro';
+  | 'source-code-pro'
+  | 'cascadia-code'
+  | 'geist-mono'
+  | 'roboto-mono'
+  | 'ubuntu-mono'
+  | 'space-mono'
+  | 'inconsolata'
+  | 'victor-mono';
 export type UpdateStatus = 'idle' | 'checking' | 'available' | 'downloading' | 'downloaded' | 'upToDate' | 'error';
 export type SftpPaneId = 'left' | 'right';
 export type SftpEndpointKind = 'local' | 'remote';

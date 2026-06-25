@@ -22,6 +22,7 @@ import { AwsProfilesPanel } from './AwsProfilesPanel';
 import {
   Button,
   FieldGroup,
+  FontSelectField,
   Input,
   OptionCard,
   SectionLabel,
@@ -278,20 +279,14 @@ export function SettingsPanel({
 
             <div className="mb-[1.15rem] grid items-start grid-cols-[repeat(2,minmax(0,1fr))] gap-[0.9rem] max-[1320px]:grid-cols-[repeat(2,minmax(0,1fr))] max-[760px]:grid-cols-1">
               <FieldGroup label="Font">
-                <SelectField
+                <FontSelectField
+                  ariaLabel="Font"
                   value={settings.terminalFontFamily}
-                  onChange={async (event) =>
-                    handleChangeTerminalFontFamily(
-                      event.target.value as TerminalFontFamilyId,
-                    )
+                  options={visibleTerminalFontOptions}
+                  onChange={(id) =>
+                    handleChangeTerminalFontFamily(id as TerminalFontFamilyId)
                   }
-                >
-                  {visibleTerminalFontOptions.map((option) => (
-                    <option key={option.id} value={option.id}>
-                      {option.title}
-                    </option>
-                  ))}
-                </SelectField>
+                />
               </FieldGroup>
 
               <FieldGroup label="Font Size">
